@@ -377,7 +377,7 @@ INDEX_HTML = r"""<!doctype html>
           </label>
         </div>
         <details open>
-          <summary><strong>视频生成配置</strong> <span class="muted small">用于 06_视频生成执行员生成制作包</span></summary>
+          <summary><strong>视频生成配置</strong> <span class="muted small">用于 06_分镜生图设计师和 07_视频生成执行员</span></summary>
           <div class="video-grid" style="margin-top: 12px;">
             <label>视频工具
               <select id="videoTool">
@@ -1103,7 +1103,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 视频风格：{value('style')}\n"
             f"- 视频平台 API Key：{api_note}\n"
             f"- 视频平台 Base URL：{base_url_note}\n"
-            "- 执行要求：当前阶段由 06_视频生成执行员输出视频生成提示词、镜头清单、TTS 配音稿、SRT 字幕草案和剪辑说明；不要声称已经生成 mp4。\n"
+            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，再由 07_视频生成执行员输出视频生成提示词、镜头清单、TTS 配音稿、SRT 字幕草案和剪辑说明；不要声称已经生成 mp4。\n"
         )
 
     def _upload_reference_image(self, payload: dict) -> dict:
@@ -1139,7 +1139,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _append_reference_images(user_input: str, reference_images: list[dict]) -> str:
-        lines = ["## 参考图", "以下参考图由管理台上传到本地，仅作为 06_视频生成执行员生成视频制作包时的角色/产品/风格参考："]
+        lines = ["## 参考图", "以下参考图由管理台上传到本地，供 06_分镜生图设计师和 07_视频生成执行员作为角色/产品/风格参考："]
         for index, image in enumerate(reference_images, start=1):
             lines.extend(
                 [

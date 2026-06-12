@@ -1,5 +1,5 @@
 {
-  "agent_id": "06_视频生成执行员",
+  "agent_id": "07_视频生成执行员",
   "agent_name": "视频生成执行员",
   "role": "video_generation_operator",
   "inputs": [
@@ -8,6 +8,7 @@
     "口播脚本",
     "标题封面优化方案",
     "内容合规审核报告",
+    "分镜生图方案",
     "视频生成工具偏好"
   ],
   "outputs": [

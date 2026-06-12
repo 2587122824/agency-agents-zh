@@ -43,7 +43,8 @@ Current custom staff:
 03_口播脚本师
 04_标题封面优化师
 05_内容合规审核官
-06_视频生成执行员
+06_分镜生图设计师
+07_视频生成执行员
 ```
 
 ### Workflows
@@ -149,13 +150,13 @@ http://127.0.0.1:8765
 Current verified capabilities:
 
 - Lists 3 workflows.
-- Lists 5 custom staff folders.
+- Lists 7 custom staff folders.
 - Runs workflows through `/api/run`.
 - Accepts a one-off API Key from the web form; the key is passed to the engine for that request only and is not written to task output.
 - Accepts a one-off OpenAI-compatible Base URL from the web form for relay/proxy providers; the URL is used only for that request and is not written to task output.
 - Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
-- Provides video-generation configuration fields in the web UI: target tool, model, aspect ratio, duration, style, video API key presence, and video base URL presence. These fields are appended to workflow input for `06_视频生成执行员`; the system does not directly call video-generation APIs yet.
-- Provides reference image upload fields in the web UI. Selected local images show thumbnail previews before running. Uploaded images are saved under `my_reference_images/`; workflow input receives stored path, role, and note for `06_视频生成执行员`. No vision model is used yet, so the system does not claim to understand image content.
+- Provides video-generation configuration fields in the web UI: target tool, model, aspect ratio, duration, style, video API key presence, and video base URL presence. These fields are appended to workflow input for `06_分镜生图设计师` and `07_视频生成执行员`; the system does not directly call video-generation APIs yet.
+- Provides reference image upload fields in the web UI. Selected local images show thumbnail previews before running. Uploaded images are saved under `my_reference_images/`; workflow input receives stored path, role, and note for `06_分镜生图设计师` and `07_视频生成执行员`. No vision model is used yet, so the system does not claim to understand image content.
 - Provides memory controls in the web UI: `长期记忆` appends `my_memory/*.md`, and `继承历史任务` can append either the previous final product only or both the previous demand and final product.
 - Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, and video configuration. The `清除已保存配置` button removes the saved local settings.
 - Shows historical tasks from `my_task_output`.
@@ -188,9 +189,9 @@ Generated task folders are disposable unless the user explicitly wants to preser
   - generated metadata JSON files
 - CLI offline workflow run succeeded for `workflow_短视频全流程`.
 - Web API offline workflow run succeeded for `workflow_小红书图文`.
-- `06_视频生成执行员` was added to generate video production packages; `workflow_短视频全流程` and `workflow_开发外包` now include a final video-generation step. It produces prompts, shot lists, TTS copy, SRT drafts, and edit instructions; it does not create mp4 files directly.
+- `06_分镜生图设计师` was added before video generation; `workflow_短视频全流程` and `workflow_开发外包` now run 06 for storyboard/keyframe image prompts, then 07 for video generation packages. 07 produces prompts, shot lists, TTS copy, SRT drafts, and edit instructions; it does not create mp4 files directly.
 - Local web UI responded with HTTP 200 and showed valid config.
-- Reference image UI and `/api/upload-reference-image` were verified with HTTP 200. The endpoint returned a stored local path under `my_reference_images/` for `06_视频生成执行员`.
+- Reference image UI and `/api/upload-reference-image` were verified with HTTP 200. The endpoint returned a stored local path under `my_reference_images/` for `06_分镜生图设计师` and `07_视频生成执行员`.
 
 ## Important Notes
 
@@ -222,4 +223,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 
 
 [2026-06-12 20:10:02 +08:00] command: added local thumbnail previews for selected reference images in the web UI; restarted http://127.0.0.1:8765 and verified page includes reference-preview and URL.createObjectURL.
+
+
+[2026-06-12 20:28:58 +08:00] command: added 06_�־���ͼ���ʦ, moved original video-generation staff to 07_��Ƶ����ִ��Ա, updated short-video and outsourcing workflows to 7 steps, verified JSON/Python syntax, offline short-video run with 7 steps, and web /api/config staff count 7.
 
