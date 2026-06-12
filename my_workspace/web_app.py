@@ -377,6 +377,82 @@ INDEX_HTML = r"""<!doctype html>
           </label>
         </div>
         <details open>
+          <summary><strong>生图配置</strong> <span class="muted small">用于 06_分镜生图设计师生成关键帧方案</span></summary>
+          <div class="video-grid" style="margin-top: 12px;">
+            <label>生图工具
+              <select id="imageTool">
+                <option value="prompt_only" selected>仅生成生图提示词</option>
+                <option value="gpt-image">GPT Image</option>
+                <option value="midjourney">Midjourney</option>
+                <option value="stable-diffusion">Stable Diffusion</option>
+                <option value="flux">FLUX</option>
+                <option value="jimeng">即梦生图</option>
+                <option value="kling">可灵生图</option>
+                <option value="seedream">Seedream</option>
+                <option value="custom">其他/自定义</option>
+              </select>
+            </label>
+            <label>生图模型
+              <input id="imageModel" list="imageModelOptions" placeholder="例如 gpt-image-1 / midjourney v7，可留空" />
+              <datalist id="imageModelOptions">
+                <option value="gpt-image-1" label="GPT Image 1"></option>
+                <option value="dall-e-3" label="DALL-E 3"></option>
+                <option value="midjourney-v7" label="Midjourney v7"></option>
+                <option value="stable-diffusion-xl" label="Stable Diffusion XL"></option>
+                <option value="flux-1.1-pro" label="FLUX 1.1 Pro"></option>
+                <option value="seedream-3.0" label="Seedream 3.0"></option>
+                <option value="jimeng-image" label="即梦生图"></option>
+                <option value="kling-image" label="可灵生图"></option>
+              </datalist>
+            </label>
+            <label>图片尺寸
+              <select id="imageSize">
+                <option value="9:16" selected>9:16 竖屏关键帧</option>
+                <option value="16:9">16:9 横屏关键帧</option>
+                <option value="1:1">1:1 方图</option>
+                <option value="4:5">4:5 信息流</option>
+                <option value="1024x1792">1024x1792</option>
+                <option value="1792x1024">1792x1024</option>
+                <option value="1024x1024">1024x1024</option>
+              </select>
+            </label>
+            <label>每镜头图片数
+              <select id="imageCount">
+                <option value="1" selected>1 张</option>
+                <option value="2">2 张备选</option>
+                <option value="3">3 张备选</option>
+                <option value="4">4 张备选</option>
+              </select>
+            </label>
+          </div>
+          <div class="provider-grid" style="margin-top: 12px;">
+            <label>生图风格
+              <input id="imageStyle" placeholder="例如 写实商业、电影感、干净明亮、赛博科技、国风插画" />
+            </label>
+            <label>生图质量
+              <select id="imageQuality">
+                <option value="standard" selected>标准</option>
+                <option value="high">高清/高质量</option>
+                <option value="draft">草图/快速预览</option>
+              </select>
+            </label>
+            <label>生图平台 API Key
+              <input id="imageApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用生图 API，会保存到本浏览器" />
+            </label>
+          </div>
+          <div class="provider-grid" style="margin-top: 12px;">
+            <label>生图平台 Base URL
+              <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入生图 API 使用，可留空" />
+            </label>
+            <label>负面提示词
+              <input id="imageNegativePrompt" placeholder="例如 水印、畸形手指、低清晰度、脸部变形、错误文字" />
+            </label>
+            <label>一致性重点
+              <input id="imageConsistency" placeholder="例如 保持同一人物脸型、服装、产品外观和主色调" />
+            </label>
+          </div>
+        </details>
+        <details open>
           <summary><strong>视频生成配置</strong> <span class="muted small">用于 06_分镜生图设计师和 07_视频生成执行员</span></summary>
           <div class="video-grid" style="margin-top: 12px;">
             <label>视频工具
@@ -489,6 +565,16 @@ INDEX_HTML = r"""<!doctype html>
       useMemory: document.getElementById('useMemory'),
       inheritTask: document.getElementById('inheritTask'),
       inheritMode: document.getElementById('inheritMode'),
+      imageTool: document.getElementById('imageTool'),
+      imageModel: document.getElementById('imageModel'),
+      imageSize: document.getElementById('imageSize'),
+      imageCount: document.getElementById('imageCount'),
+      imageStyle: document.getElementById('imageStyle'),
+      imageQuality: document.getElementById('imageQuality'),
+      imageApiKey: document.getElementById('imageApiKey'),
+      imageBaseUrl: document.getElementById('imageBaseUrl'),
+      imageNegativePrompt: document.getElementById('imageNegativePrompt'),
+      imageConsistency: document.getElementById('imageConsistency'),
       videoTool: document.getElementById('videoTool'),
       videoModel: document.getElementById('videoModel'),
       videoAspect: document.getElementById('videoAspect'),
@@ -555,6 +641,16 @@ INDEX_HTML = r"""<!doctype html>
         useMemory: els.useMemory.value,
         inheritTask: els.inheritTask.value,
         inheritMode: els.inheritMode.value,
+        imageTool: els.imageTool.value,
+        imageModel: els.imageModel.value,
+        imageSize: els.imageSize.value,
+        imageCount: els.imageCount.value,
+        imageStyle: els.imageStyle.value,
+        imageQuality: els.imageQuality.value,
+        imageApiKey: els.imageApiKey.value,
+        imageBaseUrl: els.imageBaseUrl.value,
+        imageNegativePrompt: els.imageNegativePrompt.value,
+        imageConsistency: els.imageConsistency.value,
         videoTool: els.videoTool.value,
         videoModel: els.videoModel.value,
         videoAspect: els.videoAspect.value,
@@ -579,6 +675,16 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.useMemory, settings.useMemory);
       setIfExists(els.inheritTask, settings.inheritTask);
       setIfExists(els.inheritMode, settings.inheritMode);
+      setIfExists(els.imageTool, settings.imageTool);
+      els.imageModel.value = settings.imageModel || '';
+      setIfExists(els.imageSize, settings.imageSize);
+      setIfExists(els.imageCount, settings.imageCount);
+      els.imageStyle.value = settings.imageStyle || '';
+      setIfExists(els.imageQuality, settings.imageQuality);
+      els.imageApiKey.value = settings.imageApiKey || '';
+      els.imageBaseUrl.value = settings.imageBaseUrl || '';
+      els.imageNegativePrompt.value = settings.imageNegativePrompt || '';
+      els.imageConsistency.value = settings.imageConsistency || '';
       setIfExists(els.videoTool, settings.videoTool);
       els.videoModel.value = settings.videoModel || '';
       setIfExists(els.videoAspect, settings.videoAspect);
@@ -608,6 +714,16 @@ INDEX_HTML = r"""<!doctype html>
         els.useMemory,
         els.inheritTask,
         els.inheritMode,
+        els.imageTool,
+        els.imageModel,
+        els.imageSize,
+        els.imageCount,
+        els.imageStyle,
+        els.imageQuality,
+        els.imageApiKey,
+        els.imageBaseUrl,
+        els.imageNegativePrompt,
+        els.imageConsistency,
         els.videoTool,
         els.videoModel,
         els.videoAspect,
@@ -820,6 +936,18 @@ INDEX_HTML = r"""<!doctype html>
       setStatus('工作流运行中');
       try {
         const referenceImages = await uploadReferenceImages();
+        const imageConfig = {
+          tool: els.imageTool.value,
+          model: els.imageModel.value.trim(),
+          size: els.imageSize.value,
+          count_per_shot: els.imageCount.value,
+          style: els.imageStyle.value.trim(),
+          quality: els.imageQuality.value,
+          negative_prompt: els.imageNegativePrompt.value.trim(),
+          consistency: els.imageConsistency.value.trim(),
+          api_key_provided: Boolean(els.imageApiKey.value.trim()),
+          base_url_provided: Boolean(els.imageBaseUrl.value.trim()),
+        };
         const videoConfig = {
           tool: els.videoTool.value,
           model: els.videoModel.value.trim(),
@@ -842,8 +970,11 @@ INDEX_HTML = r"""<!doctype html>
             use_memory: els.useMemory.value === 'on',
             inherit_task: els.inheritTask.value,
             inherit_mode: els.inheritMode.value,
+            image_config: imageConfig,
             video_config: videoConfig,
             reference_images: referenceImages,
+            image_api_key: els.imageApiKey.value.trim(),
+            image_base_url: els.imageBaseUrl.value.trim(),
             video_api_key: els.videoApiKey.value.trim(),
             video_base_url: els.videoBaseUrl.value.trim(),
           }),
@@ -866,6 +997,14 @@ INDEX_HTML = r"""<!doctype html>
     };
     els.sampleBtn.onclick = () => {
       els.userInput.value = '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。';
+      els.imageTool.value = 'prompt_only';
+      els.imageModel.value = '';
+      els.imageSize.value = '9:16';
+      els.imageCount.value = '1';
+      els.imageStyle.value = '写实商业，干净明亮，统一人物形象';
+      els.imageQuality.value = 'standard';
+      els.imageNegativePrompt.value = '水印、畸形手指、低清晰度、脸部变形、错误文字';
+      els.imageConsistency.value = '保持同一人物脸型、服装、产品外观和主色调';
       els.videoTool.value = 'prompt_only';
       els.videoModel.value = '';
       els.videoAspect.value = '9:16';
@@ -876,7 +1015,7 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
     };
     els.clearSettingsBtn.onclick = () => {
-      if (!confirm('确定清除本浏览器保存的 API Key、Base URL、模型和视频配置？')) return;
+      if (!confirm('确定清除本浏览器保存的 API Key、Base URL、模型、生图配置和视频配置？')) return;
       localStorage.removeItem(SETTINGS_KEY);
       els.provider.value = 'auto';
       els.model.value = 'gpt-5.5';
@@ -886,6 +1025,16 @@ INDEX_HTML = r"""<!doctype html>
       els.useMemory.value = 'on';
       els.inheritTask.value = '';
       els.inheritMode.value = 'final_output';
+      els.imageTool.value = 'prompt_only';
+      els.imageModel.value = '';
+      els.imageSize.value = '9:16';
+      els.imageCount.value = '1';
+      els.imageStyle.value = '';
+      els.imageQuality.value = 'standard';
+      els.imageApiKey.value = '';
+      els.imageBaseUrl.value = '';
+      els.imageNegativePrompt.value = '';
+      els.imageConsistency.value = '';
       els.videoTool.value = 'prompt_only';
       els.videoModel.value = '';
       els.videoAspect.value = '9:16';
@@ -971,6 +1120,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 user_input = self._append_long_term_memory(user_input)
             if inherit_task:
                 user_input = self._append_inherited_task(user_input, inherit_task, inherit_mode)
+            image_config = payload.get("image_config") or {}
+            if image_config:
+                user_input = self._append_image_config(user_input, image_config)
             video_config = payload.get("video_config") or {}
             if video_config:
                 user_input = self._append_video_config(user_input, video_config)
@@ -1084,6 +1236,30 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not content_type.startswith("text/") and target.suffix.lower() not in {".json", ".md"}:
             raise ValueError(f"Unsupported file type: {target.name}")
         return {"file": file_name, "content": target.read_text(encoding="utf-8", errors="replace")}
+
+    @staticmethod
+    def _append_image_config(user_input: str, image_config: dict) -> str:
+        def value(key: str, default: str = "未填写") -> str:
+            item = image_config.get(key)
+            return str(item).strip() if item not in (None, "") else default
+
+        api_note = "已填写，当前版本仅记录为可用条件，不保存密钥、不直接调用生图 API" if image_config.get("api_key_provided") else "未填写"
+        base_url_note = "已填写，当前版本仅记录为可用条件，不保存地址到输出" if image_config.get("base_url_provided") else "未填写"
+        return (
+            f"{user_input}\n\n"
+            "## 生图配置\n"
+            f"- 生图工具：{value('tool')}\n"
+            f"- 生图模型：{value('model')}\n"
+            f"- 图片尺寸/画幅：{value('size', '9:16')}\n"
+            f"- 每镜头图片数：{value('count_per_shot', '1')}\n"
+            f"- 生图风格：{value('style')}\n"
+            f"- 生图质量：{value('quality', 'standard')}\n"
+            f"- 负面提示词：{value('negative_prompt')}\n"
+            f"- 一致性重点：{value('consistency')}\n"
+            f"- 生图平台 API Key：{api_note}\n"
+            f"- 生图平台 Base URL：{base_url_note}\n"
+            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜总表、关键帧生图提示词、参考图使用策略和连续性控制说明；不要声称已经生成图片文件。\n"
+        )
 
     @staticmethod
     def _append_video_config(user_input: str, video_config: dict) -> str:

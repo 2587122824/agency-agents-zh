@@ -155,10 +155,11 @@ Current verified capabilities:
 - Accepts a one-off API Key from the web form; the key is passed to the engine for that request only and is not written to task output.
 - Accepts a one-off OpenAI-compatible Base URL from the web form for relay/proxy providers; the URL is used only for that request and is not written to task output.
 - Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
+- Provides image-generation configuration fields in the web UI: target image tool, model, size/aspect, count per shot, style, quality, negative prompt, consistency focus, image API key presence, and image base URL presence. These fields are appended to workflow input for `06_分镜生图设计师`; the system does not directly call image-generation APIs yet.
 - Provides video-generation configuration fields in the web UI: target tool, model, aspect ratio, duration, style, video API key presence, and video base URL presence. These fields are appended to workflow input for `06_分镜生图设计师` and `07_视频生成执行员`; the system does not directly call video-generation APIs yet.
 - Provides reference image upload fields in the web UI. Selected local images show thumbnail previews before running. Uploaded images are saved under `my_reference_images/`; workflow input receives stored path, role, and note for `06_分镜生图设计师` and `07_视频生成执行员`. No vision model is used yet, so the system does not claim to understand image content.
 - Provides memory controls in the web UI: `长期记忆` appends `my_memory/*.md`, and `继承历史任务` can append either the previous final product only or both the previous demand and final product.
-- Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, and video configuration. The `清除已保存配置` button removes the saved local settings.
+- Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, image-generation configuration, and video-generation configuration. The `清除已保存配置` button removes the saved local settings.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
 - Deletes historical task output directories through `/api/delete-task`; deletion is constrained to a validated child directory under `my_workspace/my_task_output`.
@@ -201,6 +202,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - Web UI saved settings are client-side browser state only; they are not committed to the repo and are not written into `my_task_output`, but anyone with access to the same browser profile may reuse them.
 - Long-term memory files are tracked in the repo as editable templates. They should contain reusable brand/style/character guidance, not secrets.
 - Current engine uses OpenAI-compatible `/chat/completions`. Official default base URL is `https://api.openai.com/v1`; relay/proxy providers can be configured through `OPENAI_BASE_URL`, CLI `--base-url`, or the web UI `中转站 Base URL` field.
+- Image provider API fields in the UI are currently planning/configuration inputs only. They are not used to call GPT Image, Midjourney, Stable Diffusion, FLUX, Seedream, Jimeng, Kling, or other image APIs.
 - Video provider API fields in the UI are currently planning/configuration inputs only. They are not used to call Sora, Runway, Pika, Seedance, Kling, Jimeng, Hailuo, Luma, or other video APIs.
 - Reference images are local assets for prompt planning. Actual image understanding requires adding a vision model later.
 - Default model is currently `gpt-5.5`; UI also offers `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `o3`, `o4-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, and a custom model field.
@@ -225,5 +227,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 [2026-06-12 20:10:02 +08:00] command: added local thumbnail previews for selected reference images in the web UI; restarted http://127.0.0.1:8765 and verified page includes reference-preview and URL.createObjectURL.
 
 
-[2026-06-12 20:28:58 +08:00] command: added 06_�־���ͼ���ʦ, moved original video-generation staff to 07_��Ƶ����ִ��Ա, updated short-video and outsourcing workflows to 7 steps, verified JSON/Python syntax, offline short-video run with 7 steps, and web /api/config staff count 7.
+[2026-06-12 20:28:58 +08:00] command: added 06_分镜生图设计师, moved original video-generation staff to 07_视频生成执行员, updated short-video and outsourcing workflows to 7 steps, verified JSON/Python syntax, offline short-video run with 7 steps, and web /api/config staff count 7.
 
+
+[2026-06-12 20:35:21 +08:00] command: added web UI image-generation configuration for 06_分镜生图设计师, including tool/model/size/count/style/quality/negative prompt/consistency/API presence fields; verified HTTP page markers and /api/run wrote 生图配置 without writing test secrets.
