@@ -15,6 +15,7 @@ WORKSPACE_ROOT = Path(__file__).resolve().parent
 OUTPUT_ROOT = WORKSPACE_ROOT / "my_task_output"
 WORKFLOW_ROOT = WORKSPACE_ROOT / "my_workflows"
 STAFF_ROOT = WORKSPACE_ROOT / "my_custom_staff"
+MEMORY_ROOT = WORKSPACE_ROOT / "my_memory"
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -318,6 +319,25 @@ INDEX_HTML = r"""<!doctype html>
         <label>原始需求
           <textarea id="userInput" placeholder="例如：我要做一条抖音短视频，推广 AI 自动化开发服务，目标客户是中小企业老板，目标是让客户私信咨询。"></textarea>
         </label>
+        <div class="provider-grid">
+          <label>长期记忆
+            <select id="useMemory">
+              <option value="on" selected>启用 my_memory</option>
+              <option value="off">不启用</option>
+            </select>
+          </label>
+          <label>继承历史任务
+            <select id="inheritTask">
+              <option value="">不继承</option>
+            </select>
+          </label>
+          <label>继承范围
+            <select id="inheritMode">
+              <option value="final_output" selected>继承 final_output.md</option>
+              <option value="input_and_final">继承 input.md + final_output.md</option>
+            </select>
+          </label>
+        </div>
         <details open>
           <summary><strong>视频生成配置</strong> <span class="muted small">用于 06_视频生成执行员生成制作包</span></summary>
           <div class="video-grid" style="margin-top: 12px;">
@@ -410,6 +430,9 @@ INDEX_HTML = r"""<!doctype html>
       apiKey: document.getElementById('apiKey'),
       baseUrl: document.getElementById('baseUrl'),
       userInput: document.getElementById('userInput'),
+      useMemory: document.getElementById('useMemory'),
+      inheritTask: document.getElementById('inheritTask'),
+      inheritMode: document.getElementById('inheritMode'),
       videoTool: document.getElementById('videoTool'),
       videoModel: document.getElementById('videoModel'),
       videoAspect: document.getElementById('videoAspect'),
@@ -467,6 +490,9 @@ INDEX_HTML = r"""<!doctype html>
         customModel: els.customModel.value,
         apiKey: els.apiKey.value,
         baseUrl: els.baseUrl.value,
+        useMemory: els.useMemory.value,
+        inheritTask: els.inheritTask.value,
+        inheritMode: els.inheritMode.value,
         videoTool: els.videoTool.value,
         videoModel: els.videoModel.value,
         videoAspect: els.videoAspect.value,
@@ -486,6 +512,9 @@ INDEX_HTML = r"""<!doctype html>
       els.customModel.value = settings.customModel || '';
       els.apiKey.value = settings.apiKey || '';
       els.baseUrl.value = settings.baseUrl || '';
+      setIfExists(els.useMemory, settings.useMemory);
+      setIfExists(els.inheritTask, settings.inheritTask);
+      setIfExists(els.inheritMode, settings.inheritMode);
       setIfExists(els.videoTool, settings.videoTool);
       els.videoModel.value = settings.videoModel || '';
       setIfExists(els.videoAspect, settings.videoAspect);
@@ -510,6 +539,9 @@ INDEX_HTML = r"""<!doctype html>
         els.customModel,
         els.apiKey,
         els.baseUrl,
+        els.useMemory,
+        els.inheritTask,
+        els.inheritMode,
         els.videoTool,
         els.videoModel,
         els.videoAspect,
@@ -533,9 +565,11 @@ INDEX_HTML = r"""<!doctype html>
       const data = await api('/api/tasks');
       if (!data.tasks.length) {
         els.taskList.innerHTML = '<div class="muted small">暂无任务输出</div>';
+        syncInheritTaskOptions([]);
         return;
       }
       els.taskList.innerHTML = '';
+      syncInheritTaskOptions(data.tasks);
       for (const task of data.tasks) {
         const btn = document.createElement('button');
         btn.className = `item ${selectedTask === task.name ? 'active' : ''}`;
@@ -547,6 +581,18 @@ INDEX_HTML = r"""<!doctype html>
         };
         els.taskList.appendChild(btn);
       }
+    }
+
+    function syncInheritTaskOptions(tasks) {
+      const current = els.inheritTask.value;
+      els.inheritTask.innerHTML = '<option value="">不继承</option>';
+      for (const task of tasks) {
+        const option = document.createElement('option');
+        option.value = task.name;
+        option.textContent = `${task.workflow || task.name} / ${task.name}`;
+        els.inheritTask.appendChild(option);
+      }
+      setIfExists(els.inheritTask, current);
     }
 
     async function deleteTask(name) {
@@ -640,6 +686,9 @@ INDEX_HTML = r"""<!doctype html>
             model,
             api_key: els.apiKey.value.trim(),
             base_url: els.baseUrl.value.trim(),
+            use_memory: els.useMemory.value === 'on',
+            inherit_task: els.inheritTask.value,
+            inherit_mode: els.inheritMode.value,
             video_config: videoConfig,
             video_api_key: els.videoApiKey.value.trim(),
             video_base_url: els.videoBaseUrl.value.trim(),
@@ -678,6 +727,9 @@ INDEX_HTML = r"""<!doctype html>
       els.customModel.value = '';
       els.apiKey.value = '';
       els.baseUrl.value = '';
+      els.useMemory.value = 'on';
+      els.inheritTask.value = '';
+      els.inheritMode.value = 'final_output';
       els.videoTool.value = 'prompt_only';
       els.videoModel.value = '';
       els.videoAspect.value = '9:16';
@@ -742,6 +794,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             workflow = str(payload.get("workflow") or "").strip()
             user_input = str(payload.get("input") or "").strip()
+            use_memory = bool(payload.get("use_memory"))
+            inherit_task = str(payload.get("inherit_task") or "").strip()
+            inherit_mode = str(payload.get("inherit_mode") or "final_output").strip()
+            if use_memory:
+                user_input = self._append_long_term_memory(user_input)
+            if inherit_task:
+                user_input = self._append_inherited_task(user_input, inherit_task, inherit_mode)
             video_config = payload.get("video_config") or {}
             if video_config:
                 user_input = self._append_video_config(user_input, video_config)
@@ -885,6 +944,38 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif path.is_dir():
                 path.rmdir()
         task_dir.rmdir()
+
+    def _append_long_term_memory(self, user_input: str) -> str:
+        if not MEMORY_ROOT.exists():
+            return user_input
+
+        sections = []
+        for path in sorted(MEMORY_ROOT.glob("*.md")):
+            content = path.read_text(encoding="utf-8", errors="replace").strip()
+            if content:
+                sections.append(f"### {path.name}\n{content}")
+
+        if not sections:
+            return user_input
+        return f"{user_input}\n\n## 长期记忆\n" + "\n\n".join(sections) + "\n"
+
+    def _append_inherited_task(self, user_input: str, task_name: str, inherit_mode: str) -> str:
+        task_dir = self._safe_task_dir(task_name)
+        files = ["final_output.md"]
+        if inherit_mode == "input_and_final":
+            files = ["input.md", "final_output.md"]
+
+        sections = []
+        for file_name in files:
+            path = task_dir / file_name
+            if path.exists() and path.is_file():
+                content = path.read_text(encoding="utf-8", errors="replace").strip()
+                if content:
+                    sections.append(f"### {task_name}/{file_name}\n{content}")
+
+        if not sections:
+            return user_input
+        return f"{user_input}\n\n## 继承历史任务记忆\n" + "\n\n".join(sections) + "\n"
 
     def _safe_task_dir(self, name: str) -> Path:
         if not name or "/" in name or "\\" in name or name in {".", ".."}:

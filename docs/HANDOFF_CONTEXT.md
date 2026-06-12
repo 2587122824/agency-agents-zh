@@ -18,6 +18,7 @@ my_workspace/
   my_codex_core/
   my_custom_staff/
   my_workflows/
+  my_memory/
   my_task_output/
   run_flow.py
   web_app.py
@@ -53,6 +54,18 @@ my_workspace/my_workflows/workflow_短视频全流程.json
 my_workspace/my_workflows/workflow_小红书图文.json
 my_workspace/my_workflows/workflow_开发外包.json
 ```
+
+### Long-Term Memory
+
+Long-term memory templates are stored in:
+
+```text
+my_workspace/my_memory/brand_profile.md
+my_workspace/my_memory/character_bible.md
+my_workspace/my_memory/style_guide.md
+```
+
+The web UI can append these files to each workflow run when `启用 my_memory` is selected.
 
 ## Automation Engine
 
@@ -131,6 +144,7 @@ Current verified capabilities:
 - Accepts a one-off OpenAI-compatible Base URL from the web form for relay/proxy providers; the URL is used only for that request and is not written to task output.
 - Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
 - Provides video-generation configuration fields in the web UI: target tool, model, aspect ratio, duration, style, video API key presence, and video base URL presence. These fields are appended to workflow input for `06_视频生成执行员`; the system does not directly call video-generation APIs yet.
+- Provides memory controls in the web UI: `长期记忆` appends `my_memory/*.md`, and `继承历史任务` appends a selected task's `final_output.md` or `input.md + final_output.md`.
 - Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, and video configuration. The `清除已保存配置` button removes the saved local settings.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
@@ -171,6 +185,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - `package.json` from the upstream repo may also display mojibake in default PowerShell output; avoid treating terminal mojibake as file corruption without UTF-8 verification.
 - The web UI is intentionally dependency-free and uses Python standard library only.
 - Web UI saved settings are client-side browser state only; they are not committed to the repo and are not written into `my_task_output`, but anyone with access to the same browser profile may reuse them.
+- Long-term memory files are tracked in the repo as editable templates. They should contain reusable brand/style/character guidance, not secrets.
 - Current engine uses OpenAI-compatible `/chat/completions`. Official default base URL is `https://api.openai.com/v1`; relay/proxy providers can be configured through `OPENAI_BASE_URL`, CLI `--base-url`, or the web UI `中转站 Base URL` field.
 - Video provider API fields in the UI are currently planning/configuration inputs only. They are not used to call Sora, Runway, Pika, Seedance, Kling, Jimeng, Hailuo, Luma, or other video APIs.
 - Default model is currently `gpt-5.5`; UI also offers `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `o3`, `o4-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, and a custom model field.
