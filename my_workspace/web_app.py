@@ -152,13 +152,42 @@ INDEX_HTML = r"""<!doctype html>
       border: 1px solid var(--line);
       background: #fff;
       border-radius: 6px;
-      display: grid;
-      gap: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
       width: 100%;
     }
     .item.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    .item-main {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      flex: 1;
+    }
     .item-title { font-weight: 650; overflow-wrap: anywhere; }
     .item-meta { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+    .icon-btn {
+      width: 32px;
+      min-width: 32px;
+      height: 32px;
+      min-height: 32px;
+      padding: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      line-height: 1;
+    }
+    .icon-btn.danger {
+      color: var(--danger);
+      border-color: #fecdca;
+      background: #fffafa;
+    }
+    .icon-btn.danger:hover {
+      background: #fef3f2;
+      border-color: var(--danger);
+    }
     .status {
       padding: 8px 10px;
       border-radius: 6px;
@@ -353,9 +382,37 @@ INDEX_HTML = r"""<!doctype html>
       for (const task of data.tasks) {
         const btn = document.createElement('button');
         btn.className = `item ${selectedTask === task.name ? 'active' : ''}`;
-        btn.innerHTML = `<span class="item-title">${task.workflow || task.name}</span><span class="item-meta">${task.name}</span>`;
+        btn.innerHTML = `<span class="item-main"><span class="item-title">${task.workflow || task.name}</span><span class="item-meta">${task.name}</span></span><span class="icon-btn danger" title="删除任务" aria-label="删除任务">×</span>`;
         btn.onclick = () => selectTask(task.name);
+        btn.querySelector('.icon-btn').onclick = (event) => {
+          event.stopPropagation();
+          deleteTask(task.name);
+        };
         els.taskList.appendChild(btn);
+      }
+    }
+
+    async function deleteTask(name) {
+      if (!confirm(`确定删除任务输出？\n\n${name}`)) return;
+      setStatus('正在删除任务');
+      try {
+        await api('/api/delete-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        if (selectedTask === name) {
+          selectedTask = null;
+          selectedFile = null;
+          els.viewerTitle.textContent = '未选择任务';
+          els.viewerMeta.textContent = '运行后会在这里查看输出文件';
+          els.fileTabs.innerHTML = '';
+          els.fileContent.textContent = '选择左侧任务，或运行一个新任务。';
+        }
+        setStatus('任务已删除');
+        await loadTasks();
+      } catch (err) {
+        setStatus(err.message, true);
       }
     }
 
@@ -479,11 +536,16 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         try:
+            payload = self._read_json()
+            if parsed.path == "/api/delete-task":
+                self._delete_task(str(payload.get("name") or "").strip())
+                self._send_json({"ok": True})
+                return
+
             if parsed.path != "/api/run":
                 self.send_error(404)
                 return
 
-            payload = self._read_json()
             workflow = str(payload.get("workflow") or "").strip()
             user_input = str(payload.get("input") or "").strip()
             provider = str(payload.get("provider") or "auto").strip()
@@ -593,6 +655,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not content_type.startswith("text/") and target.suffix.lower() not in {".json", ".md"}:
             raise ValueError(f"Unsupported file type: {target.name}")
         return {"file": file_name, "content": target.read_text(encoding="utf-8", errors="replace")}
+
+    def _delete_task(self, name: str) -> None:
+        task_dir = self._safe_task_dir(name)
+        if task_dir == OUTPUT_ROOT.resolve():
+            raise ValueError("Refusing to delete output root")
+
+        for path in sorted(task_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+            elif path.is_dir():
+                path.rmdir()
+        task_dir.rmdir()
 
     def _safe_task_dir(self, name: str) -> Path:
         if not name or "/" in name or "\\" in name or name in {".", ".."}:

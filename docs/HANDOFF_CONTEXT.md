@@ -131,6 +131,7 @@ Current verified capabilities:
 - Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
+- Deletes historical task output directories through `/api/delete-task`; deletion is constrained to a validated child directory under `my_workspace/my_task_output`.
 
 The web service was started and verified successfully during setup. If not running in a future session, restart it with the command above.
 
@@ -171,9 +172,8 @@ Generated task folders are disposable unless the user explicitly wants to preser
 ## Suggested Next Improvements
 
 1. Add a proper model provider selector for OpenAI Responses API or local models.
-2. Add a task delete button in the web UI.
-3. Add workflow editing in the UI.
-4. Add staff editing and preview in the UI.
-5. Add export buttons for final Markdown, script-only output, and publish checklist.
-6. Add a real Markdown renderer in the viewer instead of plain `<pre>` output.
-7. Add `.env` loading so users do not need to set environment variables manually each session.
+2. Add workflow editing in the UI.
+3. Add staff editing and preview in the UI.
+4. Add export buttons for final Markdown, script-only output, and publish checklist.
+5. Add a real Markdown renderer in the viewer instead of plain `<pre>` output.
+6. Add `.env` loading so users do not need to set environment variables manually each session.
