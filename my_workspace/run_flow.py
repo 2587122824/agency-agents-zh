@@ -15,6 +15,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--provider", choices=["auto", "offline", "openai"], default="auto")
     parser.add_argument("--model", help="Model name when provider=openai or OPENAI_API_KEY is set.")
     parser.add_argument("--api-key", help="OpenAI API key for this run. Prefer environment variables for shared machines.")
+    parser.add_argument("--base-url", help="OpenAI-compatible base URL, for example https://api.example.com/v1.")
     return parser.parse_args()
 
 
@@ -44,6 +45,7 @@ def main() -> int:
         provider=args.provider,
         model=args.model,
         api_key=args.api_key,
+        base_url=args.base_url,
     )
     result = engine.run(args.workflow, user_input)
 

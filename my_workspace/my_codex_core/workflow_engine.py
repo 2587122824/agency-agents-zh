@@ -25,6 +25,7 @@ class WorkflowEngine:
         provider: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
     ) -> None:
         self.workspace_root = workspace_root
         self.staff_root = workspace_root / "my_custom_staff"
@@ -32,7 +33,7 @@ class WorkflowEngine:
         self.output_root = workspace_root / "my_task_output"
         self.staff_loader = StaffLoader(self.staff_root)
         self.storage = TaskStorage(self.output_root)
-        self.api = CodexAPI(provider=provider, model=model, api_key=api_key)
+        self.api = CodexAPI(provider=provider, model=model, api_key=api_key, base_url=base_url)
 
     def run(self, workflow_key: str, user_input: str) -> WorkflowRunResult:
         workflow_path = self._resolve_workflow_path(workflow_key)

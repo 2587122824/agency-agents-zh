@@ -28,10 +28,11 @@ class CodexAPI:
         provider: str | None = None,
         model: str | None = None,
         api_key: str | None = None,
+        base_url: str | None = None,
     ) -> None:
         self.provider = provider or os.getenv("MY_WORKFLOW_PROVIDER") or "auto"
         self.model = model or os.getenv("OPENAI_MODEL") or "gpt-5.5"
-        self.base_url = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        self.base_url = (base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
 
     def run(self, system_prompt: str, user_prompt: str) -> LLMResult:

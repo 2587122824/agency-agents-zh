@@ -138,7 +138,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .provider-grid {
       display: grid;
-      grid-template-columns: minmax(220px, 1fr) minmax(280px, 1fr);
+      grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) minmax(260px, 1fr);
       gap: 12px;
     }
     .list {
@@ -272,6 +272,9 @@ INDEX_HTML = r"""<!doctype html>
           <label>API Key
             <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...，只用于本次运行，不保存" />
           </label>
+          <label>中转站 Base URL
+            <input id="baseUrl" autocomplete="off" spellcheck="false" placeholder="例如 https://api.example.com/v1，留空用官方地址" />
+          </label>
           <label>自定义模型名
             <input id="customModel" placeholder="选择“手动输入模型名”时填写" disabled />
           </label>
@@ -307,6 +310,7 @@ INDEX_HTML = r"""<!doctype html>
       model: document.getElementById('model'),
       customModel: document.getElementById('customModel'),
       apiKey: document.getElementById('apiKey'),
+      baseUrl: document.getElementById('baseUrl'),
       userInput: document.getElementById('userInput'),
       runBtn: document.getElementById('runBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
@@ -411,6 +415,7 @@ INDEX_HTML = r"""<!doctype html>
             provider: els.provider.value,
             model,
             api_key: els.apiKey.value.trim(),
+            base_url: els.baseUrl.value.trim(),
           }),
         });
         setStatus(`完成：${result.workflow_name}，${result.step_count} 步`);
@@ -484,13 +489,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             provider = str(payload.get("provider") or "auto").strip()
             model = str(payload.get("model") or "").strip() or None
             api_key = str(payload.get("api_key") or "").strip() or None
+            base_url = str(payload.get("base_url") or "").strip() or None
 
             if not workflow:
                 raise ValueError("workflow is required")
             if not user_input:
                 raise ValueError("input is required")
 
-            engine = WorkflowEngine(WORKSPACE_ROOT, provider=provider, model=model, api_key=api_key)
+            engine = WorkflowEngine(
+                WORKSPACE_ROOT,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+            )
             result = engine.run(workflow, user_input)
             task_name = Path(result.task_dir).name
             self._send_json(
@@ -528,7 +540,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "workflows": workflows,
             "staff": staff,
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+            "base_url_configured": bool(os.getenv("OPENAI_BASE_URL")),
             "default_model": os.getenv("OPENAI_MODEL") or "gpt-5.5",
+            "default_base_url": os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
         }
 
     def _tasks(self) -> list[dict]:
