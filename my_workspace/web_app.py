@@ -370,6 +370,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="row">
           <button class="primary" id="runBtn">运行工作流</button>
           <button id="sampleBtn">填入示例</button>
+          <button id="clearSettingsBtn">清除已保存配置</button>
           <span id="status" class="status">准备就绪</span>
         </div>
       </div>
@@ -406,6 +407,7 @@ INDEX_HTML = r"""<!doctype html>
       videoBaseUrl: document.getElementById('videoBaseUrl'),
       runBtn: document.getElementById('runBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
+      clearSettingsBtn: document.getElementById('clearSettingsBtn'),
       status: document.getElementById('status'),
       taskList: document.getElementById('taskList'),
       refreshTasks: document.getElementById('refreshTasks'),
@@ -416,6 +418,7 @@ INDEX_HTML = r"""<!doctype html>
     };
     let selectedTask = null;
     let selectedFile = null;
+    const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
 
     function setStatus(text, isError = false) {
       els.status.textContent = text;
@@ -433,6 +436,85 @@ INDEX_HTML = r"""<!doctype html>
       const data = await api('/api/config');
       els.env.textContent = data.openai_configured ? 'OpenAI 已配置' : 'OpenAI 未配置，默认离线模式';
       els.workflow.innerHTML = data.workflows.map(w => `<option value="${w.stem}">${w.name}</option>`).join('');
+      restoreSettings();
+    }
+
+    function readSettings() {
+      try {
+        return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
+      } catch {
+        return {};
+      }
+    }
+
+    function saveSettings() {
+      const settings = {
+        workflow: els.workflow.value,
+        provider: els.provider.value,
+        model: els.model.value,
+        customModel: els.customModel.value,
+        apiKey: els.apiKey.value,
+        baseUrl: els.baseUrl.value,
+        videoTool: els.videoTool.value,
+        videoModel: els.videoModel.value,
+        videoAspect: els.videoAspect.value,
+        videoDuration: els.videoDuration.value,
+        videoStyle: els.videoStyle.value,
+        videoApiKey: els.videoApiKey.value,
+        videoBaseUrl: els.videoBaseUrl.value,
+      };
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    }
+
+    function restoreSettings() {
+      const settings = readSettings();
+      setIfExists(els.workflow, settings.workflow);
+      setIfExists(els.provider, settings.provider);
+      setIfExists(els.model, settings.model);
+      els.customModel.value = settings.customModel || '';
+      els.apiKey.value = settings.apiKey || '';
+      els.baseUrl.value = settings.baseUrl || '';
+      setIfExists(els.videoTool, settings.videoTool);
+      els.videoModel.value = settings.videoModel || '';
+      setIfExists(els.videoAspect, settings.videoAspect);
+      setIfExists(els.videoDuration, settings.videoDuration);
+      els.videoStyle.value = settings.videoStyle || '';
+      els.videoApiKey.value = settings.videoApiKey || '';
+      els.videoBaseUrl.value = settings.videoBaseUrl || '';
+      syncCustomModelState(false);
+    }
+
+    function setIfExists(control, value) {
+      if (!value) return;
+      const values = Array.from(control.options || []).map(option => option.value);
+      if (!values.length || values.includes(value)) control.value = value;
+    }
+
+    function bindSettingsPersistence() {
+      [
+        els.workflow,
+        els.provider,
+        els.model,
+        els.customModel,
+        els.apiKey,
+        els.baseUrl,
+        els.videoTool,
+        els.videoModel,
+        els.videoAspect,
+        els.videoDuration,
+        els.videoStyle,
+        els.videoApiKey,
+        els.videoBaseUrl,
+      ].forEach(control => {
+        control.addEventListener('change', saveSettings);
+        control.addEventListener('input', saveSettings);
+      });
+    }
+
+    function syncCustomModelState(focusWhenCustom = true) {
+      const custom = els.model.value === 'custom';
+      els.customModel.disabled = !custom;
+      if (custom && focusWhenCustom) els.customModel.focus();
     }
 
     async function loadTasks() {
@@ -524,6 +606,7 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       els.runBtn.disabled = true;
+      saveSettings();
       setStatus('工作流运行中');
       try {
         const videoConfig = {
@@ -563,9 +646,8 @@ INDEX_HTML = r"""<!doctype html>
     els.runBtn.onclick = runWorkflow;
     els.refreshTasks.onclick = loadTasks;
     els.model.onchange = () => {
-      const custom = els.model.value === 'custom';
-      els.customModel.disabled = !custom;
-      if (custom) els.customModel.focus();
+      syncCustomModelState();
+      saveSettings();
     };
     els.sampleBtn.onclick = () => {
       els.userInput.value = '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。';
@@ -574,7 +656,27 @@ INDEX_HTML = r"""<!doctype html>
       els.videoAspect.value = '9:16';
       els.videoDuration.value = '30s';
       els.videoStyle.value = '真人口播，商业科技感，干净明亮';
+      saveSettings();
     };
+    els.clearSettingsBtn.onclick = () => {
+      if (!confirm('确定清除本浏览器保存的 API Key、Base URL、模型和视频配置？')) return;
+      localStorage.removeItem(SETTINGS_KEY);
+      els.provider.value = 'auto';
+      els.model.value = 'gpt-5.5';
+      els.customModel.value = '';
+      els.apiKey.value = '';
+      els.baseUrl.value = '';
+      els.videoTool.value = 'prompt_only';
+      els.videoModel.value = '';
+      els.videoAspect.value = '9:16';
+      els.videoDuration.value = '30s';
+      els.videoStyle.value = '';
+      els.videoApiKey.value = '';
+      els.videoBaseUrl.value = '';
+      syncCustomModelState(false);
+      setStatus('已清除本地保存配置');
+    };
+    bindSettingsPersistence();
 
     (async function init() {
       try {

@@ -131,6 +131,7 @@ Current verified capabilities:
 - Accepts a one-off OpenAI-compatible Base URL from the web form for relay/proxy providers; the URL is used only for that request and is not written to task output.
 - Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
 - Provides video-generation configuration fields in the web UI: target tool, model, aspect ratio, duration, style, video API key presence, and video base URL presence. These fields are appended to workflow input for `06_视频生成执行员`; the system does not directly call video-generation APIs yet.
+- Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, and video configuration. The `清除已保存配置` button removes the saved local settings.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
 - Deletes historical task output directories through `/api/delete-task`; deletion is constrained to a validated child directory under `my_workspace/my_task_output`.
@@ -169,6 +170,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - PowerShell may display UTF-8 Chinese text incorrectly unless commands explicitly read with UTF-8. The files themselves are UTF-8.
 - `package.json` from the upstream repo may also display mojibake in default PowerShell output; avoid treating terminal mojibake as file corruption without UTF-8 verification.
 - The web UI is intentionally dependency-free and uses Python standard library only.
+- Web UI saved settings are client-side browser state only; they are not committed to the repo and are not written into `my_task_output`, but anyone with access to the same browser profile may reuse them.
 - Current engine uses OpenAI-compatible `/chat/completions`. Official default base URL is `https://api.openai.com/v1`; relay/proxy providers can be configured through `OPENAI_BASE_URL`, CLI `--base-url`, or the web UI `中转站 Base URL` field.
 - Video provider API fields in the UI are currently planning/configuration inputs only. They are not used to call Sora, Runway, Pika, Kling, Jimeng, Hailuo, Luma, or other video APIs.
 - Default model is currently `gpt-5.5`; UI also offers `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `o3`, `o4-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, and a custom model field.
