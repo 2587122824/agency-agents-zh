@@ -141,6 +141,11 @@ INDEX_HTML = r"""<!doctype html>
       grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) minmax(260px, 1fr);
       gap: 12px;
     }
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(160px, 1fr));
+      gap: 12px;
+    }
     .list {
       display: grid;
       gap: 8px;
@@ -242,6 +247,8 @@ INDEX_HTML = r"""<!doctype html>
       main { grid-template-columns: 1fr; }
       aside { border-right: 0; border-bottom: 1px solid var(--line); }
       .split { grid-template-columns: 1fr; }
+      .provider-grid { grid-template-columns: 1fr; }
+      .video-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -311,6 +318,55 @@ INDEX_HTML = r"""<!doctype html>
         <label>原始需求
           <textarea id="userInput" placeholder="例如：我要做一条抖音短视频，推广 AI 自动化开发服务，目标客户是中小企业老板，目标是让客户私信咨询。"></textarea>
         </label>
+        <details open>
+          <summary><strong>视频生成配置</strong> <span class="muted small">用于 06_视频生成执行员生成制作包</span></summary>
+          <div class="video-grid" style="margin-top: 12px;">
+            <label>视频工具
+              <select id="videoTool">
+                <option value="prompt_only" selected>仅生成提示词/制作包</option>
+                <option value="sora">Sora</option>
+                <option value="runway">Runway</option>
+                <option value="pika">Pika</option>
+                <option value="kling">可灵 Kling</option>
+                <option value="jimeng">即梦 Jimeng</option>
+                <option value="hailuo">海螺 Hailuo</option>
+                <option value="luma">Luma</option>
+                <option value="custom">其他/自定义</option>
+              </select>
+            </label>
+            <label>视频模型
+              <input id="videoModel" placeholder="例如 sora / runway gen-3 / kling 2.0，可留空" />
+            </label>
+            <label>画幅
+              <select id="videoAspect">
+                <option value="9:16" selected>9:16 竖屏</option>
+                <option value="16:9">16:9 横屏</option>
+                <option value="1:1">1:1 方屏</option>
+                <option value="4:5">4:5 信息流</option>
+              </select>
+            </label>
+            <label>目标时长
+              <select id="videoDuration">
+                <option value="15s">15 秒</option>
+                <option value="30s" selected>30 秒</option>
+                <option value="45s">45 秒</option>
+                <option value="60s">60 秒</option>
+                <option value="custom">按脚本自动拆分</option>
+              </select>
+            </label>
+          </div>
+          <div class="provider-grid" style="margin-top: 12px;">
+            <label>视频风格
+              <input id="videoStyle" placeholder="例如 真人口播、科技感、写实商业、国风、美妆种草" />
+            </label>
+            <label>视频平台 API Key
+              <input id="videoApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用视频 API，不保存" />
+            </label>
+            <label>视频平台 Base URL
+              <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入视频 API 使用，可留空" />
+            </label>
+          </div>
+        </details>
         <div class="row">
           <button class="primary" id="runBtn">运行工作流</button>
           <button id="sampleBtn">填入示例</button>
@@ -341,6 +397,13 @@ INDEX_HTML = r"""<!doctype html>
       apiKey: document.getElementById('apiKey'),
       baseUrl: document.getElementById('baseUrl'),
       userInput: document.getElementById('userInput'),
+      videoTool: document.getElementById('videoTool'),
+      videoModel: document.getElementById('videoModel'),
+      videoAspect: document.getElementById('videoAspect'),
+      videoDuration: document.getElementById('videoDuration'),
+      videoStyle: document.getElementById('videoStyle'),
+      videoApiKey: document.getElementById('videoApiKey'),
+      videoBaseUrl: document.getElementById('videoBaseUrl'),
       runBtn: document.getElementById('runBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
       status: document.getElementById('status'),
@@ -463,6 +526,15 @@ INDEX_HTML = r"""<!doctype html>
       els.runBtn.disabled = true;
       setStatus('工作流运行中');
       try {
+        const videoConfig = {
+          tool: els.videoTool.value,
+          model: els.videoModel.value.trim(),
+          aspect_ratio: els.videoAspect.value,
+          duration: els.videoDuration.value,
+          style: els.videoStyle.value.trim(),
+          api_key_provided: Boolean(els.videoApiKey.value.trim()),
+          base_url_provided: Boolean(els.videoBaseUrl.value.trim()),
+        };
         const result = await api('/api/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -473,6 +545,9 @@ INDEX_HTML = r"""<!doctype html>
             model,
             api_key: els.apiKey.value.trim(),
             base_url: els.baseUrl.value.trim(),
+            video_config: videoConfig,
+            video_api_key: els.videoApiKey.value.trim(),
+            video_base_url: els.videoBaseUrl.value.trim(),
           }),
         });
         setStatus(`完成：${result.workflow_name}，${result.step_count} 步`);
@@ -494,6 +569,11 @@ INDEX_HTML = r"""<!doctype html>
     };
     els.sampleBtn.onclick = () => {
       els.userInput.value = '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。';
+      els.videoTool.value = 'prompt_only';
+      els.videoModel.value = '';
+      els.videoAspect.value = '9:16';
+      els.videoDuration.value = '30s';
+      els.videoStyle.value = '真人口播，商业科技感，干净明亮';
     };
 
     (async function init() {
@@ -548,6 +628,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             workflow = str(payload.get("workflow") or "").strip()
             user_input = str(payload.get("input") or "").strip()
+            video_config = payload.get("video_config") or {}
+            if video_config:
+                user_input = self._append_video_config(user_input, video_config)
             provider = str(payload.get("provider") or "auto").strip()
             model = str(payload.get("model") or "").strip() or None
             api_key = str(payload.get("api_key") or "").strip() or None
@@ -655,6 +738,27 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not content_type.startswith("text/") and target.suffix.lower() not in {".json", ".md"}:
             raise ValueError(f"Unsupported file type: {target.name}")
         return {"file": file_name, "content": target.read_text(encoding="utf-8", errors="replace")}
+
+    @staticmethod
+    def _append_video_config(user_input: str, video_config: dict) -> str:
+        def value(key: str, default: str = "未填写") -> str:
+            item = video_config.get(key)
+            return str(item).strip() if item not in (None, "") else default
+
+        api_note = "已填写，当前版本仅记录为可用条件，不保存密钥、不直接调用视频 API" if video_config.get("api_key_provided") else "未填写"
+        base_url_note = "已填写，当前版本仅记录为可用条件，不保存地址到输出" if video_config.get("base_url_provided") else "未填写"
+        return (
+            f"{user_input}\n\n"
+            "## 视频生成配置\n"
+            f"- 视频工具：{value('tool')}\n"
+            f"- 视频模型：{value('model')}\n"
+            f"- 画幅：{value('aspect_ratio', '9:16')}\n"
+            f"- 目标时长：{value('duration', '30s')}\n"
+            f"- 视频风格：{value('style')}\n"
+            f"- 视频平台 API Key：{api_note}\n"
+            f"- 视频平台 Base URL：{base_url_note}\n"
+            "- 执行要求：当前阶段由 06_视频生成执行员输出视频生成提示词、镜头清单、TTS 配音稿、SRT 字幕草案和剪辑说明；不要声称已经生成 mp4。\n"
+        )
 
     def _delete_task(self, name: str) -> None:
         task_dir = self._safe_task_dir(name)

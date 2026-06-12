@@ -130,6 +130,7 @@ Current verified capabilities:
 - Accepts a one-off API Key from the web form; the key is passed to the engine for that request only and is not written to task output.
 - Accepts a one-off OpenAI-compatible Base URL from the web form for relay/proxy providers; the URL is used only for that request and is not written to task output.
 - Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
+- Provides video-generation configuration fields in the web UI: target tool, model, aspect ratio, duration, style, video API key presence, and video base URL presence. These fields are appended to workflow input for `06_视频生成执行员`; the system does not directly call video-generation APIs yet.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
 - Deletes historical task output directories through `/api/delete-task`; deletion is constrained to a validated child directory under `my_workspace/my_task_output`.
@@ -160,7 +161,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
   - generated metadata JSON files
 - CLI offline workflow run succeeded for `workflow_短视频全流程`.
 - Web API offline workflow run succeeded for `workflow_小红书图文`.
-- `06_视频生成执行员` was added to generate video production packages; `workflow_短视频全流程` and `workflow_开发外包` now include a final video-generation step.
+- `06_视频生成执行员` was added to generate video production packages; `workflow_短视频全流程` and `workflow_开发外包` now include a final video-generation step. It produces prompts, shot lists, TTS copy, SRT drafts, and edit instructions; it does not create mp4 files directly.
 - Local web UI responded with HTTP 200 and showed valid config.
 
 ## Important Notes
@@ -169,14 +170,16 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - `package.json` from the upstream repo may also display mojibake in default PowerShell output; avoid treating terminal mojibake as file corruption without UTF-8 verification.
 - The web UI is intentionally dependency-free and uses Python standard library only.
 - Current engine uses OpenAI-compatible `/chat/completions`. Official default base URL is `https://api.openai.com/v1`; relay/proxy providers can be configured through `OPENAI_BASE_URL`, CLI `--base-url`, or the web UI `中转站 Base URL` field.
+- Video provider API fields in the UI are currently planning/configuration inputs only. They are not used to call Sora, Runway, Pika, Kling, Jimeng, Hailuo, Luma, or other video APIs.
 - Default model is currently `gpt-5.5`; UI also offers `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `o3`, `o4-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, and a custom model field.
 - GitHub Actions were adjusted for this fork: CI has `paths-ignore` for `docs/**` and `my_workspace/**`, and its agent scan prunes `my_workspace/`; `Sync to Gitee` is manual-only and skips when `GITEE_TOKEN` is absent.
 
 ## Suggested Next Improvements
 
 1. Add a proper model provider selector for OpenAI Responses API or local models.
-2. Add workflow editing in the UI.
-3. Add staff editing and preview in the UI.
-4. Add export buttons for final Markdown, script-only output, and publish checklist.
-5. Add a real Markdown renderer in the viewer instead of plain `<pre>` output.
-6. Add `.env` loading so users do not need to set environment variables manually each session.
+2. Add actual video API adapters for a selected provider after choosing which provider to use first.
+3. Add workflow editing in the UI.
+4. Add staff editing and preview in the UI.
+5. Add export buttons for final Markdown, script-only output, and publish checklist.
+6. Add a real Markdown renderer in the viewer instead of plain `<pre>` output.
+7. Add `.env` loading so users do not need to set environment variables manually each session.
