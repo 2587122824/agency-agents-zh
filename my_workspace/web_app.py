@@ -141,7 +141,26 @@ INDEX_HTML = r"""<!doctype html>
     }
     .split {
       display: grid;
-      grid-template-columns: 1fr 160px 240px;
+      grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 140px minmax(220px, 1fr);
+      gap: 12px;
+    }
+    details {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfd;
+      padding: 0;
+    }
+    summary {
+      cursor: pointer;
+      padding: 10px 12px;
+      list-style-position: inside;
+    }
+    details[open] summary {
+      border-bottom: 1px solid var(--line);
+    }
+    .details-body {
+      padding: 12px;
+      display: grid;
       gap: 12px;
     }
     .provider-grid {
@@ -360,6 +379,9 @@ INDEX_HTML = r"""<!doctype html>
           <label>工作流
             <select id="workflow"></select>
           </label>
+          <label>任务名称
+            <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI自动化获客短视频-第1版，可留空" />
+          </label>
           <label>执行模式
             <select id="provider">
               <option value="auto">auto</option>
@@ -393,196 +415,207 @@ INDEX_HTML = r"""<!doctype html>
             </select>
           </label>
         </div>
-        <div class="provider-grid">
-          <label>任务名称
-            <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI自动化获客短视频-第1版，可留空" />
-          </label>
-          <label>API Key
-            <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...，只用于本次运行，不保存" />
-          </label>
-          <label>中转站 Base URL
-            <input id="baseUrl" autocomplete="off" spellcheck="false" placeholder="例如 https://api.example.com/v1，留空用官方地址" />
-          </label>
-          <label>自定义模型名
-            <input id="customModel" placeholder="选择“手动输入模型名”时填写" disabled />
-          </label>
-        </div>
         <label>原始需求
           <textarea id="userInput" placeholder="例如：我要做一条抖音短视频，推广 AI 自动化开发服务，目标客户是中小企业老板，目标是让客户私信咨询。"></textarea>
         </label>
-        <div class="provider-grid">
-          <label>长期记忆
-            <select id="useMemory">
-              <option value="on" selected>启用 my_memory</option>
-              <option value="off">不启用</option>
-            </select>
-          </label>
-          <label>继承历史任务
-            <select id="inheritTask">
-              <option value="">不继承</option>
-            </select>
-          </label>
-          <label>继承范围
-            <select id="inheritMode">
-              <option value="final_output" selected>只参考上次最终成品</option>
-              <option value="input_and_final">参考上次需求和最终成品</option>
-            </select>
-          </label>
-        </div>
-        <details open>
-          <summary><strong>生图配置</strong> <span class="muted small">用于 06_分镜生图设计师生成关键帧方案</span></summary>
-          <div class="video-grid" style="margin-top: 12px;">
-            <label>生图工具
-              <select id="imageTool">
-                <option value="prompt_only" selected>仅生成生图提示词</option>
-                <option value="gpt-image">GPT Image</option>
-                <option value="midjourney">Midjourney</option>
-                <option value="stable-diffusion">Stable Diffusion</option>
-                <option value="flux">FLUX</option>
-                <option value="jimeng">即梦生图</option>
-                <option value="kling">可灵生图</option>
-                <option value="seedream">Seedream</option>
-                <option value="custom">其他/自定义</option>
-              </select>
-            </label>
-            <label>生图模型
-              <input id="imageModel" list="imageModelOptions" placeholder="例如 gpt-image-1 / midjourney v7，可留空" />
-              <datalist id="imageModelOptions">
-                <option value="gpt-image-1" label="GPT Image 1"></option>
-                <option value="dall-e-3" label="DALL-E 3"></option>
-                <option value="midjourney-v7" label="Midjourney v7"></option>
-                <option value="stable-diffusion-xl" label="Stable Diffusion XL"></option>
-                <option value="flux-1.1-pro" label="FLUX 1.1 Pro"></option>
-                <option value="seedream-3.0" label="Seedream 3.0"></option>
-                <option value="jimeng-image" label="即梦生图"></option>
-                <option value="kling-image" label="可灵生图"></option>
-              </datalist>
-            </label>
-            <label>图片尺寸
-              <select id="imageSize">
-                <option value="9:16" selected>9:16 竖屏关键帧</option>
-                <option value="16:9">16:9 横屏关键帧</option>
-                <option value="1:1">1:1 方图</option>
-                <option value="4:5">4:5 信息流</option>
-                <option value="1024x1792">1024x1792</option>
-                <option value="1792x1024">1792x1024</option>
-                <option value="1024x1024">1024x1024</option>
-              </select>
-            </label>
-            <label>每镜头图片数
-              <select id="imageCount">
-                <option value="1" selected>1 张</option>
-                <option value="2">2 张备选</option>
-                <option value="3">3 张备选</option>
-                <option value="4">4 张备选</option>
-              </select>
-            </label>
-          </div>
-          <div class="provider-grid" style="margin-top: 12px;">
-            <label>生图风格
-              <input id="imageStyle" placeholder="例如 写实商业、电影感、干净明亮、赛博科技、国风插画" />
-            </label>
-            <label>生图质量
-              <select id="imageQuality">
-                <option value="standard" selected>标准</option>
-                <option value="high">高清/高质量</option>
-                <option value="draft">草图/快速预览</option>
-              </select>
-            </label>
-            <label>生图平台 API Key
-              <input id="imageApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用生图 API，会保存到本浏览器" />
-            </label>
-          </div>
-          <div class="provider-grid" style="margin-top: 12px;">
-            <label>生图平台 Base URL
-              <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入生图 API 使用，可留空" />
-            </label>
-            <label>负面提示词
-              <input id="imageNegativePrompt" placeholder="例如 水印、畸形手指、低清晰度、脸部变形、错误文字" />
-            </label>
-            <label>一致性重点
-              <input id="imageConsistency" placeholder="例如 保持同一人物脸型、服装、产品外观和主色调" />
-            </label>
+        <details>
+          <summary><strong>模型接口配置</strong> <span class="muted small">API Key、中转站和自定义模型名</span></summary>
+          <div class="details-body">
+            <div class="provider-grid">
+              <label>API Key
+                <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...，只用于本次运行，不保存" />
+              </label>
+              <label>中转站 Base URL
+                <input id="baseUrl" autocomplete="off" spellcheck="false" placeholder="例如 https://api.example.com/v1，留空用官方地址" />
+              </label>
+              <label>自定义模型名
+                <input id="customModel" placeholder="选择“手动输入模型名”时填写" disabled />
+              </label>
+            </div>
           </div>
         </details>
-        <details open>
+        <details>
+          <summary><strong>记忆与继承</strong> <span class="muted small">长期记忆和历史任务上下文</span></summary>
+          <div class="details-body">
+            <div class="provider-grid">
+              <label>长期记忆
+                <select id="useMemory">
+                  <option value="on" selected>启用 my_memory</option>
+                  <option value="off">不启用</option>
+                </select>
+              </label>
+              <label>继承历史任务
+                <select id="inheritTask">
+                  <option value="">不继承</option>
+                </select>
+              </label>
+              <label>继承范围
+                <select id="inheritMode">
+                  <option value="final_output" selected>只参考上次最终成品</option>
+                  <option value="input_and_final">参考上次需求和最终成品</option>
+                </select>
+              </label>
+            </div>
+          </div>
+        </details>
+        <details>
+          <summary><strong>生图配置</strong> <span class="muted small">用于 06_分镜生图设计师生成关键帧方案</span></summary>
+          <div class="details-body">
+            <div class="video-grid">
+              <label>生图工具
+                <select id="imageTool">
+                  <option value="prompt_only" selected>仅生成生图提示词</option>
+                  <option value="gpt-image">GPT Image</option>
+                  <option value="midjourney">Midjourney</option>
+                  <option value="stable-diffusion">Stable Diffusion</option>
+                  <option value="flux">FLUX</option>
+                  <option value="jimeng">即梦生图</option>
+                  <option value="kling">可灵生图</option>
+                  <option value="seedream">Seedream</option>
+                  <option value="custom">其他/自定义</option>
+                </select>
+              </label>
+              <label>生图模型
+                <input id="imageModel" list="imageModelOptions" placeholder="例如 gpt-image-1 / midjourney v7，可留空" />
+                <datalist id="imageModelOptions">
+                  <option value="gpt-image-1" label="GPT Image 1"></option>
+                  <option value="dall-e-3" label="DALL-E 3"></option>
+                  <option value="midjourney-v7" label="Midjourney v7"></option>
+                  <option value="stable-diffusion-xl" label="Stable Diffusion XL"></option>
+                  <option value="flux-1.1-pro" label="FLUX 1.1 Pro"></option>
+                  <option value="seedream-3.0" label="Seedream 3.0"></option>
+                  <option value="jimeng-image" label="即梦生图"></option>
+                  <option value="kling-image" label="可灵生图"></option>
+                </datalist>
+              </label>
+              <label>图片尺寸
+                <select id="imageSize">
+                  <option value="9:16" selected>9:16 竖屏关键帧</option>
+                  <option value="16:9">16:9 横屏关键帧</option>
+                  <option value="1:1">1:1 方图</option>
+                  <option value="4:5">4:5 信息流</option>
+                  <option value="1024x1792">1024x1792</option>
+                  <option value="1792x1024">1792x1024</option>
+                  <option value="1024x1024">1024x1024</option>
+                </select>
+              </label>
+              <label>每镜头图片数
+                <select id="imageCount">
+                  <option value="1" selected>1 张</option>
+                  <option value="2">2 张备选</option>
+                  <option value="3">3 张备选</option>
+                  <option value="4">4 张备选</option>
+                </select>
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>生图风格
+                <input id="imageStyle" placeholder="例如 写实商业、电影感、干净明亮、赛博科技、国风插画" />
+              </label>
+              <label>生图质量
+                <select id="imageQuality">
+                  <option value="standard" selected>标准</option>
+                  <option value="high">高清/高质量</option>
+                  <option value="draft">草图/快速预览</option>
+                </select>
+              </label>
+              <label>生图平台 API Key
+                <input id="imageApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用生图 API，会保存到本浏览器" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>生图平台 Base URL
+                <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入生图 API 使用，可留空" />
+              </label>
+              <label>负面提示词
+                <input id="imageNegativePrompt" placeholder="例如 水印、畸形手指、低清晰度、脸部变形、错误文字" />
+              </label>
+              <label>一致性重点
+                <input id="imageConsistency" placeholder="例如 保持同一人物脸型、服装、产品外观和主色调" />
+              </label>
+            </div>
+          </div>
+        </details>
+        <details>
           <summary><strong>视频生成配置</strong> <span class="muted small">用于 06_分镜生图设计师和 07_视频生成执行员</span></summary>
-          <div class="video-grid" style="margin-top: 12px;">
-            <label>视频工具
-              <select id="videoTool">
-                <option value="prompt_only" selected>仅生成提示词/制作包</option>
-                <option value="sora">Sora</option>
-                <option value="runway">Runway</option>
-                <option value="pika">Pika</option>
-                <option value="seedance">Seedance</option>
-                <option value="kling">可灵 Kling</option>
-                <option value="jimeng">即梦 Jimeng</option>
-                <option value="hailuo">海螺 Hailuo</option>
-                <option value="luma">Luma</option>
-                <option value="custom">其他/自定义</option>
-              </select>
-            </label>
-            <label>视频模型
-              <input id="videoModel" list="videoModelOptions" placeholder="例如 seedance-2-0-pro / kling 2.0，可留空" />
-              <datalist id="videoModelOptions">
-                <option value="seedance-2-0-pro" label="Seedance 2.0 Pro"></option>
-                <option value="seedance-2-0-lite" label="Seedance 2.0 Lite"></option>
-                <option value="sora" label="Sora"></option>
-                <option value="runway-gen-3" label="Runway Gen-3"></option>
-                <option value="pika" label="Pika"></option>
-                <option value="kling-2.0" label="可灵 2.0"></option>
-                <option value="jimeng" label="即梦"></option>
-                <option value="hailuo" label="海螺"></option>
-                <option value="luma" label="Luma"></option>
-              </datalist>
-            </label>
-            <label>画幅
-              <select id="videoAspect">
-                <option value="9:16" selected>9:16 竖屏</option>
-                <option value="16:9">16:9 横屏</option>
-                <option value="1:1">1:1 方屏</option>
-                <option value="4:5">4:5 信息流</option>
-              </select>
-            </label>
-            <label>目标时长
-              <select id="videoDuration">
-                <option value="15s">15 秒</option>
-                <option value="30s" selected>30 秒</option>
-                <option value="45s">45 秒</option>
-                <option value="60s">60 秒</option>
-                <option value="custom">按脚本自动拆分</option>
-              </select>
-            </label>
+          <div class="details-body">
+            <div class="video-grid">
+              <label>视频工具
+                <select id="videoTool">
+                  <option value="prompt_only" selected>仅生成提示词/制作包</option>
+                  <option value="sora">Sora</option>
+                  <option value="runway">Runway</option>
+                  <option value="pika">Pika</option>
+                  <option value="seedance">Seedance</option>
+                  <option value="kling">可灵 Kling</option>
+                  <option value="jimeng">即梦 Jimeng</option>
+                  <option value="hailuo">海螺 Hailuo</option>
+                  <option value="luma">Luma</option>
+                  <option value="custom">其他/自定义</option>
+                </select>
+              </label>
+              <label>视频模型
+                <input id="videoModel" list="videoModelOptions" placeholder="例如 seedance-2-0-pro / kling 2.0，可留空" />
+                <datalist id="videoModelOptions">
+                  <option value="seedance-2-0-pro" label="Seedance 2.0 Pro"></option>
+                  <option value="seedance-2-0-lite" label="Seedance 2.0 Lite"></option>
+                  <option value="sora" label="Sora"></option>
+                  <option value="runway-gen-3" label="Runway Gen-3"></option>
+                  <option value="pika" label="Pika"></option>
+                  <option value="kling-2.0" label="可灵 2.0"></option>
+                  <option value="jimeng" label="即梦"></option>
+                  <option value="hailuo" label="海螺"></option>
+                  <option value="luma" label="Luma"></option>
+                </datalist>
+              </label>
+              <label>画幅
+                <select id="videoAspect">
+                  <option value="9:16" selected>9:16 竖屏</option>
+                  <option value="16:9">16:9 横屏</option>
+                  <option value="1:1">1:1 方屏</option>
+                  <option value="4:5">4:5 信息流</option>
+                </select>
+              </label>
+              <label>目标时长
+                <select id="videoDuration">
+                  <option value="15s">15 秒</option>
+                  <option value="30s" selected>30 秒</option>
+                  <option value="45s">45 秒</option>
+                  <option value="60s">60 秒</option>
+                  <option value="custom">按脚本自动拆分</option>
+                </select>
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>视频风格
+                <input id="videoStyle" placeholder="例如 真人口播、科技感、写实商业、国风、美妆种草" />
+              </label>
+              <label>视频平台 API Key
+                <input id="videoApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用视频 API，会保存到本浏览器" />
+              </label>
+              <label>视频平台 Base URL
+                <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入视频 API 使用，可留空" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>参考图
+                <input id="referenceImages" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+              </label>
+              <label>参考图用途
+                <select id="referenceRole">
+                  <option value="人物一致性" selected>人物一致性</option>
+                  <option value="产品参考">产品参考</option>
+                  <option value="视觉风格参考">视觉风格参考</option>
+                  <option value="场景参考">场景参考</option>
+                  <option value="封面参考">封面参考</option>
+                </select>
+              </label>
+              <label>参考图说明
+                <input id="referenceNote" placeholder="例如：第一张固定人物参考图，后续镜头保持同一角色" />
+              </label>
+            </div>
+            <div class="reference-list" id="referenceList"></div>
           </div>
-          <div class="provider-grid" style="margin-top: 12px;">
-            <label>视频风格
-              <input id="videoStyle" placeholder="例如 真人口播、科技感、写实商业、国风、美妆种草" />
-            </label>
-            <label>视频平台 API Key
-              <input id="videoApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用视频 API，会保存到本浏览器" />
-            </label>
-            <label>视频平台 Base URL
-              <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入视频 API 使用，可留空" />
-            </label>
-          </div>
-          <div class="provider-grid" style="margin-top: 12px;">
-            <label>参考图
-              <input id="referenceImages" type="file" accept="image/png,image/jpeg,image/webp" multiple />
-            </label>
-            <label>参考图用途
-              <select id="referenceRole">
-                <option value="人物一致性" selected>人物一致性</option>
-                <option value="产品参考">产品参考</option>
-                <option value="视觉风格参考">视觉风格参考</option>
-                <option value="场景参考">场景参考</option>
-                <option value="封面参考">封面参考</option>
-              </select>
-            </label>
-            <label>参考图说明
-              <input id="referenceNote" placeholder="例如：第一张固定人物参考图，后续镜头保持同一角色" />
-            </label>
-          </div>
-          <div class="reference-list" id="referenceList"></div>
         </details>
         <div class="row">
           <button class="primary" id="runBtn">运行工作流</button>

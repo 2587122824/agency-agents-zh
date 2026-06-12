@@ -162,6 +162,7 @@ Current verified capabilities:
 - Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, image-generation configuration, and video-generation configuration. The `清除已保存配置` button removes the saved local settings.
 - Shows workflow run progress in the web UI with a progress bar and per-step staff status. `/api/run` now starts a background job and returns a `run_id`; `/api/run-status?id=...` returns current status.
 - Supports an optional web UI task name. When provided, the task name is used in the output directory suffix, task list display, run progress title, and `run_summary.json` `task_title`.
+- Web UI layout keeps core workflow/task/input fields visible first, with model interface, memory inheritance, image-generation, video-generation, and reference-image controls moved into compact collapsible sections.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
 - Deletes historical task output directories through `/api/delete-task`; deletion is constrained to a validated child directory under `my_workspace/my_task_output`.
@@ -239,3 +240,6 @@ Generated task folders are disposable unless the user explicitly wants to preser
 
 
 [2026-06-12 21:55:00 +08:00] command: added optional web UI task naming; task_title is passed to WorkflowEngine/TaskStorage, stored in run_summary.json, shown in progress and task lists, and used in task output directory suffix.
+
+
+[2026-06-12 22:03:00 +08:00] command: optimized web UI layout by moving model API, memory, image, video, and reference image settings into compact collapsible sections; verified HTTP page markers and offline API run completed.
