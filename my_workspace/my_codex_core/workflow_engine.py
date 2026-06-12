@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from .codex_api import CodexAPI
 from .staff_loader import StaffLoader
@@ -35,25 +36,52 @@ class WorkflowEngine:
         self.storage = TaskStorage(self.output_root)
         self.api = CodexAPI(provider=provider, model=model, api_key=api_key, base_url=base_url)
 
-    def run(self, workflow_key: str, user_input: str) -> WorkflowRunResult:
+    def run(
+        self,
+        workflow_key: str,
+        user_input: str,
+        progress_callback: Callable[[dict], None] | None = None,
+    ) -> WorkflowRunResult:
         workflow_path = self._resolve_workflow_path(workflow_key)
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
         workflow_name = workflow.get("name") or workflow_path.stem
+        steps = workflow.get("steps", [])
         task_dir = self.storage.create_task_dir(workflow_path.stem)
         agents = self.staff_loader.load_all()
 
         self.storage.write_json(task_dir / "workflow.json", workflow)
         self.storage.write_text(task_dir / "input.md", user_input)
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "started",
+                    "workflow_name": workflow_name,
+                    "task_dir": str(task_dir),
+                    "total_steps": len(steps),
+                }
+            )
 
         previous_outputs: list[dict[str, str]] = []
         step_outputs: list[dict[str, str]] = []
         provider_used = "offline"
 
-        for step in workflow.get("steps", []):
+        for step in steps:
             step_no = int(step["step"])
             agent = self.staff_loader.resolve_agent(agents, step["agent"])
             step_dir = task_dir / f"step_{step_no:02d}_{agent.agent_id}"
             prompt = self._build_step_prompt(workflow, step, user_input, previous_outputs)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "step_started",
+                        "step": step_no,
+                        "agent_id": agent.agent_id,
+                        "agent_name": agent.name,
+                        "task": step.get("task", ""),
+                        "expected_output": step.get("output", ""),
+                        "total_steps": len(steps),
+                    }
+                )
 
             self.storage.write_text(step_dir / "system.md", agent.prompt)
             self.storage.write_text(step_dir / "prompt.md", prompt)
@@ -83,6 +111,19 @@ class WorkflowEngine:
             }
             previous_outputs.append(step_record)
             step_outputs.append(step_record)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "step_completed",
+                        "step": step_no,
+                        "agent_id": agent.agent_id,
+                        "agent_name": agent.name,
+                        "task": step.get("task", ""),
+                        "expected_output": step.get("output", ""),
+                        "output_path": str(step_dir / "output.md"),
+                        "total_steps": len(steps),
+                    }
+                )
 
         final_output = self._build_final_output(workflow, user_input, step_outputs)
         final_path = task_dir / "final_output.md"
@@ -98,6 +139,18 @@ class WorkflowEngine:
                 "final_output": str(final_path),
             },
         )
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "completed",
+                    "workflow_name": workflow_name,
+                    "task_dir": str(task_dir),
+                    "provider": provider_used,
+                    "step_count": len(step_outputs),
+                    "final_output": str(final_path),
+                    "total_steps": len(steps),
+                }
+            )
 
         return WorkflowRunResult(
             task_dir=str(task_dir),

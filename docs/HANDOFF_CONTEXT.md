@@ -160,6 +160,7 @@ Current verified capabilities:
 - Provides reference image upload fields in the web UI. Selected local images show thumbnail previews before running. Uploaded images are saved under `my_reference_images/`; workflow input receives stored path, role, and note for `06_分镜生图设计师` and `07_视频生成执行员`. No vision model is used yet, so the system does not claim to understand image content.
 - Provides memory controls in the web UI: `长期记忆` appends `my_memory/*.md`, and `继承历史任务` can append either the previous final product only or both the previous demand and final product.
 - Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, image-generation configuration, and video-generation configuration. The `清除已保存配置` button removes the saved local settings.
+- Shows workflow run progress in the web UI with a progress bar and per-step staff status. `/api/run` now starts a background job and returns a `run_id`; `/api/run-status?id=...` returns current status.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
 - Deletes historical task output directories through `/api/delete-task`; deletion is constrained to a validated child directory under `my_workspace/my_task_output`.
@@ -231,3 +232,6 @@ Generated task folders are disposable unless the user explicitly wants to preser
 
 
 [2026-06-12 20:35:21 +08:00] command: added web UI image-generation configuration for 06_分镜生图设计师, including tool/model/size/count/style/quality/negative prompt/consistency/API presence fields; verified HTTP page markers and /api/run wrote 生图配置 without writing test secrets.
+
+
+[2026-06-12 20:44:00 +08:00] command: added web workflow progress display; /api/run now starts a background job and /api/run-status polls status. Verified HTTP page has progressBox and offline workflow completed with 7/7 steps.

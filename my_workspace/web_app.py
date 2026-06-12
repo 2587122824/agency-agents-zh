@@ -4,6 +4,8 @@ import base64
 import json
 import mimetypes
 import sys
+import threading
+import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -19,6 +21,8 @@ WORKFLOW_ROOT = WORKSPACE_ROOT / "my_workflows"
 STAFF_ROOT = WORKSPACE_ROOT / "my_custom_staff"
 MEMORY_ROOT = WORKSPACE_ROOT / "my_memory"
 REFERENCE_ROOT = WORKSPACE_ROOT / "my_reference_images"
+RUN_JOBS: dict[str, dict] = {}
+RUN_JOBS_LOCK = threading.RLock()
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -240,6 +244,52 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 13px;
     }
     .status.error { background: #fef3f2; color: var(--danger); }
+    .progress-box {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfd;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .progress-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .progress-bar {
+      height: 8px;
+      border-radius: 999px;
+      background: #e4e7ec;
+      overflow: hidden;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--accent);
+      transition: width .2s ease;
+    }
+    .progress-list {
+      display: grid;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .progress-step {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      background: #fff;
+      font-size: 13px;
+    }
+    .progress-step.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+    .progress-step.done { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
+    .progress-step.error { color: var(--danger); background: #fef3f2; border-color: #fecdca; }
     .viewer {
       display: grid;
       grid-template-rows: auto minmax(320px, 1fr);
@@ -537,6 +587,14 @@ INDEX_HTML = r"""<!doctype html>
           <button id="clearSettingsBtn">清除已保存配置</button>
           <span id="status" class="status">准备就绪</span>
         </div>
+        <div class="progress-box" id="progressBox" hidden>
+          <div class="progress-head">
+            <strong id="progressTitle">等待运行</strong>
+            <span id="progressMeta">0/0</span>
+          </div>
+          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+          <div class="progress-list" id="progressList"></div>
+        </div>
       </div>
 
       <div class="panel viewer">
@@ -590,6 +648,11 @@ INDEX_HTML = r"""<!doctype html>
       sampleBtn: document.getElementById('sampleBtn'),
       clearSettingsBtn: document.getElementById('clearSettingsBtn'),
       status: document.getElementById('status'),
+      progressBox: document.getElementById('progressBox'),
+      progressTitle: document.getElementById('progressTitle'),
+      progressMeta: document.getElementById('progressMeta'),
+      progressFill: document.getElementById('progressFill'),
+      progressList: document.getElementById('progressList'),
       taskList: document.getElementById('taskList'),
       refreshTasks: document.getElementById('refreshTasks'),
       viewerTitle: document.getElementById('viewerTitle'),
@@ -601,11 +664,87 @@ INDEX_HTML = r"""<!doctype html>
     let selectedFile = null;
     let selectedReferenceFiles = [];
     let referencePreviewUrls = new Map();
+    let progressTimer = null;
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
 
     function setStatus(text, isError = false) {
       els.status.textContent = text;
       els.status.classList.toggle('error', isError);
+    }
+
+    function resetProgress() {
+      if (progressTimer) {
+        clearTimeout(progressTimer);
+        progressTimer = null;
+      }
+      els.progressBox.hidden = true;
+      els.progressTitle.textContent = '等待运行';
+      els.progressMeta.textContent = '0/0';
+      els.progressFill.style.width = '0%';
+      els.progressList.innerHTML = '';
+    }
+
+    function renderProgress(job) {
+      els.progressBox.hidden = false;
+      const total = job.total_steps || 0;
+      const completed = job.completed_steps || 0;
+      const percent = total ? Math.round((completed / total) * 100) : 0;
+      const statusText = {
+        queued: '排队中',
+        running: '运行中',
+        completed: '已完成',
+        failed: '失败',
+      }[job.status] || job.status || '运行中';
+      els.progressTitle.textContent = `${statusText}${job.workflow_name ? `：${job.workflow_name}` : ''}`;
+      els.progressMeta.textContent = `${completed}/${total} 步 · ${percent}%`;
+      els.progressFill.style.width = `${percent}%`;
+      els.progressList.innerHTML = '';
+
+      const steps = job.steps || [];
+      for (const step of steps) {
+        const item = document.createElement('div');
+        item.className = `progress-step ${step.status || ''}`;
+        const left = document.createElement('span');
+        left.textContent = `${step.step}. ${step.agent_name || step.agent_id || '等待中'}`;
+        const right = document.createElement('span');
+        right.className = 'muted small';
+        right.textContent = step.status === 'done' ? '完成' : step.status === 'active' ? '执行中' : step.status === 'error' ? '失败' : '等待';
+        item.appendChild(left);
+        item.appendChild(right);
+        els.progressList.appendChild(item);
+      }
+      if (job.error) {
+        const err = document.createElement('div');
+        err.className = 'progress-step error';
+        err.textContent = job.error;
+        els.progressList.appendChild(err);
+      }
+    }
+
+    async function pollRunStatus(runId) {
+      const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
+      renderProgress(job);
+      if (job.status === 'completed') {
+        setStatus(`完成：${job.workflow_name}，${job.step_count || job.completed_steps} 步`);
+        await loadTasks();
+        if (job.task_name) await selectTask(job.task_name);
+        els.runBtn.disabled = false;
+        progressTimer = null;
+        return;
+      }
+      if (job.status === 'failed') {
+        setStatus(job.error || '工作流运行失败', true);
+        els.runBtn.disabled = false;
+        progressTimer = null;
+        return;
+      }
+      progressTimer = setTimeout(() => {
+        pollRunStatus(runId).catch(err => {
+          setStatus(err.message, true);
+          els.runBtn.disabled = false;
+          progressTimer = null;
+        });
+      }, 1000);
     }
 
     async function api(path, options) {
@@ -933,6 +1072,7 @@ INDEX_HTML = r"""<!doctype html>
       }
       els.runBtn.disabled = true;
       saveSettings();
+      resetProgress();
       setStatus('工作流运行中');
       try {
         const referenceImages = await uploadReferenceImages();
@@ -979,13 +1119,13 @@ INDEX_HTML = r"""<!doctype html>
             video_base_url: els.videoBaseUrl.value.trim(),
           }),
         });
-        setStatus(`完成：${result.workflow_name}，${result.step_count} 步`);
-        await loadTasks();
-        await selectTask(result.task_name);
+        setStatus('工作流已开始，正在执行第 1 步');
+        renderProgress(result);
+        await pollRunStatus(result.run_id);
       } catch (err) {
         setStatus(err.message, true);
-      } finally {
         els.runBtn.disabled = false;
+      } finally {
       }
     }
 
@@ -1089,6 +1229,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/file":
                 query = parse_qs(parsed.query)
                 self._send_json(self._file_content(self._single(query, "task"), self._single(query, "file")))
+            elif parsed.path == "/api/run-status":
+                query = parse_qs(parsed.query)
+                self._send_json(self._run_status(self._single(query, "id")))
             else:
                 self.send_error(404)
         except Exception as exc:
@@ -1139,25 +1282,28 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if not user_input:
                 raise ValueError("input is required")
 
-            engine = WorkflowEngine(
-                WORKSPACE_ROOT,
-                provider=provider,
-                model=model,
-                api_key=api_key,
-                base_url=base_url,
+            run_id = uuid4().hex
+            job = {
+                "run_id": run_id,
+                "status": "queued",
+                "workflow": workflow,
+                "workflow_name": "",
+                "created_at": time.time(),
+                "updated_at": time.time(),
+                "total_steps": 0,
+                "completed_steps": 0,
+                "steps": [],
+            }
+            with RUN_JOBS_LOCK:
+                RUN_JOBS[run_id] = job
+
+            worker = threading.Thread(
+                target=self._run_workflow_job,
+                args=(run_id, workflow, user_input, provider, model, api_key, base_url),
+                daemon=True,
             )
-            result = engine.run(workflow, user_input)
-            task_name = Path(result.task_dir).name
-            self._send_json(
-                {
-                    "task_name": task_name,
-                    "task_dir": result.task_dir,
-                    "workflow_name": result.workflow_name,
-                    "provider": result.provider,
-                    "step_count": result.step_count,
-                    "final_output": result.final_output,
-                }
-            )
+            worker.start()
+            self._send_json(job)
         except Exception as exc:
             self._send_error(exc)
 
@@ -1187,6 +1333,122 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "default_model": os.getenv("OPENAI_MODEL") or "gpt-5.5",
             "default_base_url": os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
         }
+
+    def _run_status(self, run_id: str) -> dict:
+        with RUN_JOBS_LOCK:
+            job = RUN_JOBS.get(run_id)
+            if not job:
+                raise FileNotFoundError(f"Run not found: {run_id}")
+            return json.loads(json.dumps(job, ensure_ascii=False))
+
+    @staticmethod
+    def _update_job(run_id: str, updates: dict) -> None:
+        with RUN_JOBS_LOCK:
+            job = RUN_JOBS.get(run_id)
+            if not job:
+                return
+            job.update(updates)
+            job["updated_at"] = time.time()
+
+    @classmethod
+    def _apply_progress(cls, run_id: str, event: dict) -> None:
+        with RUN_JOBS_LOCK:
+            job = RUN_JOBS.get(run_id)
+            if not job:
+                return
+            kind = event.get("event")
+            if kind == "started":
+                total = int(event.get("total_steps") or 0)
+                job.update(
+                    {
+                        "status": "running",
+                        "workflow_name": event.get("workflow_name") or job.get("workflow_name", ""),
+                        "task_dir": event.get("task_dir", ""),
+                        "task_name": Path(event.get("task_dir", "")).name if event.get("task_dir") else "",
+                        "total_steps": total,
+                        "completed_steps": 0,
+                        "steps": [
+                            {"step": step_no, "status": "pending", "agent_id": "", "agent_name": ""}
+                            for step_no in range(1, total + 1)
+                        ],
+                    }
+                )
+            elif kind == "step_started":
+                step_no = int(event.get("step") or 0)
+                cls._set_step(job, step_no, event, "active")
+            elif kind == "step_completed":
+                step_no = int(event.get("step") or 0)
+                cls._set_step(job, step_no, event, "done")
+                job["completed_steps"] = max(int(job.get("completed_steps") or 0), step_no)
+            elif kind == "completed":
+                job.update(
+                    {
+                        "status": "completed",
+                        "workflow_name": event.get("workflow_name") or job.get("workflow_name", ""),
+                        "task_dir": event.get("task_dir") or job.get("task_dir", ""),
+                        "task_name": Path(event.get("task_dir", "")).name if event.get("task_dir") else job.get("task_name", ""),
+                        "provider": event.get("provider", ""),
+                        "step_count": event.get("step_count", 0),
+                        "completed_steps": event.get("step_count", job.get("completed_steps", 0)),
+                        "final_output": event.get("final_output", ""),
+                    }
+                )
+            job["updated_at"] = time.time()
+
+    @staticmethod
+    def _set_step(job: dict, step_no: int, event: dict, status: str) -> None:
+        if step_no <= 0:
+            return
+        steps = job.setdefault("steps", [])
+        while len(steps) < step_no:
+            steps.append({"step": len(steps) + 1, "status": "pending", "agent_id": "", "agent_name": ""})
+        steps[step_no - 1].update(
+            {
+                "step": step_no,
+                "status": status,
+                "agent_id": event.get("agent_id", ""),
+                "agent_name": event.get("agent_name", ""),
+                "task": event.get("task", ""),
+                "expected_output": event.get("expected_output", ""),
+                "output_path": event.get("output_path", ""),
+            }
+        )
+
+    def _run_workflow_job(
+        self,
+        run_id: str,
+        workflow: str,
+        user_input: str,
+        provider: str,
+        model: str | None,
+        api_key: str | None,
+        base_url: str | None,
+    ) -> None:
+        try:
+            self._update_job(run_id, {"status": "running"})
+            engine = WorkflowEngine(
+                WORKSPACE_ROOT,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+            )
+            engine.run(
+                workflow,
+                user_input,
+                progress_callback=lambda event: self._apply_progress(run_id, event),
+            )
+        except Exception as exc:
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job:
+                    job["status"] = "failed"
+                    job["error"] = str(exc)
+                    job["traceback"] = traceback.format_exc()
+                    for step in job.get("steps", []):
+                        if step.get("status") == "active":
+                            step["status"] = "error"
+                    job["updated_at"] = time.time()
 
     def _tasks(self) -> list[dict]:
         if not OUTPUT_ROOT.exists():
