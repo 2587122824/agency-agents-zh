@@ -14,6 +14,7 @@ from .task_storage import TaskStorage
 class WorkflowRunResult:
     task_dir: str
     workflow_name: str
+    task_title: str
     provider: str
     step_count: int
     final_output: str
@@ -40,13 +41,15 @@ class WorkflowEngine:
         self,
         workflow_key: str,
         user_input: str,
+        task_title: str | None = None,
         progress_callback: Callable[[dict], None] | None = None,
     ) -> WorkflowRunResult:
         workflow_path = self._resolve_workflow_path(workflow_key)
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
         workflow_name = workflow.get("name") or workflow_path.stem
+        task_title = (task_title or "").strip()
         steps = workflow.get("steps", [])
-        task_dir = self.storage.create_task_dir(workflow_path.stem)
+        task_dir = self.storage.create_task_dir(workflow_path.stem, task_title=task_title)
         agents = self.staff_loader.load_all()
 
         self.storage.write_json(task_dir / "workflow.json", workflow)
@@ -56,6 +59,7 @@ class WorkflowEngine:
                 {
                     "event": "started",
                     "workflow_name": workflow_name,
+                    "task_title": task_title,
                     "task_dir": str(task_dir),
                     "total_steps": len(steps),
                 }
@@ -133,6 +137,7 @@ class WorkflowEngine:
             {
                 "task_dir": str(task_dir),
                 "workflow": workflow_name,
+                "task_title": task_title,
                 "workflow_file": str(workflow_path),
                 "provider": provider_used,
                 "step_count": len(step_outputs),
@@ -144,6 +149,7 @@ class WorkflowEngine:
                 {
                     "event": "completed",
                     "workflow_name": workflow_name,
+                    "task_title": task_title,
                     "task_dir": str(task_dir),
                     "provider": provider_used,
                     "step_count": len(step_outputs),
@@ -155,6 +161,7 @@ class WorkflowEngine:
         return WorkflowRunResult(
             task_dir=str(task_dir),
             workflow_name=workflow_name,
+            task_title=task_title,
             provider=provider_used,
             step_count=len(step_outputs),
             final_output=str(final_path),

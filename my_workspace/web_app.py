@@ -394,6 +394,9 @@ INDEX_HTML = r"""<!doctype html>
           </label>
         </div>
         <div class="provider-grid">
+          <label>任务名称
+            <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI自动化获客短视频-第1版，可留空" />
+          </label>
           <label>API Key
             <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...，只用于本次运行，不保存" />
           </label>
@@ -617,6 +620,7 @@ INDEX_HTML = r"""<!doctype html>
       provider: document.getElementById('provider'),
       model: document.getElementById('model'),
       customModel: document.getElementById('customModel'),
+      taskTitle: document.getElementById('taskTitle'),
       apiKey: document.getElementById('apiKey'),
       baseUrl: document.getElementById('baseUrl'),
       userInput: document.getElementById('userInput'),
@@ -695,7 +699,8 @@ INDEX_HTML = r"""<!doctype html>
         completed: '已完成',
         failed: '失败',
       }[job.status] || job.status || '运行中';
-      els.progressTitle.textContent = `${statusText}${job.workflow_name ? `：${job.workflow_name}` : ''}`;
+      const jobTitle = job.task_title || job.workflow_name || '';
+      els.progressTitle.textContent = `${statusText}${jobTitle ? `：${jobTitle}` : ''}`;
       els.progressMeta.textContent = `${completed}/${total} 步 · ${percent}%`;
       els.progressFill.style.width = `${percent}%`;
       els.progressList.innerHTML = '';
@@ -725,7 +730,7 @@ INDEX_HTML = r"""<!doctype html>
       const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
       renderProgress(job);
       if (job.status === 'completed') {
-        setStatus(`完成：${job.workflow_name}，${job.step_count || job.completed_steps} 步`);
+        setStatus(`完成：${job.task_title || job.workflow_name}，${job.step_count || job.completed_steps} 步`);
         await loadTasks();
         if (job.task_name) await selectTask(job.task_name);
         els.runBtn.disabled = false;
@@ -809,6 +814,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.provider, settings.provider);
       setIfExists(els.model, settings.model);
       els.customModel.value = settings.customModel || '';
+      els.taskTitle.value = '';
       els.apiKey.value = settings.apiKey || '';
       els.baseUrl.value = settings.baseUrl || '';
       setIfExists(els.useMemory, settings.useMemory);
@@ -848,6 +854,7 @@ INDEX_HTML = r"""<!doctype html>
         els.provider,
         els.model,
         els.customModel,
+        els.taskTitle,
         els.apiKey,
         els.baseUrl,
         els.useMemory,
@@ -980,7 +987,9 @@ INDEX_HTML = r"""<!doctype html>
       for (const task of data.tasks) {
         const btn = document.createElement('button');
         btn.className = `item ${selectedTask === task.name ? 'active' : ''}`;
-        btn.innerHTML = `<span class="item-main"><span class="item-title">${task.workflow || task.name}</span><span class="item-meta">${task.name}</span></span><span class="icon-btn danger" title="删除任务" aria-label="删除任务">×</span>`;
+        const title = task.task_title || task.workflow || task.name;
+        const meta = task.task_title ? `${task.workflow || ''} / ${task.name}` : task.name;
+        btn.innerHTML = `<span class="item-main"><span class="item-title">${title}</span><span class="item-meta">${meta}</span></span><span class="icon-btn danger" title="删除任务" aria-label="删除任务">×</span>`;
         btn.onclick = () => selectTask(task.name);
         btn.querySelector('.icon-btn').onclick = (event) => {
           event.stopPropagation();
@@ -996,7 +1005,7 @@ INDEX_HTML = r"""<!doctype html>
       for (const task of tasks) {
         const option = document.createElement('option');
         option.value = task.name;
-        option.textContent = `${task.workflow || task.name} / ${task.name}`;
+        option.textContent = `${task.task_title || task.workflow || task.name} / ${task.name}`;
         els.inheritTask.appendChild(option);
       }
       setIfExists(els.inheritTask, current);
@@ -1031,7 +1040,7 @@ INDEX_HTML = r"""<!doctype html>
       selectedFile = null;
       await loadTasks();
       const data = await api(`/api/task?name=${encodeURIComponent(name)}`);
-      els.viewerTitle.textContent = data.summary.workflow || name;
+      els.viewerTitle.textContent = data.summary.task_title || data.summary.workflow || name;
       els.viewerMeta.textContent = name;
       renderFiles(data.files);
       const first = data.files.find(f => f.endsWith('final_output.md')) || data.files[0];
@@ -1102,6 +1111,7 @@ INDEX_HTML = r"""<!doctype html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             workflow: els.workflow.value,
+            task_title: els.taskTitle.value.trim(),
             input,
             provider: els.provider.value,
             model,
@@ -1137,6 +1147,7 @@ INDEX_HTML = r"""<!doctype html>
     };
     els.sampleBtn.onclick = () => {
       els.userInput.value = '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。';
+      els.taskTitle.value = 'AI自动化获客短视频';
       els.imageTool.value = 'prompt_only';
       els.imageModel.value = '';
       els.imageSize.value = '9:16';
@@ -1160,6 +1171,7 @@ INDEX_HTML = r"""<!doctype html>
       els.provider.value = 'auto';
       els.model.value = 'gpt-5.5';
       els.customModel.value = '';
+      els.taskTitle.value = '';
       els.apiKey.value = '';
       els.baseUrl.value = '';
       els.useMemory.value = 'on';
@@ -1255,6 +1267,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 return
 
             workflow = str(payload.get("workflow") or "").strip()
+            task_title = str(payload.get("task_title") or "").strip()
             user_input = str(payload.get("input") or "").strip()
             use_memory = bool(payload.get("use_memory"))
             inherit_task = str(payload.get("inherit_task") or "").strip()
@@ -1287,6 +1300,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "run_id": run_id,
                 "status": "queued",
                 "workflow": workflow,
+                "task_title": task_title,
                 "workflow_name": "",
                 "created_at": time.time(),
                 "updated_at": time.time(),
@@ -1299,7 +1313,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             worker = threading.Thread(
                 target=self._run_workflow_job,
-                args=(run_id, workflow, user_input, provider, model, api_key, base_url),
+                args=(run_id, workflow, user_input, task_title, provider, model, api_key, base_url),
                 daemon=True,
             )
             worker.start()
@@ -1363,6 +1377,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     {
                         "status": "running",
                         "workflow_name": event.get("workflow_name") or job.get("workflow_name", ""),
+                        "task_title": event.get("task_title") or job.get("task_title", ""),
                         "task_dir": event.get("task_dir", ""),
                         "task_name": Path(event.get("task_dir", "")).name if event.get("task_dir") else "",
                         "total_steps": total,
@@ -1385,6 +1400,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     {
                         "status": "completed",
                         "workflow_name": event.get("workflow_name") or job.get("workflow_name", ""),
+                        "task_title": event.get("task_title") or job.get("task_title", ""),
                         "task_dir": event.get("task_dir") or job.get("task_dir", ""),
                         "task_name": Path(event.get("task_dir", "")).name if event.get("task_dir") else job.get("task_name", ""),
                         "provider": event.get("provider", ""),
@@ -1419,6 +1435,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         run_id: str,
         workflow: str,
         user_input: str,
+        task_title: str,
         provider: str,
         model: str | None,
         api_key: str | None,
@@ -1436,6 +1453,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             engine.run(
                 workflow,
                 user_input,
+                task_title=task_title,
                 progress_callback=lambda event: self._apply_progress(run_id, event),
             )
         except Exception as exc:
@@ -1468,6 +1486,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             tasks.append(
                 {
                     "name": path.name,
+                    "task_title": summary.get("task_title") or "",
                     "workflow": summary.get("workflow") or path.name,
                     "provider": summary.get("provider") or "",
                     "mtime": path.stat().st_mtime,
