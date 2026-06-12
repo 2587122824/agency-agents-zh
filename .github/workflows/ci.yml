@@ -3,8 +3,14 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'my_workspace/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - 'my_workspace/**'
 
 jobs:
   validate:
@@ -15,7 +21,7 @@ jobs:
 
       - name: Count agents
         run: |
-          TOTAL=$(find . -path './.github' -prune -o -path './scripts' -prune -o -path './examples' -prune -o -path './integrations' -prune -o -name '*.md' -print | grep -c '/')
+          TOTAL=$(find . -path './.github' -prune -o -path './scripts' -prune -o -path './examples' -prune -o -path './integrations' -prune -o -path './my_workspace' -prune -o -name '*.md' -print | grep -c '/')
           echo "Total agent files: $TOTAL"
 
       - name: Check frontmatter format
@@ -24,7 +30,7 @@ jobs:
           while IFS= read -r file; do
             # Skip non-agent files
             case "$file" in
-              ./README*|./CONTRIBUTING*|./UPSTREAM*|./AGENT-LIST*|./CATALOG*|./CODE_OF_CONDUCT*|./.github/*|./scripts/*|./examples/*|./integrations/*|./docs/*|./strategy/*) continue ;;
+              ./README*|./CONTRIBUTING*|./UPSTREAM*|./AGENT-LIST*|./CATALOG*|./CODE_OF_CONDUCT*|./.github/*|./scripts/*|./examples/*|./integrations/*|./docs/*|./strategy/*|./my_workspace/*) continue ;;
             esac
 
             # Check frontmatter exists
@@ -41,7 +47,7 @@ jobs:
                 echo "::warning file=$file::Missing recommended field: $field"
               fi
             done
-          done < <(find . -path './.github' -prune -o -path './scripts' -prune -o -path './examples' -prune -o -path './integrations' -prune -o -path './node_modules' -prune -o -name '*.md' -print | grep '/')
+          done < <(find . -path './.github' -prune -o -path './scripts' -prune -o -path './examples' -prune -o -path './integrations' -prune -o -path './my_workspace' -prune -o -path './node_modules' -prune -o -name '*.md' -print | grep '/')
 
           if [ $ERRORS -gt 0 ]; then
             echo "::error::$ERRORS file(s) have frontmatter errors"

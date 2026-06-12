@@ -1,13 +1,13 @@
 name: Sync to Gitee
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:  # 允许手动触发
 
 jobs:
   sync:
     runs-on: ubuntu-latest
+    env:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,6 +15,11 @@ jobs:
           fetch-depth: 0  # 获取完整历史
 
       - name: Push to Gitee
+        if: ${{ env.GITEE_TOKEN != '' }}
         run: |
-          git remote add gitee https://jnMetaCode:${{ secrets.GITEE_TOKEN }}@gitee.com/jnMetaCode/agency-agents-zh.git 2>/dev/null || true
+          git remote add gitee https://jnMetaCode:${GITEE_TOKEN}@gitee.com/jnMetaCode/agency-agents-zh.git 2>/dev/null || true
           git push gitee main --force
+
+      - name: Skip when token is missing
+        if: ${{ env.GITEE_TOKEN == '' }}
+        run: echo "GITEE_TOKEN is not configured; skipping Gitee sync."
