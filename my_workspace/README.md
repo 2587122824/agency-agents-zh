@@ -43,6 +43,12 @@ $env:OPENAI_MODEL="gpt-4.1-mini"
 python my_workspace/run_flow.py --workflow workflow_短视频全流程 --input "你的内容需求"
 ```
 
+也可以只对单次 CLI 运行传入 API Key：
+
+```powershell
+python my_workspace/run_flow.py --provider openai --api-key "你的 API Key" --model gpt-5.5 --workflow workflow_短视频全流程 --input "你的内容需求"
+```
+
 执行后会在 `my_task_output/task_时间戳_工作流名/` 下生成：
 
 ```text
@@ -79,6 +85,8 @@ http://127.0.0.1:8765
 - 选择 `my_workflows` 里的工作流。
 - 输入原始内容需求。
 - 选择 `auto`、`offline` 或 `openai` 执行模式。
+- 在 `API Key` 输入框填入密钥；密钥只用于本次运行，不写入任务输出文件。
+- 通过分组模型下拉选择主力模型、轻量模型、推理模型、旧版兼容模型，或选择自定义模型名。
 - 一键运行并写入 `my_task_output`。
 - 查看历史任务、每一步的 `prompt.md`、`output.md` 和最终 `final_output.md`。
 

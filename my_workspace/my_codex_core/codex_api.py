@@ -23,11 +23,16 @@ class CodexAPI:
     chat completions endpoint.
     """
 
-    def __init__(self, provider: str | None = None, model: str | None = None) -> None:
+    def __init__(
+        self,
+        provider: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+    ) -> None:
         self.provider = provider or os.getenv("MY_WORKFLOW_PROVIDER") or "auto"
-        self.model = model or os.getenv("OPENAI_MODEL") or "gpt-4.1-mini"
+        self.model = model or os.getenv("OPENAI_MODEL") or "gpt-5.5"
         self.base_url = (os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-        self.api_key = os.getenv("OPENAI_API_KEY")
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
 
     def run(self, system_prompt: str, user_prompt: str) -> LLMResult:
         provider = self.provider
@@ -44,9 +49,9 @@ class CodexAPI:
     def _run_offline(self, system_prompt: str, user_prompt: str) -> LLMResult:
         content = (
             "# 待执行提示词\n\n"
-            "当前未检测到 `OPENAI_API_KEY`，所以本步骤未调用模型。\n\n"
+            "当前未检测到 API Key，所以本步骤未调用模型。\n\n"
             "把同目录下的 `prompt.md` 内容发送给模型，即可得到本步骤产出；"
-            "或设置 `OPENAI_API_KEY` 后重新运行工作流。\n"
+            "或在可视化界面的 API Key 输入框填入密钥后重新运行工作流。\n"
         )
         return LLMResult(provider="offline", model="none", content=content)
 

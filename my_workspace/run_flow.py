@@ -14,6 +14,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--input-file", help="Path to a UTF-8 text file containing the user request.")
     parser.add_argument("--provider", choices=["auto", "offline", "openai"], default="auto")
     parser.add_argument("--model", help="Model name when provider=openai or OPENAI_API_KEY is set.")
+    parser.add_argument("--api-key", help="OpenAI API key for this run. Prefer environment variables for shared machines.")
     return parser.parse_args()
 
 
@@ -38,7 +39,12 @@ def main() -> int:
         print("ERROR: provide --input, --input-file, or stdin content.", file=sys.stderr)
         return 2
 
-    engine = WorkflowEngine(workspace_root=workspace_root, provider=args.provider, model=args.model)
+    engine = WorkflowEngine(
+        workspace_root=workspace_root,
+        provider=args.provider,
+        model=args.model,
+        api_key=args.api_key,
+    )
     result = engine.run(args.workflow, user_input)
 
     print(f"workflow: {result.workflow_name}")

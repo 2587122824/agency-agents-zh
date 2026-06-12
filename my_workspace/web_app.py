@@ -133,7 +133,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     .split {
       display: grid;
-      grid-template-columns: 1fr 180px 180px;
+      grid-template-columns: 1fr 160px 240px;
+      gap: 12px;
+    }
+    .provider-grid {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(280px, 1fr);
       gap: 12px;
     }
     .list {
@@ -238,7 +243,37 @@ INDEX_HTML = r"""<!doctype html>
             </select>
           </label>
           <label>模型
-            <input id="model" placeholder="默认 gpt-4.1-mini" />
+            <select id="model">
+              <optgroup label="推荐主力模型">
+                <option value="gpt-5.5" selected>GPT-5.5 - 复杂任务/最高质量</option>
+                <option value="gpt-5.4">GPT-5.4 - 通用高质量</option>
+              </optgroup>
+              <optgroup label="轻量与低成本">
+                <option value="gpt-5.4-mini">GPT-5.4 mini - 速度/成本平衡</option>
+                <option value="gpt-5.4-nano">GPT-5.4 nano - 最低延迟/批量任务</option>
+              </optgroup>
+              <optgroup label="推理模型">
+                <option value="o3">o3 - 深度推理</option>
+                <option value="o4-mini">o4-mini - 快速推理</option>
+              </optgroup>
+              <optgroup label="兼容旧模型">
+                <option value="gpt-4.1">GPT-4.1 - 旧版通用</option>
+                <option value="gpt-4.1-mini">GPT-4.1 mini - 旧版低成本</option>
+                <option value="gpt-4o">GPT-4o - 旧版多模态</option>
+                <option value="gpt-4o-mini">GPT-4o mini - 旧版轻量</option>
+              </optgroup>
+              <optgroup label="自定义">
+                <option value="custom">手动输入模型名</option>
+              </optgroup>
+            </select>
+          </label>
+        </div>
+        <div class="provider-grid">
+          <label>API Key
+            <input id="apiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-...，只用于本次运行，不保存" />
+          </label>
+          <label>自定义模型名
+            <input id="customModel" placeholder="选择“手动输入模型名”时填写" disabled />
           </label>
         </div>
         <label>原始需求
@@ -270,6 +305,8 @@ INDEX_HTML = r"""<!doctype html>
       workflow: document.getElementById('workflow'),
       provider: document.getElementById('provider'),
       model: document.getElementById('model'),
+      customModel: document.getElementById('customModel'),
+      apiKey: document.getElementById('apiKey'),
       userInput: document.getElementById('userInput'),
       runBtn: document.getElementById('runBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
@@ -357,6 +394,11 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请输入原始需求', true);
         return;
       }
+      const model = els.model.value === 'custom' ? els.customModel.value.trim() : els.model.value;
+      if (els.model.value === 'custom' && !model) {
+        setStatus('请输入自定义模型名', true);
+        return;
+      }
       els.runBtn.disabled = true;
       setStatus('工作流运行中');
       try {
@@ -367,7 +409,8 @@ INDEX_HTML = r"""<!doctype html>
             workflow: els.workflow.value,
             input,
             provider: els.provider.value,
-            model: els.model.value.trim(),
+            model,
+            api_key: els.apiKey.value.trim(),
           }),
         });
         setStatus(`完成：${result.workflow_name}，${result.step_count} 步`);
@@ -382,6 +425,11 @@ INDEX_HTML = r"""<!doctype html>
 
     els.runBtn.onclick = runWorkflow;
     els.refreshTasks.onclick = loadTasks;
+    els.model.onchange = () => {
+      const custom = els.model.value === 'custom';
+      els.customModel.disabled = !custom;
+      if (custom) els.customModel.focus();
+    };
     els.sampleBtn.onclick = () => {
       els.userInput.value = '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。';
     };
@@ -435,13 +483,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             user_input = str(payload.get("input") or "").strip()
             provider = str(payload.get("provider") or "auto").strip()
             model = str(payload.get("model") or "").strip() or None
+            api_key = str(payload.get("api_key") or "").strip() or None
 
             if not workflow:
                 raise ValueError("workflow is required")
             if not user_input:
                 raise ValueError("input is required")
 
-            engine = WorkflowEngine(WORKSPACE_ROOT, provider=provider, model=model)
+            engine = WorkflowEngine(WORKSPACE_ROOT, provider=provider, model=model, api_key=api_key)
             result = engine.run(workflow, user_input)
             task_name = Path(result.task_dir).name
             self._send_json(
@@ -479,6 +528,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "workflows": workflows,
             "staff": staff,
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
+            "default_model": os.getenv("OPENAI_MODEL") or "gpt-5.5",
         }
 
     def _tasks(self) -> list[dict]:

@@ -91,7 +91,13 @@ OpenAI mode environment variables:
 
 ```powershell
 $env:OPENAI_API_KEY="你的 API Key"
-$env:OPENAI_MODEL="gpt-4.1-mini"
+$env:OPENAI_MODEL="gpt-5.5"
+```
+
+The CLI also supports a one-off key:
+
+```powershell
+python my_workspace/run_flow.py --provider openai --api-key "你的 API Key" --model gpt-5.5 --workflow workflow_短视频全流程 --input "你的内容需求"
 ```
 
 ## Visual Management UI
@@ -113,6 +119,8 @@ Current verified capabilities:
 - Lists 3 workflows.
 - Lists 5 custom staff folders.
 - Runs workflows through `/api/run`.
+- Accepts a one-off API Key from the web form; the key is passed to the engine for that request only and is not written to task output.
+- Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
 
@@ -150,6 +158,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - `package.json` from the upstream repo may also display mojibake in default PowerShell output; avoid treating terminal mojibake as file corruption without UTF-8 verification.
 - The web UI is intentionally dependency-free and uses Python standard library only.
 - Current engine uses OpenAI-compatible `/chat/completions`. If the user wants Responses API or another provider, update `my_workspace/my_codex_core/codex_api.py`.
+- Default model is currently `gpt-5.5`; UI also offers `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `o3`, `o4-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, and a custom model field.
 
 ## Suggested Next Improvements
 
