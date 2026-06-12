@@ -41,6 +41,7 @@ Current custom staff:
 03_口播脚本师
 04_标题封面优化师
 05_内容合规审核官
+06_视频生成执行员
 ```
 
 ### Workflows
@@ -159,6 +160,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
   - generated metadata JSON files
 - CLI offline workflow run succeeded for `workflow_短视频全流程`.
 - Web API offline workflow run succeeded for `workflow_小红书图文`.
+- `06_视频生成执行员` was added to generate video production packages; `workflow_短视频全流程` and `workflow_开发外包` now include a final video-generation step.
 - Local web UI responded with HTTP 200 and showed valid config.
 
 ## Important Notes
