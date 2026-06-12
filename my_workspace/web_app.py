@@ -158,13 +158,32 @@ INDEX_HTML = r"""<!doctype html>
     .reference-item {
       border: 1px solid var(--line);
       border-radius: 6px;
-      padding: 8px 10px;
+      padding: 8px;
       display: flex;
       justify-content: space-between;
       gap: 10px;
       align-items: center;
       background: #fff;
       font-size: 13px;
+    }
+    .reference-preview {
+      width: 64px;
+      height: 64px;
+      min-width: 64px;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      object-fit: cover;
+      background: #f2f4f7;
+    }
+    .reference-info {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+      flex: 1;
+    }
+    .reference-name {
+      font-weight: 650;
+      overflow-wrap: anywhere;
     }
     .list {
       display: grid;
@@ -495,6 +514,7 @@ INDEX_HTML = r"""<!doctype html>
     let selectedTask = null;
     let selectedFile = null;
     let selectedReferenceFiles = [];
+    let referencePreviewUrls = new Map();
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
 
     function setStatus(text, isError = false) {
@@ -610,15 +630,50 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       selectedReferenceFiles.forEach((file, index) => {
+        if (!referencePreviewUrls.has(file)) {
+          referencePreviewUrls.set(file, URL.createObjectURL(file));
+        }
         const item = document.createElement('div');
         item.className = 'reference-item';
-        item.innerHTML = `<span>${file.name} <span class="muted">(${Math.round(file.size / 1024)} KB)</span></span><button class="icon-btn danger" type="button" title="移除参考图">×</button>`;
-        item.querySelector('button').onclick = () => {
+        const preview = document.createElement('img');
+        preview.className = 'reference-preview';
+        preview.src = referencePreviewUrls.get(file);
+        preview.alt = file.name;
+        const info = document.createElement('div');
+        info.className = 'reference-info';
+        const name = document.createElement('div');
+        name.className = 'reference-name';
+        name.textContent = file.name;
+        const meta = document.createElement('div');
+        meta.className = 'muted small';
+        meta.textContent = `${Math.max(1, Math.round(file.size / 1024))} KB`;
+        const remove = document.createElement('button');
+        remove.className = 'icon-btn danger';
+        remove.type = 'button';
+        remove.title = '移除参考图';
+        remove.textContent = '×';
+        remove.onclick = () => {
+          const previewUrl = referencePreviewUrls.get(file);
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
+          referencePreviewUrls.delete(file);
           selectedReferenceFiles.splice(index, 1);
           renderReferenceFiles();
         };
+        info.appendChild(name);
+        info.appendChild(meta);
+        item.appendChild(preview);
+        item.appendChild(info);
+        item.appendChild(remove);
         els.referenceList.appendChild(item);
       });
+    }
+
+    function clearReferenceFiles() {
+      referencePreviewUrls.forEach(url => URL.revokeObjectURL(url));
+      referencePreviewUrls = new Map();
+      selectedReferenceFiles = [];
+      els.referenceImages.value = '';
+      renderReferenceFiles();
     }
 
     function fileToBase64(file) {
@@ -840,13 +895,13 @@ INDEX_HTML = r"""<!doctype html>
       els.videoBaseUrl.value = '';
       els.referenceRole.value = '人物一致性';
       els.referenceNote.value = '';
-      selectedReferenceFiles = [];
-      els.referenceImages.value = '';
-      renderReferenceFiles();
+      clearReferenceFiles();
       syncCustomModelState(false);
       setStatus('已清除本地保存配置');
     };
     els.referenceImages.onchange = () => {
+      referencePreviewUrls.forEach(url => URL.revokeObjectURL(url));
+      referencePreviewUrls = new Map();
       selectedReferenceFiles = Array.from(els.referenceImages.files || []);
       renderReferenceFiles();
     };

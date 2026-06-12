@@ -155,7 +155,7 @@ Current verified capabilities:
 - Accepts a one-off OpenAI-compatible Base URL from the web form for relay/proxy providers; the URL is used only for that request and is not written to task output.
 - Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
 - Provides video-generation configuration fields in the web UI: target tool, model, aspect ratio, duration, style, video API key presence, and video base URL presence. These fields are appended to workflow input for `06_视频生成执行员`; the system does not directly call video-generation APIs yet.
-- Provides reference image upload fields in the web UI. Uploaded images are saved under `my_reference_images/`; workflow input receives stored path, role, and note for `06_视频生成执行员`. No vision model is used yet, so the system does not claim to understand image content.
+- Provides reference image upload fields in the web UI. Selected local images show thumbnail previews before running. Uploaded images are saved under `my_reference_images/`; workflow input receives stored path, role, and note for `06_视频生成执行员`. No vision model is used yet, so the system does not claim to understand image content.
 - Provides memory controls in the web UI: `长期记忆` appends `my_memory/*.md`, and `继承历史任务` can append either the previous final product only or both the previous demand and final product.
 - Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, and video configuration. The `清除已保存配置` button removes the saved local settings.
 - Shows historical tasks from `my_task_output`.
@@ -219,4 +219,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 
 
 [2026-06-12 20:07:33 +08:00] command: restarted my_workspace web management UI on http://127.0.0.1:8765 and verified HTTP 200 with reference image controls present.
+
+
+[2026-06-12 20:10:02 +08:00] command: added local thumbnail previews for selected reference images in the web UI; restarted http://127.0.0.1:8765 and verified page includes reference-preview and URL.createObjectURL.
 
