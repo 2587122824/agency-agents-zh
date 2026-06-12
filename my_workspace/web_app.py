@@ -459,6 +459,30 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <details>
+          <summary><strong>全自动生成</strong> <span class="muted small">生成生产资产包，后续接入 API 自动出图出视频</span></summary>
+          <div class="details-body">
+            <div class="provider-grid">
+              <label>自动生成模式
+                <select id="autoProductionMode">
+                  <option value="off" selected>关闭</option>
+                  <option value="package_only">生成生产资产包</option>
+                  <option value="api_ready">调用 API 生成（适配器预留）</option>
+                </select>
+              </label>
+              <label>合成工具
+                <select id="composeTool">
+                  <option value="ffmpeg" selected>ffmpeg</option>
+                  <option value="jianying">剪映工程（预留）</option>
+                  <option value="manual">只生成清单</option>
+                </select>
+              </label>
+              <label>最终视频文件名
+                <input id="finalVideoName" autocomplete="off" spellcheck="false" placeholder="final_video.mp4" />
+              </label>
+            </div>
+          </div>
+        </details>
+        <details>
           <summary><strong>生图配置</strong> <span class="muted small">用于 06_分镜生图设计师生成关键帧方案</span></summary>
           <div class="details-body">
             <div class="video-grid">
@@ -660,6 +684,9 @@ INDEX_HTML = r"""<!doctype html>
       useMemory: document.getElementById('useMemory'),
       inheritTask: document.getElementById('inheritTask'),
       inheritMode: document.getElementById('inheritMode'),
+      autoProductionMode: document.getElementById('autoProductionMode'),
+      composeTool: document.getElementById('composeTool'),
+      finalVideoName: document.getElementById('finalVideoName'),
       imageTool: document.getElementById('imageTool'),
       imageModel: document.getElementById('imageModel'),
       imageSize: document.getElementById('imageSize'),
@@ -818,6 +845,9 @@ INDEX_HTML = r"""<!doctype html>
         useMemory: els.useMemory.value,
         inheritTask: els.inheritTask.value,
         inheritMode: els.inheritMode.value,
+        autoProductionMode: els.autoProductionMode.value,
+        composeTool: els.composeTool.value,
+        finalVideoName: els.finalVideoName.value,
         imageTool: els.imageTool.value,
         imageModel: els.imageModel.value,
         imageSize: els.imageSize.value,
@@ -853,6 +883,9 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.useMemory, settings.useMemory);
       setIfExists(els.inheritTask, settings.inheritTask);
       setIfExists(els.inheritMode, settings.inheritMode);
+      setIfExists(els.autoProductionMode, settings.autoProductionMode);
+      setIfExists(els.composeTool, settings.composeTool);
+      els.finalVideoName.value = settings.finalVideoName || '';
       setIfExists(els.imageTool, settings.imageTool);
       els.imageModel.value = settings.imageModel || '';
       setIfExists(els.imageSize, settings.imageSize);
@@ -893,6 +926,9 @@ INDEX_HTML = r"""<!doctype html>
         els.useMemory,
         els.inheritTask,
         els.inheritMode,
+        els.autoProductionMode,
+        els.composeTool,
+        els.finalVideoName,
         els.imageTool,
         els.imageModel,
         els.imageSize,
@@ -1139,6 +1175,15 @@ INDEX_HTML = r"""<!doctype html>
           api_key_provided: Boolean(els.videoApiKey.value.trim()),
           base_url_provided: Boolean(els.videoBaseUrl.value.trim()),
         };
+        const productionConfig = {
+          mode: els.autoProductionMode.value,
+          image_config: imageConfig,
+          video_config: videoConfig,
+          compose_config: {
+            tool: els.composeTool.value,
+            final_video_name: els.finalVideoName.value.trim() || 'final_video.mp4',
+          },
+        };
         const result = await api('/api/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1153,6 +1198,7 @@ INDEX_HTML = r"""<!doctype html>
             use_memory: els.useMemory.value === 'on',
             inherit_task: els.inheritTask.value,
             inherit_mode: els.inheritMode.value,
+            production_config: productionConfig,
             image_config: imageConfig,
             video_config: videoConfig,
             reference_images: referenceImages,
@@ -1181,6 +1227,9 @@ INDEX_HTML = r"""<!doctype html>
     els.sampleBtn.onclick = () => {
       els.userInput.value = '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。';
       els.taskTitle.value = 'AI自动化获客短视频';
+      els.autoProductionMode.value = 'package_only';
+      els.composeTool.value = 'ffmpeg';
+      els.finalVideoName.value = 'final_video.mp4';
       els.imageTool.value = 'prompt_only';
       els.imageModel.value = '';
       els.imageSize.value = '9:16';
@@ -1210,6 +1259,9 @@ INDEX_HTML = r"""<!doctype html>
       els.useMemory.value = 'on';
       els.inheritTask.value = '';
       els.inheritMode.value = 'final_output';
+      els.autoProductionMode.value = 'off';
+      els.composeTool.value = 'ffmpeg';
+      els.finalVideoName.value = '';
       els.imageTool.value = 'prompt_only';
       els.imageModel.value = '';
       els.imageSize.value = '9:16';
@@ -1309,6 +1361,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 user_input = self._append_long_term_memory(user_input)
             if inherit_task:
                 user_input = self._append_inherited_task(user_input, inherit_task, inherit_mode)
+            production_config = payload.get("production_config") or {}
             image_config = payload.get("image_config") or {}
             if image_config:
                 user_input = self._append_image_config(user_input, image_config)
@@ -1346,7 +1399,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             worker = threading.Thread(
                 target=self._run_workflow_job,
-                args=(run_id, workflow, user_input, task_title, provider, model, api_key, base_url),
+                args=(run_id, workflow, user_input, task_title, production_config, provider, model, api_key, base_url),
                 daemon=True,
             )
             worker.start()
@@ -1440,6 +1493,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                         "step_count": event.get("step_count", 0),
                         "completed_steps": event.get("step_count", job.get("completed_steps", 0)),
                         "final_output": event.get("final_output", ""),
+                        "production_manifest": event.get("production_manifest", ""),
+                        "production_status": event.get("production_status", "off"),
                     }
                 )
             job["updated_at"] = time.time()
@@ -1469,6 +1524,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         workflow: str,
         user_input: str,
         task_title: str,
+        production_config: dict,
         provider: str,
         model: str | None,
         api_key: str | None,
@@ -1487,6 +1543,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 workflow,
                 user_input,
                 task_title=task_title,
+                production_config=production_config,
                 progress_callback=lambda event: self._apply_progress(run_id, event),
             )
         except Exception as exc:

@@ -94,6 +94,7 @@ my_workspace/my_codex_core/staff_loader.py
 my_workspace/my_codex_core/workflow_engine.py
 my_workspace/my_codex_core/task_storage.py
 my_workspace/my_codex_core/codex_api.py
+my_workspace/my_codex_core/production_pipeline.py
 ```
 
 Behavior:
@@ -163,6 +164,7 @@ Current verified capabilities:
 - Shows workflow run progress in the web UI with a progress bar and per-step staff status. `/api/run` now starts a background job and returns a `run_id`; `/api/run-status?id=...` returns current status.
 - Supports an optional web UI task name. When provided, the task name is used in the output directory suffix, task list display, run progress title, and `run_summary.json` `task_title`.
 - Web UI layout keeps core workflow/task/input fields visible first, with model interface, memory inheritance, image-generation, video-generation, and reference-image controls moved into compact collapsible sections.
+- Provides a full-auto production framework option. In `package_only` mode it creates `production_manifest.json`, `auto_production.md`, image prompt files, video prompt files, audio/subtitle placeholders, output folders, and an edit checklist without calling external media APIs.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
 - Deletes historical task output directories through `/api/delete-task`; deletion is constrained to a validated child directory under `my_workspace/my_task_output`.
@@ -207,6 +209,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - Current engine uses OpenAI-compatible `/chat/completions`. Official default base URL is `https://api.openai.com/v1`; relay/proxy providers can be configured through `OPENAI_BASE_URL`, CLI `--base-url`, or the web UI `中转站 Base URL` field.
 - Image provider API fields in the UI are currently planning/configuration inputs only. They are not used to call GPT Image, Midjourney, Stable Diffusion, FLUX, Seedream, Jimeng, Kling, or other image APIs.
 - Video provider API fields in the UI are currently planning/configuration inputs only. They are not used to call Sora, Runway, Pika, Seedance, Kling, Jimeng, Hailuo, Luma, or other video APIs.
+- Full-auto production currently generates a production asset package only. Real image/video API adapters should read `production_manifest.json` and write generated media into `generated_images/` and `video_clips/`.
 - Reference images are local assets for prompt planning. Actual image understanding requires adding a vision model later.
 - Default model is currently `gpt-5.5`; UI also offers `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `o3`, `o4-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, and a custom model field.
 - GitHub Actions were adjusted for this fork: CI has `paths-ignore` for `docs/**` and `my_workspace/**`, and its agent scan prunes `my_workspace/`; `Sync to Gitee` is manual-only and skips when `GITEE_TOKEN` is absent.
@@ -243,3 +246,6 @@ Generated task folders are disposable unless the user explicitly wants to preser
 
 
 [2026-06-12 22:03:00 +08:00] command: optimized web UI layout by moving model API, memory, image, video, and reference image settings into compact collapsible sections; verified HTTP page markers and offline API run completed.
+
+
+[2026-06-12 22:43:25 +08:00] command: added full-auto production framework package mode via production_pipeline.py and web UI controls. Verified package_only run created production_manifest.json, image_prompts/, video_prompts/, subtitles.srt, audio/voiceover.txt, and edit_checklist.md without storing secrets.

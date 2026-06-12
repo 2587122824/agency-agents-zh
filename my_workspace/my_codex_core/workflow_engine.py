@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from .codex_api import CodexAPI
+from .production_pipeline import run_auto_production
 from .staff_loader import StaffLoader
 from .task_storage import TaskStorage
 
@@ -18,6 +19,7 @@ class WorkflowRunResult:
     provider: str
     step_count: int
     final_output: str
+    production_manifest: str | None = None
 
 
 class WorkflowEngine:
@@ -42,6 +44,7 @@ class WorkflowEngine:
         workflow_key: str,
         user_input: str,
         task_title: str | None = None,
+        production_config: dict | None = None,
         progress_callback: Callable[[dict], None] | None = None,
     ) -> WorkflowRunResult:
         workflow_path = self._resolve_workflow_path(workflow_key)
@@ -132,6 +135,7 @@ class WorkflowEngine:
         final_output = self._build_final_output(workflow, user_input, step_outputs)
         final_path = task_dir / "final_output.md"
         self.storage.write_text(final_path, final_output)
+        production_manifest = run_auto_production(task_dir, step_outputs, production_config)
         self.storage.write_json(
             task_dir / "run_summary.json",
             {
@@ -142,6 +146,8 @@ class WorkflowEngine:
                 "provider": provider_used,
                 "step_count": len(step_outputs),
                 "final_output": str(final_path),
+                "production_manifest": production_manifest["files"]["manifest"] if production_manifest else "",
+                "production_status": production_manifest["status"] if production_manifest else "off",
             },
         )
         if progress_callback:
@@ -154,6 +160,8 @@ class WorkflowEngine:
                     "provider": provider_used,
                     "step_count": len(step_outputs),
                     "final_output": str(final_path),
+                    "production_manifest": production_manifest["files"]["manifest"] if production_manifest else "",
+                    "production_status": production_manifest["status"] if production_manifest else "off",
                     "total_steps": len(steps),
                 }
             )
@@ -165,6 +173,7 @@ class WorkflowEngine:
             provider=provider_used,
             step_count=len(step_outputs),
             final_output=str(final_path),
+            production_manifest=production_manifest["files"]["manifest"] if production_manifest else None,
         )
 
     def _resolve_workflow_path(self, workflow_key: str) -> Path:

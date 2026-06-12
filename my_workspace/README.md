@@ -116,6 +116,7 @@ http://127.0.0.1:8765
 - 可填写 `任务名称`，用于生成更容易识别的任务输出目录和历史任务标题；留空则继续使用工作流名。
 - 输入原始内容需求。
 - 管理台首屏保留核心输入，模型接口、记忆继承、生图配置、视频生成和参考图放在折叠配置区中，减少配置项堆叠。
+- 可在 `全自动生成` 中选择生成生产资产包；当前会自动整理 `production_manifest.json`、生图提示词、视频提示词、字幕、配音文本和剪辑清单，供后续 API 适配器继续执行。
 - 选择 `auto`、`offline` 或 `openai` 执行模式。
 - 在 `API Key` 输入框填入密钥；密钥只用于本次运行，不写入任务输出文件。
 - 如果使用中转站，在 `中转站 Base URL` 输入框填入兼容 OpenAI 的地址，例如 `https://你的中转站域名/v1`；留空则使用官方地址。
@@ -129,6 +130,24 @@ http://127.0.0.1:8765
 - 运行工作流时会显示进度条和每一步员工状态；后台通过 `/api/run-status` 查询当前运行状态。
 - 查看历史任务、每一步的 `prompt.md`、`output.md` 和最终 `final_output.md`。
 - 删除历史任务输出；删除只作用于 `my_task_output` 下对应的任务目录，不会删除工作流、员工或 `.gitignore`。
+
+## 全自动生产框架
+
+选择 `全自动生成 -> 生成生产资产包` 后，任务目录会额外生成：
+
+```text
+production_manifest.json
+auto_production.md
+image_prompts/storyboard_image_prompts.md
+generated_images/
+video_prompts/video_generation_prompts.md
+video_clips/
+audio/voiceover.txt
+subtitles.srt
+edit_checklist.md
+```
+
+当前版本先生成可执行资产包和 manifest，不直接调用第三方生图或生视频 API。后续接入平台 API 时，适配器读取 `production_manifest.json` 中的工具、模型、提示词文件和输出目录继续执行。
 
 ## 当前员工
 
