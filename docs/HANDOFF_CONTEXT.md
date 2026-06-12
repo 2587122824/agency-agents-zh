@@ -19,6 +19,7 @@ my_workspace/
   my_custom_staff/
   my_workflows/
   my_memory/
+  my_reference_images/
   my_task_output/
   run_flow.py
   web_app.py
@@ -66,6 +67,16 @@ my_workspace/my_memory/style_guide.md
 ```
 
 The web UI can append these files to each workflow run when `启用 my_memory` is selected.
+
+### Reference Images
+
+Reference image uploads are stored under:
+
+```text
+my_workspace/my_reference_images/
+```
+
+The directory tracks only `.gitignore`; uploaded images are local generated assets and should not be committed by default.
 
 ## Automation Engine
 
@@ -144,7 +155,8 @@ Current verified capabilities:
 - Accepts a one-off OpenAI-compatible Base URL from the web form for relay/proxy providers; the URL is used only for that request and is not written to task output.
 - Provides a grouped model dropdown with recommended, lightweight, reasoning, legacy-compatible, and custom model options.
 - Provides video-generation configuration fields in the web UI: target tool, model, aspect ratio, duration, style, video API key presence, and video base URL presence. These fields are appended to workflow input for `06_视频生成执行员`; the system does not directly call video-generation APIs yet.
-- Provides memory controls in the web UI: `长期记忆` appends `my_memory/*.md`, and `继承历史任务` appends a selected task's `final_output.md` or `input.md + final_output.md`.
+- Provides reference image upload fields in the web UI. Uploaded images are saved under `my_reference_images/`; workflow input receives stored path, role, and note for `06_视频生成执行员`. No vision model is used yet, so the system does not claim to understand image content.
+- Provides memory controls in the web UI: `长期记忆` appends `my_memory/*.md`, and `继承历史任务` can append either the previous final product only or both the previous demand and final product.
 - Persists web UI settings in browser `localStorage` by default, including API keys, Base URLs, model selections, and video configuration. The `清除已保存配置` button removes the saved local settings.
 - Shows historical tasks from `my_task_output`.
 - Opens `prompt.md`, `output.md`, `metadata.json`, `workflow.json`, and `final_output.md`.
@@ -178,6 +190,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - Web API offline workflow run succeeded for `workflow_小红书图文`.
 - `06_视频生成执行员` was added to generate video production packages; `workflow_短视频全流程` and `workflow_开发外包` now include a final video-generation step. It produces prompts, shot lists, TTS copy, SRT drafts, and edit instructions; it does not create mp4 files directly.
 - Local web UI responded with HTTP 200 and showed valid config.
+- Reference image UI and `/api/upload-reference-image` were verified with HTTP 200. The endpoint returned a stored local path under `my_reference_images/` for `06_视频生成执行员`.
 
 ## Important Notes
 
@@ -188,6 +201,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - Long-term memory files are tracked in the repo as editable templates. They should contain reusable brand/style/character guidance, not secrets.
 - Current engine uses OpenAI-compatible `/chat/completions`. Official default base URL is `https://api.openai.com/v1`; relay/proxy providers can be configured through `OPENAI_BASE_URL`, CLI `--base-url`, or the web UI `中转站 Base URL` field.
 - Video provider API fields in the UI are currently planning/configuration inputs only. They are not used to call Sora, Runway, Pika, Seedance, Kling, Jimeng, Hailuo, Luma, or other video APIs.
+- Reference images are local assets for prompt planning. Actual image understanding requires adding a vision model later.
 - Default model is currently `gpt-5.5`; UI also offers `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `o3`, `o4-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, and a custom model field.
 - GitHub Actions were adjusted for this fork: CI has `paths-ignore` for `docs/**` and `my_workspace/**`, and its agent scan prunes `my_workspace/`; `Sync to Gitee` is manual-only and skips when `GITEE_TOKEN` is absent.
 
@@ -200,3 +214,9 @@ Generated task folders are disposable unless the user explicitly wants to preser
 5. Add export buttons for final Markdown, script-only output, and publish checklist.
 6. Add a real Markdown renderer in the viewer instead of plain `<pre>` output.
 7. Add `.env` loading so users do not need to set environment variables manually each session.
+
+[2026-06-12 20:04:03 +08:00] command: git push origin main failed twice with GitHub port 443 connection timeout; local commit 8b56043 remains ahead of origin/main by 1.
+
+
+[2026-06-12 20:07:33 +08:00] command: restarted my_workspace web management UI on http://127.0.0.1:8765 and verified HTTP 200 with reference image controls present.
+

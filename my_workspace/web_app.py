@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import mimetypes
 import sys
@@ -7,6 +8,7 @@ import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from uuid import uuid4
 
 from my_codex_core.workflow_engine import WorkflowEngine
 
@@ -16,6 +18,7 @@ OUTPUT_ROOT = WORKSPACE_ROOT / "my_task_output"
 WORKFLOW_ROOT = WORKSPACE_ROOT / "my_workflows"
 STAFF_ROOT = WORKSPACE_ROOT / "my_custom_staff"
 MEMORY_ROOT = WORKSPACE_ROOT / "my_memory"
+REFERENCE_ROOT = WORKSPACE_ROOT / "my_reference_images"
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -146,6 +149,22 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: repeat(4, minmax(160px, 1fr));
       gap: 12px;
+    }
+    .reference-list {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .reference-item {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 8px 10px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+      background: #fff;
+      font-size: 13px;
     }
     .list {
       display: grid;
@@ -333,8 +352,8 @@ INDEX_HTML = r"""<!doctype html>
           </label>
           <label>继承范围
             <select id="inheritMode">
-              <option value="final_output" selected>继承 final_output.md</option>
-              <option value="input_and_final">继承 input.md + final_output.md</option>
+              <option value="final_output" selected>只参考上次最终成品</option>
+              <option value="input_and_final">参考上次需求和最终成品</option>
             </select>
           </label>
         </div>
@@ -392,12 +411,30 @@ INDEX_HTML = r"""<!doctype html>
               <input id="videoStyle" placeholder="例如 真人口播、科技感、写实商业、国风、美妆种草" />
             </label>
             <label>视频平台 API Key
-              <input id="videoApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用视频 API，不保存" />
+              <input id="videoApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用视频 API，会保存到本浏览器" />
             </label>
             <label>视频平台 Base URL
               <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入视频 API 使用，可留空" />
             </label>
           </div>
+          <div class="provider-grid" style="margin-top: 12px;">
+            <label>参考图
+              <input id="referenceImages" type="file" accept="image/png,image/jpeg,image/webp" multiple />
+            </label>
+            <label>参考图用途
+              <select id="referenceRole">
+                <option value="人物一致性" selected>人物一致性</option>
+                <option value="产品参考">产品参考</option>
+                <option value="视觉风格参考">视觉风格参考</option>
+                <option value="场景参考">场景参考</option>
+                <option value="封面参考">封面参考</option>
+              </select>
+            </label>
+            <label>参考图说明
+              <input id="referenceNote" placeholder="例如：第一张固定人物参考图，后续镜头保持同一角色" />
+            </label>
+          </div>
+          <div class="reference-list" id="referenceList"></div>
         </details>
         <div class="row">
           <button class="primary" id="runBtn">运行工作流</button>
@@ -440,6 +477,10 @@ INDEX_HTML = r"""<!doctype html>
       videoStyle: document.getElementById('videoStyle'),
       videoApiKey: document.getElementById('videoApiKey'),
       videoBaseUrl: document.getElementById('videoBaseUrl'),
+      referenceImages: document.getElementById('referenceImages'),
+      referenceRole: document.getElementById('referenceRole'),
+      referenceNote: document.getElementById('referenceNote'),
+      referenceList: document.getElementById('referenceList'),
       runBtn: document.getElementById('runBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
       clearSettingsBtn: document.getElementById('clearSettingsBtn'),
@@ -453,6 +494,7 @@ INDEX_HTML = r"""<!doctype html>
     };
     let selectedTask = null;
     let selectedFile = null;
+    let selectedReferenceFiles = [];
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
 
     function setStatus(text, isError = false) {
@@ -500,6 +542,8 @@ INDEX_HTML = r"""<!doctype html>
         videoStyle: els.videoStyle.value,
         videoApiKey: els.videoApiKey.value,
         videoBaseUrl: els.videoBaseUrl.value,
+        referenceRole: els.referenceRole.value,
+        referenceNote: els.referenceNote.value,
       };
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     }
@@ -522,6 +566,8 @@ INDEX_HTML = r"""<!doctype html>
       els.videoStyle.value = settings.videoStyle || '';
       els.videoApiKey.value = settings.videoApiKey || '';
       els.videoBaseUrl.value = settings.videoBaseUrl || '';
+      setIfExists(els.referenceRole, settings.referenceRole);
+      els.referenceNote.value = settings.referenceNote || '';
       syncCustomModelState(false);
     }
 
@@ -549,10 +595,61 @@ INDEX_HTML = r"""<!doctype html>
         els.videoStyle,
         els.videoApiKey,
         els.videoBaseUrl,
+        els.referenceRole,
+        els.referenceNote,
       ].forEach(control => {
         control.addEventListener('change', saveSettings);
         control.addEventListener('input', saveSettings);
       });
+    }
+
+    function renderReferenceFiles() {
+      els.referenceList.innerHTML = '';
+      if (!selectedReferenceFiles.length) {
+        els.referenceList.innerHTML = '<div class="muted small">未选择参考图</div>';
+        return;
+      }
+      selectedReferenceFiles.forEach((file, index) => {
+        const item = document.createElement('div');
+        item.className = 'reference-item';
+        item.innerHTML = `<span>${file.name} <span class="muted">(${Math.round(file.size / 1024)} KB)</span></span><button class="icon-btn danger" type="button" title="移除参考图">×</button>`;
+        item.querySelector('button').onclick = () => {
+          selectedReferenceFiles.splice(index, 1);
+          renderReferenceFiles();
+        };
+        els.referenceList.appendChild(item);
+      });
+    }
+
+    function fileToBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = String(reader.result || '');
+          resolve(result.includes(',') ? result.split(',')[1] : result);
+        };
+        reader.onerror = () => reject(reader.error || new Error('读取参考图失败'));
+        reader.readAsDataURL(file);
+      });
+    }
+
+    async function uploadReferenceImages() {
+      const uploaded = [];
+      for (const file of selectedReferenceFiles) {
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/upload-reference-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+            role: els.referenceRole.value,
+            note: els.referenceNote.value.trim(),
+          }),
+        });
+        uploaded.push(result);
+      }
+      return uploaded;
     }
 
     function syncCustomModelState(focusWhenCustom = true) {
@@ -667,6 +764,7 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
       setStatus('工作流运行中');
       try {
+        const referenceImages = await uploadReferenceImages();
         const videoConfig = {
           tool: els.videoTool.value,
           model: els.videoModel.value.trim(),
@@ -690,6 +788,7 @@ INDEX_HTML = r"""<!doctype html>
             inherit_task: els.inheritTask.value,
             inherit_mode: els.inheritMode.value,
             video_config: videoConfig,
+            reference_images: referenceImages,
             video_api_key: els.videoApiKey.value.trim(),
             video_base_url: els.videoBaseUrl.value.trim(),
           }),
@@ -717,6 +816,8 @@ INDEX_HTML = r"""<!doctype html>
       els.videoAspect.value = '9:16';
       els.videoDuration.value = '30s';
       els.videoStyle.value = '真人口播，商业科技感，干净明亮';
+      els.referenceRole.value = '人物一致性';
+      els.referenceNote.value = '固定人物参考图，后续镜头保持同一角色与风格';
       saveSettings();
     };
     els.clearSettingsBtn.onclick = () => {
@@ -737,10 +838,20 @@ INDEX_HTML = r"""<!doctype html>
       els.videoStyle.value = '';
       els.videoApiKey.value = '';
       els.videoBaseUrl.value = '';
+      els.referenceRole.value = '人物一致性';
+      els.referenceNote.value = '';
+      selectedReferenceFiles = [];
+      els.referenceImages.value = '';
+      renderReferenceFiles();
       syncCustomModelState(false);
       setStatus('已清除本地保存配置');
     };
+    els.referenceImages.onchange = () => {
+      selectedReferenceFiles = Array.from(els.referenceImages.files || []);
+      renderReferenceFiles();
+    };
     bindSettingsPersistence();
+    renderReferenceFiles();
 
     (async function init() {
       try {
@@ -788,6 +899,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"ok": True})
                 return
 
+            if parsed.path == "/api/upload-reference-image":
+                self._send_json(self._upload_reference_image(payload))
+                return
+
             if parsed.path != "/api/run":
                 self.send_error(404)
                 return
@@ -804,6 +919,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             video_config = payload.get("video_config") or {}
             if video_config:
                 user_input = self._append_video_config(user_input, video_config)
+            reference_images = payload.get("reference_images") or []
+            if reference_images:
+                user_input = self._append_reference_images(user_input, reference_images)
             provider = str(payload.get("provider") or "auto").strip()
             model = str(payload.get("model") or "").strip() or None
             api_key = str(payload.get("api_key") or "").strip() or None
@@ -932,6 +1050,52 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 视频平台 Base URL：{base_url_note}\n"
             "- 执行要求：当前阶段由 06_视频生成执行员输出视频生成提示词、镜头清单、TTS 配音稿、SRT 字幕草案和剪辑说明；不要声称已经生成 mp4。\n"
         )
+
+    def _upload_reference_image(self, payload: dict) -> dict:
+        filename = str(payload.get("filename") or "").strip()
+        content_base64 = str(payload.get("content_base64") or "").strip()
+        role = str(payload.get("role") or "参考图").strip()
+        note = str(payload.get("note") or "").strip()
+        if not filename or not content_base64:
+            raise ValueError("filename and content_base64 are required")
+
+        suffix = Path(filename).suffix.lower()
+        allowed = {".jpg", ".jpeg", ".png", ".webp"}
+        if suffix not in allowed:
+            raise ValueError(f"Unsupported image type: {suffix}")
+
+        image_bytes = base64.b64decode(content_base64, validate=True)
+        if len(image_bytes) > 12 * 1024 * 1024:
+            raise ValueError("Reference image is too large; max size is 12 MB")
+
+        REFERENCE_ROOT.mkdir(parents=True, exist_ok=True)
+        safe_stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in Path(filename).stem)[:80]
+        target = REFERENCE_ROOT / f"{safe_stem}_{uuid4().hex[:8]}{suffix}"
+        target.write_bytes(image_bytes)
+
+        relative_path = target.relative_to(WORKSPACE_ROOT).as_posix()
+        return {
+            "filename": filename,
+            "stored_path": relative_path,
+            "role": role,
+            "note": note,
+            "size_bytes": len(image_bytes),
+        }
+
+    @staticmethod
+    def _append_reference_images(user_input: str, reference_images: list[dict]) -> str:
+        lines = ["## 参考图", "以下参考图由管理台上传到本地，仅作为 06_视频生成执行员生成视频制作包时的角色/产品/风格参考："]
+        for index, image in enumerate(reference_images, start=1):
+            lines.extend(
+                [
+                    f"{index}. 文件名：{image.get('filename', '')}",
+                    f"   - 本地路径：{image.get('stored_path', '')}",
+                    f"   - 用途：{image.get('role', '参考图')}",
+                    f"   - 说明：{image.get('note', '') or '无'}",
+                ]
+            )
+        lines.append("执行要求：如果视频工具支持参考图或图生视频，应在镜头提示词中明确使用这些参考图保持人物、产品或视觉风格一致；不要声称已经分析图片内容。")
+        return f"{user_input}\n\n" + "\n".join(lines) + "\n"
 
     def _delete_task(self, name: str) -> None:
         task_dir = self._safe_task_dir(name)
