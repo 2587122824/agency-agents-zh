@@ -172,7 +172,7 @@ Generated task folders are disposable unless the user explicitly wants to preser
 - The web UI is intentionally dependency-free and uses Python standard library only.
 - Web UI saved settings are client-side browser state only; they are not committed to the repo and are not written into `my_task_output`, but anyone with access to the same browser profile may reuse them.
 - Current engine uses OpenAI-compatible `/chat/completions`. Official default base URL is `https://api.openai.com/v1`; relay/proxy providers can be configured through `OPENAI_BASE_URL`, CLI `--base-url`, or the web UI `中转站 Base URL` field.
-- Video provider API fields in the UI are currently planning/configuration inputs only. They are not used to call Sora, Runway, Pika, Kling, Jimeng, Hailuo, Luma, or other video APIs.
+- Video provider API fields in the UI are currently planning/configuration inputs only. They are not used to call Sora, Runway, Pika, Seedance, Kling, Jimeng, Hailuo, Luma, or other video APIs.
 - Default model is currently `gpt-5.5`; UI also offers `gpt-5.4`, `gpt-5.4-mini`, `gpt-5.4-nano`, `o3`, `o4-mini`, `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, and a custom model field.
 - GitHub Actions were adjusted for this fork: CI has `paths-ignore` for `docs/**` and `my_workspace/**`, and its agent scan prunes `my_workspace/`; `Sync to Gitee` is manual-only and skips when `GITEE_TOKEN` is absent.
 

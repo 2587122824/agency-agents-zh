@@ -327,6 +327,7 @@ INDEX_HTML = r"""<!doctype html>
                 <option value="sora">Sora</option>
                 <option value="runway">Runway</option>
                 <option value="pika">Pika</option>
+                <option value="seedance">Seedance</option>
                 <option value="kling">可灵 Kling</option>
                 <option value="jimeng">即梦 Jimeng</option>
                 <option value="hailuo">海螺 Hailuo</option>
@@ -335,7 +336,18 @@ INDEX_HTML = r"""<!doctype html>
               </select>
             </label>
             <label>视频模型
-              <input id="videoModel" placeholder="例如 sora / runway gen-3 / kling 2.0，可留空" />
+              <input id="videoModel" list="videoModelOptions" placeholder="例如 seedance-1-0-pro / kling 2.0，可留空" />
+              <datalist id="videoModelOptions">
+                <option value="seedance-1-0-pro" label="Seedance 1.0 Pro"></option>
+                <option value="seedance-1-0-lite" label="Seedance 1.0 Lite"></option>
+                <option value="sora" label="Sora"></option>
+                <option value="runway-gen-3" label="Runway Gen-3"></option>
+                <option value="pika" label="Pika"></option>
+                <option value="kling-2.0" label="可灵 2.0"></option>
+                <option value="jimeng" label="即梦"></option>
+                <option value="hailuo" label="海螺"></option>
+                <option value="luma" label="Luma"></option>
+              </datalist>
             </label>
             <label>画幅
               <select id="videoAspect">
