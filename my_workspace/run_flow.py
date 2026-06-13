@@ -16,6 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", help="Model name when provider=openai or OPENAI_API_KEY is set.")
     parser.add_argument("--api-key", help="OpenAI API key for this run. Prefer environment variables for shared machines.")
     parser.add_argument("--base-url", help="OpenAI-compatible base URL, for example https://api.example.com/v1.")
+    parser.add_argument("--timeout", type=int, help="Model request timeout in seconds. Local Ollama defaults to 900.")
     return parser.parse_args()
 
 
@@ -46,6 +47,7 @@ def main() -> int:
         model=args.model,
         api_key=args.api_key,
         base_url=args.base_url,
+        timeout=args.timeout,
     )
     result = engine.run(args.workflow, user_input)
 

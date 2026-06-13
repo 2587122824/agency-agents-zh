@@ -566,6 +566,15 @@ INDEX_HTML = r"""<!doctype html>
               <span class="muted small">自动使用 Ollama + qwen3:8b-q4_K_M + 项目内 runtime/models</span>
             </div>
             <div class="provider-grid">
+              <label>模型超时
+                <select id="modelTimeout">
+                  <option value="120">120 秒（云端默认）</option>
+                  <option value="300">300 秒</option>
+                  <option value="600">600 秒</option>
+                  <option value="900" selected>900 秒（本地模型推荐）</option>
+                  <option value="1800">1800 秒</option>
+                </select>
+              </label>
               <label>本地模型服务
                 <select id="localModelPreset">
                   <option value="">不使用本地预设</option>
@@ -918,6 +927,7 @@ INDEX_HTML = r"""<!doctype html>
       taskTitle: document.getElementById('taskTitle'),
       apiKey: document.getElementById('apiKey'),
       baseUrl: document.getElementById('baseUrl'),
+      modelTimeout: document.getElementById('modelTimeout'),
       localModelPreset: document.getElementById('localModelPreset'),
       localModelName: document.getElementById('localModelName'),
       localOfflineBtn: document.getElementById('localOfflineBtn'),
@@ -1090,6 +1100,11 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (job.status === 'failed') {
         setStatus(job.error || '工作流运行失败', true);
+        await loadTasks();
+        if (job.task_name) {
+          showView('output');
+          await selectTask(job.task_name);
+        }
         els.runBtn.disabled = false;
         progressTimer = null;
         return;
@@ -1135,6 +1150,7 @@ INDEX_HTML = r"""<!doctype html>
         customModel: els.customModel.value,
         apiKey: els.apiKey.value,
         baseUrl: els.baseUrl.value,
+        modelTimeout: els.modelTimeout.value,
         localModelPreset: els.localModelPreset.value,
         localModelName: els.localModelName.value,
         useMemory: els.useMemory.value,
@@ -1176,6 +1192,7 @@ INDEX_HTML = r"""<!doctype html>
       els.taskTitle.value = '';
       els.apiKey.value = settings.apiKey || '';
       els.baseUrl.value = settings.baseUrl || '';
+      setIfExists(els.modelTimeout, settings.modelTimeout);
       setIfExists(els.localModelPreset, settings.localModelPreset);
       renderLocalModelNames();
       setIfExists(els.localModelName, settings.localModelName);
@@ -1223,6 +1240,7 @@ INDEX_HTML = r"""<!doctype html>
         els.taskTitle,
         els.apiKey,
         els.baseUrl,
+        els.modelTimeout,
         els.localModelPreset,
         els.localModelName,
         els.useMemory,
@@ -1321,6 +1339,7 @@ INDEX_HTML = r"""<!doctype html>
       els.provider.value = 'openai';
       els.apiKey.value = 'local';
       els.baseUrl.value = OLLAMA_BASE_URL;
+      els.modelTimeout.value = '900';
       setIfExists(els.localModelPreset, 'ollama');
       renderLocalModelNames();
       setIfExists(els.localModelName, DEFAULT_LOCAL_MODEL);
@@ -1809,6 +1828,7 @@ INDEX_HTML = r"""<!doctype html>
             model,
             api_key: els.apiKey.value.trim(),
             base_url: els.baseUrl.value.trim(),
+            timeout: Number(els.modelTimeout.value || 900),
             use_memory: els.useMemory.value === 'on',
             use_knowledge: els.useKnowledge.value === 'on',
             inherit_task: els.inheritTask.value,
@@ -1908,6 +1928,7 @@ INDEX_HTML = r"""<!doctype html>
       els.taskTitle.value = '';
       els.apiKey.value = '';
       els.baseUrl.value = '';
+      els.modelTimeout.value = '900';
       els.localModelPreset.value = '';
       renderLocalModelNames();
       els.useMemory.value = 'on';
@@ -2062,6 +2083,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             model = str(payload.get("model") or "").strip() or None
             api_key = str(payload.get("api_key") or "").strip() or None
             base_url = str(payload.get("base_url") or "").strip() or None
+            timeout = int(payload.get("timeout") or 0) or None
 
             if not workflow:
                 raise ValueError("workflow is required")
@@ -2086,7 +2108,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             worker = threading.Thread(
                 target=self._run_workflow_job,
-                args=(run_id, workflow, user_input, task_title, production_config, provider, model, api_key, base_url),
+                args=(run_id, workflow, user_input, task_title, production_config, provider, model, api_key, base_url, timeout),
                 daemon=True,
             )
             worker.start()
@@ -2372,6 +2394,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         model: str | None,
         api_key: str | None,
         base_url: str | None,
+        timeout: int | None,
     ) -> None:
         try:
             self._update_job(run_id, {"status": "running"})
@@ -2381,6 +2404,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 model=model,
                 api_key=api_key,
                 base_url=base_url,
+                timeout=timeout,
             )
             engine.run(
                 workflow,

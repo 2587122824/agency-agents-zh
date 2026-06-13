@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -29,11 +30,24 @@ class CodexAPI:
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        timeout: int | None = None,
     ) -> None:
         self.provider = provider or os.getenv("MY_WORKFLOW_PROVIDER") or "auto"
         self.model = model or os.getenv("OPENAI_MODEL") or "gpt-5.5"
         self.base_url = (base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
         self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.timeout = timeout or self._default_timeout()
+
+    def _default_timeout(self) -> int:
+        env_timeout = os.getenv("MY_WORKFLOW_TIMEOUT")
+        if env_timeout:
+            try:
+                return max(30, int(env_timeout))
+            except ValueError:
+                pass
+        if "127.0.0.1:11434" in self.base_url or "localhost:11434" in self.base_url:
+            return 900
+        return 120
 
     def run(self, system_prompt: str, user_prompt: str) -> LLMResult:
         provider = self.provider
@@ -79,11 +93,15 @@ class CodexAPI:
         )
 
         try:
-            with urllib.request.urlopen(request, timeout=120) as response:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
                 raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", errors="replace")
             raise RuntimeError(f"OpenAI request failed: HTTP {exc.code}: {body}") from exc
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
+            raise RuntimeError(
+                f"Model request timed out or connection failed after {self.timeout}s: {exc}"
+            ) from exc
 
         content = raw["choices"][0]["message"]["content"]
         return LLMResult(provider="openai", model=self.model, content=content, raw=raw)

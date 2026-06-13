@@ -31,6 +31,7 @@ class WorkflowEngine:
         model: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        timeout: int | None = None,
     ) -> None:
         self.workspace_root = workspace_root
         self.staff_root = workspace_root / "my_custom_staff"
@@ -39,7 +40,7 @@ class WorkflowEngine:
         self.action_root = workspace_root / "my_action_workspace"
         self.staff_loader = StaffLoader(self.staff_root)
         self.storage = TaskStorage(self.output_root)
-        self.api = CodexAPI(provider=provider, model=model, api_key=api_key, base_url=base_url)
+        self.api = CodexAPI(provider=provider, model=model, api_key=api_key, base_url=base_url, timeout=timeout)
         self.action_executor = ActionExecutor(self.action_root)
 
     def run(
@@ -107,7 +108,28 @@ class WorkflowEngine:
                 },
             )
 
-            result = self.api.run(agent.prompt, prompt)
+            try:
+                result = self.api.run(agent.prompt, prompt)
+            except Exception as exc:
+                error_text = (
+                    "# 当前步骤执行失败\n\n"
+                    f"- 步骤：{step_no}\n"
+                    f"- 员工：{agent.agent_id}\n"
+                    f"- 错误：{exc}\n\n"
+                    "如果使用本地 Ollama 模型，通常是模型生成时间超过超时设置。"
+                    "可以在管理台把 `模型超时` 调到 900 秒或 1800 秒后重试。\n"
+                )
+                self.storage.write_text(step_dir / "output.md", error_text)
+                self.storage.write_json(
+                    step_dir / "error.json",
+                    {
+                        "step": step_no,
+                        "agent_id": agent.agent_id,
+                        "agent_name": agent.name,
+                        "error": str(exc),
+                    },
+                )
+                raise
             provider_used = result.provider
             self.storage.write_text(step_dir / "output.md", result.content)
             action_results = self.action_executor.execute_from_text(result.content, task_dir)

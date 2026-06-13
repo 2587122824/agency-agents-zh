@@ -668,3 +668,32 @@ Validation:
 - Home page contains `localOfflineBtn`, `一键本地离线模式`, `qwen3:8b-q4_K_M`, and `ensureLocalModelReady`.
 - `GET /api/system-health` returned 8 checks, all `ok`, including `推荐本地模型: qwen3:8b-q4_K_M 已可用`.
 - `POST /api/test-model` with `base_url=http://127.0.0.1:11434/v1`, `api_key=local`, and `model=qwen3:8b-q4_K_M` returned `ok=true`.
+
+## Local Model Timeout Handling
+
+[2026-06-13 19:35:00 +08:00] command: increased local model timeout handling after Ollama runs timed out around step 5 of the short-video workflow.
+
+Root cause:
+
+- `my_workspace/my_codex_core/codex_api.py` used a fixed 120-second `urllib.request.urlopen` timeout.
+- Local `qwen3:8b-q4_K_M` can exceed 120 seconds once workflow context grows after several steps, especially around compliance/review steps.
+
+Changes:
+
+- `CodexAPI` now accepts a `timeout` argument.
+- `MY_WORKFLOW_TIMEOUT` environment variable can override the timeout.
+- If Base URL is local Ollama (`127.0.0.1:11434` or `localhost:11434`), default timeout is now 900 seconds.
+- Cloud/default timeout remains 120 seconds.
+- `WorkflowEngine` accepts and passes timeout to `CodexAPI`.
+- CLI `my_workspace/run_flow.py` adds `--timeout`.
+- Web UI `模型接口配置` adds `模型超时` select: 120, 300, 600, 900, 1800 seconds.
+- `一键本地离线模式` sets model timeout to 900 seconds.
+- `/api/run` accepts `timeout` and passes it into the background workflow job.
+- If a model step fails, the engine now writes failure details to that step's `output.md` and `error.json` before re-raising.
+- If a web workflow fails after a task directory exists, the UI now refreshes task output and opens the failed task automatically.
+
+Expected behavior:
+
+- Local Ollama workflows should no longer fail at 120 seconds by default.
+- If a later step still exceeds 900 seconds, the user can set `模型超时=1800 秒`.
+- Failed runs now leave readable output/error files instead of appearing to produce nothing.
