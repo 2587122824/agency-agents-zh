@@ -561,6 +561,10 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="customModel" placeholder="选择“手动输入模型名”时填写" disabled />
               </label>
             </div>
+            <div class="row">
+              <button id="localOfflineBtn" type="button">一键本地离线模式</button>
+              <span class="muted small">自动使用 Ollama + qwen3:8b-q4_K_M + 项目内 runtime/models</span>
+            </div>
             <div class="provider-grid">
               <label>本地模型服务
                 <select id="localModelPreset">
@@ -876,7 +880,7 @@ INDEX_HTML = r"""<!doctype html>
               <div class="reference-item">
                 <div class="reference-info">
                   <div class="reference-name">2. 选择本地模型</div>
-                  <div class="muted small">进入“运行工作流 -> 模型接口配置”，选择 Ollama 本地模型，模型名使用已下载的模型，例如 qwen2.5:7b。</div>
+                  <div class="muted small">点击“运行工作流 -> 模型接口配置 -> 一键本地离线模式”，系统会自动填好 Ollama、local、Base URL 和 qwen3:8b-q4_K_M。</div>
                 </div>
               </div>
               <div class="reference-item">
@@ -916,6 +920,7 @@ INDEX_HTML = r"""<!doctype html>
       baseUrl: document.getElementById('baseUrl'),
       localModelPreset: document.getElementById('localModelPreset'),
       localModelName: document.getElementById('localModelName'),
+      localOfflineBtn: document.getElementById('localOfflineBtn'),
       testModelBtn: document.getElementById('testModelBtn'),
       userInput: document.getElementById('userInput'),
       useMemory: document.getElementById('useMemory'),
@@ -988,6 +993,8 @@ INDEX_HTML = r"""<!doctype html>
     let referencePreviewUrls = new Map();
     let progressTimer = null;
     let localModelPresets = [];
+    const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
+    const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
 
     function setStatus(text, isError = false) {
@@ -1310,6 +1317,20 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
     }
 
+    function applyLocalOfflineMode() {
+      els.provider.value = 'openai';
+      els.apiKey.value = 'local';
+      els.baseUrl.value = OLLAMA_BASE_URL;
+      setIfExists(els.localModelPreset, 'ollama');
+      renderLocalModelNames();
+      setIfExists(els.localModelName, DEFAULT_LOCAL_MODEL);
+      els.model.value = 'custom';
+      els.customModel.value = DEFAULT_LOCAL_MODEL;
+      syncCustomModelState(false);
+      saveSettings();
+      setStatus(`已切换到本地离线模式：${DEFAULT_LOCAL_MODEL}`);
+    }
+
     async function testModelConnection() {
       const model = els.model.value === 'custom' ? els.customModel.value.trim() : els.model.value;
       if (!model) {
@@ -1331,6 +1352,21 @@ INDEX_HTML = r"""<!doctype html>
       } catch (err) {
         setStatus(`模型接口不可用：${err.message}`, true);
       }
+    }
+
+    async function ensureLocalModelReady(model) {
+      const isOllama = els.provider.value === 'openai' && els.baseUrl.value.trim().replace(/\/$/, '') === OLLAMA_BASE_URL;
+      if (!isOllama) return;
+      setStatus(`正在检测本地模型：${model}`);
+      await api('/api/test-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: els.apiKey.value.trim() || 'local',
+          base_url: OLLAMA_BASE_URL,
+          model,
+        }),
+      });
     }
 
     async function loadKnowledgeList() {
@@ -1730,6 +1766,7 @@ INDEX_HTML = r"""<!doctype html>
       resetProgress();
       setStatus('工作流运行中');
       try {
+        await ensureLocalModelReady(model);
         const referenceImages = await uploadReferenceImages();
         const imageConfig = {
           tool: els.imageTool.value,
@@ -1807,6 +1844,7 @@ INDEX_HTML = r"""<!doctype html>
     els.deleteStaffBtn.onclick = deleteStaff;
     els.localModelPreset.onchange = applyLocalModelPreset;
     els.localModelName.onchange = applyLocalModelName;
+    els.localOfflineBtn.onclick = applyLocalOfflineMode;
     els.testModelBtn.onclick = testModelConnection;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
     els.refreshHealthBtn.onclick = loadSystemHealth;
@@ -2093,6 +2131,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return presets if isinstance(presets, list) else []
 
     def _system_health(self) -> dict:
+        ollama_models = self._ollama_model_names()
         checks = [
             self._health_check("Python 运行时", "ok", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"),
             self._path_check("工作区目录", WORKSPACE_ROOT, must_be_writable=False),
@@ -2114,7 +2153,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             else:
                 checks.append(self._health_check("Ollama 命令", "warn", "未在 PATH 或 runtime/ollama/ollama.exe 找到；可先安装 Ollama 或放入 runtime/ollama/"))
 
-        checks.append(self._ollama_service_check())
+        checks.append(self._ollama_service_check(ollama_models))
+        if "qwen3:8b-q4_K_M" in ollama_models:
+            checks.append(self._health_check("推荐本地模型", "ok", "qwen3:8b-q4_K_M 已可用"))
+        else:
+            checks.append(self._health_check("推荐本地模型", "warn", "未发现 qwen3:8b-q4_K_M；可运行 start_local.ps1 自动拉取"))
 
         return {
             "checks": checks,
@@ -2137,13 +2180,23 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         except Exception as exc:
             return self._health_check(name, "error", f"{path}: {exc}")
 
-    def _ollama_service_check(self) -> dict:
+    def _ollama_model_names(self) -> list[str]:
         req = urllib_request.Request("http://127.0.0.1:11434/v1/models", method="GET")
         try:
             with urllib_request.urlopen(req, timeout=3) as response:
                 data = json.loads(response.read().decode("utf-8", errors="replace"))
             models = data.get("data") if isinstance(data, dict) else []
-            names = [str(item.get("id") or item.get("name") or "") for item in models if isinstance(item, dict)]
+            return [str(item.get("id") or item.get("name") or "") for item in models if isinstance(item, dict)]
+        except Exception:
+            return []
+
+    def _ollama_service_check(self, names: list[str] | None = None) -> dict:
+        if names is None:
+            names = self._ollama_model_names()
+        req = urllib_request.Request("http://127.0.0.1:11434/v1/models", method="GET")
+        try:
+            with urllib_request.urlopen(req, timeout=3):
+                pass
             detail = "已连接 http://127.0.0.1:11434/v1"
             if names:
                 detail += "；模型：" + ", ".join(names[:5])

@@ -632,3 +632,39 @@ Notes:
 
 - `runtime/ollama/ollama.exe` is still not present because the standalone zip download was unreliable and was abandoned after winget installation succeeded.
 - `install_ollama_runtime.ps1` exists to support future standalone runtime embedding, but the current working runtime is the winget-installed Ollama executable plus project-local model storage.
+
+## Local Offline Mode Shortcut
+
+[2026-06-13 19:20:00 +08:00] command: added one-click local offline model configuration in the web UI.
+
+Management UI changes:
+
+- Added `一键本地离线模式` button under `模型接口配置`.
+- The button automatically sets:
+
+```text
+provider=openai
+api_key=local
+base_url=http://127.0.0.1:11434/v1
+local_model_preset=ollama
+model=custom
+custom_model=qwen3:8b-q4_K_M
+```
+
+- Workflow runs now preflight-test the local Ollama model when provider is `openai` and Base URL is `http://127.0.0.1:11434/v1`.
+- If local model preflight fails, the UI stops before creating a workflow run and shows the model connection error.
+- System health now adds a separate `推荐本地模型` check for `qwen3:8b-q4_K_M`.
+
+Documentation:
+
+- Updated `my_workspace/README.md` to mention the one-click local offline mode and preflight behavior.
+
+Validation:
+
+- Python syntax check passed for `my_workspace/run_flow.py`, `my_workspace/web_app.py`, and every Python file under `my_workspace/my_codex_core`.
+- JSON check passed for `my_workspace/my_local_models/local_model_presets.json`.
+- PowerShell parser check passed for `start_local.ps1`.
+- Management UI restarted on `http://127.0.0.1:8765` and returned HTTP 200.
+- Home page contains `localOfflineBtn`, `一键本地离线模式`, `qwen3:8b-q4_K_M`, and `ensureLocalModelReady`.
+- `GET /api/system-health` returned 8 checks, all `ok`, including `推荐本地模型: qwen3:8b-q4_K_M 已可用`.
+- `POST /api/test-model` with `base_url=http://127.0.0.1:11434/v1`, `api_key=local`, and `model=qwen3:8b-q4_K_M` returned `ok=true`.
