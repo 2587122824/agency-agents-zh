@@ -697,3 +697,40 @@ Expected behavior:
 - Local Ollama workflows should no longer fail at 120 seconds by default.
 - If a later step still exceeds 900 seconds, the user can set `模型超时=1800 秒`.
 - Failed runs now leave readable output/error files instead of appearing to produce nothing.
+
+## Workflow Editor
+
+[2026-06-13 20:05:00 +08:00] command: added a visual workflow editor to the management UI after the user confirmed the local model run had succeeded and asked for the next editor step.
+
+Management UI changes:
+
+- Added top navigation item `工作流`.
+- Added `工作流编辑器` page for `my_workspace/my_workflows`.
+- The editor can list existing workflow JSON files, select a workflow, edit file name, display name, description, and ordered steps.
+- Each step can choose an existing custom staff folder from a dropdown, edit task text, edit expected output, move up/down, or delete.
+- Editing an existing workflow preserves advanced top-level fields such as `workflow_id`, `input_required`, `final_outputs`, and `acceptance_criteria`.
+- Added buttons: `刷新工作流`, `新建工作流`, `新增步骤`, `保存工作流`, `删除工作流`.
+- Saving a workflow refreshes `/api/config`, so the `运行工作流` dropdown updates without restarting the server.
+
+Backend API changes:
+
+- Added `GET /api/workflows`.
+- Added `GET /api/workflow-detail?name=...`.
+- Added `POST /api/save-workflow`.
+- Added `POST /api/delete-workflow`.
+- Added safe workflow path handling so saves/deletes are limited to `my_workspace/my_workflows/*.json`.
+- Save validation requires a workflow name, at least one step, an existing staff agent, non-empty task text, and non-empty output text.
+
+Documentation:
+
+- Updated `my_workspace/README.md` to mention the `工作流` page and its create/edit/delete/reorder capability.
+
+Validation:
+
+- `python -m py_compile my_workspace/web_app.py` passed.
+- Extracted the embedded `<script>` from `my_workspace/web_app.py` and `node --check runtime/_tmp_web_app_script.js` passed.
+- Restarted the management UI on `http://127.0.0.1:8765`.
+- Home page markers verified: `data-view-target="workflow"`, `workflowEditorStatus`, `saveWorkflowBtn`, and `addWorkflowStepBtn`.
+- `GET /api/workflows` returned all current workflows and custom staff folders.
+- `GET /api/workflow-detail?name=workflow_短视频全流程` returned the full short-video workflow.
+- Smoke-tested workflow create/read/delete through the API using temporary file `workflow_codex_smoke_editor.json`; it was saved, read back, verified to preserve extra top-level fields, and deleted successfully.

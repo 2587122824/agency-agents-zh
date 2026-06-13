@@ -111,6 +111,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     body[data-view="run"] main,
     body[data-view="staff"] main,
+    body[data-view="workflow"] main,
     body[data-view="system"] main {
       grid-template-columns: 1fr;
     }
@@ -416,6 +417,26 @@ INDEX_HTML = r"""<!doctype html>
       font-family: Consolas, "Cascadia Mono", monospace;
       font-size: 13px;
     }
+    .workflow-step {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      padding: 10px;
+      display: grid;
+      gap: 10px;
+    }
+    .workflow-step-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .workflow-step-grid {
+      display: grid;
+      grid-template-columns: minmax(180px, 240px) minmax(220px, 1fr) minmax(220px, 1fr);
+      gap: 10px;
+    }
     .health-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(180px, 1fr));
@@ -477,6 +498,7 @@ INDEX_HTML = r"""<!doctype html>
       .provider-grid { grid-template-columns: 1fr; }
       .video-grid { grid-template-columns: 1fr; }
       .staff-manager { grid-template-columns: 1fr; }
+      .workflow-step-grid { grid-template-columns: 1fr; }
       .health-grid { grid-template-columns: 1fr; }
     }
   </style>
@@ -488,6 +510,7 @@ INDEX_HTML = r"""<!doctype html>
       <nav class="top-nav" aria-label="主功能">
         <button class="nav-btn active" data-view-target="run" type="button">运行工作流</button>
         <button class="nav-btn" data-view-target="staff" type="button">数字员工</button>
+        <button class="nav-btn" data-view-target="workflow" type="button">工作流</button>
         <button class="nav-btn" data-view-target="output" type="button">任务输出</button>
         <button class="nav-btn" data-view-target="system" type="button">系统状态</button>
       </nav>
@@ -858,6 +881,42 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
 
+      <div class="panel form view" data-view="workflow" hidden>
+        <div class="row">
+          <strong>工作流编辑器</strong>
+          <button id="refreshWorkflowsBtn" type="button">刷新工作流</button>
+          <button id="newWorkflowBtn" type="button">新建工作流</button>
+          <button id="addWorkflowStepBtn" type="button">新增步骤</button>
+          <button class="danger" id="deleteWorkflowBtn" type="button" disabled>删除工作流</button>
+          <span id="workflowEditorStatus" class="status">管理 my_workflows</span>
+        </div>
+        <div class="staff-manager">
+          <div class="staff-list" id="workflowList"></div>
+          <div class="staff-editor">
+            <div class="provider-grid">
+              <label>工作流文件名
+                <input id="workflowFile" autocomplete="off" spellcheck="false" placeholder="例如 workflow_短视频全流程" />
+              </label>
+              <label>工作流名称
+                <input id="workflowName" autocomplete="off" spellcheck="false" placeholder="例如 短视频全流程" />
+              </label>
+              <label>说明
+                <input id="workflowDescription" autocomplete="off" spellcheck="false" placeholder="这个工作流用于什么场景" />
+              </label>
+            </div>
+            <div class="row">
+              <strong>执行步骤</strong>
+              <span class="muted small">每一步选择一个数字员工，填写它要完成的任务和输出物。</span>
+            </div>
+            <div class="reference-list" id="workflowSteps"></div>
+            <div class="row">
+              <button class="primary" id="saveWorkflowBtn" type="button">保存工作流</button>
+              <span class="muted small">保存后写入 my_workflows/*.json，并同步到“运行工作流”的下拉列表。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel viewer view" data-view="output" hidden>
         <div class="viewer-head">
           <div>
@@ -989,6 +1048,17 @@ INDEX_HTML = r"""<!doctype html>
       staffName: document.getElementById('staffName'),
       staffAgentMd: document.getElementById('staffAgentMd'),
       staffFlowRule: document.getElementById('staffFlowRule'),
+      refreshWorkflowsBtn: document.getElementById('refreshWorkflowsBtn'),
+      newWorkflowBtn: document.getElementById('newWorkflowBtn'),
+      addWorkflowStepBtn: document.getElementById('addWorkflowStepBtn'),
+      deleteWorkflowBtn: document.getElementById('deleteWorkflowBtn'),
+      saveWorkflowBtn: document.getElementById('saveWorkflowBtn'),
+      workflowEditorStatus: document.getElementById('workflowEditorStatus'),
+      workflowList: document.getElementById('workflowList'),
+      workflowFile: document.getElementById('workflowFile'),
+      workflowName: document.getElementById('workflowName'),
+      workflowDescription: document.getElementById('workflowDescription'),
+      workflowSteps: document.getElementById('workflowSteps'),
       taskSidebar: document.getElementById('taskSidebar'),
       refreshHealthBtn: document.getElementById('refreshHealthBtn'),
       healthStatus: document.getElementById('healthStatus'),
@@ -999,6 +1069,10 @@ INDEX_HTML = r"""<!doctype html>
     let selectedTask = null;
     let selectedFile = null;
     let selectedStaff = null;
+    let selectedWorkflow = null;
+    let workflowEditorSteps = [];
+    let workflowEditorBase = {};
+    let staffOptions = [];
     let selectedReferenceFiles = [];
     let referencePreviewUrls = new Map();
     let progressTimer = null;
@@ -1026,6 +1100,9 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (viewName === 'system') {
         loadSystemHealth().catch(err => setHealthStatus(err.message, true));
+      }
+      if (viewName === 'workflow') {
+        loadWorkflowList().catch(err => setWorkflowEditorStatus(err.message, true));
       }
     }
 
@@ -1128,6 +1205,7 @@ INDEX_HTML = r"""<!doctype html>
     async function loadConfig() {
       const data = await api('/api/config');
       localModelPresets = data.local_model_presets || [];
+      staffOptions = data.staff || [];
       els.env.textContent = data.openai_configured ? 'OpenAI 已配置' : 'OpenAI 未配置，默认离线模式';
       els.workflow.innerHTML = data.workflows.map(w => `<option value="${w.stem}">${w.name}</option>`).join('');
       renderLocalModelPresets();
@@ -1735,6 +1813,254 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function setWorkflowEditorStatus(text, isError = false) {
+      els.workflowEditorStatus.textContent = text;
+      els.workflowEditorStatus.classList.toggle('error', isError);
+    }
+
+    async function loadWorkflowList() {
+      const data = await api('/api/workflows');
+      staffOptions = data.staff || staffOptions;
+      els.workflowList.innerHTML = '';
+      if (!data.workflows.length) {
+        els.workflowList.innerHTML = '<div class="muted small">暂无工作流</div>';
+        return;
+      }
+      for (const workflow of data.workflows) {
+        const btn = document.createElement('button');
+        btn.className = `staff-card ${selectedWorkflow === workflow.stem ? 'active' : ''}`;
+        const title = document.createElement('strong');
+        title.textContent = workflow.name || workflow.stem;
+        const file = document.createElement('span');
+        file.className = 'muted small';
+        file.textContent = workflow.file || `${workflow.stem}.json`;
+        const description = document.createElement('span');
+        description.className = 'muted small';
+        description.textContent = workflow.description || '';
+        btn.appendChild(title);
+        btn.appendChild(file);
+        btn.appendChild(description);
+        btn.onclick = () => selectWorkflow(workflow.stem);
+        els.workflowList.appendChild(btn);
+      }
+    }
+
+    async function selectWorkflow(name) {
+      selectedWorkflow = name;
+      const data = await api(`/api/workflow-detail?name=${encodeURIComponent(name)}`);
+      const workflow = data.workflow || {};
+      els.workflowFile.value = data.file || `${data.name}.json`;
+      els.workflowName.value = workflow.name || data.name || '';
+      els.workflowDescription.value = workflow.description || '';
+      workflowEditorBase = workflow;
+      workflowEditorSteps = normalizeWorkflowSteps(workflow.steps || []);
+      els.deleteWorkflowBtn.disabled = false;
+      renderWorkflowSteps();
+      setWorkflowEditorStatus(`已选择：${data.file || data.name}`);
+      await loadWorkflowList();
+    }
+
+    function normalizeWorkflowSteps(steps) {
+      return steps.map((step, index) => ({
+        step: index + 1,
+        agent: String(step.agent || step.agent_id || '').trim(),
+        task: String(step.task || step.instruction || '').trim(),
+        output: String(step.output || step.expected_output || '').trim(),
+      }));
+    }
+
+    function newWorkflow() {
+      selectedWorkflow = null;
+      const stamp = new Date().toISOString().slice(0, 10).replaceAll('-', '');
+      els.workflowFile.value = `workflow_新工作流_${stamp}`;
+      els.workflowName.value = '新工作流';
+      els.workflowDescription.value = '';
+      workflowEditorBase = {};
+      workflowEditorSteps = [];
+      els.deleteWorkflowBtn.disabled = true;
+      renderWorkflowSteps();
+      setWorkflowEditorStatus('正在编辑新工作流，点击“保存工作流”写入文件');
+      loadWorkflowList().catch(err => setWorkflowEditorStatus(err.message, true));
+    }
+
+    function addWorkflowStep() {
+      workflowEditorSteps.push({
+        step: workflowEditorSteps.length + 1,
+        agent: staffOptions[0] || '',
+        task: '',
+        output: '',
+      });
+      renderWorkflowSteps();
+    }
+
+    function moveWorkflowStep(index, delta) {
+      const next = index + delta;
+      if (next < 0 || next >= workflowEditorSteps.length) return;
+      const current = workflowEditorSteps[index];
+      workflowEditorSteps[index] = workflowEditorSteps[next];
+      workflowEditorSteps[next] = current;
+      renderWorkflowSteps();
+    }
+
+    function deleteWorkflowStep(index) {
+      workflowEditorSteps.splice(index, 1);
+      renderWorkflowSteps();
+    }
+
+    function renderWorkflowSteps() {
+      els.workflowSteps.innerHTML = '';
+      if (!workflowEditorSteps.length) {
+        els.workflowSteps.innerHTML = '<div class="muted small">暂无步骤，点击“新增步骤”开始组装。</div>';
+        return;
+      }
+      workflowEditorSteps.forEach((step, index) => {
+        step.step = index + 1;
+        const item = document.createElement('div');
+        item.className = 'workflow-step';
+
+        const head = document.createElement('div');
+        head.className = 'workflow-step-head';
+        const title = document.createElement('strong');
+        title.textContent = `第 ${index + 1} 步`;
+        const actions = document.createElement('div');
+        actions.className = 'row';
+        const up = document.createElement('button');
+        up.type = 'button';
+        up.textContent = '上移';
+        up.disabled = index === 0;
+        up.onclick = () => moveWorkflowStep(index, -1);
+        const down = document.createElement('button');
+        down.type = 'button';
+        down.textContent = '下移';
+        down.disabled = index === workflowEditorSteps.length - 1;
+        down.onclick = () => moveWorkflowStep(index, 1);
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'danger';
+        remove.textContent = '删除步骤';
+        remove.onclick = () => deleteWorkflowStep(index);
+        actions.appendChild(up);
+        actions.appendChild(down);
+        actions.appendChild(remove);
+        head.appendChild(title);
+        head.appendChild(actions);
+
+        const grid = document.createElement('div');
+        grid.className = 'workflow-step-grid';
+
+        const agentLabel = document.createElement('label');
+        agentLabel.textContent = '数字员工';
+        const agentSelect = document.createElement('select');
+        if (!staffOptions.length) {
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = '暂无员工';
+          agentSelect.appendChild(option);
+        } else {
+          for (const staff of staffOptions) {
+            const option = document.createElement('option');
+            option.value = staff;
+            option.textContent = staff;
+            agentSelect.appendChild(option);
+          }
+        }
+        agentSelect.value = step.agent;
+        agentSelect.onchange = () => { step.agent = agentSelect.value; };
+        agentLabel.appendChild(agentSelect);
+
+        const taskLabel = document.createElement('label');
+        taskLabel.textContent = '任务说明';
+        const taskInput = document.createElement('input');
+        taskInput.value = step.task;
+        taskInput.placeholder = '这一位员工要完成什么';
+        taskInput.oninput = () => { step.task = taskInput.value; };
+        taskLabel.appendChild(taskInput);
+
+        const outputLabel = document.createElement('label');
+        outputLabel.textContent = '输出物';
+        const outputInput = document.createElement('input');
+        outputInput.value = step.output;
+        outputInput.placeholder = '例如 需求拆解.md / 分镜脚本.md';
+        outputInput.oninput = () => { step.output = outputInput.value; };
+        outputLabel.appendChild(outputInput);
+
+        grid.appendChild(agentLabel);
+        grid.appendChild(taskLabel);
+        grid.appendChild(outputLabel);
+        item.appendChild(head);
+        item.appendChild(grid);
+        els.workflowSteps.appendChild(item);
+      });
+    }
+
+    function workflowPayloadFromEditor() {
+      const file = els.workflowFile.value.trim();
+      const name = els.workflowName.value.trim();
+      if (!file) throw new Error('工作流文件名不能为空');
+      if (!name) throw new Error('工作流名称不能为空');
+      if (!workflowEditorSteps.length) throw new Error('工作流至少需要 1 个步骤');
+      const steps = workflowEditorSteps.map((step, index) => {
+        const agent = String(step.agent || '').trim();
+        const task = String(step.task || '').trim();
+        const output = String(step.output || '').trim();
+        if (!agent) throw new Error(`第 ${index + 1} 步未选择数字员工`);
+        if (!task) throw new Error(`第 ${index + 1} 步任务说明不能为空`);
+        if (!output) throw new Error(`第 ${index + 1} 步输出物不能为空`);
+        return { step: index + 1, agent, task, output };
+      });
+      return {
+        file,
+        workflow: {
+          ...workflowEditorBase,
+          name,
+          description: els.workflowDescription.value.trim(),
+          steps,
+        },
+      };
+    }
+
+    async function saveWorkflow() {
+      try {
+        const payload = workflowPayloadFromEditor();
+        const result = await api('/api/save-workflow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        selectedWorkflow = result.name;
+        setWorkflowEditorStatus(`已保存：${result.file}`);
+        await loadConfig();
+        await selectWorkflow(result.name);
+      } catch (err) {
+        setWorkflowEditorStatus(err.message, true);
+      }
+    }
+
+    async function deleteWorkflow() {
+      if (!selectedWorkflow) return;
+      if (!confirm(`确定删除这个工作流？\n\n${selectedWorkflow}\n\n这会删除 my_workflows 下对应 JSON 文件。`)) return;
+      try {
+        await api('/api/delete-workflow', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: selectedWorkflow }),
+        });
+        selectedWorkflow = null;
+        workflowEditorSteps = [];
+        workflowEditorBase = {};
+        els.workflowFile.value = '';
+        els.workflowName.value = '';
+        els.workflowDescription.value = '';
+        els.deleteWorkflowBtn.disabled = true;
+        renderWorkflowSteps();
+        setWorkflowEditorStatus('工作流已删除');
+        await loadConfig();
+        await loadWorkflowList();
+      } catch (err) {
+        setWorkflowEditorStatus(err.message, true);
+      }
+    }
+
     async function selectTask(name) {
       showView('output');
       selectedTask = name;
@@ -1862,6 +2188,11 @@ INDEX_HTML = r"""<!doctype html>
     els.newStaffBtn.onclick = newStaff;
     els.saveStaffBtn.onclick = saveStaff;
     els.deleteStaffBtn.onclick = deleteStaff;
+    els.refreshWorkflowsBtn.onclick = loadWorkflowList;
+    els.newWorkflowBtn.onclick = newWorkflow;
+    els.addWorkflowStepBtn.onclick = addWorkflowStep;
+    els.saveWorkflowBtn.onclick = saveWorkflow;
+    els.deleteWorkflowBtn.onclick = deleteWorkflow;
     els.localModelPreset.onchange = applyLocalModelPreset;
     els.localModelName.onchange = applyLocalModelName;
     els.localOfflineBtn.onclick = applyLocalOfflineMode;
@@ -1975,6 +2306,7 @@ INDEX_HTML = r"""<!doctype html>
         await loadConfig();
         await loadTasks();
         await loadStaffList();
+        await loadWorkflowList();
         await loadKnowledgeList();
         await loadSystemHealth();
       } catch (err) {
@@ -2008,6 +2340,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/staff-detail":
                 query = parse_qs(parsed.query)
                 self._send_json(self._staff_detail(self._single(query, "name")))
+            elif parsed.path == "/api/workflows":
+                self._send_json({"workflows": self._workflow_list(), "staff": [item["name"] for item in self._staff_list()]})
+            elif parsed.path == "/api/workflow-detail":
+                query = parse_qs(parsed.query)
+                self._send_json(self._workflow_detail(self._single(query, "name")))
             elif parsed.path == "/api/task":
                 query = parse_qs(parsed.query)
                 self._send_json(self._task_detail(self._single(query, "name")))
@@ -2049,6 +2386,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/delete-staff":
                 self._delete_staff(str(payload.get("name") or "").strip())
+                self._send_json({"ok": True})
+                return
+
+            if parsed.path == "/api/save-workflow":
+                self._send_json(self._save_workflow(payload))
+                return
+
+            if parsed.path == "/api/delete-workflow":
+                self._delete_workflow(str(payload.get("name") or "").strip())
                 self._send_json({"ok": True})
                 return
 
@@ -2122,17 +2468,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _config(self) -> dict:
         import os
 
-        workflows = []
-        for path in sorted(WORKFLOW_ROOT.glob("*.json")):
-            data = json.loads(path.read_text(encoding="utf-8"))
-            workflows.append(
-                {
-                    "stem": path.stem,
-                    "file": path.name,
-                    "name": data.get("name") or path.stem,
-                    "description": data.get("description") or "",
-                }
-            )
+        workflows = self._workflow_list()
         staff = [path.name for path in sorted(STAFF_ROOT.iterdir()) if path.is_dir()]
         return {
             "workflows": workflows,
@@ -2227,6 +2563,78 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             return self._health_check("Ollama 模型服务", "ok", detail)
         except Exception as exc:
             return self._health_check("Ollama 模型服务", "warn", f"未连接 http://127.0.0.1:11434/v1；{exc}")
+
+    def _workflow_list(self) -> list[dict]:
+        if not WORKFLOW_ROOT.exists():
+            return []
+
+        workflows = []
+        for path in sorted(WORKFLOW_ROOT.glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                data = {}
+            workflows.append(
+                {
+                    "stem": path.stem,
+                    "file": path.name,
+                    "name": data.get("name") or path.stem,
+                    "description": data.get("description") or "",
+                }
+            )
+        return workflows
+
+    def _workflow_detail(self, name: str) -> dict:
+        path = self._safe_workflow_path(name, must_exist=True)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Workflow JSON must be an object")
+        return {"name": path.stem, "file": path.name, "workflow": data}
+
+    def _save_workflow(self, payload: dict) -> dict:
+        file_name = str(payload.get("file") or "").strip()
+        workflow = payload.get("workflow")
+        if not isinstance(workflow, dict):
+            raise ValueError("workflow must be a JSON object")
+
+        name = str(workflow.get("name") or "").strip()
+        description = str(workflow.get("description") or "").strip()
+        steps = workflow.get("steps")
+        if not name:
+            raise ValueError("Workflow name cannot be empty")
+        if not isinstance(steps, list) or not steps:
+            raise ValueError("Workflow must contain at least one step")
+
+        staff_names = {item["name"] for item in self._staff_list()}
+        normalized_steps = []
+        for index, step in enumerate(steps, start=1):
+            if not isinstance(step, dict):
+                raise ValueError(f"Step {index} must be a JSON object")
+            agent = str(step.get("agent") or step.get("agent_id") or "").strip()
+            task = str(step.get("task") or step.get("instruction") or "").strip()
+            output = str(step.get("output") or step.get("expected_output") or "").strip()
+            if not agent:
+                raise ValueError(f"Step {index} agent cannot be empty")
+            if staff_names and agent not in staff_names:
+                raise ValueError(f"Step {index} agent does not exist: {agent}")
+            if not task:
+                raise ValueError(f"Step {index} task cannot be empty")
+            if not output:
+                raise ValueError(f"Step {index} output cannot be empty")
+            normalized_steps.append({"step": index, "agent": agent, "task": task, "output": output})
+
+        path = self._safe_workflow_path(file_name, must_exist=False)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data = dict(workflow)
+        data["name"] = name
+        data["description"] = description
+        data["steps"] = normalized_steps
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return {"ok": True, "name": path.stem, "file": path.name}
+
+    def _delete_workflow(self, name: str) -> None:
+        path = self._safe_workflow_path(name, must_exist=True)
+        path.unlink()
 
     def _staff_list(self) -> list[dict]:
         if not STAFF_ROOT.exists():
@@ -2725,6 +3133,22 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not self._is_relative_to(task_dir, output_root) or not task_dir.is_dir():
             raise FileNotFoundError(name)
         return task_dir
+
+    def _safe_workflow_path(self, name: str, must_exist: bool) -> Path:
+        if not name:
+            raise ValueError("Invalid workflow name")
+        candidate = name.strip()
+        if candidate.endswith(".json"):
+            candidate = candidate[:-5]
+        if not candidate or "/" in candidate or "\\" in candidate or candidate in {".", ".."}:
+            raise ValueError("Invalid workflow name")
+        path = (WORKFLOW_ROOT / f"{candidate}.json").resolve()
+        workflow_root = WORKFLOW_ROOT.resolve()
+        if not self._is_relative_to(path, workflow_root):
+            raise ValueError("Invalid workflow path")
+        if must_exist and not path.is_file():
+            raise FileNotFoundError(name)
+        return path
 
     def _safe_staff_dir(self, name: str, must_exist: bool) -> Path:
         if not name or "/" in name or "\\" in name or name in {".", ".."}:

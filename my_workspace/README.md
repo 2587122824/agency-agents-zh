@@ -215,6 +215,7 @@ runtime/models/
 - 查看历史任务、每一步的 `prompt.md`、`output.md` 和最终 `final_output.md`。
 - 删除历史任务输出；删除只作用于 `my_task_output` 下对应的任务目录，不会删除工作流、员工或 `.gitignore`。
 - 在 `数字员工管理` 中查看、新建、编辑、保存、删除 `my_custom_staff` 下的自定义员工；保存时会写入员工目录的 `agent.md` 和 `flow_rule.json`，并校验 `flow_rule.json` 是否是合法 JSON。
+- 在 `工作流` 页面查看、新建、编辑、保存、删除 `my_workflows` 下的工作流 JSON；可用员工下拉列表组装步骤，调整步骤顺序，并同步到 `运行工作流` 下拉列表。
 
 ## Unity 3D Steam 游戏工作流
 
