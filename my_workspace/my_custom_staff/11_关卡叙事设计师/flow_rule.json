@@ -1,0 +1,35 @@
+{
+  "agent_id": "11_关卡叙事设计师",
+  "agent_name": "关卡叙事设计师",
+  "role": "level_and_narrative_design",
+  "source_agents": [
+    "game-development/level-designer.md",
+    "game-development/narrative-designer.md"
+  ],
+  "inputs": [
+    "GDD核心方案",
+    "Unity系统架构",
+    "核心机制",
+    "目标玩家",
+    "美术风格约束"
+  ],
+  "outputs": [
+    "关卡设计文档",
+    "白盒规格",
+    "环境叙事方案",
+    "玩家引导方案",
+    "测试指标"
+  ],
+  "handoff_to": [
+    "12_3D美术技术指导",
+    "13_游戏音频与体验设计师",
+    "14_Steam发行与测试经理"
+  ],
+  "quality_gate": [
+    "关键路径可读",
+    "白盒可搭建",
+    "关卡节奏明确",
+    "叙事与玩法一致",
+    "测试指标可观察"
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "agent_id": "08_游戏项目编排制片人",
+  "agent_name": "游戏项目编排制片人",
+  "role": "game_orchestrator_producer",
+  "source_agents": [
+    "specialized/agents-orchestrator.md",
+    "project-management/project-management-studio-producer.md"
+  ],
+  "inputs": [
+    "用户游戏想法",
+    "目标平台",
+    "开发规模",
+    "预算与周期",
+    "已有素材或技术限制"
+  ],
+  "outputs": [
+    "项目总览",
+    "MVP范围",
+    "阶段里程碑",
+    "质量门禁",
+    "风险与降级方案"
+  ],
+  "handoff_to": [
+    "09_游戏创意与系统设计师",
+    "10_Unity3D架构工程师",
+    "14_Steam发行与测试经理"
+  ],
+  "quality_gate": [
+    "目标平台明确",
+    "MVP边界明确",
+    "里程碑可执行",
+    "风险有降级方案",
+    "后续员工输入清晰"
+  ]
+}

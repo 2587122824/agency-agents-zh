@@ -1,0 +1,32 @@
+{
+  "agent_id": "13_游戏音频与体验设计师",
+  "agent_name": "游戏音频与体验设计师",
+  "role": "game_audio_and_feedback",
+  "source_agents": [
+    "game-development/game-audio-engineer.md"
+  ],
+  "inputs": [
+    "GDD核心方案",
+    "关卡设计文档",
+    "视觉风格方案",
+    "目标平台",
+    "MVP范围"
+  ],
+  "outputs": [
+    "音频设计文档",
+    "音效事件清单",
+    "自适应音乐方案",
+    "交互反馈方案",
+    "音频预算"
+  ],
+  "handoff_to": [
+    "14_Steam发行与测试经理"
+  ],
+  "quality_gate": [
+    "音效事件可实现",
+    "触发条件明确",
+    "音乐状态清晰",
+    "性能预算明确",
+    "体验反馈覆盖核心行为"
+  ]
+}

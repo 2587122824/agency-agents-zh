@@ -224,6 +224,68 @@ Generated task folders are disposable unless the user explicitly wants to preser
 6. Add a real Markdown renderer in the viewer instead of plain `<pre>` output.
 7. Add `.env` loading so users do not need to set environment variables manually each session.
 
+## Unity 3D Steam Game Workflow
+
+Added a custom Unity 3D game team under `my_workspace/my_custom_staff/` based on original project agents:
+
+```text
+08_游戏项目编排制片人
+09_游戏创意与系统设计师
+10_Unity3D架构工程师
+11_关卡叙事设计师
+12_3D美术技术指导
+13_游戏音频与体验设计师
+14_Steam发行与测试经理
+```
+
+The source inspirations are kept in each staff `flow_rule.json` under `source_agents`. Original project agent files were not modified.
+
+New workflow:
+
+```text
+my_workspace/my_workflows/workflow_Unity3D游戏Steam上架.json
+```
+
+Purpose: turn a Unity 3D Steam game idea into a production blueprint, including project orchestration, GDD, Unity architecture, level/narrative design, 3D technical art, game audio/feedback, Steam store/launch/testing package.
+
+Management UI changes:
+
+- Web title changed from self-media-specific wording to `自定义工作流管理台`.
+- Added `游戏示例` button. It selects `workflow_Unity3D游戏Steam上架`, fills a small-team Unity 3D exploration puzzle game example, and sets relevant image/video planning defaults.
+- Existing workflow execution, progress tracking, task output, deletion, localStorage config, and history viewer are reused for the game workflow.
+
+Verification run:
+
+```powershell
+python -m py_compile my_workspace/run_flow.py my_workspace/web_app.py my_workspace/my_codex_core/*.py
+```
+
+PowerShell did not expand `*.py`, so the syntax check was rerun with explicit file enumeration and passed.
+
+```powershell
+python my_workspace/run_flow.py --provider offline --workflow workflow_Unity3D游戏Steam上架 --input "我要做一款 Unity 3D 第三人称探索解谜游戏，上架 Steam。目标玩家喜欢低多边形、环境谜题和短流程独立游戏。团队规模是单人或两人，先做 20-30 分钟 Demo，不做联网，不做大型开放世界。"
+```
+
+Result: workflow completed offline with 7 steps and wrote output under:
+
+```text
+my_workspace/my_task_output/task_20260613_103554_workflow_Unity3D游戏Steam上架/
+```
+
+The web management UI was restarted on:
+
+```text
+http://127.0.0.1:8765
+```
+
+Verified HTTP 200 and page markers:
+
+```text
+gameSampleBtn
+自定义工作流管理台
+workflow_Unity3D游戏Steam上架
+```
+
 [2026-06-12 20:04:03 +08:00] command: git push origin main failed twice with GitHub port 443 connection timeout; local commit 8b56043 remains ahead of origin/main by 1.
 
 

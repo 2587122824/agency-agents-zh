@@ -1,0 +1,34 @@
+{
+  "agent_id": "12_3D美术技术指导",
+  "agent_name": "3D美术技术指导",
+  "role": "technical_art_3d_pipeline",
+  "source_agents": [
+    "game-development/technical-artist.md",
+    "game-development/unity/unity-shader-graph-artist.md"
+  ],
+  "inputs": [
+    "GDD核心方案",
+    "关卡白盒规格",
+    "目标平台",
+    "视觉参考",
+    "性能目标"
+  ],
+  "outputs": [
+    "视觉风格方案",
+    "资产清单",
+    "模型与材质规格",
+    "LOD与性能预算",
+    "Unity导入规范"
+  ],
+  "handoff_to": [
+    "13_游戏音频与体验设计师",
+    "14_Steam发行与测试经理"
+  ],
+  "quality_gate": [
+    "资产清单完整",
+    "预算可执行",
+    "Unity导入规范明确",
+    "视觉方案支持玩法",
+    "性能风险有降级方案"
+  ]
+}

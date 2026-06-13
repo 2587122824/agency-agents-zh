@@ -1,0 +1,32 @@
+{
+  "agent_id": "14_Steam发行与测试经理",
+  "agent_name": "Steam发行与测试经理",
+  "role": "steam_launch_qa_manager",
+  "source_agents": [
+    "marketing/marketing-app-store-optimizer.md",
+    "testing/testing-performance-benchmarker.md"
+  ],
+  "inputs": [
+    "项目总览",
+    "GDD核心方案",
+    "Unity工程架构",
+    "关卡设计文档",
+    "视觉资产方案",
+    "音频体验方案"
+  ],
+  "outputs": [
+    "Steam商店页方案",
+    "发行素材清单",
+    "测试计划",
+    "性能验收标准",
+    "最终制作包"
+  ],
+  "handoff_to": [],
+  "quality_gate": [
+    "商店定位清晰",
+    "素材清单完整",
+    "测试计划可执行",
+    "Steam接入项明确",
+    "下一步顺序明确"
+  ]
+}

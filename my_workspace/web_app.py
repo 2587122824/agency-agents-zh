@@ -30,7 +30,7 @@ INDEX_HTML = r"""<!doctype html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>自媒体工作流管理台</title>
+  <title>自定义工作流管理台</title>
   <style>
     :root {
       color-scheme: light;
@@ -362,7 +362,7 @@ INDEX_HTML = r"""<!doctype html>
 </head>
 <body>
   <header>
-    <h1>自媒体工作流管理台</h1>
+    <h1>自定义工作流管理台</h1>
     <div class="muted small" id="env">加载中</div>
   </header>
   <main>
@@ -644,6 +644,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="row">
           <button class="primary" id="runBtn">运行工作流</button>
           <button id="sampleBtn">填入示例</button>
+          <button id="gameSampleBtn">游戏示例</button>
           <button id="clearSettingsBtn">清除已保存配置</button>
           <span id="status" class="status">准备就绪</span>
         </div>
@@ -710,6 +711,7 @@ INDEX_HTML = r"""<!doctype html>
       referenceList: document.getElementById('referenceList'),
       runBtn: document.getElementById('runBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
+      gameSampleBtn: document.getElementById('gameSampleBtn'),
       clearSettingsBtn: document.getElementById('clearSettingsBtn'),
       status: document.getElementById('status'),
       progressBox: document.getElementById('progressBox'),
@@ -1245,6 +1247,30 @@ INDEX_HTML = r"""<!doctype html>
       els.videoStyle.value = '真人口播，商业科技感，干净明亮';
       els.referenceRole.value = '人物一致性';
       els.referenceNote.value = '固定人物参考图，后续镜头保持同一角色与风格';
+      saveSettings();
+    };
+    els.gameSampleBtn.onclick = () => {
+      setIfExists(els.workflow, 'workflow_Unity3D游戏Steam上架');
+      els.userInput.value = '我想做一款 Unity 3D 第三人称探索解谜游戏，上架 Steam。目标玩家是喜欢低多边形、轻剧情、环境谜题和短流程独立游戏的玩家。团队规模按单人或两人小团队考虑，优先做 20-30 分钟可玩 Demo，用于 Steam 商店页、愿望单和后续众筹/抢先体验验证。希望风格统一、开发范围可控，不做联网，不做大型开放世界。';
+      els.taskTitle.value = 'Unity3D探索解谜Steam游戏立项';
+      els.autoProductionMode.value = 'off';
+      els.composeTool.value = 'manual';
+      els.finalVideoName.value = '';
+      els.imageTool.value = 'prompt_only';
+      els.imageModel.value = '';
+      els.imageSize.value = '16:9';
+      els.imageCount.value = '1';
+      els.imageStyle.value = '低多边形 3D，温暖但带神秘感，清晰轮廓，适合 Steam 商店截图';
+      els.imageQuality.value = 'standard';
+      els.imageNegativePrompt.value = '水印、低清晰度、文字错误、角色比例异常、过度写实';
+      els.imageConsistency.value = '保持同一主角造型、低多边形材质语言、统一色彩和关卡氛围';
+      els.videoTool.value = 'prompt_only';
+      els.videoModel.value = '';
+      els.videoAspect.value = '16:9';
+      els.videoDuration.value = '30s';
+      els.videoStyle.value = 'Steam商店预告片，展示玩法循环、探索、谜题和关键氛围';
+      els.referenceRole.value = '视觉风格参考';
+      els.referenceNote.value = '用于统一角色、场景、美术风格和 Steam 宣传素材方向';
       saveSettings();
     };
     els.clearSettingsBtn.onclick = () => {
