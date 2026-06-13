@@ -61,15 +61,50 @@ INDEX_HTML = r"""<!doctype html>
       background: var(--panel);
       border-bottom: 1px solid var(--line);
     }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-width: 0;
+    }
     h1 {
       margin: 0;
       font-size: 18px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .top-nav {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+    }
+    .nav-btn {
+      min-height: 30px;
+      padding: 5px 10px;
+      border: 0;
+      background: transparent;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .nav-btn.active {
+      background: #fff;
+      color: var(--accent);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
       font-weight: 650;
     }
     main {
       display: grid;
       grid-template-columns: 280px minmax(0, 1fr);
       min-height: calc(100vh - 56px);
+    }
+    body[data-view="run"] main,
+    body[data-view="staff"] main {
+      grid-template-columns: 1fr;
     }
     aside {
       border-right: 1px solid var(--line);
@@ -87,6 +122,7 @@ INDEX_HTML = r"""<!doctype html>
       border-radius: 8px;
       box-shadow: var(--shadow);
     }
+    .view[hidden], aside[hidden] { display: none; }
     .stack { display: grid; gap: 14px; }
     .row {
       display: flex;
@@ -386,6 +422,20 @@ INDEX_HTML = r"""<!doctype html>
     .muted { color: var(--muted); }
     .small { font-size: 12px; }
     @media (max-width: 860px) {
+      header {
+        height: auto;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 12px;
+        flex-direction: column;
+      }
+      .brand {
+        width: 100%;
+        align-items: flex-start;
+        gap: 10px;
+        flex-direction: column;
+      }
+      .top-nav { width: 100%; overflow-x: auto; }
       main { grid-template-columns: 1fr; }
       aside { border-right: 0; border-bottom: 1px solid var(--line); }
       .split { grid-template-columns: 1fr; }
@@ -395,13 +445,20 @@ INDEX_HTML = r"""<!doctype html>
     }
   </style>
 </head>
-<body>
+<body data-view="run">
   <header>
-    <h1>自定义工作流管理台</h1>
+    <div class="brand">
+      <h1>自定义工作流管理台</h1>
+      <nav class="top-nav" aria-label="主功能">
+        <button class="nav-btn active" data-view-target="run" type="button">运行工作流</button>
+        <button class="nav-btn" data-view-target="staff" type="button">数字员工</button>
+        <button class="nav-btn" data-view-target="output" type="button">任务输出</button>
+      </nav>
+    </div>
     <div class="muted small" id="env">加载中</div>
   </header>
   <main>
-    <aside>
+    <aside id="taskSidebar" hidden>
       <div class="row">
         <strong>任务输出</strong>
         <button id="refreshTasks" title="刷新任务列表">刷新</button>
@@ -409,7 +466,7 @@ INDEX_HTML = r"""<!doctype html>
       <div class="list" id="taskList"></div>
     </aside>
     <section class="stack">
-      <div class="panel form">
+      <div class="panel form view" data-view="run">
         <div class="split">
           <label>工作流
             <select id="workflow"></select>
@@ -693,7 +750,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
 
-      <div class="panel form">
+      <div class="panel form view" data-view="staff" hidden>
         <div class="row">
           <strong>数字员工管理</strong>
           <button id="refreshStaffBtn">刷新员工</button>
@@ -721,7 +778,7 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
 
-      <div class="panel viewer">
+      <div class="panel viewer view" data-view="output" hidden>
         <div class="viewer-head">
           <div>
             <strong id="viewerTitle">未选择任务</strong>
@@ -797,7 +854,10 @@ INDEX_HTML = r"""<!doctype html>
       staffName: document.getElementById('staffName'),
       staffAgentMd: document.getElementById('staffAgentMd'),
       staffFlowRule: document.getElementById('staffFlowRule'),
+      taskSidebar: document.getElementById('taskSidebar'),
     };
+    const navButtons = Array.from(document.querySelectorAll('[data-view-target]'));
+    const views = Array.from(document.querySelectorAll('[data-view]'));
     let selectedTask = null;
     let selectedFile = null;
     let selectedStaff = null;
@@ -809,6 +869,20 @@ INDEX_HTML = r"""<!doctype html>
     function setStatus(text, isError = false) {
       els.status.textContent = text;
       els.status.classList.toggle('error', isError);
+    }
+
+    function showView(viewName) {
+      document.body.dataset.view = viewName;
+      for (const view of views) {
+        view.hidden = view.dataset.view !== viewName;
+      }
+      for (const btn of navButtons) {
+        btn.classList.toggle('active', btn.dataset.viewTarget === viewName);
+      }
+      els.taskSidebar.hidden = viewName !== 'output';
+      if (viewName === 'output') {
+        loadTasks().catch(err => setStatus(err.message, true));
+      }
     }
 
     function resetProgress() {
@@ -867,7 +941,10 @@ INDEX_HTML = r"""<!doctype html>
       if (job.status === 'completed') {
         setStatus(`完成：${job.task_title || job.workflow_name}，${job.step_count || job.completed_steps} 步`);
         await loadTasks();
-        if (job.task_name) await selectTask(job.task_name);
+        if (job.task_name) {
+          showView('output');
+          await selectTask(job.task_name);
+        }
         els.runBtn.disabled = false;
         progressTimer = null;
         return;
@@ -1292,6 +1369,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function selectTask(name) {
+      showView('output');
       selectedTask = name;
       selectedFile = null;
       await loadTasks();
@@ -1406,6 +1484,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     els.runBtn.onclick = runWorkflow;
+    navButtons.forEach(button => {
+      button.onclick = () => showView(button.dataset.viewTarget);
+    });
     els.refreshTasks.onclick = loadTasks;
     els.refreshStaffBtn.onclick = loadStaffList;
     els.newStaffBtn.onclick = newStaff;

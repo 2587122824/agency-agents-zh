@@ -398,6 +398,33 @@ The web management UI was restarted on `http://127.0.0.1:8765` and verified with
 home page contains 数字员工管理 and saveStaffBtn
 ```
 
+## Management UI Product Redesign
+
+The web management UI was simplified around three primary workspaces instead of one long stacked page:
+
+```text
+运行工作流
+数字员工
+任务输出
+```
+
+Changes in `my_workspace/web_app.py`:
+
+- Added top navigation buttons using `data-view-target`.
+- Added view containers using `data-view`.
+- `运行工作流` is the default workspace.
+- `数字员工` contains the staff manager only.
+- `任务输出` shows the task sidebar and output viewer; the sidebar is hidden in other workspaces.
+- Completed workflow runs automatically switch to `任务输出` and open the generated task.
+- Non-output workspaces use a single-column full-width layout.
+
+Verification:
+
+```text
+Local page returned HTTP 200.
+Page contains data-view-target="run", data-view-target="staff", data-view-target="output", taskSidebar, and data-view="staff" hidden.
+```
+
 [2026-06-12 20:04:03 +08:00] command: git push origin main failed twice with GitHub port 443 connection timeout; local commit 8b56043 remains ahead of origin/main by 1.
 
 
