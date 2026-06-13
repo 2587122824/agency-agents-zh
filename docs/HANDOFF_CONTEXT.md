@@ -895,3 +895,30 @@ Validation:
   - `/api/export-task` generated 9 files
   - `/api/task` detected 2 step output files and 9 package files after export
   - temporary task directory was deleted after validation
+
+## Run Page And Output List Layout Fix
+
+[2026-06-13 22:15:00 +08:00] command: fixed task-output list clipping and optimized the `运行工作流` tab layout after the user reported display issues.
+
+Management UI changes:
+
+- Fixed `任务输出` structured lists:
+  - output buttons now have a taller two-line layout
+  - file title and file path use separate classes
+  - long names are ellipsized instead of being vertically clipped
+- Optimized `运行工作流` tab:
+  - added a lightweight `任务基础信息` section
+  - product type, workflow, and task name are grouped together
+  - execution mode, model, and model timeout are grouped together
+  - original request is now in a dedicated `原始需求` section with clearer helper text
+  - action buttons are styled as a bottom action bar on desktop and fall back to normal flow on narrow screens
+- Moved `模型超时` out of the collapsible model config and confirmed it appears only once.
+- Run-page sections use divider lines rather than nested cards to avoid visual clutter.
+
+Validation:
+
+- `python -m py_compile my_workspace/web_app.py` passed.
+- Extracted embedded frontend script and parsed it with Node via stdin; syntax passed.
+- Confirmed `id="modelTimeout"` appears exactly once.
+- Restarted local services with `powershell -NoProfile -ExecutionPolicy Bypass -File .\start_local.ps1 -SkipModelPull -NoBrowser`.
+- Home page returned HTTP 200 and contained `run-form`, `run-primary-grid`, `output-link-title`, and `output-link-subtitle`.

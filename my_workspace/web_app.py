@@ -184,6 +184,53 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       gap: 14px;
     }
+    .run-form {
+      gap: 16px;
+    }
+    .run-section {
+      border-bottom: 1px solid var(--line);
+      padding: 0 0 14px;
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+    .run-section:last-of-type {
+      border-bottom: 0;
+      padding-bottom: 0;
+    }
+    .run-section-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .run-section-head strong {
+      font-size: 15px;
+    }
+    .run-primary-grid {
+      display: grid;
+      grid-template-columns: minmax(180px, .8fr) minmax(240px, 1fr) minmax(240px, 1fr);
+      gap: 12px;
+    }
+    .run-model-grid {
+      display: grid;
+      grid-template-columns: minmax(160px, .65fr) minmax(280px, 1fr) minmax(160px, .65fr);
+      gap: 12px;
+    }
+    .run-input textarea {
+      min-height: 150px;
+    }
+    .run-actions {
+      position: sticky;
+      bottom: 0;
+      z-index: 2;
+      margin: 0 -16px -16px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+      background: rgba(255, 255, 255, .96);
+      backdrop-filter: blur(6px);
+    }
     .split {
       display: grid;
       grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 140px minmax(220px, 1fr);
@@ -447,10 +494,13 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       gap: 2px;
       text-align: left;
-      min-height: 42px;
-      padding: 7px 9px;
+      min-height: 58px;
+      padding: 9px 10px;
       border-radius: 6px;
       background: #fff;
+      align-content: center;
+      min-width: 0;
+      overflow: hidden;
     }
     .output-link.active {
       border-color: var(--accent);
@@ -461,6 +511,14 @@ INDEX_HTML = r"""<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .output-link .output-link-title {
+      font-weight: 650;
+      line-height: 1.3;
+    }
+    .output-link .output-link-subtitle {
+      display: block;
+      line-height: 1.25;
     }
     .staff-manager {
       display: grid;
@@ -665,6 +723,9 @@ INDEX_HTML = r"""<!doctype html>
       main { grid-template-columns: 1fr; }
       aside { border-right: 0; border-bottom: 1px solid var(--line); }
       .split { grid-template-columns: 1fr; }
+      .run-primary-grid { grid-template-columns: 1fr; }
+      .run-model-grid { grid-template-columns: 1fr; }
+      .run-actions { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
       .provider-grid { grid-template-columns: 1fr; }
       .video-grid { grid-template-columns: 1fr; }
       .staff-manager { grid-template-columns: 1fr; }
@@ -698,59 +759,82 @@ INDEX_HTML = r"""<!doctype html>
       <div class="list" id="taskList"></div>
     </aside>
     <section class="stack">
-      <div class="panel form view" data-view="run">
-        <div class="split">
-          <label>产品类型
-            <select id="productTemplate">
-              <option value="short_video" selected>短视频</option>
-              <option value="xiaohongshu">小红书图文</option>
-              <option value="game_steam">Unity 3D Steam 游戏</option>
-              <option value="software_market">软件市场分析</option>
-              <option value="agent_platform">AI 员工平台</option>
-            </select>
-          </label>
-          <label>工作流
-            <select id="workflow"></select>
-          </label>
-          <label>任务名称
-            <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI自动化获客短视频-第1版，可留空" />
-          </label>
-          <label>执行模式
-            <select id="provider">
-              <option value="auto">auto</option>
-              <option value="offline">offline</option>
-              <option value="openai">openai</option>
-            </select>
-          </label>
-          <label>模型
-            <select id="model">
-              <optgroup label="推荐主力模型">
-                <option value="gpt-5.5" selected>GPT-5.5 - 复杂任务/最高质量</option>
-                <option value="gpt-5.4">GPT-5.4 - 通用高质量</option>
-              </optgroup>
-              <optgroup label="轻量与低成本">
-                <option value="gpt-5.4-mini">GPT-5.4 mini - 速度/成本平衡</option>
-                <option value="gpt-5.4-nano">GPT-5.4 nano - 最低延迟/批量任务</option>
-              </optgroup>
-              <optgroup label="推理模型">
-                <option value="o3">o3 - 深度推理</option>
-                <option value="o4-mini">o4-mini - 快速推理</option>
-              </optgroup>
-              <optgroup label="兼容旧模型">
-                <option value="gpt-4.1">GPT-4.1 - 旧版通用</option>
-                <option value="gpt-4.1-mini">GPT-4.1 mini - 旧版低成本</option>
-                <option value="gpt-4o">GPT-4o - 旧版多模态</option>
-                <option value="gpt-4o-mini">GPT-4o mini - 旧版轻量</option>
-              </optgroup>
-              <optgroup label="自定义">
-                <option value="custom">手动输入模型名</option>
-              </optgroup>
-            </select>
+      <div class="panel form run-form view" data-view="run">
+        <div class="run-section">
+          <div class="run-section-head">
+            <strong>任务基础信息</strong>
+            <span class="muted small">先确定要跑什么，再配置模型和生产选项</span>
+          </div>
+          <div class="run-primary-grid">
+            <label>产品类型
+              <select id="productTemplate">
+                <option value="short_video" selected>短视频</option>
+                <option value="xiaohongshu">小红书图文</option>
+                <option value="game_steam">Unity 3D Steam 游戏</option>
+                <option value="software_market">软件市场分析</option>
+                <option value="agent_platform">AI 员工平台</option>
+              </select>
+            </label>
+            <label>工作流
+              <select id="workflow"></select>
+            </label>
+            <label>任务名称
+              <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI自动化获客短视频-第1版，可留空" />
+            </label>
+          </div>
+          <div class="run-model-grid">
+            <label>执行模式
+              <select id="provider">
+                <option value="auto">auto</option>
+                <option value="offline">offline</option>
+                <option value="openai">openai</option>
+              </select>
+            </label>
+            <label>模型
+              <select id="model">
+                <optgroup label="推荐主力模型">
+                  <option value="gpt-5.5" selected>GPT-5.5 - 复杂任务/最高质量</option>
+                  <option value="gpt-5.4">GPT-5.4 - 通用高质量</option>
+                </optgroup>
+                <optgroup label="轻量与低成本">
+                  <option value="gpt-5.4-mini">GPT-5.4 mini - 速度/成本平衡</option>
+                  <option value="gpt-5.4-nano">GPT-5.4 nano - 最低延迟/批量任务</option>
+                </optgroup>
+                <optgroup label="推理模型">
+                  <option value="o3">o3 - 深度推理</option>
+                  <option value="o4-mini">o4-mini - 快速推理</option>
+                </optgroup>
+                <optgroup label="兼容旧模型">
+                  <option value="gpt-4.1">GPT-4.1 - 旧版通用</option>
+                  <option value="gpt-4.1-mini">GPT-4.1 mini - 旧版低成本</option>
+                  <option value="gpt-4o">GPT-4o - 旧版多模态</option>
+                  <option value="gpt-4o-mini">GPT-4o mini - 旧版轻量</option>
+                </optgroup>
+                <optgroup label="自定义">
+                  <option value="custom">手动输入模型名</option>
+                </optgroup>
+              </select>
+            </label>
+            <label>模型超时
+              <select id="modelTimeout">
+                <option value="120">120 秒（云端默认）</option>
+                <option value="300">300 秒</option>
+                <option value="600">600 秒</option>
+                <option value="900" selected>900 秒（本地模型推荐）</option>
+                <option value="1800">1800 秒</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="run-section run-input">
+          <div class="run-section-head">
+            <strong>原始需求</strong>
+            <span class="muted small">这里写清目标用户、平台、风格、交付目标</span>
+          </div>
+          <label>需求内容
+            <textarea id="userInput" placeholder="例如：我要做一条抖音短视频，推广 AI 自动化开发服务，目标客户是中小企业老板，目标是让客户私信咨询。"></textarea>
           </label>
         </div>
-        <label>原始需求
-          <textarea id="userInput" placeholder="例如：我要做一条抖音短视频，推广 AI 自动化开发服务，目标客户是中小企业老板，目标是让客户私信咨询。"></textarea>
-        </label>
         <details>
           <summary><strong>模型接口配置</strong> <span class="muted small">API Key、中转站和自定义模型名</span></summary>
           <div class="details-body">
@@ -770,15 +854,6 @@ INDEX_HTML = r"""<!doctype html>
               <span class="muted small">自动使用 Ollama + qwen3:8b-q4_K_M + 项目内 runtime/models</span>
             </div>
             <div class="provider-grid">
-              <label>模型超时
-                <select id="modelTimeout">
-                  <option value="120">120 秒（云端默认）</option>
-                  <option value="300">300 秒</option>
-                  <option value="600">600 秒</option>
-                  <option value="900" selected>900 秒（本地模型推荐）</option>
-                  <option value="1800">1800 秒</option>
-                </select>
-              </label>
               <label>本地模型服务
                 <select id="localModelPreset">
                   <option value="">不使用本地预设</option>
@@ -1017,7 +1092,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="reference-list" id="referenceList"></div>
           </div>
         </details>
-        <div class="row">
+        <div class="row run-actions">
           <button class="primary" id="runBtn">运行工作流</button>
           <button id="sampleBtn">填入示例</button>
           <button id="gameSampleBtn">游戏示例</button>
@@ -2452,9 +2527,10 @@ INDEX_HTML = r"""<!doctype html>
       btn.className = `output-link ${selectedFile === file ? 'active' : ''}`;
       btn.dataset.file = file;
       const main = document.createElement('span');
+      main.className = 'output-link-title';
       main.textContent = title;
       const sub = document.createElement('span');
-      sub.className = 'muted small';
+      sub.className = 'muted small output-link-subtitle';
       sub.textContent = subtitle;
       btn.appendChild(main);
       btn.appendChild(sub);
