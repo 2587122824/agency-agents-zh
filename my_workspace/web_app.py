@@ -338,6 +338,40 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--accent);
       font-weight: 650;
     }
+    .staff-manager {
+      display: grid;
+      grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+      gap: 12px;
+    }
+    .staff-list {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      max-height: 520px;
+      overflow: auto;
+    }
+    .staff-card {
+      text-align: left;
+      padding: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 6px;
+      display: grid;
+      gap: 4px;
+    }
+    .staff-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(15, 118, 110, .12);
+    }
+    .staff-editor {
+      display: grid;
+      gap: 10px;
+    }
+    .staff-editor textarea {
+      min-height: 260px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 13px;
+    }
     pre {
       margin: 0;
       padding: 16px;
@@ -357,6 +391,7 @@ INDEX_HTML = r"""<!doctype html>
       .split { grid-template-columns: 1fr; }
       .provider-grid { grid-template-columns: 1fr; }
       .video-grid { grid-template-columns: 1fr; }
+      .staff-manager { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -658,6 +693,34 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
 
+      <div class="panel form">
+        <div class="row">
+          <strong>数字员工管理</strong>
+          <button id="refreshStaffBtn">刷新员工</button>
+          <button id="newStaffBtn">新建员工</button>
+          <button class="danger" id="deleteStaffBtn" disabled>删除员工</button>
+          <span id="staffStatus" class="status">管理 my_custom_staff</span>
+        </div>
+        <div class="staff-manager">
+          <div class="staff-list" id="staffList"></div>
+          <div class="staff-editor">
+            <label>员工文件夹名
+              <input id="staffName" autocomplete="off" spellcheck="false" placeholder="例如 20_销售话术专员" />
+            </label>
+            <label>agent.md
+              <textarea id="staffAgentMd" spellcheck="false" placeholder="选择一个员工后查看或编辑 agent.md"></textarea>
+            </label>
+            <label>flow_rule.json
+              <textarea id="staffFlowRule" spellcheck="false" placeholder="选择一个员工后查看或编辑 flow_rule.json"></textarea>
+            </label>
+            <div class="row">
+              <button class="primary" id="saveStaffBtn">保存员工</button>
+              <span class="muted small">保存后会直接写入 my_custom_staff；flow_rule.json 必须是合法 JSON。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel viewer">
         <div class="viewer-head">
           <div>
@@ -725,9 +788,19 @@ INDEX_HTML = r"""<!doctype html>
       viewerMeta: document.getElementById('viewerMeta'),
       fileTabs: document.getElementById('fileTabs'),
       fileContent: document.getElementById('fileContent'),
+      refreshStaffBtn: document.getElementById('refreshStaffBtn'),
+      newStaffBtn: document.getElementById('newStaffBtn'),
+      deleteStaffBtn: document.getElementById('deleteStaffBtn'),
+      saveStaffBtn: document.getElementById('saveStaffBtn'),
+      staffStatus: document.getElementById('staffStatus'),
+      staffList: document.getElementById('staffList'),
+      staffName: document.getElementById('staffName'),
+      staffAgentMd: document.getElementById('staffAgentMd'),
+      staffFlowRule: document.getElementById('staffFlowRule'),
     };
     let selectedTask = null;
     let selectedFile = null;
+    let selectedStaff = null;
     let selectedReferenceFiles = [];
     let referencePreviewUrls = new Map();
     let progressTimer = null;
@@ -1106,6 +1179,118 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function setStaffStatus(text, isError = false) {
+      els.staffStatus.textContent = text;
+      els.staffStatus.classList.toggle('error', isError);
+    }
+
+    async function loadStaffList() {
+      const data = await api('/api/staff');
+      els.staffList.innerHTML = '';
+      if (!data.staff.length) {
+        els.staffList.innerHTML = '<div class="muted small">暂无数字员工</div>';
+        return;
+      }
+      for (const staff of data.staff) {
+        const btn = document.createElement('button');
+        btn.className = `staff-card ${selectedStaff === staff.name ? 'active' : ''}`;
+        btn.innerHTML = `<strong>${staff.display_name || staff.name}</strong><span class="muted small">${staff.name}</span><span class="muted small">${staff.role || ''}</span>`;
+        btn.onclick = () => selectStaff(staff.name);
+        els.staffList.appendChild(btn);
+      }
+    }
+
+    async function selectStaff(name) {
+      selectedStaff = name;
+      const data = await api(`/api/staff-detail?name=${encodeURIComponent(name)}`);
+      els.staffName.value = data.name;
+      els.staffAgentMd.value = data.agent_md || '';
+      els.staffFlowRule.value = data.flow_rule_json || '{}';
+      els.deleteStaffBtn.disabled = false;
+      setStaffStatus(`已选择：${name}`);
+      await loadStaffList();
+    }
+
+    function defaultStaffAgentMd(name) {
+      return `---\nname: ${name.replace(/^\\d+_/, '')}\ndescription: 请填写这个数字员工的职责。\nemoji: 🧩\ncolor: blue\n---\n\n# ${name.replace(/^\\d+_/, '')}\n\n## 核心职责\n\n- 请填写职责 1。\n- 请填写职责 2。\n\n## 输出格式\n\n请始终输出中文 Markdown。\n`;
+    }
+
+    function defaultStaffFlowRule(name) {
+      return JSON.stringify({
+        agent_id: name,
+        agent_name: name.replace(/^\\d+_/, ''),
+        role: 'custom_staff',
+        inputs: ['用户需求'],
+        outputs: ['员工输出'],
+        handoff_to: [],
+        quality_gate: ['输出清晰', '可交给下游继续使用'],
+      }, null, 2);
+    }
+
+    function newStaff() {
+      const name = prompt('请输入员工文件夹名，例如：20_销售话术专员');
+      if (!name) return;
+      selectedStaff = null;
+      els.staffName.value = name.trim();
+      els.staffAgentMd.value = defaultStaffAgentMd(name.trim());
+      els.staffFlowRule.value = defaultStaffFlowRule(name.trim());
+      els.deleteStaffBtn.disabled = true;
+      setStaffStatus('正在编辑新员工，点击“保存员工”写入');
+    }
+
+    async function saveStaff() {
+      const name = els.staffName.value.trim();
+      if (!name) {
+        setStaffStatus('员工文件夹名不能为空', true);
+        return;
+      }
+      try {
+        JSON.parse(els.staffFlowRule.value || '{}');
+      } catch (err) {
+        setStaffStatus(`flow_rule.json 不是合法 JSON：${err.message}`, true);
+        return;
+      }
+      try {
+        const result = await api('/api/save-staff', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            agent_md: els.staffAgentMd.value,
+            flow_rule_json: els.staffFlowRule.value,
+          }),
+        });
+        selectedStaff = result.name;
+        setStaffStatus(`已保存：${result.name}`);
+        await loadStaffList();
+        await loadConfig();
+      } catch (err) {
+        setStaffStatus(err.message, true);
+      }
+    }
+
+    async function deleteStaff() {
+      if (!selectedStaff) return;
+      if (!confirm(`确定删除这个数字员工？\n\n${selectedStaff}\n\n这会删除 my_custom_staff 下对应文件夹。`)) return;
+      try {
+        await api('/api/delete-staff', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: selectedStaff }),
+        });
+        selectedStaff = null;
+        els.staffName.value = '';
+        els.staffAgentMd.value = '';
+        els.staffFlowRule.value = '';
+        els.deleteStaffBtn.disabled = true;
+        setStaffStatus('员工已删除');
+        await loadStaffList();
+        await loadConfig();
+      } catch (err) {
+        setStaffStatus(err.message, true);
+      }
+    }
+
     async function selectTask(name) {
       selectedTask = name;
       selectedFile = null;
@@ -1222,6 +1407,10 @@ INDEX_HTML = r"""<!doctype html>
 
     els.runBtn.onclick = runWorkflow;
     els.refreshTasks.onclick = loadTasks;
+    els.refreshStaffBtn.onclick = loadStaffList;
+    els.newStaffBtn.onclick = newStaff;
+    els.saveStaffBtn.onclick = saveStaff;
+    els.deleteStaffBtn.onclick = deleteStaff;
     els.model.onchange = () => {
       syncCustomModelState();
       saveSettings();
@@ -1324,6 +1513,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         await loadConfig();
         await loadTasks();
+        await loadStaffList();
       } catch (err) {
         setStatus(err.message, true);
       }
@@ -1346,6 +1536,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._config())
             elif parsed.path == "/api/tasks":
                 self._send_json({"tasks": self._tasks()})
+            elif parsed.path == "/api/staff":
+                self._send_json({"staff": self._staff_list()})
+            elif parsed.path == "/api/staff-detail":
+                query = parse_qs(parsed.query)
+                self._send_json(self._staff_detail(self._single(query, "name")))
             elif parsed.path == "/api/task":
                 query = parse_qs(parsed.query)
                 self._send_json(self._task_detail(self._single(query, "name")))
@@ -1371,6 +1566,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/upload-reference-image":
                 self._send_json(self._upload_reference_image(payload))
+                return
+
+            if parsed.path == "/api/save-staff":
+                self._send_json(self._save_staff(payload))
+                return
+
+            if parsed.path == "/api/delete-staff":
+                self._delete_staff(str(payload.get("name") or "").strip())
+                self._send_json({"ok": True})
                 return
 
             if parsed.path != "/api/run":
@@ -1459,6 +1663,77 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "default_model": os.getenv("OPENAI_MODEL") or "gpt-5.5",
             "default_base_url": os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
         }
+
+    def _staff_list(self) -> list[dict]:
+        if not STAFF_ROOT.exists():
+            return []
+
+        staff = []
+        for path in sorted(STAFF_ROOT.iterdir()):
+            if not path.is_dir():
+                continue
+            rule_path = path / "flow_rule.json"
+            rule = {}
+            if rule_path.exists():
+                try:
+                    rule = json.loads(rule_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    rule = {}
+            staff.append(
+                {
+                    "name": path.name,
+                    "display_name": rule.get("agent_name") or path.name,
+                    "agent_id": rule.get("agent_id") or path.name,
+                    "role": rule.get("role") or "",
+                }
+            )
+        return staff
+
+    def _staff_detail(self, name: str) -> dict:
+        staff_dir = self._safe_staff_dir(name, must_exist=True)
+        agent_path = staff_dir / "agent.md"
+        rule_path = staff_dir / "flow_rule.json"
+        rule_text = rule_path.read_text(encoding="utf-8", errors="replace") if rule_path.exists() else "{}"
+        if rule_text.strip():
+            json.loads(rule_text)
+        return {
+            "name": staff_dir.name,
+            "agent_md": agent_path.read_text(encoding="utf-8", errors="replace") if agent_path.exists() else "",
+            "flow_rule_json": rule_text,
+        }
+
+    def _save_staff(self, payload: dict) -> dict:
+        name = str(payload.get("name") or "").strip()
+        agent_md = str(payload.get("agent_md") or "").strip()
+        flow_rule_json = str(payload.get("flow_rule_json") or "{}").strip()
+        if not agent_md:
+            raise ValueError("agent.md cannot be empty")
+        rule = json.loads(flow_rule_json)
+        staff_dir = self._safe_staff_dir(name, must_exist=False)
+        staff_dir.mkdir(parents=True, exist_ok=True)
+        if not isinstance(rule, dict):
+            raise ValueError("flow_rule.json must be a JSON object")
+        rule.setdefault("agent_id", staff_dir.name)
+        rule.setdefault("agent_name", staff_dir.name)
+        (staff_dir / "agent.md").write_text(agent_md.rstrip() + "\n", encoding="utf-8")
+        (staff_dir / "flow_rule.json").write_text(
+            json.dumps(rule, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return {"ok": True, "name": staff_dir.name}
+
+    def _delete_staff(self, name: str) -> None:
+        staff_dir = self._safe_staff_dir(name, must_exist=True)
+        staff_root = STAFF_ROOT.resolve()
+        if staff_dir == staff_root:
+            raise ValueError("Refusing to delete staff root")
+
+        for path in sorted(staff_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+            elif path.is_dir():
+                path.rmdir()
+        staff_dir.rmdir()
 
     def _run_status(self, run_id: str) -> dict:
         with RUN_JOBS_LOCK:
@@ -1777,6 +2052,17 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not self._is_relative_to(task_dir, output_root) or not task_dir.is_dir():
             raise FileNotFoundError(name)
         return task_dir
+
+    def _safe_staff_dir(self, name: str, must_exist: bool) -> Path:
+        if not name or "/" in name or "\\" in name or name in {".", ".."}:
+            raise ValueError("Invalid staff name")
+        staff_dir = (STAFF_ROOT / name).resolve()
+        staff_root = STAFF_ROOT.resolve()
+        if not self._is_relative_to(staff_dir, staff_root):
+            raise ValueError("Invalid staff path")
+        if must_exist and not staff_dir.is_dir():
+            raise FileNotFoundError(name)
+        return staff_dir
 
     def _read_json(self) -> dict:
         length = int(self.headers.get("Content-Length", "0"))

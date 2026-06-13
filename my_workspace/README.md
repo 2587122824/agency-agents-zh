@@ -21,12 +21,17 @@ my_custom_staff/
   13_游戏音频与体验设计师/
   14_Steam发行与测试经理/
   15_软件市场需求分析师/
+  16_AI员工平台产品经理/
+  17_AI员工平台工作流架构师/
+  18_AI员工平台软件架构师/
+  19_AI员工平台增长验证师/
 my_workflows/
   workflow_短视频全流程.json
   workflow_小红书图文.json
   workflow_开发外包.json
   workflow_Unity3D游戏Steam上架.json
   workflow_软件市场机会分析.json
+  workflow_AI员工工作流平台设计.json
 my_task_output/
 my_memory/
   brand_profile.md
@@ -45,6 +50,7 @@ my_reference_images/
 5. 最后由 `07_视频生成执行员` 生成视频提示词、配音字幕和剪辑制作包。
 6. 游戏类工作流由 `08` 到 `14` 号员工协作，从项目编排、GDD、Unity 架构、关卡叙事、3D 美术技术、音频体验，到 Steam 发行测试制作包。
 7. 软件市场机会分析工作流由 `15_软件市场需求分析师` 输出高潜力软件方向、MVP、获客渠道、商业化和风险验证。
+8. AI 员工工作流平台设计由 `15` 到 `19` 号员工协作，输出平台定位、员工管理、工作流架构、技术架构和增长验证方案。
 
 ## 自动化执行
 
@@ -64,6 +70,12 @@ python my_workspace/run_flow.py --provider offline --workflow workflow_Unity3D�
 
 ```powershell
 python my_workspace/run_flow.py --provider offline --workflow workflow_软件市场机会分析 --input "目标中国中小企业和个人开发者市场，团队1-2人，擅长Python、Web和AI API，希望找可MVP验证的软件方向。"
+```
+
+离线生成 AI 员工工作流平台设计：
+
+```powershell
+python my_workspace/run_flow.py --provider offline --workflow workflow_AI员工工作流平台设计 --input "我要做中小企业AI员工工作流平台，以my_custom_staff里的自定义员工为核心，能管理数字员工、运行工作流、查看任务输出，先自用跑通再销售。"
 ```
 
 有 `OPENAI_API_KEY` 时自动调用模型：
@@ -155,6 +167,7 @@ http://127.0.0.1:8765
 - 运行工作流时会显示进度条和每一步员工状态；后台通过 `/api/run-status` 查询当前运行状态。
 - 查看历史任务、每一步的 `prompt.md`、`output.md` 和最终 `final_output.md`。
 - 删除历史任务输出；删除只作用于 `my_task_output` 下对应的任务目录，不会删除工作流、员工或 `.gitignore`。
+- 在 `数字员工管理` 中查看、新建、编辑、保存、删除 `my_custom_staff` 下的自定义员工；保存时会写入员工目录的 `agent.md` 和 `flow_rule.json`，并校验 `flow_rule.json` 是否是合法 JSON。
 
 ## Unity 3D Steam 游戏工作流
 
@@ -210,6 +223,31 @@ my_workflows/workflow_软件市场机会分析.json
 
 输出会包含前十软件机会、目标用户、痛点、MVP形态、首批获客渠道、收费方式、风险、机会评分和第一周验证动作。
 
+## AI 员工工作流平台设计
+
+工作流文件：
+
+```text
+my_workflows/workflow_AI员工工作流平台设计.json
+```
+
+团队：
+
+- `15_软件市场需求分析师`：分析平台市场机会和切入方向。
+- `16_AI员工平台产品经理`：定义平台定位、MVP、用户旅程和员工管理需求。
+- `17_AI员工平台工作流架构师`：设计员工、工作流、任务、上下文、输出和状态机。
+- `18_AI员工平台软件架构师`：设计本地版管理台架构、API、页面、数据模型和未来 SaaS 演进。
+- `19_AI员工平台增长验证师`：设计首批客户、Demo、话术、定价和 7/30/90 天验证计划。
+
+当前管理台已经支持基础数字员工管理，数据源就是：
+
+```text
+my_custom_staff/<员工文件夹>/agent.md
+my_custom_staff/<员工文件夹>/flow_rule.json
+```
+
+这套平台当前仍是本地文件版，适合先自用跑通和服务式交付；后续如果要面向客户开放账号、权限、计费和多人协作，需要再迁移到数据库、队列和用户系统。
+
 ## 全自动生产框架
 
 选择 `全自动生成 -> 生成生产资产包` 后，任务目录会额外生成：
@@ -245,3 +283,7 @@ edit_checklist.md
 - `13_游戏音频与体验设计师`：生成音效事件、自适应音乐、空间音频和交互反馈方案。
 - `14_Steam发行与测试经理`：生成 Steam 商店页、发行素材、测试计划和最终制作包。
 - `15_软件市场需求分析师`：生成高潜力软件方向排行榜、MVP建议、获客渠道、商业化路径和验证计划。
+- `16_AI员工平台产品经理`：定义 AI 员工工作流平台定位、MVP、核心旅程和路线图。
+- `17_AI员工平台工作流架构师`：设计员工管理、工作流管理、任务状态机和上下文传递规则。
+- `18_AI员工平台软件架构师`：生成平台技术架构、API、页面结构、数据模型和开发任务。
+- `19_AI员工平台增长验证师`：生成首批客户、Demo脚本、销售话术、定价试探和增长验证计划。

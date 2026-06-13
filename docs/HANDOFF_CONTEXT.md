@@ -321,6 +321,83 @@ my_workspace/my_workflows/workflow_软件市场机会分析.json
 
 Purpose: evaluate high-potential software opportunities by market pain, timing, MVP difficulty, acquisition feasibility, monetization, and risk. The workflow has one step using `15_软件市场需求分析师` and is intended for use from the management UI or CLI.
 
+## AI Staff Workflow Platform Design
+
+Added platform-design staff:
+
+```text
+16_AI员工平台产品经理
+17_AI员工平台工作流架构师
+18_AI员工平台软件架构师
+19_AI员工平台增长验证师
+```
+
+Source-agent inspirations:
+
+```text
+product/product-manager.md
+product/product-trend-researcher.md
+product/product-feedback-synthesizer.md
+specialized/specialized-workflow-architect.md
+specialized/agents-orchestrator.md
+engineering/engineering-software-architect.md
+engineering/engineering-backend-architect.md
+engineering/engineering-frontend-developer.md
+design/design-ux-architect.md
+marketing/marketing-growth-hacker.md
+marketing/marketing-app-store-optimizer.md
+```
+
+Added workflow:
+
+```text
+my_workspace/my_workflows/workflow_AI员工工作流平台设计.json
+```
+
+Purpose: design an AI staff workflow platform using `my_custom_staff` as the custom employee source, covering product positioning, workflow architecture, software architecture, and growth validation.
+
+Management UI update:
+
+- Added `数字员工管理` panel to `my_workspace/web_app.py`.
+- New UI can list, select, create, edit, save, and delete custom staff under `my_workspace/my_custom_staff/`.
+- Save writes `agent.md` and `flow_rule.json`; `flow_rule.json` is JSON-validated.
+- Delete is constrained to a validated child directory under `my_workspace/my_custom_staff/`.
+
+New endpoints:
+
+```text
+GET  /api/staff
+GET  /api/staff-detail?name=...
+POST /api/save-staff
+POST /api/delete-staff
+```
+
+Verification:
+
+```powershell
+python -m py_compile my_workspace/run_flow.py my_workspace/web_app.py my_workspace/my_codex_core/*.py
+```
+
+Passed with explicit PowerShell file enumeration.
+
+```powershell
+python my_workspace/run_flow.py --provider offline --workflow workflow_AI员工工作流平台设计 --input "我要做中小企业AI员工工作流平台，以my_custom_staff里的自定义员工为核心，能管理数字员工、运行工作流、查看任务输出，先自用跑通再销售。"
+```
+
+Result: workflow completed offline with 5 steps and wrote output under:
+
+```text
+my_workspace/my_task_output/task_20260613_123206_workflow_AI员工工作流平台设计/
+```
+
+The web management UI was restarted on `http://127.0.0.1:8765` and verified with:
+
+```text
+/api/config contains AI员工工作流平台设计 and 19_AI员工平台增长验证师
+/api/staff contains 16_AI员工平台产品经理
+home page contains 数字员工管理 and saveStaffBtn
+```
+
 [2026-06-12 20:04:03 +08:00] command: git push origin main failed twice with GitHub port 443 connection timeout; local commit 8b56043 remains ahead of origin/main by 1.
 
 

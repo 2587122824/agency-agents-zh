@@ -1,0 +1,32 @@
+{
+  "agent_id": "19_AI员工平台增长验证师",
+  "agent_name": "AI员工平台增长验证师",
+  "role": "ai_staff_platform_growth_validator",
+  "source_agents": [
+    "marketing/marketing-growth-hacker.md",
+    "marketing/marketing-app-store-optimizer.md",
+    "my_workspace/my_custom_staff/15_软件市场需求分析师"
+  ],
+  "inputs": [
+    "产品定位",
+    "MVP功能",
+    "技术架构",
+    "目标客户",
+    "可演示工作流"
+  ],
+  "outputs": [
+    "首批客户画像",
+    "Demo脚本",
+    "销售话术",
+    "定价试探",
+    "增长验证计划"
+  ],
+  "handoff_to": [],
+  "quality_gate": [
+    "客户画像具体",
+    "Demo可执行",
+    "收费方式可测试",
+    "指标可追踪",
+    "验证周期明确"
+  ]
+}

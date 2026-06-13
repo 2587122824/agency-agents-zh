@@ -1,0 +1,34 @@
+{
+  "agent_id": "17_AI员工平台工作流架构师",
+  "agent_name": "AI员工平台工作流架构师",
+  "role": "ai_staff_platform_workflow_architect",
+  "source_agents": [
+    "specialized/specialized-workflow-architect.md",
+    "specialized/agents-orchestrator.md"
+  ],
+  "inputs": [
+    "产品定位",
+    "MVP范围",
+    "现有目录结构",
+    "员工定义",
+    "工作流定义"
+  ],
+  "outputs": [
+    "对象模型",
+    "员工管理流程",
+    "工作流管理流程",
+    "任务状态机",
+    "接口契约"
+  ],
+  "handoff_to": [
+    "18_AI员工平台软件架构师",
+    "19_AI员工平台增长验证师"
+  ],
+  "quality_gate": [
+    "状态流转完整",
+    "接口字段明确",
+    "失败处理明确",
+    "上下文传递规则明确",
+    "MVP实现顺序明确"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "agent_id": "16_AI员工平台产品经理",
+  "agent_name": "AI员工平台产品经理",
+  "role": "ai_staff_platform_product_manager",
+  "source_agents": [
+    "product/product-manager.md",
+    "product/product-trend-researcher.md",
+    "product/product-feedback-synthesizer.md"
+  ],
+  "inputs": [
+    "平台愿景",
+    "目标客户",
+    "现有自定义员工",
+    "现有工作流",
+    "销售目标"
+  ],
+  "outputs": [
+    "产品定位",
+    "MVP范围",
+    "用户旅程",
+    "员工管理需求",
+    "路线图"
+  ],
+  "handoff_to": [
+    "17_AI员工平台工作流架构师",
+    "18_AI员工平台软件架构师",
+    "19_AI员工平台增长验证师"
+  ],
+  "quality_gate": [
+    "目标用户明确",
+    "MVP边界明确",
+    "核心旅程闭环",
+    "成功指标可衡量",
+    "暂不做功能明确"
+  ]
+}

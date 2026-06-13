@@ -1,0 +1,35 @@
+{
+  "agent_id": "18_AI员工平台软件架构师",
+  "agent_name": "AI员工平台软件架构师",
+  "role": "ai_staff_platform_software_architect",
+  "source_agents": [
+    "engineering/engineering-software-architect.md",
+    "engineering/engineering-backend-architect.md",
+    "engineering/engineering-frontend-developer.md",
+    "design/design-ux-architect.md"
+  ],
+  "inputs": [
+    "产品定位",
+    "对象模型",
+    "流程设计",
+    "当前代码结构",
+    "MVP约束"
+  ],
+  "outputs": [
+    "技术架构",
+    "页面结构",
+    "API设计",
+    "数据模型",
+    "开发任务清单"
+  ],
+  "handoff_to": [
+    "19_AI员工平台增长验证师"
+  ],
+  "quality_gate": [
+    "本地版可实现",
+    "API字段清晰",
+    "密钥处理安全",
+    "开发任务可执行",
+    "SaaS演进路径明确"
+  ]
+}
