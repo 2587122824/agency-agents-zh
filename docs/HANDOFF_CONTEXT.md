@@ -854,3 +854,44 @@ Validation:
 - `http://127.0.0.1:8765/` returned HTTP 200 and contained the updated staff-manager CSS.
 - `/api/system-health` returned HTTP 200 with 8 checks.
 - A delayed re-check after 6 seconds still returned HTTP 200.
+
+## Task Output Overview Upgrade
+
+[2026-06-13 21:55:00 +08:00] command: added a structured task-output overview after the user asked to add the next-step output detail page improvements.
+
+Management UI changes:
+
+- The `任务输出` page now has an output dashboard above the file editor.
+- Added four summary cards for:
+  - task title
+  - workflow
+  - final output status
+  - product package status
+- Added `步骤输出` list:
+  - detects files matching `step_*/output.md`
+  - shows each step as a clickable entry
+  - clicking a step opens the corresponding `output.md`
+- Added `产品包文件` list:
+  - detects files under `export_package/`
+  - prioritizes common deliverables such as `README.md`, `final_output.md`, `视频制作包.md`, `小红书文案.md`, `GDD.md`, `产品需求文档.md`, and `manifest.json`
+  - clicking a package file opens it in the editor
+- The current file is highlighted in both normal file tabs and the structured output lists.
+- Added responsive layout rules so summary cards and output sections collapse on narrow screens.
+
+Backend robustness:
+
+- `run_summary.json` is now read with `utf-8-sig` in task listing, task detail, and export handling.
+- This prevents PowerShell-created UTF-8 BOM JSON files from breaking the task output page.
+- Task detail now tolerates malformed `run_summary.json` by falling back to an empty summary.
+
+Validation:
+
+- `python -m py_compile my_workspace/web_app.py` passed.
+- Extracted embedded frontend script and parsed it with Node via stdin; syntax passed.
+- Restarted local services with `powershell -NoProfile -ExecutionPolicy Bypass -File .\start_local.ps1 -SkipModelPull -NoBrowser`.
+- Home page returned HTTP 200 and contained `outputDashboard`, `outputSummaryGrid`, and `packageOutputList`.
+- Temporary smoke task `task_codex_output_overview_smoke` verified:
+  - `/api/task` returned 5 files before export
+  - `/api/export-task` generated 9 files
+  - `/api/task` detected 2 step output files and 9 package files after export
+  - temporary task directory was deleted after validation

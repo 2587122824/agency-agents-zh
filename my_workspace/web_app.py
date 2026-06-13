@@ -356,7 +356,7 @@ INDEX_HTML = r"""<!doctype html>
     .progress-step.error { color: var(--danger); background: #fef3f2; border-color: #fecdca; }
     .viewer {
       display: grid;
-      grid-template-rows: auto minmax(320px, 1fr);
+      grid-template-rows: auto auto minmax(320px, 1fr);
       min-height: 520px;
     }
     .viewer-head {
@@ -382,6 +382,85 @@ INDEX_HTML = r"""<!doctype html>
       border-color: var(--accent);
       color: var(--accent);
       font-weight: 650;
+    }
+    .output-dashboard {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+    .output-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(140px, 1fr));
+      gap: 10px;
+    }
+    .output-card {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      padding: 10px;
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    .output-card .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .output-card .value {
+      font-size: 15px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .output-sections {
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+      gap: 10px;
+      min-width: 0;
+    }
+    .output-section {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .output-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+    .output-link-list {
+      display: grid;
+      gap: 6px;
+      max-height: 180px;
+      overflow: auto;
+    }
+    .output-link {
+      display: grid;
+      gap: 2px;
+      text-align: left;
+      min-height: 42px;
+      padding: 7px 9px;
+      border-radius: 6px;
+      background: #fff;
+    }
+    .output-link.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .output-link span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .staff-manager {
       display: grid;
@@ -589,6 +668,8 @@ INDEX_HTML = r"""<!doctype html>
       .provider-grid { grid-template-columns: 1fr; }
       .video-grid { grid-template-columns: 1fr; }
       .staff-manager { grid-template-columns: 1fr; }
+      .output-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .output-sections { grid-template-columns: 1fr; }
       .workflow-step-grid { grid-template-columns: 1fr; }
       .health-grid { grid-template-columns: 1fr; }
     }
@@ -1040,6 +1121,29 @@ INDEX_HTML = r"""<!doctype html>
           </div>
           <div class="file-tabs" id="fileTabs"></div>
         </div>
+        <div class="output-dashboard" id="outputDashboard">
+          <div class="output-summary-grid" id="outputSummaryGrid"></div>
+          <div class="output-sections">
+            <div class="output-section">
+              <div class="output-section-head">
+                <strong>步骤输出</strong>
+                <span class="muted small" id="stepOutputMeta">0 个步骤</span>
+              </div>
+              <div class="output-link-list" id="stepOutputList">
+                <div class="muted small">选择任务后显示每个员工的输出。</div>
+              </div>
+            </div>
+            <div class="output-section">
+              <div class="output-section-head">
+                <strong>产品包文件</strong>
+                <span class="muted small" id="packageOutputMeta">未生成</span>
+              </div>
+              <div class="output-link-list" id="packageOutputList">
+                <div class="muted small">点击“导出产品包”后显示可交付文件。</div>
+              </div>
+            </div>
+          </div>
+        </div>
         <textarea class="file-editor" id="fileContent" spellcheck="false">选择左侧任务，或运行一个新任务。</textarea>
       </div>
 
@@ -1155,6 +1259,11 @@ INDEX_HTML = r"""<!doctype html>
       viewerMeta: document.getElementById('viewerMeta'),
       fileTabs: document.getElementById('fileTabs'),
       fileContent: document.getElementById('fileContent'),
+      outputSummaryGrid: document.getElementById('outputSummaryGrid'),
+      stepOutputMeta: document.getElementById('stepOutputMeta'),
+      stepOutputList: document.getElementById('stepOutputList'),
+      packageOutputMeta: document.getElementById('packageOutputMeta'),
+      packageOutputList: document.getElementById('packageOutputList'),
       saveFileBtn: document.getElementById('saveFileBtn'),
       rebuildFinalBtn: document.getElementById('rebuildFinalBtn'),
       rerunStepBtn: document.getElementById('rerunStepBtn'),
@@ -1866,6 +1975,7 @@ INDEX_HTML = r"""<!doctype html>
           els.viewerMeta.textContent = '运行后会在这里查看输出文件';
           els.fileTabs.innerHTML = '';
           els.fileContent.value = '选择左侧任务，或运行一个新任务。';
+          renderOutputOverview(null);
           syncOutputButtons();
         }
         setStatus('任务已删除');
@@ -2263,9 +2373,110 @@ INDEX_HTML = r"""<!doctype html>
       els.viewerTitle.textContent = data.summary.task_title || data.summary.workflow || name;
       els.viewerMeta.textContent = name;
       renderFiles(data.files);
+      renderOutputOverview(data);
       syncOutputButtons();
       const first = data.files.find(f => f.endsWith('final_output.md')) || data.files[0];
       if (first) await openFile(first);
+    }
+
+    function renderOutputOverview(data) {
+      if (!data) {
+        els.outputSummaryGrid.innerHTML = summaryCards([
+          ['任务', '未选择'],
+          ['工作流', '-'],
+          ['步骤输出', '0'],
+          ['产品包', '未生成'],
+        ]);
+        els.stepOutputMeta.textContent = '0 个步骤';
+        els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
+        els.packageOutputMeta.textContent = '未生成';
+        els.packageOutputList.innerHTML = '<div class="muted small">点击“导出产品包”后显示可交付文件。</div>';
+        return;
+      }
+
+      const files = data.files || [];
+      const summary = data.summary || {};
+      const stepFiles = files.filter(file => /^step_\d+_.*\/output\.md$/.test(file));
+      const packageFiles = files.filter(file => file.startsWith('export_package/') && !file.endsWith('/'));
+      const finalReady = files.includes('final_output.md') ? '已生成' : '缺失';
+      const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
+      els.outputSummaryGrid.innerHTML = summaryCards([
+        ['任务', summary.task_title || data.name],
+        ['工作流', summary.workflow || '-'],
+        ['最终输出', finalReady],
+        ['产品包', packageReady],
+      ]);
+
+      els.stepOutputMeta.textContent = `${stepFiles.length} 个步骤`;
+      els.stepOutputList.innerHTML = '';
+      if (!stepFiles.length) {
+        els.stepOutputList.innerHTML = '<div class="muted small">暂无步骤输出。先运行工作流，或检查 task_output 目录。</div>';
+      } else {
+        for (const file of stepFiles) {
+          els.stepOutputList.appendChild(outputFileButton(file, stepFileLabel(file), '点击查看该员工 output.md'));
+        }
+      }
+
+      els.packageOutputMeta.textContent = packageReady;
+      els.packageOutputList.innerHTML = '';
+      if (!packageFiles.length) {
+        els.packageOutputList.innerHTML = '<div class="muted small">还没有产品包。点击右上角“导出产品包”生成可交付文件。</div>';
+      } else {
+        const priority = ['README.md', 'final_output.md', '视频制作包.md', '小红书文案.md', 'GDD.md', '产品需求文档.md', 'manifest.json'];
+        packageFiles.sort((a, b) => {
+          const an = a.split('/').pop();
+          const bn = b.split('/').pop();
+          const ai = priority.indexOf(an);
+          const bi = priority.indexOf(bn);
+          if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+          return a.localeCompare(b);
+        });
+        for (const file of packageFiles) {
+          els.packageOutputList.appendChild(outputFileButton(file, file.replace('export_package/', ''), file));
+        }
+      }
+    }
+
+    function summaryCards(items) {
+      return items.map(([label, value]) => `
+        <div class="output-card">
+          <span class="label">${escapeHtml(label)}</span>
+          <span class="value" title="${escapeHtml(String(value))}">${escapeHtml(String(value))}</span>
+        </div>
+      `).join('');
+    }
+
+    function outputFileButton(file, title, subtitle) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = `output-link ${selectedFile === file ? 'active' : ''}`;
+      btn.dataset.file = file;
+      const main = document.createElement('span');
+      main.textContent = title;
+      const sub = document.createElement('span');
+      sub.className = 'muted small';
+      sub.textContent = subtitle;
+      btn.appendChild(main);
+      btn.appendChild(sub);
+      btn.onclick = () => openFile(file);
+      return btn;
+    }
+
+    function stepFileLabel(file) {
+      const match = String(file).match(/^step_(\d+)_(.*)\/output\.md$/);
+      if (!match) return file;
+      const agent = match[2].replaceAll('_', ' ');
+      return `${Number(match[1])}. ${agent}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value).replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[char]));
     }
 
     function renderFiles(files) {
@@ -2286,6 +2497,9 @@ INDEX_HTML = r"""<!doctype html>
       els.fileContent.value = data.content;
       for (const btn of els.fileTabs.querySelectorAll('button')) {
         btn.classList.toggle('active', btn.textContent === file);
+      }
+      for (const btn of document.querySelectorAll('.output-link')) {
+        btn.classList.toggle('active', btn.dataset.file === file);
       }
       syncOutputButtons();
     }
@@ -2625,6 +2839,7 @@ INDEX_HTML = r"""<!doctype html>
     };
     bindSettingsPersistence();
     renderReferenceFiles();
+    renderOutputOverview(null);
 
     (async function init() {
       try {
@@ -3185,7 +3400,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             summary = {}
             if summary_path.exists():
                 try:
-                    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                    summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
                 except json.JSONDecodeError:
                     summary = {}
             tasks.append(
@@ -3209,7 +3424,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         summary_path = task_dir / "run_summary.json"
         summary = {}
         if summary_path.exists():
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except json.JSONDecodeError:
+                summary = {}
         return {"name": name, "summary": summary, "files": files}
 
     def _file_content(self, task: str, file_name: str) -> dict:
@@ -3271,7 +3489,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         summary_path = task_dir / "run_summary.json"
         if summary_path.exists():
             try:
-                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
             except json.JSONDecodeError:
                 summary = {}
         workflow_name = str(summary.get("workflow") or "")
