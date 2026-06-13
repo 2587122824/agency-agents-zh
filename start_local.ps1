@@ -128,13 +128,27 @@ if (-not $KeepExistingWeb) {
 }
 if (-not (Test-HttpOk -Url $WebUrl)) {
   Write-Step "Starting web app: $WebUrl"
-  $webArgs = @("my_workspace/web_app.py", "--port", "$Port")
+  $logDir = Join-Path $Root "runtime\logs"
+  New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+  $outLog = Join-Path $logDir "web_app.out.log"
+  $errLog = Join-Path $logDir "web_app.err.log"
+  $webArgs = @(
+    "my_workspace/web_app.py",
+    "--host",
+    "127.0.0.1",
+    "--port",
+    "$Port"
+  )
   if ((Split-Path -Leaf $PythonExe) -ieq "py.exe") {
     $webArgs = @("-3") + $webArgs
   }
-  Start-Process -FilePath $PythonExe -ArgumentList $webArgs -WorkingDirectory $Root -WindowStyle Hidden
+  $webProcess = Start-Process -FilePath $PythonExe -ArgumentList $webArgs -WorkingDirectory $Root -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru -WindowStyle Hidden
   if (-not (Wait-Http -Url $WebUrl -Seconds 30)) {
-    throw "Web app did not start within 30 seconds."
+    throw "Web app did not start within 30 seconds. Check logs: $errLog and $outLog"
+  }
+  Start-Sleep -Seconds 2
+  if ($webProcess.HasExited -or -not (Test-HttpOk -Url $WebUrl -TimeoutSec 3)) {
+    throw "Web app started briefly but is not staying alive. Check logs: $errLog and $outLog"
   }
 }
 

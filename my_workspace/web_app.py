@@ -385,9 +385,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     .staff-manager {
       display: grid;
-      grid-template-columns: minmax(280px, 360px) minmax(560px, 1fr);
+      grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
       gap: 14px;
       align-items: start;
+      width: 100%;
+      min-width: 0;
+      overflow: hidden;
     }
     .manager-toolbar {
       display: flex;
@@ -423,20 +426,22 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       gap: 6px;
       align-content: start;
-      max-height: calc(100vh - 230px);
+      max-height: calc(100vh - 250px);
       overflow: auto;
       padding-right: 4px;
     }
     .staff-card {
       text-align: left;
-      padding: 8px 10px;
+      padding: 9px 10px;
       border: 1px solid var(--line);
       background: #fff;
       border-radius: 6px;
       display: grid;
-      gap: 2px;
+      gap: 4px;
       min-width: 0;
-      min-height: 54px;
+      min-height: 76px;
+      align-content: start;
+      overflow: hidden;
     }
     .staff-card strong {
       font-size: 14px;
@@ -455,7 +460,7 @@ INDEX_HTML = r"""<!doctype html>
       max-width: 100%;
       margin-top: 2px;
       padding: 2px 6px;
-      border-radius: 999px;
+      border-radius: 6px;
       background: #e6f4f1;
       color: var(--accent);
       overflow: hidden;
@@ -475,11 +480,23 @@ INDEX_HTML = r"""<!doctype html>
       background: #fff;
       padding: 12px;
       min-width: 0;
+      max-width: 100%;
+      overflow: hidden;
+    }
+    .staff-editor label {
+      min-width: 0;
+    }
+    .staff-editor input,
+    .staff-editor textarea {
+      min-width: 0;
+      max-width: 100%;
     }
     .staff-editor textarea {
       min-height: 220px;
       font-family: Consolas, "Cascadia Mono", monospace;
       font-size: 13px;
+      overflow: auto;
+      white-space: pre;
     }
     .workflow-step {
       border: 1px solid var(--line);

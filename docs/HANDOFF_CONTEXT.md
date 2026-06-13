@@ -822,3 +822,35 @@ Validation:
 - `powershell -NoProfile -ExecutionPolicy Bypass -File .\start_local.ps1 -SkipModelPull -NoBrowser` succeeded and started project Ollama plus web app.
 - Home page markers verified: `staffFilter`, `manager-toolbar`, `staff-sidebar`.
 - `/api/system-health` verified project-local Ollama command path and `qwen3:8b-q4_K_M` availability.
+
+## Web Startup Reliability Fix
+
+[2026-06-13 21:30:00 +08:00] command: investigated the user's `127.0.0.1:8765` `ERR_EMPTY_RESPONSE` report and made Web startup more diagnosable.
+
+Findings:
+
+- Port `8765` could be listening while the browser still showed `ERR_EMPTY_RESPONSE`.
+- Raw socket and PowerShell checks later confirmed `/`, `/api/config`, `/api/system-health`, `/api/staff`, `/api/tasks`, and `/api/workflows` can return HTTP 200 after restarting the Web process.
+- `http://127.0.0.1:8765/` returned title `自定义工作流管理台`; `/api/system-health` returned 8 checks.
+
+Changes:
+
+- Updated `start_local.ps1` to launch the Web app directly with Python from the project root.
+- Web stdout/stderr are redirected to:
+  - `runtime/logs/web_app.out.log`
+  - `runtime/logs/web_app.err.log`
+- `start_local.ps1` now performs a second post-start check so a short-lived Web process is not mistaken for a ready service.
+- If the Web app fails to become ready or exits immediately after startup, `start_local.ps1` reports the exact log paths to inspect.
+- Fixed the digital staff manager layout:
+  - staff manager grid now uses `minmax(300px, 360px) minmax(0, 1fr)`
+  - right-side editor is constrained with `min-width: 0`, `max-width: 100%`, and internal textarea scrolling
+  - staff cards now have enough height for name, folder, and role without clipping
+
+Validation:
+
+- `python -m py_compile my_workspace/web_app.py` passed.
+- PowerShell parser checks for `start_local.ps1` passed.
+- After stopping the old 8765 listener, `powershell -NoProfile -ExecutionPolicy Bypass -File .\start_local.ps1 -SkipModelPull -NoBrowser` started Ollama and Web.
+- `http://127.0.0.1:8765/` returned HTTP 200 and contained the updated staff-manager CSS.
+- `/api/system-health` returned HTTP 200 with 8 checks.
+- A delayed re-check after 6 seconds still returned HTTP 200.
