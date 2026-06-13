@@ -168,7 +168,15 @@ http://127.0.0.1:8765
 start_local.bat
 ```
 
-默认会检查并启动 Ollama，确认 `qwen2.5:7b` 模型存在，启动管理台，并打开浏览器。第一次使用如果本机没有模型，会通过 `ollama pull qwen2.5:7b` 下载模型。
+默认会检查并启动 Ollama，确认 `qwen3:8b-q4_K_M` 模型存在，启动管理台，并打开浏览器。第一次使用如果本机没有模型，会通过 `ollama pull qwen3:8b-q4_K_M` 下载模型。
+
+默认模型目录已经指向项目内：
+
+```text
+runtime/models/
+```
+
+也就是说，用 `start_local.ps1` 启动时，Ollama 会优先使用项目内模型目录，而不是默认的 `C:\Users\<用户名>\.ollama\models`。
 
 可指定模型：
 

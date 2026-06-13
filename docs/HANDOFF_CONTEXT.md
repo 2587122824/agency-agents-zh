@@ -532,7 +532,7 @@ Behavior:
 
 - `start_local.ps1` finds `ollama` from PATH, or `runtime/ollama/ollama.exe` for a future bundled package.
 - It starts `ollama serve` when `http://127.0.0.1:11434/v1/models` is not reachable.
-- It checks the default model `qwen2.5:7b`; if missing and `-SkipModelPull` is not provided, it runs `ollama pull qwen2.5:7b`.
+- It checks the default model `qwen3:8b-q4_K_M`; if missing and `-SkipModelPull` is not provided, it runs `ollama pull qwen3:8b-q4_K_M`.
 - It sets `OPENAI_API_KEY=local`, `OPENAI_BASE_URL=http://127.0.0.1:11434/v1`, and `OPENAI_MODEL=<model>` for the launched web app process.
 - It starts `python my_workspace/web_app.py --port 8765`.
 - It opens `http://127.0.0.1:8765` unless `-NoBrowser` is passed.
@@ -557,8 +557,78 @@ Validation run:
 - Management UI restarted on `http://127.0.0.1:8765` and returned HTTP 200.
 - Home page markers verified: `data-view-target="system"`, `refreshHealthBtn`, `healthGrid`, `首次启动向导`, and `/api/system-health`.
 - `/api/system-health` returned 7 checks: Python runtime, workspace path, task output path, knowledge base path, action workspace path, Ollama command, and Ollama model service.
-- On the current machine, Python and local directories are OK; Ollama command and service return `warn` because Ollama is not installed/in PATH and `http://127.0.0.1:11434/v1` is not running. This is expected until the user installs or bundles Ollama.
+- Superseded by the later Ollama setup section: after installing Ollama and migrating the model, Python, local directories, Ollama command, and Ollama model service all return `ok`.
 
 Packaging note:
 
 - Current implementation is a lightweight local package path. It does not embed a model file in Git. A full offline installer can later place `ollama.exe` under `runtime/ollama/` and pre-import model data outside Git because model files are too large for normal source control.
+
+## Ollama Runtime And Qwen3 Local Model
+
+[2026-06-13 19:10:00 +08:00] command: installed Ollama with winget and pulled the requested quantized local model.
+
+Installed runtime:
+
+```text
+C:\Users\Administrator\AppData\Local\Programs\Ollama\ollama.exe
+```
+
+Requested model:
+
+```text
+qwen3:8b-q4_K_M
+```
+
+Ollama model list after pull:
+
+```text
+NAME               ID              SIZE      MODIFIED
+qwen3:8b-q4_K_M    500a1f067a9f    5.2 GB    Less than a second ago
+```
+
+Important storage change:
+
+- The model was first downloaded to the default Ollama model path:
+
+```text
+C:\Users\Administrator\.ollama\models
+```
+
+- The model directory was then copied into the project:
+
+```text
+I:\AI_Workspace\agency-agents-zh\runtime\models
+```
+
+- Source size before copy: about 5.22 GB.
+- Project model directory after copy contains the `qwen3:8b-q4_K_M` manifests/blobs and is ignored by Git through `runtime/.gitignore`.
+- The original C drive model directory was intentionally kept as a backup and was not deleted.
+
+Startup script update:
+
+- `start_local.ps1` default model changed to `qwen3:8b-q4_K_M`.
+- `start_local.ps1` now sets `OLLAMA_MODELS` to `<repo>\runtime\models` before starting Ollama.
+- This makes project startup use the project-local model directory instead of the default C drive model directory.
+- `start_local.ps1` now also detects the winget install path `C:\Users\Administrator\AppData\Local\Programs\Ollama\ollama.exe` when `ollama` is not yet available in the current PATH.
+
+Validation:
+
+```powershell
+$env:OLLAMA_MODELS='I:\AI_Workspace\agency-agents-zh\runtime\models'
+Start-Process 'C:\Users\Administrator\AppData\Local\Programs\Ollama\ollama.exe' -ArgumentList 'serve'
+ollama list
+POST http://127.0.0.1:11434/v1/chat/completions model=qwen3:8b-q4_K_M
+```
+
+Results:
+
+- `ollama list` using project `runtime\models` shows `qwen3:8b-q4_K_M`.
+- OpenAI-compatible `/v1/chat/completions` call returned a response for `qwen3:8b-q4_K_M`.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\start_local.ps1 -SkipModelPull -NoBrowser` succeeded and printed the project model directory.
+- `GET /api/system-health` returned 7 checks all `ok`, including the winget Ollama executable and the model service showing `qwen3:8b-q4_K_M`.
+- The previous partial standalone zip download under `runtime/_cache` was removed.
+
+Notes:
+
+- `runtime/ollama/ollama.exe` is still not present because the standalone zip download was unreliable and was abandoned after winget installation succeeded.
+- `install_ollama_runtime.ps1` exists to support future standalone runtime embedding, but the current working runtime is the winget-installed Ollama executable plus project-local model storage.

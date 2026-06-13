@@ -1,6 +1,7 @@
 param(
-  [string]$Model = "qwen2.5:7b",
+  [string]$Model = "qwen3:8b-q4_K_M",
   [int]$Port = 8765,
+  [string]$ModelsDir = "",
   [switch]$SkipModelPull,
   [switch]$NoBrowser
 )
@@ -43,11 +44,23 @@ function Wait-Http {
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+if (-not $ModelsDir) {
+  $ModelsDir = Join-Path $Root "runtime\models"
+}
+New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
+$env:OLLAMA_MODELS = $ModelsDir
+
 $OllamaExe = Get-Command ollama -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
 if (-not $OllamaExe) {
   $BundledOllama = Join-Path $Root "runtime\ollama\ollama.exe"
   if (Test-Path $BundledOllama) {
     $OllamaExe = $BundledOllama
+  }
+}
+if (-not $OllamaExe) {
+  $InstalledOllama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
+  if (Test-Path $InstalledOllama) {
+    $OllamaExe = $InstalledOllama
   }
 }
 
@@ -56,6 +69,7 @@ if (-not $OllamaExe) {
 }
 
 Write-Step "Ollama: $OllamaExe"
+Write-Step "Models: $env:OLLAMA_MODELS"
 if (-not (Test-HttpOk -Url "http://127.0.0.1:11434/v1/models")) {
   Write-Step "Starting Ollama service"
   Start-Process -FilePath $OllamaExe -ArgumentList "serve" -WindowStyle Hidden

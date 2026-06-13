@@ -2106,8 +2106,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             checks.append(self._health_check("Ollama 命令", "ok", ollama_path))
         else:
             bundled = WORKSPACE_ROOT.parent / "runtime" / "ollama" / "ollama.exe"
+            installed = Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe"
             if bundled.exists():
                 checks.append(self._health_check("Ollama 命令", "ok", str(bundled)))
+            elif installed.exists():
+                checks.append(self._health_check("Ollama 命令", "ok", str(installed)))
             else:
                 checks.append(self._health_check("Ollama 命令", "warn", "未在 PATH 或 runtime/ollama/ollama.exe 找到；可先安装 Ollama 或放入 runtime/ollama/"))
 

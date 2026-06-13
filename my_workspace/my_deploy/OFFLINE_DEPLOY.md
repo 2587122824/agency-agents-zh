@@ -18,10 +18,24 @@ start_local.bat
 
 1. 查找 `ollama` 命令，或查找 `runtime/ollama/ollama.exe`。
 2. 启动 Ollama 服务。
-3. 检查默认模型 `qwen2.5:7b`，如果缺失则执行 `ollama pull qwen2.5:7b`。
+3. 检查默认模型 `qwen3:8b-q4_K_M`，如果缺失则执行 `ollama pull qwen3:8b-q4_K_M`。
 4. 设置当前进程的 OpenAI-compatible 环境变量。
 5. 启动 `my_workspace/web_app.py`。
 6. 打开 `http://127.0.0.1:8765`。
+
+默认模型目录：
+
+```text
+runtime/models/
+```
+
+`start_local.ps1` 会在启动 Ollama 前设置：
+
+```powershell
+$env:OLLAMA_MODELS="<项目根目录>\runtime\models"
+```
+
+这样一站式包可以把模型放在项目目录内，而不是依赖系统默认的 `C:\Users\<用户名>\.ollama\models`。
 
 手动启动顺序：
 

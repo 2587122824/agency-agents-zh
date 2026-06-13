@@ -1,0 +1,6 @@
+*
+!.gitignore
+!ollama/
+!ollama/.gitkeep
+!models/
+!models/.gitkeep
