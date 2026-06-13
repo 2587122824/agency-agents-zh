@@ -475,6 +475,16 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 13px;
       background: #fff;
     }
+    .file-editor {
+      min-height: 520px;
+      border: 0;
+      border-radius: 0;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 13px;
+      line-height: 1.55;
+      background: #fff;
+      resize: vertical;
+    }
     .muted { color: var(--muted); }
     .small { font-size: 12px; }
     @media (max-width: 860px) {
@@ -528,6 +538,15 @@ INDEX_HTML = r"""<!doctype html>
     <section class="stack">
       <div class="panel form view" data-view="run">
         <div class="split">
+          <label>产品类型
+            <select id="productTemplate">
+              <option value="short_video" selected>短视频</option>
+              <option value="xiaohongshu">小红书图文</option>
+              <option value="game_steam">Unity 3D Steam 游戏</option>
+              <option value="software_market">软件市场分析</option>
+              <option value="agent_platform">AI 员工平台</option>
+            </select>
+          </label>
           <label>工作流
             <select id="workflow"></select>
           </label>
@@ -923,9 +942,15 @@ INDEX_HTML = r"""<!doctype html>
             <strong id="viewerTitle">未选择任务</strong>
             <div class="muted small" id="viewerMeta">运行后会在这里查看输出文件</div>
           </div>
+          <div class="row">
+            <button id="saveFileBtn" type="button" disabled>保存当前文件</button>
+            <button id="rebuildFinalBtn" type="button" disabled>重建最终汇总</button>
+            <button id="rerunStepBtn" type="button" disabled>重跑当前步骤</button>
+            <button id="exportTaskBtn" type="button" disabled>导出产品包</button>
+          </div>
           <div class="file-tabs" id="fileTabs"></div>
         </div>
-        <pre id="fileContent">选择左侧任务，或运行一个新任务。</pre>
+        <textarea class="file-editor" id="fileContent" spellcheck="false">选择左侧任务，或运行一个新任务。</textarea>
       </div>
 
       <div class="panel form view" data-view="system" hidden>
@@ -979,6 +1004,7 @@ INDEX_HTML = r"""<!doctype html>
   <script>
     const els = {
       env: document.getElementById('env'),
+      productTemplate: document.getElementById('productTemplate'),
       workflow: document.getElementById('workflow'),
       provider: document.getElementById('provider'),
       model: document.getElementById('model'),
@@ -1039,6 +1065,10 @@ INDEX_HTML = r"""<!doctype html>
       viewerMeta: document.getElementById('viewerMeta'),
       fileTabs: document.getElementById('fileTabs'),
       fileContent: document.getElementById('fileContent'),
+      saveFileBtn: document.getElementById('saveFileBtn'),
+      rebuildFinalBtn: document.getElementById('rebuildFinalBtn'),
+      rerunStepBtn: document.getElementById('rerunStepBtn'),
+      exportTaskBtn: document.getElementById('exportTaskBtn'),
       refreshStaffBtn: document.getElementById('refreshStaffBtn'),
       newStaffBtn: document.getElementById('newStaffBtn'),
       deleteStaffBtn: document.getElementById('deleteStaffBtn'),
@@ -1068,6 +1098,7 @@ INDEX_HTML = r"""<!doctype html>
     const views = Array.from(document.querySelectorAll('[data-view]'));
     let selectedTask = null;
     let selectedFile = null;
+    let selectedTaskSummary = {};
     let selectedStaff = null;
     let selectedWorkflow = null;
     let workflowEditorSteps = [];
@@ -1080,6 +1111,53 @@ INDEX_HTML = r"""<!doctype html>
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
+    const PRODUCT_TEMPLATES = {
+      short_video: {
+        workflow: 'workflow_短视频全流程',
+        taskTitle: '短视频内容生产',
+        sample: '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。',
+        autoProductionMode: 'package_only',
+        imageSize: '9:16',
+        videoAspect: '9:16',
+        videoDuration: '30s',
+      },
+      xiaohongshu: {
+        workflow: 'workflow_小红书图文',
+        taskTitle: '小红书图文内容',
+        sample: '我要做一篇小红书图文笔记，主题是 AI 自动化如何帮小团队节省重复工作。目标读者是创业者、自由职业者和中小企业老板，风格真实、具体、可收藏。',
+        autoProductionMode: 'off',
+        imageSize: '4:5',
+        videoAspect: '4:5',
+        videoDuration: 'custom',
+      },
+      game_steam: {
+        workflow: 'workflow_Unity3D游戏Steam上架',
+        taskTitle: 'Unity3D探索解谜Steam游戏立项',
+        sample: '我想做一款 Unity 3D 第三人称探索解谜游戏，上架 Steam。目标玩家是喜欢低多边形、轻剧情、环境谜题和短流程独立游戏的玩家。团队规模按单人或两人小团队考虑，优先做 20-30 分钟可玩 Demo，用于 Steam 商店页、愿望单和后续众筹/抢先体验验证。',
+        autoProductionMode: 'off',
+        imageSize: '16:9',
+        videoAspect: '16:9',
+        videoDuration: '30s',
+      },
+      software_market: {
+        workflow: 'workflow_软件市场机会分析',
+        taskTitle: '软件市场机会分析',
+        sample: '目标中国中小企业和个人开发者市场，团队1-2人，擅长 Python、Web 和 AI API，希望找可 MVP 验证的软件方向。请从痛点强度、付费意愿、获客难度、交付复杂度和差异化角度筛选机会。',
+        autoProductionMode: 'off',
+        imageSize: '16:9',
+        videoAspect: '16:9',
+        videoDuration: 'custom',
+      },
+      agent_platform: {
+        workflow: 'workflow_AI员工工作流平台设计',
+        taskTitle: 'AI员工工作流平台设计',
+        sample: '我要做中小企业 AI 员工工作流平台，以 my_custom_staff 里的自定义员工为核心，能管理数字员工、运行工作流、查看任务输出，先自用跑通再销售。',
+        autoProductionMode: 'off',
+        imageSize: '16:9',
+        videoAspect: '16:9',
+        videoDuration: 'custom',
+      },
+    };
 
     function setStatus(text, isError = false) {
       els.status.textContent = text;
@@ -1222,6 +1300,7 @@ INDEX_HTML = r"""<!doctype html>
 
     function saveSettings() {
       const settings = {
+        productTemplate: els.productTemplate.value,
         workflow: els.workflow.value,
         provider: els.provider.value,
         model: els.model.value,
@@ -1263,6 +1342,7 @@ INDEX_HTML = r"""<!doctype html>
 
     function restoreSettings() {
       const settings = readSettings();
+      setIfExists(els.productTemplate, settings.productTemplate);
       setIfExists(els.workflow, settings.workflow);
       setIfExists(els.provider, settings.provider);
       setIfExists(els.model, settings.model);
@@ -1312,6 +1392,7 @@ INDEX_HTML = r"""<!doctype html>
     function bindSettingsPersistence() {
       [
         els.workflow,
+        els.productTemplate,
         els.provider,
         els.model,
         els.customModel,
@@ -1689,10 +1770,12 @@ INDEX_HTML = r"""<!doctype html>
         if (selectedTask === name) {
           selectedTask = null;
           selectedFile = null;
+          selectedTaskSummary = {};
           els.viewerTitle.textContent = '未选择任务';
           els.viewerMeta.textContent = '运行后会在这里查看输出文件';
           els.fileTabs.innerHTML = '';
-          els.fileContent.textContent = '选择左侧任务，或运行一个新任务。';
+          els.fileContent.value = '选择左侧任务，或运行一个新任务。';
+          syncOutputButtons();
         }
         setStatus('任务已删除');
         await loadTasks();
@@ -2067,9 +2150,11 @@ INDEX_HTML = r"""<!doctype html>
       selectedFile = null;
       await loadTasks();
       const data = await api(`/api/task?name=${encodeURIComponent(name)}`);
+      selectedTaskSummary = data.summary || {};
       els.viewerTitle.textContent = data.summary.task_title || data.summary.workflow || name;
       els.viewerMeta.textContent = name;
       renderFiles(data.files);
+      syncOutputButtons();
       const first = data.files.find(f => f.endsWith('final_output.md')) || data.files[0];
       if (first) await openFile(first);
     }
@@ -2089,10 +2174,130 @@ INDEX_HTML = r"""<!doctype html>
       if (!selectedTask) return;
       selectedFile = file;
       const data = await api(`/api/file?task=${encodeURIComponent(selectedTask)}&file=${encodeURIComponent(file)}`);
-      els.fileContent.textContent = data.content;
+      els.fileContent.value = data.content;
       for (const btn of els.fileTabs.querySelectorAll('button')) {
         btn.classList.toggle('active', btn.textContent === file);
       }
+      syncOutputButtons();
+    }
+
+    function syncOutputButtons() {
+      const hasTask = Boolean(selectedTask);
+      const hasFile = Boolean(selectedTask && selectedFile);
+      els.saveFileBtn.disabled = !hasFile;
+      els.rebuildFinalBtn.disabled = !hasTask;
+      els.exportTaskBtn.disabled = !hasTask;
+      els.rerunStepBtn.disabled = !hasFile || !stepNumberFromFile(selectedFile);
+    }
+
+    function stepNumberFromFile(file) {
+      const match = String(file || '').match(/^step_(\d+)_.*\/output\.md$/);
+      return match ? Number(match[1]) : 0;
+    }
+
+    async function saveCurrentFile() {
+      if (!selectedTask || !selectedFile) return;
+      setStatus('正在保存当前输出文件');
+      try {
+        await api('/api/save-file', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task: selectedTask,
+            file: selectedFile,
+            content: els.fileContent.value,
+          }),
+        });
+        setStatus(`已保存：${selectedFile}`);
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
+    async function rebuildFinalOutput() {
+      if (!selectedTask) return;
+      setStatus('正在重建最终汇总');
+      try {
+        const result = await api('/api/rebuild-final-output', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task: selectedTask }),
+        });
+        setStatus(`已重建：${result.file}`);
+        await selectTask(selectedTask);
+        await openFile('final_output.md');
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
+    async function rerunCurrentStep() {
+      if (!selectedTask || !selectedFile) return;
+      const step = stepNumberFromFile(selectedFile);
+      if (!step) return;
+      const model = els.model.value === 'custom' ? els.customModel.value.trim() : els.model.value;
+      if (els.model.value === 'custom' && !model) {
+        setStatus('请输入自定义模型名', true);
+        return;
+      }
+      if (!confirm(`确定重跑第 ${step} 步？\n\n系统会覆盖该步骤 output.md，并基于当前各步骤输出重建 final_output.md。`)) return;
+      setStatus(`正在重跑第 ${step} 步`);
+      els.rerunStepBtn.disabled = true;
+      try {
+        await ensureLocalModelReady(model);
+        const result = await api('/api/rerun-step', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task: selectedTask,
+            step,
+            provider: els.provider.value,
+            model,
+            api_key: els.apiKey.value.trim(),
+            base_url: els.baseUrl.value.trim(),
+            timeout: Number(els.modelTimeout.value || 900),
+          }),
+        });
+        setStatus(`第 ${step} 步已重跑：${result.file}`);
+        await selectTask(selectedTask);
+        await openFile(result.file);
+      } catch (err) {
+        setStatus(err.message, true);
+      } finally {
+        syncOutputButtons();
+      }
+    }
+
+    async function exportCurrentTask() {
+      if (!selectedTask) return;
+      setStatus('正在导出产品包');
+      try {
+        const result = await api('/api/export-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task: selectedTask,
+            template: els.productTemplate.value,
+          }),
+        });
+        setStatus(`已导出产品包：${result.export_dir}`);
+        await selectTask(selectedTask);
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
+    function applyProductTemplate(fillSample = false) {
+      const template = PRODUCT_TEMPLATES[els.productTemplate.value];
+      if (!template) return;
+      setIfExists(els.workflow, template.workflow);
+      els.taskTitle.value = template.taskTitle || '';
+      setIfExists(els.autoProductionMode, template.autoProductionMode);
+      setIfExists(els.imageSize, template.imageSize);
+      setIfExists(els.videoAspect, template.videoAspect);
+      setIfExists(els.videoDuration, template.videoDuration);
+      if (fillSample) els.userInput.value = template.sample || '';
+      saveSettings();
     }
 
     async function runWorkflow() {
@@ -2184,6 +2389,10 @@ INDEX_HTML = r"""<!doctype html>
       button.onclick = () => showView(button.dataset.viewTarget);
     });
     els.refreshTasks.onclick = loadTasks;
+    els.saveFileBtn.onclick = saveCurrentFile;
+    els.rebuildFinalBtn.onclick = rebuildFinalOutput;
+    els.rerunStepBtn.onclick = rerunCurrentStep;
+    els.exportTaskBtn.onclick = exportCurrentTask;
     els.refreshStaffBtn.onclick = loadStaffList;
     els.newStaffBtn.onclick = newStaff;
     els.saveStaffBtn.onclick = saveStaff;
@@ -2199,11 +2408,14 @@ INDEX_HTML = r"""<!doctype html>
     els.testModelBtn.onclick = testModelConnection;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
     els.refreshHealthBtn.onclick = loadSystemHealth;
+    els.productTemplate.onchange = () => applyProductTemplate(false);
     els.model.onchange = () => {
       syncCustomModelState();
       saveSettings();
     };
     els.sampleBtn.onclick = () => {
+      applyProductTemplate(true);
+      if (els.productTemplate.value !== 'short_video') return;
       els.userInput.value = '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。';
       els.taskTitle.value = 'AI自动化获客短视频';
       els.autoProductionMode.value = 'package_only';
@@ -2227,6 +2439,8 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
     };
     els.gameSampleBtn.onclick = () => {
+      els.productTemplate.value = 'game_steam';
+      applyProductTemplate(true);
       setIfExists(els.workflow, 'workflow_Unity3D游戏Steam上架');
       els.userInput.value = '我想做一款 Unity 3D 第三人称探索解谜游戏，上架 Steam。目标玩家是喜欢低多边形、轻剧情、环境谜题和短流程独立游戏的玩家。团队规模按单人或两人小团队考虑，优先做 20-30 分钟可玩 Demo，用于 Steam 商店页、愿望单和后续众筹/抢先体验验证。希望风格统一、开发范围可控，不做联网，不做大型开放世界。';
       els.taskTitle.value = 'Unity3D探索解谜Steam游戏立项';
@@ -2253,6 +2467,7 @@ INDEX_HTML = r"""<!doctype html>
     els.clearSettingsBtn.onclick = () => {
       if (!confirm('确定清除本浏览器保存的 API Key、Base URL、模型、生图配置和视频配置？')) return;
       localStorage.removeItem(SETTINGS_KEY);
+      els.productTemplate.value = 'short_video';
       els.provider.value = 'auto';
       els.model.value = 'gpt-5.5';
       els.customModel.value = '';
@@ -2396,6 +2611,22 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/delete-workflow":
                 self._delete_workflow(str(payload.get("name") or "").strip())
                 self._send_json({"ok": True})
+                return
+
+            if parsed.path == "/api/save-file":
+                self._send_json(self._save_file(payload))
+                return
+
+            if parsed.path == "/api/rebuild-final-output":
+                self._send_json(self._rebuild_final_output(str(payload.get("task") or "").strip()))
+                return
+
+            if parsed.path == "/api/rerun-step":
+                self._send_json(self._rerun_step(payload))
+                return
+
+            if parsed.path == "/api/export-task":
+                self._send_json(self._export_task(payload))
                 return
 
             if parsed.path != "/api/run":
@@ -2873,15 +3104,248 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return {"name": name, "summary": summary, "files": files}
 
     def _file_content(self, task: str, file_name: str) -> dict:
-        task_dir = self._safe_task_dir(task)
-        target = (task_dir / file_name).resolve()
-        if not target.is_file() or not self._is_relative_to(target, task_dir.resolve()):
-            raise FileNotFoundError(file_name)
-
-        content_type = mimetypes.guess_type(target.name)[0] or "text/plain"
-        if not content_type.startswith("text/") and target.suffix.lower() not in {".json", ".md"}:
-            raise ValueError(f"Unsupported file type: {target.name}")
+        target, _ = self._safe_task_file(task, file_name, must_exist=True)
+        self._ensure_editable_file(target)
         return {"file": file_name, "content": target.read_text(encoding="utf-8", errors="replace")}
+
+    def _save_file(self, payload: dict) -> dict:
+        task = str(payload.get("task") or "").strip()
+        file_name = str(payload.get("file") or "").strip()
+        content = str(payload.get("content") or "")
+        target, task_dir = self._safe_task_file(task, file_name, must_exist=True)
+        self._ensure_editable_file(target)
+        target.write_text(content.rstrip() + "\n", encoding="utf-8")
+        return {"ok": True, "file": target.relative_to(task_dir).as_posix()}
+
+    def _rebuild_final_output(self, task: str) -> dict:
+        task_dir = self._safe_task_dir(task)
+        workflow_path = task_dir / "workflow.json"
+        input_path = task_dir / "input.md"
+        if not workflow_path.is_file():
+            raise FileNotFoundError("workflow.json")
+        if not input_path.is_file():
+            raise FileNotFoundError("input.md")
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        user_input = input_path.read_text(encoding="utf-8", errors="replace")
+        step_outputs = WorkflowEngine._collect_step_outputs(workflow, task_dir)
+        final_output = WorkflowEngine._build_final_output(workflow, user_input, step_outputs)
+        final_path = task_dir / "final_output.md"
+        final_path.write_text(final_output, encoding="utf-8")
+        return {"ok": True, "file": final_path.relative_to(task_dir).as_posix()}
+
+    def _rerun_step(self, payload: dict) -> dict:
+        task = str(payload.get("task") or "").strip()
+        step = int(payload.get("step") or 0)
+        if step <= 0:
+            raise ValueError("step is required")
+        task_dir = self._safe_task_dir(task)
+        engine = WorkflowEngine(
+            WORKSPACE_ROOT,
+            provider=str(payload.get("provider") or "auto").strip(),
+            model=str(payload.get("model") or "").strip() or None,
+            api_key=str(payload.get("api_key") or "").strip() or None,
+            base_url=str(payload.get("base_url") or "").strip() or None,
+            timeout=int(payload.get("timeout") or 0) or None,
+        )
+        result = engine.rerun_step(task_dir, step)
+        result["ok"] = True
+        return result
+
+    def _export_task(self, payload: dict) -> dict:
+        task = str(payload.get("task") or "").strip()
+        template = str(payload.get("template") or "").strip()
+        task_dir = self._safe_task_dir(task)
+        export_dir = task_dir / "export_package"
+        export_dir.mkdir(parents=True, exist_ok=True)
+
+        summary = {}
+        summary_path = task_dir / "run_summary.json"
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                summary = {}
+        workflow_name = str(summary.get("workflow") or "")
+        if not template:
+            template = self._infer_export_template(workflow_name)
+
+        final_output = self._read_task_text(task_dir, "final_output.md")
+        input_text = self._read_task_text(task_dir, "input.md")
+        step_outputs = self._read_all_step_outputs(task_dir)
+        files = self._write_export_files(export_dir, template, workflow_name, input_text, final_output, step_outputs)
+        return {
+            "ok": True,
+            "template": template,
+            "export_dir": export_dir.relative_to(task_dir).as_posix(),
+            "files": [path.relative_to(task_dir).as_posix() for path in files],
+        }
+
+    @staticmethod
+    def _ensure_editable_file(path: Path) -> None:
+        content_type = mimetypes.guess_type(path.name)[0] or "text/plain"
+        editable_suffixes = {".json", ".md", ".txt", ".csv", ".srt", ".log"}
+        if not content_type.startswith("text/") and path.suffix.lower() not in editable_suffixes:
+            raise ValueError(f"Unsupported file type: {path.name}")
+
+    @staticmethod
+    def _infer_export_template(workflow_name: str) -> str:
+        if "小红书" in workflow_name:
+            return "xiaohongshu"
+        if "游戏" in workflow_name or "Steam" in workflow_name:
+            return "game_steam"
+        if "软件市场" in workflow_name:
+            return "software_market"
+        if "员工" in workflow_name or "平台" in workflow_name:
+            return "agent_platform"
+        return "short_video"
+
+    @staticmethod
+    def _read_task_text(task_dir: Path, relative: str) -> str:
+        path = task_dir / relative
+        return path.read_text(encoding="utf-8", errors="replace") if path.is_file() else ""
+
+    @staticmethod
+    def _read_all_step_outputs(task_dir: Path) -> list[dict]:
+        outputs = []
+        for path in sorted(task_dir.glob("step_*/output.md")):
+            step_match = path.parent.name.split("_", 2)
+            outputs.append(
+                {
+                    "step": step_match[1] if len(step_match) > 1 else "",
+                    "agent": step_match[2] if len(step_match) > 2 else path.parent.name,
+                    "file": path.relative_to(task_dir).as_posix(),
+                    "content": path.read_text(encoding="utf-8", errors="replace"),
+                }
+            )
+        return outputs
+
+    def _write_export_files(
+        self,
+        export_dir: Path,
+        template: str,
+        workflow_name: str,
+        input_text: str,
+        final_output: str,
+        step_outputs: list[dict],
+    ) -> list[Path]:
+        written: list[Path] = []
+
+        def write(name: str, content: str) -> None:
+            path = export_dir / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content.rstrip() + "\n", encoding="utf-8")
+            written.append(path)
+
+        manifest = {
+            "template": template,
+            "workflow": workflow_name,
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+            "files": [],
+        }
+
+        write("README.md", self._export_readme(template, workflow_name))
+        write("final_output.md", final_output or "# 最终输出\n\n暂无 final_output.md。\n")
+
+        if template == "short_video":
+            write("视频制作包.md", final_output)
+            write("字幕.srt", self._extract_srt_from_text(final_output))
+            write("镜头清单.csv", self._shot_csv(step_outputs))
+            write("生图提示词.json", json.dumps(self._prompt_json(step_outputs, "06_"), ensure_ascii=False, indent=2))
+            write("视频提示词.json", json.dumps(self._prompt_json(step_outputs, "07_"), ensure_ascii=False, indent=2))
+        elif template == "xiaohongshu":
+            write("小红书文案.md", final_output)
+            write("标题列表.txt", self._extract_lines(final_output, ["标题", "选题"]))
+            write("封面文案.txt", self._extract_lines(final_output, ["封面"]))
+            write("发布检查清单.md", self._checklist("小红书图文"))
+        elif template == "game_steam":
+            write("GDD.md", final_output)
+            write("Unity开发任务清单.md", self._extract_lines(final_output, ["Unity", "开发", "任务", "架构"]))
+            write("Steam商店页文案.md", self._extract_lines(final_output, ["Steam", "商店", "愿望单"]))
+            write("测试发行清单.md", self._checklist("Steam 游戏"))
+        elif template == "software_market":
+            write("软件机会排行榜.md", final_output)
+            write("MVP验证计划.md", self._extract_lines(final_output, ["MVP", "验证", "获客", "风险"]))
+            write("商业化假设.md", self._extract_lines(final_output, ["商业化", "定价", "付费"]))
+        elif template == "agent_platform":
+            write("产品需求文档.md", final_output)
+            write("员工管理方案.md", self._extract_lines(final_output, ["员工", "管理", "权限"]))
+            write("工作流架构.md", self._extract_lines(final_output, ["工作流", "状态机", "上下文"]))
+            write("技术落地清单.md", self._extract_lines(final_output, ["技术", "架构", "API", "本地"]))
+        else:
+            write("产品包.md", final_output)
+
+        write("原始需求.md", input_text)
+        manifest["files"] = [path.name for path in written]
+        write("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        return written
+
+    @staticmethod
+    def _export_readme(template: str, workflow_name: str) -> str:
+        return "\n".join(
+            [
+                "# 产品导出包",
+                "",
+                f"- 类型：{template}",
+                f"- 工作流：{workflow_name or '未知'}",
+                "- 用途：把工作流输出整理成可继续制作、复制或交付的文件。",
+                "",
+                "建议先检查 `final_output.md`，再按具体产品类型查看拆分文件。",
+            ]
+        )
+
+    @staticmethod
+    def _extract_srt_from_text(text: str) -> str:
+        import re
+
+        match = re.search(r"```srt\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip() + "\n"
+        return "1\n00:00:00,000 --> 00:00:03,000\n请根据视频制作包补充字幕。\n"
+
+    @staticmethod
+    def _shot_csv(step_outputs: list[dict]) -> str:
+        rows = ['step,agent,file,summary']
+        for item in step_outputs:
+            summary = " ".join(str(item.get("content", "")).split())[:160].replace('"', '""')
+            rows.append(f'{item.get("step","")},{item.get("agent","")},{item.get("file","")},"{summary}"')
+        return "\n".join(rows)
+
+    @staticmethod
+    def _prompt_json(step_outputs: list[dict], agent_prefix: str) -> list[dict]:
+        return [
+            {
+                "step": item.get("step"),
+                "agent": item.get("agent"),
+                "source_file": item.get("file"),
+                "content": item.get("content", ""),
+            }
+            for item in step_outputs
+            if str(item.get("agent", "")).startswith(agent_prefix)
+        ]
+
+    @staticmethod
+    def _extract_lines(text: str, keywords: list[str]) -> str:
+        lines = []
+        for line in text.splitlines():
+            if any(keyword in line for keyword in keywords):
+                lines.append(line)
+        if not lines:
+            return text[:4000] if text else "暂无可提取内容。"
+        return "\n".join(lines)
+
+    @staticmethod
+    def _checklist(name: str) -> str:
+        return "\n".join(
+            [
+                f"# {name}交付检查清单",
+                "",
+                "- [ ] 需求和目标用户清楚",
+                "- [ ] 核心内容可直接复制使用",
+                "- [ ] 风险和待确认项已标记",
+                "- [ ] 文件命名和版本可追踪",
+                "- [ ] 已人工复核最终交付内容",
+            ]
+        )
 
     @staticmethod
     def _append_image_config(user_input: str, image_config: dict) -> str:
@@ -3133,6 +3597,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not self._is_relative_to(task_dir, output_root) or not task_dir.is_dir():
             raise FileNotFoundError(name)
         return task_dir
+
+    def _safe_task_file(self, task: str, file_name: str, must_exist: bool) -> tuple[Path, Path]:
+        if not file_name or file_name.startswith("/") or file_name.startswith("\\"):
+            raise ValueError("Invalid file name")
+        task_dir = self._safe_task_dir(task)
+        target = (task_dir / file_name).resolve()
+        task_root = task_dir.resolve()
+        if not self._is_relative_to(target, task_root):
+            raise ValueError("Invalid task file path")
+        if must_exist and not target.is_file():
+            raise FileNotFoundError(file_name)
+        return target, task_dir
 
     def _safe_workflow_path(self, name: str, must_exist: bool) -> Path:
         if not name:

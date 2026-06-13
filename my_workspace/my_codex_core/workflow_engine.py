@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -203,6 +204,76 @@ class WorkflowEngine:
             production_manifest=production_manifest["files"]["manifest"] if production_manifest else None,
         )
 
+    def rerun_step(self, task_dir: Path, step_no: int) -> dict:
+        workflow_path = task_dir / "workflow.json"
+        input_path = task_dir / "input.md"
+        if not workflow_path.is_file():
+            raise FileNotFoundError("workflow.json")
+        if not input_path.is_file():
+            raise FileNotFoundError("input.md")
+
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        steps = workflow.get("steps", [])
+        target_step = next((step for step in steps if int(step.get("step") or 0) == step_no), None)
+        if not target_step:
+            raise ValueError(f"Step not found: {step_no}")
+
+        user_input = input_path.read_text(encoding="utf-8", errors="replace")
+        agents = self.staff_loader.load_all()
+        agent = self.staff_loader.resolve_agent(agents, target_step["agent"])
+        step_dir = self._step_dir(task_dir, step_no, agent.agent_id)
+        previous_outputs = self._collect_step_outputs(workflow, task_dir, before_step=step_no)
+        prompt = self._build_step_prompt(workflow, target_step, user_input, previous_outputs)
+
+        output_path = step_dir / "output.md"
+        if output_path.exists():
+            backup = step_dir / f"output_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+            backup.write_text(output_path.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+
+        self.storage.write_text(step_dir / "system.md", agent.prompt)
+        self.storage.write_text(step_dir / "prompt.md", prompt)
+        self.storage.write_json(
+            step_dir / "metadata.json",
+            {
+                "step": step_no,
+                "agent_id": agent.agent_id,
+                "agent_name": agent.name,
+                "task": target_step.get("task"),
+                "expected_output": target_step.get("output"),
+                "flow_rule": agent.flow_rule,
+                "rerun_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+
+        result = self.api.run(agent.prompt, prompt)
+        self.storage.write_text(output_path, result.content)
+        action_results = self.action_executor.execute_from_text(result.content, task_dir)
+        self.storage.write_json(
+            step_dir / "rerun_result.json",
+            {
+                "step": step_no,
+                "agent_id": agent.agent_id,
+                "provider": result.provider,
+                "output_path": str(output_path),
+                "action_results": action_results,
+                "rerun_at": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+
+        step_outputs = self._collect_step_outputs(workflow, task_dir)
+        final_output = self._build_final_output(workflow, user_input, step_outputs)
+        final_path = task_dir / "final_output.md"
+        self.storage.write_text(final_path, final_output)
+        self._append_rerun_summary(task_dir, step_no, agent.agent_id, result.provider, str(output_path), str(final_path))
+
+        return {
+            "step": step_no,
+            "agent": agent.agent_id,
+            "provider": result.provider,
+            "file": output_path.relative_to(task_dir).as_posix(),
+            "final_output": final_path.relative_to(task_dir).as_posix(),
+        }
+
     def _resolve_workflow_path(self, workflow_key: str) -> Path:
         candidates = [
             self.workflow_root / workflow_key,
@@ -281,3 +352,63 @@ class WorkflowEngine:
                 ]
             )
         return "\n".join(sections).rstrip() + "\n"
+
+    @staticmethod
+    def _step_dir(task_dir: Path, step_no: int, agent_id: str) -> Path:
+        matches = sorted(task_dir.glob(f"step_{step_no:02d}_*"))
+        if matches:
+            return matches[0]
+        return task_dir / f"step_{step_no:02d}_{agent_id}"
+
+    @classmethod
+    def _collect_step_outputs(cls, workflow: dict, task_dir: Path, before_step: int | None = None) -> list[dict[str, str]]:
+        outputs: list[dict[str, str]] = []
+        for step in workflow.get("steps", []):
+            step_no = int(step.get("step") or 0)
+            if before_step is not None and step_no >= before_step:
+                continue
+            matches = sorted(task_dir.glob(f"step_{step_no:02d}_*/output.md"))
+            content = matches[0].read_text(encoding="utf-8", errors="replace") if matches else ""
+            outputs.append(
+                {
+                    "step": str(step_no),
+                    "agent": str(step.get("agent") or ""),
+                    "task": str(step.get("task") or ""),
+                    "expected_output": str(step.get("output") or ""),
+                    "output_path": str(matches[0]) if matches else "",
+                    "content": content,
+                    "action_results": "",
+                }
+            )
+        return outputs
+
+    @staticmethod
+    def _append_rerun_summary(
+        task_dir: Path,
+        step_no: int,
+        agent_id: str,
+        provider: str,
+        output_path: str,
+        final_path: str,
+    ) -> None:
+        summary_path = task_dir / "run_summary.json"
+        summary = {}
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                summary = {}
+        history = summary.setdefault("rerun_history", [])
+        history.append(
+            {
+                "step": step_no,
+                "agent": agent_id,
+                "provider": provider,
+                "output_path": output_path,
+                "final_output": final_path,
+                "rerun_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        summary["provider"] = provider
+        summary["final_output"] = final_path
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

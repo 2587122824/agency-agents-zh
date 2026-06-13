@@ -734,3 +734,55 @@ Validation:
 - `GET /api/workflows` returned all current workflows and custom staff folders.
 - `GET /api/workflow-detail?name=workflow_短视频全流程` returned the full short-video workflow.
 - Smoke-tested workflow create/read/delete through the API using temporary file `workflow_codex_smoke_editor.json`; it was saved, read back, verified to preserve extra top-level fields, and deleted successfully.
+
+## Output Editor, Step Rerun, Export Package, And Product Templates
+
+[2026-06-13 20:45:00 +08:00] command: implemented the four requested next-step capabilities after the user asked to add all four.
+
+Management UI changes:
+
+- Added `产品类型` selector in the run form.
+- Product templates currently cover `短视频`, `小红书图文`, `Unity 3D Steam 游戏`, `软件市场分析`, and `AI 员工平台`.
+- Changing product type auto-fills the recommended workflow, task title, aspect ratio/duration defaults, and production mode defaults.
+- `填入示例` now uses the selected product template; `游戏示例` switches to the game template.
+- Replaced the output viewer's read-only `pre` with an editable textarea.
+- Added task-output action buttons: `保存当前文件`, `重建最终汇总`, `重跑当前步骤`, and `导出产品包`.
+
+Backend/API changes:
+
+- Added `POST /api/save-file` to save editable text files under a task directory.
+- Added `POST /api/rebuild-final-output` to rebuild `final_output.md` from current step outputs.
+- Added `POST /api/rerun-step` to rerun one step using the original `workflow.json`, original `input.md`, existing prior step outputs, and the currently selected model provider.
+- Added `POST /api/export-task` to generate an `export_package/` folder under the task output.
+- Export templates create practical delivery files:
+  - short video: `视频制作包.md`, `字幕.srt`, `镜头清单.csv`, `生图提示词.json`, `视频提示词.json`
+  - xiaohongshu: `小红书文案.md`, `标题列表.txt`, `封面文案.txt`, `发布检查清单.md`
+  - game: `GDD.md`, `Unity开发任务清单.md`, `Steam商店页文案.md`, `测试发行清单.md`
+  - software market: `软件机会排行榜.md`, `MVP验证计划.md`, `商业化假设.md`
+  - agent platform: `产品需求文档.md`, `员工管理方案.md`, `工作流架构.md`, `技术落地清单.md`
+- Added safe task-file path handling so text editing stays inside `my_workspace/my_task_output/<task>/`.
+
+Workflow engine changes:
+
+- Added `WorkflowEngine.rerun_step(task_dir, step_no)`.
+- Rerun backs up the previous `output.md` to `output_backup_YYYYMMDD_HHMMSS.md`.
+- Rerun writes fresh `system.md`, `prompt.md`, `metadata.json`, `output.md`, `rerun_result.json`, rebuilds `final_output.md`, and appends `rerun_history` to `run_summary.json`.
+- Offline rerun works without calling a model; OpenAI-compatible rerun uses the selected provider/model/API config from the UI.
+
+Documentation:
+
+- Updated `my_workspace/README.md` with output editing, one-step rerun, export package, and product template usage notes.
+
+Validation:
+
+- `ast.parse` syntax check passed for `my_workspace/web_app.py` and `my_workspace/my_codex_core/workflow_engine.py`.
+- Extracted the embedded `<script>` from `my_workspace/web_app.py`; `node --check` passed.
+- Started the current management UI on `http://127.0.0.1:8767` for verification because an older process was still responding on `8765`.
+- Home page markers verified: `productTemplate`, `saveFileBtn`, `rebuildFinalBtn`, `rerunStepBtn`, and `exportTaskBtn`.
+- Node-based smoke test created temporary task `task_codex_editor_smoke`, then verified:
+  - `POST /api/save-file` returned `final_output.md`
+  - `POST /api/rebuild-final-output` returned `final_output.md`
+  - `POST /api/rerun-step` in `offline` mode returned `step_01_agent/output.md`
+  - `POST /api/export-task` returned `export_package` with 9 files and `export_package/视频制作包.md`
+  - `POST /api/delete-task` removed the temporary task successfully
+- Replaced the old process on `http://127.0.0.1:8765`; page markers `saveFileBtn` and `productTemplate` returned `True` on the default management UI port.
