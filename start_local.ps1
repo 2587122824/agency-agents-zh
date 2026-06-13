@@ -1,0 +1,104 @@
+param(
+  [string]$Model = "qwen2.5:7b",
+  [int]$Port = 8765,
+  [switch]$SkipModelPull,
+  [switch]$NoBrowser
+)
+
+$ErrorActionPreference = "Stop"
+
+function Write-Step {
+  param([string]$Message)
+  Write-Host "[start_local] $Message"
+}
+
+function Test-HttpOk {
+  param(
+    [string]$Url,
+    [int]$TimeoutSec = 3
+  )
+  try {
+    $response = Invoke-WebRequest -UseBasicParsing -Uri $Url -TimeoutSec $TimeoutSec
+    return ($response.StatusCode -ge 200 -and $response.StatusCode -lt 500)
+  } catch {
+    return $false
+  }
+}
+
+function Wait-Http {
+  param(
+    [string]$Url,
+    [int]$Seconds = 30
+  )
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-HttpOk -Url $Url -TimeoutSec 2) {
+      return $true
+    }
+    Start-Sleep -Seconds 1
+  }
+  return $false
+}
+
+$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $Root
+
+$OllamaExe = Get-Command ollama -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
+if (-not $OllamaExe) {
+  $BundledOllama = Join-Path $Root "runtime\ollama\ollama.exe"
+  if (Test-Path $BundledOllama) {
+    $OllamaExe = $BundledOllama
+  }
+}
+
+if (-not $OllamaExe) {
+  throw "Ollama not found. Install Ollama or put ollama.exe at runtime\ollama\ollama.exe."
+}
+
+Write-Step "Ollama: $OllamaExe"
+if (-not (Test-HttpOk -Url "http://127.0.0.1:11434/v1/models")) {
+  Write-Step "Starting Ollama service"
+  Start-Process -FilePath $OllamaExe -ArgumentList "serve" -WindowStyle Hidden
+  if (-not (Wait-Http -Url "http://127.0.0.1:11434/v1/models" -Seconds 45)) {
+    throw "Ollama service did not start within 45 seconds."
+  }
+}
+
+if (-not $SkipModelPull) {
+  Write-Step "Checking model: $Model"
+  $modelList = & $OllamaExe list
+  if (($modelList -join "`n") -notmatch [regex]::Escape($Model)) {
+    Write-Step "Model $Model not found. Pulling it now. First download can take a while."
+    & $OllamaExe pull $Model
+  }
+}
+
+$PythonExe = Get-Command python -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
+if (-not $PythonExe) {
+  $PythonExe = Get-Command py -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
+}
+if (-not $PythonExe) {
+  throw "Python not found. Install Python 3.10+ or add Python to PATH."
+}
+
+$env:OPENAI_API_KEY = "local"
+$env:OPENAI_BASE_URL = "http://127.0.0.1:11434/v1"
+$env:OPENAI_MODEL = $Model
+
+$WebUrl = "http://127.0.0.1:$Port"
+if (-not (Test-HttpOk -Url $WebUrl)) {
+  Write-Step "Starting web app: $WebUrl"
+  $webArgs = @("my_workspace/web_app.py", "--port", "$Port")
+  if ((Split-Path -Leaf $PythonExe) -ieq "py.exe") {
+    $webArgs = @("-3") + $webArgs
+  }
+  Start-Process -FilePath $PythonExe -ArgumentList $webArgs -WorkingDirectory $Root -WindowStyle Hidden
+  if (-not (Wait-Http -Url $WebUrl -Seconds 30)) {
+    throw "Web app did not start within 30 seconds."
+  }
+}
+
+Write-Step "Web app is ready: $WebUrl"
+if (-not $NoBrowser) {
+  Start-Process $WebUrl
+}

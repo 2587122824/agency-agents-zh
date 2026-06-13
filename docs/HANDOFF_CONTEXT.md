@@ -516,3 +516,49 @@ Results:
 Important limitation:
 
 - This is a safe foundation, not a full autonomous operating layer. It does not run shell commands, delete files, call paid media APIs, or edit arbitrary project paths. Those require an approval layer, action queue, permission model, and audit log before enabling.
+
+## One-Stop Local Startup
+
+[2026-06-13 17:25:00 +08:00] command: added a one-stop local startup path for packaging the project as a local service.
+
+New startup files:
+
+```text
+start_local.ps1
+start_local.bat
+```
+
+Behavior:
+
+- `start_local.ps1` finds `ollama` from PATH, or `runtime/ollama/ollama.exe` for a future bundled package.
+- It starts `ollama serve` when `http://127.0.0.1:11434/v1/models` is not reachable.
+- It checks the default model `qwen2.5:7b`; if missing and `-SkipModelPull` is not provided, it runs `ollama pull qwen2.5:7b`.
+- It sets `OPENAI_API_KEY=local`, `OPENAI_BASE_URL=http://127.0.0.1:11434/v1`, and `OPENAI_MODEL=<model>` for the launched web app process.
+- It starts `python my_workspace/web_app.py --port 8765`.
+- It opens `http://127.0.0.1:8765` unless `-NoBrowser` is passed.
+- `start_local.bat` is a double-click wrapper around the PowerShell script using `ExecutionPolicy Bypass`.
+
+Management UI changes:
+
+- Added top navigation item `系统状态`.
+- Added `GET /api/system-health`.
+- The system status page checks Python runtime, workspace path, task output directory write access, knowledge base write access, action workspace write access, Ollama command presence, and Ollama OpenAI-compatible model endpoint.
+- Added a first-start guide covering one-click startup, selecting local model, testing model connection, uploading knowledge base files, and running a sample workflow.
+
+Documentation:
+
+- Updated `my_workspace/README.md` with one-stop startup commands and system status notes.
+- Updated `my_workspace/my_deploy/OFFLINE_DEPLOY.md` with the light one-stop startup flow and manual fallback flow.
+
+Validation run:
+
+- PowerShell parser check for `start_local.ps1` passed using default PowerShell file reading after converting script messages to ASCII.
+- Python syntax check passed for `my_workspace/run_flow.py`, `my_workspace/web_app.py`, and every Python file under `my_workspace/my_codex_core`.
+- Management UI restarted on `http://127.0.0.1:8765` and returned HTTP 200.
+- Home page markers verified: `data-view-target="system"`, `refreshHealthBtn`, `healthGrid`, `首次启动向导`, and `/api/system-health`.
+- `/api/system-health` returned 7 checks: Python runtime, workspace path, task output path, knowledge base path, action workspace path, Ollama command, and Ollama model service.
+- On the current machine, Python and local directories are OK; Ollama command and service return `warn` because Ollama is not installed/in PATH and `http://127.0.0.1:11434/v1` is not running. This is expected until the user installs or bundles Ollama.
+
+Packaging note:
+
+- Current implementation is a lightweight local package path. It does not embed a model file in Git. A full offline installer can later place `ollama.exe` under `runtime/ollama/` and pre-import model data outside Git because model files are too large for normal source control.

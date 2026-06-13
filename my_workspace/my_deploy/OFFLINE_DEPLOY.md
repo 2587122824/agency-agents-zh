@@ -2,11 +2,35 @@
 
 ## 推荐启动顺序
 
+轻量一站式启动：
+
+```powershell
+.\start_local.ps1
+```
+
+或双击：
+
+```text
+start_local.bat
+```
+
+默认行为：
+
+1. 查找 `ollama` 命令，或查找 `runtime/ollama/ollama.exe`。
+2. 启动 Ollama 服务。
+3. 检查默认模型 `qwen2.5:7b`，如果缺失则执行 `ollama pull qwen2.5:7b`。
+4. 设置当前进程的 OpenAI-compatible 环境变量。
+5. 启动 `my_workspace/web_app.py`。
+6. 打开 `http://127.0.0.1:8765`。
+
+手动启动顺序：
+
 1. 启动本地模型服务，例如 Ollama、LM Studio、vLLM 或 Xinference。
-2. 在管理台 `模型接口配置` 中选择本地模型预设，或填写 OpenAI-compatible Base URL。
-3. 点击 `测试模型连接`。
-4. 上传本地知识库文件。
-5. 运行工作流。
+2. 在管理台 `系统状态` 页面检查 Python、目录写入权限和 Ollama 服务。
+3. 在管理台 `模型接口配置` 中选择本地模型预设，或填写 OpenAI-compatible Base URL。
+4. 点击 `测试当前模型接口`。
+5. 上传本地知识库文件。
+6. 运行工作流。
 
 ## 常用本地模型地址
 

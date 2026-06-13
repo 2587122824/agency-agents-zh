@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import shutil
 import sys
 import threading
 import time
@@ -45,7 +46,9 @@ INDEX_HTML = r"""<!doctype html>
       --muted: #667085;
       --accent: #0f766e;
       --accent-strong: #0b5f59;
-      --danger: #b42318;
+              --danger: #b42318;
+      --ok: #166534;
+      --warn: #92400e;
       --shadow: 0 1px 3px rgba(16, 24, 40, .08);
     }
     * { box-sizing: border-box; }
@@ -107,7 +110,8 @@ INDEX_HTML = r"""<!doctype html>
       min-height: calc(100vh - 56px);
     }
     body[data-view="run"] main,
-    body[data-view="staff"] main {
+    body[data-view="staff"] main,
+    body[data-view="system"] main {
       grid-template-columns: 1fr;
     }
     aside {
@@ -412,6 +416,33 @@ INDEX_HTML = r"""<!doctype html>
       font-family: Consolas, "Cascadia Mono", monospace;
       font-size: 13px;
     }
+    .health-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .health-card {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fff;
+      padding: 12px;
+      display: grid;
+      gap: 6px;
+      min-height: 96px;
+    }
+    .health-card.ok { border-color: #bbf7d0; background: #f0fdf4; }
+    .health-card.warn { border-color: #fde68a; background: #fffbeb; }
+    .health-card.error { border-color: #fecdca; background: #fef3f2; }
+    .health-card strong {
+      font-size: 14px;
+    }
+    .health-state {
+      font-weight: 650;
+      color: var(--muted);
+    }
+    .health-card.ok .health-state { color: var(--ok); }
+    .health-card.warn .health-state { color: var(--warn); }
+    .health-card.error .health-state { color: var(--danger); }
     pre {
       margin: 0;
       padding: 16px;
@@ -446,6 +477,7 @@ INDEX_HTML = r"""<!doctype html>
       .provider-grid { grid-template-columns: 1fr; }
       .video-grid { grid-template-columns: 1fr; }
       .staff-manager { grid-template-columns: 1fr; }
+      .health-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -457,6 +489,7 @@ INDEX_HTML = r"""<!doctype html>
         <button class="nav-btn active" data-view-target="run" type="button">运行工作流</button>
         <button class="nav-btn" data-view-target="staff" type="button">数字员工</button>
         <button class="nav-btn" data-view-target="output" type="button">任务输出</button>
+        <button class="nav-btn" data-view-target="system" type="button">系统状态</button>
       </nav>
     </div>
     <div class="muted small" id="env">加载中</div>
@@ -822,6 +855,52 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <pre id="fileContent">选择左侧任务，或运行一个新任务。</pre>
       </div>
+
+      <div class="panel form view" data-view="system" hidden>
+        <div class="row">
+          <strong>系统状态</strong>
+          <button id="refreshHealthBtn" type="button">刷新状态</button>
+          <span id="healthStatus" class="status">检查本地运行环境</span>
+        </div>
+        <div class="health-grid" id="healthGrid"></div>
+        <details open>
+          <summary><strong>首次启动向导</strong> <span class="muted small">面向一站式本地部署</span></summary>
+          <div class="details-body">
+            <div class="reference-list">
+              <div class="reference-item">
+                <div class="reference-info">
+                  <div class="reference-name">1. 一键启动</div>
+                  <div class="muted small">Windows 用户可双击项目根目录的 start_local.bat；它会启动 Ollama、启动管理台并打开浏览器。</div>
+                </div>
+              </div>
+              <div class="reference-item">
+                <div class="reference-info">
+                  <div class="reference-name">2. 选择本地模型</div>
+                  <div class="muted small">进入“运行工作流 -> 模型接口配置”，选择 Ollama 本地模型，模型名使用已下载的模型，例如 qwen2.5:7b。</div>
+                </div>
+              </div>
+              <div class="reference-item">
+                <div class="reference-info">
+                  <div class="reference-name">3. 测试模型接口</div>
+                  <div class="muted small">点击“测试当前模型接口”。通过后再运行工作流；如果失败，先看系统状态里的 Ollama 和模型服务提示。</div>
+                </div>
+              </div>
+              <div class="reference-item">
+                <div class="reference-info">
+                  <div class="reference-name">4. 上传知识库</div>
+                  <div class="muted small">把公司资料、产品说明、话术 SOP 上传到 my_knowledge_base，运行时选择“追加 my_knowledge_base”。</div>
+                </div>
+              </div>
+              <div class="reference-item">
+                <div class="reference-info">
+                  <div class="reference-name">5. 运行示例工作流</div>
+                  <div class="muted small">先用 offline 检查流程，再切到 openai/本地模型执行。输出统一写入 my_task_output。</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </details>
+      </div>
     </section>
   </main>
 
@@ -896,6 +975,9 @@ INDEX_HTML = r"""<!doctype html>
       staffAgentMd: document.getElementById('staffAgentMd'),
       staffFlowRule: document.getElementById('staffFlowRule'),
       taskSidebar: document.getElementById('taskSidebar'),
+      refreshHealthBtn: document.getElementById('refreshHealthBtn'),
+      healthStatus: document.getElementById('healthStatus'),
+      healthGrid: document.getElementById('healthGrid'),
     };
     const navButtons = Array.from(document.querySelectorAll('[data-view-target]'));
     const views = Array.from(document.querySelectorAll('[data-view]'));
@@ -925,6 +1007,14 @@ INDEX_HTML = r"""<!doctype html>
       if (viewName === 'output') {
         loadTasks().catch(err => setStatus(err.message, true));
       }
+      if (viewName === 'system') {
+        loadSystemHealth().catch(err => setHealthStatus(err.message, true));
+      }
+    }
+
+    function setHealthStatus(text, isError = false) {
+      els.healthStatus.textContent = text;
+      els.healthStatus.classList.toggle('error', isError);
     }
 
     function resetProgress() {
@@ -1265,6 +1355,41 @@ INDEX_HTML = r"""<!doctype html>
         info.appendChild(meta);
         item.appendChild(info);
         els.knowledgeList.appendChild(item);
+      }
+    }
+
+    async function loadSystemHealth() {
+      setHealthStatus('正在检查系统状态');
+      const data = await api('/api/system-health');
+      renderSystemHealth(data.checks || []);
+      const errors = (data.checks || []).filter(item => item.status === 'error').length;
+      const warns = (data.checks || []).filter(item => item.status === 'warn').length;
+      if (errors) {
+        setHealthStatus(`发现 ${errors} 项异常`, true);
+      } else if (warns) {
+        setHealthStatus(`发现 ${warns} 项提醒`);
+      } else {
+        setHealthStatus('系统状态正常');
+      }
+    }
+
+    function renderSystemHealth(checks) {
+      els.healthGrid.innerHTML = '';
+      for (const check of checks) {
+        const card = document.createElement('div');
+        card.className = `health-card ${check.status || 'warn'}`;
+        const title = document.createElement('strong');
+        title.textContent = check.name || '';
+        const state = document.createElement('div');
+        state.className = 'health-state';
+        state.textContent = check.label || check.status || '';
+        const detail = document.createElement('div');
+        detail.className = 'muted small';
+        detail.textContent = check.detail || '';
+        card.appendChild(title);
+        card.appendChild(state);
+        card.appendChild(detail);
+        els.healthGrid.appendChild(card);
       }
     }
 
@@ -1684,6 +1809,7 @@ INDEX_HTML = r"""<!doctype html>
     els.localModelName.onchange = applyLocalModelName;
     els.testModelBtn.onclick = testModelConnection;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
+    els.refreshHealthBtn.onclick = loadSystemHealth;
     els.model.onchange = () => {
       syncCustomModelState();
       saveSettings();
@@ -1791,6 +1917,7 @@ INDEX_HTML = r"""<!doctype html>
         await loadTasks();
         await loadStaffList();
         await loadKnowledgeList();
+        await loadSystemHealth();
       } catch (err) {
         setStatus(err.message, true);
       }
@@ -1811,6 +1938,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_html(INDEX_HTML)
             elif parsed.path == "/api/config":
                 self._send_json(self._config())
+            elif parsed.path == "/api/system-health":
+                self._send_json(self._system_health())
             elif parsed.path == "/api/tasks":
                 self._send_json({"tasks": self._tasks()})
             elif parsed.path == "/api/knowledge":
@@ -1962,6 +2091,64 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         data = json.loads(LOCAL_MODEL_PRESETS.read_text(encoding="utf-8"))
         presets = data.get("presets") if isinstance(data, dict) else data
         return presets if isinstance(presets, list) else []
+
+    def _system_health(self) -> dict:
+        checks = [
+            self._health_check("Python 运行时", "ok", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"),
+            self._path_check("工作区目录", WORKSPACE_ROOT, must_be_writable=False),
+            self._path_check("任务输出目录", OUTPUT_ROOT, must_be_writable=True),
+            self._path_check("知识库目录", KNOWLEDGE_ROOT, must_be_writable=True),
+            self._path_check("动作工作区", WORKSPACE_ROOT / "my_action_workspace", must_be_writable=True),
+        ]
+
+        ollama_path = shutil.which("ollama")
+        if ollama_path:
+            checks.append(self._health_check("Ollama 命令", "ok", ollama_path))
+        else:
+            bundled = WORKSPACE_ROOT.parent / "runtime" / "ollama" / "ollama.exe"
+            if bundled.exists():
+                checks.append(self._health_check("Ollama 命令", "ok", str(bundled)))
+            else:
+                checks.append(self._health_check("Ollama 命令", "warn", "未在 PATH 或 runtime/ollama/ollama.exe 找到；可先安装 Ollama 或放入 runtime/ollama/"))
+
+        checks.append(self._ollama_service_check())
+
+        return {
+            "checks": checks,
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        }
+
+    @staticmethod
+    def _health_check(name: str, status: str, detail: str) -> dict:
+        labels = {"ok": "正常", "warn": "提醒", "error": "异常"}
+        return {"name": name, "status": status, "label": labels.get(status, status), "detail": detail}
+
+    def _path_check(self, name: str, path: Path, must_be_writable: bool) -> dict:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            if must_be_writable:
+                marker = path / f".health_{uuid4().hex[:8]}"
+                marker.write_text("ok", encoding="utf-8")
+                marker.unlink()
+            return self._health_check(name, "ok", str(path))
+        except Exception as exc:
+            return self._health_check(name, "error", f"{path}: {exc}")
+
+    def _ollama_service_check(self) -> dict:
+        req = urllib_request.Request("http://127.0.0.1:11434/v1/models", method="GET")
+        try:
+            with urllib_request.urlopen(req, timeout=3) as response:
+                data = json.loads(response.read().decode("utf-8", errors="replace"))
+            models = data.get("data") if isinstance(data, dict) else []
+            names = [str(item.get("id") or item.get("name") or "") for item in models if isinstance(item, dict)]
+            detail = "已连接 http://127.0.0.1:11434/v1"
+            if names:
+                detail += "；模型：" + ", ".join(names[:5])
+            else:
+                detail += "；暂未发现模型，可运行 start_local.ps1 自动拉取默认模型"
+            return self._health_check("Ollama 模型服务", "ok", detail)
+        except Exception as exc:
+            return self._health_check("Ollama 模型服务", "warn", f"未连接 http://127.0.0.1:11434/v1；{exc}")
 
     def _staff_list(self) -> list[dict]:
         if not STAFF_ROOT.exists():
