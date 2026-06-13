@@ -1,0 +1,51 @@
+{
+  "presets": [
+    {
+      "id": "ollama",
+      "name": "Ollama 本地模型",
+      "base_url": "http://127.0.0.1:11434/v1",
+      "api_key": "local",
+      "models": [
+        "qwen2.5:7b",
+        "qwen2.5:14b",
+        "qwen3:8b",
+        "deepseek-r1:14b",
+        "llama3.1:8b"
+      ]
+    },
+    {
+      "id": "lm-studio",
+      "name": "LM Studio 本地服务",
+      "base_url": "http://127.0.0.1:1234/v1",
+      "api_key": "local",
+      "models": [
+        "local-model",
+        "qwen2.5-7b-instruct",
+        "qwen2.5-coder-7b-instruct",
+        "deepseek-coder"
+      ]
+    },
+    {
+      "id": "vllm",
+      "name": "vLLM/OpenAI兼容服务",
+      "base_url": "http://127.0.0.1:8000/v1",
+      "api_key": "local",
+      "models": [
+        "Qwen/Qwen2.5-7B-Instruct",
+        "Qwen/Qwen2.5-14B-Instruct",
+        "deepseek-ai/DeepSeek-R1-Distill-Qwen-14B"
+      ]
+    },
+    {
+      "id": "xinference",
+      "name": "Xinference 本地服务",
+      "base_url": "http://127.0.0.1:9997/v1",
+      "api_key": "local",
+      "models": [
+        "qwen2.5-instruct",
+        "qwen2.5-coder-instruct",
+        "deepseek-r1-distill-qwen"
+      ]
+    }
+  ]
+}

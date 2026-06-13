@@ -450,3 +450,69 @@ Page contains data-view-target="run", data-view-target="staff", data-view-target
 
 
 [2026-06-12 22:43:25 +08:00] command: added full-auto production framework package mode via production_pipeline.py and web UI controls. Verified package_only run created production_manifest.json, image_prompts/, video_prompts/, subtitles.srt, audio/voiceover.txt, and edit_checklist.md without storing secrets.
+
+## Offline Deploy Agent Foundation
+
+[2026-06-13 16:58:08 +08:00] command: added a conservative execution-action foundation for offline agents.
+
+New files/directories:
+
+```text
+my_workspace/my_codex_core/action_executor.py
+my_workspace/my_action_workspace/.gitignore
+my_workspace/my_action_logs/.gitignore
+my_workspace/my_knowledge_base/.gitignore
+my_workspace/my_local_models/local_model_presets.json
+my_workspace/my_deploy/OFFLINE_DEPLOY.md
+```
+
+Workflow engine changes:
+
+- `WorkflowEngine` now creates an `ActionExecutor` rooted at `my_workspace/my_action_workspace`.
+- Agent step outputs are scanned for JSON action blocks.
+- Supported actions are currently limited to `mkdir`, `create_file`, and `write_json`.
+- All action paths must be relative and are constrained under `my_action_workspace`.
+- When actions run, their results are written to the task `action_log.json` and included in the step record as `action_results`.
+- The per-step prompt now tells agents how to provide optional action JSON blocks.
+
+Management UI changes:
+
+- `模型接口配置` now includes local model presets and local model name selection.
+- Local presets are loaded from `my_workspace/my_local_models/local_model_presets.json`.
+- Current presets cover Ollama, LM Studio, vLLM, and Xinference using OpenAI-compatible Base URLs.
+- Selecting a local preset switches provider to `openai`, fills the preset Base URL and `local` API Key, and puts the selected local model into the custom model field.
+- Added `测试当前模型接口`, backed by `POST /api/test-model`, which calls the configured OpenAI-compatible `/chat/completions` endpoint.
+- `记忆与继承` now includes local knowledge controls.
+- Added `GET /api/knowledge` and `POST /api/upload-knowledge`.
+- Allowed knowledge file types are `.md`, `.txt`, `.json`, and `.csv`; upload max size is 5 MB; files must decode as UTF-8.
+- When `use_knowledge` is enabled, workflow input appends up to 20,000 characters from `my_knowledge_base`.
+
+Documentation changes:
+
+- Updated `my_workspace/README.md` with local model, knowledge base, action execution, and offline deployment notes.
+- Added `my_workspace/my_deploy/OFFLINE_DEPLOY.md` for offline startup order and action boundaries.
+
+Verification run:
+
+```powershell
+python - <syntax compile script>
+python - <json parse script>
+python - <action executor smoke script>
+python my_workspace/run_flow.py --provider offline --workflow workflow_软件市场机会分析 --input "测试离线部署基础框架：请输出一个可离线使用的AI员工平台验证方案。"
+```
+
+Results:
+
+- Python syntax check passed for `my_workspace/run_flow.py`, `my_workspace/web_app.py`, and every Python file under `my_workspace/my_codex_core`.
+- JSON parsing passed for all staff/workflow JSON files and `my_local_models/local_model_presets.json`.
+- Action executor smoke test created `smoke/hello.txt` and `smoke/data.json` under `my_action_workspace`.
+- Offline workflow run completed with 1 step and wrote output under `my_workspace/my_task_output/task_20260613_165808_workflow_软件市场机会分析/`.
+- Management UI restarted on `http://127.0.0.1:8765` and returned HTTP 200.
+- Home page markers verified: `localModelPreset`, `localModelName`, `testModelBtn`, `useKnowledge`, `uploadKnowledgeBtn`, and `knowledgeList`.
+- `/api/config` returned 4 local model presets.
+- `/api/knowledge` returned HTTP 200.
+- `/api/upload-knowledge` was smoke-tested with a small UTF-8 text file; the uploaded test file was listed, then removed.
+
+Important limitation:
+
+- This is a safe foundation, not a full autonomous operating layer. It does not run shell commands, delete files, call paid media APIs, or edit arbitrary project paths. Those require an approval layer, action queue, permission model, and audit log before enabling.

@@ -9,6 +9,8 @@ import time
 import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
@@ -21,6 +23,8 @@ WORKFLOW_ROOT = WORKSPACE_ROOT / "my_workflows"
 STAFF_ROOT = WORKSPACE_ROOT / "my_custom_staff"
 MEMORY_ROOT = WORKSPACE_ROOT / "my_memory"
 REFERENCE_ROOT = WORKSPACE_ROOT / "my_reference_images"
+KNOWLEDGE_ROOT = WORKSPACE_ROOT / "my_knowledge_base"
+LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
 
@@ -524,6 +528,21 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="customModel" placeholder="选择“手动输入模型名”时填写" disabled />
               </label>
             </div>
+            <div class="provider-grid">
+              <label>本地模型服务
+                <select id="localModelPreset">
+                  <option value="">不使用本地预设</option>
+                </select>
+              </label>
+              <label>本地模型名
+                <select id="localModelName">
+                  <option value="">先选择本地模型服务</option>
+                </select>
+              </label>
+              <label>连接测试
+                <button id="testModelBtn" type="button">测试当前模型接口</button>
+              </label>
+            </div>
           </div>
         </details>
         <details>
@@ -548,6 +567,21 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
+            <div class="provider-grid">
+              <label>本地知识库
+                <select id="useKnowledge">
+                  <option value="off" selected>不追加知识库</option>
+                  <option value="on">追加 my_knowledge_base</option>
+                </select>
+              </label>
+              <label>上传知识文件
+                <input id="knowledgeFile" type="file" accept=".md,.txt,.json,.csv" />
+              </label>
+              <label>知识库操作
+                <button id="uploadKnowledgeBtn" type="button">上传到知识库</button>
+              </label>
+            </div>
+            <div class="reference-list" id="knowledgeList"></div>
           </div>
         </details>
         <details>
@@ -801,10 +835,17 @@ INDEX_HTML = r"""<!doctype html>
       taskTitle: document.getElementById('taskTitle'),
       apiKey: document.getElementById('apiKey'),
       baseUrl: document.getElementById('baseUrl'),
+      localModelPreset: document.getElementById('localModelPreset'),
+      localModelName: document.getElementById('localModelName'),
+      testModelBtn: document.getElementById('testModelBtn'),
       userInput: document.getElementById('userInput'),
       useMemory: document.getElementById('useMemory'),
       inheritTask: document.getElementById('inheritTask'),
       inheritMode: document.getElementById('inheritMode'),
+      useKnowledge: document.getElementById('useKnowledge'),
+      knowledgeFile: document.getElementById('knowledgeFile'),
+      uploadKnowledgeBtn: document.getElementById('uploadKnowledgeBtn'),
+      knowledgeList: document.getElementById('knowledgeList'),
       autoProductionMode: document.getElementById('autoProductionMode'),
       composeTool: document.getElementById('composeTool'),
       finalVideoName: document.getElementById('finalVideoName'),
@@ -864,6 +905,7 @@ INDEX_HTML = r"""<!doctype html>
     let selectedReferenceFiles = [];
     let referencePreviewUrls = new Map();
     let progressTimer = null;
+    let localModelPresets = [];
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
 
     function setStatus(text, isError = false) {
@@ -973,8 +1015,10 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadConfig() {
       const data = await api('/api/config');
+      localModelPresets = data.local_model_presets || [];
       els.env.textContent = data.openai_configured ? 'OpenAI 已配置' : 'OpenAI 未配置，默认离线模式';
       els.workflow.innerHTML = data.workflows.map(w => `<option value="${w.stem}">${w.name}</option>`).join('');
+      renderLocalModelPresets();
       restoreSettings();
     }
 
@@ -994,9 +1038,12 @@ INDEX_HTML = r"""<!doctype html>
         customModel: els.customModel.value,
         apiKey: els.apiKey.value,
         baseUrl: els.baseUrl.value,
+        localModelPreset: els.localModelPreset.value,
+        localModelName: els.localModelName.value,
         useMemory: els.useMemory.value,
         inheritTask: els.inheritTask.value,
         inheritMode: els.inheritMode.value,
+        useKnowledge: els.useKnowledge.value,
         autoProductionMode: els.autoProductionMode.value,
         composeTool: els.composeTool.value,
         finalVideoName: els.finalVideoName.value,
@@ -1032,9 +1079,13 @@ INDEX_HTML = r"""<!doctype html>
       els.taskTitle.value = '';
       els.apiKey.value = settings.apiKey || '';
       els.baseUrl.value = settings.baseUrl || '';
+      setIfExists(els.localModelPreset, settings.localModelPreset);
+      renderLocalModelNames();
+      setIfExists(els.localModelName, settings.localModelName);
       setIfExists(els.useMemory, settings.useMemory);
       setIfExists(els.inheritTask, settings.inheritTask);
       setIfExists(els.inheritMode, settings.inheritMode);
+      setIfExists(els.useKnowledge, settings.useKnowledge);
       setIfExists(els.autoProductionMode, settings.autoProductionMode);
       setIfExists(els.composeTool, settings.composeTool);
       els.finalVideoName.value = settings.finalVideoName || '';
@@ -1075,9 +1126,12 @@ INDEX_HTML = r"""<!doctype html>
         els.taskTitle,
         els.apiKey,
         els.baseUrl,
+        els.localModelPreset,
+        els.localModelName,
         els.useMemory,
         els.inheritTask,
         els.inheritMode,
+        els.useKnowledge,
         els.autoProductionMode,
         els.composeTool,
         els.finalVideoName,
@@ -1104,6 +1158,139 @@ INDEX_HTML = r"""<!doctype html>
         control.addEventListener('change', saveSettings);
         control.addEventListener('input', saveSettings);
       });
+    }
+
+    function renderLocalModelPresets() {
+      const current = els.localModelPreset.value;
+      els.localModelPreset.innerHTML = '<option value="">不使用本地预设</option>';
+      for (const preset of localModelPresets) {
+        const option = document.createElement('option');
+        option.value = preset.id;
+        option.textContent = preset.name || preset.id;
+        els.localModelPreset.appendChild(option);
+      }
+      setIfExists(els.localModelPreset, current);
+      renderLocalModelNames();
+    }
+
+    function renderLocalModelNames() {
+      const current = els.localModelName.value;
+      const preset = localModelPresets.find(item => item.id === els.localModelPreset.value);
+      els.localModelName.innerHTML = '';
+      if (!preset) {
+        els.localModelName.innerHTML = '<option value="">先选择本地模型服务</option>';
+        return;
+      }
+      const models = preset.models || [];
+      for (const modelName of models) {
+        const option = document.createElement('option');
+        option.value = modelName;
+        option.textContent = modelName;
+        els.localModelName.appendChild(option);
+      }
+      if (!models.length) {
+        els.localModelName.innerHTML = '<option value="">请手动输入模型名</option>';
+      }
+      setIfExists(els.localModelName, current);
+    }
+
+    function applyLocalModelPreset() {
+      const preset = localModelPresets.find(item => item.id === els.localModelPreset.value);
+      renderLocalModelNames();
+      if (!preset) {
+        saveSettings();
+        return;
+      }
+      els.provider.value = 'openai';
+      els.baseUrl.value = preset.base_url || '';
+      els.apiKey.value = preset.api_key || 'local';
+      els.model.value = 'custom';
+      const modelName = els.localModelName.value || (preset.models || [])[0] || '';
+      els.customModel.value = modelName;
+      syncCustomModelState(false);
+      saveSettings();
+    }
+
+    function applyLocalModelName() {
+      if (els.localModelName.value) {
+        els.model.value = 'custom';
+        els.customModel.value = els.localModelName.value;
+        syncCustomModelState(false);
+      }
+      saveSettings();
+    }
+
+    async function testModelConnection() {
+      const model = els.model.value === 'custom' ? els.customModel.value.trim() : els.model.value;
+      if (!model) {
+        setStatus('请先选择或填写模型名', true);
+        return;
+      }
+      setStatus('正在测试模型接口');
+      try {
+        const result = await api('/api/test-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: els.apiKey.value.trim(),
+            base_url: els.baseUrl.value.trim(),
+            model,
+          }),
+        });
+        setStatus(`模型接口可用：${result.model}`);
+      } catch (err) {
+        setStatus(`模型接口不可用：${err.message}`, true);
+      }
+    }
+
+    async function loadKnowledgeList() {
+      const data = await api('/api/knowledge');
+      els.knowledgeList.innerHTML = '';
+      if (!data.files.length) {
+        els.knowledgeList.innerHTML = '<div class="muted small">my_knowledge_base 暂无知识文件</div>';
+        return;
+      }
+      for (const file of data.files) {
+        const item = document.createElement('div');
+        item.className = 'reference-item';
+        const info = document.createElement('div');
+        info.className = 'reference-info';
+        const name = document.createElement('div');
+        name.className = 'reference-name';
+        name.textContent = file.name;
+        const meta = document.createElement('div');
+        meta.className = 'muted small';
+        meta.textContent = `${Math.max(1, Math.round(file.size / 1024))} KB · ${file.mtime}`;
+        info.appendChild(name);
+        info.appendChild(meta);
+        item.appendChild(info);
+        els.knowledgeList.appendChild(item);
+      }
+    }
+
+    async function uploadKnowledgeFile() {
+      const file = (els.knowledgeFile.files || [])[0];
+      if (!file) {
+        setStatus('请选择 .md/.txt/.json/.csv 知识文件', true);
+        return;
+      }
+      setStatus('正在上传知识文件');
+      try {
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/upload-knowledge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+          }),
+        });
+        els.knowledgeFile.value = '';
+        setStatus(`知识文件已上传：${result.name}`);
+        await loadKnowledgeList();
+      } catch (err) {
+        setStatus(err.message, true);
+      }
     }
 
     function renderReferenceFiles() {
@@ -1461,6 +1648,7 @@ INDEX_HTML = r"""<!doctype html>
             api_key: els.apiKey.value.trim(),
             base_url: els.baseUrl.value.trim(),
             use_memory: els.useMemory.value === 'on',
+            use_knowledge: els.useKnowledge.value === 'on',
             inherit_task: els.inheritTask.value,
             inherit_mode: els.inheritMode.value,
             production_config: productionConfig,
@@ -1492,6 +1680,10 @@ INDEX_HTML = r"""<!doctype html>
     els.newStaffBtn.onclick = newStaff;
     els.saveStaffBtn.onclick = saveStaff;
     els.deleteStaffBtn.onclick = deleteStaff;
+    els.localModelPreset.onchange = applyLocalModelPreset;
+    els.localModelName.onchange = applyLocalModelName;
+    els.testModelBtn.onclick = testModelConnection;
+    els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
     els.model.onchange = () => {
       syncCustomModelState();
       saveSettings();
@@ -1552,7 +1744,10 @@ INDEX_HTML = r"""<!doctype html>
       els.taskTitle.value = '';
       els.apiKey.value = '';
       els.baseUrl.value = '';
+      els.localModelPreset.value = '';
+      renderLocalModelNames();
       els.useMemory.value = 'on';
+      els.useKnowledge.value = 'off';
       els.inheritTask.value = '';
       els.inheritMode.value = 'final_output';
       els.autoProductionMode.value = 'off';
@@ -1595,6 +1790,7 @@ INDEX_HTML = r"""<!doctype html>
         await loadConfig();
         await loadTasks();
         await loadStaffList();
+        await loadKnowledgeList();
       } catch (err) {
         setStatus(err.message, true);
       }
@@ -1617,6 +1813,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._config())
             elif parsed.path == "/api/tasks":
                 self._send_json({"tasks": self._tasks()})
+            elif parsed.path == "/api/knowledge":
+                self._send_json({"files": self._knowledge_files()})
             elif parsed.path == "/api/staff":
                 self._send_json({"staff": self._staff_list()})
             elif parsed.path == "/api/staff-detail":
@@ -1649,6 +1847,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._upload_reference_image(payload))
                 return
 
+            if parsed.path == "/api/upload-knowledge":
+                self._send_json(self._upload_knowledge(payload))
+                return
+
+            if parsed.path == "/api/test-model":
+                self._send_json(self._test_model(payload))
+                return
+
             if parsed.path == "/api/save-staff":
                 self._send_json(self._save_staff(payload))
                 return
@@ -1666,10 +1872,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             task_title = str(payload.get("task_title") or "").strip()
             user_input = str(payload.get("input") or "").strip()
             use_memory = bool(payload.get("use_memory"))
+            use_knowledge = bool(payload.get("use_knowledge"))
             inherit_task = str(payload.get("inherit_task") or "").strip()
             inherit_mode = str(payload.get("inherit_mode") or "final_output").strip()
             if use_memory:
                 user_input = self._append_long_term_memory(user_input)
+            if use_knowledge:
+                user_input = self._append_knowledge_base(user_input)
             if inherit_task:
                 user_input = self._append_inherited_task(user_input, inherit_task, inherit_mode)
             production_config = payload.get("production_config") or {}
@@ -1739,11 +1948,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return {
             "workflows": workflows,
             "staff": staff,
+            "local_model_presets": self._local_model_presets(),
             "openai_configured": bool(os.getenv("OPENAI_API_KEY")),
             "base_url_configured": bool(os.getenv("OPENAI_BASE_URL")),
             "default_model": os.getenv("OPENAI_MODEL") or "gpt-5.5",
             "default_base_url": os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
         }
+
+    @staticmethod
+    def _local_model_presets() -> list[dict]:
+        if not LOCAL_MODEL_PRESETS.exists():
+            return []
+        data = json.loads(LOCAL_MODEL_PRESETS.read_text(encoding="utf-8"))
+        presets = data.get("presets") if isinstance(data, dict) else data
+        return presets if isinstance(presets, list) else []
 
     def _staff_list(self) -> list[dict]:
         if not STAFF_ROOT.exists():
@@ -2066,6 +2284,89 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "size_bytes": len(image_bytes),
         }
 
+    def _knowledge_files(self) -> list[dict]:
+        if not KNOWLEDGE_ROOT.exists():
+            return []
+
+        files = []
+        for path in sorted(KNOWLEDGE_ROOT.iterdir()):
+            if not path.is_file() or path.name == ".gitignore":
+                continue
+            if path.suffix.lower() not in {".md", ".txt", ".json", ".csv"}:
+                continue
+            stat = path.stat()
+            files.append(
+                {
+                    "name": path.name,
+                    "size": stat.st_size,
+                    "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+                }
+            )
+        return files
+
+    def _upload_knowledge(self, payload: dict) -> dict:
+        filename = str(payload.get("filename") or "").strip()
+        content_base64 = str(payload.get("content_base64") or "").strip()
+        if not filename or not content_base64:
+            raise ValueError("filename and content_base64 are required")
+
+        suffix = Path(filename).suffix.lower()
+        allowed = {".md", ".txt", ".json", ".csv"}
+        if suffix not in allowed:
+            raise ValueError(f"Unsupported knowledge file type: {suffix}")
+
+        content_bytes = base64.b64decode(content_base64, validate=True)
+        if len(content_bytes) > 5 * 1024 * 1024:
+            raise ValueError("Knowledge file is too large; max size is 5 MB")
+        content_bytes.decode("utf-8")
+
+        KNOWLEDGE_ROOT.mkdir(parents=True, exist_ok=True)
+        safe_stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in Path(filename).stem)[:80]
+        target = KNOWLEDGE_ROOT / f"{safe_stem}{suffix}"
+        if target.exists():
+            target = KNOWLEDGE_ROOT / f"{safe_stem}_{uuid4().hex[:8]}{suffix}"
+        target.write_bytes(content_bytes)
+        return {"ok": True, "name": target.name, "size_bytes": len(content_bytes)}
+
+    def _test_model(self, payload: dict) -> dict:
+        api_key = str(payload.get("api_key") or "").strip()
+        base_url = str(payload.get("base_url") or "https://api.openai.com/v1").strip().rstrip("/")
+        model = str(payload.get("model") or "").strip()
+        if not api_key:
+            raise ValueError("API Key is required for model test")
+        if not base_url:
+            raise ValueError("Base URL is required for model test")
+        if not model:
+            raise ValueError("model is required for model test")
+
+        body = json.dumps(
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 8,
+            }
+        ).encode("utf-8")
+        req = urllib_request.Request(
+            f"{base_url}/chat/completions",
+            data=body,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(req, timeout=20) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+        except urllib_error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:800]
+            raise ValueError(f"HTTP {exc.code}: {detail}") from exc
+        except urllib_error.URLError as exc:
+            raise ValueError(f"连接失败：{exc.reason}") from exc
+
+        data = json.loads(raw)
+        return {"ok": True, "model": model, "id": data.get("id", "")}
+
     @staticmethod
     def _append_reference_images(user_input: str, reference_images: list[dict]) -> str:
         lines = ["## 参考图", "以下参考图由管理台上传到本地，供 06_分镜生图设计师和 07_视频生成执行员作为角色/产品/风格参考："]
@@ -2106,6 +2407,30 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not sections:
             return user_input
         return f"{user_input}\n\n## 长期记忆\n" + "\n\n".join(sections) + "\n"
+
+    def _append_knowledge_base(self, user_input: str) -> str:
+        if not KNOWLEDGE_ROOT.exists():
+            return user_input
+
+        sections = []
+        remaining = 20000
+        for path in sorted(KNOWLEDGE_ROOT.iterdir()):
+            if not path.is_file() or path.name == ".gitignore":
+                continue
+            if path.suffix.lower() not in {".md", ".txt", ".json", ".csv"}:
+                continue
+            content = path.read_text(encoding="utf-8", errors="replace").strip()
+            if not content:
+                continue
+            clipped = content[:remaining]
+            sections.append(f"### {path.name}\n{clipped}")
+            remaining -= len(clipped)
+            if remaining <= 0:
+                break
+
+        if not sections:
+            return user_input
+        return f"{user_input}\n\n## 本地知识库\n" + "\n\n".join(sections) + "\n"
 
     def _append_inherited_task(self, user_input: str, task_name: str, inherit_mode: str) -> str:
         task_dir = self._safe_task_dir(task_name)

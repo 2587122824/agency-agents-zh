@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from .codex_api import CodexAPI
+from .action_executor import ActionExecutor
 from .production_pipeline import run_auto_production
 from .staff_loader import StaffLoader
 from .task_storage import TaskStorage
@@ -35,9 +36,11 @@ class WorkflowEngine:
         self.staff_root = workspace_root / "my_custom_staff"
         self.workflow_root = workspace_root / "my_workflows"
         self.output_root = workspace_root / "my_task_output"
+        self.action_root = workspace_root / "my_action_workspace"
         self.staff_loader = StaffLoader(self.staff_root)
         self.storage = TaskStorage(self.output_root)
         self.api = CodexAPI(provider=provider, model=model, api_key=api_key, base_url=base_url)
+        self.action_executor = ActionExecutor(self.action_root)
 
     def run(
         self,
@@ -107,6 +110,7 @@ class WorkflowEngine:
             result = self.api.run(agent.prompt, prompt)
             provider_used = result.provider
             self.storage.write_text(step_dir / "output.md", result.content)
+            action_results = self.action_executor.execute_from_text(result.content, task_dir)
 
             step_record = {
                 "step": str(step_no),
@@ -115,6 +119,7 @@ class WorkflowEngine:
                 "expected_output": step.get("output", ""),
                 "output_path": str(step_dir / "output.md"),
                 "content": result.content,
+                "action_results": json.dumps(action_results, ensure_ascii=False),
             }
             previous_outputs.append(step_record)
             step_outputs.append(step_record)
@@ -227,6 +232,11 @@ class WorkflowEngine:
 2. 严格按你的 `agent.md` 中定义的职责和输出格式交付。
 3. 如果信息不足，使用合理默认假设，并在输出中列出“待确认信息”。
 4. 输出必须是中文 Markdown，可直接交给下一位员工继续处理。
+5. 如果需要执行文件类动作，只能在输出末尾提供一个 JSON 代码块，格式为：
+```json
+{{"actions":[{{"action":"mkdir","params":{{"path":"demo"}}}},{{"action":"create_file","params":{{"path":"demo/readme.md","content":"内容","overwrite":false}}}}]}}
+```
+当前允许的动作只有 `mkdir`、`create_file`、`write_json`。动作路径必须使用相对路径，系统会限制写入 `my_action_workspace`。
 """
 
     @staticmethod

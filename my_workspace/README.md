@@ -39,6 +39,16 @@ my_memory/
   style_guide.md
 my_reference_images/
   .gitignore
+my_knowledge_base/
+  .gitignore
+my_local_models/
+  local_model_presets.json
+my_action_workspace/
+  .gitignore
+my_action_logs/
+  .gitignore
+my_deploy/
+  OFFLINE_DEPLOY.md
 ```
 
 ## 使用顺序
@@ -158,6 +168,9 @@ http://127.0.0.1:8765
 - 在 `API Key` 输入框填入密钥；密钥只用于本次运行，不写入任务输出文件。
 - 如果使用中转站，在 `中转站 Base URL` 输入框填入兼容 OpenAI 的地址，例如 `https://你的中转站域名/v1`；留空则使用官方地址。
 - 通过分组模型下拉选择主力模型、轻量模型、推理模型、旧版兼容模型，或选择自定义模型名。
+- 可在 `模型接口配置` 里选择本地模型预设，例如 Ollama、LM Studio、vLLM、Xinference；选择后会自动填入本地 Base URL、local API Key，并切换到自定义模型名。
+- 可点击 `测试当前模型接口`，管理台会调用 OpenAI-compatible `/chat/completions` 做一次连通性测试。
+- 可在 `记忆与继承` 里上传 `.md/.txt/.json/.csv` 到 `my_knowledge_base`，并选择是否把本地知识库追加到本次工作流输入。
 - 在 `生图配置` 中选择生图工具、模型、尺寸、每镜头图片数、质量、风格、负面提示词和一致性重点；当前版本会把这些配置传给 `06_分镜生图设计师` 生成分镜和关键帧生图提示词，不直接调用生图平台 API。
 - 在 `视频生成配置` 中选择视频工具、模型、画幅、时长和风格。工具下拉包含 Sora、Runway、Pika、Seedance、可灵、即梦、海螺、Luma 等；当前版本会把这些配置传给 `06_分镜生图设计师` 和 `07_视频生成执行员`，不直接调用视频平台 API。
 - 可在 `视频生成配置` 中上传参考图，并标注用途和说明。选择图片后会显示本地缩略图预览；图片保存到 `my_reference_images/`，任务输入只记录本地路径和说明，供 `06_分镜生图设计师` 和 `07_视频生成执行员` 生成参考图使用方案。
@@ -265,6 +278,47 @@ edit_checklist.md
 ```
 
 当前版本先生成可执行资产包和 manifest，不直接调用第三方生图或生视频 API。后续接入平台 API 时，适配器读取 `production_manifest.json` 中的工具、模型、提示词文件和输出目录继续执行。
+
+## 离线部署与动作执行
+
+离线部署说明位于：
+
+```text
+my_deploy/OFFLINE_DEPLOY.md
+```
+
+当前离线部署基础能力包括：
+
+- 本地模型预设：`my_local_models/local_model_presets.json`。
+- 本地知识库：`my_knowledge_base/`，运行时可追加到提示词。
+- 受限动作执行：员工输出末尾可以提供 JSON 动作块，系统只执行 `mkdir`、`create_file`、`write_json`。
+- 动作写入边界：所有动作只能写入 `my_action_workspace/`，不会写入项目根目录或系统路径。
+- 动作日志：每次触发动作时，会在对应任务目录写入 `action_log.json`。
+
+动作 JSON 示例：
+
+```json
+{
+  "actions": [
+    {
+      "action": "mkdir",
+      "params": {
+        "path": "demo"
+      }
+    },
+    {
+      "action": "create_file",
+      "params": {
+        "path": "demo/readme.md",
+        "content": "内容",
+        "overwrite": false
+      }
+    }
+  ]
+}
+```
+
+当前不支持删除文件、运行 shell、修改任意系统路径、自动推送代码或直接调用付费媒体 API。后续要做完整执行型智能体，需要再加审批层、权限模型、动作队列和审计日志。
 
 ## 当前员工
 
