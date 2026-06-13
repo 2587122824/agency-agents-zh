@@ -786,3 +786,39 @@ Validation:
   - `POST /api/export-task` returned `export_package` with 9 files and `export_package/视频制作包.md`
   - `POST /api/delete-task` removed the temporary task successfully
 - Replaced the old process on `http://127.0.0.1:8765`; page markers `saveFileBtn` and `productTemplate` returned `True` on the default management UI port.
+
+## Bundled Ollama Startup And Staff Manager Layout
+
+[2026-06-13 21:05:00 +08:00] command: copied the installed Ollama runtime into the project and optimized the staff management layout after the user asked why system status still showed C drive and then asked product design to improve the page layout.
+
+Runtime changes:
+
+- Copied installed Ollama runtime from `C:\Users\Administrator\AppData\Local\Programs\Ollama` into `runtime/ollama/`.
+- Project runtime now includes `runtime/ollama/ollama.exe`, `runtime/ollama/ollama app.exe`, `runtime/ollama/app.ico`, and `runtime/ollama/lib/` on disk.
+- The copied runtime is ignored by Git through `runtime/.gitignore`; binaries and large dependency files are intentionally not committed.
+- `start_local.ps1` now prefers `runtime/ollama/ollama.exe` before PATH or the system install path.
+- `start_local.ps1` now stops existing listeners on Ollama port `11434` and web port `8765` by default before starting services. This prevents old processes from keeping stale `OLLAMA_MODELS` or old web UI code.
+- Added `-KeepExistingOllama` and `-KeepExistingWeb` switches for cases where an existing listener should be preserved.
+- `start_local.ps1 -SkipModelPull -NoBrowser` printed:
+  - `Ollama: I:\AI_Workspace\agency-agents-zh\runtime\ollama\ollama.exe`
+  - `Models: I:\AI_Workspace\agency-agents-zh\runtime\models`
+
+Management UI changes:
+
+- System health now prefers showing project `runtime/ollama/ollama.exe` when it exists, before PATH or system install path.
+- Verified `/api/system-health` shows `Ollama 命令 = I:\Ai_WorkSpace\agency-agents-zh\runtime\ollama\ollama.exe` after restarting the current web process.
+- `数字员工管理` page layout was redesigned as a two-column management workspace:
+  - top toolbar separates title/status from action buttons
+  - left sidebar contains `员工搜索` and a compact staff list
+  - right side is a bordered editor panel for `agent.md` and `flow_rule.json`
+  - staff cards now use tighter spacing, single-line title/meta, and a small role pill
+- Added `staffFilter` input and client-side filtering by staff name, display name, or role.
+
+Validation:
+
+- PowerShell parser check for `start_local.ps1` passed.
+- `ast.parse` check for `my_workspace/web_app.py` passed.
+- Extracted web script from `my_workspace/web_app.py`; `node --check` passed.
+- `powershell -NoProfile -ExecutionPolicy Bypass -File .\start_local.ps1 -SkipModelPull -NoBrowser` succeeded and started project Ollama plus web app.
+- Home page markers verified: `staffFilter`, `manager-toolbar`, `staff-sidebar`.
+- `/api/system-health` verified project-local Ollama command path and `qwen3:8b-q4_K_M` availability.

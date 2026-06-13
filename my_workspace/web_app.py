@@ -385,35 +385,99 @@ INDEX_HTML = r"""<!doctype html>
     }
     .staff-manager {
       display: grid;
-      grid-template-columns: minmax(220px, 320px) minmax(0, 1fr);
+      grid-template-columns: minmax(280px, 360px) minmax(560px, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .manager-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
       gap: 12px;
+      flex-wrap: wrap;
+      padding-bottom: 2px;
+    }
+    .manager-title {
+      display: grid;
+      gap: 3px;
+    }
+    .manager-title strong {
+      font-size: 16px;
+    }
+    .manager-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .staff-sidebar {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+      padding: 10px;
+      display: grid;
+      gap: 10px;
+      min-width: 0;
     }
     .staff-list {
       display: grid;
-      gap: 8px;
+      gap: 6px;
       align-content: start;
-      max-height: 520px;
+      max-height: calc(100vh - 230px);
       overflow: auto;
+      padding-right: 4px;
     }
     .staff-card {
       text-align: left;
-      padding: 10px;
+      padding: 8px 10px;
       border: 1px solid var(--line);
       background: #fff;
       border-radius: 6px;
       display: grid;
-      gap: 4px;
+      gap: 2px;
+      min-width: 0;
+      min-height: 54px;
+    }
+    .staff-card strong {
+      font-size: 14px;
+      line-height: 1.25;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .staff-card .staff-meta {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .staff-card .staff-role {
+      justify-self: start;
+      max-width: 100%;
+      margin-top: 2px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #e6f4f1;
+      color: var(--accent);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .staff-card.active {
       border-color: var(--accent);
       box-shadow: 0 0 0 2px rgba(15, 118, 110, .12);
+      background: #f0fdfa;
     }
     .staff-editor {
       display: grid;
       gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      min-width: 0;
     }
     .staff-editor textarea {
-      min-height: 260px;
+      min-height: 220px;
       font-family: Consolas, "Cascadia Mono", monospace;
       font-size: 13px;
     }
@@ -873,15 +937,24 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div class="panel form view" data-view="staff" hidden>
-        <div class="row">
-          <strong>数字员工管理</strong>
-          <button id="refreshStaffBtn">刷新员工</button>
-          <button id="newStaffBtn">新建员工</button>
-          <button class="danger" id="deleteStaffBtn" disabled>删除员工</button>
-          <span id="staffStatus" class="status">管理 my_custom_staff</span>
+        <div class="manager-toolbar">
+          <div class="manager-title">
+            <strong>数字员工管理</strong>
+            <span id="staffStatus" class="status">管理 my_custom_staff</span>
+          </div>
+          <div class="manager-actions">
+            <button id="refreshStaffBtn">刷新员工</button>
+            <button id="newStaffBtn">新建员工</button>
+            <button class="danger" id="deleteStaffBtn" disabled>删除员工</button>
+          </div>
         </div>
         <div class="staff-manager">
-          <div class="staff-list" id="staffList"></div>
+          <div class="staff-sidebar">
+            <label>员工搜索
+              <input id="staffFilter" autocomplete="off" spellcheck="false" placeholder="按名称、编号或角色筛选" />
+            </label>
+            <div class="staff-list" id="staffList"></div>
+          </div>
           <div class="staff-editor">
             <label>员工文件夹名
               <input id="staffName" autocomplete="off" spellcheck="false" placeholder="例如 20_销售话术专员" />
@@ -1074,6 +1147,7 @@ INDEX_HTML = r"""<!doctype html>
       deleteStaffBtn: document.getElementById('deleteStaffBtn'),
       saveStaffBtn: document.getElementById('saveStaffBtn'),
       staffStatus: document.getElementById('staffStatus'),
+      staffFilter: document.getElementById('staffFilter'),
       staffList: document.getElementById('staffList'),
       staffName: document.getElementById('staffName'),
       staffAgentMd: document.getElementById('staffAgentMd'),
@@ -1791,15 +1865,33 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadStaffList() {
       const data = await api('/api/staff');
+      const keyword = (els.staffFilter.value || '').trim().toLowerCase();
+      const staffItems = (data.staff || []).filter(staff => {
+        const text = `${staff.name || ''} ${staff.display_name || ''} ${staff.role || ''}`.toLowerCase();
+        return !keyword || text.includes(keyword);
+      });
       els.staffList.innerHTML = '';
-      if (!data.staff.length) {
-        els.staffList.innerHTML = '<div class="muted small">暂无数字员工</div>';
+      setStaffStatus(`共 ${data.staff.length} 位员工${keyword ? `，筛选出 ${staffItems.length} 位` : ''}`);
+      if (!staffItems.length) {
+        els.staffList.innerHTML = '<div class="muted small">暂无匹配员工</div>';
         return;
       }
-      for (const staff of data.staff) {
+      for (const staff of staffItems) {
         const btn = document.createElement('button');
         btn.className = `staff-card ${selectedStaff === staff.name ? 'active' : ''}`;
-        btn.innerHTML = `<strong>${staff.display_name || staff.name}</strong><span class="muted small">${staff.name}</span><span class="muted small">${staff.role || ''}</span>`;
+        const title = document.createElement('strong');
+        title.textContent = staff.display_name || staff.name;
+        const meta = document.createElement('span');
+        meta.className = 'muted small staff-meta';
+        meta.textContent = staff.name;
+        btn.appendChild(title);
+        btn.appendChild(meta);
+        if (staff.role) {
+          const role = document.createElement('span');
+          role.className = 'small staff-role';
+          role.textContent = staff.role;
+          btn.appendChild(role);
+        }
         btn.onclick = () => selectStaff(staff.name);
         els.staffList.appendChild(btn);
       }
@@ -2394,6 +2486,7 @@ INDEX_HTML = r"""<!doctype html>
     els.rerunStepBtn.onclick = rerunCurrentStep;
     els.exportTaskBtn.onclick = exportCurrentTask;
     els.refreshStaffBtn.onclick = loadStaffList;
+    els.staffFilter.oninput = () => loadStaffList().catch(err => setStaffStatus(err.message, true));
     els.newStaffBtn.onclick = newStaff;
     els.saveStaffBtn.onclick = saveStaff;
     els.deleteStaffBtn.onclick = deleteStaff;
@@ -2729,18 +2822,17 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             self._path_check("动作工作区", WORKSPACE_ROOT / "my_action_workspace", must_be_writable=True),
         ]
 
+        bundled = WORKSPACE_ROOT.parent / "runtime" / "ollama" / "ollama.exe"
+        installed = Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe"
         ollama_path = shutil.which("ollama")
-        if ollama_path:
+        if bundled.exists():
+            checks.append(self._health_check("Ollama 命令", "ok", str(bundled)))
+        elif ollama_path:
             checks.append(self._health_check("Ollama 命令", "ok", ollama_path))
+        elif installed.exists():
+            checks.append(self._health_check("Ollama 命令", "ok", str(installed)))
         else:
-            bundled = WORKSPACE_ROOT.parent / "runtime" / "ollama" / "ollama.exe"
-            installed = Path.home() / "AppData" / "Local" / "Programs" / "Ollama" / "ollama.exe"
-            if bundled.exists():
-                checks.append(self._health_check("Ollama 命令", "ok", str(bundled)))
-            elif installed.exists():
-                checks.append(self._health_check("Ollama 命令", "ok", str(installed)))
-            else:
-                checks.append(self._health_check("Ollama 命令", "warn", "未在 PATH 或 runtime/ollama/ollama.exe 找到；可先安装 Ollama 或放入 runtime/ollama/"))
+            checks.append(self._health_check("Ollama 命令", "warn", "未在 runtime/ollama/ollama.exe、PATH 或系统安装目录找到；可先安装 Ollama 或放入 runtime/ollama/"))
 
         checks.append(self._ollama_service_check(ollama_models))
         if "qwen3:8b-q4_K_M" in ollama_models:

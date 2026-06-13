@@ -326,6 +326,12 @@ edit_checklist.md
 my_deploy/OFFLINE_DEPLOY.md
 ```
 
+## 最近管理台更新
+
+- `start_local.ps1` 现在优先使用项目内 `runtime/ollama/ollama.exe`，并默认把模型目录设置为 `runtime/models`。
+- 默认启动会重启旧的 Ollama/Web 监听进程，避免旧进程继续使用 C 盘模型目录或旧版管理台；需要保留旧进程时可加 `-KeepExistingOllama` 或 `-KeepExistingWeb`。
+- `数字员工管理` 页面已优化为左侧员工库、右侧编辑器布局；左侧支持按员工名称、编号或角色搜索，员工卡片改为更紧凑的列表样式。
+
 当前离线部署基础能力包括：
 
 - 本地模型预设：`my_local_models/local_model_presets.json`。

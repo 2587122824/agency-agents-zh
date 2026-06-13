@@ -3,7 +3,9 @@ param(
   [int]$Port = 8765,
   [string]$ModelsDir = "",
   [switch]$SkipModelPull,
-  [switch]$NoBrowser
+  [switch]$NoBrowser,
+  [switch]$KeepExistingOllama,
+  [switch]$KeepExistingWeb
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,6 +43,21 @@ function Wait-Http {
   return $false
 }
 
+function Stop-ListenerOnPort {
+  param(
+    [int]$TargetPort,
+    [string]$Name
+  )
+  $connections = Get-NetTCPConnection -LocalPort $TargetPort -State Listen -ErrorAction SilentlyContinue
+  $processIds = @($connections | Select-Object -ExpandProperty OwningProcess -Unique)
+  foreach ($processId in $processIds) {
+    if ($processId -and $processId -ne $PID) {
+      Write-Step "Stopping existing $Name process on port ${TargetPort}: PID $processId"
+      Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
+    }
+  }
+}
+
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
@@ -50,12 +67,13 @@ if (-not $ModelsDir) {
 New-Item -ItemType Directory -Force -Path $ModelsDir | Out-Null
 $env:OLLAMA_MODELS = $ModelsDir
 
-$OllamaExe = Get-Command ollama -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
+$BundledOllama = Join-Path $Root "runtime\ollama\ollama.exe"
+$OllamaExe = ""
+if (Test-Path $BundledOllama) {
+  $OllamaExe = $BundledOllama
+}
 if (-not $OllamaExe) {
-  $BundledOllama = Join-Path $Root "runtime\ollama\ollama.exe"
-  if (Test-Path $BundledOllama) {
-    $OllamaExe = $BundledOllama
-  }
+  $OllamaExe = Get-Command ollama -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -First 1
 }
 if (-not $OllamaExe) {
   $InstalledOllama = Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"
@@ -70,7 +88,12 @@ if (-not $OllamaExe) {
 
 Write-Step "Ollama: $OllamaExe"
 Write-Step "Models: $env:OLLAMA_MODELS"
-if (-not (Test-HttpOk -Url "http://127.0.0.1:11434/v1/models")) {
+if (-not $KeepExistingOllama) {
+  Stop-ListenerOnPort -TargetPort 11434 -Name "Ollama"
+}
+if ($KeepExistingOllama -and (Test-HttpOk -Url "http://127.0.0.1:11434/v1/models")) {
+  Write-Step "Using existing Ollama service"
+} else {
   Write-Step "Starting Ollama service"
   Start-Process -FilePath $OllamaExe -ArgumentList "serve" -WindowStyle Hidden
   if (-not (Wait-Http -Url "http://127.0.0.1:11434/v1/models" -Seconds 45)) {
@@ -100,6 +123,9 @@ $env:OPENAI_BASE_URL = "http://127.0.0.1:11434/v1"
 $env:OPENAI_MODEL = $Model
 
 $WebUrl = "http://127.0.0.1:$Port"
+if (-not $KeepExistingWeb) {
+  Stop-ListenerOnPort -TargetPort $Port -Name "web app"
+}
 if (-not (Test-HttpOk -Url $WebUrl)) {
   Write-Step "Starting web app: $WebUrl"
   $webArgs = @("my_workspace/web_app.py", "--port", "$Port")
