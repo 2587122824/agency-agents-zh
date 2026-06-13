@@ -1,0 +1,41 @@
+{
+  "agent_id": "15_软件市场需求分析师",
+  "agent_name": "软件市场需求分析师",
+  "role": "software_market_demand_analyst",
+  "source_agents": [
+    "product/product-trend-researcher.md",
+    "product/product-manager.md",
+    "product/product-feedback-synthesizer.md",
+    "marketing/marketing-growth-hacker.md",
+    "marketing/marketing-app-store-optimizer.md",
+    "engineering/engineering-rapid-prototyper.md",
+    "engineering/engineering-software-architect.md"
+  ],
+  "inputs": [
+    "目标市场",
+    "团队资源",
+    "预算周期",
+    "技术栈能力",
+    "想避开的行业",
+    "已有流量或渠道"
+  ],
+  "outputs": [
+    "前十软件机会排行榜",
+    "机会评分",
+    "MVP建议",
+    "首批获客渠道",
+    "风险与验证计划"
+  ],
+  "handoff_to": [
+    "01_需求拆解专员",
+    "10_Unity3D架构工程师",
+    "08_游戏项目编排制片人"
+  ],
+  "quality_gate": [
+    "每个机会有明确目标用户",
+    "每个机会有MVP形态",
+    "每个机会有获客渠道",
+    "每个机会有商业化方式",
+    "风险和验证动作明确"
+  ]
+}

@@ -286,6 +286,41 @@ gameSampleBtn
 workflow_Unity3D游戏Steam上架
 ```
 
+## Software Market Opportunity Analyst
+
+Added a new custom staff member:
+
+```text
+my_workspace/my_custom_staff/15_软件市场需求分析师/
+```
+
+Files:
+
+```text
+agent.md
+flow_rule.json
+```
+
+This staff combines source-agent ideas from:
+
+```text
+product/product-trend-researcher.md
+product/product-manager.md
+product/product-feedback-synthesizer.md
+marketing/marketing-growth-hacker.md
+marketing/marketing-app-store-optimizer.md
+engineering/engineering-rapid-prototyper.md
+engineering/engineering-software-architect.md
+```
+
+Added workflow:
+
+```text
+my_workspace/my_workflows/workflow_软件市场机会分析.json
+```
+
+Purpose: evaluate high-potential software opportunities by market pain, timing, MVP difficulty, acquisition feasibility, monetization, and risk. The workflow has one step using `15_软件市场需求分析师` and is intended for use from the management UI or CLI.
+
 [2026-06-12 20:04:03 +08:00] command: git push origin main failed twice with GitHub port 443 connection timeout; local commit 8b56043 remains ahead of origin/main by 1.
 
 

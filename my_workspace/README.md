@@ -20,11 +20,13 @@ my_custom_staff/
   12_3D美术技术指导/
   13_游戏音频与体验设计师/
   14_Steam发行与测试经理/
+  15_软件市场需求分析师/
 my_workflows/
   workflow_短视频全流程.json
   workflow_小红书图文.json
   workflow_开发外包.json
   workflow_Unity3D游戏Steam上架.json
+  workflow_软件市场机会分析.json
 my_task_output/
 my_memory/
   brand_profile.md
@@ -42,6 +44,7 @@ my_reference_images/
 4. 视频类工作流先由 `06_分镜生图设计师` 生成分镜和关键帧生图方案。
 5. 最后由 `07_视频生成执行员` 生成视频提示词、配音字幕和剪辑制作包。
 6. 游戏类工作流由 `08` 到 `14` 号员工协作，从项目编排、GDD、Unity 架构、关卡叙事、3D 美术技术、音频体验，到 Steam 发行测试制作包。
+7. 软件市场机会分析工作流由 `15_软件市场需求分析师` 输出高潜力软件方向、MVP、获客渠道、商业化和风险验证。
 
 ## 自动化执行
 
@@ -55,6 +58,12 @@ python my_workspace/run_flow.py --provider offline --workflow workflow_短视频
 
 ```powershell
 python my_workspace/run_flow.py --provider offline --workflow workflow_Unity3D游戏Steam上架 --input "我要做一款 Unity 3D 第三人称探索解谜游戏，上架 Steam。团队规模是单人或两人小团队，先做 20-30 分钟 Demo。"
+```
+
+离线生成软件市场机会分析：
+
+```powershell
+python my_workspace/run_flow.py --provider offline --workflow workflow_软件市场机会分析 --input "目标中国中小企业和个人开发者市场，团队1-2人，擅长Python、Web和AI API，希望找可MVP验证的软件方向。"
 ```
 
 有 `OPENAI_API_KEY` 时自动调用模型：
@@ -176,6 +185,31 @@ my_workflows/workflow_Unity3D游戏Steam上架.json
 
 最终输出会给到一个游戏制作包，包括项目路线、GDD、Unity 工程架构、关卡白盒方案、3D 美术技术规范、音频体验方案、Steam 商店页和测试发行清单。它不会直接创建 Unity 工程或上传 Steam；它是用于指导后续开发和发行准备的制作蓝图。
 
+## 软件市场机会分析工作流
+
+工作流文件：
+
+```text
+my_workflows/workflow_软件市场机会分析.json
+```
+
+员工：
+
+- `15_软件市场需求分析师`：来自趋势研究员、产品经理、反馈分析师、增长黑客、应用商店优化师、快速原型师和软件架构师能力，负责筛选高潜力软件方向。
+
+推荐输入：
+
+```text
+目标市场：中国中小企业/个人创作者/跨境卖家/本地生活商家
+团队规模：1-2 人
+技术能力：Python、Web、AI API、微信生态
+周期：2-6 周做 MVP
+已有渠道：短视频账号、私域、行业客户、开源社区
+避开方向：重监管、重硬件、重线下交付
+```
+
+输出会包含前十软件机会、目标用户、痛点、MVP形态、首批获客渠道、收费方式、风险、机会评分和第一周验证动作。
+
 ## 全自动生产框架
 
 选择 `全自动生成 -> 生成生产资产包` 后，任务目录会额外生成：
@@ -210,3 +244,4 @@ edit_checklist.md
 - `12_3D美术技术指导`：生成 3D 美术资产、材质、Shader、LOD 和性能预算方案。
 - `13_游戏音频与体验设计师`：生成音效事件、自适应音乐、空间音频和交互反馈方案。
 - `14_Steam发行与测试经理`：生成 Steam 商店页、发行素材、测试计划和最终制作包。
+- `15_软件市场需求分析师`：生成高潜力软件方向排行榜、MVP建议、获客渠道、商业化路径和验证计划。
