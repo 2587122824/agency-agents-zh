@@ -332,7 +332,19 @@ edit_checklist.md
 ComfyUI 全自动成片：预留高算力一体化路径，输出 ComfyUI 参数包，后续可接云端或本地 ComfyUI 全流程。
 ```
 
-当前版本会生成可执行资产包和 manifest；只有选择 `调用生图/生视频 API` 时才会调用已接入适配器。ComfyUI 全自动成片模式先输出参数包和编排方案，避免在节点未确认前直接消耗算力。
+当前版本会生成可执行资产包和 manifest；选择 `调用生图/生视频 API` 时会调用已接入的生图/生视频适配器。选择 `ComfyUI 全自动成片` 且合成工具为 `RunningHub / 云端 ComfyUI`、密钥、接口地址和成片工作流接口都已填写时，会调用成片适配器。
+
+ComfyUI 成片配置说明：
+
+```text
+成片平台密钥：RunningHub 或云端 ComfyUI API Key，只用于本次请求，不写入输出文件。
+成片平台接口地址：例如 https://www.runninghub.cn/openapi/v2。
+成片工作流接口：例如 /run/workflow/你的全自动成片工作流ID 或 /run/ai-app/你的应用ID。
+ComfyUI 节点映射 JSON：RunningHub nodeInfoList 数组，可使用 {{payload}}、{{prompt}}、{{voice_text}}、{{subtitle_srt}} 占位符。
+成片轮询超时：全自动成片通常更慢，默认 60 分钟。
+```
+
+成片适配器会读取 `comfyui/comfyui_payload.json`，提交任务后轮询结果，并把返回的 mp4、音频、图片等结果下载到 `comfyui/` 目录。若缺少密钥、Base URL 或 endpoint，会标记为 skipped，不会发起请求。
 
 ## 离线部署与动作执行
 

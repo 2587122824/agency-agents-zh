@@ -1326,3 +1326,69 @@ Production pipeline updates:
   - `comfyui/comfyui_payload.json`
 - `production_manifest.json` now references the audio package, ComfyUI plan, and ComfyUI payload.
 - API adapters are marked `pending` only for `api_ready` mode; package and ComfyUI planning modes do not falsely indicate external API calls.
+
+## Cloud ComfyUI Final Production Adapter
+
+[2026-06-15 +08:00] command: added the ComfyUI final-production configuration and adapter framework after the user asked to add the next step.
+
+New file:
+
+```text
+my_workspace/my_codex_core/cloud_comfyui_adapter.py
+```
+
+Behavior:
+
+- Supports cloud ComfyUI / RunningHub final-production execution in `comfy_full` mode.
+- Reads `comfyui/comfyui_payload.json` generated from `21_ComfyUI成片编排师`.
+- Submits to the configured endpoint, polls `/query`, and downloads result files into:
+
+```text
+my_workspace/my_task_output/<task>/comfyui/
+```
+
+- Downloadable result extensions include:
+
+```text
+mp4, mov, webm, m4v, mp3, wav, aac, png, jpg, jpeg, webp
+```
+
+- Writes:
+
+```text
+comfyui/runninghub_comfyui_submit_response.json
+comfyui/runninghub_comfyui_query_response.json
+comfyui/cloud_comfyui_manifest.json
+```
+
+- API keys are used only in memory for the current request. They are not written to `production_manifest.json`, adapter manifests, response files, README, or this handoff document.
+
+Management UI changes:
+
+- `全自动生成` now has ComfyUI final-production fields:
+  - 成片平台密钥
+  - 成片平台接口地址
+  - 成片工作流接口
+  - ComfyUI 节点映射 JSON
+  - 成片轮询超时
+- Selecting `ComfyUI 全自动成片（高算力预留）` switches `合成工具` to `RunningHub / 云端 ComfyUI`.
+- Selecting the cloud compose tool fills default Base URL `https://www.runninghub.cn/openapi/v2` and `[]` node mapping when blank.
+- Browser `localStorage` persistence now includes the new ComfyUI final-production fields.
+
+Production pipeline changes:
+
+- `run_auto_production()` calls the ComfyUI adapter only when:
+  - `mode == comfy_full`
+  - compose tool is a cloud provider such as `runninghub`
+  - ComfyUI API key, Base URL, and workflow endpoint are present
+- Missing config returns `adapter_status=skipped` instead of making a request.
+- `production_manifest.json` records only booleans for whether API key, Base URL, endpoint, and node mapping were provided; it does not store secrets or Base URLs.
+
+Node mapping placeholders:
+
+```text
+{{payload}}
+{{prompt}}
+{{voice_text}}
+{{subtitle_srt}}
+```

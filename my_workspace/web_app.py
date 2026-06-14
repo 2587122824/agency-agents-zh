@@ -925,12 +925,37 @@ INDEX_HTML = r"""<!doctype html>
               <label>合成工具
                 <select id="composeTool">
                   <option value="ffmpeg" selected>ffmpeg</option>
+                  <option value="runninghub">RunningHub / 云端 ComfyUI</option>
                   <option value="jianying">剪映工程（预留）</option>
                   <option value="manual">只生成清单</option>
                 </select>
               </label>
               <label>最终视频文件名
                 <input id="finalVideoName" autocomplete="off" spellcheck="false" placeholder="final_video.mp4" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>成片平台密钥
+                <input id="comfyApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="RunningHub 或云端 ComfyUI API Key" />
+              </label>
+              <label>成片平台接口地址
+                <input id="comfyBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
+              </label>
+              <label>成片工作流接口
+                <input id="comfyWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/你的全自动成片工作流ID 或 /run/ai-app/你的应用ID" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>ComfyUI 节点映射 JSON
+                <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{payload}}、{{prompt}}、{{voice_text}}、{{subtitle_srt}} 注入 21 号员工生成的参数'></textarea>
+              </label>
+              <label>成片轮询超时
+                <select id="comfyPollTimeout">
+                  <option value="900">15 分钟</option>
+                  <option value="1800">30 分钟</option>
+                  <option value="3600" selected>60 分钟</option>
+                  <option value="7200">120 分钟</option>
+                </select>
               </label>
             </div>
           </div>
@@ -1431,6 +1456,11 @@ INDEX_HTML = r"""<!doctype html>
       autoProductionMode: document.getElementById('autoProductionMode'),
       composeTool: document.getElementById('composeTool'),
       finalVideoName: document.getElementById('finalVideoName'),
+      comfyApiKey: document.getElementById('comfyApiKey'),
+      comfyBaseUrl: document.getElementById('comfyBaseUrl'),
+      comfyWorkflowEndpoint: document.getElementById('comfyWorkflowEndpoint'),
+      comfyNodeInfoList: document.getElementById('comfyNodeInfoList'),
+      comfyPollTimeout: document.getElementById('comfyPollTimeout'),
       imageTool: document.getElementById('imageTool'),
       imageModel: document.getElementById('imageModel'),
       imageSize: document.getElementById('imageSize'),
@@ -1752,6 +1782,11 @@ INDEX_HTML = r"""<!doctype html>
         autoProductionMode: els.autoProductionMode.value,
         composeTool: els.composeTool.value,
         finalVideoName: els.finalVideoName.value,
+        comfyApiKey: els.comfyApiKey.value,
+        comfyBaseUrl: els.comfyBaseUrl.value,
+        comfyWorkflowEndpoint: els.comfyWorkflowEndpoint.value,
+        comfyNodeInfoList: els.comfyNodeInfoList.value,
+        comfyPollTimeout: els.comfyPollTimeout.value,
         imageTool: els.imageTool.value,
         imageModel: els.imageModel.value,
         imageSize: els.imageSize.value,
@@ -1822,6 +1857,11 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.autoProductionMode, settings.autoProductionMode);
       setIfExists(els.composeTool, settings.composeTool);
       els.finalVideoName.value = settings.finalVideoName || '';
+      els.comfyApiKey.value = settings.comfyApiKey || '';
+      els.comfyBaseUrl.value = settings.comfyBaseUrl || '';
+      els.comfyWorkflowEndpoint.value = settings.comfyWorkflowEndpoint || '';
+      els.comfyNodeInfoList.value = settings.comfyNodeInfoList || '';
+      setIfExists(els.comfyPollTimeout, settings.comfyPollTimeout);
       setIfExists(els.imageTool, settings.imageTool);
       els.imageModel.value = settings.imageModel || '';
       setIfExists(els.imageSize, settings.imageSize);
@@ -1870,6 +1910,7 @@ INDEX_HTML = r"""<!doctype html>
       syncCustomModelState(false);
       applyImageProviderDefaults();
       applyVideoProviderDefaults();
+      applyComfyProviderDefaults();
     }
 
     function setIfExists(control, value) {
@@ -1898,6 +1939,11 @@ INDEX_HTML = r"""<!doctype html>
         els.autoProductionMode,
         els.composeTool,
         els.finalVideoName,
+        els.comfyApiKey,
+        els.comfyBaseUrl,
+        els.comfyWorkflowEndpoint,
+        els.comfyNodeInfoList,
+        els.comfyPollTimeout,
         els.imageTool,
         els.imageModel,
         els.imageSize,
@@ -1973,6 +2019,17 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (!els.videoNodeInfoList.value.trim()) {
         els.videoNodeInfoList.value = '[]';
+      }
+      saveSettings();
+    }
+
+    function applyComfyProviderDefaults() {
+      if (els.composeTool.value !== 'runninghub' && els.autoProductionMode.value !== 'comfy_full') return;
+      if (!els.comfyBaseUrl.value.trim()) {
+        els.comfyBaseUrl.value = 'https://www.runninghub.cn/openapi/v2';
+      }
+      if (!els.comfyNodeInfoList.value.trim()) {
+        els.comfyNodeInfoList.value = '[]';
       }
       saveSettings();
     }
@@ -3040,6 +3097,12 @@ INDEX_HTML = r"""<!doctype html>
             tool: els.composeTool.value,
             execution_mode: els.autoProductionMode.value,
             final_video_name: els.finalVideoName.value.trim() || 'final_video.mp4',
+            api_key_provided: Boolean(els.comfyApiKey.value.trim()),
+            base_url_provided: Boolean(els.comfyBaseUrl.value.trim()),
+            base_url: els.comfyBaseUrl.value.trim(),
+            workflow_endpoint: els.comfyWorkflowEndpoint.value.trim(),
+            node_info_list_json: els.comfyNodeInfoList.value.trim(),
+            poll_timeout_seconds: Number(els.comfyPollTimeout.value || 3600),
           },
         };
         const result = await api('/api/run', {
@@ -3066,6 +3129,8 @@ INDEX_HTML = r"""<!doctype html>
             image_base_url: els.imageBaseUrl.value.trim(),
             video_api_key: els.videoApiKey.value.trim(),
             video_base_url: els.videoBaseUrl.value.trim(),
+            comfy_api_key: els.comfyApiKey.value.trim(),
+            comfy_base_url: els.comfyBaseUrl.value.trim(),
           }),
         });
         setStatus('工作流已开始，正在执行第 1 步');
@@ -3107,6 +3172,17 @@ INDEX_HTML = r"""<!doctype html>
       applyVideoProviderDefaults();
       saveSettings();
     };
+    els.composeTool.onchange = () => {
+      applyComfyProviderDefaults();
+      saveSettings();
+    };
+    els.autoProductionMode.onchange = () => {
+      if (els.autoProductionMode.value === 'comfy_full') {
+        els.composeTool.value = 'runninghub';
+      }
+      applyComfyProviderDefaults();
+      saveSettings();
+    };
     els.localOfflineBtn.onclick = applyLocalOfflineMode;
     els.testModelBtn.onclick = testModelConnection;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
@@ -3124,6 +3200,11 @@ INDEX_HTML = r"""<!doctype html>
       els.autoProductionMode.value = 'package_only';
       els.composeTool.value = 'ffmpeg';
       els.finalVideoName.value = 'final_video.mp4';
+      els.comfyApiKey.value = '';
+      els.comfyBaseUrl.value = '';
+      els.comfyWorkflowEndpoint.value = '';
+      els.comfyNodeInfoList.value = '[]';
+      els.comfyPollTimeout.value = '3600';
       els.imageTool.value = 'prompt_only';
       els.imageModel.value = '';
       els.imageSize.value = '9:16';
@@ -3151,6 +3232,11 @@ INDEX_HTML = r"""<!doctype html>
       els.autoProductionMode.value = 'off';
       els.composeTool.value = 'manual';
       els.finalVideoName.value = '';
+      els.comfyApiKey.value = '';
+      els.comfyBaseUrl.value = '';
+      els.comfyWorkflowEndpoint.value = '';
+      els.comfyNodeInfoList.value = '[]';
+      els.comfyPollTimeout.value = '3600';
       els.imageTool.value = 'prompt_only';
       els.imageModel.value = '';
       els.imageSize.value = '16:9';
@@ -3189,6 +3275,11 @@ INDEX_HTML = r"""<!doctype html>
       els.autoProductionMode.value = 'off';
       els.composeTool.value = 'ffmpeg';
       els.finalVideoName.value = '';
+      els.comfyApiKey.value = '';
+      els.comfyBaseUrl.value = '';
+      els.comfyWorkflowEndpoint.value = '';
+      els.comfyNodeInfoList.value = '[]';
+      els.comfyPollTimeout.value = '3600';
       els.imageTool.value = 'prompt_only';
       els.imageModel.value = '';
       els.imageSize.value = '9:16';
@@ -3363,12 +3454,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if isinstance(production_video_config, dict):
                     production_video_config["api_key"] = str(payload.get("video_api_key") or "").strip()
                     production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
+                production_compose_config = production_config.get("compose_config")
+                if isinstance(production_compose_config, dict):
+                    production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
+                    production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
             image_config = payload.get("image_config") or {}
             if image_config:
                 user_input = self._append_image_config(user_input, image_config)
             video_config = payload.get("video_config") or {}
             if video_config:
                 user_input = self._append_video_config(user_input, video_config)
+            if isinstance(production_config, dict):
+                compose_config = production_config.get("compose_config") or {}
+                if isinstance(compose_config, dict) and compose_config:
+                    user_input = self._append_comfyui_config(user_input, production_config, compose_config)
             reference_images = payload.get("reference_images") or []
             if reference_images:
                 user_input = self._append_reference_images(user_input, reference_images)
@@ -4120,6 +4219,30 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 视频平台密钥：{api_note}\n"
             f"- 视频平台接口地址：{base_url_note}\n"
             "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，07_视频生成执行员输出视频画面提示词和镜头清单，20_语音字幕包装师输出 TTS、SRT、BGM 和音效方案，21_ComfyUI成片编排师整理一体化成片参数；不要声称已经生成 mp4。\n"
+        )
+
+    @staticmethod
+    def _append_comfyui_config(user_input: str, production_config: dict, compose_config: dict) -> str:
+        def value(key: str, default: str = "未填写") -> str:
+            item = compose_config.get(key)
+            return str(item).strip() if item not in (None, "") else default
+
+        mode = str(production_config.get("mode") or "off").strip()
+        api_note = "已填写，运行时可调用，不保存密钥" if compose_config.get("api_key_provided") else "未填写"
+        base_url_note = "已填写，运行时可调用，不保存地址到输出" if compose_config.get("base_url_provided") else "未填写"
+        node_info = str(compose_config.get("node_info_list_json") or "").strip()
+        node_note = "已填写节点映射 JSON" if node_info and node_info != "[]" else "未填写，需后续按实际 ComfyUI 节点补齐"
+        return (
+            f"{user_input}\n\n"
+            "## ComfyUI 成片配置\n"
+            f"- 自动生成模式：{mode or 'off'}\n"
+            f"- 合成工具：{value('tool', 'ffmpeg')}\n"
+            f"- 成片工作流接口：{value('workflow_endpoint')}\n"
+            f"- 成片平台密钥：{api_note}\n"
+            f"- 成片平台接口地址：{base_url_note}\n"
+            f"- 节点映射：{node_note}\n"
+            f"- 轮询超时：{value('poll_timeout_seconds', '3600')} 秒\n"
+            "- 执行要求：21_ComfyUI成片编排师需要输出可映射到 ComfyUI/RunningHub 的参数包；如果节点 ID 未知，必须标注待确认，不要编造节点。\n"
         )
 
     def _upload_reference_image(self, payload: dict) -> dict:

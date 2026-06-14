@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .cloud_comfyui_adapter import CloudComfyUIAdapter
 from .cloud_image_adapter import CloudImageAdapter
 from .cloud_video_adapter import CloudVideoAdapter
 
@@ -115,6 +116,10 @@ def run_auto_production(
             "audio_package_file": str(audio_package_path),
             "comfyui_plan_file": str(comfyui_plan_path),
             "comfyui_payload_file": str(comfyui_payload_path),
+            "api_key_provided": bool(compose_config.get("api_key_provided")),
+            "base_url_provided": bool(compose_config.get("base_url_provided")),
+            "workflow_endpoint_provided": bool(str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()),
+            "node_mapping_provided": bool(str(compose_config.get("node_info_list_json") or "").strip() not in {"", "[]"}),
             "adapter_status": "pending" if mode in {"api_ready", "comfy_full"} else "not_configured",
         },
         "files": {
@@ -152,6 +157,18 @@ def run_auto_production(
                 manifest["status"] = "api_adapter_skipped"
             elif video_adapter_result["status"] not in {"skipped", "success"}:
                 manifest["status"] = "video_adapter_failed"
+    if mode == "comfy_full":
+        comfyui_adapter_result = _run_comfyui_adapter(comfyui_payload_path, compose_config, paths["comfyui"])
+        if comfyui_adapter_result:
+            manifest["composition"]["adapter_status"] = comfyui_adapter_result["status"]
+            manifest["composition"]["adapter_manifest"] = comfyui_adapter_result.get("manifest_file", "")
+            manifest["composition"]["downloaded_files"] = comfyui_adapter_result.get("downloaded_files", [])
+            if comfyui_adapter_result["status"] == "success":
+                manifest["status"] = "comfyui_generated"
+            elif comfyui_adapter_result["status"] == "skipped":
+                manifest["status"] = "comfyui_adapter_skipped"
+            else:
+                manifest["status"] = "comfyui_adapter_failed"
 
     manifest_path = task_dir / "production_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -159,6 +176,44 @@ def run_auto_production(
     manifest["files"]["manifest"] = str(manifest_path)
     manifest["files"]["note"] = str(production_note_path)
     return manifest
+
+
+def _run_comfyui_adapter(
+    comfyui_payload_path: Path,
+    compose_config: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any] | None:
+    tool = str(compose_config.get("tool") or "").strip().lower()
+    if tool in {"", "manual", "ffmpeg", "jianying"}:
+        return {"status": "skipped", "reason": "compose tool is not a cloud ComfyUI provider"}
+    api_key = str(compose_config.get("api_key") or "").strip()
+    base_url = str(compose_config.get("base_url") or "").strip()
+    endpoint = str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()
+    if not api_key or not base_url or not endpoint:
+        return {"status": "skipped", "reason": "ComfyUI API key, base URL, or workflow endpoint is missing"}
+
+    try:
+        comfyui_payload = json.loads(comfyui_payload_path.read_text(encoding="utf-8"))
+        if not isinstance(comfyui_payload, dict):
+            raise ValueError("comfyui_payload.json must contain a JSON object")
+        manifest = CloudComfyUIAdapter(base_url=base_url, api_key=api_key, endpoint=endpoint).run(
+            comfyui_payload=comfyui_payload,
+            compose_config=compose_config,
+            output_dir=output_dir,
+        )
+    except Exception as exc:
+        error_path = output_dir / "cloud_comfyui_error.json"
+        error_path.write_text(
+            json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return {"status": "failed", "error": str(exc), "manifest_file": str(error_path)}
+
+    return {
+        "status": manifest.get("status") or "success",
+        "manifest_file": str(output_dir / "cloud_comfyui_manifest.json"),
+        "downloaded_files": manifest.get("downloaded_files", []),
+    }
 
 
 def _run_video_adapter(
