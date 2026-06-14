@@ -70,6 +70,7 @@ def run_auto_production(
             "model": video_config.get("model") or "",
             "aspect_ratio": video_config.get("aspect_ratio") or "",
             "duration": video_config.get("duration") or "",
+            "prompt_notes": video_config.get("prompt_notes") or "",
             "negative_prompt": video_config.get("negative_prompt") or "",
             "seed": video_config.get("seed") or "",
             "fps": video_config.get("fps") or "",

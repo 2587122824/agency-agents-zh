@@ -995,12 +995,12 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="draft">草图/快速预览</option>
                 </select>
               </label>
-              <label>生图平台 API Key
+              <label>生图平台密钥
                 <input id="imageApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用生图 API，会保存到本浏览器" />
               </label>
             </div>
             <div class="provider-grid">
-              <label>生图平台 Base URL
+              <label>生图平台接口地址
                 <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
               </label>
               <label hidden>RunningHub Workflow Endpoint
@@ -1011,6 +1011,14 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="default" selected>default - 24G VRAM</option>
                   <option value="plus">plus - 48G VRAM</option>
                 </select>
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>负面提示词
+                <input id="imageNegativePrompt" placeholder="例如 水印、畸形手指、低清晰度、脸部变形、错误文字" />
+              </label>
+              <label>一致性重点
+                <input id="imageConsistency" placeholder="例如 保持同一人物脸型、服装、产品外观和主色调" />
               </label>
             </div>
             <div class="provider-grid" hidden>
@@ -1024,12 +1032,6 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="1800">30 min</option>
                   <option value="3600">60 min</option>
                 </select>
-              </label>
-              <label>负面提示词
-                <input id="imageNegativePrompt" placeholder="例如 水印、畸形手指、低清晰度、脸部变形、错误文字" />
-              </label>
-              <label>一致性重点
-                <input id="imageConsistency" placeholder="例如 保持同一人物脸型、服装、产品外观和主色调" />
               </label>
             </div>
             <div class="provider-grid" hidden>
@@ -1111,10 +1113,13 @@ INDEX_HTML = r"""<!doctype html>
               <label>视频风格
                 <input id="videoStyle" placeholder="例如 真人口播、科技感、写实商业、国风、美妆种草" />
               </label>
-              <label>视频平台 API Key
+              <label>视频画面与运动要求
+                <input id="videoPromptNotes" autocomplete="off" spellcheck="false" placeholder="例如 半身口播推近到产品特写，人物动作自然，节奏干净，避免夸张运镜" />
+              </label>
+              <label>视频平台密钥
                 <input id="videoApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用视频 API，会保存到本浏览器" />
               </label>
-              <label>视频平台 Base URL
+              <label>视频平台接口地址
                 <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
               </label>
             </div>
@@ -1134,7 +1139,7 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>运动强度
                 <select id="videoMotionStrength">
                   <option value="low">低：稳定轻微运动</option>
@@ -1449,6 +1454,7 @@ INDEX_HTML = r"""<!doctype html>
       videoAspect: document.getElementById('videoAspect'),
       videoDuration: document.getElementById('videoDuration'),
       videoStyle: document.getElementById('videoStyle'),
+      videoPromptNotes: document.getElementById('videoPromptNotes'),
       videoApiKey: document.getElementById('videoApiKey'),
       videoBaseUrl: document.getElementById('videoBaseUrl'),
       videoWorkflowEndpoint: document.getElementById('videoWorkflowEndpoint'),
@@ -1769,6 +1775,7 @@ INDEX_HTML = r"""<!doctype html>
         videoAspect: els.videoAspect.value,
         videoDuration: els.videoDuration.value,
         videoStyle: els.videoStyle.value,
+        videoPromptNotes: els.videoPromptNotes.value,
         videoApiKey: els.videoApiKey.value,
         videoBaseUrl: els.videoBaseUrl.value,
         videoWorkflowEndpoint: els.videoWorkflowEndpoint.value,
@@ -1838,6 +1845,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.videoAspect, settings.videoAspect);
       setIfExists(els.videoDuration, settings.videoDuration);
       els.videoStyle.value = settings.videoStyle || '';
+      els.videoPromptNotes.value = settings.videoPromptNotes || '';
       els.videoApiKey.value = settings.videoApiKey || '';
       els.videoBaseUrl.value = settings.videoBaseUrl || '';
       els.videoWorkflowEndpoint.value = settings.videoWorkflowEndpoint || '';
@@ -1913,6 +1921,7 @@ INDEX_HTML = r"""<!doctype html>
         els.videoAspect,
         els.videoDuration,
         els.videoStyle,
+        els.videoPromptNotes,
         els.videoApiKey,
         els.videoBaseUrl,
         els.videoWorkflowEndpoint,
@@ -3002,6 +3011,7 @@ INDEX_HTML = r"""<!doctype html>
           aspect_ratio: els.videoAspect.value,
           duration: els.videoDuration.value,
           style: els.videoStyle.value.trim(),
+          prompt_notes: els.videoPromptNotes.value.trim(),
           negative_prompt: els.videoNegativePrompt.value.trim(),
           seed: els.videoSeed.value.trim(),
           fps: els.videoFps.value,
@@ -3124,6 +3134,7 @@ INDEX_HTML = r"""<!doctype html>
       els.videoAspect.value = '9:16';
       els.videoDuration.value = '30s';
       els.videoStyle.value = '真人口播，商业科技感，干净明亮';
+      els.videoPromptNotes.value = '前半段人物口播稳定推进，中段切产品界面和案例画面，结尾推近到行动号召；镜头自然，节奏直接。';
       els.referenceRole.value = '人物一致性';
       els.referenceNote.value = '固定人物参考图，后续镜头保持同一角色与风格';
       saveSettings();
@@ -3150,6 +3161,7 @@ INDEX_HTML = r"""<!doctype html>
       els.videoAspect.value = '16:9';
       els.videoDuration.value = '30s';
       els.videoStyle.value = 'Steam商店预告片，展示玩法循环、探索、谜题和关键氛围';
+      els.videoPromptNotes.value = '从环境氛围开场，切到角色探索、谜题互动和关键机制，最后展示标题画面；镜头平稳，突出可玩内容。';
       els.referenceRole.value = '视觉风格参考';
       els.referenceNote.value = '用于统一角色、场景、美术风格和 Steam 宣传素材方向';
       saveSettings();
@@ -3189,6 +3201,7 @@ INDEX_HTML = r"""<!doctype html>
       els.videoAspect.value = '9:16';
       els.videoDuration.value = '30s';
       els.videoStyle.value = '';
+      els.videoPromptNotes.value = '';
       els.videoApiKey.value = '';
       els.videoBaseUrl.value = '';
       els.referenceRole.value = '人物一致性';
@@ -4068,17 +4081,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 生图质量：{value('quality', 'standard')}\n"
             f"- 负面提示词：{value('negative_prompt')}\n"
             f"- 一致性重点：{value('consistency')}\n"
-            f"- 随机种子 Seed：{value('seed')}\n"
-            f"- 提示词遵循强度 Guidance/CFG：{value('guidance_scale')}\n"
-            f"- 采样步数 Steps：{value('steps')}\n"
-            f"- 重绘/图生图强度 Denoise：{value('denoise_strength')}\n"
-            f"- 采样器 Sampler：{value('sampler')}\n"
-            f"- LoRA / ControlNet / IP-Adapter / Face reference：{value('control')}\n"
-            f"- RunningHub 工作流接口：{value('workflow_endpoint')}\n"
-            f"- RunningHub 实例规格：{value('instance_type', 'default')}\n"
-            f"- RunningHub 轮询超时：{value('poll_timeout_seconds', '900')} 秒\n"
-            f"- 生图平台 API Key：{api_note}\n"
-            f"- 生图平台 Base URL：{base_url_note}\n"
+            f"- 生图平台密钥：{api_note}\n"
+            f"- 生图平台接口地址：{base_url_note}\n"
             "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜总表、关键帧生图提示词、参考图使用策略和连续性控制说明；不要声称已经生成图片文件。\n"
         )
 
@@ -4098,22 +4102,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 画幅：{value('aspect_ratio', '9:16')}\n"
             f"- 目标时长：{value('duration', '30s')}\n"
             f"- 视频风格：{value('style')}\n"
+            f"- 视频画面与运动要求：{value('prompt_notes')}\n"
             f"- 负面提示词：{value('negative_prompt')}\n"
-            f"- 随机种子 Seed：{value('seed')}\n"
-            f"- FPS：{value('fps')}\n"
-            f"- 运动强度：{value('motion_strength')}\n"
-            f"- 镜头运动：{value('camera_motion')}\n"
-            f"- 分辨率：{value('resolution')}\n"
-            f"- 提示词遵循强度 Guidance：{value('guidance_scale')}\n"
-            f"- 帧数：{value('frames')}\n"
-            f"- 参考图/首帧影响强度：{value('image_strength')}\n"
-            f"- 镜头路径/分镜说明：{value('camera_path')}\n"
-            f"- 配音/字幕/音乐说明：{value('audio_notes')}\n"
-            f"- 模型高级参数：{value('advanced_params')}\n"
-            f"- RunningHub Video Endpoint：{value('workflow_endpoint')}\n"
-            f"- RunningHub 轮询超时：{value('poll_timeout_seconds', '1800')} 秒\n"
-            f"- 视频平台 API Key：{api_note}\n"
-            f"- 视频平台 Base URL：{base_url_note}\n"
+            f"- 视频平台密钥：{api_note}\n"
+            f"- 视频平台接口地址：{base_url_note}\n"
             "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，再由 07_视频生成执行员输出视频生成提示词、镜头清单、TTS 配音稿、SRT 字幕草案和剪辑说明；不要声称已经生成 mp4。\n"
         )
 

@@ -465,7 +465,7 @@ video_clips/runninghub_video_query_response.json
 生图常用参数：
 
 ```text
-工具、模型、尺寸/画幅、每镜头图片数、风格、质量、负面提示词、一致性重点、API Key、Base URL
+工具、模型、尺寸/画幅、每镜头图片数、风格、质量、负面提示词、一致性重点、平台密钥、平台接口地址
 ```
 
 生图隐藏高级参数：
@@ -477,13 +477,15 @@ Seed、Guidance/CFG、Steps、Denoise Strength、Sampler、LoRA / ControlNet / I
 生视频常用参数：
 
 ```text
-工具、模型、画幅、目标时长、风格、负面提示词、运动强度、镜头运动、API Key、Base URL
+工具、模型、画幅、目标时长、风格、画面与运动要求、负面提示词、平台密钥、平台接口地址
 ```
+
+`画面与运动要求` 用自然语言合并填写镜头运动、节奏、转场、人物动作、首帧/参考图使用方式等信息。常规用户不需要单独理解 FPS、Frames、Guidance、Image Strength 这类模型内部参数。
 
 生视频隐藏高级参数：
 
 ```text
-Seed、FPS、分辨率、Guidance、Frames、Image Strength、Camera Path / Shot Notes、Audio / Subtitle Notes、Advanced Model Params、RunningHub Video Endpoint、nodeInfoList JSON、轮询超时
+Seed、FPS、分辨率、运动强度、镜头运动、Guidance、Frames、Image Strength、Camera Path / Shot Notes、Audio / Subtitle Notes、Advanced Model Params、RunningHub Video Endpoint、nodeInfoList JSON、轮询超时
 ```
 
 隐藏字段仍保留默认值并继续写入 `image_config` 和 `video_config`，避免破坏 RunningHub 适配器。API Key 仍只用于本次请求，不写入任务输出文件。

@@ -1250,3 +1250,30 @@ node --check runtime/_tmp_web_app_script.js
 ```
 
 Local page returned HTTP 200 and contained the expected Chinese visible labels while hidden advanced fields remained present for compatibility.
+
+## Media Prompt UI Refinement
+
+[2026-06-14 +08:00] command: further simplified the image/video generation controls after the user said video parameters that can be merged into prompts should be optimized and remaining English labels should be translated.
+
+Management UI changes:
+
+- `生图平台 API Key` was renamed to `生图平台密钥`.
+- `生图平台 Base URL` was renamed to `生图平台接口地址`.
+- Restored visible image fields for:
+  - `负面提示词`
+  - `一致性重点`
+- `视频平台 API Key` was renamed to `视频平台密钥`.
+- `视频平台 Base URL` was renamed to `视频平台接口地址`.
+- Added `视频画面与运动要求` as the main natural-language field for video generation.
+- Moved separate `运动强度` and `镜头运动` controls into hidden compatibility defaults.
+
+Behavior changes:
+
+- `video_config.prompt_notes` now stores the natural-language video movement/shot requirement.
+- Workflow prompts sent to staff now include only user-facing video essentials instead of listing hidden technical parameters such as FPS, frames, guidance, resolution, image strength, endpoint, and poll timeout.
+- Image workflow prompts were also reduced to user-facing essentials; hidden advanced fields remain in DOM and request config for adapter compatibility.
+- `production_manifest.json` now includes `video_generation.prompt_notes`.
+
+Documentation:
+
+- Updated `my_workspace/README.md` to document the simplified Chinese parameter set and explain that `画面与运动要求` replaces many separate video technical controls for normal users.
