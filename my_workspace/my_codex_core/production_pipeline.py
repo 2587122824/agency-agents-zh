@@ -26,27 +26,44 @@ def run_auto_production(
     paths = _create_output_dirs(task_dir)
     image_step = _find_step(step_outputs, "06_")
     video_step = _find_step(step_outputs, "07_")
+    audio_step = _find_step(step_outputs, "20_")
+    compose_step = _find_step(step_outputs, "21_")
     image_content = image_step.get("content", "") if image_step else ""
     video_content = video_step.get("content", "") if video_step else ""
+    audio_content = audio_step.get("content", "") if audio_step else ""
+    compose_content = compose_step.get("content", "") if compose_step else ""
 
     image_prompt_path = paths["image_prompts"] / "storyboard_image_prompts.md"
     video_prompt_path = paths["video_prompts"] / "video_generation_prompts.md"
+    audio_package_path = paths["audio"] / "audio_subtitle_package.md"
     voiceover_path = paths["audio"] / "voiceover.txt"
     subtitles_path = task_dir / "subtitles.srt"
+    comfyui_plan_path = paths["comfyui"] / "comfyui_plan.md"
+    comfyui_payload_path = paths["comfyui"] / "comfyui_payload.json"
     checklist_path = task_dir / "edit_checklist.md"
     production_note_path = task_dir / "auto_production.md"
     final_video_name = _safe_file_name(str(compose_config.get("final_video_name") or "final_video.mp4"))
 
     _write_text(image_prompt_path, image_content or "# 分镜生图提示词\n\n未找到 06_分镜生图设计师输出。\n")
     _write_text(video_prompt_path, video_content or "# 视频生成提示词\n\n未找到 07_视频生成执行员输出。\n")
-    _write_text(voiceover_path, _extract_section(video_content, "TTS 配音稿") or "待从 07_视频生成执行员输出中整理配音稿。\n")
-    _write_text(subtitles_path, _extract_srt(video_content) or _default_srt())
-    _write_text(checklist_path, _build_edit_checklist(image_step, video_step, image_config, video_config, compose_config))
+    _write_text(audio_package_path, audio_content or "# 语音字幕制作包\n\n未找到 20_语音字幕包装师输出。\n")
+    _write_text(voiceover_path, _extract_section(audio_content, "TTS 配音稿") or "待从 20_语音字幕包装师输出中整理配音稿。\n")
+    _write_text(subtitles_path, _extract_srt(audio_content) or _default_srt())
+    _write_text(comfyui_plan_path, compose_content or "# ComfyUI 成片编排方案\n\n未找到 21_ComfyUI成片编排师输出。\n")
+    _write_text(comfyui_payload_path, _extract_json_block(compose_content) or _default_comfyui_payload(mode, final_video_name, video_config))
+    _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, compose_step, image_config, video_config, compose_config))
+
+    if mode == "api_ready":
+        initial_status = "api_adapter_pending"
+    elif mode == "comfy_full":
+        initial_status = "comfyui_package_ready"
+    else:
+        initial_status = "package_ready"
 
     manifest = {
         "schema_version": 1,
         "mode": mode,
-        "status": "package_ready" if mode == "package_only" else "api_adapter_pending",
+        "status": initial_status,
         "task_dir": str(task_dir),
         "image_generation": {
             "tool": image_config.get("tool") or "",
@@ -63,7 +80,7 @@ def run_auto_production(
             "base_url_provided": bool(image_config.get("base_url_provided")),
             "prompt_file": str(image_prompt_path),
             "output_dir": str(paths["generated_images"]),
-            "adapter_status": "not_configured" if mode == "package_only" else "pending",
+            "adapter_status": "pending" if mode == "api_ready" else "not_configured",
         },
         "video_generation": {
             "tool": video_config.get("tool") or "",
@@ -87,20 +104,27 @@ def run_auto_production(
             "base_url_provided": bool(video_config.get("base_url_provided")),
             "prompt_file": str(video_prompt_path),
             "output_dir": str(paths["video_clips"]),
-            "adapter_status": "not_configured" if mode == "package_only" else "pending",
+            "adapter_status": "pending" if mode == "api_ready" else "not_configured",
         },
         "composition": {
             "tool": compose_config.get("tool") or "ffmpeg",
+            "execution_mode": compose_config.get("execution_mode") or mode,
             "target_file": str(task_dir / final_video_name),
             "subtitles_file": str(subtitles_path),
             "voiceover_file": str(voiceover_path),
-            "adapter_status": "not_configured" if mode == "package_only" else "pending",
+            "audio_package_file": str(audio_package_path),
+            "comfyui_plan_file": str(comfyui_plan_path),
+            "comfyui_payload_file": str(comfyui_payload_path),
+            "adapter_status": "pending" if mode in {"api_ready", "comfy_full"} else "not_configured",
         },
         "files": {
             "image_prompts": str(image_prompt_path),
             "video_prompts": str(video_prompt_path),
+            "audio_package": str(audio_package_path),
             "voiceover": str(voiceover_path),
             "subtitles": str(subtitles_path),
+            "comfyui_plan": str(comfyui_plan_path),
+            "comfyui_payload": str(comfyui_payload_path),
             "edit_checklist": str(checklist_path),
         },
     }
@@ -214,6 +238,7 @@ def _create_output_dirs(task_dir: Path) -> dict[str, Path]:
         "video_prompts": task_dir / "video_prompts",
         "video_clips": task_dir / "video_clips",
         "audio": task_dir / "audio",
+        "comfyui": task_dir / "comfyui",
     }
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
@@ -241,13 +266,48 @@ def _extract_section(content: str, heading: str) -> str:
     return text + "\n" if text else ""
 
 
+def _extract_json_block(content: str) -> str:
+    match = re.search(r"```json\s*(.*?)```", content, re.DOTALL | re.IGNORECASE)
+    if not match:
+        return ""
+    raw = match.group(1).strip()
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw + "\n"
+    return json.dumps(parsed, ensure_ascii=False, indent=2) + "\n"
+
+
 def _default_srt() -> str:
-    return "1\n00:00:00,000 --> 00:00:03,000\n待从 07_视频生成执行员输出中整理字幕。\n"
+    return "1\n00:00:00,000 --> 00:00:03,000\n待从 20_语音字幕包装师输出中整理字幕。\n"
+
+
+def _default_comfyui_payload(mode: str, final_video_name: str, video_config: dict[str, Any]) -> str:
+    payload = {
+        "execution_mode": mode,
+        "image_prompts": [],
+        "video_prompts": [],
+        "reference_images": [],
+        "voice_text": "",
+        "subtitle_srt": "",
+        "subtitle_style": "",
+        "bgm_style": "",
+        "output": {
+            "aspect_ratio": video_config.get("aspect_ratio") or "9:16",
+            "duration": video_config.get("duration") or "30s",
+            "file_name": final_video_name,
+        },
+        "nodeInfoList": [],
+        "notes": "待根据 21_ComfyUI成片编排师输出和实际 ComfyUI 节点补全。",
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
 def _build_edit_checklist(
     image_step: dict[str, str] | None,
     video_step: dict[str, str] | None,
+    audio_step: dict[str, str] | None,
+    compose_step: dict[str, str] | None,
     image_config: dict[str, Any],
     video_config: dict[str, Any],
     compose_config: dict[str, Any],
@@ -270,15 +330,26 @@ def _build_edit_checklist(
             "- 输出目录：video_clips/",
             f"- 07 输出状态：{'已找到' if video_step else '未找到'}",
             "",
-            "## 3. 合成",
+            "## 3. 语音字幕",
+            "- 语音字幕包：audio/audio_subtitle_package.md",
+            "- 配音：audio/voiceover.txt",
+            "- 字幕：subtitles.srt",
+            f"- 20 输出状态：{'已找到' if audio_step else '未找到'}",
+            "",
+            "## 4. ComfyUI 成片编排",
+            "- 编排方案：comfyui/comfyui_plan.md",
+            "- 参数包：comfyui/comfyui_payload.json",
+            f"- 21 输出状态：{'已找到' if compose_step else '未找到'}",
+            "",
+            "## 5. 合成",
             f"- 合成工具：{compose_config.get('tool') or 'ffmpeg'}",
             "- 字幕：subtitles.srt",
             "- 配音：audio/voiceover.txt",
             "- 目标视频：final_video.mp4",
             "",
-            "## 4. 当前限制",
-            "- 当前版本生成自动生产资产包和 manifest，不直接调用第三方生图/生视频 API。",
-            "- 后续接入具体平台时，适配器读取 production_manifest.json 执行。",
+            "## 6. 当前限制",
+            "- 当前版本生成自动生产资产包、语音字幕包、ComfyUI 编排方案和 manifest。",
+            "- 只有选择调用 API 生成时，适配器才会读取 production_manifest.json 执行外部调用。",
             "",
         ]
     )
@@ -295,6 +366,9 @@ def _build_production_note(manifest: dict[str, Any]) -> str:
             f"- 视频提示词：{manifest['files']['video_prompts']}",
             f"- 字幕文件：{manifest['files']['subtitles']}",
             f"- 配音文本：{manifest['files']['voiceover']}",
+            f"- 语音字幕包：{manifest['files']['audio_package']}",
+            f"- ComfyUI 编排方案：{manifest['files']['comfyui_plan']}",
+            f"- ComfyUI 参数包：{manifest['files']['comfyui_payload']}",
             "",
             "下一步接入真实平台 API 时，直接读取 `production_manifest.json` 中的配置、提示词文件和输出目录。",
             "",

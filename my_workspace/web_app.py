@@ -910,14 +910,16 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <details>
-          <summary><strong>全自动生成</strong> <span class="muted small">生成生产资产包，后续接入 API 自动出图出视频</span></summary>
+          <summary><strong>全自动生成</strong> <span class="muted small">按成本选择视频画面、语音字幕或 ComfyUI 成片路径</span></summary>
           <div class="details-body">
             <div class="provider-grid">
               <label>自动生成模式
                 <select id="autoProductionMode">
                   <option value="off" selected>关闭</option>
-                  <option value="package_only">生成生产资产包</option>
-                  <option value="api_ready">调用 API 生成（适配器预留）</option>
+                  <option value="package_only">只生成视频制作包</option>
+                  <option value="audio_package">生成视频 + 语音字幕制作包</option>
+                  <option value="api_ready">调用生图/生视频 API</option>
+                  <option value="comfy_full">ComfyUI 全自动成片（高算力预留）</option>
                 </select>
               </label>
               <label>合成工具
@@ -1059,7 +1061,7 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <details>
-          <summary><strong>视频生成配置</strong> <span class="muted small">用于 06_分镜生图设计师和 07_视频生成执行员</span></summary>
+          <summary><strong>视频生成配置</strong> <span class="muted small">用于 06 分镜、07 视频画面、20 语音字幕和 21 ComfyUI 编排</span></summary>
           <div class="details-body">
             <div class="video-grid">
               <label>视频工具
@@ -2763,7 +2765,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!packageFiles.length) {
         els.packageOutputList.innerHTML = '<div class="muted small">还没有产品包。点击右上角“导出产品包”生成可交付文件。</div>';
       } else {
-        const priority = ['README.md', 'final_output.md', '视频制作包.md', '小红书文案.md', 'GDD.md', '产品需求文档.md', 'manifest.json'];
+        const priority = ['README.md', 'final_output.md', '视频制作包.md', '语音字幕制作包.md', 'ComfyUI成片编排.md', '小红书文案.md', 'GDD.md', '产品需求文档.md', 'manifest.json'];
         packageFiles.sort((a, b) => {
           const an = a.split('/').pop();
           const bn = b.split('/').pop();
@@ -3036,6 +3038,7 @@ INDEX_HTML = r"""<!doctype html>
           video_config: videoConfig,
           compose_config: {
             tool: els.composeTool.value,
+            execution_mode: els.autoProductionMode.value,
             final_video_name: els.finalVideoName.value.trim() || 'final_video.mp4',
           },
         };
@@ -3967,6 +3970,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             write("镜头清单.csv", self._shot_csv(step_outputs))
             write("生图提示词.json", json.dumps(self._prompt_json(step_outputs, "06_"), ensure_ascii=False, indent=2))
             write("视频提示词.json", json.dumps(self._prompt_json(step_outputs, "07_"), ensure_ascii=False, indent=2))
+            write("语音字幕制作包.md", self._agent_output_text(step_outputs, "20_"))
+            write("ComfyUI成片编排.md", self._agent_output_text(step_outputs, "21_"))
+            write("ComfyUI参数包.json", json.dumps(self._prompt_json(step_outputs, "21_"), ensure_ascii=False, indent=2))
         elif template == "xiaohongshu":
             write("小红书文案.md", final_output)
             write("标题列表.txt", self._extract_lines(final_output, ["标题", "选题"]))
@@ -4039,6 +4045,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         ]
 
     @staticmethod
+    def _agent_output_text(step_outputs: list[dict], agent_prefix: str) -> str:
+        for item in step_outputs:
+            if str(item.get("agent", "")).startswith(agent_prefix):
+                return str(item.get("content", "")).strip() + "\n"
+        return f"# {agent_prefix} 输出\n\n当前任务没有找到该员工输出。\n"
+
+    @staticmethod
     def _extract_lines(text: str, keywords: list[str]) -> str:
         lines = []
         for line in text.splitlines():
@@ -4106,7 +4119,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 负面提示词：{value('negative_prompt')}\n"
             f"- 视频平台密钥：{api_note}\n"
             f"- 视频平台接口地址：{base_url_note}\n"
-            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，再由 07_视频生成执行员输出视频生成提示词、镜头清单、TTS 配音稿、SRT 字幕草案和剪辑说明；不要声称已经生成 mp4。\n"
+            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，07_视频生成执行员输出视频画面提示词和镜头清单，20_语音字幕包装师输出 TTS、SRT、BGM 和音效方案，21_ComfyUI成片编排师整理一体化成片参数；不要声称已经生成 mp4。\n"
         )
 
     def _upload_reference_image(self, payload: dict) -> dict:

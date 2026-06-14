@@ -1277,3 +1277,52 @@ Behavior changes:
 Documentation:
 
 - Updated `my_workspace/README.md` to document the simplified Chinese parameter set and explain that `画面与运动要求` replaces many separate video technical controls for normal users.
+
+## Voice Subtitle And ComfyUI Production Staff
+
+[2026-06-14 +08:00] command: added separate voice/subtitle and ComfyUI production orchestration staff after the user noted ComfyUI can also run voice and subtitle nodes but they cost more compute.
+
+New custom staff:
+
+```text
+my_workspace/my_custom_staff/20_语音字幕包装师/
+my_workspace/my_custom_staff/21_ComfyUI成片编排师/
+```
+
+Staff responsibility split:
+
+- `07_视频生成执行员` now focuses on video visuals, shot prompts, reference images, first frames, and video clip execution.
+- `20_语音字幕包装师` owns TTS copy, TTS parameters, subtitle segmentation, SRT drafts, BGM, sound effects, and mixing notes.
+- `21_ComfyUI成片编排师` maps image/video/audio/subtitle outputs into ComfyUI or RunningHub execution parameters and gives low-cost fallback paths.
+
+Workflow updates:
+
+- `workflow_短视频全流程.json` now has 9 steps:
+  - 06 storyboard image planning
+  - 07 video visual generation package
+  - 20 voice/subtitle package
+  - 21 ComfyUI final production orchestration
+- `workflow_开发外包.json` also now has 9 steps with the same 07/20/21 split.
+- `workflow_小红书图文.json` was not changed because it is not a video production workflow.
+
+Management UI updates:
+
+- `全自动生成` mode now exposes clearer choices:
+  - `只生成视频制作包`
+  - `生成视频 + 语音字幕制作包`
+  - `调用生图/生视频 API`
+  - `ComfyUI 全自动成片（高算力预留）`
+- Video config summary now states it feeds 06, 07, 20, and 21.
+- Export package for short-video outputs now includes `语音字幕制作包.md`, `ComfyUI成片编排.md`, and `ComfyUI参数包.json`.
+
+Production pipeline updates:
+
+- `run_auto_production()` now extracts voiceover and SRT from `20_语音字幕包装师` instead of 07.
+- It writes:
+  - `audio/audio_subtitle_package.md`
+  - `audio/voiceover.txt`
+  - `subtitles.srt`
+  - `comfyui/comfyui_plan.md`
+  - `comfyui/comfyui_payload.json`
+- `production_manifest.json` now references the audio package, ComfyUI plan, and ComfyUI payload.
+- API adapters are marked `pending` only for `api_ready` mode; package and ComfyUI planning modes do not falsely indicate external API calls.
