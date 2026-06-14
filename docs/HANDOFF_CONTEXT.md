@@ -1177,3 +1177,76 @@ node --check runtime/_tmp_web_app_script.js
 ```
 
 Passed.
+
+## Media Parameter UI Simplification
+
+[2026-06-14 +08:00] command: simplified the management UI media generation controls after the user said there were too many parameters and visible labels should be Chinese.
+
+Visible image controls now prioritize:
+
+```text
+工具、模型、尺寸/画幅、每镜头图片数、风格、质量、负面提示词、一致性重点、API Key、Base URL
+```
+
+Hidden image controls remain in the DOM so existing JS, localStorage, and RunningHub adapter defaults continue to work:
+
+```text
+imageWorkflowEndpoint
+imageInstanceType
+imageNodeInfoList
+imagePollTimeout
+imageSeed
+imageGuidance
+imageSteps
+imageDenoise
+imageSampler
+imageControl
+```
+
+Visible video controls now prioritize:
+
+```text
+工具、模型、画幅、目标时长、风格、负面提示词、运动强度、镜头运动、API Key、Base URL
+```
+
+Hidden video controls remain in the DOM for compatibility:
+
+```text
+videoSeed
+videoFps
+videoResolution
+videoGuidance
+videoFrames
+videoImageStrength
+videoCameraPath
+videoAudioNotes
+videoAdvancedParams
+videoWorkflowEndpoint
+videoNodeInfoList
+videoPollTimeout
+```
+
+Visible RunningHub option labels were changed to Chinese:
+
+```text
+RunningHub 云端 ComfyUI
+RunningHub 视频应用
+```
+
+Visible video labels were changed to Chinese for:
+
+```text
+视频负面提示词
+运动强度
+镜头运动
+```
+
+Validation:
+
+```powershell
+python -m py_compile my_workspace/web_app.py my_workspace/my_codex_core/production_pipeline.py
+node --check runtime/_tmp_web_app_script.js
+.\start_local.ps1 -SkipModelPull -NoBrowser
+```
+
+Local page returned HTTP 200 and contained the expected Chinese visible labels while hidden advanced fields remained present for compatibility.

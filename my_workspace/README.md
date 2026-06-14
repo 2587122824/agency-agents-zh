@@ -460,30 +460,30 @@ video_clips/runninghub_video_query_response.json
 
 ## 生图和生视频参数
 
-管理台的生图/视频配置已经按普通参数和高级参数扩展。
+管理台的生图/视频配置已经精简为常用参数优先。多数模型内部参数保留在代码和配置中，但默认不在页面展示。
 
-生图普通参数：
-
-```text
-工具、模型、尺寸/画幅、每镜头图片数、风格、质量、负面提示词、一致性重点、Seed
-```
-
-生图高级参数：
+生图常用参数：
 
 ```text
-Guidance/CFG、Steps、Denoise Strength、Sampler、LoRA / ControlNet / IP-Adapter / Face reference、RunningHub Endpoint、nodeInfoList JSON、实例规格、轮询超时
+工具、模型、尺寸/画幅、每镜头图片数、风格、质量、负面提示词、一致性重点、API Key、Base URL
 ```
 
-生视频普通参数：
+生图隐藏高级参数：
 
 ```text
-工具、模型、画幅、目标时长、风格、负面提示词、Seed、FPS、运动强度、镜头运动、分辨率
+Seed、Guidance/CFG、Steps、Denoise Strength、Sampler、LoRA / ControlNet / IP-Adapter / Face reference、RunningHub Endpoint、nodeInfoList JSON、实例规格、轮询超时
 ```
 
-生视频高级参数：
+生视频常用参数：
 
 ```text
-Guidance、Frames、Image Strength、Camera Path / Shot Notes、Audio / Subtitle Notes、Advanced Model Params、RunningHub Video Endpoint、nodeInfoList JSON、轮询超时
+工具、模型、画幅、目标时长、风格、负面提示词、运动强度、镜头运动、API Key、Base URL
 ```
 
-这些字段会写入本次运行的 `image_config` 和 `video_config`，同时追加到 06/07 号员工的上下文中。API Key 仍只用于本次请求，不写入任务输出文件。
+生视频隐藏高级参数：
+
+```text
+Seed、FPS、分辨率、Guidance、Frames、Image Strength、Camera Path / Shot Notes、Audio / Subtitle Notes、Advanced Model Params、RunningHub Video Endpoint、nodeInfoList JSON、轮询超时
+```
+
+隐藏字段仍保留默认值并继续写入 `image_config` 和 `video_config`，避免破坏 RunningHub 适配器。API Key 仍只用于本次请求，不写入任务输出文件。

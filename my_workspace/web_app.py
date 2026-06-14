@@ -944,7 +944,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="midjourney">Midjourney</option>
                   <option value="stable-diffusion">Stable Diffusion</option>
                   <option value="flux">FLUX</option>
-                  <option value="runninghub">RunningHub Cloud ComfyUI</option>
+                  <option value="runninghub">RunningHub 云端 ComfyUI</option>
                   <option value="jimeng">即梦生图</option>
                   <option value="kling">可灵生图</option>
                   <option value="seedream">Seedream</option>
@@ -1003,17 +1003,17 @@ INDEX_HTML = r"""<!doctype html>
               <label>生图平台 Base URL
                 <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
               </label>
-              <label>RunningHub Workflow Endpoint
+              <label hidden>RunningHub Workflow Endpoint
                 <input id="imageWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/2048294089858228226" />
               </label>
-              <label>RunningHub Instance Type
+              <label hidden>RunningHub Instance Type
                 <select id="imageInstanceType">
                   <option value="default" selected>default - 24G VRAM</option>
                   <option value="plus">plus - 48G VRAM</option>
                 </select>
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>RunningHub nodeInfoList JSON
                 <textarea id="imageNodeInfoList" spellcheck="false" placeholder='[]; use {{prompt}} inside JSON strings to inject the generated prompt'></textarea>
               </label>
@@ -1032,7 +1032,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="imageConsistency" placeholder="例如 保持同一人物脸型、服装、产品外观和主色调" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>Image Seed
                 <input id="imageSeed" autocomplete="off" spellcheck="false" placeholder="Leave blank for random; fixed seed improves repeatability" />
               </label>
@@ -1043,7 +1043,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="imageSteps" autocomplete="off" spellcheck="false" placeholder="Example: 20 / 30; blank uses workflow default" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>Image Denoise Strength
                 <input id="imageDenoise" autocomplete="off" spellcheck="false" placeholder="Image-to-image repaint strength, e.g. 0.35 / 0.65" />
               </label>
@@ -1067,7 +1067,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="runway">Runway</option>
                   <option value="pika">Pika</option>
                   <option value="seedance">Seedance</option>
-                  <option value="runninghub">RunningHub AI App</option>
+                  <option value="runninghub">RunningHub 视频应用</option>
                   <option value="kling">可灵 Kling</option>
                   <option value="jimeng">即梦 Jimeng</option>
                   <option value="hailuo">海螺 Hailuo</option>
@@ -1119,13 +1119,13 @@ INDEX_HTML = r"""<!doctype html>
               </label>
             </div>
             <div class="provider-grid">
-              <label>Video Negative Prompt
-                <input id="videoNegativePrompt" autocomplete="off" spellcheck="false" placeholder="Watermark, flicker, bad hands, wrong text, face distortion" />
+              <label>视频负面提示词
+                <input id="videoNegativePrompt" autocomplete="off" spellcheck="false" placeholder="例如 水印、闪烁、畸形手、错误文字、脸部变形" />
               </label>
-              <label>Video Seed
+              <label hidden>Video Seed
                 <input id="videoSeed" autocomplete="off" spellcheck="false" placeholder="Leave blank for random; fixed seed improves repeatability" />
               </label>
-              <label>Video FPS
+              <label hidden>Video FPS
                 <select id="videoFps">
                   <option value="">Workflow default</option>
                   <option value="24">24</option>
@@ -1135,24 +1135,24 @@ INDEX_HTML = r"""<!doctype html>
               </label>
             </div>
             <div class="provider-grid">
-              <label>Motion Strength
+              <label>运动强度
                 <select id="videoMotionStrength">
-                  <option value="low">Low - stable subtle motion</option>
-                  <option value="medium" selected>Medium - natural motion</option>
-                  <option value="high">High - strong motion or transitions</option>
+                  <option value="low">低：稳定轻微运动</option>
+                  <option value="medium" selected>中：自然运动</option>
+                  <option value="high">高：强运动或强转场</option>
                 </select>
               </label>
-              <label>Camera Motion
+              <label>镜头运动
                 <select id="videoCameraMotion">
-                  <option value="static">Static</option>
-                  <option value="push_in" selected>Push in</option>
-                  <option value="pull_out">Pull out</option>
-                  <option value="pan">Pan / slide</option>
-                  <option value="orbit">Orbit</option>
-                  <option value="handheld">Handheld feel</option>
+                  <option value="static">固定机位</option>
+                  <option value="push_in" selected>推近</option>
+                  <option value="pull_out">拉远</option>
+                  <option value="pan">横移/摇镜</option>
+                  <option value="orbit">环绕</option>
+                  <option value="handheld">手持感</option>
                 </select>
               </label>
-              <label>Video Resolution
+              <label hidden>Video Resolution
                 <select id="videoResolution">
                   <option value="">Workflow default</option>
                   <option value="720p">720p</option>
@@ -1161,7 +1161,7 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>Video Guidance
                 <input id="videoGuidance" autocomplete="off" spellcheck="false" placeholder="Prompt guidance strength; blank uses workflow default" />
               </label>
@@ -1172,7 +1172,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="videoImageStrength" autocomplete="off" spellcheck="false" placeholder="Reference or first-frame strength, e.g. 0.45 / 0.75" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>Camera Path / Shot Notes
                 <input id="videoCameraPath" autocomplete="off" spellcheck="false" placeholder="Complex camera path, shot array, first/last-frame notes" />
               </label>
@@ -1183,7 +1183,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="videoAdvancedParams" autocomplete="off" spellcheck="false" placeholder="motion_bucket, motion_scale, or provider-specific params" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>RunningHub Video Endpoint
                 <input id="videoWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/ai-app/2066043648160133122" />
               </label>
