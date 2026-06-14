@@ -1047,3 +1047,79 @@ M my_workspace/my_codex_core/production_pipeline.py
 ```
 
 Branch may still be ahead of origin because the previous `Browser Action Executor Fix` commit was committed locally but GitHub push failed with port 443 connectivity errors.
+
+## RunningHub Cloud Video Adapter
+
+[2026-06-14 +08:00] command: connected the video-generation production path to the user-provided RunningHub AI App endpoint.
+
+User-provided video endpoint:
+
+```text
+/run/ai-app/2066043648160133122
+```
+
+New file:
+
+```text
+my_workspace/my_codex_core/cloud_video_adapter.py
+```
+
+Behavior:
+
+- Supports `tool=runninghub` for video generation in `api_ready` production mode.
+- Submits to the configured RunningHub AI App endpoint, reads `taskId` from either top-level `taskId` or nested `data.taskId`, polls `/query`, and downloads video results into:
+
+```text
+my_workspace/my_task_output/<task>/video_clips/
+```
+
+- Supports downloaded result types:
+
+```text
+mp4, mov, webm, m4v
+```
+
+- Writes provider response and manifest files:
+
+```text
+video_clips/runninghub_video_submit_response.json
+video_clips/runninghub_video_query_response.json
+video_clips/cloud_video_manifest.json
+production_manifest.json
+```
+
+- API keys are used only in memory for the current request. They are not written to `production_manifest.json`, `cloud_video_manifest.json`, response files, README, or this handoff document.
+
+Management UI changes:
+
+- `视频生成配置` now includes `RunningHub AI App`.
+- Added video RunningHub fields:
+  - Base URL, default intended value: `https://www.runninghub.cn/openapi/v2`
+  - Video endpoint, default intended value: `/run/ai-app/2066043648160133122`
+  - `RunningHub Video nodeInfoList JSON`
+  - poll timeout
+- Selecting RunningHub auto-fills the default Base URL, endpoint, and empty `nodeInfoList` when those fields are blank.
+- Browser `localStorage` setting persistence now includes the new RunningHub video fields.
+
+Production pipeline changes:
+
+- `run_auto_production()` now calls the video adapter when:
+  - production mode is `api_ready`
+  - video tool is not `prompt_only`
+  - video API key, Base URL, and workflow endpoint are present
+- Missing config results in `adapter_status=skipped` instead of an accidental API call.
+- Failed video API calls write `video_clips/cloud_video_error.json` and mark the video adapter failed in `production_manifest.json`.
+
+Verification:
+
+```powershell
+python -m py_compile my_workspace/web_app.py my_workspace/my_codex_core/production_pipeline.py my_workspace/my_codex_core/cloud_image_adapter.py my_workspace/my_codex_core/cloud_video_adapter.py
+node --check runtime/_tmp_web_app_script.js
+```
+
+Passed.
+
+Local fake RunningHub video smoke tests passed:
+
+- `CloudVideoAdapter` submitted a fake AI App task, read nested `data.taskId`, queried fake `/query`, and downloaded `runninghub_video_01.mp4`.
+- `run_auto_production(..., mode=api_ready, video tool=runninghub)` downloaded `video_clips/runninghub_video_01.mp4`, set `production_manifest.status=video_generated`, and confirmed the dummy API key was not written into `production_manifest.json`.

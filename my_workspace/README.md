@@ -430,3 +430,30 @@ production_manifest.json
 - API Key 只通过本次请求传给适配器，不写入 `production_manifest.json` 或任务输出。
 - RunningHub 返回的结果 URL 通常 24 小时有效，适配器会立即下载到本地 `generated_images/`。
 - 当前只接入生图；视频生成仍先输出制作包和提示词，后续再接视频 API。
+
+## RunningHub 云端视频接入
+
+管理台现在也支持在 `全自动生成 -> 调用 API 生成` 模式下调用 RunningHub AI App 视频接口。
+
+使用方式：
+
+1. 在 `视频生成配置` 中选择 `RunningHub AI App`。
+2. 填入 `视频平台 API Key`。
+3. Base URL 使用 `https://www.runninghub.cn/openapi/v2`。
+4. Video Endpoint 使用 `/run/ai-app/2066043648160133122`。
+5. `RunningHub Video nodeInfoList JSON` 默认可填 `[]`；如需把 07 号员工生成的视频提示词写入某个节点，可在 JSON 字符串中使用 `{{prompt}}`。
+
+运行成功后，任务目录会额外生成：
+
+```text
+video_clips/runninghub_video_01.mp4
+video_clips/cloud_video_manifest.json
+video_clips/runninghub_video_submit_response.json
+video_clips/runninghub_video_query_response.json
+```
+
+注意：
+
+- 视频 API Key 只通过本次请求传给适配器，不写入 `production_manifest.json` 或任务输出。
+- 如果 RunningHub AI App 需要固定节点输入，先从 RunningHub 页面确认节点参数，再填入 `nodeInfoList JSON`。
+- 当前框架负责提交、轮询、下载视频文件；生成质量取决于 RunningHub AI App 内部工作流配置。

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from .cloud_image_adapter import CloudImageAdapter
+from .cloud_video_adapter import CloudVideoAdapter
 
 
 def run_auto_production(
@@ -97,6 +98,17 @@ def run_auto_production(
                 manifest["status"] = "api_adapter_skipped"
             else:
                 manifest["status"] = "image_adapter_failed"
+        video_adapter_result = _run_video_adapter(video_content, video_config, paths["video_clips"])
+        if video_adapter_result:
+            manifest["video_generation"]["adapter_status"] = video_adapter_result["status"]
+            manifest["video_generation"]["adapter_manifest"] = video_adapter_result.get("manifest_file", "")
+            manifest["video_generation"]["downloaded_files"] = video_adapter_result.get("downloaded_files", [])
+            if video_adapter_result["status"] == "success":
+                manifest["status"] = "video_generated"
+            elif manifest["status"] == "api_adapter_pending" and video_adapter_result["status"] == "skipped":
+                manifest["status"] = "api_adapter_skipped"
+            elif video_adapter_result["status"] not in {"skipped", "success"}:
+                manifest["status"] = "video_adapter_failed"
 
     manifest_path = task_dir / "production_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -104,6 +116,41 @@ def run_auto_production(
     manifest["files"]["manifest"] = str(manifest_path)
     manifest["files"]["note"] = str(production_note_path)
     return manifest
+
+
+def _run_video_adapter(
+    video_content: str,
+    video_config: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any] | None:
+    tool = str(video_config.get("tool") or "").strip().lower()
+    if tool in {"", "prompt_only"}:
+        return {"status": "skipped", "reason": "video tool is prompt_only"}
+    api_key = str(video_config.get("api_key") or "").strip()
+    base_url = str(video_config.get("base_url") or "").strip()
+    endpoint = str(video_config.get("workflow_endpoint") or video_config.get("endpoint") or "").strip()
+    if not api_key or not base_url or not endpoint:
+        return {"status": "skipped", "reason": "video API key, base URL, or workflow endpoint is missing"}
+
+    try:
+        manifest = CloudVideoAdapter(base_url=base_url, api_key=api_key, endpoint=endpoint).run(
+            prompt_text=video_content,
+            video_config=video_config,
+            output_dir=output_dir,
+        )
+    except Exception as exc:
+        error_path = output_dir / "cloud_video_error.json"
+        error_path.write_text(
+            json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return {"status": "failed", "error": str(exc), "manifest_file": str(error_path)}
+
+    return {
+        "status": manifest.get("status") or "success",
+        "manifest_file": str(output_dir / "cloud_video_manifest.json"),
+        "downloaded_files": manifest.get("downloaded_files", []),
+    }
 
 
 def _run_image_adapter(

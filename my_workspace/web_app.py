@@ -1045,6 +1045,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="runway">Runway</option>
                   <option value="pika">Pika</option>
                   <option value="seedance">Seedance</option>
+                  <option value="runninghub">RunningHub AI App</option>
                   <option value="kling">可灵 Kling</option>
                   <option value="jimeng">即梦 Jimeng</option>
                   <option value="hailuo">海螺 Hailuo</option>
@@ -1092,7 +1093,23 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="videoApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用视频 API，会保存到本浏览器" />
               </label>
               <label>视频平台 Base URL
-                <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入视频 API 使用，可留空" />
+                <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>RunningHub Video Endpoint
+                <input id="videoWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/ai-app/2066043648160133122" />
+              </label>
+              <label>RunningHub Video nodeInfoList JSON
+                <textarea id="videoNodeInfoList" spellcheck="false" placeholder='[]; use {{prompt}} inside JSON strings to inject the generated video prompt'></textarea>
+              </label>
+              <label>RunningHub Video Poll Timeout
+                <select id="videoPollTimeout">
+                  <option value="900">15 min</option>
+                  <option value="1800" selected>30 min</option>
+                  <option value="3600">60 min</option>
+                  <option value="7200">120 min</option>
+                </select>
               </label>
             </div>
             <div class="provider-grid">
@@ -1341,6 +1358,9 @@ INDEX_HTML = r"""<!doctype html>
       videoStyle: document.getElementById('videoStyle'),
       videoApiKey: document.getElementById('videoApiKey'),
       videoBaseUrl: document.getElementById('videoBaseUrl'),
+      videoWorkflowEndpoint: document.getElementById('videoWorkflowEndpoint'),
+      videoNodeInfoList: document.getElementById('videoNodeInfoList'),
+      videoPollTimeout: document.getElementById('videoPollTimeout'),
       referenceImages: document.getElementById('referenceImages'),
       referenceRole: document.getElementById('referenceRole'),
       referenceNote: document.getElementById('referenceNote'),
@@ -1640,6 +1660,9 @@ INDEX_HTML = r"""<!doctype html>
         videoStyle: els.videoStyle.value,
         videoApiKey: els.videoApiKey.value,
         videoBaseUrl: els.videoBaseUrl.value,
+        videoWorkflowEndpoint: els.videoWorkflowEndpoint.value,
+        videoNodeInfoList: els.videoNodeInfoList.value,
+        videoPollTimeout: els.videoPollTimeout.value,
         referenceRole: els.referenceRole.value,
         referenceNote: els.referenceNote.value,
       };
@@ -1688,10 +1711,14 @@ INDEX_HTML = r"""<!doctype html>
       els.videoStyle.value = settings.videoStyle || '';
       els.videoApiKey.value = settings.videoApiKey || '';
       els.videoBaseUrl.value = settings.videoBaseUrl || '';
+      els.videoWorkflowEndpoint.value = settings.videoWorkflowEndpoint || '';
+      els.videoNodeInfoList.value = settings.videoNodeInfoList || '';
+      setIfExists(els.videoPollTimeout, settings.videoPollTimeout);
       setIfExists(els.referenceRole, settings.referenceRole);
       els.referenceNote.value = settings.referenceNote || '';
       syncCustomModelState(false);
       applyImageProviderDefaults();
+      applyVideoProviderDefaults();
     }
 
     function setIfExists(control, value) {
@@ -1741,6 +1768,9 @@ INDEX_HTML = r"""<!doctype html>
         els.videoStyle,
         els.videoApiKey,
         els.videoBaseUrl,
+        els.videoWorkflowEndpoint,
+        els.videoNodeInfoList,
+        els.videoPollTimeout,
         els.referenceRole,
         els.referenceNote,
       ].forEach(control => {
@@ -1759,6 +1789,20 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (!els.imageNodeInfoList.value.trim()) {
         els.imageNodeInfoList.value = '[]';
+      }
+      saveSettings();
+    }
+
+    function applyVideoProviderDefaults() {
+      if (els.videoTool.value !== 'runninghub') return;
+      if (!els.videoBaseUrl.value.trim()) {
+        els.videoBaseUrl.value = 'https://www.runninghub.cn/openapi/v2';
+      }
+      if (!els.videoWorkflowEndpoint.value.trim()) {
+        els.videoWorkflowEndpoint.value = '/run/ai-app/2066043648160133122';
+      }
+      if (!els.videoNodeInfoList.value.trim()) {
+        els.videoNodeInfoList.value = '[]';
       }
       saveSettings();
     }
@@ -2795,6 +2839,9 @@ INDEX_HTML = r"""<!doctype html>
           style: els.videoStyle.value.trim(),
           api_key_provided: Boolean(els.videoApiKey.value.trim()),
           base_url_provided: Boolean(els.videoBaseUrl.value.trim()),
+          workflow_endpoint: els.videoWorkflowEndpoint.value.trim(),
+          node_info_list_json: els.videoNodeInfoList.value.trim(),
+          poll_timeout_seconds: Number(els.videoPollTimeout.value || 1800),
         };
         const productionConfig = {
           mode: els.autoProductionMode.value,
@@ -2864,6 +2911,10 @@ INDEX_HTML = r"""<!doctype html>
     els.localModelName.onchange = applyLocalModelName;
     els.imageTool.onchange = () => {
       applyImageProviderDefaults();
+      saveSettings();
+    };
+    els.videoTool.onchange = () => {
+      applyVideoProviderDefaults();
       saveSettings();
     };
     els.localOfflineBtn.onclick = applyLocalOfflineMode;
@@ -3115,6 +3166,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if isinstance(production_image_config, dict):
                     production_image_config["api_key"] = str(payload.get("image_api_key") or "").strip()
                     production_image_config["base_url"] = str(payload.get("image_base_url") or "").strip()
+                production_video_config = production_config.get("video_config")
+                if isinstance(production_video_config, dict):
+                    production_video_config["api_key"] = str(payload.get("video_api_key") or "").strip()
+                    production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
             image_config = payload.get("image_config") or {}
             if image_config:
                 user_input = self._append_image_config(user_input, image_config)
