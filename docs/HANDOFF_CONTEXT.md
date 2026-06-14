@@ -969,3 +969,81 @@ Validation:
   - `fetch_url` returned `done` and saved readable text to `my_action_workspace`.
   - illegal `file://` fetch returned `error`.
   - `action_log.json` recorded all 3 attempted actions.
+
+## RunningHub Cloud Image Adapter
+
+[2026-06-14 +08:00] command: connected the image-generation production path to RunningHub cloud ComfyUI without storing user secrets in repo or task output.
+
+New file:
+
+```text
+my_workspace/my_codex_core/cloud_image_adapter.py
+```
+
+Behavior:
+
+- Supports `tool=runninghub` for image generation in `api_ready` production mode.
+- Submits to the configured RunningHub workflow endpoint, reads `taskId`, polls `/query`, and downloads successful image results into:
+
+```text
+my_workspace/my_task_output/<task>/generated_images/
+```
+
+- Writes provider responses and manifest files:
+
+```text
+generated_images/runninghub_submit_response.json
+generated_images/runninghub_query_response.json
+generated_images/cloud_image_manifest.json
+production_manifest.json
+```
+
+- RunningHub result URLs are temporary, so generated image files are downloaded locally immediately.
+- API keys are used only in memory for the current request. They are not written to `production_manifest.json`, `cloud_image_manifest.json`, response files, README, or this handoff document.
+
+Management UI changes:
+
+- `生图配置` now includes `RunningHub Cloud ComfyUI`.
+- Added RunningHub fields:
+  - Base URL, default intended value: `https://www.runninghub.cn/openapi/v2`
+  - Workflow endpoint, default intended value: `/run/workflow/2048294089858228226`
+  - Instance type: `default` or `plus`
+  - `nodeInfoList JSON`
+  - poll timeout
+- Selecting RunningHub auto-fills the default Base URL, endpoint, and empty `nodeInfoList` when those fields are blank.
+- Existing browser `localStorage` setting persistence now includes the new RunningHub image fields.
+
+Production pipeline changes:
+
+- `run_auto_production()` now calls the image adapter only when:
+  - production mode is `api_ready`
+  - image tool is not `prompt_only`
+  - image API key, Base URL, and workflow endpoint are present
+- Missing config results in `adapter_status=skipped` rather than an accidental API call.
+- Failed API calls write `generated_images/cloud_image_error.json` and mark the image adapter failed in `production_manifest.json`.
+
+Verification:
+
+```powershell
+python -m py_compile my_workspace/web_app.py my_workspace/my_codex_core/production_pipeline.py my_workspace/my_codex_core/cloud_image_adapter.py
+node --check runtime/_tmp_web_app_script.js
+```
+
+Passed.
+
+Local fake RunningHub smoke tests passed:
+
+- `CloudImageAdapter` submitted a fake workflow, queried fake `/query`, and downloaded `runninghub_01.png`.
+- `run_auto_production(..., mode=api_ready, tool=runninghub)` downloaded `generated_images/runninghub_01.png`, set `production_manifest.status=image_generated`, and confirmed the dummy API key was not written into `production_manifest.json`.
+
+Git status after implementation should include:
+
+```text
+M docs/HANDOFF_CONTEXT.md
+M my_workspace/README.md
+M my_workspace/web_app.py
+M my_workspace/my_codex_core/production_pipeline.py
+?? my_workspace/my_codex_core/cloud_image_adapter.py
+```
+
+Branch may still be ahead of origin because the previous `Browser Action Executor Fix` commit was committed locally but GitHub push failed with port 443 connectivity errors.

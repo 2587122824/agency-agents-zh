@@ -5,6 +5,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from .cloud_image_adapter import CloudImageAdapter
+
 
 def run_auto_production(
     task_dir: Path,
@@ -83,12 +85,60 @@ def run_auto_production(
         },
     }
 
+    if mode == "api_ready":
+        image_adapter_result = _run_image_adapter(image_content, image_config, paths["generated_images"])
+        if image_adapter_result:
+            manifest["image_generation"]["adapter_status"] = image_adapter_result["status"]
+            manifest["image_generation"]["adapter_manifest"] = image_adapter_result.get("manifest_file", "")
+            manifest["image_generation"]["downloaded_files"] = image_adapter_result.get("downloaded_files", [])
+            if image_adapter_result["status"] == "success":
+                manifest["status"] = "image_generated"
+            elif image_adapter_result["status"] == "skipped":
+                manifest["status"] = "api_adapter_skipped"
+            else:
+                manifest["status"] = "image_adapter_failed"
+
     manifest_path = task_dir / "production_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_text(production_note_path, _build_production_note(manifest))
     manifest["files"]["manifest"] = str(manifest_path)
     manifest["files"]["note"] = str(production_note_path)
     return manifest
+
+
+def _run_image_adapter(
+    image_content: str,
+    image_config: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any] | None:
+    tool = str(image_config.get("tool") or "").strip().lower()
+    if tool in {"", "prompt_only"}:
+        return {"status": "skipped", "reason": "image tool is prompt_only"}
+    api_key = str(image_config.get("api_key") or "").strip()
+    base_url = str(image_config.get("base_url") or "").strip()
+    endpoint = str(image_config.get("workflow_endpoint") or image_config.get("endpoint") or "").strip()
+    if not api_key or not base_url or not endpoint:
+        return {"status": "skipped", "reason": "image API key, base URL, or workflow endpoint is missing"}
+
+    try:
+        manifest = CloudImageAdapter(base_url=base_url, api_key=api_key, endpoint=endpoint).run(
+            prompt_text=image_content,
+            image_config=image_config,
+            output_dir=output_dir,
+        )
+    except Exception as exc:
+        error_path = output_dir / "cloud_image_error.json"
+        error_path.write_text(
+            json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return {"status": "failed", "error": str(exc), "manifest_file": str(error_path)}
+
+    return {
+        "status": manifest.get("status") or "success",
+        "manifest_file": str(output_dir / "cloud_image_manifest.json"),
+        "downloaded_files": manifest.get("downloaded_files", []),
+    }
 
 
 def _create_output_dirs(task_dir: Path) -> dict[str, Path]:

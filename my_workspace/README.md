@@ -400,3 +400,33 @@ my_deploy/OFFLINE_DEPLOY.md
 - `17_AI员工平台工作流架构师`：设计员工管理、工作流管理、任务状态机和上下文传递规则。
 - `18_AI员工平台软件架构师`：生成平台技术架构、API、页面结构、数据模型和开发任务。
 - `19_AI员工平台增长验证师`：生成首批客户、Demo脚本、销售话术、定价试探和增长验证计划。
+
+## RunningHub 云端生图接入
+
+管理台现在支持在 `全自动生成 -> 调用 API 生成` 模式下调用 RunningHub 云端 ComfyUI 生图工作流。
+
+使用方式：
+
+1. 打开管理台 `http://127.0.0.1:8765`。
+2. 在 `全自动生成` 中选择 `调用 API 生成`。
+3. 在 `生图配置` 中选择 `RunningHub Cloud ComfyUI`。
+4. 填入 `生图平台 API Key`。
+5. Base URL 使用 `https://www.runninghub.cn/openapi/v2`。
+6. 工作流接口使用 `/run/workflow/2048294089858228226`。
+7. `nodeInfoList JSON` 默认可填 `[]`；如果 RunningHub 工作流需要改节点参数，可填 RunningHub 要求的节点参数数组，并可在字符串中使用 `{{prompt}}` 注入 06 号员工生成的提示词。
+
+运行成功后，任务目录会额外生成：
+
+```text
+generated_images/runninghub_01.png
+generated_images/cloud_image_manifest.json
+generated_images/runninghub_submit_response.json
+generated_images/runninghub_query_response.json
+production_manifest.json
+```
+
+注意：
+
+- API Key 只通过本次请求传给适配器，不写入 `production_manifest.json` 或任务输出。
+- RunningHub 返回的结果 URL 通常 24 小时有效，适配器会立即下载到本地 `generated_images/`。
+- 当前只接入生图；视频生成仍先输出制作包和提示词，后续再接视频 API。

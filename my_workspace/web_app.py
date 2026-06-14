@@ -944,6 +944,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="midjourney">Midjourney</option>
                   <option value="stable-diffusion">Stable Diffusion</option>
                   <option value="flux">FLUX</option>
+                  <option value="runninghub">RunningHub Cloud ComfyUI</option>
                   <option value="jimeng">即梦生图</option>
                   <option value="kling">可灵生图</option>
                   <option value="seedream">Seedream</option>
@@ -1000,7 +1001,29 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <div class="provider-grid">
               <label>生图平台 Base URL
-                <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="预留：未来接入生图 API 使用，可留空" />
+                <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
+              </label>
+              <label>RunningHub Workflow Endpoint
+                <input id="imageWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/2048294089858228226" />
+              </label>
+              <label>RunningHub Instance Type
+                <select id="imageInstanceType">
+                  <option value="default" selected>default - 24G VRAM</option>
+                  <option value="plus">plus - 48G VRAM</option>
+                </select>
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>RunningHub nodeInfoList JSON
+                <textarea id="imageNodeInfoList" spellcheck="false" placeholder='[]; use {{prompt}} inside JSON strings to inject the generated prompt'></textarea>
+              </label>
+              <label>RunningHub Poll Timeout
+                <select id="imagePollTimeout">
+                  <option value="300">5 min</option>
+                  <option value="900" selected>15 min</option>
+                  <option value="1800">30 min</option>
+                  <option value="3600">60 min</option>
+                </select>
               </label>
               <label>负面提示词
                 <input id="imageNegativePrompt" placeholder="例如 水印、畸形手指、低清晰度、脸部变形、错误文字" />
@@ -1305,6 +1328,10 @@ INDEX_HTML = r"""<!doctype html>
       imageQuality: document.getElementById('imageQuality'),
       imageApiKey: document.getElementById('imageApiKey'),
       imageBaseUrl: document.getElementById('imageBaseUrl'),
+      imageWorkflowEndpoint: document.getElementById('imageWorkflowEndpoint'),
+      imageInstanceType: document.getElementById('imageInstanceType'),
+      imageNodeInfoList: document.getElementById('imageNodeInfoList'),
+      imagePollTimeout: document.getElementById('imagePollTimeout'),
       imageNegativePrompt: document.getElementById('imageNegativePrompt'),
       imageConsistency: document.getElementById('imageConsistency'),
       videoTool: document.getElementById('videoTool'),
@@ -1600,6 +1627,10 @@ INDEX_HTML = r"""<!doctype html>
         imageQuality: els.imageQuality.value,
         imageApiKey: els.imageApiKey.value,
         imageBaseUrl: els.imageBaseUrl.value,
+        imageWorkflowEndpoint: els.imageWorkflowEndpoint.value,
+        imageInstanceType: els.imageInstanceType.value,
+        imageNodeInfoList: els.imageNodeInfoList.value,
+        imagePollTimeout: els.imagePollTimeout.value,
         imageNegativePrompt: els.imageNegativePrompt.value,
         imageConsistency: els.imageConsistency.value,
         videoTool: els.videoTool.value,
@@ -1644,6 +1675,10 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.imageQuality, settings.imageQuality);
       els.imageApiKey.value = settings.imageApiKey || '';
       els.imageBaseUrl.value = settings.imageBaseUrl || '';
+      els.imageWorkflowEndpoint.value = settings.imageWorkflowEndpoint || '';
+      setIfExists(els.imageInstanceType, settings.imageInstanceType);
+      els.imageNodeInfoList.value = settings.imageNodeInfoList || '';
+      setIfExists(els.imagePollTimeout, settings.imagePollTimeout);
       els.imageNegativePrompt.value = settings.imageNegativePrompt || '';
       els.imageConsistency.value = settings.imageConsistency || '';
       setIfExists(els.videoTool, settings.videoTool);
@@ -1656,6 +1691,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.referenceRole, settings.referenceRole);
       els.referenceNote.value = settings.referenceNote || '';
       syncCustomModelState(false);
+      applyImageProviderDefaults();
     }
 
     function setIfExists(control, value) {
@@ -1692,6 +1728,10 @@ INDEX_HTML = r"""<!doctype html>
         els.imageQuality,
         els.imageApiKey,
         els.imageBaseUrl,
+        els.imageWorkflowEndpoint,
+        els.imageInstanceType,
+        els.imageNodeInfoList,
+        els.imagePollTimeout,
         els.imageNegativePrompt,
         els.imageConsistency,
         els.videoTool,
@@ -1707,6 +1747,20 @@ INDEX_HTML = r"""<!doctype html>
         control.addEventListener('change', saveSettings);
         control.addEventListener('input', saveSettings);
       });
+    }
+
+    function applyImageProviderDefaults() {
+      if (els.imageTool.value !== 'runninghub') return;
+      if (!els.imageBaseUrl.value.trim()) {
+        els.imageBaseUrl.value = 'https://www.runninghub.cn/openapi/v2';
+      }
+      if (!els.imageWorkflowEndpoint.value.trim()) {
+        els.imageWorkflowEndpoint.value = '/run/workflow/2048294089858228226';
+      }
+      if (!els.imageNodeInfoList.value.trim()) {
+        els.imageNodeInfoList.value = '[]';
+      }
+      saveSettings();
     }
 
     function renderLocalModelPresets() {
@@ -2728,6 +2782,10 @@ INDEX_HTML = r"""<!doctype html>
           consistency: els.imageConsistency.value.trim(),
           api_key_provided: Boolean(els.imageApiKey.value.trim()),
           base_url_provided: Boolean(els.imageBaseUrl.value.trim()),
+          workflow_endpoint: els.imageWorkflowEndpoint.value.trim(),
+          instance_type: els.imageInstanceType.value,
+          node_info_list_json: els.imageNodeInfoList.value.trim(),
+          poll_timeout_seconds: Number(els.imagePollTimeout.value || 900),
         };
         const videoConfig = {
           tool: els.videoTool.value,
@@ -2804,6 +2862,10 @@ INDEX_HTML = r"""<!doctype html>
     els.deleteWorkflowBtn.onclick = deleteWorkflow;
     els.localModelPreset.onchange = applyLocalModelPreset;
     els.localModelName.onchange = applyLocalModelName;
+    els.imageTool.onchange = () => {
+      applyImageProviderDefaults();
+      saveSettings();
+    };
     els.localOfflineBtn.onclick = applyLocalOfflineMode;
     els.testModelBtn.onclick = testModelConnection;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
@@ -3048,6 +3110,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if inherit_task:
                 user_input = self._append_inherited_task(user_input, inherit_task, inherit_mode)
             production_config = payload.get("production_config") or {}
+            if isinstance(production_config, dict):
+                production_image_config = production_config.get("image_config")
+                if isinstance(production_image_config, dict):
+                    production_image_config["api_key"] = str(payload.get("image_api_key") or "").strip()
+                    production_image_config["base_url"] = str(payload.get("image_base_url") or "").strip()
             image_config = payload.get("image_config") or {}
             if image_config:
                 user_input = self._append_image_config(user_input, image_config)
