@@ -1123,3 +1123,57 @@ Local fake RunningHub video smoke tests passed:
 
 - `CloudVideoAdapter` submitted a fake AI App task, read nested `data.taskId`, queried fake `/query`, and downloaded `runninghub_video_01.mp4`.
 - `run_auto_production(..., mode=api_ready, video tool=runninghub)` downloaded `video_clips/runninghub_video_01.mp4`, set `production_manifest.status=video_generated`, and confirmed the dummy API key was not written into `production_manifest.json`.
+
+## Media Parameter UI Expansion
+
+[2026-06-14 +08:00] command: expanded the management UI image/video configuration with normal and advanced generation parameters.
+
+Image configuration now includes:
+
+```text
+seed
+guidance_scale
+steps
+denoise_strength
+sampler
+control
+```
+
+Where `control` is intended for LoRA, ControlNet, IP-Adapter, and face-reference notes.
+
+Video configuration now includes:
+
+```text
+negative_prompt
+seed
+fps
+motion_strength
+camera_motion
+resolution
+guidance_scale
+frames
+image_strength
+camera_path
+audio_notes
+advanced_params
+```
+
+The new fields are wired through:
+
+- DOM element lookup in `my_workspace/web_app.py`
+- browser `localStorage` save/restore
+- settings persistence binding
+- `/api/run` `image_config` and `video_config`
+- `_append_image_config()` and `_append_video_config()` so staff 06/07 receive the parameters as context
+- `production_manifest.json` via `production_pipeline.py`
+
+The UI labels for the newly added fields use English placeholders to avoid the current Windows PowerShell/encoding path corrupting newly inserted Chinese text into `?` characters.
+
+Validation:
+
+```powershell
+python -m py_compile my_workspace/web_app.py my_workspace/my_codex_core/production_pipeline.py my_workspace/my_codex_core/cloud_image_adapter.py my_workspace/my_codex_core/cloud_video_adapter.py
+node --check runtime/_tmp_web_app_script.js
+```
+
+Passed.

@@ -457,3 +457,33 @@ video_clips/runninghub_video_query_response.json
 - 视频 API Key 只通过本次请求传给适配器，不写入 `production_manifest.json` 或任务输出。
 - 如果 RunningHub AI App 需要固定节点输入，先从 RunningHub 页面确认节点参数，再填入 `nodeInfoList JSON`。
 - 当前框架负责提交、轮询、下载视频文件；生成质量取决于 RunningHub AI App 内部工作流配置。
+
+## 生图和生视频参数
+
+管理台的生图/视频配置已经按普通参数和高级参数扩展。
+
+生图普通参数：
+
+```text
+工具、模型、尺寸/画幅、每镜头图片数、风格、质量、负面提示词、一致性重点、Seed
+```
+
+生图高级参数：
+
+```text
+Guidance/CFG、Steps、Denoise Strength、Sampler、LoRA / ControlNet / IP-Adapter / Face reference、RunningHub Endpoint、nodeInfoList JSON、实例规格、轮询超时
+```
+
+生视频普通参数：
+
+```text
+工具、模型、画幅、目标时长、风格、负面提示词、Seed、FPS、运动强度、镜头运动、分辨率
+```
+
+生视频高级参数：
+
+```text
+Guidance、Frames、Image Strength、Camera Path / Shot Notes、Audio / Subtitle Notes、Advanced Model Params、RunningHub Video Endpoint、nodeInfoList JSON、轮询超时
+```
+
+这些字段会写入本次运行的 `image_config` 和 `video_config`，同时追加到 06/07 号员工的上下文中。API Key 仍只用于本次请求，不写入任务输出文件。

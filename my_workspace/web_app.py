@@ -1032,6 +1032,28 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="imageConsistency" placeholder="例如 保持同一人物脸型、服装、产品外观和主色调" />
               </label>
             </div>
+            <div class="provider-grid">
+              <label>Image Seed
+                <input id="imageSeed" autocomplete="off" spellcheck="false" placeholder="Leave blank for random; fixed seed improves repeatability" />
+              </label>
+              <label>Image Guidance / CFG
+                <input id="imageGuidance" autocomplete="off" spellcheck="false" placeholder="Example: 3.5 / 7 / 12; blank uses workflow default" />
+              </label>
+              <label>Image Steps
+                <input id="imageSteps" autocomplete="off" spellcheck="false" placeholder="Example: 20 / 30; blank uses workflow default" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>Image Denoise Strength
+                <input id="imageDenoise" autocomplete="off" spellcheck="false" placeholder="Image-to-image repaint strength, e.g. 0.35 / 0.65" />
+              </label>
+              <label>Image Sampler
+                <input id="imageSampler" autocomplete="off" spellcheck="false" placeholder="Example: euler / dpmpp_2m; blank uses workflow default" />
+              </label>
+              <label>Image LoRA / Control
+                <input id="imageControl" autocomplete="off" spellcheck="false" placeholder="LoRA, ControlNet, IP-Adapter, face reference notes" />
+              </label>
+            </div>
           </div>
         </details>
         <details>
@@ -1094,6 +1116,71 @@ INDEX_HTML = r"""<!doctype html>
               </label>
               <label>视频平台 Base URL
                 <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>Video Negative Prompt
+                <input id="videoNegativePrompt" autocomplete="off" spellcheck="false" placeholder="Watermark, flicker, bad hands, wrong text, face distortion" />
+              </label>
+              <label>Video Seed
+                <input id="videoSeed" autocomplete="off" spellcheck="false" placeholder="Leave blank for random; fixed seed improves repeatability" />
+              </label>
+              <label>Video FPS
+                <select id="videoFps">
+                  <option value="">Workflow default</option>
+                  <option value="24">24</option>
+                  <option value="30" selected>30</option>
+                  <option value="60">60</option>
+                </select>
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>Motion Strength
+                <select id="videoMotionStrength">
+                  <option value="low">Low - stable subtle motion</option>
+                  <option value="medium" selected>Medium - natural motion</option>
+                  <option value="high">High - strong motion or transitions</option>
+                </select>
+              </label>
+              <label>Camera Motion
+                <select id="videoCameraMotion">
+                  <option value="static">Static</option>
+                  <option value="push_in" selected>Push in</option>
+                  <option value="pull_out">Pull out</option>
+                  <option value="pan">Pan / slide</option>
+                  <option value="orbit">Orbit</option>
+                  <option value="handheld">Handheld feel</option>
+                </select>
+              </label>
+              <label>Video Resolution
+                <select id="videoResolution">
+                  <option value="">Workflow default</option>
+                  <option value="720p">720p</option>
+                  <option value="1080p" selected>1080p</option>
+                  <option value="4k">4K</option>
+                </select>
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>Video Guidance
+                <input id="videoGuidance" autocomplete="off" spellcheck="false" placeholder="Prompt guidance strength; blank uses workflow default" />
+              </label>
+              <label>Video Frames
+                <input id="videoFrames" autocomplete="off" spellcheck="false" placeholder="Frame count; blank derives from duration and fps" />
+              </label>
+              <label>Image Strength
+                <input id="videoImageStrength" autocomplete="off" spellcheck="false" placeholder="Reference or first-frame strength, e.g. 0.45 / 0.75" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>Camera Path / Shot Notes
+                <input id="videoCameraPath" autocomplete="off" spellcheck="false" placeholder="Complex camera path, shot array, first/last-frame notes" />
+              </label>
+              <label>Audio / Subtitle Notes
+                <input id="videoAudioNotes" autocomplete="off" spellcheck="false" placeholder="Voiceover, subtitles, background music, or mute notes" />
+              </label>
+              <label>Advanced Model Params
+                <input id="videoAdvancedParams" autocomplete="off" spellcheck="false" placeholder="motion_bucket, motion_scale, or provider-specific params" />
               </label>
             </div>
             <div class="provider-grid">
@@ -1351,6 +1438,12 @@ INDEX_HTML = r"""<!doctype html>
       imagePollTimeout: document.getElementById('imagePollTimeout'),
       imageNegativePrompt: document.getElementById('imageNegativePrompt'),
       imageConsistency: document.getElementById('imageConsistency'),
+      imageSeed: document.getElementById('imageSeed'),
+      imageGuidance: document.getElementById('imageGuidance'),
+      imageSteps: document.getElementById('imageSteps'),
+      imageDenoise: document.getElementById('imageDenoise'),
+      imageSampler: document.getElementById('imageSampler'),
+      imageControl: document.getElementById('imageControl'),
       videoTool: document.getElementById('videoTool'),
       videoModel: document.getElementById('videoModel'),
       videoAspect: document.getElementById('videoAspect'),
@@ -1361,6 +1454,18 @@ INDEX_HTML = r"""<!doctype html>
       videoWorkflowEndpoint: document.getElementById('videoWorkflowEndpoint'),
       videoNodeInfoList: document.getElementById('videoNodeInfoList'),
       videoPollTimeout: document.getElementById('videoPollTimeout'),
+      videoNegativePrompt: document.getElementById('videoNegativePrompt'),
+      videoSeed: document.getElementById('videoSeed'),
+      videoFps: document.getElementById('videoFps'),
+      videoMotionStrength: document.getElementById('videoMotionStrength'),
+      videoCameraMotion: document.getElementById('videoCameraMotion'),
+      videoResolution: document.getElementById('videoResolution'),
+      videoGuidance: document.getElementById('videoGuidance'),
+      videoFrames: document.getElementById('videoFrames'),
+      videoImageStrength: document.getElementById('videoImageStrength'),
+      videoCameraPath: document.getElementById('videoCameraPath'),
+      videoAudioNotes: document.getElementById('videoAudioNotes'),
+      videoAdvancedParams: document.getElementById('videoAdvancedParams'),
       referenceImages: document.getElementById('referenceImages'),
       referenceRole: document.getElementById('referenceRole'),
       referenceNote: document.getElementById('referenceNote'),
@@ -1653,6 +1758,12 @@ INDEX_HTML = r"""<!doctype html>
         imagePollTimeout: els.imagePollTimeout.value,
         imageNegativePrompt: els.imageNegativePrompt.value,
         imageConsistency: els.imageConsistency.value,
+        imageSeed: els.imageSeed.value,
+        imageGuidance: els.imageGuidance.value,
+        imageSteps: els.imageSteps.value,
+        imageDenoise: els.imageDenoise.value,
+        imageSampler: els.imageSampler.value,
+        imageControl: els.imageControl.value,
         videoTool: els.videoTool.value,
         videoModel: els.videoModel.value,
         videoAspect: els.videoAspect.value,
@@ -1663,6 +1774,18 @@ INDEX_HTML = r"""<!doctype html>
         videoWorkflowEndpoint: els.videoWorkflowEndpoint.value,
         videoNodeInfoList: els.videoNodeInfoList.value,
         videoPollTimeout: els.videoPollTimeout.value,
+        videoNegativePrompt: els.videoNegativePrompt.value,
+        videoSeed: els.videoSeed.value,
+        videoFps: els.videoFps.value,
+        videoMotionStrength: els.videoMotionStrength.value,
+        videoCameraMotion: els.videoCameraMotion.value,
+        videoResolution: els.videoResolution.value,
+        videoGuidance: els.videoGuidance.value,
+        videoFrames: els.videoFrames.value,
+        videoImageStrength: els.videoImageStrength.value,
+        videoCameraPath: els.videoCameraPath.value,
+        videoAudioNotes: els.videoAudioNotes.value,
+        videoAdvancedParams: els.videoAdvancedParams.value,
         referenceRole: els.referenceRole.value,
         referenceNote: els.referenceNote.value,
       };
@@ -1704,6 +1827,12 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.imagePollTimeout, settings.imagePollTimeout);
       els.imageNegativePrompt.value = settings.imageNegativePrompt || '';
       els.imageConsistency.value = settings.imageConsistency || '';
+      els.imageSeed.value = settings.imageSeed || '';
+      els.imageGuidance.value = settings.imageGuidance || '';
+      els.imageSteps.value = settings.imageSteps || '';
+      els.imageDenoise.value = settings.imageDenoise || '';
+      els.imageSampler.value = settings.imageSampler || '';
+      els.imageControl.value = settings.imageControl || '';
       setIfExists(els.videoTool, settings.videoTool);
       els.videoModel.value = settings.videoModel || '';
       setIfExists(els.videoAspect, settings.videoAspect);
@@ -1714,6 +1843,18 @@ INDEX_HTML = r"""<!doctype html>
       els.videoWorkflowEndpoint.value = settings.videoWorkflowEndpoint || '';
       els.videoNodeInfoList.value = settings.videoNodeInfoList || '';
       setIfExists(els.videoPollTimeout, settings.videoPollTimeout);
+      els.videoNegativePrompt.value = settings.videoNegativePrompt || '';
+      els.videoSeed.value = settings.videoSeed || '';
+      setIfExists(els.videoFps, settings.videoFps);
+      setIfExists(els.videoMotionStrength, settings.videoMotionStrength);
+      setIfExists(els.videoCameraMotion, settings.videoCameraMotion);
+      setIfExists(els.videoResolution, settings.videoResolution);
+      els.videoGuidance.value = settings.videoGuidance || '';
+      els.videoFrames.value = settings.videoFrames || '';
+      els.videoImageStrength.value = settings.videoImageStrength || '';
+      els.videoCameraPath.value = settings.videoCameraPath || '';
+      els.videoAudioNotes.value = settings.videoAudioNotes || '';
+      els.videoAdvancedParams.value = settings.videoAdvancedParams || '';
       setIfExists(els.referenceRole, settings.referenceRole);
       els.referenceNote.value = settings.referenceNote || '';
       syncCustomModelState(false);
@@ -1761,6 +1902,12 @@ INDEX_HTML = r"""<!doctype html>
         els.imagePollTimeout,
         els.imageNegativePrompt,
         els.imageConsistency,
+        els.imageSeed,
+        els.imageGuidance,
+        els.imageSteps,
+        els.imageDenoise,
+        els.imageSampler,
+        els.imageControl,
         els.videoTool,
         els.videoModel,
         els.videoAspect,
@@ -1771,6 +1918,18 @@ INDEX_HTML = r"""<!doctype html>
         els.videoWorkflowEndpoint,
         els.videoNodeInfoList,
         els.videoPollTimeout,
+        els.videoNegativePrompt,
+        els.videoSeed,
+        els.videoFps,
+        els.videoMotionStrength,
+        els.videoCameraMotion,
+        els.videoResolution,
+        els.videoGuidance,
+        els.videoFrames,
+        els.videoImageStrength,
+        els.videoCameraPath,
+        els.videoAudioNotes,
+        els.videoAdvancedParams,
         els.referenceRole,
         els.referenceNote,
       ].forEach(control => {
@@ -2824,6 +2983,12 @@ INDEX_HTML = r"""<!doctype html>
           quality: els.imageQuality.value,
           negative_prompt: els.imageNegativePrompt.value.trim(),
           consistency: els.imageConsistency.value.trim(),
+          seed: els.imageSeed.value.trim(),
+          guidance_scale: els.imageGuidance.value.trim(),
+          steps: els.imageSteps.value.trim(),
+          denoise_strength: els.imageDenoise.value.trim(),
+          sampler: els.imageSampler.value.trim(),
+          control: els.imageControl.value.trim(),
           api_key_provided: Boolean(els.imageApiKey.value.trim()),
           base_url_provided: Boolean(els.imageBaseUrl.value.trim()),
           workflow_endpoint: els.imageWorkflowEndpoint.value.trim(),
@@ -2837,6 +3002,18 @@ INDEX_HTML = r"""<!doctype html>
           aspect_ratio: els.videoAspect.value,
           duration: els.videoDuration.value,
           style: els.videoStyle.value.trim(),
+          negative_prompt: els.videoNegativePrompt.value.trim(),
+          seed: els.videoSeed.value.trim(),
+          fps: els.videoFps.value,
+          motion_strength: els.videoMotionStrength.value,
+          camera_motion: els.videoCameraMotion.value,
+          resolution: els.videoResolution.value,
+          guidance_scale: els.videoGuidance.value.trim(),
+          frames: els.videoFrames.value.trim(),
+          image_strength: els.videoImageStrength.value.trim(),
+          camera_path: els.videoCameraPath.value.trim(),
+          audio_notes: els.videoAudioNotes.value.trim(),
+          advanced_params: els.videoAdvancedParams.value.trim(),
           api_key_provided: Boolean(els.videoApiKey.value.trim()),
           base_url_provided: Boolean(els.videoBaseUrl.value.trim()),
           workflow_endpoint: els.videoWorkflowEndpoint.value.trim(),
@@ -3891,6 +4068,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 生图质量：{value('quality', 'standard')}\n"
             f"- 负面提示词：{value('negative_prompt')}\n"
             f"- 一致性重点：{value('consistency')}\n"
+            f"- 随机种子 Seed：{value('seed')}\n"
+            f"- 提示词遵循强度 Guidance/CFG：{value('guidance_scale')}\n"
+            f"- 采样步数 Steps：{value('steps')}\n"
+            f"- 重绘/图生图强度 Denoise：{value('denoise_strength')}\n"
+            f"- 采样器 Sampler：{value('sampler')}\n"
+            f"- LoRA / ControlNet / IP-Adapter / Face reference：{value('control')}\n"
+            f"- RunningHub 工作流接口：{value('workflow_endpoint')}\n"
+            f"- RunningHub 实例规格：{value('instance_type', 'default')}\n"
+            f"- RunningHub 轮询超时：{value('poll_timeout_seconds', '900')} 秒\n"
             f"- 生图平台 API Key：{api_note}\n"
             f"- 生图平台 Base URL：{base_url_note}\n"
             "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜总表、关键帧生图提示词、参考图使用策略和连续性控制说明；不要声称已经生成图片文件。\n"
@@ -3912,6 +4098,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 画幅：{value('aspect_ratio', '9:16')}\n"
             f"- 目标时长：{value('duration', '30s')}\n"
             f"- 视频风格：{value('style')}\n"
+            f"- 负面提示词：{value('negative_prompt')}\n"
+            f"- 随机种子 Seed：{value('seed')}\n"
+            f"- FPS：{value('fps')}\n"
+            f"- 运动强度：{value('motion_strength')}\n"
+            f"- 镜头运动：{value('camera_motion')}\n"
+            f"- 分辨率：{value('resolution')}\n"
+            f"- 提示词遵循强度 Guidance：{value('guidance_scale')}\n"
+            f"- 帧数：{value('frames')}\n"
+            f"- 参考图/首帧影响强度：{value('image_strength')}\n"
+            f"- 镜头路径/分镜说明：{value('camera_path')}\n"
+            f"- 配音/字幕/音乐说明：{value('audio_notes')}\n"
+            f"- 模型高级参数：{value('advanced_params')}\n"
+            f"- RunningHub Video Endpoint：{value('workflow_endpoint')}\n"
+            f"- RunningHub 轮询超时：{value('poll_timeout_seconds', '1800')} 秒\n"
             f"- 视频平台 API Key：{api_note}\n"
             f"- 视频平台 Base URL：{base_url_note}\n"
             "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，再由 07_视频生成执行员输出视频生成提示词、镜头清单、TTS 配音稿、SRT 字幕草案和剪辑说明；不要声称已经生成 mp4。\n"
