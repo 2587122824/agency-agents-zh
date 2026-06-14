@@ -922,3 +922,50 @@ Validation:
 - Confirmed `id="modelTimeout"` appears exactly once.
 - Restarted local services with `powershell -NoProfile -ExecutionPolicy Bypass -File .\start_local.ps1 -SkipModelPull -NoBrowser`.
 - Home page returned HTTP 200 and contained `run-form`, `run-primary-grid`, `output-link-title`, and `output-link-subtitle`.
+
+## Browser Action Executor Fix
+
+[2026-06-14 00:00:00 +08:00] command: fixed the missing browser-operation capability in the local action executor after the user reported that agents could not operate the computer/browser.
+
+Action executor changes:
+
+- Extended `my_workspace/my_codex_core/action_executor.py`.
+- Existing safe file actions remain:
+  - `mkdir`
+  - `create_file`
+  - `write_json`
+- Added controlled browser/workspace actions:
+  - `open_url`: opens an http/https URL in the default browser.
+  - `fetch_url`: fetches an http/https URL, converts HTML to readable text when possible, and saves it under `my_action_workspace`.
+  - `open_workspace_path`: opens an existing file or folder under `my_action_workspace`.
+- URL safety:
+  - only `http` and `https` schemes are allowed.
+  - URLs must include a host.
+  - `file://` and other schemes are blocked.
+- Filesystem safety:
+  - all written or opened local paths still go through `_safe_path`.
+  - absolute paths and paths escaping `my_action_workspace` remain blocked.
+- Fetch safety:
+  - request timeout is clamped to 3-60 seconds.
+  - fetched content is capped at 1 MB.
+  - no shell commands are introduced.
+
+Workflow prompt changes:
+
+- Updated `WorkflowEngine._build_step_prompt` so staff can request `open_url`, `fetch_url`, and `open_workspace_path` in JSON action blocks.
+- Prompt explicitly states that browser actions only allow http/https and that file paths are constrained under `my_action_workspace`.
+
+Documentation changes:
+
+- Updated `my_workspace/README.md` action list and example JSON.
+- Updated `my_workspace/my_deploy/OFFLINE_DEPLOY.md` action boundaries.
+- Documentation still states unsupported capabilities: deleting files, shell execution, arbitrary system paths, code push, paid API calls, and mouse/keyboard control without an approval layer.
+
+Validation:
+
+- `python -m py_compile my_workspace/my_codex_core/action_executor.py my_workspace/my_codex_core/workflow_engine.py` passed.
+- Smoke test started a temporary local HTTP server and executed actions:
+  - `mkdir` returned `done`.
+  - `fetch_url` returned `done` and saved readable text to `my_action_workspace`.
+  - illegal `file://` fetch returned `error`.
+  - `action_log.json` recorded all 3 attempted actions.

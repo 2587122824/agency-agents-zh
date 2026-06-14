@@ -325,11 +325,11 @@ class WorkflowEngine:
 2. 严格按你的 `agent.md` 中定义的职责和输出格式交付。
 3. 如果信息不足，使用合理默认假设，并在输出中列出“待确认信息”。
 4. 输出必须是中文 Markdown，可直接交给下一位员工继续处理。
-5. 如果需要执行文件类动作，只能在输出末尾提供一个 JSON 代码块，格式为：
+5. 如果需要执行受控动作，只能在输出末尾提供一个 JSON 代码块，格式为：
 ```json
-{{"actions":[{{"action":"mkdir","params":{{"path":"demo"}}}},{{"action":"create_file","params":{{"path":"demo/readme.md","content":"内容","overwrite":false}}}}]}}
+{{"actions":[{{"action":"mkdir","params":{{"path":"demo"}}}},{{"action":"create_file","params":{{"path":"demo/readme.md","content":"内容","overwrite":false}}}},{{"action":"open_url","params":{{"url":"https://example.com"}}}},{{"action":"fetch_url","params":{{"url":"https://example.com","path":"web/example.txt","overwrite":true}}}}]}}
 ```
-当前允许的动作只有 `mkdir`、`create_file`、`write_json`。动作路径必须使用相对路径，系统会限制写入 `my_action_workspace`。
+当前允许的动作只有 `mkdir`、`create_file`、`write_json`、`open_url`、`fetch_url`、`open_workspace_path`。文件路径必须使用相对路径，系统会限制写入或打开 `my_action_workspace`；网页动作只允许 http/https URL，不允许 shell 命令或任意系统路径。
 """
 
     @staticmethod

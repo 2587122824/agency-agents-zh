@@ -336,8 +336,8 @@ my_deploy/OFFLINE_DEPLOY.md
 
 - 本地模型预设：`my_local_models/local_model_presets.json`。
 - 本地知识库：`my_knowledge_base/`，运行时可追加到提示词。
-- 受限动作执行：员工输出末尾可以提供 JSON 动作块，系统只执行 `mkdir`、`create_file`、`write_json`。
-- 动作写入边界：所有动作只能写入 `my_action_workspace/`，不会写入项目根目录或系统路径。
+- 受限动作执行：员工输出末尾可以提供 JSON 动作块，系统只执行 `mkdir`、`create_file`、`write_json`、`open_url`、`fetch_url`、`open_workspace_path`。
+- 动作边界：文件动作只能写入 `my_action_workspace/`；浏览器动作只允许 http/https URL；打开本地路径时只能打开 `my_action_workspace/` 内部文件或文件夹。
 - 动作日志：每次触发动作时，会在对应任务目录写入 `action_log.json`。
 
 动作 JSON 示例：
@@ -358,12 +358,26 @@ my_deploy/OFFLINE_DEPLOY.md
         "content": "内容",
         "overwrite": false
       }
+    },
+    {
+      "action": "open_url",
+      "params": {
+        "url": "https://example.com"
+      }
+    },
+    {
+      "action": "fetch_url",
+      "params": {
+        "url": "https://example.com",
+        "path": "web/example.txt",
+        "overwrite": true
+      }
     }
   ]
 }
 ```
 
-当前不支持删除文件、运行 shell、修改任意系统路径、自动推送代码或直接调用付费媒体 API。后续要做完整执行型智能体，需要再加审批层、权限模型、动作队列和审计日志。
+当前不支持删除文件、运行 shell、修改任意系统路径、自动推送代码、控制鼠标键盘或直接调用付费媒体 API。后续要做完整执行型智能体，需要再加审批层、权限模型、动作队列和审计日志。
 
 ## 当前员工
 

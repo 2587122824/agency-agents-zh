@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import webbrowser
 from dataclasses import dataclass, asdict
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
+from urllib import request as urllib_request
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -16,15 +21,24 @@ class ActionResult:
 
 
 class ActionExecutor:
-    """Execute a conservative subset of file actions requested by agents.
+    """Execute a conservative subset of actions requested by agents.
 
     All paths are constrained to action_root. The executor intentionally starts
-    small: directories, text files, and JSON files. Shell commands, deletes,
-    overwrites without explicit opt-in, and external API calls are left for a
-    later approval layer.
+    small: directories, text files, JSON files, and a few browser-oriented
+    actions. Shell commands, deletes, overwrites without explicit opt-in, paid
+    API calls, and arbitrary filesystem access are left for a later approval
+    layer.
     """
 
-    SUPPORTED_ACTIONS = {"mkdir", "create_file", "write_json"}
+    SUPPORTED_ACTIONS = {
+        "mkdir",
+        "create_file",
+        "write_json",
+        "open_url",
+        "fetch_url",
+        "open_workspace_path",
+    }
+    MAX_FETCH_BYTES = 1_000_000
 
     def __init__(self, action_root: Path) -> None:
         self.action_root = action_root.resolve()
@@ -86,10 +100,88 @@ class ActionExecutor:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
                 return ActionResult(action=action, status="done", target=str(target), message="json written")
+
+            if action == "open_url":
+                url = self._safe_url(str(params.get("url") or ""))
+                opened = webbrowser.open(url, new=2 if params.get("new_tab", True) else 0, autoraise=True)
+                status = "done" if opened else "blocked"
+                message = "browser open requested" if opened else "browser refused open request"
+                return ActionResult(action=action, status=status, target=url, message=message)
+
+            if action == "fetch_url":
+                url = self._safe_url(str(params.get("url") or ""))
+                target = self._safe_path(str(params.get("path") or self._default_fetch_path(url)))
+                overwrite = bool(params.get("overwrite"))
+                if target.exists() and not overwrite:
+                    return ActionResult(action=action, status="blocked", target=str(target), message="file exists; overwrite not enabled")
+                timeout = self._safe_timeout(params.get("timeout"))
+                text = self._fetch_url_text(url, timeout=timeout)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(text.rstrip() + "\n", encoding="utf-8")
+                return ActionResult(action=action, status="done", target=str(target), message=f"web text saved from {url}")
+
+            if action == "open_workspace_path":
+                target = self._safe_path(str(params.get("path") or ""))
+                if not target.exists():
+                    return ActionResult(action=action, status="blocked", target=str(target), message="path does not exist")
+                os.startfile(str(target))
+                return ActionResult(action=action, status="done", target=str(target), message="workspace path open requested")
         except Exception as exc:
             return ActionResult(action=action, status="error", target=str(params.get("path") or ""), message=str(exc))
 
         return ActionResult(action=action, status="skipped", target="", message="no handler")
+
+    def _safe_url(self, url_text: str) -> str:
+        url = url_text.strip()
+        if not url:
+            raise ValueError("url is required")
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"}:
+            raise ValueError("only http and https URLs are allowed")
+        if not parsed.netloc:
+            raise ValueError("url host is required")
+        return url
+
+    def _fetch_url_text(self, url: str, timeout: int) -> str:
+        req = urllib_request.Request(
+            url,
+            headers={
+                "User-Agent": "agency-agents-zh-action-executor/1.0",
+                "Accept": "text/html,text/plain,application/json,*/*;q=0.8",
+            },
+            method="GET",
+        )
+        with urllib_request.urlopen(req, timeout=timeout) as response:
+            content_type = response.headers.get("content-type", "")
+            raw = response.read(self.MAX_FETCH_BYTES + 1)
+        if len(raw) > self.MAX_FETCH_BYTES:
+            raw = raw[: self.MAX_FETCH_BYTES]
+        charset = self._charset_from_content_type(content_type)
+        text = raw.decode(charset, errors="replace")
+        if "html" in content_type.lower() or text.lstrip().lower().startswith(("<!doctype html", "<html")):
+            text = _HTMLTextExtractor.to_text(text)
+        return text
+
+    @staticmethod
+    def _safe_timeout(value: Any) -> int:
+        try:
+            timeout = int(value or 20)
+        except (TypeError, ValueError):
+            timeout = 20
+        return min(max(timeout, 3), 60)
+
+    @staticmethod
+    def _charset_from_content_type(content_type: str) -> str:
+        match = re.search(r"charset=([\w.-]+)", content_type, flags=re.IGNORECASE)
+        return match.group(1) if match else "utf-8"
+
+    @staticmethod
+    def _default_fetch_path(url: str) -> str:
+        parsed = urlparse(url)
+        host = re.sub(r"[^A-Za-z0-9._-]+", "_", parsed.netloc).strip("_") or "page"
+        path = re.sub(r"[^A-Za-z0-9._-]+", "_", parsed.path).strip("_")
+        name = f"{host}_{path}" if path else host
+        return f"web/{name[:120]}.txt"
 
     def _safe_path(self, path_text: str) -> Path:
         if not path_text:
@@ -113,3 +205,37 @@ class ActionExecutor:
         if stripped.startswith("{") or stripped.startswith("["):
             blocks.append(stripped)
         return blocks
+
+
+class _HTMLTextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self._chunks: list[str] = []
+        self._skip_depth = 0
+
+    @classmethod
+    def to_text(cls, html: str) -> str:
+        parser = cls()
+        parser.feed(html)
+        lines = [line.strip() for line in "".join(parser._chunks).splitlines()]
+        text = "\n".join(line for line in lines if line)
+        return re.sub(r"\n{3,}", "\n\n", re.sub(r"[ \t]{2,}", " ", text)).strip()
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style", "noscript"}:
+            self._skip_depth += 1
+        if tag in {"p", "div", "section", "article", "br", "li", "h1", "h2", "h3", "h4"}:
+            self._chunks.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style", "noscript"} and self._skip_depth:
+            self._skip_depth -= 1
+        if tag in {"p", "div", "section", "article", "li", "h1", "h2", "h3", "h4"}:
+            self._chunks.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        text = data.strip()
+        if text:
+            self._chunks.append(text)

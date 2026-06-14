@@ -63,12 +63,17 @@ Xinference:http://127.0.0.1:9997/v1
 mkdir
 create_file
 write_json
+open_url
+fetch_url
+open_workspace_path
 ```
 
-所有动作都被限制写入：
+文件动作都被限制写入：
 
 ```text
 my_workspace/my_action_workspace/
 ```
 
-暂不支持删除文件、运行 shell、推送代码、调用付费 API。此类动作后续需要审批层。
+浏览器动作只允许 http/https URL；打开本地路径时只能打开 `my_action_workspace/` 内部文件或文件夹。
+
+暂不支持删除文件、运行 shell、推送代码、调用付费 API、控制鼠标键盘或修改任意系统路径。此类动作后续需要审批层。
