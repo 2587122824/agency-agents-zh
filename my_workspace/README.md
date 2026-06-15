@@ -211,6 +211,7 @@ runtime/models/
 - `系统状态` 页面内置首次启动向导，按一键启动、本地模型、连接测试、知识库、示例工作流顺序引导配置。
 - 可在 `全自动生成` 中选择只生成视频制作包、生成视频加语音字幕制作包、调用生图/生视频 API，或预留 ComfyUI 自动化素材/预览路径；当前会自动整理 `production_manifest.json`、生图提示词、视频提示词、语音字幕包、ComfyUI 参数包、字幕、配音文本和剪辑清单，供后续 API 适配器继续执行。
 - 可在 `全自动生成` 中启用 `VoxCPM2 本地仿声`，上传本人授权参考音频后，本地生成 `audio/voiceover.wav`；字幕和语音由 20 号员工维护，最终硬字幕和最终混音默认交给 22 号员工和剪辑工具。
+- 可在 `全自动生成 -> 剪辑/预览工具` 中选择 `ffmpeg`。系统会优先查找 `runtime/ffmpeg/bin/ffmpeg.exe`，其次查找 `runtime/ffmpeg/ffmpeg.exe` 和系统 PATH；当任务目录里已有 `video_clips/` 视频、`generated_images/` 图片或 `audio/voiceover.wav` 时，会尝试输出 `final_video.mp4`。缺少 FFmpeg 或素材不足时会写入 `local_ffmpeg_manifest.json` 并跳过，不中断工作流。
 - 可在 `全自动生成 -> ComfyUI 工作流库` 中配置 6 个默认槽位：图生图/文生图、图生视频、参考图保持一致性、B-roll 素材生成、字幕预览合成、音频字幕视频片段预览合成。下拉选择某个槽位会加载该槽位已保存的接口、节点映射、轮询时间和用途说明，保存后写入当前浏览器 `localStorage`，刷新页面仍会恢复；列表区只展示当前选中槽位；运行时会把当前槽位和库状态传给员工，但 API Key 不写入任务输出。
 - 选择 `auto`、`offline` 或 `openai` 执行模式。
 - 在 `API Key` 输入框填入密钥；密钥只用于本次运行，不写入任务输出文件。
@@ -378,6 +379,49 @@ my_workspace/comfyui_workflows/long_video_universal/
 ```
 
 ComfyUI 适配器会读取 `comfyui/comfyui_payload.json`，提交任务后轮询结果，并把返回的 mp4、音频、图片等结果下载到 `comfyui/` 目录。若缺少密钥、Base URL 或 endpoint，会标记为 skipped，不会发起请求。
+
+## 本地 FFmpeg 自动成片
+
+当前本地 FFmpeg 适配器已经接入自动生产管线。它不会替代 22 号员工的剪辑判断，但可以在素材已存在时生成一个可检查的本地成片草稿或最终导出文件。
+
+查找顺序：
+
+```text
+runtime/ffmpeg/bin/ffmpeg.exe
+runtime/ffmpeg/ffmpeg.exe
+系统 PATH 中的 ffmpeg
+```
+
+项目根目录提供安装脚本：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\install_ffmpeg_runtime.ps1
+```
+
+脚本会下载 Windows 静态 FFmpeg 包并安装到 `runtime/ffmpeg/`；该目录被 Git 忽略，不会提交二进制。
+
+运行条件：
+
+```text
+全自动生成模式不是关闭
+剪辑/预览工具选择 ffmpeg
+任务目录里至少存在以下任一类素材：
+- video_clips/*.mp4 / *.mov / *.mkv / *.webm
+- generated_images/*.png / *.jpg / *.jpeg / *.webp
+- audio/voiceover.wav / audio/voiceover.mp3
+```
+
+输出文件：
+
+```text
+final_video.mp4
+local_ffmpeg_manifest.json
+local_ffmpeg_command.txt
+local_ffmpeg_stdout.txt
+local_ffmpeg_stderr.txt
+```
+
+字幕目前保留为 sidecar `subtitles.srt`，由剪辑工具最终硬字幕烧录；本地 FFmpeg 先负责把可用视频/图片/音频合成为视频文件。若缺少 FFmpeg 或素材不足，`local_ffmpeg_manifest.json` 会记录 skipped 原因。
 
 ## 离线部署与动作执行
 

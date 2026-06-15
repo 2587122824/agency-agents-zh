@@ -4341,6 +4341,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         else:
             checks.append(self._health_check("推荐本地模型", "warn", "未发现 qwen3:8b-q4_K_M；可运行 start_local.ps1 自动拉取"))
 
+        ffmpeg_bundled = WORKSPACE_ROOT.parent / "runtime" / "ffmpeg" / "bin" / "ffmpeg.exe"
+        ffmpeg_alt = WORKSPACE_ROOT.parent / "runtime" / "ffmpeg" / "ffmpeg.exe"
+        ffmpeg_path = shutil.which("ffmpeg")
+        if ffmpeg_bundled.exists():
+            checks.append(self._health_check("FFmpeg 命令", "ok", str(ffmpeg_bundled)))
+        elif ffmpeg_alt.exists():
+            checks.append(self._health_check("FFmpeg 命令", "ok", str(ffmpeg_alt)))
+        elif ffmpeg_path:
+            checks.append(self._health_check("FFmpeg 命令", "ok", ffmpeg_path))
+        else:
+            checks.append(self._health_check("FFmpeg 命令", "warn", "未在 runtime/ffmpeg/bin/ffmpeg.exe 或 PATH 找到；本地自动成片会跳过，但制作包仍会生成"))
+
         return {
             "checks": checks,
             "generated_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),

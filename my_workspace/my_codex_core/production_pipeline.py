@@ -8,6 +8,7 @@ from typing import Any
 from .cloud_comfyui_adapter import CloudComfyUIAdapter
 from .cloud_image_adapter import CloudImageAdapter
 from .cloud_video_adapter import CloudVideoAdapter
+from .local_ffmpeg_adapter import LocalFFmpegAdapter
 from .local_tts_adapter import LocalTTSAdapter
 
 
@@ -126,6 +127,8 @@ def run_auto_production(
             "comfyui_plan_file": str(comfyui_plan_path),
             "comfyui_payload_file": str(comfyui_payload_path),
             "final_edit_plan_file": str(edit_plan_path),
+            "local_ffmpeg_manifest": "",
+            "local_ffmpeg_command": "",
             "api_key_provided": bool(compose_config.get("api_key_provided")),
             "base_url_provided": bool(compose_config.get("base_url_provided")),
             "workflow_endpoint_provided": bool(str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()),
@@ -134,7 +137,7 @@ def run_auto_production(
             "workflow_preset_name": str(compose_config.get("workflow_preset_name") or ""),
             "workflow_preset_purpose": str(compose_config.get("workflow_preset_purpose") or ""),
             "workflow_library": compose_config.get("workflow_library") if isinstance(compose_config.get("workflow_library"), list) else [],
-            "adapter_status": "pending" if mode in {"api_ready", "comfy_full"} else "not_configured",
+            "adapter_status": "pending" if mode in {"api_ready", "comfy_full"} or str(compose_config.get("tool") or "").strip().lower() == "ffmpeg" else "not_configured",
         },
         "audio": {
             "provider": voice_config.get("provider") or "",
@@ -205,6 +208,22 @@ def run_auto_production(
         elif tts_adapter_result.get("status") not in {"success", "skipped"}:
             manifest["status"] = "local_tts_failed"
 
+    ffmpeg_adapter_result = _run_local_ffmpeg_adapter(task_dir, paths, compose_config, manifest)
+    if ffmpeg_adapter_result:
+        manifest["composition"]["adapter_status"] = ffmpeg_adapter_result.get("status") or "failed"
+        manifest["composition"]["local_ffmpeg_manifest"] = str(task_dir / "local_ffmpeg_manifest.json")
+        manifest["composition"]["local_ffmpeg_command"] = str(task_dir / "local_ffmpeg_command.txt")
+        files = ffmpeg_adapter_result.get("downloaded_files") or []
+        if files:
+            manifest["composition"]["final_video_file"] = str(files[0])
+            manifest["files"]["final_video"] = str(files[0])
+        if ffmpeg_adapter_result.get("status") == "success":
+            manifest["status"] = "final_video_generated"
+        elif ffmpeg_adapter_result.get("status") == "skipped" and manifest["status"] in {"package_ready", "audio_generated", "comfyui_package_ready"}:
+            manifest["status"] = "local_ffmpeg_skipped"
+        elif ffmpeg_adapter_result.get("status") not in {"success", "skipped"}:
+            manifest["status"] = "local_ffmpeg_failed"
+
     manifest_path = task_dir / "production_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_text(production_note_path, _build_production_note(manifest))
@@ -230,6 +249,32 @@ def _run_local_tts_adapter(
         )
     except Exception as exc:
         error_path = output_dir / "local_tts_error.json"
+        error_path.write_text(
+            json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    return {"status": "failed", "error": str(exc), "manifest_file": str(error_path)}
+
+
+def _run_local_ffmpeg_adapter(
+    task_dir: Path,
+    paths: dict[str, Path],
+    compose_config: dict[str, Any],
+    manifest: dict[str, Any],
+) -> dict[str, Any] | None:
+    tool = str(compose_config.get("tool") or "").strip().lower()
+    if tool not in {"", "ffmpeg"}:
+        return None
+    try:
+        workspace_root = Path(__file__).resolve().parents[1]
+        return LocalFFmpegAdapter(workspace_root=workspace_root).run(
+            task_dir=task_dir,
+            paths=paths,
+            compose_config=compose_config,
+            manifest=manifest,
+        )
+    except Exception as exc:
+        error_path = task_dir / "local_ffmpeg_error.json"
         error_path.write_text(
             json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -476,8 +521,9 @@ def _build_edit_checklist(
             "- 目标视频：final_video.mp4",
             "",
             "## 7. 当前限制",
-            "- 当前版本生成自动生产资产包、语音字幕包、ComfyUI 素材编排方案、剪辑成片方案和 manifest。",
-            "- 只有选择调用 API 生成时，适配器才会读取 production_manifest.json 执行外部调用。",
+            "- 当前版本会生成自动生产资产包、语音字幕包、ComfyUI 素材编排方案、剪辑成片方案和 manifest。",
+            "- 当合成工具为 ffmpeg 且本地可找到 ffmpeg.exe，并且已有视频片段、图片或配音音频时，会尝试生成 final_video.mp4。",
+            "- 若缺少 FFmpeg 或素材不足，会在 local_ffmpeg_manifest.json 里记录 skipped 原因，不中断工作流。",
             "",
         ]
     )
@@ -498,8 +544,10 @@ def _build_production_note(manifest: dict[str, Any]) -> str:
             f"- ComfyUI 素材编排方案：{manifest['files']['comfyui_plan']}",
             f"- ComfyUI 参数包：{manifest['files']['comfyui_payload']}",
             f"- 剪辑成片方案：{manifest['files'].get('final_edit_plan', '')}",
+            f"- 本地 FFmpeg：{manifest.get('composition', {}).get('adapter_status', '')}",
+            f"- 目标视频：{manifest.get('files', {}).get('final_video') or manifest.get('composition', {}).get('target_file', '')}",
             "",
-            "下一步接入真实平台 API 时，直接读取 `production_manifest.json` 中的配置、提示词文件和输出目录。",
+            "下一步可把素材放入 generated_images/、video_clips/ 或生成 audio/voiceover.wav 后，由本地 FFmpeg 适配器合成视频；云端平台仍读取 `production_manifest.json` 中的配置、提示词文件和输出目录。",
             "",
         ]
     )
