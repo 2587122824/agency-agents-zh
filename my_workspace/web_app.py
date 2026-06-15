@@ -773,6 +773,7 @@ INDEX_HTML = r"""<!doctype html>
             <label>产品类型
               <select id="productTemplate">
                 <option value="short_video" selected>短视频</option>
+                <option value="long_video">长视频</option>
                 <option value="xiaohongshu">小红书图文</option>
                 <option value="game_steam">Unity 3D Steam 游戏</option>
                 <option value="software_market">软件市场分析</option>
@@ -915,19 +916,19 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <details>
-          <summary><strong>全自动生成</strong> <span class="muted small">按成本生成素材、配音字幕，并输出剪辑成片方案</span></summary>
+          <summary><strong>全自动生成</strong> <span class="muted small">先生成制作包、配音字幕和素材预览；最终硬字幕、混音、导出交给剪辑阶段</span></summary>
           <div class="details-body">
             <div class="provider-grid">
               <label>自动生成模式
                 <select id="autoProductionMode">
                   <option value="off" selected>关闭</option>
                   <option value="package_only">只生成视频制作包</option>
-                  <option value="audio_package">生成视频 + 语音字幕制作包</option>
+                  <option value="audio_package">生成视频制作包 + 语音字幕包（推荐）</option>
                   <option value="api_ready">调用生图/生视频 API</option>
-                  <option value="comfy_full">ComfyUI 全自动成片（高算力预留）</option>
+                  <option value="comfy_full">ComfyUI 素材/预览草稿（高算力，可选）</option>
                 </select>
               </label>
-              <label>剪辑/合成工具
+              <label>剪辑/预览工具
                 <select id="composeTool">
                   <option value="ffmpeg" selected>ffmpeg</option>
                   <option value="runninghub">RunningHub / 云端 ComfyUI（素材/预览）</option>
@@ -935,19 +936,19 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="manual">只生成清单</option>
                 </select>
               </label>
-              <label>最终视频文件名
+              <label>预览/最终视频文件名
                 <input id="finalVideoName" autocomplete="off" spellcheck="false" placeholder="final_video.mp4" />
               </label>
             </div>
             <div class="provider-grid">
-              <label>成片平台密钥
+              <label>ComfyUI 平台密钥
                 <input id="comfyApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="RunningHub 或云端 ComfyUI API Key" />
               </label>
-              <label>成片平台接口地址
+              <label>ComfyUI 平台接口地址
                 <input id="comfyBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
               </label>
-              <label>成片工作流接口
-                <input id="comfyWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/你的全自动成片工作流ID 或 /run/ai-app/你的应用ID" />
+              <label>ComfyUI 素材/预览工作流接口
+                <input id="comfyWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/你的素材预览工作流ID 或 /run/ai-app/你的应用ID" />
               </label>
             </div>
             <div class="provider-grid">
@@ -987,7 +988,7 @@ INDEX_HTML = r"""<!doctype html>
               <label>导入 API JSON 自动识别
                 <input id="comfyApiWorkflowFile" type="file" accept=".json,application/json" />
               </label>
-              <label>成片轮询超时
+              <label>ComfyUI 轮询超时
                 <select id="comfyPollTimeout">
                   <option value="900">15 分钟</option>
                   <option value="1800">30 分钟</option>
@@ -1649,6 +1650,15 @@ INDEX_HTML = r"""<!doctype html>
         imageSize: '9:16',
         videoAspect: '9:16',
         videoDuration: '30s',
+      },
+      long_video: {
+        workflow: 'workflow_长视频全流程',
+        taskTitle: '长视频内容生产',
+        sample: '我要做一条 12-18 分钟的长视频，主题是“中小企业如何用 AI 员工工作流平台降低重复劳动”。目标平台是 B 站和视频号，目标观众是中小企业老板、运营负责人和想做 AI 自动化服务的人。视频要专业、清晰、有案例感，结构包括痛点、平台演示、落地步骤、成本和风险、最后引导私信咨询。可用素材包括管理台录屏、工作流输出截图、本人配音和少量 AI 示意图；不要夸大收益，不承诺具体增长结果。',
+        autoProductionMode: 'audio_package',
+        imageSize: '16:9',
+        videoAspect: '16:9',
+        videoDuration: 'custom',
       },
       xiaohongshu: {
         workflow: 'workflow_小红书图文',
@@ -3568,7 +3578,7 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
     };
     els.longVideoSampleBtn.onclick = () => {
-      els.productTemplate.value = 'short_video';
+      els.productTemplate.value = 'long_video';
       applyProductTemplate(true);
       setIfExists(els.workflow, 'workflow_长视频全流程');
       els.userInput.value = '我要做一条 12-18 分钟的长视频，主题是“中小企业如何用 AI 员工工作流平台降低重复劳动”。目标平台是 B 站和视频号，目标观众是中小企业老板、运营负责人和想做 AI 自动化服务的人。视频要专业、清楚、有案例感，结构包括痛点、平台演示、落地步骤、成本和风险、最后引导私信咨询。可用素材包括管理台录屏、工作流输出截图、本人配音和少量 AI 示意图；不要夸大收益，不承诺具体增长结果。';
@@ -4675,7 +4685,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 正向提示词：{value('positive_prompt')}\n"
             "- 参考图：如用户上传参考图，请把它作为首帧、角色一致性、产品一致性或风格参考来规划。\n"
             "- 参数来源：模型、画幅、时长、运动强度、镜头、seed、FPS、分辨率、负向词等由视频/ComfyUI 工作流或导入的 API JSON 节点映射配置，不需要在员工输出中重复询问。\n"
-            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，07_视频生成执行员输出视频画面正向提示词和镜头清单，20_语音字幕包装师输出 TTS、SRT、BGM 和音效方案，21_ComfyUI成片编排师整理一体化成片参数；不要声称已经生成 mp4。\n"
+            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，07_视频生成执行员输出视频画面正向提示词和镜头清单，20_语音字幕包装师输出 TTS、SRT、BGM 和音效方案，21_ComfyUI素材编排师整理素材/预览参数；最终硬字幕、最终混音和最终导出交给 22_剪辑成片执行师，不要声称已经生成 mp4。\n"
         )
 
     @staticmethod
@@ -4693,13 +4703,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"{user_input}\n\n"
             "## ComfyUI 素材/预览配置\n"
             f"- 自动生成模式：{mode or 'off'}\n"
-            f"- 剪辑/合成工具：{value('tool', 'ffmpeg')}\n"
-            f"- 成片工作流接口：{value('workflow_endpoint')}\n"
-            f"- 成片平台密钥：{api_note}\n"
-            f"- 成片平台接口地址：{base_url_note}\n"
+            f"- 剪辑/预览工具：{value('tool', 'ffmpeg')}\n"
+            f"- ComfyUI 素材/预览工作流接口：{value('workflow_endpoint')}\n"
+            f"- ComfyUI 平台密钥：{api_note}\n"
+            f"- ComfyUI 平台接口地址：{base_url_note}\n"
             f"- 节点映射：{node_note}\n"
             f"- 轮询超时：{value('poll_timeout_seconds', '3600')} 秒\n"
-            "- 执行要求：21_ComfyUI素材编排师需要输出可映射到 ComfyUI/RunningHub 的素材参数包；AI 图片和视频只是片段素材，最终剪辑成片交给 22_剪辑成片执行师。\n"
+            "- 执行要求：21_ComfyUI素材编排师需要输出可映射到 ComfyUI/RunningHub 的素材或预览参数包；AI 图片和视频只是片段素材，SRT 字幕只默认用于预览或自动化草稿，最终硬字幕、最终混音和最终导出交给 22_剪辑成片执行师。\n"
         )
 
     def _upload_reference_image(self, payload: dict) -> dict:

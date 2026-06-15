@@ -10,6 +10,8 @@
 
 Latest update on 2026-06-15:
 
+- Optimized the long-video workflow and full-auto UI semantics: long-video template is now available in the product template selector, the long-video sample defaults to `audio_package`, and `comfy_full` is described as `ComfyUI 素材/预览草稿` rather than final video export.
+- Clarified long-video workflow boundaries: `07_视频生成执行员` outputs auxiliary AI video material only, `20_语音字幕包装师` owns `voiceover.txt` and `subtitles.srt`, `21_ComfyUI素材编排师` prepares material/preview parameters, and `22_剪辑成片执行师` owns final hard subtitles, mix, export specs, and release checks.
 - Adjusted video pipeline ownership: `20_语音字幕包装师` owns voice + SRT packaging, `21_ComfyUI成片编排师` uses voice/subtitle inputs only for ComfyUI preview/draft automation, and `22_剪辑成片执行师` owns final hard subtitles, final mix, and final export.
 - Added workflow breakpoint resume.
 - Management UI task output page now has `继续任务`.

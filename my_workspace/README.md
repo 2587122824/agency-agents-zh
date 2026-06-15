@@ -338,19 +338,19 @@ edit_checklist.md
 只生成视频制作包：低成本，只整理生图、生视频和合成材料。
 生成视频 + 语音字幕制作包：增加 TTS、SRT 字幕、BGM、音效和混音建议，由 20 号员工统一维护。
 调用生图/生视频 API：读取 RunningHub 等配置并调用已接入适配器。
-ComfyUI 全自动成片：预留高算力一体化路径，输出 ComfyUI 参数包，建议用于素材、预览或自动化草稿；最终硬字幕、最终混音和最终导出仍以剪辑阶段为准。
+ComfyUI 素材/预览草稿：预留高算力自动化路径，输出 ComfyUI 参数包，建议用于关键帧、B-roll、视频片段、字幕预览或自动化草稿；最终硬字幕、最终混音和最终导出仍以剪辑阶段为准。
 ```
 
-当前版本会生成可执行资产包和 manifest；选择 `调用生图/生视频 API` 时会调用已接入的生图/生视频适配器。选择 `ComfyUI 全自动成片` 且合成工具为 `RunningHub / 云端 ComfyUI`、密钥、接口地址和成片工作流接口都已填写时，会调用成片适配器。
+当前版本会生成可执行资产包和 manifest；选择 `调用生图/生视频 API` 时会调用已接入的生图/生视频适配器。选择 `ComfyUI 素材/预览草稿` 且剪辑/预览工具为 `RunningHub / 云端 ComfyUI（素材/预览）`、密钥、接口地址和 ComfyUI 工作流接口都已填写时，会调用 ComfyUI 素材/预览适配器。
 
-ComfyUI 成片配置说明：
+ComfyUI 素材/预览配置说明：
 
 ```text
-成片平台密钥：RunningHub 或云端 ComfyUI API Key，只用于本次请求，不写入输出文件。
-成片平台接口地址：例如 https://www.runninghub.cn/openapi/v2。
-成片工作流接口：例如 /run/workflow/你的全自动成片工作流ID 或 /run/ai-app/你的应用ID。
+ComfyUI 平台密钥：RunningHub 或云端 ComfyUI API Key，只用于本次请求，不写入输出文件。
+ComfyUI 平台接口地址：例如 https://www.runninghub.cn/openapi/v2。
+ComfyUI 素材/预览工作流接口：例如 /run/workflow/你的素材预览工作流ID 或 /run/ai-app/你的应用ID。
 ComfyUI 节点映射 JSON：RunningHub nodeInfoList 数组，可使用 {{payload}}、{{prompt}}、{{voice_text}}、{{subtitle_srt}} 占位符。
-成片轮询超时：全自动成片通常更慢，默认 60 分钟。
+ComfyUI 轮询超时：素材/预览任务通常更慢，默认 60 分钟。
 ```
 
 可以在管理台直接导入 ComfyUI 导出的 API JSON。管理台会在浏览器本地识别 API JSON 中可覆盖的节点输入，例如 `CLIPTextEncode.text`、`LoadImage.image`、`KSampler.seed/steps/cfg/denoise`、`EmptySD3LatentImage.width/height`，然后让你勾选哪些字段要传参，并自动生成 `nodeInfoList`。
@@ -374,7 +374,7 @@ my_workspace/comfyui_workflows/long_video_universal/
 普通画布工作流 JSON 主要用于导入 ComfyUI 继续编辑，不能直接用于自动生成 nodeInfoList。
 ```
 
-成片适配器会读取 `comfyui/comfyui_payload.json`，提交任务后轮询结果，并把返回的 mp4、音频、图片等结果下载到 `comfyui/` 目录。若缺少密钥、Base URL 或 endpoint，会标记为 skipped，不会发起请求。
+ComfyUI 适配器会读取 `comfyui/comfyui_payload.json`，提交任务后轮询结果，并把返回的 mp4、音频、图片等结果下载到 `comfyui/` 目录。若缺少密钥、Base URL 或 endpoint，会标记为 skipped，不会发起请求。
 
 ## 离线部署与动作执行
 
@@ -465,14 +465,14 @@ my_deploy/OFFLINE_DEPLOY.md
 
 ## RunningHub 云端生图接入
 
-早期版本支持在 `全自动生成 -> 调用 API 生成` 模式下单独调用 RunningHub 云端 ComfyUI 生图工作流。当前管理台已隐藏单独的生图配置入口，推荐使用 `全自动生成 -> ComfyUI 全自动成片` 和 API JSON 节点映射统一调用。
+早期版本支持在 `全自动生成 -> 调用 API 生成` 模式下单独调用 RunningHub 云端 ComfyUI 生图工作流。当前管理台已隐藏单独的生图配置入口，推荐使用 `全自动生成 -> ComfyUI 素材/预览草稿` 和 API JSON 节点映射统一调用。
 
 使用方式：
 
 1. 打开管理台 `http://127.0.0.1:8765`。
 2. 在 `全自动生成` 中选择 `调用 API 生成`。
-3. 在 `全自动生成` 中选择 ComfyUI 全自动成片路径。
-4. 填入成片平台密钥、接口地址和工作流接口。
+3. 在 `全自动生成` 中选择 ComfyUI 素材/预览草稿路径。
+4. 填入 ComfyUI 平台密钥、接口地址和工作流接口。
 5. 导入 ComfyUI API JSON，选择需要映射的节点参数。
 6. 使用 `{{prompt}}`、`{{image_prompt}}`、`{{video_prompt}}`、`{{reference_image}}` 等占位符注入工作流员工生成的内容。
 
@@ -494,12 +494,12 @@ production_manifest.json
 
 ## RunningHub 云端视频接入
 
-早期版本也支持在 `全自动生成 -> 调用 API 生成` 模式下调用 RunningHub AI App 视频接口。当前管理台已隐藏单独的视频配置入口，推荐统一走 ComfyUI/RunningHub 成片配置。
+早期版本也支持在 `全自动生成 -> 调用 API 生成` 模式下调用 RunningHub AI App 视频接口。当前管理台已隐藏单独的视频配置入口，推荐统一走 ComfyUI/RunningHub 素材/预览配置。
 
 使用方式：
 
-1. 在 `全自动生成` 中选择 ComfyUI 全自动成片路径。
-2. 填入成片平台密钥、接口地址和工作流接口。
+1. 在 `全自动生成` 中选择 ComfyUI 素材/预览草稿路径。
+2. 填入 ComfyUI 平台密钥、接口地址和工作流接口。
 3. 导入 ComfyUI API JSON，选择视频相关节点参数。
 4. 如需把员工生成的视频提示词写入某个节点，可在节点映射中使用 `{{video_prompt}}` 或 `{{prompt}}`。
 
@@ -526,7 +526,7 @@ video_clips/runninghub_video_query_response.json
 
 1. 先在本机单独安装并跑通 VoxCPM2。
 2. 打开管理台 `http://127.0.0.1:8765`。
-3. 在 `全自动生成` 中选择 `生成视频 + 语音字幕制作包` 或 `ComfyUI 全自动成片`。
+3. 在 `全自动生成` 中选择 `生成视频制作包 + 语音字幕包` 或 `ComfyUI 素材/预览草稿`。
 4. `本地配音` 选择 `VoxCPM2 本地仿声`。
 5. 上传本人或已授权的参考音频。
 6. 可选填写参考音频原文。
@@ -586,4 +586,4 @@ audio/voxcpm2_stderr.txt
 
 这些高级字段仍保留在代码中，用于兼容旧设置和适配器结构；但默认不再暴露给普通用户填写，运行时也不会把单独的生图/生视频配置追加到员工输入。
 
-`image_config` 和 `video_config` 仍保留空的兼容结构，避免破坏制作包和适配器代码；实际执行建议走 ComfyUI/RunningHub 成片配置和 API JSON 节点映射。
+`image_config` 和 `video_config` 仍保留空的兼容结构，避免破坏制作包和适配器代码；实际执行建议走 ComfyUI/RunningHub 素材/预览配置和 API JSON 节点映射。
