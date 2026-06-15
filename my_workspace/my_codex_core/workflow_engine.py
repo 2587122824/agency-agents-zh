@@ -81,7 +81,7 @@ class WorkflowEngine:
             step_no = int(step["step"])
             agent = self.staff_loader.resolve_agent(agents, step["agent"])
             step_dir = task_dir / f"step_{step_no:02d}_{agent.agent_id}"
-            prompt = self._build_step_prompt(workflow, step, user_input, previous_outputs)
+            prompt = self._build_step_prompt(workflow, step, user_input, previous_outputs, production_config)
             if progress_callback:
                 progress_callback(
                     {
@@ -295,12 +295,19 @@ class WorkflowEngine:
         raise FileNotFoundError(f"Workflow not found: {workflow_key}. Available: {available}")
 
     @staticmethod
-    def _build_step_prompt(workflow: dict, step: dict, user_input: str, previous_outputs: list[dict[str, str]]) -> str:
+    def _build_step_prompt(
+        workflow: dict,
+        step: dict,
+        user_input: str,
+        previous_outputs: list[dict[str, str]],
+        production_config: dict | None = None,
+    ) -> str:
         previous_text = "\n\n".join(
             f"## Step {item['step']} - {item['agent']}\n{item['content']}" for item in previous_outputs
         )
         if not previous_text:
             previous_text = "无。"
+        scoped_context = WorkflowEngine._scoped_video_context(step, production_config)
 
         return f"""# 工作流执行任务
 
@@ -319,6 +326,7 @@ class WorkflowEngine:
 
 ## 上游步骤输出
 {previous_text}
+{scoped_context}
 
 ## 执行要求
 1. 只完成当前步骤，不要代替后续员工完成全部流程。
@@ -331,6 +339,19 @@ class WorkflowEngine:
 ```
 当前允许的动作只有 `mkdir`、`create_file`、`write_json`、`open_url`、`fetch_url`、`open_workspace_path`。文件路径必须使用相对路径，系统会限制写入或打开 `my_action_workspace`；网页动作只允许 http/https URL，不允许 shell 命令或任意系统路径。
 """
+
+    @staticmethod
+    def _scoped_video_context(step: dict, production_config: dict | None) -> str:
+        if not isinstance(production_config, dict):
+            return ""
+        context = str(production_config.get("video_memory_context") or "").strip()
+        if not context:
+            return ""
+        agent = str(step.get("agent") or "")
+        allowed_prefixes = ("06_", "07_", "20_", "21_", "22_")
+        if not agent.startswith(allowed_prefixes):
+            return ""
+        return f"\n\n## 视频输出长期记忆\n{context}\n"
 
     @staticmethod
     def _build_final_output(workflow: dict, user_input: str, step_outputs: list[dict[str, str]]) -> str:

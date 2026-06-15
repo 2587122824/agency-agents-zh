@@ -67,7 +67,7 @@ my_workspace/my_memory/character_bible.md
 my_workspace/my_memory/style_guide.md
 ```
 
-The web UI can append these files to each workflow run when `启用 my_memory` is selected.
+The web UI now defaults to using these files only as `视频输出长期记忆`; they are injected only into later video-output agents such as 06/07/20/21/22. Full-workflow memory injection remains available only through the advanced `全流程使用 my_memory` option.
 
 ### Reference Images
 
@@ -1545,3 +1545,49 @@ Security and usage notes:
 - Command template execution is local and intended for the desktop owner only.
 - Use only the user's own voice or voices with explicit authorization.
 - If the actual VoxCPM2 CLI differs, edit the command template in the management UI rather than changing adapter code.
+
+## Video Workflow Editing-First Architecture
+
+[2026-06-15 +08:00] command: adjusted video workflows after the user pointed out that editing tools should be the final step and AI image/video generation should only provide auxiliary clips.
+
+Product decision:
+
+- Final video output should be controlled by an editing/composition tool such as 剪映, CapCut, Premiere, DaVinci Resolve, or FFmpeg.
+- AI images and AI videos are treated as optional素材片段, not as the final product.
+- ComfyUI / RunningHub is now framed as素材生成、参数编排 or optional automation preview, not as the primary final editing authority.
+
+New staff:
+
+```text
+my_workspace/my_custom_staff/22_剪辑成片执行师/
+  agent.md
+  flow_rule.json
+```
+
+Staff responsibility split:
+
+- `21_ComfyUI成片编排师` folder remains for compatibility, but its displayed role is now `ComfyUI素材编排师`.
+- `21` prepares ComfyUI / RunningHub素材生成参数、nodeInfoList 映射、成本回退方案.
+- `22_剪辑成片执行师` is the final video step and outputs a剪辑时间线、素材清单、剪辑工具参数、发布前检查清单.
+
+Workflow changes:
+
+- `workflow_短视频全流程.json` now has 10 steps; step 9 is ComfyUI素材生成编排, step 10 is final剪辑成片执行.
+- `workflow_开发外包.json` now has 10 steps with the same final editing structure.
+- Final outputs and acceptance criteria now explicitly state that AI image/video clips are auxiliary素材 and final output must be executable in editing tools.
+
+Production package changes:
+
+- `production_pipeline.py` now extracts step `22_` and writes `final_edit_plan.md`.
+- `production_manifest.json` includes `files.final_edit_plan`.
+- `edit_checklist.md` now includes a剪辑成片 section.
+- Export package now writes `ComfyUI素材编排.md` and `剪辑成片执行方案.md`.
+
+Long-term memory scope change:
+
+- Management UI `长期记忆` is no longer a global on/off switch.
+- Default is now `仅视频输出阶段使用 my_memory`.
+- The backend no longer appends my_memory directly to `user_input` for all workflow steps by default.
+- `workflow_engine.py` supports `production_config.video_memory_context`.
+- Video memory context is only injected into later video-output agents with IDs starting `06_`, `07_`, `20_`, `21_`, and `22_`.
+- `全流程使用 my_memory（高级）` still exists for rare cases where the user intentionally wants all employees to see memory.

@@ -880,8 +880,9 @@ INDEX_HTML = r"""<!doctype html>
             <div class="provider-grid">
               <label>长期记忆
                 <select id="useMemory">
-                  <option value="on" selected>启用 my_memory</option>
-                  <option value="off">不启用</option>
+                  <option value="video_output" selected>仅视频输出阶段使用 my_memory</option>
+                  <option value="off">不使用长期记忆</option>
+                  <option value="all">全流程使用 my_memory（高级）</option>
                 </select>
               </label>
               <label>继承历史任务
@@ -914,7 +915,7 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <details>
-          <summary><strong>全自动生成</strong> <span class="muted small">按成本选择视频画面、语音字幕或 ComfyUI 成片路径</span></summary>
+          <summary><strong>全自动生成</strong> <span class="muted small">按成本生成素材、配音字幕，并输出剪辑成片方案</span></summary>
           <div class="details-body">
             <div class="provider-grid">
               <label>自动生成模式
@@ -926,10 +927,10 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="comfy_full">ComfyUI 全自动成片（高算力预留）</option>
                 </select>
               </label>
-              <label>合成工具
+              <label>剪辑/合成工具
                 <select id="composeTool">
                   <option value="ffmpeg" selected>ffmpeg</option>
-                  <option value="runninghub">RunningHub / 云端 ComfyUI</option>
+                  <option value="runninghub">RunningHub / 云端 ComfyUI（素材/预览）</option>
                   <option value="jianying">剪映工程（预留）</option>
                   <option value="manual">只生成清单</option>
                 </select>
@@ -1916,7 +1917,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.localModelPreset, settings.localModelPreset);
       renderLocalModelNames();
       setIfExists(els.localModelName, settings.localModelName);
-      setIfExists(els.useMemory, settings.useMemory);
+      setIfExists(els.useMemory, settings.useMemory === 'on' ? 'video_output' : settings.useMemory);
       setIfExists(els.inheritTask, settings.inheritTask);
       setIfExists(els.inheritMode, settings.inheritMode);
       setIfExists(els.useKnowledge, settings.useKnowledge);
@@ -3102,7 +3103,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!packageFiles.length) {
         els.packageOutputList.innerHTML = '<div class="muted small">还没有产品包。点击右上角“导出产品包”生成可交付文件。</div>';
       } else {
-        const priority = ['README.md', 'final_output.md', '视频制作包.md', '语音字幕制作包.md', 'ComfyUI成片编排.md', '小红书文案.md', 'GDD.md', '产品需求文档.md', 'manifest.json'];
+        const priority = ['README.md', 'final_output.md', '视频制作包.md', '语音字幕制作包.md', 'ComfyUI素材编排.md', '剪辑成片执行方案.md', '小红书文案.md', 'GDD.md', '产品需求文档.md', 'manifest.json'];
         packageFiles.sort((a, b) => {
           const an = a.split('/').pop();
           const bn = b.split('/').pop();
@@ -3408,7 +3409,7 @@ INDEX_HTML = r"""<!doctype html>
             api_key: els.apiKey.value.trim(),
             base_url: els.baseUrl.value.trim(),
             timeout: Number(els.modelTimeout.value || 900),
-            use_memory: els.useMemory.value === 'on',
+            memory_scope: els.useMemory.value,
             use_knowledge: els.useKnowledge.value === 'on',
             inherit_task: els.inheritTask.value,
             inherit_mode: els.inheritMode.value,
@@ -3574,7 +3575,7 @@ INDEX_HTML = r"""<!doctype html>
       els.modelTimeout.value = '900';
       els.localModelPreset.value = '';
       renderLocalModelNames();
-      els.useMemory.value = 'on';
+      els.useMemory.value = 'video_output';
       els.useKnowledge.value = 'off';
       els.inheritTask.value = '';
       els.inheritMode.value = 'final_output';
@@ -3751,17 +3752,21 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             workflow = str(payload.get("workflow") or "").strip()
             task_title = str(payload.get("task_title") or "").strip()
             user_input = str(payload.get("input") or "").strip()
-            use_memory = bool(payload.get("use_memory"))
+            memory_scope = str(payload.get("memory_scope") or "").strip()
+            if not memory_scope and bool(payload.get("use_memory")):
+                memory_scope = "all"
             use_knowledge = bool(payload.get("use_knowledge"))
             inherit_task = str(payload.get("inherit_task") or "").strip()
             inherit_mode = str(payload.get("inherit_mode") or "final_output").strip()
-            if use_memory:
+            if memory_scope == "all":
                 user_input = self._append_long_term_memory(user_input)
             if use_knowledge:
                 user_input = self._append_knowledge_base(user_input)
             if inherit_task:
                 user_input = self._append_inherited_task(user_input, inherit_task, inherit_mode)
             production_config = payload.get("production_config") or {}
+            if memory_scope == "video_output" and isinstance(production_config, dict):
+                production_config["video_memory_context"] = self._long_term_memory_context()
             if isinstance(production_config, dict):
                 production_image_config = production_config.get("image_config")
                 if isinstance(production_image_config, dict):
@@ -4387,8 +4392,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             write("生图提示词.json", json.dumps(self._prompt_json(step_outputs, "06_"), ensure_ascii=False, indent=2))
             write("视频提示词.json", json.dumps(self._prompt_json(step_outputs, "07_"), ensure_ascii=False, indent=2))
             write("语音字幕制作包.md", self._agent_output_text(step_outputs, "20_"))
-            write("ComfyUI成片编排.md", self._agent_output_text(step_outputs, "21_"))
+            write("ComfyUI素材编排.md", self._agent_output_text(step_outputs, "21_"))
             write("ComfyUI参数包.json", json.dumps(self._prompt_json(step_outputs, "21_"), ensure_ascii=False, indent=2))
+            write("剪辑成片执行方案.md", self._agent_output_text(step_outputs, "22_"))
         elif template == "xiaohongshu":
             write("小红书文案.md", final_output)
             write("标题列表.txt", self._extract_lines(final_output, ["标题", "选题"]))
@@ -4534,15 +4540,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         node_note = "已填写节点映射 JSON" if node_info and node_info != "[]" else "未填写，需后续按实际 ComfyUI 节点补齐"
         return (
             f"{user_input}\n\n"
-            "## ComfyUI 成片配置\n"
+            "## ComfyUI 素材/预览配置\n"
             f"- 自动生成模式：{mode or 'off'}\n"
-            f"- 合成工具：{value('tool', 'ffmpeg')}\n"
+            f"- 剪辑/合成工具：{value('tool', 'ffmpeg')}\n"
             f"- 成片工作流接口：{value('workflow_endpoint')}\n"
             f"- 成片平台密钥：{api_note}\n"
             f"- 成片平台接口地址：{base_url_note}\n"
             f"- 节点映射：{node_note}\n"
             f"- 轮询超时：{value('poll_timeout_seconds', '3600')} 秒\n"
-            "- 执行要求：21_ComfyUI成片编排师需要输出可映射到 ComfyUI/RunningHub 的参数包；如果节点 ID 未知，必须标注待确认，不要编造节点。\n"
+            "- 执行要求：21_ComfyUI素材编排师需要输出可映射到 ComfyUI/RunningHub 的素材参数包；AI 图片和视频只是片段素材，最终剪辑成片交给 22_剪辑成片执行师。\n"
         )
 
     def _upload_reference_image(self, payload: dict) -> dict:
@@ -4714,8 +4720,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         task_dir.rmdir()
 
     def _append_long_term_memory(self, user_input: str) -> str:
-        if not MEMORY_ROOT.exists():
+        context = self._long_term_memory_context()
+        if not context:
             return user_input
+        return f"{user_input}\n\n## 长期记忆\n{context}\n"
+
+    def _long_term_memory_context(self) -> str:
+        if not MEMORY_ROOT.exists():
+            return ""
 
         sections = []
         for path in sorted(MEMORY_ROOT.glob("*.md")):
@@ -4724,8 +4736,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 sections.append(f"### {path.name}\n{content}")
 
         if not sections:
-            return user_input
-        return f"{user_input}\n\n## 长期记忆\n" + "\n\n".join(sections) + "\n"
+            return ""
+        return "\n\n".join(sections)
 
     def _append_knowledge_base(self, user_input: str) -> str:
         if not KNOWLEDGE_ROOT.exists():

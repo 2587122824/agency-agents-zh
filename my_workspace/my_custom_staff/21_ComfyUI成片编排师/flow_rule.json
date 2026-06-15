@@ -1,19 +1,18 @@
 {
   "agent_id": "21_ComfyUI成片编排师",
-  "agent_name": "ComfyUI成片编排师",
-  "role": "comfyui_production_orchestrator",
+  "agent_name": "ComfyUI素材编排师",
+  "role": "comfyui_asset_orchestrator",
   "inputs": [
     "分镜生图方案",
     "视频生成制作包",
     "语音字幕制作包",
-    "生图配置",
-    "视频配置",
     "全自动生成模式",
     "RunningHub / ComfyUI 工作流接口信息",
-    "参考图路径和用途说明"
+    "参考图路径和用途说明",
+    "视频输出长期记忆"
   ],
   "outputs": [
-    "ComfyUI 成片编排方案",
+    "ComfyUI 素材生成编排方案",
     "节点输入总览",
     "ComfyUI 参数包",
     "RunningHub / ComfyUI 映射建议",
@@ -23,14 +22,16 @@
   "handoff_to": [
     "RunningHub 云端 ComfyUI",
     "本地 ComfyUI",
+    "22_剪辑成片执行师",
     "production_pipeline",
     "人工复核"
   ],
   "quality_gate": [
-    "清楚区分视频画面、语音字幕和最终合成",
+    "清楚区分 AI 素材片段、语音字幕和最终剪辑",
     "参数包包含可映射到 ComfyUI 的字段",
     "未编造未知节点 ID",
     "包含低成本回退方案",
+    "明确最终成片交给剪辑工具",
     "不输出或保存 API Key"
   ]
 }
