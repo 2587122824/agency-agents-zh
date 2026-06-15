@@ -10,6 +10,7 @@
 
 Latest update on 2026-06-15:
 
+- Added a browser-local `ComfyUI 工作流库` in the management UI with 6 default slots: text/image-to-image, image-to-video, reference consistency, B-roll material generation, subtitle preview, and audio+subtitle+video preview. Each slot stores endpoint, nodeInfoList, timeout, and purpose; runtime passes selected slot and sanitized library status to employees and `production_manifest.json`.
 - Optimized the long-video workflow and full-auto UI semantics: long-video template is now available in the product template selector, the long-video sample defaults to `audio_package`, and `comfy_full` is described as `ComfyUI 素材/预览草稿` rather than final video export.
 - Clarified long-video workflow boundaries: `07_视频生成执行员` outputs auxiliary AI video material only, `20_语音字幕包装师` owns `voiceover.txt` and `subtitles.srt`, `21_ComfyUI素材编排师` prepares material/preview parameters, and `22_剪辑成片执行师` owns final hard subtitles, mix, export specs, and release checks.
 - Adjusted video pipeline ownership: `20_语音字幕包装师` owns voice + SRT packaging, `21_ComfyUI成片编排师` uses voice/subtitle inputs only for ComfyUI preview/draft automation, and `22_剪辑成片执行师` owns final hard subtitles, final mix, and final export.
@@ -167,6 +168,7 @@ Important features:
 - Upload reference images with thumbnail preview.
 - Upload authorized voice samples for local TTS.
 - Import ComfyUI API JSON and generate RunningHub-style `nodeInfoList` mappings.
+- Configure a browser-local ComfyUI workflow library for common material/preview jobs.
 - Save browser settings in `localStorage`.
 - Delete generated task folders safely under `my_task_output`.
 
@@ -248,7 +250,7 @@ comfy_full
 Important distinction:
 
 - `api_ready` can call separate image/video adapters if configured.
-- `comfy_full` can call cloud ComfyUI/RunningHub final-production adapter if configured.
+- `comfy_full` can call cloud ComfyUI/RunningHub material/preview adapter if configured.
 - Final video planning should still end at `22_剪辑成片执行师`.
 
 ## Local TTS / VoxCPM2

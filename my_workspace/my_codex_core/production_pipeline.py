@@ -130,6 +130,10 @@ def run_auto_production(
             "base_url_provided": bool(compose_config.get("base_url_provided")),
             "workflow_endpoint_provided": bool(str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()),
             "node_mapping_provided": bool(str(compose_config.get("node_info_list_json") or "").strip() not in {"", "[]"}),
+            "workflow_preset_id": str(compose_config.get("workflow_preset_id") or ""),
+            "workflow_preset_name": str(compose_config.get("workflow_preset_name") or ""),
+            "workflow_preset_purpose": str(compose_config.get("workflow_preset_purpose") or ""),
+            "workflow_library": compose_config.get("workflow_library") if isinstance(compose_config.get("workflow_library"), list) else [],
             "adapter_status": "pending" if mode in {"api_ready", "comfy_full"} else "not_configured",
         },
         "audio": {

@@ -285,6 +285,15 @@ INDEX_HTML = r"""<!doctype html>
       background: #fff;
       font-size: 13px;
     }
+    .inline-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    .inline-actions button {
+      width: auto;
+    }
     .reference-preview {
       width: 64px;
       height: 64px;
@@ -952,6 +961,22 @@ INDEX_HTML = r"""<!doctype html>
               </label>
             </div>
             <div class="provider-grid">
+              <label>ComfyUI 工作流库
+                <select id="comfyWorkflowPreset"></select>
+              </label>
+              <label>当前工作流说明
+                <input id="comfyWorkflowPresetNote" autocomplete="off" spellcheck="false" placeholder="例如：用参考图生成统一风格关键帧" />
+              </label>
+              <label>工作流库操作
+                <div class="inline-actions">
+                  <button id="applyComfyWorkflowPresetBtn" type="button">应用到配置</button>
+                  <button id="saveComfyWorkflowPresetBtn" type="button">保存当前配置</button>
+                  <button id="resetComfyWorkflowPresetBtn" type="button">重置槽位</button>
+                </div>
+              </label>
+            </div>
+            <div class="reference-list" id="comfyWorkflowLibraryList"></div>
+            <div class="provider-grid">
               <label>本地配音
                 <select id="voiceMode">
                   <option value="off" selected>不生成配音音频</option>
@@ -1511,6 +1536,12 @@ INDEX_HTML = r"""<!doctype html>
       comfyApiKey: document.getElementById('comfyApiKey'),
       comfyBaseUrl: document.getElementById('comfyBaseUrl'),
       comfyWorkflowEndpoint: document.getElementById('comfyWorkflowEndpoint'),
+      comfyWorkflowPreset: document.getElementById('comfyWorkflowPreset'),
+      comfyWorkflowPresetNote: document.getElementById('comfyWorkflowPresetNote'),
+      applyComfyWorkflowPresetBtn: document.getElementById('applyComfyWorkflowPresetBtn'),
+      saveComfyWorkflowPresetBtn: document.getElementById('saveComfyWorkflowPresetBtn'),
+      resetComfyWorkflowPresetBtn: document.getElementById('resetComfyWorkflowPresetBtn'),
+      comfyWorkflowLibraryList: document.getElementById('comfyWorkflowLibraryList'),
       comfyNodeInfoList: document.getElementById('comfyNodeInfoList'),
       comfyApiWorkflowFile: document.getElementById('comfyApiWorkflowFile'),
       comfyParameterMapper: document.getElementById('comfyParameterMapper'),
@@ -1641,6 +1672,58 @@ INDEX_HTML = r"""<!doctype html>
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
+    let comfyWorkflowLibrary = [];
+    const DEFAULT_COMFY_WORKFLOW_PRESET_ID = 'txt_img_img';
+    const DEFAULT_COMFY_WORKFLOW_LIBRARY = [
+      {
+        id: 'txt_img_img',
+        name: '图生图 / 文生图',
+        purpose: '生成封面、关键画面、配图、场景图',
+        endpoint: '',
+        nodeInfoList: '[]',
+        pollTimeout: '3600',
+      },
+      {
+        id: 'image_to_video',
+        name: '图生视频',
+        purpose: '把参考图、分镜图或产品图生成视频片段',
+        endpoint: '',
+        nodeInfoList: '[]',
+        pollTimeout: '3600',
+      },
+      {
+        id: 'reference_consistency',
+        name: '参考图保持一致性',
+        purpose: '保持人物、产品、品牌、画风一致',
+        endpoint: '',
+        nodeInfoList: '[]',
+        pollTimeout: '3600',
+      },
+      {
+        id: 'broll_material',
+        name: 'B-roll 素材生成',
+        purpose: '生成补画面、转场、氛围镜头和说明性画面',
+        endpoint: '',
+        nodeInfoList: '[]',
+        pollTimeout: '3600',
+      },
+      {
+        id: 'subtitle_preview',
+        name: '字幕预览合成',
+        purpose: '快速检查字幕位置、样式和节奏',
+        endpoint: '',
+        nodeInfoList: '[]',
+        pollTimeout: '3600',
+      },
+      {
+        id: 'audio_subtitle_video_preview',
+        name: '音频 + 字幕 + 视频片段预览合成',
+        purpose: '生成草稿预览，检查整体节奏和素材衔接',
+        endpoint: '',
+        nodeInfoList: '[]',
+        pollTimeout: '7200',
+      },
+    ];
     const PRODUCT_TEMPLATES = {
       short_video: {
         workflow: 'workflow_短视频全流程',
@@ -1862,6 +1945,9 @@ INDEX_HTML = r"""<!doctype html>
         comfyApiKey: els.comfyApiKey.value,
         comfyBaseUrl: els.comfyBaseUrl.value,
         comfyWorkflowEndpoint: els.comfyWorkflowEndpoint.value,
+        comfyWorkflowPreset: els.comfyWorkflowPreset.value,
+        comfyWorkflowPresetNote: els.comfyWorkflowPresetNote.value,
+        comfyWorkflowLibrary,
         comfyNodeInfoList: els.comfyNodeInfoList.value,
         comfyPollTimeout: els.comfyPollTimeout.value,
         voiceMode: els.voiceMode.value,
@@ -1944,6 +2030,10 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyApiKey.value = settings.comfyApiKey || '';
       els.comfyBaseUrl.value = settings.comfyBaseUrl || '';
       els.comfyWorkflowEndpoint.value = settings.comfyWorkflowEndpoint || '';
+      comfyWorkflowLibrary = normalizeComfyWorkflowLibrary(settings.comfyWorkflowLibrary);
+      renderComfyWorkflowLibrary();
+      setIfExists(els.comfyWorkflowPreset, settings.comfyWorkflowPreset || DEFAULT_COMFY_WORKFLOW_PRESET_ID);
+      els.comfyWorkflowPresetNote.value = settings.comfyWorkflowPresetNote || getSelectedComfyWorkflowPreset()?.purpose || '';
       els.comfyNodeInfoList.value = settings.comfyNodeInfoList || '';
       setIfExists(els.comfyPollTimeout, settings.comfyPollTimeout);
       setIfExists(els.voiceMode, settings.voiceMode);
@@ -2005,6 +2095,111 @@ INDEX_HTML = r"""<!doctype html>
       renderComfyParameterMapper();
     }
 
+    function normalizeComfyWorkflowLibrary(value) {
+      const saved = Array.isArray(value) ? value : [];
+      const byId = new Map(saved.filter(item => item && item.id).map(item => [item.id, item]));
+      return DEFAULT_COMFY_WORKFLOW_LIBRARY.map(defaultItem => {
+        const item = byId.get(defaultItem.id) || {};
+        return {
+          ...defaultItem,
+          name: String(item.name || defaultItem.name),
+          purpose: String(item.purpose || defaultItem.purpose),
+          endpoint: String(item.endpoint || ''),
+          nodeInfoList: String(item.nodeInfoList || item.node_info_list_json || defaultItem.nodeInfoList),
+          pollTimeout: String(item.pollTimeout || item.poll_timeout_seconds || defaultItem.pollTimeout),
+        };
+      });
+    }
+
+    function getSelectedComfyWorkflowPreset() {
+      const selectedId = els.comfyWorkflowPreset.value || DEFAULT_COMFY_WORKFLOW_PRESET_ID;
+      return comfyWorkflowLibrary.find(item => item.id === selectedId) || comfyWorkflowLibrary[0] || null;
+    }
+
+    function renderComfyWorkflowLibrary() {
+      if (!comfyWorkflowLibrary.length) {
+        comfyWorkflowLibrary = normalizeComfyWorkflowLibrary([]);
+      }
+      els.comfyWorkflowPreset.innerHTML = '';
+      comfyWorkflowLibrary.forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.id;
+        option.textContent = item.name;
+        els.comfyWorkflowPreset.appendChild(option);
+      });
+      const selected = getSelectedComfyWorkflowPreset();
+      if (selected) els.comfyWorkflowPresetNote.value = els.comfyWorkflowPresetNote.value || selected.purpose;
+      renderComfyWorkflowLibraryList();
+    }
+
+    function renderComfyWorkflowLibraryList() {
+      if (!els.comfyWorkflowLibraryList) return;
+      els.comfyWorkflowLibraryList.innerHTML = '';
+      comfyWorkflowLibrary.forEach(item => {
+        const row = document.createElement('div');
+        row.className = 'reference-item';
+        const endpoint = item.endpoint ? item.endpoint : '未配置接口';
+        const nodeText = item.nodeInfoList && item.nodeInfoList !== '[]' ? '已配置节点映射' : '未配置节点映射';
+        row.innerHTML = `
+          <div class="reference-info">
+            <div class="reference-name">${escapeHtml(item.name)}</div>
+            <div class="muted small">${escapeHtml(item.purpose || '')}</div>
+            <div class="muted small">${escapeHtml(endpoint)} · ${nodeText} · ${escapeHtml(item.pollTimeout || '3600')} 秒</div>
+          </div>
+        `;
+        els.comfyWorkflowLibraryList.appendChild(row);
+      });
+    }
+
+    function applySelectedComfyWorkflowPreset() {
+      const item = getSelectedComfyWorkflowPreset();
+      if (!item) return;
+      els.comfyWorkflowPresetNote.value = item.purpose || '';
+      els.comfyWorkflowEndpoint.value = item.endpoint || '';
+      els.comfyNodeInfoList.value = item.nodeInfoList || '[]';
+      setIfExists(els.comfyPollTimeout, item.pollTimeout || '3600');
+      applyComfyProviderDefaults();
+      renderComfyParameterMapper();
+      saveSettings();
+      setStatus(`已应用 ComfyUI 工作流：${item.name}`);
+    }
+
+    function saveSelectedComfyWorkflowPreset() {
+      const item = getSelectedComfyWorkflowPreset();
+      if (!item) return;
+      item.purpose = els.comfyWorkflowPresetNote.value.trim() || item.purpose;
+      item.endpoint = els.comfyWorkflowEndpoint.value.trim();
+      item.nodeInfoList = els.comfyNodeInfoList.value.trim() || '[]';
+      item.pollTimeout = els.comfyPollTimeout.value || '3600';
+      renderComfyWorkflowLibraryList();
+      saveSettings();
+      setStatus(`已保存 ComfyUI 工作流槽位：${item.name}`);
+    }
+
+    function resetSelectedComfyWorkflowPreset() {
+      const item = getSelectedComfyWorkflowPreset();
+      const defaults = DEFAULT_COMFY_WORKFLOW_LIBRARY.find(defaultItem => defaultItem.id === item?.id);
+      if (!item || !defaults) return;
+      item.purpose = defaults.purpose;
+      item.endpoint = '';
+      item.nodeInfoList = '[]';
+      item.pollTimeout = defaults.pollTimeout;
+      applySelectedComfyWorkflowPreset();
+      renderComfyWorkflowLibraryList();
+      setStatus(`已重置 ComfyUI 工作流槽位：${item.name}`);
+    }
+
+    function getComfyWorkflowLibraryPayload() {
+      return comfyWorkflowLibrary.map(item => ({
+        id: item.id,
+        name: item.name,
+        purpose: item.purpose,
+        endpoint_configured: Boolean(item.endpoint),
+        node_mapping_configured: Boolean(item.nodeInfoList && item.nodeInfoList !== '[]'),
+        poll_timeout_seconds: Number(item.pollTimeout || 3600),
+      }));
+    }
+
     function setIfExists(control, value) {
       if (!value) return;
       const values = Array.from(control.options || []).map(option => option.value);
@@ -2034,6 +2229,8 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyApiKey,
         els.comfyBaseUrl,
         els.comfyWorkflowEndpoint,
+        els.comfyWorkflowPreset,
+        els.comfyWorkflowPresetNote,
         els.comfyNodeInfoList,
         els.comfyPollTimeout,
         els.voiceMode,
@@ -3448,6 +3645,10 @@ INDEX_HTML = r"""<!doctype html>
             workflow_endpoint: els.comfyWorkflowEndpoint.value.trim(),
             node_info_list_json: els.comfyNodeInfoList.value.trim(),
             poll_timeout_seconds: Number(els.comfyPollTimeout.value || 3600),
+            workflow_preset_id: getSelectedComfyWorkflowPreset()?.id || '',
+            workflow_preset_name: getSelectedComfyWorkflowPreset()?.name || '',
+            workflow_preset_purpose: els.comfyWorkflowPresetNote.value.trim(),
+            workflow_library: getComfyWorkflowLibraryPayload(),
           },
         };
         const result = await api('/api/run', {
@@ -3489,6 +3690,14 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     els.runBtn.onclick = runWorkflow;
+    els.comfyWorkflowPreset.onchange = () => {
+      const item = getSelectedComfyWorkflowPreset();
+      els.comfyWorkflowPresetNote.value = item?.purpose || '';
+      saveSettings();
+    };
+    els.applyComfyWorkflowPresetBtn.onclick = applySelectedComfyWorkflowPreset;
+    els.saveComfyWorkflowPresetBtn.onclick = saveSelectedComfyWorkflowPreset;
+    els.resetComfyWorkflowPresetBtn.onclick = resetSelectedComfyWorkflowPreset;
     navButtons.forEach(button => {
       button.onclick = () => showView(button.dataset.viewTarget);
     });
@@ -3550,6 +3759,10 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyApiKey.value = '';
       els.comfyBaseUrl.value = '';
       els.comfyWorkflowEndpoint.value = '';
+      comfyWorkflowLibrary = normalizeComfyWorkflowLibrary([]);
+      renderComfyWorkflowLibrary();
+      setIfExists(els.comfyWorkflowPreset, DEFAULT_COMFY_WORKFLOW_PRESET_ID);
+      els.comfyWorkflowPresetNote.value = getSelectedComfyWorkflowPreset()?.purpose || '';
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
       els.voiceMode.value = 'off';
@@ -4699,16 +4912,30 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         base_url_note = "已填写，运行时可调用，不保存地址到输出" if compose_config.get("base_url_provided") else "未填写"
         node_info = str(compose_config.get("node_info_list_json") or "").strip()
         node_note = "已填写节点映射 JSON" if node_info and node_info != "[]" else "未填写，需后续按实际 ComfyUI 节点补齐"
+        library = compose_config.get("workflow_library")
+        library_lines: list[str] = []
+        if isinstance(library, list):
+            for item in library:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or item.get("id") or "未命名工作流").strip()
+                purpose = str(item.get("purpose") or "").strip()
+                endpoint_status = "已配置接口" if item.get("endpoint_configured") else "未配置接口"
+                node_status = "已配置节点映射" if item.get("node_mapping_configured") else "未配置节点映射"
+                library_lines.append(f"  - {name}：{purpose}；{endpoint_status}；{node_status}")
+        library_note = "\n".join(library_lines) if library_lines else "  - 未配置工作流库"
         return (
             f"{user_input}\n\n"
             "## ComfyUI 素材/预览配置\n"
             f"- 自动生成模式：{mode or 'off'}\n"
             f"- 剪辑/预览工具：{value('tool', 'ffmpeg')}\n"
+            f"- 当前工作流槽位：{value('workflow_preset_name')}（{value('workflow_preset_purpose')}）\n"
             f"- ComfyUI 素材/预览工作流接口：{value('workflow_endpoint')}\n"
             f"- ComfyUI 平台密钥：{api_note}\n"
             f"- ComfyUI 平台接口地址：{base_url_note}\n"
             f"- 节点映射：{node_note}\n"
             f"- 轮询超时：{value('poll_timeout_seconds', '3600')} 秒\n"
+            f"- 工作流库配置状态：\n{library_note}\n"
             "- 执行要求：21_ComfyUI素材编排师需要输出可映射到 ComfyUI/RunningHub 的素材或预览参数包；AI 图片和视频只是片段素材，SRT 字幕只默认用于预览或自动化草稿，最终硬字幕、最终混音和最终导出交给 22_剪辑成片执行师。\n"
         )
 
