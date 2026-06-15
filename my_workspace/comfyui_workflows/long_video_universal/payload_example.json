@@ -28,20 +28,31 @@
     }
   ],
   "voice": {
+    "owner": "20_语音字幕包装师",
     "voice_text": "",
-    "voice_file": "",
+    "voice_file": "audio/voiceover.wav",
     "style": "自然，清晰，有节奏"
   },
   "subtitles": {
-    "srt": "",
-    "style": "大号白字，黑色描边，关键词高亮"
+    "owner": "20_语音字幕包装师",
+    "srt": "subtitles.srt",
+    "style": "大号白字，黑色描边，关键词高亮",
+    "comfyui_usage": "preview_only",
+    "final_burn_owner": "22_剪辑成片执行师"
   },
   "music_and_sfx": {
+    "owner": "20_语音字幕包装师",
     "bgm_style": "轻节奏，不抢人声",
-    "sfx_notes": "转场、强调、点击等轻量音效"
+    "sfx_notes": "转场、强调、点击等轻量音效",
+    "final_mix_owner": "22_剪辑成片执行师"
+  },
+  "comfyui": {
+    "owner": "21_ComfyUI成片编排师",
+    "rule": "ComfyUI 输出只作为素材、预览或自动合成草稿，不作为最终剪辑判断"
   },
   "final_editing": {
-    "tool": "剪辑工具或 22_剪辑成片执行师",
-    "rule": "ComfyUI 输出只作为素材或预览，最终成片以剪辑时间线为准"
+    "owner": "22_剪辑成片执行师",
+    "tool": "剪辑工具",
+    "rule": "最终硬字幕、最终混音、最终导出以剪辑时间线为准"
   }
 }

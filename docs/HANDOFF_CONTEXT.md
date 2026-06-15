@@ -10,6 +10,7 @@
 
 Latest update on 2026-06-15:
 
+- Adjusted video pipeline ownership: `20_语音字幕包装师` owns voice + SRT packaging, `21_ComfyUI成片编排师` uses voice/subtitle inputs only for ComfyUI preview/draft automation, and `22_剪辑成片执行师` owns final hard subtitles, final mix, and final export.
 - Added workflow breakpoint resume.
 - Management UI task output page now has `继续任务`.
 - `/api/resume-task` starts a background resume job and reuses `/api/run-status`.
@@ -86,8 +87,11 @@ Video workflow design:
 
 - Editing/composition tool is the final output authority.
 - AI image/video generation is only auxiliary素材片段.
+- `20_语音字幕包装师` owns both voice text and subtitle/SRT packaging so voice and subtitles stay consistent.
 - `21_ComfyUI成片编排师` folder remains for compatibility, but displayed role is now `ComfyUI素材编排师`.
+- ComfyUI should use voice/subtitle inputs only for preview, draft automation, or special visual subtitle effects by default.
 - `22_剪辑成片执行师` is the final video step.
+- Final hard subtitles, final audio mix, and final export belong to `22_剪辑成片执行师` / editing tools by default.
 - Long videos use `23_长视频策划编导` for chapters, retention, and long-form素材规划.
 
 ## Current Staff
@@ -321,7 +325,7 @@ my_workspace/comfyui_workflows/long_video_universal/runninghub_node_info_list_pr
 my_workspace/comfyui_workflows/long_video_universal/payload_example.json
 ```
 
-This template exposes only dynamic fields for management UI mapping: `{{prompt}}`, `{{negative_prompt}}`, `{{reference_image}}`, `{{voice_text}}`, `{{subtitle_srt}}`, and `{{payload}}`. Keep model, sampler, resolution, subtitle style, transitions, audio mix, and final composition in the real ComfyUI/RunningHub workflow.
+This template exposes only dynamic fields for management UI mapping: `{{prompt}}`, `{{negative_prompt}}`, `{{reference_image}}`, `{{voice_text}}`, `{{subtitle_srt}}`, and `{{payload}}`. Keep model, sampler, resolution, transitions, and material-generation logic in the real ComfyUI/RunningHub workflow. Use `{{subtitle_srt}}` for preview or draft automation; final subtitle burn, final audio mix, and final export are handled by `22_剪辑成片执行师` / editing tools by default.
 
 ## Current Verification Snapshot
 
