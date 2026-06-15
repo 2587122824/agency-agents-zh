@@ -1591,3 +1591,45 @@ Long-term memory scope change:
 - `workflow_engine.py` supports `production_config.video_memory_context`.
 - Video memory context is only injected into later video-output agents with IDs starting `06_`, `07_`, `20_`, `21_`, and `22_`.
 - `全流程使用 my_memory（高级）` still exists for rare cases where the user intentionally wants all employees to see memory.
+
+## Long-Form Video Workflow
+
+[2026-06-15 +08:00] command: added a dedicated long-form video workflow after the user asked for a 长视频工作流.
+
+New staff:
+
+```text
+my_workspace/my_custom_staff/23_长视频策划编导/
+  agent.md
+  flow_rule.json
+```
+
+Role:
+
+- Designs 5-60 minute video structure.
+- Owns chapter planning, opening hook, mid-video retention,素材规划, and long-form editing rhythm.
+- Keeps AI image/video as辅助素材 rather than the core final product.
+
+New workflow:
+
+```text
+my_workspace/my_workflows/workflow_长视频全流程.json
+```
+
+Flow:
+
+1. `01_需求拆解专员`
+2. `23_长视频策划编导`
+3. `03_口播脚本师`
+4. `04_标题封面优化师`
+5. `05_内容合规审核官`
+6. `06_分镜生图设计师`
+7. `07_视频生成执行员`
+8. `20_语音字幕包装师`
+9. `21_ComfyUI成片编排师` as displayed `ComfyUI素材编排师`
+10. `22_剪辑成片执行师`
+
+Management UI:
+
+- Added `长视频示例` button.
+- The button selects `workflow_长视频全流程`, fills a 12-18 minute AI employee workflow platform long-video example, sets `audio_package`, `ffmpeg`, and a long-video final file name.

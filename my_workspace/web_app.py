@@ -1303,6 +1303,7 @@ INDEX_HTML = r"""<!doctype html>
         <div class="row run-actions">
           <button class="primary" id="runBtn">运行工作流</button>
           <button id="sampleBtn">填入示例</button>
+          <button id="longVideoSampleBtn">长视频示例</button>
           <button id="gameSampleBtn">游戏示例</button>
           <button id="clearSettingsBtn">清除已保存配置</button>
           <span id="status" class="status">准备就绪</span>
@@ -1569,6 +1570,7 @@ INDEX_HTML = r"""<!doctype html>
       referenceList: document.getElementById('referenceList'),
       runBtn: document.getElementById('runBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
+      longVideoSampleBtn: document.getElementById('longVideoSampleBtn'),
       gameSampleBtn: document.getElementById('gameSampleBtn'),
       clearSettingsBtn: document.getElementById('clearSettingsBtn'),
       status: document.getElementById('status'),
@@ -3521,6 +3523,29 @@ INDEX_HTML = r"""<!doctype html>
       els.videoPromptNotes.value = '前半段人物口播稳定推进，中段切产品界面和案例画面，结尾推近到行动号召；镜头自然，节奏直接。';
       els.referenceRole.value = '人物一致性';
       els.referenceNote.value = '固定人物参考图，后续镜头保持同一角色与风格';
+      saveSettings();
+    };
+    els.longVideoSampleBtn.onclick = () => {
+      els.productTemplate.value = 'short_video';
+      applyProductTemplate(true);
+      setIfExists(els.workflow, 'workflow_长视频全流程');
+      els.userInput.value = '我要做一条 12-18 分钟的长视频，主题是“中小企业如何用 AI 员工工作流平台降低重复劳动”。目标平台是 B 站和视频号，目标观众是中小企业老板、运营负责人和想做 AI 自动化服务的人。视频要专业、清楚、有案例感，结构包括痛点、平台演示、落地步骤、成本和风险、最后引导私信咨询。可用素材包括管理台录屏、工作流输出截图、本人配音和少量 AI 示意图；不要夸大收益，不承诺具体增长结果。';
+      els.taskTitle.value = 'AI员工工作流平台长视频';
+      els.autoProductionMode.value = 'audio_package';
+      els.composeTool.value = 'ffmpeg';
+      els.finalVideoName.value = 'long_video_final.mp4';
+      els.comfyApiKey.value = '';
+      els.comfyBaseUrl.value = '';
+      els.comfyWorkflowEndpoint.value = '';
+      els.comfyNodeInfoList.value = '[]';
+      els.comfyPollTimeout.value = '3600';
+      els.voiceMode.value = 'off';
+      els.voiceReferenceAudioPath.value = '';
+      els.voiceReferenceText.value = '';
+      els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
+      els.voiceTimeout.value = '3600';
+      els.referenceRole.value = '视觉风格参考';
+      els.referenceNote.value = '用于统一长视频中的人物形象、平台界面、封面和案例画面风格';
       saveSettings();
     };
     els.gameSampleBtn.onclick = () => {
