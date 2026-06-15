@@ -1401,6 +1401,7 @@ INDEX_HTML = r"""<!doctype html>
             <button id="saveFileBtn" type="button" disabled>保存当前文件</button>
             <button id="rebuildFinalBtn" type="button" disabled>重建最终汇总</button>
             <button id="rerunStepBtn" type="button" disabled>重跑当前步骤</button>
+            <button id="resumeTaskBtn" type="button" disabled>继续任务</button>
             <button id="exportTaskBtn" type="button" disabled>导出产品包</button>
           </div>
           <div class="file-tabs" id="fileTabs"></div>
@@ -1593,6 +1594,7 @@ INDEX_HTML = r"""<!doctype html>
       saveFileBtn: document.getElementById('saveFileBtn'),
       rebuildFinalBtn: document.getElementById('rebuildFinalBtn'),
       rerunStepBtn: document.getElementById('rerunStepBtn'),
+      resumeTaskBtn: document.getElementById('resumeTaskBtn'),
       exportTaskBtn: document.getElementById('exportTaskBtn'),
       refreshStaffBtn: document.getElementById('refreshStaffBtn'),
       newStaffBtn: document.getElementById('newStaffBtn'),
@@ -1777,6 +1779,7 @@ INDEX_HTML = r"""<!doctype html>
           await selectTask(job.task_name);
         }
         els.runBtn.disabled = false;
+        syncOutputButtons();
         progressTimer = null;
         return;
       }
@@ -1788,6 +1791,7 @@ INDEX_HTML = r"""<!doctype html>
           await selectTask(job.task_name);
         }
         els.runBtn.disabled = false;
+        syncOutputButtons();
         progressTimer = null;
         return;
       }
@@ -1795,6 +1799,7 @@ INDEX_HTML = r"""<!doctype html>
         pollRunStatus(runId).catch(err => {
           setStatus(err.message, true);
           els.runBtn.disabled = false;
+          syncOutputButtons();
           progressTimer = null;
         });
       }, 1000);
@@ -3194,6 +3199,7 @@ INDEX_HTML = r"""<!doctype html>
       els.saveFileBtn.disabled = !hasFile;
       els.rebuildFinalBtn.disabled = !hasTask;
       els.exportTaskBtn.disabled = !hasTask;
+      els.resumeTaskBtn.disabled = !hasTask;
       els.rerunStepBtn.disabled = !hasFile || !stepNumberFromFile(selectedFile);
     }
 
@@ -3271,6 +3277,41 @@ INDEX_HTML = r"""<!doctype html>
       } catch (err) {
         setStatus(err.message, true);
       } finally {
+        syncOutputButtons();
+      }
+    }
+
+    async function resumeSelectedTask() {
+      if (!selectedTask) return;
+      const model = els.model.value === 'custom' ? els.customModel.value.trim() : els.model.value;
+      if (els.model.value === 'custom' && !model) {
+        setStatus('请输入自定义模型名', true);
+        return;
+      }
+      if (!confirm(`确定继续任务？\n\n系统会从第一个失败、缺少 output.md 或输出为空的步骤继续执行，并写回当前任务目录。`)) return;
+      saveSettings();
+      resetProgress();
+      setStatus('正在继续任务');
+      els.resumeTaskBtn.disabled = true;
+      try {
+        await ensureLocalModelReady(model);
+        const result = await api('/api/resume-task', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task: selectedTask,
+            provider: els.provider.value,
+            model,
+            api_key: els.apiKey.value.trim(),
+            base_url: els.baseUrl.value.trim(),
+            timeout: Number(els.modelTimeout.value || 900),
+          }),
+        });
+        setStatus('任务已开始继续执行');
+        renderProgress(result);
+        await pollRunStatus(result.run_id);
+      } catch (err) {
+        setStatus(err.message, true);
         syncOutputButtons();
       }
     }
@@ -3445,6 +3486,7 @@ INDEX_HTML = r"""<!doctype html>
     els.saveFileBtn.onclick = saveCurrentFile;
     els.rebuildFinalBtn.onclick = rebuildFinalOutput;
     els.rerunStepBtn.onclick = rerunCurrentStep;
+    els.resumeTaskBtn.onclick = resumeSelectedTask;
     els.exportTaskBtn.onclick = exportCurrentTask;
     els.refreshStaffBtn.onclick = loadStaffList;
     els.staffFilter.oninput = () => loadStaffList().catch(err => setStaffStatus(err.message, true));
@@ -3764,6 +3806,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/rerun-step":
                 self._send_json(self._rerun_step(payload))
+                return
+
+            if parsed.path == "/api/resume-task":
+                self._send_json(self._resume_task(payload))
                 return
 
             if parsed.path == "/api/export-task":
@@ -4225,6 +4271,42 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                             step["status"] = "error"
                     job["updated_at"] = time.time()
 
+    def _run_resume_job(
+        self,
+        run_id: str,
+        task_dir: Path,
+        provider: str,
+        model: str | None,
+        api_key: str | None,
+        base_url: str | None,
+        timeout: int | None,
+    ) -> None:
+        try:
+            self._update_job(run_id, {"status": "running"})
+            engine = WorkflowEngine(
+                WORKSPACE_ROOT,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                timeout=timeout,
+            )
+            engine.resume(
+                task_dir,
+                progress_callback=lambda event: self._apply_progress(run_id, event),
+            )
+        except Exception as exc:
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job:
+                    job["status"] = "failed"
+                    job["error"] = str(exc)
+                    job["traceback"] = traceback.format_exc()
+                    for step in job.get("steps", []):
+                        if step.get("status") == "active":
+                            step["status"] = "error"
+                    job["updated_at"] = time.time()
+
     def _tasks(self) -> list[dict]:
         if not OUTPUT_ROOT.exists():
             return []
@@ -4314,6 +4396,50 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         result = engine.rerun_step(task_dir, step)
         result["ok"] = True
         return result
+
+    def _resume_task(self, payload: dict) -> dict:
+        task = str(payload.get("task") or "").strip()
+        task_dir = self._safe_task_dir(task)
+        summary = {}
+        summary_path = task_dir / "run_summary.json"
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except json.JSONDecodeError:
+                summary = {}
+        run_id = uuid4().hex
+        job = {
+            "run_id": run_id,
+            "status": "queued",
+            "workflow": summary.get("workflow") or task,
+            "task_title": summary.get("task_title") or "",
+            "workflow_name": summary.get("workflow") or task,
+            "task_dir": str(task_dir),
+            "task_name": task_dir.name,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "total_steps": 0,
+            "completed_steps": 0,
+            "steps": [],
+        }
+        with RUN_JOBS_LOCK:
+            RUN_JOBS[run_id] = job
+
+        worker = threading.Thread(
+            target=self._run_resume_job,
+            args=(
+                run_id,
+                task_dir,
+                str(payload.get("provider") or "auto").strip(),
+                str(payload.get("model") or "").strip() or None,
+                str(payload.get("api_key") or "").strip() or None,
+                str(payload.get("base_url") or "").strip() or None,
+                int(payload.get("timeout") or 0) or None,
+            ),
+            daemon=True,
+        )
+        worker.start()
+        return job
 
     def _export_task(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()

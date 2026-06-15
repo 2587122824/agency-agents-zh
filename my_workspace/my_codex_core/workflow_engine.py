@@ -274,6 +274,195 @@ class WorkflowEngine:
             "final_output": final_path.relative_to(task_dir).as_posix(),
         }
 
+    def resume(
+        self,
+        task_dir: Path,
+        production_config: dict | None = None,
+        progress_callback: Callable[[dict], None] | None = None,
+    ) -> WorkflowRunResult:
+        workflow_path = task_dir / "workflow.json"
+        input_path = task_dir / "input.md"
+        if not workflow_path.is_file():
+            raise FileNotFoundError("workflow.json")
+        if not input_path.is_file():
+            raise FileNotFoundError("input.md")
+
+        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        workflow_name = workflow.get("name") or task_dir.name
+        task_title = self._summary_value(task_dir, "task_title")
+        user_input = input_path.read_text(encoding="utf-8", errors="replace")
+        steps = workflow.get("steps", [])
+        agents = self.staff_loader.load_all()
+        resume_step = self._first_incomplete_step(workflow, task_dir)
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "started",
+                    "workflow_name": workflow_name,
+                    "task_title": task_title,
+                    "task_dir": str(task_dir),
+                    "total_steps": len(steps),
+                    "resume": True,
+                    "resume_step": resume_step,
+                }
+            )
+
+        if progress_callback:
+            for step in steps:
+                step_no = int(step.get("step") or 0)
+                if resume_step is not None and step_no >= resume_step:
+                    continue
+                agent = self.staff_loader.resolve_agent(agents, step["agent"])
+                step_dir = self._step_dir(task_dir, step_no, agent.agent_id)
+                progress_callback(
+                    {
+                        "event": "step_completed",
+                        "step": step_no,
+                        "agent_id": agent.agent_id,
+                        "agent_name": agent.name,
+                        "task": step.get("task", ""),
+                        "expected_output": step.get("output", ""),
+                        "output_path": str(step_dir / "output.md"),
+                        "total_steps": len(steps),
+                    }
+                )
+
+        previous_outputs = self._collect_step_outputs(workflow, task_dir, before_step=resume_step) if resume_step else []
+        provider_used = self._summary_value(task_dir, "provider") or "offline"
+
+        for step in steps:
+            step_no = int(step.get("step") or 0)
+            if resume_step is None or step_no < resume_step:
+                continue
+            agent = self.staff_loader.resolve_agent(agents, step["agent"])
+            step_dir = self._step_dir(task_dir, step_no, agent.agent_id)
+            prompt = self._build_step_prompt(workflow, step, user_input, previous_outputs, production_config)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "step_started",
+                        "step": step_no,
+                        "agent_id": agent.agent_id,
+                        "agent_name": agent.name,
+                        "task": step.get("task", ""),
+                        "expected_output": step.get("output", ""),
+                        "total_steps": len(steps),
+                    }
+                )
+
+            self.storage.write_text(step_dir / "system.md", agent.prompt)
+            self.storage.write_text(step_dir / "prompt.md", prompt)
+            self.storage.write_json(
+                step_dir / "metadata.json",
+                {
+                    "step": step_no,
+                    "agent_id": agent.agent_id,
+                    "agent_name": agent.name,
+                    "task": step.get("task"),
+                    "expected_output": step.get("output"),
+                    "flow_rule": agent.flow_rule,
+                    "resume_at": datetime.now().isoformat(timespec="seconds"),
+                },
+            )
+
+            try:
+                result = self.api.run(agent.prompt, prompt)
+            except Exception as exc:
+                error_text = (
+                    "# 当前步骤执行失败\n\n"
+                    f"- 步骤：{step_no}\n"
+                    f"- 员工：{agent.agent_id}\n"
+                    f"- 错误：{exc}\n\n"
+                    "可以在管理台修正模型/API/上下文后点击“继续任务”，系统会从这个步骤继续执行。\n"
+                )
+                self.storage.write_text(step_dir / "output.md", error_text)
+                self.storage.write_json(
+                    step_dir / "error.json",
+                    {
+                        "step": step_no,
+                        "agent_id": agent.agent_id,
+                        "agent_name": agent.name,
+                        "error": str(exc),
+                        "resume_at": datetime.now().isoformat(timespec="seconds"),
+                    },
+                )
+                raise
+
+            provider_used = result.provider
+            self.storage.write_text(step_dir / "output.md", result.content)
+            error_path = step_dir / "error.json"
+            if error_path.exists():
+                error_path.unlink()
+            action_results = self.action_executor.execute_from_text(result.content, task_dir)
+            step_record = {
+                "step": str(step_no),
+                "agent": agent.agent_id,
+                "task": step.get("task", ""),
+                "expected_output": step.get("output", ""),
+                "output_path": str(step_dir / "output.md"),
+                "content": result.content,
+                "action_results": json.dumps(action_results, ensure_ascii=False),
+            }
+            previous_outputs.append(step_record)
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "step_completed",
+                        "step": step_no,
+                        "agent_id": agent.agent_id,
+                        "agent_name": agent.name,
+                        "task": step.get("task", ""),
+                        "expected_output": step.get("output", ""),
+                        "output_path": str(step_dir / "output.md"),
+                        "total_steps": len(steps),
+                    }
+                )
+
+        step_outputs = self._collect_step_outputs(workflow, task_dir)
+        final_output = self._build_final_output(workflow, user_input, step_outputs)
+        final_path = task_dir / "final_output.md"
+        self.storage.write_text(final_path, final_output)
+        production_manifest = run_auto_production(task_dir, step_outputs, production_config)
+        self._append_resume_summary(
+            task_dir,
+            workflow_name,
+            task_title,
+            provider_used,
+            len(step_outputs),
+            str(final_path),
+            production_manifest["files"]["manifest"] if production_manifest else "",
+            production_manifest["status"] if production_manifest else "off",
+            resume_step,
+        )
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "completed",
+                    "workflow_name": workflow_name,
+                    "task_title": task_title,
+                    "task_dir": str(task_dir),
+                    "provider": provider_used,
+                    "step_count": len(step_outputs),
+                    "final_output": str(final_path),
+                    "production_manifest": production_manifest["files"]["manifest"] if production_manifest else "",
+                    "production_status": production_manifest["status"] if production_manifest else "off",
+                    "total_steps": len(steps),
+                    "resume": True,
+                    "resume_step": resume_step,
+                }
+            )
+
+        return WorkflowRunResult(
+            task_dir=str(task_dir),
+            workflow_name=workflow_name,
+            task_title=task_title,
+            provider=provider_used,
+            step_count=len(step_outputs),
+            final_output=str(final_path),
+            production_manifest=production_manifest["files"]["manifest"] if production_manifest else None,
+        )
+
     def _resolve_workflow_path(self, workflow_key: str) -> Path:
         candidates = [
             self.workflow_root / workflow_key,
@@ -404,6 +593,36 @@ class WorkflowEngine:
         return outputs
 
     @staticmethod
+    def _summary_value(task_dir: Path, key: str) -> str:
+        summary_path = task_dir / "run_summary.json"
+        if not summary_path.exists():
+            return ""
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError:
+            return ""
+        return str(summary.get(key) or "")
+
+    @classmethod
+    def _first_incomplete_step(cls, workflow: dict, task_dir: Path) -> int | None:
+        for step in workflow.get("steps", []):
+            step_no = int(step.get("step") or 0)
+            if step_no <= 0:
+                continue
+            step_dirs = sorted(task_dir.glob(f"step_{step_no:02d}_*"))
+            if not step_dirs:
+                return step_no
+            step_dir = step_dirs[0]
+            if (step_dir / "error.json").exists():
+                return step_no
+            output_path = step_dir / "output.md"
+            if not output_path.exists():
+                return step_no
+            if not output_path.read_text(encoding="utf-8", errors="replace").strip():
+                return step_no
+        return None
+
+    @staticmethod
     def _append_rerun_summary(
         task_dir: Path,
         step_no: int,
@@ -432,4 +651,46 @@ class WorkflowEngine:
         )
         summary["provider"] = provider
         summary["final_output"] = final_path
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def _append_resume_summary(
+        task_dir: Path,
+        workflow_name: str,
+        task_title: str,
+        provider: str,
+        step_count: int,
+        final_path: str,
+        production_manifest: str,
+        production_status: str,
+        resume_step: int | None,
+    ) -> None:
+        summary_path = task_dir / "run_summary.json"
+        summary = {}
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except json.JSONDecodeError:
+                summary = {}
+        summary.update(
+            {
+                "task_dir": str(task_dir),
+                "workflow": workflow_name,
+                "task_title": task_title,
+                "provider": provider,
+                "step_count": step_count,
+                "final_output": final_path,
+                "production_manifest": production_manifest,
+                "production_status": production_status,
+            }
+        )
+        history = summary.setdefault("resume_history", [])
+        history.append(
+            {
+                "resume_from_step": resume_step,
+                "provider": provider,
+                "final_output": final_path,
+                "resumed_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")

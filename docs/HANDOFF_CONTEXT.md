@@ -8,6 +8,14 @@
 - Custom work lives under `my_workspace/`; original upstream agent files are not modified.
 - Current local branch may be ahead of GitHub if network push failed. Latest local commit at time of this handoff: `245d8cc Add long-form video workflow`.
 
+Latest update on 2026-06-15:
+
+- Added workflow breakpoint resume.
+- Management UI task output page now has `继续任务`.
+- `/api/resume-task` starts a background resume job and reuses `/api/run-status`.
+- `WorkflowEngine.resume()` resumes from the first step with `error.json`, missing `output.md`, or empty output.
+- Verified with Python compile, inline JS syntax check, offline resume smoke test, local HTTP `/api/resume-task`, and browser DOM check.
+
 ## Main Entrypoints
 
 ```powershell
@@ -148,6 +156,7 @@ Important features:
 - Create/edit/delete workflows.
 - Edit task output files and rebuild final output.
 - Rerun a single failed/weak step.
+- Resume an interrupted task from the first failed, missing, or empty step via `/api/resume-task`; progress is still polled through `/api/run-status`.
 - Upload local knowledge files.
 - Upload reference images with thumbnail preview.
 - Upload authorized voice samples for local TTS.
