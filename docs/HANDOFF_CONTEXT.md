@@ -10,7 +10,7 @@
 
 Latest update on 2026-06-15:
 
-- Added global button-click feedback in the management UI. Button clicks now immediately show a `正在处理` or `正在切换` message in the relevant status area, while existing success/error messages still override it after the action completes.
+- Added visible global button-click feedback in the management UI. Button clicks now immediately show a top-right toast with `正在处理` or `正在切换`, and status areas still show the detailed success/error result after the action completes.
 - Added a browser-local `ComfyUI 工作流库` in the management UI with 6 default slots: text/image-to-image, image-to-video, reference consistency, B-roll material generation, subtitle preview, and audio+subtitle+video preview. Each slot stores endpoint, nodeInfoList, timeout, and purpose; runtime passes selected slot and sanitized library status to employees and `production_manifest.json`.
 - Optimized the long-video workflow and full-auto UI semantics: long-video template is now available in the product template selector, the long-video sample defaults to `audio_package`, and `comfy_full` is described as `ComfyUI 素材/预览草稿` rather than final video export.
 - Clarified long-video workflow boundaries: `07_视频生成执行员` outputs auxiliary AI video material only, `20_语音字幕包装师` owns `voiceover.txt` and `subtitles.srt`, `21_ComfyUI素材编排师` prepares material/preview parameters, and `22_剪辑成片执行师` owns final hard subtitles, mix, export specs, and release checks.

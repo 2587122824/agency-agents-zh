@@ -368,6 +368,34 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 13px;
     }
     .status.error { background: #fef3f2; color: var(--danger); }
+    .toast {
+      position: fixed;
+      top: 16px;
+      right: 16px;
+      z-index: 9999;
+      max-width: min(420px, calc(100vw - 32px));
+      padding: 10px 12px;
+      border: 1px solid #bae6fd;
+      border-radius: 8px;
+      background: #f0f9ff;
+      color: #075985;
+      box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+      font-size: 13px;
+      font-weight: 650;
+      opacity: 0;
+      transform: translateY(-8px);
+      pointer-events: none;
+      transition: opacity 0.16s ease, transform 0.16s ease;
+    }
+    .toast.show {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .toast.error {
+      border-color: #fecaca;
+      background: #fef2f2;
+      color: #991b1b;
+    }
     .progress-box {
       border: 1px solid var(--line);
       border-radius: 6px;
@@ -763,6 +791,7 @@ INDEX_HTML = r"""<!doctype html>
     </div>
     <div class="muted small" id="env">加载中</div>
   </header>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <main>
     <aside id="taskSidebar" hidden>
       <div class="row">
@@ -1607,6 +1636,7 @@ INDEX_HTML = r"""<!doctype html>
       gameSampleBtn: document.getElementById('gameSampleBtn'),
       clearSettingsBtn: document.getElementById('clearSettingsBtn'),
       status: document.getElementById('status'),
+      toast: document.getElementById('toast'),
       progressBox: document.getElementById('progressBox'),
       progressTitle: document.getElementById('progressTitle'),
       progressMeta: document.getElementById('progressMeta'),
@@ -1781,9 +1811,23 @@ INDEX_HTML = r"""<!doctype html>
       },
     };
 
-    function setStatus(text, isError = false) {
+    let toastTimer = null;
+
+    function showToast(text, isError = false) {
+      if (!els.toast || !text) return;
+      els.toast.textContent = text;
+      els.toast.classList.toggle('error', isError);
+      els.toast.classList.add('show');
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => {
+        els.toast.classList.remove('show');
+      }, isError ? 5200 : 2600);
+    }
+
+    function setStatus(text, isError = false, showPopup = true) {
       els.status.textContent = text;
       els.status.classList.toggle('error', isError);
+      if (showPopup) showToast(text, isError);
     }
 
     function buttonLabel(button) {
@@ -1841,9 +1885,10 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function setHealthStatus(text, isError = false) {
+    function setHealthStatus(text, isError = false, showPopup = true) {
       els.healthStatus.textContent = text;
       els.healthStatus.classList.toggle('error', isError);
+      if (showPopup) showToast(text, isError);
     }
 
     function resetProgress() {
@@ -2915,9 +2960,10 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function setStaffStatus(text, isError = false) {
+    function setStaffStatus(text, isError = false, showPopup = true) {
       els.staffStatus.textContent = text;
       els.staffStatus.classList.toggle('error', isError);
+      if (showPopup) showToast(text, isError);
     }
 
     async function loadStaffList() {
@@ -2928,7 +2974,7 @@ INDEX_HTML = r"""<!doctype html>
         return !keyword || text.includes(keyword);
       });
       els.staffList.innerHTML = '';
-      setStaffStatus(`共 ${data.staff.length} 位员工${keyword ? `，筛选出 ${staffItems.length} 位` : ''}`);
+      setStaffStatus(`共 ${data.staff.length} 位员工${keyword ? `，筛选出 ${staffItems.length} 位` : ''}`, false, false);
       if (!staffItems.length) {
         els.staffList.innerHTML = '<div class="muted small">暂无匹配员工</div>';
         return;
@@ -3045,9 +3091,10 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function setWorkflowEditorStatus(text, isError = false) {
+    function setWorkflowEditorStatus(text, isError = false, showPopup = true) {
       els.workflowEditorStatus.textContent = text;
       els.workflowEditorStatus.classList.toggle('error', isError);
+      if (showPopup) showToast(text, isError);
     }
 
     async function loadWorkflowList() {
