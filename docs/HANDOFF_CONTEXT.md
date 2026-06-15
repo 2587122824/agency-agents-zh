@@ -1487,3 +1487,61 @@ Management UI behavior:
 - Runtime `image_config` and `video_config` are forced to empty `prompt_only` compatibility objects.
 - `/api/run` no longer appends `## 生图配置` or `## 视频生成配置` to workflow input unless a future explicit positive prompt is provided.
 - Direct separate image/video API keys and Base URLs are no longer sent from the management UI; ComfyUI/RunningHub final-production execution should use the `全自动生成` compose configuration and API JSON node mapping.
+
+## Local VoxCPM2 Voice Adapter
+
+[2026-06-15 +08:00] command: added local VoxCPM2 voice-cloning integration for generating voiceover audio before ComfyUI/RunningHub composition.
+
+New files and directories:
+
+```text
+my_workspace/my_codex_core/local_tts_adapter.py
+my_workspace/my_voice_samples/.gitignore
+```
+
+Management UI changes:
+
+- `全自动生成` now includes local voice controls:
+  - `本地配音`: off or `VoxCPM2 本地仿声`
+  - reference audio upload
+  - stored reference audio path
+  - reference audio transcript
+  - VoxCPM2 command template
+  - local TTS timeout
+- Uploaded voice samples are stored under `my_voice_samples/` and ignored by Git.
+- `/api/upload-voice-sample` accepts `.wav`, `.mp3`, `.m4a`, `.flac`, and `.ogg` files up to 50 MB.
+
+Production pipeline changes:
+
+- `production_config.voice_config` is passed from the UI into `run_auto_production()`.
+- `20_语音字幕包装师` output is still written to `audio/voiceover.txt`.
+- If VoxCPM2 is enabled, `LocalTTSAdapter` runs the configured command template and writes:
+  - `audio/voxcpm2_voice_text.txt`
+  - `audio/voiceover.wav`
+  - `audio/local_tts_manifest.json`
+  - `audio/voxcpm2_stdout.txt`
+  - `audio/voxcpm2_stderr.txt`
+- `production_manifest.json` now includes an `audio` block with local TTS status and `voiceover_audio_file`.
+- The adapter does not install VoxCPM2 or download models; it only calls an already installed local command.
+
+Default command template:
+
+```text
+voxcpm clone --text-file {text_file} --reference-audio {reference_audio} --output {output_file}
+```
+
+Supported placeholders:
+
+```text
+{text}
+{text_file}
+{reference_audio}
+{reference_text}
+{output_file}
+```
+
+Security and usage notes:
+
+- Command template execution is local and intended for the desktop owner only.
+- Use only the user's own voice or voices with explicit authorization.
+- If the actual VoxCPM2 CLI differs, edit the command template in the management UI rather than changing adapter code.

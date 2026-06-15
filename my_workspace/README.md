@@ -202,6 +202,7 @@ runtime/models/
 - 如果某一步失败，管理台会自动打开该任务输出；失败步骤也会写入 `output.md` 和 `error.json`，便于定位。
 - `系统状态` 页面内置首次启动向导，按一键启动、本地模型、连接测试、知识库、示例工作流顺序引导配置。
 - 可在 `全自动生成` 中选择只生成视频制作包、生成视频加语音字幕制作包、调用生图/生视频 API，或预留 ComfyUI 全自动成片路径；当前会自动整理 `production_manifest.json`、生图提示词、视频提示词、语音字幕包、ComfyUI 参数包、字幕、配音文本和剪辑清单，供后续 API 适配器继续执行。
+- 可在 `全自动生成` 中启用 `VoxCPM2 本地仿声`，上传本人授权参考音频后，本地生成 `audio/voiceover.wav`，再交给 ComfyUI/RunningHub 或剪辑工具合成。
 - 选择 `auto`、`offline` 或 `openai` 执行模式。
 - 在 `API Key` 输入框填入密钥；密钥只用于本次运行，不写入任务输出文件。
 - 如果使用中转站，在 `中转站 Base URL` 输入框填入兼容 OpenAI 的地址，例如 `https://你的中转站域名/v1`；留空则使用官方地址。
@@ -493,6 +494,55 @@ video_clips/runninghub_video_query_response.json
 - 视频 API Key 只通过本次请求传给适配器，不写入 `production_manifest.json` 或任务输出。
 - 如果 RunningHub AI App 需要固定节点输入，先从 RunningHub 页面确认节点参数，再填入 `nodeInfoList JSON`。
 - 当前框架负责提交、轮询、下载视频文件；生成质量取决于 RunningHub AI App 内部工作流配置。
+
+## VoxCPM2 本地配音接入
+
+管理台支持把 `20_语音字幕包装师` 生成的 `TTS 配音稿` 交给本机 VoxCPM2 生成配音音频。
+
+使用方式：
+
+1. 先在本机单独安装并跑通 VoxCPM2。
+2. 打开管理台 `http://127.0.0.1:8765`。
+3. 在 `全自动生成` 中选择 `生成视频 + 语音字幕制作包` 或 `ComfyUI 全自动成片`。
+4. `本地配音` 选择 `VoxCPM2 本地仿声`。
+5. 上传本人或已授权的参考音频。
+6. 可选填写参考音频原文。
+7. 保持或修改 VoxCPM2 命令模板。
+8. 运行工作流。
+
+默认命令模板：
+
+```text
+voxcpm clone --text-file {text_file} --reference-audio {reference_audio} --output {output_file}
+```
+
+支持的占位符：
+
+```text
+{text}              配音文本内容
+{text_file}         配音文本文件路径，默认 audio/voxcpm2_voice_text.txt
+{reference_audio}   上传后的参考音频路径
+{reference_text}    参考音频原文
+{output_file}       输出音频路径，默认 audio/voiceover.wav
+```
+
+输出文件：
+
+```text
+audio/voiceover.txt
+audio/voiceover.wav
+audio/voxcpm2_voice_text.txt
+audio/local_tts_manifest.json
+audio/voxcpm2_stdout.txt
+audio/voxcpm2_stderr.txt
+```
+
+注意：
+
+- 参考音频会保存到 `my_voice_samples/`，该目录默认不提交到 Git。
+- 本项目不内置 VoxCPM2 大模型，只负责调用本机已安装的 VoxCPM2 命令。
+- VoxCPM2 具体 CLI 参数如果和默认模板不同，直接在管理台修改命令模板即可。
+- 只使用本人声音或已获得授权的声音样本。
 
 ## 生图和生视频参数
 

@@ -8,6 +8,7 @@ from typing import Any
 from .cloud_comfyui_adapter import CloudComfyUIAdapter
 from .cloud_image_adapter import CloudImageAdapter
 from .cloud_video_adapter import CloudVideoAdapter
+from .local_tts_adapter import LocalTTSAdapter
 
 
 def run_auto_production(
@@ -23,6 +24,7 @@ def run_auto_production(
     image_config = config.get("image_config") or {}
     video_config = config.get("video_config") or {}
     compose_config = config.get("compose_config") or {}
+    voice_config = config.get("voice_config") or {}
 
     paths = _create_output_dirs(task_dir)
     image_step = _find_step(step_outputs, "06_")
@@ -48,10 +50,11 @@ def run_auto_production(
     _write_text(image_prompt_path, image_content or "# 分镜生图提示词\n\n未找到 06_分镜生图设计师输出。\n")
     _write_text(video_prompt_path, video_content or "# 视频生成提示词\n\n未找到 07_视频生成执行员输出。\n")
     _write_text(audio_package_path, audio_content or "# 语音字幕制作包\n\n未找到 20_语音字幕包装师输出。\n")
-    _write_text(voiceover_path, _extract_section(audio_content, "TTS 配音稿") or "待从 20_语音字幕包装师输出中整理配音稿。\n")
+    voice_text = _extract_section(audio_content, "TTS 配音稿") or "待从 20_语音字幕包装师输出中整理配音稿。\n"
+    _write_text(voiceover_path, voice_text)
     _write_text(subtitles_path, _extract_srt(audio_content) or _default_srt())
     _write_text(comfyui_plan_path, compose_content or "# ComfyUI 成片编排方案\n\n未找到 21_ComfyUI成片编排师输出。\n")
-    _write_text(comfyui_payload_path, _extract_json_block(compose_content) or _default_comfyui_payload(mode, final_video_name, video_config))
+    _write_text(comfyui_payload_path, _extract_json_block(compose_content) or _default_comfyui_payload(mode, final_video_name, video_config, voice_text))
     _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, compose_step, image_config, video_config, compose_config))
 
     if mode == "api_ready":
@@ -124,6 +127,14 @@ def run_auto_production(
             "node_mapping_provided": bool(str(compose_config.get("node_info_list_json") or "").strip() not in {"", "[]"}),
             "adapter_status": "pending" if mode in {"api_ready", "comfy_full"} else "not_configured",
         },
+        "audio": {
+            "provider": voice_config.get("provider") or "",
+            "mode": voice_config.get("mode") or "off",
+            "reference_audio_provided": bool(str(voice_config.get("reference_audio") or "").strip()),
+            "reference_text_provided": bool(str(voice_config.get("reference_text") or "").strip()),
+            "adapter_status": "pending" if str(voice_config.get("mode") or "").strip().lower() not in {"", "off"} else "not_configured",
+            "voiceover_audio_file": "",
+        },
         "files": {
             "image_prompts": str(image_prompt_path),
             "video_prompts": str(video_prompt_path),
@@ -172,12 +183,48 @@ def run_auto_production(
             else:
                 manifest["status"] = "comfyui_adapter_failed"
 
+    tts_adapter_result = _run_local_tts_adapter(voice_text, voice_config, paths["audio"])
+    if tts_adapter_result:
+        manifest["audio"]["adapter_status"] = tts_adapter_result.get("status") or "failed"
+        manifest["audio"]["adapter_manifest"] = str(paths["audio"] / "local_tts_manifest.json")
+        files = tts_adapter_result.get("downloaded_files") or []
+        if files:
+            manifest["audio"]["voiceover_audio_file"] = str(files[0])
+        if tts_adapter_result.get("status") == "success" and manifest["status"] in {"package_ready", "comfyui_package_ready"}:
+            manifest["status"] = "audio_generated"
+        elif tts_adapter_result.get("status") not in {"success", "skipped"}:
+            manifest["status"] = "local_tts_failed"
+
     manifest_path = task_dir / "production_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_text(production_note_path, _build_production_note(manifest))
     manifest["files"]["manifest"] = str(manifest_path)
     manifest["files"]["note"] = str(production_note_path)
     return manifest
+
+
+def _run_local_tts_adapter(
+    voice_text: str,
+    voice_config: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any] | None:
+    mode = str(voice_config.get("mode") or "off").strip().lower()
+    if mode in {"", "off"}:
+        return {"status": "skipped", "reason": "local TTS is disabled"}
+    try:
+        workspace_root = Path(__file__).resolve().parents[1]
+        return LocalTTSAdapter(workspace_root=workspace_root).run(
+            voice_text=voice_text,
+            voice_config=voice_config,
+            output_dir=output_dir,
+        )
+    except Exception as exc:
+        error_path = output_dir / "local_tts_error.json"
+        error_path.write_text(
+            json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return {"status": "failed", "error": str(exc), "manifest_file": str(error_path)}
 
 
 def _run_comfyui_adapter(
@@ -339,7 +386,7 @@ def _default_srt() -> str:
     return "1\n00:00:00,000 --> 00:00:03,000\n待从 20_语音字幕包装师输出中整理字幕。\n"
 
 
-def _default_comfyui_payload(mode: str, final_video_name: str, video_config: dict[str, Any]) -> str:
+def _default_comfyui_payload(mode: str, final_video_name: str, video_config: dict[str, Any], voice_text: str = "") -> str:
     payload = {
         "execution_mode": mode,
         "image_prompts": [],
@@ -349,7 +396,7 @@ def _default_comfyui_payload(mode: str, final_video_name: str, video_config: dic
         "reference_images": [],
         "reference_image": "",
         "negative_prompt": video_config.get("negative_prompt") or "",
-        "voice_text": "",
+        "voice_text": voice_text,
         "subtitle_srt": "",
         "subtitle_style": "",
         "bgm_style": "",
@@ -397,6 +444,7 @@ def _build_edit_checklist(
             "## 3. 语音字幕",
             "- 语音字幕包：audio/audio_subtitle_package.md",
             "- 配音：audio/voiceover.txt",
+            "- 本地配音音频：audio/voiceover.wav（启用 VoxCPM2 后生成）",
             "- 字幕：subtitles.srt",
             f"- 20 输出状态：{'已找到' if audio_step else '未找到'}",
             "",

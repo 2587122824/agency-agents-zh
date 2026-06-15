@@ -24,6 +24,7 @@ WORKFLOW_ROOT = WORKSPACE_ROOT / "my_workflows"
 STAFF_ROOT = WORKSPACE_ROOT / "my_custom_staff"
 MEMORY_ROOT = WORKSPACE_ROOT / "my_memory"
 REFERENCE_ROOT = WORKSPACE_ROOT / "my_reference_images"
+VOICE_SAMPLE_ROOT = WORKSPACE_ROOT / "my_voice_samples"
 KNOWLEDGE_ROOT = WORKSPACE_ROOT / "my_knowledge_base"
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUN_JOBS: dict[str, dict] = {}
@@ -949,6 +950,36 @@ INDEX_HTML = r"""<!doctype html>
               </label>
             </div>
             <div class="provider-grid">
+              <label>本地配音
+                <select id="voiceMode">
+                  <option value="off" selected>不生成配音音频</option>
+                  <option value="voxcpm2">VoxCPM2 本地仿声</option>
+                </select>
+              </label>
+              <label>本人参考音频
+                <input id="voiceReferenceFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
+              </label>
+              <label>已上传参考音频路径
+                <input id="voiceReferenceAudioPath" autocomplete="off" spellcheck="false" placeholder="上传后自动填入，也可手动填 my_voice_samples/xxx.wav" />
+              </label>
+            </div>
+            <div class="provider-grid">
+              <label>参考音频原文
+                <input id="voiceReferenceText" autocomplete="off" spellcheck="false" placeholder="可选：参考音频里本人说的话，能提高仿声稳定性" />
+              </label>
+              <label>VoxCPM2 命令模板
+                <input id="voiceCommandTemplate" autocomplete="off" spellcheck="false" placeholder="voxcpm clone --text-file {text_file} --reference-audio {reference_audio} --output {output_file}" />
+              </label>
+              <label>配音超时
+                <select id="voiceTimeout">
+                  <option value="900">15 分钟</option>
+                  <option value="1800" selected>30 分钟</option>
+                  <option value="3600">60 分钟</option>
+                  <option value="7200">120 分钟</option>
+                </select>
+              </label>
+            </div>
+            <div class="provider-grid">
               <label>ComfyUI 节点映射 JSON
                 <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{voice_text}}、{{subtitle_srt}}、{{payload}}'></textarea>
               </label>
@@ -1480,6 +1511,12 @@ INDEX_HTML = r"""<!doctype html>
       comfyApiWorkflowFile: document.getElementById('comfyApiWorkflowFile'),
       comfyParameterMapper: document.getElementById('comfyParameterMapper'),
       comfyPollTimeout: document.getElementById('comfyPollTimeout'),
+      voiceMode: document.getElementById('voiceMode'),
+      voiceReferenceFile: document.getElementById('voiceReferenceFile'),
+      voiceReferenceAudioPath: document.getElementById('voiceReferenceAudioPath'),
+      voiceReferenceText: document.getElementById('voiceReferenceText'),
+      voiceCommandTemplate: document.getElementById('voiceCommandTemplate'),
+      voiceTimeout: document.getElementById('voiceTimeout'),
       imageTool: document.getElementById('imageTool'),
       imagePositivePrompt: document.getElementById('imagePositivePrompt'),
       imageModel: document.getElementById('imageModel'),
@@ -1809,6 +1846,11 @@ INDEX_HTML = r"""<!doctype html>
         comfyWorkflowEndpoint: els.comfyWorkflowEndpoint.value,
         comfyNodeInfoList: els.comfyNodeInfoList.value,
         comfyPollTimeout: els.comfyPollTimeout.value,
+        voiceMode: els.voiceMode.value,
+        voiceReferenceAudioPath: els.voiceReferenceAudioPath.value,
+        voiceReferenceText: els.voiceReferenceText.value,
+        voiceCommandTemplate: els.voiceCommandTemplate.value,
+        voiceTimeout: els.voiceTimeout.value,
         imageTool: els.imageTool.value,
         imagePositivePrompt: els.imagePositivePrompt.value,
         imageModel: els.imageModel.value,
@@ -1886,6 +1928,11 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyWorkflowEndpoint.value = settings.comfyWorkflowEndpoint || '';
       els.comfyNodeInfoList.value = settings.comfyNodeInfoList || '';
       setIfExists(els.comfyPollTimeout, settings.comfyPollTimeout);
+      setIfExists(els.voiceMode, settings.voiceMode);
+      els.voiceReferenceAudioPath.value = settings.voiceReferenceAudioPath || '';
+      els.voiceReferenceText.value = settings.voiceReferenceText || '';
+      els.voiceCommandTemplate.value = settings.voiceCommandTemplate || '';
+      setIfExists(els.voiceTimeout, settings.voiceTimeout);
       setIfExists(els.imageTool, settings.imageTool);
       els.imagePositivePrompt.value = settings.imagePositivePrompt || '';
       els.imageModel.value = settings.imageModel || '';
@@ -1971,6 +2018,11 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyWorkflowEndpoint,
         els.comfyNodeInfoList,
         els.comfyPollTimeout,
+        els.voiceMode,
+        els.voiceReferenceAudioPath,
+        els.voiceReferenceText,
+        els.voiceCommandTemplate,
+        els.voiceTimeout,
         els.imageTool,
         els.imagePositivePrompt,
         els.imageModel,
@@ -2521,6 +2573,27 @@ INDEX_HTML = r"""<!doctype html>
         uploaded.push(result);
       }
       return uploaded;
+    }
+
+    async function uploadVoiceReferenceAudio() {
+      const file = els.voiceReferenceFile.files && els.voiceReferenceFile.files[0];
+      if (!file) return els.voiceReferenceAudioPath.value.trim();
+      const contentBase64 = await fileToBase64(file);
+      const result = await api('/api/upload-voice-sample', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          filename: file.name,
+          content_base64: contentBase64,
+        }),
+      });
+      els.voiceReferenceAudioPath.value = result.stored_path || '';
+      saveSettings();
+      return els.voiceReferenceAudioPath.value.trim();
+    }
+
+    function defaultVoxCPM2CommandTemplate() {
+      return 'voxcpm clone --text-file {text_file} --reference-audio {reference_audio} --output {output_file}';
     }
 
     function syncCustomModelState(focusWhenCustom = true) {
@@ -3249,6 +3322,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         await ensureLocalModelReady(model);
         const referenceImages = await uploadReferenceImages();
+        const voiceReferenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
         const imageConfig = {
           tool: 'prompt_only',
           positive_prompt: '',
@@ -3302,6 +3376,14 @@ INDEX_HTML = r"""<!doctype html>
           mode: els.autoProductionMode.value,
           image_config: imageConfig,
           video_config: videoConfig,
+          voice_config: {
+            mode: els.voiceMode.value,
+            provider: els.voiceMode.value === 'voxcpm2' ? 'voxcpm2' : '',
+            reference_audio: voiceReferenceAudio,
+            reference_text: els.voiceReferenceText.value.trim(),
+            command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
+            timeout_seconds: Number(els.voiceTimeout.value || 1800),
+          },
           compose_config: {
             tool: els.composeTool.value,
             execution_mode: els.autoProductionMode.value,
@@ -3415,6 +3497,11 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyWorkflowEndpoint.value = '';
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
+      els.voiceMode.value = 'off';
+      els.voiceReferenceAudioPath.value = '';
+      els.voiceReferenceText.value = '';
+      els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
+      els.voiceTimeout.value = '1800';
       els.imageTool.value = 'prompt_only';
       els.imagePositivePrompt.value = '写实商业，干净明亮，统一人物形象，突出 AI 自动化服务价值';
       els.imageModel.value = '';
@@ -3449,6 +3536,11 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyWorkflowEndpoint.value = '';
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
+      els.voiceMode.value = 'off';
+      els.voiceReferenceAudioPath.value = '';
+      els.voiceReferenceText.value = '';
+      els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
+      els.voiceTimeout.value = '1800';
       els.imageTool.value = 'prompt_only';
       els.imagePositivePrompt.value = '低多边形 3D，温暖但带神秘感，清晰轮廓，适合 Steam 商店截图，角色和场景风格统一';
       els.imageModel.value = '';
@@ -3494,6 +3586,11 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyWorkflowEndpoint.value = '';
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
+      els.voiceMode.value = 'off';
+      els.voiceReferenceAudioPath.value = '';
+      els.voiceReferenceText.value = '';
+      els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
+      els.voiceTimeout.value = '1800';
       els.imageTool.value = 'prompt_only';
       els.imagePositivePrompt.value = '';
       els.imageModel.value = '';
@@ -3599,6 +3696,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/upload-reference-image":
                 self._send_json(self._upload_reference_image(payload))
+                return
+
+            if parsed.path == "/api/upload-voice-sample":
+                self._send_json(self._upload_voice_sample(payload))
                 return
 
             if parsed.path == "/api/upload-knowledge":
@@ -4473,6 +4574,33 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "role": role,
             "note": note,
             "size_bytes": len(image_bytes),
+        }
+
+    def _upload_voice_sample(self, payload: dict) -> dict:
+        filename = str(payload.get("filename") or "").strip()
+        content_base64 = str(payload.get("content_base64") or "").strip()
+        if not filename or not content_base64:
+            raise ValueError("filename and content_base64 are required")
+
+        suffix = Path(filename).suffix.lower()
+        allowed = {".wav", ".mp3", ".m4a", ".flac", ".ogg"}
+        if suffix not in allowed:
+            raise ValueError(f"Unsupported voice sample type: {suffix}")
+
+        audio_bytes = base64.b64decode(content_base64, validate=True)
+        if len(audio_bytes) > 50 * 1024 * 1024:
+            raise ValueError("Voice sample is too large; max size is 50 MB")
+
+        VOICE_SAMPLE_ROOT.mkdir(parents=True, exist_ok=True)
+        safe_stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in Path(filename).stem)[:80]
+        target = VOICE_SAMPLE_ROOT / f"{safe_stem}_{uuid4().hex[:8]}{suffix}"
+        target.write_bytes(audio_bytes)
+
+        relative_path = target.relative_to(WORKSPACE_ROOT).as_posix()
+        return {
+            "filename": filename,
+            "stored_path": relative_path,
+            "size_bytes": len(audio_bytes),
         }
 
     def _knowledge_files(self) -> list[dict]:
