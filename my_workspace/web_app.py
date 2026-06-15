@@ -947,7 +947,10 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <div class="provider-grid">
               <label>ComfyUI 节点映射 JSON
-                <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{payload}}、{{prompt}}、{{voice_text}}、{{subtitle_srt}} 注入 21 号员工生成的参数'></textarea>
+                <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{voice_text}}、{{subtitle_srt}}、{{payload}}'></textarea>
+              </label>
+              <label>导入 API JSON 自动识别
+                <input id="comfyApiWorkflowFile" type="file" accept=".json,application/json" />
               </label>
               <label>成片轮询超时
                 <select id="comfyPollTimeout">
@@ -958,6 +961,7 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
+            <div class="reference-list" id="comfyParameterMapper"></div>
           </div>
         </details>
         <details>
@@ -1460,6 +1464,8 @@ INDEX_HTML = r"""<!doctype html>
       comfyBaseUrl: document.getElementById('comfyBaseUrl'),
       comfyWorkflowEndpoint: document.getElementById('comfyWorkflowEndpoint'),
       comfyNodeInfoList: document.getElementById('comfyNodeInfoList'),
+      comfyApiWorkflowFile: document.getElementById('comfyApiWorkflowFile'),
+      comfyParameterMapper: document.getElementById('comfyParameterMapper'),
       comfyPollTimeout: document.getElementById('comfyPollTimeout'),
       imageTool: document.getElementById('imageTool'),
       imageModel: document.getElementById('imageModel'),
@@ -1571,6 +1577,7 @@ INDEX_HTML = r"""<!doctype html>
     let staffOptions = [];
     let selectedReferenceFiles = [];
     let referencePreviewUrls = new Map();
+    let comfyParameterCandidates = [];
     let progressTimer = null;
     let localModelPresets = [];
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
@@ -1911,6 +1918,7 @@ INDEX_HTML = r"""<!doctype html>
       applyImageProviderDefaults();
       applyVideoProviderDefaults();
       applyComfyProviderDefaults();
+      renderComfyParameterMapper();
     }
 
     function setIfExists(control, value) {
@@ -2032,6 +2040,184 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyNodeInfoList.value = '[]';
       }
       saveSettings();
+    }
+
+    function isComfyConnection(value) {
+      return Array.isArray(value) && value.length === 2 && (typeof value[0] === 'string' || typeof value[0] === 'number') && typeof value[1] === 'number';
+    }
+
+    function isMappableComfyValue(value) {
+      return value === null || ['string', 'number', 'boolean'].includes(typeof value);
+    }
+
+    function guessComfySource(candidate, textIndex) {
+      const type = candidate.classType.toLowerCase();
+      const field = candidate.fieldName.toLowerCase();
+      const value = String(candidate.value ?? '').trim();
+      if (type.includes('cliptextencode') && field === 'text') {
+        return value ? '{{prompt}}' : '{{negative_prompt}}';
+      }
+      if (type.includes('loadimage') && field === 'image') return '{{reference_image}}';
+      if (field.includes('prompt') && field.includes('negative')) return '{{negative_prompt}}';
+      if (field.includes('prompt')) return '{{prompt}}';
+      return 'fixed';
+    }
+
+    function comfySourceLabel(value) {
+      const labels = {
+        fixed: '固定值',
+        '{{prompt}}': '主提示词',
+        '{{negative_prompt}}': '负向提示词',
+        '{{image_prompt}}': '生图提示词',
+        '{{video_prompt}}': '视频提示词',
+        '{{reference_image}}': '参考图文件名/URL',
+        '{{voice_text}}': '配音文本',
+        '{{subtitle_srt}}': '字幕 SRT',
+        '{{payload}}': '完整参数包',
+      };
+      return labels[value] || value;
+    }
+
+    function parseComfyManualValue(raw, original) {
+      if (typeof original === 'number') {
+        const parsed = Number(raw);
+        return Number.isFinite(parsed) ? parsed : original;
+      }
+      if (typeof original === 'boolean') {
+        return String(raw).trim().toLowerCase() === 'true';
+      }
+      if (raw === 'null') return null;
+      return raw;
+    }
+
+    function extractComfyApiCandidates(data) {
+      if (!data || typeof data !== 'object' || Array.isArray(data)) {
+        throw new Error('JSON 顶层必须是对象');
+      }
+      const entries = Object.entries(data);
+      const apiLike = entries.length > 0 && entries.every(([nodeId, node]) => /^\d+$/.test(String(nodeId)) && node && typeof node === 'object' && node.class_type);
+      if (!apiLike) {
+        throw new Error('这不是 API 格式 JSON。请在 ComfyUI 里导出 API 格式，而不是普通画布工作流 JSON。');
+      }
+      const candidates = [];
+      let textIndex = 0;
+      for (const [nodeId, node] of entries) {
+        const inputs = node.inputs || {};
+        for (const [fieldName, value] of Object.entries(inputs)) {
+          if (isComfyConnection(value) || !isMappableComfyValue(value)) continue;
+          const candidate = {
+            id: `${nodeId}.${fieldName}`,
+            nodeId: String(nodeId),
+            classType: String(node.class_type || ''),
+            fieldName,
+            value,
+            source: 'fixed',
+            enabled: false,
+          };
+          candidate.source = guessComfySource(candidate, textIndex);
+          candidate.enabled = candidate.source !== 'fixed' || ['width', 'height', 'seed', 'steps', 'cfg', 'denoise', 'batch_size'].includes(fieldName);
+          if (candidate.classType.toLowerCase().includes('cliptextencode') && fieldName === 'text') textIndex += 1;
+          candidates.push(candidate);
+        }
+      }
+      const priority = ['text', 'image', 'width', 'height', 'batch_size', 'seed', 'steps', 'cfg', 'denoise'];
+      candidates.sort((a, b) => {
+        const ai = priority.indexOf(a.fieldName);
+        const bi = priority.indexOf(b.fieldName);
+        return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi) || Number(a.nodeId) - Number(b.nodeId);
+      });
+      return candidates;
+    }
+
+    function renderComfyParameterMapper() {
+      if (!comfyParameterCandidates.length) {
+        els.comfyParameterMapper.innerHTML = '<div class="muted small">导入 ComfyUI API JSON 后，这里会显示可传参节点。</div>';
+        return;
+      }
+      els.comfyParameterMapper.innerHTML = '';
+      const head = document.createElement('div');
+      head.className = 'muted small';
+      head.textContent = `已识别 ${comfyParameterCandidates.length} 个可传参字段。勾选要传给 RunningHub 的参数，系统会自动生成 nodeInfoList。`;
+      els.comfyParameterMapper.appendChild(head);
+      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{reference_image}}', '{{voice_text}}', '{{subtitle_srt}}', '{{payload}}'];
+      comfyParameterCandidates.forEach((candidate, index) => {
+        const item = document.createElement('div');
+        item.className = 'reference-item';
+        const left = document.createElement('label');
+        left.style.display = 'grid';
+        left.style.gap = '4px';
+        left.style.flex = '1';
+        const line = document.createElement('span');
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = candidate.enabled;
+        checkbox.onchange = () => {
+          candidate.enabled = checkbox.checked;
+          updateComfyNodeInfoFromCandidates();
+        };
+        line.appendChild(checkbox);
+        line.append(` #${candidate.nodeId} ${candidate.classType}.${candidate.fieldName}`);
+        const meta = document.createElement('span');
+        meta.className = 'muted small';
+        meta.textContent = `当前值：${String(candidate.value ?? '').slice(0, 80)}`;
+        left.appendChild(line);
+        left.appendChild(meta);
+
+        const select = document.createElement('select');
+        sourceOptions.forEach(value => {
+          const option = document.createElement('option');
+          option.value = value;
+          option.textContent = comfySourceLabel(value);
+          select.appendChild(option);
+        });
+        select.value = candidate.source;
+        select.onchange = () => {
+          candidate.source = select.value;
+          updateComfyNodeInfoFromCandidates();
+        };
+
+        const input = document.createElement('input');
+        input.value = String(candidate.value ?? '');
+        input.placeholder = '固定值';
+        input.oninput = () => {
+          candidate.value = parseComfyManualValue(input.value, candidate.value);
+          updateComfyNodeInfoFromCandidates();
+        };
+
+        item.appendChild(left);
+        item.appendChild(select);
+        item.appendChild(input);
+        els.comfyParameterMapper.appendChild(item);
+      });
+      updateComfyNodeInfoFromCandidates();
+    }
+
+    function updateComfyNodeInfoFromCandidates() {
+      const nodeInfo = comfyParameterCandidates
+        .filter(candidate => candidate.enabled)
+        .map(candidate => ({
+          nodeId: candidate.nodeId,
+          fieldName: candidate.fieldName,
+          fieldValue: candidate.source === 'fixed' ? candidate.value : candidate.source,
+        }));
+      els.comfyNodeInfoList.value = JSON.stringify(nodeInfo, null, 2);
+      saveSettings();
+    }
+
+    async function analyzeComfyApiWorkflowFile() {
+      const file = els.comfyApiWorkflowFile.files && els.comfyApiWorkflowFile.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        comfyParameterCandidates = extractComfyApiCandidates(data);
+        renderComfyParameterMapper();
+        setStatus(`已识别 ComfyUI API JSON：${file.name}`);
+      } catch (err) {
+        comfyParameterCandidates = [];
+        renderComfyParameterMapper();
+        setStatus(err.message, true);
+      }
     }
 
     function renderLocalModelPresets() {
@@ -3183,6 +3369,7 @@ INDEX_HTML = r"""<!doctype html>
       applyComfyProviderDefaults();
       saveSettings();
     };
+    els.comfyApiWorkflowFile.onchange = analyzeComfyApiWorkflowFile;
     els.localOfflineBtn.onclick = applyLocalOfflineMode;
     els.testModelBtn.onclick = testModelConnection;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;

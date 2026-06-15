@@ -344,6 +344,15 @@ ComfyUI 节点映射 JSON：RunningHub nodeInfoList 数组，可使用 {{payload
 成片轮询超时：全自动成片通常更慢，默认 60 分钟。
 ```
 
+可以在管理台直接导入 ComfyUI 导出的 API JSON。管理台会在浏览器本地识别 API JSON 中可覆盖的节点输入，例如 `CLIPTextEncode.text`、`LoadImage.image`、`KSampler.seed/steps/cfg/denoise`、`EmptySD3LatentImage.width/height`，然后让你勾选哪些字段要传参，并自动生成 `nodeInfoList`。
+
+注意：
+
+```text
+用于自动识别的是 ComfyUI API 格式 JSON，也就是节点以 "39"、"86" 这类 ID 为顶层 key 的文件。
+普通画布工作流 JSON 主要用于导入 ComfyUI 继续编辑，不能直接用于自动生成 nodeInfoList。
+```
+
 成片适配器会读取 `comfyui/comfyui_payload.json`，提交任务后轮询结果，并把返回的 mp4、音频、图片等结果下载到 `comfyui/` 目录。若缺少密钥、Base URL 或 endpoint，会标记为 skipped，不会发起请求。
 
 ## 离线部署与动作执行

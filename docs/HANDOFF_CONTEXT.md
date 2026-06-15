@@ -1392,3 +1392,47 @@ Node mapping placeholders:
 {{voice_text}}
 {{subtitle_srt}}
 ```
+
+## ComfyUI API JSON Node Mapping Helper
+
+[2026-06-15 +08:00] command: added a browser-side ComfyUI API JSON analyzer after the user clarified that RunningHub does not need explicit interface exposure and can receive parameters through `nodeInfoList`.
+
+Management UI changes:
+
+- `全自动生成` now includes `导入 API JSON 自动识别`.
+- The selected file is read only in the browser; it is not uploaded to the backend, not copied into the repo, and not committed.
+- The analyzer supports ComfyUI API-format JSON where top-level keys are node IDs such as `39`, `86`.
+- It rejects normal ComfyUI canvas JSON and tells the user to export API format instead.
+- It identifies primitive, non-link inputs such as:
+  - `CLIPTextEncode.text`
+  - `LoadImage.image`
+  - `EmptySD3LatentImage.width`
+  - `EmptySD3LatentImage.height`
+  - `KSampler.seed`
+  - `KSampler.steps`
+  - `KSampler.cfg`
+  - `KSampler.denoise`
+- The UI lets the user select each parameter source:
+  - 固定值
+  - 主提示词 `{{prompt}}`
+  - 负向提示词 `{{negative_prompt}}`
+  - 生图提示词 `{{image_prompt}}`
+  - 视频提示词 `{{video_prompt}}`
+  - 参考图文件名/URL `{{reference_image}}`
+  - 配音文本 `{{voice_text}}`
+  - 字幕 SRT `{{subtitle_srt}}`
+  - 完整参数包 `{{payload}}`
+- Selected rows automatically generate `ComfyUI 节点映射 JSON` as RunningHub-style `nodeInfoList` objects with `nodeId`, `fieldName`, and `fieldValue`.
+
+Adapter updates:
+
+- `cloud_comfyui_adapter.py` now supports additional placeholders:
+  - `{{negative_prompt}}`
+  - `{{image_prompt}}`
+  - `{{video_prompt}}`
+  - `{{reference_image}}`
+  - `{{seed}}`
+  - `{{width}}`
+  - `{{height}}`
+- Placeholder replacement is now recursive over parsed JSON values instead of raw string replacement, so quotes/newlines inside prompts do not corrupt JSON.
+- Default `comfyui_payload.json` now includes `negative_prompt`, `reference_image`, `seed`, `width`, and `height` fields for future mapping.

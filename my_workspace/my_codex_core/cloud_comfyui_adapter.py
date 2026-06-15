@@ -139,13 +139,17 @@ class CloudComfyUIAdapter:
             "{{payload}}": json.dumps(comfyui_payload, ensure_ascii=False),
             "{{voice_text}}": str(comfyui_payload.get("voice_text") or ""),
             "{{subtitle_srt}}": str(comfyui_payload.get("subtitle_srt") or ""),
+            "{{negative_prompt}}": str(comfyui_payload.get("negative_prompt") or ""),
+            "{{image_prompt}}": self._first_list_or_value(comfyui_payload, "image_prompts", "image_prompt"),
+            "{{video_prompt}}": self._first_list_or_value(comfyui_payload, "video_prompts", "video_prompt"),
+            "{{reference_image}}": self._first_reference_image(comfyui_payload),
+            "{{seed}}": str(comfyui_payload.get("seed") or ""),
+            "{{width}}": str(comfyui_payload.get("width") or ""),
+            "{{height}}": str(comfyui_payload.get("height") or ""),
             "{{prompt}}": self._first_prompt(comfyui_payload),
         }
         if node_info:
-            text = json.dumps(node_info, ensure_ascii=False)
-            for key, value in replacements.items():
-                text = text.replace(key, value)
-            node_info = json.loads(text)
+            node_info = self._replace_placeholders(node_info, replacements)
         payload: dict[str, Any] = {
             "apiKey": self.api_key,
             "addMetadata": bool(compose_config.get("add_metadata", True)),
@@ -193,6 +197,18 @@ class CloudComfyUIAdapter:
     def _app_id_from_endpoint(self) -> str:
         match = re.search(r"/ai-app/([^/?#]+)", self.endpoint)
         return match.group(1) if match else ""
+
+    @classmethod
+    def _replace_placeholders(cls, value: Any, replacements: dict[str, str]) -> Any:
+        if isinstance(value, str):
+            for key, replacement in replacements.items():
+                value = value.replace(key, replacement)
+            return value
+        if isinstance(value, list):
+            return [cls._replace_placeholders(item, replacements) for item in value]
+        if isinstance(value, dict):
+            return {key: cls._replace_placeholders(item, replacements) for key, item in value.items()}
+        return value
 
     @staticmethod
     def _parse_node_info_list(compose_config: dict[str, Any]) -> list[Any]:
@@ -252,6 +268,36 @@ class CloudComfyUIAdapter:
         if isinstance(prompts, list) and prompts:
             return json.dumps(prompts, ensure_ascii=False)[:8000]
         return json.dumps(payload, ensure_ascii=False)[:8000]
+
+    @staticmethod
+    def _first_list_or_value(payload: dict[str, Any], list_key: str, value_key: str) -> str:
+        value = payload.get(value_key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()[:8000]
+        values = payload.get(list_key)
+        if isinstance(values, list) and values:
+            first = values[0]
+            if isinstance(first, str):
+                return first.strip()[:8000]
+            return json.dumps(first, ensure_ascii=False)[:8000]
+        return ""
+
+    @staticmethod
+    def _first_reference_image(payload: dict[str, Any]) -> str:
+        value = payload.get("reference_image")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        values = payload.get("reference_images")
+        if isinstance(values, list) and values:
+            first = values[0]
+            if isinstance(first, str):
+                return first.strip()
+            if isinstance(first, dict):
+                for key in ("url", "path", "file", "image"):
+                    item = first.get(key)
+                    if isinstance(item, str) and item.strip():
+                        return item.strip()
+        return ""
 
     @staticmethod
     def _status(data: dict[str, Any]) -> str:
