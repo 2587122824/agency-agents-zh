@@ -250,6 +250,9 @@ INDEX_HTML = r"""<!doctype html>
     details[open] summary {
       border-bottom: 1px solid var(--line);
     }
+    [hidden] {
+      display: none !important;
+    }
     .details-body {
       padding: 12px;
       display: grid;

@@ -1454,3 +1454,16 @@ Production package behavior:
 
 - `production_manifest.json` records `image_generation.positive_prompt` and `video_generation.positive_prompt`.
 - Default `comfyui_payload.json` includes `image_prompt` and `video_prompt` placeholders for later node mapping.
+
+## Hidden Media Field Display Fix
+
+[2026-06-15 +08:00] command: fixed hidden image/video parameter controls still showing in the management UI.
+
+Root cause:
+
+- Detailed image/video controls were marked with the HTML `hidden` attribute, but author CSS for `.provider-grid` and `.video-grid` set `display: grid`, which overrode the browser default hidden style.
+
+Fix:
+
+- Added a global CSS rule `[hidden] { display: none !important; }` in `my_workspace/web_app.py`.
+- The page should now show only the simplified positive-prompt fields in `生图配置` and `视频生成配置`, while hidden compatibility fields remain in the DOM for JS/localStorage/adapter usage.
