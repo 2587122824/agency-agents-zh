@@ -10,7 +10,10 @@
 
 Latest update on 2026-06-15:
 
-- Added visible global button-click feedback in the management UI. Button clicks now immediately show a top-right toast with `正在处理` or `正在切换`, and status areas still show the detailed success/error result after the action completes.
+- Refined the ComfyUI workflow library UI: the library list now shows only the selected slot, changing the dropdown loads that slot's saved endpoint/nodeInfoList/timeout/purpose into the editable fields, and node mapping/import/timeout controls were moved directly under the workflow-library selector before voice settings.
+- Improved form alignment in the management UI: provider-grid forms now top-align controls, and the ComfyUI node-mapping row uses a shorter textarea so file import and timeout controls no longer stretch vertically.
+- Improved ComfyUI API JSON mapping UX: imported node candidates render in a compact, height-limited scrolling panel so large workflows do not stretch the page; saving the selected workflow-library slot now persists the slot to browser localStorage and clears the temporary imported API JSON file/candidate list while keeping the saved nodeInfoList.
+- Added visible global button-click feedback in the management UI. Operation buttons now immediately show a top-right toast with `正在处理`, status areas still show detailed success/error results, and main tab switching no longer shows a toast.
 - Added a browser-local `ComfyUI 工作流库` in the management UI with 6 default slots: text/image-to-image, image-to-video, reference consistency, B-roll material generation, subtitle preview, and audio+subtitle+video preview. Each slot stores endpoint, nodeInfoList, timeout, and purpose; runtime passes selected slot and sanitized library status to employees and `production_manifest.json`.
 - Optimized the long-video workflow and full-auto UI semantics: long-video template is now available in the product template selector, the long-video sample defaults to `audio_package`, and `comfy_full` is described as `ComfyUI 素材/预览草稿` rather than final video export.
 - Clarified long-video workflow boundaries: `07_视频生成执行员` outputs auxiliary AI video material only, `20_语音字幕包装师` owns `voiceover.txt` and `subtitles.srt`, `21_ComfyUI素材编排师` prepares material/preview parameters, and `22_剪辑成片执行师` owns final hard subtitles, mix, export specs, and release checks.

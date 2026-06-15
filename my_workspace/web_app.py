@@ -263,6 +263,14 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) minmax(260px, 1fr);
       gap: 12px;
+      align-items: start;
+    }
+    .comfy-mapping-grid textarea {
+      min-height: 132px;
+    }
+    .comfy-mapping-grid input[type="file"],
+    .comfy-mapping-grid select {
+      min-height: 38px;
     }
     .video-grid {
       display: grid;
@@ -284,6 +292,63 @@ INDEX_HTML = r"""<!doctype html>
       align-items: center;
       background: #fff;
       font-size: 13px;
+    }
+    .reference-item.active {
+      border-color: var(--accent);
+      background: #ecfeff;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .comfy-parameter-panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      display: grid;
+      gap: 0;
+      max-height: 360px;
+      overflow: auto;
+    }
+    .comfy-parameter-head {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+      padding: 8px 10px;
+    }
+    .comfy-parameter-row {
+      display: grid;
+      grid-template-columns: minmax(220px, .8fr) minmax(180px, .7fr) minmax(240px, 1fr);
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      font-size: 13px;
+    }
+    .comfy-parameter-row:last-child {
+      border-bottom: 0;
+    }
+    .comfy-parameter-row label {
+      min-width: 0;
+    }
+    .comfy-parameter-left {
+      display: grid;
+      gap: 3px;
+    }
+    .comfy-parameter-row select,
+    .comfy-parameter-row input {
+      height: 34px;
+      min-height: 34px;
+    }
+    .comfy-parameter-name,
+    .comfy-parameter-value {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    @media (max-width: 900px) {
+      .comfy-parameter-row {
+        grid-template-columns: 1fr;
+      }
     }
     .inline-actions {
       display: flex;
@@ -1005,6 +1070,23 @@ INDEX_HTML = r"""<!doctype html>
               </label>
             </div>
             <div class="reference-list" id="comfyWorkflowLibraryList"></div>
+            <div class="provider-grid comfy-mapping-grid">
+              <label>ComfyUI 节点映射 JSON
+                <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{voice_text}}、{{subtitle_srt}}、{{payload}}'></textarea>
+              </label>
+              <label>导入 API JSON 自动识别
+                <input id="comfyApiWorkflowFile" type="file" accept=".json,application/json" />
+              </label>
+              <label>ComfyUI 轮询超时
+                <select id="comfyPollTimeout">
+                  <option value="900">15 分钟</option>
+                  <option value="1800">30 分钟</option>
+                  <option value="3600" selected>60 分钟</option>
+                  <option value="7200">120 分钟</option>
+                </select>
+              </label>
+            </div>
+            <div class="reference-list" id="comfyParameterMapper"></div>
             <div class="provider-grid">
               <label>本地配音
                 <select id="voiceMode">
@@ -1035,23 +1117,6 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid">
-              <label>ComfyUI 节点映射 JSON
-                <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{voice_text}}、{{subtitle_srt}}、{{payload}}'></textarea>
-              </label>
-              <label>导入 API JSON 自动识别
-                <input id="comfyApiWorkflowFile" type="file" accept=".json,application/json" />
-              </label>
-              <label>ComfyUI 轮询超时
-                <select id="comfyPollTimeout">
-                  <option value="900">15 分钟</option>
-                  <option value="1800">30 分钟</option>
-                  <option value="3600" selected>60 分钟</option>
-                  <option value="7200">120 分钟</option>
-                </select>
-              </label>
-            </div>
-            <div class="reference-list" id="comfyParameterMapper"></div>
           </div>
         </details>
         <details hidden>
@@ -1841,7 +1906,7 @@ INDEX_HTML = r"""<!doctype html>
       const label = buttonLabel(button);
       if (!label) return;
       if (button.dataset.viewTarget) {
-        setStatus(`正在切换：${label}`);
+        setStatus(`正在切换：${label}`, false, false);
         return;
       }
       const currentView = document.body.dataset.view || 'run';
@@ -2113,9 +2178,12 @@ INDEX_HTML = r"""<!doctype html>
       comfyWorkflowLibrary = normalizeComfyWorkflowLibrary(settings.comfyWorkflowLibrary);
       renderComfyWorkflowLibrary();
       setIfExists(els.comfyWorkflowPreset, settings.comfyWorkflowPreset || DEFAULT_COMFY_WORKFLOW_PRESET_ID);
-      els.comfyWorkflowPresetNote.value = settings.comfyWorkflowPresetNote || getSelectedComfyWorkflowPreset()?.purpose || '';
-      els.comfyNodeInfoList.value = settings.comfyNodeInfoList || '';
-      setIfExists(els.comfyPollTimeout, settings.comfyPollTimeout);
+      const selectedComfyWorkflow = getSelectedComfyWorkflowPreset();
+      els.comfyWorkflowPresetNote.value = selectedComfyWorkflow?.purpose || settings.comfyWorkflowPresetNote || '';
+      els.comfyWorkflowEndpoint.value = selectedComfyWorkflow?.endpoint || settings.comfyWorkflowEndpoint || '';
+      els.comfyNodeInfoList.value = selectedComfyWorkflow?.nodeInfoList || settings.comfyNodeInfoList || '[]';
+      setIfExists(els.comfyPollTimeout, selectedComfyWorkflow?.pollTimeout || settings.comfyPollTimeout || '3600');
+      renderComfyWorkflowLibraryList();
       setIfExists(els.voiceMode, settings.voiceMode);
       els.voiceReferenceAudioPath.value = settings.voiceReferenceAudioPath || '';
       els.voiceReferenceText.value = settings.voiceReferenceText || '';
@@ -2215,23 +2283,23 @@ INDEX_HTML = r"""<!doctype html>
     function renderComfyWorkflowLibraryList() {
       if (!els.comfyWorkflowLibraryList) return;
       els.comfyWorkflowLibraryList.innerHTML = '';
-      comfyWorkflowLibrary.forEach(item => {
-        const row = document.createElement('div');
-        row.className = 'reference-item';
-        const endpoint = item.endpoint ? item.endpoint : '未配置接口';
-        const nodeText = item.nodeInfoList && item.nodeInfoList !== '[]' ? '已配置节点映射' : '未配置节点映射';
-        row.innerHTML = `
-          <div class="reference-info">
-            <div class="reference-name">${escapeHtml(item.name)}</div>
-            <div class="muted small">${escapeHtml(item.purpose || '')}</div>
-            <div class="muted small">${escapeHtml(endpoint)} · ${nodeText} · ${escapeHtml(item.pollTimeout || '3600')} 秒</div>
-          </div>
-        `;
-        els.comfyWorkflowLibraryList.appendChild(row);
-      });
+      const item = getSelectedComfyWorkflowPreset();
+      if (!item) return;
+      const row = document.createElement('div');
+      row.className = 'reference-item active';
+      const endpoint = item.endpoint ? item.endpoint : '未配置接口';
+      const nodeText = item.nodeInfoList && item.nodeInfoList !== '[]' ? '已配置节点映射' : '未配置节点映射';
+      row.innerHTML = `
+        <div class="reference-info">
+          <div class="reference-name">${escapeHtml(item.name)}</div>
+          <div class="muted small">${escapeHtml(item.purpose || '')}</div>
+          <div class="muted small">${escapeHtml(endpoint)} · ${nodeText} · ${escapeHtml(item.pollTimeout || '3600')} 秒</div>
+        </div>
+      `;
+      els.comfyWorkflowLibraryList.appendChild(row);
     }
 
-    function applySelectedComfyWorkflowPreset() {
+    function loadSelectedComfyWorkflowPreset(showMessage = true) {
       const item = getSelectedComfyWorkflowPreset();
       if (!item) return;
       els.comfyWorkflowPresetNote.value = item.purpose || '';
@@ -2240,8 +2308,13 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.comfyPollTimeout, item.pollTimeout || '3600');
       applyComfyProviderDefaults();
       renderComfyParameterMapper();
+      renderComfyWorkflowLibraryList();
       saveSettings();
-      setStatus(`已应用 ComfyUI 工作流：${item.name}`);
+      if (showMessage) setStatus(`已加载 ComfyUI 工作流：${item.name}`);
+    }
+
+    function applySelectedComfyWorkflowPreset() {
+      loadSelectedComfyWorkflowPreset(true);
     }
 
     function saveSelectedComfyWorkflowPreset() {
@@ -2253,7 +2326,14 @@ INDEX_HTML = r"""<!doctype html>
       item.pollTimeout = els.comfyPollTimeout.value || '3600';
       renderComfyWorkflowLibraryList();
       saveSettings();
+      clearComfyApiImportState();
       setStatus(`已保存 ComfyUI 工作流槽位：${item.name}`);
+    }
+
+    function clearComfyApiImportState() {
+      comfyParameterCandidates = [];
+      if (els.comfyApiWorkflowFile) els.comfyApiWorkflowFile.value = '';
+      renderComfyParameterMapper();
     }
 
     function resetSelectedComfyWorkflowPreset() {
@@ -2504,18 +2584,19 @@ INDEX_HTML = r"""<!doctype html>
       }
       els.comfyParameterMapper.innerHTML = '';
       const head = document.createElement('div');
-      head.className = 'muted small';
+      head.className = 'muted small comfy-parameter-head';
       head.textContent = `已识别 ${comfyParameterCandidates.length} 个可传参字段。勾选要传给 RunningHub 的参数，系统会自动生成 nodeInfoList。`;
-      els.comfyParameterMapper.appendChild(head);
+      const panel = document.createElement('div');
+      panel.className = 'comfy-parameter-panel';
+      panel.appendChild(head);
       const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{reference_image}}', '{{voice_text}}', '{{subtitle_srt}}', '{{payload}}'];
       comfyParameterCandidates.forEach((candidate, index) => {
         const item = document.createElement('div');
-        item.className = 'reference-item';
+        item.className = 'comfy-parameter-row';
         const left = document.createElement('label');
-        left.style.display = 'grid';
-        left.style.gap = '4px';
-        left.style.flex = '1';
+        left.className = 'comfy-parameter-left';
         const line = document.createElement('span');
+        line.className = 'comfy-parameter-name';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = candidate.enabled;
@@ -2526,7 +2607,7 @@ INDEX_HTML = r"""<!doctype html>
         line.appendChild(checkbox);
         line.append(` #${candidate.nodeId} ${candidate.classType}.${candidate.fieldName}`);
         const meta = document.createElement('span');
-        meta.className = 'muted small';
+        meta.className = 'muted small comfy-parameter-value';
         meta.textContent = `当前值：${String(candidate.value ?? '').slice(0, 80)}`;
         left.appendChild(line);
         left.appendChild(meta);
@@ -2555,8 +2636,9 @@ INDEX_HTML = r"""<!doctype html>
         item.appendChild(left);
         item.appendChild(select);
         item.appendChild(input);
-        els.comfyParameterMapper.appendChild(item);
+        panel.appendChild(item);
       });
+      els.comfyParameterMapper.appendChild(panel);
       updateComfyNodeInfoFromCandidates();
     }
 
@@ -3773,9 +3855,7 @@ INDEX_HTML = r"""<!doctype html>
 
     els.runBtn.onclick = runWorkflow;
     els.comfyWorkflowPreset.onchange = () => {
-      const item = getSelectedComfyWorkflowPreset();
-      els.comfyWorkflowPresetNote.value = item?.purpose || '';
-      saveSettings();
+      loadSelectedComfyWorkflowPreset(true);
     };
     els.applyComfyWorkflowPresetBtn.onclick = applySelectedComfyWorkflowPreset;
     els.saveComfyWorkflowPresetBtn.onclick = saveSelectedComfyWorkflowPreset;
