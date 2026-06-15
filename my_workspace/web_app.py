@@ -965,9 +965,14 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <details>
-          <summary><strong>生图配置</strong> <span class="muted small">用于 06_分镜生图设计师生成关键帧方案</span></summary>
+          <summary><strong>生图配置</strong> <span class="muted small">只填正向提示词；参考图在下方单独上传，其余参数在 ComfyUI 工作流里配置</span></summary>
           <div class="details-body">
-            <div class="video-grid">
+            <div class="provider-grid">
+              <label>生图正向提示词
+                <input id="imagePositivePrompt" autocomplete="off" spellcheck="false" placeholder="例如：专业、真实、干净明亮的AI自动化服务宣传画面，人物和产品风格统一" />
+              </label>
+            </div>
+            <div class="video-grid" hidden>
               <label>生图工具
                 <select id="imageTool">
                   <option value="prompt_only" selected>仅生成生图提示词</option>
@@ -1015,7 +1020,7 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>生图风格
                 <input id="imageStyle" placeholder="例如 写实商业、电影感、干净明亮、赛博科技、国风插画" />
               </label>
@@ -1030,7 +1035,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="imageApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用生图 API，会保存到本浏览器" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>生图平台接口地址
                 <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
               </label>
@@ -1044,7 +1049,7 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>负面提示词
                 <input id="imageNegativePrompt" placeholder="例如 水印、畸形手指、低清晰度、脸部变形、错误文字" />
               </label>
@@ -1090,9 +1095,14 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <details>
-          <summary><strong>视频生成配置</strong> <span class="muted small">用于 06 分镜、07 视频画面、20 语音字幕和 21 ComfyUI 编排</span></summary>
+          <summary><strong>视频生成配置</strong> <span class="muted small">只填正向提示词；镜头、尺寸、采样等参数在视频工作流里配置</span></summary>
           <div class="details-body">
-            <div class="video-grid">
+            <div class="provider-grid">
+              <label>生视频正向提示词
+                <input id="videoPositivePrompt" autocomplete="off" spellcheck="false" placeholder="例如：专业真实的短视频，人物口播自然，镜头稳定，突出AI自动化服务价值" />
+              </label>
+            </div>
+            <div class="video-grid" hidden>
               <label>视频工具
                 <select id="videoTool">
                   <option value="prompt_only" selected>仅生成提示词/制作包</option>
@@ -1140,7 +1150,7 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>视频风格
                 <input id="videoStyle" placeholder="例如 真人口播、科技感、写实商业、国风、美妆种草" />
               </label>
@@ -1154,7 +1164,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid" hidden>
               <label>视频负面提示词
                 <input id="videoNegativePrompt" autocomplete="off" spellcheck="false" placeholder="例如 水印、闪烁、畸形手、错误文字、脸部变形" />
               </label>
@@ -1468,6 +1478,7 @@ INDEX_HTML = r"""<!doctype html>
       comfyParameterMapper: document.getElementById('comfyParameterMapper'),
       comfyPollTimeout: document.getElementById('comfyPollTimeout'),
       imageTool: document.getElementById('imageTool'),
+      imagePositivePrompt: document.getElementById('imagePositivePrompt'),
       imageModel: document.getElementById('imageModel'),
       imageSize: document.getElementById('imageSize'),
       imageCount: document.getElementById('imageCount'),
@@ -1488,6 +1499,7 @@ INDEX_HTML = r"""<!doctype html>
       imageSampler: document.getElementById('imageSampler'),
       imageControl: document.getElementById('imageControl'),
       videoTool: document.getElementById('videoTool'),
+      videoPositivePrompt: document.getElementById('videoPositivePrompt'),
       videoModel: document.getElementById('videoModel'),
       videoAspect: document.getElementById('videoAspect'),
       videoDuration: document.getElementById('videoDuration'),
@@ -1795,6 +1807,7 @@ INDEX_HTML = r"""<!doctype html>
         comfyNodeInfoList: els.comfyNodeInfoList.value,
         comfyPollTimeout: els.comfyPollTimeout.value,
         imageTool: els.imageTool.value,
+        imagePositivePrompt: els.imagePositivePrompt.value,
         imageModel: els.imageModel.value,
         imageSize: els.imageSize.value,
         imageCount: els.imageCount.value,
@@ -1815,6 +1828,7 @@ INDEX_HTML = r"""<!doctype html>
         imageSampler: els.imageSampler.value,
         imageControl: els.imageControl.value,
         videoTool: els.videoTool.value,
+        videoPositivePrompt: els.videoPositivePrompt.value,
         videoModel: els.videoModel.value,
         videoAspect: els.videoAspect.value,
         videoDuration: els.videoDuration.value,
@@ -1870,6 +1884,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyNodeInfoList.value = settings.comfyNodeInfoList || '';
       setIfExists(els.comfyPollTimeout, settings.comfyPollTimeout);
       setIfExists(els.imageTool, settings.imageTool);
+      els.imagePositivePrompt.value = settings.imagePositivePrompt || '';
       els.imageModel.value = settings.imageModel || '';
       setIfExists(els.imageSize, settings.imageSize);
       setIfExists(els.imageCount, settings.imageCount);
@@ -1890,6 +1905,7 @@ INDEX_HTML = r"""<!doctype html>
       els.imageSampler.value = settings.imageSampler || '';
       els.imageControl.value = settings.imageControl || '';
       setIfExists(els.videoTool, settings.videoTool);
+      els.videoPositivePrompt.value = settings.videoPositivePrompt || '';
       els.videoModel.value = settings.videoModel || '';
       setIfExists(els.videoAspect, settings.videoAspect);
       setIfExists(els.videoDuration, settings.videoDuration);
@@ -1953,6 +1969,7 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyNodeInfoList,
         els.comfyPollTimeout,
         els.imageTool,
+        els.imagePositivePrompt,
         els.imageModel,
         els.imageSize,
         els.imageCount,
@@ -1973,6 +1990,7 @@ INDEX_HTML = r"""<!doctype html>
         els.imageSampler,
         els.imageControl,
         els.videoTool,
+        els.videoPositivePrompt,
         els.videoModel,
         els.videoAspect,
         els.videoDuration,
@@ -3230,6 +3248,7 @@ INDEX_HTML = r"""<!doctype html>
         const referenceImages = await uploadReferenceImages();
         const imageConfig = {
           tool: els.imageTool.value,
+          positive_prompt: els.imagePositivePrompt.value.trim(),
           model: els.imageModel.value.trim(),
           size: els.imageSize.value,
           count_per_shot: els.imageCount.value,
@@ -3252,6 +3271,7 @@ INDEX_HTML = r"""<!doctype html>
         };
         const videoConfig = {
           tool: els.videoTool.value,
+          positive_prompt: els.videoPositivePrompt.value.trim(),
           model: els.videoModel.value.trim(),
           aspect_ratio: els.videoAspect.value,
           duration: els.videoDuration.value,
@@ -3393,6 +3413,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
       els.imageTool.value = 'prompt_only';
+      els.imagePositivePrompt.value = '写实商业，干净明亮，统一人物形象，突出 AI 自动化服务价值';
       els.imageModel.value = '';
       els.imageSize.value = '9:16';
       els.imageCount.value = '1';
@@ -3401,6 +3422,7 @@ INDEX_HTML = r"""<!doctype html>
       els.imageNegativePrompt.value = '水印、畸形手指、低清晰度、脸部变形、错误文字';
       els.imageConsistency.value = '保持同一人物脸型、服装、产品外观和主色调';
       els.videoTool.value = 'prompt_only';
+      els.videoPositivePrompt.value = '真人口播，商业科技感，画面干净明亮，前半段人物口播稳定推进，中段切产品界面和案例画面，结尾推近到行动号召。';
       els.videoModel.value = '';
       els.videoAspect.value = '9:16';
       els.videoDuration.value = '30s';
@@ -3425,6 +3447,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
       els.imageTool.value = 'prompt_only';
+      els.imagePositivePrompt.value = '低多边形 3D，温暖但带神秘感，清晰轮廓，适合 Steam 商店截图，角色和场景风格统一';
       els.imageModel.value = '';
       els.imageSize.value = '16:9';
       els.imageCount.value = '1';
@@ -3433,6 +3456,7 @@ INDEX_HTML = r"""<!doctype html>
       els.imageNegativePrompt.value = '水印、低清晰度、文字错误、角色比例异常、过度写实';
       els.imageConsistency.value = '保持同一主角造型、低多边形材质语言、统一色彩和关卡氛围';
       els.videoTool.value = 'prompt_only';
+      els.videoPositivePrompt.value = 'Steam 商店预告片，从环境氛围开场，切到角色探索、谜题互动和关键机制，最后展示标题画面；镜头平稳，突出可玩内容。';
       els.videoModel.value = '';
       els.videoAspect.value = '16:9';
       els.videoDuration.value = '30s';
@@ -3468,6 +3492,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
       els.imageTool.value = 'prompt_only';
+      els.imagePositivePrompt.value = '';
       els.imageModel.value = '';
       els.imageSize.value = '9:16';
       els.imageCount.value = '1';
@@ -3478,6 +3503,7 @@ INDEX_HTML = r"""<!doctype html>
       els.imageNegativePrompt.value = '';
       els.imageConsistency.value = '';
       els.videoTool.value = 'prompt_only';
+      els.videoPositivePrompt.value = '';
       els.videoModel.value = '';
       els.videoAspect.value = '9:16';
       els.videoDuration.value = '30s';
@@ -4367,22 +4393,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             item = image_config.get(key)
             return str(item).strip() if item not in (None, "") else default
 
-        api_note = "已填写，当前版本仅记录为可用条件，不保存密钥、不直接调用生图 API" if image_config.get("api_key_provided") else "未填写"
-        base_url_note = "已填写，当前版本仅记录为可用条件，不保存地址到输出" if image_config.get("base_url_provided") else "未填写"
         return (
             f"{user_input}\n\n"
             "## 生图配置\n"
-            f"- 生图工具：{value('tool')}\n"
-            f"- 生图模型：{value('model')}\n"
-            f"- 图片尺寸/画幅：{value('size', '9:16')}\n"
-            f"- 每镜头图片数：{value('count_per_shot', '1')}\n"
-            f"- 生图风格：{value('style')}\n"
-            f"- 生图质量：{value('quality', 'standard')}\n"
-            f"- 负面提示词：{value('negative_prompt')}\n"
-            f"- 一致性重点：{value('consistency')}\n"
-            f"- 生图平台密钥：{api_note}\n"
-            f"- 生图平台接口地址：{base_url_note}\n"
-            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜总表、关键帧生图提示词、参考图使用策略和连续性控制说明；不要声称已经生成图片文件。\n"
+            f"- 正向提示词：{value('positive_prompt')}\n"
+            "- 参考图：如用户上传参考图，请优先按参考图说明保持人物、产品、风格或构图一致。\n"
+            "- 参数来源：尺寸、模型、seed、steps、CFG、采样器、负向词等由 ComfyUI/RunningHub 工作流或导入的 API JSON 节点映射配置，不需要在员工输出中重复询问。\n"
+            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜总表、关键帧正向提示词、参考图使用策略和连续性控制说明；不要声称已经生成图片文件。\n"
         )
 
     @staticmethod
@@ -4391,21 +4408,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             item = video_config.get(key)
             return str(item).strip() if item not in (None, "") else default
 
-        api_note = "已填写，当前版本仅记录为可用条件，不保存密钥、不直接调用视频 API" if video_config.get("api_key_provided") else "未填写"
-        base_url_note = "已填写，当前版本仅记录为可用条件，不保存地址到输出" if video_config.get("base_url_provided") else "未填写"
         return (
             f"{user_input}\n\n"
             "## 视频生成配置\n"
-            f"- 视频工具：{value('tool')}\n"
-            f"- 视频模型：{value('model')}\n"
-            f"- 画幅：{value('aspect_ratio', '9:16')}\n"
-            f"- 目标时长：{value('duration', '30s')}\n"
-            f"- 视频风格：{value('style')}\n"
-            f"- 视频画面与运动要求：{value('prompt_notes')}\n"
-            f"- 负面提示词：{value('negative_prompt')}\n"
-            f"- 视频平台密钥：{api_note}\n"
-            f"- 视频平台接口地址：{base_url_note}\n"
-            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，07_视频生成执行员输出视频画面提示词和镜头清单，20_语音字幕包装师输出 TTS、SRT、BGM 和音效方案，21_ComfyUI成片编排师整理一体化成片参数；不要声称已经生成 mp4。\n"
+            f"- 正向提示词：{value('positive_prompt')}\n"
+            "- 参考图：如用户上传参考图，请把它作为首帧、角色一致性、产品一致性或风格参考来规划。\n"
+            "- 参数来源：模型、画幅、时长、运动强度、镜头、seed、FPS、分辨率、负向词等由视频/ComfyUI 工作流或导入的 API JSON 节点映射配置，不需要在员工输出中重复询问。\n"
+            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，07_视频生成执行员输出视频画面正向提示词和镜头清单，20_语音字幕包装师输出 TTS、SRT、BGM 和音效方案，21_ComfyUI成片编排师整理一体化成片参数；不要声称已经生成 mp4。\n"
         )
 
     @staticmethod

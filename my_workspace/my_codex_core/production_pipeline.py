@@ -68,6 +68,7 @@ def run_auto_production(
         "task_dir": str(task_dir),
         "image_generation": {
             "tool": image_config.get("tool") or "",
+            "positive_prompt": image_config.get("positive_prompt") or "",
             "model": image_config.get("model") or "",
             "size": image_config.get("size") or "",
             "count_per_shot": image_config.get("count_per_shot") or "",
@@ -85,6 +86,7 @@ def run_auto_production(
         },
         "video_generation": {
             "tool": video_config.get("tool") or "",
+            "positive_prompt": video_config.get("positive_prompt") or "",
             "model": video_config.get("model") or "",
             "aspect_ratio": video_config.get("aspect_ratio") or "",
             "duration": video_config.get("duration") or "",
@@ -341,7 +343,9 @@ def _default_comfyui_payload(mode: str, final_video_name: str, video_config: dic
     payload = {
         "execution_mode": mode,
         "image_prompts": [],
+        "image_prompt": "",
         "video_prompts": [],
+        "video_prompt": video_config.get("positive_prompt") or "",
         "reference_images": [],
         "reference_image": "",
         "negative_prompt": video_config.get("negative_prompt") or "",

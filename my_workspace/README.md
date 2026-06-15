@@ -209,9 +209,9 @@ runtime/models/
 - 可在 `模型接口配置` 里选择本地模型预设，例如 Ollama、LM Studio、vLLM、Xinference；选择后会自动填入本地 Base URL、local API Key，并切换到自定义模型名。
 - 可点击 `测试当前模型接口`，管理台会调用 OpenAI-compatible `/chat/completions` 做一次连通性测试。
 - 可在 `记忆与继承` 里上传 `.md/.txt/.json/.csv` 到 `my_knowledge_base`，并选择是否把本地知识库追加到本次工作流输入。
-- 在 `生图配置` 中选择生图工具、模型、尺寸、每镜头图片数、质量、风格、负面提示词和一致性重点；当前版本会把这些配置传给 `06_分镜生图设计师` 生成分镜和关键帧生图提示词，不直接调用生图平台 API。
-- 在 `视频生成配置` 中选择视频工具、模型、画幅、时长和风格。工具下拉包含 Sora、Runway、Pika、Seedance、可灵、即梦、海螺、Luma 等；当前版本会把这些配置传给 `06_分镜生图设计师`、`07_视频生成执行员`、`20_语音字幕包装师` 和 `21_ComfyUI成片编排师`。
-- 可在 `视频生成配置` 中上传参考图，并标注用途和说明。选择图片后会显示本地缩略图预览；图片保存到 `my_reference_images/`，任务输入只记录本地路径和说明，供 06、07、20、21 号员工生成参考图使用方案和 ComfyUI 参数映射。
+- 在 `生图配置` 中只填写生图正向提示词；模型、尺寸、seed、steps、CFG、采样器和负向词等参数建议在 ComfyUI/RunningHub 工作流或 API JSON 节点映射中配置。
+- 在 `视频生成配置` 中只填写生视频正向提示词；画幅、时长、运动强度、镜头、FPS、分辨率和负向词等参数建议在视频/ComfyUI 工作流或 API JSON 节点映射中配置。
+- 可在 `参考图` 区域上传图片，并标注用途和说明。选择图片后会显示本地缩略图预览；图片保存到 `my_reference_images/`，任务输入只记录本地路径和说明，供 06、07、20、21 号员工生成参考图使用方案和 ComfyUI 参数映射。
 - 在 `长期记忆` 中选择是否启用 `my_memory`，并可在 `继承历史任务` 中选择上一条任务来保持系列视频的人物和风格连续性。
 - 管理台会把 API Key、Base URL、模型选择、生图配置和视频生成配置默认保存到当前浏览器的 `localStorage`，下次打开自动填回；可点击 `清除已保存配置` 删除。
 - 一键运行并写入 `my_task_output`。
@@ -499,32 +499,21 @@ video_clips/runninghub_video_query_response.json
 
 ## 生图和生视频参数
 
-管理台的生图/视频配置已经精简为常用参数优先。多数模型内部参数保留在代码和配置中，但默认不在页面展示。
-
-生图常用参数：
+管理台的生图/视频配置已经精简为普通用户只填两类信息：
 
 ```text
-工具、模型、尺寸/画幅、每镜头图片数、风格、质量、负面提示词、一致性重点、平台密钥、平台接口地址
+参考图、正向提示词
 ```
 
-生图隐藏高级参数：
+生图正向提示词用于 `06_分镜生图设计师` 生成关键帧提示词和参考图使用策略。生视频正向提示词用于 `07_视频生成执行员` 生成视频画面提示词和镜头清单，并供 `21_ComfyUI成片编排师` 整理节点映射。
+
+其他模型参数不要在管理台普通界面里堆叠，统一放在实际工作流里维护：
 
 ```text
-Seed、Guidance/CFG、Steps、Denoise Strength、Sampler、LoRA / ControlNet / IP-Adapter / Face reference、RunningHub Endpoint、nodeInfoList JSON、实例规格、轮询超时
+生图：模型、尺寸、seed、steps、CFG、denoise、采样器、LoRA、ControlNet、IP-Adapter、负向词、RunningHub endpoint、nodeInfoList
+生视频：模型、画幅、时长、FPS、分辨率、运动强度、镜头运动、首帧强度、负向词、RunningHub endpoint、nodeInfoList
 ```
 
-生视频常用参数：
-
-```text
-工具、模型、画幅、目标时长、风格、画面与运动要求、负面提示词、平台密钥、平台接口地址
-```
-
-`画面与运动要求` 用自然语言合并填写镜头运动、节奏、转场、人物动作、首帧/参考图使用方式等信息。常规用户不需要单独理解 FPS、Frames、Guidance、Image Strength 这类模型内部参数。
-
-生视频隐藏高级参数：
-
-```text
-Seed、FPS、分辨率、运动强度、镜头运动、Guidance、Frames、Image Strength、Camera Path / Shot Notes、Audio / Subtitle Notes、Advanced Model Params、RunningHub Video Endpoint、nodeInfoList JSON、轮询超时
-```
+这些高级字段仍保留在代码和浏览器本地配置中，用于兼容旧设置、RunningHub 调用和 ComfyUI API JSON 自动识别；但默认不再暴露给普通用户填写。
 
 隐藏字段仍保留默认值并继续写入 `image_config` 和 `video_config`，避免破坏 RunningHub 适配器。API Key 仍只用于本次请求，不写入任务输出文件。

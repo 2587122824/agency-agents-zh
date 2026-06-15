@@ -1436,3 +1436,21 @@ Adapter updates:
   - `{{height}}`
 - Placeholder replacement is now recursive over parsed JSON values instead of raw string replacement, so quotes/newlines inside prompts do not corrupt JSON.
 - Default `comfyui_payload.json` now includes `negative_prompt`, `reference_image`, `seed`, `width`, and `height` fields for future mapping.
+
+## Minimal Media Prompt UI
+
+[2026-06-15 +08:00] command: simplified image and video generation controls after the user said the page had too many parameters and only wanted reference image plus positive prompt.
+
+Management UI behavior:
+
+- `生图配置` now exposes only `生图正向提示词`.
+- `视频生成配置` now exposes only `生视频正向提示词`.
+- Reference images remain in the separate reference-image upload section with local thumbnail preview.
+- Existing detailed image/video fields remain hidden in the DOM for compatibility with browser localStorage, RunningHub adapters, and ComfyUI API JSON node mapping.
+- `/api/run` now sends `image_config.positive_prompt` and `video_config.positive_prompt`.
+- Staff prompt context now tells 06/07/20/21 that model parameters such as size, seed, steps, CFG, sampler, duration, FPS, motion, resolution, and negative prompts should come from ComfyUI/RunningHub workflow configuration or imported API JSON mappings rather than user-facing form fields.
+
+Production package behavior:
+
+- `production_manifest.json` records `image_generation.positive_prompt` and `video_generation.positive_prompt`.
+- Default `comfyui_payload.json` includes `image_prompt` and `video_prompt` placeholders for later node mapping.
