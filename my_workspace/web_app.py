@@ -967,7 +967,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="reference-list" id="comfyParameterMapper"></div>
           </div>
         </details>
-        <details>
+        <details hidden>
           <summary><strong>生图配置</strong> <span class="muted small">只填正向提示词；参考图在下方单独上传，其余参数在 ComfyUI 工作流里配置</span></summary>
           <div class="details-body">
             <div class="provider-grid">
@@ -1097,7 +1097,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
         </details>
-        <details>
+        <details hidden>
           <summary><strong>视频生成配置</strong> <span class="muted small">只填正向提示词；镜头、尺寸、采样等参数在视频工作流里配置</span></summary>
           <div class="details-body">
             <div class="provider-grid">
@@ -3250,53 +3250,53 @@ INDEX_HTML = r"""<!doctype html>
         await ensureLocalModelReady(model);
         const referenceImages = await uploadReferenceImages();
         const imageConfig = {
-          tool: els.imageTool.value,
-          positive_prompt: els.imagePositivePrompt.value.trim(),
-          model: els.imageModel.value.trim(),
-          size: els.imageSize.value,
-          count_per_shot: els.imageCount.value,
-          style: els.imageStyle.value.trim(),
-          quality: els.imageQuality.value,
-          negative_prompt: els.imageNegativePrompt.value.trim(),
-          consistency: els.imageConsistency.value.trim(),
-          seed: els.imageSeed.value.trim(),
-          guidance_scale: els.imageGuidance.value.trim(),
-          steps: els.imageSteps.value.trim(),
-          denoise_strength: els.imageDenoise.value.trim(),
-          sampler: els.imageSampler.value.trim(),
-          control: els.imageControl.value.trim(),
-          api_key_provided: Boolean(els.imageApiKey.value.trim()),
-          base_url_provided: Boolean(els.imageBaseUrl.value.trim()),
-          workflow_endpoint: els.imageWorkflowEndpoint.value.trim(),
-          instance_type: els.imageInstanceType.value,
-          node_info_list_json: els.imageNodeInfoList.value.trim(),
-          poll_timeout_seconds: Number(els.imagePollTimeout.value || 900),
+          tool: 'prompt_only',
+          positive_prompt: '',
+          model: '',
+          size: '',
+          count_per_shot: '',
+          style: '',
+          quality: '',
+          negative_prompt: '',
+          consistency: '',
+          seed: '',
+          guidance_scale: '',
+          steps: '',
+          denoise_strength: '',
+          sampler: '',
+          control: '',
+          api_key_provided: false,
+          base_url_provided: false,
+          workflow_endpoint: '',
+          instance_type: '',
+          node_info_list_json: '',
+          poll_timeout_seconds: 900,
         };
         const videoConfig = {
-          tool: els.videoTool.value,
-          positive_prompt: els.videoPositivePrompt.value.trim(),
-          model: els.videoModel.value.trim(),
-          aspect_ratio: els.videoAspect.value,
-          duration: els.videoDuration.value,
-          style: els.videoStyle.value.trim(),
-          prompt_notes: els.videoPromptNotes.value.trim(),
-          negative_prompt: els.videoNegativePrompt.value.trim(),
-          seed: els.videoSeed.value.trim(),
-          fps: els.videoFps.value,
-          motion_strength: els.videoMotionStrength.value,
-          camera_motion: els.videoCameraMotion.value,
-          resolution: els.videoResolution.value,
-          guidance_scale: els.videoGuidance.value.trim(),
-          frames: els.videoFrames.value.trim(),
-          image_strength: els.videoImageStrength.value.trim(),
-          camera_path: els.videoCameraPath.value.trim(),
-          audio_notes: els.videoAudioNotes.value.trim(),
-          advanced_params: els.videoAdvancedParams.value.trim(),
-          api_key_provided: Boolean(els.videoApiKey.value.trim()),
-          base_url_provided: Boolean(els.videoBaseUrl.value.trim()),
-          workflow_endpoint: els.videoWorkflowEndpoint.value.trim(),
-          node_info_list_json: els.videoNodeInfoList.value.trim(),
-          poll_timeout_seconds: Number(els.videoPollTimeout.value || 1800),
+          tool: 'prompt_only',
+          positive_prompt: '',
+          model: '',
+          aspect_ratio: '',
+          duration: '',
+          style: '',
+          prompt_notes: '',
+          negative_prompt: '',
+          seed: '',
+          fps: '',
+          motion_strength: '',
+          camera_motion: '',
+          resolution: '',
+          guidance_scale: '',
+          frames: '',
+          image_strength: '',
+          camera_path: '',
+          audio_notes: '',
+          advanced_params: '',
+          api_key_provided: false,
+          base_url_provided: false,
+          workflow_endpoint: '',
+          node_info_list_json: '',
+          poll_timeout_seconds: 1800,
         };
         const productionConfig = {
           mode: els.autoProductionMode.value,
@@ -3334,10 +3334,10 @@ INDEX_HTML = r"""<!doctype html>
             image_config: imageConfig,
             video_config: videoConfig,
             reference_images: referenceImages,
-            image_api_key: els.imageApiKey.value.trim(),
-            image_base_url: els.imageBaseUrl.value.trim(),
-            video_api_key: els.videoApiKey.value.trim(),
-            video_base_url: els.videoBaseUrl.value.trim(),
+            image_api_key: '',
+            image_base_url: '',
+            video_api_key: '',
+            video_base_url: '',
             comfy_api_key: els.comfyApiKey.value.trim(),
             comfy_base_url: els.comfyBaseUrl.value.trim(),
           }),
@@ -3675,10 +3675,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
                     production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
             image_config = payload.get("image_config") or {}
-            if image_config:
+            if isinstance(image_config, dict) and str(image_config.get("positive_prompt") or "").strip():
                 user_input = self._append_image_config(user_input, image_config)
             video_config = payload.get("video_config") or {}
-            if video_config:
+            if isinstance(video_config, dict) and str(video_config.get("positive_prompt") or "").strip():
                 user_input = self._append_video_config(user_input, video_config)
             if isinstance(production_config, dict):
                 compose_config = production_config.get("compose_config") or {}

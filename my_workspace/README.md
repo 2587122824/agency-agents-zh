@@ -194,7 +194,7 @@ runtime/models/
 - 点击 `游戏示例` 会自动切换到 `Unity3D游戏Steam上架` 工作流，并填入一份适合单人/小团队的 Unity 3D Steam 游戏需求。
 - 可填写 `任务名称`，用于生成更容易识别的任务输出目录和历史任务标题；留空则继续使用工作流名。
 - 输入原始内容需求。
-- 管理台首屏保留核心输入，模型接口、记忆继承、生图配置、视频生成和参考图放在折叠配置区中，减少配置项堆叠。
+- 管理台首屏保留核心输入、模型接口、记忆继承、全自动生成、ComfyUI 映射和参考图；生图/生视频提示词不再单独填写，由工作流员工自动生成。
 - `系统状态` 页面可查看 Python、任务输出目录、知识库目录、动作工作区、Ollama 命令和 Ollama 模型服务状态。
 - `模型接口配置` 里可以点击 `一键本地离线模式`，自动填好 Ollama、`local`、`http://127.0.0.1:11434/v1` 和 `qwen3:8b-q4_K_M`。
 - `模型接口配置` 里可以设置 `模型超时`。本地 Ollama 推荐 900 秒；长流程或上下文很长时可以调到 1800 秒。
@@ -209,11 +209,10 @@ runtime/models/
 - 可在 `模型接口配置` 里选择本地模型预设，例如 Ollama、LM Studio、vLLM、Xinference；选择后会自动填入本地 Base URL、local API Key，并切换到自定义模型名。
 - 可点击 `测试当前模型接口`，管理台会调用 OpenAI-compatible `/chat/completions` 做一次连通性测试。
 - 可在 `记忆与继承` 里上传 `.md/.txt/.json/.csv` 到 `my_knowledge_base`，并选择是否把本地知识库追加到本次工作流输入。
-- 在 `生图配置` 中只填写生图正向提示词；模型、尺寸、seed、steps、CFG、采样器和负向词等参数建议在 ComfyUI/RunningHub 工作流或 API JSON 节点映射中配置。
-- 在 `视频生成配置` 中只填写生视频正向提示词；画幅、时长、运动强度、镜头、FPS、分辨率和负向词等参数建议在视频/ComfyUI 工作流或 API JSON 节点映射中配置。
+- 生图和生视频不再提供单独输入区；画面、镜头和生成提示词交给 `02_短视频编导`、`06_分镜生图设计师`、`07_视频生成执行员` 在工作流内生成。
 - 可在 `参考图` 区域上传图片，并标注用途和说明。选择图片后会显示本地缩略图预览；图片保存到 `my_reference_images/`，任务输入只记录本地路径和说明，供 06、07、20、21 号员工生成参考图使用方案和 ComfyUI 参数映射。
 - 在 `长期记忆` 中选择是否启用 `my_memory`，并可在 `继承历史任务` 中选择上一条任务来保持系列视频的人物和风格连续性。
-- 管理台会把 API Key、Base URL、模型选择、生图配置和视频生成配置默认保存到当前浏览器的 `localStorage`，下次打开自动填回；可点击 `清除已保存配置` 删除。
+- 管理台会把 API Key、Base URL、模型选择、ComfyUI 映射和参考图说明默认保存到当前浏览器的 `localStorage`，下次打开自动填回；可点击 `清除已保存配置` 删除。
 - 一键运行并写入 `my_task_output`。
 - 运行工作流时会显示进度条和每一步员工状态；后台通过 `/api/run-status` 查询当前运行状态。
 - 查看历史任务、每一步的 `prompt.md`、`output.md` 和最终 `final_output.md`。
@@ -442,17 +441,16 @@ my_deploy/OFFLINE_DEPLOY.md
 
 ## RunningHub 云端生图接入
 
-管理台现在支持在 `全自动生成 -> 调用 API 生成` 模式下调用 RunningHub 云端 ComfyUI 生图工作流。
+早期版本支持在 `全自动生成 -> 调用 API 生成` 模式下单独调用 RunningHub 云端 ComfyUI 生图工作流。当前管理台已隐藏单独的生图配置入口，推荐使用 `全自动生成 -> ComfyUI 全自动成片` 和 API JSON 节点映射统一调用。
 
 使用方式：
 
 1. 打开管理台 `http://127.0.0.1:8765`。
 2. 在 `全自动生成` 中选择 `调用 API 生成`。
-3. 在 `生图配置` 中选择 `RunningHub Cloud ComfyUI`。
-4. 填入 `生图平台 API Key`。
-5. Base URL 使用 `https://www.runninghub.cn/openapi/v2`。
-6. 工作流接口使用 `/run/workflow/2048294089858228226`。
-7. `nodeInfoList JSON` 默认可填 `[]`；如果 RunningHub 工作流需要改节点参数，可填 RunningHub 要求的节点参数数组，并可在字符串中使用 `{{prompt}}` 注入 06 号员工生成的提示词。
+3. 在 `全自动生成` 中选择 ComfyUI 全自动成片路径。
+4. 填入成片平台密钥、接口地址和工作流接口。
+5. 导入 ComfyUI API JSON，选择需要映射的节点参数。
+6. 使用 `{{prompt}}`、`{{image_prompt}}`、`{{video_prompt}}`、`{{reference_image}}` 等占位符注入工作流员工生成的内容。
 
 运行成功后，任务目录会额外生成：
 
@@ -468,19 +466,18 @@ production_manifest.json
 
 - API Key 只通过本次请求传给适配器，不写入 `production_manifest.json` 或任务输出。
 - RunningHub 返回的结果 URL 通常 24 小时有效，适配器会立即下载到本地 `generated_images/`。
-- 当前只接入生图；视频生成仍先输出制作包和提示词，后续再接视频 API。
+- 单独生图 API 入口不再作为普通管理台流程使用；统一走 ComfyUI/RunningHub 成片配置。
 
 ## RunningHub 云端视频接入
 
-管理台现在也支持在 `全自动生成 -> 调用 API 生成` 模式下调用 RunningHub AI App 视频接口。
+早期版本也支持在 `全自动生成 -> 调用 API 生成` 模式下调用 RunningHub AI App 视频接口。当前管理台已隐藏单独的视频配置入口，推荐统一走 ComfyUI/RunningHub 成片配置。
 
 使用方式：
 
-1. 在 `视频生成配置` 中选择 `RunningHub AI App`。
-2. 填入 `视频平台 API Key`。
-3. Base URL 使用 `https://www.runninghub.cn/openapi/v2`。
-4. Video Endpoint 使用 `/run/ai-app/2066043648160133122`。
-5. `RunningHub Video nodeInfoList JSON` 默认可填 `[]`；如需把 07 号员工生成的视频提示词写入某个节点，可在 JSON 字符串中使用 `{{prompt}}`。
+1. 在 `全自动生成` 中选择 ComfyUI 全自动成片路径。
+2. 填入成片平台密钥、接口地址和工作流接口。
+3. 导入 ComfyUI API JSON，选择视频相关节点参数。
+4. 如需把员工生成的视频提示词写入某个节点，可在节点映射中使用 `{{video_prompt}}` 或 `{{prompt}}`。
 
 运行成功后，任务目录会额外生成：
 
@@ -499,13 +496,13 @@ video_clips/runninghub_video_query_response.json
 
 ## 生图和生视频参数
 
-管理台的生图/视频配置已经精简为普通用户只填两类信息：
+管理台的生图/视频配置已经收敛为普通用户只提供：
 
 ```text
-参考图、正向提示词
+原始需求、参考图
 ```
 
-生图正向提示词用于 `06_分镜生图设计师` 生成关键帧提示词和参考图使用策略。生视频正向提示词用于 `07_视频生成执行员` 生成视频画面提示词和镜头清单，并供 `21_ComfyUI成片编排师` 整理节点映射。
+具体生图/生视频提示词由 `02_短视频编导` 先根据原始需求设计内容和镜头方向，再由 `06_分镜生图设计师` 拆成关键帧方案，由 `07_视频生成执行员` 整理成视频生成包，并供 `21_ComfyUI成片编排师` 整理节点映射。
 
 其他模型参数不要在管理台普通界面里堆叠，统一放在实际工作流里维护：
 
@@ -514,6 +511,6 @@ video_clips/runninghub_video_query_response.json
 生视频：模型、画幅、时长、FPS、分辨率、运动强度、镜头运动、首帧强度、负向词、RunningHub endpoint、nodeInfoList
 ```
 
-这些高级字段仍保留在代码和浏览器本地配置中，用于兼容旧设置、RunningHub 调用和 ComfyUI API JSON 自动识别；但默认不再暴露给普通用户填写。
+这些高级字段仍保留在代码中，用于兼容旧设置和适配器结构；但默认不再暴露给普通用户填写，运行时也不会把单独的生图/生视频配置追加到员工输入。
 
-隐藏字段仍保留默认值并继续写入 `image_config` 和 `video_config`，避免破坏 RunningHub 适配器。API Key 仍只用于本次请求，不写入任务输出文件。
+`image_config` 和 `video_config` 仍保留空的兼容结构，避免破坏制作包和适配器代码；实际执行建议走 ComfyUI/RunningHub 成片配置和 API JSON 节点映射。
