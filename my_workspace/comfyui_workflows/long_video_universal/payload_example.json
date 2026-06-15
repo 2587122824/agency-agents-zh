@@ -1,0 +1,47 @@
+{
+  "project_type": "long_video",
+  "execution_mode": "comfy_preview_then_edit",
+  "title": "长视频标题",
+  "aspect_ratio": "9:16",
+  "width": 1080,
+  "height": 1920,
+  "target_duration": "8-15min",
+  "prompt": "长视频统一风格与主体描述",
+  "negative_prompt": "低清晰度，错误文字，人物变形，画面闪烁，风格不一致",
+  "reference_images": [
+    {
+      "role": "人物一致性",
+      "path_or_url": "",
+      "note": "用于统一主角形象"
+    }
+  ],
+  "chapters": [
+    {
+      "chapter_no": 1,
+      "title": "开场钩子",
+      "duration": "30-60s",
+      "voice_text": "",
+      "subtitle_srt": "",
+      "visual_prompt": "",
+      "b_roll_prompt": "",
+      "editing_notes": ""
+    }
+  ],
+  "voice": {
+    "voice_text": "",
+    "voice_file": "",
+    "style": "自然，清晰，有节奏"
+  },
+  "subtitles": {
+    "srt": "",
+    "style": "大号白字，黑色描边，关键词高亮"
+  },
+  "music_and_sfx": {
+    "bgm_style": "轻节奏，不抢人声",
+    "sfx_notes": "转场、强调、点击等轻量音效"
+  },
+  "final_editing": {
+    "tool": "剪辑工具或 22_剪辑成片执行师",
+    "rule": "ComfyUI 输出只作为素材或预览，最终成片以剪辑时间线为准"
+  }
+}

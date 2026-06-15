@@ -355,6 +355,18 @@ ComfyUI 节点映射 JSON：RunningHub nodeInfoList 数组，可使用 {{payload
 
 可以在管理台直接导入 ComfyUI 导出的 API JSON。管理台会在浏览器本地识别 API JSON 中可覆盖的节点输入，例如 `CLIPTextEncode.text`、`LoadImage.image`、`KSampler.seed/steps/cfg/denoise`、`EmptySD3LatentImage.width/height`，然后让你勾选哪些字段要传参，并自动生成 `nodeInfoList`。
 
+项目内置了一个长视频通用模板：
+
+```text
+my_workspace/comfyui_workflows/long_video_universal/
+  long_video_universal_api_template.json
+  runninghub_node_info_list_preset.json
+  payload_example.json
+  README.md
+```
+
+这个模板优先用于管理台参数识别和 RunningHub 映射预设：只把正向提示词、负向提示词、参考图、配音文本、字幕 SRT 和完整制作包暴露为动态参数；模型、采样器、分辨率、字幕样式、音频混合、转场和最终成片逻辑建议固定在真实 ComfyUI / RunningHub 工作流里维护。
+
 注意：
 
 ```text

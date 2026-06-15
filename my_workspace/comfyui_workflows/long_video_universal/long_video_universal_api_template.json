@@ -1,0 +1,156 @@
+{
+  "10": {
+    "inputs": {
+      "text": "{{prompt}}",
+      "clip": [
+        "30",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "主提示词入口"
+    }
+  },
+  "11": {
+    "inputs": {
+      "text": "{{negative_prompt}}",
+      "clip": [
+        "30",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "负向提示词入口"
+    }
+  },
+  "12": {
+    "inputs": {
+      "image": "{{reference_image}}",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "参考图入口"
+    }
+  },
+  "13": {
+    "inputs": {
+      "text": "{{voice_text}}",
+      "clip": [
+        "30",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "配音文案入口"
+    }
+  },
+  "14": {
+    "inputs": {
+      "text": "{{subtitle_srt}}",
+      "clip": [
+        "30",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "字幕 SRT 入口"
+    }
+  },
+  "15": {
+    "inputs": {
+      "text": "{{payload}}",
+      "clip": [
+        "30",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "完整长视频制作包入口"
+    }
+  },
+  "20": {
+    "inputs": {
+      "width": 1080,
+      "height": 1920,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "画幅尺寸"
+    }
+  },
+  "21": {
+    "inputs": {
+      "seed": 123456,
+      "steps": 24,
+      "cfg": 6.5,
+      "sampler_name": "euler",
+      "scheduler": "normal",
+      "denoise": 0.75,
+      "model": [
+        "30",
+        0
+      ],
+      "positive": [
+        "10",
+        0
+      ],
+      "negative": [
+        "11",
+        0
+      ],
+      "latent_image": [
+        "20",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "关键帧采样参数"
+    }
+  },
+  "22": {
+    "inputs": {
+      "samples": [
+        "21",
+        0
+      ],
+      "vae": [
+        "30",
+        2
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "关键帧解码"
+    }
+  },
+  "23": {
+    "inputs": {
+      "filename_prefix": "long_video/keyframe",
+      "images": [
+        "22",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "保存关键帧"
+    }
+  },
+  "30": {
+    "inputs": {
+      "ckpt_name": "your_model.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "模型加载"
+    }
+  }
+}

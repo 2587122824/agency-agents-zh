@@ -313,6 +313,16 @@ Base URL: https://www.runninghub.cn/openapi/v2
 
 API keys are used only in memory for the request and must not be written to repo or task output.
 
+Long-video ComfyUI template:
+
+```text
+my_workspace/comfyui_workflows/long_video_universal/long_video_universal_api_template.json
+my_workspace/comfyui_workflows/long_video_universal/runninghub_node_info_list_preset.json
+my_workspace/comfyui_workflows/long_video_universal/payload_example.json
+```
+
+This template exposes only dynamic fields for management UI mapping: `{{prompt}}`, `{{negative_prompt}}`, `{{reference_image}}`, `{{voice_text}}`, `{{subtitle_srt}}`, and `{{payload}}`. Keep model, sampler, resolution, subtitle style, transitions, audio mix, and final composition in the real ComfyUI/RunningHub workflow.
+
 ## Current Verification Snapshot
 
 Recently verified:
