@@ -1786,6 +1786,41 @@ INDEX_HTML = r"""<!doctype html>
       els.status.classList.toggle('error', isError);
     }
 
+    function buttonLabel(button) {
+      return (button.textContent || button.title || button.getAttribute('aria-label') || '按钮')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function showButtonFeedback(button) {
+      if (!button || button.disabled) return;
+      const label = buttonLabel(button);
+      if (!label) return;
+      if (button.dataset.viewTarget) {
+        setStatus(`正在切换：${label}`);
+        return;
+      }
+      const currentView = document.body.dataset.view || 'run';
+      const message = `正在处理：${label}`;
+      if (currentView === 'staff') {
+        setStaffStatus(message);
+      } else if (currentView === 'workflow') {
+        setWorkflowEditorStatus(message);
+      } else if (currentView === 'system') {
+        setHealthStatus(message);
+      } else {
+        setStatus(message);
+      }
+    }
+
+    function bindButtonClickFeedback() {
+      document.addEventListener('click', event => {
+        const button = event.target.closest('button');
+        if (!button) return;
+        showButtonFeedback(button);
+      }, true);
+    }
+
     function showView(viewName) {
       document.body.dataset.view = viewName;
       for (const view of views) {
@@ -3915,6 +3950,7 @@ INDEX_HTML = r"""<!doctype html>
       renderReferenceFiles();
     };
     bindSettingsPersistence();
+    bindButtonClickFeedback();
     renderReferenceFiles();
     renderOutputOverview(null);
 
