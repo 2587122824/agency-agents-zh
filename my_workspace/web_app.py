@@ -2250,8 +2250,8 @@ INDEX_HTML = r"""<!doctype html>
         const item = byId.get(defaultItem.id) || {};
         return {
           ...defaultItem,
-          name: String(item.name || defaultItem.name),
-          purpose: String(item.purpose || defaultItem.purpose),
+          name: defaultItem.name,
+          purpose: defaultItem.purpose,
           endpoint: String(item.endpoint || ''),
           nodeInfoList: String(item.nodeInfoList || item.node_info_list_json || defaultItem.nodeInfoList),
           pollTimeout: String(item.pollTimeout || item.poll_timeout_seconds || defaultItem.pollTimeout),
