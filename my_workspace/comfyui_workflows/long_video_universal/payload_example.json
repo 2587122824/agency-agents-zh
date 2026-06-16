@@ -20,26 +20,11 @@
       "chapter_no": 1,
       "title": "开场钩子",
       "duration": "30-60s",
-      "voice_text": "",
-      "subtitle_srt": "",
       "visual_prompt": "",
       "b_roll_prompt": "",
       "editing_notes": ""
     }
   ],
-  "voice": {
-    "owner": "20_语音字幕包装师",
-    "voice_text": "",
-    "voice_file": "audio/voiceover.wav",
-    "style": "自然，清晰，有节奏"
-  },
-  "subtitles": {
-    "owner": "20_语音字幕包装师",
-    "srt": "subtitles.srt",
-    "style": "大号白字，黑色描边，关键词高亮",
-    "comfyui_usage": "preview_only",
-    "final_burn_owner": "22_剪辑成片执行师"
-  },
   "music_and_sfx": {
     "owner": "20_语音字幕包装师",
     "bgm_style": "轻节奏，不抢人声",

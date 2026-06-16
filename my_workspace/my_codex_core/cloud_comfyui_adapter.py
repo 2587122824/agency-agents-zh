@@ -137,8 +137,6 @@ class CloudComfyUIAdapter:
         node_info = self._parse_node_info_list(compose_config)
         replacements = {
             "{{payload}}": json.dumps(comfyui_payload, ensure_ascii=False),
-            "{{voice_text}}": str(comfyui_payload.get("voice_text") or ""),
-            "{{subtitle_srt}}": str(comfyui_payload.get("subtitle_srt") or ""),
             "{{negative_prompt}}": str(comfyui_payload.get("negative_prompt") or ""),
             "{{image_prompt}}": self._first_list_or_value(comfyui_payload, "image_prompts", "image_prompt"),
             "{{video_prompt}}": self._first_list_or_value(comfyui_payload, "video_prompts", "video_prompt"),
@@ -260,7 +258,7 @@ class CloudComfyUIAdapter:
 
     @staticmethod
     def _first_prompt(payload: dict[str, Any]) -> str:
-        for key in ("video_prompt", "image_prompt", "prompt", "voice_text"):
+        for key in ("video_prompt", "image_prompt", "prompt"):
             value = payload.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()[:8000]

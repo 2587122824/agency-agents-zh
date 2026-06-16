@@ -10,6 +10,10 @@
 
 Latest update on 2026-06-15:
 
+- Removed audio and subtitle responsibilities from the ComfyUI step. ComfyUI workflow-library slots now only map visual-material inputs such as prompt, negative prompt, reference image, seed, width, and height. Slots `05` and `06` are now visual-material helpers (`字幕安全区画面素材`, `剪辑节奏画面素材`) instead of audio/subtitle composition templates. `voice_text`, `subtitle_srt`, and `subtitle_style` are no longer included in ComfyUI node mapping defaults or generated `comfyui_payload.json`; the management UI sanitizes old browser-cached node mappings that still contain those placeholders or nodes `5101-5103`. Audio, subtitles, hard subtitles, mix, and final export belong to `20_语音字幕包装师` and `22_剪辑成片执行师`.
+- Added a full-auto material quality gate for ComfyUI `comfy_full` runs: management UI now exposes `素材自动评审`, `最多尝试次数`, and `最低通过分`; `production_pipeline.py` retries ComfyUI attempts in `comfyui/attempt_XX/`, scores by API success, downloaded files, and file size, writes `comfyui/auto_quality_report.json`, and keeps the best result. Missing API configuration stops after one skipped attempt.
+- Updated all LTX-based ComfyUI workflow-library canvases (`02`-`06`) to use the user's visible node model names: `ltx-2.3-22b-dev-fp8.safetensors`, `gemma_3_12B_it.safetensors`, and `ltx-2.3-22b-distilled-lora-384-1.1.safetensors` without the old `ltxv/ltx2/` LoRA path prefix.
+- Fixed the LTX reference-image templates `02_ltx_video_2_3` and `03_reference_consistency`: `bypass_i2v` is now false by default, I2V reference strength is raised to 0.9 / 1.0, and the RunningHub presets now target the real canvas nodes (`2004.image`, `2483.text`, `2612.text`) instead of old demo nodes (`10/11/12`). If the browser has old workflow-library settings in localStorage, reset the slot or re-import the new preset before testing.
 - Refined the ComfyUI workflow library UI: the library list now shows only the selected slot, changing the dropdown loads that slot's saved endpoint/nodeInfoList/timeout/purpose into the editable fields, and node mapping/import/timeout controls were moved directly under the workflow-library selector before voice settings.
 - Improved form alignment in the management UI: provider-grid forms now top-align controls, and the ComfyUI node-mapping row uses a shorter textarea so file import and timeout controls no longer stretch vertically.
 - Improved ComfyUI API JSON mapping UX: imported node candidates render in a compact, height-limited scrolling panel so large workflows do not stretch the page; saving the selected workflow-library slot now persists the slot to browser localStorage and clears the temporary imported API JSON file/candidate list while keeping the saved nodeInfoList.
@@ -312,8 +316,6 @@ The management UI can import ComfyUI API-format JSON and map node inputs to:
 {{image_prompt}}
 {{video_prompt}}
 {{reference_image}}
-{{voice_text}}
-{{subtitle_srt}}
 {{payload}}
 {{seed}}
 {{width}}
@@ -336,7 +338,7 @@ my_workspace/comfyui_workflows/long_video_universal/runninghub_node_info_list_pr
 my_workspace/comfyui_workflows/long_video_universal/payload_example.json
 ```
 
-This template exposes only dynamic fields for management UI mapping: `{{prompt}}`, `{{negative_prompt}}`, `{{reference_image}}`, `{{voice_text}}`, `{{subtitle_srt}}`, and `{{payload}}`. Keep model, sampler, resolution, transitions, and material-generation logic in the real ComfyUI/RunningHub workflow. Use `{{subtitle_srt}}` for preview or draft automation; final subtitle burn, final audio mix, and final export are handled by `22_剪辑成片执行师` / editing tools by default.
+This template exposes only dynamic fields for visual-material mapping: `{{prompt}}`, `{{negative_prompt}}`, `{{reference_image}}`, and `{{payload}}`. Keep model, sampler, resolution, transitions, and material-generation logic in the real ComfyUI/RunningHub workflow. Final subtitle burn, final audio mix, and final export are handled by `20_语音字幕包装师` / `22_剪辑成片执行师` / editing tools by default.
 
 ## Current Verification Snapshot
 

@@ -15,16 +15,6 @@
     "fieldValue": "{{reference_image}}"
   },
   {
-    "nodeId": "13",
-    "fieldName": "text",
-    "fieldValue": "{{voice_text}}"
-  },
-  {
-    "nodeId": "14",
-    "fieldName": "text",
-    "fieldValue": "{{subtitle_srt}}"
-  },
-  {
     "nodeId": "15",
     "fieldName": "text",
     "fieldValue": "{{payload}}"

@@ -62,7 +62,7 @@
     {
       "step": 9,
       "agent": "21_ComfyUI成片编排师",
-      "task": "把获客分镜生图、视频画面和语音字幕参数整理成 ComfyUI / RunningHub 素材生成与参数编排方案；ComfyUI 字幕默认只做预览或自动化草稿，AI 片段只是辅助素材。",
+      "task": "把获客分镜生图和视频画面参数整理成 ComfyUI / RunningHub 画面素材生成与参数编排方案；配音和字幕不传给 ComfyUI，AI 片段只是辅助素材。",
       "output": "获客 ComfyUI 素材生成编排方案"
     },
     {

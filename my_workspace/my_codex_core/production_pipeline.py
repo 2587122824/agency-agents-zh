@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ def run_auto_production(
     video_config = config.get("video_config") or {}
     compose_config = config.get("compose_config") or {}
     voice_config = config.get("voice_config") or {}
+    quality_config = config.get("quality_config") or {}
 
     paths = _create_output_dirs(task_dir)
     image_step = _find_step(step_outputs, "06_")
@@ -55,11 +57,19 @@ def run_auto_production(
     _write_text(video_prompt_path, video_content or "# 视频生成提示词\n\n未找到 07_视频生成执行员输出。\n")
     _write_text(audio_package_path, audio_content or "# 语音字幕制作包\n\n未找到 20_语音字幕包装师输出。\n")
     voice_text = _extract_section(audio_content, "TTS 配音稿") or "待从 20_语音字幕包装师输出中整理配音稿。\n"
+    subtitle_srt = _extract_srt(audio_content) or _default_srt()
     _write_text(voiceover_path, voice_text)
-    _write_text(subtitles_path, _extract_srt(audio_content) or _default_srt())
+    _write_text(subtitles_path, subtitle_srt)
     _write_text(comfyui_plan_path, compose_content or "# ComfyUI 素材生成编排方案\n\n未找到 21_ComfyUI素材编排师输出。\n")
     _write_text(edit_plan_path, edit_content or "# 剪辑成片执行方案\n\n未找到 22_剪辑成片执行师输出。\n")
-    _write_text(comfyui_payload_path, _extract_json_block(compose_content) or _default_comfyui_payload(mode, final_video_name, video_config, voice_text))
+    comfyui_payload_text = (
+        _extract_json_block(compose_content)
+        or _default_comfyui_payload(mode, final_video_name, video_config)
+    )
+    _write_text(
+        comfyui_payload_path,
+        _ensure_comfyui_payload_defaults(comfyui_payload_text, mode, final_video_name, video_config),
+    )
     _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, compose_step, edit_step, image_config, video_config, compose_config))
 
     if mode == "api_ready":
@@ -138,6 +148,10 @@ def run_auto_production(
             "workflow_preset_purpose": str(compose_config.get("workflow_preset_purpose") or ""),
             "workflow_library": compose_config.get("workflow_library") if isinstance(compose_config.get("workflow_library"), list) else [],
             "adapter_status": "pending" if mode in {"api_ready", "comfy_full"} or str(compose_config.get("tool") or "").strip().lower() == "ffmpeg" else "not_configured",
+            "quality_gate_enabled": _as_bool(quality_config.get("enabled"), default=True),
+            "quality_min_score": _safe_int(quality_config.get("min_score"), default=70, minimum=0, maximum=100),
+            "quality_max_attempts": _safe_int(quality_config.get("max_attempts"), default=2, minimum=1, maximum=6),
+            "quality_report": "",
         },
         "audio": {
             "provider": voice_config.get("provider") or "",
@@ -184,11 +198,19 @@ def run_auto_production(
             elif video_adapter_result["status"] not in {"skipped", "success"}:
                 manifest["status"] = "video_adapter_failed"
     if mode == "comfy_full":
-        comfyui_adapter_result = _run_comfyui_adapter(comfyui_payload_path, compose_config, paths["comfyui"])
+        comfyui_adapter_result = _run_comfyui_adapter_with_quality_gate(
+            comfyui_payload_path,
+            compose_config,
+            quality_config,
+            paths["comfyui"],
+        )
         if comfyui_adapter_result:
             manifest["composition"]["adapter_status"] = comfyui_adapter_result["status"]
             manifest["composition"]["adapter_manifest"] = comfyui_adapter_result.get("manifest_file", "")
             manifest["composition"]["downloaded_files"] = comfyui_adapter_result.get("downloaded_files", [])
+            manifest["composition"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
+            manifest["composition"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
+            manifest["composition"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
             if comfyui_adapter_result["status"] == "success":
                 manifest["status"] = "comfyui_generated"
             elif comfyui_adapter_result["status"] == "skipped":
@@ -320,6 +342,134 @@ def _run_comfyui_adapter(
     }
 
 
+def _run_comfyui_adapter_with_quality_gate(
+    comfyui_payload_path: Path,
+    compose_config: dict[str, Any],
+    quality_config: dict[str, Any],
+    output_dir: Path,
+) -> dict[str, Any] | None:
+    enabled = _as_bool(quality_config.get("enabled"), default=True)
+    max_attempts = _safe_int(quality_config.get("max_attempts"), default=2, minimum=1, maximum=6)
+    min_score = _safe_int(quality_config.get("min_score"), default=70, minimum=0, maximum=100)
+    min_file_size_kb = _safe_int(quality_config.get("min_file_size_kb"), default=64, minimum=1, maximum=200000)
+    if not enabled:
+        result = _run_comfyui_adapter(comfyui_payload_path, compose_config, output_dir)
+        if result:
+            score = _score_material_result(result, min_file_size_kb)
+            result["quality_score"] = score["score"]
+            result["quality_report"] = str(_write_quality_report(output_dir, [score], score, min_score, enabled=False))
+            result["attempts"] = 1
+        return result
+
+    try:
+        base_payload = json.loads(comfyui_payload_path.read_text(encoding="utf-8"))
+    except Exception:
+        base_payload = {}
+    if not isinstance(base_payload, dict):
+        base_payload = {}
+
+    attempts: list[dict[str, Any]] = []
+    best_result: dict[str, Any] | None = None
+    best_score: dict[str, Any] = {"score": -1}
+    for attempt in range(1, max_attempts + 1):
+        attempt_dir = output_dir / f"attempt_{attempt:02d}"
+        attempt_payload_path = attempt_dir / "comfyui_payload.json"
+        attempt_payload = _payload_for_attempt(base_payload, attempt)
+        attempt_dir.mkdir(parents=True, exist_ok=True)
+        attempt_payload_path.write_text(json.dumps(attempt_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        result = _run_comfyui_adapter(attempt_payload_path, compose_config, attempt_dir)
+        score = _score_material_result(result or {}, min_file_size_kb)
+        score["attempt"] = attempt
+        score["payload_file"] = str(attempt_payload_path)
+        attempts.append(score)
+        if score["score"] > int(best_score.get("score", -1)):
+            best_score = score
+            best_result = result
+        if result and result.get("status") == "skipped":
+            break
+        if result and result.get("status") == "success" and score["score"] >= min_score:
+            break
+
+    report_path = _write_quality_report(output_dir, attempts, best_score, min_score, enabled=True)
+    if not best_result:
+        return {
+            "status": "failed",
+            "quality_score": int(best_score.get("score", 0)),
+            "quality_report": str(report_path),
+            "attempts": len(attempts),
+        }
+    best_result = dict(best_result)
+    best_result["quality_score"] = int(best_score.get("score", 0))
+    best_result["quality_report"] = str(report_path)
+    best_result["attempts"] = len(attempts)
+    if best_result.get("status") == "success" and best_result["quality_score"] < min_score:
+        best_result["status"] = "quality_failed"
+    return best_result
+
+
+def _payload_for_attempt(payload: dict[str, Any], attempt: int) -> dict[str, Any]:
+    data = json.loads(json.dumps(payload, ensure_ascii=False))
+    base_seed = str(data.get("seed") or "").strip()
+    if attempt > 1:
+        if base_seed.isdigit():
+            data["seed"] = str(int(base_seed) + attempt - 1)
+        elif not base_seed:
+            data["seed"] = str(int(time.time()) + attempt)
+        data["attempt_index"] = attempt
+    return data
+
+
+def _score_material_result(result: dict[str, Any], min_file_size_kb: int) -> dict[str, Any]:
+    files = [Path(path) for path in result.get("downloaded_files", []) if path]
+    existing = [path for path in files if path.exists()]
+    total_size = sum(path.stat().st_size for path in existing)
+    score = 0
+    reasons = []
+    if result.get("status") == "success":
+        score += 45
+        reasons.append("接口返回成功")
+    else:
+        reasons.append(f"接口状态：{result.get('status') or 'unknown'}")
+    if existing:
+        score += 30
+        reasons.append(f"已下载 {len(existing)} 个素材文件")
+    else:
+        reasons.append("没有下载到素材文件")
+    if total_size >= min_file_size_kb * 1024:
+        score += 25
+        reasons.append(f"素材总大小 {total_size} bytes 达到阈值")
+    else:
+        reasons.append(f"素材总大小 {total_size} bytes 低于阈值")
+    return {
+        "score": min(score, 100),
+        "status": result.get("status") or "unknown",
+        "downloaded_files": [str(path) for path in existing],
+        "total_size_bytes": total_size,
+        "reasons": reasons,
+        "manifest_file": result.get("manifest_file", ""),
+    }
+
+
+def _write_quality_report(
+    output_dir: Path,
+    attempts: list[dict[str, Any]],
+    best_score: dict[str, Any],
+    min_score: int,
+    enabled: bool,
+) -> Path:
+    report = {
+        "enabled": enabled,
+        "min_score": min_score,
+        "best_score": int(best_score.get("score", 0)),
+        "passed": int(best_score.get("score", 0)) >= min_score,
+        "attempt_count": len(attempts),
+        "attempts": attempts,
+    }
+    path = output_dir / "auto_quality_report.json"
+    path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def _run_video_adapter(
     video_content: str,
     video_config: dict[str, Any],
@@ -441,7 +591,11 @@ def _default_srt() -> str:
     return "1\n00:00:00,000 --> 00:00:03,000\n待从 20_语音字幕包装师输出中整理字幕。\n"
 
 
-def _default_comfyui_payload(mode: str, final_video_name: str, video_config: dict[str, Any], voice_text: str = "") -> str:
+def _default_comfyui_payload(
+    mode: str,
+    final_video_name: str,
+    video_config: dict[str, Any],
+) -> str:
     payload = {
         "execution_mode": mode,
         "image_prompts": [],
@@ -451,9 +605,6 @@ def _default_comfyui_payload(mode: str, final_video_name: str, video_config: dic
         "reference_images": [],
         "reference_image": "",
         "negative_prompt": video_config.get("negative_prompt") or "",
-        "voice_text": voice_text,
-        "subtitle_srt": "",
-        "subtitle_style": "",
         "bgm_style": "",
         "seed": video_config.get("seed") or "",
         "width": "",
@@ -466,6 +617,27 @@ def _default_comfyui_payload(mode: str, final_video_name: str, video_config: dic
         "nodeInfoList": [],
         "notes": "待根据 21_ComfyUI成片编排师输出和实际 ComfyUI 节点补全。",
     }
+    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+
+
+def _ensure_comfyui_payload_defaults(
+    payload_text: str,
+    mode: str,
+    final_video_name: str,
+    video_config: dict[str, Any],
+) -> str:
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        return payload_text
+    if not isinstance(payload, dict):
+        return payload_text
+    defaults = json.loads(_default_comfyui_payload(mode, final_video_name, video_config))
+    for key in ("negative_prompt", "reference_image", "seed"):
+        if not str(payload.get(key) or "").strip():
+            payload[key] = defaults.get(key, "")
+    if not isinstance(payload.get("output"), dict):
+        payload["output"] = defaults.get("output", {})
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 
@@ -524,6 +696,7 @@ def _build_edit_checklist(
             "- 当前版本会生成自动生产资产包、语音字幕包、ComfyUI 素材编排方案、剪辑成片方案和 manifest。",
             "- 当合成工具为 ffmpeg 且本地可找到 ffmpeg.exe，并且已有视频片段、图片或配音音频时，会尝试生成 final_video.mp4。",
             "- 若缺少 FFmpeg 或素材不足，会在 local_ffmpeg_manifest.json 里记录 skipped 原因，不中断工作流。",
+            "- 启用 ComfyUI 全自动生成时，会生成 comfyui/auto_quality_report.json；不合格素材会按配置自动重试，保留最高分结果。",
             "",
         ]
     )
@@ -545,6 +718,8 @@ def _build_production_note(manifest: dict[str, Any]) -> str:
             f"- ComfyUI 参数包：{manifest['files']['comfyui_payload']}",
             f"- 剪辑成片方案：{manifest['files'].get('final_edit_plan', '')}",
             f"- 本地 FFmpeg：{manifest.get('composition', {}).get('adapter_status', '')}",
+            f"- 素材自动评审：{manifest.get('composition', {}).get('quality_score', '')} 分，尝试 {manifest.get('composition', {}).get('quality_attempts', '')} 次",
+            f"- 评审报告：{manifest.get('composition', {}).get('quality_report', '')}",
             f"- 目标视频：{manifest.get('files', {}).get('final_video') or manifest.get('composition', {}).get('target_file', '')}",
             "",
             "下一步可把素材放入 generated_images/、video_clips/ 或生成 audio/voiceover.wav 后，由本地 FFmpeg 适配器合成视频；云端平台仍读取 `production_manifest.json` 中的配置、提示词文件和输出目录。",
@@ -565,3 +740,21 @@ def _safe_file_name(name: str) -> str:
     if "." not in safe:
         safe += ".mp4"
     return safe[:120]
+
+
+def _safe_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return min(max(parsed, minimum), maximum)
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "enabled", "启用"}

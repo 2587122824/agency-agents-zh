@@ -1072,7 +1072,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="reference-list" id="comfyWorkflowLibraryList"></div>
             <div class="provider-grid comfy-mapping-grid">
               <label>ComfyUI 节点映射 JSON
-                <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{voice_text}}、{{subtitle_srt}}、{{payload}}'></textarea>
+                <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{image_prompt}}、{{video_prompt}}、{{reference_image}}、{{payload}}'></textarea>
               </label>
               <label>导入 API JSON 自动识别
                 <input id="comfyApiWorkflowFile" type="file" accept=".json,application/json" />
@@ -1087,6 +1087,30 @@ INDEX_HTML = r"""<!doctype html>
               </label>
             </div>
             <div class="reference-list" id="comfyParameterMapper"></div>
+            <div class="provider-grid">
+              <label>素材自动评审
+                <select id="assetQualityGate">
+                  <option value="on" selected>启用：不合格自动重试</option>
+                  <option value="off">关闭：只跑一次</option>
+                </select>
+              </label>
+              <label>最多尝试次数
+                <select id="assetMaxAttempts">
+                  <option value="1">1 次</option>
+                  <option value="2" selected>2 次</option>
+                  <option value="3">3 次</option>
+                  <option value="4">4 次</option>
+                </select>
+              </label>
+              <label>最低通过分
+                <select id="assetMinScore">
+                  <option value="60">60 分：宽松</option>
+                  <option value="70" selected>70 分：标准</option>
+                  <option value="80">80 分：严格</option>
+                  <option value="90">90 分：很严格</option>
+                </select>
+              </label>
+            </div>
             <div class="provider-grid">
               <label>本地配音
                 <select id="voiceMode">
@@ -1640,6 +1664,9 @@ INDEX_HTML = r"""<!doctype html>
       comfyApiWorkflowFile: document.getElementById('comfyApiWorkflowFile'),
       comfyParameterMapper: document.getElementById('comfyParameterMapper'),
       comfyPollTimeout: document.getElementById('comfyPollTimeout'),
+      assetQualityGate: document.getElementById('assetQualityGate'),
+      assetMaxAttempts: document.getElementById('assetMaxAttempts'),
+      assetMinScore: document.getElementById('assetMinScore'),
       voiceMode: document.getElementById('voiceMode'),
       voiceReferenceFile: document.getElementById('voiceReferenceFile'),
       voiceReferenceAudioPath: document.getElementById('voiceReferenceAudioPath'),
@@ -1804,16 +1831,16 @@ INDEX_HTML = r"""<!doctype html>
       },
       {
         id: 'subtitle_preview',
-        name: '字幕预览合成',
-        purpose: 'LTX-Video 2.3：生成字幕安全区预览素材，SRT 交给预览/剪辑阶段',
+        name: '字幕安全区画面素材',
+        purpose: 'LTX-Video 2.3：生成底部留出字幕安全区的画面素材；字幕交给剪辑步骤处理',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
       },
       {
         id: 'audio_subtitle_video_preview',
-        name: '音频 + 字幕 + 视频片段预览合成',
-        purpose: 'LTX-Video 2.3：生成可与本地配音和 SRT 对齐的预览素材片段',
+        name: '剪辑节奏画面素材',
+        purpose: 'LTX-Video 2.3：生成适合后期配音、字幕和剪辑节奏的视频画面素材；音频和字幕交给剪辑步骤处理',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '7200',
@@ -2095,6 +2122,9 @@ INDEX_HTML = r"""<!doctype html>
         comfyWorkflowLibrary,
         comfyNodeInfoList: els.comfyNodeInfoList.value,
         comfyPollTimeout: els.comfyPollTimeout.value,
+        assetQualityGate: els.assetQualityGate.value,
+        assetMaxAttempts: els.assetMaxAttempts.value,
+        assetMinScore: els.assetMinScore.value,
         voiceMode: els.voiceMode.value,
         voiceReferenceAudioPath: els.voiceReferenceAudioPath.value,
         voiceReferenceText: els.voiceReferenceText.value,
@@ -2183,6 +2213,9 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyWorkflowEndpoint.value = selectedComfyWorkflow?.endpoint || settings.comfyWorkflowEndpoint || '';
       els.comfyNodeInfoList.value = selectedComfyWorkflow?.nodeInfoList || settings.comfyNodeInfoList || '[]';
       setIfExists(els.comfyPollTimeout, selectedComfyWorkflow?.pollTimeout || settings.comfyPollTimeout || '3600');
+      setIfExists(els.assetQualityGate, settings.assetQualityGate || 'on');
+      setIfExists(els.assetMaxAttempts, settings.assetMaxAttempts || '2');
+      setIfExists(els.assetMinScore, settings.assetMinScore || '70');
       renderComfyWorkflowLibraryList();
       setIfExists(els.voiceMode, settings.voiceMode);
       els.voiceReferenceAudioPath.value = settings.voiceReferenceAudioPath || '';
@@ -2248,15 +2281,38 @@ INDEX_HTML = r"""<!doctype html>
       const byId = new Map(saved.filter(item => item && item.id).map(item => [item.id, item]));
       return DEFAULT_COMFY_WORKFLOW_LIBRARY.map(defaultItem => {
         const item = byId.get(defaultItem.id) || {};
+        const savedNodeInfo = String(item.nodeInfoList || item.node_info_list_json || defaultItem.nodeInfoList);
         return {
           ...defaultItem,
           name: defaultItem.name,
           purpose: defaultItem.purpose,
           endpoint: String(item.endpoint || ''),
-          nodeInfoList: String(item.nodeInfoList || item.node_info_list_json || defaultItem.nodeInfoList),
+          nodeInfoList: sanitizeComfyVisualNodeInfoList(savedNodeInfo),
           pollTimeout: String(item.pollTimeout || item.poll_timeout_seconds || defaultItem.pollTimeout),
         };
       });
+    }
+
+    function sanitizeComfyVisualNodeInfoList(raw) {
+      const text = String(raw || '').trim();
+      if (!text || text === '[]') return '[]';
+      try {
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed)) return text;
+        const cleaned = parsed.filter(item => {
+          if (!item || typeof item !== 'object') return true;
+          const value = String(item.fieldValue ?? '');
+          const nodeId = String(item.nodeId ?? '');
+          return !['{{voice_text}}', '{{subtitle_srt}}', '{{subtitle_style}}'].includes(value)
+            && !['5101', '5102', '5103'].includes(nodeId);
+        });
+        return JSON.stringify(cleaned, null, 2);
+      } catch {
+        return text
+          .replace(/\\{\\{voice_text\\}\\}/g, '')
+          .replace(/\\{\\{subtitle_srt\\}\\}/g, '')
+          .replace(/\\{\\{subtitle_style\\}\\}/g, '');
+      }
     }
 
     function getSelectedComfyWorkflowPreset() {
@@ -2322,7 +2378,8 @@ INDEX_HTML = r"""<!doctype html>
       if (!item) return;
       item.purpose = els.comfyWorkflowPresetNote.value.trim() || item.purpose;
       item.endpoint = els.comfyWorkflowEndpoint.value.trim();
-      item.nodeInfoList = els.comfyNodeInfoList.value.trim() || '[]';
+      item.nodeInfoList = sanitizeComfyVisualNodeInfoList(els.comfyNodeInfoList.value.trim() || '[]');
+      els.comfyNodeInfoList.value = item.nodeInfoList;
       item.pollTimeout = els.comfyPollTimeout.value || '3600';
       renderComfyWorkflowLibraryList();
       saveSettings();
@@ -2393,6 +2450,9 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyWorkflowPresetNote,
         els.comfyNodeInfoList,
         els.comfyPollTimeout,
+        els.assetQualityGate,
+        els.assetMaxAttempts,
+        els.assetMinScore,
         els.voiceMode,
         els.voiceReferenceAudioPath,
         els.voiceReferenceText,
@@ -2519,8 +2579,6 @@ INDEX_HTML = r"""<!doctype html>
         '{{image_prompt}}': '生图提示词',
         '{{video_prompt}}': '视频提示词',
         '{{reference_image}}': '参考图文件名/URL',
-        '{{voice_text}}': '配音文本',
-        '{{subtitle_srt}}': '字幕 SRT',
         '{{payload}}': '完整参数包',
       };
       return labels[value] || value;
@@ -2589,7 +2647,7 @@ INDEX_HTML = r"""<!doctype html>
       const panel = document.createElement('div');
       panel.className = 'comfy-parameter-panel';
       panel.appendChild(head);
-      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{reference_image}}', '{{voice_text}}', '{{subtitle_srt}}', '{{payload}}'];
+      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{reference_image}}', '{{payload}}'];
       comfyParameterCandidates.forEach((candidate, index) => {
         const item = document.createElement('div');
         item.className = 'comfy-parameter-row';
@@ -3814,6 +3872,12 @@ INDEX_HTML = r"""<!doctype html>
             workflow_preset_purpose: els.comfyWorkflowPresetNote.value.trim(),
             workflow_library: getComfyWorkflowLibraryPayload(),
           },
+          quality_config: {
+            enabled: els.assetQualityGate.value === 'on',
+            max_attempts: Number(els.assetMaxAttempts.value || 2),
+            min_score: Number(els.assetMinScore.value || 70),
+            min_file_size_kb: 64,
+          },
         };
         const result = await api('/api/run', {
           method: 'POST',
@@ -3927,6 +3991,9 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyWorkflowPresetNote.value = getSelectedComfyWorkflowPreset()?.purpose || '';
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
+      els.assetQualityGate.value = 'on';
+      els.assetMaxAttempts.value = '2';
+      els.assetMinScore.value = '70';
       els.voiceMode.value = 'off';
       els.voiceReferenceAudioPath.value = '';
       els.voiceReferenceText.value = '';
@@ -5111,7 +5178,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 节点映射：{node_note}\n"
             f"- 轮询超时：{value('poll_timeout_seconds', '3600')} 秒\n"
             f"- 工作流库配置状态：\n{library_note}\n"
-            "- 执行要求：21_ComfyUI素材编排师需要输出可映射到 ComfyUI/RunningHub 的素材或预览参数包；AI 图片和视频只是片段素材，SRT 字幕只默认用于预览或自动化草稿，最终硬字幕、最终混音和最终导出交给 22_剪辑成片执行师。\n"
+            "- 执行要求：21_ComfyUI素材编排师只输出可映射到 ComfyUI/RunningHub 的画面素材参数包；AI 图片和视频只是片段素材，配音、SRT 字幕、最终硬字幕、最终混音和最终导出交给 20_语音字幕包装师与 22_剪辑成片执行师。\n"
         )
 
     def _upload_reference_image(self, payload: dict) -> dict:

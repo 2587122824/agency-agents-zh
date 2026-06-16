@@ -212,7 +212,7 @@ runtime/models/
 - 可在 `全自动生成` 中选择只生成视频制作包、生成视频加语音字幕制作包、调用生图/生视频 API，或预留 ComfyUI 自动化素材/预览路径；当前会自动整理 `production_manifest.json`、生图提示词、视频提示词、语音字幕包、ComfyUI 参数包、字幕、配音文本和剪辑清单，供后续 API 适配器继续执行。
 - 可在 `全自动生成` 中启用 `VoxCPM2 本地仿声`，上传本人授权参考音频后，本地生成 `audio/voiceover.wav`；字幕和语音由 20 号员工维护，最终硬字幕和最终混音默认交给 22 号员工和剪辑工具。
 - 可在 `全自动生成 -> 剪辑/预览工具` 中选择 `ffmpeg`。系统会优先查找 `runtime/ffmpeg/bin/ffmpeg.exe`，其次查找 `runtime/ffmpeg/ffmpeg.exe` 和系统 PATH；当任务目录里已有 `video_clips/` 视频、`generated_images/` 图片或 `audio/voiceover.wav` 时，会尝试输出 `final_video.mp4`。缺少 FFmpeg 或素材不足时会写入 `local_ffmpeg_manifest.json` 并跳过，不中断工作流。
-- 可在 `全自动生成 -> ComfyUI 工作流库` 中配置 6 个默认槽位：图生图/文生图、图生视频、参考图保持一致性、B-roll 素材生成、字幕预览合成、音频字幕视频片段预览合成。下拉选择某个槽位会加载该槽位已保存的接口、节点映射、轮询时间和用途说明，保存后写入当前浏览器 `localStorage`，刷新页面仍会恢复；列表区只展示当前选中槽位；运行时会把当前槽位和库状态传给员工，但 API Key 不写入任务输出。
+- 可在 `全自动生成 -> ComfyUI 工作流库` 中配置 6 个默认槽位：图生图/文生图、图生视频、参考图保持一致性、B-roll 素材生成、字幕安全区画面素材、剪辑节奏画面素材。下拉选择某个槽位会加载该槽位已保存的接口、节点映射、轮询时间和用途说明，保存后写入当前浏览器 `localStorage`，刷新页面仍会恢复；列表区只展示当前选中槽位；运行时会把当前槽位和库状态传给员工，但 API Key 不写入任务输出。
 - 内置工作流库槽位的名称和用途说明跟随代码版本更新；浏览器缓存只保留接口地址、节点映射和轮询时间，避免旧缓存挡住模板命名修正。
 - 选择 `auto`、`offline` 或 `openai` 执行模式。
 - 在 `API Key` 输入框填入密钥；密钥只用于本次运行，不写入任务输出文件。
@@ -354,7 +354,7 @@ ComfyUI 素材/预览配置说明：
 ComfyUI 平台密钥：RunningHub 或云端 ComfyUI API Key，只用于本次请求，不写入输出文件。
 ComfyUI 平台接口地址：例如 https://www.runninghub.cn/openapi/v2。
 ComfyUI 素材/预览工作流接口：例如 /run/workflow/你的素材预览工作流ID 或 /run/ai-app/你的应用ID。
-ComfyUI 节点映射 JSON：RunningHub nodeInfoList 数组，可使用 {{payload}}、{{prompt}}、{{voice_text}}、{{subtitle_srt}} 占位符。
+ComfyUI 节点映射 JSON：RunningHub nodeInfoList 数组，可使用 {{payload}}、{{prompt}}、{{negative_prompt}}、{{image_prompt}}、{{video_prompt}}、{{reference_image}} 占位符；配音和字幕不传给 ComfyUI，交给剪辑步骤处理。
 ComfyUI 轮询超时：素材/预览任务通常更慢，默认 60 分钟。
 ```
 

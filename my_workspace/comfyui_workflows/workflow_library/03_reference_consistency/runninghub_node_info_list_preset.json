@@ -1,51 +1,56 @@
 [
   {
-    "nodeId": "10",
+    "nodeId": "2483",
     "fieldName": "text",
     "fieldValue": "{{prompt}}"
   },
   {
-    "nodeId": "11",
+    "nodeId": "2612",
     "fieldName": "text",
     "fieldValue": "{{negative_prompt}}"
   },
   {
-    "nodeId": "12",
+    "nodeId": "2004",
     "fieldName": "image",
     "fieldValue": "{{reference_image}}"
   },
   {
-    "nodeId": "13",
-    "fieldName": "text",
-    "fieldValue": "{{voice_text}}"
+    "nodeId": "4977",
+    "fieldName": "value",
+    "fieldValue": false
   },
   {
-    "nodeId": "14",
-    "fieldName": "text",
-    "fieldValue": "{{subtitle_srt}}"
+    "nodeId": "3159",
+    "fieldName": "strength",
+    "fieldValue": 1.0
   },
   {
-    "nodeId": "15",
-    "fieldName": "text",
-    "fieldValue": "{{payload}}"
+    "nodeId": "4979",
+    "fieldName": "value",
+    "fieldValue": 121
   },
   {
-    "nodeId": "20",
+    "nodeId": "3059",
     "fieldName": "width",
     "fieldValue": 960
   },
   {
-    "nodeId": "20",
+    "nodeId": "3059",
     "fieldName": "height",
     "fieldValue": 544
   },
   {
-    "nodeId": "20",
-    "fieldName": "frames",
+    "nodeId": "3059",
+    "fieldName": "length",
     "fieldValue": 121
   },
   {
-    "nodeId": "40",
+    "nodeId": "4823",
+    "fieldName": "filename_prefix",
+    "fieldValue": "reference_consistency_ltx_video"
+  },
+  {
+    "nodeId": "4852",
     "fieldName": "filename_prefix",
     "fieldValue": "reference_consistency_ltx_video"
   }

@@ -25,24 +25,24 @@
   },
   {
     "id": "04_broll_material",
-    "title": "B-roll 素材生成",
-    "purpose": "用 LTX-Video 2.3 生成补画面、转场、氛围镜头和说明性画面。",
+    "title": "B-roll ????",
+    "purpose": "???????????????????",
     "canvas": "04_broll_material/workflow_canvas.json",
     "api_template": "04_broll_material/api_template.json",
     "node_info_preset": "04_broll_material/runninghub_node_info_list_preset.json"
   },
   {
     "id": "05_subtitle_preview",
-    "title": "字幕预览合成",
-    "purpose": "用 LTX-Video 2.3 生成预览视频素材，字幕 SRT 作为外部参数保留给预览/剪辑阶段。",
+    "title": "?????????",
+    "purpose": "?????????????????????????????",
     "canvas": "05_subtitle_preview/workflow_canvas.json",
     "api_template": "05_subtitle_preview/api_template.json",
     "node_info_preset": "05_subtitle_preview/runninghub_node_info_list_preset.json"
   },
   {
     "id": "06_audio_subtitle_video_preview",
-    "title": "音频 + 字幕 + 视频片段预览合成",
-    "purpose": "用 LTX-Video 2.3 生成可与本地配音和 SRT 对齐的预览素材片段。",
+    "title": "????????",
+    "purpose": "?????????????????????????????????????",
     "canvas": "06_audio_subtitle_video_preview/workflow_canvas.json",
     "api_template": "06_audio_subtitle_video_preview/api_template.json",
     "node_info_preset": "06_audio_subtitle_video_preview/runninghub_node_info_list_preset.json"

@@ -39,9 +39,9 @@ Value not in list: text_encoder ... not in list
 模板默认引用的文件名：
 
 ```text
-checkpoints/ltx-2.3-22b-dev.safetensors
-text_encoders/comfy_gemma_3_12B_it.safetensors
-loras/ltxv/ltx2/ltx-2.3-22b-distilled-lora-384-1.1.safetensors
+checkpoints/ltx-2.3-22b-dev-fp8.safetensors
+text_encoders/gemma_3_12B_it.safetensors
+loras/ltx-2.3-22b-distilled-lora-384-1.1.safetensors
 ```
 
 实际位置以你的 ComfyUI 节点下拉列表为准。模板不能保证你的机器已经有这些模型。

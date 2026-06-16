@@ -1,87 +1,87 @@
 {
-  "10": {
+  "2483": {
     "inputs": {
       "text": "{{prompt}}"
     },
     "class_type": "CLIPTextEncode",
     "_meta": {
-      "title": "LTX-Video 2.3 ?????"
+      "title": "positive_prompt"
     }
   },
-  "11": {
+  "2612": {
     "inputs": {
       "text": "{{negative_prompt}}"
     },
     "class_type": "CLIPTextEncode",
     "_meta": {
-      "title": "?????"
+      "title": "negative_prompt"
     }
   },
-  "12": {
+  "2004": {
     "inputs": {
       "image": "{{reference_image}}",
       "upload": "image"
     },
     "class_type": "LoadImage",
     "_meta": {
-      "title": "??? / ?????"
+      "title": "reference_image"
     }
   },
-  "13": {
+  "4977": {
     "inputs": {
-      "text": "{{voice_text}}"
+      "value": false
     },
-    "class_type": "PrimitiveString",
+    "class_type": "PrimitiveBoolean",
     "_meta": {
-      "title": "???????"
+      "title": "enable_i2v_reference_bypass_false"
     }
   },
-  "14": {
+  "3159": {
     "inputs": {
-      "text": "{{subtitle_srt}}"
+      "strength": 0.9
     },
-    "class_type": "PrimitiveString",
+    "class_type": "LTXVImgToVideoConditionOnly",
     "_meta": {
-      "title": "?? SRT???"
+      "title": "i2v_reference_strength"
     }
   },
-  "15": {
+  "4979": {
     "inputs": {
-      "text": "{{payload}}"
+      "value": 121
     },
-    "class_type": "PrimitiveString",
+    "class_type": "PrimitiveInt",
     "_meta": {
-      "title": "????? JSON???"
+      "title": "frame_count"
     }
   },
-  "20": {
+  "3059": {
     "inputs": {
       "width": 960,
       "height": 544,
-      "frames": 121,
+      "length": 121,
       "batch_size": 1
     },
     "class_type": "EmptyLTXVLatentVideo",
     "_meta": {
-      "title": "LTX ???????"
+      "title": "video_size_and_length"
     }
   },
-  "30": {
-    "inputs": {
-      "ckpt_name": "ltx-2.3-22b-dev.safetensors"
-    },
-    "class_type": "CheckpointLoaderSimple",
-    "_meta": {
-      "title": "LTX-Video 2.3 ??"
-    }
-  },
-  "40": {
+  "4823": {
     "inputs": {
       "filename_prefix": "ltx_video_2_3_clip"
     },
     "class_type": "SaveVideo",
     "_meta": {
-      "title": "????"
+      "title": "save_video_f"
+    }
+  },
+  "4852": {
+    "inputs": {
+      "filename_prefix": "ltx_video_2_3_clip"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "save_video_d"
     }
   }
 }

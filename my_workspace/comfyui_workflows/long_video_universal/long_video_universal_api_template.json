@@ -35,32 +35,6 @@
       "title": "参考图入口"
     }
   },
-  "13": {
-    "inputs": {
-      "text": "{{voice_text}}",
-      "clip": [
-        "30",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "配音文案入口"
-    }
-  },
-  "14": {
-    "inputs": {
-      "text": "{{subtitle_srt}}",
-      "clip": [
-        "30",
-        1
-      ]
-    },
-    "class_type": "CLIPTextEncode",
-    "_meta": {
-      "title": "字幕 SRT 入口"
-    }
-  },
   "15": {
     "inputs": {
       "text": "{{payload}}",
