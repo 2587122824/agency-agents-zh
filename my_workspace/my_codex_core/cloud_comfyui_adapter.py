@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 import time
@@ -16,10 +17,11 @@ class CloudComfyUIAdapter:
     MAX_RESPONSE_BYTES = 4_000_000
     DOWNLOAD_TYPES = {"mp4", "mov", "webm", "m4v", "mp3", "wav", "aac", "png", "jpg", "jpeg", "webp"}
 
-    def __init__(self, base_url: str, api_key: str, endpoint: str) -> None:
+    def __init__(self, base_url: str, api_key: str, endpoint: str, progress_callback=None) -> None:
         self.base_url = base_url.strip().rstrip("/")
         self.api_key = api_key.strip()
         self.endpoint = endpoint.strip()
+        self.progress_callback = progress_callback
         if not self.base_url:
             raise ValueError("ComfyUI base URL is required")
         if not self.api_key:
@@ -30,16 +32,198 @@ class CloudComfyUIAdapter:
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("ComfyUI base URL must be an http/https URL")
 
+    def _emit(self, message: str, **extra: Any) -> None:
+        if not self.progress_callback:
+            return
+        event = {"event": "production_update", "stage": "comfyui", "message": message}
+        event.update(extra)
+        self.progress_callback(event)
+
     def run(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         output_dir.mkdir(parents=True, exist_ok=True)
-        provider = str(compose_config.get("provider") or compose_config.get("tool") or "runninghub").strip().lower()
+        provider = self._provider(compose_config)
+        material_jobs = self._expand_material_jobs(comfyui_payload, compose_config)
+        if material_jobs and self._uses_workflow_library(compose_config):
+            return self._run_material_jobs(material_jobs, provider, compose_config, output_dir)
+        if len(material_jobs) > 1 and self._as_bool(compose_config.get("loop_material_prompts"), default=True):
+            return self._run_material_jobs(material_jobs, provider, compose_config, output_dir)
         if provider == "runninghub":
             return self._run_runninghub(comfyui_payload, compose_config, output_dir)
         return self._run_generic(comfyui_payload, compose_config, output_dir)
 
+    def _provider(self, compose_config: dict[str, Any]) -> str:
+        provider = str(compose_config.get("provider") or "").strip().lower()
+        if provider:
+            return provider
+        base_url = self.base_url.lower()
+        endpoint = self.endpoint.lower()
+        if "runninghub" in base_url or endpoint.startswith(("/run/workflow/", "/run/ai-app/")):
+            return "runninghub"
+        tool = str(compose_config.get("tool") or "").strip().lower()
+        return tool or "generic"
+
+    def _run_material_jobs(
+        self,
+        material_jobs: list[dict[str, Any]],
+        provider: str,
+        compose_config: dict[str, Any],
+        output_dir: Path,
+    ) -> dict[str, Any]:
+        max_jobs = self._safe_int(compose_config.get("max_material_jobs"), default=50, minimum=1, maximum=50)
+        selected_jobs = material_jobs[:max_jobs]
+        job_results = []
+        downloaded_files = []
+        generated_reference_images: list[str] = []
+        video_job_index = 0
+        success_count = 0
+        self._emit(f"ComfyUI 素材批量任务开始：{len(selected_jobs)} 个", total_jobs=len(selected_jobs), completed_jobs=0)
+
+        for index, job in enumerate(selected_jobs, start=1):
+            job_name = str(job.get("name") or f"material_{index:02d}")
+            job_type = str(job.get("type") or "material")
+            job_dir = output_dir / f"material_{index:02d}_{self._safe_name(job_name)}"
+            job_dir.mkdir(parents=True, exist_ok=True)
+            job_config = self._compose_config_for_job(job, compose_config)
+            if job_type == "video":
+                if not str(job.get("reference_image") or "").strip() and generated_reference_images:
+                    paired_index = min(video_job_index, len(generated_reference_images) - 1)
+                    job = dict(job)
+                    job["reference_image"] = self._reference_image_value(generated_reference_images[paired_index])
+                    self._emit(
+                        f"已把第 {paired_index + 1} 张生图作为视频素材 {index}/{len(selected_jobs)} 的参考图",
+                        total_jobs=len(selected_jobs),
+                        completed_jobs=index - 1,
+                        current_job=index,
+                        job_type=job_type,
+                    )
+                video_job_index += 1
+            job_payload = self._payload_for_material_job(job["base_payload"], job, index)
+            self._write_json(job_dir / "comfyui_payload.json", job_payload)
+            self._emit(
+                f"提交 ComfyUI 素材 {index}/{len(selected_jobs)}：{job_type}",
+                total_jobs=len(selected_jobs),
+                completed_jobs=index - 1,
+                current_job=index,
+                job_type=job_type,
+                endpoint=str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint),
+            )
+            try:
+                if provider == "runninghub":
+                    manifest = self._run_runninghub(job_payload, job_config, job_dir)
+                else:
+                    manifest = self._run_generic(job_payload, job_config, job_dir)
+                job_downloaded = [str(path) for path in manifest.get("downloaded_files", [])]
+                if manifest.get("status") in {"success", "downloaded", "submitted"}:
+                    success_count += 1
+                downloaded_files.extend(job_downloaded)
+                if job_type == "image":
+                    generated_reference_images.extend(
+                        path
+                        for path in job_downloaded
+                        if Path(path).suffix.lower().lstrip(".") in {"png", "jpg", "jpeg", "webp"}
+                    )
+                job_results.append(
+                    {
+                        "index": index,
+                        "name": job_name,
+                        "type": job_type,
+                        "status": manifest.get("status", "unknown"),
+                        "prompt": str(job.get("prompt") or "")[:500],
+                        "workflow_preset_id": str(job_config.get("workflow_preset_id") or ""),
+                        "workflow_preset_name": str(job_config.get("workflow_preset_name") or ""),
+                        "endpoint": str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint),
+                        "manifest_file": str(job_dir / "cloud_comfyui_manifest.json"),
+                        "downloaded_files": job_downloaded,
+                    }
+                )
+                self._emit(
+                    f"ComfyUI 素材 {index}/{len(selected_jobs)} 完成：下载 {len(job_downloaded)} 个文件",
+                    total_jobs=len(selected_jobs),
+                    completed_jobs=index,
+                    current_job=index,
+                    job_type=job_type,
+                    job_status=manifest.get("status", "unknown"),
+                    downloaded_count=len(job_downloaded),
+                )
+            except Exception as exc:
+                error_manifest = {
+                    "provider": provider,
+                    "status": "failed",
+                    "name": job_name,
+                    "type": job_type,
+                    "prompt": str(job.get("prompt") or "")[:2000],
+                    "workflow_preset_id": str(job_config.get("workflow_preset_id") or ""),
+                    "workflow_preset_name": str(job_config.get("workflow_preset_name") or ""),
+                    "endpoint": str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint),
+                    "error": str(exc),
+                }
+                self._write_json(job_dir / "cloud_comfyui_manifest.json", error_manifest)
+                job_results.append(
+                    {
+                        "index": index,
+                        "name": job_name,
+                        "type": job_type,
+                        "status": "failed",
+                        "prompt": str(job.get("prompt") or "")[:500],
+                        "workflow_preset_id": str(job_config.get("workflow_preset_id") or ""),
+                        "workflow_preset_name": str(job_config.get("workflow_preset_name") or ""),
+                        "endpoint": str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint),
+                        "manifest_file": str(job_dir / "cloud_comfyui_manifest.json"),
+                        "downloaded_files": [],
+                        "error": str(exc),
+                    }
+                )
+                self._emit(
+                    f"ComfyUI 素材 {index}/{len(selected_jobs)} 失败：{exc}",
+                    total_jobs=len(selected_jobs),
+                    completed_jobs=index,
+                    current_job=index,
+                    job_type=job_type,
+                    job_status="failed",
+                    error=str(exc),
+                )
+
+        failed_count = len(selected_jobs) - success_count
+        if success_count == len(selected_jobs):
+            status = "success"
+        elif success_count > 0:
+            status = "partial_success"
+        else:
+            status = "failed"
+        manifest = {
+            "provider": provider,
+            "status": status,
+            "looped": True,
+            "job_count": len(selected_jobs),
+            "source_job_count": len(material_jobs),
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "max_material_jobs": max_jobs,
+            "endpoint": self.endpoint,
+            "routing": "workflow_library_by_material_type" if self._uses_workflow_library(compose_config) else "selected_workflow",
+            "downloaded_files": downloaded_files,
+            "jobs": job_results,
+            "note": "Each material prompt was submitted as a separate ComfyUI/RunningHub job.",
+        }
+        self._write_json(output_dir / "cloud_comfyui_manifest.json", manifest)
+        self._emit(
+            f"ComfyUI 素材批量完成：成功 {success_count} 个，失败 {failed_count} 个",
+            total_jobs=len(selected_jobs),
+            completed_jobs=len(selected_jobs),
+            success_count=success_count,
+            failed_count=failed_count,
+            downloaded_count=len(downloaded_files),
+            job_status=status,
+        )
+        if success_count == 0:
+            raise ValueError("All ComfyUI material jobs failed")
+        return manifest
+
     def _run_runninghub(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         payload = self._build_runninghub_payload(comfyui_payload, compose_config)
-        submit_response = self._post_json(self._endpoint_url(), payload)
+        endpoint = self._effective_endpoint(compose_config)
+        self._emit(f"提交 RunningHub 请求：{endpoint}", endpoint=endpoint)
+        submit_response = self._post_json(self._endpoint_url(endpoint), payload)
         submit_path = output_dir / "runninghub_comfyui_submit_response.json"
         self._write_json(submit_path, self._redact_response(submit_response))
 
@@ -56,6 +240,7 @@ class CloudComfyUIAdapter:
         while time.time() < deadline:
             query_response = self._post_json(query_url, {"taskId": task_id})
             status = self._status(query_response)
+            self._emit(f"RunningHub 任务 {task_id} 状态：{status or 'UNKNOWN'}", task_id=task_id, remote_status=status)
             if status == "SUCCESS":
                 break
             if status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED"}:
@@ -98,7 +283,7 @@ class CloudComfyUIAdapter:
             "provider": "runninghub",
             "status": "success" if status == "SUCCESS" else "failed" if status != "TIMEOUT" else "timeout",
             "taskId": task_id,
-            "endpoint": self.endpoint,
+            "endpoint": endpoint,
             "submit_response_file": str(submit_path),
             "query_response_file": str(query_path),
             "result_count": len(result_items),
@@ -114,7 +299,8 @@ class CloudComfyUIAdapter:
         return manifest
 
     def _run_generic(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
-        response = self._post_json(self._endpoint_url(), comfyui_payload)
+        endpoint = self._effective_endpoint(compose_config)
+        response = self._post_json(self._endpoint_url(endpoint), comfyui_payload)
         response_path = output_dir / "cloud_comfyui_response.json"
         self._write_json(response_path, self._redact_response(response))
         urls = self._find_download_urls(response)
@@ -125,7 +311,7 @@ class CloudComfyUIAdapter:
         manifest = {
             "provider": str(compose_config.get("provider") or "generic"),
             "status": "submitted" if not downloaded else "downloaded",
-            "endpoint": self.endpoint,
+            "endpoint": endpoint,
             "response_file": str(response_path),
             "download_urls": urls,
             "downloaded_files": [str(path) for path in downloaded],
@@ -155,15 +341,274 @@ class CloudComfyUIAdapter:
             "instanceType": str(compose_config.get("instance_type") or "default").strip(),
             "usePersonalQueue": str(compose_config.get("use_personal_queue") or "false").strip().lower(),
         }
-        app_id = self._app_id_from_endpoint()
+        app_id = self._app_id_from_endpoint(self._effective_endpoint(compose_config))
         if app_id:
             payload["webappId"] = app_id
         return payload
 
-    def _endpoint_url(self) -> str:
-        if self.endpoint.startswith(("http://", "https://")):
-            return self.endpoint
-        return urljoin(f"{self.base_url}/", self.endpoint.lstrip("/"))
+    def _expand_material_jobs(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any]) -> list[dict[str, Any]]:
+        prompt_types = {"image", "video"} if self._uses_workflow_library(compose_config) else self._workflow_prompt_types(compose_config)
+        jobs: list[dict[str, Any]] = []
+        if "image" in prompt_types:
+            jobs.extend(self._jobs_from_prompt_groups(comfyui_payload, "image_prompts", "image_prompt", "image"))
+        if "video" in prompt_types:
+            jobs.extend(self._jobs_from_prompt_groups(comfyui_payload, "video_prompts", "video_prompt", "video"))
+        if not jobs:
+            jobs.extend(self._jobs_from_prompt_groups(comfyui_payload, "image_prompts", "image_prompt", "image"))
+            jobs.extend(self._jobs_from_prompt_groups(comfyui_payload, "video_prompts", "video_prompt", "video"))
+        return jobs
+
+    def _compose_config_for_job(self, job: dict[str, Any], compose_config: dict[str, Any]) -> dict[str, Any]:
+        preset = self._workflow_library_preset_for_job(job, compose_config)
+        if not preset:
+            return compose_config
+        job_config = dict(compose_config)
+        job_config["workflow_endpoint"] = str(preset.get("endpoint") or "").strip() or job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint
+        job_config["node_info_list_json"] = str(preset.get("node_info_list_json") or preset.get("nodeInfoList") or "[]").strip() or "[]"
+        job_config["poll_timeout_seconds"] = preset.get("poll_timeout_seconds") or preset.get("pollTimeout") or job_config.get("poll_timeout_seconds")
+        job_config["workflow_preset_id"] = str(preset.get("id") or "").strip()
+        job_config["workflow_preset_name"] = str(preset.get("name") or "").strip()
+        job_config["workflow_preset_purpose"] = str(preset.get("purpose") or "").strip()
+        return job_config
+
+    @classmethod
+    def _workflow_library_preset_for_job(cls, job: dict[str, Any], compose_config: dict[str, Any]) -> dict[str, Any] | None:
+        library = compose_config.get("workflow_library")
+        if not isinstance(library, list):
+            return None
+        configured = [item for item in library if cls._is_configured_library_item(item)]
+        if not configured:
+            return None
+        job_type = str(job.get("type") or "").strip().lower()
+        if job_type == "video":
+            return cls._first_matching_preset(configured, ("image_to_video", "ltx", "video", "broll", "视频", "图生视频", "生视频"))
+        return cls._first_matching_preset(configured, ("txt_img", "z_image", "image", "keyframe", "文生图", "生图", "关键帧", "配图"))
+
+    @staticmethod
+    def _is_configured_library_item(item: Any) -> bool:
+        if not isinstance(item, dict):
+            return False
+        endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
+        node_info = str(item.get("node_info_list_json") or item.get("nodeInfoList") or "").strip()
+        return bool(endpoint and node_info and node_info != "[]")
+
+    @classmethod
+    def _first_matching_preset(cls, presets: list[dict[str, Any]], keywords: tuple[str, ...]) -> dict[str, Any] | None:
+        lowered_keywords = tuple(keyword.lower() for keyword in keywords)
+        for item in presets:
+            text = " ".join(
+                str(item.get(key) or "")
+                for key in ("id", "name", "purpose")
+            ).lower()
+            if any(keyword in text for keyword in lowered_keywords):
+                return item
+        return presets[0] if presets else None
+
+    @classmethod
+    def _uses_workflow_library(cls, compose_config: dict[str, Any]) -> bool:
+        library = compose_config.get("workflow_library")
+        return isinstance(library, list) and any(cls._is_configured_library_item(item) for item in library)
+
+    @staticmethod
+    def _workflow_prompt_types(compose_config: dict[str, Any]) -> set[str]:
+        preset_id = str(compose_config.get("workflow_preset_id") or "").strip().lower()
+        preset_name = str(compose_config.get("workflow_preset_name") or "").strip().lower()
+        text = f"{preset_id} {preset_name}"
+        if any(key in text for key in ("03_reference", "reference_consistency", "04_broll", "broll")):
+            return {"image", "video"}
+        if any(key in text for key in ("02_ltx_video", "image_to_video", "video", "图生视频", "视频")):
+            return {"video"}
+        if any(key in text for key in ("01_image", "z_image", "txt_img", "image", "subtitle", "文生图", "生图", "素材")):
+            return {"image"}
+        return {"image", "video"}
+
+    def _jobs_from_prompt_groups(
+        self,
+        payload: dict[str, Any],
+        group_key: str,
+        value_key: str,
+        job_type: str,
+    ) -> list[dict[str, Any]]:
+        jobs: list[dict[str, Any]] = []
+        direct_value = payload.get(value_key)
+        if isinstance(direct_value, str) and direct_value.strip():
+            jobs.append(
+                {
+                    "type": job_type,
+                    "name": value_key,
+                    "prompt": direct_value.strip(),
+                    "negative_prompt": str(payload.get("negative_prompt") or ""),
+                    "reference_image": self._first_reference_image(payload),
+                    "base_payload": payload,
+                    "source": value_key,
+                    "group": {},
+                }
+            )
+        groups = payload.get(group_key)
+        if not isinstance(groups, list):
+            return jobs
+        for group_index, group in enumerate(groups, start=1):
+            if isinstance(group, str) and group.strip():
+                jobs.append(
+                    {
+                        "type": job_type,
+                        "name": f"{job_type}_{group_index:02d}",
+                        "prompt": group.strip(),
+                        "negative_prompt": str(payload.get("negative_prompt") or ""),
+                        "reference_image": self._first_reference_image(payload),
+                        "base_payload": payload,
+                        "source": group_key,
+                        "group": {},
+                    }
+                )
+                continue
+            if not isinstance(group, dict):
+                continue
+            prompts = group.get("prompts")
+            if isinstance(prompts, dict):
+                for name, item in prompts.items():
+                    prompt_data = item if isinstance(item, dict) else {"positive": item}
+                    prompt = self._prompt_from_item(prompt_data)
+                    if not prompt:
+                        continue
+                    jobs.append(self._job_from_prompt_item(payload, group, prompt_data, str(name), job_type, group_key))
+            elif isinstance(prompts, list):
+                for item_index, item in enumerate(prompts, start=1):
+                    prompt_data = item if isinstance(item, dict) else {"positive": item}
+                    prompt = self._prompt_from_item(prompt_data)
+                    if not prompt:
+                        continue
+                    name = str(prompt_data.get("name") or prompt_data.get("title") or f"{job_type}_{group_index:02d}_{item_index:02d}")
+                    jobs.append(self._job_from_prompt_item(payload, group, prompt_data, name, job_type, group_key))
+            else:
+                prompt = self._prompt_from_item(group)
+                if prompt:
+                    name = str(group.get("name") or group.get("title") or group.get("slot") or f"{job_type}_{group_index:02d}")
+                    jobs.append(self._job_from_prompt_item(payload, group, group, name, job_type, group_key))
+        return jobs
+
+    @classmethod
+    def _job_from_prompt_item(
+        cls,
+        base_payload: dict[str, Any],
+        group: dict[str, Any],
+        prompt_data: dict[str, Any],
+        name: str,
+        job_type: str,
+        source: str,
+    ) -> dict[str, Any]:
+        prompt = cls._prompt_from_item(prompt_data)
+        negative = str(
+            prompt_data.get("negative")
+            or prompt_data.get("negative_prompt")
+            or group.get("negative_prompt")
+            or base_payload.get("negative_prompt")
+            or ""
+        )
+        reference_image = str(
+            prompt_data.get("reference_image")
+            or prompt_data.get("reference")
+            or group.get("reference_image")
+            or cls._first_reference_image(base_payload)
+            or ""
+        ).strip()
+        return {
+            "type": job_type,
+            "name": name,
+            "prompt": prompt,
+            "negative_prompt": negative,
+            "reference_image": reference_image,
+            "seed": prompt_data.get("seed", group.get("seed", base_payload.get("seed", ""))),
+            "width": prompt_data.get("width", group.get("width", base_payload.get("width", ""))),
+            "height": prompt_data.get("height", group.get("height", base_payload.get("height", ""))),
+            "base_payload": base_payload,
+            "source": source,
+            "group": group,
+            "prompt_data": prompt_data,
+        }
+
+    @staticmethod
+    def _prompt_from_item(item: dict[str, Any]) -> str:
+        for key in ("positive", "prompt", "text", "description", "content"):
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
+
+    @staticmethod
+    def _payload_for_material_job(base_payload: dict[str, Any], job: dict[str, Any], index: int) -> dict[str, Any]:
+        payload = json.loads(json.dumps(base_payload, ensure_ascii=False))
+        prompt = str(job.get("prompt") or "").strip()
+        negative = str(job.get("negative_prompt") or "").strip()
+        reference_image = str(job.get("reference_image") or "").strip()
+        job_type = str(job.get("type") or "material")
+        payload["workflow_item_index"] = index
+        payload["workflow_item_name"] = str(job.get("name") or f"material_{index:02d}")
+        payload["workflow_item_type"] = job_type
+        payload["prompt"] = prompt
+        payload["negative_prompt"] = negative
+        if job_type == "video":
+            payload["video_prompt"] = prompt
+            payload["video_prompts"] = [
+                {
+                    "slot": job.get("name"),
+                    "prompts": {
+                        str(job.get("name") or f"video_{index:02d}"): {
+                            "positive": prompt,
+                            "negative": negative,
+                        }
+                    },
+                }
+            ]
+        else:
+            payload["image_prompt"] = prompt
+            payload["image_prompts"] = [
+                {
+                    "slot": job.get("name"),
+                    "prompts": {
+                        str(job.get("name") or f"image_{index:02d}"): {
+                            "positive": prompt,
+                            "negative": negative,
+                        }
+                    },
+                }
+            ]
+        if reference_image:
+            payload["reference_image"] = reference_image
+        for key in ("seed", "width", "height"):
+            value = job.get(key)
+            if value not in (None, ""):
+                payload[key] = value
+        return payload
+
+    @classmethod
+    def _reference_image_value(cls, value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if text.startswith(("http://", "https://", "data:image/")):
+            return text
+        path = Path(text)
+        if not path.is_file():
+            return text
+        suffix = path.suffix.lower().lstrip(".")
+        mime = {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+            "webp": "image/webp",
+        }.get(suffix, "image/png")
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        return f"data:{mime};base64,{encoded}"
+
+    def _effective_endpoint(self, compose_config: dict[str, Any]) -> str:
+        return str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or self.endpoint).strip()
+
+    def _endpoint_url(self, endpoint: str | None = None) -> str:
+        endpoint = (endpoint or self.endpoint).strip()
+        if endpoint.startswith(("http://", "https://")):
+            return endpoint
+        return urljoin(f"{self.base_url}/", endpoint.lstrip("/"))
 
     def _post_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -192,8 +637,9 @@ class CloudComfyUIAdapter:
             parsed = {"raw": raw}
         return parsed if isinstance(parsed, dict) else {"data": parsed}
 
-    def _app_id_from_endpoint(self) -> str:
-        match = re.search(r"/ai-app/([^/?#]+)", self.endpoint)
+    @staticmethod
+    def _app_id_from_endpoint(endpoint: str) -> str:
+        match = re.search(r"/ai-app/([^/?#]+)", endpoint)
         return match.group(1) if match else ""
 
     @classmethod
@@ -330,6 +776,19 @@ class CloudComfyUIAdapter:
         except (TypeError, ValueError):
             parsed = default
         return min(max(parsed, minimum), maximum)
+
+    @staticmethod
+    def _as_bool(value: Any, default: bool = False) -> bool:
+        if value in (None, ""):
+            return default
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on", "y", "enabled", "启用", "是"}
+
+    @staticmethod
+    def _safe_name(value: str) -> str:
+        text = re.sub(r"[^\w\u4e00-\u9fff.-]+", "_", value.strip(), flags=re.UNICODE).strip("._")
+        return (text or "material")[:80]
 
     @staticmethod
     def _redact_response(data: Any) -> Any:

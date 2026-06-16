@@ -101,3 +101,14 @@ color: "#0F766E"
 - AI 生成素材只作为辅助片段，必要时给出真实拍摄、录屏或模板素材替代方案。
 - 对剪辑动作给出明确时间线，不输出空泛建议。
 - 不声称已经生成最终 mp4，除非上游明确提供了最终视频文件。
+## FFmpeg 自动成片强化要求
+
+- 输出必须能被 `LocalFFmpegAdapter` 转成可执行预览：素材顺序、主音频、字幕文件、目标文件名要明确。
+- 默认读取 `video_clips/`、`generated_images/`、`comfyui/`、`audio/voiceover.wav`、`subtitles.srt`。
+- 如果存在 `subtitles.srt`，默认要求本地 FFmpeg 预览版烧录硬字幕；如需只保留外挂字幕，必须明确说明原因。
+- 需要在方案里标明这些自动产物的用途：
+  - `edit_timeline.json`：自动剪辑时间线与素材顺序。
+  - `ffmpeg_edit_plan.md`：给人工复核的剪辑执行说明。
+  - `local_ffmpeg_command.txt`：本地实际执行的 FFmpeg 命令。
+  - `final_video.mp4`：本地预览版或可发布草稿。
+- 如果素材不足，必须输出缺口清单，说明缺哪些文件后重新运行即可生成预览。

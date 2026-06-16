@@ -21,10 +21,10 @@ color: "#2563EB"
   - 剪辑交接包：说明素材如何交给 22 号剪辑，但不配置音频字幕节点。
 - 明确哪些参数可以直接传给 RunningHub / ComfyUI `nodeInfoList`，哪些仍需人工确认。
 - 给出低成本回退方案，避免每次都跑完整高算力工作流。
-- 当用户需要可导入 ComfyUI 画布的工作流时，优先引用并维护 `my_workspace/comfyui_workflows/workflow_library/` 下的 6 个槽位模板。
+- 当用户需要可导入 ComfyUI 画布的工作流时，优先引用并维护 `my_workspace/comfyui_workflows/workflow_library/` 下的 5 个默认槽位模板。
 - 默认模型选择：
   - 生图、封面、关键帧：Z-Image Turbo。
-  - 生视频、B-roll、剪辑节奏画面素材：LTX-Video 2.3。
+  - 生视频、B-roll、字幕安全区画面素材：LTX-Video 2.3。
 - 输出时必须区分：
   - `workflow_canvas.json`：导入 ComfyUI 画布调试。
   - `api_template.json`：上传到管理台自动识别动态参数。

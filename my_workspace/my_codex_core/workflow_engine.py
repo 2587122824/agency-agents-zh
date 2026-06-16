@@ -163,7 +163,7 @@ class WorkflowEngine:
         final_output = self._build_final_output(workflow, user_input, step_outputs)
         final_path = task_dir / "final_output.md"
         self.storage.write_text(final_path, final_output)
-        production_manifest = run_auto_production(task_dir, step_outputs, production_config)
+        production_manifest = run_auto_production(task_dir, step_outputs, production_config, progress_callback=progress_callback)
         self.storage.write_json(
             task_dir / "run_summary.json",
             {
@@ -204,7 +204,7 @@ class WorkflowEngine:
             production_manifest=production_manifest["files"]["manifest"] if production_manifest else None,
         )
 
-    def rerun_step(self, task_dir: Path, step_no: int) -> dict:
+    def rerun_step(self, task_dir: Path, step_no: int, progress_callback: Callable[[dict], None] | None = None) -> dict:
         workflow_path = task_dir / "workflow.json"
         input_path = task_dir / "input.md"
         if not workflow_path.is_file():
@@ -213,6 +213,8 @@ class WorkflowEngine:
             raise FileNotFoundError("input.md")
 
         workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        workflow_name = workflow.get("name") or task_dir.name
+        task_title = self._summary_value(task_dir, "task_title")
         steps = workflow.get("steps", [])
         target_step = next((step for step in steps if int(step.get("step") or 0) == step_no), None)
         if not target_step:
@@ -224,6 +226,49 @@ class WorkflowEngine:
         step_dir = self._step_dir(task_dir, step_no, agent.agent_id)
         previous_outputs = self._collect_step_outputs(workflow, task_dir, before_step=step_no)
         prompt = self._build_step_prompt(workflow, target_step, user_input, previous_outputs)
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "started",
+                    "workflow_name": workflow_name,
+                    "task_title": task_title,
+                    "task_dir": str(task_dir),
+                    "total_steps": len(steps),
+                    "rerun": True,
+                    "rerun_step": step_no,
+                }
+            )
+            for step in steps:
+                current_step_no = int(step.get("step") or 0)
+                if current_step_no == step_no:
+                    break
+                previous_agent = self.staff_loader.resolve_agent(agents, step["agent"])
+                previous_step_dir = self._step_dir(task_dir, current_step_no, previous_agent.agent_id)
+                progress_callback(
+                    {
+                        "event": "step_completed",
+                        "step": current_step_no,
+                        "agent_id": previous_agent.agent_id,
+                        "agent_name": previous_agent.name,
+                        "task": step.get("task", ""),
+                        "expected_output": step.get("output", ""),
+                        "output_path": str(previous_step_dir / "output.md"),
+                        "total_steps": len(steps),
+                    }
+                )
+            progress_callback(
+                {
+                    "event": "step_started",
+                    "step": step_no,
+                    "agent_id": agent.agent_id,
+                    "agent_name": agent.name,
+                    "task": target_step.get("task", ""),
+                    "expected_output": target_step.get("output", ""),
+                    "total_steps": len(steps),
+                    "rerun": True,
+                }
+            )
 
         output_path = step_dir / "output.md"
         if output_path.exists():
@@ -265,6 +310,35 @@ class WorkflowEngine:
         final_path = task_dir / "final_output.md"
         self.storage.write_text(final_path, final_output)
         self._append_rerun_summary(task_dir, step_no, agent.agent_id, result.provider, str(output_path), str(final_path))
+
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "step_completed",
+                    "step": step_no,
+                    "agent_id": agent.agent_id,
+                    "agent_name": agent.name,
+                    "task": target_step.get("task", ""),
+                    "expected_output": target_step.get("output", ""),
+                    "output_path": str(output_path),
+                    "total_steps": len(steps),
+                    "rerun": True,
+                }
+            )
+            progress_callback(
+                {
+                    "event": "completed",
+                    "workflow_name": workflow_name,
+                    "task_title": task_title,
+                    "task_dir": str(task_dir),
+                    "provider": result.provider,
+                    "step_count": step_no,
+                    "final_output": str(final_path),
+                    "total_steps": len(steps),
+                    "rerun": True,
+                    "rerun_step": step_no,
+                }
+            )
 
         return {
             "step": step_no,
@@ -423,7 +497,7 @@ class WorkflowEngine:
         final_output = self._build_final_output(workflow, user_input, step_outputs)
         final_path = task_dir / "final_output.md"
         self.storage.write_text(final_path, final_output)
-        production_manifest = run_auto_production(task_dir, step_outputs, production_config)
+        production_manifest = run_auto_production(task_dir, step_outputs, production_config, progress_callback=progress_callback)
         self._append_resume_summary(
             task_dir,
             workflow_name,

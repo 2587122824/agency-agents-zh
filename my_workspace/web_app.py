@@ -536,12 +536,42 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--accent);
       font-weight: 650;
     }
+    .inline-check {
+      min-height: 34px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .inline-check input {
+      width: auto;
+      margin: 0;
+    }
     .output-dashboard {
       display: grid;
       gap: 12px;
       padding: 12px;
       border-bottom: 1px solid var(--line);
       background: #fbfcfd;
+    }
+    .video-preview {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .video-preview[hidden] {
+      display: none;
+    }
+    .video-preview video {
+      width: 100%;
+      max-height: 520px;
+      background: #000;
+      border-radius: 6px;
     }
     .output-summary-grid {
       display: grid;
@@ -1019,22 +1049,22 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </details>
         <details>
-          <summary><strong>全自动生成</strong> <span class="muted small">先生成制作包、配音字幕和素材预览；最终硬字幕、混音、导出交给剪辑阶段</span></summary>
+          <summary><strong>全自动生成</strong> <span class="muted small">需要自动出预览视频时，选择“全自动成片预览”并使用 FFmpeg 自动剪辑</span></summary>
           <div class="details-body">
             <div class="provider-grid">
               <label>自动生成模式
                 <select id="autoProductionMode">
                   <option value="off" selected>关闭</option>
-                  <option value="package_only">只生成视频制作包</option>
-                  <option value="audio_package">生成视频制作包 + 语音字幕包（推荐）</option>
-                  <option value="api_ready">调用生图/生视频 API</option>
-                  <option value="comfy_full">ComfyUI 素材/预览草稿（高算力，可选）</option>
+                  <option value="package_only">只出制作包：不调用接口、不剪辑</option>
+                  <option value="audio_package">出制作包 + 配音字幕文本：不生成视频</option>
+                  <option value="api_ready">旧接口：只调用独立生图/生视频</option>
+                  <option value="comfy_full">全自动成片预览：调用 ComfyUI 素材接口 + FFmpeg 自动剪辑</option>
                 </select>
               </label>
-              <label>剪辑/预览工具
+              <label>自动剪辑方式
                 <select id="composeTool">
-                  <option value="ffmpeg" selected>ffmpeg</option>
-                  <option value="runninghub">RunningHub / 云端 ComfyUI（素材/预览）</option>
+                  <option value="ffmpeg" selected>本地 FFmpeg 自动剪辑预览</option>
+                  <option value="runninghub">只调用云端 ComfyUI 生成素材</option>
                   <option value="jianying">剪映工程（预留）</option>
                   <option value="manual">只生成清单</option>
                 </select>
@@ -1050,12 +1080,12 @@ INDEX_HTML = r"""<!doctype html>
               <label>ComfyUI 平台接口地址
                 <input id="comfyBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
               </label>
-              <label>ComfyUI 素材/预览工作流接口
+              <label>当前编辑槽位接口
                 <input id="comfyWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/你的素材预览工作流ID 或 /run/ai-app/你的应用ID" />
               </label>
             </div>
             <div class="provider-grid">
-              <label>ComfyUI 工作流库
+              <label>ComfyUI 工作流库（运行时自动选择）
                 <select id="comfyWorkflowPreset"></select>
               </label>
               <label>当前工作流说明
@@ -1071,7 +1101,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <div class="reference-list" id="comfyWorkflowLibraryList"></div>
             <div class="provider-grid comfy-mapping-grid">
-              <label>ComfyUI 节点映射 JSON
+              <label>当前编辑槽位节点映射 JSON
                 <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{image_prompt}}、{{video_prompt}}、{{reference_image}}、{{payload}}'></textarea>
               </label>
               <label>导入 API JSON 自动识别
@@ -1115,7 +1145,19 @@ INDEX_HTML = r"""<!doctype html>
               <label>本地配音
                 <select id="voiceMode">
                   <option value="off" selected>不生成配音音频</option>
+                  <option value="windows_sapi">Windows 本地语音（最快备用）</option>
+                  <option value="preset">默认 AI 音色</option>
                   <option value="voxcpm2">VoxCPM2 本地仿声</option>
+                </select>
+              </label>
+              <label>默认 AI 音色
+                <select id="voicePreset">
+                  <option value="warm_female">暖心女声：自然亲和，适合口播种草</option>
+                  <option value="clear_female">清爽女声：干净利落，适合教程解说</option>
+                  <option value="pro_male">专业男声：稳重可信，适合商业介绍</option>
+                  <option value="deep_male">沉稳男声：低沉有质感，适合纪录片旁白</option>
+                  <option value="young_male">活力男声：节奏明快，适合短视频营销</option>
+                  <option value="story_female">故事女声：温柔叙事，适合长视频讲述</option>
                 </select>
               </label>
               <label>本人参考音频
@@ -1130,7 +1172,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="voiceReferenceText" autocomplete="off" spellcheck="false" placeholder="可选：参考音频里本人说的话，能提高仿声稳定性" />
               </label>
               <label>VoxCPM2 命令模板
-                <input id="voiceCommandTemplate" autocomplete="off" spellcheck="false" placeholder="voxcpm clone --text-file {text_file} --reference-audio {reference_audio} --output {output_file}" />
+                <input id="voiceCommandTemplate" autocomplete="off" spellcheck="false" placeholder="留空使用项目内 VoxCPM2；高级用户可填自定义命令" />
               </label>
               <label>配音超时
                 <select id="voiceTimeout">
@@ -1547,11 +1589,22 @@ INDEX_HTML = r"""<!doctype html>
             <button id="rerunStepBtn" type="button" disabled>重跑当前步骤</button>
             <button id="resumeTaskBtn" type="button" disabled>继续任务</button>
             <button id="exportTaskBtn" type="button" disabled>导出产品包</button>
+            <label class="inline-check">
+              <input id="showDebugFiles" type="checkbox" />
+              显示调试文件
+            </label>
           </div>
           <div class="file-tabs" id="fileTabs"></div>
         </div>
         <div class="output-dashboard" id="outputDashboard">
           <div class="output-summary-grid" id="outputSummaryGrid"></div>
+          <div class="video-preview" id="videoPreviewBox" hidden>
+            <div class="output-section-head">
+              <strong>最终视频预览</strong>
+              <span class="muted small" id="videoPreviewMeta"></span>
+            </div>
+            <video id="videoPreview" controls preload="metadata"></video>
+          </div>
           <div class="output-sections">
             <div class="output-section">
               <div class="output-section-head">
@@ -1668,6 +1721,7 @@ INDEX_HTML = r"""<!doctype html>
       assetMaxAttempts: document.getElementById('assetMaxAttempts'),
       assetMinScore: document.getElementById('assetMinScore'),
       voiceMode: document.getElementById('voiceMode'),
+      voicePreset: document.getElementById('voicePreset'),
       voiceReferenceFile: document.getElementById('voiceReferenceFile'),
       voiceReferenceAudioPath: document.getElementById('voiceReferenceAudioPath'),
       voiceReferenceText: document.getElementById('voiceReferenceText'),
@@ -1741,6 +1795,9 @@ INDEX_HTML = r"""<!doctype html>
       fileTabs: document.getElementById('fileTabs'),
       fileContent: document.getElementById('fileContent'),
       outputSummaryGrid: document.getElementById('outputSummaryGrid'),
+      videoPreviewBox: document.getElementById('videoPreviewBox'),
+      videoPreview: document.getElementById('videoPreview'),
+      videoPreviewMeta: document.getElementById('videoPreviewMeta'),
       stepOutputMeta: document.getElementById('stepOutputMeta'),
       stepOutputList: document.getElementById('stepOutputList'),
       packageOutputMeta: document.getElementById('packageOutputMeta'),
@@ -1750,6 +1807,7 @@ INDEX_HTML = r"""<!doctype html>
       rerunStepBtn: document.getElementById('rerunStepBtn'),
       resumeTaskBtn: document.getElementById('resumeTaskBtn'),
       exportTaskBtn: document.getElementById('exportTaskBtn'),
+      showDebugFiles: document.getElementById('showDebugFiles'),
       refreshStaffBtn: document.getElementById('refreshStaffBtn'),
       newStaffBtn: document.getElementById('newStaffBtn'),
       deleteStaffBtn: document.getElementById('deleteStaffBtn'),
@@ -1781,6 +1839,7 @@ INDEX_HTML = r"""<!doctype html>
     let selectedTask = null;
     let selectedFile = null;
     let selectedTaskSummary = {};
+    let currentTaskFiles = [];
     let selectedStaff = null;
     let selectedWorkflow = null;
     let workflowEditorSteps = [];
@@ -1836,14 +1895,6 @@ INDEX_HTML = r"""<!doctype html>
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
-      },
-      {
-        id: 'audio_subtitle_video_preview',
-        name: '剪辑节奏画面素材',
-        purpose: 'LTX-Video 2.3：生成适合后期配音、字幕和剪辑节奏的视频画面素材；音频和字幕交给剪辑步骤处理',
-        endpoint: '',
-        nodeInfoList: '[]',
-        pollTimeout: '7200',
       },
     ];
     const PRODUCT_TEMPLATES = {
@@ -2000,6 +2051,7 @@ INDEX_HTML = r"""<!doctype html>
       const total = job.total_steps || 0;
       const completed = job.completed_steps || 0;
       const percent = total ? Math.round((completed / total) * 100) : 0;
+      const productionMessage = job.production_message || '';
       const statusText = {
         queued: '排队中',
         running: '运行中',
@@ -2008,9 +2060,12 @@ INDEX_HTML = r"""<!doctype html>
       }[job.status] || job.status || '运行中';
       const jobTitle = job.task_title || job.workflow_name || '';
       els.progressTitle.textContent = `${statusText}${jobTitle ? `：${jobTitle}` : ''}`;
-      els.progressMeta.textContent = `${completed}/${total} 步 · ${percent}%`;
+      els.progressMeta.textContent = `${completed}/${total} 步 · ${percent}%${productionMessage ? ` · ${productionMessage}` : ''}`;
       els.progressFill.style.width = `${percent}%`;
       els.progressList.innerHTML = '';
+      if (job.rerun && job.rerun_step) {
+        els.progressTitle.textContent = `重跑第 ${job.rerun_step} 步${jobTitle ? ` - ${jobTitle}` : ''}`;
+      }
 
       const steps = job.steps || [];
       for (const step of steps) {
@@ -2021,6 +2076,21 @@ INDEX_HTML = r"""<!doctype html>
         const right = document.createElement('span');
         right.className = 'muted small';
         right.textContent = step.status === 'done' ? '完成' : step.status === 'active' ? '执行中' : step.status === 'error' ? '失败' : '等待';
+        item.appendChild(left);
+        item.appendChild(right);
+        els.progressList.appendChild(item);
+      }
+      const productionEvents = job.production_events || [];
+      for (const event of productionEvents.slice(-8)) {
+        const item = document.createElement('div');
+        const isError = String(event.status || event.job_status || '').includes('failed') || event.error;
+        const isDone = ['success', 'partial_success', 'final_video_generated', 'skipped'].includes(String(event.status || event.job_status || ''));
+        item.className = `progress-step ${isError ? 'error' : isDone ? 'done' : 'active'}`;
+        const left = document.createElement('span');
+        left.textContent = `后处理 · ${event.stage || 'production'}`;
+        const right = document.createElement('span');
+        right.className = 'muted small';
+        right.textContent = event.message || '';
         item.appendChild(left);
         item.appendChild(right);
         els.progressList.appendChild(item);
@@ -2037,11 +2107,16 @@ INDEX_HTML = r"""<!doctype html>
       const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
       renderProgress(job);
       if (job.status === 'completed') {
-        setStatus(`完成：${job.task_title || job.workflow_name}，${job.step_count || job.completed_steps} 步`);
+        const productionStatus = job.production_status && job.production_status !== 'off' ? `，自动生成：${job.production_status}` : '';
+        setStatus(`完成：${job.task_title || job.workflow_name}，${job.step_count || job.completed_steps} 步${productionStatus}`);
         await loadTasks();
         if (job.task_name) {
           showView('output');
           await selectTask(job.task_name);
+          if (job.rerun_result && job.rerun_result.file) {
+            await openFile(job.rerun_result.file);
+            setStatus(`重跑完成：第 ${job.rerun_step || ''} 步`);
+          }
         }
         els.runBtn.disabled = false;
         syncOutputButtons();
@@ -2126,6 +2201,7 @@ INDEX_HTML = r"""<!doctype html>
         assetMaxAttempts: els.assetMaxAttempts.value,
         assetMinScore: els.assetMinScore.value,
         voiceMode: els.voiceMode.value,
+        voicePreset: els.voicePreset.value,
         voiceReferenceAudioPath: els.voiceReferenceAudioPath.value,
         voiceReferenceText: els.voiceReferenceText.value,
         voiceCommandTemplate: els.voiceCommandTemplate.value,
@@ -2218,10 +2294,12 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.assetMinScore, settings.assetMinScore || '70');
       renderComfyWorkflowLibraryList();
       setIfExists(els.voiceMode, settings.voiceMode);
+      setIfExists(els.voicePreset, settings.voicePreset || 'warm_female');
       els.voiceReferenceAudioPath.value = settings.voiceReferenceAudioPath || '';
       els.voiceReferenceText.value = settings.voiceReferenceText || '';
       els.voiceCommandTemplate.value = settings.voiceCommandTemplate || '';
       setIfExists(els.voiceTimeout, settings.voiceTimeout);
+      syncVoiceCommandTemplateForMode();
       setIfExists(els.imageTool, settings.imageTool);
       els.imagePositivePrompt.value = settings.imagePositivePrompt || '';
       els.imageModel.value = settings.imageModel || '';
@@ -2411,9 +2489,11 @@ INDEX_HTML = r"""<!doctype html>
         id: item.id,
         name: item.name,
         purpose: item.purpose,
+        endpoint: item.endpoint || '',
+        node_info_list_json: item.nodeInfoList || '[]',
+        poll_timeout_seconds: Number(item.pollTimeout || 3600),
         endpoint_configured: Boolean(item.endpoint),
         node_mapping_configured: Boolean(item.nodeInfoList && item.nodeInfoList !== '[]'),
-        poll_timeout_seconds: Number(item.pollTimeout || 3600),
       }));
     }
 
@@ -2454,6 +2534,7 @@ INDEX_HTML = r"""<!doctype html>
         els.assetMaxAttempts,
         els.assetMinScore,
         els.voiceMode,
+        els.voicePreset,
         els.voiceReferenceAudioPath,
         els.voiceReferenceText,
         els.voiceCommandTemplate,
@@ -2509,6 +2590,7 @@ INDEX_HTML = r"""<!doctype html>
         control.addEventListener('change', saveSettings);
         control.addEventListener('input', saveSettings);
       });
+      els.voiceMode.addEventListener('change', syncVoiceCommandTemplateForMode);
     }
 
     function applyImageProviderDefaults() {
@@ -3028,7 +3110,25 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function defaultVoxCPM2CommandTemplate() {
-      return 'voxcpm clone --text-file {text_file} --reference-audio {reference_audio} --output {output_file}';
+      return '';
+    }
+
+    function syncVoiceCommandTemplateForMode() {
+      const current = els.voiceCommandTemplate.value.trim();
+      const knownDefaults = [
+        '',
+        'voxcpm clone --text-file {text_file} --reference-audio {reference_audio} --output {output_file}',
+        'voxcpm tts --text-file {text_file} --voice {voice_preset} --output {output_file}',
+      ];
+      if (knownDefaults.includes(current)) {
+        els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
+      }
+      saveSettings();
+    }
+
+    function selectedVoicePresetLabel() {
+      const option = els.voicePreset?.selectedOptions?.[0];
+      return option ? option.textContent.trim() : '';
     }
 
     function syncCustomModelState(focusWhenCustom = true) {
@@ -3489,10 +3589,12 @@ INDEX_HTML = r"""<!doctype html>
       selectedTaskSummary = data.summary || {};
       els.viewerTitle.textContent = data.summary.task_title || data.summary.workflow || name;
       els.viewerMeta.textContent = name;
-      renderFiles(data.files);
+      currentTaskFiles = data.files || [];
+      renderFiles(currentTaskFiles);
       renderOutputOverview(data);
       syncOutputButtons();
-      const first = data.files.find(f => f.endsWith('final_output.md')) || data.files[0];
+      const visibleFiles = visibleTaskFiles(currentTaskFiles);
+      const first = currentTaskFiles.find(f => f.endsWith('final_output.md')) || visibleFiles[0] || currentTaskFiles[0];
       if (first) await openFile(first);
     }
 
@@ -3508,6 +3610,7 @@ INDEX_HTML = r"""<!doctype html>
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
         els.packageOutputMeta.textContent = '未生成';
         els.packageOutputList.innerHTML = '<div class="muted small">点击“导出产品包”后显示可交付文件。</div>';
+        clearVideoPreview();
         return;
       }
 
@@ -3517,6 +3620,7 @@ INDEX_HTML = r"""<!doctype html>
       const packageFiles = files.filter(file => file.startsWith('export_package/') && !file.endsWith('/'));
       const finalReady = files.includes('final_output.md') ? '已生成' : '缺失';
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
+      renderVideoPreview(data.name, files);
       els.outputSummaryGrid.innerHTML = summaryCards([
         ['任务', summary.task_title || data.name],
         ['工作流', summary.workflow || '-'],
@@ -3599,13 +3703,80 @@ INDEX_HTML = r"""<!doctype html>
 
     function renderFiles(files) {
       els.fileTabs.innerHTML = '';
-      for (const file of files) {
+      const visibleFiles = visibleTaskFiles(files);
+      if (!visibleFiles.length) {
+        els.fileTabs.innerHTML = '<span class="muted small">暂无可查看文件</span>';
+        return;
+      }
+      for (const file of visibleFiles) {
         const btn = document.createElement('button');
-        btn.textContent = file;
+        btn.textContent = compactTaskFileLabel(file);
+        btn.title = file;
+        btn.dataset.file = file;
         btn.className = selectedFile === file ? 'active' : '';
         btn.onclick = () => openFile(file);
         els.fileTabs.appendChild(btn);
       }
+    }
+
+    function renderVideoPreview(taskName, files) {
+      const videoFile = preferredVideoFile(files || []);
+      if (!videoFile) {
+        clearVideoPreview();
+        return;
+      }
+      els.videoPreviewBox.hidden = false;
+      els.videoPreviewMeta.textContent = videoFile;
+      els.videoPreview.src = `/api/media?task=${encodeURIComponent(taskName)}&file=${encodeURIComponent(videoFile)}`;
+    }
+
+    function clearVideoPreview() {
+      els.videoPreview.removeAttribute('src');
+      els.videoPreview.load();
+      els.videoPreviewMeta.textContent = '';
+      els.videoPreviewBox.hidden = true;
+    }
+
+    function preferredVideoFile(files) {
+      const videos = files.filter(file => /\.(mp4|mov|webm|m4v)$/i.test(file));
+      if (!videos.length) return '';
+      return (
+        videos.find(file => /(^|\/)(long_video_final|final_video)\.mp4$/i.test(file)) ||
+        videos.find(file => !file.startsWith('export_package/')) ||
+        videos[0]
+      );
+    }
+
+    function visibleTaskFiles(files) {
+      const list = Array.isArray(files) ? files : [];
+      if (els.showDebugFiles.checked) return list;
+      return list.filter(file => !isDebugTaskFile(file));
+    }
+
+    function isDebugTaskFile(file) {
+      const name = String(file || '');
+      const base = name.split('/').pop();
+      if (name.startsWith('export_package/')) return true;
+      if (name.includes('/attempt_')) return true;
+      if (['prompt.md', 'system.md', 'metadata.json'].includes(base)) return true;
+      if (['action_log.json', 'workflow.json', 'run_summary.json'].includes(name)) return true;
+      if (base.endsWith('_manifest.json') || base === 'manifest.json') return true;
+      if (['comfyui_payload.json', 'auto_quality_report.json'].includes(base)) return true;
+      if (name.endsWith('_stdout.txt') || name.endsWith('_stderr.txt') || name.endsWith('_command.txt')) return true;
+      if (name.endsWith('_response.json') || name.endsWith('_request.json')) return true;
+      return false;
+    }
+
+    function compactTaskFileLabel(file) {
+      const name = String(file || '');
+      if (name === 'input.md') return '原始需求';
+      if (name === 'final_output.md') return '最终汇总';
+      if (name === 'production_manifest.json') return '自动生成清单';
+      if (name === 'auto_production.md') return '自动生成说明';
+      if (name === 'final_video.mp4') return '最终视频';
+      if (/^step_\d+_.*\/output\.md$/.test(name)) return stepFileLabel(name);
+      if (name.startsWith('export_package/')) return name.replace('export_package/', '产品包/');
+      return name;
     }
 
     async function openFile(file) {
@@ -3614,7 +3785,7 @@ INDEX_HTML = r"""<!doctype html>
       const data = await api(`/api/file?task=${encodeURIComponent(selectedTask)}&file=${encodeURIComponent(file)}`);
       els.fileContent.value = data.content;
       for (const btn of els.fileTabs.querySelectorAll('button')) {
-        btn.classList.toggle('active', btn.textContent === file);
+        btn.classList.toggle('active', btn.dataset.file === file);
       }
       for (const btn of document.querySelectorAll('.output-link')) {
         btn.classList.toggle('active', btn.dataset.file === file);
@@ -3700,9 +3871,9 @@ INDEX_HTML = r"""<!doctype html>
             timeout: Number(els.modelTimeout.value || 900),
           }),
         });
-        setStatus(`第 ${step} 步已重跑：${result.file}`);
-        await selectTask(selectedTask);
-        await openFile(result.file);
+        setStatus(`重跑任务已开始：第 ${step} 步`);
+        renderProgress(result);
+        await pollRunStatus(result.run_id);
       } catch (err) {
         setStatus(err.message, true);
       } finally {
@@ -3796,6 +3967,9 @@ INDEX_HTML = r"""<!doctype html>
         await ensureLocalModelReady(model);
         const referenceImages = await uploadReferenceImages();
         const voiceReferenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
+        const voiceProvider = els.voiceMode.value === 'windows_sapi'
+          ? 'windows_sapi'
+          : (['voxcpm2', 'preset'].includes(els.voiceMode.value) ? 'voxcpm2' : '');
         const imageConfig = {
           tool: 'prompt_only',
           positive_prompt: '',
@@ -3851,7 +4025,9 @@ INDEX_HTML = r"""<!doctype html>
           video_config: videoConfig,
           voice_config: {
             mode: els.voiceMode.value,
-            provider: els.voiceMode.value === 'voxcpm2' ? 'voxcpm2' : '',
+            provider: voiceProvider,
+            voice_preset: els.voicePreset.value,
+            voice_preset_name: selectedVoicePresetLabel(),
             reference_audio: voiceReferenceAudio,
             reference_text: els.voiceReferenceText.value.trim(),
             command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
@@ -3957,9 +4133,12 @@ INDEX_HTML = r"""<!doctype html>
       applyComfyProviderDefaults();
       saveSettings();
     };
+    els.showDebugFiles.onchange = () => {
+      renderFiles(currentTaskFiles);
+    };
     els.autoProductionMode.onchange = () => {
       if (els.autoProductionMode.value === 'comfy_full') {
-        els.composeTool.value = 'runninghub';
+        els.composeTool.value = 'ffmpeg';
       }
       applyComfyProviderDefaults();
       saveSettings();
@@ -3995,6 +4174,7 @@ INDEX_HTML = r"""<!doctype html>
       els.assetMaxAttempts.value = '2';
       els.assetMinScore.value = '70';
       els.voiceMode.value = 'off';
+      els.voicePreset.value = 'warm_female';
       els.voiceReferenceAudioPath.value = '';
       els.voiceReferenceText.value = '';
       els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
@@ -4028,16 +4208,6 @@ INDEX_HTML = r"""<!doctype html>
       els.autoProductionMode.value = 'audio_package';
       els.composeTool.value = 'ffmpeg';
       els.finalVideoName.value = 'long_video_final.mp4';
-      els.comfyApiKey.value = '';
-      els.comfyBaseUrl.value = '';
-      els.comfyWorkflowEndpoint.value = '';
-      els.comfyNodeInfoList.value = '[]';
-      els.comfyPollTimeout.value = '3600';
-      els.voiceMode.value = 'off';
-      els.voiceReferenceAudioPath.value = '';
-      els.voiceReferenceText.value = '';
-      els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
-      els.voiceTimeout.value = '3600';
       els.referenceRole.value = '视觉风格参考';
       els.referenceNote.value = '用于统一长视频中的人物形象、平台界面、封面和案例画面风格';
       saveSettings();
@@ -4057,6 +4227,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
       els.voiceMode.value = 'off';
+      els.voicePreset.value = 'warm_female';
       els.voiceReferenceAudioPath.value = '';
       els.voiceReferenceText.value = '';
       els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
@@ -4107,6 +4278,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
       els.voiceMode.value = 'off';
+      els.voicePreset.value = 'warm_female';
       els.voiceReferenceAudioPath.value = '';
       els.voiceReferenceText.value = '';
       els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
@@ -4198,6 +4370,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/file":
                 query = parse_qs(parsed.query)
                 self._send_json(self._file_content(self._single(query, "task"), self._single(query, "file")))
+            elif parsed.path == "/api/media":
+                query = parse_qs(parsed.query)
+                self._send_media(self._single(query, "task"), self._single(query, "file"))
             elif parsed.path == "/api/run-status":
                 query = parse_qs(parsed.query)
                 self._send_json(self._run_status(self._single(query, "id")))
@@ -4419,6 +4594,16 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             checks.append(self._health_check("FFmpeg 命令", "ok", ffmpeg_path))
         else:
             checks.append(self._health_check("FFmpeg 命令", "warn", "未在 runtime/ffmpeg/bin/ffmpeg.exe 或 PATH 找到；本地自动成片会跳过，但制作包仍会生成"))
+
+        voxcpm_bundled = WORKSPACE_ROOT.parent / "runtime" / "tts" / "venv" / "Scripts" / "voxcpm.exe"
+        voxcpm_runner = WORKSPACE_ROOT / "my_codex_core" / "voxcpm2_tts_runner.py"
+        voxcpm_path = shutil.which("voxcpm")
+        if voxcpm_bundled.exists() and voxcpm_runner.exists():
+            checks.append(self._health_check("VoxCPM2 本地配音", "ok", str(voxcpm_bundled)))
+        elif voxcpm_path:
+            checks.append(self._health_check("VoxCPM2 本地配音", "ok", voxcpm_path))
+        else:
+            checks.append(self._health_check("VoxCPM2 本地配音", "warn", "未发现 runtime/tts/venv/Scripts/voxcpm.exe；可运行 install_voxcpm2_runtime.ps1 安装"))
 
         return {
             "checks": checks,
@@ -4648,6 +4833,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                             {"step": step_no, "status": "pending", "agent_id": "", "agent_name": ""}
                             for step_no in range(1, total + 1)
                         ],
+                        "production_events": [],
+                        "production_message": "",
                     }
                 )
             elif kind == "step_started":
@@ -4657,6 +4844,23 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 step_no = int(event.get("step") or 0)
                 cls._set_step(job, step_no, event, "done")
                 job["completed_steps"] = max(int(job.get("completed_steps") or 0), step_no)
+            elif kind == "production_update":
+                events = job.setdefault("production_events", [])
+                item = {
+                    "stage": event.get("stage", "production"),
+                    "message": event.get("message", ""),
+                    "status": event.get("status", ""),
+                    "job_status": event.get("job_status", ""),
+                    "error": event.get("error", ""),
+                    "updated_at": time.time(),
+                }
+                for key in ("total_jobs", "completed_jobs", "success_count", "failed_count", "downloaded_count", "quality_score", "attempt", "max_attempts", "current_job", "remote_status"):
+                    if key in event:
+                        item[key] = event.get(key)
+                events.append(item)
+                if len(events) > 80:
+                    del events[:-80]
+                job["production_message"] = event.get("message", "")
             elif kind == "completed":
                 job.update(
                     {
@@ -4671,6 +4875,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                         "final_output": event.get("final_output", ""),
                         "production_manifest": event.get("production_manifest", ""),
                         "production_status": event.get("production_status", "off"),
+                        "production_message": f"自动生成：{event.get('production_status', 'off')}",
                     }
                 )
             job["updated_at"] = time.time()
@@ -4772,6 +4977,50 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                             step["status"] = "error"
                     job["updated_at"] = time.time()
 
+    def _run_rerun_step_job(
+        self,
+        run_id: str,
+        task_dir: Path,
+        step: int,
+        provider: str,
+        model: str | None,
+        api_key: str | None,
+        base_url: str | None,
+        timeout: int | None,
+    ) -> None:
+        try:
+            self._update_job(run_id, {"status": "running"})
+            engine = WorkflowEngine(
+                WORKSPACE_ROOT,
+                provider=provider,
+                model=model,
+                api_key=api_key,
+                base_url=base_url,
+                timeout=timeout,
+            )
+            result = engine.rerun_step(
+                task_dir,
+                step,
+                progress_callback=lambda event: self._apply_progress(run_id, event),
+            )
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job:
+                    job["rerun_result"] = result
+                    job["output_file"] = result.get("file", "")
+                    job["updated_at"] = time.time()
+        except Exception as exc:
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job:
+                    job["status"] = "failed"
+                    job["error"] = str(exc)
+                    job["traceback"] = traceback.format_exc()
+                    for item in job.get("steps", []):
+                        if item.get("status") == "active":
+                            item["status"] = "error"
+                    job["updated_at"] = time.time()
+
     def _tasks(self) -> list[dict]:
         if not OUTPUT_ROOT.exists():
             return []
@@ -4819,6 +5068,34 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         self._ensure_editable_file(target)
         return {"file": file_name, "content": target.read_text(encoding="utf-8", errors="replace")}
 
+    def _send_media(self, task: str, file_name: str) -> None:
+        target, _ = self._safe_task_file(task, file_name, must_exist=True)
+        suffix = target.suffix.lower()
+        allowed = {
+            ".mp4",
+            ".mov",
+            ".webm",
+            ".m4v",
+            ".mp3",
+            ".wav",
+            ".aac",
+            ".m4a",
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".webp",
+        }
+        if suffix not in allowed:
+            raise ValueError(f"Unsupported media file type: {suffix}")
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        data = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
     def _save_file(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
         file_name = str(payload.get("file") or "").strip()
@@ -4850,17 +5127,60 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if step <= 0:
             raise ValueError("step is required")
         task_dir = self._safe_task_dir(task)
-        engine = WorkflowEngine(
-            WORKSPACE_ROOT,
-            provider=str(payload.get("provider") or "auto").strip(),
-            model=str(payload.get("model") or "").strip() or None,
-            api_key=str(payload.get("api_key") or "").strip() or None,
-            base_url=str(payload.get("base_url") or "").strip() or None,
-            timeout=int(payload.get("timeout") or 0) or None,
+        summary = {}
+        summary_path = task_dir / "run_summary.json"
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except json.JSONDecodeError:
+                summary = {}
+        workflow = {}
+        workflow_path = task_dir / "workflow.json"
+        if workflow_path.exists():
+            try:
+                workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError:
+                workflow = {}
+        total_steps = len(workflow.get("steps", [])) if isinstance(workflow.get("steps"), list) else 0
+        run_id = uuid4().hex
+        job = {
+            "run_id": run_id,
+            "status": "queued",
+            "workflow": summary.get("workflow") or task,
+            "task_title": summary.get("task_title") or "",
+            "workflow_name": summary.get("workflow") or task,
+            "task_dir": str(task_dir),
+            "task_name": task_dir.name,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "total_steps": total_steps,
+            "completed_steps": max(0, step - 1),
+            "steps": [
+                {"step": step_no, "status": "done" if step_no < step else "active" if step_no == step else "pending", "agent_id": "", "agent_name": ""}
+                for step_no in range(1, total_steps + 1)
+            ],
+            "rerun": True,
+            "rerun_step": step,
+        }
+        with RUN_JOBS_LOCK:
+            RUN_JOBS[run_id] = job
+
+        worker = threading.Thread(
+            target=self._run_rerun_step_job,
+            args=(
+                run_id,
+                task_dir,
+                step,
+                str(payload.get("provider") or "auto").strip(),
+                str(payload.get("model") or "").strip() or None,
+                str(payload.get("api_key") or "").strip() or None,
+                str(payload.get("base_url") or "").strip() or None,
+                int(payload.get("timeout") or 0) or None,
+            ),
+            daemon=True,
         )
-        result = engine.rerun_step(task_dir, step)
-        result["ok"] = True
-        return result
+        worker.start()
+        return job
 
     def _resume_task(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
@@ -5171,14 +5491,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "## ComfyUI 素材/预览配置\n"
             f"- 自动生成模式：{mode or 'off'}\n"
             f"- 剪辑/预览工具：{value('tool', 'ffmpeg')}\n"
-            f"- 当前工作流槽位：{value('workflow_preset_name')}（{value('workflow_preset_purpose')}）\n"
+            f"- 当前编辑槽位：{value('workflow_preset_name')}（仅用于管理台编辑，不决定运行时路由）\n"
             f"- ComfyUI 素材/预览工作流接口：{value('workflow_endpoint')}\n"
             f"- ComfyUI 平台密钥：{api_note}\n"
             f"- ComfyUI 平台接口地址：{base_url_note}\n"
             f"- 节点映射：{node_note}\n"
             f"- 轮询超时：{value('poll_timeout_seconds', '3600')} 秒\n"
             f"- 工作流库配置状态：\n{library_note}\n"
-            "- 执行要求：21_ComfyUI素材编排师只输出可映射到 ComfyUI/RunningHub 的画面素材参数包；AI 图片和视频只是片段素材，配音、SRT 字幕、最终硬字幕、最终混音和最终导出交给 20_语音字幕包装师与 22_剪辑成片执行师。\n"
+            "- 执行要求：21_ComfyUI素材编排师只输出可映射到 ComfyUI/RunningHub 的画面素材参数包；运行时会根据素材类型自动选择工作流库里的生图或生视频槽位，而不是按当前下拉编辑槽位执行。AI 图片和视频只是片段素材，配音、SRT 字幕、最终硬字幕、最终混音和最终导出交给 20_语音字幕包装师与 22_剪辑成片执行师。\n"
         )
 
     def _upload_reference_image(self, payload: dict) -> dict:

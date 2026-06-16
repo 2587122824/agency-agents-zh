@@ -209,10 +209,10 @@ runtime/models/
 - 使用 Ollama 本地地址运行工作流前，管理台会先检测当前模型接口是否可用，失败时会阻止运行并显示错误。
 - 如果某一步失败，管理台会自动打开该任务输出；失败步骤也会写入 `output.md` 和 `error.json`，便于定位。
 - `系统状态` 页面内置首次启动向导，按一键启动、本地模型、连接测试、知识库、示例工作流顺序引导配置。
-- 可在 `全自动生成` 中选择只生成视频制作包、生成视频加语音字幕制作包、调用生图/生视频 API，或预留 ComfyUI 自动化素材/预览路径；当前会自动整理 `production_manifest.json`、生图提示词、视频提示词、语音字幕包、ComfyUI 参数包、字幕、配音文本和剪辑清单，供后续 API 适配器继续执行。
+- 可在 `全自动生成` 中选择只出制作包、出制作包 + 配音字幕文本、旧版独立生图/生视频接口，或 `全自动成片预览：调用 ComfyUI 素材接口 + FFmpeg 自动剪辑`；当前会自动整理 `production_manifest.json`、生图提示词、视频提示词、语音字幕包、ComfyUI 参数包、字幕、配音文本和剪辑清单，供后续工具继续执行。
 - 可在 `全自动生成` 中启用 `VoxCPM2 本地仿声`，上传本人授权参考音频后，本地生成 `audio/voiceover.wav`；字幕和语音由 20 号员工维护，最终硬字幕和最终混音默认交给 22 号员工和剪辑工具。
-- 可在 `全自动生成 -> 剪辑/预览工具` 中选择 `ffmpeg`。系统会优先查找 `runtime/ffmpeg/bin/ffmpeg.exe`，其次查找 `runtime/ffmpeg/ffmpeg.exe` 和系统 PATH；当任务目录里已有 `video_clips/` 视频、`generated_images/` 图片或 `audio/voiceover.wav` 时，会尝试输出 `final_video.mp4`。缺少 FFmpeg 或素材不足时会写入 `local_ffmpeg_manifest.json` 并跳过，不中断工作流。
-- 可在 `全自动生成 -> ComfyUI 工作流库` 中配置 6 个默认槽位：图生图/文生图、图生视频、参考图保持一致性、B-roll 素材生成、字幕安全区画面素材、剪辑节奏画面素材。下拉选择某个槽位会加载该槽位已保存的接口、节点映射、轮询时间和用途说明，保存后写入当前浏览器 `localStorage`，刷新页面仍会恢复；列表区只展示当前选中槽位；运行时会把当前槽位和库状态传给员工，但 API Key 不写入任务输出。
+- 可在 `全自动生成 -> 自动剪辑方式` 中选择 `本地 FFmpeg 自动剪辑预览`。系统会优先查找 `runtime/ffmpeg/bin/ffmpeg.exe`，其次查找 `runtime/ffmpeg/ffmpeg.exe` 和系统 PATH；当任务目录里已有 `video_clips/` 视频、`generated_images/` 图片或 `audio/voiceover.wav` 时，会尝试输出 `final_video.mp4`。缺少 FFmpeg 或素材不足时会写入 `local_ffmpeg_manifest.json` 并跳过，不中断工作流。
+- 可在 `全自动生成 -> ComfyUI 工作流库` 中配置 5 个默认槽位：图生图/文生图、图生视频、参考图保持一致性、B-roll 素材生成、字幕安全区画面素材。下拉选择某个槽位会加载该槽位已保存的接口、节点映射、轮询时间和用途说明，保存后写入当前浏览器 `localStorage`，刷新页面仍会恢复；列表区只展示当前选中槽位；运行时会把当前槽位和库状态传给员工，但 API Key 不写入任务输出。
 - 内置工作流库槽位的名称和用途说明跟随代码版本更新；浏览器缓存只保留接口地址、节点映射和轮询时间，避免旧缓存挡住模板命名修正。
 - 选择 `auto`、`offline` 或 `openai` 执行模式。
 - 在 `API Key` 输入框填入密钥；密钥只用于本次运行，不写入任务输出文件。
@@ -340,13 +340,13 @@ edit_checklist.md
 执行模式含义：
 
 ```text
-只生成视频制作包：低成本，只整理生图、生视频和合成材料。
-生成视频 + 语音字幕制作包：增加 TTS、SRT 字幕、BGM、音效和混音建议，由 20 号员工统一维护。
-调用生图/生视频 API：读取 RunningHub 等配置并调用已接入适配器。
-ComfyUI 素材/预览草稿：预留高算力自动化路径，输出 ComfyUI 参数包，建议用于关键帧、B-roll、视频片段、字幕预览或自动化草稿；最终硬字幕、最终混音和最终导出仍以剪辑阶段为准。
+只出制作包：不调用接口、不剪辑，只整理生图、生视频和合成材料。
+出制作包 + 配音字幕文本：增加 TTS 配音稿、SRT 字幕草案、BGM、音效和混音建议，由 20 号员工统一维护；只有本地 TTS 命令可用时才会额外生成 `audio/voiceover.wav`。
+旧接口：只调用独立生图/生视频：读取 RunningHub 等配置并调用已接入的旧版独立适配器。
+全自动成片预览：调用 ComfyUI 素材接口 + FFmpeg 自动剪辑，先下载云端 ComfyUI 生成的图片/视频素材，再用本地 FFmpeg 合成 `final_video.mp4` 预览版。
 ```
 
-当前版本会生成可执行资产包和 manifest；选择 `调用生图/生视频 API` 时会调用已接入的生图/生视频适配器。选择 `ComfyUI 素材/预览草稿` 且剪辑/预览工具为 `RunningHub / 云端 ComfyUI（素材/预览）`、密钥、接口地址和 ComfyUI 工作流接口都已填写时，会调用 ComfyUI 素材/预览适配器。
+当前版本会生成可执行资产包和 manifest；选择 `旧接口：只调用独立生图/生视频` 时会调用已接入的生图/生视频适配器。选择 `全自动成片预览`，并填写密钥、接口地址和 ComfyUI 工作流接口时，会调用 ComfyUI 素材适配器；自动剪辑方式选择 `本地 FFmpeg 自动剪辑预览` 时，会继续尝试输出 `final_video.mp4`。
 
 ComfyUI 素材/预览配置说明：
 
@@ -370,9 +370,9 @@ my_workspace/comfyui_workflows/long_video_universal/
   README.md
 ```
 
-这个模板优先用于管理台参数识别和 RunningHub 映射预设：只把正向提示词、负向提示词、参考图、配音文本、字幕 SRT 和完整制作包暴露为动态参数；模型、采样器、分辨率、转场和素材生成逻辑建议固定在真实 ComfyUI / RunningHub 工作流里维护。字幕 SRT 可传给 ComfyUI 做预览或自动化草稿，最终硬字幕、最终混音和最终导出默认交给剪辑工具处理。
+这个模板优先用于管理台参数识别和 RunningHub 映射预设：只把正向提示词、负向提示词、参考图和完整制作包暴露为动态参数；模型、采样器、分辨率、转场和素材生成逻辑建议固定在真实 ComfyUI / RunningHub 工作流里维护。配音、字幕、最终硬字幕、最终混音和最终导出默认交给剪辑工具处理。
 
-另外，项目内置了对应管理台 6 个 ComfyUI 工作流库槽位的画布模板：
+另外，项目内置了对应管理台 5 个 ComfyUI 工作流库槽位的画布模板：
 
 ```text
 my_workspace/comfyui_workflows/workflow_library/
@@ -381,7 +381,6 @@ my_workspace/comfyui_workflows/workflow_library/
   03_reference_consistency/
   04_broll_material/
   05_subtitle_preview/
-  06_audio_subtitle_video_preview/
 ```
 
 每个槽位目录都包含：
@@ -607,7 +606,7 @@ video_clips/runninghub_video_query_response.json
 
 1. 先在本机单独安装并跑通 VoxCPM2。
 2. 打开管理台 `http://127.0.0.1:8765`。
-3. 在 `全自动生成` 中选择 `生成视频制作包 + 语音字幕包` 或 `ComfyUI 素材/预览草稿`。
+3. 在 `全自动生成` 中选择 `生成制作包 + 配音/字幕文本包` 或 `调用 ComfyUI 生成素材/预览草稿`。
 4. `本地配音` 选择 `VoxCPM2 本地仿声`。
 5. 上传本人或已授权的参考音频。
 6. 可选填写参考音频原文。
@@ -668,3 +667,57 @@ audio/voxcpm2_stderr.txt
 这些高级字段仍保留在代码中，用于兼容旧设置和适配器结构；但默认不再暴露给普通用户填写，运行时也不会把单独的生图/生视频配置追加到员工输入。
 
 `image_config` 和 `video_config` 仍保留空的兼容结构，避免破坏制作包和适配器代码；实际执行建议走 ComfyUI/RunningHub 素材/预览配置和 API JSON 节点映射。
+## FFmpeg 自动成片强化产物
+
+当全自动生成模式启用本地 `ffmpeg`，并且任务目录里存在视频片段、图片素材或 `audio/voiceover.wav` 时，系统会尝试生成本地预览版成片。新增/强化产物如下：
+
+```text
+final_video.mp4              本地预览版或可发布草稿
+edit_timeline.json           自动剪辑时间线，记录素材顺序、音频、字幕和输出模式
+ffmpeg_edit_plan.md          给人工复核的剪辑执行说明
+local_ffmpeg_command.txt     实际执行的 FFmpeg 命令
+local_ffmpeg_manifest.json   执行状态、输入文件、输出文件、失败/跳过原因
+```
+
+素材搜索范围：
+
+```text
+video_clips/                 视频片段
+generated_images/            图片素材
+comfyui/                     ComfyUI/RunningHub 下载结果，递归搜索图片和视频
+audio/voiceover.wav          本地 TTS 或手动放入的主配音
+subtitles.srt                默认用于烧录硬字幕
+```
+
+如果 `subtitles.srt` 存在，FFmpeg 预览版默认烧录硬字幕；如果缺少 FFmpeg 或素材不足，工作流不会中断，会把原因写入 `local_ffmpeg_manifest.json`。
+
+## 默认 AI 配音音色
+
+管理台 `全自动生成 -> 本地配音` 现在支持两类本地配音：
+
+```text
+不生成配音音频
+默认 AI 音色
+VoxCPM2 本地仿声
+```
+
+默认 AI 音色不需要上传本人参考音频，会把选择的音色 ID 传给命令模板：
+
+```text
+voxcpm tts --text-file {text_file} --voice {voice_preset} --output {output_file}
+```
+
+内置音色选项：
+
+```text
+暖心女声
+清爽女声
+专业男声
+沉稳男声
+活力男声
+故事女声
+```
+
+如果你本地安装的 TTS 命令参数不同，直接在管理台修改 `VoxCPM2 命令模板` 即可；可用占位符包括 `{text_file}`、`{text}`、`{voice_preset}`、`{voice_name}`、`{reference_audio}`、`{reference_text}`、`{output_file}`。
+
+点击 `长视频示例` 只会填入长视频需求、任务名和基础成片默认值，不会清空已经配置好的 ComfyUI 接口、节点映射、轮询超时、本地配音模式、默认音色、参考音频或命令模板。

@@ -1,5 +1,5 @@
 {
-  "id": "06_audio_subtitle_video_preview",
+  "id": "06_deprecated_edit_rhythm_visual_material",
   "revision": 0,
   "last_node_id": 4986,
   "last_link_id": 13363,
@@ -1942,7 +1942,7 @@
         "Node name for S&R": "MarkdownNote"
       },
       "widgets_values": [
-        "# 运行前检查\n\n这个模板基于 LTX-Video 2.3 官方 ComfyUI 示例。直接点 Run 前必须满足：\n\n1. 在 LoadImage 节点手动上传参考图。模板中的 upload_reference_image_first.png 只是提示名，不是真实文件。\n2. 安装 ComfyUI-LTXVideo 自定义节点。\n3. 安装并在节点下拉中选择本机已有的模型文件：\n   - ltx-2.3-22b-dev-fp8.safetensors\n   - gemma_3_12B_it.safetensors 或你本机实际的 Gemma 文本编码器\n   - ltx-2.3-22b-distilled-lora-384-1.1.safetensors 或你本机实际的 LTX 2.3 LoRA\n\n如果节点下拉列表里没有这些文件，ComfyUI 会报 Value not in list。请先下载模型，或在节点里改成你本机已有的模型名。\n\n4. ComfyUI only generates visual material in this template. Voice, SRT subtitles, hard subtitles, final mix, and final export are handled in the editing step.\n"
+        "# DEPRECATED\n\nThis canvas is no longer listed in the management UI.\n\nUse one of these active slots instead:\n\n- 02_ltx_video_2_3\n- 04_broll_material\n- 05_subtitle_preview\n\nIt is kept only for old task compatibility.\n"
       ]
     }
   ],
@@ -3113,11 +3113,17 @@
       }
     ],
     "agency_agents_zh": {
-      "slot_id": "06_audio_subtitle_video_preview",
-      "slot_title": "????????",
-      "purpose": "?????????????????????????????????????",
+      "slot_id": "06_deprecated_edit_rhythm_visual_material",
+      "slot_title": "DEPRECATED - edit rhythm visual material",
+      "purpose": "Removed from active workflow library. Use 02_ltx_video_2_3, 04_broll_material, or 05_subtitle_preview instead.",
       "image_model": "Z-Image Turbo",
-      "video_model": "LTX-Video 2.3"
+      "video_model": "LTX-Video 2.3",
+      "deprecated": true,
+      "replacement_slots": [
+        "02_ltx_video_2_3",
+        "04_broll_material",
+        "05_subtitle_preview"
+      ]
     }
   },
   "version": 0.4

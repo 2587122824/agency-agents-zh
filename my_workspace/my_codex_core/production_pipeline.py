@@ -17,11 +17,19 @@ def run_auto_production(
     task_dir: Path,
     step_outputs: list[dict[str, str]],
     production_config: dict[str, Any] | None = None,
+    progress_callback=None,
 ) -> dict[str, Any] | None:
     config = production_config or {}
     mode = str(config.get("mode") or "off").strip()
     if mode == "off":
         return None
+
+    def emit(message: str, stage: str = "production", **extra: Any) -> None:
+        if not progress_callback:
+            return
+        event = {"event": "production_update", "stage": stage, "message": message}
+        event.update(extra)
+        progress_callback(event)
 
     image_config = config.get("image_config") or {}
     video_config = config.get("video_config") or {}
@@ -52,12 +60,20 @@ def run_auto_production(
     checklist_path = task_dir / "edit_checklist.md"
     production_note_path = task_dir / "auto_production.md"
     final_video_name = _safe_file_name(str(compose_config.get("final_video_name") or "final_video.mp4"))
+    emit("正在整理制作包：提示词、配音文案、字幕、ComfyUI 参数和剪辑方案", stage="package")
 
     _write_text(image_prompt_path, image_content or "# 分镜生图提示词\n\n未找到 06_分镜生图设计师输出。\n")
     _write_text(video_prompt_path, video_content or "# 视频生成提示词\n\n未找到 07_视频生成执行员输出。\n")
     _write_text(audio_package_path, audio_content or "# 语音字幕制作包\n\n未找到 20_语音字幕包装师输出。\n")
-    voice_text = _extract_section(audio_content, "TTS 配音稿") or "待从 20_语音字幕包装师输出中整理配音稿。\n"
-    subtitle_srt = _extract_srt(audio_content) or _default_srt()
+    voice_text = _extract_voice_text(audio_content)
+    voice_text_quality = _quality_check_voice_text(voice_text)
+    if not voice_text_quality["usable"]:
+        voice_text = "待从 20_语音字幕包装师输出中整理配音稿。\n"
+    subtitle_srt = _extract_srt(audio_content)
+    subtitle_srt_quality = _quality_check_srt(subtitle_srt)
+    if not subtitle_srt_quality["usable"]:
+        subtitle_srt = _srt_from_voice_text(voice_text) if voice_text_quality["usable"] else _default_srt()
+        subtitle_srt_quality = _quality_check_srt(subtitle_srt)
     _write_text(voiceover_path, voice_text)
     _write_text(subtitles_path, subtitle_srt)
     _write_text(comfyui_plan_path, compose_content or "# ComfyUI 素材生成编排方案\n\n未找到 21_ComfyUI素材编排师输出。\n")
@@ -71,6 +87,7 @@ def run_auto_production(
         _ensure_comfyui_payload_defaults(comfyui_payload_text, mode, final_video_name, video_config),
     )
     _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, compose_step, edit_step, image_config, video_config, compose_config))
+    emit("制作包已生成，开始按自动生成配置调用工具", stage="package")
 
     if mode == "api_ready":
         initial_status = "api_adapter_pending"
@@ -156,6 +173,14 @@ def run_auto_production(
         "audio": {
             "provider": voice_config.get("provider") or "",
             "mode": voice_config.get("mode") or "off",
+            "voice_preset": voice_config.get("voice_preset") or "",
+            "voice_preset_name": voice_config.get("voice_preset_name") or "",
+            "voice_text_status": voice_text_quality["status"],
+            "voice_text_reason": voice_text_quality["reason"],
+            "voice_text_chars": len(voice_text.strip()),
+            "subtitle_status": subtitle_srt_quality["status"],
+            "subtitle_reason": subtitle_srt_quality["reason"],
+            "subtitle_entries": subtitle_srt_quality["entries"],
             "reference_audio_provided": bool(str(voice_config.get("reference_audio") or "").strip()),
             "reference_text_provided": bool(str(voice_config.get("reference_text") or "").strip()),
             "adapter_status": "pending" if str(voice_config.get("mode") or "").strip().lower() not in {"", "off"} else "not_configured",
@@ -198,11 +223,13 @@ def run_auto_production(
             elif video_adapter_result["status"] not in {"skipped", "success"}:
                 manifest["status"] = "video_adapter_failed"
     if mode == "comfy_full":
+        emit("开始调用 ComfyUI 素材/预览工作流", stage="comfyui")
         comfyui_adapter_result = _run_comfyui_adapter_with_quality_gate(
             comfyui_payload_path,
             compose_config,
             quality_config,
             paths["comfyui"],
+            progress_callback=progress_callback,
         )
         if comfyui_adapter_result:
             manifest["composition"]["adapter_status"] = comfyui_adapter_result["status"]
@@ -211,13 +238,21 @@ def run_auto_production(
             manifest["composition"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
             manifest["composition"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
             manifest["composition"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
-            if comfyui_adapter_result["status"] == "success":
+            if comfyui_adapter_result["status"] in {"success", "partial_success"}:
                 manifest["status"] = "comfyui_generated"
             elif comfyui_adapter_result["status"] == "skipped":
                 manifest["status"] = "comfyui_adapter_skipped"
             else:
                 manifest["status"] = "comfyui_adapter_failed"
+            emit(
+                f"ComfyUI 阶段结束：{comfyui_adapter_result.get('status') or 'unknown'}，下载 {len(comfyui_adapter_result.get('downloaded_files') or [])} 个素材",
+                stage="comfyui",
+                status=comfyui_adapter_result.get("status") or "",
+                downloaded_count=len(comfyui_adapter_result.get("downloaded_files") or []),
+                quality_score=comfyui_adapter_result.get("quality_score", 0),
+            )
 
+    emit("开始本地配音处理", stage="tts")
     tts_adapter_result = _run_local_tts_adapter(voice_text, voice_config, paths["audio"])
     if tts_adapter_result:
         manifest["audio"]["adapter_status"] = tts_adapter_result.get("status") or "failed"
@@ -229,12 +264,26 @@ def run_auto_production(
             manifest["status"] = "audio_generated"
         elif tts_adapter_result.get("status") not in {"success", "skipped"}:
             manifest["status"] = "local_tts_failed"
+        emit(
+            f"本地配音阶段结束：{tts_adapter_result.get('status') or 'unknown'}",
+            stage="tts",
+            status=tts_adapter_result.get("status") or "",
+        )
 
+    emit("开始本地 FFmpeg 剪辑/预览合成", stage="ffmpeg")
     ffmpeg_adapter_result = _run_local_ffmpeg_adapter(task_dir, paths, compose_config, manifest)
     if ffmpeg_adapter_result:
         manifest["composition"]["adapter_status"] = ffmpeg_adapter_result.get("status") or "failed"
         manifest["composition"]["local_ffmpeg_manifest"] = str(task_dir / "local_ffmpeg_manifest.json")
         manifest["composition"]["local_ffmpeg_command"] = str(task_dir / "local_ffmpeg_command.txt")
+        manifest["files"]["ffmpeg_manifest"] = str(task_dir / "local_ffmpeg_manifest.json")
+        manifest["files"]["ffmpeg_command"] = str(task_dir / "local_ffmpeg_command.txt")
+        if ffmpeg_adapter_result.get("timeline_file"):
+            manifest["composition"]["local_ffmpeg_timeline"] = ffmpeg_adapter_result.get("timeline_file", "")
+            manifest["files"]["ffmpeg_timeline"] = ffmpeg_adapter_result.get("timeline_file", "")
+        if ffmpeg_adapter_result.get("edit_plan_file"):
+            manifest["composition"]["local_ffmpeg_edit_plan"] = ffmpeg_adapter_result.get("edit_plan_file", "")
+            manifest["files"]["ffmpeg_edit_plan"] = ffmpeg_adapter_result.get("edit_plan_file", "")
         files = ffmpeg_adapter_result.get("downloaded_files") or []
         if files:
             manifest["composition"]["final_video_file"] = str(files[0])
@@ -245,12 +294,19 @@ def run_auto_production(
             manifest["status"] = "local_ffmpeg_skipped"
         elif ffmpeg_adapter_result.get("status") not in {"success", "skipped"}:
             manifest["status"] = "local_ffmpeg_failed"
+        emit(
+            f"FFmpeg 阶段结束：{ffmpeg_adapter_result.get('status') or 'unknown'}",
+            stage="ffmpeg",
+            status=ffmpeg_adapter_result.get("status") or "",
+            final_video=(files[0] if files else ""),
+        )
 
     manifest_path = task_dir / "production_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_text(production_note_path, _build_production_note(manifest))
     manifest["files"]["manifest"] = str(manifest_path)
     manifest["files"]["note"] = str(production_note_path)
+    emit(f"自动生成阶段完成：{manifest['status']}", stage="production", status=manifest["status"])
     return manifest
 
 
@@ -308,9 +364,10 @@ def _run_comfyui_adapter(
     comfyui_payload_path: Path,
     compose_config: dict[str, Any],
     output_dir: Path,
+    progress_callback=None,
 ) -> dict[str, Any] | None:
     tool = str(compose_config.get("tool") or "").strip().lower()
-    if tool in {"", "manual", "ffmpeg", "jianying"}:
+    if tool in {"", "manual", "jianying"}:
         return {"status": "skipped", "reason": "compose tool is not a cloud ComfyUI provider"}
     api_key = str(compose_config.get("api_key") or "").strip()
     base_url = str(compose_config.get("base_url") or "").strip()
@@ -322,7 +379,7 @@ def _run_comfyui_adapter(
         comfyui_payload = json.loads(comfyui_payload_path.read_text(encoding="utf-8"))
         if not isinstance(comfyui_payload, dict):
             raise ValueError("comfyui_payload.json must contain a JSON object")
-        manifest = CloudComfyUIAdapter(base_url=base_url, api_key=api_key, endpoint=endpoint).run(
+        manifest = CloudComfyUIAdapter(base_url=base_url, api_key=api_key, endpoint=endpoint, progress_callback=progress_callback).run(
             comfyui_payload=comfyui_payload,
             compose_config=compose_config,
             output_dir=output_dir,
@@ -347,13 +404,14 @@ def _run_comfyui_adapter_with_quality_gate(
     compose_config: dict[str, Any],
     quality_config: dict[str, Any],
     output_dir: Path,
+    progress_callback=None,
 ) -> dict[str, Any] | None:
     enabled = _as_bool(quality_config.get("enabled"), default=True)
     max_attempts = _safe_int(quality_config.get("max_attempts"), default=2, minimum=1, maximum=6)
     min_score = _safe_int(quality_config.get("min_score"), default=70, minimum=0, maximum=100)
     min_file_size_kb = _safe_int(quality_config.get("min_file_size_kb"), default=64, minimum=1, maximum=200000)
     if not enabled:
-        result = _run_comfyui_adapter(comfyui_payload_path, compose_config, output_dir)
+        result = _run_comfyui_adapter(comfyui_payload_path, compose_config, output_dir, progress_callback=progress_callback)
         if result:
             score = _score_material_result(result, min_file_size_kb)
             result["quality_score"] = score["score"]
@@ -361,10 +419,7 @@ def _run_comfyui_adapter_with_quality_gate(
             result["attempts"] = 1
         return result
 
-    try:
-        base_payload = json.loads(comfyui_payload_path.read_text(encoding="utf-8"))
-    except Exception:
-        base_payload = {}
+    base_payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
     if not isinstance(base_payload, dict):
         base_payload = {}
 
@@ -372,12 +427,22 @@ def _run_comfyui_adapter_with_quality_gate(
     best_result: dict[str, Any] | None = None
     best_score: dict[str, Any] = {"score": -1}
     for attempt in range(1, max_attempts + 1):
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "production_update",
+                    "stage": "comfyui",
+                    "message": f"ComfyUI 质量检查第 {attempt}/{max_attempts} 次尝试",
+                    "attempt": attempt,
+                    "max_attempts": max_attempts,
+                }
+            )
         attempt_dir = output_dir / f"attempt_{attempt:02d}"
         attempt_payload_path = attempt_dir / "comfyui_payload.json"
         attempt_payload = _payload_for_attempt(base_payload, attempt)
         attempt_dir.mkdir(parents=True, exist_ok=True)
         attempt_payload_path.write_text(json.dumps(attempt_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        result = _run_comfyui_adapter(attempt_payload_path, compose_config, attempt_dir)
+        result = _run_comfyui_adapter(attempt_payload_path, compose_config, attempt_dir, progress_callback=progress_callback)
         score = _score_material_result(result or {}, min_file_size_kb)
         score["attempt"] = attempt
         score["payload_file"] = str(attempt_payload_path)
@@ -402,7 +467,7 @@ def _run_comfyui_adapter_with_quality_gate(
     best_result["quality_score"] = int(best_score.get("score", 0))
     best_result["quality_report"] = str(report_path)
     best_result["attempts"] = len(attempts)
-    if best_result.get("status") == "success" and best_result["quality_score"] < min_score:
+    if best_result.get("status") in {"success", "partial_success"} and best_result["quality_score"] < min_score:
         best_result["status"] = "quality_failed"
     return best_result
 
@@ -419,6 +484,119 @@ def _payload_for_attempt(payload: dict[str, Any], attempt: int) -> dict[str, Any
     return data
 
 
+def _load_comfyui_payload_with_fallback(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return {}
+    try:
+        payload = json.loads(text)
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return _salvage_comfyui_payload(text)
+
+
+def _salvage_comfyui_payload(text: str) -> dict[str, Any]:
+    image_section = _between_markers(text, '"image_prompts"', '"video_prompts"')
+    video_section = _between_markers(text, '"video_prompts"', '"reference_images"')
+    image_prompts = _salvage_prompt_items(image_section, default_model="Z-Image Turbo", include_duration=False)
+    video_prompts = _salvage_prompt_items(video_section, default_model="LTX-Video 2.3", include_duration=True)
+    if not image_prompts and not video_prompts:
+        return {}
+    payload: dict[str, Any] = {
+        "execution_mode": "comfy_full",
+        "image_prompts": image_prompts,
+        "video_prompts": video_prompts,
+        "reference_images": [],
+        "output": {
+            "aspect_ratio": "16:9",
+            "output_directory": "output/comfyui_materials/",
+            "file_naming_convention": "{type}_{id}.mp4 or .png",
+        },
+        "payload_recovered": True,
+        "payload_recovery_note": "Original ComfyUI JSON was invalid; prompt items were recovered from text.",
+    }
+    return payload
+
+
+def _between_markers(text: str, start_marker: str, end_marker: str) -> str:
+    start = text.find(start_marker)
+    if start < 0:
+        return ""
+    end = text.find(end_marker, start + len(start_marker))
+    return text[start:end] if end > start else text[start:]
+
+
+def _salvage_prompt_items(section: str, default_model: str, include_duration: bool) -> list[dict[str, Any]]:
+    if not section:
+        return []
+    items: list[dict[str, Any]] = []
+    pattern = re.compile(
+        r'"id"\s*:\s*"(?P<id>[^"]+)"(?P<body>.*?)(?=\n\s*\{\s*\n\s*"id"|\n\s*\]\s*,|\Z)',
+        re.DOTALL,
+    )
+    for match in pattern.finditer(section):
+        body = match.group("body")
+        prompt = _salvage_json_string_field(body, "prompt")
+        if not prompt:
+            continue
+        negative_prompt = _salvage_json_string_field(body, "negative_prompt")
+        item: dict[str, Any] = {
+            "id": match.group("id"),
+            "prompt": prompt,
+            "negative_prompt": negative_prompt,
+            "aspect_ratio": _salvage_json_string_field(body, "aspect_ratio") or "16:9",
+            "model": _salvage_json_string_field(body, "model") or default_model,
+        }
+        item_type = _salvage_json_string_field(body, "type")
+        if item_type:
+            item["type"] = item_type
+        if include_duration:
+            duration = _salvage_json_number_field(body, "duration")
+            fps = _salvage_json_number_field(body, "fps")
+            if duration:
+                item["duration"] = duration
+            if fps:
+                item["fps"] = fps
+        seed = _salvage_json_number_field(body, "seed")
+        if seed:
+            item["seed"] = seed
+        items.append(item)
+    return items
+
+
+def _salvage_json_string_field(body: str, key: str) -> str:
+    marker = f'"{key}"'
+    start = body.find(marker)
+    if start < 0:
+        return ""
+    colon = body.find(":", start + len(marker))
+    if colon < 0:
+        return ""
+    first_quote = body.find('"', colon + 1)
+    if first_quote < 0:
+        return ""
+    next_key = re.search(r'\n\s*"[A-Za-z_][A-Za-z0-9_]*"\s*:', body[first_quote + 1 :])
+    if next_key:
+        end_region = first_quote + 1 + next_key.start()
+        comma = body.rfind(",", first_quote + 1, end_region)
+        last_quote = body.rfind('"', first_quote + 1, comma if comma > first_quote else end_region)
+    else:
+        last_quote = body.rfind('"')
+    if last_quote <= first_quote:
+        return ""
+    value = body[first_quote + 1 : last_quote]
+    return value.replace('\\"', '"').strip()
+
+
+def _salvage_json_number_field(body: str, key: str) -> int | float | None:
+    match = re.search(rf'"{re.escape(key)}"\s*:\s*(-?\d+(?:\.\d+)?)', body)
+    if not match:
+        return None
+    value = match.group(1)
+    return float(value) if "." in value else int(value)
+
+
 def _score_material_result(result: dict[str, Any], min_file_size_kb: int) -> dict[str, Any]:
     files = [Path(path) for path in result.get("downloaded_files", []) if path]
     existing = [path for path in files if path.exists()]
@@ -428,6 +606,9 @@ def _score_material_result(result: dict[str, Any], min_file_size_kb: int) -> dic
     if result.get("status") == "success":
         score += 45
         reasons.append("接口返回成功")
+    elif result.get("status") == "partial_success":
+        score += 35
+        reasons.append("ComfyUI batch partially succeeded")
     else:
         reasons.append(f"接口状态：{result.get('status') or 'unknown'}")
     if existing:
@@ -566,13 +747,121 @@ def _extract_srt(content: str) -> str:
     return match.group(1).strip() + "\n" if match else ""
 
 
+def _extract_voice_text(content: str) -> str:
+    for heading in ("完整配音稿", "TTS 配音稿", "配音稿", "口播稿", "旁白稿"):
+        text_block = _extract_fenced_block_after_heading(content, heading)
+        if text_block:
+            return _clean_voice_text(text_block)
+    for heading in ("TTS 配音稿", "配音稿", "口播稿", "旁白稿"):
+        section = _extract_section(content, heading)
+        if section:
+            return _clean_voice_text(section)
+    return ""
+
+
 def _extract_section(content: str, heading: str) -> str:
-    pattern = rf"#+\s*{re.escape(heading)}\s*(.*?)(?:\n#+\s|\Z)"
+    pattern = rf"#+\s*(?:\d+(?:\.\d+)*[\.、]?\s*)?{re.escape(heading)}\s*(.*?)(?:\n#+\s|\Z)"
     match = re.search(pattern, content, re.DOTALL)
     if not match:
         return ""
     text = re.sub(r"```(?:text)?\s*|\s*```", "", match.group(1)).strip()
     return text + "\n" if text else ""
+
+
+def _extract_fenced_block_after_heading(content: str, heading: str) -> str:
+    pattern = rf"#+\s*(?:\d+(?:\.\d+)*[\.、]?\s*)?{re.escape(heading)}(?:[^\n]*)\n.*?```(?:text)?\s*(.*?)```"
+    match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+    return match.group(1).strip() + "\n" if match else ""
+
+
+def _clean_voice_text(text: str) -> str:
+    lines: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            lines.append("")
+            continue
+        if line.startswith("|") or re.match(r"^[-:| ]{3,}$", line):
+            continue
+        if re.match(r"^#+\s+", line):
+            break
+        lines.append(line)
+    cleaned = "\n".join(lines).strip()
+    return cleaned + "\n" if cleaned else ""
+
+
+def _quality_check_voice_text(text: str) -> dict[str, Any]:
+    stripped = (text or "").strip()
+    placeholder_patterns = ["待从", "后续", "自行完成", "按上述", "....", "..."]
+    if not stripped:
+        return {"usable": False, "status": "missing", "reason": "没有抽取到配音稿"}
+    if any(pattern in stripped for pattern in placeholder_patterns):
+        return {"usable": False, "status": "placeholder", "reason": "配音稿包含占位说明"}
+    if len(stripped) < 80:
+        return {"usable": False, "status": "too_short", "reason": "配音稿过短"}
+    return {"usable": True, "status": "ok", "reason": ""}
+
+
+def _quality_check_srt(srt: str) -> dict[str, Any]:
+    stripped = (srt or "").strip()
+    entries = len(re.findall(r"(?m)^\d+\s*$", stripped))
+    placeholder_patterns = ["后续", "自行完成", "按上述", "....", "..."]
+    if not stripped:
+        return {"usable": False, "status": "missing", "reason": "没有抽取到 SRT", "entries": 0}
+    if any(pattern in stripped for pattern in placeholder_patterns):
+        return {"usable": False, "status": "placeholder", "reason": "SRT 包含占位说明", "entries": entries}
+    if entries < 3:
+        return {"usable": False, "status": "too_few_entries", "reason": "SRT 条目过少", "entries": entries}
+    if "-->" not in stripped:
+        return {"usable": False, "status": "invalid", "reason": "SRT 缺少时间轴", "entries": entries}
+    return {"usable": True, "status": "ok", "reason": "", "entries": entries}
+
+
+def _srt_from_voice_text(voice_text: str) -> str:
+    chunks = _chunk_voice_text_for_srt(voice_text)
+    if not chunks:
+        return _default_srt()
+    lines: list[str] = []
+    current_ms = 0
+    for index, chunk in enumerate(chunks, start=1):
+        duration_ms = max(2200, min(7000, int(len(chunk) / 5 * 1000)))
+        start = _format_srt_time(current_ms)
+        end = _format_srt_time(current_ms + duration_ms)
+        lines.extend([str(index), f"{start} --> {end}", chunk, ""])
+        current_ms += duration_ms + 120
+    return "\n".join(lines).strip() + "\n"
+
+
+def _chunk_voice_text_for_srt(text: str, max_chars: int = 32) -> list[str]:
+    source = re.sub(r"【.*?】", "", text)
+    source = re.sub(r"\s+", " ", source).strip()
+    if not source:
+        return []
+    parts = [part.strip() for part in re.split(r"([。！？!?；;])", source) if part.strip()]
+    sentences: list[str] = []
+    current = ""
+    for part in parts:
+        current += part
+        if re.fullmatch(r"[。！？!?；;]", part):
+            sentences.append(current.strip())
+            current = ""
+    if current.strip():
+        sentences.append(current.strip())
+    chunks: list[str] = []
+    for sentence in sentences:
+        while len(sentence) > max_chars:
+            chunks.append(sentence[:max_chars])
+            sentence = sentence[max_chars:]
+        if sentence:
+            chunks.append(sentence)
+    return chunks
+
+
+def _format_srt_time(milliseconds: int) -> str:
+    seconds, ms = divmod(milliseconds, 1000)
+    minutes, sec = divmod(seconds, 60)
+    hours, minute = divmod(minutes, 60)
+    return f"{hours:02d}:{minute:02d}:{sec:02d},{ms:03d}"
 
 
 def _extract_json_block(content: str) -> str:
