@@ -394,6 +394,8 @@ runninghub_node_info_list_preset.json
   RunningHub nodeInfoList 初始映射。
 ```
 
+`01_image_z_image_turbo` 是 Z-Image Turbo 文生图/关键帧生图模板，不是图生图。需要参考图保持人物、产品或风格一致时，优先使用 `03_reference_consistency`，或在 ComfyUI 中搭 Z-Image Turbo + ControlNet / IP-Adapter / 图像编辑类节点后重新导出 API JSON。
+
 生图默认使用 Z-Image Turbo；生视频、B-roll、字幕/音频预览素材默认使用 LTX-Video 2.3。先把 `workflow_canvas.json` 导入 ComfyUI 跑通，再从 ComfyUI / RunningHub 导出 API JSON 给管理台识别，最后保存到对应工作流库槽位。
 
 注意：

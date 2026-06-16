@@ -1772,8 +1772,8 @@ INDEX_HTML = r"""<!doctype html>
     const DEFAULT_COMFY_WORKFLOW_LIBRARY = [
       {
         id: 'txt_img_img',
-        name: '图生图 / 文生图',
-        purpose: 'Z-Image Turbo：生成封面、关键画面、配图、场景图',
+        name: '文生图 / 关键帧生图',
+        purpose: 'Z-Image Turbo：根据提示词生成封面、关键画面、配图、场景图',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
