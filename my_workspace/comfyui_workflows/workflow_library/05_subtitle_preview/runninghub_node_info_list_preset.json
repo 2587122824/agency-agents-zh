@@ -1,0 +1,52 @@
+[
+  {
+    "nodeId": "10",
+    "fieldName": "text",
+    "fieldValue": "{{prompt}}"
+  },
+  {
+    "nodeId": "11",
+    "fieldName": "text",
+    "fieldValue": "{{negative_prompt}}"
+  },
+  {
+    "nodeId": "12",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image}}"
+  },
+  {
+    "nodeId": "13",
+    "fieldName": "text",
+    "fieldValue": "{{voice_text}}"
+  },
+  {
+    "nodeId": "14",
+    "fieldName": "text",
+    "fieldValue": "{{subtitle_srt}}"
+  },
+  {
+    "nodeId": "15",
+    "fieldName": "text",
+    "fieldValue": "{{payload}}"
+  },
+  {
+    "nodeId": "20",
+    "fieldName": "width",
+    "fieldValue": 960
+  },
+  {
+    "nodeId": "20",
+    "fieldName": "height",
+    "fieldValue": 544
+  },
+  {
+    "nodeId": "20",
+    "fieldName": "frames",
+    "fieldValue": 121
+  },
+  {
+    "nodeId": "40",
+    "fieldName": "filename_prefix",
+    "fieldValue": "subtitle_preview_ltx_video"
+  }
+]

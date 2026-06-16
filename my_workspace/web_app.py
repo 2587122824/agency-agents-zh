@@ -1773,7 +1773,7 @@ INDEX_HTML = r"""<!doctype html>
       {
         id: 'txt_img_img',
         name: '图生图 / 文生图',
-        purpose: '生成封面、关键画面、配图、场景图',
+        purpose: 'Z-Image Turbo：生成封面、关键画面、配图、场景图',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -1781,7 +1781,7 @@ INDEX_HTML = r"""<!doctype html>
       {
         id: 'image_to_video',
         name: '图生视频',
-        purpose: '把参考图、分镜图或产品图生成视频片段',
+        purpose: 'LTX-Video 2.3：把参考图、分镜图或产品图生成视频片段',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -1789,7 +1789,7 @@ INDEX_HTML = r"""<!doctype html>
       {
         id: 'reference_consistency',
         name: '参考图保持一致性',
-        purpose: '保持人物、产品、品牌、画风一致',
+        purpose: 'Z-Image Turbo 生成一致关键帧，LTX-Video 2.3 生成视频片段',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -1797,7 +1797,7 @@ INDEX_HTML = r"""<!doctype html>
       {
         id: 'broll_material',
         name: 'B-roll 素材生成',
-        purpose: '生成补画面、转场、氛围镜头和说明性画面',
+        purpose: 'LTX-Video 2.3：生成补画面、转场、氛围镜头和说明性画面',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -1805,7 +1805,7 @@ INDEX_HTML = r"""<!doctype html>
       {
         id: 'subtitle_preview',
         name: '字幕预览合成',
-        purpose: '快速检查字幕位置、样式和节奏',
+        purpose: 'LTX-Video 2.3：生成字幕安全区预览素材，SRT 交给预览/剪辑阶段',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -1813,7 +1813,7 @@ INDEX_HTML = r"""<!doctype html>
       {
         id: 'audio_subtitle_video_preview',
         name: '音频 + 字幕 + 视频片段预览合成',
-        purpose: '生成草稿预览，检查整体节奏和素材衔接',
+        purpose: 'LTX-Video 2.3：生成可与本地配音和 SRT 对齐的预览素材片段',
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '7200',

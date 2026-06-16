@@ -16,6 +16,7 @@
     "节点输入总览",
     "ComfyUI 参数包",
     "RunningHub / ComfyUI 映射建议",
+    "可导入 ComfyUI 画布的工作流模板引用",
     "执行顺序",
     "风险和回退方案"
   ],
@@ -31,6 +32,9 @@
     "语音和字幕只作为 20 号员工产出的参数输入",
     "ComfyUI 字幕默认只做预览或自动化草稿",
     "参数包包含可映射到 ComfyUI 的字段",
+    "生图默认使用 Z-Image Turbo",
+    "生视频默认使用 LTX-Video 2.3",
+    "优先引用 my_workspace/comfyui_workflows/workflow_library 下的画布模板",
     "未编造未知节点 ID",
     "包含低成本回退方案",
     "明确最终硬字幕和混音交给剪辑工具",

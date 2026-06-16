@@ -371,6 +371,31 @@ my_workspace/comfyui_workflows/long_video_universal/
 
 这个模板优先用于管理台参数识别和 RunningHub 映射预设：只把正向提示词、负向提示词、参考图、配音文本、字幕 SRT 和完整制作包暴露为动态参数；模型、采样器、分辨率、转场和素材生成逻辑建议固定在真实 ComfyUI / RunningHub 工作流里维护。字幕 SRT 可传给 ComfyUI 做预览或自动化草稿，最终硬字幕、最终混音和最终导出默认交给剪辑工具处理。
 
+另外，项目内置了对应管理台 6 个 ComfyUI 工作流库槽位的画布模板：
+
+```text
+my_workspace/comfyui_workflows/workflow_library/
+  01_image_z_image_turbo/
+  02_ltx_video_2_3/
+  03_reference_consistency/
+  04_broll_material/
+  05_subtitle_preview/
+  06_audio_subtitle_video_preview/
+```
+
+每个槽位目录都包含：
+
+```text
+workflow_canvas.json
+  可导入 ComfyUI 画布的模板。
+api_template.json
+  可上传到管理台“导入 API JSON 自动识别”的参数模板。
+runninghub_node_info_list_preset.json
+  RunningHub nodeInfoList 初始映射。
+```
+
+生图默认使用 Z-Image Turbo；生视频、B-roll、字幕/音频预览素材默认使用 LTX-Video 2.3。先把 `workflow_canvas.json` 导入 ComfyUI 跑通，再从 ComfyUI / RunningHub 导出 API JSON 给管理台识别，最后保存到对应工作流库槽位。
+
 注意：
 
 ```text

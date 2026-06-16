@@ -1,0 +1,87 @@
+{
+  "10": {
+    "inputs": {
+      "text": "{{prompt}}"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "LTX-Video 2.3 ?????"
+    }
+  },
+  "11": {
+    "inputs": {
+      "text": "{{negative_prompt}}"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "?????"
+    }
+  },
+  "12": {
+    "inputs": {
+      "image": "{{reference_image}}",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "??? / ?????"
+    }
+  },
+  "13": {
+    "inputs": {
+      "text": "{{voice_text}}"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "???????"
+    }
+  },
+  "14": {
+    "inputs": {
+      "text": "{{subtitle_srt}}"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "?? SRT???"
+    }
+  },
+  "15": {
+    "inputs": {
+      "text": "{{payload}}"
+    },
+    "class_type": "PrimitiveString",
+    "_meta": {
+      "title": "????? JSON???"
+    }
+  },
+  "20": {
+    "inputs": {
+      "width": 960,
+      "height": 544,
+      "frames": 121,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLTXVLatentVideo",
+    "_meta": {
+      "title": "LTX ???????"
+    }
+  },
+  "30": {
+    "inputs": {
+      "ckpt_name": "ltx-2.3-22b-dev.safetensors"
+    },
+    "class_type": "CheckpointLoaderSimple",
+    "_meta": {
+      "title": "LTX-Video 2.3 ??"
+    }
+  },
+  "40": {
+    "inputs": {
+      "filename_prefix": "reference_consistency_ltx_video"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "????"
+    }
+  }
+}

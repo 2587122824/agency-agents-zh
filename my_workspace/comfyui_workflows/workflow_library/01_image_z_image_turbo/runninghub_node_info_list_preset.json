@@ -1,0 +1,32 @@
+[
+  {
+    "nodeId": "10",
+    "fieldName": "text",
+    "fieldValue": "{{prompt}}"
+  },
+  {
+    "nodeId": "11",
+    "fieldName": "text",
+    "fieldValue": "{{negative_prompt}}"
+  },
+  {
+    "nodeId": "12",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image}}"
+  },
+  {
+    "nodeId": "20",
+    "fieldName": "width",
+    "fieldValue": 1080
+  },
+  {
+    "nodeId": "20",
+    "fieldName": "height",
+    "fieldValue": 1920
+  },
+  {
+    "nodeId": "40",
+    "fieldName": "filename_prefix",
+    "fieldValue": "z_image_turbo_keyframe"
+  }
+]

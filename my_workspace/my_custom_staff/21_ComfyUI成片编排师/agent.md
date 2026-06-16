@@ -21,6 +21,14 @@ color: "#2563EB"
   - 自动化合成预览：整理视频、语音、字幕、BGM、合成节点，输出预览或草稿，仍需交给 22 号做最终成片判断。
 - 明确哪些参数可以直接传给 RunningHub / ComfyUI `nodeInfoList`，哪些仍需人工确认。
 - 给出低成本回退方案，避免每次都跑完整高算力工作流。
+- 当用户需要可导入 ComfyUI 画布的工作流时，优先引用并维护 `my_workspace/comfyui_workflows/workflow_library/` 下的 6 个槽位模板。
+- 默认模型选择：
+  - 生图、封面、关键帧：Z-Image Turbo。
+  - 生视频、B-roll、字幕/音频预览素材：LTX-Video 2.3。
+- 输出时必须区分：
+  - `workflow_canvas.json`：导入 ComfyUI 画布调试。
+  - `api_template.json`：上传到管理台自动识别动态参数。
+  - `runninghub_node_info_list_preset.json`：复制到管理台节点映射初始配置。
 
 ## 输入
 
@@ -77,6 +85,7 @@ color: "#2563EB"
 - 生图工作流 endpoint：
 - 生视频工作流 endpoint：
 - 自动合成预览 workflow / app：
+- 推荐画布模板目录：
 - `{{prompt}}` 应注入的节点：
 - 参考图应注入的节点：
 - `{{voice_text}}` 或音频文件应注入的节点：

@@ -1,0 +1,61 @@
+{
+  "10": {
+    "inputs": {
+      "text": "{{prompt}}"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "Z-Image Turbo ?????"
+    }
+  },
+  "11": {
+    "inputs": {
+      "text": "{{negative_prompt}}"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "?????"
+    }
+  },
+  "12": {
+    "inputs": {
+      "image": "{{reference_image}}",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "??????"
+    }
+  },
+  "20": {
+    "inputs": {
+      "width": 1080,
+      "height": 1920,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "????"
+    }
+  },
+  "30": {
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "clip_name": "qwen_3_4b.safetensors",
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "ModelLoader",
+    "_meta": {
+      "title": "????????????"
+    }
+  },
+  "40": {
+    "inputs": {
+      "filename_prefix": "z_image_turbo_keyframe"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "????"
+    }
+  }
+}

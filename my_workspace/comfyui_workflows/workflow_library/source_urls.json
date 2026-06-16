@@ -1,0 +1,17 @@
+{
+  "image_model": {
+    "name": "Z-Image Turbo",
+    "canvas_source": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/image_z_image_turbo.json",
+    "docs": "https://docs.comfy.org/tutorials/image/z-image/z-image-turbo"
+  },
+  "video_model": {
+    "name": "LTX-Video 2.3",
+    "canvas_source": "https://raw.githubusercontent.com/Lightricks/ComfyUI-LTXVideo/refs/heads/master/example_workflows/2.3/LTX-2.3_T2V_I2V_Single_Stage_Distilled_Full.json",
+    "repository": "https://github.com/Lightricks/ComfyUI-LTXVideo"
+  },
+  "notes": [
+    "workflow_canvas.json files are canvas-import templates adapted for this project.",
+    "api_template.json files expose stable parameters for the management UI mapper and must be calibrated against the API JSON exported from the actual RunningHub or local ComfyUI workflow.",
+    "runninghub_node_info_list_preset.json files are starting points, not guaranteed final node IDs for every published workflow."
+  ]
+}
