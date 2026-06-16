@@ -399,6 +399,12 @@ runninghub_node_info_list_preset.json
 
 生图默认使用 Z-Image Turbo；生视频、B-roll、字幕/音频预览素材默认使用 LTX-Video 2.3。先把 `workflow_canvas.json` 导入 ComfyUI 跑通，再从 ComfyUI / RunningHub 导出 API JSON 给管理台识别，最后保存到对应工作流库槽位。
 
+LTX-Video 2.3 模板运行前必须安装对应 ComfyUI 自定义节点和模型，并在 LoadImage 节点上传参考图。若看到 `Invalid image file` 或 `Value not in list`，优先看：
+
+```text
+my_workspace/comfyui_workflows/workflow_library/LTX_VIDEO_2_3_MODEL_REQUIREMENTS.md
+```
+
 注意：
 
 ```text
