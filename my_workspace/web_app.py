@@ -1001,32 +1001,39 @@ INDEX_HTML = r"""<!doctype html>
     }
     .staff-card {
       text-align: left;
-      padding: 10px 11px;
+      padding: 12px 12px;
       border: 1px solid var(--line);
       background: #fbfcfd;
       border-radius: 8px;
       display: grid;
-      gap: 4px;
+      grid-template-rows: auto auto auto;
+      gap: 6px;
       min-width: 0;
-      min-height: 70px;
+      min-height: 86px;
       align-content: start;
-      overflow: hidden;
+      overflow: visible;
       box-shadow: none;
       transition: border-color .14s ease, background .14s ease, box-shadow .14s ease, transform .14s ease;
     }
     .staff-card strong {
-      font-size: 14px;
-      line-height: 1.25;
+      display: block;
+      min-width: 0;
+      font-size: 15px;
+      line-height: 1.35;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .staff-card .staff-meta {
+      display: block;
+      min-width: 0;
+      line-height: 1.35;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
     .staff-card .staff-role {
+      display: inline-block;
       justify-self: start;
       max-width: 100%;
       margin-top: 2px;
@@ -1034,6 +1041,7 @@ INDEX_HTML = r"""<!doctype html>
       border-radius: 6px;
       background: #e6f4f1;
       color: var(--accent);
+      line-height: 1.35;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -1924,7 +1932,7 @@ INDEX_HTML = r"""<!doctype html>
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
             <div class="progress-list" id="progressList"></div>
           </div>
-          <div class="output-summary-grid" id="outputSummaryGrid"></div>
+          <div class="output-summary-grid" id="outputSummaryGrid" hidden></div>
           <div class="video-preview" id="videoPreviewBox" hidden>
             <div class="output-section-head">
               <strong>最终视频预览</strong>
@@ -4462,13 +4470,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function renderOutputOverview(data) {
+      els.outputSummaryGrid.hidden = true;
+      els.outputSummaryGrid.innerHTML = '';
       if (!data) {
-        els.outputSummaryGrid.innerHTML = summaryCards([
-          ['任务', '未选择'],
-          ['工作流', '-'],
-          ['步骤输出', '0'],
-          ['产品包', '未生成'],
-        ]);
         els.stepOutputMeta.textContent = '0 个步骤';
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
         els.packageOutputMeta.textContent = '未生成';
@@ -4482,18 +4486,9 @@ INDEX_HTML = r"""<!doctype html>
       const summary = data.summary || {};
       const stepFiles = files.filter(file => /^step_\d+_.*\/output\.md$/.test(file));
       const packageFiles = files.filter(file => file.startsWith('export_package/') && !file.endsWith('/'));
-      const finalReady = files.includes('final_output.md') ? '已生成' : '缺失';
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
       const videoFile = preferredVideoFile(files);
-      const videoReady = videoFile ? videoFile.split('/').pop() : '未生成';
       renderVideoPreview(data.name, files);
-      els.outputSummaryGrid.innerHTML = summaryCards([
-        ['任务', summary.task_title || data.name],
-        ['工作流', summary.workflow || '-'],
-        ['最终输出', finalReady],
-        ['最终视频', videoReady],
-        ['产品包', packageReady],
-      ]);
 
       els.stepOutputMeta.textContent = `${stepFiles.length} 个步骤`;
       els.stepOutputList.innerHTML = '';
@@ -4527,15 +4522,6 @@ INDEX_HTML = r"""<!doctype html>
           els.packageOutputList.appendChild(outputFileButton(file, file.replace('export_package/', ''), file));
         }
       }
-    }
-
-    function summaryCards(items) {
-      return items.map(([label, value]) => `
-        <div class="output-card">
-          <span class="label">${escapeHtml(label)}</span>
-          <span class="value" title="${escapeHtml(String(value))}">${escapeHtml(String(value))}</span>
-        </div>
-      `).join('');
     }
 
     function outputFileButton(file, title, subtitle) {
@@ -4621,21 +4607,12 @@ INDEX_HTML = r"""<!doctype html>
     function visibleTaskFiles(files) {
       const list = Array.isArray(files) ? files : [];
       if (els.showDebugFiles.checked) return list;
-      return list.filter(file => !isDebugTaskFile(file));
+      return list.filter(isPrimaryTaskTabFile);
     }
 
-    function isDebugTaskFile(file) {
+    function isPrimaryTaskTabFile(file) {
       const name = String(file || '');
-      const base = name.split('/').pop();
-      if (name.startsWith('export_package/')) return true;
-      if (name.includes('/attempt_')) return true;
-      if (['prompt.md', 'system.md', 'metadata.json'].includes(base)) return true;
-      if (['action_log.json', 'workflow.json', 'run_summary.json'].includes(name)) return true;
-      if (base.endsWith('_manifest.json') || base === 'manifest.json') return true;
-      if (['comfyui_payload.json', 'auto_quality_report.json'].includes(base)) return true;
-      if (name.endsWith('_stdout.txt') || name.endsWith('_stderr.txt') || name.endsWith('_command.txt')) return true;
-      if (name.endsWith('_response.json') || name.endsWith('_request.json')) return true;
-      return false;
+      return name === 'input.md' || name === 'final_output.md';
     }
 
     function compactTaskFileLabel(file) {

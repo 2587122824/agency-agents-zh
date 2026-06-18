@@ -25,6 +25,8 @@
 - Refresh/browser-exit should pause active jobs so the task can resume from `任务输出`.
 - Task output should auto-select the latest task when no task is selected.
 - Progress panel should show the current step by default; details are collapsed and expandable.
+- When `显示调试文件` is off, the top file tabs should only show `input.md` and `final_output.md`; step outputs remain available in the dedicated step-output list.
+- The task-output summary card strip is intentionally hidden to avoid duplicate task/workflow/final-status information.
 
 ## Production Pipeline
 
