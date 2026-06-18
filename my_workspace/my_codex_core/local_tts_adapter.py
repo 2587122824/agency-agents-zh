@@ -69,8 +69,8 @@ class LocalTTSAdapter:
             .replace("{cache_dir}", _quote_arg(cache_dir))
             .replace("{output_file}", _quote_arg(str(output_path)))
         )
-        requested_timeout = _int_or_default(voice_config.get("timeout_seconds"), 300)
-        timeout = self._effective_timeout(mode, requested_timeout)
+        requested_timeout = _int_or_default(voice_config.get("timeout_seconds"), 1800)
+        timeout, timeout_note = self._effective_timeout(mode, requested_timeout, text, command)
 
         manifest: dict[str, Any] = {
             "status": "running",
@@ -87,11 +87,8 @@ class LocalTTSAdapter:
             "timeout_seconds": timeout,
             "requested_timeout_seconds": requested_timeout,
         }
-        if timeout < requested_timeout:
-            manifest["timeout_note"] = (
-                "VoxCPM2 preset/clone synthesis is capped so a stalled local TTS run "
-                "does not block ComfyUI/FFmpeg final output."
-            )
+        if timeout_note:
+            manifest["timeout_note"] = timeout_note
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
         result, timed_out, timeout_stdout, timeout_stderr = self._run_shell_command(command, timeout)
@@ -147,12 +144,21 @@ class LocalTTSAdapter:
         return manifest
 
     @staticmethod
-    def _effective_timeout(mode: str, requested_timeout: int) -> int:
-        if mode == "preset":
-            return min(requested_timeout, 300)
-        if mode in {"voxcpm2", "clone", "voice_clone"}:
-            return min(requested_timeout, 900)
-        return requested_timeout
+    def _effective_timeout(mode: str, requested_timeout: int, text: str, command: str) -> tuple[int, str]:
+        timeout = requested_timeout
+        note = ""
+        command_lower = command.lower()
+        is_voxcpm_mode = mode in {"preset", "voxcpm2", "clone", "voice_clone"}
+        is_cpu = "--device cpu" in command_lower or " device=cpu" in command_lower
+        if is_voxcpm_mode and is_cpu:
+            estimated_timeout = min(7200, max(600, int(len(text) * 1.15)))
+            if estimated_timeout > timeout:
+                timeout = estimated_timeout
+                note = (
+                    "VoxCPM2 CPU synthesis is slow for long scripts; timeout was automatically "
+                    f"raised from {requested_timeout} to {timeout} seconds based on {len(text)} characters."
+                )
+        return timeout, note
 
     def _run_shell_command(self, command: str, timeout: int) -> tuple[subprocess.CompletedProcess[str] | None, bool, str, str]:
         process = subprocess.Popen(

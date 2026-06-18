@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -197,8 +198,26 @@ def run_auto_production(
         },
     }
 
-    if mode == "api_ready":
-        image_adapter_result = _run_image_adapter(image_content, image_config, paths["generated_images"])
+    def run_material_branch() -> tuple[str, dict[str, Any] | None]:
+        if mode == "api_ready":
+            emit("开始图片素材生成/匹配", stage="image")
+            return "image", _run_image_adapter(image_content, image_config, paths["generated_images"])
+        if mode == "comfy_full":
+            emit("开始调用 ComfyUI 素材/预览工作流", stage="comfyui")
+            return "comfyui", _run_comfyui_adapter_with_quality_gate(
+                comfyui_payload_path,
+                compose_config,
+                quality_config,
+                paths["comfyui"],
+                progress_callback=progress_callback,
+            )
+        return "none", None
+
+    def run_tts_branch() -> tuple[str, dict[str, Any] | None]:
+        emit("开始本地配音处理", stage="tts")
+        return "tts", _run_local_tts_adapter(voice_text, voice_config, paths["audio"])
+
+    def apply_image_result(image_adapter_result: dict[str, Any] | None) -> None:
         if image_adapter_result:
             manifest["image_generation"]["adapter_status"] = image_adapter_result["status"]
             manifest["image_generation"]["adapter_manifest"] = image_adapter_result.get("manifest_file", "")
@@ -209,17 +228,16 @@ def run_auto_production(
                 manifest["status"] = "api_adapter_skipped"
             else:
                 manifest["status"] = "image_adapter_failed"
+            emit(
+                f"图片素材阶段结束：{image_adapter_result.get('status') or 'unknown'}",
+                stage="image",
+                status=image_adapter_result.get("status") or "",
+                downloaded_count=len(image_adapter_result.get("downloaded_files") or []),
+            )
         manifest["video_generation"]["adapter_status"] = "skipped"
         manifest["video_generation"]["skip_reason"] = "api_ready mode is image-only; video generation is disabled."
-    if mode == "comfy_full":
-        emit("开始调用 ComfyUI 素材/预览工作流", stage="comfyui")
-        comfyui_adapter_result = _run_comfyui_adapter_with_quality_gate(
-            comfyui_payload_path,
-            compose_config,
-            quality_config,
-            paths["comfyui"],
-            progress_callback=progress_callback,
-        )
+
+    def apply_comfyui_result(comfyui_adapter_result: dict[str, Any] | None) -> None:
         if comfyui_adapter_result:
             manifest["composition"]["adapter_status"] = comfyui_adapter_result["status"]
             manifest["composition"]["adapter_manifest"] = comfyui_adapter_result.get("manifest_file", "")
@@ -242,26 +260,58 @@ def run_auto_production(
                 downloaded_count=len(comfyui_adapter_result.get("downloaded_files") or []),
                 quality_score=comfyui_adapter_result.get("quality_score", 0),
             )
-        if stop_after_comfyui:
-            return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "ComfyUI 素材门禁完成")
 
-    emit("开始本地配音处理", stage="tts")
-    tts_adapter_result = _run_local_tts_adapter(voice_text, voice_config, paths["audio"])
-    if tts_adapter_result:
-        manifest["audio"]["adapter_status"] = tts_adapter_result.get("status") or "failed"
-        manifest["audio"]["adapter_manifest"] = str(paths["audio"] / "local_tts_manifest.json")
-        files = tts_adapter_result.get("downloaded_files") or []
-        if files:
-            manifest["audio"]["voiceover_audio_file"] = str(files[0])
-        if tts_adapter_result.get("status") == "success" and manifest["status"] in {"package_ready", "comfyui_package_ready"}:
-            manifest["status"] = "audio_generated"
-        elif tts_adapter_result.get("status") not in {"success", "skipped"}:
-            manifest["status"] = "local_tts_failed"
-        emit(
-            f"本地配音阶段结束：{tts_adapter_result.get('status') or 'unknown'}",
-            stage="tts",
-            status=tts_adapter_result.get("status") or "",
-        )
+    def apply_tts_result(tts_adapter_result: dict[str, Any] | None) -> None:
+        if tts_adapter_result:
+            manifest["audio"]["adapter_status"] = tts_adapter_result.get("status") or "failed"
+            manifest["audio"]["adapter_manifest"] = str(paths["audio"] / "local_tts_manifest.json")
+            files = tts_adapter_result.get("downloaded_files") or []
+            if files:
+                manifest["audio"]["voiceover_audio_file"] = str(files[0])
+            if tts_adapter_result.get("status") == "success" and manifest["status"] in {"package_ready", "comfyui_package_ready"}:
+                manifest["status"] = "audio_generated"
+            elif tts_adapter_result.get("status") not in {"success", "skipped"}:
+                manifest["status"] = "local_tts_failed"
+            emit(
+                f"本地配音阶段结束：{tts_adapter_result.get('status') or 'unknown'}",
+                stage="tts",
+                status=tts_adapter_result.get("status") or "",
+            )
+
+    if stop_after_comfyui:
+        material_kind, material_result = run_material_branch()
+        if material_kind == "image":
+            apply_image_result(material_result)
+        elif material_kind == "comfyui":
+            apply_comfyui_result(material_result)
+        return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "ComfyUI 素材门禁完成")
+
+    material_enabled = mode in {"api_ready", "comfy_full"}
+    tts_enabled = str(voice_config.get("mode") or "").strip().lower() not in {"", "off"}
+    if material_enabled and tts_enabled:
+        emit("并行启动素材生成/匹配与本地配音", stage="production")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            material_future = executor.submit(run_material_branch)
+            tts_future = executor.submit(run_tts_branch)
+            material_kind, material_result = material_future.result()
+            tts_kind, tts_result = tts_future.result()
+        if material_kind == "image":
+            apply_image_result(material_result)
+        elif material_kind == "comfyui":
+            apply_comfyui_result(material_result)
+        if tts_kind == "tts":
+            apply_tts_result(tts_result)
+    else:
+        if material_enabled:
+            material_kind, material_result = run_material_branch()
+            if material_kind == "image":
+                apply_image_result(material_result)
+            elif material_kind == "comfyui":
+                apply_comfyui_result(material_result)
+        if tts_enabled:
+            tts_kind, tts_result = run_tts_branch()
+            if tts_kind == "tts":
+                apply_tts_result(tts_result)
 
     emit("开始本地 FFmpeg 剪辑/预览合成", stage="ffmpeg")
     ffmpeg_adapter_result = _run_local_ffmpeg_adapter(task_dir, paths, compose_config, manifest)

@@ -64,6 +64,10 @@
 - Windows SAPI TTS uses PowerShell encoded commands to preserve Chinese task paths.
 - FFmpeg composition can generate `long_video_final.mp4` when audio/material inputs are available.
 - Progress details preserve useful RunningHub/ComfyUI/TTS/FFmpeg metadata while hiding repetitive plain step rows.
+- VoxCPM2 preset/clone TTS no longer hard-caps CPU synthesis to 300/900 seconds. The adapter now honors the requested timeout and automatically raises it for long CPU scripts based on character count; the UI default is 60 minutes with 90 minutes available.
+- Task output now includes an `已生成素材` section that surfaces only generated image/video media, including final videos and image/video files under generated image, video clip, or ComfyUI output folders. Media opens through `/api/media` instead of the text editor; image assets show thumbnails in the management UI.
+- During active runs, the UI only auto-focuses `任务输出` while the run was just started/resumed/rerun. If the user manually switches top tabs or terminates the task, polling no longer forces the page back to `任务输出`, so other tabs remain clickable after stop/cancel.
+- Auto production can run material generation/matching and local TTS in parallel during full production, because material generation depends on visual prompts while TTS depends only on voiceover text. FFmpeg still waits until both branches finish. The ComfyUI material gate path with `stop_after_comfyui=True` remains material-only and does not start TTS.
 
 ## Important Files
 

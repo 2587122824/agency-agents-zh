@@ -858,7 +858,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .output-sections {
       display: grid;
-      grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 12px;
       min-width: 0;
     }
@@ -919,6 +919,15 @@ INDEX_HTML = r"""<!doctype html>
     .output-link .output-link-subtitle {
       display: block;
       line-height: 1.25;
+    }
+    .asset-thumb {
+      width: 100%;
+      max-height: 120px;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid var(--line);
+      background: #f8fafc;
+      margin-bottom: 4px;
     }
     .step-confirm-bar {
       margin: 0 14px 12px;
@@ -1494,10 +1503,12 @@ INDEX_HTML = r"""<!doctype html>
               <label>配音超时
                 <select id="voiceTimeout">
                   <option value="180">3 分钟（预览优先）</option>
-                  <option value="300" selected>5 分钟（推荐）</option>
+                  <option value="300">5 分钟</option>
                   <option value="600">10 分钟</option>
                   <option value="900">15 分钟</option>
                   <option value="1800">30 分钟</option>
+                  <option value="3600" selected>60 分钟（VoxCPM2 CPU 推荐）</option>
+                  <option value="5400">90 分钟</option>
                 </select>
               </label>
             </div>
@@ -1952,6 +1963,15 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <div class="output-section">
               <div class="output-section-head">
+                <strong>已生成素材</strong>
+                <span class="muted small" id="assetOutputMeta">未生成</span>
+              </div>
+              <div class="output-link-list" id="assetOutputList">
+                <div class="muted small">运行后只显示图片和视频素材。</div>
+              </div>
+            </div>
+            <div class="output-section">
+              <div class="output-section-head">
                 <strong>产品包文件</strong>
                 <span class="muted small" id="packageOutputMeta">未生成</span>
               </div>
@@ -2148,6 +2168,8 @@ INDEX_HTML = r"""<!doctype html>
       videoPreviewMeta: document.getElementById('videoPreviewMeta'),
       stepOutputMeta: document.getElementById('stepOutputMeta'),
       stepOutputList: document.getElementById('stepOutputList'),
+      assetOutputMeta: document.getElementById('assetOutputMeta'),
+      assetOutputList: document.getElementById('assetOutputList'),
       packageOutputMeta: document.getElementById('packageOutputMeta'),
       packageOutputList: document.getElementById('packageOutputList'),
       stepConfirmBar: document.getElementById('stepConfirmBar'),
@@ -2207,6 +2229,7 @@ INDEX_HTML = r"""<!doctype html>
     let progressTimer = null;
     let currentRunId = "";
     let currentRunStatus = "";
+    let autoFocusOutputDuringRun = false;
     let activeRunTaskName = "";
     let workflowInteractionLocked = false;
     const progressStepOpenState = new Map();
@@ -2410,6 +2433,14 @@ INDEX_HTML = r"""<!doctype html>
         els.outputCancelRunBtn.hidden = !hasRun;
         els.outputCancelRunBtn.disabled = !hasRun;
       }
+    }
+
+    function maybeShowOutput() {
+      if (autoFocusOutputDuringRun || document.body.dataset.view === 'output') {
+        showView('output');
+        return true;
+      }
+      return false;
     }
 
     function setWorkflowInteractionLocked(locked) {
@@ -2732,10 +2763,11 @@ INDEX_HTML = r"""<!doctype html>
 
     async function pollRunStatus(runId) {
       const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
+      if (currentRunId && currentRunId !== runId) return;
+      if (!currentRunId && !autoFocusOutputDuringRun) return;
       renderProgress(job);
       if (job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
-        showView('output');
-        await selectActiveRunTask(job);
+        if (maybeShowOutput()) await selectActiveRunTask(job);
       }
       if (job.status === 'running') {
         const runningText = job.current_message || job.production_message || '工作流运行中';
@@ -2746,13 +2778,13 @@ INDEX_HTML = r"""<!doctype html>
         setStatus(`完成：${job.task_title || job.workflow_name}，${job.step_count || job.completed_steps} 步${productionStatus}`);
         await loadTasks();
         if (job.task_name) {
-          showView('output');
-          await selectTaskAndOpenJobOutput(job);
+          if (maybeShowOutput()) await selectTaskAndOpenJobOutput(job);
           if (job.rerun_result && job.rerun_result.file) {
             await openFile(job.rerun_result.file);
             setStatus(`重跑完成：第 ${job.rerun_step || ''} 步`);
           }
         }
+        autoFocusOutputDuringRun = false;
         els.runBtn.disabled = false;
         trackRun("");
         setWorkflowInteractionLocked(false);
@@ -2765,9 +2797,9 @@ INDEX_HTML = r"""<!doctype html>
         setStatus(job.error || '工作流运行失败', true);
         await loadTasks();
         if (job.task_name) {
-          showView('output');
-          await selectTaskAndOpenJobOutput(job);
+          if (maybeShowOutput()) await selectTaskAndOpenJobOutput(job);
         }
+        autoFocusOutputDuringRun = false;
         els.runBtn.disabled = false;
         trackRun("");
         setWorkflowInteractionLocked(false);
@@ -2780,9 +2812,9 @@ INDEX_HTML = r"""<!doctype html>
         setStatus(job.error || '任务已终止', true);
         await loadTasks();
         if (job.task_name) {
-          showView('output');
-          await selectTaskAndOpenJobOutput(job);
+          if (maybeShowOutput()) await selectTaskAndOpenJobOutput(job);
         }
+        autoFocusOutputDuringRun = false;
         els.runBtn.disabled = false;
         trackRun("");
         setWorkflowInteractionLocked(false);
@@ -2799,9 +2831,9 @@ INDEX_HTML = r"""<!doctype html>
         );
         await loadTasks();
         if (job.task_name) {
-          showView('output');
-          await selectTaskAndOpenJobOutput(job);
+          if (maybeShowOutput()) await selectTaskAndOpenJobOutput(job);
         }
+        autoFocusOutputDuringRun = false;
         els.runBtn.disabled = false;
         trackRun("");
         setWorkflowInteractionLocked(false);
@@ -2833,6 +2865,7 @@ INDEX_HTML = r"""<!doctype html>
         await selectTaskAndOpenJobOutput(job);
       }
       if (job.status === 'queued' || job.status === 'running') {
+        autoFocusOutputDuringRun = true;
         setWorkflowInteractionLocked(true);
         trackRun(job.run_id);
         await pollRunStatus(job.run_id);
@@ -3067,6 +3100,7 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (!confirm('确定终止当前任务吗？\\n\\n正在等待的模型或 RunningHub 请求可能会在当前请求返回后停止。')) return;
       try {
+        autoFocusOutputDuringRun = false;
         if (els.cancelRunBtn) els.cancelRunBtn.disabled = true;
         if (els.outputCancelRunBtn) els.outputCancelRunBtn.disabled = true;
         const result = await api('/api/cancel-run', {
@@ -3076,10 +3110,12 @@ INDEX_HTML = r"""<!doctype html>
         });
         setStatus(result.message || '已发送终止请求');
         renderProgress(result);
+        trackRun("");
+        setWorkflowInteractionLocked(false);
+        setRunButtonProgress(0);
+        syncOutputButtons();
         if (['cancelled', 'failed', 'paused', 'completed'].includes(result.status)) {
-          trackRun("");
-          setWorkflowInteractionLocked(false);
-          setRunButtonProgress(0);
+          progressTimer = null;
         }
       } catch (err) {
         setStatus(err.message, true);
@@ -3879,7 +3915,9 @@ INDEX_HTML = r"""<!doctype html>
       if (seconds <= 300) return '300';
       if (seconds <= 600) return '600';
       if (seconds <= 900) return '900';
-      return '1800';
+      if (seconds <= 1800) return '1800';
+      if (seconds <= 3600) return '3600';
+      return '5400';
     }
 
     function syncVoiceCommandTemplateForMode() {
@@ -4487,6 +4525,8 @@ INDEX_HTML = r"""<!doctype html>
       if (!data) {
         els.stepOutputMeta.textContent = '0 个步骤';
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
+        els.assetOutputMeta.textContent = '未生成';
+        els.assetOutputList.innerHTML = '<div class="muted small">运行后只显示图片和视频素材。</div>';
         els.packageOutputMeta.textContent = '未生成';
         els.packageOutputList.innerHTML = '<div class="muted small">点击“导出产品包”后显示可交付文件。</div>';
         renderStepConfirmBar();
@@ -4498,6 +4538,7 @@ INDEX_HTML = r"""<!doctype html>
       const summary = data.summary || {};
       const stepFiles = files.filter(file => /^step_\d+_.*\/output\.md$/.test(file));
       const packageFiles = files.filter(file => file.startsWith('export_package/') && !file.endsWith('/'));
+      const assetFiles = generatedAssetFiles(files);
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
       const videoFile = preferredVideoFile(files);
       renderVideoPreview(data.name, files);
@@ -4515,6 +4556,16 @@ INDEX_HTML = r"""<!doctype html>
         }
       }
       renderStepConfirmBar();
+
+      els.assetOutputMeta.textContent = assetFiles.length ? `${assetFiles.length} 个素材/清单` : '未生成';
+      els.assetOutputList.innerHTML = '';
+      if (!assetFiles.length) {
+        els.assetOutputList.innerHTML = '<div class="muted small">还没有可显示的图片/视频素材。若使用 prompt_only 模式，通常只会生成提示词和生产清单。</div>';
+      } else {
+        for (const file of assetFiles) {
+          els.assetOutputList.appendChild(assetFileButton(data.name, file));
+        }
+      }
 
       els.packageOutputMeta.textContent = packageReady;
       els.packageOutputList.innerHTML = '';
@@ -4534,6 +4585,86 @@ INDEX_HTML = r"""<!doctype html>
           els.packageOutputList.appendChild(outputFileButton(file, file.replace('export_package/', ''), file));
         }
       }
+    }
+
+    function generatedAssetFiles(files) {
+      const list = Array.isArray(files) ? files : [];
+      const assetPrefixes = [
+        'generated_images/',
+        'video_clips/',
+        'comfyui/',
+      ];
+      const assetNames = new Set([
+        'long_video_final.mp4',
+        'final_video.mp4',
+      ]);
+      return list
+        .filter(file => {
+          const name = String(file || '');
+          if (!name || name.startsWith('export_package/') || /^step_\d+_/.test(name)) return false;
+          if (!isImageFile(name) && !isVideoFile(name)) return false;
+          return assetNames.has(name) || assetPrefixes.some(prefix => name.startsWith(prefix));
+        })
+        .sort((a, b) => assetSortKey(a).localeCompare(assetSortKey(b), undefined, { numeric: true }));
+    }
+
+    function assetSortKey(file) {
+      const name = String(file || '');
+      const order = [
+        ['long_video_final.mp4', '00_'],
+        ['final_video.mp4', '00_'],
+        ['generated_images/', '10_'],
+        ['video_clips/', '20_'],
+        ['comfyui/', '60_'],
+      ];
+      const found = order.find(([prefix]) => name === prefix || name.startsWith(prefix));
+      return (found ? found[1] : '99_') + name;
+    }
+
+    function assetFileButton(taskName, file) {
+      const btn = outputFileButton(file, assetFileLabel(file), assetFileSubtitle(file));
+      if (isImageFile(file) || isVideoFile(file)) {
+        btn.onclick = () => window.open(mediaUrl(taskName, file), '_blank', 'noopener');
+        if (isImageFile(file)) {
+          const img = document.createElement('img');
+          img.className = 'asset-thumb';
+          img.loading = 'lazy';
+          img.alt = assetFileLabel(file);
+          img.src = mediaUrl(taskName, file);
+          btn.insertBefore(img, btn.firstChild);
+        }
+      }
+      return btn;
+    }
+
+    function mediaUrl(taskName, file) {
+      return `/api/media?task=${encodeURIComponent(taskName)}&file=${encodeURIComponent(file)}`;
+    }
+
+    function isMediaFile(file) {
+      return /\.(mp4|mov|webm|m4v|mp3|wav|aac|m4a|png|jpg|jpeg|webp)$/i.test(String(file || ''));
+    }
+
+    function isImageFile(file) {
+      return /\.(png|jpg|jpeg|webp)$/i.test(String(file || ''));
+    }
+
+    function isVideoFile(file) {
+      return /\.(mp4|mov|webm|m4v)$/i.test(String(file || ''));
+    }
+
+    function assetFileLabel(file) {
+      const name = String(file || '');
+      if (name === 'long_video_final.mp4' || name === 'final_video.mp4') return '最终视频';
+      if (name.startsWith('generated_images/')) return `图片素材 · ${name.split('/').pop()}`;
+      if (name.startsWith('video_clips/')) return `视频素材 · ${name.split('/').pop()}`;
+      if (name.startsWith('comfyui/')) return `ComfyUI 素材 · ${name.split('/').pop()}`;
+      return name;
+    }
+
+    function assetFileSubtitle(file) {
+      if (isMediaFile(file)) return '点击打开媒体预览';
+      return file;
     }
 
     function outputFileButton(file, title, subtitle) {
@@ -4641,6 +4772,10 @@ INDEX_HTML = r"""<!doctype html>
 
     async function openFile(file) {
       if (!selectedTask) return;
+      if (isMediaFile(file)) {
+        window.open(mediaUrl(selectedTask, file), '_blank', 'noopener');
+        return;
+      }
       selectedFile = file;
       const data = await api(`/api/file?task=${encodeURIComponent(selectedTask)}&file=${encodeURIComponent(file)}`);
       els.fileContent.value = data.content;
@@ -4728,6 +4863,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!confirm(`确定重跑第 ${step} 步？\n\n系统会覆盖该步骤 output.md，并基于当前各步骤输出重建 final_output.md。`)) return;
       setStatus(`正在重跑第 ${step} 步`);
       els.rerunStepBtn.disabled = true;
+      autoFocusOutputDuringRun = true;
       setWorkflowInteractionLocked(true);
       showStartupProgress(`重跑第 ${step} 步`);
       showView('output');
@@ -4774,6 +4910,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!confirm(`确定${resumeLabel}？\n\n系统会从第一个失败、缺少 output.md 或输出为空的步骤继续执行，并写回当前任务目录。`)) return;
       saveSettings();
       resetProgress();
+      autoFocusOutputDuringRun = true;
       setWorkflowInteractionLocked(true);
       showStartupProgress('继续中');
       showView('output');
@@ -4904,7 +5041,7 @@ INDEX_HTML = r"""<!doctype html>
           reference_audio: voiceReferenceAudio,
           reference_text: els.voiceReferenceText.value.trim(),
           command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
-          timeout_seconds: Number(els.voiceTimeout.value || 1800),
+          timeout_seconds: Number(els.voiceTimeout.value || 3600),
         },
         compose_config: {
           tool: els.composeTool.value,
@@ -4963,6 +5100,7 @@ INDEX_HTML = r"""<!doctype html>
       els.runBtn.disabled = true;
       saveSettings();
       resetProgress();
+      autoFocusOutputDuringRun = true;
       setWorkflowInteractionLocked(true);
       showStartupProgress('启动中');
       setStatus('工作流运行中');
@@ -5027,7 +5165,10 @@ INDEX_HTML = r"""<!doctype html>
     els.saveComfyWorkflowPresetBtn.onclick = saveSelectedComfyWorkflowPreset;
     els.resetComfyWorkflowPresetBtn.onclick = resetSelectedComfyWorkflowPreset;
     navButtons.forEach(button => {
-      button.onclick = () => showView(button.dataset.viewTarget);
+      button.onclick = () => {
+        autoFocusOutputDuringRun = false;
+        showView(button.dataset.viewTarget);
+      };
     });
     els.refreshTasks.onclick = loadTasks;
     els.saveFileBtn.onclick = saveCurrentFile;
@@ -5144,7 +5285,7 @@ INDEX_HTML = r"""<!doctype html>
       els.voiceReferenceAudioPath.value = '';
       els.voiceReferenceText.value = '';
       els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
-      els.voiceTimeout.value = '1800';
+      els.voiceTimeout.value = '3600';
       els.imageTool.value = 'prompt_only';
       els.imagePositivePrompt.value = '';
       els.imageModel.value = '';
