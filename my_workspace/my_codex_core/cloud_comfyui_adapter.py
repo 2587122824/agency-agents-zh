@@ -22,6 +22,7 @@ class CloudComfyUIAdapter:
         self.api_key = api_key.strip()
         self.endpoint = endpoint.strip()
         self.progress_callback = progress_callback
+        self._media_upload_cache: dict[str, str] = {}
         if not self.base_url:
             raise ValueError("ComfyUI base URL is required")
         if not self.api_key:
@@ -74,6 +75,7 @@ class CloudComfyUIAdapter:
         job_results = []
         downloaded_files = []
         generated_reference_images: list[str] = []
+        generated_reference_map: dict[str, str] = {}
         video_job_index = 0
         success_count = 0
         self._emit(f"ComfyUI 素材批量任务开始：{len(selected_jobs)} 个", total_jobs=len(selected_jobs), completed_jobs=0)
@@ -85,7 +87,23 @@ class CloudComfyUIAdapter:
             job_dir.mkdir(parents=True, exist_ok=True)
             job_config = self._compose_config_for_job(job, compose_config)
             if job_type == "video":
-                if not str(job.get("reference_image") or "").strip() and generated_reference_images:
+                reference_image = str(job.get("reference_image") or "").strip()
+                resolved_reference = self._resolve_reference_image(reference_image, generated_reference_map)
+                if resolved_reference:
+                    job = dict(job)
+                    job["reference_image"] = self._reference_image_value(resolved_reference)
+                    self._emit(
+                        f"已把视频素材 {index}/{len(selected_jobs)} 的参考图映射到本地生成图片",
+                        total_jobs=len(selected_jobs),
+                        completed_jobs=index - 1,
+                        current_job=index,
+                        job_index=index,
+                        job_count=len(selected_jobs),
+                        material_name=job_name,
+                        material_type=job_type,
+                        job_type=job_type,
+                    )
+                elif generated_reference_images:
                     paired_index = min(video_job_index, len(generated_reference_images) - 1)
                     job = dict(job)
                     job["reference_image"] = self._reference_image_value(generated_reference_images[paired_index])
@@ -94,6 +112,10 @@ class CloudComfyUIAdapter:
                         total_jobs=len(selected_jobs),
                         completed_jobs=index - 1,
                         current_job=index,
+                        job_index=index,
+                        job_count=len(selected_jobs),
+                        material_name=job_name,
+                        material_type=job_type,
                         job_type=job_type,
                     )
                 video_job_index += 1
@@ -104,6 +126,10 @@ class CloudComfyUIAdapter:
                 total_jobs=len(selected_jobs),
                 completed_jobs=index - 1,
                 current_job=index,
+                job_index=index,
+                job_count=len(selected_jobs),
+                material_name=job_name,
+                material_type=job_type,
                 job_type=job_type,
                 endpoint=str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint),
             )
@@ -122,6 +148,18 @@ class CloudComfyUIAdapter:
                         for path in job_downloaded
                         if Path(path).suffix.lower().lstrip(".") in {"png", "jpg", "jpeg", "webp"}
                     )
+                    if job_downloaded:
+                        first_image = next(
+                            (
+                                path
+                                for path in job_downloaded
+                                if Path(path).suffix.lower().lstrip(".") in {"png", "jpg", "jpeg", "webp"}
+                            ),
+                            "",
+                        )
+                        if first_image:
+                            for key in self._reference_keys_for_job(job):
+                                generated_reference_map[key] = first_image
                 job_results.append(
                     {
                         "index": index,
@@ -141,9 +179,14 @@ class CloudComfyUIAdapter:
                     total_jobs=len(selected_jobs),
                     completed_jobs=index,
                     current_job=index,
+                    job_index=index,
+                    job_count=len(selected_jobs),
+                    material_name=job_name,
+                    material_type=job_type,
                     job_type=job_type,
                     job_status=manifest.get("status", "unknown"),
                     downloaded_count=len(job_downloaded),
+                    output_file=job_downloaded[0] if job_downloaded else "",
                 )
             except Exception as exc:
                 error_manifest = {
@@ -178,6 +221,10 @@ class CloudComfyUIAdapter:
                     total_jobs=len(selected_jobs),
                     completed_jobs=index,
                     current_job=index,
+                    job_index=index,
+                    job_count=len(selected_jobs),
+                    material_name=job_name,
+                    material_type=job_type,
                     job_type=job_type,
                     job_status="failed",
                     error=str(exc),
@@ -230,6 +277,7 @@ class CloudComfyUIAdapter:
         task_id = self._first_value(submit_response, ("taskId", "task_id"))
         if not task_id:
             raise ValueError("RunningHub ComfyUI workflow did not return taskId")
+        self._emit(f"RunningHub 已返回任务 ID：{task_id}", endpoint=endpoint, task_id=task_id, remote_status=self._status(submit_response))
 
         query_url = urljoin(f"{self.base_url}/", "query")
         poll_interval = self._safe_int(compose_config.get("poll_interval_seconds"), default=10, minimum=2, maximum=60)
@@ -240,7 +288,7 @@ class CloudComfyUIAdapter:
         while time.time() < deadline:
             query_response = self._post_json(query_url, {"taskId": task_id})
             status = self._status(query_response)
-            self._emit(f"RunningHub 任务 {task_id} 状态：{status or 'UNKNOWN'}", task_id=task_id, remote_status=status)
+            self._emit(f"RunningHub 任务 {task_id} 状态：{status or 'UNKNOWN'}", endpoint=endpoint, task_id=task_id, remote_status=status)
             if status == "SUCCESS":
                 break
             if status in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED"}:
@@ -256,6 +304,7 @@ class CloudComfyUIAdapter:
         query_path = output_dir / "runninghub_comfyui_query_response.json"
         self._write_json(query_path, self._redact_response(query_response))
 
+        status = self._status(query_response)
         results = self._results(query_response)
         downloaded = []
         result_items = []
@@ -273,12 +322,33 @@ class CloudComfyUIAdapter:
                 "text": result.get("text"),
             }
             if url and output_type in self.DOWNLOAD_TYPES:
-                path = self._download_file(url, output_dir, f"comfyui_result_{index:02d}", output_type)
-                item["downloaded_file"] = str(path)
-                downloaded.append(path)
+                try:
+                    path = self._download_file(url, output_dir, f"comfyui_result_{index:02d}", output_type)
+                    item["downloaded_file"] = str(path)
+                    downloaded.append(path)
+                    self._emit(
+                        f"RunningHub 结果下载成功：{path.name}",
+                        endpoint=endpoint,
+                        task_id=task_id,
+                        remote_status=status,
+                        output_type=output_type,
+                        downloaded_file=str(path),
+                        downloaded_count=len(downloaded),
+                        url=url,
+                    )
+                except Exception as exc:
+                    item["download_error"] = str(exc)
+                    self._emit(
+                        f"RunningHub 结果下载失败：{exc}",
+                        endpoint=endpoint,
+                        task_id=task_id,
+                        remote_status=status,
+                        output_type=output_type,
+                        url=url,
+                        error=str(exc),
+                    )
             result_items.append(item)
 
-        status = self._status(query_response)
         manifest = {
             "provider": "runninghub",
             "status": "success" if status == "SUCCESS" else "failed" if status != "TIMEOUT" else "timeout",
@@ -363,7 +433,10 @@ class CloudComfyUIAdapter:
         if not preset:
             return compose_config
         job_config = dict(compose_config)
-        job_config["workflow_endpoint"] = str(preset.get("endpoint") or "").strip() or job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint
+        preset_endpoint = str(preset.get("endpoint") or "").strip()
+        if not self._is_usable_endpoint(preset_endpoint):
+            preset_endpoint = ""
+        job_config["workflow_endpoint"] = preset_endpoint or job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint
         job_config["node_info_list_json"] = str(preset.get("node_info_list_json") or preset.get("nodeInfoList") or "[]").strip() or "[]"
         job_config["poll_timeout_seconds"] = preset.get("poll_timeout_seconds") or preset.get("pollTimeout") or job_config.get("poll_timeout_seconds")
         job_config["workflow_preset_id"] = str(preset.get("id") or "").strip()
@@ -384,13 +457,13 @@ class CloudComfyUIAdapter:
             return cls._first_matching_preset(configured, ("image_to_video", "ltx", "video", "broll", "视频", "图生视频", "生视频"))
         return cls._first_matching_preset(configured, ("txt_img", "z_image", "image", "keyframe", "文生图", "生图", "关键帧", "配图"))
 
-    @staticmethod
-    def _is_configured_library_item(item: Any) -> bool:
+    @classmethod
+    def _is_configured_library_item(cls, item: Any) -> bool:
         if not isinstance(item, dict):
             return False
         endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
         node_info = str(item.get("node_info_list_json") or item.get("nodeInfoList") or "").strip()
-        return bool(endpoint and node_info and node_info != "[]")
+        return bool(cls._is_usable_endpoint(endpoint) and node_info and node_info != "[]")
 
     @classmethod
     def _first_matching_preset(cls, presets: list[dict[str, Any]], keywords: tuple[str, ...]) -> dict[str, Any] | None:
@@ -478,12 +551,27 @@ class CloudComfyUIAdapter:
                     prompt = self._prompt_from_item(prompt_data)
                     if not prompt:
                         continue
-                    name = str(prompt_data.get("name") or prompt_data.get("title") or f"{job_type}_{group_index:02d}_{item_index:02d}")
+                    name = str(
+                        prompt_data.get("name")
+                        or prompt_data.get("title")
+                        or prompt_data.get("prompt_id")
+                        or prompt_data.get("id")
+                        or prompt_data.get("output_filename")
+                        or f"{job_type}_{group_index:02d}_{item_index:02d}"
+                    )
                     jobs.append(self._job_from_prompt_item(payload, group, prompt_data, name, job_type, group_key))
             else:
                 prompt = self._prompt_from_item(group)
                 if prompt:
-                    name = str(group.get("name") or group.get("title") or group.get("slot") or f"{job_type}_{group_index:02d}")
+                    name = str(
+                        group.get("name")
+                        or group.get("title")
+                        or group.get("prompt_id")
+                        or group.get("id")
+                        or group.get("output_filename")
+                        or group.get("slot")
+                        or f"{job_type}_{group_index:02d}"
+                    )
                     jobs.append(self._job_from_prompt_item(payload, group, group, name, job_type, group_key))
         return jobs
 
@@ -529,11 +617,61 @@ class CloudComfyUIAdapter:
 
     @staticmethod
     def _prompt_from_item(item: dict[str, Any]) -> str:
-        for key in ("positive", "prompt", "text", "description", "content"):
+        for key in ("positive", "prompt", "prompt_text", "text", "description", "content"):
             value = item.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return ""
+
+    @classmethod
+    def _resolve_reference_image(cls, reference_image: str, generated_reference_map: dict[str, str]) -> str:
+        text = str(reference_image or "").strip()
+        if not text:
+            return ""
+        if text.startswith(("http://", "https://", "data:image/")) or Path(text).is_file():
+            return text
+        keys = cls._reference_lookup_keys(text)
+        for key in keys:
+            if key in generated_reference_map:
+                return generated_reference_map[key]
+        return ""
+
+    @classmethod
+    def _reference_keys_for_job(cls, job: dict[str, Any]) -> set[str]:
+        keys: set[str] = set()
+        prompt_data = job.get("prompt_data") if isinstance(job.get("prompt_data"), dict) else {}
+        group = job.get("group") if isinstance(job.get("group"), dict) else {}
+        for value in (
+            job.get("name"),
+            prompt_data.get("prompt_id"),
+            prompt_data.get("id"),
+            prompt_data.get("name"),
+            prompt_data.get("title"),
+            prompt_data.get("output_filename"),
+            group.get("prompt_id"),
+            group.get("id"),
+            group.get("name"),
+            group.get("title"),
+            group.get("output_filename"),
+        ):
+            keys.update(cls._reference_lookup_keys(value))
+        return {key for key in keys if key}
+
+    @staticmethod
+    def _reference_lookup_keys(value: Any) -> set[str]:
+        text = str(value or "").strip()
+        if not text:
+            return set()
+        path = Path(text)
+        stem = path.stem if path.suffix else text
+        return {
+            text,
+            text.lower(),
+            path.name,
+            path.name.lower(),
+            stem,
+            stem.lower(),
+        }
 
     @staticmethod
     def _payload_for_material_job(base_payload: dict[str, Any], job: dict[str, Any], index: int) -> dict[str, Any]:
@@ -581,8 +719,7 @@ class CloudComfyUIAdapter:
                 payload[key] = value
         return payload
 
-    @classmethod
-    def _reference_image_value(cls, value: str) -> str:
+    def _reference_image_value(self, value: str) -> str:
         text = str(value or "").strip()
         if not text:
             return ""
@@ -591,6 +728,16 @@ class CloudComfyUIAdapter:
         path = Path(text)
         if not path.is_file():
             return text
+        if "runninghub" in self.base_url.lower():
+            try:
+                cache_key = str(path.resolve())
+                if cache_key in self._media_upload_cache:
+                    return self._media_upload_cache[cache_key]
+                uploaded_url = self._upload_runninghub_media(path)
+                self._media_upload_cache[cache_key] = uploaded_url
+                return uploaded_url
+            except Exception as exc:
+                self._emit(f"RunningHub 参考图上传失败，回退 Base64：{exc}", error=str(exc))
         suffix = path.suffix.lower().lstrip(".")
         mime = {
             "jpg": "image/jpeg",
@@ -601,14 +748,73 @@ class CloudComfyUIAdapter:
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{encoded}"
 
+    def _upload_runninghub_media(self, path: Path) -> str:
+        boundary = f"----agencyAgentsZh{int(time.time() * 1000)}"
+        mime = {
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".webp": "image/webp",
+        }.get(path.suffix.lower(), "application/octet-stream")
+        file_bytes = path.read_bytes()
+        head = (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="file"; filename="{path.name}"\r\n'
+            f"Content-Type: {mime}\r\n\r\n"
+        ).encode("utf-8")
+        tail = f"\r\n--{boundary}--\r\n".encode("utf-8")
+        body = head + file_bytes + tail
+        url = urljoin(f"{self.base_url}/", "media/upload/binary")
+        req = urllib_request.Request(
+            url,
+            data=body,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Accept": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(req, timeout=120) as response:
+                raw = response.read(self.MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
+        except urllib_error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:1200]
+            raise ValueError(f"RunningHub media upload HTTP {exc.code}: {detail}") from exc
+        parsed = json.loads(raw)
+        data = parsed.get("data") if isinstance(parsed, dict) else {}
+        url_value = ""
+        if isinstance(data, dict):
+            url_value = str(data.get("download_url") or data.get("url") or "").strip()
+        if not url_value and isinstance(parsed, dict):
+            url_value = str(parsed.get("download_url") or parsed.get("url") or "").strip()
+        if not url_value:
+            raise ValueError(f"RunningHub media upload did not return download_url: {raw[:300]}")
+        self._emit(f"RunningHub 参考图上传成功：{path.name}", url=url_value, output_file=str(path))
+        return url_value
+
     def _effective_endpoint(self, compose_config: dict[str, Any]) -> str:
-        return str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or self.endpoint).strip()
+        endpoint = str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or self.endpoint).strip()
+        if self._is_usable_endpoint(endpoint):
+            return endpoint
+        fallback = str(self.endpoint or "").strip()
+        return fallback if self._is_usable_endpoint(fallback) else endpoint
 
     def _endpoint_url(self, endpoint: str | None = None) -> str:
         endpoint = (endpoint or self.endpoint).strip()
+        if not self._is_usable_endpoint(endpoint):
+            raise ValueError("ComfyUI workflow endpoint is missing or still set to a placeholder such as /run/workflow/keep")
         if endpoint.startswith(("http://", "https://")):
             return endpoint
         return urljoin(f"{self.base_url}/", endpoint.lstrip("/"))
+
+    @staticmethod
+    def _is_usable_endpoint(endpoint: str) -> bool:
+        value = str(endpoint or "").strip().lower().rstrip("/")
+        if not value:
+            return False
+        placeholders = {"keep", "/keep", "/run/workflow/keep", "/run/ai-app/keep", "未配置", "none", "null"}
+        return value not in placeholders
 
     def _post_json(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import subprocess
 import textwrap
 from pathlib import Path
@@ -49,6 +50,7 @@ class LocalTTSAdapter:
         manifest_path = output_dir / "local_tts_manifest.json"
         stdout_path = output_dir / "voxcpm2_stdout.txt"
         stderr_path = output_dir / "voxcpm2_stderr.txt"
+        self._remove_stale_file(output_path)
         text_path.write_text(text + "\n", encoding="utf-8")
 
         command_template = self._normalize_command_template(str(voice_config.get("command_template") or ""))
@@ -67,7 +69,8 @@ class LocalTTSAdapter:
             .replace("{cache_dir}", _quote_arg(cache_dir))
             .replace("{output_file}", _quote_arg(str(output_path)))
         )
-        timeout = _int_or_default(voice_config.get("timeout_seconds"), 1800)
+        requested_timeout = _int_or_default(voice_config.get("timeout_seconds"), 300)
+        timeout = self._effective_timeout(mode, requested_timeout)
 
         manifest: dict[str, Any] = {
             "status": "running",
@@ -82,23 +85,20 @@ class LocalTTSAdapter:
             "output_file": str(output_path),
             "command_template": command_template,
             "timeout_seconds": timeout,
+            "requested_timeout_seconds": requested_timeout,
         }
+        if timeout < requested_timeout:
+            manifest["timeout_note"] = (
+                "VoxCPM2 preset/clone synthesis is capped so a stalled local TTS run "
+                "does not block ComfyUI/FFmpeg final output."
+            )
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-        try:
-            result = subprocess.run(
-                command,
-                cwd=str(self.workspace_root),
-                shell=True,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-            )
-        except subprocess.TimeoutExpired as exc:
-            stdout_path.write_text(exc.stdout or "", encoding="utf-8")
-            stderr_path.write_text(exc.stderr or "", encoding="utf-8")
+        result, timed_out, timeout_stdout, timeout_stderr = self._run_shell_command(command, timeout)
+        if timed_out:
+            self._remove_stale_file(output_path)
+            stdout_path.write_text(timeout_stdout or "", encoding="utf-8")
+            stderr_path.write_text(timeout_stderr or "", encoding="utf-8")
             manifest.update(
                 {
                     "status": "failed",
@@ -113,6 +113,7 @@ class LocalTTSAdapter:
         stdout_path.write_text(result.stdout or "", encoding="utf-8")
         stderr_path.write_text(result.stderr or "", encoding="utf-8")
         if result.returncode != 0:
+            self._remove_stale_file(output_path)
             manifest.update(
                 {
                     "status": "failed",
@@ -122,6 +123,7 @@ class LocalTTSAdapter:
                 }
             )
         elif not output_path.is_file():
+            self._remove_stale_file(output_path)
             manifest.update(
                 {
                     "status": "failed",
@@ -143,6 +145,53 @@ class LocalTTSAdapter:
 
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
+
+    @staticmethod
+    def _effective_timeout(mode: str, requested_timeout: int) -> int:
+        if mode == "preset":
+            return min(requested_timeout, 300)
+        if mode in {"voxcpm2", "clone", "voice_clone"}:
+            return min(requested_timeout, 900)
+        return requested_timeout
+
+    def _run_shell_command(self, command: str, timeout: int) -> tuple[subprocess.CompletedProcess[str] | None, bool, str, str]:
+        process = subprocess.Popen(
+            command,
+            cwd=str(self.workspace_root),
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        try:
+            stdout, stderr = process.communicate(timeout=timeout)
+            return subprocess.CompletedProcess(command, process.returncode, stdout, stderr), False, "", ""
+        except subprocess.TimeoutExpired:
+            self._kill_process_tree(process.pid)
+            try:
+                stdout, stderr = process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                stdout, stderr = "", ""
+            return None, True, stdout or "", stderr or ""
+
+    @staticmethod
+    def _kill_process_tree(pid: int) -> None:
+        if pid <= 0:
+            return
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except Exception:
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True, text=True, timeout=5)
+            except Exception:
+                pass
 
     def _default_command_template(self, needs_reference_audio: bool) -> str:
         project_root = self.workspace_root.parent
@@ -169,7 +218,10 @@ class LocalTTSAdapter:
         stale_defaults = {
             "voxcpm tts --text-file {text_file} --voice {voice_preset} --output {output_file}",
             "voxcpm clone --text-file {text_file} --reference-audio {reference_audio} --output {output_file}",
+            "custom tts {voice_preset} {output_file}",
         }
+        if command_template.lower().startswith("custom tts "):
+            return ""
         return "" if command_template in stale_defaults else command_template
 
     def _run_windows_sapi(self, voice_text: str, voice_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
@@ -184,6 +236,7 @@ class LocalTTSAdapter:
         stdout_path = output_dir / "windows_sapi_stdout.txt"
         stderr_path = output_dir / "windows_sapi_stderr.txt"
         script_path = output_dir / "windows_sapi_tts.ps1"
+        self._remove_stale_file(output_path)
         text_path.write_text(text + "\n", encoding="utf-8")
         rate = _int_or_default(voice_config.get("sapi_rate"), 0, minimum=-10, maximum=10)
         volume = _int_or_default(voice_config.get("sapi_volume"), 100, minimum=0, maximum=100)
@@ -201,6 +254,7 @@ class LocalTTSAdapter:
             """
         ).strip()
         script_path.write_text(script + "\n", encoding="utf-8")
+        encoded_script = base64.b64encode(script.encode("utf-16le")).decode("ascii")
         manifest = {
             "status": "running",
             "provider": "windows_sapi",
@@ -212,7 +266,7 @@ class LocalTTSAdapter:
         }
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         result = subprocess.run(
-            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(script_path)],
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded_script],
             cwd=str(self.workspace_root),
             capture_output=True,
             text=True,
@@ -223,6 +277,7 @@ class LocalTTSAdapter:
         stdout_path.write_text(result.stdout or "", encoding="utf-8")
         stderr_path.write_text(result.stderr or "", encoding="utf-8")
         if result.returncode != 0:
+            self._remove_stale_file(output_path)
             manifest.update(
                 {
                     "status": "failed",
@@ -232,6 +287,7 @@ class LocalTTSAdapter:
                 }
             )
         elif not output_path.is_file():
+            self._remove_stale_file(output_path)
             manifest.update(
                 {
                     "status": "failed",
@@ -252,6 +308,14 @@ class LocalTTSAdapter:
             )
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
+
+    @staticmethod
+    def _remove_stale_file(path: Path) -> None:
+        try:
+            if path.exists():
+                path.unlink()
+        except OSError:
+            pass
 
     @staticmethod
     def _ps_literal(value: str) -> str:

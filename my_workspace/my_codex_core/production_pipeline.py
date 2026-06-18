@@ -18,6 +18,7 @@ def run_auto_production(
     step_outputs: list[dict[str, str]],
     production_config: dict[str, Any] | None = None,
     progress_callback=None,
+    stop_after_comfyui: bool = False,
 ) -> dict[str, Any] | None:
     config = production_config or {}
     mode = str(config.get("mode") or "off").strip()
@@ -238,8 +239,10 @@ def run_auto_production(
             manifest["composition"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
             manifest["composition"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
             manifest["composition"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
-            if comfyui_adapter_result["status"] in {"success", "partial_success"}:
+            if comfyui_adapter_result["status"] == "success":
                 manifest["status"] = "comfyui_generated"
+            elif comfyui_adapter_result["status"] == "partial_success":
+                manifest["status"] = "comfyui_partial_failed"
             elif comfyui_adapter_result["status"] == "skipped":
                 manifest["status"] = "comfyui_adapter_skipped"
             else:
@@ -251,6 +254,8 @@ def run_auto_production(
                 downloaded_count=len(comfyui_adapter_result.get("downloaded_files") or []),
                 quality_score=comfyui_adapter_result.get("quality_score", 0),
             )
+        if stop_after_comfyui:
+            return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "ComfyUI 素材门禁完成")
 
     emit("开始本地配音处理", stage="tts")
     tts_adapter_result = _run_local_tts_adapter(voice_text, voice_config, paths["audio"])
@@ -301,12 +306,16 @@ def run_auto_production(
             final_video=(files[0] if files else ""),
         )
 
+    return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "自动生成阶段完成")
+
+
+def _finalize_production_manifest(task_dir: Path, manifest: dict[str, Any], production_note_path: Path, emit, message: str) -> dict[str, Any]:
     manifest_path = task_dir / "production_manifest.json"
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     _write_text(production_note_path, _build_production_note(manifest))
     manifest["files"]["manifest"] = str(manifest_path)
     manifest["files"]["note"] = str(production_note_path)
-    emit(f"自动生成阶段完成：{manifest['status']}", stage="production", status=manifest["status"])
+    emit(f"{message}：{manifest['status']}", stage="production", status=manifest["status"])
     return manifest
 
 
@@ -376,9 +385,9 @@ def _run_comfyui_adapter(
         return {"status": "skipped", "reason": "ComfyUI API key, base URL, or workflow endpoint is missing"}
 
     try:
-        comfyui_payload = json.loads(comfyui_payload_path.read_text(encoding="utf-8"))
-        if not isinstance(comfyui_payload, dict):
-            raise ValueError("comfyui_payload.json must contain a JSON object")
+        comfyui_payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+        if not isinstance(comfyui_payload, dict) or not comfyui_payload:
+            raise ValueError("comfyui_payload.json must contain a JSON object with image_prompts or video_prompts")
         manifest = CloudComfyUIAdapter(base_url=base_url, api_key=api_key, endpoint=endpoint, progress_callback=progress_callback).run(
             comfyui_payload=comfyui_payload,
             compose_config=compose_config,
@@ -532,12 +541,12 @@ def _salvage_prompt_items(section: str, default_model: str, include_duration: bo
         return []
     items: list[dict[str, Any]] = []
     pattern = re.compile(
-        r'"id"\s*:\s*"(?P<id>[^"]+)"(?P<body>.*?)(?=\n\s*\{\s*\n\s*"id"|\n\s*\]\s*,|\Z)',
+        r'"(?:id|prompt_id)"\s*:\s*"(?P<id>[^"]+)"(?P<body>.*?)(?=\n\s*\{\s*\n\s*"(?:id|prompt_id)"|\n\s*\]\s*,|\Z)',
         re.DOTALL,
     )
     for match in pattern.finditer(section):
         body = match.group("body")
-        prompt = _salvage_json_string_field(body, "prompt")
+        prompt = _salvage_json_string_field(body, "prompt") or _salvage_json_string_field(body, "prompt_text")
         if not prompt:
             continue
         negative_prompt = _salvage_json_string_field(body, "negative_prompt")
@@ -748,6 +757,18 @@ def _extract_srt(content: str) -> str:
 
 
 def _extract_voice_text(content: str) -> str:
+    for heading in ("完整配音稿", "TTS 配音稿", "配音稿", "口播配音稿", "旁白稿"):
+        text_block = _extract_fenced_block_after_heading(content, heading)
+        if text_block:
+            return _clean_voice_text(text_block)
+    for heading in ("TTS 配音稿", "配音稿", "口播配音稿", "旁白稿"):
+        section = _extract_section(content, heading)
+        if section:
+            return _clean_voice_text(section)
+    for match in re.finditer(r"```(?:text)?\s*(.*?)```", content, re.DOTALL | re.IGNORECASE):
+        block = match.group(1).strip()
+        if len(block) > 200 and any(marker in block for marker in ("口播配音稿", "0s -", "我跟你说", "开头痛点")):
+            return _clean_voice_text(block)
     for heading in ("完整配音稿", "TTS 配音稿", "配音稿", "口播稿", "旁白稿"):
         text_block = _extract_fenced_block_after_heading(content, heading)
         if text_block:
@@ -784,7 +805,7 @@ def _clean_voice_text(text: str) -> str:
         if line.startswith("|") or re.match(r"^[-:| ]{3,}$", line):
             continue
         if re.match(r"^#+\s+", line):
-            break
+            continue
         lines.append(line)
     cleaned = "\n".join(lines).strip()
     return cleaned + "\n" if cleaned else ""
@@ -795,7 +816,9 @@ def _quality_check_voice_text(text: str) -> dict[str, Any]:
     placeholder_patterns = ["待从", "后续", "自行完成", "按上述", "....", "..."]
     if not stripped:
         return {"usable": False, "status": "missing", "reason": "没有抽取到配音稿"}
-    if any(pattern in stripped for pattern in placeholder_patterns):
+    if len(stripped) < 200 and any(pattern in stripped for pattern in placeholder_patterns):
+        return {"usable": False, "status": "placeholder", "reason": "配音稿包含占位说明"}
+    if any(stripped.startswith(pattern) for pattern in placeholder_patterns):
         return {"usable": False, "status": "placeholder", "reason": "配音稿包含占位说明"}
     if len(stripped) < 80:
         return {"usable": False, "status": "too_short", "reason": "配音稿过短"}
@@ -915,13 +938,15 @@ def _ensure_comfyui_payload_defaults(
     final_video_name: str,
     video_config: dict[str, Any],
 ) -> str:
+    defaults = json.loads(_default_comfyui_payload(mode, final_video_name, video_config))
     try:
         payload = json.loads(payload_text)
     except json.JSONDecodeError:
-        return payload_text
+        payload = _salvage_comfyui_payload(payload_text)
+        if not payload:
+            payload = defaults
     if not isinstance(payload, dict):
-        return payload_text
-    defaults = json.loads(_default_comfyui_payload(mode, final_video_name, video_config))
+        payload = defaults
     for key in ("negative_prompt", "reference_image", "seed"):
         if not str(payload.get(key) or "").strip():
             payload[key] = defaults.get(key, "")

@@ -15,7 +15,7 @@ from urllib import request as urllib_request
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
-from my_codex_core.workflow_engine import WorkflowEngine
+from my_codex_core.workflow_engine import WorkflowCheckpointPause, WorkflowEngine
 
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent
@@ -42,17 +42,37 @@ INDEX_HTML = r"""<!doctype html>
       color-scheme: light;
       --bg: #f6f7f9;
       --panel: #ffffff;
-      --line: #d8dde6;
+      --line: #e1e6ef;
+      --line-strong: #ccd5e1;
       --text: #1b1f24;
       --muted: #667085;
       --accent: #0f766e;
       --accent-strong: #0b5f59;
-              --danger: #b42318;
+      --accent-soft: #eefaf8;
+      --danger: #b42318;
       --ok: #166534;
       --warn: #92400e;
-      --shadow: 0 1px 3px rgba(16, 24, 40, .08);
+      --shadow: 0 1px 2px rgba(16, 24, 40, .05);
+      --shadow-soft: 0 8px 22px rgba(16, 24, 40, .06);
     }
     * { box-sizing: border-box; }
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: #cbd5e1 transparent;
+    }
+    ::-webkit-scrollbar {
+      width: 9px;
+      height: 9px;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 999px;
+      border: 2px solid transparent;
+      background-clip: content-box;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
     body {
       margin: 0;
       font-family: "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
@@ -68,6 +88,7 @@ INDEX_HTML = r"""<!doctype html>
       padding: 0 20px;
       background: var(--panel);
       border-bottom: 1px solid var(--line);
+      box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
     }
     .brand {
       display: flex;
@@ -88,7 +109,7 @@ INDEX_HTML = r"""<!doctype html>
       padding: 4px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #f8fafc;
+      background: #f6f8fb;
     }
     .nav-btn {
       min-height: 30px;
@@ -111,6 +132,7 @@ INDEX_HTML = r"""<!doctype html>
       min-height: calc(100vh - 56px);
     }
     body[data-view="run"] main,
+    body[data-view="config"] main,
     body[data-view="staff"] main,
     body[data-view="workflow"] main,
     body[data-view="system"] main {
@@ -130,7 +152,7 @@ INDEX_HTML = r"""<!doctype html>
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 8px;
-      box-shadow: var(--shadow);
+      box-shadow: var(--shadow-soft);
     }
     .view[hidden], aside[hidden] { display: none; }
     .stack { display: grid; gap: 14px; }
@@ -149,7 +171,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     select, textarea, input, button {
       font: inherit;
-      border-radius: 6px;
+      border-radius: 8px;
     }
     select, textarea, input {
       width: 100%;
@@ -158,6 +180,14 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--text);
       padding: 9px 10px;
       outline: none;
+      transition: border-color .14s ease, box-shadow .14s ease, background .14s ease;
+    }
+    select:hover, textarea:hover, input:hover {
+      border-color: var(--line-strong);
+    }
+    select:focus, textarea:focus, input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, .10);
     }
     textarea {
       min-height: 180px;
@@ -171,6 +201,12 @@ INDEX_HTML = r"""<!doctype html>
       padding: 9px 12px;
       cursor: pointer;
       min-height: 38px;
+      transition: border-color .14s ease, background .14s ease, box-shadow .14s ease, color .14s ease;
+    }
+    button:hover:not(:disabled) {
+      border-color: var(--line-strong);
+      background: #f8fafc;
+      box-shadow: var(--shadow);
     }
     button.primary {
       background: var(--accent);
@@ -179,20 +215,102 @@ INDEX_HTML = r"""<!doctype html>
       font-weight: 650;
     }
     button.primary:hover { background: var(--accent-strong); }
-    button:disabled { opacity: .55; cursor: not-allowed; }
+    button.primary.run-progress {
+      --run-progress: 0%;
+      min-width: 116px;
+      color: #fff;
+      border-color: var(--accent);
+      background:
+        linear-gradient(90deg, var(--accent-strong) 0 var(--run-progress), var(--accent) var(--run-progress) 100%);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .18), var(--shadow);
+    }
+    button.primary.run-progress:disabled {
+      opacity: 1;
+      cursor: progress;
+      color: #fff;
+      background:
+        linear-gradient(90deg, var(--accent-strong) 0 var(--run-progress), var(--accent) var(--run-progress) 100%);
+    }
+    button.danger {
+      color: var(--danger);
+      border-color: #fecdca;
+      background: #fff7f6;
+      font-weight: 650;
+    }
+    button.danger:hover:not(:disabled) {
+      color: #912018;
+      border-color: #fda29b;
+      background: #fef3f2;
+    }
+    button:disabled {
+      opacity: .6;
+      cursor: not-allowed;
+      background: #f8fafc;
+      color: #98a2b3;
+    }
     .form {
       padding: 16px;
       display: grid;
       gap: 14px;
     }
     .run-form {
+      min-height: calc(100vh - 120px);
+      align-content: center;
+      justify-items: center;
       gap: 16px;
+      background: transparent;
+      border: 0;
+      box-shadow: none;
+    }
+    .run-composer {
+      width: min(920px, 100%);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: #fff;
+      box-shadow: var(--shadow-soft);
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+    .run-composer textarea {
+      min-height: 170px;
+      border: 0;
+      box-shadow: none;
+      resize: vertical;
+      padding: 8px;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+    .run-composer textarea:focus,
+    .run-composer textarea:hover {
+      border: 0;
+      box-shadow: none;
+    }
+    .run-composer.is-locked {
+      border-color: #99f6e4;
+      background: linear-gradient(180deg, #fff, #f0fdfa);
+    }
+    .run-composer.is-locked textarea {
+      color: #667085;
+      background: transparent;
+    }
+    .composer-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+      flex-wrap: wrap;
+    }
+    #cancelRunBtn:disabled {
+      display: none;
     }
     .run-section {
       border-bottom: 1px solid var(--line);
-      padding: 0 0 14px;
+      padding: 0 0 16px;
       display: grid;
-      gap: 12px;
+      gap: 14px;
       min-width: 0;
     }
     .run-section:last-of-type {
@@ -205,6 +323,7 @@ INDEX_HTML = r"""<!doctype html>
       align-items: baseline;
       gap: 12px;
       flex-wrap: wrap;
+      padding-bottom: 2px;
     }
     .run-section-head strong {
       font-size: 15px;
@@ -232,6 +351,17 @@ INDEX_HTML = r"""<!doctype html>
       background: rgba(255, 255, 255, .96);
       backdrop-filter: blur(6px);
     }
+    .run-form .run-section,
+    .run-form .run-actions {
+      display: none;
+    }
+    .run-form .run-composer,
+    .run-form .progress-box {
+      display: grid;
+    }
+    .run-form .progress-box {
+      width: min(920px, 100%);
+    }
     .split {
       display: grid;
       grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) 140px minmax(220px, 1fr);
@@ -239,25 +369,30 @@ INDEX_HTML = r"""<!doctype html>
     }
     details {
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #fbfcfd;
+      border-radius: 8px;
+      background: #fff;
       padding: 0;
+      overflow: hidden;
+      box-shadow: var(--shadow);
     }
     summary {
       cursor: pointer;
-      padding: 10px 12px;
+      padding: 11px 12px;
       list-style-position: inside;
+      color: #334155;
+      background: #fff;
     }
     details[open] summary {
       border-bottom: 1px solid var(--line);
+      background: #f8fafc;
     }
     [hidden] {
       display: none !important;
     }
     .details-body {
-      padding: 12px;
+      padding: 14px 12px 12px;
       display: grid;
-      gap: 12px;
+      gap: 14px;
     }
     .provider-grid {
       display: grid;
@@ -279,24 +414,29 @@ INDEX_HTML = r"""<!doctype html>
     }
     .reference-list {
       display: grid;
-      gap: 8px;
+      gap: 7px;
       margin-top: 10px;
     }
     .reference-item {
       border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 8px;
+      border-radius: 8px;
+      padding: 10px 11px;
       display: flex;
       justify-content: space-between;
       gap: 10px;
       align-items: center;
-      background: #fff;
+      background: #fbfcfd;
       font-size: 13px;
+      min-width: 0;
     }
     .reference-item.active {
       border-color: var(--accent);
-      background: #ecfeff;
-      box-shadow: inset 3px 0 0 var(--accent);
+      background: var(--accent-soft);
+      box-shadow: inset 2px 0 0 var(--accent);
+    }
+    .reference-item:hover {
+      border-color: var(--line-strong);
+      background: #fbfcfd;
     }
     .comfy-parameter-panel {
       border: 1px solid var(--line);
@@ -304,8 +444,9 @@ INDEX_HTML = r"""<!doctype html>
       background: #fff;
       display: grid;
       gap: 0;
-      max-height: 360px;
+      max-height: 320px;
       overflow: auto;
+      box-shadow: var(--shadow-soft);
     }
     .comfy-parameter-head {
       position: sticky;
@@ -320,9 +461,13 @@ INDEX_HTML = r"""<!doctype html>
       grid-template-columns: minmax(220px, .8fr) minmax(180px, .7fr) minmax(240px, 1fr);
       gap: 10px;
       align-items: center;
-      padding: 8px 10px;
+      padding: 9px 10px;
       border-bottom: 1px solid var(--line);
       font-size: 13px;
+      background: #fff;
+    }
+    .comfy-parameter-row:nth-child(even) {
+      background: #fbfcfd;
     }
     .comfy-parameter-row:last-child {
       border-bottom: 0;
@@ -427,8 +572,9 @@ INDEX_HTML = r"""<!doctype html>
     }
     .status {
       padding: 8px 10px;
-      border-radius: 6px;
-      background: #eef6f5;
+      border-radius: 8px;
+      border: 1px solid #d7ebe8;
+      background: #f3fbfa;
       color: #134e4a;
       font-size: 13px;
     }
@@ -463,11 +609,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     .progress-box {
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #fbfcfd;
-      padding: 10px;
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
       display: grid;
-      gap: 8px;
+      gap: 10px;
+      box-shadow: var(--shadow);
     }
     .progress-head {
       display: flex;
@@ -478,9 +625,9 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--muted);
     }
     .progress-bar {
-      height: 8px;
+      height: 7px;
       border-radius: 999px;
-      background: #e4e7ec;
+      background: #edf1f7;
       overflow: hidden;
     }
     .progress-fill {
@@ -491,22 +638,127 @@ INDEX_HTML = r"""<!doctype html>
     }
     .progress-list {
       display: grid;
-      gap: 6px;
+      gap: 8px;
       margin-top: 2px;
+    }
+    .progress-step-wrap {
+      display: grid;
+      gap: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+    .progress-step-wrap > summary {
+      list-style: none;
+      cursor: default;
+      background: #fff;
+    }
+    .progress-step-wrap > summary::-webkit-details-marker {
+      display: none;
+    }
+    .progress-step-wrap.has-details > summary {
+      cursor: pointer;
     }
     .progress-step {
       display: flex;
+      align-items: center;
       justify-content: space-between;
       gap: 10px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      padding: 8px 10px;
-      background: #fff;
+      border: 0;
+      border-radius: 0;
+      padding: 10px 12px;
+      background: transparent;
       font-size: 13px;
+      line-height: 1.35;
     }
-    .progress-step.active { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
-    .progress-step.done { color: #166534; background: #f0fdf4; border-color: #bbf7d0; }
-    .progress-step.error { color: var(--danger); background: #fef3f2; border-color: #fecdca; }
+    .progress-step span:first-child {
+      min-width: 0;
+    }
+    .progress-step.active { box-shadow: inset 3px 0 0 var(--accent); background: #fbfefe; }
+    .progress-step.done { color: #166534; background: #f6fef9; }
+    .progress-step.error { color: var(--danger); background: #fff7f6; }
+    .progress-step-main {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+    }
+    .progress-step-toggle {
+      display: inline-flex;
+      width: 18px;
+      height: 18px;
+      flex: 0 0 18px;
+      color: var(--muted);
+      font-size: 12px;
+      align-items: center;
+      justify-content: center;
+      border-radius: 999px;
+      background: #f1f5f9;
+    }
+    .progress-step-wrap[open] .progress-step-toggle {
+      background: #dff5f1;
+      color: var(--accent);
+    }
+    .progress-step-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 650;
+    }
+    .progress-step-status {
+      text-align: right;
+      flex: 0 0 auto;
+    }
+    .progress-detail-list {
+      display: grid;
+      gap: 0;
+      margin: 0;
+      padding: 8px 12px 10px 40px;
+      border-top: 1px solid var(--line);
+      background: #fbfcfd;
+    }
+    .progress-detail-item {
+      position: relative;
+      border: 0;
+      border-left: 1px solid var(--line);
+      border-radius: 0;
+      padding: 7px 0 8px 14px;
+      background: transparent;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .progress-detail-item::before {
+      content: "";
+      position: absolute;
+      left: -4px;
+      top: 13px;
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: var(--line-strong);
+    }
+    .progress-detail-item.done {
+      color: #166534;
+    }
+    .progress-detail-item.done::before { background: var(--ok); }
+    .progress-detail-item.error {
+      color: var(--danger);
+    }
+    .progress-detail-item.error::before { background: var(--danger); }
+    .progress-detail-main {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: baseline;
+    }
+    .progress-detail-meta {
+      margin-top: 4px;
+      color: var(--muted);
+      word-break: break-all;
+      line-height: 1.45;
+    }
     .viewer {
       display: grid;
       grid-template-rows: auto auto minmax(320px, 1fr);
@@ -523,18 +775,21 @@ INDEX_HTML = r"""<!doctype html>
     }
     .file-tabs {
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
     }
     .file-tabs button {
-      min-height: 32px;
-      padding: 6px 9px;
-      font-size: 13px;
+      min-height: 30px;
+      padding: 5px 9px;
+      font-size: 12px;
+      border-radius: 999px;
+      background: #f8fafc;
     }
     .file-tabs button.active {
       border-color: var(--accent);
       color: var(--accent);
       font-weight: 650;
+      background: var(--accent-soft);
     }
     .inline-check {
       min-height: 34px;
@@ -552,17 +807,18 @@ INDEX_HTML = r"""<!doctype html>
     .output-dashboard {
       display: grid;
       gap: 12px;
-      padding: 12px;
+      padding: 14px;
       border-bottom: 1px solid var(--line);
-      background: #fbfcfd;
+      background: #f8fafc;
     }
     .video-preview {
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
-      padding: 10px;
+      padding: 12px;
       display: grid;
       gap: 8px;
+      box-shadow: var(--shadow);
     }
     .video-preview[hidden] {
       display: none;
@@ -580,12 +836,13 @@ INDEX_HTML = r"""<!doctype html>
     }
     .output-card {
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: #fff;
-      padding: 10px;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #fff, #fbfcfd);
+      padding: 11px 12px;
       display: grid;
       gap: 5px;
       min-width: 0;
+      box-shadow: var(--shadow-soft);
     }
     .output-card .label {
       color: var(--muted);
@@ -593,7 +850,7 @@ INDEX_HTML = r"""<!doctype html>
       font-weight: 650;
     }
     .output-card .value {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 700;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -602,17 +859,18 @@ INDEX_HTML = r"""<!doctype html>
     .output-sections {
       display: grid;
       grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr);
-      gap: 10px;
+      gap: 12px;
       min-width: 0;
     }
     .output-section {
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 8px;
       background: #fff;
-      padding: 10px;
+      padding: 12px;
       display: grid;
       gap: 8px;
       min-width: 0;
+      box-shadow: var(--shadow-soft);
     }
     .output-section-head {
       display: flex;
@@ -622,7 +880,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .output-link-list {
       display: grid;
-      gap: 6px;
+      gap: 7px;
       max-height: 180px;
       overflow: auto;
     }
@@ -630,18 +888,24 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       gap: 2px;
       text-align: left;
-      min-height: 58px;
+      min-height: 54px;
       padding: 9px 10px;
-      border-radius: 6px;
-      background: #fff;
+      border-radius: 8px;
+      background: #fbfcfd;
       align-content: center;
       min-width: 0;
       overflow: hidden;
+      box-shadow: none;
     }
     .output-link.active {
       border-color: var(--accent);
       color: var(--accent);
-      box-shadow: inset 3px 0 0 var(--accent);
+      background: var(--accent-soft);
+      box-shadow: inset 2px 0 0 var(--accent);
+    }
+    .output-link:hover {
+      border-color: var(--line-strong);
+      background: #f8fafc;
     }
     .output-link span {
       overflow: hidden;
@@ -655,6 +919,37 @@ INDEX_HTML = r"""<!doctype html>
     .output-link .output-link-subtitle {
       display: block;
       line-height: 1.25;
+    }
+    .step-confirm-bar {
+      margin: 0 14px 12px;
+      border: 1px solid #99f6e4;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #f0fdfa, #fff);
+      padding: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      box-shadow: var(--shadow-soft);
+    }
+    .step-confirm-bar[hidden] {
+      display: none;
+    }
+    .step-confirm-copy {
+      display: grid;
+      gap: 4px;
+      min-width: 0;
+    }
+    .step-confirm-title {
+      font-weight: 750;
+      color: var(--accent-strong);
+    }
+    .step-confirm-actions {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: flex-end;
     }
     .staff-manager {
       display: grid;
@@ -689,15 +984,16 @@ INDEX_HTML = r"""<!doctype html>
     .staff-sidebar {
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fbfcfd;
-      padding: 10px;
+      background: #fff;
+      padding: 12px;
       display: grid;
-      gap: 10px;
+      gap: 8px;
       min-width: 0;
+      box-shadow: var(--shadow-soft);
     }
     .staff-list {
       display: grid;
-      gap: 6px;
+      gap: 8px;
       align-content: start;
       max-height: calc(100vh - 250px);
       overflow: auto;
@@ -705,16 +1001,18 @@ INDEX_HTML = r"""<!doctype html>
     }
     .staff-card {
       text-align: left;
-      padding: 9px 10px;
+      padding: 10px 11px;
       border: 1px solid var(--line);
-      background: #fff;
-      border-radius: 6px;
+      background: #fbfcfd;
+      border-radius: 8px;
       display: grid;
       gap: 4px;
       min-width: 0;
-      min-height: 76px;
+      min-height: 70px;
       align-content: start;
       overflow: hidden;
+      box-shadow: none;
+      transition: border-color .14s ease, background .14s ease, box-shadow .14s ease, transform .14s ease;
     }
     .staff-card strong {
       font-size: 14px;
@@ -742,8 +1040,13 @@ INDEX_HTML = r"""<!doctype html>
     }
     .staff-card.active {
       border-color: var(--accent);
-      box-shadow: 0 0 0 2px rgba(15, 118, 110, .12);
-      background: #f0fdfa;
+      box-shadow: 0 0 0 2px rgba(15, 118, 110, .10);
+      background: var(--accent-soft);
+      transform: translateY(-1px);
+    }
+    .staff-card:hover {
+      border-color: var(--line-strong);
+      background: #fbfcfd;
     }
     .staff-editor {
       display: grid;
@@ -755,6 +1058,7 @@ INDEX_HTML = r"""<!doctype html>
       min-width: 0;
       max-width: 100%;
       overflow: hidden;
+      box-shadow: var(--shadow-soft);
     }
     .staff-editor label {
       min-width: 0;
@@ -773,11 +1077,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     .workflow-step {
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 8px;
       background: #fff;
       padding: 10px;
       display: grid;
       gap: 10px;
+      box-shadow: var(--shadow-soft);
     }
     .workflow-step-head {
       display: flex;
@@ -798,16 +1103,17 @@ INDEX_HTML = r"""<!doctype html>
     }
     .health-card {
       border: 1px solid var(--line);
-      border-radius: 6px;
+      border-radius: 8px;
       background: #fff;
       padding: 12px;
       display: grid;
       gap: 6px;
       min-height: 96px;
+      box-shadow: var(--shadow-soft);
     }
-    .health-card.ok { border-color: #bbf7d0; background: #f0fdf4; }
-    .health-card.warn { border-color: #fde68a; background: #fffbeb; }
-    .health-card.error { border-color: #fecdca; background: #fef3f2; }
+    .health-card.ok { border-color: #c9f2d8; background: #f7fffa; }
+    .health-card.warn { border-color: #f6e4a7; background: #fffdf4; }
+    .health-card.error { border-color: #fac8c5; background: #fff8f7; }
     .health-card strong {
       font-size: 14px;
     }
@@ -877,7 +1183,8 @@ INDEX_HTML = r"""<!doctype html>
     <div class="brand">
       <h1>自定义工作流管理台</h1>
       <nav class="top-nav" aria-label="主功能">
-        <button class="nav-btn active" data-view-target="run" type="button">运行工作流</button>
+        <button class="nav-btn active" data-view-target="run" type="button">新建任务</button>
+        <button class="nav-btn" data-view-target="config" type="button">系统配置</button>
         <button class="nav-btn" data-view-target="staff" type="button">数字员工</button>
         <button class="nav-btn" data-view-target="workflow" type="button">工作流</button>
         <button class="nav-btn" data-view-target="output" type="button">任务输出</button>
@@ -900,27 +1207,22 @@ INDEX_HTML = r"""<!doctype html>
         <div class="run-section">
           <div class="run-section-head">
             <strong>任务基础信息</strong>
-            <span class="muted small">先确定要跑什么，再配置模型和生产选项</span>
+            <span class="muted small">这里仅填写本次长视频任务，模型和自动化参数到“系统配置”维护</span>
           </div>
           <div class="run-primary-grid">
-            <label>产品类型
+            <label hidden>产品类型
               <select id="productTemplate">
-                <option value="short_video" selected>短视频</option>
-                <option value="long_video">长视频</option>
-                <option value="xiaohongshu">小红书图文</option>
-                <option value="game_steam">Unity 3D Steam 游戏</option>
-                <option value="software_market">软件市场分析</option>
-                <option value="agent_platform">AI 员工平台</option>
+                <option value="long_video" selected>长视频工作流</option>
               </select>
             </label>
             <label>工作流
               <select id="workflow"></select>
             </label>
             <label>任务名称
-              <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI自动化获客短视频-第1版，可留空" />
+              <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI员工工作流平台长视频，可留空" />
             </label>
           </div>
-          <div class="run-model-grid">
+          <div class="run-model-grid" id="modelRuntimeConfig">
             <label>执行模式
               <select id="provider">
                 <option value="auto">auto</option>
@@ -964,16 +1266,17 @@ INDEX_HTML = r"""<!doctype html>
             </label>
           </div>
         </div>
-        <div class="run-section run-input">
-          <div class="run-section-head">
-            <strong>原始需求</strong>
-            <span class="muted small">这里写清目标用户、平台、风格、交付目标</span>
+        <div class="run-composer">
+          <textarea id="userInput" aria-label="长视频需求" placeholder="输入你要制作的长视频需求。比如：主题、平台、目标观众、风格、可用素材、交付目标。"></textarea>
+          <div class="composer-actions">
+            <span id="status" class="status">准备就绪</span>
+            <div class="row">
+              <button class="danger" id="cancelRunBtn" disabled hidden>终止</button>
+              <button class="primary" id="runBtn">开始生成</button>
+            </div>
           </div>
-          <label>需求内容
-            <textarea id="userInput" placeholder="例如：我要做一条抖音短视频，推广 AI 自动化开发服务，目标客户是中小企业老板，目标是让客户私信咨询。"></textarea>
-          </label>
         </div>
-        <details>
+        <details data-config-section>
           <summary><strong>模型接口配置</strong> <span class="muted small">API Key、中转站和自定义模型名</span></summary>
           <div class="details-body">
             <div class="provider-grid">
@@ -1008,7 +1311,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
         </details>
-        <details>
+        <details data-config-section>
           <summary><strong>记忆与继承</strong> <span class="muted small">长期记忆和历史任务上下文</span></summary>
           <div class="details-body">
             <div class="provider-grid">
@@ -1048,10 +1351,16 @@ INDEX_HTML = r"""<!doctype html>
             <div class="reference-list" id="knowledgeList"></div>
           </div>
         </details>
-        <details>
-          <summary><strong>全自动生成</strong> <span class="muted small">需要自动出预览视频时，选择“全自动成片预览”并使用 FFmpeg 自动剪辑</span></summary>
+        <details data-config-section open>
+          <summary><strong>自动化与成片配置</strong> <span class="muted small">打开“一键到底”自动跑完整流程；关闭后每步确认再继续</span></summary>
           <div class="details-body">
             <div class="provider-grid">
+              <label>推进方式
+                <select id="workflowAdvanceMode">
+                  <option value="auto" selected>一键到底：自动跑到最终产物</option>
+                  <option value="step_confirm">逐步确认：每步输出确认后继续</option>
+                </select>
+              </label>
               <label>自动生成模式
                 <select id="autoProductionMode">
                   <option value="off" selected>关闭</option>
@@ -1156,7 +1465,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="clear_female">清爽女声：干净利落，适合教程解说</option>
                   <option value="pro_male">专业男声：稳重可信，适合商业介绍</option>
                   <option value="deep_male">沉稳男声：低沉有质感，适合纪录片旁白</option>
-                  <option value="young_male">活力男声：节奏明快，适合短视频营销</option>
+                  <option value="young_male">活力男声：节奏明快，适合长视频重点段落</option>
                   <option value="story_female">故事女声：温柔叙事，适合长视频讲述</option>
                 </select>
               </label>
@@ -1176,16 +1485,17 @@ INDEX_HTML = r"""<!doctype html>
               </label>
               <label>配音超时
                 <select id="voiceTimeout">
+                  <option value="180">3 分钟（预览优先）</option>
+                  <option value="300" selected>5 分钟（推荐）</option>
+                  <option value="600">10 分钟</option>
                   <option value="900">15 分钟</option>
-                  <option value="1800" selected>30 分钟</option>
-                  <option value="3600">60 分钟</option>
-                  <option value="7200">120 分钟</option>
+                  <option value="1800">30 分钟</option>
                 </select>
               </label>
             </div>
           </div>
         </details>
-        <details hidden>
+        <details hidden data-config-section>
           <summary><strong>生图配置</strong> <span class="muted small">只填正向提示词；参考图在下方单独上传，其余参数在 ComfyUI 工作流里配置</span></summary>
           <div class="details-body">
             <div class="provider-grid">
@@ -1315,12 +1625,12 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
         </details>
-        <details hidden>
+        <details hidden data-config-section>
           <summary><strong>视频生成配置</strong> <span class="muted small">只填正向提示词；镜头、尺寸、采样等参数在视频工作流里配置</span></summary>
           <div class="details-body">
             <div class="provider-grid">
               <label>生视频正向提示词
-                <input id="videoPositivePrompt" autocomplete="off" spellcheck="false" placeholder="例如：专业真实的短视频，人物口播自然，镜头稳定，突出AI自动化服务价值" />
+                <input id="videoPositivePrompt" autocomplete="off" spellcheck="false" placeholder="例如：专业真实的长视频素材片段，人物口播自然，镜头稳定，突出AI自动化服务价值" />
               </label>
             </div>
             <div class="video-grid" hidden>
@@ -1486,22 +1796,22 @@ INDEX_HTML = r"""<!doctype html>
             <div class="reference-list" id="referenceList"></div>
           </div>
         </details>
-        <div class="row run-actions">
-          <button class="primary" id="runBtn">运行工作流</button>
-          <button id="sampleBtn">填入示例</button>
-          <button id="longVideoSampleBtn">长视频示例</button>
-          <button id="gameSampleBtn">游戏示例</button>
+        <div class="row run-actions" hidden>
+          <button id="sampleBtn">填入长视频示例</button>
+          <button id="longVideoSampleBtn" hidden>长视频示例</button>
+          <button id="gameSampleBtn" hidden>游戏示例</button>
           <button id="clearSettingsBtn">清除已保存配置</button>
-          <span id="status" class="status">准备就绪</span>
         </div>
-        <div class="progress-box" id="progressBox" hidden>
-          <div class="progress-head">
-            <strong id="progressTitle">等待运行</strong>
-            <span id="progressMeta">0/0</span>
+      </div>
+
+      <div class="panel form view" data-view="config" hidden>
+        <div class="run-section">
+          <div class="run-section-head">
+            <strong>系统配置</strong>
+            <span class="muted small">模型接口、自动化、ComfyUI、配音、记忆都在这里维护；运行页只负责输入需求和启动任务。</span>
           </div>
-          <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
-          <div class="progress-list" id="progressList"></div>
         </div>
+        <div class="stack" id="configSections"></div>
       </div>
 
       <div class="panel form view" data-view="staff" hidden>
@@ -1520,6 +1830,10 @@ INDEX_HTML = r"""<!doctype html>
           <div class="staff-sidebar">
             <label>员工搜索
               <input id="staffFilter" autocomplete="off" spellcheck="false" placeholder="按名称、编号或角色筛选" />
+            </label>
+            <label class="inline-check">
+              <input id="showArchivedStaff" type="checkbox" />
+              显示归档员工
             </label>
             <div class="staff-list" id="staffList"></div>
           </div>
@@ -1548,6 +1862,10 @@ INDEX_HTML = r"""<!doctype html>
           <button id="newWorkflowBtn" type="button">新建工作流</button>
           <button id="addWorkflowStepBtn" type="button">新增步骤</button>
           <button class="danger" id="deleteWorkflowBtn" type="button" disabled>删除工作流</button>
+          <label class="inline-check">
+            <input id="showArchivedWorkflows" type="checkbox" />
+            显示归档工作流
+          </label>
           <span id="workflowEditorStatus" class="status">管理 my_workflows</span>
         </div>
         <div class="staff-manager">
@@ -1555,10 +1873,10 @@ INDEX_HTML = r"""<!doctype html>
           <div class="staff-editor">
             <div class="provider-grid">
               <label>工作流文件名
-                <input id="workflowFile" autocomplete="off" spellcheck="false" placeholder="例如 workflow_短视频全流程" />
+                <input id="workflowFile" autocomplete="off" spellcheck="false" placeholder="例如 workflow_长视频全流程" />
               </label>
               <label>工作流名称
-                <input id="workflowName" autocomplete="off" spellcheck="false" placeholder="例如 短视频全流程" />
+                <input id="workflowName" autocomplete="off" spellcheck="false" placeholder="例如 长视频全流程" />
               </label>
               <label>说明
                 <input id="workflowDescription" autocomplete="off" spellcheck="false" placeholder="这个工作流用于什么场景" />
@@ -1588,6 +1906,7 @@ INDEX_HTML = r"""<!doctype html>
             <button id="rebuildFinalBtn" type="button" disabled>重建最终汇总</button>
             <button id="rerunStepBtn" type="button" disabled>重跑当前步骤</button>
             <button id="resumeTaskBtn" type="button" disabled>继续任务</button>
+            <button class="danger" id="outputCancelRunBtn" type="button" disabled hidden>终止任务</button>
             <button id="exportTaskBtn" type="button" disabled>导出产品包</button>
             <label class="inline-check">
               <input id="showDebugFiles" type="checkbox" />
@@ -1597,6 +1916,14 @@ INDEX_HTML = r"""<!doctype html>
           <div class="file-tabs" id="fileTabs"></div>
         </div>
         <div class="output-dashboard" id="outputDashboard">
+          <div class="progress-box" id="progressBox" hidden>
+            <div class="progress-head">
+              <strong id="progressTitle">等待运行</strong>
+              <span id="progressMeta">0/0</span>
+            </div>
+            <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+            <div class="progress-list" id="progressList"></div>
+          </div>
           <div class="output-summary-grid" id="outputSummaryGrid"></div>
           <div class="video-preview" id="videoPreviewBox" hidden>
             <div class="output-section-head">
@@ -1624,6 +1951,16 @@ INDEX_HTML = r"""<!doctype html>
                 <div class="muted small">点击“导出产品包”后显示可交付文件。</div>
               </div>
             </div>
+          </div>
+        </div>
+        <div class="step-confirm-bar" id="stepConfirmBar" hidden>
+          <div class="step-confirm-copy">
+            <span class="step-confirm-title" id="stepConfirmTitle">当前步骤已完成</span>
+            <span class="muted small" id="stepConfirmHint">请检查下方输出，确认无误后继续下一步。</span>
+          </div>
+          <div class="step-confirm-actions">
+            <button class="primary" id="confirmStepContinueBtn" type="button">确认并继续下一步</button>
+            <button id="confirmStepRerunBtn" type="button">重跑当前步骤</button>
           </div>
         </div>
         <textarea class="file-editor" id="fileContent" spellcheck="false">选择左侧任务，或运行一个新任务。</textarea>
@@ -1680,6 +2017,7 @@ INDEX_HTML = r"""<!doctype html>
   <script>
     const els = {
       env: document.getElementById('env'),
+      configSections: document.getElementById('configSections'),
       productTemplate: document.getElementById('productTemplate'),
       workflow: document.getElementById('workflow'),
       provider: document.getElementById('provider'),
@@ -1701,6 +2039,7 @@ INDEX_HTML = r"""<!doctype html>
       knowledgeFile: document.getElementById('knowledgeFile'),
       uploadKnowledgeBtn: document.getElementById('uploadKnowledgeBtn'),
       knowledgeList: document.getElementById('knowledgeList'),
+      workflowAdvanceMode: document.getElementById('workflowAdvanceMode'),
       autoProductionMode: document.getElementById('autoProductionMode'),
       composeTool: document.getElementById('composeTool'),
       finalVideoName: document.getElementById('finalVideoName'),
@@ -1777,6 +2116,7 @@ INDEX_HTML = r"""<!doctype html>
       referenceNote: document.getElementById('referenceNote'),
       referenceList: document.getElementById('referenceList'),
       runBtn: document.getElementById('runBtn'),
+      cancelRunBtn: document.getElementById('cancelRunBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
       longVideoSampleBtn: document.getElementById('longVideoSampleBtn'),
       gameSampleBtn: document.getElementById('gameSampleBtn'),
@@ -1802,10 +2142,16 @@ INDEX_HTML = r"""<!doctype html>
       stepOutputList: document.getElementById('stepOutputList'),
       packageOutputMeta: document.getElementById('packageOutputMeta'),
       packageOutputList: document.getElementById('packageOutputList'),
+      stepConfirmBar: document.getElementById('stepConfirmBar'),
+      stepConfirmTitle: document.getElementById('stepConfirmTitle'),
+      stepConfirmHint: document.getElementById('stepConfirmHint'),
+      confirmStepContinueBtn: document.getElementById('confirmStepContinueBtn'),
+      confirmStepRerunBtn: document.getElementById('confirmStepRerunBtn'),
       saveFileBtn: document.getElementById('saveFileBtn'),
       rebuildFinalBtn: document.getElementById('rebuildFinalBtn'),
       rerunStepBtn: document.getElementById('rerunStepBtn'),
       resumeTaskBtn: document.getElementById('resumeTaskBtn'),
+      outputCancelRunBtn: document.getElementById('outputCancelRunBtn'),
       exportTaskBtn: document.getElementById('exportTaskBtn'),
       showDebugFiles: document.getElementById('showDebugFiles'),
       refreshStaffBtn: document.getElementById('refreshStaffBtn'),
@@ -1814,6 +2160,7 @@ INDEX_HTML = r"""<!doctype html>
       saveStaffBtn: document.getElementById('saveStaffBtn'),
       staffStatus: document.getElementById('staffStatus'),
       staffFilter: document.getElementById('staffFilter'),
+      showArchivedStaff: document.getElementById('showArchivedStaff'),
       staffList: document.getElementById('staffList'),
       staffName: document.getElementById('staffName'),
       staffAgentMd: document.getElementById('staffAgentMd'),
@@ -1824,6 +2171,7 @@ INDEX_HTML = r"""<!doctype html>
       deleteWorkflowBtn: document.getElementById('deleteWorkflowBtn'),
       saveWorkflowBtn: document.getElementById('saveWorkflowBtn'),
       workflowEditorStatus: document.getElementById('workflowEditorStatus'),
+      showArchivedWorkflows: document.getElementById('showArchivedWorkflows'),
       workflowList: document.getElementById('workflowList'),
       workflowFile: document.getElementById('workflowFile'),
       workflowName: document.getElementById('workflowName'),
@@ -1849,6 +2197,11 @@ INDEX_HTML = r"""<!doctype html>
     let referencePreviewUrls = new Map();
     let comfyParameterCandidates = [];
     let progressTimer = null;
+    let currentRunId = "";
+    let activeRunTaskName = "";
+    let workflowInteractionLocked = false;
+    const progressStepOpenState = new Map();
+    const progressUserToggledSteps = new Set();
     let localModelPresets = [];
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
@@ -1897,57 +2250,26 @@ INDEX_HTML = r"""<!doctype html>
         pollTimeout: '3600',
       },
     ];
+    const LONG_VIDEO_WORKFLOW_STEM = 'workflow_长视频全流程';
+    const ACTIVE_STAFF_PREFIXES = ['01_', '03_', '04_', '05_', '06_', '07_', '20_', '21_', '22_', '23_'];
+    function isActiveLongVideoWorkflow(workflow) {
+      if (workflow && workflow.archived === false) return true;
+      if (workflow && workflow.archived === true) return false;
+      const stem = workflow?.stem || workflow?.name || '';
+      return stem === LONG_VIDEO_WORKFLOW_STEM || String(stem).includes('长视频全流程');
+    }
+    function isActiveLongVideoStaff(staff) {
+      if (staff && staff.archived === false) return true;
+      if (staff && staff.archived === true) return false;
+      const name = staff?.name || staff || '';
+      return ACTIVE_STAFF_PREFIXES.some(prefix => String(name).startsWith(prefix));
+    }
     const PRODUCT_TEMPLATES = {
-      short_video: {
-        workflow: 'workflow_短视频全流程',
-        taskTitle: '短视频内容生产',
-        sample: '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。',
-        autoProductionMode: 'package_only',
-        imageSize: '9:16',
-        videoAspect: '9:16',
-        videoDuration: '30s',
-      },
       long_video: {
-        workflow: 'workflow_长视频全流程',
+        workflow: LONG_VIDEO_WORKFLOW_STEM,
         taskTitle: '长视频内容生产',
         sample: '我要做一条 12-18 分钟的长视频，主题是“中小企业如何用 AI 员工工作流平台降低重复劳动”。目标平台是 B 站和视频号，目标观众是中小企业老板、运营负责人和想做 AI 自动化服务的人。视频要专业、清晰、有案例感，结构包括痛点、平台演示、落地步骤、成本和风险、最后引导私信咨询。可用素材包括管理台录屏、工作流输出截图、本人配音和少量 AI 示意图；不要夸大收益，不承诺具体增长结果。',
-        autoProductionMode: 'audio_package',
-        imageSize: '16:9',
-        videoAspect: '16:9',
-        videoDuration: 'custom',
-      },
-      xiaohongshu: {
-        workflow: 'workflow_小红书图文',
-        taskTitle: '小红书图文内容',
-        sample: '我要做一篇小红书图文笔记，主题是 AI 自动化如何帮小团队节省重复工作。目标读者是创业者、自由职业者和中小企业老板，风格真实、具体、可收藏。',
-        autoProductionMode: 'off',
-        imageSize: '4:5',
-        videoAspect: '4:5',
-        videoDuration: 'custom',
-      },
-      game_steam: {
-        workflow: 'workflow_Unity3D游戏Steam上架',
-        taskTitle: 'Unity3D探索解谜Steam游戏立项',
-        sample: '我想做一款 Unity 3D 第三人称探索解谜游戏，上架 Steam。目标玩家是喜欢低多边形、轻剧情、环境谜题和短流程独立游戏的玩家。团队规模按单人或两人小团队考虑，优先做 20-30 分钟可玩 Demo，用于 Steam 商店页、愿望单和后续众筹/抢先体验验证。',
-        autoProductionMode: 'off',
-        imageSize: '16:9',
-        videoAspect: '16:9',
-        videoDuration: '30s',
-      },
-      software_market: {
-        workflow: 'workflow_软件市场机会分析',
-        taskTitle: '软件市场机会分析',
-        sample: '目标中国中小企业和个人开发者市场，团队1-2人，擅长 Python、Web 和 AI API，希望找可 MVP 验证的软件方向。请从痛点强度、付费意愿、获客难度、交付复杂度和差异化角度筛选机会。',
-        autoProductionMode: 'off',
-        imageSize: '16:9',
-        videoAspect: '16:9',
-        videoDuration: 'custom',
-      },
-      agent_platform: {
-        workflow: 'workflow_AI员工工作流平台设计',
-        taskTitle: 'AI员工工作流平台设计',
-        sample: '我要做中小企业 AI 员工工作流平台，以 my_custom_staff 里的自定义员工为核心，能管理数字员工、运行工作流、查看任务输出，先自用跑通再销售。',
-        autoProductionMode: 'off',
+        autoProductionMode: 'comfy_full',
         imageSize: '16:9',
         videoAspect: '16:9',
         videoDuration: 'custom',
@@ -2008,6 +2330,18 @@ INDEX_HTML = r"""<!doctype html>
       }, true);
     }
 
+    function moveConfigSections() {
+      if (!els.configSections) return;
+      const modelRuntimeConfig = document.getElementById('modelRuntimeConfig');
+      const firstConfigBody = document.querySelector('[data-config-section] .details-body');
+      if (modelRuntimeConfig && firstConfigBody) {
+        firstConfigBody.insertBefore(modelRuntimeConfig, firstConfigBody.firstChild);
+      }
+      document.querySelectorAll('[data-config-section]').forEach(section => {
+        els.configSections.appendChild(section);
+      });
+    }
+
     function showView(viewName) {
       document.body.dataset.view = viewName;
       for (const view of views) {
@@ -2018,7 +2352,11 @@ INDEX_HTML = r"""<!doctype html>
       }
       els.taskSidebar.hidden = viewName !== 'output';
       if (viewName === 'output') {
-        loadTasks().catch(err => setStatus(err.message, true));
+        loadTasks()
+          .then(tasks => {
+            if (!selectedTask && tasks.length) return selectTask(tasks[0].name);
+          })
+          .catch(err => setStatus(err.message, true));
       }
       if (viewName === 'system') {
         loadSystemHealth().catch(err => setHealthStatus(err.message, true));
@@ -2034,16 +2372,207 @@ INDEX_HTML = r"""<!doctype html>
       if (showPopup) showToast(text, isError);
     }
 
+    function setRunButtonProgress(percent = 0, label = '') {
+      const safePercent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+      if (!els.runBtn) return;
+      if (!label && safePercent <= 0) {
+        els.runBtn.classList.remove('run-progress');
+        els.runBtn.style.removeProperty('--run-progress');
+        els.runBtn.textContent = '开始生成';
+        return;
+      }
+      els.runBtn.classList.add('run-progress');
+      els.runBtn.style.setProperty('--run-progress', `${safePercent}%`);
+      els.runBtn.textContent = label || `运行中 ${safePercent}%`;
+    }
+
+    function syncRunControlButtons() {
+      const hasRun = Boolean(currentRunId);
+      if (els.cancelRunBtn) {
+        els.cancelRunBtn.hidden = true;
+        els.cancelRunBtn.disabled = true;
+      }
+      if (els.outputCancelRunBtn) {
+        els.outputCancelRunBtn.hidden = !hasRun;
+        els.outputCancelRunBtn.disabled = !hasRun;
+      }
+    }
+
+    function setWorkflowInteractionLocked(locked) {
+      workflowInteractionLocked = Boolean(locked);
+      const runView = document.querySelector('[data-view="run"]');
+      const composer = document.querySelector('.run-composer');
+      if (composer) composer.classList.toggle('is-locked', workflowInteractionLocked);
+      if (runView) {
+        for (const control of runView.querySelectorAll('input, select, textarea, button')) {
+          if (control === els.cancelRunBtn) {
+            control.disabled = true;
+            control.hidden = true;
+          } else {
+            control.disabled = workflowInteractionLocked;
+          }
+        }
+      }
+      for (const control of document.querySelectorAll('[data-config-section] input, [data-config-section] select, [data-config-section] textarea, [data-config-section] button')) {
+        control.disabled = workflowInteractionLocked;
+      }
+      if (!workflowInteractionLocked && els.runBtn) els.runBtn.disabled = false;
+      syncRunControlButtons();
+      syncOutputButtons();
+    }
+
+    function showStartupProgress(label = '启动中') {
+      els.progressBox.hidden = false;
+      els.progressTitle.textContent = label;
+      els.progressMeta.textContent = '准备连接模型/API';
+      els.progressFill.style.width = '1%';
+      setRunButtonProgress(1, label);
+    }
+
     function resetProgress() {
       if (progressTimer) {
         clearTimeout(progressTimer);
         progressTimer = null;
       }
+      currentRunId = "";
+      progressStepOpenState.clear();
+      progressUserToggledSteps.clear();
+      syncRunControlButtons();
       els.progressBox.hidden = true;
       els.progressTitle.textContent = '等待运行';
       els.progressMeta.textContent = '0/0';
       els.progressFill.style.width = '0%';
       els.progressList.innerHTML = '';
+      setRunButtonProgress(0);
+    }
+
+    function trackRun(runId) {
+      if (currentRunId !== (runId || "")) {
+        progressStepOpenState.clear();
+        progressUserToggledSteps.clear();
+      }
+      currentRunId = runId || "";
+      if (!currentRunId) activeRunTaskName = "";
+      syncRunControlButtons();
+      syncOutputButtons();
+    }
+
+    function progressStepKey(job, stepNo) {
+      return `${job.run_id || currentRunId || 'run'}:${stepNo}`;
+    }
+
+    function progressProductionStep(event, steps) {
+      const stage = String(event.stage || '').toLowerCase();
+      const message = String(event.message || '').toLowerCase();
+      const findStep = keywords => {
+        const hit = (steps || []).find(step => {
+          const name = `${step.agent_name || ''} ${step.agent_id || ''} ${step.task || ''}`.toLowerCase();
+          return keywords.some(keyword => name.includes(keyword));
+        });
+        return hit ? Number(hit.step || 0) : 0;
+      };
+      if (stage.includes('comfy') || stage.includes('runninghub') || stage.includes('material') || message.includes('runninghub') || message.includes('comfy')) {
+        return findStep(['comfy', '素材', 'material']) || 9;
+      }
+      if (stage.includes('tts') || stage.includes('voice') || stage.includes('audio')) {
+        return findStep(['语音', '字幕', 'tts', 'audio']) || 8;
+      }
+      if (stage.includes('ffmpeg') || stage.includes('compose') || stage.includes('production') || stage.includes('package')) {
+        return findStep(['剪辑', '成片', 'ffmpeg', 'compose']) || (steps || []).length || 10;
+      }
+      return Number(event.step || 0) || Number((steps || []).find(step => step.status === 'active')?.step || 0) || 1;
+    }
+
+    function compactProgressMeta(event) {
+      const parts = [];
+      const push = (label, value) => {
+        if (value === undefined || value === null || value === '') return;
+        parts.push(`${label}: ${value}`);
+      };
+      push('阶段', event.stage);
+      push('接口', event.endpoint);
+      push('任务ID', event.task_id || event.taskId);
+      push('远端状态', event.remote_status);
+      push('素材', event.current_job && event.total_jobs ? `${event.current_job}/${event.total_jobs}` : event.current_job);
+      push('完成素材', event.completed_jobs && event.total_jobs ? `${event.completed_jobs}/${event.total_jobs}` : event.completed_jobs);
+      push('成功', event.success_count);
+      push('失败', event.failed_count);
+      push('已下载', event.downloaded_count);
+      push('文件', event.downloaded_file || event.output_file);
+      push('类型', event.output_type || event.job_type);
+      push('质量分', event.quality_score);
+      push('错误', event.error);
+      return parts.join(' | ');
+    }
+
+    function progressDetailsByStep(job, steps) {
+      const grouped = new Map();
+      const add = (stepNo, item) => {
+        const safeStep = Number(stepNo || 0) || 1;
+        if (!grouped.has(safeStep)) grouped.set(safeStep, []);
+        grouped.get(safeStep).push(item);
+      };
+      for (const event of job.detail_events || []) {
+        const kind = event.kind || 'active';
+        if (!['active', 'done', 'error'].includes(kind)) continue;
+        const eventStep = Number(event.step || 0);
+        if (!eventStep) continue;
+        add(eventStep, {
+          kind,
+          title: kind === 'error' ? '步骤错误' : kind === 'done' ? '步骤完成' : '步骤进度',
+          message: event.message || '',
+          meta: '',
+          updated_at: Number(event.updated_at || 0),
+        });
+      }
+      for (const event of job.production_events || []) {
+        const statusText = String(event.status || event.job_status || '').toLowerCase();
+        const isError = Boolean(event.error) || statusText.includes('failed') || statusText.includes('timeout') || statusText.includes('error');
+        const isDone = ['success', 'partial_success', 'final_video_generated', 'skipped', 'downloaded'].includes(statusText);
+        add(progressProductionStep(event, steps), {
+          kind: isError ? 'error' : isDone ? 'done' : 'active',
+          title: event.stage && String(event.stage).toLowerCase().includes('comfy') ? 'RunningHub / ComfyUI 明细' : '自动生成明细',
+          message: event.message || '',
+          meta: compactProgressMeta(event),
+          updated_at: Number(event.updated_at || 0),
+        });
+      }
+      if (false && job.error) {
+        add(job.current_step || (steps || []).find(step => step.status === 'error')?.step || (steps || []).length || 1, {
+          kind: 'error',
+          title: '错误',
+          message: job.error,
+          meta: '',
+          updated_at: Date.now() / 1000,
+        });
+      }
+      if (job.error) {
+        add(job.current_step || (steps || []).find(step => step.status === 'error')?.step || (steps || []).length || 1, {
+          kind: 'error',
+          title: '任务错误',
+          message: job.error,
+          meta: '',
+          updated_at: Date.now() / 1000,
+        });
+      }
+      for (const items of grouped.values()) {
+        items.sort((a, b) => (a.updated_at || 0) - (b.updated_at || 0));
+      }
+      return grouped;
+    }
+
+    function currentProgressStep(job, steps) {
+      const items = steps || [];
+      const explicitStep = Number(job.rerun_step || job.awaiting_confirmation_step || job.current_step || 0);
+      if (explicitStep) {
+        const found = items.find(step => Number(step.step || 0) === explicitStep);
+        if (found) return found;
+      }
+      return items.find(step => step.status === 'active')
+        || items.find(step => step.status === 'error')
+        || items.find(step => step.status === 'pending')
+        || [...items].reverse().find(step => step.status === 'done')
+        || null;
     }
 
     function renderProgress(job) {
@@ -2052,73 +2581,164 @@ INDEX_HTML = r"""<!doctype html>
       const completed = job.completed_steps || 0;
       const percent = total ? Math.round((completed / total) * 100) : 0;
       const productionMessage = job.production_message || '';
+      const currentMessage = job.current_message || productionMessage || '';
       const statusText = {
         queued: '排队中',
         running: '运行中',
         completed: '已完成',
         failed: '失败',
+        paused: '已暂停',
+        cancelled: '已终止',
       }[job.status] || job.status || '运行中';
       const jobTitle = job.task_title || job.workflow_name || '';
       els.progressTitle.textContent = `${statusText}${jobTitle ? `：${jobTitle}` : ''}`;
-      els.progressMeta.textContent = `${completed}/${total} 步 · ${percent}%${productionMessage ? ` · ${productionMessage}` : ''}`;
+      els.progressMeta.textContent = `${completed}/${total} 步 · ${percent}%${currentMessage ? ` · ${currentMessage}` : ''}`;
       els.progressFill.style.width = `${percent}%`;
+      if (job.status === 'running' || job.status === 'queued') {
+        setRunButtonProgress(percent || 1, `${percent || 1}%`);
+      } else if (job.status === 'completed') {
+        setRunButtonProgress(100, '完成');
+      } else if (job.status === 'paused') {
+        setRunButtonProgress(percent, '待确认');
+      } else {
+        setRunButtonProgress(0);
+      }
       els.progressList.innerHTML = '';
       if (job.rerun && job.rerun_step) {
         els.progressTitle.textContent = `重跑第 ${job.rerun_step} 步${jobTitle ? ` - ${jobTitle}` : ''}`;
       }
 
       const steps = job.steps || [];
-      for (const step of steps) {
-        const item = document.createElement('div');
+      const detailsByStep = progressDetailsByStep(job, steps);
+      const currentStep = currentProgressStep(job, steps);
+      const visibleSteps = currentStep ? [currentStep] : [];
+      for (const step of visibleSteps) {
+        const stepNo = Number(step.step || 0);
+        const detailItems = detailsByStep.get(stepNo) || [];
+        const stepKey = progressStepKey(job, stepNo);
+        const hasUserState = progressUserToggledSteps.has(stepKey);
+        const wrapper = document.createElement('details');
+        wrapper.className = `progress-step-wrap ${detailItems.length ? 'has-details' : ''}`;
+        wrapper.open = hasUserState
+          ? Boolean(progressStepOpenState.get(stepKey))
+          : false;
+        const item = document.createElement('summary');
         item.className = `progress-step ${step.status || ''}`;
         const left = document.createElement('span');
-        left.textContent = `${step.step}. ${step.agent_name || step.agent_id || '等待中'}`;
+        left.className = 'progress-step-main';
+        if (detailItems.length) {
+          const toggle = document.createElement('span');
+          toggle.className = 'progress-step-toggle';
+          toggle.textContent = wrapper.open ? '−' : '+';
+          wrapper.addEventListener('toggle', () => {
+            progressUserToggledSteps.add(stepKey);
+            progressStepOpenState.set(stepKey, wrapper.open);
+            toggle.textContent = wrapper.open ? '−' : '+';
+          });
+          left.appendChild(toggle);
+        }
+        const titleNode = document.createElement('span');
+        titleNode.className = 'progress-step-title';
+        const taskText = step.task ? ` - ${step.task}` : '';
+        titleNode.textContent = `${step.step}. ${step.agent_name || step.agent_id || '等待中'}${taskText}`;
+        left.appendChild(titleNode);
         const right = document.createElement('span');
-        right.className = 'muted small';
-        right.textContent = step.status === 'done' ? '完成' : step.status === 'active' ? '执行中' : step.status === 'error' ? '失败' : '等待';
+        right.className = 'muted small progress-step-status';
+        const elapsedText = step.elapsed_seconds ? ` · ${step.elapsed_seconds}s` : '';
+        right.textContent = step.message || (step.status === 'done' ? `完成${elapsedText}` : step.status === 'active' ? '执行中' : step.status === 'error' ? '失败' : '等待');
         item.appendChild(left);
         item.appendChild(right);
-        els.progressList.appendChild(item);
+        wrapper.appendChild(item);
+        if (detailItems.length) {
+          const detailList = document.createElement('div');
+          detailList.className = 'progress-detail-list';
+          for (const detail of detailItems.slice(-30)) {
+            const detailItem = document.createElement('div');
+            detailItem.className = `progress-detail-item ${detail.kind === 'error' ? 'error' : detail.kind === 'done' ? 'done' : ''}`;
+            const main = document.createElement('div');
+            main.className = 'progress-detail-main';
+            const title = document.createElement('span');
+            title.textContent = detail.title || '明细';
+            const message = document.createElement('span');
+            message.className = 'muted small';
+            message.textContent = detail.message || '';
+            main.appendChild(title);
+            main.appendChild(message);
+            detailItem.appendChild(main);
+            if (detail.meta) {
+              const meta = document.createElement('div');
+              meta.className = 'progress-detail-meta';
+              meta.textContent = detail.meta;
+              detailItem.appendChild(meta);
+            }
+            detailList.appendChild(detailItem);
+          }
+          wrapper.appendChild(detailList);
+        }
+        els.progressList.appendChild(wrapper);
       }
-      const productionEvents = job.production_events || [];
-      for (const event of productionEvents.slice(-8)) {
-        const item = document.createElement('div');
-        const isError = String(event.status || event.job_status || '').includes('failed') || event.error;
-        const isDone = ['success', 'partial_success', 'final_video_generated', 'skipped'].includes(String(event.status || event.job_status || ''));
-        item.className = `progress-step ${isError ? 'error' : isDone ? 'done' : 'active'}`;
-        const left = document.createElement('span');
-        left.textContent = `后处理 · ${event.stage || 'production'}`;
-        const right = document.createElement('span');
-        right.className = 'muted small';
-        right.textContent = event.message || '';
-        item.appendChild(left);
-        item.appendChild(right);
-        els.progressList.appendChild(item);
-      }
-      if (job.error) {
-        const err = document.createElement('div');
-        err.className = 'progress-step error';
-        err.textContent = job.error;
-        els.progressList.appendChild(err);
+      const showRunDetails = false;
+      if (showRunDetails) {
+        const detailEvents = (job.detail_events || []).map(event => ({
+          ...event,
+          detailType: 'step',
+          sortTime: Number(event.updated_at || 0),
+        }));
+        const productionEvents = (job.production_events || []).map(event => ({
+          ...event,
+          detailType: 'production',
+          sortTime: Number(event.updated_at || 0),
+        }));
+        const latestEvents = detailEvents
+          .concat(productionEvents)
+          .sort((a, b) => a.sortTime - b.sortTime)
+          .slice(-1);
+        for (const event of latestEvents) {
+          const item = document.createElement('div');
+          const isError = String(event.status || event.job_status || '').includes('failed') || event.error;
+          const isDone = ['success', 'partial_success', 'final_video_generated', 'skipped'].includes(String(event.status || event.job_status || ''));
+          item.className = `progress-step ${event.kind === 'error' || isError ? 'error' : event.kind === 'done' || isDone ? 'done' : 'active'}`;
+          const left = document.createElement('span');
+          left.textContent = event.detailType === 'production'
+            ? `后处理 · ${event.stage || 'production'}`
+            : (event.step ? `第 ${event.step} 步明细` : '运行明细');
+          const right = document.createElement('span');
+          right.className = 'muted small';
+          right.textContent = event.message || '';
+          item.appendChild(left);
+          item.appendChild(right);
+          els.progressList.appendChild(item);
+        }
       }
     }
 
     async function pollRunStatus(runId) {
       const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
       renderProgress(job);
+      if (job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
+        showView('output');
+        await selectActiveRunTask(job);
+      }
+      if (job.status === 'running') {
+        const runningText = job.current_message || job.production_message || '工作流运行中';
+        setStatus(runningText, false);
+      }
       if (job.status === 'completed') {
         const productionStatus = job.production_status && job.production_status !== 'off' ? `，自动生成：${job.production_status}` : '';
         setStatus(`完成：${job.task_title || job.workflow_name}，${job.step_count || job.completed_steps} 步${productionStatus}`);
         await loadTasks();
         if (job.task_name) {
           showView('output');
-          await selectTask(job.task_name);
+          await selectTaskAndOpenJobOutput(job);
           if (job.rerun_result && job.rerun_result.file) {
             await openFile(job.rerun_result.file);
             setStatus(`重跑完成：第 ${job.rerun_step || ''} 步`);
           }
         }
         els.runBtn.disabled = false;
+        trackRun("");
+        setWorkflowInteractionLocked(false);
+        setTimeout(() => setRunButtonProgress(0), 900);
         syncOutputButtons();
         progressTimer = null;
         return;
@@ -2128,9 +2748,46 @@ INDEX_HTML = r"""<!doctype html>
         await loadTasks();
         if (job.task_name) {
           showView('output');
-          await selectTask(job.task_name);
+          await selectTaskAndOpenJobOutput(job);
         }
         els.runBtn.disabled = false;
+        trackRun("");
+        setWorkflowInteractionLocked(false);
+        setRunButtonProgress(0);
+        syncOutputButtons();
+        progressTimer = null;
+        return;
+      }
+      if (job.status === 'cancelled') {
+        setStatus(job.error || '任务已终止', true);
+        await loadTasks();
+        if (job.task_name) {
+          showView('output');
+          await selectTaskAndOpenJobOutput(job);
+        }
+        els.runBtn.disabled = false;
+        trackRun("");
+        setWorkflowInteractionLocked(false);
+        setRunButtonProgress(0);
+        syncOutputButtons();
+        progressTimer = null;
+        return;
+      }
+      if (job.status === 'paused') {
+        const isCheckpoint = job.awaiting_confirmation || String(job.error || '').includes('等待确认');
+        setStatus(
+          job.error || (isCheckpoint ? '当前步骤已完成，确认输出后点击继续下一步' : '任务已暂停，可在任务输出里点击继续任务'),
+          !isCheckpoint
+        );
+        await loadTasks();
+        if (job.task_name) {
+          showView('output');
+          await selectTaskAndOpenJobOutput(job);
+        }
+        els.runBtn.disabled = false;
+        trackRun("");
+        setWorkflowInteractionLocked(false);
+        setTimeout(() => setRunButtonProgress(0), 900);
         syncOutputButtons();
         progressTimer = null;
         return;
@@ -2139,10 +2796,32 @@ INDEX_HTML = r"""<!doctype html>
         pollRunStatus(runId).catch(err => {
           setStatus(err.message, true);
           els.runBtn.disabled = false;
+          setWorkflowInteractionLocked(false);
+          setRunButtonProgress(0);
           syncOutputButtons();
           progressTimer = null;
         });
       }, 1000);
+    }
+
+    async function restoreActiveRun() {
+      const data = await api('/api/active-run');
+      const job = data.run;
+      if (!job) return;
+      showView('output');
+      renderProgress(job);
+      if (job.task_name) {
+        await loadTasks();
+        await selectTaskAndOpenJobOutput(job);
+      }
+      if (job.status === 'queued' || job.status === 'running') {
+        setWorkflowInteractionLocked(true);
+        trackRun(job.run_id);
+        await pollRunStatus(job.run_id);
+      } else {
+        setWorkflowInteractionLocked(false);
+        syncOutputButtons();
+      }
     }
 
     async function api(path, options) {
@@ -2155,11 +2834,16 @@ INDEX_HTML = r"""<!doctype html>
     async function loadConfig() {
       const data = await api('/api/config');
       localModelPresets = data.local_model_presets || [];
-      staffOptions = data.staff || [];
+      staffOptions = (data.staff || []).filter(isActiveLongVideoStaff);
       els.env.textContent = data.openai_configured ? 'OpenAI 已配置' : 'OpenAI 未配置，默认离线模式';
-      els.workflow.innerHTML = data.workflows.map(w => `<option value="${w.stem}">${w.name}</option>`).join('');
+      const activeWorkflows = (data.workflows || []).filter(isActiveLongVideoWorkflow);
+      els.workflow.innerHTML = activeWorkflows.map(w => `<option value="${w.stem}">${w.name}</option>`).join('');
+      setIfExists(els.productTemplate, 'long_video');
+      setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       renderLocalModelPresets();
       restoreSettings();
+      setIfExists(els.productTemplate, 'long_video');
+      setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
     }
 
     function readSettings() {
@@ -2186,6 +2870,7 @@ INDEX_HTML = r"""<!doctype html>
         inheritTask: els.inheritTask.value,
         inheritMode: els.inheritMode.value,
         useKnowledge: els.useKnowledge.value,
+        workflowAdvanceMode: els.workflowAdvanceMode.value,
         autoProductionMode: els.autoProductionMode.value,
         composeTool: els.composeTool.value,
         finalVideoName: els.finalVideoName.value,
@@ -2259,8 +2944,8 @@ INDEX_HTML = r"""<!doctype html>
 
     function restoreSettings() {
       const settings = readSettings();
-      setIfExists(els.productTemplate, settings.productTemplate);
-      setIfExists(els.workflow, settings.workflow);
+      setIfExists(els.productTemplate, 'long_video');
+      setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       setIfExists(els.provider, settings.provider);
       setIfExists(els.model, settings.model);
       els.customModel.value = settings.customModel || '';
@@ -2275,6 +2960,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.inheritTask, settings.inheritTask);
       setIfExists(els.inheritMode, settings.inheritMode);
       setIfExists(els.useKnowledge, settings.useKnowledge);
+      setIfExists(els.workflowAdvanceMode, settings.workflowAdvanceMode || 'auto');
       setIfExists(els.autoProductionMode, settings.autoProductionMode);
       setIfExists(els.composeTool, settings.composeTool);
       els.finalVideoName.value = settings.finalVideoName || '';
@@ -2298,7 +2984,7 @@ INDEX_HTML = r"""<!doctype html>
       els.voiceReferenceAudioPath.value = settings.voiceReferenceAudioPath || '';
       els.voiceReferenceText.value = settings.voiceReferenceText || '';
       els.voiceCommandTemplate.value = settings.voiceCommandTemplate || '';
-      setIfExists(els.voiceTimeout, settings.voiceTimeout);
+      setIfExists(els.voiceTimeout, normalizeVoiceTimeout(settings.voiceTimeout));
       syncVoiceCommandTemplateForMode();
       setIfExists(els.imageTool, settings.imageTool);
       els.imagePositivePrompt.value = settings.imagePositivePrompt || '';
@@ -2352,6 +3038,55 @@ INDEX_HTML = r"""<!doctype html>
       applyVideoProviderDefaults();
       applyComfyProviderDefaults();
       renderComfyParameterMapper();
+      setIfExists(els.productTemplate, 'long_video');
+      setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
+    }
+
+    async function cancelCurrentRun() {
+      if (!currentRunId) {
+        setStatus('当前没有正在运行的任务', true);
+        return;
+      }
+      if (!confirm('确定终止当前任务吗？\\n\\n正在等待的模型或 RunningHub 请求可能会在当前请求返回后停止。')) return;
+      try {
+        if (els.cancelRunBtn) els.cancelRunBtn.disabled = true;
+        if (els.outputCancelRunBtn) els.outputCancelRunBtn.disabled = true;
+        const result = await api('/api/cancel-run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ run_id: currentRunId }),
+        });
+        setStatus(result.message || '已发送终止请求');
+        renderProgress(result);
+        if (['cancelled', 'failed', 'paused', 'completed'].includes(result.status)) {
+          trackRun("");
+          setWorkflowInteractionLocked(false);
+          setRunButtonProgress(0);
+        }
+      } catch (err) {
+        setStatus(err.message, true);
+        if (currentRunId) {
+          if (els.cancelRunBtn) els.cancelRunBtn.disabled = true;
+          if (els.outputCancelRunBtn) els.outputCancelRunBtn.disabled = false;
+        }
+      }
+    }
+
+    function pauseCurrentRunOnExit() {
+      if (!currentRunId) return;
+      const payload = JSON.stringify({ run_id: currentRunId, reason: 'browser_exit' });
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon('/api/pause-run', new Blob([payload], { type: 'application/json' }));
+        } else {
+          fetch('/api/pause-run', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: payload,
+            keepalive: true,
+          }).catch(() => {});
+        }
+      } catch {}
     }
 
     function normalizeComfyWorkflowLibrary(value) {
@@ -3113,6 +3848,20 @@ INDEX_HTML = r"""<!doctype html>
       return '';
     }
 
+    function normalizeVoiceTimeout(value) {
+      const allowed = new Set(['180', '300', '600', '900', '1800']);
+      const text = String(value || '').trim();
+      if (!text) return '300';
+      if (allowed.has(text)) return text;
+      const seconds = Number(text);
+      if (!Number.isFinite(seconds)) return '300';
+      if (seconds <= 180) return '180';
+      if (seconds <= 300) return '300';
+      if (seconds <= 600) return '600';
+      if (seconds <= 900) return '900';
+      return '1800';
+    }
+
     function syncVoiceCommandTemplateForMode() {
       const current = els.voiceCommandTemplate.value.trim();
       const knownDefaults = [
@@ -3142,11 +3891,16 @@ INDEX_HTML = r"""<!doctype html>
       if (!data.tasks.length) {
         els.taskList.innerHTML = '<div class="muted small">暂无任务输出</div>';
         syncInheritTaskOptions([]);
-        return;
+        return [];
       }
       els.taskList.innerHTML = '';
       syncInheritTaskOptions(data.tasks);
-      for (const task of data.tasks) {
+      const tasks = [...data.tasks].sort((a, b) => {
+        if (activeRunTaskName && a.name === activeRunTaskName) return -1;
+        if (activeRunTaskName && b.name === activeRunTaskName) return 1;
+        return 0;
+      });
+      for (const task of tasks) {
         const btn = document.createElement('button');
         btn.className = `item ${selectedTask === task.name ? 'active' : ''}`;
         const title = task.task_title || task.workflow || task.name;
@@ -3159,6 +3913,7 @@ INDEX_HTML = r"""<!doctype html>
         };
         els.taskList.appendChild(btn);
       }
+      return data.tasks;
     }
 
     function syncInheritTaskOptions(tasks) {
@@ -3209,12 +3964,20 @@ INDEX_HTML = r"""<!doctype html>
     async function loadStaffList() {
       const data = await api('/api/staff');
       const keyword = (els.staffFilter.value || '').trim().toLowerCase();
-      const staffItems = (data.staff || []).filter(staff => {
+      const allStaff = data.staff || [];
+      const showArchived = Boolean(els.showArchivedStaff?.checked);
+      const staffItems = allStaff.filter(staff => {
+        if (!showArchived && !isActiveLongVideoStaff(staff)) return false;
         const text = `${staff.name || ''} ${staff.display_name || ''} ${staff.role || ''}`.toLowerCase();
         return !keyword || text.includes(keyword);
       });
       els.staffList.innerHTML = '';
-      setStaffStatus(`共 ${data.staff.length} 位员工${keyword ? `，筛选出 ${staffItems.length} 位` : ''}`, false, false);
+      const archivedCount = allStaff.filter(staff => !isActiveLongVideoStaff(staff)).length;
+      setStaffStatus(
+        `长视频员工 ${allStaff.length - archivedCount} 位${showArchived ? `，归档 ${archivedCount} 位` : ''}${keyword ? `，筛选出 ${staffItems.length} 位` : ''}`,
+        false,
+        false
+      );
       if (!staffItems.length) {
         els.staffList.innerHTML = '<div class="muted small">暂无匹配员工</div>';
         return;
@@ -3226,7 +3989,7 @@ INDEX_HTML = r"""<!doctype html>
         title.textContent = staff.display_name || staff.name;
         const meta = document.createElement('span');
         meta.className = 'muted small staff-meta';
-        meta.textContent = staff.name;
+        meta.textContent = isActiveLongVideoStaff(staff) ? staff.name : `${staff.name} · 归档`;
         btn.appendChild(title);
         btn.appendChild(meta);
         if (staff.role) {
@@ -3339,20 +4102,31 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadWorkflowList() {
       const data = await api('/api/workflows');
-      staffOptions = data.staff || staffOptions;
+      const showArchived = Boolean(els.showArchivedWorkflows?.checked);
+      staffOptions = (data.staff || staffOptions).filter(staff => showArchived || isActiveLongVideoStaff(staff));
+      const allWorkflows = data.workflows || [];
+      const workflowItems = allWorkflows.filter(workflow => showArchived || isActiveLongVideoWorkflow(workflow));
       els.workflowList.innerHTML = '';
-      if (!data.workflows.length) {
+      const archivedCount = allWorkflows.filter(workflow => !isActiveLongVideoWorkflow(workflow)).length;
+      setWorkflowEditorStatus(
+        `长视频工作流 ${allWorkflows.length - archivedCount} 个${showArchived ? `，归档 ${archivedCount} 个` : ''}`,
+        false,
+        false
+      );
+      if (!workflowItems.length) {
         els.workflowList.innerHTML = '<div class="muted small">暂无工作流</div>';
         return;
       }
-      for (const workflow of data.workflows) {
+      for (const workflow of workflowItems) {
         const btn = document.createElement('button');
         btn.className = `staff-card ${selectedWorkflow === workflow.stem ? 'active' : ''}`;
         const title = document.createElement('strong');
         title.textContent = workflow.name || workflow.stem;
         const file = document.createElement('span');
         file.className = 'muted small';
-        file.textContent = workflow.file || `${workflow.stem}.json`;
+        file.textContent = isActiveLongVideoWorkflow(workflow)
+          ? (workflow.file || `${workflow.stem}.json`)
+          : `${workflow.file || `${workflow.stem}.json`} · 归档`;
         const description = document.createElement('span');
         description.className = 'muted small';
         description.textContent = workflow.description || '';
@@ -3581,8 +4355,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function selectTask(name) {
-      showView('output');
       selectedTask = name;
+      showView('output');
       selectedFile = null;
       await loadTasks();
       const data = await api(`/api/task?name=${encodeURIComponent(name)}`);
@@ -3593,9 +4367,98 @@ INDEX_HTML = r"""<!doctype html>
       renderFiles(currentTaskFiles);
       renderOutputOverview(data);
       syncOutputButtons();
-      const visibleFiles = visibleTaskFiles(currentTaskFiles);
-      const first = currentTaskFiles.find(f => f.endsWith('final_output.md')) || visibleFiles[0] || currentTaskFiles[0];
+      const first = preferredInitialTaskFile(data);
       if (first) await openFile(first);
+    }
+
+    function prepareOutputForPendingRun(title) {
+      selectedTask = null;
+      selectedFile = null;
+      selectedTaskSummary = {};
+      currentTaskFiles = [];
+      els.viewerTitle.textContent = title || '正在创建任务';
+      els.viewerMeta.textContent = '任务启动后会自动在这里显示进度、步骤输出和最终产物。';
+      els.fileTabs.innerHTML = '';
+      els.fileContent.value = '任务正在启动，后续步骤输出会自动显示在这里。';
+      renderOutputOverview(null);
+      syncOutputButtons();
+    }
+
+    function stepOutputFileForStep(stepNo, files = currentTaskFiles) {
+      const safeStep = Number(stepNo || 0);
+      if (!safeStep) return '';
+      const prefix = `step_${String(safeStep).padStart(2, '0')}_`;
+      return (files || []).find(file => file.startsWith(prefix) && file.endsWith('/output.md')) || '';
+    }
+
+    function awaitingConfirmationStep(summary = selectedTaskSummary) {
+      if (!summary || !summary.awaiting_confirmation) return 0;
+      return Number(summary.awaiting_confirmation_step || summary.blocked_step || summary.resume_step || 0);
+    }
+
+    function preferredInitialTaskFile(data) {
+      const files = data?.files || [];
+      const summary = data?.summary || {};
+      const confirmStep = awaitingConfirmationStep(summary);
+      if (confirmStep) {
+        const stepFile = stepOutputFileForStep(confirmStep, files);
+        if (stepFile) return stepFile;
+      }
+      const visibleFiles = visibleTaskFiles(files);
+      return files.find(file => file.endsWith('final_output.md')) || visibleFiles[0] || files[0] || '';
+    }
+
+    function preferredStepOutputFromJob(job) {
+      if (job?.rerun_result?.file) return job.rerun_result.file;
+      const stepNo = Number(job?.awaiting_confirmation_step || job?.current_step || job?.completed_steps || job?.step_count || 0);
+      return stepOutputFileForStep(stepNo);
+    }
+
+    function preferredCompletedTaskFile(files = currentTaskFiles) {
+      return (files || []).find(file => file.endsWith('final_output.md'))
+        || (files || []).find(file => file.endsWith('auto_production.md'))
+        || visibleTaskFiles(files || [])[0]
+        || (files || [])[0]
+        || '';
+    }
+
+    async function selectTaskAndOpenJobOutput(job) {
+      if (!job?.task_name) return;
+      await selectTask(job.task_name);
+      const preferred = job.status === 'completed' && !job.rerun_result
+        ? preferredCompletedTaskFile()
+        : preferredStepOutputFromJob(job);
+      if (preferred) await openFile(preferred);
+    }
+
+    async function selectActiveRunTask(job) {
+      if (!job?.task_name || activeRunTaskName === job.task_name) return;
+      activeRunTaskName = job.task_name;
+      await loadTasks();
+      if (selectedTask !== job.task_name) {
+        await selectTask(job.task_name);
+      }
+    }
+
+    function renderStepConfirmBar() {
+      const stepNo = awaitingConfirmationStep();
+      const stepFile = stepOutputFileForStep(stepNo);
+      const shouldShow = Boolean(selectedTask && stepNo && stepFile);
+      els.stepConfirmBar.hidden = !shouldShow;
+      if (!shouldShow) {
+        els.confirmStepContinueBtn.disabled = true;
+        els.confirmStepRerunBtn.disabled = true;
+        return;
+      }
+      els.stepConfirmTitle.textContent = `${stepFileLabel(stepFile)} 已完成，等待确认`;
+      els.stepConfirmHint.textContent = selectedFile === stepFile
+        ? '请检查下方输出，确认无误后继续下一步。'
+        : '已自动定位到当前步骤输出；请检查后继续。';
+      els.confirmStepContinueBtn.textContent = els.workflowAdvanceMode.value === 'auto'
+        ? '确认并自动跑完后续步骤'
+        : '确认并继续下一步';
+      els.confirmStepContinueBtn.disabled = Boolean(currentRunId);
+      els.confirmStepRerunBtn.disabled = Boolean(currentRunId);
     }
 
     function renderOutputOverview(data) {
@@ -3610,6 +4473,7 @@ INDEX_HTML = r"""<!doctype html>
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
         els.packageOutputMeta.textContent = '未生成';
         els.packageOutputList.innerHTML = '<div class="muted small">点击“导出产品包”后显示可交付文件。</div>';
+        renderStepConfirmBar();
         clearVideoPreview();
         return;
       }
@@ -3620,11 +4484,14 @@ INDEX_HTML = r"""<!doctype html>
       const packageFiles = files.filter(file => file.startsWith('export_package/') && !file.endsWith('/'));
       const finalReady = files.includes('final_output.md') ? '已生成' : '缺失';
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
+      const videoFile = preferredVideoFile(files);
+      const videoReady = videoFile ? videoFile.split('/').pop() : '未生成';
       renderVideoPreview(data.name, files);
       els.outputSummaryGrid.innerHTML = summaryCards([
         ['任务', summary.task_title || data.name],
         ['工作流', summary.workflow || '-'],
         ['最终输出', finalReady],
+        ['最终视频', videoReady],
         ['产品包', packageReady],
       ]);
 
@@ -3633,17 +4500,21 @@ INDEX_HTML = r"""<!doctype html>
       if (!stepFiles.length) {
         els.stepOutputList.innerHTML = '<div class="muted small">暂无步骤输出。先运行工作流，或检查 task_output 目录。</div>';
       } else {
+        const confirmStep = awaitingConfirmationStep(summary);
         for (const file of stepFiles) {
-          els.stepOutputList.appendChild(outputFileButton(file, stepFileLabel(file), '点击查看该员工 output.md'));
+          const stepNo = stepNumberFromFile(file);
+          const subtitle = confirmStep && stepNo === confirmStep ? '当前需要确认' : '查看本步骤结果';
+          els.stepOutputList.appendChild(outputFileButton(file, stepFileLabel(file), subtitle));
         }
       }
+      renderStepConfirmBar();
 
       els.packageOutputMeta.textContent = packageReady;
       els.packageOutputList.innerHTML = '';
       if (!packageFiles.length) {
         els.packageOutputList.innerHTML = '<div class="muted small">还没有产品包。点击右上角“导出产品包”生成可交付文件。</div>';
       } else {
-        const priority = ['README.md', 'final_output.md', '视频制作包.md', '语音字幕制作包.md', 'ComfyUI素材编排.md', '剪辑成片执行方案.md', '小红书文案.md', 'GDD.md', '产品需求文档.md', 'manifest.json'];
+        const priority = ['long_video_final.mp4', 'final_video.mp4', 'README.md', 'final_output.md', '视频制作包.md', '语音字幕制作包.md', 'ComfyUI素材编排.md', '剪辑成片执行方案.md', 'manifest.json'];
         packageFiles.sort((a, b) => {
           const an = a.split('/').pop();
           const bn = b.split('/').pop();
@@ -3773,7 +4644,7 @@ INDEX_HTML = r"""<!doctype html>
       if (name === 'final_output.md') return '最终汇总';
       if (name === 'production_manifest.json') return '自动生成清单';
       if (name === 'auto_production.md') return '自动生成说明';
-      if (name === 'final_video.mp4') return '最终视频';
+      if (name === 'final_video.mp4' || name === 'long_video_final.mp4') return '最终视频';
       if (/^step_\d+_.*\/output\.md$/.test(name)) return stepFileLabel(name);
       if (name.startsWith('export_package/')) return name.replace('export_package/', '产品包/');
       return name;
@@ -3790,17 +4661,29 @@ INDEX_HTML = r"""<!doctype html>
       for (const btn of document.querySelectorAll('.output-link')) {
         btn.classList.toggle('active', btn.dataset.file === file);
       }
+      renderStepConfirmBar();
       syncOutputButtons();
     }
 
     function syncOutputButtons() {
       const hasTask = Boolean(selectedTask);
       const hasFile = Boolean(selectedTask && selectedFile);
-      els.saveFileBtn.disabled = !hasFile;
-      els.rebuildFinalBtn.disabled = !hasTask;
-      els.exportTaskBtn.disabled = !hasTask;
-      els.resumeTaskBtn.disabled = !hasTask;
-      els.rerunStepBtn.disabled = !hasFile || !stepNumberFromFile(selectedFile);
+      const running = Boolean(currentRunId);
+      const confirmStep = awaitingConfirmationStep();
+      const isConfirmingCurrentStep = Boolean(confirmStep && selectedFile === stepOutputFileForStep(confirmStep));
+      els.saveFileBtn.disabled = running || !hasFile;
+      els.rebuildFinalBtn.disabled = running || !hasTask;
+      els.exportTaskBtn.disabled = running || !hasTask;
+      els.resumeTaskBtn.hidden = Boolean(confirmStep);
+      els.resumeTaskBtn.disabled = running || !hasTask;
+      els.resumeTaskBtn.textContent = els.workflowAdvanceMode.value === 'step_confirm' ? '继续下一步' : '继续任务';
+      if (els.outputCancelRunBtn) {
+        els.outputCancelRunBtn.hidden = !running;
+        els.outputCancelRunBtn.disabled = !running;
+      }
+      els.rerunStepBtn.disabled = running || !hasFile || !stepNumberFromFile(selectedFile);
+      els.confirmStepContinueBtn.disabled = running || !isConfirmingCurrentStep;
+      els.confirmStepRerunBtn.disabled = running || !isConfirmingCurrentStep;
     }
 
     function stepNumberFromFile(file) {
@@ -3856,6 +4739,9 @@ INDEX_HTML = r"""<!doctype html>
       if (!confirm(`确定重跑第 ${step} 步？\n\n系统会覆盖该步骤 output.md，并基于当前各步骤输出重建 final_output.md。`)) return;
       setStatus(`正在重跑第 ${step} 步`);
       els.rerunStepBtn.disabled = true;
+      setWorkflowInteractionLocked(true);
+      showStartupProgress(`重跑第 ${step} 步`);
+      showView('output');
       try {
         await ensureLocalModelReady(model);
         const result = await api('/api/rerun-step', {
@@ -3872,10 +4758,14 @@ INDEX_HTML = r"""<!doctype html>
           }),
         });
         setStatus(`重跑任务已开始：第 ${step} 步`);
+        trackRun(result.run_id);
         renderProgress(result);
+        showView('output');
         await pollRunStatus(result.run_id);
       } catch (err) {
         setStatus(err.message, true);
+        setWorkflowInteractionLocked(false);
+        setRunButtonProgress(0);
       } finally {
         syncOutputButtons();
       }
@@ -3888,13 +4778,21 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请输入自定义模型名', true);
         return;
       }
-      if (!confirm(`确定继续任务？\n\n系统会从第一个失败、缺少 output.md 或输出为空的步骤继续执行，并写回当前任务目录。`)) return;
+      const resumeLabel = els.workflowAdvanceMode.value === 'step_confirm' ? '继续下一步' : '继续任务';
+      const resumeStatusText = els.workflowAdvanceMode.value === 'auto'
+        ? '已切换为全自动，正在继续后续步骤'
+        : '正在继续下一步';
+      if (!confirm(`确定${resumeLabel}？\n\n系统会从第一个失败、缺少 output.md 或输出为空的步骤继续执行，并写回当前任务目录。`)) return;
       saveSettings();
       resetProgress();
-      setStatus('正在继续任务');
+      setWorkflowInteractionLocked(true);
+      showStartupProgress('继续中');
+      showView('output');
+      setStatus(resumeStatusText);
       els.resumeTaskBtn.disabled = true;
       try {
         await ensureLocalModelReady(model);
+        const { productionConfig } = await collectProductionConfig();
         const result = await api('/api/resume-task', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -3905,13 +4803,27 @@ INDEX_HTML = r"""<!doctype html>
             api_key: els.apiKey.value.trim(),
             base_url: els.baseUrl.value.trim(),
             timeout: Number(els.modelTimeout.value || 900),
+            production_config: productionConfig,
+            image_api_key: '',
+            image_base_url: '',
+            video_api_key: '',
+            video_base_url: '',
+            comfy_api_key: els.comfyApiKey.value.trim(),
+            comfy_base_url: els.comfyBaseUrl.value.trim(),
           }),
         });
-        setStatus('任务已开始继续执行');
+        setStatus(`任务已开始${resumeLabel}`);
+        trackRun(result.run_id);
         renderProgress(result);
+        showView('output');
         await pollRunStatus(result.run_id);
+        if (selectedTask) {
+          await selectTask(selectedTask);
+        }
       } catch (err) {
         setStatus(err.message, true);
+        setWorkflowInteractionLocked(false);
+        setRunButtonProgress(0);
         syncOutputButtons();
       }
     }
@@ -3925,7 +4837,7 @@ INDEX_HTML = r"""<!doctype html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             task: selectedTask,
-            template: els.productTemplate.value,
+            template: 'long_video',
           }),
         });
         setStatus(`已导出产品包：${result.export_dir}`);
@@ -3935,11 +4847,107 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    async function collectProductionConfig() {
+      const voiceReferenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
+      const voiceProvider = els.voiceMode.value === 'windows_sapi'
+        ? 'windows_sapi'
+        : (['voxcpm2', 'preset'].includes(els.voiceMode.value) ? 'voxcpm2' : '');
+      const imageConfig = {
+        tool: 'prompt_only',
+        positive_prompt: '',
+        model: '',
+        size: '',
+        count_per_shot: '',
+        style: '',
+        quality: '',
+        negative_prompt: '',
+        consistency: '',
+        seed: '',
+        guidance_scale: '',
+        steps: '',
+        denoise_strength: '',
+        sampler: '',
+        control: '',
+        api_key_provided: false,
+        base_url_provided: false,
+        workflow_endpoint: '',
+        instance_type: '',
+        node_info_list_json: '',
+        poll_timeout_seconds: 900,
+      };
+      const videoConfig = {
+        tool: 'prompt_only',
+        positive_prompt: '',
+        model: '',
+        aspect_ratio: '',
+        duration: '',
+        style: '',
+        prompt_notes: '',
+        negative_prompt: '',
+        seed: '',
+        fps: '',
+        motion_strength: '',
+        camera_motion: '',
+        resolution: '',
+        guidance_scale: '',
+        frames: '',
+        image_strength: '',
+        camera_path: '',
+        audio_notes: '',
+        advanced_params: '',
+        api_key_provided: false,
+        base_url_provided: false,
+        workflow_endpoint: '',
+        node_info_list_json: '',
+        poll_timeout_seconds: 1800,
+      };
+      const productionConfig = {
+        mode: els.autoProductionMode.value,
+        workflow_advance_mode: els.workflowAdvanceMode.value,
+        step_confirmation: els.workflowAdvanceMode.value === 'step_confirm',
+        image_config: imageConfig,
+        video_config: videoConfig,
+        voice_config: {
+          mode: els.voiceMode.value,
+          provider: voiceProvider,
+          voice_preset: els.voicePreset.value,
+          voice_preset_name: selectedVoicePresetLabel(),
+          reference_audio: voiceReferenceAudio,
+          reference_text: els.voiceReferenceText.value.trim(),
+          command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
+          timeout_seconds: Number(els.voiceTimeout.value || 1800),
+        },
+        compose_config: {
+          tool: els.composeTool.value,
+          execution_mode: els.autoProductionMode.value,
+          final_video_name: els.finalVideoName.value.trim() || 'final_video.mp4',
+          api_key_provided: Boolean(els.comfyApiKey.value.trim()),
+          base_url_provided: Boolean(els.comfyBaseUrl.value.trim()),
+          base_url: els.comfyBaseUrl.value.trim(),
+          workflow_endpoint: els.comfyWorkflowEndpoint.value.trim(),
+          node_info_list_json: els.comfyNodeInfoList.value.trim(),
+          poll_timeout_seconds: Number(els.comfyPollTimeout.value || 3600),
+          workflow_preset_id: getSelectedComfyWorkflowPreset()?.id || '',
+          workflow_preset_name: getSelectedComfyWorkflowPreset()?.name || '',
+          workflow_preset_purpose: els.comfyWorkflowPresetNote.value.trim(),
+          workflow_library: getComfyWorkflowLibraryPayload(),
+        },
+        quality_config: {
+          enabled: els.assetQualityGate.value === 'on',
+          max_attempts: Number(els.assetMaxAttempts.value || 2),
+          min_score: Number(els.assetMinScore.value || 70),
+          min_file_size_kb: 64,
+        },
+      };
+      return { imageConfig, videoConfig, productionConfig };
+    }
+
     function applyProductTemplate(fillSample = false) {
-      const template = PRODUCT_TEMPLATES[els.productTemplate.value];
+      setIfExists(els.productTemplate, 'long_video');
+      const template = PRODUCT_TEMPLATES.long_video;
       if (!template) return;
       setIfExists(els.workflow, template.workflow);
-      els.taskTitle.value = template.taskTitle || '';
+      if (fillSample) els.taskTitle.value = template.taskTitle || '';
       setIfExists(els.autoProductionMode, template.autoProductionMode);
       setIfExists(els.imageSize, template.imageSize);
       setIfExists(els.videoAspect, template.videoAspect);
@@ -3949,6 +4957,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function runWorkflow() {
+      setIfExists(els.productTemplate, 'long_video');
+      setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       const input = els.userInput.value.trim();
       if (!input) {
         setStatus('请输入原始需求', true);
@@ -3959,102 +4969,20 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请输入自定义模型名', true);
         return;
       }
+      const titleFromInput = input.replace(/\s+/g, '').slice(0, 18);
+      els.taskTitle.value = els.taskTitle.value.trim() || (titleFromInput ? `${titleFromInput}长视频` : '长视频任务');
       els.runBtn.disabled = true;
       saveSettings();
       resetProgress();
+      setWorkflowInteractionLocked(true);
+      showStartupProgress('启动中');
       setStatus('工作流运行中');
+      prepareOutputForPendingRun(els.taskTitle.value.trim() || '正在创建长视频任务');
+      showView('output');
       try {
         await ensureLocalModelReady(model);
         const referenceImages = await uploadReferenceImages();
-        const voiceReferenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
-        const voiceProvider = els.voiceMode.value === 'windows_sapi'
-          ? 'windows_sapi'
-          : (['voxcpm2', 'preset'].includes(els.voiceMode.value) ? 'voxcpm2' : '');
-        const imageConfig = {
-          tool: 'prompt_only',
-          positive_prompt: '',
-          model: '',
-          size: '',
-          count_per_shot: '',
-          style: '',
-          quality: '',
-          negative_prompt: '',
-          consistency: '',
-          seed: '',
-          guidance_scale: '',
-          steps: '',
-          denoise_strength: '',
-          sampler: '',
-          control: '',
-          api_key_provided: false,
-          base_url_provided: false,
-          workflow_endpoint: '',
-          instance_type: '',
-          node_info_list_json: '',
-          poll_timeout_seconds: 900,
-        };
-        const videoConfig = {
-          tool: 'prompt_only',
-          positive_prompt: '',
-          model: '',
-          aspect_ratio: '',
-          duration: '',
-          style: '',
-          prompt_notes: '',
-          negative_prompt: '',
-          seed: '',
-          fps: '',
-          motion_strength: '',
-          camera_motion: '',
-          resolution: '',
-          guidance_scale: '',
-          frames: '',
-          image_strength: '',
-          camera_path: '',
-          audio_notes: '',
-          advanced_params: '',
-          api_key_provided: false,
-          base_url_provided: false,
-          workflow_endpoint: '',
-          node_info_list_json: '',
-          poll_timeout_seconds: 1800,
-        };
-        const productionConfig = {
-          mode: els.autoProductionMode.value,
-          image_config: imageConfig,
-          video_config: videoConfig,
-          voice_config: {
-            mode: els.voiceMode.value,
-            provider: voiceProvider,
-            voice_preset: els.voicePreset.value,
-            voice_preset_name: selectedVoicePresetLabel(),
-            reference_audio: voiceReferenceAudio,
-            reference_text: els.voiceReferenceText.value.trim(),
-            command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
-            timeout_seconds: Number(els.voiceTimeout.value || 1800),
-          },
-          compose_config: {
-            tool: els.composeTool.value,
-            execution_mode: els.autoProductionMode.value,
-            final_video_name: els.finalVideoName.value.trim() || 'final_video.mp4',
-            api_key_provided: Boolean(els.comfyApiKey.value.trim()),
-            base_url_provided: Boolean(els.comfyBaseUrl.value.trim()),
-            base_url: els.comfyBaseUrl.value.trim(),
-            workflow_endpoint: els.comfyWorkflowEndpoint.value.trim(),
-            node_info_list_json: els.comfyNodeInfoList.value.trim(),
-            poll_timeout_seconds: Number(els.comfyPollTimeout.value || 3600),
-            workflow_preset_id: getSelectedComfyWorkflowPreset()?.id || '',
-            workflow_preset_name: getSelectedComfyWorkflowPreset()?.name || '',
-            workflow_preset_purpose: els.comfyWorkflowPresetNote.value.trim(),
-            workflow_library: getComfyWorkflowLibraryPayload(),
-          },
-          quality_config: {
-            enabled: els.assetQualityGate.value === 'on',
-            max_attempts: Number(els.assetMaxAttempts.value || 2),
-            min_score: Number(els.assetMinScore.value || 70),
-            min_file_size_kb: 64,
-          },
-        };
+        const { imageConfig, videoConfig, productionConfig } = await collectProductionConfig();
         const result = await api('/api/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -4084,16 +5012,25 @@ INDEX_HTML = r"""<!doctype html>
           }),
         });
         setStatus('工作流已开始，正在执行第 1 步');
+        trackRun(result.run_id);
         renderProgress(result);
+        showView('output');
+        await selectActiveRunTask(result);
         await pollRunStatus(result.run_id);
       } catch (err) {
         setStatus(err.message, true);
         els.runBtn.disabled = false;
+        setWorkflowInteractionLocked(false);
+        setRunButtonProgress(0);
       } finally {
       }
     }
 
     els.runBtn.onclick = runWorkflow;
+    els.cancelRunBtn.onclick = cancelCurrentRun;
+    els.outputCancelRunBtn.onclick = cancelCurrentRun;
+    window.addEventListener('pagehide', pauseCurrentRunOnExit);
+    window.addEventListener('beforeunload', pauseCurrentRunOnExit);
     els.comfyWorkflowPreset.onchange = () => {
       loadSelectedComfyWorkflowPreset(true);
     };
@@ -4108,13 +5045,17 @@ INDEX_HTML = r"""<!doctype html>
     els.rebuildFinalBtn.onclick = rebuildFinalOutput;
     els.rerunStepBtn.onclick = rerunCurrentStep;
     els.resumeTaskBtn.onclick = resumeSelectedTask;
+    els.confirmStepContinueBtn.onclick = resumeSelectedTask;
+    els.confirmStepRerunBtn.onclick = rerunCurrentStep;
     els.exportTaskBtn.onclick = exportCurrentTask;
     els.refreshStaffBtn.onclick = loadStaffList;
     els.staffFilter.oninput = () => loadStaffList().catch(err => setStaffStatus(err.message, true));
+    els.showArchivedStaff.onchange = () => loadStaffList().catch(err => setStaffStatus(err.message, true));
     els.newStaffBtn.onclick = newStaff;
     els.saveStaffBtn.onclick = saveStaff;
     els.deleteStaffBtn.onclick = deleteStaff;
     els.refreshWorkflowsBtn.onclick = loadWorkflowList;
+    els.showArchivedWorkflows.onchange = () => loadWorkflowList().catch(err => setWorkflowEditorStatus(err.message, true));
     els.newWorkflowBtn.onclick = newWorkflow;
     els.addWorkflowStepBtn.onclick = addWorkflowStep;
     els.saveWorkflowBtn.onclick = saveWorkflow;
@@ -4132,6 +5073,11 @@ INDEX_HTML = r"""<!doctype html>
     els.composeTool.onchange = () => {
       applyComfyProviderDefaults();
       saveSettings();
+    };
+    els.workflowAdvanceMode.onchange = () => {
+      saveSettings();
+      renderStepConfirmBar();
+      syncOutputButtons();
     };
     els.showDebugFiles.onchange = () => {
       renderFiles(currentTaskFiles);
@@ -4154,108 +5100,34 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
     };
     els.sampleBtn.onclick = () => {
-      applyProductTemplate(true);
-      if (els.productTemplate.value !== 'short_video') return;
-      els.userInput.value = '我要做一条抖音短视频，推广 AI 自动化开发服务。目标客户是中小企业老板，他们想降本增效但不知道怎么落地。视频目标是让客户私信咨询，风格专业、直接、有案例感，不要夸大承诺。';
-      els.taskTitle.value = 'AI自动化获客短视频';
-      els.autoProductionMode.value = 'package_only';
-      els.composeTool.value = 'ffmpeg';
-      els.finalVideoName.value = 'final_video.mp4';
-      els.comfyApiKey.value = '';
-      els.comfyBaseUrl.value = '';
-      els.comfyWorkflowEndpoint.value = '';
-      comfyWorkflowLibrary = normalizeComfyWorkflowLibrary([]);
-      renderComfyWorkflowLibrary();
-      setIfExists(els.comfyWorkflowPreset, DEFAULT_COMFY_WORKFLOW_PRESET_ID);
-      els.comfyWorkflowPresetNote.value = getSelectedComfyWorkflowPreset()?.purpose || '';
-      els.comfyNodeInfoList.value = '[]';
-      els.comfyPollTimeout.value = '3600';
-      els.assetQualityGate.value = 'on';
-      els.assetMaxAttempts.value = '2';
-      els.assetMinScore.value = '70';
-      els.voiceMode.value = 'off';
-      els.voicePreset.value = 'warm_female';
-      els.voiceReferenceAudioPath.value = '';
-      els.voiceReferenceText.value = '';
-      els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
-      els.voiceTimeout.value = '1800';
-      els.imageTool.value = 'prompt_only';
-      els.imagePositivePrompt.value = '写实商业，干净明亮，统一人物形象，突出 AI 自动化服务价值';
-      els.imageModel.value = '';
-      els.imageSize.value = '9:16';
-      els.imageCount.value = '1';
-      els.imageStyle.value = '写实商业，干净明亮，统一人物形象';
-      els.imageQuality.value = 'standard';
-      els.imageNegativePrompt.value = '水印、畸形手指、低清晰度、脸部变形、错误文字';
-      els.imageConsistency.value = '保持同一人物脸型、服装、产品外观和主色调';
-      els.videoTool.value = 'prompt_only';
-      els.videoPositivePrompt.value = '真人口播，商业科技感，画面干净明亮，前半段人物口播稳定推进，中段切产品界面和案例画面，结尾推近到行动号召。';
-      els.videoModel.value = '';
-      els.videoAspect.value = '9:16';
-      els.videoDuration.value = '30s';
-      els.videoStyle.value = '真人口播，商业科技感，干净明亮';
-      els.videoPromptNotes.value = '前半段人物口播稳定推进，中段切产品界面和案例画面，结尾推近到行动号召；镜头自然，节奏直接。';
-      els.referenceRole.value = '人物一致性';
-      els.referenceNote.value = '固定人物参考图，后续镜头保持同一角色与风格';
-      saveSettings();
+      fillLongVideoSample();
     };
     els.longVideoSampleBtn.onclick = () => {
+      fillLongVideoSample();
+    };
+
+    function fillLongVideoSample() {
       els.productTemplate.value = 'long_video';
       applyProductTemplate(true);
-      setIfExists(els.workflow, 'workflow_长视频全流程');
+      setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       els.userInput.value = '我要做一条 12-18 分钟的长视频，主题是“中小企业如何用 AI 员工工作流平台降低重复劳动”。目标平台是 B 站和视频号，目标观众是中小企业老板、运营负责人和想做 AI 自动化服务的人。视频要专业、清楚、有案例感，结构包括痛点、平台演示、落地步骤、成本和风险、最后引导私信咨询。可用素材包括管理台录屏、工作流输出截图、本人配音和少量 AI 示意图；不要夸大收益，不承诺具体增长结果。';
       els.taskTitle.value = 'AI员工工作流平台长视频';
-      els.autoProductionMode.value = 'audio_package';
+      els.autoProductionMode.value = 'comfy_full';
+      els.workflowAdvanceMode.value = 'auto';
       els.composeTool.value = 'ffmpeg';
       els.finalVideoName.value = 'long_video_final.mp4';
       els.referenceRole.value = '视觉风格参考';
       els.referenceNote.value = '用于统一长视频中的人物形象、平台界面、封面和案例画面风格';
       saveSettings();
-    };
+    }
     els.gameSampleBtn.onclick = () => {
-      els.productTemplate.value = 'game_steam';
-      applyProductTemplate(true);
-      setIfExists(els.workflow, 'workflow_Unity3D游戏Steam上架');
-      els.userInput.value = '我想做一款 Unity 3D 第三人称探索解谜游戏，上架 Steam。目标玩家是喜欢低多边形、轻剧情、环境谜题和短流程独立游戏的玩家。团队规模按单人或两人小团队考虑，优先做 20-30 分钟可玩 Demo，用于 Steam 商店页、愿望单和后续众筹/抢先体验验证。希望风格统一、开发范围可控，不做联网，不做大型开放世界。';
-      els.taskTitle.value = 'Unity3D探索解谜Steam游戏立项';
-      els.autoProductionMode.value = 'off';
-      els.composeTool.value = 'manual';
-      els.finalVideoName.value = '';
-      els.comfyApiKey.value = '';
-      els.comfyBaseUrl.value = '';
-      els.comfyWorkflowEndpoint.value = '';
-      els.comfyNodeInfoList.value = '[]';
-      els.comfyPollTimeout.value = '3600';
-      els.voiceMode.value = 'off';
-      els.voicePreset.value = 'warm_female';
-      els.voiceReferenceAudioPath.value = '';
-      els.voiceReferenceText.value = '';
-      els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
-      els.voiceTimeout.value = '1800';
-      els.imageTool.value = 'prompt_only';
-      els.imagePositivePrompt.value = '低多边形 3D，温暖但带神秘感，清晰轮廓，适合 Steam 商店截图，角色和场景风格统一';
-      els.imageModel.value = '';
-      els.imageSize.value = '16:9';
-      els.imageCount.value = '1';
-      els.imageStyle.value = '低多边形 3D，温暖但带神秘感，清晰轮廓，适合 Steam 商店截图';
-      els.imageQuality.value = 'standard';
-      els.imageNegativePrompt.value = '水印、低清晰度、文字错误、角色比例异常、过度写实';
-      els.imageConsistency.value = '保持同一主角造型、低多边形材质语言、统一色彩和关卡氛围';
-      els.videoTool.value = 'prompt_only';
-      els.videoPositivePrompt.value = 'Steam 商店预告片，从环境氛围开场，切到角色探索、谜题互动和关键机制，最后展示标题画面；镜头平稳，突出可玩内容。';
-      els.videoModel.value = '';
-      els.videoAspect.value = '16:9';
-      els.videoDuration.value = '30s';
-      els.videoStyle.value = 'Steam商店预告片，展示玩法循环、探索、谜题和关键氛围';
-      els.videoPromptNotes.value = '从环境氛围开场，切到角色探索、谜题互动和关键机制，最后展示标题画面；镜头平稳，突出可玩内容。';
-      els.referenceRole.value = '视觉风格参考';
-      els.referenceNote.value = '用于统一角色、场景、美术风格和 Steam 宣传素材方向';
-      saveSettings();
+      fillLongVideoSample();
     };
     els.clearSettingsBtn.onclick = () => {
       if (!confirm('确定清除本浏览器保存的 API Key、Base URL、模型、生图配置和视频配置？')) return;
       localStorage.removeItem(SETTINGS_KEY);
-      els.productTemplate.value = 'short_video';
+      els.productTemplate.value = 'long_video';
+      setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       els.provider.value = 'auto';
       els.model.value = 'gpt-5.5';
       els.customModel.value = '';
@@ -4269,9 +5141,10 @@ INDEX_HTML = r"""<!doctype html>
       els.useKnowledge.value = 'off';
       els.inheritTask.value = '';
       els.inheritMode.value = 'final_output';
+      els.workflowAdvanceMode.value = 'auto';
       els.autoProductionMode.value = 'off';
       els.composeTool.value = 'ffmpeg';
-      els.finalVideoName.value = '';
+      els.finalVideoName.value = 'long_video_final.mp4';
       els.comfyApiKey.value = '';
       els.comfyBaseUrl.value = '';
       els.comfyWorkflowEndpoint.value = '';
@@ -4286,7 +5159,7 @@ INDEX_HTML = r"""<!doctype html>
       els.imageTool.value = 'prompt_only';
       els.imagePositivePrompt.value = '';
       els.imageModel.value = '';
-      els.imageSize.value = '9:16';
+      els.imageSize.value = '16:9';
       els.imageCount.value = '1';
       els.imageStyle.value = '';
       els.imageQuality.value = 'standard';
@@ -4297,13 +5170,13 @@ INDEX_HTML = r"""<!doctype html>
       els.videoTool.value = 'prompt_only';
       els.videoPositivePrompt.value = '';
       els.videoModel.value = '';
-      els.videoAspect.value = '9:16';
-      els.videoDuration.value = '30s';
+      els.videoAspect.value = '16:9';
+      els.videoDuration.value = 'custom';
       els.videoStyle.value = '';
       els.videoPromptNotes.value = '';
       els.videoApiKey.value = '';
       els.videoBaseUrl.value = '';
-      els.referenceRole.value = '人物一致性';
+      els.referenceRole.value = '视觉风格参考';
       els.referenceNote.value = '';
       clearReferenceFiles();
       syncCustomModelState(false);
@@ -4317,6 +5190,7 @@ INDEX_HTML = r"""<!doctype html>
     };
     bindSettingsPersistence();
     bindButtonClickFeedback();
+    moveConfigSections();
     renderReferenceFiles();
     renderOutputOverview(null);
 
@@ -4328,6 +5202,7 @@ INDEX_HTML = r"""<!doctype html>
         await loadWorkflowList();
         await loadKnowledgeList();
         await loadSystemHealth();
+        await restoreActiveRun();
       } catch (err) {
         setStatus(err.message, true);
       }
@@ -4376,6 +5251,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/run-status":
                 query = parse_qs(parsed.query)
                 self._send_json(self._run_status(self._single(query, "id")))
+            elif parsed.path == "/api/active-run":
+                self._send_json(self._active_run())
             else:
                 self.send_error(404)
         except Exception as exc:
@@ -4438,6 +5315,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/resume-task":
                 self._send_json(self._resume_task(payload))
+                return
+
+            if parsed.path == "/api/cancel-run":
+                self._send_json(self._cancel_run(payload))
+                return
+
+            if parsed.path == "/api/pause-run":
+                self._send_json(self._pause_run(payload))
                 return
 
             if parsed.path == "/api/export-task":
@@ -4515,6 +5400,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "total_steps": 0,
                 "completed_steps": 0,
                 "steps": [],
+                "cancel_requested": False,
+                "pause_requested": False,
             }
             with RUN_JOBS_LOCK:
                 RUN_JOBS[run_id] = job
@@ -4668,9 +5555,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     "file": path.name,
                     "name": data.get("name") or path.stem,
                     "description": data.get("description") or "",
+                    "archived": not self._is_long_video_workflow(path.stem, data.get("name") or ""),
                 }
             )
         return workflows
+
+    @staticmethod
+    def _is_long_video_workflow(stem: str, name: str = "") -> bool:
+        text = f"{stem} {name}"
+        return stem == "workflow_长视频全流程" or "长视频全流程" in text
 
     def _workflow_detail(self, name: str) -> dict:
         path = self._safe_workflow_path(name, must_exist=True)
@@ -4745,9 +5638,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     "display_name": rule.get("agent_name") or path.name,
                     "agent_id": rule.get("agent_id") or path.name,
                     "role": rule.get("role") or "",
+                    "archived": not self._is_long_video_staff(path.name),
                 }
             )
         return staff
+
+    @staticmethod
+    def _is_long_video_staff(name: str) -> bool:
+        return name.startswith(("01_", "03_", "04_", "05_", "06_", "07_", "20_", "21_", "22_", "23_"))
 
     def _staff_detail(self, name: str) -> dict:
         staff_dir = self._safe_staff_dir(name, must_exist=True)
@@ -4802,6 +5700,77 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 raise FileNotFoundError(f"Run not found: {run_id}")
             return json.loads(json.dumps(job, ensure_ascii=False))
 
+    def _active_run(self) -> dict:
+        with RUN_JOBS_LOCK:
+            jobs = sorted(
+                RUN_JOBS.values(),
+                key=lambda item: float(item.get("updated_at") or 0),
+                reverse=True,
+            )
+            for status_group in ({"queued", "running"}, {"paused"}):
+                for job in jobs:
+                    if job.get("status") in status_group:
+                        return {"run": json.loads(json.dumps(job, ensure_ascii=False))}
+        return {"run": None}
+
+    def _cancel_run(self, payload: dict) -> dict:
+        return self._stop_run(payload, paused=False)
+
+    def _pause_run(self, payload: dict) -> dict:
+        return self._stop_run(payload, paused=True)
+
+    def _stop_run(self, payload: dict, paused: bool) -> dict:
+        run_id = str(payload.get("run_id") or payload.get("id") or "").strip()
+        if not run_id:
+            raise ValueError("run_id is required")
+        with RUN_JOBS_LOCK:
+            job = RUN_JOBS.get(run_id)
+            if not job:
+                raise FileNotFoundError(f"Run not found: {run_id}")
+            if job.get("status") in {"completed", "failed", "cancelled", "paused"}:
+                job["updated_at"] = time.time()
+                job["message"] = "任务已经结束"
+                return json.loads(json.dumps(job, ensure_ascii=False))
+            job["cancel_requested"] = True
+            job["pause_requested"] = bool(paused)
+            job["status"] = "paused" if paused else "cancelled"
+            job["error"] = "用户已暂停任务，可断点继续" if paused else "用户已终止任务"
+            job["current_message"] = "用户已暂停任务，正在停止后续步骤" if paused else "用户已终止任务，正在停止后续步骤"
+            for step in job.get("steps", []):
+                if step.get("status") == "active":
+                    step["status"] = "error"
+                    step["message"] = "用户已暂停" if paused else "用户已终止"
+            self._append_detail_event(
+                job,
+                {
+                    "step": job.get("current_step") or 1,
+                    "message": "浏览器刷新/关闭，任务自动暂停" if paused else "用户点击终止任务",
+                    "kind": "error",
+                },
+            )
+            job["updated_at"] = time.time()
+            job["message"] = "已发送暂停请求" if paused else "已发送终止请求"
+            return json.loads(json.dumps(job, ensure_ascii=False))
+
+    @staticmethod
+    def _stop_requested(run_id: str) -> str:
+        with RUN_JOBS_LOCK:
+            job = RUN_JOBS.get(run_id)
+            if not job or not job.get("cancel_requested"):
+                return ""
+            return "paused" if job.get("pause_requested") else "cancelled"
+
+    @classmethod
+    def _progress_callback_for_run(cls, run_id: str):
+        def callback(event: dict) -> None:
+            stop_status = cls._stop_requested(run_id)
+            if stop_status == "paused":
+                raise RuntimeError("用户已暂停任务")
+            if stop_status == "cancelled":
+                raise RuntimeError("用户已终止任务")
+            cls._apply_progress(run_id, event)
+        return callback
+
     @staticmethod
     def _update_job(run_id: str, updates: dict) -> None:
         with RUN_JOBS_LOCK:
@@ -4835,15 +5804,53 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                         ],
                         "production_events": [],
                         "production_message": "",
+                        "detail_events": [],
+                        "current_step": 0,
+                        "current_message": "任务已开始，准备执行第 1 步",
                     }
                 )
             elif kind == "step_started":
                 step_no = int(event.get("step") or 0)
                 cls._set_step(job, step_no, event, "active")
+                message = f"正在执行第 {step_no} 步：{event.get('agent_name') or event.get('agent_id') or ''}"
+                job["current_step"] = step_no
+                job["current_message"] = message
+                cls._append_detail_event(job, {"step": step_no, "message": message, "kind": "active"})
+            elif kind == "step_update":
+                step_no = int(event.get("step") or 0)
+                cls._set_step(job, step_no, event, "active")
+                message = event.get("message", "")
+                job["current_step"] = step_no
+                job["current_message"] = f"第 {step_no} 步：{message}" if message else f"第 {step_no} 步执行中"
+                cls._append_detail_event(job, {"step": step_no, "message": job["current_message"], "kind": "active"})
             elif kind == "step_completed":
                 step_no = int(event.get("step") or 0)
                 cls._set_step(job, step_no, event, "done")
                 job["completed_steps"] = max(int(job.get("completed_steps") or 0), step_no)
+                message = event.get("message") or f"第 {step_no} 步完成"
+                job["current_step"] = step_no
+                job["current_message"] = message
+                cls._append_detail_event(job, {"step": step_no, "message": message, "kind": "done"})
+            elif kind == "step_error":
+                step_no = int(event.get("step") or 0)
+                cls._set_step(job, step_no, event, "error")
+                message = event.get("message") or f"第 {step_no} 步失败"
+                job["current_step"] = step_no
+                job["current_message"] = message
+                cls._append_detail_event(job, {"step": step_no, "message": message, "kind": "error"})
+            elif kind == "checkpoint":
+                step_no = int(event.get("step") or 0)
+                cls._set_step(job, step_no, event, "done")
+                job["status"] = "paused"
+                job["pause_requested"] = False
+                job["cancel_requested"] = False
+                job["completed_steps"] = max(int(job.get("completed_steps") or 0), step_no)
+                job["current_step"] = step_no
+                job["awaiting_confirmation"] = True
+                job["awaiting_confirmation_step"] = step_no
+                job["error"] = event.get("message") or f"第 {step_no} 步已完成，等待确认"
+                job["current_message"] = job["error"]
+                cls._append_detail_event(job, {"step": step_no, "message": job["error"], "kind": "done"})
             elif kind == "production_update":
                 events = job.setdefault("production_events", [])
                 item = {
@@ -4854,14 +5861,69 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     "error": event.get("error", ""),
                     "updated_at": time.time(),
                 }
-                for key in ("total_jobs", "completed_jobs", "success_count", "failed_count", "downloaded_count", "quality_score", "attempt", "max_attempts", "current_job", "remote_status"):
+                for key in (
+                    "total_jobs",
+                    "completed_jobs",
+                    "success_count",
+                    "failed_count",
+                    "downloaded_count",
+                    "quality_score",
+                    "attempt",
+                    "max_attempts",
+                    "current_job",
+                    "remote_status",
+                    "endpoint",
+                    "task_id",
+                    "taskId",
+                    "job_type",
+                    "job_index",
+                    "job_count",
+                    "material_name",
+                    "material_type",
+                    "output_file",
+                    "output_type",
+                    "downloaded_file",
+                    "url",
+                    "provider",
+                ):
                     if key in event:
                         item[key] = event.get(key)
                 events.append(item)
                 if len(events) > 80:
                     del events[:-80]
                 job["production_message"] = event.get("message", "")
+                job["current_message"] = event.get("message", "")
+                cls._append_detail_event(job, {"step": 0, "message": event.get("message", ""), "kind": "active"})
             elif kind == "completed":
+                if cls._has_running_remote_jobs(job):
+                    job["status"] = "running"
+                    job["current_message"] = "RunningHub 远程任务仍在运行，继续等待素材结果"
+                    job["updated_at"] = time.time()
+                    return
+                production_status = str(event.get("production_status") or "off").strip().lower()
+                if cls._is_failed_production_status(production_status):
+                    failed_step = cls._production_failure_step(job, production_status)
+                    cls._set_step(job, failed_step, {"step": failed_step, "message": f"自动生成失败：{production_status}"}, "error")
+                    job.update(
+                        {
+                            "status": "failed",
+                            "workflow_name": event.get("workflow_name") or job.get("workflow_name", ""),
+                            "task_title": event.get("task_title") or job.get("task_title", ""),
+                            "task_dir": event.get("task_dir") or job.get("task_dir", ""),
+                            "task_name": Path(event.get("task_dir", "")).name if event.get("task_dir") else job.get("task_name", ""),
+                            "provider": event.get("provider", ""),
+                            "step_count": event.get("step_count", 0),
+                            "final_output": event.get("final_output", ""),
+                            "production_manifest": event.get("production_manifest", ""),
+                            "production_status": event.get("production_status", "off"),
+                            "error": f"自动生成失败：{event.get('production_status', 'off')}",
+                            "production_message": f"自动生成失败：{event.get('production_status', 'off')}",
+                            "current_message": f"自动生成失败：{event.get('production_status', 'off')}",
+                        }
+                    )
+                    cls._append_detail_event(job, {"step": failed_step, "message": job["error"], "kind": "error"})
+                    job["updated_at"] = time.time()
+                    return
                 job.update(
                     {
                         "status": "completed",
@@ -4876,9 +5938,40 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                         "production_manifest": event.get("production_manifest", ""),
                         "production_status": event.get("production_status", "off"),
                         "production_message": f"自动生成：{event.get('production_status', 'off')}",
+                        "current_message": f"任务完成，自动生成：{event.get('production_status', 'off')}",
                     }
                 )
             job["updated_at"] = time.time()
+
+    @staticmethod
+    def _has_running_remote_jobs(job: dict) -> bool:
+        for event in job.get("production_events", [])[-20:]:
+            status = str(event.get("remote_status") or event.get("job_status") or event.get("status") or "").strip().lower()
+            if status in {"queued", "running", "pending"}:
+                return True
+        return False
+
+    @staticmethod
+    def _is_failed_production_status(status: str) -> bool:
+        if not status or status == "off":
+            return False
+        failed_keywords = ("failed", "partial", "quality_failed", "adapter_failed", "timeout")
+        return any(keyword in status for keyword in failed_keywords)
+
+    @staticmethod
+    def _production_failure_step(job: dict, production_status: str) -> int:
+        text = production_status.lower()
+        if "comfy" in text or "quality" in text:
+            for step in job.get("steps", []):
+                name = f"{step.get('agent_id', '')} {step.get('agent_name', '')} {step.get('task', '')}".lower()
+                if "comfy" in name or "素材" in name or "material" in name:
+                    return int(step.get("step") or 0) or 1
+        if "tts" in text or "audio" in text:
+            for step in job.get("steps", []):
+                name = f"{step.get('agent_id', '')} {step.get('agent_name', '')} {step.get('task', '')}".lower()
+                if "tts" in name or "语音" in name or "字幕" in name:
+                    return int(step.get("step") or 0) or 1
+        return int(job.get("current_step") or 0) or len(job.get("steps", [])) or 1
 
     @staticmethod
     def _set_step(job: dict, step_no: int, event: dict, status: str) -> None:
@@ -4896,8 +5989,19 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "task": event.get("task", ""),
                 "expected_output": event.get("expected_output", ""),
                 "output_path": event.get("output_path", ""),
+                "message": event.get("message", ""),
+                "elapsed_seconds": event.get("elapsed_seconds", ""),
             }
         )
+
+    @staticmethod
+    def _append_detail_event(job: dict, event: dict) -> None:
+        events = job.setdefault("detail_events", [])
+        item = dict(event)
+        item["updated_at"] = time.time()
+        events.append(item)
+        if len(events) > 80:
+            del events[:-80]
 
     def _run_workflow_job(
         self,
@@ -4927,24 +6031,41 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 user_input,
                 task_title=task_title,
                 production_config=production_config,
-                progress_callback=lambda event: self._apply_progress(run_id, event),
+                progress_callback=self._progress_callback_for_run(run_id),
             )
+        except WorkflowCheckpointPause as exc:
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job:
+                    job["status"] = "paused"
+                    job["pause_requested"] = False
+                    job["cancel_requested"] = False
+                    job["error"] = str(exc)
+                    job["current_message"] = str(exc)
+                    job["updated_at"] = time.time()
         except Exception as exc:
             with RUN_JOBS_LOCK:
                 job = RUN_JOBS.get(run_id)
                 if job:
-                    job["status"] = "failed"
+                    paused = bool(job.get("pause_requested"))
+                    stopped = bool(job.get("cancel_requested"))
+                    job["status"] = "paused" if paused else "cancelled" if stopped else "failed"
                     job["error"] = str(exc)
                     job["traceback"] = traceback.format_exc()
                     for step in job.get("steps", []):
                         if step.get("status") == "active":
                             step["status"] = "error"
+                            if paused:
+                                step["message"] = "用户已暂停"
+                            elif stopped:
+                                step["message"] = "用户已终止"
                     job["updated_at"] = time.time()
 
     def _run_resume_job(
         self,
         run_id: str,
         task_dir: Path,
+        production_config: dict,
         provider: str,
         model: str | None,
         api_key: str | None,
@@ -4963,18 +6084,35 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             )
             engine.resume(
                 task_dir,
-                progress_callback=lambda event: self._apply_progress(run_id, event),
+                production_config=production_config,
+                progress_callback=self._progress_callback_for_run(run_id),
             )
+        except WorkflowCheckpointPause as exc:
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job:
+                    job["status"] = "paused"
+                    job["pause_requested"] = False
+                    job["cancel_requested"] = False
+                    job["error"] = str(exc)
+                    job["current_message"] = str(exc)
+                    job["updated_at"] = time.time()
         except Exception as exc:
             with RUN_JOBS_LOCK:
                 job = RUN_JOBS.get(run_id)
                 if job:
-                    job["status"] = "failed"
+                    paused = bool(job.get("pause_requested"))
+                    stopped = bool(job.get("cancel_requested"))
+                    job["status"] = "paused" if paused else "cancelled" if stopped else "failed"
                     job["error"] = str(exc)
                     job["traceback"] = traceback.format_exc()
                     for step in job.get("steps", []):
                         if step.get("status") == "active":
                             step["status"] = "error"
+                            if paused:
+                                step["message"] = "用户已暂停"
+                            elif stopped:
+                                step["message"] = "用户已终止"
                     job["updated_at"] = time.time()
 
     def _run_rerun_step_job(
@@ -5001,7 +6139,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             result = engine.rerun_step(
                 task_dir,
                 step,
-                progress_callback=lambda event: self._apply_progress(run_id, event),
+                progress_callback=self._progress_callback_for_run(run_id),
             )
             with RUN_JOBS_LOCK:
                 job = RUN_JOBS.get(run_id)
@@ -5013,12 +6151,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             with RUN_JOBS_LOCK:
                 job = RUN_JOBS.get(run_id)
                 if job:
-                    job["status"] = "failed"
+                    paused = bool(job.get("pause_requested"))
+                    stopped = bool(job.get("cancel_requested"))
+                    job["status"] = "paused" if paused else "cancelled" if stopped else "failed"
                     job["error"] = str(exc)
                     job["traceback"] = traceback.format_exc()
                     for item in job.get("steps", []):
                         if item.get("status") == "active":
                             item["status"] = "error"
+                            if paused:
+                                item["message"] = "用户已暂停"
+                            elif stopped:
+                                item["message"] = "用户已终止"
                     job["updated_at"] = time.time()
 
     def _tasks(self) -> list[dict]:
@@ -5159,6 +6303,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 {"step": step_no, "status": "done" if step_no < step else "active" if step_no == step else "pending", "agent_id": "", "agent_name": ""}
                 for step_no in range(1, total_steps + 1)
             ],
+            "cancel_requested": False,
+            "pause_requested": False,
             "rerun": True,
             "rerun_step": step,
         }
@@ -5185,6 +6331,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _resume_task(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
         task_dir = self._safe_task_dir(task)
+        production_config = payload.get("production_config") or {}
+        if isinstance(production_config, dict):
+            production_image_config = production_config.get("image_config")
+            if isinstance(production_image_config, dict):
+                production_image_config["api_key"] = str(payload.get("image_api_key") or "").strip()
+                production_image_config["base_url"] = str(payload.get("image_base_url") or "").strip()
+            production_video_config = production_config.get("video_config")
+            if isinstance(production_video_config, dict):
+                production_video_config["api_key"] = str(payload.get("video_api_key") or "").strip()
+                production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
+            production_compose_config = production_config.get("compose_config")
+            if isinstance(production_compose_config, dict):
+                production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
+                production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
         summary = {}
         summary_path = task_dir / "run_summary.json"
         if summary_path.exists():
@@ -5206,6 +6366,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "total_steps": 0,
             "completed_steps": 0,
             "steps": [],
+            "cancel_requested": False,
+            "pause_requested": False,
         }
         with RUN_JOBS_LOCK:
             RUN_JOBS[run_id] = job
@@ -5215,6 +6377,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             args=(
                 run_id,
                 task_dir,
+                production_config if isinstance(production_config, dict) else {},
                 str(payload.get("provider") or "auto").strip(),
                 str(payload.get("model") or "").strip() or None,
                 str(payload.get("api_key") or "").strip() or None,
@@ -5264,6 +6427,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _infer_export_template(workflow_name: str) -> str:
+        if "长视频" in workflow_name:
+            return "long_video"
         if "小红书" in workflow_name:
             return "xiaohongshu"
         if "游戏" in workflow_name or "Steam" in workflow_name:
@@ -5272,7 +6437,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             return "software_market"
         if "员工" in workflow_name or "平台" in workflow_name:
             return "agent_platform"
-        return "short_video"
+        return "long_video"
 
     @staticmethod
     def _read_task_text(task_dir: Path, relative: str) -> str:
@@ -5321,7 +6486,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         write("README.md", self._export_readme(template, workflow_name))
         write("final_output.md", final_output or "# 最终输出\n\n暂无 final_output.md。\n")
 
-        if template == "short_video":
+        if template in {"short_video", "long_video"}:
             write("视频制作包.md", final_output)
             write("字幕.srt", self._extract_srt_from_text(final_output))
             write("镜头清单.csv", self._shot_csv(step_outputs))
