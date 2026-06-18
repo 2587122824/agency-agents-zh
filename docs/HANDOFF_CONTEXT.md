@@ -35,17 +35,25 @@
 - Audio and subtitles belong to the voice/subtitle and editing employees:
   - `20_语音字幕包装师`
   - `22_剪辑成片执行师`
-- ComfyUI material scheduling belongs to:
-  - `21_ComfyUI素材编排师`
+- ComfyUI material scheduling is now integrated into:
+  - `06_分镜生图设计师` for `image_prompts`
+  - `07_视频生成执行员` for `video_prompts`
 - Final composition is handled locally by FFmpeg when configured.
 - `my_memory` should normally be injected only into video-output stages, not every employee step.
-- In `comfy_full` mode, the engine runs a hard ComfyUI material gate after the `21_` step writes output.
+- In `comfy_full` mode, the engine runs a hard ComfyUI material gate after the material step. For the current long-video workflow, this is now the `07_视频生成执行员` step; older workflows with `21_` still gate there for compatibility.
 - The material gate only passes when the ComfyUI adapter reports success, has downloaded files, and its manifest has `success_count == job_count` and `failed_count == 0`.
 - If the material gate fails, the workflow must stop at the ComfyUI material step and must not enter the final editing step.
 - RunningHub/ComfyUI endpoint placeholders such as `/run/workflow/keep` are invalid and should be surfaced as configuration errors.
 
 ## Recent Fixes
 
+- The current long-video workflow no longer runs `21_ComfyUI素材编排师` as a separate step. Its responsibilities are integrated into `06_分镜生图设计师` (`image_prompts`) and `07_视频生成执行员` (`video_prompts`). `production_pipeline.py` now merges the first JSON blocks from 06/07 into `comfyui/comfyui_payload.json`, and the ComfyUI material gate falls back to the 07 step when no 21 step exists.
+- Staff 06 and 07 now explicitly require full per-shot prompt expansion: every row in the storyboard / shot list must have a matching detailed prompt section, with no "same as above", "omitted", or "key shots only" shortcuts. Staff 21 now has a fallback requirement to cover all shot numbers in `image_prompts` / `video_prompts`, and to record inferred or missing prompts in `missing_or_inferred_prompts` instead of silently dropping shots.
+- The first ComfyUI template `01_image_z_image_turbo` is a single boolean-Switch image workflow: `Switch=false` routes `EmptySD3LatentImage` to KSampler for text-to-image, and `Switch=true` routes `LoadImage -> VAEEncode` to KSampler for image-to-image. The Switch node must be the Comfy Core boolean Switch with only `on_false` and `on_true` inputs, not the `Input_1` / `Path` variant. API template and RunningHub nodeInfo preset include `LoadImage.image -> {{reference_image}}` on node `12` and `Switch.switch -> {{has_reference_image}}` on node `63`.
+- ComfyUI material job chaining now supports image-to-image as well as image-to-video. During the sequential material loop, image jobs with explicit `reference_image` resolve against earlier generated images; image jobs without a reference automatically use the previous generated image when available. Video jobs keep the existing generated-image pairing behavior.
+- Task output editing is now allowed while a run is paused at a step-confirmation checkpoint. The UI tracks the active run status separately from `currentRunId`, so `paused` / `awaiting_confirmation` no longer disables save, rerun, or confirm controls as if the job were still running.
+- ComfyUI workflow templates now carry explicit material type metadata (`image` / `video`) through the UI payload, and `CloudComfyUIAdapter` prefers that metadata when routing material jobs. This reduces reliance on Chinese/English keyword matching in slot names. README files for `01_image_z_image_turbo`, `04_broll_material`, and deprecated `06_audio_subtitle_video_preview` were rewritten to remove mojibake and clarify production boundaries.
+- Auto production mode `api_ready` is now image-only: the UI label is `只生图，不生视频`, the production pipeline no longer calls the legacy video adapter in this mode, and `production_manifest.json` marks `video_generation.adapter_status` as `skipped`.
 - Resume now passes `production_config` into `WorkflowEngine.resume()`, so resumed long-video jobs can still run ComfyUI, TTS, and FFmpeg production.
 - Step-confirm to auto-run transition is fixed: confirming a paused step clears `awaiting_confirmation` even after the user switches `推进方式` to auto.
 - Confirmation-derived `blocked_step` / `blocked_reason` are cleared together so stale waiting-confirmation state does not remain in `run_summary.json`.

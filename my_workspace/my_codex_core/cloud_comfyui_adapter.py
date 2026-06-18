@@ -86,14 +86,14 @@ class CloudComfyUIAdapter:
             job_dir = output_dir / f"material_{index:02d}_{self._safe_name(job_name)}"
             job_dir.mkdir(parents=True, exist_ok=True)
             job_config = self._compose_config_for_job(job, compose_config)
-            if job_type == "video":
+            if job_type in {"image", "video"}:
                 reference_image = str(job.get("reference_image") or "").strip()
                 resolved_reference = self._resolve_reference_image(reference_image, generated_reference_map)
                 if resolved_reference:
                     job = dict(job)
                     job["reference_image"] = self._reference_image_value(resolved_reference)
                     self._emit(
-                        f"已把视频素材 {index}/{len(selected_jobs)} 的参考图映射到本地生成图片",
+                        f"已把{job_type}素材 {index}/{len(selected_jobs)} 的参考图映射到本地生成图片",
                         total_jobs=len(selected_jobs),
                         completed_jobs=index - 1,
                         current_job=index,
@@ -103,7 +103,7 @@ class CloudComfyUIAdapter:
                         material_type=job_type,
                         job_type=job_type,
                     )
-                elif generated_reference_images:
+                elif job_type == "video" and generated_reference_images:
                     paired_index = min(video_job_index, len(generated_reference_images) - 1)
                     job = dict(job)
                     job["reference_image"] = self._reference_image_value(generated_reference_images[paired_index])
@@ -118,7 +118,23 @@ class CloudComfyUIAdapter:
                         material_type=job_type,
                         job_type=job_type,
                     )
-                video_job_index += 1
+                elif job_type == "image" and generated_reference_images:
+                    previous_index = len(generated_reference_images) - 1
+                    job = dict(job)
+                    job["reference_image"] = self._reference_image_value(generated_reference_images[previous_index])
+                    self._emit(
+                        f"已把上一张生图作为生图素材 {index}/{len(selected_jobs)} 的参考图",
+                        total_jobs=len(selected_jobs),
+                        completed_jobs=index - 1,
+                        current_job=index,
+                        job_index=index,
+                        job_count=len(selected_jobs),
+                        material_name=job_name,
+                        material_type=job_type,
+                        job_type=job_type,
+                    )
+                if job_type == "video":
+                    video_job_index += 1
             job_payload = self._payload_for_material_job(job["base_payload"], job, index)
             self._write_json(job_dir / "comfyui_payload.json", job_payload)
             self._emit(
@@ -397,6 +413,7 @@ class CloudComfyUIAdapter:
             "{{image_prompt}}": self._first_list_or_value(comfyui_payload, "image_prompts", "image_prompt"),
             "{{video_prompt}}": self._first_list_or_value(comfyui_payload, "video_prompts", "video_prompt"),
             "{{reference_image}}": self._first_reference_image(comfyui_payload),
+            "{{has_reference_image}}": bool(self._first_reference_image(comfyui_payload)),
             "{{seed}}": str(comfyui_payload.get("seed") or ""),
             "{{width}}": str(comfyui_payload.get("width") or ""),
             "{{height}}": str(comfyui_payload.get("height") or ""),
@@ -453,9 +470,27 @@ class CloudComfyUIAdapter:
         if not configured:
             return None
         job_type = str(job.get("type") or "").strip().lower()
+        typed = [
+            item
+            for item in configured
+            if cls._library_item_supports_material_type(item, job_type)
+        ]
+        if typed:
+            configured = typed
         if job_type == "video":
             return cls._first_matching_preset(configured, ("image_to_video", "ltx", "video", "broll", "视频", "图生视频", "生视频"))
         return cls._first_matching_preset(configured, ("txt_img", "z_image", "image", "keyframe", "文生图", "生图", "关键帧", "配图"))
+
+    @classmethod
+    def _library_item_supports_material_type(cls, item: dict[str, Any], material_type: str) -> bool:
+        raw_types = item.get("material_types") or item.get("materialTypes") or item.get("types")
+        if isinstance(raw_types, str):
+            types = {part.strip().lower() for part in raw_types.split(",") if part.strip()}
+        elif isinstance(raw_types, list):
+            types = {str(part).strip().lower() for part in raw_types if str(part).strip()}
+        else:
+            types = set()
+        return bool(material_type and material_type in types)
 
     @classmethod
     def _is_configured_library_item(cls, item: Any) -> bool:
@@ -713,6 +748,7 @@ class CloudComfyUIAdapter:
             ]
         if reference_image:
             payload["reference_image"] = reference_image
+        payload["has_reference_image"] = bool(reference_image)
         for key in ("seed", "width", "height"):
             value = job.get(key)
             if value not in (None, ""):
@@ -849,10 +885,12 @@ class CloudComfyUIAdapter:
         return match.group(1) if match else ""
 
     @classmethod
-    def _replace_placeholders(cls, value: Any, replacements: dict[str, str]) -> Any:
+    def _replace_placeholders(cls, value: Any, replacements: dict[str, Any]) -> Any:
         if isinstance(value, str):
             for key, replacement in replacements.items():
-                value = value.replace(key, replacement)
+                if value == key:
+                    return replacement
+                value = value.replace(key, str(replacement).lower() if isinstance(replacement, bool) else str(replacement))
             return value
         if isinstance(value, list):
             return [cls._replace_placeholders(item, replacements) for item in value]

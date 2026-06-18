@@ -181,7 +181,7 @@ class WorkflowEngine:
             }
             previous_outputs.append(step_record)
             step_outputs.append(step_record)
-            if self._requires_material_gate(step, production_config):
+            if self._requires_material_gate(workflow, step, production_config):
                 self._run_material_gate_or_block(
                     task_dir,
                     workflow,
@@ -572,7 +572,7 @@ class WorkflowEngine:
                 "action_results": json.dumps(action_results, ensure_ascii=False),
             }
             previous_outputs.append(step_record)
-            if self._requires_material_gate(step, production_config):
+            if self._requires_material_gate(workflow, step, production_config):
                 self._run_material_gate_or_block(
                     task_dir,
                     workflow,
@@ -659,12 +659,13 @@ class WorkflowEngine:
             production_manifest=production_manifest["files"]["manifest"] if production_manifest else None,
         )
 
-    def _requires_material_gate(self, step: dict, production_config: dict | None) -> bool:
+    def _requires_material_gate(self, workflow: dict, step: dict, production_config: dict | None) -> bool:
         if not isinstance(production_config, dict):
             return False
         if str(production_config.get("mode") or "").strip() != "comfy_full":
             return False
-        return str(step.get("agent") or "").startswith("21_")
+        gate_step_no = self._material_step_number(workflow)
+        return bool(gate_step_no and int(step.get("step") or 0) == gate_step_no)
 
     def _run_material_gate_or_block(
         self,
@@ -895,7 +896,7 @@ class WorkflowEngine:
         if not context:
             return ""
         agent = str(step.get("agent") or "")
-        allowed_prefixes = ("06_", "07_", "20_", "21_", "22_")
+        allowed_prefixes = ("06_", "07_", "20_", "22_")
         if not agent.startswith(allowed_prefixes):
             return ""
         return f"\n\n## 视频输出长期记忆\n{context}\n"
@@ -1106,9 +1107,15 @@ class WorkflowEngine:
 
     @staticmethod
     def _material_step_number(workflow: dict) -> int | None:
-        for step in workflow.get("steps", []):
+        steps = workflow.get("steps", [])
+        for step in steps:
             agent = str(step.get("agent") or "")
             if agent.startswith("21_"):
+                step_no = int(step.get("step") or 0)
+                return step_no or None
+        for step in steps:
+            agent = str(step.get("agent") or "")
+            if agent.startswith("07_"):
                 step_no = int(step.get("step") or 0)
                 return step_no or None
         return None

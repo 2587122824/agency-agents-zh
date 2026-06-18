@@ -42,12 +42,11 @@ def run_auto_production(
     image_step = _find_step(step_outputs, "06_")
     video_step = _find_step(step_outputs, "07_")
     audio_step = _find_step(step_outputs, "20_")
-    compose_step = _find_step(step_outputs, "21_")
     edit_step = _find_step(step_outputs, "22_")
     image_content = image_step.get("content", "") if image_step else ""
     video_content = video_step.get("content", "") if video_step else ""
     audio_content = audio_step.get("content", "") if audio_step else ""
-    compose_content = compose_step.get("content", "") if compose_step else ""
+    compose_content = _combined_comfyui_plan(image_content, video_content)
     edit_content = edit_step.get("content", "") if edit_step else ""
 
     image_prompt_path = paths["image_prompts"] / "storyboard_image_prompts.md"
@@ -77,21 +76,18 @@ def run_auto_production(
         subtitle_srt_quality = _quality_check_srt(subtitle_srt)
     _write_text(voiceover_path, voice_text)
     _write_text(subtitles_path, subtitle_srt)
-    _write_text(comfyui_plan_path, compose_content or "# ComfyUI 素材生成编排方案\n\n未找到 21_ComfyUI素材编排师输出。\n")
+    _write_text(comfyui_plan_path, compose_content)
     _write_text(edit_plan_path, edit_content or "# 剪辑成片执行方案\n\n未找到 22_剪辑成片执行师输出。\n")
-    comfyui_payload_text = (
-        _extract_json_block(compose_content)
-        or _default_comfyui_payload(mode, final_video_name, video_config)
-    )
+    comfyui_payload_text = _combined_comfyui_payload_text(image_content, video_content, mode, final_video_name, video_config)
     _write_text(
         comfyui_payload_path,
         _ensure_comfyui_payload_defaults(comfyui_payload_text, mode, final_video_name, video_config),
     )
-    _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, compose_step, edit_step, image_config, video_config, compose_config))
+    _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, None, edit_step, image_config, video_config, compose_config))
     emit("制作包已生成，开始按自动生成配置调用工具", stage="package")
 
     if mode == "api_ready":
-        initial_status = "api_adapter_pending"
+        initial_status = "image_adapter_pending"
     elif mode == "comfy_full":
         initial_status = "comfyui_package_ready"
     else:
@@ -143,7 +139,8 @@ def run_auto_production(
             "base_url_provided": bool(video_config.get("base_url_provided")),
             "prompt_file": str(video_prompt_path),
             "output_dir": str(paths["video_clips"]),
-            "adapter_status": "pending" if mode == "api_ready" else "not_configured",
+            "adapter_status": "skipped" if mode == "api_ready" else "not_configured",
+            "skip_reason": "api_ready mode is image-only; video generation is disabled." if mode == "api_ready" else "",
         },
         "composition": {
             "tool": compose_config.get("tool") or "ffmpeg",
@@ -212,17 +209,8 @@ def run_auto_production(
                 manifest["status"] = "api_adapter_skipped"
             else:
                 manifest["status"] = "image_adapter_failed"
-        video_adapter_result = _run_video_adapter(video_content, video_config, paths["video_clips"])
-        if video_adapter_result:
-            manifest["video_generation"]["adapter_status"] = video_adapter_result["status"]
-            manifest["video_generation"]["adapter_manifest"] = video_adapter_result.get("manifest_file", "")
-            manifest["video_generation"]["downloaded_files"] = video_adapter_result.get("downloaded_files", [])
-            if video_adapter_result["status"] == "success":
-                manifest["status"] = "video_generated"
-            elif manifest["status"] == "api_adapter_pending" and video_adapter_result["status"] == "skipped":
-                manifest["status"] = "api_adapter_skipped"
-            elif video_adapter_result["status"] not in {"skipped", "success"}:
-                manifest["status"] = "video_adapter_failed"
+        manifest["video_generation"]["adapter_status"] = "skipped"
+        manifest["video_generation"]["skip_reason"] = "api_ready mode is image-only; video generation is disabled."
     if mode == "comfy_full":
         emit("开始调用 ComfyUI 素材/预览工作流", stage="comfyui")
         comfyui_adapter_result = _run_comfyui_adapter_with_quality_gate(
@@ -534,6 +522,58 @@ def _between_markers(text: str, start_marker: str, end_marker: str) -> str:
         return ""
     end = text.find(end_marker, start + len(start_marker))
     return text[start:end] if end > start else text[start:]
+
+
+def _combined_comfyui_plan(image_content: str, video_content: str) -> str:
+    return (
+        "# ComfyUI 素材生成编排方案\n\n"
+        "本方案由 06_分镜生图设计师和 07_视频生成执行员输出整合生成；项目已不再单独运行 21_ComfyUI素材编排师。\n\n"
+        "## 1. 生图参数来源（06）\n\n"
+        f"{image_content or '未找到 06_分镜生图设计师输出。'}\n\n"
+        "## 2. 生视频参数来源（07）\n\n"
+        f"{video_content or '未找到 07_视频生成执行员输出。'}\n"
+    )
+
+
+def _combined_comfyui_payload_text(
+    image_content: str,
+    video_content: str,
+    mode: str,
+    final_video_name: str,
+    video_config: dict[str, Any],
+) -> str:
+    defaults = json.loads(_default_comfyui_payload(mode, final_video_name, video_config))
+    image_payload = _json_object_from_first_block(image_content)
+    video_payload = _json_object_from_first_block(video_content)
+    for source in (image_payload, video_payload):
+        if not source:
+            continue
+        for key in ("image_prompts", "video_prompts", "reference_images", "missing_or_inferred_prompts"):
+            value = source.get(key)
+            if isinstance(value, list):
+                defaults.setdefault(key, [])
+                defaults[key].extend(value)
+        for key in ("image_prompt", "video_prompt", "reference_image", "negative_prompt", "seed", "width", "height"):
+            value = source.get(key)
+            if value not in (None, "", []):
+                defaults[key] = value
+        output = source.get("output")
+        if isinstance(output, dict):
+            defaults.setdefault("output", {}).update(output)
+    defaults["payload_source"] = "merged_from_06_07"
+    defaults["notes"] = "ComfyUI 参数包由 06 的 image_prompts 和 07 的 video_prompts 合并生成。"
+    return json.dumps(defaults, ensure_ascii=False, indent=2) + "\n"
+
+
+def _json_object_from_first_block(content: str) -> dict[str, Any]:
+    block = _extract_json_block(content)
+    if not block:
+        return {}
+    try:
+        data = json.loads(block)
+    except Exception:
+        data = _salvage_comfyui_payload(block)
+    return data if isinstance(data, dict) else {}
 
 
 def _salvage_prompt_items(section: str, default_model: str, include_duration: bool) -> list[dict[str, Any]]:
@@ -927,7 +967,7 @@ def _default_comfyui_payload(
             "file_name": final_video_name,
         },
         "nodeInfoList": [],
-        "notes": "待根据 21_ComfyUI成片编排师输出和实际 ComfyUI 节点补全。",
+        "notes": "待根据 06/07 输出的 ComfyUI 参数包和实际 ComfyUI 节点补全。",
     }
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
@@ -993,7 +1033,8 @@ def _build_edit_checklist(
             "## 4. ComfyUI 素材编排",
             "- 素材编排方案：comfyui/comfyui_plan.md",
             "- 参数包：comfyui/comfyui_payload.json",
-            f"- 21 输出状态：{'已找到' if compose_step else '未找到'}",
+            f"- 06 生图参数包状态：{'已找到' if image_step else '未找到'}",
+            f"- 07 生视频参数包状态：{'已找到' if video_step else '未找到'}",
             "",
             "## 5. 剪辑成片",
             "- 剪辑方案：final_edit_plan.md",
@@ -1007,7 +1048,7 @@ def _build_edit_checklist(
             "- 目标视频：final_video.mp4",
             "",
             "## 7. 当前限制",
-            "- 当前版本会生成自动生产资产包、语音字幕包、ComfyUI 素材编排方案、剪辑成片方案和 manifest。",
+            "- 当前版本会生成自动生产资产包、语音字幕包、由 06/07 合并得到的 ComfyUI 素材编排方案、剪辑成片方案和 manifest。",
             "- 当合成工具为 ffmpeg 且本地可找到 ffmpeg.exe，并且已有视频片段、图片或配音音频时，会尝试生成 final_video.mp4。",
             "- 若缺少 FFmpeg 或素材不足，会在 local_ffmpeg_manifest.json 里记录 skipped 原因，不中断工作流。",
             "- 启用 ComfyUI 全自动生成时，会生成 comfyui/auto_quality_report.json；不合格素材会按配置自动重试，保留最高分结果。",

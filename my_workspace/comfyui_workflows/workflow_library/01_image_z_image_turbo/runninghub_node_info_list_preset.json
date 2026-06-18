@@ -23,5 +23,15 @@
     "nodeId": "40",
     "fieldName": "filename_prefix",
     "fieldValue": "z_image_turbo_keyframe"
+  },
+  {
+    "nodeId": "12",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image}}"
+  },
+  {
+    "nodeId": "63",
+    "fieldName": "switch",
+    "fieldValue": "{{has_reference_image}}"
   }
 ]

@@ -47,5 +47,24 @@
     "_meta": {
       "title": "????"
     }
+  },
+  "12": {
+    "inputs": {
+      "image": "{{reference_image}}",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "reference_image_for_img2img"
+    }
+  },
+  "63": {
+    "inputs": {
+      "switch": "{{has_reference_image}}"
+    },
+    "class_type": "Switch",
+    "_meta": {
+      "title": "boolean_switch_false_txt2img_true_img2img"
+    }
   }
 }

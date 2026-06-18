@@ -1,8 +1,8 @@
 {
   "id": "01_image_z_image_turbo",
   "revision": 0,
-  "last_node_id": 61,
-  "last_link_id": 75,
+  "last_node_id": 63,
+  "last_link_id": 81,
   "nodes": [
     {
       "id": 35,
@@ -25,7 +25,7 @@
       "title": "Model link",
       "properties": {},
       "widgets_values": [
-        "# agency-agents-zh: ??? / ?????\n\n? Z-Image Turbo ??????????????????????????????????? 03_reference_consistency ???\n\n?????Z-Image Turbo?????????????? ComfyUI/models ?????\n\n## Report workflow issue\n\nIf you found any issues when running this workflow, [report template issue here](https://github.com/Comfy-Org/workflow_templates/issues)\n\n\n## Model links\n\n**text_encoders**\n\n- [qwen_3_4b.safetensors](https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors)\n\n**diffusion_models**\n\n- [z_image_turbo_bf16.safetensors](https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors)\n\n**vae**\n\n- [ae.safetensors](https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors)\n\n\nModel Storage Location\n\n```\n📂 ComfyUI/\n├── 📂 models/\n│   ├── 📂 text_encoders/\n│   │      └── qwen_3_4b.safetensors\n│   ├── 📂 diffusion_models/\n│   │      └── z_image_turbo_bf16.safetensors\n│   └── 📂 vae/\n│          └── ae.safetensors\n```\n"
+        "# agency-agents-zh: 文生图 / 图生图 / 关键帧生图\n\n一个画布同时支持文生图和图生图：\n\n- `Switch=false`：使用 EmptySD3LatentImage，走文生图。\n- `Switch=true`：使用 LoadImage -> VAEEncode，走图生图。\n- 管理台 / RunningHub 使用 `{{has_reference_image}}` 自动控制 Switch。\n- `{{reference_image}}` 注入 LoadImage.image。\n"
       ],
       "color": "#222",
       "bgcolor": "#000"
@@ -69,6 +69,45 @@
       ]
     },
     {
+      "id": 12,
+      "type": "LoadImage",
+      "pos": [
+        -200,
+        1020
+      ],
+      "size": [
+        315,
+        314
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            76
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage",
+        "cnr_id": "comfy-core",
+        "ver": "0.3.64"
+      },
+      "widgets_values": [
+        "reference_image.png",
+        "image"
+      ]
+    },
+    {
       "id": 57,
       "type": "f2fdebf6-dfaf-43b6-9eb2-7f70613cfdc1",
       "pos": [
@@ -91,6 +130,12 @@
             "name": "text"
           },
           "link": null
+        },
+        {
+          "label": "reference_image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 76
         }
       ],
       "outputs": [
@@ -162,6 +207,14 @@
       9,
       0,
       "IMAGE"
+    ],
+    [
+      76,
+      12,
+      0,
+      57,
+      1,
+      "IMAGE"
     ]
   ],
   "groups": [],
@@ -172,13 +225,13 @@
         "version": 1,
         "state": {
           "lastGroupId": 4,
-          "lastNodeId": 61,
-          "lastLinkId": 75,
+          "lastNodeId": 63,
+          "lastLinkId": 81,
           "lastRerouteId": 0
         },
         "revision": 0,
         "config": {},
-        "name": "??? / ????? (Z-Image Turbo)",
+        "name": "??? / ??? / ????? (Z-Image Turbo Switch)",
         "inputNode": {
           "id": -10,
           "bounding": [
@@ -294,6 +347,19 @@
               -460,
               640
             ]
+          },
+          {
+            "id": "b96d6edc-8c2e-43d0-9fe2-80e8be455001",
+            "name": "image",
+            "type": "IMAGE",
+            "linkIds": [
+              77
+            ],
+            "label": "reference_image",
+            "pos": [
+              -460,
+              660
+            ]
           }
         ],
         "outputs": [
@@ -404,7 +470,8 @@
                 "name": "VAE",
                 "type": "VAE",
                 "links": [
-                  27
+                  27,
+                  78
                 ]
               }
             ],
@@ -796,7 +863,7 @@
                 "localized_name": "latent_image",
                 "name": "latent_image",
                 "type": "LATENT",
-                "link": 17
+                "link": 81
               },
               {
                 "localized_name": "seed",
@@ -849,6 +916,96 @@
               "simple",
               1
             ]
+          },
+          {
+            "id": 62,
+            "type": "VAEEncode",
+            "pos": [
+              629.9998362150791,
+              760
+            ],
+            "size": [
+              210,
+              46
+            ],
+            "flags": {},
+            "order": 9,
+            "mode": 0,
+            "inputs": [
+              {
+                "localized_name": "pixels",
+                "name": "pixels",
+                "type": "IMAGE",
+                "link": 77
+              },
+              {
+                "localized_name": "vae",
+                "name": "vae",
+                "type": "VAE",
+                "link": 78
+              }
+            ],
+            "outputs": [
+              {
+                "localized_name": "LATENT",
+                "name": "LATENT",
+                "type": "LATENT",
+                "links": [
+                  79
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "VAEEncode",
+              "cnr_id": "comfy-core",
+              "ver": "0.3.64"
+            },
+            "widgets_values": []
+          },
+          {
+            "id": 63,
+            "type": "Switch",
+            "pos": [
+              650,
+              860
+            ],
+            "size": [
+              300,
+              120
+            ],
+            "flags": {},
+            "order": 10,
+            "mode": 0,
+            "inputs": [
+              {
+                "name": "on_false",
+                "type": "LATENT",
+                "link": 17
+              },
+              {
+                "name": "on_true",
+                "type": "LATENT",
+                "link": 79
+              }
+            ],
+            "outputs": [
+              {
+                "name": "output",
+                "type": "LATENT",
+                "links": [
+                  81
+                ]
+              }
+            ],
+            "properties": {
+              "Node name for S&R": "Switch",
+              "cnr_id": "comfy-core",
+              "ver": "0.3.64"
+            },
+            "widgets_values": [
+              false
+            ],
+            "title": "Switch"
           }
         ],
         "groups": [
@@ -950,14 +1107,6 @@
             "type": "CONDITIONING"
           },
           {
-            "id": 17,
-            "origin_id": 13,
-            "origin_slot": 0,
-            "target_id": 3,
-            "target_slot": 3,
-            "type": "LATENT"
-          },
-          {
             "id": 28,
             "origin_id": 30,
             "origin_slot": 0,
@@ -1036,6 +1185,46 @@
             "target_id": 29,
             "target_slot": 0,
             "type": "COMBO"
+          },
+          {
+            "id": 17,
+            "origin_id": 13,
+            "origin_slot": 0,
+            "target_id": 63,
+            "target_slot": 0,
+            "type": "LATENT"
+          },
+          {
+            "id": 77,
+            "origin_id": -10,
+            "origin_slot": 8,
+            "target_id": 62,
+            "target_slot": 0,
+            "type": "IMAGE"
+          },
+          {
+            "id": 78,
+            "origin_id": 29,
+            "origin_slot": 0,
+            "target_id": 62,
+            "target_slot": 1,
+            "type": "VAE"
+          },
+          {
+            "id": 79,
+            "origin_id": 62,
+            "origin_slot": 0,
+            "target_id": 63,
+            "target_slot": 1,
+            "type": "LATENT"
+          },
+          {
+            "id": 81,
+            "origin_id": 63,
+            "origin_slot": 0,
+            "target_id": 3,
+            "target_slot": 3,
+            "type": "LATENT"
           }
         ],
         "extra": {
@@ -1061,10 +1250,16 @@
     "VHS_KeepIntermediate": true,
     "agency_agents_zh": {
       "slot_id": "01_image_z_image_turbo",
-      "slot_title": "??? / ?????",
-      "purpose": "? Z-Image Turbo ??????????????????????????????? 03_reference_consistency?",
+      "slot_title": "文生图 / 图生图 / 关键帧生图",
+      "purpose": "一个画布通过 Switch 同时支持无参考图文生图和有参考图图生图。",
       "image_model": "Z-Image Turbo",
-      "video_model": "LTX-Video 2.3"
+      "video_model": "LTX-Video 2.3",
+      "supports_reference_image": true,
+      "switch_node_id": 63,
+      "reference_image_node_id": 12,
+      "switch_field_name": "switch",
+      "switch_false": "txt2img_empty_latent",
+      "switch_true": "img2img_reference_latent"
     }
   },
   "version": 0.4

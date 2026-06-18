@@ -1,16 +1,23 @@
 [
   {
     "id": "01_image_z_image_turbo",
-    "title": "文生图 / 关键帧生图",
-    "purpose": "用 Z-Image Turbo 根据提示词生成封面、关键画面、配图、场景图；参考图一致性请使用 03_reference_consistency。",
+    "title": "文生图 / 图生图 / 关键帧生图",
+    "purpose": "一个生图槽位：无参考图时 Switch=false 走文生图；有 reference_image 时 Switch=true 走图生图。",
+    "material_types": [
+      "image"
+    ],
     "canvas": "01_image_z_image_turbo/workflow_canvas.json",
     "api_template": "01_image_z_image_turbo/api_template.json",
-    "node_info_preset": "01_image_z_image_turbo/runninghub_node_info_list_preset.json"
+    "node_info_preset": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
+    "supports_reference_image": true
   },
   {
     "id": "02_ltx_video_2_3",
     "title": "图生视频",
     "purpose": "用 LTX-Video 2.3 根据提示词和参考图生成短视频素材片段。",
+    "material_types": [
+      "video"
+    ],
     "canvas": "02_ltx_video_2_3/workflow_canvas.json",
     "api_template": "02_ltx_video_2_3/api_template.json",
     "node_info_preset": "02_ltx_video_2_3/runninghub_node_info_list_preset.json"
@@ -19,6 +26,10 @@
     "id": "03_reference_consistency",
     "title": "参考图保持一致性",
     "purpose": "用 Z-Image Turbo 生成统一人物/产品关键帧，再交给 LTX-Video 2.3 做图生视频。",
+    "material_types": [
+      "image",
+      "video"
+    ],
     "canvas": "03_reference_consistency/workflow_canvas.json",
     "api_template": "03_reference_consistency/api_template.json",
     "node_info_preset": "03_reference_consistency/runninghub_node_info_list_preset.json"
@@ -27,6 +38,9 @@
     "id": "04_broll_material",
     "title": "B-roll 素材生成",
     "purpose": "生成补画面、转场、氛围镜头和说明性画面。",
+    "material_types": [
+      "video"
+    ],
     "canvas": "04_broll_material/workflow_canvas.json",
     "api_template": "04_broll_material/api_template.json",
     "node_info_preset": "04_broll_material/runninghub_node_info_list_preset.json"
@@ -35,6 +49,9 @@
     "id": "05_subtitle_preview",
     "title": "字幕安全区画面素材",
     "purpose": "生成底部留出字幕安全区的画面素材；字幕本身交给剪辑步骤处理。",
+    "material_types": [
+      "video"
+    ],
     "canvas": "05_subtitle_preview/workflow_canvas.json",
     "api_template": "05_subtitle_preview/api_template.json",
     "node_info_preset": "05_subtitle_preview/runninghub_node_info_list_preset.json"

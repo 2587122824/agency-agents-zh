@@ -1374,7 +1374,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="off" selected>关闭</option>
                   <option value="package_only">只出制作包：不调用接口、不剪辑</option>
                   <option value="audio_package">出制作包 + 配音字幕文本：不生成视频</option>
-                  <option value="api_ready">旧接口：只调用独立生图/生视频</option>
+                  <option value="api_ready">只生图，不生视频</option>
                   <option value="comfy_full">全自动成片预览：调用 ComfyUI 素材接口 + FFmpeg 自动剪辑</option>
                 </select>
               </label>
@@ -2206,6 +2206,7 @@ INDEX_HTML = r"""<!doctype html>
     let comfyParameterCandidates = [];
     let progressTimer = null;
     let currentRunId = "";
+    let currentRunStatus = "";
     let activeRunTaskName = "";
     let workflowInteractionLocked = false;
     const progressStepOpenState = new Map();
@@ -2219,8 +2220,9 @@ INDEX_HTML = r"""<!doctype html>
     const DEFAULT_COMFY_WORKFLOW_LIBRARY = [
       {
         id: 'txt_img_img',
-        name: '文生图 / 关键帧生图',
-        purpose: 'Z-Image Turbo：根据提示词生成封面、关键画面、配图、场景图',
+        name: '文生图 / 图生图 / 关键帧生图',
+        purpose: 'Z-Image Turbo：根据提示词和可选参考图生成封面、关键画面、配图、场景图',
+        materialTypes: ['image'],
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -2229,6 +2231,7 @@ INDEX_HTML = r"""<!doctype html>
         id: 'image_to_video',
         name: '图生视频',
         purpose: 'LTX-Video 2.3：把参考图、分镜图或产品图生成视频片段',
+        materialTypes: ['video'],
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -2237,6 +2240,7 @@ INDEX_HTML = r"""<!doctype html>
         id: 'reference_consistency',
         name: '参考图保持一致性',
         purpose: 'Z-Image Turbo 生成一致关键帧，LTX-Video 2.3 生成视频片段',
+        materialTypes: ['image', 'video'],
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -2245,6 +2249,7 @@ INDEX_HTML = r"""<!doctype html>
         id: 'broll_material',
         name: 'B-roll 素材生成',
         purpose: 'LTX-Video 2.3：生成补画面、转场、氛围镜头和说明性画面',
+        materialTypes: ['video'],
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
@@ -2253,13 +2258,14 @@ INDEX_HTML = r"""<!doctype html>
         id: 'subtitle_preview',
         name: '字幕安全区画面素材',
         purpose: 'LTX-Video 2.3：生成底部留出字幕安全区的画面素材；字幕交给剪辑步骤处理',
+        materialTypes: ['video'],
         endpoint: '',
         nodeInfoList: '[]',
         pollTimeout: '3600',
       },
     ];
     const LONG_VIDEO_WORKFLOW_STEM = 'workflow_长视频全流程';
-    const ACTIVE_STAFF_PREFIXES = ['01_', '03_', '04_', '05_', '06_', '07_', '20_', '21_', '22_', '23_'];
+    const ACTIVE_STAFF_PREFIXES = ['01_', '03_', '04_', '05_', '06_', '07_', '20_', '22_', '23_'];
     function isActiveLongVideoWorkflow(workflow) {
       if (workflow && workflow.archived === false) return true;
       if (workflow && workflow.archived === true) return false;
@@ -2460,7 +2466,10 @@ INDEX_HTML = r"""<!doctype html>
         progressUserToggledSteps.clear();
       }
       currentRunId = runId || "";
-      if (!currentRunId) activeRunTaskName = "";
+      if (!currentRunId) {
+        activeRunTaskName = "";
+        currentRunStatus = "";
+      }
       syncRunControlButtons();
       syncOutputButtons();
     }
@@ -2584,6 +2593,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function renderProgress(job) {
+      currentRunStatus = String(job?.status || currentRunStatus || "");
       els.progressBox.hidden = false;
       const total = job.total_steps || 0;
       const completed = job.completed_steps || 0;
@@ -3107,6 +3117,7 @@ INDEX_HTML = r"""<!doctype html>
           ...defaultItem,
           name: defaultItem.name,
           purpose: defaultItem.purpose,
+          materialTypes: Array.isArray(defaultItem.materialTypes) ? defaultItem.materialTypes : [],
           endpoint: String(item.endpoint || ''),
           nodeInfoList: sanitizeComfyVisualNodeInfoList(savedNodeInfo),
           pollTimeout: String(item.pollTimeout || item.poll_timeout_seconds || defaultItem.pollTimeout),
@@ -3232,6 +3243,7 @@ INDEX_HTML = r"""<!doctype html>
         id: item.id,
         name: item.name,
         purpose: item.purpose,
+        material_types: Array.isArray(item.materialTypes) ? item.materialTypes : [],
         endpoint: item.endpoint || '',
         node_info_list_json: item.nodeInfoList || '[]',
         poll_timeout_seconds: Number(item.pollTimeout || 3600),
@@ -4509,7 +4521,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!packageFiles.length) {
         els.packageOutputList.innerHTML = '<div class="muted small">还没有产品包。点击右上角“导出产品包”生成可交付文件。</div>';
       } else {
-        const priority = ['long_video_final.mp4', 'final_video.mp4', 'README.md', 'final_output.md', '视频制作包.md', '语音字幕制作包.md', 'ComfyUI素材编排.md', '剪辑成片执行方案.md', 'manifest.json'];
+        const priority = ['long_video_final.mp4', 'final_video.mp4', 'README.md', 'final_output.md', '视频制作包.md', '语音字幕制作包.md', 'ComfyUI生图参数包.json', 'ComfyUI生视频参数包.json', '剪辑成片执行方案.md', 'manifest.json'];
         packageFiles.sort((a, b) => {
           const an = a.split('/').pop();
           const bn = b.split('/').pop();
@@ -4645,7 +4657,7 @@ INDEX_HTML = r"""<!doctype html>
     function syncOutputButtons() {
       const hasTask = Boolean(selectedTask);
       const hasFile = Boolean(selectedTask && selectedFile);
-      const running = Boolean(currentRunId);
+      const running = Boolean(currentRunId && ['queued', 'running'].includes(currentRunStatus));
       const confirmStep = awaitingConfirmationStep();
       const isConfirmingCurrentStep = Boolean(confirmStep && selectedFile === stepOutputFileForStep(confirmStep));
       els.saveFileBtn.disabled = running || !hasFile;
@@ -5622,7 +5634,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _is_long_video_staff(name: str) -> bool:
-        return name.startswith(("01_", "03_", "04_", "05_", "06_", "07_", "20_", "21_", "22_", "23_"))
+        return name.startswith(("01_", "03_", "04_", "05_", "06_", "07_", "20_", "22_", "23_"))
 
     def _staff_detail(self, name: str) -> dict:
         staff_dir = self._safe_staff_dir(name, must_exist=True)
@@ -6470,8 +6482,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             write("生图提示词.json", json.dumps(self._prompt_json(step_outputs, "06_"), ensure_ascii=False, indent=2))
             write("视频提示词.json", json.dumps(self._prompt_json(step_outputs, "07_"), ensure_ascii=False, indent=2))
             write("语音字幕制作包.md", self._agent_output_text(step_outputs, "20_"))
-            write("ComfyUI素材编排.md", self._agent_output_text(step_outputs, "21_"))
-            write("ComfyUI参数包.json", json.dumps(self._prompt_json(step_outputs, "21_"), ensure_ascii=False, indent=2))
+            write("ComfyUI生图参数包.json", json.dumps(self._prompt_json(step_outputs, "06_"), ensure_ascii=False, indent=2))
+            write("ComfyUI生视频参数包.json", json.dumps(self._prompt_json(step_outputs, "07_"), ensure_ascii=False, indent=2))
             write("剪辑成片执行方案.md", self._agent_output_text(step_outputs, "22_"))
         elif template == "xiaohongshu":
             write("小红书文案.md", final_output)
@@ -6602,7 +6614,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 正向提示词：{value('positive_prompt')}\n"
             "- 参考图：如用户上传参考图，请把它作为首帧、角色一致性、产品一致性或风格参考来规划。\n"
             "- 参数来源：模型、画幅、时长、运动强度、镜头、seed、FPS、分辨率、负向词等由视频/ComfyUI 工作流或导入的 API JSON 节点映射配置，不需要在员工输出中重复询问。\n"
-            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案，07_视频生成执行员输出视频画面正向提示词和镜头清单，20_语音字幕包装师输出 TTS、SRT、BGM 和音效方案，21_ComfyUI素材编排师整理素材/预览参数；最终硬字幕、最终混音和最终导出交给 22_剪辑成片执行师，不要声称已经生成 mp4。\n"
+            "- 执行要求：当前阶段由 06_分镜生图设计师输出分镜生图方案和 ComfyUI 生图参数包，07_视频生成执行员输出视频画面正向提示词、镜头清单和 ComfyUI 生视频参数包，20_语音字幕包装师输出 TTS、SRT、BGM 和音效方案；最终硬字幕、最终混音和最终导出交给 22_剪辑成片执行师，不要声称已经生成 mp4。\n"
         )
 
     @staticmethod
@@ -6640,7 +6652,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             f"- 节点映射：{node_note}\n"
             f"- 轮询超时：{value('poll_timeout_seconds', '3600')} 秒\n"
             f"- 工作流库配置状态：\n{library_note}\n"
-            "- 执行要求：21_ComfyUI素材编排师只输出可映射到 ComfyUI/RunningHub 的画面素材参数包；运行时会根据素材类型自动选择工作流库里的生图或生视频槽位，而不是按当前下拉编辑槽位执行。AI 图片和视频只是片段素材，配音、SRT 字幕、最终硬字幕、最终混音和最终导出交给 20_语音字幕包装师与 22_剪辑成片执行师。\n"
+            "- 执行要求：06_分镜生图设计师和 07_视频生成执行员直接输出可映射到 ComfyUI/RunningHub 的画面素材参数包；运行时会根据素材类型自动选择工作流库里的生图或生视频槽位，而不是按当前下拉编辑槽位执行。AI 图片和视频只是片段素材，配音、SRT 字幕、最终硬字幕、最终混音和最终导出交给 20_语音字幕包装师与 22_剪辑成片执行师。\n"
         )
 
     def _upload_reference_image(self, payload: dict) -> dict:
