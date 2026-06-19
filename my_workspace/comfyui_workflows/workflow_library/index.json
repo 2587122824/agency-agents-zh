@@ -1,59 +1,32 @@
 [
   {
-    "id": "01_image_z_image_turbo",
-    "title": "文生图 / 图生图 / 关键帧生图",
-    "purpose": "一个生图槽位：无参考图时 Switch=false 走文生图；有 reference_image 时 Switch=true 走图生图。",
+    "id": "01_all_in_one_image",
+    "title": "全能图片",
+    "purpose": "统一图片 API：文生图、图生图、关键帧、封面、人物/产品/风格参考统一从 image_jobs 调用。",
     "material_types": [
       "image"
     ],
-    "canvas": "01_image_z_image_turbo/workflow_canvas.json",
-    "api_template": "01_image_z_image_turbo/api_template.json",
-    "node_info_preset": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
-    "supports_reference_image": true
+    "api_template": "01_all_in_one_image/api_template.json",
+    "workflow_canvas": "01_all_in_one_image/workflow_canvas.json",
+    "node_info_preset": "01_all_in_one_image/runninghub_node_info_list_preset.json",
+    "workflow_contract": "01_all_in_one_image/workflow_contract.json",
+    "node_info_extended_example": "01_all_in_one_image/node_info_extended_example.json",
+    "supports_reference_image": true,
+    "supports_control_mode": true
   },
   {
-    "id": "02_ltx_video_2_3",
-    "title": "图生视频",
-    "purpose": "用 LTX-Video 2.3 根据提示词和参考图生成短视频素材片段。",
+    "id": "02_all_in_one_video",
+    "title": "全能视频",
+    "purpose": "统一视频 API：文生视频、图生视频、首帧视频、B-roll、转场、人物/产品参考统一从 video_jobs 调用。",
     "material_types": [
       "video"
     ],
-    "canvas": "02_ltx_video_2_3/workflow_canvas.json",
-    "api_template": "02_ltx_video_2_3/api_template.json",
-    "node_info_preset": "02_ltx_video_2_3/runninghub_node_info_list_preset.json"
-  },
-  {
-    "id": "03_reference_consistency",
-    "title": "参考图保持一致性",
-    "purpose": "用 Z-Image Turbo 生成统一人物/产品关键帧，再交给 LTX-Video 2.3 做图生视频。",
-    "material_types": [
-      "image",
-      "video"
-    ],
-    "canvas": "03_reference_consistency/workflow_canvas.json",
-    "api_template": "03_reference_consistency/api_template.json",
-    "node_info_preset": "03_reference_consistency/runninghub_node_info_list_preset.json"
-  },
-  {
-    "id": "04_broll_material",
-    "title": "B-roll 素材生成",
-    "purpose": "生成补画面、转场、氛围镜头和说明性画面。",
-    "material_types": [
-      "video"
-    ],
-    "canvas": "04_broll_material/workflow_canvas.json",
-    "api_template": "04_broll_material/api_template.json",
-    "node_info_preset": "04_broll_material/runninghub_node_info_list_preset.json"
-  },
-  {
-    "id": "05_subtitle_preview",
-    "title": "字幕安全区画面素材",
-    "purpose": "生成底部留出字幕安全区的画面素材；字幕本身交给剪辑步骤处理。",
-    "material_types": [
-      "video"
-    ],
-    "canvas": "05_subtitle_preview/workflow_canvas.json",
-    "api_template": "05_subtitle_preview/api_template.json",
-    "node_info_preset": "05_subtitle_preview/runninghub_node_info_list_preset.json"
+    "api_template": "02_all_in_one_video/api_template.json",
+    "workflow_canvas": "02_all_in_one_video/workflow_canvas.json",
+    "node_info_preset": "02_all_in_one_video/runninghub_node_info_list_preset.json",
+    "workflow_contract": "02_all_in_one_video/workflow_contract.json",
+    "node_info_extended_example": "02_all_in_one_video/node_info_extended_example.json",
+    "supports_reference_image": true,
+    "supports_control_mode": true
   }
 ]

@@ -1,0 +1,38 @@
+[
+  {
+    "role": "task_type_selector",
+    "fieldValue": "{{task_type}}"
+  },
+  {
+    "role": "control_mode_selector",
+    "fieldValue": "{{control_mode}}"
+  },
+  {
+    "role": "reference_strength",
+    "fieldValue": "{{reference_strength}}"
+  },
+  {
+    "role": "ipadapter_weight",
+    "fieldValue": "{{ipadapter_weight}}"
+  },
+  {
+    "role": "motion_strength",
+    "fieldValue": "{{motion_strength}}"
+  },
+  {
+    "role": "pose_video",
+    "fieldValue": "{{pose_video}}"
+  },
+  {
+    "role": "duration",
+    "fieldValue": "{{duration}}"
+  },
+  {
+    "role": "fps",
+    "fieldValue": "{{fps}}"
+  },
+  {
+    "role": "seed",
+    "fieldValue": "{{seed}}"
+  }
+]

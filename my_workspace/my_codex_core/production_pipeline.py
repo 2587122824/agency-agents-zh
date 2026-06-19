@@ -242,6 +242,9 @@ def run_auto_production(
             manifest["composition"]["adapter_status"] = comfyui_adapter_result["status"]
             manifest["composition"]["adapter_manifest"] = comfyui_adapter_result.get("manifest_file", "")
             manifest["composition"]["downloaded_files"] = comfyui_adapter_result.get("downloaded_files", [])
+            manifest["composition"]["comfyui_adapter_status"] = comfyui_adapter_result["status"]
+            manifest["composition"]["comfyui_adapter_manifest"] = comfyui_adapter_result.get("manifest_file", "")
+            manifest["composition"]["comfyui_downloaded_files"] = comfyui_adapter_result.get("downloaded_files", [])
             manifest["composition"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
             manifest["composition"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
             manifest["composition"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
@@ -317,6 +320,7 @@ def run_auto_production(
     ffmpeg_adapter_result = _run_local_ffmpeg_adapter(task_dir, paths, compose_config, manifest)
     if ffmpeg_adapter_result:
         manifest["composition"]["adapter_status"] = ffmpeg_adapter_result.get("status") or "failed"
+        manifest["composition"]["local_ffmpeg_status"] = ffmpeg_adapter_result.get("status") or "failed"
         manifest["composition"]["local_ffmpeg_manifest"] = str(task_dir / "local_ffmpeg_manifest.json")
         manifest["composition"]["local_ffmpeg_command"] = str(task_dir / "local_ffmpeg_command.txt")
         manifest["files"]["ffmpeg_manifest"] = str(task_dir / "local_ffmpeg_manifest.json")
@@ -355,6 +359,278 @@ def _finalize_production_manifest(task_dir: Path, manifest: dict[str, Any], prod
     manifest["files"]["note"] = str(production_note_path)
     emit(f"{message}：{manifest['status']}", stage="production", status=manifest["status"])
     return manifest
+
+
+def retry_production_job(
+    task_dir: Path,
+    job: str,
+    production_config: dict[str, Any] | None = None,
+    progress_callback=None,
+) -> dict[str, Any]:
+    retry_job = str(job or "").strip().lower()
+    if retry_job not in {"material", "tts", "ffmpeg"}:
+        raise ValueError("job must be one of: material, tts, ffmpeg")
+
+    manifest_path = task_dir / "production_manifest.json"
+    if not manifest_path.is_file():
+        raise FileNotFoundError("production_manifest.json")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+    if not isinstance(manifest, dict):
+        raise ValueError("production_manifest.json must contain a JSON object")
+
+    config = production_config if isinstance(production_config, dict) else {}
+    mode = _retry_mode(manifest, config)
+    image_config = _retry_section_config(manifest, config, "image_config", "image_generation")
+    voice_config = _retry_section_config(manifest, config, "voice_config", "audio")
+    compose_config = _retry_section_config(manifest, config, "compose_config", "composition")
+    quality_config = _retry_quality_config(manifest, config)
+    paths = _create_output_dirs(task_dir)
+    production_note_path = task_dir / "auto_production.md"
+
+    manifest.setdefault("schema_version", 1)
+    manifest["mode"] = mode
+    manifest.setdefault("files", {})
+    manifest.setdefault("image_generation", {})
+    manifest.setdefault("video_generation", {})
+    manifest.setdefault("composition", {})
+    manifest.setdefault("audio", {})
+
+    def emit(message: str, stage: str = "production", **extra: Any) -> None:
+        if not progress_callback:
+            return
+        event = {"event": "production_update", "stage": stage, "message": message}
+        event.update(extra)
+        progress_callback(event)
+
+    history_item: dict[str, Any] = {
+        "job": retry_job,
+        "status": "running",
+        "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        "ended_at": "",
+        "outputs": [],
+        "error": "",
+    }
+    manifest.setdefault("production_job_history", []).append(history_item)
+
+    try:
+        if retry_job == "material":
+            result = _retry_material_job(task_dir, paths, manifest, mode, image_config, compose_config, quality_config, emit, progress_callback)
+        elif retry_job == "tts":
+            result = _retry_tts_job(task_dir, paths, manifest, voice_config, emit)
+        else:
+            result = _retry_ffmpeg_job(task_dir, paths, manifest, compose_config, emit)
+
+        history_item["status"] = str(result.get("status") or "unknown")
+        history_item["outputs"] = [str(item) for item in (result.get("downloaded_files") or []) if item]
+        history_item["ended_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        return _finalize_retry_manifest(task_dir, manifest, production_note_path, emit, f"production retry finished: {retry_job}")
+    except Exception as exc:
+        history_item["status"] = "failed"
+        history_item["error"] = str(exc)
+        history_item["ended_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        manifest["status"] = f"{retry_job}_retry_failed"
+        _finalize_retry_manifest(task_dir, manifest, production_note_path, emit, f"production retry failed: {retry_job}")
+        raise
+
+
+def _retry_material_job(
+    task_dir: Path,
+    paths: dict[str, Path],
+    manifest: dict[str, Any],
+    mode: str,
+    image_config: dict[str, Any],
+    compose_config: dict[str, Any],
+    quality_config: dict[str, Any],
+    emit,
+    progress_callback=None,
+) -> dict[str, Any]:
+    if mode == "api_ready":
+        prompt_path = paths["image_prompts"] / "storyboard_image_prompts.md"
+        image_content = prompt_path.read_text(encoding="utf-8", errors="replace") if prompt_path.is_file() else ""
+        emit("retrying image material generation", stage="image")
+        result = _run_image_adapter(image_content, image_config, paths["generated_images"]) or {"status": "skipped"}
+        image_generation = manifest.setdefault("image_generation", {})
+        image_generation["adapter_status"] = result.get("status") or "failed"
+        image_generation["adapter_manifest"] = result.get("manifest_file", "")
+        image_generation["downloaded_files"] = result.get("downloaded_files", [])
+        video_generation = manifest.setdefault("video_generation", {})
+        video_generation["adapter_status"] = "skipped"
+        video_generation["skip_reason"] = "api_ready mode is image-only; video generation is disabled."
+        if result.get("status") == "success":
+            manifest["status"] = "image_generated"
+        elif result.get("status") == "skipped":
+            manifest["status"] = "api_adapter_skipped"
+        else:
+            manifest["status"] = "image_adapter_failed"
+        emit("image material retry finished", stage="image", status=result.get("status") or "")
+        return result
+
+    if mode == "comfy_full":
+        comfyui_payload_path = paths["comfyui"] / "comfyui_payload.json"
+        if not comfyui_payload_path.is_file():
+            raise FileNotFoundError("comfyui/comfyui_payload.json")
+        emit("retrying ComfyUI material generation", stage="comfyui")
+        result = _run_comfyui_adapter_with_quality_gate(
+            comfyui_payload_path,
+            compose_config,
+            quality_config,
+            paths["comfyui"],
+            progress_callback=progress_callback,
+        ) or {"status": "skipped"}
+        composition = manifest.setdefault("composition", {})
+        composition["adapter_status"] = result.get("status") or "failed"
+        composition["adapter_manifest"] = result.get("manifest_file", "")
+        composition["downloaded_files"] = result.get("downloaded_files", [])
+        composition["comfyui_adapter_status"] = result.get("status") or "failed"
+        composition["comfyui_adapter_manifest"] = result.get("manifest_file", "")
+        composition["comfyui_downloaded_files"] = result.get("downloaded_files", [])
+        composition["quality_report"] = result.get("quality_report", "")
+        composition["quality_score"] = result.get("quality_score", 0)
+        composition["quality_attempts"] = result.get("attempts", 1)
+        if result.get("status") == "success":
+            manifest["status"] = "comfyui_generated"
+        elif result.get("status") == "partial_success":
+            manifest["status"] = "comfyui_partial_failed"
+        elif result.get("status") == "skipped":
+            manifest["status"] = "comfyui_adapter_skipped"
+        else:
+            manifest["status"] = "comfyui_adapter_failed"
+        emit("ComfyUI material retry finished", stage="comfyui", status=result.get("status") or "")
+        return result
+
+    raise ValueError(f"Cannot retry material job when production mode is {mode!r}")
+
+
+def _retry_tts_job(
+    task_dir: Path,
+    paths: dict[str, Path],
+    manifest: dict[str, Any],
+    voice_config: dict[str, Any],
+    emit,
+) -> dict[str, Any]:
+    voiceover_path = paths["audio"] / "voiceover.txt"
+    audio_package_path = paths["audio"] / "audio_subtitle_package.md"
+    if voiceover_path.is_file():
+        voice_text = voiceover_path.read_text(encoding="utf-8", errors="replace")
+    elif audio_package_path.is_file():
+        voice_text = _extract_voice_text(audio_package_path.read_text(encoding="utf-8", errors="replace"))
+    else:
+        raise FileNotFoundError("audio/voiceover.txt")
+    if not voice_text.strip():
+        raise ValueError("voiceover text is empty")
+
+    emit("retrying local TTS", stage="tts")
+    result = _run_local_tts_adapter(voice_text, voice_config, paths["audio"]) or {"status": "skipped"}
+    audio = manifest.setdefault("audio", {})
+    audio["adapter_status"] = result.get("status") or "failed"
+    audio["adapter_manifest"] = str(paths["audio"] / "local_tts_manifest.json")
+    files = result.get("downloaded_files") or []
+    if files:
+        audio["voiceover_audio_file"] = str(files[0])
+    if result.get("status") == "success":
+        manifest["status"] = "audio_generated"
+    elif result.get("status") == "skipped":
+        manifest["status"] = "local_tts_skipped"
+    else:
+        manifest["status"] = "local_tts_failed"
+    emit("local TTS retry finished", stage="tts", status=result.get("status") or "")
+    return result
+
+
+def _retry_ffmpeg_job(
+    task_dir: Path,
+    paths: dict[str, Path],
+    manifest: dict[str, Any],
+    compose_config: dict[str, Any],
+    emit,
+) -> dict[str, Any]:
+    emit("retrying local FFmpeg composition", stage="ffmpeg")
+    result = _run_local_ffmpeg_adapter(task_dir, paths, compose_config, manifest) or {"status": "skipped"}
+    composition = manifest.setdefault("composition", {})
+    files_section = manifest.setdefault("files", {})
+    composition["adapter_status"] = result.get("status") or "failed"
+    composition["local_ffmpeg_status"] = result.get("status") or "failed"
+    composition["local_ffmpeg_manifest"] = str(task_dir / "local_ffmpeg_manifest.json")
+    composition["local_ffmpeg_command"] = str(task_dir / "local_ffmpeg_command.txt")
+    files_section["ffmpeg_manifest"] = str(task_dir / "local_ffmpeg_manifest.json")
+    files_section["ffmpeg_command"] = str(task_dir / "local_ffmpeg_command.txt")
+    if result.get("timeline_file"):
+        composition["local_ffmpeg_timeline"] = result.get("timeline_file", "")
+        files_section["ffmpeg_timeline"] = result.get("timeline_file", "")
+    if result.get("edit_plan_file"):
+        composition["local_ffmpeg_edit_plan"] = result.get("edit_plan_file", "")
+        files_section["ffmpeg_edit_plan"] = result.get("edit_plan_file", "")
+    outputs = result.get("downloaded_files") or []
+    if outputs:
+        composition["final_video_file"] = str(outputs[0])
+        files_section["final_video"] = str(outputs[0])
+    if result.get("status") == "success":
+        manifest["status"] = "final_video_generated"
+    elif result.get("status") == "skipped":
+        manifest["status"] = "local_ffmpeg_skipped"
+    else:
+        manifest["status"] = "local_ffmpeg_failed"
+    emit("FFmpeg composition retry finished", stage="ffmpeg", status=result.get("status") or "")
+    return result
+
+
+def _finalize_retry_manifest(task_dir: Path, manifest: dict[str, Any], production_note_path: Path, emit, message: str) -> dict[str, Any]:
+    manifest_path = task_dir / "production_manifest.json"
+    files_section = manifest.setdefault("files", {})
+    files_section["manifest"] = str(manifest_path)
+    files_section["note"] = str(production_note_path)
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_text(production_note_path, _build_production_note(manifest))
+    _update_run_summary_production_status(task_dir, manifest)
+    emit(message, stage="production", status=manifest.get("status", ""))
+    return manifest
+
+
+def _update_run_summary_production_status(task_dir: Path, manifest: dict[str, Any]) -> None:
+    summary_path = task_dir / "run_summary.json"
+    if not summary_path.is_file():
+        return
+    try:
+        summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+    except json.JSONDecodeError:
+        return
+    if not isinstance(summary, dict):
+        return
+    summary["production_status"] = manifest.get("status", "")
+    summary["production_manifest"] = str(task_dir / "production_manifest.json")
+    summary["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    if str(manifest.get("status") or "") == "final_video_generated":
+        final_video = manifest.get("files", {}).get("final_video") if isinstance(manifest.get("files"), dict) else ""
+        if final_video:
+            summary["final_video"] = final_video
+    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _retry_mode(manifest: dict[str, Any], config: dict[str, Any]) -> str:
+    configured = str(config.get("mode") or "").strip()
+    if configured and configured != "off":
+        return configured
+    return str(manifest.get("mode") or configured or "off").strip()
+
+
+def _retry_section_config(manifest: dict[str, Any], config: dict[str, Any], config_key: str, manifest_key: str) -> dict[str, Any]:
+    base = manifest.get(manifest_key) if isinstance(manifest.get(manifest_key), dict) else {}
+    override = config.get(config_key) if isinstance(config.get(config_key), dict) else {}
+    merged = dict(base)
+    merged.update({key: value for key, value in override.items() if value not in (None, "")})
+    return merged
+
+
+def _retry_quality_config(manifest: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
+    override = config.get("quality_config") if isinstance(config.get("quality_config"), dict) else {}
+    composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
+    base = {
+        "enabled": composition.get("quality_gate_enabled", True),
+        "min_score": composition.get("quality_min_score", 70),
+        "max_attempts": composition.get("quality_max_attempts", 2),
+    }
+    base.update({key: value for key, value in override.items() if value not in (None, "")})
+    return base
 
 
 def _run_local_tts_adapter(

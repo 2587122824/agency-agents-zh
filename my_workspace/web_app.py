@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import re
 import shutil
 import sys
 import threading
@@ -15,6 +16,7 @@ from urllib import request as urllib_request
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
+from my_codex_core.production_pipeline import retry_production_job
 from my_codex_core.workflow_engine import WorkflowCheckpointPause, WorkflowEngine
 
 
@@ -394,11 +396,72 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       gap: 14px;
     }
+    .automation-config .details-body {
+      gap: 16px;
+      background: #fbfcfd;
+    }
+    .config-card {
+      position: relative;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+      gap: 12px;
+      align-items: start;
+      padding: 42px 12px 12px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      box-shadow: var(--shadow);
+    }
+    .config-card::before {
+      content: attr(data-title);
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      color: #0f172a;
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .config-card::after {
+      content: attr(data-desc);
+      position: absolute;
+      top: 14px;
+      left: 120px;
+      right: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 500;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .config-card label {
+      min-width: 0;
+    }
+    .config-card textarea {
+      min-height: 160px;
+    }
+    .config-card.mapping-card {
+      grid-template-columns: minmax(420px, 1.2fr) minmax(260px, .8fr) minmax(180px, .45fr);
+    }
+    .workflow-summary-card {
+      margin: 0;
+      border: 1px solid #99f6e4;
+      border-left: 4px solid var(--accent);
+      border-radius: 12px;
+      background: #f0fdfa;
+      padding: 10px;
+    }
     .provider-grid {
       display: grid;
       grid-template-columns: minmax(220px, 1fr) minmax(260px, 1fr) minmax(260px, 1fr);
       gap: 12px;
       align-items: start;
+    }
+    .automation-config .provider-grid.config-card {
+      grid-template-columns: repeat(3, minmax(220px, 1fr));
+    }
+    .automation-config .provider-grid.config-card.mapping-card {
+      grid-template-columns: minmax(420px, 1.2fr) minmax(260px, .8fr) minmax(180px, .45fr);
     }
     .comfy-mapping-grid textarea {
       min-height: 132px;
@@ -491,6 +554,17 @@ INDEX_HTML = r"""<!doctype html>
       white-space: nowrap;
     }
     @media (max-width: 900px) {
+      .config-card,
+      .config-card.mapping-card,
+      .automation-config .provider-grid.config-card,
+      .automation-config .provider-grid.config-card.mapping-card {
+        grid-template-columns: 1fr;
+        padding-top: 58px;
+      }
+      .config-card::after {
+        top: 32px;
+        left: 12px;
+      }
       .comfy-parameter-row {
         grid-template-columns: 1fr;
       }
@@ -1368,10 +1442,10 @@ INDEX_HTML = r"""<!doctype html>
             <div class="reference-list" id="knowledgeList"></div>
           </div>
         </details>
-        <details data-config-section open>
+        <details class="automation-config" data-config-section open>
           <summary><strong>自动化与成片配置</strong> <span class="muted small">打开“一键到底”自动跑完整流程；关闭后每步确认再继续</span></summary>
           <div class="details-body">
-            <div class="provider-grid">
+            <div class="provider-grid config-card" data-title="流程开关" data-desc="控制推进方式、自动生产模式、剪辑方式和最终输出文件名">
               <label>推进方式
                 <select id="workflowAdvanceMode">
                   <option value="auto" selected>一键到底：自动跑到最终产物</option>
@@ -1399,7 +1473,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="finalVideoName" autocomplete="off" spellcheck="false" placeholder="final_video.mp4" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid config-card" data-title="ComfyUI 连接" data-desc="配置 RunningHub/云端 ComfyUI 的密钥、基础地址和当前编辑槽位接口">
               <label>ComfyUI 平台密钥
                 <input id="comfyApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="RunningHub 或云端 ComfyUI API Key" />
               </label>
@@ -1410,7 +1484,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="comfyWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/你的素材预览工作流ID 或 /run/ai-app/你的应用ID" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid config-card" data-title="两工作流路由" data-desc="运行时按素材类型自动选择全能图片或全能视频，保存当前槽位映射">
               <label>ComfyUI 工作流库（运行时自动选择）
                 <select id="comfyWorkflowPreset"></select>
               </label>
@@ -1425,8 +1499,8 @@ INDEX_HTML = r"""<!doctype html>
                 </div>
               </label>
             </div>
-            <div class="reference-list" id="comfyWorkflowLibraryList"></div>
-            <div class="provider-grid comfy-mapping-grid">
+            <div class="reference-list workflow-summary-card" id="comfyWorkflowLibraryList"></div>
+            <div class="provider-grid comfy-mapping-grid config-card mapping-card" data-title="节点映射" data-desc="导入 API JSON 后确认可传参节点；支持 prompt、reference_image、control_mode 等占位符">
               <label>当前编辑槽位节点映射 JSON
                 <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{image_prompt}}、{{video_prompt}}、{{reference_image}}、{{payload}}'></textarea>
               </label>
@@ -1442,8 +1516,8 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="reference-list" id="comfyParameterMapper"></div>
-            <div class="provider-grid">
+            <div class="reference-list parameter-map" id="comfyParameterMapper"></div>
+            <div class="provider-grid config-card" data-title="素材质检" data-desc="自动评分，不合格时按最大尝试次数重试素材生成">
               <label>素材自动评审
                 <select id="assetQualityGate">
                   <option value="on" selected>启用：不合格自动重试</option>
@@ -1467,7 +1541,7 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid config-card" data-title="本地配音" data-desc="选择 TTS 模式、默认音色和参考音频，供自动成片使用">
               <label>本地配音
                 <select id="voiceMode">
                   <option value="off" selected>不生成配音音频</option>
@@ -1493,7 +1567,7 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="voiceReferenceAudioPath" autocomplete="off" spellcheck="false" placeholder="上传后自动填入，也可手动填 my_voice_samples/xxx.wav" />
               </label>
             </div>
-            <div class="provider-grid">
+            <div class="provider-grid config-card" data-title="配音高级项" data-desc="仿声参考文本、VoxCPM2 命令模板和配音超时设置">
               <label>参考音频原文
                 <input id="voiceReferenceText" autocomplete="off" spellcheck="false" placeholder="可选：参考音频里本人说的话，能提高仿声稳定性" />
               </label>
@@ -2217,6 +2291,8 @@ INDEX_HTML = r"""<!doctype html>
     let selectedTask = null;
     let selectedFile = null;
     let selectedTaskSummary = {};
+    let selectedTaskStatus = null;
+    let selectedTaskAllowedActions = [];
     let currentTaskFiles = [];
     let selectedStaff = null;
     let selectedWorkflow = null;
@@ -2232,58 +2308,52 @@ INDEX_HTML = r"""<!doctype html>
     let autoFocusOutputDuringRun = false;
     let activeRunTaskName = "";
     let workflowInteractionLocked = false;
+    let lastTaskDetailRefreshAt = 0;
     const progressStepOpenState = new Map();
     const progressUserToggledSteps = new Set();
     let localModelPresets = [];
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
-    const SETTINGS_KEY = 'my_workspace.workflow_settings.v1';
+    const SETTINGS_KEY = 'my_workspace.workflow_settings.v2';
     let comfyWorkflowLibrary = [];
-    const DEFAULT_COMFY_WORKFLOW_PRESET_ID = 'txt_img_img';
+    const DEFAULT_COMFY_WORKFLOW_PRESET_ID = 'all_in_one_image';
     const DEFAULT_COMFY_WORKFLOW_LIBRARY = [
       {
-        id: 'txt_img_img',
-        name: '文生图 / 图生图 / 关键帧生图',
-        purpose: 'Z-Image Turbo：根据提示词和可选参考图生成封面、关键画面、配图、场景图',
+        id: 'all_in_one_image',
+        name: '全能图片',
+        purpose: '统一图片 API：文生图、图生图、关键帧、封面、人物/产品/风格参考统一从 image_jobs 调用',
         materialTypes: ['image'],
         endpoint: '',
-        nodeInfoList: '[]',
+        nodeInfoList: JSON.stringify([
+          { nodeId: '10', fieldName: 'text', fieldValue: '{{prompt}}' },
+          { nodeId: '11', fieldName: 'text', fieldValue: '{{negative_prompt}}' },
+          { nodeId: '12', fieldName: 'image', fieldValue: '{{reference_image}}' },
+          { nodeId: '63', fieldName: 'switch', fieldValue: '{{has_reference_image}}' },
+          { nodeId: '20', fieldName: 'width', fieldValue: 1080 },
+          { nodeId: '20', fieldName: 'height', fieldValue: 1920 },
+          { nodeId: '40', fieldName: 'filename_prefix', fieldValue: 'all_in_one_image' },
+        ], null, 2),
         pollTimeout: '3600',
       },
       {
-        id: 'image_to_video',
-        name: '图生视频',
-        purpose: 'LTX-Video 2.3：把参考图、分镜图或产品图生成视频片段',
+        id: 'all_in_one_video',
+        name: '全能视频',
+        purpose: '统一视频 API：文生视频、图生视频、首帧视频、B-roll、转场、人物/产品参考统一从 video_jobs 调用',
         materialTypes: ['video'],
         endpoint: '',
-        nodeInfoList: '[]',
-        pollTimeout: '3600',
-      },
-      {
-        id: 'reference_consistency',
-        name: '参考图保持一致性',
-        purpose: 'Z-Image Turbo 生成一致关键帧，LTX-Video 2.3 生成视频片段',
-        materialTypes: ['image', 'video'],
-        endpoint: '',
-        nodeInfoList: '[]',
-        pollTimeout: '3600',
-      },
-      {
-        id: 'broll_material',
-        name: 'B-roll 素材生成',
-        purpose: 'LTX-Video 2.3：生成补画面、转场、氛围镜头和说明性画面',
-        materialTypes: ['video'],
-        endpoint: '',
-        nodeInfoList: '[]',
-        pollTimeout: '3600',
-      },
-      {
-        id: 'subtitle_preview',
-        name: '字幕安全区画面素材',
-        purpose: 'LTX-Video 2.3：生成底部留出字幕安全区的画面素材；字幕交给剪辑步骤处理',
-        materialTypes: ['video'],
-        endpoint: '',
-        nodeInfoList: '[]',
+        nodeInfoList: JSON.stringify([
+          { nodeId: '2483', fieldName: 'text', fieldValue: 'Use the reference image as strict person identity control. Keep the same face shape, facial features, hairstyle, body proportions, outfit, product appearance, color palette and subject silhouette. {{prompt}}' },
+          { nodeId: '2612', fieldName: 'text', fieldValue: 'identity drift, different person, different face, changed facial features, changed hairstyle, changed outfit, inconsistent body proportions, distorted face, deformed body, bad hands, inconsistent product, {{negative_prompt}}' },
+          { nodeId: '2004', fieldName: 'image', fieldValue: '{{reference_image}}' },
+          { nodeId: '4977', fieldName: 'value', fieldValue: false },
+          { nodeId: '3159', fieldName: 'strength', fieldValue: 1.0 },
+          { nodeId: '4979', fieldName: 'value', fieldValue: 121 },
+          { nodeId: '3059', fieldName: 'width', fieldValue: 960 },
+          { nodeId: '3059', fieldName: 'height', fieldValue: 544 },
+          { nodeId: '3059', fieldName: 'length', fieldValue: 121 },
+          { nodeId: '4823', fieldName: 'filename_prefix', fieldValue: 'all_in_one_video' },
+          { nodeId: '4852', fieldName: 'filename_prefix', fieldValue: 'all_in_one_video' },
+        ], null, 2),
         pollTimeout: '3600',
       },
     ];
@@ -2767,7 +2837,10 @@ INDEX_HTML = r"""<!doctype html>
       if (!currentRunId && !autoFocusOutputDuringRun) return;
       renderProgress(job);
       if (job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
-        if (maybeShowOutput()) await selectActiveRunTask(job);
+        if (maybeShowOutput()) {
+          await selectActiveRunTask(job);
+          await refreshActiveRunTaskDetail(job);
+        }
       }
       if (job.status === 'running') {
         const runningText = job.current_message || job.production_message || '工作流运行中';
@@ -3267,7 +3340,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!item || !defaults) return;
       item.purpose = defaults.purpose;
       item.endpoint = '';
-      item.nodeInfoList = '[]';
+      item.nodeInfoList = defaults.nodeInfoList || '[]';
       item.pollTimeout = defaults.pollTimeout;
       applySelectedComfyWorkflowPreset();
       renderComfyWorkflowLibraryList();
@@ -3999,6 +4072,8 @@ INDEX_HTML = r"""<!doctype html>
           selectedTask = null;
           selectedFile = null;
           selectedTaskSummary = {};
+          selectedTaskStatus = null;
+          selectedTaskAllowedActions = [];
           els.viewerTitle.textContent = '未选择任务';
           els.viewerMeta.textContent = '运行后会在这里查看输出文件';
           els.fileTabs.innerHTML = '';
@@ -4419,6 +4494,10 @@ INDEX_HTML = r"""<!doctype html>
       await loadTasks();
       const data = await api(`/api/task?name=${encodeURIComponent(name)}`);
       selectedTaskSummary = data.summary || {};
+      selectedTaskStatus = canonicalTaskStatus(data);
+      selectedTaskAllowedActions = Array.isArray(selectedTaskStatus?.allowed_actions)
+        ? selectedTaskStatus.allowed_actions
+        : Array.isArray(data.allowed_actions) ? data.allowed_actions : [];
       els.viewerTitle.textContent = data.summary.task_title || data.summary.workflow || name;
       els.viewerMeta.textContent = name;
       currentTaskFiles = data.files || [];
@@ -4429,10 +4508,44 @@ INDEX_HTML = r"""<!doctype html>
       if (first) await openFile(first);
     }
 
+    async function refreshSelectedTaskDetail(options = {}) {
+      if (!selectedTask) return;
+      const data = await api(`/api/task?name=${encodeURIComponent(selectedTask)}`);
+      selectedTaskSummary = data.summary || {};
+      selectedTaskStatus = canonicalTaskStatus(data);
+      selectedTaskAllowedActions = Array.isArray(selectedTaskStatus?.allowed_actions)
+        ? selectedTaskStatus.allowed_actions
+        : Array.isArray(data.allowed_actions) ? data.allowed_actions : [];
+      els.viewerTitle.textContent = data.summary.task_title || data.summary.workflow || selectedTask;
+      els.viewerMeta.textContent = selectedTask;
+      currentTaskFiles = data.files || [];
+      renderFiles(currentTaskFiles);
+      renderOutputOverview(data);
+      syncOutputButtons();
+      if (options.openMissingFile && selectedFile && !currentTaskFiles.includes(selectedFile)) {
+        const first = preferredInitialTaskFile(data);
+        if (first) await openFile(first);
+      }
+    }
+
+    async function refreshActiveRunTaskDetail(job) {
+      if (!job?.task_name || selectedTask !== job.task_name) return;
+      const now = Date.now();
+      if (now - lastTaskDetailRefreshAt < 2000) return;
+      lastTaskDetailRefreshAt = now;
+      try {
+        await refreshSelectedTaskDetail({ openMissingFile: false });
+      } catch (err) {
+        // The task directory may not exist during the first seconds after a run starts.
+      }
+    }
+
     function prepareOutputForPendingRun(title) {
       selectedTask = null;
       selectedFile = null;
       selectedTaskSummary = {};
+      selectedTaskStatus = null;
+      selectedTaskAllowedActions = [];
       currentTaskFiles = [];
       els.viewerTitle.textContent = title || '正在创建任务';
       els.viewerMeta.textContent = '任务启动后会自动在这里显示进度、步骤输出和最终产物。';
@@ -4519,10 +4632,25 @@ INDEX_HTML = r"""<!doctype html>
       els.confirmStepRerunBtn.disabled = Boolean(currentRunId);
     }
 
+    function canonicalTaskStatus(data) {
+      const status = data?.task_status && typeof data.task_status === 'object' ? data.task_status : {};
+      return {
+        schema_version: status.schema_version || 0,
+        state: status.state || data?.task_state || '',
+        workflow: status.workflow || {},
+        steps: Array.isArray(status.steps) ? status.steps : [],
+        production: status.production || { jobs: data?.production_jobs || [] },
+        assets: status.assets || data?.assets || {},
+        allowed_actions: Array.isArray(status.allowed_actions) ? status.allowed_actions : (data?.allowed_actions || []),
+        diagnostics: Array.isArray(status.diagnostics) ? status.diagnostics : [],
+      };
+    }
+
     function renderOutputOverview(data) {
       els.outputSummaryGrid.hidden = true;
       els.outputSummaryGrid.innerHTML = '';
       if (!data) {
+        renderProductionJobs([]);
         els.stepOutputMeta.textContent = '0 个步骤';
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
         els.assetOutputMeta.textContent = '未生成';
@@ -4534,36 +4662,46 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
 
+      const status = canonicalTaskStatus(data);
       const files = data.files || [];
       const summary = data.summary || {};
-      const stepFiles = files.filter(file => /^step_\d+_.*\/output\.md$/.test(file));
+      const statusSteps = Array.isArray(status.steps) ? status.steps : [];
+      const stepFiles = statusSteps
+        .filter(step => step && step.has_output && step.output_file)
+        .map(step => step.output_file);
+      const fallbackStepFiles = files.filter(file => /^step_\d+_.*\/output\.md$/.test(file));
+      const visibleStepFiles = stepFiles.length ? stepFiles : fallbackStepFiles;
       const packageFiles = files.filter(file => file.startsWith('export_package/') && !file.endsWith('/'));
-      const assetFiles = generatedAssetFiles(files);
+      const assetItems = structuredAssetItems({ ...data, assets: status.assets });
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
       const videoFile = preferredVideoFile(files);
+      renderProductionJobs(status.production?.jobs || data.production_jobs || [], status.diagnostics || []);
       renderVideoPreview(data.name, files);
 
-      els.stepOutputMeta.textContent = `${stepFiles.length} 个步骤`;
+      els.stepOutputMeta.textContent = `${visibleStepFiles.length} 个步骤`;
       els.stepOutputList.innerHTML = '';
-      if (!stepFiles.length) {
+      if (!visibleStepFiles.length) {
         els.stepOutputList.innerHTML = '<div class="muted small">暂无步骤输出。先运行工作流，或检查 task_output 目录。</div>';
       } else {
         const confirmStep = awaitingConfirmationStep(summary);
-        for (const file of stepFiles) {
+        for (const file of visibleStepFiles) {
           const stepNo = stepNumberFromFile(file);
-          const subtitle = confirmStep && stepNo === confirmStep ? '当前需要确认' : '查看本步骤结果';
+          const statusStep = statusSteps.find(step => Number(step.step) === stepNo);
+          const subtitle = statusStep?.needs_confirmation || (confirmStep && stepNo === confirmStep)
+            ? '当前需要确认'
+            : (productionStatusLabel(statusStep?.status || '') || '查看本步骤结果');
           els.stepOutputList.appendChild(outputFileButton(file, stepFileLabel(file), subtitle));
         }
       }
       renderStepConfirmBar();
 
-      els.assetOutputMeta.textContent = assetFiles.length ? `${assetFiles.length} 个素材/清单` : '未生成';
+      els.assetOutputMeta.textContent = assetItems.length ? `${assetItems.length} 个图片/视频` : '未生成';
       els.assetOutputList.innerHTML = '';
-      if (!assetFiles.length) {
+      if (!assetItems.length) {
         els.assetOutputList.innerHTML = '<div class="muted small">还没有可显示的图片/视频素材。若使用 prompt_only 模式，通常只会生成提示词和生产清单。</div>';
       } else {
-        for (const file of assetFiles) {
-          els.assetOutputList.appendChild(assetFileButton(data.name, file));
+        for (const item of assetItems) {
+          els.assetOutputList.appendChild(assetFileButton(data.name, item));
         }
       }
 
@@ -4585,6 +4723,101 @@ INDEX_HTML = r"""<!doctype html>
           els.packageOutputList.appendChild(outputFileButton(file, file.replace('export_package/', ''), file));
         }
       }
+    }
+
+    function renderProductionJobs(jobs, diagnostics = []) {
+      const list = Array.isArray(jobs) ? jobs.filter(job => job && job.id) : [];
+      const diagnosticList = Array.isArray(diagnostics) ? diagnostics.filter(item => item && item.message) : [];
+      els.outputSummaryGrid.innerHTML = '';
+      els.outputSummaryGrid.hidden = !list.length && !diagnosticList.length;
+      if (!list.length && !diagnosticList.length) return;
+      for (const item of diagnosticList) {
+        const card = document.createElement('div');
+        card.className = 'output-card';
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = item.level === 'error' ? '诊断：错误' : item.level === 'warn' ? '诊断：提醒' : '诊断';
+        const value = document.createElement('div');
+        value.className = 'value';
+        value.textContent = item.code || item.level || 'diagnostic';
+        const detail = document.createElement('div');
+        detail.className = 'muted small';
+        detail.textContent = item.message || '';
+        card.appendChild(label);
+        card.appendChild(value);
+        card.appendChild(detail);
+        els.outputSummaryGrid.appendChild(card);
+      }
+      for (const job of list) {
+        const card = document.createElement('div');
+        card.className = 'output-card';
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = job.label || job.id;
+        const value = document.createElement('div');
+        value.className = 'value';
+        value.textContent = productionStatusLabel(job.status);
+        const detail = document.createElement('div');
+        detail.className = 'muted small';
+        const outputCount = Array.isArray(job.outputs) ? job.outputs.filter(Boolean).length : 0;
+        detail.textContent = outputCount ? `${outputCount} 个输出` : compactPath(job.detail || '');
+        card.appendChild(label);
+        card.appendChild(value);
+        if (detail.textContent) card.appendChild(detail);
+        const retryAction = productionRetryAction(job.id);
+        if (retryAction) {
+          const action = document.createElement('button');
+          action.type = 'button';
+          action.className = 'secondary small';
+          action.textContent = retryAction;
+          action.disabled = !selectedTask || workflowInteractionLocked;
+          action.onclick = () => retryProductionJob(job.id);
+          card.appendChild(action);
+        }
+        els.outputSummaryGrid.appendChild(card);
+      }
+    }
+
+    function productionRetryAction(jobId) {
+      if (jobId === 'material') return '重试素材';
+      if (jobId === 'tts') return '重试配音';
+      if (jobId === 'ffmpeg') return '重新合成';
+      return '';
+    }
+
+    function productionStatusLabel(status) {
+      const text = String(status || '').toLowerCase();
+      if (!text || text === 'not_configured') return '未启用';
+      if (text === 'pending') return '等待中';
+      if (text === 'running') return '运行中';
+      if (text === 'completed') return '已完成';
+      if (text === 'awaiting_confirmation') return '等待确认';
+      if (text === 'blocked') return '已阻塞';
+      if (text === 'success' || text === 'final_video_generated') return '成功';
+      if (text === 'skipped') return '已跳过';
+      if (text === 'partial_success') return '部分成功';
+      if (text.includes('failed') || text === 'failed') return '失败';
+      return status;
+    }
+
+    function compactPath(value) {
+      const text = String(value || '');
+      if (!text) return '';
+      return text.split(/[\\/]/).slice(-2).join('/');
+    }
+
+    function structuredAssetItems(data) {
+      const assets = data?.assets || {};
+      const images = Array.isArray(assets.images) ? assets.images.map(item => ({ ...item, kind: 'image' })) : [];
+      const videos = Array.isArray(assets.videos) ? assets.videos.map(item => ({ ...item, kind: 'video' })) : [];
+      const structured = images.concat(videos).filter(item => item && item.file);
+      if (structured.length) return structured;
+      return generatedAssetFiles(data?.files || []).map(file => ({
+        file,
+        label: assetFileLabel(file),
+        name: String(file).split('/').pop(),
+        kind: isImageFile(file) ? 'image' : 'video',
+      }));
     }
 
     function generatedAssetFiles(files) {
@@ -4621,8 +4854,11 @@ INDEX_HTML = r"""<!doctype html>
       return (found ? found[1] : '99_') + name;
     }
 
-    function assetFileButton(taskName, file) {
+    function assetFileButton(taskName, asset) {
+      const file = typeof asset === 'string' ? asset : asset.file;
+      const label = typeof asset === 'string' ? assetFileLabel(file) : (asset.label || assetFileLabel(file));
       const btn = outputFileButton(file, assetFileLabel(file), assetFileSubtitle(file));
+      btn.querySelector('.output-link-title').textContent = label;
       if (isImageFile(file) || isVideoFile(file)) {
         btn.onclick = () => window.open(mediaUrl(taskName, file), '_blank', 'noopener');
         if (isImageFile(file)) {
@@ -4795,19 +5031,21 @@ INDEX_HTML = r"""<!doctype html>
       const running = Boolean(currentRunId && ['queued', 'running'].includes(currentRunStatus));
       const confirmStep = awaitingConfirmationStep();
       const isConfirmingCurrentStep = Boolean(confirmStep && selectedFile === stepOutputFileForStep(confirmStep));
+      const actionSet = new Set(selectedTaskAllowedActions || []);
+      const hasStructuredActions = actionSet.size > 0;
       els.saveFileBtn.disabled = running || !hasFile;
-      els.rebuildFinalBtn.disabled = running || !hasTask;
-      els.exportTaskBtn.disabled = running || !hasTask;
+      els.rebuildFinalBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('rebuild_final'));
+      els.exportTaskBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('export'));
       els.resumeTaskBtn.hidden = Boolean(confirmStep);
-      els.resumeTaskBtn.disabled = running || !hasTask;
+      els.resumeTaskBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('resume'));
       els.resumeTaskBtn.textContent = els.workflowAdvanceMode.value === 'step_confirm' ? '继续下一步' : '继续任务';
       if (els.outputCancelRunBtn) {
         els.outputCancelRunBtn.hidden = !running;
         els.outputCancelRunBtn.disabled = !running;
       }
-      els.rerunStepBtn.disabled = running || !hasFile || !stepNumberFromFile(selectedFile);
-      els.confirmStepContinueBtn.disabled = running || !isConfirmingCurrentStep;
-      els.confirmStepRerunBtn.disabled = running || !isConfirmingCurrentStep;
+      els.rerunStepBtn.disabled = running || !hasFile || !stepNumberFromFile(selectedFile) || (hasStructuredActions && !actionSet.has('rerun_step'));
+      els.confirmStepContinueBtn.disabled = running || !isConfirmingCurrentStep || (hasStructuredActions && !actionSet.has('confirm_step'));
+      els.confirmStepRerunBtn.disabled = running || !isConfirmingCurrentStep || (hasStructuredActions && !actionSet.has('rerun_step'));
     }
 
     function stepNumberFromFile(file) {
@@ -4970,6 +5208,48 @@ INDEX_HTML = r"""<!doctype html>
         await selectTask(selectedTask);
       } catch (err) {
         setStatus(err.message, true);
+      }
+    }
+
+    async function retryProductionJob(jobId) {
+      if (!selectedTask) return;
+      const actionLabel = productionRetryAction(jobId) || '重试生产任务';
+      if (!confirm(`确定${actionLabel}？\n\n系统会复用当前任务目录里的生产包，并按系统配置重新执行该生产分支。`)) return;
+      saveSettings();
+      resetProgress();
+      autoFocusOutputDuringRun = true;
+      setWorkflowInteractionLocked(true);
+      showStartupProgress(actionLabel);
+      showView('output');
+      setStatus(`${actionLabel}已开始`);
+      try {
+        const { productionConfig } = await collectProductionConfig();
+        const result = await api('/api/retry-production-job', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task: selectedTask,
+            job: jobId,
+            production_config: productionConfig,
+            image_api_key: '',
+            image_base_url: '',
+            video_api_key: '',
+            video_base_url: '',
+            comfy_api_key: els.comfyApiKey.value.trim(),
+            comfy_base_url: els.comfyBaseUrl.value.trim(),
+          }),
+        });
+        trackRun(result.run_id);
+        renderProgress(result);
+        await pollRunStatus(result.run_id);
+        if (selectedTask) {
+          await selectTask(selectedTask);
+        }
+      } catch (err) {
+        setStatus(err.message, true);
+        setWorkflowInteractionLocked(false);
+        setRunButtonProgress(0);
+        syncOutputButtons();
       }
     }
 
@@ -5372,6 +5652,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/task":
                 query = parse_qs(parsed.query)
                 self._send_json(self._task_detail(self._single(query, "name")))
+            elif parsed.path == "/api/task-status":
+                query = parse_qs(parsed.query)
+                detail = self._task_detail(self._single(query, "name"))
+                self._send_json({"name": detail["name"], "task_status": detail["task_status"]})
             elif parsed.path == "/api/file":
                 query = parse_qs(parsed.query)
                 self._send_json(self._file_content(self._single(query, "task"), self._single(query, "file")))
@@ -5441,6 +5725,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/rerun-step":
                 self._send_json(self._rerun_step(payload))
+                return
+
+            if parsed.path == "/api/retry-production-job":
+                self._send_json(self._retry_production_job(payload))
                 return
 
             if parsed.path == "/api/resume-task":
@@ -6295,6 +6583,66 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                                 item["message"] = "用户已终止"
                     job["updated_at"] = time.time()
 
+    def _run_retry_production_job(
+        self,
+        run_id: str,
+        task_dir: Path,
+        retry_job: str,
+        production_config: dict,
+    ) -> None:
+        try:
+            self._update_job(
+                run_id,
+                {
+                    "status": "running",
+                    "current_message": f"正在重试生产任务：{retry_job}",
+                    "production_events": [],
+                    "production_message": "",
+                },
+            )
+            manifest = retry_production_job(
+                task_dir,
+                retry_job,
+                production_config=production_config,
+                progress_callback=self._progress_callback_for_run(run_id),
+            )
+            production_status = str(manifest.get("status") or "").strip()
+            final_event = {
+                "event": "completed",
+                "workflow_name": "",
+                "task_title": "",
+                "task_dir": str(task_dir),
+                "step_count": 0,
+                "final_output": str(task_dir / "final_output.md") if (task_dir / "final_output.md").is_file() else "",
+                "production_manifest": str(task_dir / "production_manifest.json"),
+                "production_status": production_status,
+            }
+            self._apply_progress(run_id, final_event)
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job:
+                    job["production_retry"] = True
+                    job["production_retry_job"] = retry_job
+                    job["production_status"] = production_status
+                    job["production_manifest"] = str(task_dir / "production_manifest.json")
+                    job["current_message"] = f"生产任务重试完成：{retry_job} / {production_status}"
+                    job["updated_at"] = time.time()
+        except Exception as exc:
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job:
+                    paused = bool(job.get("pause_requested"))
+                    stopped = bool(job.get("cancel_requested"))
+                    job["status"] = "paused" if paused else "cancelled" if stopped else "failed"
+                    job["error"] = str(exc)
+                    job["traceback"] = traceback.format_exc()
+                    job["production_retry"] = True
+                    job["production_retry_job"] = retry_job
+                    job["production_status"] = f"{retry_job}_retry_failed"
+                    job["current_message"] = f"生产任务重试失败：{retry_job} / {exc}"
+                    self._append_detail_event(job, {"step": 0, "message": job["current_message"], "kind": "error"})
+                    job["updated_at"] = time.time()
+
     def _tasks(self) -> list[dict]:
         if not OUTPUT_ROOT.exists():
             return []
@@ -6335,7 +6683,401 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
             except json.JSONDecodeError:
                 summary = {}
-        return {"name": name, "summary": summary, "files": files}
+        task_state = self._task_state(summary, files)
+        production_jobs = self._production_jobs(task_dir)
+        assets = self._task_assets(task_dir, files)
+        allowed_actions = self._allowed_task_actions(task_state, summary, files)
+        task_status = self._task_status(task_dir, name, summary, files, task_state, allowed_actions, assets, production_jobs)
+        return {
+            "name": name,
+            "summary": summary,
+            "files": files,
+            "task_state": task_state,
+            "allowed_actions": allowed_actions,
+            "assets": assets,
+            "production_jobs": production_jobs,
+            "task_status": task_status,
+        }
+
+    @staticmethod
+    def _production_jobs(task_dir: Path) -> list[dict]:
+        manifest_path = task_dir / "production_manifest.json"
+        if not manifest_path.is_file():
+            return []
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError:
+            return [
+                {
+                    "id": "production",
+                    "label": "自动生产",
+                    "status": "failed",
+                    "detail": "production_manifest.json is invalid JSON",
+                    "outputs": [],
+                }
+            ]
+        if not isinstance(manifest, dict):
+            return []
+
+        composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
+        audio = manifest.get("audio") if isinstance(manifest.get("audio"), dict) else {}
+        image_generation = manifest.get("image_generation") if isinstance(manifest.get("image_generation"), dict) else {}
+        video_generation = manifest.get("video_generation") if isinstance(manifest.get("video_generation"), dict) else {}
+
+        mode = str(manifest.get("mode") or "").strip()
+        if mode == "comfy_full":
+            material_status = str(composition.get("comfyui_adapter_status") or composition.get("adapter_status") or "not_configured")
+        else:
+            material_status = str(image_generation.get("adapter_status") or video_generation.get("adapter_status") or "not_configured")
+        material_outputs = []
+        for key in ("downloaded_files",):
+            values = composition.get("comfyui_downloaded_files") or composition.get(key) or image_generation.get(key) or video_generation.get(key) or []
+            if isinstance(values, list):
+                material_outputs.extend(str(value) for value in values if value)
+        material_detail = composition.get("comfyui_adapter_manifest") or composition.get("adapter_manifest") or image_generation.get("adapter_manifest") or video_generation.get("adapter_manifest") or ""
+
+        tts_status = str(audio.get("adapter_status") or "not_configured")
+        tts_outputs = [str(audio.get("voiceover_audio_file") or "")] if audio.get("voiceover_audio_file") else []
+        tts_detail = audio.get("adapter_manifest") or audio.get("voice_text_reason") or ""
+
+        ffmpeg_status = str(composition.get("local_ffmpeg_status") or (composition.get("adapter_status") if composition.get("local_ffmpeg_manifest") else "") or "not_configured")
+        manifest_files = manifest.get("files") if isinstance(manifest.get("files"), dict) else {}
+        final_video = composition.get("final_video_file") or manifest_files.get("final_video") or ""
+        ffmpeg_outputs = [str(final_video)] if final_video else []
+        ffmpeg_detail = composition.get("local_ffmpeg_manifest") or composition.get("target_file") or ""
+
+        jobs = [
+            {
+                "id": "material",
+                "label": "素材生成/匹配",
+                "status": material_status,
+                "detail": str(material_detail or ""),
+                "outputs": material_outputs,
+            },
+            {
+                "id": "tts",
+                "label": "配音",
+                "status": tts_status,
+                "detail": str(tts_detail or ""),
+                "outputs": tts_outputs,
+            },
+            {
+                "id": "ffmpeg",
+                "label": "合成",
+                "status": ffmpeg_status,
+                "detail": str(ffmpeg_detail or ""),
+                "outputs": ffmpeg_outputs,
+            },
+        ]
+        return jobs
+
+    @classmethod
+    def _task_status(
+        cls,
+        task_dir: Path,
+        task_name: str,
+        summary: dict,
+        files: list[str],
+        task_state: str,
+        allowed_actions: list[str],
+        assets: dict,
+        production_jobs: list[dict],
+    ) -> dict:
+        active_job = cls._active_job_for_task(task_name, task_dir)
+        steps = cls._task_status_steps(task_dir, summary, files, active_job)
+        production = cls._task_status_production(task_dir, summary, production_jobs)
+        diagnostics = cls._task_status_diagnostics(task_dir, summary, files, task_state, steps, production)
+        workflow_state = cls._task_status_workflow(summary, steps, active_job, task_state)
+        return {
+            "schema_version": 1,
+            "state": task_state,
+            "workflow": workflow_state,
+            "steps": steps,
+            "production": production,
+            "assets": assets,
+            "allowed_actions": allowed_actions,
+            "diagnostics": diagnostics,
+        }
+
+    @staticmethod
+    def _active_job_for_task(task_name: str, task_dir: Path) -> dict | None:
+        with RUN_JOBS_LOCK:
+            jobs = sorted(
+                RUN_JOBS.values(),
+                key=lambda item: float(item.get("updated_at") or 0),
+                reverse=True,
+            )
+            for job in jobs:
+                if job.get("status") not in {"queued", "running", "paused"}:
+                    continue
+                if str(job.get("task_name") or "") == task_name or str(job.get("task_dir") or "") == str(task_dir):
+                    return json.loads(json.dumps(job, ensure_ascii=False))
+        return None
+
+    @classmethod
+    def _task_status_steps(cls, task_dir: Path, summary: dict, files: list[str], active_job: dict | None) -> list[dict]:
+        workflow_steps = cls._workflow_steps_for_task(task_dir)
+        output_files = {file: task_dir / file for file in files if re.match(r"^step_\d+_.*/output\.md$", file)}
+        by_step: dict[int, dict] = {}
+        for file, path in output_files.items():
+            step_no = cls._step_number_from_file(file)
+            if step_no:
+                by_step.setdefault(step_no, {})["output_file"] = file
+                by_step[step_no]["has_output"] = True
+                by_step[step_no]["size"] = path.stat().st_size if path.is_file() else 0
+                by_step[step_no]["mtime"] = path.stat().st_mtime if path.is_file() else 0
+
+        max_step = max(
+            [int(item.get("step") or 0) for item in workflow_steps if isinstance(item, dict)] + list(by_step.keys()) + [0]
+        )
+        active_step = int((active_job or {}).get("current_step") or 0)
+        completed_steps = int((active_job or {}).get("completed_steps") or summary.get("step_count") or 0)
+        awaiting_step = int(summary.get("awaiting_confirmation_step") or 0) if summary.get("awaiting_confirmation") else 0
+        blocked_step = int(summary.get("blocked_step") or 0) if summary.get("blocked_reason") else 0
+
+        steps: list[dict] = []
+        for index in range(1, max_step + 1):
+            workflow_step = next((item for item in workflow_steps if int(item.get("step") or 0) == index), {})
+            metadata = cls._step_metadata(task_dir, index)
+            output_info = by_step.get(index, {})
+            has_output = bool(output_info.get("has_output"))
+            if awaiting_step == index:
+                status = "awaiting_confirmation"
+            elif blocked_step == index:
+                status = "blocked"
+            elif active_step == index and (active_job or {}).get("status") in {"queued", "running"}:
+                status = "running"
+            elif has_output or index <= completed_steps:
+                status = "completed"
+            else:
+                status = "pending"
+            agent = metadata.get("agent_id") or workflow_step.get("agent") or ""
+            title = metadata.get("agent_name") or agent or f"Step {index}"
+            steps.append(
+                {
+                    "step": index,
+                    "status": status,
+                    "agent": agent,
+                    "title": title,
+                    "task": metadata.get("task") or workflow_step.get("task") or "",
+                    "expected_output": metadata.get("expected_output") or workflow_step.get("output") or "",
+                    "output_file": output_info.get("output_file", ""),
+                    "has_output": has_output,
+                    "size": output_info.get("size", 0),
+                    "mtime": output_info.get("mtime", 0),
+                    "needs_confirmation": awaiting_step == index,
+                    "blocked_reason": str(summary.get("blocked_reason") or "") if blocked_step == index else "",
+                }
+            )
+        return steps
+
+    @staticmethod
+    def _workflow_steps_for_task(task_dir: Path) -> list[dict]:
+        workflow_path = task_dir / "workflow.json"
+        if not workflow_path.is_file():
+            return []
+        try:
+            workflow = json.loads(workflow_path.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError:
+            return []
+        steps = workflow.get("steps") if isinstance(workflow, dict) else []
+        return steps if isinstance(steps, list) else []
+
+    @staticmethod
+    def _step_metadata(task_dir: Path, step_no: int) -> dict:
+        pattern = f"step_{step_no:02d}_*/metadata.json"
+        matches = sorted(task_dir.glob(pattern))
+        if not matches:
+            return {}
+        try:
+            data = json.loads(matches[0].read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _step_number_from_file(file: str) -> int:
+        match = re.match(r"^step_(\d+)_", str(file or ""))
+        return int(match.group(1)) if match else 0
+
+    @classmethod
+    def _task_status_production(cls, task_dir: Path, summary: dict, production_jobs: list[dict]) -> dict:
+        manifest_path = task_dir / "production_manifest.json"
+        manifest: dict = {}
+        manifest_error = ""
+        if manifest_path.is_file():
+            try:
+                loaded = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+                manifest = loaded if isinstance(loaded, dict) else {}
+            except json.JSONDecodeError as exc:
+                manifest_error = str(exc)
+        history = manifest.get("production_job_history") if isinstance(manifest.get("production_job_history"), list) else []
+        status = str(manifest.get("status") or summary.get("production_status") or "off")
+        allowed_retries = []
+        for job in production_jobs:
+            job_id = str(job.get("id") or "")
+            if job_id in {"material", "tts", "ffmpeg"}:
+                allowed_retries.append(job_id)
+        return {
+            "mode": str(manifest.get("mode") or "off"),
+            "status": status,
+            "manifest_file": str(manifest_path) if manifest_path.is_file() else "",
+            "manifest_error": manifest_error,
+            "jobs": production_jobs,
+            "history": history[-10:],
+            "allowed_retries": allowed_retries,
+        }
+
+    @classmethod
+    def _task_status_workflow(cls, summary: dict, steps: list[dict], active_job: dict | None, task_state: str) -> dict:
+        if active_job:
+            run_status = str(active_job.get("status") or "")
+            current_step = int(active_job.get("current_step") or 0)
+            completed_steps = int(active_job.get("completed_steps") or 0)
+            message = str(active_job.get("current_message") or active_job.get("error") or "")
+        else:
+            run_status = task_state
+            current_step = int(summary.get("blocked_step") or summary.get("resume_step") or 0)
+            completed_steps = len([step for step in steps if step.get("status") == "completed"])
+            message = str(summary.get("blocked_reason") or "")
+        return {
+            "run_status": run_status,
+            "current_step": current_step,
+            "completed_steps": completed_steps,
+            "total_steps": len(steps),
+            "awaiting_confirmation": bool(summary.get("awaiting_confirmation")),
+            "awaiting_confirmation_step": int(summary.get("awaiting_confirmation_step") or 0),
+            "blocked_reason": str(summary.get("blocked_reason") or ""),
+            "message": message,
+        }
+
+    @classmethod
+    def _task_status_diagnostics(
+        cls,
+        task_dir: Path,
+        summary: dict,
+        files: list[str],
+        task_state: str,
+        steps: list[dict],
+        production: dict,
+    ) -> list[dict]:
+        diagnostics: list[dict] = []
+        if not steps and files:
+            diagnostics.append({"level": "warn", "code": "missing_workflow_steps", "message": "任务有文件，但没有可识别的工作流步骤。"})
+        if production.get("manifest_error"):
+            diagnostics.append({"level": "error", "code": "invalid_production_manifest", "message": production["manifest_error"]})
+        production_status = str(production.get("status") or "").lower()
+        if cls._is_failed_production_status(production_status):
+            diagnostics.append({"level": "error", "code": "production_failed", "message": f"自动生产失败：{production.get('status')}"})
+        if summary.get("blocked_reason"):
+            diagnostics.append({"level": "warn", "code": "task_blocked", "message": str(summary.get("blocked_reason"))})
+        if task_state == "completed" and not any(file in {"long_video_final.mp4", "final_video.mp4"} for file in files):
+            final_video = any(str(file).lower().endswith((".mp4", ".mov", ".webm", ".m4v")) for file in files)
+            if not final_video:
+                diagnostics.append({"level": "info", "code": "no_final_media", "message": "任务已有文本结果，但尚未发现最终视频文件。"})
+        missing_outputs = [step["step"] for step in steps if step.get("status") in {"completed", "awaiting_confirmation"} and not step.get("has_output")]
+        if missing_outputs:
+            diagnostics.append({"level": "warn", "code": "missing_step_outputs", "message": f"步骤状态已完成但缺少 output.md：{missing_outputs}"})
+        return diagnostics
+
+    @classmethod
+    def _task_state(cls, summary: dict, files: list[str]) -> str:
+        if summary.get("awaiting_confirmation"):
+            return "awaiting_confirmation"
+        blocked_reason = str(summary.get("blocked_reason") or "").strip()
+        if blocked_reason:
+            return "blocked"
+        production_status = str(summary.get("production_status") or "").strip().lower()
+        if production_status and cls._is_failed_production_status(production_status):
+            return "failed"
+        if (summary.get("final_output") or "final_output.md" in files) and summary:
+            return "completed"
+        if any(file.startswith("step_") for file in files):
+            return "partial"
+        return "empty"
+
+    @staticmethod
+    def _allowed_task_actions(task_state: str, summary: dict, files: list[str]) -> list[str]:
+        actions = {"export"}
+        if "final_output.md" in files or any(file.startswith("step_") for file in files):
+            actions.add("rebuild_final")
+        if any(file.startswith("step_") and file.endswith("/output.md") for file in files):
+            actions.add("rerun_step")
+        if task_state in {"awaiting_confirmation", "blocked", "failed", "partial"}:
+            actions.add("resume")
+        if summary.get("awaiting_confirmation"):
+            actions.add("confirm_step")
+        return sorted(actions)
+
+    @staticmethod
+    def _task_assets(task_dir: Path, files: list[str]) -> dict:
+        images = []
+        videos = []
+        for file in files:
+            path = task_dir / file
+            if not path.is_file():
+                continue
+            if not WorkflowWebHandler._is_visible_media_asset(file):
+                continue
+            item = {
+                "file": file,
+                "name": Path(file).name,
+                "label": WorkflowWebHandler._asset_label(file),
+                "size": path.stat().st_size,
+                "mtime": path.stat().st_mtime,
+            }
+            suffix = path.suffix.lower()
+            if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+                images.append(item)
+            elif suffix in {".mp4", ".mov", ".webm", ".m4v"}:
+                videos.append(item)
+        images.sort(key=lambda item: WorkflowWebHandler._asset_sort_key(item["file"]))
+        videos.sort(key=lambda item: WorkflowWebHandler._asset_sort_key(item["file"]))
+        return {
+            "images": images,
+            "videos": videos,
+            "counts": {"images": len(images), "videos": len(videos), "total": len(images) + len(videos)},
+        }
+
+    @staticmethod
+    def _is_visible_media_asset(file: str) -> bool:
+        name = str(file or "")
+        if not name or name.startswith("export_package/") or name.startswith("step_"):
+            return False
+        suffix = Path(name).suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".m4v"}:
+            return False
+        if name in {"long_video_final.mp4", "final_video.mp4"}:
+            return True
+        return name.startswith(("generated_images/", "video_clips/", "comfyui/"))
+
+    @staticmethod
+    def _asset_sort_key(file: str) -> str:
+        name = str(file or "")
+        order = [
+            ("long_video_final.mp4", "00_"),
+            ("final_video.mp4", "00_"),
+            ("generated_images/", "10_"),
+            ("video_clips/", "20_"),
+            ("comfyui/", "60_"),
+        ]
+        for prefix, rank in order:
+            if name == prefix or name.startswith(prefix):
+                return rank + name
+        return "99_" + name
+
+    @staticmethod
+    def _asset_label(file: str) -> str:
+        name = str(file or "")
+        if name in {"long_video_final.mp4", "final_video.mp4"}:
+            return "最终视频"
+        if name.startswith("generated_images/"):
+            return f"图片素材 · {Path(name).name}"
+        if name.startswith("video_clips/"):
+            return f"视频素材 · {Path(name).name}"
+        if name.startswith("comfyui/"):
+            return f"ComfyUI 素材 · {Path(name).name}"
+        return Path(name).name
 
     def _file_content(self, task: str, file_name: str) -> dict:
         target, _ = self._safe_task_file(task, file_name, must_exist=True)
@@ -6514,6 +7256,66 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 str(payload.get("base_url") or "").strip() or None,
                 int(payload.get("timeout") or 0) or None,
             ),
+            daemon=True,
+        )
+        worker.start()
+        return job
+
+    def _retry_production_job(self, payload: dict) -> dict:
+        task = str(payload.get("task") or "").strip()
+        retry_job = str(payload.get("job") or "").strip().lower()
+        if retry_job not in {"material", "tts", "ffmpeg"}:
+            raise ValueError("job must be one of: material, tts, ffmpeg")
+        task_dir = self._safe_task_dir(task)
+        production_config = payload.get("production_config") or {}
+        if isinstance(production_config, dict):
+            production_image_config = production_config.get("image_config")
+            if isinstance(production_image_config, dict):
+                production_image_config["api_key"] = str(payload.get("image_api_key") or "").strip()
+                production_image_config["base_url"] = str(payload.get("image_base_url") or "").strip()
+            production_video_config = production_config.get("video_config")
+            if isinstance(production_video_config, dict):
+                production_video_config["api_key"] = str(payload.get("video_api_key") or "").strip()
+                production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
+            production_compose_config = production_config.get("compose_config")
+            if isinstance(production_compose_config, dict):
+                production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
+                production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
+
+        summary = {}
+        summary_path = task_dir / "run_summary.json"
+        if summary_path.exists():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except json.JSONDecodeError:
+                summary = {}
+
+        run_id = uuid4().hex
+        job = {
+            "run_id": run_id,
+            "status": "queued",
+            "workflow": summary.get("workflow") or task,
+            "task_title": summary.get("task_title") or "",
+            "workflow_name": summary.get("workflow") or task,
+            "task_dir": str(task_dir),
+            "task_name": task_dir.name,
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "total_steps": 0,
+            "completed_steps": 0,
+            "steps": [],
+            "cancel_requested": False,
+            "pause_requested": False,
+            "production_retry": True,
+            "production_retry_job": retry_job,
+            "current_message": f"准备重试生产任务：{retry_job}",
+        }
+        with RUN_JOBS_LOCK:
+            RUN_JOBS[run_id] = job
+
+        worker = threading.Thread(
+            target=self._run_retry_production_job,
+            args=(run_id, task_dir, retry_job, production_config if isinstance(production_config, dict) else {}),
             daemon=True,
         )
         worker.start()

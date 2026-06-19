@@ -78,6 +78,7 @@ class CloudComfyUIAdapter:
         generated_reference_map: dict[str, str] = {}
         video_job_index = 0
         success_count = 0
+        self._reference_search_dirs = [output_dir, output_dir.parent]
         self._emit(f"ComfyUI 素材批量任务开始：{len(selected_jobs)} 个", total_jobs=len(selected_jobs), completed_jobs=0)
 
         for index, job in enumerate(selected_jobs, start=1):
@@ -87,10 +88,10 @@ class CloudComfyUIAdapter:
             job_dir.mkdir(parents=True, exist_ok=True)
             job_config = self._compose_config_for_job(job, compose_config)
             if job_type in {"image", "video"}:
+                job = dict(job)
                 reference_image = str(job.get("reference_image") or "").strip()
                 resolved_reference = self._resolve_reference_image(reference_image, generated_reference_map)
                 if resolved_reference:
-                    job = dict(job)
                     job["reference_image"] = self._reference_image_value(resolved_reference)
                     self._emit(
                         f"已把{job_type}素材 {index}/{len(selected_jobs)} 的参考图映射到本地生成图片",
@@ -105,7 +106,6 @@ class CloudComfyUIAdapter:
                     )
                 elif job_type == "video" and generated_reference_images:
                     paired_index = min(video_job_index, len(generated_reference_images) - 1)
-                    job = dict(job)
                     job["reference_image"] = self._reference_image_value(generated_reference_images[paired_index])
                     self._emit(
                         f"已把第 {paired_index + 1} 张生图作为视频素材 {index}/{len(selected_jobs)} 的参考图",
@@ -120,7 +120,6 @@ class CloudComfyUIAdapter:
                     )
                 elif job_type == "image" and generated_reference_images:
                     previous_index = len(generated_reference_images) - 1
-                    job = dict(job)
                     job["reference_image"] = self._reference_image_value(generated_reference_images[previous_index])
                     self._emit(
                         f"已把上一张生图作为生图素材 {index}/{len(selected_jobs)} 的参考图",
@@ -133,6 +132,20 @@ class CloudComfyUIAdapter:
                         material_type=job_type,
                         job_type=job_type,
                     )
+                else:
+                    if reference_image:
+                        self._emit(
+                            f"忽略未解析的参考图：{reference_image}",
+                            total_jobs=len(selected_jobs),
+                            completed_jobs=index - 1,
+                            current_job=index,
+                            job_index=index,
+                            job_count=len(selected_jobs),
+                            material_name=job_name,
+                            material_type=job_type,
+                            job_type=job_type,
+                        )
+                    job["reference_image"] = ""
                 if job_type == "video":
                     video_job_index += 1
             job_payload = self._payload_for_material_job(job["base_payload"], job, index)
@@ -417,10 +430,20 @@ class CloudComfyUIAdapter:
             "{{seed}}": str(comfyui_payload.get("seed") or ""),
             "{{width}}": str(comfyui_payload.get("width") or ""),
             "{{height}}": str(comfyui_payload.get("height") or ""),
+            "{{task_type}}": str(comfyui_payload.get("task_type") or ""),
+            "{{control_mode}}": str(comfyui_payload.get("control_mode") or ""),
+            "{{duration}}": str(comfyui_payload.get("duration") or ""),
+            "{{fps}}": str(comfyui_payload.get("fps") or ""),
+            "{{denoise}}": str(comfyui_payload.get("denoise") or ""),
+            "{{ipadapter_weight}}": str(comfyui_payload.get("ipadapter_weight") or ""),
+            "{{reference_strength}}": str(comfyui_payload.get("reference_strength") or ""),
+            "{{motion_strength}}": str(comfyui_payload.get("motion_strength") or ""),
+            "{{pose_video}}": str(comfyui_payload.get("pose_video") or ""),
             "{{prompt}}": self._first_prompt(comfyui_payload),
         }
         if node_info:
             node_info = self._replace_placeholders(node_info, replacements)
+            node_info = self._drop_empty_image_node_info(node_info)
         payload: dict[str, Any] = {
             "apiKey": self.api_key,
             "addMetadata": bool(compose_config.get("add_metadata", True)),
@@ -432,6 +455,19 @@ class CloudComfyUIAdapter:
         if app_id:
             payload["webappId"] = app_id
         return payload
+
+    @staticmethod
+    def _drop_empty_image_node_info(node_info: list[Any]) -> list[Any]:
+        cleaned: list[Any] = []
+        for item in node_info:
+            if (
+                isinstance(item, dict)
+                and str(item.get("fieldName") or "").strip().lower() == "image"
+                and str(item.get("fieldValue") or "").strip() == ""
+            ):
+                continue
+            cleaned.append(item)
+        return cleaned
 
     def _expand_material_jobs(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any]) -> list[dict[str, Any]]:
         prompt_types = {"image", "video"} if self._uses_workflow_library(compose_config) else self._workflow_prompt_types(compose_config)
@@ -478,8 +514,8 @@ class CloudComfyUIAdapter:
         if typed:
             configured = typed
         if job_type == "video":
-            return cls._first_matching_preset(configured, ("image_to_video", "ltx", "video", "broll", "视频", "图生视频", "生视频"))
-        return cls._first_matching_preset(configured, ("txt_img", "z_image", "image", "keyframe", "文生图", "生图", "关键帧", "配图"))
+            return cls._first_matching_preset(configured, ("all_in_one_video", "全能视频", "universal_video", "image_to_video", "ltx", "video", "broll", "视频", "图生视频", "生视频"))
+        return cls._first_matching_preset(configured, ("all_in_one_image", "全能图片", "universal_image", "txt_img", "z_image", "image", "keyframe", "文生图", "生图", "关键帧", "配图"))
 
     @classmethod
     def _library_item_supports_material_type(cls, item: dict[str, Any], material_type: str) -> bool:
@@ -524,9 +560,9 @@ class CloudComfyUIAdapter:
         text = f"{preset_id} {preset_name}"
         if any(key in text for key in ("03_reference", "reference_consistency", "04_broll", "broll")):
             return {"image", "video"}
-        if any(key in text for key in ("02_ltx_video", "image_to_video", "video", "图生视频", "视频")):
+        if any(key in text for key in ("all_in_one_video", "universal_video", "02_ltx_video", "image_to_video", "video", "全能视频", "图生视频", "视频")):
             return {"video"}
-        if any(key in text for key in ("01_image", "z_image", "txt_img", "image", "subtitle", "文生图", "生图", "素材")):
+        if any(key in text for key in ("all_in_one_image", "universal_image", "01_image", "z_image", "txt_img", "image", "全能图片", "文生图", "生图", "素材")):
             return {"image"}
         return {"image", "video"}
 
@@ -658,18 +694,38 @@ class CloudComfyUIAdapter:
                 return value.strip()
         return ""
 
-    @classmethod
-    def _resolve_reference_image(cls, reference_image: str, generated_reference_map: dict[str, str]) -> str:
+    def _resolve_reference_image(self, reference_image: str, generated_reference_map: dict[str, str]) -> str:
         text = str(reference_image or "").strip()
         if not text:
             return ""
-        if text.startswith(("http://", "https://", "data:image/")) or Path(text).is_file():
+        if text.startswith(("http://", "https://", "data:image/")):
             return text
-        keys = cls._reference_lookup_keys(text)
+        path = self._resolve_reference_path(text)
+        if path:
+            return str(path)
+        keys = self._reference_lookup_keys(text)
         for key in keys:
             if key in generated_reference_map:
                 return generated_reference_map[key]
         return ""
+
+    def _resolve_reference_path(self, value: str) -> Path | None:
+        text = str(value or "").strip()
+        if not text or text.startswith(("http://", "https://", "data:image/")):
+            return None
+        direct = Path(text)
+        if direct.is_file():
+            return direct
+        if direct.is_absolute():
+            return None
+        for base in getattr(self, "_reference_search_dirs", []) or []:
+            candidate = (Path(base) / text).resolve()
+            if candidate.is_file():
+                return candidate
+            name_candidate = (Path(base) / direct.name).resolve()
+            if name_candidate.is_file():
+                return name_candidate
+        return None
 
     @classmethod
     def _reference_keys_for_job(cls, job: dict[str, Any]) -> set[str]:
@@ -715,9 +771,27 @@ class CloudComfyUIAdapter:
         negative = str(job.get("negative_prompt") or "").strip()
         reference_image = str(job.get("reference_image") or "").strip()
         job_type = str(job.get("type") or "material")
+        prompt_data = job.get("prompt_data") if isinstance(job.get("prompt_data"), dict) else {}
+        group = job.get("group") if isinstance(job.get("group"), dict) else {}
         payload["workflow_item_index"] = index
         payload["workflow_item_name"] = str(job.get("name") or f"material_{index:02d}")
         payload["workflow_item_type"] = job_type
+        payload["task_type"] = str(
+            prompt_data.get("task_type")
+            or prompt_data.get("taskType")
+            or group.get("task_type")
+            or group.get("taskType")
+            or (base_payload.get("video_task_type") if job_type == "video" else base_payload.get("image_task_type"))
+            or ("img2video" if job_type == "video" and reference_image else "txt2video" if job_type == "video" else "img2img" if reference_image else "txt2img")
+        )
+        payload["control_mode"] = str(
+            prompt_data.get("control_mode")
+            or prompt_data.get("controlMode")
+            or group.get("control_mode")
+            or group.get("controlMode")
+            or base_payload.get("control_mode")
+            or ("first_frame" if job_type == "video" and reference_image else "reference_image" if reference_image else "none")
+        )
         payload["prompt"] = prompt
         payload["negative_prompt"] = negative
         if job_type == "video":
@@ -748,9 +822,18 @@ class CloudComfyUIAdapter:
             ]
         if reference_image:
             payload["reference_image"] = reference_image
+        else:
+            payload.pop("reference_image", None)
+            payload.pop("reference_images", None)
         payload["has_reference_image"] = bool(reference_image)
-        for key in ("seed", "width", "height"):
-            value = job.get(key)
+        for key in ("seed", "width", "height", "duration", "fps", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "pose_video"):
+            value = (
+                prompt_data.get(key)
+                if key in prompt_data
+                else group.get(key)
+                if key in group
+                else job.get(key)
+            )
             if value not in (None, ""):
                 payload[key] = value
         return payload
@@ -761,8 +844,8 @@ class CloudComfyUIAdapter:
             return ""
         if text.startswith(("http://", "https://", "data:image/")):
             return text
-        path = Path(text)
-        if not path.is_file():
+        path = self._resolve_reference_path(text)
+        if not path:
             return text
         if "runninghub" in self.base_url.lower():
             try:
@@ -821,11 +904,31 @@ class CloudComfyUIAdapter:
         data = parsed.get("data") if isinstance(parsed, dict) else {}
         url_value = ""
         if isinstance(data, dict):
-            url_value = str(data.get("download_url") or data.get("url") or "").strip()
+            url_value = str(
+                data.get("fileName")
+                or data.get("file_name")
+                or data.get("filename")
+                or data.get("path")
+                or data.get("filePath")
+                or data.get("file_path")
+                or data.get("download_url")
+                or data.get("url")
+                or ""
+            ).strip()
         if not url_value and isinstance(parsed, dict):
-            url_value = str(parsed.get("download_url") or parsed.get("url") or "").strip()
+            url_value = str(
+                parsed.get("fileName")
+                or parsed.get("file_name")
+                or parsed.get("filename")
+                or parsed.get("path")
+                or parsed.get("filePath")
+                or parsed.get("file_path")
+                or parsed.get("download_url")
+                or parsed.get("url")
+                or ""
+            ).strip()
         if not url_value:
-            raise ValueError(f"RunningHub media upload did not return download_url: {raw[:300]}")
+            raise ValueError(f"RunningHub media upload did not return a usable file value: {raw[:300]}")
         self._emit(f"RunningHub 参考图上传成功：{path.name}", url=url_value, output_file=str(path))
         return url_value
 

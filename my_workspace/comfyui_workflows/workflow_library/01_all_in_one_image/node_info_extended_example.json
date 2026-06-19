@@ -1,0 +1,22 @@
+[
+  {
+    "role": "task_type_selector",
+    "fieldValue": "{{task_type}}"
+  },
+  {
+    "role": "control_mode_selector",
+    "fieldValue": "{{control_mode}}"
+  },
+  {
+    "role": "ipadapter_weight",
+    "fieldValue": "{{ipadapter_weight}}"
+  },
+  {
+    "role": "img2img_denoise",
+    "fieldValue": "{{denoise}}"
+  },
+  {
+    "role": "seed",
+    "fieldValue": "{{seed}}"
+  }
+]

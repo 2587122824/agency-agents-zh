@@ -1,0 +1,101 @@
+{
+  "id": "all_in_one_image",
+  "title": "全能图片",
+  "material_type": "image",
+  "purpose": "One API entrypoint for txt2img, img2img, keyframe, cover, character, product and style-reference image jobs.",
+  "required_inputs": {
+    "task_type": "txt2img | img2img | keyframe | cover | product | character",
+    "control_mode": "none | reference_image | ipadapter_character | ipadapter_product | style_reference",
+    "prompt": "positive image prompt",
+    "negative_prompt": "negative image prompt",
+    "reference_image": "optional uploaded image value",
+    "has_reference_image": "boolean",
+    "width": "number",
+    "height": "number",
+    "seed": "number or blank",
+    "denoise": "number, recommended 0.45-0.75 for img2img",
+    "ipadapter_weight": "number, recommended 0.55-0.85"
+  },
+  "recommended_branches": [
+    {
+      "mode": "none",
+      "branch": "txt2img",
+      "description": "Prompt only generation."
+    },
+    {
+      "mode": "reference_image",
+      "branch": "img2img",
+      "description": "Reference image to latent/image conditioning."
+    },
+    {
+      "mode": "ipadapter_character",
+      "branch": "ipadapter_character",
+      "description": "Reference image through CLIPVision/IPAdapter Face or Character preset."
+    },
+    {
+      "mode": "ipadapter_product",
+      "branch": "ipadapter_product",
+      "description": "Reference image through IPAdapter Plus/product preserving preset."
+    },
+    {
+      "mode": "style_reference",
+      "branch": "ipadapter_style",
+      "description": "Reference image through IPAdapter Style or style adapter branch."
+    }
+  ],
+  "logical_node_roles": [
+    {
+      "role": "positive_prompt",
+      "placeholder": "{{prompt}}"
+    },
+    {
+      "role": "negative_prompt",
+      "placeholder": "{{negative_prompt}}"
+    },
+    {
+      "role": "reference_load_image",
+      "placeholder": "{{reference_image}}"
+    },
+    {
+      "role": "reference_enabled_switch",
+      "placeholder": "{{has_reference_image}}"
+    },
+    {
+      "role": "control_mode_switch_or_selector",
+      "placeholder": "{{control_mode}}"
+    },
+    {
+      "role": "task_type_switch_or_selector",
+      "placeholder": "{{task_type}}"
+    },
+    {
+      "role": "ipadapter_weight",
+      "placeholder": "{{ipadapter_weight}}"
+    },
+    {
+      "role": "img2img_denoise",
+      "placeholder": "{{denoise}}"
+    },
+    {
+      "role": "image_width",
+      "placeholder": "{{width}}"
+    },
+    {
+      "role": "image_height",
+      "placeholder": "{{height}}"
+    },
+    {
+      "role": "seed",
+      "placeholder": "{{seed}}"
+    },
+    {
+      "role": "save_image_prefix",
+      "placeholder": "all_in_one_image"
+    }
+  ],
+  "implementation_notes": [
+    "Build this in ComfyUI first, then export API JSON and map real node IDs in the management UI.",
+    "The shipped api_template.json and runninghub_node_info_list_preset.json are stable contracts and examples, not a guarantee that node IDs match your local workflow.",
+    "Keep output image-only. Do not include audio, subtitle or final editing nodes."
+  ]
+}

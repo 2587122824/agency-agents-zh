@@ -98,8 +98,11 @@ color: "#7C3AED"
       "shot": 1,
       "positive": "完整视频生成正向提示词",
       "negative": "负向提示词",
+      "task_type": "img2video",
+      "control_mode": "none | first_frame | ipadapter_character | ipadapter_product | openpose_motion",
       "reference_image": "可选首帧/关键帧路径",
       "duration": "5s",
+      "fps": 24,
       "width": 1920,
       "height": 1080,
       "usage": "视频片段/静态图后期动画"
@@ -125,6 +128,7 @@ color: "#7C3AED"
 - 镜头生成清单有多少个镜头，`## 4. 视频模型提示词` 就必须有多少个 `### 镜头 N` 小节，编号必须连续且一一对应。
 - 对静态图、信息图、流程图镜头，也必须输出完整提示词，并注明“建议静态图/后期动画”，不能省略该镜头的提示词块。
 - `## 7. ComfyUI 生视频参数包` 的 `video_prompts` 必须覆盖全部镜头，供运行时直接调用 ComfyUI / RunningHub；不要把这项工作留给 21 号员工。
+- `video_prompts` 面向“全能视频 API”，必须填写 `task_type` 和 `control_mode`；不要写节点 ID、模型节点名或 RunningHub 内部参数。
 - 对人物、品牌、版权、医疗金融等敏感内容保持保守表达。
 - 如用户指定工具，按该工具能力调整提示词；未指定时输出通用视频生成提示词。
 - 如果管理台显示视频平台 API Key 或 Base URL 已填写，也只能把它作为“后续可接入 API 的条件”记录，不要输出密钥或地址，不要假装已经调用接口。

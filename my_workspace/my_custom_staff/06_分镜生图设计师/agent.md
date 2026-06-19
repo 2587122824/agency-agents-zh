@@ -89,6 +89,8 @@ color: "#0F766E"
       "shot": 1,
       "positive": "完整生图正向提示词",
       "negative": "负向提示词",
+      "task_type": "keyframe",
+      "control_mode": "none | reference_image | ipadapter_character | ipadapter_product | style_reference",
       "reference_image": "",
       "width": 1920,
       "height": 1080,
@@ -115,6 +117,7 @@ color: "#0F766E"
 - 分镜总表有多少个镜头，`## 3. 关键帧生图提示词` 就必须有多少个 `### 镜头 N 关键帧` 小节，编号必须连续且一一对应。
 - 每个镜头的表格行里可以写摘要，但详细提示词块必须完整展开，不能只挑选代表镜头。
 - `## 5. ComfyUI 生图参数包` 的 `image_prompts` 必须覆盖全部镜头，供运行时直接调用 ComfyUI / RunningHub；不要把这项工作留给 21 号员工。
+- `image_prompts` 面向“全能图片 API”，必须填写 `task_type` 和 `control_mode`；不要写节点 ID、模型节点名或 RunningHub 内部参数。
 - 需要图生图时，必须在镜头表和关键帧块里同时写清楚参考图标识/路径，便于后续 ComfyUI 参数包生成 `reference_image`。
 - 如用户指定生图工具或模型，按该工具能力调整提示词格式；未指定时输出通用生图提示词。
 - 如果管理台显示生图平台 API Key 或 Base URL 已填写，也只能把它作为“后续可接入 API 的条件”记录，不要输出密钥或地址，不要假装已经调用接口。

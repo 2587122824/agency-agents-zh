@@ -1,7 +1,7 @@
 {
   "2483": {
     "inputs": {
-      "text": "Use the reference image as strict person identity control. Keep the same face shape, facial features, hairstyle, body proportions, outfit, product appearance, color palette and subject silhouette. {{prompt}}"
+      "text": "Use the reference image as strict person identity control when control_mode is enabled. {{prompt}}"
     },
     "class_type": "CLIPTextEncode",
     "_meta": {
@@ -10,7 +10,7 @@
   },
   "2612": {
     "inputs": {
-      "text": "identity drift, different person, different face, changed facial features, changed hairstyle, changed outfit, inconsistent body proportions, distorted face, deformed body, bad hands, inconsistent product, {{negative_prompt}}"
+      "text": "identity drift, different person, different face, changed outfit, deformed body, bad hands, inconsistent product, {{negative_prompt}}"
     },
     "class_type": "CLIPTextEncode",
     "_meta": {
@@ -42,7 +42,7 @@
     },
     "class_type": "LTXVImgToVideoConditionOnly",
     "_meta": {
-      "title": "person_identity_reference_strength"
+      "title": "reference_strength"
     }
   },
   "4979": {
@@ -68,7 +68,7 @@
   },
   "4823": {
     "inputs": {
-      "filename_prefix": "ltx_video_2_3_clip"
+      "filename_prefix": "all_in_one_video"
     },
     "class_type": "SaveVideo",
     "_meta": {
@@ -77,7 +77,7 @@
   },
   "4852": {
     "inputs": {
-      "filename_prefix": "ltx_video_2_3_clip"
+      "filename_prefix": "all_in_one_video"
     },
     "class_type": "SaveVideo",
     "_meta": {

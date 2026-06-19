@@ -1,0 +1,122 @@
+{
+  "id": "all_in_one_video",
+  "title": "全能视频",
+  "material_type": "video",
+  "purpose": "One API entrypoint for txt2video, img2video, first-frame video, b-roll, transition, talking head and product demo video jobs.",
+  "required_inputs": {
+    "task_type": "txt2video | img2video | first_frame | broll | transition | talking_head | product_demo",
+    "control_mode": "none | first_frame | ipadapter_character | ipadapter_product | openpose_motion",
+    "prompt": "positive video prompt",
+    "negative_prompt": "negative video prompt",
+    "reference_image": "optional first frame or identity/product reference",
+    "has_reference_image": "boolean",
+    "pose_video": "optional pose/motion reference video for openpose_motion",
+    "duration": "seconds",
+    "fps": "frames per second",
+    "width": "number",
+    "height": "number",
+    "seed": "number or blank",
+    "reference_strength": "number, recommended 0.75-1.0 for first-frame conditioning",
+    "ipadapter_weight": "number, recommended 0.55-0.85",
+    "motion_strength": "number, workflow-specific"
+  },
+  "recommended_branches": [
+    {
+      "mode": "none",
+      "branch": "txt2video",
+      "description": "Prompt only video generation."
+    },
+    {
+      "mode": "first_frame",
+      "branch": "img2video",
+      "description": "Reference image as first frame / I2V conditioning."
+    },
+    {
+      "mode": "ipadapter_character",
+      "branch": "ipadapter_character_i2v",
+      "description": "Reference image through IPAdapter/FaceID branch while video model still generates motion."
+    },
+    {
+      "mode": "ipadapter_product",
+      "branch": "ipadapter_product_i2v",
+      "description": "Product reference image through IPAdapter branch for product consistency."
+    },
+    {
+      "mode": "openpose_motion",
+      "branch": "pose_video_to_video",
+      "description": "Use pose_video or pose frame sequence, not a single still image, to control motion."
+    }
+  ],
+  "logical_node_roles": [
+    {
+      "role": "positive_prompt",
+      "placeholder": "{{prompt}}"
+    },
+    {
+      "role": "negative_prompt",
+      "placeholder": "{{negative_prompt}}"
+    },
+    {
+      "role": "reference_load_image",
+      "placeholder": "{{reference_image}}"
+    },
+    {
+      "role": "reference_enabled_switch",
+      "placeholder": "{{has_reference_image}}"
+    },
+    {
+      "role": "control_mode_switch_or_selector",
+      "placeholder": "{{control_mode}}"
+    },
+    {
+      "role": "task_type_switch_or_selector",
+      "placeholder": "{{task_type}}"
+    },
+    {
+      "role": "pose_video_input",
+      "placeholder": "{{pose_video}}"
+    },
+    {
+      "role": "reference_strength",
+      "placeholder": "{{reference_strength}}"
+    },
+    {
+      "role": "ipadapter_weight",
+      "placeholder": "{{ipadapter_weight}}"
+    },
+    {
+      "role": "motion_strength",
+      "placeholder": "{{motion_strength}}"
+    },
+    {
+      "role": "frame_count_or_duration",
+      "placeholder": "{{duration}}"
+    },
+    {
+      "role": "fps",
+      "placeholder": "{{fps}}"
+    },
+    {
+      "role": "video_width",
+      "placeholder": "{{width}}"
+    },
+    {
+      "role": "video_height",
+      "placeholder": "{{height}}"
+    },
+    {
+      "role": "seed",
+      "placeholder": "{{seed}}"
+    },
+    {
+      "role": "save_video_prefix",
+      "placeholder": "all_in_one_video"
+    }
+  ],
+  "implementation_notes": [
+    "Build this in ComfyUI first, then export API JSON and map real node IDs in the management UI.",
+    "Keep output video-only. Do not include generated audio; TTS/FFmpeg handle voice, subtitles and final mix.",
+    "Do not use one still image as the OpenPose control for an entire clip. Use pose_video or a pose frame sequence for openpose_motion.",
+    "If the video model cannot accept IPAdapter directly, keep IPAdapter in an upstream keyframe/identity branch and feed its result to I2V."
+  ]
+}
