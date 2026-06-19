@@ -28,9 +28,62 @@ MEMORY_ROOT = WORKSPACE_ROOT / "my_memory"
 REFERENCE_ROOT = WORKSPACE_ROOT / "my_reference_images"
 VOICE_SAMPLE_ROOT = WORKSPACE_ROOT / "my_voice_samples"
 KNOWLEDGE_ROOT = WORKSPACE_ROOT / "my_knowledge_base"
+ASSET_LIBRARY_ROOT = WORKSPACE_ROOT / "my_asset_library"
+ASSET_LIBRARY_INDEX = ASSET_LIBRARY_ROOT / "library.json"
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
+
+CONTENT_COLUMNS = [
+    {
+        "id": "ai_automation_case",
+        "name": "AI 自动化案例拆解",
+        "audience": "中小企业老板、运营负责人、AI 自动化服务商",
+        "structure": "痛点开场 -> 真实业务场景 -> 自动化流程拆解 -> 成本/风险 -> 落地建议",
+        "visual_style": "真实办公场景、软件界面、流程图、少量人物口播和 B-roll",
+        "sample": "围绕一个具体行业或岗位，拆解如何用 AI 员工减少重复劳动。要求专业、克制、不承诺具体收益。",
+    },
+    {
+        "id": "tool_review",
+        "name": "工具测评 / 工具对比",
+        "audience": "想选工具的创业者、运营、内容团队",
+        "structure": "使用场景 -> 核心功能 -> 优缺点 -> 与替代方案对比 -> 推荐人群",
+        "visual_style": "录屏、界面特写、对比表、简洁科技风",
+        "sample": "测评一个 AI 工具在真实业务中的表现，重点讲适用边界、成本和替代方案。",
+    },
+    {
+        "id": "industry_solution",
+        "name": "行业方案展示",
+        "audience": "垂直行业客户、老板、业务负责人",
+        "structure": "行业现状 -> 典型流程 -> 方案架构 -> 执行步骤 -> 交付物展示",
+        "visual_style": "行业场景图、流程图、仪表盘、稳定统一的品牌视觉",
+        "sample": "针对一个行业设计 AI 自动化解决方案，强调可落地流程和实际交付物。",
+    },
+    {
+        "id": "digital_employee_demo",
+        "name": "数字员工工作流演示",
+        "audience": "对 AI Agent/工作流感兴趣的技术和业务用户",
+        "structure": "任务目标 -> 数字员工分工 -> 执行过程 -> 输出结果 -> 可复用模板",
+        "visual_style": "管理台录屏、节点流程、输出文件、简洁解说",
+        "sample": "演示一个数字员工团队如何完成从需求到素材到成片的完整任务。",
+    },
+    {
+        "id": "pain_point_solution",
+        "name": "客户痛点解决方案",
+        "audience": "正在被效率、获客、内容生产困扰的业务方",
+        "structure": "痛点故事 -> 错误做法 -> 正确方案 -> 实施清单 -> 下一步行动",
+        "visual_style": "人物场景、问题对比、清单卡片、案例感镜头",
+        "sample": "从一个高频业务痛点切入，给出清晰、保守、可执行的 AI 自动化解决路径。",
+    },
+    {
+        "id": "topic_breakdown",
+        "name": "爆款选题复盘",
+        "audience": "内容创作者、运营、知识博主",
+        "structure": "选题现象 -> 爆点拆解 -> 内容结构 -> 可复用公式 -> 反面风险",
+        "visual_style": "信息图、标题卡、案例截图、节奏较快的 B-roll",
+        "sample": "复盘一个热门选题为什么有效，并改造成适合自己业务的内容选题公式。",
+    },
+]
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -137,6 +190,7 @@ INDEX_HTML = r"""<!doctype html>
     body[data-view="config"] main,
     body[data-view="staff"] main,
     body[data-view="workflow"] main,
+    body[data-view="assets"] main,
     body[data-view="system"] main {
       grid-template-columns: 1fr;
     }
@@ -1003,6 +1057,151 @@ INDEX_HTML = r"""<!doctype html>
       background: #f8fafc;
       margin-bottom: 4px;
     }
+    .asset-gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+      gap: 10px;
+      max-height: 360px;
+      overflow: auto;
+      padding: 2px;
+      align-items: start;
+    }
+    .asset-card {
+      position: relative;
+      display: grid;
+      gap: 7px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      padding: 7px;
+      min-width: 0;
+      cursor: pointer;
+      text-align: left;
+      overflow: hidden;
+      box-shadow: var(--shadow-soft);
+      transition: transform .14s ease, box-shadow .14s ease, border-color .14s ease;
+    }
+    .asset-card:hover {
+      transform: translateY(-1px);
+      border-color: var(--accent);
+      box-shadow: 0 12px 24px rgba(15, 23, 42, .12);
+    }
+    .asset-card-media {
+      width: 100%;
+      aspect-ratio: 16 / 10;
+      border-radius: 9px;
+      overflow: hidden;
+      background: linear-gradient(135deg, #e2e8f0, #f8fafc);
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .asset-card-media img,
+    .asset-card-media video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .asset-card-kind {
+      position: absolute;
+      top: 12px;
+      left: 12px;
+      border-radius: 999px;
+      background: rgba(15, 23, 42, .72);
+      color: #fff;
+      padding: 3px 7px;
+      font-size: 11px;
+      font-weight: 700;
+      backdrop-filter: blur(8px);
+    }
+    .asset-card-title {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 700;
+      color: #0f172a;
+    }
+    .asset-card-subtitle {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .asset-lightbox {
+      position: fixed;
+      inset: 0;
+      z-index: 10000;
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
+      background: rgba(2, 6, 23, .9);
+      color: #fff;
+      padding: 18px;
+      gap: 12px;
+    }
+    .asset-lightbox[hidden] {
+      display: none;
+    }
+    .asset-lightbox-head,
+    .asset-lightbox-foot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+    }
+    .asset-lightbox-title {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+    .asset-lightbox-title strong,
+    .asset-lightbox-title span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .asset-lightbox-body {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr) 54px;
+      align-items: center;
+      gap: 14px;
+    }
+    .asset-lightbox-stage {
+      min-width: 0;
+      min-height: 0;
+      height: 100%;
+      display: grid;
+      place-items: center;
+      border-radius: 16px;
+      background: rgba(15, 23, 42, .6);
+      overflow: hidden;
+    }
+    .asset-lightbox-stage img,
+    .asset-lightbox-stage video {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 12px;
+      background: #000;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
+    }
+    .asset-lightbox button {
+      border-color: rgba(255, 255, 255, .26);
+      background: rgba(255, 255, 255, .1);
+      color: #fff;
+    }
+    .asset-lightbox-nav {
+      width: 48px;
+      height: 56px;
+      border-radius: 999px;
+      font-size: 26px;
+    }
     .step-confirm-bar {
       margin: 0 14px 12px;
       border: 1px solid #99f6e4;
@@ -1278,6 +1477,7 @@ INDEX_HTML = r"""<!doctype html>
         <button class="nav-btn" data-view-target="config" type="button">系统配置</button>
         <button class="nav-btn" data-view-target="staff" type="button">数字员工</button>
         <button class="nav-btn" data-view-target="workflow" type="button">工作流</button>
+        <button class="nav-btn" data-view-target="assets" type="button">素材库</button>
         <button class="nav-btn" data-view-target="output" type="button">任务输出</button>
         <button class="nav-btn" data-view-target="system" type="button">系统状态</button>
       </nav>
@@ -1311,6 +1511,14 @@ INDEX_HTML = r"""<!doctype html>
             </label>
             <label>任务名称
               <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI员工工作流平台长视频，可留空" />
+            </label>
+            <label>内容栏目
+              <select id="contentColumn">
+                <option value="">不使用栏目模板</option>
+              </select>
+            </label>
+            <label>栏目操作
+              <button id="applyContentColumnBtn" type="button">套用栏目模板</button>
             </label>
           </div>
           <div class="run-model-grid" id="modelRuntimeConfig">
@@ -1988,6 +2196,22 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
 
+      <div class="panel form view" data-view="assets" hidden>
+        <div class="manager-toolbar">
+          <div class="manager-title">
+            <strong>素材库</strong>
+            <span class="muted small">把满意的图片/视频收藏到这里，后续选题和生成时反复复用。</span>
+          </div>
+          <div class="row">
+            <button id="refreshAssetLibraryBtn" type="button">刷新素材库</button>
+            <span id="assetLibraryStatus" class="status">未加载</span>
+          </div>
+        </div>
+        <div class="asset-gallery" id="assetLibraryGrid">
+          <div class="muted small">从“任务输出”的已生成素材里点击“收藏”，这里会显示可复用素材。</div>
+        </div>
+      </div>
+
       <div class="panel viewer view" data-view="output" hidden>
         <div class="viewer-head">
           <div>
@@ -2068,6 +2292,28 @@ INDEX_HTML = r"""<!doctype html>
         <textarea class="file-editor" id="fileContent" spellcheck="false">选择左侧任务，或运行一个新任务。</textarea>
       </div>
 
+      <div class="asset-lightbox" id="assetLightbox" hidden>
+        <div class="asset-lightbox-head">
+          <div class="asset-lightbox-title">
+            <strong id="assetLightboxTitle">素材预览</strong>
+            <span class="muted small" id="assetLightboxMeta"></span>
+          </div>
+          <div class="row">
+            <button id="assetLightboxOpenBtn" type="button">新窗口打开</button>
+            <button id="assetLightboxCloseBtn" type="button">关闭</button>
+          </div>
+        </div>
+        <div class="asset-lightbox-body">
+          <button class="asset-lightbox-nav" id="assetLightboxPrevBtn" type="button" aria-label="上一张">‹</button>
+          <div class="asset-lightbox-stage" id="assetLightboxStage"></div>
+          <button class="asset-lightbox-nav" id="assetLightboxNextBtn" type="button" aria-label="下一张">›</button>
+        </div>
+        <div class="asset-lightbox-foot">
+          <span class="muted small">支持键盘 ← / → 翻页，Esc 关闭</span>
+          <span class="muted small" id="assetLightboxCounter"></span>
+        </div>
+      </div>
+
       <div class="panel form view" data-view="system" hidden>
         <div class="row">
           <strong>系统状态</strong>
@@ -2126,6 +2372,8 @@ INDEX_HTML = r"""<!doctype html>
       model: document.getElementById('model'),
       customModel: document.getElementById('customModel'),
       taskTitle: document.getElementById('taskTitle'),
+      contentColumn: document.getElementById('contentColumn'),
+      applyContentColumnBtn: document.getElementById('applyContentColumnBtn'),
       apiKey: document.getElementById('apiKey'),
       baseUrl: document.getElementById('baseUrl'),
       modelTimeout: document.getElementById('modelTimeout'),
@@ -2244,6 +2492,18 @@ INDEX_HTML = r"""<!doctype html>
       stepOutputList: document.getElementById('stepOutputList'),
       assetOutputMeta: document.getElementById('assetOutputMeta'),
       assetOutputList: document.getElementById('assetOutputList'),
+      assetLightbox: document.getElementById('assetLightbox'),
+      assetLightboxTitle: document.getElementById('assetLightboxTitle'),
+      assetLightboxMeta: document.getElementById('assetLightboxMeta'),
+      assetLightboxStage: document.getElementById('assetLightboxStage'),
+      assetLightboxCounter: document.getElementById('assetLightboxCounter'),
+      assetLightboxPrevBtn: document.getElementById('assetLightboxPrevBtn'),
+      assetLightboxNextBtn: document.getElementById('assetLightboxNextBtn'),
+      assetLightboxOpenBtn: document.getElementById('assetLightboxOpenBtn'),
+      assetLightboxCloseBtn: document.getElementById('assetLightboxCloseBtn'),
+      refreshAssetLibraryBtn: document.getElementById('refreshAssetLibraryBtn'),
+      assetLibraryStatus: document.getElementById('assetLibraryStatus'),
+      assetLibraryGrid: document.getElementById('assetLibraryGrid'),
       packageOutputMeta: document.getElementById('packageOutputMeta'),
       packageOutputList: document.getElementById('packageOutputList'),
       stepConfirmBar: document.getElementById('stepConfirmBar'),
@@ -2309,6 +2569,11 @@ INDEX_HTML = r"""<!doctype html>
     let activeRunTaskName = "";
     let workflowInteractionLocked = false;
     let lastTaskDetailRefreshAt = 0;
+    let assetPreviewItems = [];
+    let assetPreviewTaskName = "";
+    let assetPreviewIndex = 0;
+    let contentColumns = [];
+    let assetLibraryItems = [];
     const progressStepOpenState = new Map();
     const progressUserToggledSteps = new Set();
     let localModelPresets = [];
@@ -2471,6 +2736,9 @@ INDEX_HTML = r"""<!doctype html>
       if (viewName === 'workflow') {
         loadWorkflowList().catch(err => setWorkflowEditorStatus(err.message, true));
       }
+      if (viewName === 'assets') {
+        loadAssetLibrary();
+      }
     }
 
     function setHealthStatus(text, isError = false, showPopup = true) {
@@ -2518,6 +2786,9 @@ INDEX_HTML = r"""<!doctype html>
       const runView = document.querySelector('[data-view="run"]');
       const composer = document.querySelector('.run-composer');
       if (composer) composer.classList.toggle('is-locked', workflowInteractionLocked);
+      for (const button of navButtons) {
+        button.disabled = false;
+      }
       if (runView) {
         for (const control of runView.querySelectorAll('input, select, textarea, button')) {
           if (control === els.cancelRunBtn) {
@@ -2970,6 +3241,40 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
     }
 
+    async function loadContentColumns() {
+      const data = await api('/api/content-columns');
+      contentColumns = Array.isArray(data.columns) ? data.columns : [];
+      if (!els.contentColumn) return;
+      els.contentColumn.innerHTML = '<option value="">不使用栏目模板</option>';
+      for (const column of contentColumns) {
+        const option = document.createElement('option');
+        option.value = column.id || '';
+        option.textContent = column.name || column.id || '';
+        els.contentColumn.appendChild(option);
+      }
+    }
+
+    function applySelectedContentColumn() {
+      const column = contentColumns.find(item => item.id === els.contentColumn.value);
+      if (!column) return;
+      const currentTopic = els.userInput.value.trim();
+      const brief = [
+        `内容栏目：${column.name}`,
+        `目标受众：${column.audience}`,
+        `推荐结构：${column.structure}`,
+        `视觉风格：${column.visual_style}`,
+        `内容要求：${column.sample}`,
+        currentTopic ? `本次主题/补充要求：${currentTopic}` : '本次主题/补充要求：请基于栏目推荐 5 个具体选题，先给我选择，再继续生成脚本和素材。',
+        '素材策略：优先复用素材库中已收藏的好素材；缺口素材再生成；人物、产品、场景尽量保持一致。',
+      ].join('\n');
+      els.userInput.value = brief;
+      if (!els.taskTitle.value.trim()) {
+        els.taskTitle.value = column.name;
+      }
+      saveSettings();
+      setStatus(`已套用栏目模板：${column.name}`, false);
+    }
+
     function readSettings() {
       try {
         return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -2982,6 +3287,7 @@ INDEX_HTML = r"""<!doctype html>
       const settings = {
         productTemplate: els.productTemplate.value,
         workflow: els.workflow.value,
+        contentColumn: els.contentColumn.value,
         provider: els.provider.value,
         model: els.model.value,
         customModel: els.customModel.value,
@@ -3074,6 +3380,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.model, settings.model);
       els.customModel.value = settings.customModel || '';
       els.taskTitle.value = '';
+      setIfExists(els.contentColumn, settings.contentColumn);
       els.apiKey.value = settings.apiKey || '';
       els.baseUrl.value = settings.baseUrl || '';
       setIfExists(els.modelTimeout, settings.modelTimeout);
@@ -3172,18 +3479,27 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       if (!confirm('确定终止当前任务吗？\\n\\n正在等待的模型或 RunningHub 请求可能会在当前请求返回后停止。')) return;
+      const runIdToCancel = currentRunId;
+      if (progressTimer) {
+        clearTimeout(progressTimer);
+        progressTimer = null;
+      }
+      autoFocusOutputDuringRun = false;
+      setStatus('已发送终止请求，界面已解锁');
+      trackRun("");
+      setWorkflowInteractionLocked(false);
+      setRunButtonProgress(0);
+      syncOutputButtons();
       try {
-        autoFocusOutputDuringRun = false;
         if (els.cancelRunBtn) els.cancelRunBtn.disabled = true;
         if (els.outputCancelRunBtn) els.outputCancelRunBtn.disabled = true;
         const result = await api('/api/cancel-run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ run_id: currentRunId }),
+          body: JSON.stringify({ run_id: runIdToCancel }),
         });
         setStatus(result.message || '已发送终止请求');
         renderProgress(result);
-        trackRun("");
         setWorkflowInteractionLocked(false);
         setRunButtonProgress(0);
         syncOutputButtons();
@@ -3192,10 +3508,9 @@ INDEX_HTML = r"""<!doctype html>
         }
       } catch (err) {
         setStatus(err.message, true);
-        if (currentRunId) {
-          if (els.cancelRunBtn) els.cancelRunBtn.disabled = true;
-          if (els.outputCancelRunBtn) els.outputCancelRunBtn.disabled = false;
-        }
+        setWorkflowInteractionLocked(false);
+        setRunButtonProgress(0);
+        syncOutputButtons();
       }
     }
 
@@ -4654,6 +4969,10 @@ INDEX_HTML = r"""<!doctype html>
         els.stepOutputMeta.textContent = '0 个步骤';
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
         els.assetOutputMeta.textContent = '未生成';
+        els.assetOutputList.classList.remove('asset-gallery');
+        assetPreviewItems = [];
+        assetPreviewTaskName = "";
+        closeAssetLightbox();
         els.assetOutputList.innerHTML = '<div class="muted small">运行后只显示图片和视频素材。</div>';
         els.packageOutputMeta.textContent = '未生成';
         els.packageOutputList.innerHTML = '<div class="muted small">点击“导出产品包”后显示可交付文件。</div>';
@@ -4698,11 +5017,13 @@ INDEX_HTML = r"""<!doctype html>
       els.assetOutputMeta.textContent = assetItems.length ? `${assetItems.length} 个图片/视频` : '未生成';
       els.assetOutputList.innerHTML = '';
       if (!assetItems.length) {
+        assetPreviewItems = [];
+        assetPreviewTaskName = "";
+        els.assetOutputList.classList.remove('asset-gallery');
+        closeAssetLightbox();
         els.assetOutputList.innerHTML = '<div class="muted small">还没有可显示的图片/视频素材。若使用 prompt_only 模式，通常只会生成提示词和生产清单。</div>';
       } else {
-        for (const item of assetItems) {
-          els.assetOutputList.appendChild(assetFileButton(data.name, item));
-        }
+        renderAssetGallery(data.name, assetItems);
       }
 
       els.packageOutputMeta.textContent = packageReady;
@@ -4854,6 +5175,198 @@ INDEX_HTML = r"""<!doctype html>
       return (found ? found[1] : '99_') + name;
     }
 
+    function renderAssetGallery(taskName, assetItems) {
+      assetPreviewTaskName = taskName || "";
+      assetPreviewItems = assetItems.map(item => {
+        const file = typeof item === 'string' ? item : item.file;
+        return {
+          ...item,
+          file,
+          label: typeof item === 'string' ? assetFileLabel(file) : (item.label || assetFileLabel(file)),
+          name: typeof item === 'string' ? String(file).split('/').pop() : (item.name || String(file).split('/').pop()),
+          kind: isImageFile(file) ? 'image' : 'video',
+        };
+      }).filter(item => item.file && (isImageFile(item.file) || isVideoFile(item.file)));
+      els.assetOutputList.classList.add('asset-gallery');
+      els.assetOutputList.innerHTML = '';
+      assetPreviewItems.forEach((item, index) => {
+        els.assetOutputList.appendChild(assetGalleryCard(taskName, item, index));
+      });
+    }
+
+    function assetGalleryCard(taskName, item, index) {
+      const card = document.createElement('div');
+      card.tabIndex = 0;
+      card.role = 'button';
+      card.className = 'asset-card';
+      card.dataset.file = item.file;
+      const media = document.createElement('div');
+      media.className = 'asset-card-media';
+      const previewUrl = assetItemUrl(taskName, item);
+      if (isImageFile(item.file)) {
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.alt = item.label || assetFileLabel(item.file);
+        img.src = previewUrl;
+        media.appendChild(img);
+      } else {
+        const video = document.createElement('video');
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        video.src = previewUrl;
+        media.appendChild(video);
+      }
+      const kind = document.createElement('span');
+      kind.className = 'asset-card-kind';
+      kind.textContent = isImageFile(item.file) ? '图片' : '视频';
+      const title = document.createElement('span');
+      title.className = 'asset-card-title';
+      title.textContent = item.label || assetFileLabel(item.file);
+      const subtitle = document.createElement('span');
+      subtitle.className = 'asset-card-subtitle';
+      subtitle.textContent = item.file;
+      const actions = document.createElement('div');
+      actions.className = 'inline-actions';
+      const favorite = document.createElement('button');
+      favorite.type = 'button';
+      favorite.className = 'secondary small';
+      favorite.textContent = '收藏复用';
+      favorite.onclick = event => {
+        event.stopPropagation();
+        favoriteAsset(taskName, item);
+      };
+      if (!item.library) actions.appendChild(favorite);
+      card.appendChild(media);
+      card.appendChild(kind);
+      card.appendChild(title);
+      card.appendChild(subtitle);
+      card.appendChild(actions);
+      card.onclick = () => openAssetLightbox(index);
+      card.onkeydown = event => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openAssetLightbox(index);
+        }
+      };
+      return card;
+    }
+
+    async function favoriteAsset(taskName, item) {
+      if (!taskName || !item?.file) return;
+      try {
+        const result = await api('/api/favorite-asset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            task: taskName,
+            file: item.file,
+            label: item.label || assetFileLabel(item.file),
+            tags: [item.kind || (isImageFile(item.file) ? 'image' : 'video')],
+          }),
+        });
+        setStatus(`已收藏到素材库：${result.asset?.name || item.file}`, false);
+        await loadAssetLibrary();
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
+    async function loadAssetLibrary() {
+      if (!els.assetLibraryGrid) return;
+      try {
+        const data = await api('/api/asset-library');
+        assetLibraryItems = Array.isArray(data.assets) ? data.assets : [];
+        renderAssetLibrary();
+        if (els.assetLibraryStatus) {
+          els.assetLibraryStatus.textContent = assetLibraryItems.length ? `${assetLibraryItems.length} 个可复用素材` : '素材库为空';
+          els.assetLibraryStatus.classList.remove('error');
+        }
+      } catch (err) {
+        if (els.assetLibraryStatus) {
+          els.assetLibraryStatus.textContent = err.message;
+          els.assetLibraryStatus.classList.add('error');
+        }
+      }
+    }
+
+    function renderAssetLibrary() {
+      if (!els.assetLibraryGrid) return;
+      els.assetLibraryGrid.innerHTML = '';
+      if (!assetLibraryItems.length) {
+        els.assetLibraryGrid.innerHTML = '<div class="muted small">暂无收藏素材。到“任务输出”的已生成素材里点击“收藏复用”，好图好视频会沉淀到这里。</div>';
+        return;
+      }
+      const previewItems = assetLibraryItems.map(item => ({
+        ...item,
+        library: true,
+        label: item.name || assetFileLabel(item.file),
+        kind: item.kind || (isImageFile(item.file) ? 'image' : 'video'),
+      }));
+      previewItems.forEach((item, index) => {
+        const card = assetGalleryCard('', item, index);
+        card.onclick = () => {
+          assetPreviewTaskName = "";
+          assetPreviewItems = previewItems;
+          openAssetLightbox(index);
+        };
+        card.onkeydown = event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            assetPreviewTaskName = "";
+            assetPreviewItems = previewItems;
+            openAssetLightbox(index);
+          }
+        };
+        els.assetLibraryGrid.appendChild(card);
+      });
+    }
+
+    function openAssetLightbox(index = 0) {
+      if (!assetPreviewItems.length || !els.assetLightbox) return;
+      assetPreviewIndex = Math.max(0, Math.min(assetPreviewItems.length - 1, Number(index) || 0));
+      els.assetLightbox.hidden = false;
+      renderAssetLightbox();
+    }
+
+    function closeAssetLightbox() {
+      if (!els.assetLightbox) return;
+      els.assetLightbox.hidden = true;
+      if (els.assetLightboxStage) els.assetLightboxStage.innerHTML = '';
+    }
+
+    function moveAssetLightbox(delta) {
+      if (!assetPreviewItems.length || els.assetLightbox?.hidden) return;
+      assetPreviewIndex = (assetPreviewIndex + delta + assetPreviewItems.length) % assetPreviewItems.length;
+      renderAssetLightbox();
+    }
+
+    function renderAssetLightbox() {
+      const item = assetPreviewItems[assetPreviewIndex];
+      if (!item || !els.assetLightboxStage) return;
+      const url = assetItemUrl(assetPreviewTaskName, item);
+      els.assetLightboxStage.innerHTML = '';
+      if (isImageFile(item.file)) {
+        const img = document.createElement('img');
+        img.alt = item.label || assetFileLabel(item.file);
+        img.src = url;
+        els.assetLightboxStage.appendChild(img);
+      } else {
+        const video = document.createElement('video');
+        video.src = url;
+        video.controls = true;
+        video.autoplay = true;
+        video.playsInline = true;
+        els.assetLightboxStage.appendChild(video);
+      }
+      els.assetLightboxTitle.textContent = item.label || assetFileLabel(item.file);
+      els.assetLightboxMeta.textContent = item.file;
+      els.assetLightboxCounter.textContent = `${assetPreviewIndex + 1} / ${assetPreviewItems.length}`;
+      els.assetLightboxPrevBtn.disabled = assetPreviewItems.length <= 1;
+      els.assetLightboxNextBtn.disabled = assetPreviewItems.length <= 1;
+      els.assetLightboxOpenBtn.onclick = () => window.open(url, '_blank', 'noopener');
+    }
+
     function assetFileButton(taskName, asset) {
       const file = typeof asset === 'string' ? asset : asset.file;
       const label = typeof asset === 'string' ? assetFileLabel(file) : (asset.label || assetFileLabel(file));
@@ -4875,6 +5388,15 @@ INDEX_HTML = r"""<!doctype html>
 
     function mediaUrl(taskName, file) {
       return `/api/media?task=${encodeURIComponent(taskName)}&file=${encodeURIComponent(file)}`;
+    }
+
+    function assetLibraryMediaUrl(id) {
+      return `/api/asset-library-media?id=${encodeURIComponent(id)}`;
+    }
+
+    function assetItemUrl(taskName, item) {
+      if (item?.library && item.id) return assetLibraryMediaUrl(item.id);
+      return mediaUrl(taskName, item.file);
     }
 
     function isMediaFile(file) {
@@ -5362,10 +5884,26 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
     }
 
+    function assetLibraryContextText() {
+      const items = Array.isArray(assetLibraryItems) ? assetLibraryItems.slice(0, 30) : [];
+      if (!items.length) return '';
+      const lines = items.map((item, index) => {
+        const path = `my_workspace/my_asset_library/${item.file}`;
+        return `${index + 1}. ${item.name || item.file} | ${item.kind || ''} | ${path}`;
+      });
+      return [
+        '',
+        '## 可复用素材库',
+        '优先复用以下已收藏的好素材；只有素材库不能覆盖的画面才新生成。需要参考图/参考视频时，可在 image_prompts/video_prompts 的 reference_image 字段引用这些路径。',
+        ...lines,
+      ].join('\n');
+    }
+
     async function runWorkflow() {
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
-      const input = els.userInput.value.trim();
+      await loadAssetLibrary();
+      const input = `${els.userInput.value.trim()}${assetLibraryContextText()}`.trim();
       if (!input) {
         setStatus('请输入原始需求', true);
         return;
@@ -5436,6 +5974,18 @@ INDEX_HTML = r"""<!doctype html>
     els.runBtn.onclick = runWorkflow;
     els.cancelRunBtn.onclick = cancelCurrentRun;
     els.outputCancelRunBtn.onclick = cancelCurrentRun;
+    els.assetLightboxCloseBtn.onclick = closeAssetLightbox;
+    els.assetLightboxPrevBtn.onclick = () => moveAssetLightbox(-1);
+    els.assetLightboxNextBtn.onclick = () => moveAssetLightbox(1);
+    els.assetLightbox.onclick = event => {
+      if (event.target === els.assetLightbox) closeAssetLightbox();
+    };
+    document.addEventListener('keydown', event => {
+      if (!els.assetLightbox || els.assetLightbox.hidden) return;
+      if (event.key === 'Escape') closeAssetLightbox();
+      if (event.key === 'ArrowLeft') moveAssetLightbox(-1);
+      if (event.key === 'ArrowRight') moveAssetLightbox(1);
+    });
     window.addEventListener('pagehide', pauseCurrentRunOnExit);
     window.addEventListener('beforeunload', pauseCurrentRunOnExit);
     els.comfyWorkflowPreset.onchange = () => {
@@ -5505,6 +6055,9 @@ INDEX_HTML = r"""<!doctype html>
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
     els.refreshHealthBtn.onclick = loadSystemHealth;
     els.productTemplate.onchange = () => applyProductTemplate(false);
+    els.contentColumn.onchange = saveSettings;
+    els.applyContentColumnBtn.onclick = applySelectedContentColumn;
+    els.refreshAssetLibraryBtn.onclick = loadAssetLibrary;
     els.model.onchange = () => {
       syncCustomModelState();
       saveSettings();
@@ -5607,6 +6160,9 @@ INDEX_HTML = r"""<!doctype html>
     (async function init() {
       try {
         await loadConfig();
+        await loadContentColumns();
+        restoreSettings();
+        await loadAssetLibrary();
         await loadTasks();
         await loadStaffList();
         await loadWorkflowList();
@@ -5637,6 +6193,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._system_health())
             elif parsed.path == "/api/tasks":
                 self._send_json({"tasks": self._tasks()})
+            elif parsed.path == "/api/content-columns":
+                self._send_json({"columns": CONTENT_COLUMNS})
+            elif parsed.path == "/api/asset-library":
+                self._send_json({"assets": self._asset_library()})
             elif parsed.path == "/api/knowledge":
                 self._send_json({"files": self._knowledge_files()})
             elif parsed.path == "/api/staff":
@@ -5662,6 +6222,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/media":
                 query = parse_qs(parsed.query)
                 self._send_media(self._single(query, "task"), self._single(query, "file"))
+            elif parsed.path == "/api/asset-library-media":
+                query = parse_qs(parsed.query)
+                self._send_asset_library_media(self._single(query, "id"))
             elif parsed.path == "/api/run-status":
                 query = parse_qs(parsed.query)
                 self._send_json(self._run_status(self._single(query, "id")))
@@ -5691,6 +6254,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/upload-knowledge":
                 self._send_json(self._upload_knowledge(payload))
+                return
+
+            if parsed.path == "/api/favorite-asset":
+                self._send_json(self._favorite_asset(payload))
                 return
 
             if parsed.path == "/api/test-model":
@@ -7111,6 +7678,108 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+
+    def _asset_library(self) -> list[dict]:
+        ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
+        items = self._read_asset_library_index()
+        changed = False
+        cleaned: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                changed = True
+                continue
+            asset_id = str(item.get("id") or "").strip()
+            file_name = str(item.get("file") or "").strip()
+            if not asset_id or not file_name:
+                changed = True
+                continue
+            path = (ASSET_LIBRARY_ROOT / file_name).resolve()
+            if not path.is_file() or not self._is_relative_to(path, ASSET_LIBRARY_ROOT):
+                changed = True
+                continue
+            item = dict(item)
+            item["size"] = path.stat().st_size
+            item["mtime"] = path.stat().st_mtime
+            item["kind"] = "image" if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} else "video"
+            cleaned.append(item)
+        cleaned.sort(key=lambda item: float(item.get("created_at") or item.get("mtime") or 0), reverse=True)
+        if changed:
+            self._write_asset_library_index(cleaned)
+        return cleaned
+
+    def _favorite_asset(self, payload: dict) -> dict:
+        task = str(payload.get("task") or "").strip()
+        file_name = str(payload.get("file") or "").strip()
+        label = str(payload.get("label") or "").strip()
+        tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+        source_path, _ = self._safe_task_file(task, file_name, must_exist=True)
+        suffix = source_path.suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".m4v"}:
+            raise ValueError(f"Unsupported asset type: {suffix}")
+        ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
+        asset_id = uuid4().hex
+        safe_stem = self._safe_asset_stem(Path(file_name).stem or "asset")
+        library_name = f"{asset_id}_{safe_stem}{suffix}"
+        target = (ASSET_LIBRARY_ROOT / library_name).resolve()
+        if not self._is_relative_to(target, ASSET_LIBRARY_ROOT):
+            raise ValueError("Invalid asset path")
+        shutil.copy2(source_path, target)
+        item = {
+            "id": asset_id,
+            "file": library_name,
+            "name": label or self._asset_label(file_name),
+            "source_task": task,
+            "source_file": file_name,
+            "kind": "image" if suffix in {".png", ".jpg", ".jpeg", ".webp"} else "video",
+            "tags": [str(tag).strip() for tag in tags if str(tag).strip()],
+            "created_at": time.time(),
+            "size": target.stat().st_size,
+            "mtime": target.stat().st_mtime,
+        }
+        items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
+        items.insert(0, item)
+        self._write_asset_library_index(items)
+        return {"ok": True, "asset": item}
+
+    def _send_asset_library_media(self, asset_id: str) -> None:
+        asset_id = str(asset_id or "").strip()
+        item = next((entry for entry in self._asset_library() if str(entry.get("id") or "") == asset_id), None)
+        if not item:
+            raise FileNotFoundError(asset_id)
+        target = (ASSET_LIBRARY_ROOT / str(item.get("file") or "")).resolve()
+        if not target.is_file() or not self._is_relative_to(target, ASSET_LIBRARY_ROOT):
+            raise FileNotFoundError(asset_id)
+        suffix = target.suffix.lower()
+        if suffix not in {".mp4", ".mov", ".webm", ".m4v", ".png", ".jpg", ".jpeg", ".webp"}:
+            raise ValueError(f"Unsupported media file type: {suffix}")
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        data = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    @staticmethod
+    def _read_asset_library_index() -> list[dict]:
+        if not ASSET_LIBRARY_INDEX.is_file():
+            return []
+        try:
+            data = json.loads(ASSET_LIBRARY_INDEX.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError:
+            return []
+        return data if isinstance(data, list) else []
+
+    @staticmethod
+    def _write_asset_library_index(items: list[dict]) -> None:
+        ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
+        ASSET_LIBRARY_INDEX.write_text(json.dumps(items, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _safe_asset_stem(value: str) -> str:
+        text = re.sub(r"[^\w\u4e00-\u9fff.-]+", "_", str(value or "").strip(), flags=re.UNICODE).strip("._")
+        return (text or "asset")[:80]
 
     def _save_file(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()

@@ -85,6 +85,12 @@
 
 - The management UI `自动化与成片配置` panel has been regrouped into clearer cards for flow switches, ComfyUI connection, two-workflow routing, node mapping, material quality gate, local voice, and advanced voice settings. `web_app.py` now uses `.automation-config`, `.config-card`, `.workflow-summary-card`, and `.mapping-card` styles for this panel.
 
+- Terminating a run now performs an immediate optimistic UI unlock on the frontend: it stores the run ID to cancel, clears currentRunId/progressTimer, disables output auto-focus, resets the run button, and explicitly re-enables top navigation before awaiting `/api/cancel-run`. This prevents the UI from staying stuck on Task Output while a backend/model/RunningHub request is still unwinding.
+
+- Generated assets preview in the output page now uses a gallery/lightbox UI instead of cramped file buttons: image/video cards render in an adaptive grid, clicking opens an in-page preview overlay, and users can browse with previous/next buttons or keyboard left/right, with Esc to close.
+- New task creation now includes a `内容栏目` selector backed by built-in column templates for AI automation cases, tool reviews, industry solutions, digital-employee demos, pain-point solutions, and topic breakdowns. Applying a column rewrites the demand box with audience, structure, visual style, and material-reuse guidance.
+- The management UI now has a dedicated `素材库` tab backed by `my_workspace/my_asset_library/library.json`. Generated image/video cards can be `收藏复用`; favorites are copied into the local asset library and shown as reusable cards. Before starting a workflow, the frontend appends a reusable-asset context list so downstream staff can prefer existing good assets instead of regenerating everything.
+
 ## Important Files
 
 - Web UI: `my_workspace/web_app.py`
