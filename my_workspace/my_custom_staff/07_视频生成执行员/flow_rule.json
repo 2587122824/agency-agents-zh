@@ -26,6 +26,8 @@
     "video_prompts是合法JSON对象",
     "video_prompts覆盖所有需要视频素材的镜头",
     "每条视频任务有task_type和control_mode",
+    "每条video_prompts都有workflow_id和asset_tag",
+    "11-21各类视频任务的必需输入来源明确，缺失时进入missing_or_inferred_prompts",
     "参考图/首帧来源清楚",
     "B-roll、转场、后处理需求明确",
     "不混入TTS、字幕或最终剪辑职责"

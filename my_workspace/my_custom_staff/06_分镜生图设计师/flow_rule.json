@@ -27,6 +27,8 @@
     "关键帧覆盖所有需要视频或剪辑支撑的镜头",
     "image_prompts是合法JSON对象",
     "image_prompts覆盖所有需要图片/关键帧的镜头",
+    "每条image_prompts都有workflow_id和asset_tag",
+    "需要参考图的04/05/07/09/10任务必须写清reference_image或进入missing_or_inferred_prompts",
     "不包含API Key或具体节点ID"
   ]
 }

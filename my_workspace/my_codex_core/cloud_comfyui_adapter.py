@@ -431,6 +431,7 @@ class CloudComfyUIAdapter:
             "{{width}}": str(comfyui_payload.get("width") or ""),
             "{{height}}": str(comfyui_payload.get("height") or ""),
             "{{task_type}}": str(comfyui_payload.get("task_type") or ""),
+            "{{image_task_mode}}": str(comfyui_payload.get("image_task_mode") or ""),
             "{{control_mode}}": str(comfyui_payload.get("control_mode") or ""),
             "{{duration}}": str(comfyui_payload.get("duration") or ""),
             "{{fps}}": str(comfyui_payload.get("fps") or ""),
@@ -826,7 +827,7 @@ class CloudComfyUIAdapter:
             payload.pop("reference_image", None)
             payload.pop("reference_images", None)
         payload["has_reference_image"] = bool(reference_image)
-        for key in ("seed", "width", "height", "duration", "fps", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "pose_video"):
+        for key in ("seed", "width", "height", "duration", "fps", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "pose_video", "image_task_mode"):
             value = (
                 prompt_data.get(key)
                 if key in prompt_data

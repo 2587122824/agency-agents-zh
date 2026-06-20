@@ -33,7 +33,7 @@
     {
       "step": 4,
       "agent": "06_分镜生图设计师",
-      "task": "基于分镜与角色主体定义，输出参考图、角色/产品一致性、关键帧和封面关键视觉的生成方案，并生成完整 image_prompts JSON，覆盖所有需要图片/关键帧的镜头。",
+      "task": "基于分镜与角色主体定义，输出图片生成方案：没有参考图时先生成角色图、产品图、场景图等基础素材；已有参考图或素材库路径时可生成角色/产品三视图、关键帧和封面关键视觉。生成完整 image_prompts JSON，并明确每项 task_type、image_task_mode、control_mode、reference_image。",
       "output": "参考图/关键帧生成方案与 image_prompts"
     },
     {
@@ -81,7 +81,7 @@
   "acceptance_criteria": [
     "脚本先定稿，后续视觉和配音都围绕脚本执行",
     "分镜表覆盖完整视频结构，并明确角色、主体、场景和素材类型",
-    "06输出完整image_prompts，覆盖所有需要参考图/关键帧/封面的镜头",
+    "06输出完整image_prompts：无参考图时生成角色/产品/场景基础图，有参考图时生成三视图、关键帧或封面关键视觉，并明确task_type/image_task_mode/control_mode",
     "20输出可直接用于TTS的口播文本和SRT字幕草稿",
     "07输出完整video_prompts，覆盖分段视频、口型、B-roll、转场和后处理需求",
     "合规复核在最终拼接前完成，风险项有明确修改建议",

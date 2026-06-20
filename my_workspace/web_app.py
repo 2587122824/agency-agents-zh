@@ -31,6 +31,29 @@ VOICE_SAMPLE_ROOT = WORKSPACE_ROOT / "my_voice_samples"
 KNOWLEDGE_ROOT = WORKSPACE_ROOT / "my_knowledge_base"
 ASSET_LIBRARY_ROOT = WORKSPACE_ROOT / "my_asset_library"
 ASSET_LIBRARY_INDEX = ASSET_LIBRARY_ROOT / "library.json"
+ASSET_LIBRARY_TAG_FOLDERS = {
+    "character_base": "01_character_base",
+    "product_base": "02_product_base",
+    "scene_base": "03_scene_base",
+    "character_turnaround": "04_character_turnaround",
+    "product_turnaround": "05_product_turnaround",
+    "style_reference": "06_style_reference",
+    "keyframe": "07_keyframe",
+    "cover_key_visual": "08_cover_key_visual",
+    "image_inpaint_fix": "09_image_inpaint_fix",
+    "background_remove": "10_background_remove",
+    "i2v_first_frame": "11_i2v_first_frame",
+    "i2v_first_last_frame": "12_i2v_first_last_frame",
+    "live_to_anime": "13_live_to_anime",
+    "motion_transfer": "14_motion_transfer",
+    "talking_image": "15_talking_image",
+    "broll_scene_video": "16_broll_scene_video",
+    "empty_transition_video": "17_empty_transition_video",
+    "video_upscale": "18_video_upscale",
+    "frame_interpolation": "19_frame_interpolation",
+    "video_deflicker_stabilize": "20_video_deflicker_stabilize",
+    "video_inpaint_fix": "21_video_inpaint_fix",
+}
 COMFY_DEBUG_TASK = "__comfy_debug__"
 COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
@@ -89,146 +112,27 @@ CONTENT_COLUMNS = [
 ]
 
 COMFY_DEBUG_WORKFLOWS = [
-    {
-        "id": "reference_keyframe",
-        "name": "参考图 / 关键帧生成",
-        "type": "image",
-        "stage": "preproduction",
-        "purpose": "生成统一人物、产品、场景风格的关键帧，作为后续图生视频参考。",
-        "recommended": True,
-        "default_task_type": "txt2img",
-        "default_control_mode": "reference_image",
-        "default_width": 1080,
-        "default_height": 1920,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "identity_consistency",
-        "name": "人物 / 产品一致性",
-        "type": "image",
-        "stage": "preproduction",
-        "purpose": "用 IPAdapter / FaceID / 产品参考控制人物和主体不跑偏。",
-        "recommended": True,
-        "default_task_type": "img2img",
-        "default_control_mode": "ipadapter_faceid",
-        "default_width": 1080,
-        "default_height": 1920,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "segment_i2v",
-        "name": "分段图生视频",
-        "type": "video",
-        "stage": "production",
-        "purpose": "把单个分镜关键帧转成 3-8 秒视频片段，是长视频素材生产主力。",
-        "recommended": True,
-        "default_task_type": "img2video",
-        "default_control_mode": "first_frame",
-        "default_width": 960,
-        "default_height": 544,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "first_last_transition",
-        "name": "首尾帧过渡",
-        "type": "video",
-        "stage": "production",
-        "purpose": "用首帧/尾帧控制镜头运动和转场，减少随机跳变。",
-        "recommended": True,
-        "default_task_type": "first_last_frame_video",
-        "default_control_mode": "first_last_frame",
-        "default_width": 960,
-        "default_height": 544,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "broll_scene",
-        "name": "B-roll / 场景素材",
-        "type": "video",
-        "stage": "production",
-        "purpose": "生成办公、行业、产品、抽象概念等补充画面，解决正片画面单调。",
-        "recommended": True,
-        "default_task_type": "txt2video",
-        "default_control_mode": "none",
-        "default_width": 960,
-        "default_height": 544,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "video_upscale",
-        "name": "视频放大 / 清晰化",
-        "type": "video",
-        "stage": "postproduction",
-        "purpose": "对已生成片段做 2x/4x 放大、去噪、锐化，保证最终素材质量。",
-        "recommended": True,
-        "default_task_type": "video_upscale",
-        "default_control_mode": "upscale",
-        "default_width": 1920,
-        "default_height": 1080,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "frame_interpolation",
-        "name": "补帧 / 变速",
-        "type": "video",
-        "stage": "postproduction",
-        "purpose": "把低帧率视频补到 24/30/60fps，或做慢动作/平滑运动。",
-        "recommended": True,
-        "default_task_type": "frame_interpolation",
-        "default_control_mode": "interpolate",
-        "default_width": 1920,
-        "default_height": 1080,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "inpaint_fix",
-        "name": "局部修复 / 重绘",
-        "type": "image",
-        "stage": "repair",
-        "purpose": "修脸、修手、修字、去水印、局部替换，减少废片率。",
-        "recommended": True,
-        "default_task_type": "inpaint",
-        "default_control_mode": "mask_inpaint",
-        "default_width": 1080,
-        "default_height": 1920,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "background_remove",
-        "name": "抠图 / 透明素材",
-        "type": "image",
-        "stage": "postproduction",
-        "purpose": "生成可叠加的人物、产品、图标透明素材，方便剪辑包装。",
-        "recommended": False,
-        "default_task_type": "background_remove",
-        "default_control_mode": "matting",
-        "default_width": 1080,
-        "default_height": 1920,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
-    {
-        "id": "subtitle_safe_preview",
-        "name": "字幕安全区预览",
-        "type": "image",
-        "stage": "review",
-        "purpose": "检查封面/关键帧/画面构图是否会被字幕、平台 UI、标题遮挡。",
-        "recommended": False,
-        "default_task_type": "preview_overlay",
-        "default_control_mode": "safe_area",
-        "default_width": 1080,
-        "default_height": 1920,
-        "default_endpoint": "",
-        "default_node_info": "[]",
-    },
+    {"id": "01_character_base", "name": "01 角色基础图", "type": "image", "stage": "image_base", "purpose": "生成可复用人物角色设定图。", "asset_tag": "character_base", "recommended": True, "default_task_type": "character_generation", "default_control_mode": "none", "default_image_task_type": "character_generation", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "02_product_base", "name": "02 产品基础图", "type": "image", "stage": "image_base", "purpose": "生成可复用产品主体图。", "asset_tag": "product_base", "recommended": True, "default_task_type": "product_generation", "default_control_mode": "none", "default_image_task_type": "product_generation", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "03_scene_base", "name": "03 场景基础图", "type": "image", "stage": "image_base", "purpose": "生成办公、行业、科技等可复用场景图。", "asset_tag": "scene_base", "recommended": True, "default_task_type": "scene_generation", "default_control_mode": "none", "default_image_task_type": "scene_generation", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "04_character_turnaround", "name": "04 角色三视图", "type": "image", "stage": "image_control", "purpose": "基于角色参考图生成正面/侧面/背面三视图。", "asset_tag": "character_turnaround", "recommended": True, "default_task_type": "character_turnaround", "default_control_mode": "character_reference", "default_image_task_type": "character_turnaround", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "05_product_turnaround", "name": "05 产品三视图", "type": "image", "stage": "image_control", "purpose": "基于产品参考图生成正面/侧面/背面三视图。", "asset_tag": "product_turnaround", "recommended": True, "default_task_type": "product_turnaround", "default_control_mode": "product_reference", "default_image_task_type": "product_turnaround", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "06_style_reference", "name": "06 风格参考图", "type": "image", "stage": "image_base", "purpose": "生成统一色彩、光线和画面气质的风格基准图。", "asset_tag": "style_reference", "recommended": True, "default_task_type": "style_reference", "default_control_mode": "none", "default_image_task_type": "style_reference", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "07_keyframe", "name": "07 关键帧生成", "type": "image", "stage": "image_keyframe", "purpose": "基于角色/产品/场景参考图生成视频首帧关键帧。", "asset_tag": "keyframe", "recommended": True, "default_task_type": "keyframe", "default_control_mode": "keyframe_reference", "default_image_task_type": "keyframe", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "08_cover_key_visual", "name": "08 封面关键视觉", "type": "image", "stage": "image_packaging", "purpose": "生成封面主视觉和标题安全区画面。", "asset_tag": "cover_key_visual", "recommended": True, "default_task_type": "cover_key_visual", "default_control_mode": "style_reference", "default_image_task_type": "cover_key_visual", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "09_image_inpaint_fix", "name": "09 局部修复 / 重绘", "type": "image", "stage": "image_repair", "purpose": "修脸、修手、去水印、局部替换。", "asset_tag": "image_inpaint_fix", "recommended": True, "default_task_type": "inpaint_fix", "default_control_mode": "mask_inpaint", "default_image_task_type": "inpaint_fix", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "10_background_remove", "name": "10 抠图 / 透明素材", "type": "image", "stage": "image_post", "purpose": "生成可叠加的人物、产品、图标透明素材。", "asset_tag": "background_remove", "recommended": False, "default_task_type": "background_remove", "default_control_mode": "matting", "default_image_task_type": "background_remove", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "11_i2v_first_frame", "name": "11 图生视频：首帧", "type": "video", "stage": "video_production", "purpose": "用单张首帧生成 3-8 秒视频片段。", "asset_tag": "i2v_first_frame", "recommended": True, "default_task_type": "img2video", "default_control_mode": "first_frame", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "12_i2v_first_last_frame", "name": "12 图生视频：首尾帧", "type": "video", "stage": "video_production", "purpose": "用首帧和尾帧控制转场与镜头运动。", "asset_tag": "i2v_first_last_frame", "recommended": True, "default_task_type": "first_last_frame_video", "default_control_mode": "first_last_frame", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "13_live_to_anime", "name": "13 真人转动漫风格", "type": "video", "stage": "video_style", "purpose": "把真人参考转成动漫或风格化视频。", "asset_tag": "live_to_anime", "recommended": False, "default_task_type": "live_to_anime_video", "default_control_mode": "style_transfer", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "14_motion_transfer", "name": "14 动作迁移", "type": "video", "stage": "video_control", "purpose": "用动作或姿态参考迁移到目标人物。", "asset_tag": "motion_transfer", "recommended": False, "default_task_type": "motion_transfer_video", "default_control_mode": "motion_reference", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "15_talking_image", "name": "15 图片说话 / 口型同步", "type": "video", "stage": "video_talking", "purpose": "让单张人物图按音频或文本口型说话。", "asset_tag": "talking_image", "recommended": True, "default_task_type": "talking_image_video", "default_control_mode": "audio_lipsync", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "16_broll_scene_video", "name": "16 B-roll / 场景视频", "type": "video", "stage": "video_broll", "purpose": "生成办公、行业、产品和抽象概念补充视频。", "asset_tag": "broll_scene_video", "recommended": True, "default_task_type": "txt2video", "default_control_mode": "none", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "17_empty_transition_video", "name": "17 空镜 / 转场视频", "type": "video", "stage": "video_transition", "purpose": "生成空镜、氛围镜头和章节转场。", "asset_tag": "empty_transition_video", "recommended": False, "default_task_type": "transition_video", "default_control_mode": "none", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "18_video_upscale", "name": "18 视频放大 / 清晰化", "type": "video", "stage": "video_post", "purpose": "对已生成视频做 2x/4x 放大、去噪和锐化。", "asset_tag": "video_upscale", "recommended": True, "default_task_type": "video_upscale", "default_control_mode": "upscale", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "19_frame_interpolation", "name": "19 视频补帧", "type": "video", "stage": "video_post", "purpose": "把低帧率视频补到 24/30/60fps。", "asset_tag": "frame_interpolation", "recommended": True, "default_task_type": "frame_interpolation", "default_control_mode": "interpolate", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "20_video_deflicker_stabilize", "name": "20 视频去闪烁 / 稳定", "type": "video", "stage": "video_post", "purpose": "降低视频闪烁、抖动和画面不稳定。", "asset_tag": "video_deflicker_stabilize", "recommended": False, "default_task_type": "video_deflicker_stabilize", "default_control_mode": "stabilize", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "21_video_inpaint_fix", "name": "21 视频局部修复", "type": "video", "stage": "video_repair", "purpose": "对视频局部区域做修复、遮罩重绘或瑕疵处理。", "asset_tag": "video_inpaint_fix", "recommended": False, "default_task_type": "video_inpaint_fix", "default_control_mode": "video_mask_inpaint", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]"},
 ]
 
 
@@ -1322,6 +1226,55 @@ INDEX_HTML = r"""<!doctype html>
       overflow-wrap: anywhere;
       color: var(--muted);
       font-size: 11px;
+    }
+    .asset-tag-row,
+    .asset-meta-editor {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+      min-width: 0;
+    }
+    .asset-chip {
+      border-radius: 999px;
+      background: #ecfeff;
+      color: #0f766e;
+      border: 1px solid rgba(20, 184, 166, .28);
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.4;
+    }
+    .asset-meta-editor {
+      margin-top: 2px;
+      padding-top: 6px;
+      border-top: 1px dashed var(--line);
+    }
+    .asset-meta-editor select,
+    .asset-meta-editor input {
+      min-width: 0;
+      font-size: 12px;
+      padding: 6px 8px;
+    }
+    .asset-meta-editor select {
+      flex: 0 0 96px;
+    }
+    .asset-meta-editor input {
+      flex: 1 1 120px;
+    }
+    .asset-meta-editor button {
+      padding: 6px 9px;
+      white-space: nowrap;
+    }
+    .asset-meta-editor .asset-delete-btn {
+      margin-left: auto;
+      border-color: rgba(239, 68, 68, .35);
+      color: #b91c1c;
+      background: #fff7f7;
+    }
+    .asset-meta-editor .asset-delete-btn:hover {
+      border-color: rgba(220, 38, 38, .65);
+      background: #fee2e2;
     }
     .asset-lightbox {
       position: fixed;
@@ -2650,6 +2603,13 @@ INDEX_HTML = r"""<!doctype html>
             <span id="assetLibraryStatus" class="status">未加载</span>
           </div>
         </div>
+        <div class="row">
+          <label>素材标签筛选
+            <select id="assetLibraryTagFilter">
+              <option value="">全部素材</option>
+            </select>
+          </label>
+        </div>
         <div class="asset-gallery" id="assetLibraryGrid">
           <div class="muted small">从“任务输出”的已生成素材里点击“收藏”，这里会显示可复用素材。</div>
         </div>
@@ -2711,6 +2671,11 @@ INDEX_HTML = r"""<!doctype html>
                 <label>参考图/视频路径
                   <input id="comfyDebugReference" autocomplete="off" spellcheck="false" placeholder="可填 my_workspace/my_asset_library/xxx.png 或任务输出里的相对路径" />
                 </label>
+                <label>素材标签筛选
+                  <select id="comfyDebugAssetTagFilter">
+                    <option value="">全部素材</option>
+                  </select>
+                </label>
                 <label>从素材库选择
                   <select id="comfyDebugAssetReference">
                     <option value="">不使用素材库参考</option>
@@ -2745,7 +2710,7 @@ INDEX_HTML = r"""<!doctype html>
                 <textarea id="comfyDebugNegative" spellcheck="false" placeholder="例如：文字、水印、畸形手、脸部变形、闪烁、低清晰度"></textarea>
               </label>
               <label>nodeInfoList JSON（覆盖槽位）
-                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{seed}}、{{width}}、{{height}}、{{duration}}、{{task_type}}、{{control_mode}}"></textarea>
+                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{seed}}、{{width}}、{{height}}、{{duration}}、{{task_type}}、{{image_task_mode}}、{{control_mode}}"></textarea>
               </label>
               <label>导入 API JSON 自动识别（仅本次调试）
                 <input id="comfyDebugApiWorkflowFile" type="file" accept=".json,application/json" />
@@ -3054,6 +3019,7 @@ INDEX_HTML = r"""<!doctype html>
       assetLightboxOpenBtn: document.getElementById('assetLightboxOpenBtn'),
       assetLightboxCloseBtn: document.getElementById('assetLightboxCloseBtn'),
       refreshAssetLibraryBtn: document.getElementById('refreshAssetLibraryBtn'),
+      assetLibraryTagFilter: document.getElementById('assetLibraryTagFilter'),
       assetLibraryStatus: document.getElementById('assetLibraryStatus'),
       assetLibraryGrid: document.getElementById('assetLibraryGrid'),
       refreshComfyDebugBtn: document.getElementById('refreshComfyDebugBtn'),
@@ -3065,6 +3031,7 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugPollTimeout: document.getElementById('comfyDebugPollTimeout'),
       comfyDebugEndpoint: document.getElementById('comfyDebugEndpoint'),
       comfyDebugReference: document.getElementById('comfyDebugReference'),
+      comfyDebugAssetTagFilter: document.getElementById('comfyDebugAssetTagFilter'),
       comfyDebugAssetReference: document.getElementById('comfyDebugAssetReference'),
       comfyDebugReferenceFile: document.getElementById('comfyDebugReferenceFile'),
       clearComfyDebugReferenceBtn: document.getElementById('clearComfyDebugReferenceBtn'),
@@ -3153,6 +3120,46 @@ INDEX_HTML = r"""<!doctype html>
     let assetPreviewIndex = 0;
     let contentColumns = [];
     let assetLibraryItems = [];
+    const ASSET_CATEGORY_TAGS = [
+      { value: 'person', label: '人物' },
+      { value: 'product', label: '产品' },
+      { value: 'scene', label: '场景' },
+      { value: 'broll', label: 'B-roll' },
+      { value: 'cover', label: '封面' },
+      { value: 'style', label: '风格参考' },
+      { value: 'keyframe', label: '关键帧' },
+      { value: 'reference', label: '参考图' },
+      { value: 'character_base', label: '01 角色基础图' },
+      { value: 'product_base', label: '02 产品基础图' },
+      { value: 'scene_base', label: '03 场景基础图' },
+      { value: 'character_turnaround', label: '04 角色三视图' },
+      { value: 'product_turnaround', label: '05 产品三视图' },
+      { value: 'cover_key_visual', label: '08 封面关键视觉' },
+      { value: 'image_inpaint_fix', label: '09 图片修复' },
+      { value: 'background_remove', label: '10 抠图透明素材' },
+      { value: 'i2v_first_frame', label: '11 首帧视频' },
+      { value: 'i2v_first_last_frame', label: '12 首尾帧视频' },
+      { value: 'live_to_anime', label: '13 真人转动漫' },
+      { value: 'motion_transfer', label: '14 动作迁移' },
+      { value: 'talking_image', label: '15 图片说话' },
+      { value: 'broll_scene_video', label: '16 B-roll 场景视频' },
+      { value: 'empty_transition_video', label: '17 空镜转场' },
+      { value: 'video_upscale', label: '18 视频放大' },
+      { value: 'frame_interpolation', label: '19 视频补帧' },
+      { value: 'video_deflicker_stabilize', label: '20 去闪烁稳定' },
+      { value: 'video_inpaint_fix', label: '21 视频局部修复' },
+    ];
+    const COMFY_IMAGE_TASK_TYPES = [
+      { value: 'character_generation', label: '角色生成', taskType: 'character_generation', controlMode: 'none', requiresReference: false, prompt: '生成统一角色设定图：单个专业人物角色，正面半身，服装、发型、气质清晰，写实商业风格，干净背景，无文字水印。' },
+      { value: 'product_generation', label: '产品生成', taskType: 'product_generation', controlMode: 'none', requiresReference: false, prompt: '生成产品主体图：产品外观清晰，材质、颜色、比例稳定，商业摄影风格，干净背景，无文字水印。' },
+      { value: 'scene_generation', label: '场景生成', taskType: 'scene_generation', controlMode: 'none', requiresReference: false, prompt: '生成可复用场景图：办公、科技、行业业务场景，空间层次清楚，适合后续人物或产品合成，写实风格，无文字水印。' },
+      { value: 'character_turnaround', label: '角色三视图', taskType: 'character_turnaround', controlMode: 'character_reference', requiresReference: true, prompt: '基于参考图生成角色三视图：同一人物正面、侧面、背面，服装发型一致，比例稳定，干净白底或浅色背景，无文字水印。' },
+      { value: 'product_turnaround', label: '产品三视图', taskType: 'product_turnaround', controlMode: 'product_reference', requiresReference: true, prompt: '基于参考图生成产品三视图：同一产品正面、侧面、背面，材质颜色一致，结构准确，干净背景，无文字水印。' },
+      { value: 'keyframe', label: '关键帧', taskType: 'keyframe', controlMode: 'keyframe_reference', requiresReference: true, prompt: '基于参考图生成视频关键帧：保持角色/产品/场景一致，构图适合后续图生视频，写实商业风格，无文字水印。' },
+      { value: 'cover_key_visual', label: '封面关键视觉', taskType: 'cover_key_visual', controlMode: 'style_reference', requiresReference: false, prompt: '生成封面关键视觉：主体明确，构图有冲击力，适合竖屏封面，预留标题安全区，写实商业科技风格，无文字水印。' },
+      { value: 'style_reference', label: '风格参考图', taskType: 'style_reference', controlMode: 'none', requiresReference: false, prompt: '生成统一风格参考图：色彩、光线、材质和画面气质明确，可作为后续整条视频的视觉风格基准，无文字水印。' },
+      { value: 'inpaint_fix', label: '局部修复/重绘', taskType: 'inpaint_fix', controlMode: 'mask_inpaint', requiresReference: true, prompt: '基于参考图进行局部修复或重绘：修正脸部、手部、文字、水印或局部瑕疵，保持原图主体和风格一致。' },
+    ];
     let comfyDebugWorkflows = [];
     let activeComfyDebugWorkflowId = '';
     const comfyDebugStateByWorkflowId = new Map();
@@ -4288,6 +4295,7 @@ INDEX_HTML = r"""<!doctype html>
           defaultReference: '',
           defaultSeed: '',
           defaultDuration: '',
+          defaultImageTaskType: 'character_generation',
           defaultPrompt: '',
           defaultNegative: '',
           defaultAssetReference: '',
@@ -4358,6 +4366,7 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugReferenceHint) {
         els.comfyDebugReferenceHint.textContent = state.referenceHint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。';
       }
+      updateComfyImageTaskHint();
       comfyDebugFormHydrated = true;
     }
 
@@ -4529,6 +4538,7 @@ INDEX_HTML = r"""<!doctype html>
         default_reference: item.defaultReference || '',
         default_seed: item.defaultSeed || '',
         default_duration: item.defaultDuration || '',
+        default_image_task_type: item.defaultImageTaskType || '',
         default_prompt: item.defaultPrompt || '',
         default_negative: item.defaultNegative || '',
         default_asset_reference: item.defaultAssetReference || '',
@@ -6196,6 +6206,15 @@ INDEX_HTML = r"""<!doctype html>
       const subtitle = document.createElement('span');
       subtitle.className = 'asset-card-subtitle';
       subtitle.textContent = item.file;
+      const tags = normalizeAssetTags(item.tags);
+      const tagRow = document.createElement('span');
+      tagRow.className = 'asset-tag-row';
+      tags.slice(0, 4).forEach(tag => {
+        const chip = document.createElement('span');
+        chip.className = 'asset-chip';
+        chip.textContent = assetTagLabel(tag);
+        tagRow.appendChild(chip);
+      });
       card.appendChild(media);
       card.appendChild(kind);
       if (favorited) {
@@ -6206,6 +6225,7 @@ INDEX_HTML = r"""<!doctype html>
       }
       card.appendChild(title);
       card.appendChild(subtitle);
+      if (tags.length) card.appendChild(tagRow);
       card.onclick = () => openAssetLightboxFromItems(taskName, previewItems || [item], previewItems ? index : 0);
       card.onkeydown = event => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -6235,6 +6255,99 @@ INDEX_HTML = r"""<!doctype html>
       return assetLibraryItems.find(existing => assetSourceKey('', existing) === key) || null;
     }
 
+    function normalizeAssetTags(tags) {
+      return (Array.isArray(tags) ? tags : String(tags || '').split(','))
+        .map(tag => String(tag || '').trim())
+        .filter(Boolean)
+        .filter((tag, index, arr) => arr.indexOf(tag) === index);
+    }
+
+    function assetTagLabel(tag) {
+      const found = ASSET_CATEGORY_TAGS.find(item => item.value === tag);
+      if (found) return found.label;
+      if (tag === 'image') return '图片';
+      if (tag === 'video') return '视频';
+      return tag;
+    }
+
+    function assetPrimaryCategory(item) {
+      const tags = normalizeAssetTags(item?.tags);
+      return ASSET_CATEGORY_TAGS.find(option => tags.includes(option.value))?.value || '';
+    }
+
+    function assetMatchesTag(item, tag) {
+      if (!tag) return true;
+      return normalizeAssetTags(item?.tags).includes(tag);
+    }
+
+    function renderAssetTagFilters() {
+      const selects = [els.assetLibraryTagFilter, els.comfyDebugAssetTagFilter].filter(Boolean);
+      selects.forEach(select => {
+        const current = select.value;
+        select.innerHTML = '';
+        const all = document.createElement('option');
+        all.value = '';
+        all.textContent = '全部素材';
+        select.appendChild(all);
+        ASSET_CATEGORY_TAGS.forEach(tag => {
+          const count = assetLibraryItems.filter(item => assetMatchesTag(item, tag.value)).length;
+          const option = document.createElement('option');
+          option.value = tag.value;
+          option.textContent = count ? `${tag.label} (${count})` : tag.label;
+          select.appendChild(option);
+        });
+        if ([...select.options].some(option => option.value === current)) select.value = current;
+      });
+    }
+
+    function comfyImageTaskDefinition(value) {
+      return COMFY_IMAGE_TASK_TYPES.find(item => item.value === value) || COMFY_IMAGE_TASK_TYPES[0];
+    }
+
+    function imageTaskDefinitionForWorkflow(workflow) {
+      const savedConfig = workflow ? getComfyWorkflowLibraryItemById(workflow.id) : null;
+      const mode = workflow?.default_image_task_type
+        || savedConfig?.defaultImageTaskType
+        || workflow?.default_task_type
+        || 'character_generation';
+      return comfyImageTaskDefinition(mode);
+    }
+
+    function updateComfyImageTaskHint() {
+      const selected = activeComfyDebugWorkflow();
+      const isImageWorkflow = !selected || selected.type === 'image';
+      const def = imageTaskDefinitionForWorkflow(selected);
+      if (els.comfyDebugReferenceHint && isImageWorkflow) {
+        const current = els.comfyDebugReferenceHint.textContent || '';
+        const modeHint = def.label + '：task_type=' + def.taskType + '，control_mode=' + def.controlMode + (def.requiresReference ? '，需要参考图' : '，可不传参考图');
+        if (!current.includes('task_type=')) {
+          els.comfyDebugReferenceHint.textContent = current + '｜' + modeHint;
+        }
+      }
+    }
+
+    async function updateAssetMetadata(assetId, tags, note) {
+      const id = String(assetId || '').trim();
+      if (!id) return;
+      try {
+        const result = await api('/api/update-asset-metadata', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id, tags: normalizeAssetTags(tags), note: String(note || '').trim() }),
+        });
+        const updated = result.asset || null;
+        if (updated) {
+          assetLibraryItems = assetLibraryItems.map(item => String(item.id || '') === String(updated.id || '') ? updated : item);
+        }
+        renderAssetTagFilters();
+        renderAssetLibrary();
+        renderComfyDebugAssetReferenceOptions();
+        setStatus('素材标签已保存', false);
+      } catch (err) {
+        setStatus(err.message || '素材标签保存失败', true);
+      }
+    }
+
     async function favoriteAsset(taskName, item) {
       if (!taskName || !item?.file) return;
       try {
@@ -6245,7 +6358,7 @@ INDEX_HTML = r"""<!doctype html>
             task: taskName,
             file: item.file,
             label: item.label || assetFileLabel(item.file),
-            tags: [item.kind || (isImageFile(item.file) ? 'image' : 'video')],
+            tags: normalizeAssetTags([item.kind || (isImageFile(item.file) ? 'image' : 'video'), ...(item.tags || [])]),
           }),
         });
         setStatus(`已收藏到素材库：${result.asset?.name || item.file}`, false);
@@ -6300,6 +6413,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         const data = await api('/api/asset-library');
         assetLibraryItems = Array.isArray(data.assets) ? data.assets : [];
+        renderAssetTagFilters();
         renderAssetLibrary();
         renderComfyDebugAssetReferenceOptions();
         if (els.assetLibraryStatus) {
@@ -6319,15 +6433,19 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugReferenceHint) {
         els.comfyDebugReferenceHint.textContent = hint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。';
       }
+      updateComfyImageTaskHint();
     }
 
     function renderComfyDebugAssetReferenceOptions() {
       if (!els.comfyDebugAssetReference) return;
       const currentValue = els.comfyDebugAssetReference.value;
+      const selectedTag = els.comfyDebugAssetTagFilter?.value || '';
       const referenceAssets = assetLibraryItems.filter(item => {
         const file = String(item.file || '');
         const kind = String(item.kind || '').toLowerCase();
-        return file && (kind === 'image' || kind === 'video' || isImageFile(file) || isVideoFile(file));
+        return file
+          && (kind === 'image' || kind === 'video' || isImageFile(file) || isVideoFile(file))
+          && assetMatchesTag(item, selectedTag);
       });
       els.comfyDebugAssetReference.innerHTML = '';
       const defaultOption = document.createElement('option');
@@ -6339,7 +6457,8 @@ INDEX_HTML = r"""<!doctype html>
         const option = document.createElement('option');
         option.value = file.startsWith('my_workspace/') ? file : `my_workspace/my_asset_library/${file}`;
         const kind = (item.kind || (isImageFile(file) ? 'image' : 'video')) === 'video' ? '视频' : '图片';
-        option.textContent = `${kind} · ${item.name || assetFileLabel(file)}`;
+        const tagText = normalizeAssetTags(item.tags).map(assetTagLabel).join('/');
+        option.textContent = `${kind} · ${item.name || assetFileLabel(file)}${tagText ? ` · ${tagText}` : ''}`;
         els.comfyDebugAssetReference.appendChild(option);
       });
       if ([...els.comfyDebugAssetReference.options].some(option => option.value === currentValue)) {
@@ -6372,14 +6491,76 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function appendAssetMetadataEditor(card, item) {
+      if (!card || !item?.id) return;
+      const editor = document.createElement('div');
+      editor.className = 'asset-meta-editor';
+      editor.onclick = event => event.stopPropagation();
+      editor.onkeydown = event => event.stopPropagation();
+
+      const category = document.createElement('select');
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = '未分类';
+      category.appendChild(empty);
+      ASSET_CATEGORY_TAGS.forEach(tag => {
+        const option = document.createElement('option');
+        option.value = tag.value;
+        option.textContent = tag.label;
+        category.appendChild(option);
+      });
+      category.value = assetPrimaryCategory(item);
+
+      const note = document.createElement('input');
+      note.placeholder = '备注用途，例如：主角头像 / 办公场景 / 封面风格';
+      note.value = item.note || '';
+
+      const save = document.createElement('button');
+      save.type = 'button';
+      save.textContent = '保存';
+      save.onclick = async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const mediaTag = item.kind || (isImageFile(item.file) ? 'image' : 'video');
+        const tags = normalizeAssetTags([mediaTag, category.value]);
+        await updateAssetMetadata(item.id, tags, note.value);
+      };
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'asset-delete-btn';
+      remove.textContent = '删除';
+      remove.onclick = async event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const label = item.name || item.label || item.file || 'asset';
+        if (!window.confirm('确定删除这个素材吗？\\n' + label)) return;
+        remove.disabled = true;
+        remove.textContent = '删除中...';
+        await unfavoriteAsset('', item);
+      };
+
+      editor.appendChild(category);
+      editor.appendChild(note);
+      editor.appendChild(save);
+      editor.appendChild(remove);
+      card.appendChild(editor);
+    }
+
     function renderAssetLibrary() {
       if (!els.assetLibraryGrid) return;
       els.assetLibraryGrid.innerHTML = '';
+      const selectedTag = els.assetLibraryTagFilter?.value || '';
+      const filteredItems = assetLibraryItems.filter(item => assetMatchesTag(item, selectedTag));
       if (!assetLibraryItems.length) {
         els.assetLibraryGrid.innerHTML = '<div class="muted small">暂无收藏素材。到“任务输出”的已生成素材里点击“收藏复用”，好图好视频会沉淀到这里。</div>';
         return;
       }
-      const previewItems = assetLibraryItems.map(item => ({
+      if (!filteredItems.length) {
+        els.assetLibraryGrid.innerHTML = '<div class="muted small">当前标签下没有素材。</div>';
+        return;
+      }
+      const previewItems = filteredItems.map(item => ({
         ...item,
         library: true,
         label: item.name || assetFileLabel(item.file),
@@ -6387,6 +6568,7 @@ INDEX_HTML = r"""<!doctype html>
       }));
       previewItems.forEach((item, index) => {
         const card = assetGalleryCard('', item, index, previewItems);
+        appendAssetMetadataEditor(card, item);
         card.onclick = () => {
           openAssetLightboxFromItems("", previewItems, index);
         };
@@ -6815,7 +6997,7 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    async function resumeSelectedTask() {
+    async function resumeSelectedTask(options = {}) {
       if (!selectedTask) return;
       const model = els.model.value === 'custom' ? els.customModel.value.trim() : els.model.value;
       if (els.model.value === 'custom' && !model) {
@@ -6826,7 +7008,7 @@ INDEX_HTML = r"""<!doctype html>
       const resumeStatusText = els.workflowAdvanceMode.value === 'auto'
         ? '已切换为全自动，正在继续后续步骤'
         : '正在继续下一步';
-      if (!confirm(`确定${resumeLabel}？\n\n系统会从第一个失败、缺少 output.md 或输出为空的步骤继续执行，并写回当前任务目录。`)) return;
+      if (!options.skipConfirm && !confirm(`确定${resumeLabel}？\n\n系统会从第一个失败、缺少 output.md 或输出为空的步骤继续执行，并写回当前任务目录。`)) return;
       saveSettings();
       resetProgress();
       autoFocusOutputDuringRun = true;
@@ -7047,8 +7229,10 @@ INDEX_HTML = r"""<!doctype html>
       const items = Array.isArray(assetLibraryItems) ? assetLibraryItems.slice(0, 30) : [];
       if (!items.length) return '';
       const lines = items.map((item, index) => {
-        const path = `my_workspace/my_asset_library/${item.file}`;
-        return `${index + 1}. ${item.name || item.file} | ${item.kind || ''} | ${path}`;
+        const path = 'my_workspace/my_asset_library/' + item.file;
+        const tags = normalizeAssetTags(item.tags).map(assetTagLabel).join('/');
+        const note = String(item.note || '').trim();
+        return `${index + 1}. ${item.name || item.file} | ${item.kind || ''} | 标签:${tags || '无'} | 备注:${note || '无'} | ${path}`;
       });
       return [
         '',
@@ -7199,6 +7383,7 @@ INDEX_HTML = r"""<!doctype html>
       item.defaultReference = els.comfyDebugReference.value.trim();
       item.defaultSeed = els.comfyDebugSeed.value.trim();
       item.defaultDuration = els.comfyDebugDuration.value.trim();
+      item.defaultImageTaskType = workflow.default_image_task_type || item.defaultImageTaskType || workflow.default_task_type || '';
       item.defaultPrompt = els.comfyDebugPrompt.value;
       item.defaultNegative = els.comfyDebugNegative.value;
       item.defaultAssetReference = els.comfyDebugAssetReference.value || '';
@@ -7233,6 +7418,7 @@ INDEX_HTML = r"""<!doctype html>
       item.defaultReference = '';
       item.defaultSeed = '';
       item.defaultDuration = '';
+      item.defaultImageTaskType = workflow.default_image_task_type || workflow.default_task_type || '';
       item.defaultPrompt = '';
       item.defaultNegative = '';
       item.defaultAssetReference = '';
@@ -7249,9 +7435,19 @@ INDEX_HTML = r"""<!doctype html>
     function fillComfyDebugSample() {
       const selected = activeComfyDebugWorkflow();
       const isVideo = selected?.type === 'video';
-      els.comfyDebugPrompt.value = isVideo
-        ? '写实商业短视频镜头：AI 自动化工作台界面发光，镜头缓慢推进，干净科技感，稳定运动，无文字水印。'
-        : '写实商业关键帧：AI 自动化服务场景，干净办公室，专业人物，蓝绿色科技光效，竖版构图，无文字水印。';
+      const hasReference = Boolean(els.comfyDebugReference?.value?.trim());
+      if (selected?.id === 'reference_keyframe') {
+        els.comfyDebugPrompt.value = hasReference
+          ? '基于参考图生成竖屏视频关键帧：保持参考图人物/产品/场景主体一致，构图更适合后续图生视频，写实商业风格，干净光线，无文字水印。'
+          : '生成一组可复用的竖屏基础素材图：统一风格的专业人物角色、产品主体、办公/科技场景，写实商业质感，蓝绿色科技光效，干净背景，无文字水印。';
+      } else {
+        els.comfyDebugPrompt.value = isVideo
+          ? '写实商业短视频镜头：AI 自动化工作台界面发光，镜头缓慢推进，干净科技感，稳定运动，无文字水印。'
+          : '写实商业关键帧：AI 自动化服务场景，干净办公室，专业人物，蓝绿色科技光效，竖版构图，无文字水印。';
+      }
+      if (selected?.type === 'image') {
+        els.comfyDebugPrompt.value = imageTaskDefinitionForWorkflow(selected).prompt;
+      }
       els.comfyDebugNegative.value = '文字，水印，logo，畸形手，脸部变形，低清晰度，闪烁，过曝，噪点';
       if (!els.comfyDebugWidth.value.trim()) els.comfyDebugWidth.value = selected?.default_width || (isVideo ? '960' : '1080');
       if (!els.comfyDebugHeight.value.trim()) els.comfyDebugHeight.value = selected?.default_height || (isVideo ? '544' : '1920');
@@ -7269,6 +7465,12 @@ INDEX_HTML = r"""<!doctype html>
       const prompt = els.comfyDebugPrompt.value.trim();
       if (!prompt) {
         setStatus('请输入调试提示词', true);
+        return;
+      }
+      const imageTaskDef = imageTaskDefinitionForWorkflow(selected);
+      const referenceValue = els.comfyDebugReference.value.trim();
+      if (selected.type === 'image' && imageTaskDef.requiresReference && !referenceValue) {
+        setStatus(imageTaskDef.label + ' 需要先选择或上传参考图', true);
         return;
       }
       saveActiveComfyDebugWorkflowConfig(false);
@@ -7295,7 +7497,10 @@ INDEX_HTML = r"""<!doctype html>
             poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
             prompt,
             negative_prompt: els.comfyDebugNegative.value.trim(),
-            reference_image: els.comfyDebugReference.value.trim(),
+            reference_image: referenceValue,
+            task_type: selected.type === 'image' ? imageTaskDef.taskType : '',
+            control_mode: selected.type === 'image' ? imageTaskDef.controlMode : '',
+            image_task_mode: selected.type === 'image' ? imageTaskDef.value : '',
             seed: els.comfyDebugSeed.value.trim(),
             width: els.comfyDebugWidth.value.trim(),
             height: els.comfyDebugHeight.value.trim(),
@@ -7384,6 +7589,7 @@ INDEX_HTML = r"""<!doctype html>
             file,
             label: file.split('/').pop(),
             kind: isImageFile(file) ? 'image' : 'video',
+            tags: [result.asset_tag || result.id || 'comfy_debug', isImageFile(file) ? 'image' : 'video'],
           }));
           files.forEach((file, index) => {
             const item = previewItems[index];
@@ -7546,7 +7752,7 @@ INDEX_HTML = r"""<!doctype html>
     els.rebuildFinalBtn.onclick = rebuildFinalOutput;
     els.rerunStepBtn.onclick = rerunCurrentStep;
     els.resumeTaskBtn.onclick = resumeSelectedTask;
-    els.confirmStepContinueBtn.onclick = resumeSelectedTask;
+    els.confirmStepContinueBtn.onclick = () => resumeSelectedTask({ skipConfirm: true });
     els.confirmStepRerunBtn.onclick = rerunCurrentStep;
     els.exportTaskBtn.onclick = exportCurrentTask;
     els.refreshStaffBtn.onclick = loadStaffList;
@@ -7662,6 +7868,12 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请输入调试提示词', true);
         return;
       }
+      const imageTaskDef = imageTaskDefinitionForWorkflow(selected);
+      const referenceValue = els.comfyDebugReference.value.trim();
+      if (selected.type === 'image' && imageTaskDef.requiresReference && !referenceValue) {
+        setStatus(imageTaskDef.label + ' 需要先选择或上传参考图', true);
+        return;
+      }
       const existingState = comfyDebugStateByWorkflowId.get(selected.id) || {};
       if (existingState.running) {
         renderComfyDebugRunningAsync(selected, existingState);
@@ -7700,7 +7912,10 @@ INDEX_HTML = r"""<!doctype html>
             poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
             prompt,
             negative_prompt: els.comfyDebugNegative.value.trim(),
-            reference_image: els.comfyDebugReference.value.trim(),
+            reference_image: referenceValue,
+            task_type: selected.type === 'image' ? imageTaskDef.taskType : '',
+            control_mode: selected.type === 'image' ? imageTaskDef.controlMode : '',
+            image_task_mode: selected.type === 'image' ? imageTaskDef.value : '',
             seed: els.comfyDebugSeed.value.trim(),
             width: els.comfyDebugWidth.value.trim(),
             height: els.comfyDebugHeight.value.trim(),
@@ -7869,6 +8084,17 @@ INDEX_HTML = r"""<!doctype html>
       saveCurrentComfyDebugUiState();
       saveSettings();
     };
+    if (els.assetLibraryTagFilter) {
+      els.assetLibraryTagFilter.onchange = () => {
+        renderAssetLibrary();
+      };
+    }
+    if (els.comfyDebugAssetTagFilter) {
+      els.comfyDebugAssetTagFilter.onchange = () => {
+        if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+        renderComfyDebugAssetReferenceOptions();
+      };
+    }
     els.comfyDebugReferenceFile.onchange = uploadComfyDebugReferenceFile;
     els.clearComfyDebugReferenceBtn.onclick = () => {
       if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
@@ -8088,6 +8314,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/unfavorite-asset":
                 self._send_json(self._unfavorite_asset(payload))
+                return
+
+            if parsed.path == "/api/update-asset-metadata":
+                self._send_json(self._update_asset_metadata(payload))
                 return
 
             if parsed.path == "/api/comfy-debug-run":
@@ -9553,33 +9783,6 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     def _comfy_debug_workflows(self) -> list[dict]:
         workflows = [dict(item) for item in COMFY_DEBUG_WORKFLOWS]
-        library_index = WORKSPACE_ROOT / "comfyui_workflows" / "workflow_library" / "index.json"
-        if library_index.is_file():
-            try:
-                data = json.loads(library_index.read_text(encoding="utf-8-sig"))
-            except json.JSONDecodeError:
-                data = []
-            if isinstance(data, list):
-                for item in data:
-                    if not isinstance(item, dict):
-                        continue
-                    material_types = item.get("material_types") if isinstance(item.get("material_types"), list) else []
-                    workflows.append(
-                        {
-                            "id": str(item.get("id") or "").strip(),
-                            "name": str(item.get("title") or item.get("name") or item.get("id") or "").strip(),
-                            "type": "video" if "video" in material_types else "image" if "image" in material_types else "workflow",
-                            "stage": "library",
-                            "purpose": str(item.get("purpose") or "").strip(),
-                            "recommended": False,
-                            "default_task_type": "img2video" if "video" in material_types else "txt2img",
-                            "default_control_mode": "first_frame" if "video" in material_types else "reference_image",
-                            "default_width": 960 if "video" in material_types else 1080,
-                            "default_height": 544 if "video" in material_types else 1920,
-                            "default_endpoint": "",
-                            "default_node_info": self._read_workflow_library_text(item.get("node_info_preset")),
-                        }
-                    )
         seen = set()
         unique = []
         for item in workflows:
@@ -9727,6 +9930,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         height = str(payload.get("height") or "").strip()
         duration = str(payload.get("duration") or "").strip()
         negative_prompt = str(payload.get("negative_prompt") or "").strip()
+        task_type_override = str(payload.get("task_type") or "").strip()
+        control_mode_override = str(payload.get("control_mode") or "").strip()
+        image_task_mode = str(payload.get("image_task_mode") or "").strip()
         workflows = {item["id"]: item for item in self._comfy_debug_workflows()}
         frontend_library = payload.get("workflow_library") if isinstance(payload.get("workflow_library"), list) else []
         for library_item in frontend_library:
@@ -9741,16 +9947,30 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             endpoint_value = str(library_item.get("endpoint") or "").strip()
             node_info_value = str(library_item.get("nodeInfoList") or library_item.get("node_info_list_json") or "").strip()
             poll_timeout_value = str(library_item.get("pollTimeout") or library_item.get("poll_timeout_seconds") or "").strip()
+            image_task_type_value = str(library_item.get("defaultImageTaskType") or library_item.get("default_image_task_type") or "").strip()
             if endpoint_value:
                 target["default_endpoint"] = endpoint_value
             if node_info_value:
                 target["default_node_info"] = node_info_value
             if poll_timeout_value:
                 target["poll_timeout_seconds"] = poll_timeout_value
+            if image_task_type_value:
+                target["default_image_task_type"] = image_task_type_value
         run_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
         run_root = COMFY_DEBUG_ROOT / run_id
         run_root.mkdir(parents=True, exist_ok=True)
         results = []
+        image_task_modes = {
+            "character_generation": ("character_generation", "none", False),
+            "product_generation": ("product_generation", "none", False),
+            "scene_generation": ("scene_generation", "none", False),
+            "character_turnaround": ("character_turnaround", "character_reference", True),
+            "product_turnaround": ("product_turnaround", "product_reference", True),
+            "keyframe": ("keyframe", "keyframe_reference", True),
+            "cover_key_visual": ("cover_key_visual", "style_reference", False),
+            "style_reference": ("style_reference", "none", False),
+            "inpaint_fix": ("inpaint_fix", "mask_inpaint", True),
+        }
 
         for workflow_id in selected_ids:
             item = workflows.get(workflow_id)
@@ -9775,6 +9995,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             task_type = str(item.get("default_task_type") or "").strip()
             control_mode = str(item.get("default_control_mode") or "").strip()
             job_type = "video" if str(item.get("type") or "").lower() == "video" else "image"
+            mode = image_task_mode or str(item.get("default_image_task_type") or "").strip()
+            if job_type == "image" and mode in image_task_modes:
+                task_type, control_mode, requires_reference = image_task_modes[mode]
+                if requires_reference and not reference_image:
+                    raise ValueError(f"{mode} requires reference_image")
+            if task_type_override:
+                task_type = task_type_override
+            if control_mode_override:
+                control_mode = control_mode_override
             request_payload = {
                 "prompt": prompt,
                 "negative_prompt": negative_prompt,
@@ -9785,6 +10014,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "duration": duration,
                 "task_type": task_type,
                 "control_mode": control_mode,
+                "image_task_mode": mode,
                 "image_task_type": task_type if job_type == "image" else "",
                 "video_task_type": task_type if job_type == "video" else "",
             }
@@ -9813,6 +10043,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                         "id": workflow_id,
                         "name": item.get("name") or workflow_id,
                         "type": item.get("type") or "",
+                        "asset_tag": item.get("asset_tag") or workflow_id,
                         "status": manifest.get("status", "unknown"),
                         "endpoint": endpoint,
                         "task": COMFY_DEBUG_TASK,
@@ -9829,7 +10060,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     "error": str(exc),
                 }
                 (output_dir / "debug_error.json").write_text(json.dumps(error_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-                results.append({**error_manifest, "type": item.get("type") or "", "task": COMFY_DEBUG_TASK, "files": []})
+                results.append({**error_manifest, "type": item.get("type") or "", "asset_tag": item.get("asset_tag") or workflow_id, "task": COMFY_DEBUG_TASK, "files": []})
 
         manifest = {"run_id": run_id, "created_at": time.time(), "results": results}
         (run_root / "comfy_debug_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -9845,6 +10076,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".m4v"}:
             raise ValueError(f"Unsupported asset type: {suffix}")
         ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
+        clean_tags = [str(tag).strip() for tag in tags if str(tag).strip()]
+        folder_name = next((ASSET_LIBRARY_TAG_FOLDERS[tag] for tag in clean_tags if tag in ASSET_LIBRARY_TAG_FOLDERS), "uncategorized")
+        target_dir = (ASSET_LIBRARY_ROOT / folder_name).resolve()
+        if not self._is_relative_to(target_dir, ASSET_LIBRARY_ROOT):
+            raise ValueError("Invalid asset library folder")
+        target_dir.mkdir(parents=True, exist_ok=True)
         items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
         for existing in items:
             if str(existing.get("source_task") or "") == task and str(existing.get("source_file") or "") == file_name:
@@ -9852,18 +10089,19 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         asset_id = uuid4().hex
         safe_stem = self._safe_asset_stem(Path(file_name).stem or "asset")
         library_name = f"{asset_id}_{safe_stem}{suffix}"
-        target = (ASSET_LIBRARY_ROOT / library_name).resolve()
+        relative_library_name = f"{folder_name}/{library_name}"
+        target = (target_dir / library_name).resolve()
         if not self._is_relative_to(target, ASSET_LIBRARY_ROOT):
             raise ValueError("Invalid asset path")
         shutil.copy2(source_path, target)
         item = {
             "id": asset_id,
-            "file": library_name,
+            "file": relative_library_name,
             "name": label or self._asset_label(file_name),
             "source_task": task,
             "source_file": file_name,
             "kind": "image" if suffix in {".png", ".jpg", ".jpeg", ".webp"} else "video",
-            "tags": [str(tag).strip() for tag in tags if str(tag).strip()],
+            "tags": clean_tags,
             "created_at": time.time(),
             "size": target.stat().st_size,
             "mtime": target.stat().st_mtime,
@@ -9871,6 +10109,46 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         items.insert(0, item)
         self._write_asset_library_index(items)
         return {"ok": True, "asset": item}
+
+    def _update_asset_metadata(self, payload: dict) -> dict:
+        asset_id = str(payload.get("id") or "").strip()
+        if not asset_id:
+            raise ValueError("Missing asset id")
+        tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+        note = str(payload.get("note") or "").strip()
+        clean_tags: list[str] = []
+        for tag in tags:
+            value = str(tag or "").strip()
+            if value and value not in clean_tags:
+                clean_tags.append(value)
+        items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
+        updated: dict | None = None
+        for item in items:
+            if str(item.get("id") or "") == asset_id:
+                old_file = str(item.get("file") or "").strip()
+                item["tags"] = clean_tags
+                item["note"] = note
+                item["updated_at"] = time.time()
+                folder_name = next((ASSET_LIBRARY_TAG_FOLDERS[tag] for tag in clean_tags if tag in ASSET_LIBRARY_TAG_FOLDERS), "uncategorized")
+                if old_file:
+                    old_path = (ASSET_LIBRARY_ROOT / old_file).resolve()
+                    if old_path.is_file() and self._is_relative_to(old_path, ASSET_LIBRARY_ROOT):
+                        target_dir = (ASSET_LIBRARY_ROOT / folder_name).resolve()
+                        if not self._is_relative_to(target_dir, ASSET_LIBRARY_ROOT):
+                            raise ValueError("Invalid asset library folder")
+                        target_dir.mkdir(parents=True, exist_ok=True)
+                        new_path = (target_dir / old_path.name).resolve()
+                        if old_path != new_path:
+                            shutil.move(str(old_path), str(new_path))
+                            item["file"] = f"{folder_name}/{old_path.name}"
+                            item["size"] = new_path.stat().st_size
+                            item["mtime"] = new_path.stat().st_mtime
+                updated = item
+                break
+        if updated is None:
+            raise FileNotFoundError(asset_id)
+        self._write_asset_library_index(items)
+        return {"ok": True, "asset": updated}
 
     def _unfavorite_asset(self, payload: dict) -> dict:
         asset_id = str(payload.get("id") or "").strip()

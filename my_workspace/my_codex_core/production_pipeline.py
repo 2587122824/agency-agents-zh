@@ -879,7 +879,7 @@ def _combined_comfyui_payload_text(
             if isinstance(value, list):
                 defaults.setdefault(key, [])
                 defaults[key].extend(value)
-        for key in ("image_prompt", "video_prompt", "reference_image", "negative_prompt", "seed", "width", "height"):
+        for key in ("image_prompt", "video_prompt", "reference_image", "negative_prompt", "seed", "width", "height", "task_type", "control_mode", "image_task_mode"):
             value = source.get(key)
             if value not in (None, "", []):
                 defaults[key] = value
