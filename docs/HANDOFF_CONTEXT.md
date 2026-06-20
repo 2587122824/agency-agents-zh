@@ -120,6 +120,7 @@
 - Staff 21 is now legacy compatibility only. The main long-video path should not run `21_ComfyUI成片编排师`; ComfyUI/RunningHub visual parameters come directly from 06 and 07. Keep 21 only for old tasks or manual fallback consolidation.
 
 - Asset lightbox fitting is now deterministic. The stage uses flex centering and media elements default to natural `width/height:auto`; after image load or video metadata load, `fitAssetLightboxMedia()` compares media ratio to stage ratio and applies `fit-height` for portrait/tall media or `fit-width` for landscape media. Button clicks stop propagation, keyboard arrows prevent default browser handling, and blank-area close ignores toolbar/media/nav clicks. Chrome headless validation used local `__lightbox_test__` portrait/landscape/square assets and confirmed portrait media fits inside the stage and centers without cropping.
+- Asset lightbox preview source is now isolated from gallery rerenders. `renderAssetGallery()` no longer rewrites global `assetPreviewItems` / `assetPreviewTaskName`; only `openAssetLightboxFromItems()` updates the active lightbox source snapshot when the user opens a card. This fixes ComfyUI debug previews jumping into mixed `__comfy_debug__` task assets after favoriting or background refresh. Chrome validation used `__preview_isolation_test__` debug assets and confirmed background task-gallery refresh plus real favorite/unfavorite calls keep the current preview on the same result group.
 
 ## Important Files
 

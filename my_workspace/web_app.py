@@ -6145,8 +6145,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function renderAssetGallery(taskName, assetItems) {
-      assetPreviewTaskName = taskName || "";
-      assetPreviewItems = assetItems.map(item => {
+      const galleryItems = assetItems.map(item => {
         const file = typeof item === 'string' ? item : item.file;
         return {
           ...item,
@@ -6158,12 +6157,12 @@ INDEX_HTML = r"""<!doctype html>
       }).filter(item => item.file && (isImageFile(item.file) || isVideoFile(item.file)));
       els.assetOutputList.classList.add('asset-gallery');
       els.assetOutputList.innerHTML = '';
-      assetPreviewItems.forEach((item, index) => {
-        els.assetOutputList.appendChild(assetGalleryCard(taskName, item, index));
+      galleryItems.forEach((item, index) => {
+        els.assetOutputList.appendChild(assetGalleryCard(taskName, item, index, galleryItems));
       });
     }
 
-    function assetGalleryCard(taskName, item, index) {
+    function assetGalleryCard(taskName, item, index, previewItems = null) {
       const card = document.createElement('div');
       card.tabIndex = 0;
       card.role = 'button';
@@ -6207,11 +6206,11 @@ INDEX_HTML = r"""<!doctype html>
       }
       card.appendChild(title);
       card.appendChild(subtitle);
-      card.onclick = () => openAssetLightbox(index);
+      card.onclick = () => openAssetLightboxFromItems(taskName, previewItems || [item], previewItems ? index : 0);
       card.onkeydown = event => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
-          openAssetLightbox(index);
+          openAssetLightboxFromItems(taskName, previewItems || [item], previewItems ? index : 0);
         }
       };
       return card;
@@ -6387,22 +6386,40 @@ INDEX_HTML = r"""<!doctype html>
         kind: item.kind || (isImageFile(item.file) ? 'image' : 'video'),
       }));
       previewItems.forEach((item, index) => {
-        const card = assetGalleryCard('', item, index);
+        const card = assetGalleryCard('', item, index, previewItems);
         card.onclick = () => {
-          assetPreviewTaskName = "";
-          assetPreviewItems = previewItems;
-          openAssetLightbox(index);
+          openAssetLightboxFromItems("", previewItems, index);
         };
         card.onkeydown = event => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            assetPreviewTaskName = "";
-            assetPreviewItems = previewItems;
-            openAssetLightbox(index);
+            openAssetLightboxFromItems("", previewItems, index);
           }
         };
         els.assetLibraryGrid.appendChild(card);
       });
+    }
+
+    function normalizeAssetPreviewItems(items) {
+      return (Array.isArray(items) ? items : []).map(item => {
+        const file = typeof item === 'string' ? item : item?.file;
+        if (!file) return null;
+        return {
+          ...(typeof item === 'string' ? {} : item),
+          file,
+          label: typeof item === 'string' ? assetFileLabel(file) : (item.label || assetFileLabel(file)),
+          name: typeof item === 'string' ? String(file).split('/').pop() : (item.name || String(file).split('/').pop()),
+          kind: isImageFile(file) ? 'image' : 'video',
+        };
+      }).filter(item => item && item.file && (isImageFile(item.file) || isVideoFile(item.file)));
+    }
+
+    function openAssetLightboxFromItems(taskName, items, index = 0) {
+      const nextItems = normalizeAssetPreviewItems(items);
+      if (!nextItems.length) return;
+      assetPreviewTaskName = taskName || "";
+      assetPreviewItems = nextItems;
+      openAssetLightbox(index);
     }
 
     function openAssetLightbox(index = 0) {
@@ -7370,18 +7387,15 @@ INDEX_HTML = r"""<!doctype html>
           }));
           files.forEach((file, index) => {
             const item = previewItems[index];
-            const card = assetGalleryCard(result.task || '__comfy_debug__', item, index);
+            const taskName = result.task || '__comfy_debug__';
+            const card = assetGalleryCard(taskName, item, index, previewItems);
             card.onclick = () => {
-              assetPreviewTaskName = result.task || '__comfy_debug__';
-              assetPreviewItems = previewItems;
-              openAssetLightbox(index);
+              openAssetLightboxFromItems(taskName, previewItems, index);
             };
             card.onkeydown = event => {
               if (event.key === 'Enter' || event.key === ' ') {
                 event.preventDefault();
-                assetPreviewTaskName = result.task || '__comfy_debug__';
-                assetPreviewItems = previewItems;
-                openAssetLightbox(index);
+                openAssetLightboxFromItems(taskName, previewItems, index);
               }
             };
             gallery.appendChild(card);
