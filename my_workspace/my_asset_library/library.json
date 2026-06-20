@@ -1,1 +1,30 @@
-﻿[]
+[
+  {
+    "id": "5df092a4cfc64a008480b90cb3e816cf",
+    "file": "5df092a4cfc64a008480b90cb3e816cf_comfyui_result_01.png",
+    "name": "ComfyUI 调试素材 · comfyui_result_01.png",
+    "source_task": "__comfy_debug__",
+    "source_file": "20260620_075546_0181970c/reference_keyframe/material_03_video_prompt/comfyui_result_01.png",
+    "kind": "image",
+    "tags": [
+      "image"
+    ],
+    "created_at": 1781931668.538545,
+    "size": 3728532,
+    "mtime": 1781913499.651134
+  },
+  {
+    "id": "b58433736b83447d851be2af5273406f",
+    "file": "b58433736b83447d851be2af5273406f_comfyui_result_01.png",
+    "name": "ComfyUI 素材 · comfyui_result_01.png",
+    "source_task": "task_20260619_174348_运动长视频",
+    "source_file": "comfyui/material_15_shot_015_keyframe/comfyui_result_01.png",
+    "kind": "image",
+    "tags": [
+      "image"
+    ],
+    "created_at": 1781863726.8952687,
+    "size": 3059344,
+    "mtime": 1781863698.3462284
+  }
+]

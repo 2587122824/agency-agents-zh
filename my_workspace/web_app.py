@@ -16,6 +16,7 @@ from urllib import request as urllib_request
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
 
+from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
 from my_codex_core.production_pipeline import retry_production_job
 from my_codex_core.workflow_engine import WorkflowCheckpointPause, WorkflowEngine
 
@@ -30,6 +31,8 @@ VOICE_SAMPLE_ROOT = WORKSPACE_ROOT / "my_voice_samples"
 KNOWLEDGE_ROOT = WORKSPACE_ROOT / "my_knowledge_base"
 ASSET_LIBRARY_ROOT = WORKSPACE_ROOT / "my_asset_library"
 ASSET_LIBRARY_INDEX = ASSET_LIBRARY_ROOT / "library.json"
+COMFY_DEBUG_TASK = "__comfy_debug__"
+COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
@@ -82,6 +85,149 @@ CONTENT_COLUMNS = [
         "structure": "选题现象 -> 爆点拆解 -> 内容结构 -> 可复用公式 -> 反面风险",
         "visual_style": "信息图、标题卡、案例截图、节奏较快的 B-roll",
         "sample": "复盘一个热门选题为什么有效，并改造成适合自己业务的内容选题公式。",
+    },
+]
+
+COMFY_DEBUG_WORKFLOWS = [
+    {
+        "id": "reference_keyframe",
+        "name": "参考图 / 关键帧生成",
+        "type": "image",
+        "stage": "preproduction",
+        "purpose": "生成统一人物、产品、场景风格的关键帧，作为后续图生视频参考。",
+        "recommended": True,
+        "default_task_type": "txt2img",
+        "default_control_mode": "reference_image",
+        "default_width": 1080,
+        "default_height": 1920,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "identity_consistency",
+        "name": "人物 / 产品一致性",
+        "type": "image",
+        "stage": "preproduction",
+        "purpose": "用 IPAdapter / FaceID / 产品参考控制人物和主体不跑偏。",
+        "recommended": True,
+        "default_task_type": "img2img",
+        "default_control_mode": "ipadapter_faceid",
+        "default_width": 1080,
+        "default_height": 1920,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "segment_i2v",
+        "name": "分段图生视频",
+        "type": "video",
+        "stage": "production",
+        "purpose": "把单个分镜关键帧转成 3-8 秒视频片段，是长视频素材生产主力。",
+        "recommended": True,
+        "default_task_type": "img2video",
+        "default_control_mode": "first_frame",
+        "default_width": 960,
+        "default_height": 544,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "first_last_transition",
+        "name": "首尾帧过渡",
+        "type": "video",
+        "stage": "production",
+        "purpose": "用首帧/尾帧控制镜头运动和转场，减少随机跳变。",
+        "recommended": True,
+        "default_task_type": "first_last_frame_video",
+        "default_control_mode": "first_last_frame",
+        "default_width": 960,
+        "default_height": 544,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "broll_scene",
+        "name": "B-roll / 场景素材",
+        "type": "video",
+        "stage": "production",
+        "purpose": "生成办公、行业、产品、抽象概念等补充画面，解决正片画面单调。",
+        "recommended": True,
+        "default_task_type": "txt2video",
+        "default_control_mode": "none",
+        "default_width": 960,
+        "default_height": 544,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "video_upscale",
+        "name": "视频放大 / 清晰化",
+        "type": "video",
+        "stage": "postproduction",
+        "purpose": "对已生成片段做 2x/4x 放大、去噪、锐化，保证最终素材质量。",
+        "recommended": True,
+        "default_task_type": "video_upscale",
+        "default_control_mode": "upscale",
+        "default_width": 1920,
+        "default_height": 1080,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "frame_interpolation",
+        "name": "补帧 / 变速",
+        "type": "video",
+        "stage": "postproduction",
+        "purpose": "把低帧率视频补到 24/30/60fps，或做慢动作/平滑运动。",
+        "recommended": True,
+        "default_task_type": "frame_interpolation",
+        "default_control_mode": "interpolate",
+        "default_width": 1920,
+        "default_height": 1080,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "inpaint_fix",
+        "name": "局部修复 / 重绘",
+        "type": "image",
+        "stage": "repair",
+        "purpose": "修脸、修手、修字、去水印、局部替换，减少废片率。",
+        "recommended": True,
+        "default_task_type": "inpaint",
+        "default_control_mode": "mask_inpaint",
+        "default_width": 1080,
+        "default_height": 1920,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "background_remove",
+        "name": "抠图 / 透明素材",
+        "type": "image",
+        "stage": "postproduction",
+        "purpose": "生成可叠加的人物、产品、图标透明素材，方便剪辑包装。",
+        "recommended": False,
+        "default_task_type": "background_remove",
+        "default_control_mode": "matting",
+        "default_width": 1080,
+        "default_height": 1920,
+        "default_endpoint": "",
+        "default_node_info": "[]",
+    },
+    {
+        "id": "subtitle_safe_preview",
+        "name": "字幕安全区预览",
+        "type": "image",
+        "stage": "review",
+        "purpose": "检查封面/关键帧/画面构图是否会被字幕、平台 UI、标题遮挡。",
+        "recommended": False,
+        "default_task_type": "preview_overlay",
+        "default_control_mode": "safe_area",
+        "default_width": 1080,
+        "default_height": 1920,
+        "default_endpoint": "",
+        "default_node_info": "[]",
     },
 ]
 
@@ -191,6 +337,7 @@ INDEX_HTML = r"""<!doctype html>
     body[data-view="staff"] main,
     body[data-view="workflow"] main,
     body[data-view="assets"] main,
+    body[data-view="comfyDebug"] main,
     body[data-view="system"] main {
       grid-template-columns: 1fr;
     }
@@ -393,6 +540,21 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: minmax(160px, .65fr) minmax(280px, 1fr) minmax(160px, .65fr);
       gap: 12px;
+    }
+    .content-column-bar {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1.2fr);
+      gap: 10px;
+      align-items: end;
+      padding: 10px;
+      border: 1px solid #bfdbfe;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #eff6ff, #f8fafc);
+    }
+    .content-column-hint {
+      color: #1e3a8a;
+      font-size: 12px;
+      line-height: 1.45;
     }
     .run-input textarea {
       min-height: 150px;
@@ -782,6 +944,7 @@ INDEX_HTML = r"""<!doctype html>
       list-style: none;
       cursor: default;
       background: #fff;
+      min-height: auto;
     }
     .progress-step-wrap > summary::-webkit-details-marker {
       display: none;
@@ -791,7 +954,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .progress-step {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       justify-content: space-between;
       gap: 10px;
       border: 0;
@@ -809,9 +972,10 @@ INDEX_HTML = r"""<!doctype html>
     .progress-step.error { color: var(--danger); background: #fff7f6; }
     .progress-step-main {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
       min-width: 0;
+      flex: 1 1 auto;
     }
     .progress-step-toggle {
       display: inline-flex;
@@ -830,14 +994,17 @@ INDEX_HTML = r"""<!doctype html>
       color: var(--accent);
     }
     .progress-step-title {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
       font-weight: 650;
     }
     .progress-step-status {
       text-align: right;
       flex: 0 0 auto;
+      padding-top: 1px;
     }
     .progress-detail-list {
       display: grid;
@@ -1006,6 +1173,10 @@ INDEX_HTML = r"""<!doctype html>
       justify-content: space-between;
       gap: 10px;
     }
+    .output-section-head .inline-actions {
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
     .output-link-list {
       display: grid;
       gap: 7px;
@@ -1036,9 +1207,10 @@ INDEX_HTML = r"""<!doctype html>
       background: #f8fafc;
     }
     .output-link span {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .output-link .output-link-title {
       font-weight: 650;
@@ -1086,6 +1258,10 @@ INDEX_HTML = r"""<!doctype html>
       border-color: var(--accent);
       box-shadow: 0 12px 24px rgba(15, 23, 42, .12);
     }
+    .asset-card.is-favorited {
+      border-color: rgba(20, 184, 166, .72);
+      background: linear-gradient(180deg, #f0fdfa, #fff);
+    }
     .asset-card-media {
       width: 100%;
       aspect-ratio: 16 / 10;
@@ -1116,18 +1292,34 @@ INDEX_HTML = r"""<!doctype html>
       font-weight: 700;
       backdrop-filter: blur(8px);
     }
+    .asset-card-badge {
+      position: absolute;
+      right: 10px;
+      top: 10px;
+      z-index: 4;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(15, 118, 110, .9);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 800;
+      box-shadow: 0 8px 18px rgba(15, 23, 42, .16);
+      backdrop-filter: blur(8px);
+    }
     .asset-card-title {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
       font-size: 12px;
       font-weight: 700;
       color: #0f172a;
     }
     .asset-card-subtitle {
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
       color: var(--muted);
       font-size: 11px;
     }
@@ -1136,7 +1328,7 @@ INDEX_HTML = r"""<!doctype html>
       inset: 0;
       z-index: 10000;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr) auto;
+      grid-template-rows: minmax(44px, auto) minmax(0, 1fr) minmax(24px, auto);
       background: rgba(2, 6, 23, .9);
       color: #fff;
       padding: 18px;
@@ -1152,6 +1344,8 @@ INDEX_HTML = r"""<!doctype html>
       justify-content: space-between;
       gap: 12px;
       min-width: 0;
+      position: relative;
+      z-index: 2;
     }
     .asset-lightbox-title {
       display: grid;
@@ -1167,34 +1361,63 @@ INDEX_HTML = r"""<!doctype html>
     .asset-lightbox-body {
       min-width: 0;
       min-height: 0;
+      height: auto;
       display: grid;
       grid-template-columns: 54px minmax(0, 1fr) 54px;
       align-items: center;
       gap: 14px;
+      overflow: hidden;
     }
     .asset-lightbox-stage {
       min-width: 0;
       min-height: 0;
       height: 100%;
-      display: grid;
-      place-items: center;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       border-radius: 16px;
       background: rgba(15, 23, 42, .6);
       overflow: hidden;
+      padding: 10px;
+      box-sizing: border-box;
     }
     .asset-lightbox-stage img,
     .asset-lightbox-stage video {
+      width: auto;
+      height: auto;
       max-width: 100%;
       max-height: 100%;
       object-fit: contain;
+      object-position: center center;
+      display: block;
       border-radius: 12px;
       background: #000;
       box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
+    }
+    .asset-lightbox-media {
+      width: auto !important;
+      height: auto !important;
+      max-width: 100% !important;
+      max-height: 100% !important;
+      object-fit: contain !important;
+      object-position: center center !important;
+      flex: 0 1 auto;
+    }
+    .asset-lightbox-media.fit-height {
+      width: auto !important;
+      height: 100% !important;
+    }
+    .asset-lightbox-media.fit-width {
+      width: 100% !important;
+      height: auto !important;
     }
     .asset-lightbox button {
       border-color: rgba(255, 255, 255, .26);
       background: rgba(255, 255, 255, .1);
       color: #fff;
+      position: relative;
+      z-index: 3;
     }
     .asset-lightbox-nav {
       width: 48px;
@@ -1292,6 +1515,7 @@ INDEX_HTML = r"""<!doctype html>
       gap: 6px;
       min-width: 0;
       min-height: 86px;
+      height: auto;
       align-content: start;
       overflow: visible;
       box-shadow: none;
@@ -1302,17 +1526,20 @@ INDEX_HTML = r"""<!doctype html>
       min-width: 0;
       font-size: 15px;
       line-height: 1.35;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      word-break: break-word;
+      overflow-wrap: anywhere;
     }
     .staff-card .staff-meta {
       display: block;
       min-width: 0;
       line-height: 1.35;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .staff-card .staff-role {
       display: inline-block;
@@ -1324,9 +1551,10 @@ INDEX_HTML = r"""<!doctype html>
       background: #e6f4f1;
       color: var(--accent);
       line-height: 1.35;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
+      overflow: visible;
+      text-overflow: clip;
+      white-space: normal;
+      overflow-wrap: anywhere;
     }
     .staff-card.active {
       border-color: var(--accent);
@@ -1386,6 +1614,183 @@ INDEX_HTML = r"""<!doctype html>
       grid-template-columns: minmax(180px, 240px) minmax(220px, 1fr) minmax(220px, 1fr);
       gap: 10px;
     }
+    .comfy-debug-layout {
+      display: grid;
+      grid-template-columns: minmax(260px, .72fr) minmax(0, 1.4fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .comfy-debug-sidebar,
+    .comfy-debug-main {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+    }
+    .comfy-debug-list {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      grid-auto-rows: max-content;
+      max-height: calc(100vh - 260px);
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .comfy-debug-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+      align-content: start;
+      min-height: 0;
+      cursor: pointer;
+    }
+    .comfy-debug-card.active {
+      border-color: var(--accent);
+      background: #f0fdfa;
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .comfy-debug-card.editing {
+      outline: 2px solid rgba(15, 118, 110, .25);
+      outline-offset: 2px;
+    }
+    .comfy-debug-card strong,
+    .comfy-debug-card span {
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .comfy-debug-card-head {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      gap: 8px;
+      align-items: flex-start;
+      min-width: 0;
+    }
+    .comfy-debug-card-head input {
+      margin-top: 3px;
+      flex: 0 0 auto;
+    }
+    .comfy-debug-select-marker {
+      margin-top: 1px;
+      color: var(--accent);
+      font-size: 15px;
+      line-height: 1;
+      user-select: none;
+    }
+    .comfy-debug-card-title {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+    .comfy-debug-card-title strong {
+      line-height: 1.35;
+    }
+    .comfy-debug-type {
+      display: inline-flex;
+      justify-self: start;
+      border-radius: 999px;
+      padding: 2px 7px;
+      background: #e0f2fe;
+      color: #075985;
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .comfy-debug-type.configured {
+      background: #dcfce7;
+      color: #166534;
+    }
+    .comfy-debug-run-state {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      justify-self: start;
+      font-size: 11px;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-top: -2px;
+    }
+    .comfy-debug-run-state::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: #94a3b8;
+      flex: 0 0 auto;
+    }
+    .comfy-debug-run-state.running {
+      color: #0369a1;
+      font-weight: 700;
+    }
+    .comfy-debug-run-state.running::before {
+      background: #0ea5e9;
+      box-shadow: 0 0 0 4px rgba(14, 165, 233, .14);
+    }
+    .comfy-debug-run-state.completed {
+      color: #166534;
+      font-weight: 700;
+    }
+    .comfy-debug-run-state.completed::before {
+      background: #22c55e;
+    }
+    .comfy-debug-run-state.failed {
+      color: #b91c1c;
+      font-weight: 700;
+    }
+    .comfy-debug-run-state.failed::before {
+      background: #ef4444;
+    }
+    .comfy-debug-result-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .comfy-debug-result {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+    }
+    .comfy-debug-result-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .comfy-debug-log {
+      max-height: 180px;
+      overflow: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border: 1px solid var(--line);
+      background: #0f172a;
+      color: #dbeafe;
+      border-radius: 10px;
+      padding: 10px;
+      font-family: Consolas, "Cascadia Mono", monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .comfy-debug-running {
+      border: 1px dashed var(--accent);
+      background: #f0fdfa;
+      border-radius: 12px;
+      padding: 14px;
+      display: grid;
+      gap: 8px;
+    }
+    .comfy-debug-running-bar {
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(90deg, var(--accent), #99f6e4, var(--accent));
+      background-size: 200% 100%;
+      animation: debugPulse 1.2s linear infinite;
+    }
+    @keyframes debugPulse {
+      from { background-position: 0 0; }
+      to { background-position: 200% 0; }
+    }
     .health-grid {
       display: grid;
       grid-template-columns: repeat(3, minmax(180px, 1fr));
@@ -1437,6 +1842,18 @@ INDEX_HTML = r"""<!doctype html>
     }
     .muted { color: var(--muted); }
     .small { font-size: 12px; }
+    .staff-card,
+    .progress-step,
+    .output-link,
+    .asset-card {
+      line-height: 1.35;
+    }
+    .staff-card *,
+    .progress-step *,
+    .output-link *,
+    .asset-card * {
+      max-height: none;
+    }
     @media (max-width: 860px) {
       header {
         height: auto;
@@ -1457,6 +1874,23 @@ INDEX_HTML = r"""<!doctype html>
       .split { grid-template-columns: 1fr; }
       .run-primary-grid { grid-template-columns: 1fr; }
       .run-model-grid { grid-template-columns: 1fr; }
+      .content-column-bar { grid-template-columns: 1fr; align-items: stretch; }
+      .asset-lightbox { padding: 10px; }
+      .asset-lightbox-body {
+        height: auto;
+        grid-template-columns: 38px minmax(0, 1fr) 38px;
+        gap: 8px;
+      }
+      .asset-lightbox-nav {
+        width: 36px;
+        height: 46px;
+      }
+      .asset-lightbox-media {
+        width: auto !important;
+        height: auto !important;
+        max-width: 100% !important;
+        max-height: 100% !important;
+      }
       .run-actions { position: static; margin: 0; padding: 0; border-top: 0; background: transparent; }
       .provider-grid { grid-template-columns: 1fr; }
       .video-grid { grid-template-columns: 1fr; }
@@ -1464,6 +1898,7 @@ INDEX_HTML = r"""<!doctype html>
       .output-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .output-sections { grid-template-columns: 1fr; }
       .workflow-step-grid { grid-template-columns: 1fr; }
+      .comfy-debug-layout { grid-template-columns: 1fr; }
       .health-grid { grid-template-columns: 1fr; }
     }
   </style>
@@ -1478,6 +1913,7 @@ INDEX_HTML = r"""<!doctype html>
         <button class="nav-btn" data-view-target="staff" type="button">数字员工</button>
         <button class="nav-btn" data-view-target="workflow" type="button">工作流</button>
         <button class="nav-btn" data-view-target="assets" type="button">素材库</button>
+        <button class="nav-btn" data-view-target="comfyDebug" type="button">ComfyUI调试</button>
         <button class="nav-btn" data-view-target="output" type="button">任务输出</button>
         <button class="nav-btn" data-view-target="system" type="button">系统状态</button>
       </nav>
@@ -1511,14 +1947,6 @@ INDEX_HTML = r"""<!doctype html>
             </label>
             <label>任务名称
               <input id="taskTitle" autocomplete="off" spellcheck="false" placeholder="例如 AI员工工作流平台长视频，可留空" />
-            </label>
-            <label>内容栏目
-              <select id="contentColumn">
-                <option value="">不使用栏目模板</option>
-              </select>
-            </label>
-            <label>栏目操作
-              <button id="applyContentColumnBtn" type="button">套用栏目模板</button>
             </label>
           </div>
           <div class="run-model-grid" id="modelRuntimeConfig">
@@ -1566,6 +1994,15 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <div class="run-composer">
+          <div class="content-column-bar">
+            <label>内容栏目
+              <select id="contentColumn">
+                <option value="">不使用栏目模板</option>
+              </select>
+            </label>
+            <button id="applyContentColumnBtn" type="button">套用栏目模板</button>
+            <div class="content-column-hint">选择栏目后，即使不点“套用栏目模板”，点击“开始生成”也会自动把栏目结构和素材复用策略写入任务上下文。</div>
+          </div>
           <textarea id="userInput" aria-label="长视频需求" placeholder="输入你要制作的长视频需求。比如：主题、平台、目标观众、风格、可用素材、交付目标。"></textarea>
           <div class="composer-actions">
             <span id="status" class="status">准备就绪</span>
@@ -1692,7 +2129,13 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="comfyWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/你的素材预览工作流ID 或 /run/ai-app/你的应用ID" />
               </label>
             </div>
-            <div class="provider-grid config-card" data-title="两工作流路由" data-desc="运行时按素材类型自动选择全能图片或全能视频，保存当前槽位映射">
+            <div class="config-card" data-title="工作流配置入口" data-desc="具体 Endpoint、nodeInfoList、API JSON 导入和调试结果预览已统一迁移到 ComfyUI 调试台">
+              <div class="row">
+                <span class="muted small">这里仅保留全局 API Key 和 Base URL。每个图片/视频工作流的参数请到 ComfyUI 调试台左侧单独保存。</span>
+                <button type="button" data-view-target="comfyDebug">打开 ComfyUI 调试台</button>
+              </div>
+            </div>
+            <div class="provider-grid config-card" data-title="两工作流路由" data-desc="运行时按素材类型自动选择全能图片或全能视频，保存当前槽位映射" hidden>
               <label>ComfyUI 工作流库（运行时自动选择）
                 <select id="comfyWorkflowPreset"></select>
               </label>
@@ -1707,8 +2150,8 @@ INDEX_HTML = r"""<!doctype html>
                 </div>
               </label>
             </div>
-            <div class="reference-list workflow-summary-card" id="comfyWorkflowLibraryList"></div>
-            <div class="provider-grid comfy-mapping-grid config-card mapping-card" data-title="节点映射" data-desc="导入 API JSON 后确认可传参节点；支持 prompt、reference_image、control_mode 等占位符">
+            <div class="reference-list workflow-summary-card" id="comfyWorkflowLibraryList" hidden></div>
+            <div class="provider-grid comfy-mapping-grid config-card mapping-card" data-title="节点映射" data-desc="导入 API JSON 后确认可传参节点；支持 prompt、reference_image、control_mode 等占位符" hidden>
               <label>当前编辑槽位节点映射 JSON
                 <textarea id="comfyNodeInfoList" spellcheck="false" placeholder='[]; 可使用 {{prompt}}、{{negative_prompt}}、{{image_prompt}}、{{video_prompt}}、{{reference_image}}、{{payload}}'></textarea>
               </label>
@@ -1724,7 +2167,7 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="reference-list parameter-map" id="comfyParameterMapper"></div>
+            <div class="reference-list parameter-map" id="comfyParameterMapper" hidden></div>
             <div class="provider-grid config-card" data-title="素材质检" data-desc="自动评分，不合格时按最大尝试次数重试素材生成">
               <label>素材自动评审
                 <select id="assetQualityGate">
@@ -2212,6 +2655,113 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
 
+      <div class="panel form view" data-view="comfyDebug" hidden>
+        <div class="manager-toolbar">
+          <div class="manager-title">
+            <strong>ComfyUI / RunningHub 调试台</strong>
+            <span class="muted small">单独调试参考图、分段视频、放大、补帧等工作流；每次运行当前选中的一个工作流，结果可连续预览。</span>
+          </div>
+          <div class="row">
+            <button id="refreshComfyDebugBtn" type="button">刷新工作流</button>
+            <span id="comfyDebugStatus" class="status">未加载</span>
+          </div>
+        </div>
+        <div class="comfy-debug-layout">
+          <aside class="comfy-debug-sidebar">
+            <div class="output-section">
+              <div class="output-section-head">
+                <strong>调试工作流</strong>
+                <span class="muted small" id="comfyDebugSelectedMeta">单选调试</span>
+              </div>
+              <div class="comfy-debug-list" id="comfyDebugWorkflowList"></div>
+            </div>
+          </aside>
+          <section class="comfy-debug-main">
+            <div class="output-section">
+              <div class="output-section-head">
+                <strong>RunningHub 调用参数</strong>
+                <div class="inline-actions">
+                  <button id="saveComfyDebugWorkflowBtn" type="button">保存配置</button>
+                  <button id="clearComfyDebugWorkflowBtn" type="button">清空配置</button>
+                  <button class="primary" id="runComfyDebugBtn" type="button">运行当前工作流</button>
+                  <button id="fillComfyDebugSampleBtn" type="button">填入测试提示词</button>
+                </div>
+              </div>
+              <div class="muted small">默认复用系统配置里的 ComfyUI 密钥和 Base URL；左侧每个工作流都有独立配置和预览。</div>
+              <div class="provider-grid">
+                <label>API Key
+                  <input id="comfyDebugApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="留空则使用系统配置 ComfyUI 平台密钥" />
+                </label>
+                <label>Base URL
+                  <input id="comfyDebugBaseUrl" autocomplete="off" spellcheck="false" placeholder="留空则使用系统配置 ComfyUI 平台接口地址" />
+                </label>
+                <label>轮询超时
+                  <select id="comfyDebugPollTimeout">
+                    <option value="300">5 分钟</option>
+                    <option value="900">15 分钟</option>
+                    <option value="1800">30 分钟</option>
+                    <option value="3600" selected>60 分钟</option>
+                  </select>
+                </label>
+              </div>
+              <div class="provider-grid">
+                <label>接口地址
+                  <input id="comfyDebugEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/xxx 或 /run/ai-app/xxx；留空用槽位配置" />
+                </label>
+                <label>参考图/视频路径
+                  <input id="comfyDebugReference" autocomplete="off" spellcheck="false" placeholder="可填 my_workspace/my_asset_library/xxx.png 或任务输出里的相对路径" />
+                </label>
+                <label>从素材库选择
+                  <select id="comfyDebugAssetReference">
+                    <option value="">不使用素材库参考</option>
+                  </select>
+                </label>
+                <label>上传参考文件
+                  <input id="comfyDebugReferenceFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" />
+                </label>
+              </div>
+              <div class="row">
+                <button id="clearComfyDebugReferenceBtn" type="button">清空参考</button>
+                <span class="muted small" id="comfyDebugReferenceHint">可直接输入路径、选择素材库资产，或上传本地参考图/视频。</span>
+              </div>
+              <div class="provider-grid">
+                <label>随机种子
+                  <input id="comfyDebugSeed" autocomplete="off" spellcheck="false" placeholder="留空随机；固定 seed 方便复现" />
+                </label>
+                <label>宽度
+                  <input id="comfyDebugWidth" autocomplete="off" spellcheck="false" placeholder="例如 1080 / 960" />
+                </label>
+                <label>高度
+                  <input id="comfyDebugHeight" autocomplete="off" spellcheck="false" placeholder="例如 1920 / 544" />
+                </label>
+                <label>时长/帧数
+                  <input id="comfyDebugDuration" autocomplete="off" spellcheck="false" placeholder="例如 5s / 121 frames；按工作流节点映射使用" />
+                </label>
+              </div>
+              <label>正向提示词
+                <textarea id="comfyDebugPrompt" spellcheck="false" placeholder="描述要生成/修复/放大的画面。调试阶段建议短而具体。"></textarea>
+              </label>
+              <label>负面提示词
+                <textarea id="comfyDebugNegative" spellcheck="false" placeholder="例如：文字、水印、畸形手、脸部变形、闪烁、低清晰度"></textarea>
+              </label>
+              <label>nodeInfoList JSON（覆盖槽位）
+                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{seed}}、{{width}}、{{height}}、{{duration}}、{{task_type}}、{{control_mode}}"></textarea>
+              </label>
+              <label>导入 API JSON 自动识别（仅本次调试）
+                <input id="comfyDebugApiWorkflowFile" type="file" accept=".json,application/json" />
+              </label>
+            </div>
+            <div class="output-section">
+              <div class="output-section-head">
+                <strong>调试结果预览</strong>
+                <span class="muted small" id="comfyDebugResultMeta">暂无结果</span>
+              </div>
+              <div class="comfy-debug-result-grid" id="comfyDebugResults"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
       <div class="panel viewer view" data-view="output" hidden>
         <div class="viewer-head">
           <div>
@@ -2299,6 +2849,7 @@ INDEX_HTML = r"""<!doctype html>
             <span class="muted small" id="assetLightboxMeta"></span>
           </div>
           <div class="row">
+            <button id="assetLightboxFavoriteBtn" type="button">收藏复用</button>
             <button id="assetLightboxOpenBtn" type="button">新窗口打开</button>
             <button id="assetLightboxCloseBtn" type="button">关闭</button>
           </div>
@@ -2499,11 +3050,39 @@ INDEX_HTML = r"""<!doctype html>
       assetLightboxCounter: document.getElementById('assetLightboxCounter'),
       assetLightboxPrevBtn: document.getElementById('assetLightboxPrevBtn'),
       assetLightboxNextBtn: document.getElementById('assetLightboxNextBtn'),
+      assetLightboxFavoriteBtn: document.getElementById('assetLightboxFavoriteBtn'),
       assetLightboxOpenBtn: document.getElementById('assetLightboxOpenBtn'),
       assetLightboxCloseBtn: document.getElementById('assetLightboxCloseBtn'),
       refreshAssetLibraryBtn: document.getElementById('refreshAssetLibraryBtn'),
       assetLibraryStatus: document.getElementById('assetLibraryStatus'),
       assetLibraryGrid: document.getElementById('assetLibraryGrid'),
+      refreshComfyDebugBtn: document.getElementById('refreshComfyDebugBtn'),
+      comfyDebugStatus: document.getElementById('comfyDebugStatus'),
+      comfyDebugWorkflowList: document.getElementById('comfyDebugWorkflowList'),
+      comfyDebugSelectedMeta: document.getElementById('comfyDebugSelectedMeta'),
+      comfyDebugApiKey: document.getElementById('comfyDebugApiKey'),
+      comfyDebugBaseUrl: document.getElementById('comfyDebugBaseUrl'),
+      comfyDebugPollTimeout: document.getElementById('comfyDebugPollTimeout'),
+      comfyDebugEndpoint: document.getElementById('comfyDebugEndpoint'),
+      comfyDebugReference: document.getElementById('comfyDebugReference'),
+      comfyDebugAssetReference: document.getElementById('comfyDebugAssetReference'),
+      comfyDebugReferenceFile: document.getElementById('comfyDebugReferenceFile'),
+      clearComfyDebugReferenceBtn: document.getElementById('clearComfyDebugReferenceBtn'),
+      comfyDebugReferenceHint: document.getElementById('comfyDebugReferenceHint'),
+      comfyDebugSeed: document.getElementById('comfyDebugSeed'),
+      comfyDebugWidth: document.getElementById('comfyDebugWidth'),
+      comfyDebugHeight: document.getElementById('comfyDebugHeight'),
+      comfyDebugDuration: document.getElementById('comfyDebugDuration'),
+      comfyDebugPrompt: document.getElementById('comfyDebugPrompt'),
+      comfyDebugNegative: document.getElementById('comfyDebugNegative'),
+      comfyDebugNodeInfoList: document.getElementById('comfyDebugNodeInfoList'),
+      comfyDebugApiWorkflowFile: document.getElementById('comfyDebugApiWorkflowFile'),
+      saveComfyDebugWorkflowBtn: document.getElementById('saveComfyDebugWorkflowBtn'),
+      clearComfyDebugWorkflowBtn: document.getElementById('clearComfyDebugWorkflowBtn'),
+      runComfyDebugBtn: document.getElementById('runComfyDebugBtn'),
+      fillComfyDebugSampleBtn: document.getElementById('fillComfyDebugSampleBtn'),
+      comfyDebugResults: document.getElementById('comfyDebugResults'),
+      comfyDebugResultMeta: document.getElementById('comfyDebugResultMeta'),
       packageOutputMeta: document.getElementById('packageOutputMeta'),
       packageOutputList: document.getElementById('packageOutputList'),
       stepConfirmBar: document.getElementById('stepConfirmBar'),
@@ -2574,6 +3153,13 @@ INDEX_HTML = r"""<!doctype html>
     let assetPreviewIndex = 0;
     let contentColumns = [];
     let assetLibraryItems = [];
+    let comfyDebugWorkflows = [];
+    let activeComfyDebugWorkflowId = '';
+    const comfyDebugStateByWorkflowId = new Map();
+    let comfyDebugFormHydrated = false;
+    const comfyDebugPollTimers = new Map();
+    let settingsRestoring = false;
+    let comfyDebugLastResults = [];
     const progressStepOpenState = new Map();
     const progressUserToggledSteps = new Set();
     let localModelPresets = [];
@@ -2738,6 +3324,10 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (viewName === 'assets') {
         loadAssetLibrary();
+      }
+      if (viewName === 'comfyDebug') {
+        loadAssetLibrary();
+        loadComfyDebugWorkflows();
       }
     }
 
@@ -3258,21 +3848,39 @@ INDEX_HTML = r"""<!doctype html>
       const column = contentColumns.find(item => item.id === els.contentColumn.value);
       if (!column) return;
       const currentTopic = els.userInput.value.trim();
-      const brief = [
-        `内容栏目：${column.name}`,
-        `目标受众：${column.audience}`,
-        `推荐结构：${column.structure}`,
-        `视觉风格：${column.visual_style}`,
-        `内容要求：${column.sample}`,
-        currentTopic ? `本次主题/补充要求：${currentTopic}` : '本次主题/补充要求：请基于栏目推荐 5 个具体选题，先给我选择，再继续生成脚本和素材。',
-        '素材策略：优先复用素材库中已收藏的好素材；缺口素材再生成；人物、产品、场景尽量保持一致。',
-      ].join('\n');
+      const brief = buildContentColumnBrief(
+        column,
+        currentTopic || '请基于栏目推荐 5 个具体选题，先给我选择，再继续生成脚本和素材。'
+      );
       els.userInput.value = brief;
       if (!els.taskTitle.value.trim()) {
         els.taskTitle.value = column.name;
       }
       saveSettings();
       setStatus(`已套用栏目模板：${column.name}`, false);
+    }
+
+    function buildContentColumnBrief(column, topicText) {
+      return [
+        `内容栏目：${column.name}`,
+        `目标受众：${column.audience}`,
+        `推荐结构：${column.structure}`,
+        `视觉风格：${column.visual_style}`,
+        `内容要求：${column.sample}`,
+        `本次主题/补充要求：${topicText}`,
+        '素材策略：优先复用素材库中已收藏的好素材；缺口素材再生成；人物、产品、场景尽量保持一致。',
+      ].join('\n');
+    }
+
+    function contentColumnContextText(rawInput) {
+      const column = contentColumns.find(item => item.id === els.contentColumn?.value);
+      if (!column) return '';
+      if ((rawInput || '').includes(`内容栏目：${column.name}`)) return '';
+      return [
+        '',
+        '## 内容栏目约束',
+        buildContentColumnBrief(column, rawInput || '按该栏目先提出可执行选题，再完成长视频方案。'),
+      ].join('\n');
     }
 
     function readSettings() {
@@ -3283,7 +3891,77 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function serializeComfyDebugState() {
+      const out = {};
+      for (const [id, state] of comfyDebugStateByWorkflowId.entries()) {
+        if (!id || !state || typeof state !== 'object') continue;
+        out[id] = {
+          endpoint: state.endpoint || '',
+          reference: state.reference || '',
+          seed: state.seed || '',
+          width: state.width || '',
+          height: state.height || '',
+          duration: state.duration || '',
+          prompt: state.prompt || '',
+          negative: state.negative || '',
+          nodeInfoList: state.nodeInfoList || '[]',
+          pollTimeout: state.pollTimeout || '3600',
+          assetReference: state.assetReference || '',
+          referenceHint: state.referenceHint || '',
+          results: compactComfyDebugResults(state.results),
+          running: Boolean(state.running),
+          runId: state.runId || '',
+          status: state.status || '',
+          error: state.error || '',
+        };
+      }
+      return out;
+    }
+
+    function compactComfyDebugResults(results) {
+      if (!Array.isArray(results)) return [];
+      return results.slice(0, 12).map(result => ({
+        id: result?.id || '',
+        name: result?.name || '',
+        status: result?.status || '',
+        type: result?.type || '',
+        task: result?.task || '__comfy_debug__',
+        endpoint: result?.endpoint || '',
+        error: result?.error || '',
+        files: Array.isArray(result?.files) ? result.files.slice(0, 80) : [],
+      }));
+    }
+
+    function restoreComfyDebugState(value) {
+      comfyDebugStateByWorkflowId.clear();
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+      Object.entries(value).forEach(([id, state]) => {
+        if (!id || !state || typeof state !== 'object' || Array.isArray(state)) return;
+        comfyDebugStateByWorkflowId.set(id, {
+          endpoint: state.endpoint || '',
+          reference: state.reference || '',
+          seed: state.seed || '',
+          width: state.width || '',
+          height: state.height || '',
+          duration: state.duration || '',
+          prompt: state.prompt || '',
+          negative: state.negative || '',
+          nodeInfoList: state.nodeInfoList || '[]',
+          pollTimeout: state.pollTimeout || '3600',
+          assetReference: state.assetReference || '',
+          referenceHint: state.referenceHint || '',
+          results: compactComfyDebugResults(state.results),
+          running: Boolean(state.running),
+          runId: state.runId || '',
+          status: state.status || '',
+          error: state.error || '',
+        });
+      });
+    }
+
     function saveSettings() {
+      if (settingsRestoring) return;
+      saveCurrentComfyDebugUiState();
       const settings = {
         productTemplate: els.productTemplate.value,
         workflow: els.workflow.value,
@@ -3310,6 +3988,8 @@ INDEX_HTML = r"""<!doctype html>
         comfyWorkflowPreset: els.comfyWorkflowPreset.value,
         comfyWorkflowPresetNote: els.comfyWorkflowPresetNote.value,
         comfyWorkflowLibrary,
+        comfyDebugStateByWorkflowId: serializeComfyDebugState(),
+        activeComfyDebugWorkflowId,
         comfyNodeInfoList: els.comfyNodeInfoList.value,
         comfyPollTimeout: els.comfyPollTimeout.value,
         assetQualityGate: els.assetQualityGate.value,
@@ -3373,6 +4053,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function restoreSettings() {
+      settingsRestoring = true;
+      comfyDebugFormHydrated = false;
       const settings = readSettings();
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
@@ -3399,6 +4081,8 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyBaseUrl.value = settings.comfyBaseUrl || '';
       els.comfyWorkflowEndpoint.value = settings.comfyWorkflowEndpoint || '';
       comfyWorkflowLibrary = normalizeComfyWorkflowLibrary(settings.comfyWorkflowLibrary);
+      restoreComfyDebugState(settings.comfyDebugStateByWorkflowId);
+      activeComfyDebugWorkflowId = settings.activeComfyDebugWorkflowId || '';
       renderComfyWorkflowLibrary();
       setIfExists(els.comfyWorkflowPreset, settings.comfyWorkflowPreset || DEFAULT_COMFY_WORKFLOW_PRESET_ID);
       const selectedComfyWorkflow = getSelectedComfyWorkflowPreset();
@@ -3471,6 +4155,7 @@ INDEX_HTML = r"""<!doctype html>
       renderComfyParameterMapper();
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
+      settingsRestoring = false;
     }
 
     async function cancelCurrentRun() {
@@ -3534,9 +4219,10 @@ INDEX_HTML = r"""<!doctype html>
     function normalizeComfyWorkflowLibrary(value) {
       const saved = Array.isArray(value) ? value : [];
       const byId = new Map(saved.filter(item => item && item.id).map(item => [item.id, item]));
-      return DEFAULT_COMFY_WORKFLOW_LIBRARY.map(defaultItem => {
+      const normalized = DEFAULT_COMFY_WORKFLOW_LIBRARY.map(defaultItem => {
         const item = byId.get(defaultItem.id) || {};
         const savedNodeInfo = String(item.nodeInfoList || item.node_info_list_json || defaultItem.nodeInfoList);
+        byId.delete(defaultItem.id);
         return {
           ...defaultItem,
           name: defaultItem.name,
@@ -3545,8 +4231,175 @@ INDEX_HTML = r"""<!doctype html>
           endpoint: String(item.endpoint || ''),
           nodeInfoList: sanitizeComfyVisualNodeInfoList(savedNodeInfo),
           pollTimeout: String(item.pollTimeout || item.poll_timeout_seconds || defaultItem.pollTimeout),
+          defaultWidth: String(item.defaultWidth || item.default_width || ''),
+          defaultHeight: String(item.defaultHeight || item.default_height || ''),
+          defaultReference: String(item.defaultReference || item.default_reference || item.reference || ''),
+          defaultSeed: String(item.defaultSeed || item.default_seed || item.seed || ''),
+          defaultDuration: String(item.defaultDuration || item.default_duration || item.duration || ''),
+          defaultPrompt: String(item.defaultPrompt || item.default_prompt || item.prompt || ''),
+          defaultNegative: String(item.defaultNegative || item.default_negative || item.negative || item.negative_prompt || ''),
+          defaultAssetReference: String(item.defaultAssetReference || item.default_asset_reference || item.assetReference || ''),
+          defaultReferenceHint: String(item.defaultReferenceHint || item.default_reference_hint || item.referenceHint || ''),
+          debugWorkflow: Boolean(item.debugWorkflow || item.debug_workflow),
         };
       });
+      byId.forEach(item => {
+        const savedNodeInfo = String(item.nodeInfoList || item.node_info_list_json || '[]');
+        normalized.push({
+          id: String(item.id || '').trim(),
+          name: String(item.name || item.title || item.id || '').trim(),
+          purpose: String(item.purpose || '').trim(),
+          materialTypes: Array.isArray(item.materialTypes) ? item.materialTypes : Array.isArray(item.material_types) ? item.material_types : [],
+          endpoint: String(item.endpoint || item.workflow_endpoint || ''),
+          nodeInfoList: sanitizeComfyVisualNodeInfoList(savedNodeInfo),
+          pollTimeout: String(item.pollTimeout || item.poll_timeout_seconds || '3600'),
+          defaultWidth: String(item.defaultWidth || item.default_width || ''),
+          defaultHeight: String(item.defaultHeight || item.default_height || ''),
+          defaultReference: String(item.defaultReference || item.default_reference || item.reference || ''),
+          defaultSeed: String(item.defaultSeed || item.default_seed || item.seed || ''),
+          defaultDuration: String(item.defaultDuration || item.default_duration || item.duration || ''),
+          defaultPrompt: String(item.defaultPrompt || item.default_prompt || item.prompt || ''),
+          defaultNegative: String(item.defaultNegative || item.default_negative || item.negative || item.negative_prompt || ''),
+          defaultAssetReference: String(item.defaultAssetReference || item.default_asset_reference || item.assetReference || ''),
+          defaultReferenceHint: String(item.defaultReferenceHint || item.default_reference_hint || item.referenceHint || ''),
+          debugWorkflow: Boolean(item.debugWorkflow || item.debug_workflow),
+        });
+      });
+      return normalized.filter(item => item.id);
+    }
+
+    function ensureComfyDebugWorkflowsInLibrary() {
+      if (!Array.isArray(comfyWorkflowLibrary)) comfyWorkflowLibrary = [];
+      const byId = new Map(comfyWorkflowLibrary.filter(item => item && item.id).map(item => [item.id, item]));
+      let changed = false;
+      comfyDebugWorkflows.forEach(workflow => {
+        const id = String(workflow.id || '').trim();
+        if (!id || byId.has(id)) return;
+        const item = {
+          id,
+          name: workflow.name || id,
+          purpose: workflow.purpose || '',
+          materialTypes: workflow.type ? [workflow.type] : [],
+          endpoint: workflow.default_endpoint || '',
+          nodeInfoList: sanitizeComfyVisualNodeInfoList(workflow.default_node_info || '[]'),
+          pollTimeout: String(workflow.poll_timeout_seconds || workflow.default_poll_timeout || '3600'),
+          defaultWidth: String(workflow.default_width || ''),
+          defaultHeight: String(workflow.default_height || ''),
+          defaultReference: '',
+          defaultSeed: '',
+          defaultDuration: '',
+          defaultPrompt: '',
+          defaultNegative: '',
+          defaultAssetReference: '',
+          defaultReferenceHint: '',
+          debugWorkflow: true,
+        };
+        comfyWorkflowLibrary.push(item);
+        byId.set(id, item);
+        changed = true;
+      });
+      if (changed) {
+        renderComfyWorkflowLibrary();
+        saveSettings();
+      }
+    }
+
+    function getComfyWorkflowLibraryItemById(id) {
+      return comfyWorkflowLibrary.find(item => String(item.id || '') === String(id || '')) || null;
+    }
+
+    function activeComfyDebugWorkflow() {
+      return comfyDebugWorkflows.find(item => item.id === activeComfyDebugWorkflowId)
+        || comfyDebugWorkflows[0]
+        || null;
+    }
+
+    function readComfyDebugFormState() {
+      return {
+        endpoint: els.comfyDebugEndpoint?.value || '',
+        reference: els.comfyDebugReference?.value || '',
+        seed: els.comfyDebugSeed?.value || '',
+        width: els.comfyDebugWidth?.value || '',
+        height: els.comfyDebugHeight?.value || '',
+        duration: els.comfyDebugDuration?.value || '',
+        prompt: els.comfyDebugPrompt?.value || '',
+        negative: els.comfyDebugNegative?.value || '',
+        nodeInfoList: els.comfyDebugNodeInfoList?.value || '',
+        pollTimeout: els.comfyDebugPollTimeout?.value || '3600',
+        assetReference: els.comfyDebugAssetReference?.value || '',
+        referenceHint: els.comfyDebugReferenceHint?.textContent || '',
+      };
+    }
+
+    function saveCurrentComfyDebugUiState() {
+      if (!comfyDebugFormHydrated) return;
+      if (!activeComfyDebugWorkflowId || !els.comfyDebugEndpoint) return;
+      const previous = comfyDebugStateByWorkflowId.get(activeComfyDebugWorkflowId) || {};
+      comfyDebugStateByWorkflowId.set(activeComfyDebugWorkflowId, {
+        ...previous,
+        ...readComfyDebugFormState(),
+      });
+    }
+
+    function writeComfyDebugFormState(state) {
+      if (!state) return;
+      if (els.comfyDebugEndpoint) els.comfyDebugEndpoint.value = state.endpoint || '';
+      if (els.comfyDebugReference) els.comfyDebugReference.value = state.reference || '';
+      if (els.comfyDebugSeed) els.comfyDebugSeed.value = state.seed || '';
+      if (els.comfyDebugWidth) els.comfyDebugWidth.value = state.width || '';
+      if (els.comfyDebugHeight) els.comfyDebugHeight.value = state.height || '';
+      if (els.comfyDebugDuration) els.comfyDebugDuration.value = state.duration || '';
+      if (els.comfyDebugPrompt) els.comfyDebugPrompt.value = state.prompt || '';
+      if (els.comfyDebugNegative) els.comfyDebugNegative.value = state.negative || '';
+      if (els.comfyDebugNodeInfoList) els.comfyDebugNodeInfoList.value = state.nodeInfoList || '[]';
+      if (els.comfyDebugPollTimeout) setIfExists(els.comfyDebugPollTimeout, String(state.pollTimeout || '3600'));
+      if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = state.assetReference || '';
+      if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+      if (els.comfyDebugReferenceHint) {
+        els.comfyDebugReferenceHint.textContent = state.referenceHint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。';
+      }
+      comfyDebugFormHydrated = true;
+    }
+
+    function defaultComfyDebugStateForWorkflow(workflow) {
+      const savedConfig = workflow ? getComfyWorkflowLibraryItemById(workflow.id) : null;
+      return {
+        endpoint: savedConfig?.endpoint || workflow?.default_endpoint || '',
+        reference: savedConfig?.defaultReference || '',
+        seed: savedConfig?.defaultSeed || '',
+        width: String(savedConfig?.defaultWidth || workflow?.default_width || ''),
+        height: String(savedConfig?.defaultHeight || workflow?.default_height || ''),
+        duration: savedConfig?.defaultDuration || '',
+        prompt: savedConfig?.defaultPrompt || '',
+        negative: savedConfig?.defaultNegative || '',
+        nodeInfoList: savedConfig?.nodeInfoList || workflow?.default_node_info || '[]',
+        pollTimeout: String(savedConfig?.pollTimeout || workflow?.poll_timeout_seconds || workflow?.default_poll_timeout || '3600'),
+        assetReference: savedConfig?.defaultAssetReference || '',
+        referenceHint: savedConfig?.defaultReferenceHint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。',
+        results: [],
+        running: false,
+        runId: '',
+        status: '',
+        error: '',
+      };
+    }
+
+    function setActiveComfyDebugWorkflow(id, forceLoad = true) {
+      saveCurrentComfyDebugUiState();
+      const workflow = comfyDebugWorkflows.find(item => item.id === id) || comfyDebugWorkflows[0] || null;
+      if (!workflow) return null;
+      activeComfyDebugWorkflowId = workflow.id;
+      if (!comfyDebugStateByWorkflowId.has(workflow.id)) {
+        comfyDebugStateByWorkflowId.set(workflow.id, defaultComfyDebugStateForWorkflow(workflow));
+      }
+      if (forceLoad) {
+        writeComfyDebugFormState(comfyDebugStateByWorkflowId.get(workflow.id));
+        renderComfyDebugStatePreview(workflow);
+      } else {
+        applyComfyDebugWorkflowDefaults(workflow, false);
+      }
+      syncComfyDebugRunButton();
+      return workflow;
     }
 
     function sanitizeComfyVisualNodeInfoList(raw) {
@@ -3671,6 +4524,16 @@ INDEX_HTML = r"""<!doctype html>
         endpoint: item.endpoint || '',
         node_info_list_json: item.nodeInfoList || '[]',
         poll_timeout_seconds: Number(item.pollTimeout || 3600),
+        default_width: item.defaultWidth || '',
+        default_height: item.defaultHeight || '',
+        default_reference: item.defaultReference || '',
+        default_seed: item.defaultSeed || '',
+        default_duration: item.defaultDuration || '',
+        default_prompt: item.defaultPrompt || '',
+        default_negative: item.defaultNegative || '',
+        default_asset_reference: item.defaultAssetReference || '',
+        default_reference_hint: item.defaultReferenceHint || '',
+        debug_workflow: Boolean(item.debugWorkflow),
         endpoint_configured: Boolean(item.endpoint),
         node_mapping_configured: Boolean(item.nodeInfoList && item.nodeInfoList !== '[]'),
       }));
@@ -3858,14 +4721,14 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function extractComfyApiCandidates(data) {
-      if (!data || typeof data !== 'object' || Array.isArray(data)) {
-        throw new Error('JSON 顶层必须是对象');
+      const prompt = findComfyApiPromptObject(data);
+      if (!prompt) {
+        if (data && typeof data === 'object' && Array.isArray(data.nodes)) {
+          throw new Error('导入的是 ComfyUI 画布 workflow JSON，不是 API JSON。画布节点缺少可靠 fieldName，无法生成 RunningHub nodeInfoList；请在 ComfyUI 导出 API 格式 JSON。');
+        }
+        throw new Error('没有在 JSON 中找到 ComfyUI API prompt。请导入 ComfyUI API 格式，或包含 prompt/workflow/api 字段的 RunningHub API JSON。');
       }
-      const entries = Object.entries(data);
-      const apiLike = entries.length > 0 && entries.every(([nodeId, node]) => /^\d+$/.test(String(nodeId)) && node && typeof node === 'object' && node.class_type);
-      if (!apiLike) {
-        throw new Error('这不是 API 格式 JSON。请在 ComfyUI 里导出 API 格式，而不是普通画布工作流 JSON。');
-      }
+      const entries = Object.entries(prompt);
       const candidates = [];
       let textIndex = 0;
       for (const [nodeId, node] of entries) {
@@ -3894,6 +4757,48 @@ INDEX_HTML = r"""<!doctype html>
         return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi) || Number(a.nodeId) - Number(b.nodeId);
       });
       return candidates;
+    }
+
+    function isComfyApiPromptObject(value) {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+      const entries = Object.entries(value);
+      if (!entries.length) return false;
+      return entries.every(([nodeId, node]) => /^\d+$/.test(String(nodeId)) && node && typeof node === 'object' && !Array.isArray(node) && node.class_type);
+    }
+
+    function findComfyApiPromptObject(data) {
+      if (isComfyApiPromptObject(data)) return data;
+      const seen = new Set();
+      const preferredKeys = ['prompt', 'workflow', 'api', 'api_json', 'apiJson', 'template', 'graph'];
+      const walk = value => {
+        if (typeof value === 'string') {
+          const trimmed = value.trim();
+          if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+            try {
+              return walk(JSON.parse(trimmed));
+            } catch {
+              return null;
+            }
+          }
+          return null;
+        }
+        if (!value || typeof value !== 'object' || seen.has(value)) return null;
+        seen.add(value);
+        if (isComfyApiPromptObject(value)) return value;
+        if (!Array.isArray(value)) {
+          for (const key of preferredKeys) {
+            const found = walk(value[key]);
+            if (found) return found;
+          }
+        }
+        const children = Array.isArray(value) ? value : Object.values(value);
+        for (const child of children) {
+          const found = walk(child);
+          if (found) return found;
+        }
+        return null;
+      };
+      return walk(data);
     }
 
     function renderComfyParameterMapper() {
@@ -3962,15 +4867,53 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function updateComfyNodeInfoFromCandidates() {
-      const nodeInfo = comfyParameterCandidates
-        .filter(candidate => candidate.enabled)
+      const nodeInfo = buildNodeInfoFromComfyCandidates(comfyParameterCandidates);
+      els.comfyNodeInfoList.value = JSON.stringify(nodeInfo, null, 2);
+      saveSettings();
+    }
+
+    function buildNodeInfoFromComfyCandidates(candidates, onlyEnabled = true) {
+      return candidates
+        .filter(candidate => !onlyEnabled || candidate.enabled)
         .map(candidate => ({
           nodeId: candidate.nodeId,
           fieldName: candidate.fieldName,
           fieldValue: candidate.source === 'fixed' ? candidate.value : candidate.source,
         }));
-      els.comfyNodeInfoList.value = JSON.stringify(nodeInfo, null, 2);
-      saveSettings();
+    }
+
+    function findEndpointInImportedJson(data) {
+      const seen = new Set();
+      const keys = ['endpoint', 'workflow_endpoint', 'workflowEndpoint', 'api', 'path', 'url'];
+      const walk = value => {
+        if (!value || typeof value !== 'object' || seen.has(value)) return '';
+        seen.add(value);
+        for (const key of keys) {
+          const candidate = value[key];
+          if (typeof candidate === 'string') {
+            const trimmed = candidate.trim();
+            const match = trimmed.match(/\/run\/(?:workflow|ai-app)\/[A-Za-z0-9_-]+/);
+            if (match) return match[0];
+            if (trimmed.startsWith('/run/workflow/') || trimmed.startsWith('/run/ai-app/')) return trimmed;
+          }
+        }
+        for (const child of Object.values(value)) {
+          const found = walk(child);
+          if (found) return found;
+        }
+        return '';
+      };
+      return walk(data);
+    }
+
+    function nodeInfoFromImportedJson(data) {
+      if (Array.isArray(data)) return data;
+      if (!data || typeof data !== 'object') throw new Error('JSON 顶层必须是对象或 nodeInfoList 数组。');
+      const direct = data.nodeInfoList || data.node_info_list || data.node_info_list_json || data.nodeInfo || data.node_info;
+      if (Array.isArray(direct)) return direct;
+      if (typeof direct === 'string' && direct.trim()) return JSON.parse(direct);
+      const candidates = extractComfyApiCandidates(data);
+      return buildNodeInfoFromComfyCandidates(candidates, false);
     }
 
     async function analyzeComfyApiWorkflowFile() {
@@ -3986,6 +4929,29 @@ INDEX_HTML = r"""<!doctype html>
         comfyParameterCandidates = [];
         renderComfyParameterMapper();
         setStatus(err.message, true);
+      }
+    }
+
+    async function analyzeComfyDebugApiWorkflowFile() {
+      const file = els.comfyDebugApiWorkflowFile?.files && els.comfyDebugApiWorkflowFile.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const nodeInfo = nodeInfoFromImportedJson(data);
+        els.comfyDebugNodeInfoList.value = JSON.stringify(nodeInfo, null, 2);
+        const endpoint = findEndpointInImportedJson(data);
+        if (endpoint && els.comfyDebugEndpoint) {
+          els.comfyDebugEndpoint.value = endpoint;
+        }
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        setStatus(endpoint
+          ? `已导入调试 API JSON：${file.name}，识别 ${nodeInfo.length} 个可传参字段，并识别 Endpoint`
+          : `已导入调试 API JSON：${file.name}，识别 ${nodeInfo.length} 个可传参字段；未识别 Endpoint，可手动填写或留空使用槽位配置`,
+          false);
+      } catch (err) {
+        setStatus(err.message || '调试 API JSON 识别失败', true);
       }
     }
 
@@ -5157,7 +6123,10 @@ INDEX_HTML = r"""<!doctype html>
           const name = String(file || '');
           if (!name || name.startsWith('export_package/') || /^step_\d+_/.test(name)) return false;
           if (!isImageFile(name) && !isVideoFile(name)) return false;
-          return assetNames.has(name) || assetPrefixes.some(prefix => name.startsWith(prefix));
+          return assetNames.has(name)
+            || assetPrefixes.some(prefix => name.startsWith(prefix))
+            || name.includes('/material_')
+            || /comfyui_result_\d+/i.test(name);
         })
         .sort((a, b) => assetSortKey(a).localeCompare(assetSortKey(b), undefined, { numeric: true }));
     }
@@ -5200,6 +6169,8 @@ INDEX_HTML = r"""<!doctype html>
       card.role = 'button';
       card.className = 'asset-card';
       card.dataset.file = item.file;
+      const favorited = item.library || isAssetFavorited(taskName, item);
+      if (favorited) card.classList.add('is-favorited');
       const media = document.createElement('div');
       media.className = 'asset-card-media';
       const previewUrl = assetItemUrl(taskName, item);
@@ -5226,22 +6197,16 @@ INDEX_HTML = r"""<!doctype html>
       const subtitle = document.createElement('span');
       subtitle.className = 'asset-card-subtitle';
       subtitle.textContent = item.file;
-      const actions = document.createElement('div');
-      actions.className = 'inline-actions';
-      const favorite = document.createElement('button');
-      favorite.type = 'button';
-      favorite.className = 'secondary small';
-      favorite.textContent = '收藏复用';
-      favorite.onclick = event => {
-        event.stopPropagation();
-        favoriteAsset(taskName, item);
-      };
-      if (!item.library) actions.appendChild(favorite);
       card.appendChild(media);
       card.appendChild(kind);
+      if (favorited) {
+        const badge = document.createElement('span');
+        badge.className = 'asset-card-badge';
+        badge.textContent = '已收藏';
+        card.appendChild(badge);
+      }
       card.appendChild(title);
       card.appendChild(subtitle);
-      card.appendChild(actions);
       card.onclick = () => openAssetLightbox(index);
       card.onkeydown = event => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -5250,6 +6215,25 @@ INDEX_HTML = r"""<!doctype html>
         }
       };
       return card;
+    }
+
+    function assetSourceKey(taskName, item) {
+      const sourceTask = item?.source_task || taskName || '';
+      const sourceFile = item?.source_file || item?.file || '';
+      return `${sourceTask}::${sourceFile}`;
+    }
+
+    function isAssetFavorited(taskName, item) {
+      if (!Array.isArray(assetLibraryItems) || !item?.file) return false;
+      const key = assetSourceKey(taskName, item);
+      return assetLibraryItems.some(existing => assetSourceKey('', existing) === key);
+    }
+
+    function findFavoritedAsset(taskName, item) {
+      if (!Array.isArray(assetLibraryItems) || !item?.file) return null;
+      if (item.library && item.id) return item;
+      const key = assetSourceKey(taskName, item);
+      return assetLibraryItems.find(existing => assetSourceKey('', existing) === key) || null;
     }
 
     async function favoriteAsset(taskName, item) {
@@ -5267,8 +6251,48 @@ INDEX_HTML = r"""<!doctype html>
         });
         setStatus(`已收藏到素材库：${result.asset?.name || item.file}`, false);
         await loadAssetLibrary();
+        if (selectedTask === taskName) await refreshSelectedTaskDetail({ silent: true, preserveFile: true });
+        renderAssetLightbox();
       } catch (err) {
         setStatus(err.message, true);
+        renderAssetLightbox();
+      }
+    }
+
+    async function unfavoriteAsset(taskName, item) {
+      const existing = findFavoritedAsset(taskName, item);
+      if (!existing) {
+        await loadAssetLibrary();
+        renderAssetLightbox();
+        return;
+      }
+      try {
+        await api('/api/unfavorite-asset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: existing.id || '',
+            task: existing.source_task || taskName || '',
+            file: existing.source_file || item.file || '',
+          }),
+        });
+        setStatus(`已取消收藏：${existing.name || existing.file || item.file}`, false);
+        await loadAssetLibrary();
+        if (item.library) {
+          assetPreviewItems.splice(assetPreviewIndex, 1);
+          if (!assetPreviewItems.length) {
+            closeAssetLightbox();
+            renderAssetLibrary();
+            return;
+          }
+          assetPreviewIndex = Math.min(assetPreviewIndex, assetPreviewItems.length - 1);
+          renderAssetLibrary();
+        }
+        if (selectedTask === taskName) await refreshSelectedTaskDetail({ silent: true, preserveFile: true });
+        renderAssetLightbox();
+      } catch (err) {
+        setStatus(err.message, true);
+        renderAssetLightbox();
       }
     }
 
@@ -5278,6 +6302,7 @@ INDEX_HTML = r"""<!doctype html>
         const data = await api('/api/asset-library');
         assetLibraryItems = Array.isArray(data.assets) ? data.assets : [];
         renderAssetLibrary();
+        renderComfyDebugAssetReferenceOptions();
         if (els.assetLibraryStatus) {
           els.assetLibraryStatus.textContent = assetLibraryItems.length ? `${assetLibraryItems.length} 个可复用素材` : '素材库为空';
           els.assetLibraryStatus.classList.remove('error');
@@ -5287,6 +6312,64 @@ INDEX_HTML = r"""<!doctype html>
           els.assetLibraryStatus.textContent = err.message;
           els.assetLibraryStatus.classList.add('error');
         }
+      }
+    }
+
+    function setComfyDebugReference(value = '', hint = '') {
+      if (els.comfyDebugReference) els.comfyDebugReference.value = value || '';
+      if (els.comfyDebugReferenceHint) {
+        els.comfyDebugReferenceHint.textContent = hint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。';
+      }
+    }
+
+    function renderComfyDebugAssetReferenceOptions() {
+      if (!els.comfyDebugAssetReference) return;
+      const currentValue = els.comfyDebugAssetReference.value;
+      const referenceAssets = assetLibraryItems.filter(item => {
+        const file = String(item.file || '');
+        const kind = String(item.kind || '').toLowerCase();
+        return file && (kind === 'image' || kind === 'video' || isImageFile(file) || isVideoFile(file));
+      });
+      els.comfyDebugAssetReference.innerHTML = '';
+      const defaultOption = document.createElement('option');
+      defaultOption.value = '';
+      defaultOption.textContent = referenceAssets.length ? '不使用素材库参考' : '素材库暂无可选图片/视频';
+      els.comfyDebugAssetReference.appendChild(defaultOption);
+      referenceAssets.forEach(item => {
+        const file = String(item.file || '');
+        const option = document.createElement('option');
+        option.value = file.startsWith('my_workspace/') ? file : `my_workspace/my_asset_library/${file}`;
+        const kind = (item.kind || (isImageFile(file) ? 'image' : 'video')) === 'video' ? '视频' : '图片';
+        option.textContent = `${kind} · ${item.name || assetFileLabel(file)}`;
+        els.comfyDebugAssetReference.appendChild(option);
+      });
+      if ([...els.comfyDebugAssetReference.options].some(option => option.value === currentValue)) {
+        els.comfyDebugAssetReference.value = currentValue;
+      }
+    }
+
+    async function uploadComfyDebugReferenceFile() {
+      const file = els.comfyDebugReferenceFile?.files && els.comfyDebugReferenceFile.files[0];
+      if (!file) return;
+      try {
+        if (els.comfyDebugReferenceHint) els.comfyDebugReferenceHint.textContent = `正在上传：${file.name}`;
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/upload-comfy-debug-reference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+          }),
+        });
+        if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+        setComfyDebugReference(result.stored_path || '', `已上传：${file.name}`);
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        setStatus(`已上传参考文件：${result.stored_path}`, false);
+      } catch (err) {
+        setComfyDebugReference(els.comfyDebugReference?.value || '', err.message || '参考文件上传失败');
+        setStatus(err.message || '参考文件上传失败', true);
       }
     }
 
@@ -5335,8 +6418,26 @@ INDEX_HTML = r"""<!doctype html>
       if (els.assetLightboxStage) els.assetLightboxStage.innerHTML = '';
     }
 
+    function handleAssetLightboxBackgroundClick(event) {
+      if (!els.assetLightbox || els.assetLightbox.hidden) return;
+      if (event.defaultPrevented) return;
+      const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+      const clickedInteractive = path.some(node => {
+        const tag = String(node?.tagName || '').toLowerCase();
+        const classList = node?.classList;
+        return tag === 'button'
+          || tag === 'img'
+          || tag === 'video'
+          || classList?.contains?.('asset-lightbox-head')
+          || classList?.contains?.('asset-lightbox-foot');
+      });
+      if (clickedInteractive) return;
+      closeAssetLightbox();
+    }
+
     function moveAssetLightbox(delta) {
       if (!assetPreviewItems.length || els.assetLightbox?.hidden) return;
+      if (assetPreviewItems.length <= 1) return;
       assetPreviewIndex = (assetPreviewIndex + delta + assetPreviewItems.length) % assetPreviewItems.length;
       renderAssetLightbox();
     }
@@ -5348,15 +6449,22 @@ INDEX_HTML = r"""<!doctype html>
       els.assetLightboxStage.innerHTML = '';
       if (isImageFile(item.file)) {
         const img = document.createElement('img');
+        img.className = 'asset-lightbox-media';
+        img.decoding = 'async';
         img.alt = item.label || assetFileLabel(item.file);
         img.src = url;
+        img.onload = () => fitAssetLightboxMedia(img);
         els.assetLightboxStage.appendChild(img);
+        if (img.complete && img.naturalWidth) fitAssetLightboxMedia(img);
       } else {
         const video = document.createElement('video');
+        video.className = 'asset-lightbox-media';
         video.src = url;
         video.controls = true;
         video.autoplay = true;
         video.playsInline = true;
+        video.preload = 'metadata';
+        video.onloadedmetadata = () => fitAssetLightboxMedia(video);
         els.assetLightboxStage.appendChild(video);
       }
       els.assetLightboxTitle.textContent = item.label || assetFileLabel(item.file);
@@ -5365,6 +6473,40 @@ INDEX_HTML = r"""<!doctype html>
       els.assetLightboxPrevBtn.disabled = assetPreviewItems.length <= 1;
       els.assetLightboxNextBtn.disabled = assetPreviewItems.length <= 1;
       els.assetLightboxOpenBtn.onclick = () => window.open(url, '_blank', 'noopener');
+      if (els.assetLightboxFavoriteBtn) {
+        const favorited = item.library || isAssetFavorited(assetPreviewTaskName, item);
+        els.assetLightboxFavoriteBtn.hidden = false;
+        els.assetLightboxFavoriteBtn.disabled = Boolean(!item.library && !assetPreviewTaskName);
+        els.assetLightboxFavoriteBtn.textContent = favorited ? '取消收藏' : '收藏复用';
+        els.assetLightboxFavoriteBtn.onclick = () => {
+          if (els.assetLightboxFavoriteBtn.disabled) return;
+          els.assetLightboxFavoriteBtn.disabled = true;
+          els.assetLightboxFavoriteBtn.textContent = favorited ? '取消中...' : '收藏中...';
+          if (favorited) {
+            unfavoriteAsset(assetPreviewTaskName, item);
+          } else {
+            favoriteAsset(assetPreviewTaskName, item);
+          }
+        };
+      }
+    }
+
+    function fitAssetLightboxMedia(media) {
+      if (!media || !els.assetLightboxStage) return;
+      const stageRect = els.assetLightboxStage.getBoundingClientRect();
+      const stageWidth = Math.max(1, stageRect.width - 20);
+      const stageHeight = Math.max(1, stageRect.height - 20);
+      const naturalWidth = Number(media.naturalWidth || media.videoWidth || 0);
+      const naturalHeight = Number(media.naturalHeight || media.videoHeight || 0);
+      if (!naturalWidth || !naturalHeight) return;
+      const stageRatio = stageWidth / stageHeight;
+      const mediaRatio = naturalWidth / naturalHeight;
+      media.classList.remove('fit-height', 'fit-width');
+      if (mediaRatio <= stageRatio) {
+        media.classList.add('fit-height');
+      } else {
+        media.classList.add('fit-width');
+      }
     }
 
     function assetFileButton(taskName, asset) {
@@ -5899,11 +7041,370 @@ INDEX_HTML = r"""<!doctype html>
       ].join('\n');
     }
 
+    async function loadComfyDebugWorkflows() {
+      if (!els.comfyDebugWorkflowList) return;
+      try {
+        const data = await api('/api/comfy-debug-workflows');
+        comfyDebugWorkflows = Array.isArray(data.workflows) ? data.workflows : [];
+        ensureComfyDebugWorkflowsInLibrary();
+        if (!activeComfyDebugWorkflowId && comfyDebugWorkflows.length) {
+          activeComfyDebugWorkflowId = comfyDebugWorkflows[0].id;
+        }
+        if (activeComfyDebugWorkflowId) {
+          setActiveComfyDebugWorkflow(activeComfyDebugWorkflowId, true);
+        }
+        renderComfyDebugWorkflows();
+        resumeComfyDebugPolls();
+        if (els.comfyDebugStatus && !activeComfyDebugState()?.running) {
+          els.comfyDebugStatus.textContent = `${comfyDebugWorkflows.length} 个调试模块`;
+          els.comfyDebugStatus.classList.remove('error');
+        }
+      } catch (err) {
+        if (els.comfyDebugStatus) {
+          els.comfyDebugStatus.textContent = err.message;
+          els.comfyDebugStatus.classList.add('error');
+        }
+      }
+    }
+
+    function renderComfyDebugWorkflows() {
+      if (!els.comfyDebugWorkflowList) return;
+      els.comfyDebugWorkflowList.innerHTML = '';
+      if (!comfyDebugWorkflows.length) {
+        els.comfyDebugWorkflowList.innerHTML = '<div class="muted small">暂无调试工作流。</div>';
+        return;
+      }
+      comfyDebugWorkflows.forEach(item => {
+        const savedConfig = getComfyWorkflowLibraryItemById(item.id);
+        const runState = comfyDebugStateByWorkflowId.get(item.id) || {};
+        const isConfigured = Boolean(savedConfig?.endpoint && savedConfig?.nodeInfoList && savedConfig.nodeInfoList !== '[]');
+        const isActiveEditor = activeComfyDebugWorkflowId === item.id;
+        const card = document.createElement('div');
+        card.className = `comfy-debug-card ${isActiveEditor ? 'active editing' : ''}`;
+        const head = document.createElement('div');
+        head.className = 'comfy-debug-card-head';
+        const marker = document.createElement('span');
+        marker.className = 'comfy-debug-select-marker';
+        marker.textContent = isActiveEditor ? '●' : '○';
+        marker.setAttribute('aria-hidden', 'true');
+        const titleWrap = document.createElement('div');
+        titleWrap.className = 'comfy-debug-card-title';
+        titleWrap.innerHTML = `
+          <strong>${escapeHtml(item.name || item.id)}</strong>
+          <span class="muted small">${escapeHtml(item.purpose || '')}</span>
+        `;
+        head.appendChild(marker);
+        head.appendChild(titleWrap);
+        const type = document.createElement('span');
+        type.className = `comfy-debug-type ${isConfigured ? 'configured' : ''}`;
+        type.textContent = `${item.type || 'workflow'} · ${item.stage || 'debug'}${isConfigured ? ' · 已配置' : ''}`;
+        card.appendChild(head);
+        card.appendChild(type);
+        const status = document.createElement('span');
+        const statusKind = runState.running ? 'running' : (runState.status === 'completed' ? 'completed' : (runState.error || runState.status === 'failed' ? 'failed' : 'idle'));
+        status.className = `comfy-debug-run-state ${statusKind}`;
+        if (statusKind === 'running') {
+          status.textContent = `运行中${runState.runId ? ' · ' + String(runState.runId).slice(-8) : ''}`;
+        } else if (statusKind === 'completed') {
+          const count = Array.isArray(runState.results) ? runState.results.length : 0;
+          status.textContent = `运行完成${count ? ' · ' + count + ' 个结果' : ''}`;
+        } else if (statusKind === 'failed') {
+          status.textContent = '运行失败';
+        } else {
+          status.textContent = '未运行';
+        }
+        card.appendChild(status);
+        card.onclick = () => {
+          setActiveComfyDebugWorkflow(item.id, true);
+          renderComfyDebugWorkflows();
+          saveSettings();
+        };
+        els.comfyDebugWorkflowList.appendChild(card);
+      });
+      const active = activeComfyDebugWorkflow();
+      if (els.comfyDebugSelectedMeta) els.comfyDebugSelectedMeta.textContent = active ? `当前：${active.name || active.id}` : '单选调试';
+      if (active) applyComfyDebugWorkflowDefaults(active, false);
+    }
+
+    function applyComfyDebugWorkflowDefaults(item, force = false) {
+      if (!item) return;
+      const savedConfig = getComfyWorkflowLibraryItemById(item.id);
+      const endpoint = savedConfig?.endpoint || item.default_endpoint || '';
+      const nodeInfo = savedConfig?.nodeInfoList || item.default_node_info || '[]';
+      const width = savedConfig?.defaultWidth || item.default_width || '';
+      const height = savedConfig?.defaultHeight || item.default_height || '';
+      const pollTimeout = savedConfig?.pollTimeout || item.poll_timeout_seconds || item.default_poll_timeout || '3600';
+      if (force || !els.comfyDebugWidth.value.trim()) els.comfyDebugWidth.value = width;
+      if (force || !els.comfyDebugHeight.value.trim()) els.comfyDebugHeight.value = height;
+      if (force || !els.comfyDebugEndpoint.value.trim()) els.comfyDebugEndpoint.value = endpoint;
+      if (force || !els.comfyDebugNodeInfoList.value.trim()) els.comfyDebugNodeInfoList.value = nodeInfo;
+      if (force || !els.comfyDebugPollTimeout.value) setIfExists(els.comfyDebugPollTimeout, String(pollTimeout));
+      els.comfyDebugEndpoint.placeholder = endpoint || '/run/workflow/xxx 或 /run/ai-app/xxx';
+      els.comfyDebugNodeInfoList.placeholder = nodeInfo || '[]';
+    }
+
+    function saveActiveComfyDebugWorkflowConfig(showMessage = true) {
+      const workflow = activeComfyDebugWorkflow();
+      if (!workflow) {
+        setStatus('请先在左侧选择一个调试工作流', true);
+        return false;
+      }
+      ensureComfyDebugWorkflowsInLibrary();
+      let item = getComfyWorkflowLibraryItemById(workflow.id);
+      if (!item) {
+        item = {
+          id: workflow.id,
+          name: workflow.name || workflow.id,
+          purpose: workflow.purpose || '',
+          materialTypes: workflow.type ? [workflow.type] : [],
+          endpoint: '',
+          nodeInfoList: '[]',
+          pollTimeout: '3600',
+          defaultReference: '',
+          defaultSeed: '',
+          defaultDuration: '',
+          defaultPrompt: '',
+          defaultNegative: '',
+          defaultAssetReference: '',
+          defaultReferenceHint: '',
+          debugWorkflow: true,
+        };
+        comfyWorkflowLibrary.push(item);
+      }
+      item.name = workflow.name || item.name || workflow.id;
+      item.purpose = workflow.purpose || item.purpose || '';
+      item.materialTypes = workflow.type ? [workflow.type] : item.materialTypes || [];
+      item.endpoint = els.comfyDebugEndpoint.value.trim();
+      item.nodeInfoList = sanitizeComfyVisualNodeInfoList(els.comfyDebugNodeInfoList.value.trim() || '[]');
+      item.pollTimeout = els.comfyDebugPollTimeout.value || '3600';
+      item.defaultWidth = els.comfyDebugWidth.value.trim();
+      item.defaultHeight = els.comfyDebugHeight.value.trim();
+      item.defaultReference = els.comfyDebugReference.value.trim();
+      item.defaultSeed = els.comfyDebugSeed.value.trim();
+      item.defaultDuration = els.comfyDebugDuration.value.trim();
+      item.defaultPrompt = els.comfyDebugPrompt.value;
+      item.defaultNegative = els.comfyDebugNegative.value;
+      item.defaultAssetReference = els.comfyDebugAssetReference.value || '';
+      item.defaultReferenceHint = els.comfyDebugReferenceHint.textContent || '';
+      item.debugWorkflow = true;
+      els.comfyDebugNodeInfoList.value = item.nodeInfoList;
+      const previousState = comfyDebugStateByWorkflowId.get(workflow.id) || {};
+      comfyDebugStateByWorkflowId.set(workflow.id, {
+        ...previousState,
+        ...readComfyDebugFormState(),
+        results: Array.isArray(previousState.results) ? previousState.results : [],
+      });
+      renderComfyDebugWorkflows();
+      renderComfyWorkflowLibrary();
+      saveSettings();
+      if (showMessage) setStatus(`已保存调试工作流配置：${item.name}`);
+      return true;
+    }
+
+    function clearActiveComfyDebugWorkflowConfig() {
+      const workflow = activeComfyDebugWorkflow();
+      const item = workflow ? getComfyWorkflowLibraryItemById(workflow.id) : null;
+      if (!workflow || !item) {
+        setStatus('请先在左侧选择一个调试工作流', true);
+        return;
+      }
+      item.endpoint = '';
+      item.nodeInfoList = workflow.default_node_info || '[]';
+      item.pollTimeout = String(workflow.poll_timeout_seconds || workflow.default_poll_timeout || '3600');
+      item.defaultWidth = String(workflow.default_width || '');
+      item.defaultHeight = String(workflow.default_height || '');
+      item.defaultReference = '';
+      item.defaultSeed = '';
+      item.defaultDuration = '';
+      item.defaultPrompt = '';
+      item.defaultNegative = '';
+      item.defaultAssetReference = '';
+      item.defaultReferenceHint = '';
+      comfyDebugStateByWorkflowId.delete(workflow.id);
+      applyComfyDebugWorkflowDefaults(workflow, true);
+      saveCurrentComfyDebugUiState();
+      renderComfyDebugWorkflows();
+      renderComfyWorkflowLibrary();
+      saveSettings();
+      setStatus(`已清空调试工作流配置：${item.name || workflow.name}`);
+    }
+
+    function fillComfyDebugSample() {
+      const selected = activeComfyDebugWorkflow();
+      const isVideo = selected?.type === 'video';
+      els.comfyDebugPrompt.value = isVideo
+        ? '写实商业短视频镜头：AI 自动化工作台界面发光，镜头缓慢推进，干净科技感，稳定运动，无文字水印。'
+        : '写实商业关键帧：AI 自动化服务场景，干净办公室，专业人物，蓝绿色科技光效，竖版构图，无文字水印。';
+      els.comfyDebugNegative.value = '文字，水印，logo，畸形手，脸部变形，低清晰度，闪烁，过曝，噪点';
+      if (!els.comfyDebugWidth.value.trim()) els.comfyDebugWidth.value = selected?.default_width || (isVideo ? '960' : '1080');
+      if (!els.comfyDebugHeight.value.trim()) els.comfyDebugHeight.value = selected?.default_height || (isVideo ? '544' : '1920');
+      saveCurrentComfyDebugUiState();
+      saveSettings();
+      setStatus('已填入 ComfyUI 调试提示词', false, false);
+    }
+
+    async function runComfyDebug() {
+      const selected = activeComfyDebugWorkflow();
+      if (!selected) {
+        setStatus('请选择一个 ComfyUI 调试工作流', true);
+        return;
+      }
+      const prompt = els.comfyDebugPrompt.value.trim();
+      if (!prompt) {
+        setStatus('请输入调试提示词', true);
+        return;
+      }
+      saveActiveComfyDebugWorkflowConfig(false);
+      els.runComfyDebugBtn.disabled = true;
+      els.runComfyDebugBtn.classList.add('run-progress');
+      els.runComfyDebugBtn.style.setProperty('--run-progress', '35%');
+      els.runComfyDebugBtn.textContent = '运行中...';
+      els.comfyDebugStatus.textContent = `调试中：${selected.name || selected.id}`;
+      els.comfyDebugStatus.classList.remove('error');
+      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = '已提交请求，等待结果...';
+      renderComfyDebugRunning(selected);
+      setStatus(`ComfyUI 调试已开始：${selected.name || selected.id}`, false);
+      try {
+        const data = await api('/api/comfy-debug-run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workflows: [selected.id],
+            api_key: els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim(),
+            base_url: els.comfyDebugBaseUrl.value.trim() || els.comfyBaseUrl.value.trim(),
+            endpoint: els.comfyDebugEndpoint.value.trim(),
+            node_info_list_json: els.comfyDebugNodeInfoList.value.trim(),
+            workflow_library: getComfyWorkflowLibraryPayload(),
+            poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
+            prompt,
+            negative_prompt: els.comfyDebugNegative.value.trim(),
+            reference_image: els.comfyDebugReference.value.trim(),
+            seed: els.comfyDebugSeed.value.trim(),
+            width: els.comfyDebugWidth.value.trim(),
+            height: els.comfyDebugHeight.value.trim(),
+            duration: els.comfyDebugDuration.value.trim(),
+          }),
+        });
+        comfyDebugLastResults = Array.isArray(data.results) ? data.results : [];
+      const currentState = comfyDebugStateByWorkflowId.get(selected.id) || readComfyDebugFormState();
+      comfyDebugStateByWorkflowId.set(selected.id, {
+        ...currentState,
+        ...readComfyDebugFormState(),
+        results: compactComfyDebugResults(comfyDebugLastResults),
+      });
+      saveSettings();
+        renderComfyDebugResults(comfyDebugLastResults);
+        els.comfyDebugStatus.textContent = `调试完成：${comfyDebugLastResults.length} 个结果`;
+        els.runComfyDebugBtn.style.setProperty('--run-progress', '100%');
+        setStatus('ComfyUI 调试完成', false);
+      } catch (err) {
+        els.comfyDebugStatus.textContent = err.message;
+        els.comfyDebugStatus.classList.add('error');
+        if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = '运行失败';
+        if (els.comfyDebugResults) {
+          els.comfyDebugResults.innerHTML = `
+            <div class="comfy-debug-result">
+              <div class="comfy-debug-result-head">
+                <strong>运行失败</strong>
+                <span class="comfy-debug-type">error</span>
+              </div>
+              <div class="comfy-debug-log">${escapeHtml(err.message || '未知错误')}</div>
+            </div>
+          `;
+        }
+        setStatus(err.message, true);
+      } finally {
+        els.runComfyDebugBtn.disabled = false;
+        setTimeout(() => {
+          els.runComfyDebugBtn.classList.remove('run-progress');
+          els.runComfyDebugBtn.style.removeProperty('--run-progress');
+          els.runComfyDebugBtn.textContent = '运行当前工作流';
+        }, 500);
+      }
+    }
+
+    function renderComfyDebugRunning(workflow) {
+      if (!els.comfyDebugResults) return;
+      const endpoint = els.comfyDebugEndpoint.value.trim() || '使用当前工作流保存的接口地址';
+      els.comfyDebugResults.innerHTML = `
+        <div class="comfy-debug-running">
+          <div class="comfy-debug-running-bar"></div>
+          <strong>正在调用：${escapeHtml(workflow?.name || workflow?.id || '当前工作流')}</strong>
+          <div class="muted small">${escapeHtml(endpoint)}</div>
+          <div class="muted small">已提交请求，正在等待 RunningHub / ComfyUI 返回结果。期间不要重复点击运行。</div>
+        </div>
+      `;
+      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = '运行中，等待结果返回...';
+    }
+
+    function renderComfyDebugResults(results) {
+      if (!els.comfyDebugResults) return;
+      els.comfyDebugResults.innerHTML = '';
+      if (!results.length) {
+        els.comfyDebugResults.innerHTML = '<div class="muted small">暂无调试结果。</div>';
+        if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = '暂无结果';
+        return;
+      }
+      let mediaCount = 0;
+      results.forEach(result => {
+        const card = document.createElement('div');
+        card.className = 'comfy-debug-result';
+        const files = Array.isArray(result.files) ? result.files : [];
+        mediaCount += files.length;
+        card.innerHTML = `
+          <div class="comfy-debug-result-head">
+            <div>
+              <strong>${escapeHtml(result.name || result.id || '调试结果')}</strong>
+              <div class="muted small">${escapeHtml(result.status || '')} · ${escapeHtml(result.endpoint || '')}</div>
+            </div>
+            <span class="comfy-debug-type">${escapeHtml(result.type || '')}</span>
+          </div>
+        `;
+        const gallery = document.createElement('div');
+        gallery.className = 'asset-gallery';
+        if (files.length) {
+          const previewItems = files.map(file => ({
+            file,
+            label: file.split('/').pop(),
+            kind: isImageFile(file) ? 'image' : 'video',
+          }));
+          files.forEach((file, index) => {
+            const item = previewItems[index];
+            const card = assetGalleryCard(result.task || '__comfy_debug__', item, index);
+            card.onclick = () => {
+              assetPreviewTaskName = result.task || '__comfy_debug__';
+              assetPreviewItems = previewItems;
+              openAssetLightbox(index);
+            };
+            card.onkeydown = event => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                assetPreviewTaskName = result.task || '__comfy_debug__';
+                assetPreviewItems = previewItems;
+                openAssetLightbox(index);
+              }
+            };
+            gallery.appendChild(card);
+          });
+        } else {
+          gallery.innerHTML = '<div class="muted small">没有下载到可预览媒体。请检查 RunningHub 返回、节点输出和 nodeInfoList。</div>';
+        }
+        const log = document.createElement('div');
+        log.className = 'comfy-debug-log';
+        log.textContent = result.error || JSON.stringify(result.manifest || {}, null, 2).slice(0, 3000);
+        card.appendChild(gallery);
+        card.appendChild(log);
+        els.comfyDebugResults.appendChild(card);
+      });
+      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = `${results.length} 个工作流 · ${mediaCount} 个媒体`;
+    }
+
     async function runWorkflow() {
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       await loadAssetLibrary();
-      const input = `${els.userInput.value.trim()}${assetLibraryContextText()}`.trim();
+      const rawInput = els.userInput.value.trim();
+      const input = `${rawInput}${contentColumnContextText(rawInput)}${assetLibraryContextText()}`.trim();
       if (!input) {
         setStatus('请输入原始需求', true);
         return;
@@ -5913,7 +7414,9 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请输入自定义模型名', true);
         return;
       }
-      const titleFromInput = input.replace(/\s+/g, '').slice(0, 18);
+      const selectedColumn = contentColumns.find(item => item.id === els.contentColumn?.value);
+      if (selectedColumn) setStatus(`已应用内容栏目：${selectedColumn.name}`, false, false);
+      const titleFromInput = (rawInput || input).replace(/\s+/g, '').slice(0, 18);
       els.taskTitle.value = els.taskTitle.value.trim() || (titleFromInput ? `${titleFromInput}长视频` : '长视频任务');
       els.runBtn.disabled = true;
       saveSettings();
@@ -5974,17 +7477,41 @@ INDEX_HTML = r"""<!doctype html>
     els.runBtn.onclick = runWorkflow;
     els.cancelRunBtn.onclick = cancelCurrentRun;
     els.outputCancelRunBtn.onclick = cancelCurrentRun;
-    els.assetLightboxCloseBtn.onclick = closeAssetLightbox;
-    els.assetLightboxPrevBtn.onclick = () => moveAssetLightbox(-1);
-    els.assetLightboxNextBtn.onclick = () => moveAssetLightbox(1);
-    els.assetLightbox.onclick = event => {
-      if (event.target === els.assetLightbox) closeAssetLightbox();
+    els.assetLightboxCloseBtn.onclick = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAssetLightbox();
     };
+    els.assetLightboxPrevBtn.onclick = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      moveAssetLightbox(-1);
+    };
+    els.assetLightboxNextBtn.onclick = event => {
+      event.preventDefault();
+      event.stopPropagation();
+      moveAssetLightbox(1);
+    };
+    els.assetLightbox.onclick = handleAssetLightboxBackgroundClick;
     document.addEventListener('keydown', event => {
       if (!els.assetLightbox || els.assetLightbox.hidden) return;
-      if (event.key === 'Escape') closeAssetLightbox();
-      if (event.key === 'ArrowLeft') moveAssetLightbox(-1);
-      if (event.key === 'ArrowRight') moveAssetLightbox(1);
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeAssetLightbox();
+      }
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault();
+        moveAssetLightbox(-1);
+      }
+      if (event.key === 'ArrowRight') {
+        event.preventDefault();
+        moveAssetLightbox(1);
+      }
+    });
+    window.addEventListener('resize', () => {
+      if (!els.assetLightbox || els.assetLightbox.hidden) return;
+      const media = els.assetLightboxStage?.querySelector('img, video');
+      if (media) fitAssetLightboxMedia(media);
     });
     window.addEventListener('pagehide', pauseCurrentRunOnExit);
     window.addEventListener('beforeunload', pauseCurrentRunOnExit);
@@ -6042,6 +7569,241 @@ INDEX_HTML = r"""<!doctype html>
     els.showDebugFiles.onchange = () => {
       renderFiles(currentTaskFiles);
     };
+    function activeComfyDebugState() {
+      const workflow = activeComfyDebugWorkflow();
+      return workflow ? comfyDebugStateByWorkflowId.get(workflow.id) : null;
+    }
+
+    function syncComfyDebugRunButton() {
+      if (!els.runComfyDebugBtn) return;
+      const state = activeComfyDebugState();
+      const running = Boolean(state?.running);
+      els.runComfyDebugBtn.disabled = running;
+      if (running) {
+        els.runComfyDebugBtn.classList.add('run-progress');
+        els.runComfyDebugBtn.style.setProperty('--run-progress', state?.status === 'running' ? '65%' : '35%');
+        els.runComfyDebugBtn.textContent = '运行中...';
+      } else {
+        els.runComfyDebugBtn.classList.remove('run-progress');
+        els.runComfyDebugBtn.style.removeProperty('--run-progress');
+        els.runComfyDebugBtn.textContent = '运行当前工作流';
+      }
+    }
+
+    function renderComfyDebugStatePreview(workflow) {
+      const state = workflow ? comfyDebugStateByWorkflowId.get(workflow.id) : null;
+      if (state?.running) {
+        renderComfyDebugRunningAsync(workflow, state);
+      } else if (state?.error) {
+        renderComfyDebugError(state.error);
+      } else {
+        renderComfyDebugResults(state?.results || []);
+      }
+    }
+
+    function renderComfyDebugError(message) {
+      if (els.comfyDebugStatus) {
+        els.comfyDebugStatus.textContent = message || '运行失败';
+        els.comfyDebugStatus.classList.add('error');
+      }
+      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = '运行失败';
+      if (els.comfyDebugResults) {
+        els.comfyDebugResults.innerHTML = `
+          <div class="comfy-debug-result">
+            <div class="comfy-debug-result-head">
+              <strong>运行失败</strong>
+              <span class="comfy-debug-type">error</span>
+            </div>
+            <div class="comfy-debug-log">${escapeHtml(message || '未知错误')}</div>
+          </div>
+        `;
+      }
+    }
+
+    function renderComfyDebugRunningAsync(workflow, state = null) {
+      if (!els.comfyDebugResults) return;
+      const endpoint = state?.endpoint || els.comfyDebugEndpoint.value.trim() || '使用当前工作流保存的接口地址';
+      const runId = state?.runId ? `任务：${state.runId}` : '正在提交任务';
+      const statusText = state?.status || 'running';
+      els.comfyDebugResults.innerHTML = `
+        <div class="comfy-debug-running">
+          <div class="comfy-debug-running-bar"></div>
+          <strong>正在调用：${escapeHtml(workflow?.name || workflow?.id || '当前工作流')}</strong>
+          <div class="muted small">${escapeHtml(endpoint)}</div>
+          <div class="muted small">${escapeHtml(runId)} · ${escapeHtml(statusText)}</div>
+          <div class="muted small">已转为后台任务，页面会自动轮询结果。你可以切换左侧其他工作流继续调试。</div>
+        </div>
+      `;
+      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = '运行中，等待结果返回...';
+    }
+
+    async function runComfyDebugAsync() {
+      const selected = activeComfyDebugWorkflow();
+      if (!selected) {
+        setStatus('请选择一个 ComfyUI 调试工作流', true);
+        return;
+      }
+      const prompt = els.comfyDebugPrompt.value.trim();
+      if (!prompt) {
+        setStatus('请输入调试提示词', true);
+        return;
+      }
+      const existingState = comfyDebugStateByWorkflowId.get(selected.id) || {};
+      if (existingState.running) {
+        renderComfyDebugRunningAsync(selected, existingState);
+        syncComfyDebugRunButton();
+        return;
+      }
+      saveActiveComfyDebugWorkflowConfig(false);
+      const startState = {
+        ...existingState,
+        ...readComfyDebugFormState(),
+        running: true,
+        runId: '',
+        status: 'starting',
+        error: '',
+      };
+      comfyDebugStateByWorkflowId.set(selected.id, startState);
+      syncComfyDebugRunButton();
+      renderComfyDebugWorkflows();
+      if (els.comfyDebugStatus) {
+        els.comfyDebugStatus.textContent = `调试中：${selected.name || selected.id}`;
+        els.comfyDebugStatus.classList.remove('error');
+      }
+      renderComfyDebugRunningAsync(selected, startState);
+      setStatus(`ComfyUI 调试已开始：${selected.name || selected.id}`, false);
+      try {
+        const job = await api('/api/comfy-debug-run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            workflows: [selected.id],
+            api_key: els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim(),
+            base_url: els.comfyDebugBaseUrl.value.trim() || els.comfyBaseUrl.value.trim(),
+            endpoint: els.comfyDebugEndpoint.value.trim(),
+            node_info_list_json: els.comfyDebugNodeInfoList.value.trim(),
+            workflow_library: getComfyWorkflowLibraryPayload(),
+            poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
+            prompt,
+            negative_prompt: els.comfyDebugNegative.value.trim(),
+            reference_image: els.comfyDebugReference.value.trim(),
+            seed: els.comfyDebugSeed.value.trim(),
+            width: els.comfyDebugWidth.value.trim(),
+            height: els.comfyDebugHeight.value.trim(),
+            duration: els.comfyDebugDuration.value.trim(),
+          }),
+        });
+        const runId = job.run_id || job.id || '';
+        const currentState = comfyDebugStateByWorkflowId.get(selected.id) || startState;
+        comfyDebugStateByWorkflowId.set(selected.id, {
+          ...currentState,
+          running: true,
+          runId,
+          status: job.status || 'queued',
+          error: '',
+        });
+        saveSettings();
+        renderComfyDebugWorkflows();
+        renderComfyDebugRunningAsync(selected, comfyDebugStateByWorkflowId.get(selected.id));
+        pollComfyDebugRun(selected.id, runId);
+      } catch (err) {
+        markComfyDebugRunFailed(selected.id, err.message || '运行失败');
+      }
+    }
+
+    function pollComfyDebugRun(workflowId, runId) {
+      if (!workflowId || !runId) {
+        markComfyDebugRunFailed(workflowId, '后端没有返回运行任务 ID');
+        return;
+      }
+      if (comfyDebugPollTimers.has(workflowId)) {
+        clearTimeout(comfyDebugPollTimers.get(workflowId));
+        comfyDebugPollTimers.delete(workflowId);
+      }
+      const tick = async () => {
+        try {
+          const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
+          const state = comfyDebugStateByWorkflowId.get(workflowId) || {};
+          if (state.runId && state.runId !== runId) return;
+          const status = job.status || '';
+          comfyDebugStateByWorkflowId.set(workflowId, {
+            ...state,
+            running: !['completed', 'failed', 'cancelled', 'paused'].includes(status),
+            status,
+            error: status === 'failed' ? (job.error || '运行失败') : '',
+          });
+          renderComfyDebugWorkflows();
+          if (activeComfyDebugWorkflowId === workflowId) {
+            renderComfyDebugStatePreview(activeComfyDebugWorkflow());
+            syncComfyDebugRunButton();
+          }
+          if (status === 'completed') {
+            const result = job.result || {};
+            const results = Array.isArray(result.results) ? result.results : (Array.isArray(job.results) ? job.results : []);
+            comfyDebugLastResults = results;
+            const finalState = comfyDebugStateByWorkflowId.get(workflowId) || {};
+            comfyDebugStateByWorkflowId.set(workflowId, {
+              ...finalState,
+              running: false,
+              status,
+              error: '',
+              results: compactComfyDebugResults(results),
+            });
+            comfyDebugPollTimers.delete(workflowId);
+            saveSettings();
+            renderComfyDebugWorkflows();
+            if (activeComfyDebugWorkflowId === workflowId) {
+              renderComfyDebugResults(results);
+              if (els.comfyDebugStatus) {
+                els.comfyDebugStatus.textContent = `调试完成：${results.length} 个结果`;
+                els.comfyDebugStatus.classList.remove('error');
+              }
+              setStatus('ComfyUI 调试完成', false);
+              syncComfyDebugRunButton();
+            }
+            return;
+          }
+          if (['failed', 'cancelled', 'paused'].includes(status)) {
+            const message = job.error || job.message || `运行结束：${status}`;
+            markComfyDebugRunFailed(workflowId, message);
+            comfyDebugPollTimers.delete(workflowId);
+            return;
+          }
+          comfyDebugPollTimers.set(workflowId, setTimeout(tick, 1800));
+        } catch (err) {
+          markComfyDebugRunFailed(workflowId, err.message || '轮询运行状态失败');
+          comfyDebugPollTimers.delete(workflowId);
+        }
+      };
+      comfyDebugPollTimers.set(workflowId, setTimeout(tick, 800));
+    }
+
+    function resumeComfyDebugPolls() {
+      for (const [workflowId, state] of comfyDebugStateByWorkflowId.entries()) {
+        if (state?.running && state?.runId && !comfyDebugPollTimers.has(workflowId)) {
+          pollComfyDebugRun(workflowId, state.runId);
+        }
+      }
+      syncComfyDebugRunButton();
+    }
+
+    function markComfyDebugRunFailed(workflowId, message) {
+      const state = comfyDebugStateByWorkflowId.get(workflowId) || {};
+      comfyDebugStateByWorkflowId.set(workflowId, {
+        ...state,
+        running: false,
+        status: 'failed',
+        error: message || '运行失败',
+      });
+      saveSettings();
+      renderComfyDebugWorkflows();
+      if (activeComfyDebugWorkflowId === workflowId) {
+        renderComfyDebugError(message);
+        syncComfyDebugRunButton();
+      }
+      setStatus(message || 'ComfyUI 调试失败', true);
+    }
+
     els.autoProductionMode.onchange = () => {
       if (els.autoProductionMode.value === 'comfy_full') {
         els.composeTool.value = 'ffmpeg';
@@ -6058,6 +7820,49 @@ INDEX_HTML = r"""<!doctype html>
     els.contentColumn.onchange = saveSettings;
     els.applyContentColumnBtn.onclick = applySelectedContentColumn;
     els.refreshAssetLibraryBtn.onclick = loadAssetLibrary;
+    els.refreshComfyDebugBtn.onclick = loadComfyDebugWorkflows;
+    els.fillComfyDebugSampleBtn.onclick = fillComfyDebugSample;
+    els.runComfyDebugBtn.onclick = runComfyDebugAsync;
+    els.comfyDebugApiWorkflowFile.onchange = analyzeComfyDebugApiWorkflowFile;
+    els.saveComfyDebugWorkflowBtn.onclick = () => saveActiveComfyDebugWorkflowConfig(true);
+    els.clearComfyDebugWorkflowBtn.onclick = clearActiveComfyDebugWorkflowConfig;
+    [
+      els.comfyDebugEndpoint,
+      els.comfyDebugReference,
+      els.comfyDebugSeed,
+      els.comfyDebugWidth,
+      els.comfyDebugHeight,
+      els.comfyDebugDuration,
+      els.comfyDebugPrompt,
+      els.comfyDebugNegative,
+      els.comfyDebugNodeInfoList,
+      els.comfyDebugPollTimeout,
+    ].forEach(control => {
+      if (!control) return;
+      control.addEventListener('input', () => {
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+      });
+      control.addEventListener('change', () => {
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+      });
+    });
+    els.comfyDebugAssetReference.onchange = () => {
+      const value = els.comfyDebugAssetReference.value;
+      if (value && els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+      setComfyDebugReference(value, value ? `已选择素材库参考：${value}` : '');
+      saveCurrentComfyDebugUiState();
+      saveSettings();
+    };
+    els.comfyDebugReferenceFile.onchange = uploadComfyDebugReferenceFile;
+    els.clearComfyDebugReferenceBtn.onclick = () => {
+      if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+      if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+      setComfyDebugReference('', '');
+      saveCurrentComfyDebugUiState();
+      saveSettings();
+    };
     els.model.onchange = () => {
       syncCustomModelState();
       saveSettings();
@@ -6163,6 +7968,7 @@ INDEX_HTML = r"""<!doctype html>
         await loadContentColumns();
         restoreSettings();
         await loadAssetLibrary();
+        await loadComfyDebugWorkflows();
         await loadTasks();
         await loadStaffList();
         await loadWorkflowList();
@@ -6197,6 +8003,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"columns": CONTENT_COLUMNS})
             elif parsed.path == "/api/asset-library":
                 self._send_json({"assets": self._asset_library()})
+            elif parsed.path == "/api/comfy-debug-workflows":
+                self._send_json({"workflows": self._comfy_debug_workflows()})
             elif parsed.path == "/api/knowledge":
                 self._send_json({"files": self._knowledge_files()})
             elif parsed.path == "/api/staff":
@@ -6248,6 +8056,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._upload_reference_image(payload))
                 return
 
+            if parsed.path == "/api/upload-comfy-debug-reference":
+                self._send_json(self._upload_comfy_debug_reference(payload))
+                return
+
             if parsed.path == "/api/upload-voice-sample":
                 self._send_json(self._upload_voice_sample(payload))
                 return
@@ -6258,6 +8070,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/favorite-asset":
                 self._send_json(self._favorite_asset(payload))
+                return
+
+            if parsed.path == "/api/unfavorite-asset":
+                self._send_json(self._unfavorite_asset(payload))
+                return
+
+            if parsed.path == "/api/comfy-debug-run":
+                self._send_json(self._start_comfy_debug(payload))
                 return
 
             if parsed.path == "/api/test-model":
@@ -6694,6 +8514,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             )
             for status_group in ({"queued", "running"}, {"paused"}):
                 for job in jobs:
+                    if job.get("debug_type") == "comfy_debug":
+                        continue
                     if job.get("status") in status_group:
                         return {"run": json.loads(json.dumps(job, ensure_ascii=False))}
         return {"run": None}
@@ -7580,11 +9402,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _task_assets(task_dir: Path, files: list[str]) -> dict:
         images = []
         videos = []
+        is_comfy_debug = task_dir.name == COMFY_DEBUG_TASK
         for file in files:
             path = task_dir / file
             if not path.is_file():
                 continue
-            if not WorkflowWebHandler._is_visible_media_asset(file):
+            if not WorkflowWebHandler._is_visible_media_asset(file, include_nested=is_comfy_debug):
                 continue
             item = {
                 "file": file,
@@ -7607,13 +9430,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         }
 
     @staticmethod
-    def _is_visible_media_asset(file: str) -> bool:
+    def _is_visible_media_asset(file: str, include_nested: bool = False) -> bool:
         name = str(file or "")
         if not name or name.startswith("export_package/") or name.startswith("step_"):
             return False
         suffix = Path(name).suffix.lower()
         if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".m4v"}:
             return False
+        if include_nested:
+            return True
         if name in {"long_video_final.mp4", "final_video.mp4"}:
             return True
         return name.startswith(("generated_images/", "video_clips/", "comfyui/"))
@@ -7627,6 +9452,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             ("generated_images/", "10_"),
             ("video_clips/", "20_"),
             ("comfyui/", "60_"),
+            ("reference_keyframe/", "65_"),
+            ("identity_consistency/", "66_"),
+            ("segment_i2v/", "67_"),
         ]
         for prefix, rank in order:
             if name == prefix or name.startswith(prefix):
@@ -7644,6 +9472,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             return f"视频素材 · {Path(name).name}"
         if name.startswith("comfyui/"):
             return f"ComfyUI 素材 · {Path(name).name}"
+        if "comfyui_result" in Path(name).name or "/material_" in name:
+            return f"ComfyUI 调试素材 · {Path(name).name}"
         return Path(name).name
 
     def _file_content(self, task: str, file_name: str) -> dict:
@@ -7707,6 +9537,290 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             self._write_asset_library_index(cleaned)
         return cleaned
 
+    def _comfy_debug_workflows(self) -> list[dict]:
+        workflows = [dict(item) for item in COMFY_DEBUG_WORKFLOWS]
+        library_index = WORKSPACE_ROOT / "comfyui_workflows" / "workflow_library" / "index.json"
+        if library_index.is_file():
+            try:
+                data = json.loads(library_index.read_text(encoding="utf-8-sig"))
+            except json.JSONDecodeError:
+                data = []
+            if isinstance(data, list):
+                for item in data:
+                    if not isinstance(item, dict):
+                        continue
+                    material_types = item.get("material_types") if isinstance(item.get("material_types"), list) else []
+                    workflows.append(
+                        {
+                            "id": str(item.get("id") or "").strip(),
+                            "name": str(item.get("title") or item.get("name") or item.get("id") or "").strip(),
+                            "type": "video" if "video" in material_types else "image" if "image" in material_types else "workflow",
+                            "stage": "library",
+                            "purpose": str(item.get("purpose") or "").strip(),
+                            "recommended": False,
+                            "default_task_type": "img2video" if "video" in material_types else "txt2img",
+                            "default_control_mode": "first_frame" if "video" in material_types else "reference_image",
+                            "default_width": 960 if "video" in material_types else 1080,
+                            "default_height": 544 if "video" in material_types else 1920,
+                            "default_endpoint": "",
+                            "default_node_info": self._read_workflow_library_text(item.get("node_info_preset")),
+                        }
+                    )
+        seen = set()
+        unique = []
+        for item in workflows:
+            item_id = str(item.get("id") or "").strip()
+            if not item_id or item_id in seen:
+                continue
+            seen.add(item_id)
+            unique.append(item)
+        return unique
+
+    @staticmethod
+    def _read_workflow_library_text(relative_path: object) -> str:
+        path_text = str(relative_path or "").strip()
+        if not path_text:
+            return "[]"
+        root = WORKSPACE_ROOT / "comfyui_workflows" / "workflow_library"
+        target = (root / path_text).resolve()
+        if not target.is_file() or not WorkflowWebHandler._is_relative_to(target, root):
+            return "[]"
+        return target.read_text(encoding="utf-8-sig", errors="replace").strip() or "[]"
+
+    def _start_comfy_debug(self, payload: dict) -> dict:
+        workflow_ids = payload.get("workflows") if isinstance(payload.get("workflows"), list) else []
+        selected_ids = [str(item).strip() for item in workflow_ids if str(item).strip()]
+        if not selected_ids:
+            raise ValueError("Please select one ComfyUI debug workflow")
+        if not str(payload.get("prompt") or "").strip():
+            raise ValueError("prompt is required")
+        run_id = "comfy_debug_" + uuid4().hex
+        workflow_name = selected_ids[0]
+        workflows = {item["id"]: item for item in self._comfy_debug_workflows()}
+        if selected_ids[0] in workflows:
+            workflow_name = str(workflows[selected_ids[0]].get("name") or workflow_name)
+        now = time.time()
+        job = {
+            "run_id": run_id,
+            "status": "queued",
+            "workflow": COMFY_DEBUG_TASK,
+            "workflow_name": workflow_name,
+            "task_title": "ComfyUI Debug",
+            "task_name": COMFY_DEBUG_TASK,
+            "created_at": now,
+            "updated_at": now,
+            "total_steps": 1,
+            "completed_steps": 0,
+            "current_step": 1,
+            "current_message": "ComfyUI debug job queued",
+            "steps": [
+                {
+                    "step": 1,
+                    "status": "pending",
+                    "agent_id": "comfy_debug",
+                    "agent_name": workflow_name,
+                    "message": "Waiting to call RunningHub / ComfyUI",
+                }
+            ],
+            "cancel_requested": False,
+            "pause_requested": False,
+            "debug_type": "comfy_debug",
+            "active_workflow_id": selected_ids[0],
+            "result": None,
+            "results": [],
+            "error": "",
+        }
+        with RUN_JOBS_LOCK:
+            RUN_JOBS[run_id] = job
+        worker = threading.Thread(target=self._run_comfy_debug_job, args=(run_id, payload), daemon=True)
+        worker.start()
+        return json.loads(json.dumps(job, ensure_ascii=False))
+
+    def _run_comfy_debug_job(self, run_id: str, payload: dict) -> None:
+        self._update_job(
+            run_id,
+            {
+                "status": "running",
+                "current_message": "Calling RunningHub / ComfyUI",
+                "steps": [
+                    {
+                        "step": 1,
+                        "status": "active",
+                        "agent_id": "comfy_debug",
+                        "agent_name": "ComfyUI Debug",
+                        "message": "Waiting for RunningHub / ComfyUI result",
+                    }
+                ],
+            },
+        )
+        try:
+            result = self._run_comfy_debug(payload)
+            self._update_job(
+                run_id,
+                {
+                    "status": "completed",
+                    "completed_steps": 1,
+                    "current_message": "ComfyUI debug completed",
+                    "result": result,
+                    "results": result.get("results", []) if isinstance(result, dict) else [],
+                    "steps": [
+                        {
+                            "step": 1,
+                            "status": "done",
+                            "agent_id": "comfy_debug",
+                            "agent_name": "ComfyUI Debug",
+                            "message": "Completed",
+                        }
+                    ],
+                },
+            )
+        except Exception as exc:
+            self._update_job(
+                run_id,
+                {
+                    "status": "failed",
+                    "completed_steps": 0,
+                    "current_message": str(exc),
+                    "error": str(exc),
+                    "steps": [
+                        {
+                            "step": 1,
+                            "status": "error",
+                            "agent_id": "comfy_debug",
+                            "agent_name": "ComfyUI Debug",
+                            "message": str(exc),
+                        }
+                    ],
+                },
+            )
+
+    def _run_comfy_debug(self, payload: dict) -> dict:
+        workflow_ids = payload.get("workflows") if isinstance(payload.get("workflows"), list) else []
+        selected_ids = [str(item).strip() for item in workflow_ids if str(item).strip()]
+        if not selected_ids:
+            raise ValueError("请选择至少一个调试工作流")
+        api_key = str(payload.get("api_key") or "").strip()
+        base_url = str(payload.get("base_url") or "").strip() or "https://www.runninghub.cn/openapi/v2"
+        prompt = str(payload.get("prompt") or "").strip()
+        if not prompt:
+            raise ValueError("prompt is required")
+        endpoint_override = str(payload.get("endpoint") or "").strip()
+        node_info_override = str(payload.get("node_info_list_json") or "").strip()
+        poll_timeout = self._safe_int(payload.get("poll_timeout_seconds"), default=3600, minimum=60, maximum=7200)
+        reference_image = str(payload.get("reference_image") or "").strip()
+        seed = str(payload.get("seed") or "").strip()
+        width = str(payload.get("width") or "").strip()
+        height = str(payload.get("height") or "").strip()
+        duration = str(payload.get("duration") or "").strip()
+        negative_prompt = str(payload.get("negative_prompt") or "").strip()
+        workflows = {item["id"]: item for item in self._comfy_debug_workflows()}
+        frontend_library = payload.get("workflow_library") if isinstance(payload.get("workflow_library"), list) else []
+        for library_item in frontend_library:
+            if not isinstance(library_item, dict):
+                continue
+            library_id = str(library_item.get("id") or "").strip()
+            if not library_id:
+                continue
+            target = workflows.get(library_id)
+            if not target:
+                continue
+            endpoint_value = str(library_item.get("endpoint") or "").strip()
+            node_info_value = str(library_item.get("nodeInfoList") or library_item.get("node_info_list_json") or "").strip()
+            poll_timeout_value = str(library_item.get("pollTimeout") or library_item.get("poll_timeout_seconds") or "").strip()
+            if endpoint_value:
+                target["default_endpoint"] = endpoint_value
+            if node_info_value:
+                target["default_node_info"] = node_info_value
+            if poll_timeout_value:
+                target["poll_timeout_seconds"] = poll_timeout_value
+        run_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
+        run_root = COMFY_DEBUG_ROOT / run_id
+        run_root.mkdir(parents=True, exist_ok=True)
+        results = []
+
+        for workflow_id in selected_ids:
+            item = workflows.get(workflow_id)
+            if not item:
+                results.append({"id": workflow_id, "name": workflow_id, "status": "failed", "error": "Unknown workflow", "files": []})
+                continue
+            endpoint = endpoint_override or str(item.get("default_endpoint") or "").strip()
+            node_info = node_info_override or str(item.get("default_node_info") or "").strip() or "[]"
+            output_dir = run_root / self._safe_asset_stem(workflow_id)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            config = {
+                "provider": "runninghub",
+                "workflow_endpoint": endpoint,
+                "node_info_list_json": node_info,
+                "poll_timeout_seconds": poll_timeout,
+                "tool": "runninghub",
+                "instance_type": "default",
+                "loop_material_prompts": False,
+                "workflow_preset_id": workflow_id,
+                "workflow_preset_name": item.get("name") or workflow_id,
+            }
+            task_type = str(item.get("default_task_type") or "").strip()
+            control_mode = str(item.get("default_control_mode") or "").strip()
+            job_type = "video" if str(item.get("type") or "").lower() == "video" else "image"
+            request_payload = {
+                "prompt": prompt,
+                "negative_prompt": negative_prompt,
+                "reference_image": reference_image,
+                "seed": seed,
+                "width": width or item.get("default_width") or "",
+                "height": height or item.get("default_height") or "",
+                "duration": duration,
+                "task_type": task_type,
+                "control_mode": control_mode,
+                "image_task_type": task_type if job_type == "image" else "",
+                "video_task_type": task_type if job_type == "video" else "",
+            }
+            if job_type == "video":
+                request_payload["video_prompt"] = prompt
+            else:
+                request_payload["image_prompt"] = prompt
+            try:
+                adapter = CloudComfyUIAdapter(base_url, api_key, endpoint, progress_callback=None)
+                adapter._reference_search_dirs = [COMFY_DEBUG_ROOT, OUTPUT_ROOT, WORKSPACE_ROOT]  # type: ignore[attr-defined]
+                if reference_image:
+                    uploaded_reference = adapter._reference_image_value(reference_image)  # type: ignore[attr-defined]
+                    request_payload["reference_image"] = uploaded_reference
+                manifest = adapter.run(request_payload, config, output_dir)
+                downloaded = [Path(path) for path in manifest.get("downloaded_files", []) if path]
+                files = []
+                for path in downloaded:
+                    try:
+                        resolved = path.resolve()
+                        if resolved.is_file() and self._is_relative_to(resolved, COMFY_DEBUG_ROOT):
+                            files.append(resolved.relative_to(COMFY_DEBUG_ROOT).as_posix())
+                    except OSError:
+                        continue
+                results.append(
+                    {
+                        "id": workflow_id,
+                        "name": item.get("name") or workflow_id,
+                        "type": item.get("type") or "",
+                        "status": manifest.get("status", "unknown"),
+                        "endpoint": endpoint,
+                        "task": COMFY_DEBUG_TASK,
+                        "files": files,
+                        "manifest": manifest,
+                    }
+                )
+            except Exception as exc:
+                error_manifest = {
+                    "id": workflow_id,
+                    "name": item.get("name") or workflow_id,
+                    "status": "failed",
+                    "endpoint": endpoint,
+                    "error": str(exc),
+                }
+                (output_dir / "debug_error.json").write_text(json.dumps(error_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+                results.append({**error_manifest, "type": item.get("type") or "", "task": COMFY_DEBUG_TASK, "files": []})
+
+        manifest = {"run_id": run_id, "created_at": time.time(), "results": results}
+        (run_root / "comfy_debug_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        return {"ok": True, "run_id": run_id, "task": COMFY_DEBUG_TASK, "results": results}
+
     def _favorite_asset(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
         file_name = str(payload.get("file") or "").strip()
@@ -7717,6 +9831,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".m4v"}:
             raise ValueError(f"Unsupported asset type: {suffix}")
         ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
+        items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
+        for existing in items:
+            if str(existing.get("source_task") or "") == task and str(existing.get("source_file") or "") == file_name:
+                return {"ok": True, "asset": existing, "duplicate": True}
         asset_id = uuid4().hex
         safe_stem = self._safe_asset_stem(Path(file_name).stem or "asset")
         library_name = f"{asset_id}_{safe_stem}{suffix}"
@@ -7736,10 +9854,38 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "size": target.stat().st_size,
             "mtime": target.stat().st_mtime,
         }
-        items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
         items.insert(0, item)
         self._write_asset_library_index(items)
         return {"ok": True, "asset": item}
+
+    def _unfavorite_asset(self, payload: dict) -> dict:
+        asset_id = str(payload.get("id") or "").strip()
+        task = str(payload.get("task") or "").strip()
+        file_name = str(payload.get("file") or "").strip()
+        items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
+        removed: list[dict] = []
+        kept: list[dict] = []
+        for item in items:
+            matches_id = asset_id and str(item.get("id") or "") == asset_id
+            matches_source = task and file_name and str(item.get("source_task") or "") == task and str(item.get("source_file") or "") == file_name
+            if matches_id or matches_source:
+                removed.append(item)
+            else:
+                kept.append(item)
+        if not removed:
+            return {"ok": True, "removed": 0}
+        for item in removed:
+            library_file = str(item.get("file") or "").strip()
+            if not library_file:
+                continue
+            target = (ASSET_LIBRARY_ROOT / library_file).resolve()
+            if target.is_file() and self._is_relative_to(target, ASSET_LIBRARY_ROOT):
+                try:
+                    target.unlink()
+                except OSError:
+                    pass
+        self._write_asset_library_index(kept)
+        return {"ok": True, "removed": len(removed), "assets": removed}
 
     def _send_asset_library_media(self, asset_id: str) -> None:
         asset_id = str(asset_id or "").strip()
@@ -7780,6 +9926,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _safe_asset_stem(value: str) -> str:
         text = re.sub(r"[^\w\u4e00-\u9fff.-]+", "_", str(value or "").strip(), flags=re.UNICODE).strip("._")
         return (text or "asset")[:80]
+
+    @staticmethod
+    def _safe_int(value: object, default: int, minimum: int, maximum: int) -> int:
+        try:
+            number = int(float(str(value).strip()))
+        except (TypeError, ValueError):
+            number = default
+        return max(minimum, min(maximum, number))
 
     def _save_file(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
@@ -8296,6 +10450,33 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "role": role,
             "note": note,
             "size_bytes": len(image_bytes),
+        }
+
+    def _upload_comfy_debug_reference(self, payload: dict) -> dict:
+        filename = str(payload.get("filename") or "").strip()
+        content_base64 = str(payload.get("content_base64") or "").strip()
+        if not filename or not content_base64:
+            raise ValueError("filename and content_base64 are required")
+
+        suffix = Path(filename).suffix.lower()
+        allowed = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".webm", ".mov", ".m4v"}
+        if suffix not in allowed:
+            raise ValueError(f"Unsupported ComfyUI debug reference type: {suffix}")
+
+        file_bytes = base64.b64decode(content_base64, validate=True)
+        if len(file_bytes) > 200 * 1024 * 1024:
+            raise ValueError("ComfyUI debug reference is too large; max size is 200 MB")
+
+        upload_root = REFERENCE_ROOT / "comfy_debug"
+        upload_root.mkdir(parents=True, exist_ok=True)
+        safe_stem = self._safe_asset_stem(Path(filename).stem or "reference")[:80]
+        target = upload_root / f"{safe_stem}_{uuid4().hex[:8]}{suffix}"
+        target.write_bytes(file_bytes)
+
+        return {
+            "filename": filename,
+            "stored_path": target.relative_to(WORKSPACE_ROOT).as_posix(),
+            "size_bytes": len(file_bytes),
         }
 
     def _upload_voice_sample(self, payload: dict) -> dict:
