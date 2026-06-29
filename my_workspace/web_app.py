@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import mimetypes
 import re
@@ -9,12 +10,15 @@ import sys
 import threading
 import time
 import traceback
+from io import BytesIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import parse_qs, urlparse
 from uuid import uuid4
+
+from PIL import Image
 
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
 from my_codex_core.production_pipeline import retry_production_job
@@ -44,6 +48,7 @@ ASSET_LIBRARY_TAG_FOLDERS = {
     "background_remove": "10_background_remove",
     "i2v_first_frame": "11_i2v_first_frame",
     "i2v_first_last_frame": "12_i2v_first_last_frame",
+    "i2v_first_middle_last_frame": "12_i2v_first_last_frame",
     "live_to_anime": "13_live_to_anime",
     "motion_transfer": "14_motion_transfer",
     "talking_image": "15_talking_image",
@@ -59,57 +64,37 @@ COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
-
-CONTENT_COLUMNS = [
-    {
-        "id": "ai_automation_case",
-        "name": "AI 自动化案例拆解",
-        "audience": "中小企业老板、运营负责人、AI 自动化服务商",
-        "structure": "痛点开场 -> 真实业务场景 -> 自动化流程拆解 -> 成本/风险 -> 落地建议",
-        "visual_style": "真实办公场景、软件界面、流程图、少量人物口播和 B-roll",
-        "sample": "围绕一个具体行业或岗位，拆解如何用 AI 员工减少重复劳动。要求专业、克制、不承诺具体收益。",
-    },
-    {
-        "id": "tool_review",
-        "name": "工具测评 / 工具对比",
-        "audience": "想选工具的创业者、运营、内容团队",
-        "structure": "使用场景 -> 核心功能 -> 优缺点 -> 与替代方案对比 -> 推荐人群",
-        "visual_style": "录屏、界面特写、对比表、简洁科技风",
-        "sample": "测评一个 AI 工具在真实业务中的表现，重点讲适用边界、成本和替代方案。",
-    },
-    {
-        "id": "industry_solution",
-        "name": "行业方案展示",
-        "audience": "垂直行业客户、老板、业务负责人",
-        "structure": "行业现状 -> 典型流程 -> 方案架构 -> 执行步骤 -> 交付物展示",
-        "visual_style": "行业场景图、流程图、仪表盘、稳定统一的品牌视觉",
-        "sample": "针对一个行业设计 AI 自动化解决方案，强调可落地流程和实际交付物。",
-    },
-    {
-        "id": "digital_employee_demo",
-        "name": "数字员工工作流演示",
-        "audience": "对 AI Agent/工作流感兴趣的技术和业务用户",
-        "structure": "任务目标 -> 数字员工分工 -> 执行过程 -> 输出结果 -> 可复用模板",
-        "visual_style": "管理台录屏、节点流程、输出文件、简洁解说",
-        "sample": "演示一个数字员工团队如何完成从需求到素材到成片的完整任务。",
-    },
-    {
-        "id": "pain_point_solution",
-        "name": "客户痛点解决方案",
-        "audience": "正在被效率、获客、内容生产困扰的业务方",
-        "structure": "痛点故事 -> 错误做法 -> 正确方案 -> 实施清单 -> 下一步行动",
-        "visual_style": "人物场景、问题对比、清单卡片、案例感镜头",
-        "sample": "从一个高频业务痛点切入，给出清晰、保守、可执行的 AI 自动化解决路径。",
-    },
-    {
-        "id": "topic_breakdown",
-        "name": "爆款选题复盘",
-        "audience": "内容创作者、运营、知识博主",
-        "structure": "选题现象 -> 爆点拆解 -> 内容结构 -> 可复用公式 -> 反面风险",
-        "visual_style": "信息图、标题卡、案例截图、节奏较快的 B-roll",
-        "sample": "复盘一个热门选题为什么有效，并改造成适合自己业务的内容选题公式。",
-    },
-]
+IMAGE_EXTENSIONS = {
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".jpe",
+    ".jfif",
+    ".pjpeg",
+    ".pjp",
+    ".webp",
+    ".bmp",
+    ".dib",
+    ".gif",
+    ".tif",
+    ".tiff",
+    ".avif",
+    ".heic",
+    ".heif",
+}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+mimetypes.add_type("image/jpeg", ".jfif")
+mimetypes.add_type("image/jpeg", ".jpe")
+mimetypes.add_type("image/jpeg", ".pjpeg")
+mimetypes.add_type("image/jpeg", ".pjp")
+mimetypes.add_type("image/bmp", ".bmp")
+mimetypes.add_type("image/bmp", ".dib")
+mimetypes.add_type("image/tiff", ".tif")
+mimetypes.add_type("image/tiff", ".tiff")
+mimetypes.add_type("image/avif", ".avif")
+mimetypes.add_type("image/heic", ".heic")
+mimetypes.add_type("image/heif", ".heif")
 
 COMFY_DEBUG_WORKFLOWS = [
     {"id": "01_character_base", "name": "01 角色基础图", "type": "image", "stage": "image_base", "purpose": "生成可复用人物角色设定图。", "asset_tag": "character_base", "recommended": True, "default_task_type": "character_generation", "default_control_mode": "none", "default_image_task_type": "character_generation", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
@@ -118,7 +103,7 @@ COMFY_DEBUG_WORKFLOWS = [
     {"id": "04_character_turnaround", "name": "04 角色三视图", "type": "image", "stage": "image_control", "purpose": "基于角色参考图生成正面/侧面/背面三视图。", "asset_tag": "character_turnaround", "recommended": True, "default_task_type": "character_turnaround", "default_control_mode": "character_reference", "default_image_task_type": "character_turnaround", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
     {"id": "05_product_turnaround", "name": "05 产品三视图", "type": "image", "stage": "image_control", "purpose": "基于产品参考图生成正面/侧面/背面三视图。", "asset_tag": "product_turnaround", "recommended": True, "default_task_type": "product_turnaround", "default_control_mode": "product_reference", "default_image_task_type": "product_turnaround", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
     {"id": "06_style_reference", "name": "06 风格参考图", "type": "image", "stage": "image_base", "purpose": "生成统一色彩、光线和画面气质的风格基准图。", "asset_tag": "style_reference", "recommended": True, "default_task_type": "style_reference", "default_control_mode": "none", "default_image_task_type": "style_reference", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
-    {"id": "07_keyframe", "name": "07 关键帧生成", "type": "image", "stage": "image_keyframe", "purpose": "基于角色/产品/场景参考图生成视频首帧关键帧。", "asset_tag": "keyframe", "recommended": True, "default_task_type": "keyframe", "default_control_mode": "keyframe_reference", "default_image_task_type": "keyframe", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
+    {"id": "07_keyframe", "name": "07 关键帧生成", "type": "image", "stage": "image_keyframe", "purpose": "根据分镜文本生成视频首帧关键帧。", "asset_tag": "keyframe", "recommended": True, "default_task_type": "keyframe", "default_control_mode": "none", "default_image_task_type": "keyframe", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
     {"id": "08_cover_key_visual", "name": "08 封面关键视觉", "type": "image", "stage": "image_packaging", "purpose": "生成封面主视觉和标题安全区画面。", "asset_tag": "cover_key_visual", "recommended": True, "default_task_type": "cover_key_visual", "default_control_mode": "style_reference", "default_image_task_type": "cover_key_visual", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
     {"id": "09_image_inpaint_fix", "name": "09 局部修复 / 重绘", "type": "image", "stage": "image_repair", "purpose": "修脸、修手、去水印、局部替换。", "asset_tag": "image_inpaint_fix", "recommended": True, "default_task_type": "inpaint_fix", "default_control_mode": "mask_inpaint", "default_image_task_type": "inpaint_fix", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
     {"id": "10_background_remove", "name": "10 抠图 / 透明素材", "type": "image", "stage": "image_post", "purpose": "生成可叠加的人物、产品、图标透明素材。", "asset_tag": "background_remove", "recommended": False, "default_task_type": "background_remove", "default_control_mode": "matting", "default_image_task_type": "background_remove", "default_width": 1080, "default_height": 1920, "default_endpoint": "", "default_node_info": "[]"},
@@ -134,6 +119,31 @@ COMFY_DEBUG_WORKFLOWS = [
     {"id": "20_video_deflicker_stabilize", "name": "20 视频去闪烁 / 稳定", "type": "video", "stage": "video_post", "purpose": "降低视频闪烁、抖动和画面不稳定。", "asset_tag": "video_deflicker_stabilize", "recommended": False, "default_task_type": "video_deflicker_stabilize", "default_control_mode": "stabilize", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]"},
     {"id": "21_video_inpaint_fix", "name": "21 视频局部修复", "type": "video", "stage": "video_repair", "purpose": "对视频局部区域做修复、遮罩重绘或瑕疵处理。", "asset_tag": "video_inpaint_fix", "recommended": False, "default_task_type": "video_inpaint_fix", "default_control_mode": "video_mask_inpaint", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]"},
 ]
+COMFY_DEBUG_WORKFLOWS = [
+    {"id": "01_base_asset_image", "name": "01 基础资产图：角色/产品/场景", "type": "image", "stage": "image_base", "purpose": "一个工作流生成角色、产品或场景基础图。", "asset_tag": "character_base", "recommended": True, "default_task_type": "character_generation", "default_control_mode": "none", "default_image_task_type": "character_generation", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "character_base", "label": "角色基础图", "asset_tag": "character_base", "task_type": "character_generation", "control_mode": "none", "requires_reference": False}, {"value": "product_base", "label": "产品基础图", "asset_tag": "product_base", "task_type": "product_generation", "control_mode": "none", "requires_reference": False}, {"value": "scene_base", "label": "场景基础图", "asset_tag": "scene_base", "task_type": "scene_generation", "control_mode": "none", "requires_reference": False}]},
+    {"id": "02_turnaround", "name": "02 三视图：角色/产品", "type": "image", "stage": "image_control", "purpose": "一个工作流生成角色或产品三视图。", "asset_tag": "character_turnaround", "recommended": True, "default_task_type": "character_turnaround", "default_control_mode": "character_reference", "default_image_task_type": "character_turnaround", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "character_turnaround", "label": "角色三视图", "asset_tag": "character_turnaround", "task_type": "character_turnaround", "control_mode": "character_reference", "requires_reference": True}, {"value": "product_turnaround", "label": "产品三视图", "asset_tag": "product_turnaround", "task_type": "product_turnaround", "control_mode": "product_reference", "requires_reference": True}]},
+    {"id": "03_style_cover_image", "name": "03 风格参考 / 封面关键视觉", "type": "image", "stage": "image_packaging", "purpose": "一个工作流生成风格参考图或封面关键视觉。", "asset_tag": "style_reference", "recommended": True, "default_task_type": "style_reference", "default_control_mode": "none", "default_image_task_type": "style_reference", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "style_reference", "label": "风格参考图", "asset_tag": "style_reference", "task_type": "style_reference", "control_mode": "none", "requires_reference": False}, {"value": "cover_key_visual", "label": "封面关键视觉", "asset_tag": "cover_key_visual", "task_type": "cover_key_visual", "control_mode": "style_reference", "requires_reference": False}]},
+    {"id": "04_keyframe", "name": "04 关键帧生成", "type": "image", "stage": "image_keyframe", "purpose": "根据分镜文本生成视频首帧关键帧。", "asset_tag": "keyframe", "recommended": True, "default_task_type": "keyframe", "default_control_mode": "none", "default_image_task_type": "keyframe", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "keyframe", "label": "关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "none", "requires_reference": False}]},
+    {"id": "05_image_repair_cutout", "name": "05 图片修复 / 抠图", "type": "image", "stage": "image_post", "purpose": "一个工作流处理图片局部修复、重绘或抠图透明素材。", "asset_tag": "image_inpaint_fix", "recommended": True, "default_task_type": "inpaint_fix", "default_control_mode": "mask_inpaint", "default_image_task_type": "inpaint_fix", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "image_inpaint_fix", "label": "局部修复/重绘", "asset_tag": "image_inpaint_fix", "task_type": "inpaint_fix", "control_mode": "mask_inpaint", "requires_reference": True}, {"value": "background_remove", "label": "抠图/透明素材", "asset_tag": "background_remove", "task_type": "background_remove", "control_mode": "matting", "requires_reference": True}]},
+    {"id": "06_i2v_first_frame", "name": "06A 图生视频：首帧", "type": "video", "stage": "video_production", "purpose": "单独的首帧图生视频工作流：一张关键帧生成视频片段，默认生产模式。", "asset_tag": "i2v_first_frame", "recommended": True, "default_task_type": "img2video", "default_control_mode": "first_frame", "default_width": 1024, "default_height": 576, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "i2v_first_frame", "label": "首帧图生视频", "asset_tag": "i2v_first_frame", "task_type": "img2video", "control_mode": "first_frame", "requires_reference": True}]},
+    {"id": "06_i2v_first_last_frame", "name": "06B 图生视频：首尾帧", "type": "video", "stage": "video_production", "purpose": "单独的首尾帧图生视频工作流：首帧+尾帧控制A到B运动，仅用于特殊镜头。", "asset_tag": "i2v_first_last_frame", "recommended": True, "default_task_type": "first_last_frame_video", "default_control_mode": "first_last_frame", "default_width": 1024, "default_height": 576, "default_duration": 4, "default_fps": 4, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "i2v_first_last_frame", "label": "首尾帧图生视频", "asset_tag": "i2v_first_last_frame", "task_type": "first_last_frame_video", "control_mode": "first_last_frame", "requires_reference": True}]},
+    {"id": "06_i2v_first_middle_last_frame", "name": "06C 图生视频：首中尾帧（实验）", "type": "video", "stage": "video_production", "purpose": "独立首中尾帧实验工作流：首帧+中帧+尾帧控制同一镜头，不替换 06B。", "asset_tag": "i2v_first_last_frame", "recommended": False, "default_task_type": "first_middle_last_frame_video", "default_control_mode": "first_middle_last_frame", "default_width": 1024, "default_height": 576, "default_duration": 4, "default_fps": 4, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "i2v_first_middle_last_frame", "label": "首中尾帧图生视频", "asset_tag": "i2v_first_last_frame", "task_type": "first_middle_last_frame_video", "control_mode": "first_middle_last_frame", "requires_reference": True}]},
+    {"id": "07_live_to_anime", "name": "07 真人转动漫风格", "type": "video", "stage": "video_style", "purpose": "真人参考转动漫或风格化视频。", "asset_tag": "live_to_anime", "recommended": False, "default_task_type": "live_to_anime_video", "default_control_mode": "style_transfer", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "live_to_anime", "label": "真人转动漫", "asset_tag": "live_to_anime", "task_type": "live_to_anime_video", "control_mode": "style_transfer", "requires_reference": True}]},
+    {"id": "08_motion_transfer", "name": "08 动作迁移", "type": "video", "stage": "video_control", "purpose": "动作或姿态参考迁移到目标人物。", "asset_tag": "motion_transfer", "recommended": False, "default_task_type": "motion_transfer_video", "default_control_mode": "motion_reference", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "motion_transfer", "label": "动作迁移", "asset_tag": "motion_transfer", "task_type": "motion_transfer_video", "control_mode": "motion_reference", "requires_reference": True}]},
+    {"id": "09_talking_image", "name": "09 图片说话 / 口型同步", "type": "video", "stage": "video_talking", "purpose": "人物图按音频或口播文本说话。", "asset_tag": "talking_image", "recommended": True, "default_task_type": "talking_image_video", "default_control_mode": "audio_lipsync", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "talking_image", "label": "图片说话/口型同步", "asset_tag": "talking_image", "task_type": "talking_image_video", "control_mode": "audio_lipsync", "requires_reference": True}]},
+    {"id": "10_broll_transition_video", "name": "10 B-roll / 空镜 / 转场", "type": "video", "stage": "video_broll", "purpose": "一个工作流生成 B-roll、空镜和转场视频。", "asset_tag": "broll_scene_video", "recommended": True, "default_task_type": "txt2video", "default_control_mode": "none", "default_width": 960, "default_height": 544, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "broll_scene_video", "label": "B-roll/场景视频", "asset_tag": "broll_scene_video", "task_type": "txt2video", "control_mode": "broll", "requires_reference": False}, {"value": "empty_transition_video", "label": "空镜/转场视频", "asset_tag": "empty_transition_video", "task_type": "transition_video", "control_mode": "transition", "requires_reference": False}]},
+    {"id": "11_video_enhance", "name": "11 视频增强：放大/补帧/稳定", "type": "video", "stage": "video_post", "purpose": "一个工作流处理视频放大、补帧、去闪烁和稳定。", "asset_tag": "video_upscale", "recommended": True, "default_task_type": "video_upscale", "default_control_mode": "upscale", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "video_upscale", "label": "视频放大/清晰化", "asset_tag": "video_upscale", "task_type": "video_upscale", "control_mode": "upscale", "requires_reference": True}, {"value": "frame_interpolation", "label": "视频补帧", "asset_tag": "frame_interpolation", "task_type": "frame_interpolation", "control_mode": "interpolate", "requires_reference": True}, {"value": "video_deflicker_stabilize", "label": "去闪烁/稳定", "asset_tag": "video_deflicker_stabilize", "task_type": "video_deflicker_stabilize", "control_mode": "stabilize", "requires_reference": True}]},
+    {"id": "12_video_inpaint_fix", "name": "12 视频局部修复", "type": "video", "stage": "video_repair", "purpose": "视频局部区域修复、遮罩重绘或瑕疵处理。", "asset_tag": "video_inpaint_fix", "recommended": False, "default_task_type": "video_inpaint_fix", "default_control_mode": "video_mask_inpaint", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "video_inpaint_fix", "label": "视频局部修复", "asset_tag": "video_inpaint_fix", "task_type": "video_inpaint_fix", "control_mode": "video_mask_inpaint", "requires_reference": True}]},
+]
+
+# Generation and pre-production use a low-cost 480p working canvas. Final
+# delivery resolution is handled by the enhancement/editing stages (11/22).
+for _workflow in COMFY_DEBUG_WORKFLOWS:
+    if str(_workflow.get("id") or "").split("_", 1)[0] in {f"{index:02d}" for index in range(1, 11)}:
+        _workflow["default_width"] = 848
+        _workflow["default_height"] = 480
+    if _workflow.get("id") == "06_i2v_first_middle_last_frame":
+        _workflow["default_fps"] = 24
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -262,7 +272,15 @@ INDEX_HTML = r"""<!doctype html>
       box-shadow: var(--shadow-soft);
     }
     .view[hidden], aside[hidden] { display: none; }
-    .stack { display: grid; gap: 14px; }
+    .stack {
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    #configSections {
+      grid-auto-rows: max-content;
+      align-content: start;
+    }
     .row {
       display: flex;
       gap: 10px;
@@ -359,6 +377,7 @@ INDEX_HTML = r"""<!doctype html>
       padding: 16px;
       display: grid;
       gap: 14px;
+      align-content: start;
     }
     .run-form {
       min-height: calc(100vh - 120px);
@@ -445,21 +464,6 @@ INDEX_HTML = r"""<!doctype html>
       grid-template-columns: minmax(160px, .65fr) minmax(280px, 1fr) minmax(160px, .65fr);
       gap: 12px;
     }
-    .content-column-bar {
-      display: grid;
-      grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1.2fr);
-      gap: 10px;
-      align-items: end;
-      padding: 10px;
-      border: 1px solid #bfdbfe;
-      border-radius: 14px;
-      background: linear-gradient(135deg, #eff6ff, #f8fafc);
-    }
-    .content-column-hint {
-      color: #1e3a8a;
-      font-size: 12px;
-      line-height: 1.45;
-    }
     .run-input textarea {
       min-height: 150px;
     }
@@ -496,13 +500,47 @@ INDEX_HTML = r"""<!doctype html>
       padding: 0;
       overflow: hidden;
       box-shadow: var(--shadow);
+      width: 100%;
+      box-sizing: border-box;
+      align-self: start;
     }
     summary {
       cursor: pointer;
       padding: 11px 12px;
-      list-style-position: inside;
+      list-style: none;
       color: #334155;
       background: #fff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 44px;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+    summary::-webkit-details-marker {
+      display: none;
+    }
+    summary::before {
+      content: "▶";
+      flex: 0 0 14px;
+      width: 14px;
+      color: #334155;
+      font-size: 12px;
+      line-height: 1;
+      text-align: center;
+    }
+    details[open] > summary::before {
+      content: "▼";
+    }
+    summary strong {
+      flex: 0 0 auto;
+      white-space: nowrap;
+    }
+    summary .muted {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     details[open] summary {
       border-bottom: 1px solid var(--line);
@@ -515,6 +553,9 @@ INDEX_HTML = r"""<!doctype html>
       padding: 14px 12px 12px;
       display: grid;
       gap: 14px;
+    }
+    details:not([open]) > .details-body {
+      display: none;
     }
     .automation-config .details-body {
       gap: 16px;
@@ -1124,6 +1165,85 @@ INDEX_HTML = r"""<!doctype html>
       display: block;
       line-height: 1.25;
     }
+    .task-comfy-debug-list {
+      display: grid;
+      grid-template-columns: 1fr;
+      align-content: start;
+      max-height: 360px;
+      min-height: 0;
+      gap: 12px;
+      padding-right: 4px;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+    .task-comfy-debug-item {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      min-height: 84px;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      overflow: visible;
+      box-sizing: border-box;
+    }
+    .task-comfy-debug-item.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    .task-comfy-debug-main {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .task-comfy-debug-title {
+      font-weight: 700;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .task-comfy-debug-progress {
+      width: 100%;
+      height: 7px;
+      border-radius: 999px;
+      background: #e5edf4;
+      overflow: hidden;
+    }
+    .task-comfy-debug-progress span {
+      display: block;
+      height: 100%;
+      width: var(--task-comfy-debug-progress, 0%);
+      background: linear-gradient(90deg, var(--accent), #20b486);
+      border-radius: inherit;
+      transition: width .25s ease;
+    }
+    .task-comfy-debug-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      align-items: flex-start;
+      flex: 0 0 auto;
+      min-width: 168px;
+    }
+    .task-comfy-debug-actions button {
+      white-space: nowrap;
+    }
+    .task-comfy-debug-item.is-approved {
+      opacity: .72;
+    }
+    @media (max-width: 760px) {
+      .task-comfy-debug-item {
+        flex-direction: column;
+      }
+      .task-comfy-debug-actions {
+        justify-content: flex-start;
+        min-width: 0;
+      }
+    }
     .asset-thumb {
       width: 100%;
       max-height: 120px;
@@ -1275,6 +1395,347 @@ INDEX_HTML = r"""<!doctype html>
     .asset-meta-editor .asset-delete-btn:hover {
       border-color: rgba(220, 38, 38, .65);
       background: #fee2e2;
+    }
+    .asset-library-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 16px;
+      min-height: 640px;
+    }
+    .asset-library-main {
+      min-width: 0;
+      display: grid;
+      gap: 16px;
+      align-content: start;
+    }
+    .asset-library-hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 14px;
+      padding: 4px 2px 0;
+    }
+    .asset-library-title {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.1;
+      letter-spacing: 0;
+      color: #0f172a;
+    }
+    .asset-library-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      width: fit-content;
+      padding: 4px;
+      border-radius: 999px;
+      background: #f1f5f9;
+      border: 1px solid var(--line);
+    }
+    .asset-library-tab {
+      border: 0;
+      border-radius: 999px;
+      background: transparent;
+      color: #334155;
+      padding: 7px 18px;
+      min-width: 74px;
+      font-weight: 750;
+      box-shadow: none;
+    }
+    .asset-library-tab.active {
+      color: #0f172a;
+      background: #fff;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, .08);
+    }
+    .asset-library-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(164px, 196px));
+      gap: 18px;
+      align-items: start;
+      min-height: 360px;
+    }
+    .asset-library-card {
+      position: relative;
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+      min-width: 0;
+      min-height: 266px;
+      border: 1px solid transparent;
+      border-radius: 20px;
+      background: #f8fafc;
+      text-align: left;
+      cursor: pointer;
+      transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease, background .14s ease;
+    }
+    .asset-library-card:hover,
+    .asset-library-card.active {
+      transform: translateY(-1px);
+      border-color: rgba(20, 184, 166, .55);
+      background: #fff;
+      box-shadow: 0 16px 34px rgba(15, 23, 42, .10);
+    }
+    .asset-library-media {
+      width: 100%;
+      aspect-ratio: 9 / 14;
+      border-radius: 18px;
+      overflow: hidden;
+      background: #e5e7eb;
+      display: grid;
+      place-items: center;
+    }
+    .asset-library-media img,
+    .asset-library-media video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .asset-library-add {
+      background: #f8fafc;
+    }
+    .asset-library-add .asset-library-media {
+      background: #e7e7e8;
+      color: #111827;
+    }
+    .asset-library-plus {
+      width: 38px;
+      height: 38px;
+      border-radius: 999px;
+      display: grid;
+      place-items: center;
+      background: #111827;
+      color: #fff;
+      font-size: 28px;
+      line-height: 1;
+      font-weight: 800;
+    }
+    .asset-library-card-title {
+      display: block;
+      color: #0f172a;
+      font-size: 14px;
+      font-weight: 760;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .asset-library-card-meta {
+      display: block;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .asset-library-card-actions {
+      position: absolute;
+      right: 18px;
+      top: 18px;
+      display: flex;
+      gap: 6px;
+      opacity: 0;
+      transform: translateY(-2px);
+      transition: opacity .14s ease, transform .14s ease;
+    }
+    .asset-library-card:hover .asset-library-card-actions,
+    .asset-library-card.active .asset-library-card-actions {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .asset-library-card-actions button {
+      width: 30px;
+      height: 30px;
+      padding: 0;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, .92);
+      box-shadow: 0 8px 18px rgba(15, 23, 42, .14);
+    }
+    .asset-library-detail {
+      position: fixed;
+      right: 18px;
+      top: 72px;
+      bottom: 18px;
+      z-index: 9700;
+      width: min(420px, calc(100vw - 36px));
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: #fff;
+      padding: 16px;
+      box-shadow: 0 24px 60px rgba(15, 23, 42, .22);
+      min-width: 0;
+      box-sizing: border-box;
+    }
+    .asset-library-detail[hidden] {
+      display: none;
+    }
+    .asset-detail-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .asset-detail-head strong {
+      font-size: 16px;
+      color: #0f172a;
+    }
+    .asset-detail-close-btn {
+      width: 36px;
+      min-width: 36px;
+      height: 36px;
+      min-height: 36px;
+      padding: 0;
+      border-radius: 999px;
+      border: 1px solid rgba(148, 163, 184, .28);
+      background: rgba(248, 250, 252, .92);
+      color: #475569;
+      font-size: 18px;
+      line-height: 1;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: none;
+    }
+    .asset-detail-close-btn:hover:not(:disabled) {
+      border-color: rgba(148, 163, 184, .5);
+      background: #fff;
+      color: #0f172a;
+      box-shadow: 0 10px 22px rgba(15, 23, 42, .08);
+      transform: translateY(-1px);
+    }
+    .asset-detail-close-btn:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, .10);
+      outline: none;
+    }
+    .asset-detail-preview {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      min-height: 0;
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 12px;
+      box-sizing: border-box;
+    }
+    .asset-detail-preview img,
+    .asset-detail-preview video {
+      width: auto;
+      height: auto;
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      object-position: center center;
+      display: block;
+    }
+    .asset-detail-media.fit-height {
+      width: auto;
+      height: 100%;
+    }
+    .asset-detail-media.fit-width {
+      width: 100%;
+      height: auto;
+    }
+    .asset-detail-form {
+      display: grid;
+      gap: 10px;
+    }
+    .asset-detail-form label {
+      display: grid;
+      gap: 5px;
+      font-size: 12px;
+      color: #475569;
+    }
+    .asset-detail-form textarea {
+      min-height: 84px;
+      resize: vertical;
+    }
+    .asset-detail-actions,
+    .asset-import-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+    .asset-import-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 9800;
+      display: grid;
+      place-items: center;
+      padding: 20px;
+      background: rgba(15, 23, 42, .42);
+    }
+    .asset-import-modal[hidden] {
+      display: none;
+    }
+    .asset-import-card {
+      width: min(560px, 100%);
+      border-radius: 16px;
+      background: #fff;
+      border: 1px solid var(--line);
+      box-shadow: 0 24px 60px rgba(15, 23, 42, .22);
+      padding: 18px;
+      display: grid;
+      gap: 14px;
+    }
+    .asset-import-card h3 {
+      margin: 0;
+      font-size: 18px;
+    }
+    .asset-import-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .asset-import-grid label {
+      display: grid;
+      gap: 6px;
+      color: #475569;
+      font-size: 12px;
+    }
+    .asset-import-grid textarea {
+      min-height: 76px;
+      resize: vertical;
+    }
+    @media (max-width: 980px) {
+      .asset-library-shell {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 640px) {
+      .asset-library-hero {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .asset-library-title {
+        font-size: 28px;
+      }
+      .asset-library-tabs {
+        width: 100%;
+        overflow: auto;
+      }
+      .asset-library-tab {
+        min-width: auto;
+        padding: 7px 13px;
+      }
+      .asset-library-grid {
+        grid-template-columns: repeat(auto-fill, minmax(142px, 1fr));
+      }
+      .asset-library-detail {
+        top: auto;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        width: 100%;
+        max-height: min(82vh, 680px);
+        border-radius: 16px 16px 0 0;
+      }
+      .asset-detail-preview {
+        aspect-ratio: 16 / 9;
+        min-height: 0;
+      }
     }
     .asset-lightbox {
       position: fixed;
@@ -1693,6 +2154,111 @@ INDEX_HTML = r"""<!doctype html>
     .comfy-debug-run-state.failed::before {
       background: #ef4444;
     }
+    .comfy-reference-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .comfy-reference-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 12px;
+      display: grid;
+      gap: 10px;
+      min-width: 0;
+    }
+    .comfy-reference-card[hidden] {
+      display: none;
+    }
+    .comfy-reference-card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .comfy-reference-card-head span {
+      font-size: 11px;
+    }
+    .comfy-reference-body {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .comfy-reference-preview {
+      width: 96px;
+      height: 96px;
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+    }
+    .comfy-reference-preview img,
+    .comfy-reference-preview video {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      background: #f8fafc;
+    }
+    .comfy-reference-preview .empty {
+      color: var(--muted);
+      font-size: 12px;
+      padding: 12px;
+      text-align: center;
+    }
+    .comfy-reference-controls {
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }
+    .comfy-reference-controls select,
+    .comfy-reference-controls input[type="file"] {
+      width: 100%;
+    }
+    .comfy-upload-control {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .comfy-upload-state {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      min-height: 38px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #f8fafc;
+      color: var(--text);
+      font-size: 12px;
+    }
+    .comfy-upload-state[hidden] {
+      display: none;
+    }
+    .comfy-upload-state span {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .comfy-upload-state button {
+      flex: 0 0 auto;
+      padding: 5px 9px;
+      font-size: 12px;
+    }
+    .comfy-reference-meta {
+      min-height: 16px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    label:has(#comfyDebugReference) {
+      display: none;
+    }
     .comfy-debug-result-grid {
       display: grid;
       gap: 10px;
@@ -1827,7 +2393,6 @@ INDEX_HTML = r"""<!doctype html>
       .split { grid-template-columns: 1fr; }
       .run-primary-grid { grid-template-columns: 1fr; }
       .run-model-grid { grid-template-columns: 1fr; }
-      .content-column-bar { grid-template-columns: 1fr; align-items: stretch; }
       .asset-lightbox { padding: 10px; }
       .asset-lightbox-body {
         height: auto;
@@ -1947,15 +2512,6 @@ INDEX_HTML = r"""<!doctype html>
           </div>
         </div>
         <div class="run-composer">
-          <div class="content-column-bar">
-            <label>内容栏目
-              <select id="contentColumn">
-                <option value="">不使用栏目模板</option>
-              </select>
-            </label>
-            <button id="applyContentColumnBtn" type="button">套用栏目模板</button>
-            <div class="content-column-hint">选择栏目后，即使不点“套用栏目模板”，点击“开始生成”也会自动把栏目结构和素材复用策略写入任务上下文。</div>
-          </div>
           <textarea id="userInput" aria-label="长视频需求" placeholder="输入你要制作的长视频需求。比如：主题、平台、目标观众、风格、可用素材、交付目标。"></textarea>
           <div class="composer-actions">
             <span id="status" class="status">准备就绪</span>
@@ -1965,6 +2521,22 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
         </div>
+        <div class="row run-actions" hidden>
+          <button id="sampleBtn">填入长视频示例</button>
+          <button id="longVideoSampleBtn" hidden>长视频示例</button>
+          <button id="gameSampleBtn" hidden>游戏示例</button>
+          <button id="clearSettingsBtn">清除已保存配置</button>
+        </div>
+      </div>
+
+      <div class="panel form view" data-view="config" hidden>
+        <div class="run-section">
+          <div class="run-section-head">
+            <strong>系统配置</strong>
+            <span class="muted small">模型接口、自动化、ComfyUI、配音、记忆都在这里维护；运行页只负责输入需求和启动任务。</span>
+          </div>
+        </div>
+        <div class="stack" id="configSections">
         <details data-config-section>
           <summary><strong>模型接口配置</strong> <span class="muted small">API Key、中转站和自定义模型名</span></summary>
           <div class="details-body">
@@ -2057,6 +2629,12 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="audio_package">出制作包 + 配音字幕文本：不生成视频</option>
                   <option value="api_ready">只生图，不生视频</option>
                   <option value="comfy_full">全自动成片预览：调用 ComfyUI 素材接口 + FFmpeg 自动剪辑</option>
+                </select>
+              </label>
+              <label>ComfyUI 调试门禁
+                <select id="comfyDebugGate">
+                  <option value="on" selected>开启：按调试台顺序确认后再下一步</option>
+                  <option value="off">关闭：直接按生产配置自动调用</option>
                 </select>
               </label>
               <label>自动剪辑方式
@@ -2192,323 +2770,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
         </details>
-        <details hidden data-config-section>
-          <summary><strong>生图配置</strong> <span class="muted small">只填正向提示词；参考图在下方单独上传，其余参数在 ComfyUI 工作流里配置</span></summary>
-          <div class="details-body">
-            <div class="provider-grid">
-              <label>生图正向提示词
-                <input id="imagePositivePrompt" autocomplete="off" spellcheck="false" placeholder="例如：专业、真实、干净明亮的AI自动化服务宣传画面，人物和产品风格统一" />
-              </label>
-            </div>
-            <div class="video-grid" hidden>
-              <label>生图工具
-                <select id="imageTool">
-                  <option value="prompt_only" selected>仅生成生图提示词</option>
-                  <option value="gpt-image">GPT Image</option>
-                  <option value="midjourney">Midjourney</option>
-                  <option value="stable-diffusion">Stable Diffusion</option>
-                  <option value="flux">FLUX</option>
-                  <option value="runninghub">RunningHub 云端 ComfyUI</option>
-                  <option value="jimeng">即梦生图</option>
-                  <option value="kling">可灵生图</option>
-                  <option value="seedream">Seedream</option>
-                  <option value="custom">其他/自定义</option>
-                </select>
-              </label>
-              <label>生图模型
-                <input id="imageModel" list="imageModelOptions" placeholder="例如 gpt-image-1 / midjourney v7，可留空" />
-                <datalist id="imageModelOptions">
-                  <option value="gpt-image-1" label="GPT Image 1"></option>
-                  <option value="dall-e-3" label="DALL-E 3"></option>
-                  <option value="midjourney-v7" label="Midjourney v7"></option>
-                  <option value="stable-diffusion-xl" label="Stable Diffusion XL"></option>
-                  <option value="flux-1.1-pro" label="FLUX 1.1 Pro"></option>
-                  <option value="seedream-3.0" label="Seedream 3.0"></option>
-                  <option value="jimeng-image" label="即梦生图"></option>
-                  <option value="kling-image" label="可灵生图"></option>
-                </datalist>
-              </label>
-              <label>图片尺寸
-                <select id="imageSize">
-                  <option value="9:16" selected>9:16 竖屏关键帧</option>
-                  <option value="16:9">16:9 横屏关键帧</option>
-                  <option value="1:1">1:1 方图</option>
-                  <option value="4:5">4:5 信息流</option>
-                  <option value="1024x1792">1024x1792</option>
-                  <option value="1792x1024">1792x1024</option>
-                  <option value="1024x1024">1024x1024</option>
-                </select>
-              </label>
-              <label>每镜头图片数
-                <select id="imageCount">
-                  <option value="1" selected>1 张</option>
-                  <option value="2">2 张备选</option>
-                  <option value="3">3 张备选</option>
-                  <option value="4">4 张备选</option>
-                </select>
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>生图风格
-                <input id="imageStyle" placeholder="例如 写实商业、电影感、干净明亮、赛博科技、国风插画" />
-              </label>
-              <label>生图质量
-                <select id="imageQuality">
-                  <option value="standard" selected>标准</option>
-                  <option value="high">高清/高质量</option>
-                  <option value="draft">草图/快速预览</option>
-                </select>
-              </label>
-              <label>生图平台密钥
-                <input id="imageApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用生图 API，会保存到本浏览器" />
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>生图平台接口地址
-                <input id="imageBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
-              </label>
-              <label hidden>RunningHub Workflow Endpoint
-                <input id="imageWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/2048294089858228226" />
-              </label>
-              <label hidden>RunningHub Instance Type
-                <select id="imageInstanceType">
-                  <option value="default" selected>default - 24G VRAM</option>
-                  <option value="plus">plus - 48G VRAM</option>
-                </select>
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>负面提示词
-                <input id="imageNegativePrompt" placeholder="例如 水印、畸形手指、低清晰度、脸部变形、错误文字" />
-              </label>
-              <label>一致性重点
-                <input id="imageConsistency" placeholder="例如 保持同一人物脸型、服装、产品外观和主色调" />
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>RunningHub nodeInfoList JSON
-                <textarea id="imageNodeInfoList" spellcheck="false" placeholder='[]; use {{prompt}} inside JSON strings to inject the generated prompt'></textarea>
-              </label>
-              <label>RunningHub Poll Timeout
-                <select id="imagePollTimeout">
-                  <option value="300">5 min</option>
-                  <option value="900" selected>15 min</option>
-                  <option value="1800">30 min</option>
-                  <option value="3600">60 min</option>
-                </select>
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>Image Seed
-                <input id="imageSeed" autocomplete="off" spellcheck="false" placeholder="Leave blank for random; fixed seed improves repeatability" />
-              </label>
-              <label>Image Guidance / CFG
-                <input id="imageGuidance" autocomplete="off" spellcheck="false" placeholder="Example: 3.5 / 7 / 12; blank uses workflow default" />
-              </label>
-              <label>Image Steps
-                <input id="imageSteps" autocomplete="off" spellcheck="false" placeholder="Example: 20 / 30; blank uses workflow default" />
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>Image Denoise Strength
-                <input id="imageDenoise" autocomplete="off" spellcheck="false" placeholder="Image-to-image repaint strength, e.g. 0.35 / 0.65" />
-              </label>
-              <label>Image Sampler
-                <input id="imageSampler" autocomplete="off" spellcheck="false" placeholder="Example: euler / dpmpp_2m; blank uses workflow default" />
-              </label>
-              <label>Image LoRA / Control
-                <input id="imageControl" autocomplete="off" spellcheck="false" placeholder="LoRA, ControlNet, IP-Adapter, face reference notes" />
-              </label>
-            </div>
-          </div>
-        </details>
-        <details hidden data-config-section>
-          <summary><strong>视频生成配置</strong> <span class="muted small">只填正向提示词；镜头、尺寸、采样等参数在视频工作流里配置</span></summary>
-          <div class="details-body">
-            <div class="provider-grid">
-              <label>生视频正向提示词
-                <input id="videoPositivePrompt" autocomplete="off" spellcheck="false" placeholder="例如：专业真实的长视频素材片段，人物口播自然，镜头稳定，突出AI自动化服务价值" />
-              </label>
-            </div>
-            <div class="video-grid" hidden>
-              <label>视频工具
-                <select id="videoTool">
-                  <option value="prompt_only" selected>仅生成提示词/制作包</option>
-                  <option value="sora">Sora</option>
-                  <option value="runway">Runway</option>
-                  <option value="pika">Pika</option>
-                  <option value="seedance">Seedance</option>
-                  <option value="runninghub">RunningHub 视频应用</option>
-                  <option value="kling">可灵 Kling</option>
-                  <option value="jimeng">即梦 Jimeng</option>
-                  <option value="hailuo">海螺 Hailuo</option>
-                  <option value="luma">Luma</option>
-                  <option value="custom">其他/自定义</option>
-                </select>
-              </label>
-              <label>视频模型
-                <input id="videoModel" list="videoModelOptions" placeholder="例如 seedance-2-0-pro / kling 2.0，可留空" />
-                <datalist id="videoModelOptions">
-                  <option value="seedance-2-0-pro" label="Seedance 2.0 Pro"></option>
-                  <option value="seedance-2-0-lite" label="Seedance 2.0 Lite"></option>
-                  <option value="sora" label="Sora"></option>
-                  <option value="runway-gen-3" label="Runway Gen-3"></option>
-                  <option value="pika" label="Pika"></option>
-                  <option value="kling-2.0" label="可灵 2.0"></option>
-                  <option value="jimeng" label="即梦"></option>
-                  <option value="hailuo" label="海螺"></option>
-                  <option value="luma" label="Luma"></option>
-                </datalist>
-              </label>
-              <label>画幅
-                <select id="videoAspect">
-                  <option value="9:16" selected>9:16 竖屏</option>
-                  <option value="16:9">16:9 横屏</option>
-                  <option value="1:1">1:1 方屏</option>
-                  <option value="4:5">4:5 信息流</option>
-                </select>
-              </label>
-              <label>目标时长
-                <select id="videoDuration">
-                  <option value="15s">15 秒</option>
-                  <option value="30s" selected>30 秒</option>
-                  <option value="45s">45 秒</option>
-                  <option value="60s">60 秒</option>
-                  <option value="custom">按脚本自动拆分</option>
-                </select>
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>视频风格
-                <input id="videoStyle" placeholder="例如 真人口播、科技感、写实商业、国风、美妆种草" />
-              </label>
-              <label>视频画面与运动要求
-                <input id="videoPromptNotes" autocomplete="off" spellcheck="false" placeholder="例如 半身口播推近到产品特写，人物动作自然，节奏干净，避免夸张运镜" />
-              </label>
-              <label>视频平台密钥
-                <input id="videoApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="预留：当前不调用视频 API，会保存到本浏览器" />
-              </label>
-              <label>视频平台接口地址
-                <input id="videoBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>视频负面提示词
-                <input id="videoNegativePrompt" autocomplete="off" spellcheck="false" placeholder="例如 水印、闪烁、畸形手、错误文字、脸部变形" />
-              </label>
-              <label hidden>Video Seed
-                <input id="videoSeed" autocomplete="off" spellcheck="false" placeholder="Leave blank for random; fixed seed improves repeatability" />
-              </label>
-              <label hidden>Video FPS
-                <select id="videoFps">
-                  <option value="">Workflow default</option>
-                  <option value="24">24</option>
-                  <option value="30" selected>30</option>
-                  <option value="60">60</option>
-                </select>
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>运动强度
-                <select id="videoMotionStrength">
-                  <option value="low">低：稳定轻微运动</option>
-                  <option value="medium" selected>中：自然运动</option>
-                  <option value="high">高：强运动或强转场</option>
-                </select>
-              </label>
-              <label>镜头运动
-                <select id="videoCameraMotion">
-                  <option value="static">固定机位</option>
-                  <option value="push_in" selected>推近</option>
-                  <option value="pull_out">拉远</option>
-                  <option value="pan">横移/摇镜</option>
-                  <option value="orbit">环绕</option>
-                  <option value="handheld">手持感</option>
-                </select>
-              </label>
-              <label hidden>Video Resolution
-                <select id="videoResolution">
-                  <option value="">Workflow default</option>
-                  <option value="720p">720p</option>
-                  <option value="1080p" selected>1080p</option>
-                  <option value="4k">4K</option>
-                </select>
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>Video Guidance
-                <input id="videoGuidance" autocomplete="off" spellcheck="false" placeholder="Prompt guidance strength; blank uses workflow default" />
-              </label>
-              <label>Video Frames
-                <input id="videoFrames" autocomplete="off" spellcheck="false" placeholder="Frame count; blank derives from duration and fps" />
-              </label>
-              <label>Image Strength
-                <input id="videoImageStrength" autocomplete="off" spellcheck="false" placeholder="Reference or first-frame strength, e.g. 0.45 / 0.75" />
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>Camera Path / Shot Notes
-                <input id="videoCameraPath" autocomplete="off" spellcheck="false" placeholder="Complex camera path, shot array, first/last-frame notes" />
-              </label>
-              <label>Audio / Subtitle Notes
-                <input id="videoAudioNotes" autocomplete="off" spellcheck="false" placeholder="Voiceover, subtitles, background music, or mute notes" />
-              </label>
-              <label>Advanced Model Params
-                <input id="videoAdvancedParams" autocomplete="off" spellcheck="false" placeholder="motion_bucket, motion_scale, or provider-specific params" />
-              </label>
-            </div>
-            <div class="provider-grid" hidden>
-              <label>RunningHub Video Endpoint
-                <input id="videoWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/ai-app/2066043648160133122" />
-              </label>
-              <label>RunningHub Video nodeInfoList JSON
-                <textarea id="videoNodeInfoList" spellcheck="false" placeholder='[]; use {{prompt}} inside JSON strings to inject the generated video prompt'></textarea>
-              </label>
-              <label>RunningHub Video Poll Timeout
-                <select id="videoPollTimeout">
-                  <option value="900">15 min</option>
-                  <option value="1800" selected>30 min</option>
-                  <option value="3600">60 min</option>
-                  <option value="7200">120 min</option>
-                </select>
-              </label>
-            </div>
-            <div class="provider-grid">
-              <label>参考图
-                <input id="referenceImages" type="file" accept="image/png,image/jpeg,image/webp" multiple />
-              </label>
-              <label>参考图用途
-                <select id="referenceRole">
-                  <option value="人物一致性" selected>人物一致性</option>
-                  <option value="产品参考">产品参考</option>
-                  <option value="视觉风格参考">视觉风格参考</option>
-                  <option value="场景参考">场景参考</option>
-                  <option value="封面参考">封面参考</option>
-                </select>
-              </label>
-              <label>参考图说明
-                <input id="referenceNote" placeholder="例如：第一张固定人物参考图，后续镜头保持同一角色" />
-              </label>
-            </div>
-            <div class="reference-list" id="referenceList"></div>
-          </div>
-        </details>
-        <div class="row run-actions" hidden>
-          <button id="sampleBtn">填入长视频示例</button>
-          <button id="longVideoSampleBtn" hidden>长视频示例</button>
-          <button id="gameSampleBtn" hidden>游戏示例</button>
-          <button id="clearSettingsBtn">清除已保存配置</button>
         </div>
-      </div>
-
-      <div class="panel form view" data-view="config" hidden>
-        <div class="run-section">
-          <div class="run-section-head">
-            <strong>系统配置</strong>
-            <span class="muted small">模型接口、自动化、ComfyUI、配音、记忆都在这里维护；运行页只负责输入需求和启动任务。</span>
-          </div>
-        </div>
-        <div class="stack" id="configSections"></div>
       </div>
 
       <div class="panel form view" data-view="staff" hidden>
@@ -2593,25 +2855,87 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div class="panel form view" data-view="assets" hidden>
-        <div class="manager-toolbar">
-          <div class="manager-title">
-            <strong>素材库</strong>
-            <span class="muted small">把满意的图片/视频收藏到这里，后续选题和生成时反复复用。</span>
+        <div class="asset-library-shell">
+          <section class="asset-library-main">
+            <div class="asset-library-hero">
+              <div>
+                <h1 class="asset-library-title">资产库</h1>
+                <span class="muted small">沉淀可复用的角色、商品、参考图和视频素材，后续任务可直接引用。</span>
+              </div>
+              <div class="row">
+                <button id="refreshAssetLibraryBtn" type="button">刷新</button>
+                <span id="assetLibraryStatus" class="status">未加载</span>
+              </div>
+            </div>
+            <div class="asset-library-tabs" id="assetLibraryTabs" role="tablist" aria-label="素材分类">
+              <button class="asset-library-tab active" data-asset-section="all" type="button">全部</button>
+              <button class="asset-library-tab" data-asset-section="material" type="button">素材</button>
+              <button class="asset-library-tab" data-asset-section="character" type="button">角色</button>
+              <button class="asset-library-tab" data-asset-section="product" type="button">商品</button>
+              <button class="asset-library-tab" data-asset-section="reference" type="button">参考</button>
+            </div>
+            <div class="row">
+              <label>标签筛选
+                <select id="assetLibraryTagFilter">
+                  <option value="">全部标签</option>
+                </select>
+              </label>
+            </div>
+            <div class="asset-library-grid" id="assetLibraryGrid">
+              <div class="muted small">从“任务输出”的已生成素材里点击“收藏复用”，或点击新增资产导入本地图片/视频。</div>
+            </div>
+          </section>
+        </div>
+        <div class="asset-library-detail" id="assetLibraryDetail" hidden>
+          <div class="asset-detail-head">
+            <strong>资产详情</strong>
+            <button class="asset-detail-close-btn" id="assetLibraryDetailCloseBtn" type="button" aria-label="关闭资产详情" title="关闭">×</button>
           </div>
-          <div class="row">
-            <button id="refreshAssetLibraryBtn" type="button">刷新素材库</button>
-            <span id="assetLibraryStatus" class="status">未加载</span>
+          <div class="asset-detail-preview" id="assetLibraryDetailPreview"></div>
+          <div class="asset-detail-form">
+            <label>名称
+              <input id="assetLibraryDetailName" autocomplete="off" spellcheck="false" />
+            </label>
+            <label>分类
+              <select id="assetLibraryDetailCategory"></select>
+            </label>
+            <label>备注
+              <textarea id="assetLibraryDetailNote" spellcheck="false" placeholder="写下这个素材适合怎么复用。"></textarea>
+            </label>
+            <div class="asset-detail-actions">
+              <button id="assetLibraryDetailOpenBtn" type="button">打开预览</button>
+              <button class="danger" id="assetLibraryDetailDeleteBtn" type="button">删除</button>
+              <button class="primary" id="assetLibraryDetailSaveBtn" type="button">保存修改</button>
+            </div>
+            <span class="muted small" id="assetLibraryDetailMeta"></span>
           </div>
         </div>
-        <div class="row">
-          <label>素材标签筛选
-            <select id="assetLibraryTagFilter">
-              <option value="">全部素材</option>
-            </select>
-          </label>
-        </div>
-        <div class="asset-gallery" id="assetLibraryGrid">
-          <div class="muted small">从“任务输出”的已生成素材里点击“收藏”，这里会显示可复用素材。</div>
+        <div class="asset-import-modal" id="assetImportModal" hidden>
+          <div class="asset-import-card">
+            <div class="row">
+              <h3 id="assetImportTitle">新增资产</h3>
+              <button id="assetImportCloseBtn" type="button">关闭</button>
+            </div>
+            <div class="asset-import-grid">
+              <label>本地图片/视频
+                <input id="assetImportFile" type="file" accept="image/*,video/*" />
+              </label>
+              <label>名称
+                <input id="assetImportName" autocomplete="off" spellcheck="false" placeholder="留空则使用文件名" />
+              </label>
+              <label>分类
+                <select id="assetImportCategory"></select>
+              </label>
+              <label>备注
+                <textarea id="assetImportNote" spellcheck="false" placeholder="例如：适合品牌人物设定、商品主图、风格参考等。"></textarea>
+              </label>
+            </div>
+            <div class="asset-import-actions">
+              <button id="assetImportComfyBtn" type="button">去 ComfyUI 生成</button>
+              <button class="primary" id="assetImportSaveBtn" type="button">导入资产</button>
+            </div>
+            <span class="muted small" id="assetImportStatus"></span>
+          </div>
         </div>
       </div>
 
@@ -2641,10 +2965,7 @@ INDEX_HTML = r"""<!doctype html>
               <div class="output-section-head">
                 <strong>RunningHub 调用参数</strong>
                 <div class="inline-actions">
-                  <button id="saveComfyDebugWorkflowBtn" type="button">保存配置</button>
-                  <button id="clearComfyDebugWorkflowBtn" type="button">清空配置</button>
                   <button class="primary" id="runComfyDebugBtn" type="button">运行当前工作流</button>
-                  <button id="fillComfyDebugSampleBtn" type="button">填入测试提示词</button>
                 </div>
               </div>
               <div class="muted small">默认复用系统配置里的 ComfyUI 密钥和 Base URL；左侧每个工作流都有独立配置和预览。</div>
@@ -2676,20 +2997,103 @@ INDEX_HTML = r"""<!doctype html>
                     <option value="">全部素材</option>
                   </select>
                 </label>
-                <label>从素材库选择
-                  <select id="comfyDebugAssetReference">
-                    <option value="">不使用素材库参考</option>
-                  </select>
-                </label>
-                <label>上传参考文件
-                  <input id="comfyDebugReferenceFile" type="file" accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime" />
-                </label>
+              </div>
+              <input id="comfyDebugMiddleFrameReference" type="hidden" />
+              <input id="comfyDebugLastFrameReference" type="hidden" />
+              <div class="comfy-reference-grid" id="comfyDebugReferenceGrid">
+                <div class="comfy-reference-card" id="comfyDebugStartFrameCard">
+                  <div class="comfy-reference-card-head">
+                    <strong>首帧 / 主参考</strong>
+                    <span class="muted small">reference_image</span>
+                  </div>
+                  <div class="comfy-reference-body">
+                    <div class="comfy-reference-preview" id="comfyDebugReferencePreview">
+                      <span class="empty">未选择参考素材</span>
+                    </div>
+                    <div class="comfy-reference-controls">
+                      <label>从素材库选择
+                        <select id="comfyDebugAssetReference">
+                          <option value="">不使用素材库参考</option>
+                        </select>
+                      </label>
+                      <div class="comfy-upload-control">
+                        <label id="comfyDebugReferenceFileLabel">上传参考文件
+                          <input id="comfyDebugReferenceFile" type="file" accept="image/*" />
+                        </label>
+                        <div id="comfyDebugReferenceUploadState" class="comfy-upload-state" hidden>
+                          <span id="comfyDebugReferenceUploadName"></span>
+                          <button id="comfyDebugReferenceReuploadBtn" type="button">重新上传</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <span class="muted small comfy-reference-meta" id="comfyDebugReferencePreviewMeta">未选择</span>
+                </div>
+                <div class="comfy-reference-card" id="comfyDebugMiddleFrameCard" hidden>
+                  <div class="comfy-reference-card-head">
+                    <strong>中帧</strong>
+                    <span class="muted small">middle_frame_image</span>
+                  </div>
+                  <div class="comfy-reference-body">
+                    <div class="comfy-reference-preview" id="comfyDebugMiddleFramePreview">
+                      <span class="empty">首中尾帧模式下选择中帧</span>
+                    </div>
+                    <div class="comfy-reference-controls">
+                      <label>从素材库选择
+                        <select id="comfyDebugMiddleFrameAssetReference">
+                          <option value="">不使用中帧素材</option>
+                        </select>
+                      </label>
+                      <div class="comfy-upload-control">
+                        <label id="comfyDebugMiddleFrameReferenceFileLabel">上传中帧文件
+                          <input id="comfyDebugMiddleFrameReferenceFile" type="file" accept="image/*" />
+                        </label>
+                        <div id="comfyDebugMiddleFrameUploadState" class="comfy-upload-state" hidden>
+                          <span id="comfyDebugMiddleFrameUploadName"></span>
+                          <button id="comfyDebugMiddleFrameReuploadBtn" type="button">重新上传</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <span class="muted small comfy-reference-meta" id="comfyDebugMiddleFrameReferenceHint">首中尾帧视频需要第二张中帧图。</span>
+                </div>
+                <div class="comfy-reference-card" id="comfyDebugLastFrameCard" hidden>
+                  <div class="comfy-reference-card-head">
+                    <strong>尾帧</strong>
+                    <span class="muted small">last_frame_image</span>
+                  </div>
+                  <div class="comfy-reference-body">
+                    <div class="comfy-reference-preview" id="comfyDebugLastFramePreview">
+                      <span class="empty">首尾帧模式下选择尾帧</span>
+                    </div>
+                    <div class="comfy-reference-controls">
+                      <label>从素材库选择
+                        <select id="comfyDebugLastFrameAssetReference">
+                          <option value="">不使用尾帧素材</option>
+                        </select>
+                      </label>
+                      <div class="comfy-upload-control">
+                        <label id="comfyDebugLastFrameReferenceFileLabel">上传尾帧文件
+                          <input id="comfyDebugLastFrameReferenceFile" type="file" accept="image/*" />
+                        </label>
+                        <div id="comfyDebugLastFrameUploadState" class="comfy-upload-state" hidden>
+                          <span id="comfyDebugLastFrameUploadName"></span>
+                          <button id="comfyDebugLastFrameReuploadBtn" type="button">重新上传</button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <span class="muted small comfy-reference-meta" id="comfyDebugLastFrameReferenceHint">首尾帧视频需要第二张尾帧图。</span>
+                </div>
               </div>
               <div class="row">
                 <button id="clearComfyDebugReferenceBtn" type="button">清空参考</button>
                 <span class="muted small" id="comfyDebugReferenceHint">可直接输入路径、选择素材库资产，或上传本地参考图/视频。</span>
               </div>
               <div class="provider-grid">
+                <label>工作流子类型
+                  <select id="comfyDebugWorkflowMode"></select>
+                </label>
                 <label>随机种子
                   <input id="comfyDebugSeed" autocomplete="off" spellcheck="false" placeholder="留空随机；固定 seed 方便复现" />
                 </label>
@@ -2699,8 +3103,12 @@ INDEX_HTML = r"""<!doctype html>
                 <label>高度
                   <input id="comfyDebugHeight" autocomplete="off" spellcheck="false" placeholder="例如 1920 / 544" />
                 </label>
-                <label>时长/帧数
-                  <input id="comfyDebugDuration" autocomplete="off" spellcheck="false" placeholder="例如 5s / 121 frames；按工作流节点映射使用" />
+                <label id="comfyDebugDurationField">视频时长（秒）
+                  <input id="comfyDebugDuration" type="number" min="0.5" step="0.5" autocomplete="off" spellcheck="false" placeholder="例如 4，表示 4 秒" />
+                  <span class="muted small" id="comfyDebugFrameCountHint">帧数会按 FPS 自动计算。</span>
+                </label>
+                <label id="comfyDebugFpsField">帧率（视频）
+                  <input id="comfyDebugFps" type="number" min="1" step="1" autocomplete="off" spellcheck="false" placeholder="例如 16 / 24 / 30" />
                 </label>
               </div>
               <label>正向提示词
@@ -2710,7 +3118,7 @@ INDEX_HTML = r"""<!doctype html>
                 <textarea id="comfyDebugNegative" spellcheck="false" placeholder="例如：文字、水印、畸形手、脸部变形、闪烁、低清晰度"></textarea>
               </label>
               <label>nodeInfoList JSON（覆盖槽位）
-                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{seed}}、{{width}}、{{height}}、{{duration}}、{{task_type}}、{{image_task_mode}}、{{control_mode}}"></textarea>
+                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；视频长度节点请优先用 {{frame_count}}，可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{last_frame_image}}、{{seed}}、{{width}}、{{height}}、{{duration}}、{{fps}}、{{frame_count}}、{{task_type}}、{{image_task_mode}}、{{control_mode}}"></textarea>
               </label>
               <label>导入 API JSON 自动识别（仅本次调试）
                 <input id="comfyDebugApiWorkflowFile" type="file" accept=".json,application/json" />
@@ -2804,6 +3212,13 @@ INDEX_HTML = r"""<!doctype html>
             <button id="confirmStepRerunBtn" type="button">重跑当前步骤</button>
           </div>
         </div>
+        <div class="output-section" id="taskComfyDebugPanel" hidden>
+          <div class="output-section-head">
+            <strong>ComfyUI 调试队列</strong>
+            <span class="muted small" id="taskComfyDebugMeta">未启用</span>
+          </div>
+          <div class="task-comfy-debug-list" id="taskComfyDebugList"></div>
+        </div>
         <textarea class="file-editor" id="fileContent" spellcheck="false">选择左侧任务，或运行一个新任务。</textarea>
       </div>
 
@@ -2888,8 +3303,6 @@ INDEX_HTML = r"""<!doctype html>
       model: document.getElementById('model'),
       customModel: document.getElementById('customModel'),
       taskTitle: document.getElementById('taskTitle'),
-      contentColumn: document.getElementById('contentColumn'),
-      applyContentColumnBtn: document.getElementById('applyContentColumnBtn'),
       apiKey: document.getElementById('apiKey'),
       baseUrl: document.getElementById('baseUrl'),
       modelTimeout: document.getElementById('modelTimeout'),
@@ -2907,6 +3320,7 @@ INDEX_HTML = r"""<!doctype html>
       knowledgeList: document.getElementById('knowledgeList'),
       workflowAdvanceMode: document.getElementById('workflowAdvanceMode'),
       autoProductionMode: document.getElementById('autoProductionMode'),
+      comfyDebugGate: document.getElementById('comfyDebugGate'),
       composeTool: document.getElementById('composeTool'),
       finalVideoName: document.getElementById('finalVideoName'),
       comfyApiKey: document.getElementById('comfyApiKey'),
@@ -3022,6 +3436,27 @@ INDEX_HTML = r"""<!doctype html>
       assetLibraryTagFilter: document.getElementById('assetLibraryTagFilter'),
       assetLibraryStatus: document.getElementById('assetLibraryStatus'),
       assetLibraryGrid: document.getElementById('assetLibraryGrid'),
+      assetLibraryTabs: document.getElementById('assetLibraryTabs'),
+      assetLibraryDetail: document.getElementById('assetLibraryDetail'),
+      assetLibraryDetailPreview: document.getElementById('assetLibraryDetailPreview'),
+      assetLibraryDetailName: document.getElementById('assetLibraryDetailName'),
+      assetLibraryDetailCategory: document.getElementById('assetLibraryDetailCategory'),
+      assetLibraryDetailNote: document.getElementById('assetLibraryDetailNote'),
+      assetLibraryDetailMeta: document.getElementById('assetLibraryDetailMeta'),
+      assetLibraryDetailCloseBtn: document.getElementById('assetLibraryDetailCloseBtn'),
+      assetLibraryDetailOpenBtn: document.getElementById('assetLibraryDetailOpenBtn'),
+      assetLibraryDetailDeleteBtn: document.getElementById('assetLibraryDetailDeleteBtn'),
+      assetLibraryDetailSaveBtn: document.getElementById('assetLibraryDetailSaveBtn'),
+      assetImportModal: document.getElementById('assetImportModal'),
+      assetImportTitle: document.getElementById('assetImportTitle'),
+      assetImportCloseBtn: document.getElementById('assetImportCloseBtn'),
+      assetImportFile: document.getElementById('assetImportFile'),
+      assetImportName: document.getElementById('assetImportName'),
+      assetImportCategory: document.getElementById('assetImportCategory'),
+      assetImportNote: document.getElementById('assetImportNote'),
+      assetImportComfyBtn: document.getElementById('assetImportComfyBtn'),
+      assetImportSaveBtn: document.getElementById('assetImportSaveBtn'),
+      assetImportStatus: document.getElementById('assetImportStatus'),
       refreshComfyDebugBtn: document.getElementById('refreshComfyDebugBtn'),
       comfyDebugStatus: document.getElementById('comfyDebugStatus'),
       comfyDebugWorkflowList: document.getElementById('comfyDebugWorkflowList'),
@@ -3030,24 +3465,54 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugBaseUrl: document.getElementById('comfyDebugBaseUrl'),
       comfyDebugPollTimeout: document.getElementById('comfyDebugPollTimeout'),
       comfyDebugEndpoint: document.getElementById('comfyDebugEndpoint'),
+      comfyDebugReferenceGrid: document.getElementById('comfyDebugReferenceGrid'),
+      comfyDebugStartFrameCard: document.getElementById('comfyDebugStartFrameCard'),
       comfyDebugReference: document.getElementById('comfyDebugReference'),
+      comfyDebugMiddleFrameReference: document.getElementById('comfyDebugMiddleFrameReference'),
+      comfyDebugLastFrameReference: document.getElementById('comfyDebugLastFrameReference'),
+      comfyDebugReferencePreview: document.getElementById('comfyDebugReferencePreview'),
+      comfyDebugReferencePreviewMeta: document.getElementById('comfyDebugReferencePreviewMeta'),
+      comfyDebugMiddleFrameCard: document.getElementById('comfyDebugMiddleFrameCard'),
+      comfyDebugMiddleFramePreview: document.getElementById('comfyDebugMiddleFramePreview'),
+      comfyDebugLastFrameCard: document.getElementById('comfyDebugLastFrameCard'),
+      comfyDebugLastFramePreview: document.getElementById('comfyDebugLastFramePreview'),
       comfyDebugAssetTagFilter: document.getElementById('comfyDebugAssetTagFilter'),
       comfyDebugAssetReference: document.getElementById('comfyDebugAssetReference'),
+      comfyDebugMiddleFrameAssetReference: document.getElementById('comfyDebugMiddleFrameAssetReference'),
+      comfyDebugLastFrameAssetReference: document.getElementById('comfyDebugLastFrameAssetReference'),
       comfyDebugReferenceFile: document.getElementById('comfyDebugReferenceFile'),
+      comfyDebugMiddleFrameReferenceFile: document.getElementById('comfyDebugMiddleFrameReferenceFile'),
+      comfyDebugLastFrameReferenceFile: document.getElementById('comfyDebugLastFrameReferenceFile'),
+      comfyDebugReferenceFileLabel: document.getElementById('comfyDebugReferenceFileLabel'),
+      comfyDebugMiddleFrameReferenceFileLabel: document.getElementById('comfyDebugMiddleFrameReferenceFileLabel'),
+      comfyDebugLastFrameReferenceFileLabel: document.getElementById('comfyDebugLastFrameReferenceFileLabel'),
+      comfyDebugReferenceUploadState: document.getElementById('comfyDebugReferenceUploadState'),
+      comfyDebugMiddleFrameUploadState: document.getElementById('comfyDebugMiddleFrameUploadState'),
+      comfyDebugLastFrameUploadState: document.getElementById('comfyDebugLastFrameUploadState'),
+      comfyDebugReferenceUploadName: document.getElementById('comfyDebugReferenceUploadName'),
+      comfyDebugMiddleFrameUploadName: document.getElementById('comfyDebugMiddleFrameUploadName'),
+      comfyDebugLastFrameUploadName: document.getElementById('comfyDebugLastFrameUploadName'),
+      comfyDebugReferenceReuploadBtn: document.getElementById('comfyDebugReferenceReuploadBtn'),
+      comfyDebugMiddleFrameReuploadBtn: document.getElementById('comfyDebugMiddleFrameReuploadBtn'),
+      comfyDebugLastFrameReuploadBtn: document.getElementById('comfyDebugLastFrameReuploadBtn'),
       clearComfyDebugReferenceBtn: document.getElementById('clearComfyDebugReferenceBtn'),
       comfyDebugReferenceHint: document.getElementById('comfyDebugReferenceHint'),
+      comfyDebugMiddleFrameReferenceHint: document.getElementById('comfyDebugMiddleFrameReferenceHint'),
+      comfyDebugLastFrameReferenceHint: document.getElementById('comfyDebugLastFrameReferenceHint'),
+      comfyDebugWorkflowMode: document.getElementById('comfyDebugWorkflowMode'),
       comfyDebugSeed: document.getElementById('comfyDebugSeed'),
       comfyDebugWidth: document.getElementById('comfyDebugWidth'),
       comfyDebugHeight: document.getElementById('comfyDebugHeight'),
       comfyDebugDuration: document.getElementById('comfyDebugDuration'),
+      comfyDebugDurationField: document.getElementById('comfyDebugDurationField'),
+      comfyDebugFrameCountHint: document.getElementById('comfyDebugFrameCountHint'),
+      comfyDebugFps: document.getElementById('comfyDebugFps'),
+      comfyDebugFpsField: document.getElementById('comfyDebugFpsField'),
       comfyDebugPrompt: document.getElementById('comfyDebugPrompt'),
       comfyDebugNegative: document.getElementById('comfyDebugNegative'),
       comfyDebugNodeInfoList: document.getElementById('comfyDebugNodeInfoList'),
       comfyDebugApiWorkflowFile: document.getElementById('comfyDebugApiWorkflowFile'),
-      saveComfyDebugWorkflowBtn: document.getElementById('saveComfyDebugWorkflowBtn'),
-      clearComfyDebugWorkflowBtn: document.getElementById('clearComfyDebugWorkflowBtn'),
       runComfyDebugBtn: document.getElementById('runComfyDebugBtn'),
-      fillComfyDebugSampleBtn: document.getElementById('fillComfyDebugSampleBtn'),
       comfyDebugResults: document.getElementById('comfyDebugResults'),
       comfyDebugResultMeta: document.getElementById('comfyDebugResultMeta'),
       packageOutputMeta: document.getElementById('packageOutputMeta'),
@@ -3057,6 +3522,9 @@ INDEX_HTML = r"""<!doctype html>
       stepConfirmHint: document.getElementById('stepConfirmHint'),
       confirmStepContinueBtn: document.getElementById('confirmStepContinueBtn'),
       confirmStepRerunBtn: document.getElementById('confirmStepRerunBtn'),
+      taskComfyDebugPanel: document.getElementById('taskComfyDebugPanel'),
+      taskComfyDebugMeta: document.getElementById('taskComfyDebugMeta'),
+      taskComfyDebugList: document.getElementById('taskComfyDebugList'),
       saveFileBtn: document.getElementById('saveFileBtn'),
       rebuildFinalBtn: document.getElementById('rebuildFinalBtn'),
       rerunStepBtn: document.getElementById('rerunStepBtn'),
@@ -3092,6 +3560,71 @@ INDEX_HTML = r"""<!doctype html>
       healthStatus: document.getElementById('healthStatus'),
       healthGrid: document.getElementById('healthGrid'),
     };
+    function detachedControl(tag = 'input', value = '') {
+      const el = document.createElement(tag);
+      el.value = value;
+      return el;
+    }
+    function detachedSelect(value = '') {
+      const el = document.createElement('select');
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = value;
+      el.appendChild(option);
+      el.value = value;
+      return el;
+    }
+    Object.assign(els, {
+      imageTool: els.imageTool || detachedSelect('prompt_only'),
+      imagePositivePrompt: els.imagePositivePrompt || detachedControl('input', ''),
+      imageModel: els.imageModel || detachedControl('input', ''),
+      imageSize: els.imageSize || detachedSelect('16:9'),
+      imageCount: els.imageCount || detachedSelect('1'),
+      imageStyle: els.imageStyle || detachedControl('input', ''),
+      imageQuality: els.imageQuality || detachedSelect('standard'),
+      imageApiKey: els.imageApiKey || detachedControl('input', ''),
+      imageBaseUrl: els.imageBaseUrl || detachedControl('input', ''),
+      imageWorkflowEndpoint: els.imageWorkflowEndpoint || detachedControl('input', ''),
+      imageInstanceType: els.imageInstanceType || detachedSelect('default'),
+      imageNodeInfoList: els.imageNodeInfoList || detachedControl('textarea', ''),
+      imagePollTimeout: els.imagePollTimeout || detachedSelect('900'),
+      imageNegativePrompt: els.imageNegativePrompt || detachedControl('input', ''),
+      imageConsistency: els.imageConsistency || detachedControl('input', ''),
+      imageSeed: els.imageSeed || detachedControl('input', ''),
+      imageGuidance: els.imageGuidance || detachedControl('input', ''),
+      imageSteps: els.imageSteps || detachedControl('input', ''),
+      imageDenoise: els.imageDenoise || detachedControl('input', ''),
+      imageSampler: els.imageSampler || detachedControl('input', ''),
+      imageControl: els.imageControl || detachedControl('input', ''),
+      videoTool: els.videoTool || detachedSelect('prompt_only'),
+      videoPositivePrompt: els.videoPositivePrompt || detachedControl('input', ''),
+      videoModel: els.videoModel || detachedControl('input', ''),
+      videoAspect: els.videoAspect || detachedSelect('16:9'),
+      videoDuration: els.videoDuration || detachedSelect('custom'),
+      videoStyle: els.videoStyle || detachedControl('input', ''),
+      videoPromptNotes: els.videoPromptNotes || detachedControl('input', ''),
+      videoApiKey: els.videoApiKey || detachedControl('input', ''),
+      videoBaseUrl: els.videoBaseUrl || detachedControl('input', ''),
+      videoWorkflowEndpoint: els.videoWorkflowEndpoint || detachedControl('input', ''),
+      videoNodeInfoList: els.videoNodeInfoList || detachedControl('textarea', ''),
+      videoPollTimeout: els.videoPollTimeout || detachedSelect('1800'),
+      videoNegativePrompt: els.videoNegativePrompt || detachedControl('input', ''),
+      videoSeed: els.videoSeed || detachedControl('input', ''),
+      videoFps: els.videoFps || detachedSelect('30'),
+      videoMotionStrength: els.videoMotionStrength || detachedSelect('medium'),
+      videoCameraMotion: els.videoCameraMotion || detachedSelect('push_in'),
+      videoResolution: els.videoResolution || detachedSelect('1080p'),
+      videoGuidance: els.videoGuidance || detachedControl('input', ''),
+      videoFrames: els.videoFrames || detachedControl('input', ''),
+      videoImageStrength: els.videoImageStrength || detachedControl('input', ''),
+      videoCameraPath: els.videoCameraPath || detachedControl('input', ''),
+      videoAudioNotes: els.videoAudioNotes || detachedControl('input', ''),
+      videoAdvancedParams: els.videoAdvancedParams || detachedControl('input', ''),
+      referenceImages: els.referenceImages || detachedControl('input', ''),
+      referenceRole: els.referenceRole || detachedSelect('视觉风格参考'),
+      referenceNote: els.referenceNote || detachedControl('input', ''),
+      referenceList: els.referenceList || document.createElement('div'),
+    });
     const navButtons = Array.from(document.querySelectorAll('[data-view-target]'));
     const views = Array.from(document.querySelectorAll('[data-view]'));
     let selectedTask = null;
@@ -3118,8 +3651,17 @@ INDEX_HTML = r"""<!doctype html>
     let assetPreviewItems = [];
     let assetPreviewTaskName = "";
     let assetPreviewIndex = 0;
-    let contentColumns = [];
     let assetLibraryItems = [];
+    let assetLibrarySection = 'all';
+    let selectedAssetLibraryId = '';
+    let assetLibraryDetailDirty = false;
+    const ASSET_LIBRARY_SECTIONS = [
+      { value: 'all', label: '全部', addLabel: '新增资产', tags: [] },
+      { value: 'material', label: '素材', addLabel: '新增素材', tags: ['scene', 'broll', 'cover', 'scene_base', 'cover_key_visual', 'image_inpaint_fix', 'background_remove', 'broll_scene_video', 'empty_transition_video', 'video_upscale', 'frame_interpolation', 'video_deflicker_stabilize', 'video_inpaint_fix'] },
+      { value: 'character', label: '角色', addLabel: '新增角色', tags: ['person', 'character_base', 'character_turnaround', 'character_generation'] },
+      { value: 'product', label: '商品', addLabel: '新增商品', tags: ['product', 'product_base', 'product_turnaround', 'product_generation'] },
+      { value: 'reference', label: '参考', addLabel: '新增参考', tags: ['style', 'style_reference', 'keyframe', 'reference', 'i2v_first_frame', 'i2v_first_last_frame', 'i2v_first_middle_last_frame', 'live_to_anime', 'motion_transfer', 'talking_image'] },
+    ];
     const ASSET_CATEGORY_TAGS = [
       { value: 'person', label: '人物' },
       { value: 'product', label: '产品' },
@@ -3139,6 +3681,7 @@ INDEX_HTML = r"""<!doctype html>
       { value: 'background_remove', label: '10 抠图透明素材' },
       { value: 'i2v_first_frame', label: '11 首帧视频' },
       { value: 'i2v_first_last_frame', label: '12 首尾帧视频' },
+      { value: 'i2v_first_middle_last_frame', label: '12 首中尾帧视频' },
       { value: 'live_to_anime', label: '13 真人转动漫' },
       { value: 'motion_transfer', label: '14 动作迁移' },
       { value: 'talking_image', label: '15 图片说话' },
@@ -3155,8 +3698,8 @@ INDEX_HTML = r"""<!doctype html>
       { value: 'scene_generation', label: '场景生成', taskType: 'scene_generation', controlMode: 'none', requiresReference: false, prompt: '生成可复用场景图：办公、科技、行业业务场景，空间层次清楚，适合后续人物或产品合成，写实风格，无文字水印。' },
       { value: 'character_turnaround', label: '角色三视图', taskType: 'character_turnaround', controlMode: 'character_reference', requiresReference: true, prompt: '基于参考图生成角色三视图：同一人物正面、侧面、背面，服装发型一致，比例稳定，干净白底或浅色背景，无文字水印。' },
       { value: 'product_turnaround', label: '产品三视图', taskType: 'product_turnaround', controlMode: 'product_reference', requiresReference: true, prompt: '基于参考图生成产品三视图：同一产品正面、侧面、背面，材质颜色一致，结构准确，干净背景，无文字水印。' },
-      { value: 'keyframe', label: '关键帧', taskType: 'keyframe', controlMode: 'keyframe_reference', requiresReference: true, prompt: '基于参考图生成视频关键帧：保持角色/产品/场景一致，构图适合后续图生视频，写实商业风格，无文字水印。' },
-      { value: 'cover_key_visual', label: '封面关键视觉', taskType: 'cover_key_visual', controlMode: 'style_reference', requiresReference: false, prompt: '生成封面关键视觉：主体明确，构图有冲击力，适合竖屏封面，预留标题安全区，写实商业科技风格，无文字水印。' },
+      { value: 'keyframe', label: '关键帧', taskType: 'keyframe', controlMode: 'none', requiresReference: false, prompt: '根据分镜文本生成视频关键帧：单张画面，构图适合后续图生视频，写实商业风格，无文字水印。' },
+      { value: 'cover_key_visual', label: '封面关键视觉', taskType: 'cover_key_visual', controlMode: 'style_reference', requiresReference: false, prompt: '生成封面关键视觉：主体明确，构图有冲击力，适合横屏视频封面，预留标题安全区，写实商业科技风格，无文字水印。' },
       { value: 'style_reference', label: '风格参考图', taskType: 'style_reference', controlMode: 'none', requiresReference: false, prompt: '生成统一风格参考图：色彩、光线、材质和画面气质明确，可作为后续整条视频的视觉风格基准，无文字水印。' },
       { value: 'inpaint_fix', label: '局部修复/重绘', taskType: 'inpaint_fix', controlMode: 'mask_inpaint', requiresReference: true, prompt: '基于参考图进行局部修复或重绘：修正脸部、手部、文字、水印或局部瑕疵，保持原图主体和风格一致。' },
     ];
@@ -3165,6 +3708,7 @@ INDEX_HTML = r"""<!doctype html>
     const comfyDebugStateByWorkflowId = new Map();
     let comfyDebugFormHydrated = false;
     const comfyDebugPollTimers = new Map();
+    let comfyDebugElapsedTimer = null;
     let settingsRestoring = false;
     let comfyDebugLastResults = [];
     const progressStepOpenState = new Map();
@@ -3187,8 +3731,8 @@ INDEX_HTML = r"""<!doctype html>
           { nodeId: '11', fieldName: 'text', fieldValue: '{{negative_prompt}}' },
           { nodeId: '12', fieldName: 'image', fieldValue: '{{reference_image}}' },
           { nodeId: '63', fieldName: 'switch', fieldValue: '{{has_reference_image}}' },
-          { nodeId: '20', fieldName: 'width', fieldValue: 1080 },
-          { nodeId: '20', fieldName: 'height', fieldValue: 1920 },
+          { nodeId: '20', fieldName: 'width', fieldValue: '{{width}}' },
+          { nodeId: '20', fieldName: 'height', fieldValue: '{{height}}' },
           { nodeId: '40', fieldName: 'filename_prefix', fieldValue: 'all_in_one_image' },
         ], null, 2),
         pollTimeout: '3600',
@@ -3296,19 +3840,24 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function moveConfigSections() {
-      if (!els.configSections) return;
+      const configSections = document.getElementById('configSections') || els.configSections;
+      if (!configSections) return;
       const modelRuntimeConfig = document.getElementById('modelRuntimeConfig');
       const firstConfigBody = document.querySelector('[data-config-section] .details-body');
       if (modelRuntimeConfig && firstConfigBody) {
         firstConfigBody.insertBefore(modelRuntimeConfig, firstConfigBody.firstChild);
       }
       document.querySelectorAll('[data-config-section]').forEach(section => {
-        els.configSections.appendChild(section);
+        configSections.appendChild(section);
+        section.hidden = false;
       });
     }
 
     function showView(viewName) {
       document.body.dataset.view = viewName;
+      if (viewName === 'config') {
+        moveConfigSections();
+      }
       for (const view of views) {
         view.hidden = view.dataset.view !== viewName;
       }
@@ -3320,6 +3869,7 @@ INDEX_HTML = r"""<!doctype html>
         loadTasks()
           .then(tasks => {
             if (!selectedTask && tasks.length) return selectTask(tasks[0].name);
+            if (selectedTask) return refreshSelectedTaskDetail({ openMissingFile: true });
           })
           .catch(err => setStatus(err.message, true));
       }
@@ -3359,7 +3909,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function syncRunControlButtons() {
-      const hasRun = Boolean(currentRunId);
+      const hasRun = Boolean(currentRunId && ['queued', 'running'].includes(currentRunStatus));
       if (els.cancelRunBtn) {
         els.cancelRunBtn.hidden = true;
         els.cancelRunBtn.disabled = true;
@@ -3735,6 +4285,20 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       if (job.status === 'failed') {
+        const isCheckpoint = job.awaiting_confirmation || String(job.error || job.current_message || '').includes('等待确认');
+        if (isCheckpoint) {
+          setStatus(job.error || '当前步骤已完成，确认输出后点击继续下一步', false);
+          await loadTasks();
+          if (job.task_name && maybeShowOutput()) await selectTaskAndOpenJobOutput(job);
+          autoFocusOutputDuringRun = false;
+          els.runBtn.disabled = false;
+          trackRun("");
+          setWorkflowInteractionLocked(false);
+          setTimeout(() => setRunButtonProgress(0), 900);
+          syncOutputButtons();
+          progressTimer = null;
+          return;
+        }
         setStatus(job.error || '工作流运行失败', true);
         await loadTasks();
         if (job.task_name) {
@@ -3838,58 +4402,6 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
     }
 
-    async function loadContentColumns() {
-      const data = await api('/api/content-columns');
-      contentColumns = Array.isArray(data.columns) ? data.columns : [];
-      if (!els.contentColumn) return;
-      els.contentColumn.innerHTML = '<option value="">不使用栏目模板</option>';
-      for (const column of contentColumns) {
-        const option = document.createElement('option');
-        option.value = column.id || '';
-        option.textContent = column.name || column.id || '';
-        els.contentColumn.appendChild(option);
-      }
-    }
-
-    function applySelectedContentColumn() {
-      const column = contentColumns.find(item => item.id === els.contentColumn.value);
-      if (!column) return;
-      const currentTopic = els.userInput.value.trim();
-      const brief = buildContentColumnBrief(
-        column,
-        currentTopic || '请基于栏目推荐 5 个具体选题，先给我选择，再继续生成脚本和素材。'
-      );
-      els.userInput.value = brief;
-      if (!els.taskTitle.value.trim()) {
-        els.taskTitle.value = column.name;
-      }
-      saveSettings();
-      setStatus(`已套用栏目模板：${column.name}`, false);
-    }
-
-    function buildContentColumnBrief(column, topicText) {
-      return [
-        `内容栏目：${column.name}`,
-        `目标受众：${column.audience}`,
-        `推荐结构：${column.structure}`,
-        `视觉风格：${column.visual_style}`,
-        `内容要求：${column.sample}`,
-        `本次主题/补充要求：${topicText}`,
-        '素材策略：优先复用素材库中已收藏的好素材；缺口素材再生成；人物、产品、场景尽量保持一致。',
-      ].join('\n');
-    }
-
-    function contentColumnContextText(rawInput) {
-      const column = contentColumns.find(item => item.id === els.contentColumn?.value);
-      if (!column) return '';
-      if ((rawInput || '').includes(`内容栏目：${column.name}`)) return '';
-      return [
-        '',
-        '## 内容栏目约束',
-        buildContentColumnBrief(column, rawInput || '按该栏目先提出可执行选题，再完成长视频方案。'),
-      ].join('\n');
-    }
-
     function readSettings() {
       try {
         return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}');
@@ -3905,6 +4417,8 @@ INDEX_HTML = r"""<!doctype html>
         out[id] = {
           endpoint: state.endpoint || '',
           reference: state.reference || '',
+          middleFrameReference: state.middleFrameReference || '',
+          lastFrameReference: state.lastFrameReference || '',
           seed: state.seed || '',
           width: state.width || '',
           height: state.height || '',
@@ -3914,7 +4428,11 @@ INDEX_HTML = r"""<!doctype html>
           nodeInfoList: state.nodeInfoList || '[]',
           pollTimeout: state.pollTimeout || '3600',
           assetReference: state.assetReference || '',
+          middleFrameAssetReference: state.middleFrameAssetReference || '',
+          lastFrameAssetReference: state.lastFrameAssetReference || '',
           referenceHint: state.referenceHint || '',
+          middleFrameReferenceHint: state.middleFrameReferenceHint || '',
+          lastFrameReferenceHint: state.lastFrameReferenceHint || '',
           results: compactComfyDebugResults(state.results),
           running: Boolean(state.running),
           runId: state.runId || '',
@@ -3947,6 +4465,8 @@ INDEX_HTML = r"""<!doctype html>
         comfyDebugStateByWorkflowId.set(id, {
           endpoint: state.endpoint || '',
           reference: state.reference || '',
+          middleFrameReference: state.middleFrameReference || '',
+          lastFrameReference: state.lastFrameReference || '',
           seed: state.seed || '',
           width: state.width || '',
           height: state.height || '',
@@ -3956,7 +4476,11 @@ INDEX_HTML = r"""<!doctype html>
           nodeInfoList: state.nodeInfoList || '[]',
           pollTimeout: state.pollTimeout || '3600',
           assetReference: state.assetReference || '',
+          middleFrameAssetReference: state.middleFrameAssetReference || '',
+          lastFrameAssetReference: state.lastFrameAssetReference || '',
           referenceHint: state.referenceHint || '',
+          middleFrameReferenceHint: state.middleFrameReferenceHint || '',
+          lastFrameReferenceHint: state.lastFrameReferenceHint || '',
           results: compactComfyDebugResults(state.results),
           running: Boolean(state.running),
           runId: state.runId || '',
@@ -3969,10 +4493,11 @@ INDEX_HTML = r"""<!doctype html>
     function saveSettings() {
       if (settingsRestoring) return;
       saveCurrentComfyDebugUiState();
+      const previousSettings = readSettings();
       const settings = {
+        ...previousSettings,
         productTemplate: els.productTemplate.value,
         workflow: els.workflow.value,
-        contentColumn: els.contentColumn.value,
         provider: els.provider.value,
         model: els.model.value,
         customModel: els.customModel.value,
@@ -3987,6 +4512,7 @@ INDEX_HTML = r"""<!doctype html>
         useKnowledge: els.useKnowledge.value,
         workflowAdvanceMode: els.workflowAdvanceMode.value,
         autoProductionMode: els.autoProductionMode.value,
+        comfyDebugGate: els.comfyDebugGate.value,
         composeTool: els.composeTool.value,
         finalVideoName: els.finalVideoName.value,
         comfyApiKey: els.comfyApiKey.value,
@@ -4056,6 +4582,59 @@ INDEX_HTML = r"""<!doctype html>
         referenceRole: els.referenceRole.value,
         referenceNote: els.referenceNote.value,
       };
+      [
+        'imageTool',
+        'imagePositivePrompt',
+        'imageModel',
+        'imageSize',
+        'imageCount',
+        'imageStyle',
+        'imageQuality',
+        'imageApiKey',
+        'imageBaseUrl',
+        'imageWorkflowEndpoint',
+        'imageInstanceType',
+        'imageNodeInfoList',
+        'imagePollTimeout',
+        'imageNegativePrompt',
+        'imageConsistency',
+        'imageSeed',
+        'imageGuidance',
+        'imageSteps',
+        'imageDenoise',
+        'imageSampler',
+        'imageControl',
+        'videoTool',
+        'videoPositivePrompt',
+        'videoModel',
+        'videoAspect',
+        'videoDuration',
+        'videoStyle',
+        'videoPromptNotes',
+        'videoApiKey',
+        'videoBaseUrl',
+        'videoWorkflowEndpoint',
+        'videoNodeInfoList',
+        'videoPollTimeout',
+        'videoNegativePrompt',
+        'videoSeed',
+        'videoFps',
+        'videoMotionStrength',
+        'videoCameraMotion',
+        'videoResolution',
+        'videoGuidance',
+        'videoFrames',
+        'videoImageStrength',
+        'videoCameraPath',
+        'videoAudioNotes',
+        'videoAdvancedParams',
+        'referenceRole',
+        'referenceNote',
+      ].forEach(key => {
+        if (els[key]?.isConnected) return;
+        if (Object.prototype.hasOwnProperty.call(previousSettings, key)) settings[key] = previousSettings[key];
+        else delete settings[key];
+      });
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
     }
 
@@ -4069,7 +4648,6 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.model, settings.model);
       els.customModel.value = settings.customModel || '';
       els.taskTitle.value = '';
-      setIfExists(els.contentColumn, settings.contentColumn);
       els.apiKey.value = settings.apiKey || '';
       els.baseUrl.value = settings.baseUrl || '';
       setIfExists(els.modelTimeout, settings.modelTimeout);
@@ -4082,6 +4660,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.useKnowledge, settings.useKnowledge);
       setIfExists(els.workflowAdvanceMode, settings.workflowAdvanceMode || 'auto');
       setIfExists(els.autoProductionMode, settings.autoProductionMode);
+      setIfExists(els.comfyDebugGate, settings.comfyDebugGate || 'on');
       setIfExists(els.composeTool, settings.composeTool);
       els.finalVideoName.value = settings.finalVideoName || '';
       els.comfyApiKey.value = settings.comfyApiKey || '';
@@ -4166,19 +4745,22 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function cancelCurrentRun() {
-      if (!currentRunId) {
-        setStatus('当前没有正在运行的任务', true);
+      const canCancelSelectedTask = Boolean(selectedTask && selectedTaskAllowedActions.includes('cancel'));
+      if (!currentRunId && !canCancelSelectedTask) {
+        setStatus('当前没有可终止的任务', true);
         return;
       }
-      if (!confirm('确定终止当前任务吗？\\n\\n正在等待的模型或 RunningHub 请求可能会在当前请求返回后停止。')) return;
+      if (!confirm('确定终止当前任务？\n\n系统会停止正在运行的流程，已生成的文件会保留，后续可从任务输出继续。')) return;
       const runIdToCancel = currentRunId;
+      const taskToCancel = !runIdToCancel && canCancelSelectedTask ? selectedTask : '';
       if (progressTimer) {
         clearTimeout(progressTimer);
         progressTimer = null;
       }
       autoFocusOutputDuringRun = false;
-      setStatus('已发送终止请求，界面已解锁');
+      setStatus('正在终止任务...');
       trackRun("");
+      selectedTaskAllowedActions = (selectedTaskAllowedActions || []).filter(action => action !== 'cancel');
       setWorkflowInteractionLocked(false);
       setRunButtonProgress(0);
       syncOutputButtons();
@@ -4188,12 +4770,15 @@ INDEX_HTML = r"""<!doctype html>
         const result = await api('/api/cancel-run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ run_id: runIdToCancel }),
+          body: JSON.stringify({ run_id: runIdToCancel, task_name: taskToCancel }),
         });
-        setStatus(result.message || '已发送终止请求');
+        setStatus(result.message || '任务已终止');
         renderProgress(result);
         setWorkflowInteractionLocked(false);
         setRunButtonProgress(0);
+        trackRun("");
+        await refreshSelectedTaskDetail({ openMissingFile: true }).catch(() => {});
+        selectedTaskAllowedActions = (selectedTaskAllowedActions || []).filter(action => action !== 'cancel');
         syncOutputButtons();
         if (['cancelled', 'failed', 'paused', 'completed'].includes(result.status)) {
           progressTimer = null;
@@ -4241,12 +4826,21 @@ INDEX_HTML = r"""<!doctype html>
           defaultWidth: String(item.defaultWidth || item.default_width || ''),
           defaultHeight: String(item.defaultHeight || item.default_height || ''),
           defaultReference: String(item.defaultReference || item.default_reference || item.reference || ''),
+          defaultMiddleFrameReference: String(item.defaultMiddleFrameReference || item.default_middle_frame_reference || item.middleFrameReference || item.middle_frame_image || ''),
+          defaultLastFrameReference: String(item.defaultLastFrameReference || item.default_last_frame_reference || item.lastFrameReference || item.last_frame_image || ''),
           defaultSeed: String(item.defaultSeed || item.default_seed || item.seed || ''),
           defaultDuration: String(item.defaultDuration || item.default_duration || item.duration || ''),
           defaultPrompt: String(item.defaultPrompt || item.default_prompt || item.prompt || ''),
           defaultNegative: String(item.defaultNegative || item.default_negative || item.negative || item.negative_prompt || ''),
           defaultAssetReference: String(item.defaultAssetReference || item.default_asset_reference || item.assetReference || ''),
+          defaultMiddleFrameAssetReference: String(item.defaultMiddleFrameAssetReference || item.default_middle_frame_asset_reference || item.middleFrameAssetReference || ''),
+          defaultLastFrameAssetReference: String(item.defaultLastFrameAssetReference || item.default_last_frame_asset_reference || item.lastFrameAssetReference || ''),
           defaultReferenceHint: String(item.defaultReferenceHint || item.default_reference_hint || item.referenceHint || ''),
+          defaultMiddleFrameReferenceHint: String(item.defaultMiddleFrameReferenceHint || item.default_middle_frame_reference_hint || item.middleFrameReferenceHint || ''),
+          defaultLastFrameReferenceHint: String(item.defaultLastFrameReferenceHint || item.default_last_frame_reference_hint || item.lastFrameReferenceHint || ''),
+          defaultWorkflowMode: String(item.defaultWorkflowMode || item.default_workflow_mode || ''),
+          defaultImageTaskType: String(item.defaultImageTaskType || item.default_image_task_type || defaultItem.defaultImageTaskType || ''),
+          defaultFps: String(item.defaultFps || item.default_fps || ''),
           debugWorkflow: Boolean(item.debugWorkflow || item.debug_workflow),
         };
       });
@@ -4263,12 +4857,21 @@ INDEX_HTML = r"""<!doctype html>
           defaultWidth: String(item.defaultWidth || item.default_width || ''),
           defaultHeight: String(item.defaultHeight || item.default_height || ''),
           defaultReference: String(item.defaultReference || item.default_reference || item.reference || ''),
+          defaultMiddleFrameReference: String(item.defaultMiddleFrameReference || item.default_middle_frame_reference || item.middleFrameReference || item.middle_frame_image || ''),
+          defaultLastFrameReference: String(item.defaultLastFrameReference || item.default_last_frame_reference || item.lastFrameReference || item.last_frame_image || ''),
           defaultSeed: String(item.defaultSeed || item.default_seed || item.seed || ''),
           defaultDuration: String(item.defaultDuration || item.default_duration || item.duration || ''),
           defaultPrompt: String(item.defaultPrompt || item.default_prompt || item.prompt || ''),
           defaultNegative: String(item.defaultNegative || item.default_negative || item.negative || item.negative_prompt || ''),
           defaultAssetReference: String(item.defaultAssetReference || item.default_asset_reference || item.assetReference || ''),
+          defaultMiddleFrameAssetReference: String(item.defaultMiddleFrameAssetReference || item.default_middle_frame_asset_reference || item.middleFrameAssetReference || ''),
+          defaultLastFrameAssetReference: String(item.defaultLastFrameAssetReference || item.default_last_frame_asset_reference || item.lastFrameAssetReference || ''),
           defaultReferenceHint: String(item.defaultReferenceHint || item.default_reference_hint || item.referenceHint || ''),
+          defaultMiddleFrameReferenceHint: String(item.defaultMiddleFrameReferenceHint || item.default_middle_frame_reference_hint || item.middleFrameReferenceHint || ''),
+          defaultLastFrameReferenceHint: String(item.defaultLastFrameReferenceHint || item.default_last_frame_reference_hint || item.lastFrameReferenceHint || ''),
+          defaultWorkflowMode: String(item.defaultWorkflowMode || item.default_workflow_mode || ''),
+          defaultImageTaskType: String(item.defaultImageTaskType || item.default_image_task_type || ''),
+          defaultFps: String(item.defaultFps || item.default_fps || ''),
           debugWorkflow: Boolean(item.debugWorkflow || item.debug_workflow),
         });
       });
@@ -4293,13 +4896,20 @@ INDEX_HTML = r"""<!doctype html>
           defaultWidth: String(workflow.default_width || ''),
           defaultHeight: String(workflow.default_height || ''),
           defaultReference: '',
+          defaultMiddleFrameReference: '',
+          defaultLastFrameReference: '',
           defaultSeed: '',
           defaultDuration: '',
-          defaultImageTaskType: 'character_generation',
+          defaultWorkflowMode: Array.isArray(workflow.modes) && workflow.modes.length === 1 ? workflow.modes[0].value || '' : '',
+          defaultImageTaskType: workflow.default_image_task_type || workflow.default_task_type || '',
           defaultPrompt: '',
           defaultNegative: '',
           defaultAssetReference: '',
+          defaultMiddleFrameAssetReference: '',
+          defaultLastFrameAssetReference: '',
           defaultReferenceHint: '',
+          defaultMiddleFrameReferenceHint: '',
+          defaultLastFrameReferenceHint: '',
           debugWorkflow: true,
         };
         comfyWorkflowLibrary.push(item);
@@ -4326,16 +4936,24 @@ INDEX_HTML = r"""<!doctype html>
       return {
         endpoint: els.comfyDebugEndpoint?.value || '',
         reference: els.comfyDebugReference?.value || '',
+        middleFrameReference: els.comfyDebugMiddleFrameReference?.value || '',
+        lastFrameReference: els.comfyDebugLastFrameReference?.value || '',
         seed: els.comfyDebugSeed?.value || '',
         width: els.comfyDebugWidth?.value || '',
         height: els.comfyDebugHeight?.value || '',
         duration: els.comfyDebugDuration?.value || '',
+        fps: els.comfyDebugFps?.value || '',
+        workflowMode: els.comfyDebugWorkflowMode?.value || '',
         prompt: els.comfyDebugPrompt?.value || '',
         negative: els.comfyDebugNegative?.value || '',
         nodeInfoList: els.comfyDebugNodeInfoList?.value || '',
         pollTimeout: els.comfyDebugPollTimeout?.value || '3600',
         assetReference: els.comfyDebugAssetReference?.value || '',
+        middleFrameAssetReference: els.comfyDebugMiddleFrameAssetReference?.value || '',
+        lastFrameAssetReference: els.comfyDebugLastFrameAssetReference?.value || '',
         referenceHint: els.comfyDebugReferenceHint?.textContent || '',
+        middleFrameReferenceHint: els.comfyDebugMiddleFrameReferenceHint?.textContent || '',
+        lastFrameReferenceHint: els.comfyDebugLastFrameReferenceHint?.textContent || '',
       };
     }
 
@@ -4351,39 +4969,63 @@ INDEX_HTML = r"""<!doctype html>
 
     function writeComfyDebugFormState(state) {
       if (!state) return;
+      renderComfyWorkflowModeOptions(activeComfyDebugWorkflow());
       if (els.comfyDebugEndpoint) els.comfyDebugEndpoint.value = state.endpoint || '';
       if (els.comfyDebugReference) els.comfyDebugReference.value = state.reference || '';
+      if (els.comfyDebugMiddleFrameReference) els.comfyDebugMiddleFrameReference.value = state.middleFrameReference || '';
+      if (els.comfyDebugLastFrameReference) els.comfyDebugLastFrameReference.value = state.lastFrameReference || '';
       if (els.comfyDebugSeed) els.comfyDebugSeed.value = state.seed || '';
       if (els.comfyDebugWidth) els.comfyDebugWidth.value = state.width || '';
       if (els.comfyDebugHeight) els.comfyDebugHeight.value = state.height || '';
       if (els.comfyDebugDuration) els.comfyDebugDuration.value = state.duration || '';
+      if (els.comfyDebugFps) els.comfyDebugFps.value = state.fps || '';
+      if (els.comfyDebugWorkflowMode && state.workflowMode) setIfExists(els.comfyDebugWorkflowMode, state.workflowMode);
       if (els.comfyDebugPrompt) els.comfyDebugPrompt.value = state.prompt || '';
       if (els.comfyDebugNegative) els.comfyDebugNegative.value = state.negative || '';
-      if (els.comfyDebugNodeInfoList) els.comfyDebugNodeInfoList.value = state.nodeInfoList || '[]';
+      if (els.comfyDebugNodeInfoList) els.comfyDebugNodeInfoList.value = sanitizeComfyVisualNodeInfoList(state.nodeInfoList || '[]');
       if (els.comfyDebugPollTimeout) setIfExists(els.comfyDebugPollTimeout, String(state.pollTimeout || '3600'));
       if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = state.assetReference || '';
+      if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = state.middleFrameAssetReference || '';
+      if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = state.lastFrameAssetReference || '';
       if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+      if (els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
+      if (els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
+      if (els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
       if (els.comfyDebugReferenceHint) {
         els.comfyDebugReferenceHint.textContent = state.referenceHint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。';
       }
+      if (els.comfyDebugLastFrameReferenceHint) {
+        els.comfyDebugLastFrameReferenceHint.textContent = state.lastFrameReferenceHint || '首尾帧视频需要第二张尾帧图。';
+      }
       updateComfyImageTaskHint();
+      updateComfyDebugReferencePreviews();
+      updateComfyDebugMediaFields();
       comfyDebugFormHydrated = true;
     }
 
     function defaultComfyDebugStateForWorkflow(workflow) {
       const savedConfig = workflow ? getComfyWorkflowLibraryItemById(workflow.id) : null;
+      normalizeComfyDebugWorkflowSavedConfig(savedConfig, workflow);
       return {
         endpoint: savedConfig?.endpoint || workflow?.default_endpoint || '',
         reference: savedConfig?.defaultReference || '',
+        middleFrameReference: savedConfig?.defaultMiddleFrameReference || '',
+        lastFrameReference: savedConfig?.defaultLastFrameReference || '',
         seed: savedConfig?.defaultSeed || '',
         width: String(savedConfig?.defaultWidth || workflow?.default_width || ''),
         height: String(savedConfig?.defaultHeight || workflow?.default_height || ''),
-        duration: savedConfig?.defaultDuration || '',
+        duration: String(savedConfig?.defaultDuration || workflow?.default_duration || ''),
+        fps: String(savedConfig?.defaultFps || workflow?.default_fps || ''),
+        workflowMode: savedConfig?.defaultWorkflowMode || '',
         prompt: savedConfig?.defaultPrompt || '',
         negative: savedConfig?.defaultNegative || '',
         nodeInfoList: savedConfig?.nodeInfoList || workflow?.default_node_info || '[]',
         pollTimeout: String(savedConfig?.pollTimeout || workflow?.poll_timeout_seconds || workflow?.default_poll_timeout || '3600'),
         assetReference: savedConfig?.defaultAssetReference || '',
+        middleFrameAssetReference: savedConfig?.defaultMiddleFrameAssetReference || '',
+        lastFrameAssetReference: savedConfig?.defaultLastFrameAssetReference || '',
+        middleFrameReferenceHint: savedConfig?.defaultMiddleFrameReferenceHint || '',
+        lastFrameReferenceHint: savedConfig?.defaultLastFrameReferenceHint || '',
         referenceHint: savedConfig?.defaultReferenceHint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。',
         results: [],
         running: false,
@@ -4400,6 +5042,8 @@ INDEX_HTML = r"""<!doctype html>
       activeComfyDebugWorkflowId = workflow.id;
       if (!comfyDebugStateByWorkflowId.has(workflow.id)) {
         comfyDebugStateByWorkflowId.set(workflow.id, defaultComfyDebugStateForWorkflow(workflow));
+      } else {
+        comfyDebugStateByWorkflowId.set(workflow.id, normalizeComfyDebugWorkflowState(comfyDebugStateByWorkflowId.get(workflow.id), workflow));
       }
       if (forceLoad) {
         writeComfyDebugFormState(comfyDebugStateByWorkflowId.get(workflow.id));
@@ -4407,6 +5051,7 @@ INDEX_HTML = r"""<!doctype html>
       } else {
         applyComfyDebugWorkflowDefaults(workflow, false);
       }
+      updateComfyDebugMediaFields();
       syncComfyDebugRunButton();
       return workflow;
     }
@@ -4423,6 +5068,18 @@ INDEX_HTML = r"""<!doctype html>
           const nodeId = String(item.nodeId ?? '');
           return !['{{voice_text}}', '{{subtitle_srt}}', '{{subtitle_style}}'].includes(value)
             && !['5101', '5102', '5103'].includes(nodeId);
+        }).map(item => {
+          if (!item || typeof item !== 'object') return item;
+          const nodeId = String(item.nodeId ?? '');
+          const fieldName = String(item.fieldName ?? '').toLowerCase();
+          const fieldValue = String(item.fieldValue ?? '');
+          if (nodeId === '2612' && fieldName === 'text' && ['{{prompt}}', '{{video_prompt}}', '{{image_prompt}}'].includes(fieldValue)) {
+            return { ...item, fieldValue: '{{negative_prompt}}' };
+          }
+          if (['length', 'frames', 'frame_count', 'num_frames'].includes(fieldName) && fieldValue === '{{duration}}') {
+            return { ...item, fieldValue: '{{frame_count}}' };
+          }
+          return item;
         });
         return JSON.stringify(cleaned, null, 2);
       } catch {
@@ -4538,6 +5195,14 @@ INDEX_HTML = r"""<!doctype html>
         default_reference: item.defaultReference || '',
         default_seed: item.defaultSeed || '',
         default_duration: item.defaultDuration || '',
+        default_fps: item.defaultFps || '',
+        default_middle_frame_reference: item.defaultMiddleFrameReference || '',
+        default_middle_frame_asset_reference: item.defaultMiddleFrameAssetReference || '',
+        default_middle_frame_reference_hint: item.defaultMiddleFrameReferenceHint || '',
+        default_last_frame_reference: item.defaultLastFrameReference || '',
+        default_last_frame_asset_reference: item.defaultLastFrameAssetReference || '',
+        default_last_frame_reference_hint: item.defaultLastFrameReferenceHint || '',
+        default_workflow_mode: item.defaultWorkflowMode || '',
         default_image_task_type: item.defaultImageTaskType || '',
         default_prompt: item.defaultPrompt || '',
         default_negative: item.defaultNegative || '',
@@ -4573,6 +5238,7 @@ INDEX_HTML = r"""<!doctype html>
         els.inheritMode,
         els.useKnowledge,
         els.autoProductionMode,
+        els.comfyDebugGate,
         els.composeTool,
         els.finalVideoName,
         els.comfyApiKey,
@@ -4696,8 +5362,19 @@ INDEX_HTML = r"""<!doctype html>
       const type = candidate.classType.toLowerCase();
       const field = candidate.fieldName.toLowerCase();
       const value = String(candidate.value ?? '').trim();
+      const title = String(candidate.title || '').toLowerCase();
+      const nodeId = String(candidate.nodeId || '');
       if (type.includes('cliptextencode') && field === 'text') {
-        return value ? '{{prompt}}' : '{{negative_prompt}}';
+        const haystack = (title + ' ' + value).toLowerCase();
+        const looksNegative = nodeId === '2612'
+          || title.includes('negative')
+          || haystack.includes('negative prompt')
+          || haystack.includes('bad hands')
+          || haystack.includes('watermark')
+          || haystack.includes('identity drift')
+          || haystack.includes('low quality')
+          || haystack.includes('deformed');
+        return looksNegative || textIndex > 0 ? '{{negative_prompt}}' : '{{prompt}}';
       }
       if (type.includes('loadimage') && field === 'image') return '{{reference_image}}';
       if (field.includes('prompt') && field.includes('negative')) return '{{negative_prompt}}';
@@ -4749,6 +5426,7 @@ INDEX_HTML = r"""<!doctype html>
             id: `${nodeId}.${fieldName}`,
             nodeId: String(nodeId),
             classType: String(node.class_type || ''),
+            title: String(node._meta?.title || node.title || ''),
             fieldName,
             value,
             source: 'fixed',
@@ -5858,6 +6536,24 @@ INDEX_HTML = r"""<!doctype html>
       return Number(summary.awaiting_confirmation_step || summary.blocked_step || summary.resume_step || 0);
     }
 
+    function activeComfyDebugGate(status = selectedTaskStatus) {
+      const debugStatus = status?.comfy_debug && typeof status.comfy_debug === 'object' ? status.comfy_debug : {};
+      return Boolean(debugStatus.enabled && !debugStatus.complete && Number(debugStatus.total || 0) > 0);
+    }
+
+    function selectedTaskState() {
+      return String(
+        selectedTaskSummary?.status
+        || selectedTaskStatus?.state
+        || selectedTaskSummary?.state
+        || ''
+      ).toLowerCase();
+    }
+
+    function selectedTaskIsStopped() {
+      return ['cancelled', 'canceled', 'completed'].includes(selectedTaskState());
+    }
+
     function preferredInitialTaskFile(data) {
       const files = data?.files || [];
       const summary = data?.summary || {};
@@ -5905,21 +6601,26 @@ INDEX_HTML = r"""<!doctype html>
     function renderStepConfirmBar() {
       const stepNo = awaitingConfirmationStep();
       const stepFile = stepOutputFileForStep(stepNo);
-      const shouldShow = Boolean(selectedTask && stepNo && stepFile);
+      const shouldShow = Boolean(selectedTask && stepNo);
       els.stepConfirmBar.hidden = !shouldShow;
       if (!shouldShow) {
         els.confirmStepContinueBtn.disabled = true;
         els.confirmStepRerunBtn.disabled = true;
         return;
       }
-      els.stepConfirmTitle.textContent = `${stepFileLabel(stepFile)} 已完成，等待确认`;
-      els.stepConfirmHint.textContent = selectedFile === stepFile
-        ? '请检查下方输出，确认无误后继续下一步。'
-        : '已自动定位到当前步骤输出；请检查后继续。';
+      els.stepConfirmTitle.textContent = `${stepFile ? stepFileLabel(stepFile) : `第 ${stepNo} 步`} 已完成，等待确认`;
+      const comfyGateActive = activeComfyDebugGate();
+      els.stepConfirmHint.textContent = comfyGateActive
+        ? '当前停在 ComfyUI 调试门禁。请先在下方“ComfyUI 调试队列”按顺序运行并确认所有组，完成后再继续主流程。'
+        : stepFile && selectedFile === stepFile
+          ? '请检查下方输出，确认无误后继续下一步。'
+          : stepFile
+            ? '当前任务正在等待确认；可先打开对应步骤输出检查，也可以直接确认继续。'
+            : '当前任务正在等待确认，但暂未定位到步骤输出文件；可刷新任务输出或直接确认继续。';
       els.confirmStepContinueBtn.textContent = els.workflowAdvanceMode.value === 'auto'
         ? '确认并自动跑完后续步骤'
         : '确认并继续下一步';
-      els.confirmStepContinueBtn.disabled = Boolean(currentRunId);
+      els.confirmStepContinueBtn.disabled = Boolean(currentRunId) || comfyGateActive;
       els.confirmStepRerunBtn.disabled = Boolean(currentRunId);
     }
 
@@ -5931,6 +6632,7 @@ INDEX_HTML = r"""<!doctype html>
         workflow: status.workflow || {},
         steps: Array.isArray(status.steps) ? status.steps : [],
         production: status.production || { jobs: data?.production_jobs || [] },
+        comfy_debug: status.comfy_debug || data?.comfy_debug || {},
         assets: status.assets || data?.assets || {},
         allowed_actions: Array.isArray(status.allowed_actions) ? status.allowed_actions : (data?.allowed_actions || []),
         diagnostics: Array.isArray(status.diagnostics) ? status.diagnostics : [],
@@ -5942,6 +6644,7 @@ INDEX_HTML = r"""<!doctype html>
       els.outputSummaryGrid.innerHTML = '';
       if (!data) {
         renderProductionJobs([]);
+        renderTaskComfyDebugPanel({});
         els.stepOutputMeta.textContent = '0 个步骤';
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
         els.assetOutputMeta.textContent = '未生成';
@@ -5971,6 +6674,7 @@ INDEX_HTML = r"""<!doctype html>
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
       const videoFile = preferredVideoFile(files);
       renderProductionJobs(status.production?.jobs || data.production_jobs || [], status.diagnostics || []);
+      renderTaskComfyDebugPanel(status.comfy_debug || {});
       renderVideoPreview(data.name, files);
 
       els.stepOutputMeta.textContent = `${visibleStepFiles.length} 个步骤`;
@@ -6075,6 +6779,142 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function renderTaskComfyDebugPanel(debugStatus) {
+      const status = debugStatus && typeof debugStatus === 'object' ? debugStatus : {};
+      const items = Array.isArray(status.items) ? status.items : [];
+      const enabled = Boolean(status.enabled || items.length);
+      const taskStopped = selectedTaskIsStopped();
+      els.taskComfyDebugPanel.hidden = !enabled;
+      els.taskComfyDebugList.innerHTML = '';
+      els.taskComfyDebugList.classList.toggle('task-comfy-debug-list', enabled);
+      if (!enabled) {
+        els.taskComfyDebugMeta.textContent = '未启用';
+        return;
+      }
+      const approved = Number(status.approved || 0);
+      const total = Number(status.total || items.length || 0);
+      const stageLabel = status.stage === 'image' ? '生图阶段' : status.stage === 'video' ? '视频阶段' : '完整队列';
+      els.taskComfyDebugMeta.textContent = total ? `${stageLabel} · ${approved}/${total} 已确认` : '等待生成 ComfyUI 参数包';
+      if (!items.length) {
+        els.taskComfyDebugList.innerHTML = '<div class="muted small">当前任务还没有可调试的 ComfyUI 队列。先运行到 06/07 视觉物料步骤。</div>';
+        return;
+      }
+      const currentId = status.current_item_id || '';
+      for (const item of items) {
+        const row = document.createElement('div');
+        row.className = 'task-comfy-debug-item';
+        if (item.id === currentId) row.classList.add('active');
+        if (item.status === 'approved') row.classList.add('is-approved');
+        const left = document.createElement('div');
+        left.className = 'task-comfy-debug-main';
+        const title = document.createElement('strong');
+        title.className = 'task-comfy-debug-title';
+        title.textContent = `${String(item.order || item.index || '').padStart(2, '0')} · ${item.workflow_name || item.workflow_id || 'ComfyUI'}`;
+        const detail = document.createElement('div');
+        detail.className = 'muted small';
+        const itemStage = item.stage === 'image' ? '图片' : item.stage === 'video' ? '视频' : item.source || '';
+        const itemMode = item.workflow_mode || item.asset_tag || 'default';
+        const fileCount = Number(item.file_count || (Array.isArray(item.files) ? item.files.length : 0));
+        const groupProgress = item.group ? ` · ${Number(item.completed_count || 0)}/${Number(item.child_count || 0)} 项` : '';
+        const itemError = item.error ? ` · ${item.error}` : '';
+        detail.textContent = `${itemStage} · ${itemMode} · ${productionStatusLabel(item.status || 'pending')}${groupProgress}${fileCount ? ` · ${fileCount} 个素材` : ''}${itemError}`;
+        left.appendChild(title);
+        left.appendChild(detail);
+        if (item.group) {
+          const totalChildren = Number(item.child_count || 0);
+          const completedChildren = Number(item.completed_count || 0);
+          const percent = totalChildren ? Math.max(0, Math.min(100, Math.round((completedChildren / totalChildren) * 100))) : 0;
+          const progress = document.createElement('div');
+          progress.className = 'task-comfy-debug-progress';
+          progress.setAttribute('aria-label', `调试进度 ${completedChildren}/${totalChildren}`);
+          const bar = document.createElement('span');
+          bar.style.setProperty('--task-comfy-debug-progress', `${percent}%`);
+          progress.appendChild(bar);
+          left.appendChild(progress);
+        }
+        const actions = document.createElement('div');
+        actions.className = 'task-comfy-debug-actions';
+        const runBtn = document.createElement('button');
+        runBtn.type = 'button';
+        runBtn.className = 'secondary small';
+        const itemStatus = String(item.status || '').toLowerCase();
+        const canRunOutOfTurn = ['failed', 'completed', 'success', 'approved'].includes(itemStatus);
+        const debugButtonLocked = Boolean(currentRunId && ['queued', 'running'].includes(currentRunStatus));
+        runBtn.textContent = itemStatus === 'running' ? '运行中' : (canRunOutOfTurn ? '重新运行本组' : '运行当前组');
+        runBtn.disabled = taskStopped || debugButtonLocked || itemStatus === 'running' || (item.id !== currentId && !canRunOutOfTurn);
+        runBtn.onclick = () => runTaskComfyDebugItem(item.id);
+        actions.appendChild(runBtn);
+        const approveBtn = document.createElement('button');
+        approveBtn.type = 'button';
+        approveBtn.className = 'primary small';
+        approveBtn.textContent = itemStatus === 'approved' ? '已满意' : '满意，下一组';
+        approveBtn.disabled = taskStopped || debugButtonLocked || item.id !== currentId || !['completed', 'success'].includes(itemStatus);
+        approveBtn.onclick = () => approveTaskComfyDebugItem(item.id);
+        actions.appendChild(approveBtn);
+        row.appendChild(left);
+        row.appendChild(actions);
+        els.taskComfyDebugList.appendChild(row);
+      }
+    }
+
+    async function runTaskComfyDebugItem(itemId) {
+      if (!selectedTask || !itemId) return;
+      if (selectedTaskIsStopped()) {
+        setStatus('任务已终止或完成，请先点击继续任务后再操作 ComfyUI 调试队列。', true);
+        return;
+      }
+      const { productionConfig } = collectProductionConfig();
+      try {
+        const job = await api('/api/task-comfy-debug-run', {
+          method: 'POST',
+          body: JSON.stringify({
+            task: selectedTask,
+            item_id: itemId,
+            api_key: els.comfyApiKey.value.trim(),
+            base_url: els.comfyBaseUrl.value.trim(),
+            workflow_library: getComfyWorkflowLibraryPayload(),
+            production_config: productionConfig,
+          }),
+        });
+        setStatus(`ComfyUI 调试已启动：${job.run_id || ''}`);
+        if (job.run_id) pollComfyDebugRunForTask(job.run_id);
+        await refreshSelectedTaskDetail({ openMissingFile: false });
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
+    async function pollComfyDebugRunForTask(runId) {
+      if (!runId) return;
+      try {
+        const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
+        if (selectedTask) await refreshSelectedTaskDetail({ openMissingFile: false });
+        if (['queued', 'running'].includes(job.status)) {
+          setTimeout(() => pollComfyDebugRunForTask(runId), 2000);
+        }
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
+    async function approveTaskComfyDebugItem(itemId) {
+      if (!selectedTask || !itemId) return;
+      if (selectedTaskIsStopped()) {
+        setStatus('任务已终止或完成，请先点击继续任务后再确认 ComfyUI 调试队列。', true);
+        return;
+      }
+      try {
+        await api('/api/task-comfy-debug-confirm', {
+          method: 'POST',
+          body: JSON.stringify({ task: selectedTask, item_id: itemId }),
+        });
+        await refreshSelectedTaskDetail({ openMissingFile: false });
+        setStatus('已确认当前 ComfyUI 调试项，可以继续下一项。');
+      } catch (err) {
+        setStatus(err.message, true);
+      }
+    }
+
     function productionRetryAction(jobId) {
       if (jobId === 'material') return '重试素材';
       if (jobId === 'tts') return '重试配音';
@@ -6089,6 +6929,8 @@ INDEX_HTML = r"""<!doctype html>
       if (text === 'running') return '运行中';
       if (text === 'completed') return '已完成';
       if (text === 'awaiting_confirmation') return '等待确认';
+      if (text === 'awaiting_comfyui_debug') return '等待调试';
+      if (text === 'approved') return '已满意';
       if (text === 'blocked') return '已阻塞';
       if (text === 'success' || text === 'final_video_generated') return '成功';
       if (text === 'skipped') return '已跳过';
@@ -6287,17 +7129,128 @@ INDEX_HTML = r"""<!doctype html>
         select.innerHTML = '';
         const all = document.createElement('option');
         all.value = '';
-        all.textContent = '全部素材';
+        all.textContent = select === els.assetLibraryTagFilter ? '全部标签' : '全部素材';
         select.appendChild(all);
+        const baseItems = select === els.assetLibraryTagFilter
+          ? assetLibraryItems.filter(item => assetMatchesLibrarySection(item))
+          : assetLibraryItems;
         ASSET_CATEGORY_TAGS.forEach(tag => {
-          const count = assetLibraryItems.filter(item => assetMatchesTag(item, tag.value)).length;
+          const count = baseItems.filter(item => assetMatchesTag(item, tag.value)).length;
+          if (select === els.assetLibraryTagFilter && !count) return;
           const option = document.createElement('option');
           option.value = tag.value;
           option.textContent = count ? `${tag.label} (${count})` : tag.label;
           select.appendChild(option);
         });
-        if ([...select.options].some(option => option.value === current)) select.value = current;
+        select.value = [...select.options].some(option => option.value === current) ? current : '';
       });
+    }
+
+    function assetLibrarySectionDefinition(section = assetLibrarySection) {
+      return ASSET_LIBRARY_SECTIONS.find(item => item.value === section) || ASSET_LIBRARY_SECTIONS[0];
+    }
+
+    function assetLibrarySectionForItem(item) {
+      const tags = normalizeAssetTags(item?.tags);
+      if (tags.some(tag => assetLibrarySectionDefinition('character').tags.includes(tag))) return 'character';
+      if (tags.some(tag => assetLibrarySectionDefinition('product').tags.includes(tag))) return 'product';
+      if (tags.some(tag => assetLibrarySectionDefinition('reference').tags.includes(tag))) return 'reference';
+      return 'material';
+    }
+
+    function assetMatchesLibrarySection(item, section = assetLibrarySection) {
+      if (!section || section === 'all') return true;
+      return assetLibrarySectionForItem(item) === section;
+    }
+
+    function assetLibraryCategoryOptions() {
+      return [
+        { value: 'scene', label: '素材 / 场景' },
+        { value: 'broll', label: '素材 / B-roll' },
+        { value: 'cover', label: '素材 / 封面' },
+        { value: 'person', label: '角色 / 人物' },
+        { value: 'character_base', label: '角色 / 基础图' },
+        { value: 'character_turnaround', label: '角色 / 多视图' },
+        { value: 'product', label: '商品 / 产品' },
+        { value: 'product_base', label: '商品 / 基础图' },
+        { value: 'product_turnaround', label: '商品 / 多视图' },
+        { value: 'style_reference', label: '参考 / 风格' },
+        { value: 'style', label: '参考 / 风格旧标签' },
+        { value: 'keyframe', label: '参考 / 关键帧' },
+        { value: 'reference', label: '参考 / 通用参考' },
+        { value: 'i2v_first_frame', label: '参考 / 首帧视频' },
+        { value: 'i2v_first_last_frame', label: '参考 / 首尾帧视频' },
+        { value: 'i2v_first_middle_last_frame', label: '参考 / 首中尾帧视频' },
+        { value: 'live_to_anime', label: '参考 / 真人转动漫' },
+        { value: 'motion_transfer', label: '参考 / 动作迁移' },
+        { value: 'talking_image', label: '参考 / 图片说话' },
+      ];
+    }
+
+    function defaultAssetCategoryForSection(section = assetLibrarySection) {
+      if (section === 'character') return 'person';
+      if (section === 'product') return 'product';
+      if (section === 'reference') return 'reference';
+      return 'scene';
+    }
+
+    function renderAssetLibraryCategorySelect(select, current = '') {
+      if (!select) return;
+      const value = current || defaultAssetCategoryForSection();
+      select.innerHTML = '';
+      assetLibraryCategoryOptions().forEach(item => {
+        const option = document.createElement('option');
+        option.value = item.value;
+        option.textContent = item.label;
+        select.appendChild(option);
+      });
+      if ([...select.options].some(option => option.value === value)) {
+        select.value = value;
+      }
+    }
+
+    function formatAssetLibraryTime(value) {
+      const number = Number(value || 0);
+      if (!Number.isFinite(number) || number <= 0) return '未知时间';
+      try {
+        return new Date(number * 1000).toLocaleString();
+      } catch {
+        return '未知时间';
+      }
+    }
+
+    function assetLibraryKindLabel(item) {
+      return (item?.kind === 'video' || isVideoFile(item?.file || '')) ? '视频' : '图片';
+    }
+
+    function assetLibrarySelectedItem() {
+      return assetLibraryItems.find(item => String(item.id || '') === String(selectedAssetLibraryId || '')) || null;
+    }
+
+    function assetLibraryFilteredItems() {
+      const selectedTag = els.assetLibraryTagFilter?.value || '';
+      return assetLibraryItems.filter(item => assetMatchesLibrarySection(item) && assetMatchesTag(item, selectedTag));
+    }
+
+    function assetLibraryAddLabel() {
+      return assetLibrarySectionDefinition().addLabel || '新增资产';
+    }
+
+    function setAssetLibraryDetailDirty(dirty) {
+      assetLibraryDetailDirty = Boolean(dirty);
+      if (els.assetLibraryDetailSaveBtn) {
+        els.assetLibraryDetailSaveBtn.disabled = !assetLibraryDetailDirty || !selectedAssetLibraryId;
+      }
+      if (els.assetLibraryDetailMeta) {
+        const item = assetLibrarySelectedItem();
+        const base = item ? `${assetLibraryKindLabel(item)} · ${assetTagLabel(assetPrimaryCategory(item)) || '未分类'} · ${formatAssetLibraryTime(item.updated_at || item.created_at || item.mtime)}` : '';
+        els.assetLibraryDetailMeta.textContent = assetLibraryDetailDirty ? `${base} · 有未保存修改` : base;
+      }
+    }
+
+    function confirmDiscardAssetLibraryDetailChanges() {
+      if (!assetLibraryDetailDirty) return true;
+      return window.confirm('资产详情有未保存修改，确定放弃这些修改吗？');
     }
 
     function comfyImageTaskDefinition(value) {
@@ -6306,17 +7259,109 @@ INDEX_HTML = r"""<!doctype html>
 
     function imageTaskDefinitionForWorkflow(workflow) {
       const savedConfig = workflow ? getComfyWorkflowLibraryItemById(workflow.id) : null;
-      const mode = workflow?.default_image_task_type
+      const selectedMode = els.comfyDebugWorkflowMode?.value || '';
+      const mode = selectedMode
+        || workflow?.default_image_task_type
         || savedConfig?.defaultImageTaskType
         || workflow?.default_task_type
         || 'character_generation';
       return comfyImageTaskDefinition(mode);
     }
 
+    function normalizeComfyDebugWorkflowDefinition(workflow) {
+      const item = { ...(workflow || {}) };
+      if (item.id === '04_keyframe') {
+        item.default_task_type = 'keyframe';
+        item.default_control_mode = 'none';
+        item.default_image_task_type = 'keyframe';
+        item.asset_tag = 'keyframe';
+        item.modes = [{
+          value: 'keyframe',
+          label: '关键帧',
+          asset_tag: 'keyframe',
+          task_type: 'keyframe',
+          control_mode: 'none',
+          requires_reference: false,
+        }];
+      }
+      return item;
+    }
+
+    function normalizeComfyDebugWorkflowSavedConfig(item, workflow) {
+      if (!item || !workflow) return;
+      if (workflow.id === '04_keyframe') {
+        item.defaultWorkflowMode = 'keyframe';
+        item.defaultImageTaskType = 'keyframe';
+        item.defaultReference = '';
+        item.defaultAssetReference = '';
+        if (String(item.defaultReferenceHint || '').includes('需要参考')) {
+          item.defaultReferenceHint = '';
+        }
+      } else if (!item.defaultWorkflowMode && Array.isArray(workflow.modes) && workflow.modes.length === 1) {
+        item.defaultWorkflowMode = workflow.modes[0].value || '';
+      }
+      if (!item.defaultImageTaskType) {
+        item.defaultImageTaskType = workflow.default_image_task_type || workflow.default_task_type || '';
+      }
+    }
+
+    function normalizeComfyDebugWorkflowState(state, workflow) {
+      const next = { ...(state || {}) };
+      if (workflow?.id === '04_keyframe') {
+        next.workflowMode = 'keyframe';
+        next.reference = '';
+        next.assetReference = '';
+        if (String(next.referenceHint || '').includes('需要参考')) {
+          next.referenceHint = '';
+        }
+      }
+      return next;
+    }
+
+    function workflowModesForWorkflow(workflow) {
+      return Array.isArray(workflow?.modes) && workflow.modes.length ? workflow.modes : [];
+    }
+
+    function selectedWorkflowModeDefinition(workflow = activeComfyDebugWorkflow()) {
+      const modes = workflowModesForWorkflow(workflow);
+      if (!modes.length) return null;
+      const selected = els.comfyDebugWorkflowMode?.value || modes[0].value;
+      return modes.find(item => item.value === selected) || modes[0];
+    }
+
+    function renderComfyWorkflowModeOptions(workflow = activeComfyDebugWorkflow()) {
+      if (!els.comfyDebugWorkflowMode) return;
+      const modes = workflowModesForWorkflow(workflow);
+      els.comfyDebugWorkflowMode.innerHTML = '';
+      if (!modes.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '当前工作流无子类型';
+        els.comfyDebugWorkflowMode.appendChild(option);
+        els.comfyDebugWorkflowMode.disabled = true;
+        return;
+      }
+      const current = els.comfyDebugWorkflowMode.value || modes[0].value;
+      modes.forEach(mode => {
+        const option = document.createElement('option');
+        option.value = mode.value;
+        option.textContent = mode.requires_reference ? mode.label + '（需参考）' : mode.label;
+        els.comfyDebugWorkflowMode.appendChild(option);
+      });
+      setIfExists(els.comfyDebugWorkflowMode, current);
+      els.comfyDebugWorkflowMode.disabled = modes.length <= 1;
+    }
+
     function updateComfyImageTaskHint() {
       const selected = activeComfyDebugWorkflow();
       const isImageWorkflow = !selected || selected.type === 'image';
-      const def = imageTaskDefinitionForWorkflow(selected);
+      const modeDef = selectedWorkflowModeDefinition(selected);
+      const def = modeDef ? {
+        label: modeDef.label,
+        taskType: modeDef.task_type,
+        controlMode: modeDef.control_mode,
+        requiresReference: Boolean(modeDef.requires_reference),
+      } : imageTaskDefinitionForWorkflow(selected);
       if (els.comfyDebugReferenceHint && isImageWorkflow) {
         const current = els.comfyDebugReferenceHint.textContent || '';
         const modeHint = def.label + '：task_type=' + def.taskType + '，control_mode=' + def.controlMode + (def.requiresReference ? '，需要参考图' : '，可不传参考图');
@@ -6326,14 +7371,49 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    async function updateAssetMetadata(assetId, tags, note) {
+    function updateComfyDebugMediaFields() {
+      const selected = activeComfyDebugWorkflow();
+      const isVideoWorkflow = selected?.type === 'video';
+      if (els.comfyDebugDurationField) els.comfyDebugDurationField.style.display = isVideoWorkflow ? '' : 'none';
+      if (els.comfyDebugFpsField) els.comfyDebugFpsField.style.display = isVideoWorkflow ? '' : 'none';
+      if (!isVideoWorkflow) {
+        if (els.comfyDebugDuration) els.comfyDebugDuration.value = '';
+        if (els.comfyDebugFps) els.comfyDebugFps.value = '';
+      }
+      updateComfyDebugFrameCountHint();
+      updateComfyDebugReferencePreviews();
+    }
+
+    function computedComfyDebugFrameCount() {
+      const duration = Number(String(els.comfyDebugDuration?.value || '').trim());
+      const fps = Number(String(els.comfyDebugFps?.value || '').trim());
+      if (!Number.isFinite(duration) || !Number.isFinite(fps) || duration <= 0 || fps <= 0) return '';
+      return String(Math.max(1, Math.round(duration * fps)));
+    }
+
+    function updateComfyDebugFrameCountHint() {
+      if (!els.comfyDebugFrameCountHint) return;
+      const selected = activeComfyDebugWorkflow();
+      if (selected?.type !== 'video') {
+        els.comfyDebugFrameCountHint.textContent = '';
+        return;
+      }
+      const frameCount = computedComfyDebugFrameCount();
+      const duration = String(els.comfyDebugDuration?.value || '').trim();
+      const fps = String(els.comfyDebugFps?.value || '').trim();
+      els.comfyDebugFrameCountHint.textContent = frameCount
+        ? `将提交：${duration} 秒 · ${fps} fps · ${frameCount} 帧（nodeInfo 用 {{frame_count}} 才会生效）`
+        : '请输入秒数和 FPS；帧数会自动按 秒数 × FPS 计算。';
+    }
+
+    async function updateAssetMetadata(assetId, tags, note, name = '') {
       const id = String(assetId || '').trim();
       if (!id) return;
       try {
         const result = await api('/api/update-asset-metadata', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id, tags: normalizeAssetTags(tags), note: String(note || '').trim() }),
+          body: JSON.stringify({ id, tags: normalizeAssetTags(tags), note: String(note || '').trim(), name: String(name || '').trim() }),
         });
         const updated = result.asset || null;
         if (updated) {
@@ -6342,9 +7422,10 @@ INDEX_HTML = r"""<!doctype html>
         renderAssetTagFilters();
         renderAssetLibrary();
         renderComfyDebugAssetReferenceOptions();
-        setStatus('素材标签已保存', false);
+        setStatus('素材信息已保存', false);
       } catch (err) {
-        setStatus(err.message || '素材标签保存失败', true);
+        setStatus(err.message || '素材信息保存失败', true);
+        throw err;
       }
     }
 
@@ -6434,41 +7515,242 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyDebugReferenceHint.textContent = hint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。';
       }
       updateComfyImageTaskHint();
+      updateComfyDebugReferencePreviews();
+      updateComfyDebugUploadStates();
+    }
+
+    function setComfyDebugLastFrameReference(value = '', hint = '') {
+      if (els.comfyDebugLastFrameReference) els.comfyDebugLastFrameReference.value = value || '';
+      if (els.comfyDebugLastFrameReferenceHint) {
+        els.comfyDebugLastFrameReferenceHint.textContent = hint || '首尾帧视频需要第二张尾帧图。';
+      }
+      updateComfyDebugReferencePreviews();
+      updateComfyDebugUploadStates();
+    }
+
+    function setComfyDebugMiddleFrameReference(value = '', hint = '') {
+      if (els.comfyDebugMiddleFrameReference) els.comfyDebugMiddleFrameReference.value = value || '';
+      if (els.comfyDebugMiddleFrameReferenceHint) {
+        els.comfyDebugMiddleFrameReferenceHint.textContent = hint || '首中尾帧视频需要第二张中间帧图。';
+      }
+      updateComfyDebugReferencePreviews();
+      updateComfyDebugUploadStates();
+    }
+
+    function isFirstLastFrameMode() {
+      const workflow = activeComfyDebugWorkflow();
+      const mode = selectedWorkflowModeDefinition(workflow)?.value || els.comfyDebugWorkflowMode?.value || workflow?.id || '';
+      return String(mode).includes('first_last') || String(mode).includes('first_middle_last') || String(workflow?.id || '').includes('first_last') || String(workflow?.id || '').includes('first_middle_last');
+    }
+
+    function comfyDebugNodeInfoText() {
+      return String(els.comfyDebugNodeInfoList?.value || '').trim();
+    }
+
+    function comfyDebugReferenceSupport() {
+      const text = comfyDebugNodeInfoText();
+      const hasReference = /\{\{\s*(reference_image|reference_image_[1-4]|has_reference_image|has_reference_image_[1-4])\s*\}\}/i.test(text);
+      const hasMiddleFrame = /\{\{\s*(middle_frame_image|mid_frame_image|has_middle_frame_image)\s*\}\}/i.test(text);
+      const hasLastFrame = /\{\{\s*(last_frame_image|end_frame_image|has_last_frame_image)\s*\}\}/i.test(text);
+      return { hasReference, hasMiddleFrame, hasLastFrame };
+    }
+
+    function referencePreviewUrl(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const normalized = raw.replace(/\\/g, '/');
+      const libraryPrefix = 'my_workspace/my_asset_library/';
+      const libraryFile = normalized.startsWith(libraryPrefix) ? normalized.slice(libraryPrefix.length) : '';
+      if (libraryFile) {
+        const asset = assetLibraryItems.find(item => String(item.file || '').replace(/\\/g, '/') === libraryFile);
+        if (asset?.id) return assetLibraryMediaUrl(asset.id);
+      }
+      const workspaceReferencePrefix = 'my_workspace/my_reference_images/';
+      if (normalized.startsWith('my_reference_images/') || normalized.startsWith(workspaceReferencePrefix)) {
+        const referenceFile = normalized.startsWith(workspaceReferencePrefix)
+          ? normalized.slice('my_workspace/'.length)
+          : normalized;
+        return `/api/reference-media?file=${encodeURIComponent(referenceFile)}`;
+      }
+      return '';
+    }
+
+    function compactReferenceName(value) {
+      const text = String(value || '').replace(/\\/g, '/').trim();
+      return text.split('/').filter(Boolean).pop() || text || '已选择文件';
+    }
+
+    function setComfyUploadState(fileLabel, stateBox, stateName, value, prefix = '已选择') {
+      const hasValue = Boolean(String(value || '').trim());
+      if (fileLabel) fileLabel.hidden = hasValue;
+      if (stateBox) stateBox.hidden = !hasValue;
+      if (stateName) stateName.textContent = hasValue ? `${prefix}：${compactReferenceName(value)}` : '';
+    }
+
+    function updateComfyDebugUploadStates() {
+      setComfyUploadState(
+        els.comfyDebugReferenceFileLabel,
+        els.comfyDebugReferenceUploadState,
+        els.comfyDebugReferenceUploadName,
+        els.comfyDebugReference?.value || '',
+        '已选择'
+      );
+      setComfyUploadState(
+        els.comfyDebugMiddleFrameReferenceFileLabel,
+        els.comfyDebugMiddleFrameUploadState,
+        els.comfyDebugMiddleFrameUploadName,
+        els.comfyDebugMiddleFrameReference?.value || '',
+        '已选择中帧'
+      );
+      setComfyUploadState(
+        els.comfyDebugLastFrameReferenceFileLabel,
+        els.comfyDebugLastFrameUploadState,
+        els.comfyDebugLastFrameUploadName,
+        els.comfyDebugLastFrameReference?.value || '',
+        '已选择尾帧'
+      );
+    }
+
+    function renderComfyReferencePreview(target, value, emptyText) {
+      if (!target) return;
+      const raw = String(value || '').trim();
+      const url = referencePreviewUrl(raw);
+      const kind = raw && url && isVideoFile(raw) ? 'video' : raw && url ? 'image' : 'empty';
+      if (target.dataset.previewRaw === raw && target.dataset.previewUrl === url && target.dataset.previewKind === kind) {
+        return;
+      }
+      target.dataset.previewRaw = raw;
+      target.dataset.previewUrl = url;
+      target.dataset.previewKind = kind;
+      target.innerHTML = '';
+      if (!raw || !url) {
+        const empty = document.createElement('span');
+        empty.className = 'empty';
+        empty.textContent = raw ? '已选择，暂无缩略图预览' : emptyText;
+        target.appendChild(empty);
+        return;
+      }
+      if (isVideoFile(raw)) {
+        const video = document.createElement('video');
+        video.src = url;
+        video.controls = false;
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        target.appendChild(video);
+      } else {
+        const img = document.createElement('img');
+        img.src = url;
+        img.alt = raw.split('/').pop() || 'reference';
+        img.loading = 'lazy';
+        img.decoding = 'async';
+        target.appendChild(img);
+      }
+    }
+
+    function updateComfyDebugReferencePreviews() {
+      const referenceValue = els.comfyDebugReference?.value || '';
+      const middleFrameValue = els.comfyDebugMiddleFrameReference?.value || '';
+      const lastFrameValue = els.comfyDebugLastFrameReference?.value || '';
+      const support = comfyDebugReferenceSupport();
+      const showReference = support.hasReference;
+      const showMiddleFrame = support.hasMiddleFrame;
+      const showLastFrame = support.hasLastFrame;
+      if (els.comfyDebugStartFrameCard) els.comfyDebugStartFrameCard.hidden = !showReference;
+      if (els.comfyDebugReferenceGrid) els.comfyDebugReferenceGrid.hidden = !(showReference || showMiddleFrame || showLastFrame);
+      if (els.comfyDebugMiddleFrameCard) els.comfyDebugMiddleFrameCard.hidden = !showMiddleFrame;
+      if (els.comfyDebugLastFrameCard) els.comfyDebugLastFrameCard.hidden = !showLastFrame;
+      renderComfyReferencePreview(els.comfyDebugReferencePreview, referenceValue, '首帧参考图');
+      renderComfyReferencePreview(els.comfyDebugMiddleFramePreview, middleFrameValue, '中帧参考图');
+      renderComfyReferencePreview(els.comfyDebugLastFramePreview, lastFrameValue, '尾帧参考图');
+      if (els.comfyDebugReferencePreviewMeta) {
+        els.comfyDebugReferencePreviewMeta.textContent = referenceValue ? (referenceValue.split('/').pop() || '???') : '???';
+      }
+      if (!showMiddleFrame && middleFrameValue && els.comfyDebugMiddleFrameReference) {
+        els.comfyDebugMiddleFrameReference.value = '';
+      }
+      if (!showLastFrame && lastFrameValue && els.comfyDebugLastFrameReference) {
+        els.comfyDebugLastFrameReference.value = '';
+      }
+      updateComfyDebugUploadStates();
     }
 
     function renderComfyDebugAssetReferenceOptions() {
       if (!els.comfyDebugAssetReference) return;
       const currentValue = els.comfyDebugAssetReference.value;
+      const currentMiddleFrameValue = els.comfyDebugMiddleFrameAssetReference?.value || '';
+      const currentLastFrameValue = els.comfyDebugLastFrameAssetReference?.value || '';
       const selectedTag = els.comfyDebugAssetTagFilter?.value || '';
       const referenceAssets = assetLibraryItems.filter(item => {
         const file = String(item.file || '');
         const kind = String(item.kind || '').toLowerCase();
         return file
-          && (kind === 'image' || kind === 'video' || isImageFile(file) || isVideoFile(file))
+          && (kind === 'image' || isImageFile(file))
           && assetMatchesTag(item, selectedTag);
       });
       els.comfyDebugAssetReference.innerHTML = '';
       const defaultOption = document.createElement('option');
       defaultOption.value = '';
-      defaultOption.textContent = referenceAssets.length ? '不使用素材库参考' : '素材库暂无可选图片/视频';
+      defaultOption.textContent = referenceAssets.length ? '不使用素材库参考' : '素材库暂无可选图片';
       els.comfyDebugAssetReference.appendChild(defaultOption);
       referenceAssets.forEach(item => {
         const file = String(item.file || '');
         const option = document.createElement('option');
         option.value = file.startsWith('my_workspace/') ? file : `my_workspace/my_asset_library/${file}`;
-        const kind = (item.kind || (isImageFile(file) ? 'image' : 'video')) === 'video' ? '视频' : '图片';
         const tagText = normalizeAssetTags(item.tags).map(assetTagLabel).join('/');
-        option.textContent = `${kind} · ${item.name || assetFileLabel(file)}${tagText ? ` · ${tagText}` : ''}`;
+        option.textContent = `图片 · ${item.name || assetFileLabel(file)}${tagText ? ` · ${tagText}` : ''}`;
         els.comfyDebugAssetReference.appendChild(option);
       });
       if ([...els.comfyDebugAssetReference.options].some(option => option.value === currentValue)) {
         els.comfyDebugAssetReference.value = currentValue;
       }
+      if (els.comfyDebugMiddleFrameAssetReference) {
+        els.comfyDebugMiddleFrameAssetReference.innerHTML = '';
+        const middleDefault = document.createElement('option');
+        middleDefault.value = '';
+        middleDefault.textContent = referenceAssets.length ? '选择中帧素材' : '素材库暂无可选图片';
+        els.comfyDebugMiddleFrameAssetReference.appendChild(middleDefault);
+        referenceAssets.filter(item => isImageFile(item.file || '')).forEach(item => {
+          const file = String(item.file || '');
+          const option = document.createElement('option');
+          option.value = file.startsWith('my_workspace/') ? file : `my_workspace/my_asset_library/${file}`;
+          const tagText = normalizeAssetTags(item.tags).map(assetTagLabel).join('/');
+          option.textContent = `${item.name || assetFileLabel(file)}${tagText ? ` ? ${tagText}` : ''}`;
+          els.comfyDebugMiddleFrameAssetReference.appendChild(option);
+        });
+        if ([...els.comfyDebugMiddleFrameAssetReference.options].some(option => option.value === currentMiddleFrameValue)) {
+          els.comfyDebugMiddleFrameAssetReference.value = currentMiddleFrameValue;
+        }
+      }
+      if (els.comfyDebugLastFrameAssetReference) {
+        els.comfyDebugLastFrameAssetReference.innerHTML = '';
+        const lastDefault = document.createElement('option');
+        lastDefault.value = '';
+        lastDefault.textContent = referenceAssets.length ? '不使用尾帧素材' : '素材库暂无可选图片';
+        els.comfyDebugLastFrameAssetReference.appendChild(lastDefault);
+        referenceAssets.filter(item => isImageFile(item.file || '')).forEach(item => {
+          const file = String(item.file || '');
+          const option = document.createElement('option');
+          option.value = file.startsWith('my_workspace/') ? file : `my_workspace/my_asset_library/${file}`;
+          const tagText = normalizeAssetTags(item.tags).map(assetTagLabel).join('/');
+          option.textContent = `${item.name || assetFileLabel(file)}${tagText ? ` · ${tagText}` : ''}`;
+          els.comfyDebugLastFrameAssetReference.appendChild(option);
+        });
+        if ([...els.comfyDebugLastFrameAssetReference.options].some(option => option.value === currentLastFrameValue)) {
+          els.comfyDebugLastFrameAssetReference.value = currentLastFrameValue;
+        }
+      }
+      updateComfyDebugReferencePreviews();
     }
 
     async function uploadComfyDebugReferenceFile() {
       const file = els.comfyDebugReferenceFile?.files && els.comfyDebugReferenceFile.files[0];
       if (!file) return;
+      if (!isImageFile(file.name || '') && !String(file.type || '').startsWith('image/')) {
+        if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+        setStatus('参考图只能上传图片文件，不能上传视频。', true);
+        return;
+      }
       try {
         if (els.comfyDebugReferenceHint) els.comfyDebugReferenceHint.textContent = `正在上传：${file.name}`;
         const contentBase64 = await fileToBase64(file);
@@ -6488,6 +7770,67 @@ INDEX_HTML = r"""<!doctype html>
       } catch (err) {
         setComfyDebugReference(els.comfyDebugReference?.value || '', err.message || '参考文件上传失败');
         setStatus(err.message || '参考文件上传失败', true);
+      }
+    }
+
+    async function uploadComfyDebugMiddleFrameReferenceFile() {
+      const file = els.comfyDebugMiddleFrameReferenceFile?.files && els.comfyDebugMiddleFrameReferenceFile.files[0];
+      if (!file) return;
+      if (!isImageFile(file.name || '') && !String(file.type || '').startsWith('image/')) {
+        if (els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
+        setStatus('中帧参考文件必须是图片', true);
+        return;
+      }
+      try {
+        if (els.comfyDebugMiddleFrameReferenceHint) els.comfyDebugMiddleFrameReferenceHint.textContent = `正在上传中帧：${file.name}`;
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/upload-comfy-debug-reference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+          }),
+        });
+        if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
+        setComfyDebugMiddleFrameReference(result.stored_path || '', `已上传中帧：${file.name}`);
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        setStatus(`中帧参考已上传：${result.stored_path}`, false);
+      } catch (err) {
+        setComfyDebugMiddleFrameReference(els.comfyDebugMiddleFrameReference?.value || '', err.message || '中帧上传失败');
+        setStatus(err.message || '中帧上传失败', true);
+      }
+    }
+
+    async function uploadComfyDebugLastFrameReferenceFile() {
+      const file = els.comfyDebugLastFrameReferenceFile?.files && els.comfyDebugLastFrameReferenceFile.files[0];
+      if (!file) return;
+      if (!isImageFile(file.name || '') && !String(file.type || '').startsWith('image/')) {
+        if (els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
+        setStatus('尾帧只能上传图片文件，不能上传视频。', true);
+        return;
+      }
+      try {
+        if (els.comfyDebugLastFrameReferenceHint) els.comfyDebugLastFrameReferenceHint.textContent = `正在上传：${file.name}`;
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/upload-comfy-debug-reference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+          }),
+        });
+        if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
+      if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
+        setComfyDebugLastFrameReference(result.stored_path || '', `已上传尾帧：${file.name}`);
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        setStatus(`已上传尾帧文件：${result.stored_path}`, false);
+      } catch (err) {
+        setComfyDebugLastFrameReference(els.comfyDebugLastFrameReference?.value || '', err.message || '尾帧文件上传失败');
+        setStatus(err.message || '尾帧文件上传失败', true);
       }
     }
 
@@ -6550,16 +7893,10 @@ INDEX_HTML = r"""<!doctype html>
     function renderAssetLibrary() {
       if (!els.assetLibraryGrid) return;
       els.assetLibraryGrid.innerHTML = '';
-      const selectedTag = els.assetLibraryTagFilter?.value || '';
-      const filteredItems = assetLibraryItems.filter(item => assetMatchesTag(item, selectedTag));
-      if (!assetLibraryItems.length) {
-        els.assetLibraryGrid.innerHTML = '<div class="muted small">暂无收藏素材。到“任务输出”的已生成素材里点击“收藏复用”，好图好视频会沉淀到这里。</div>';
-        return;
-      }
-      if (!filteredItems.length) {
-        els.assetLibraryGrid.innerHTML = '<div class="muted small">当前标签下没有素材。</div>';
-        return;
-      }
+      renderAssetLibraryTabs();
+      renderAssetTagFilters();
+      const filteredItems = assetLibraryFilteredItems();
+      els.assetLibraryGrid.appendChild(assetLibraryAddCard());
       const previewItems = filteredItems.map(item => ({
         ...item,
         library: true,
@@ -6567,19 +7904,303 @@ INDEX_HTML = r"""<!doctype html>
         kind: item.kind || (isImageFile(item.file) ? 'image' : 'video'),
       }));
       previewItems.forEach((item, index) => {
-        const card = assetGalleryCard('', item, index, previewItems);
-        appendAssetMetadataEditor(card, item);
-        card.onclick = () => {
-          openAssetLightboxFromItems("", previewItems, index);
-        };
+        const card = assetLibraryCard(item, index, previewItems);
         card.onkeydown = event => {
           if (event.key === 'Enter' || event.key === ' ') {
             event.preventDefault();
-            openAssetLightboxFromItems("", previewItems, index);
+            selectAssetLibraryItem(item.id);
           }
         };
         els.assetLibraryGrid.appendChild(card);
       });
+      if (!assetLibraryItems.length) {
+        const empty = document.createElement('div');
+        empty.className = 'muted small';
+        empty.textContent = '暂无收藏素材。到“任务输出”的已生成素材里点击“收藏复用”，或从这里导入本地图片/视频。';
+        els.assetLibraryGrid.appendChild(empty);
+      } else if (!filteredItems.length) {
+        const empty = document.createElement('div');
+        empty.className = 'muted small';
+        empty.textContent = '当前分类或标签下没有素材。';
+        els.assetLibraryGrid.appendChild(empty);
+      }
+      if (selectedAssetLibraryId && !assetLibraryItems.some(item => String(item.id || '') === String(selectedAssetLibraryId))) {
+        closeAssetLibraryDetail({ force: true });
+      } else if (selectedAssetLibraryId) {
+        renderAssetLibraryDetail(assetLibrarySelectedItem());
+      }
+    }
+
+    function renderAssetLibraryTabs() {
+      const buttons = Array.from(els.assetLibraryTabs?.querySelectorAll('[data-asset-section]') || []);
+      buttons.forEach(button => {
+        const section = button.dataset.assetSection || 'all';
+        const count = section === 'all'
+          ? assetLibraryItems.length
+          : assetLibraryItems.filter(item => assetMatchesLibrarySection(item, section)).length;
+        const label = assetLibrarySectionDefinition(section).label || section;
+        button.textContent = count ? `${label} ${count}` : label;
+        button.classList.toggle('active', section === assetLibrarySection);
+      });
+    }
+
+    function assetLibraryAddCard() {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'asset-library-card asset-library-add';
+      card.onclick = () => openAssetImportModal();
+      const media = document.createElement('span');
+      media.className = 'asset-library-media';
+      const plus = document.createElement('span');
+      plus.className = 'asset-library-plus';
+      plus.textContent = '+';
+      media.appendChild(plus);
+      const title = document.createElement('span');
+      title.className = 'asset-library-card-title';
+      title.textContent = assetLibraryAddLabel();
+      const meta = document.createElement('span');
+      meta.className = 'asset-library-card-meta';
+      meta.textContent = '本地导入 / 跳转生成';
+      card.appendChild(media);
+      card.appendChild(title);
+      card.appendChild(meta);
+      return card;
+    }
+
+    function assetLibraryCard(item, index, previewItems) {
+      const card = document.createElement('div');
+      card.tabIndex = 0;
+      card.role = 'button';
+      card.className = 'asset-library-card';
+      card.classList.toggle('active', String(item.id || '') === String(selectedAssetLibraryId || ''));
+      const media = document.createElement('div');
+      media.className = 'asset-library-media';
+      const previewUrl = assetLibraryMediaUrl(item.id);
+      if (assetLibraryKindLabel(item) === '图片') {
+        const img = document.createElement('img');
+        img.loading = 'lazy';
+        img.alt = item.name || assetFileLabel(item.file);
+        img.src = previewUrl;
+        media.appendChild(img);
+      } else {
+        const video = document.createElement('video');
+        video.muted = true;
+        video.playsInline = true;
+        video.preload = 'metadata';
+        video.src = previewUrl;
+        media.appendChild(video);
+      }
+      const actions = document.createElement('span');
+      actions.className = 'asset-library-card-actions';
+      const preview = document.createElement('button');
+      preview.type = 'button';
+      preview.title = '打开预览';
+      preview.textContent = '⌕';
+      preview.onclick = event => {
+        event.stopPropagation();
+        openAssetLightboxFromItems('', previewItems, index);
+      };
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.title = '删除';
+      remove.textContent = '×';
+      remove.onclick = async event => {
+        event.stopPropagation();
+        await deleteAssetLibraryItem(item);
+      };
+      actions.appendChild(preview);
+      actions.appendChild(remove);
+      const title = document.createElement('span');
+      title.className = 'asset-library-card-title';
+      title.textContent = item.name || assetFileLabel(item.file);
+      const meta = document.createElement('span');
+      meta.className = 'asset-library-card-meta';
+      meta.textContent = `${assetLibraryKindLabel(item)} · ${formatAssetLibraryTime(item.updated_at || item.created_at || item.mtime)}`;
+      const tags = document.createElement('span');
+      tags.className = 'asset-tag-row';
+      normalizeAssetTags(item.tags).slice(0, 3).forEach(tag => {
+        const chip = document.createElement('span');
+        chip.className = 'asset-chip';
+        chip.textContent = assetTagLabel(tag);
+        tags.appendChild(chip);
+      });
+      card.appendChild(media);
+      card.appendChild(actions);
+      card.appendChild(title);
+      card.appendChild(meta);
+      if (tags.children.length) card.appendChild(tags);
+      card.onclick = () => selectAssetLibraryItem(item.id);
+      return card;
+    }
+
+    function selectAssetLibraryItem(assetId) {
+      if (!confirmDiscardAssetLibraryDetailChanges()) return;
+      selectedAssetLibraryId = String(assetId || '');
+      assetLibraryDetailDirty = false;
+      renderAssetLibrary();
+      renderAssetLibraryDetail(assetLibrarySelectedItem());
+    }
+
+    function renderAssetLibraryDetail(item) {
+      if (!els.assetLibraryDetail) return;
+      if (!item) {
+        els.assetLibraryDetail.hidden = true;
+        return;
+      }
+      els.assetLibraryDetail.hidden = false;
+      if (els.assetLibraryDetailPreview) {
+        els.assetLibraryDetailPreview.innerHTML = '';
+        const url = assetLibraryMediaUrl(item.id);
+        if (assetLibraryKindLabel(item) === '图片') {
+          const img = document.createElement('img');
+          img.className = 'asset-detail-media';
+          img.alt = item.name || assetFileLabel(item.file);
+          img.src = url;
+          img.onload = () => fitAssetDetailPreviewMedia(img);
+          if (img.complete && img.naturalWidth) fitAssetDetailPreviewMedia(img);
+          els.assetLibraryDetailPreview.appendChild(img);
+        } else {
+          const video = document.createElement('video');
+          video.className = 'asset-detail-media';
+          video.controls = true;
+          video.preload = 'metadata';
+          video.src = url;
+          video.onloadedmetadata = () => fitAssetDetailPreviewMedia(video);
+          els.assetLibraryDetailPreview.appendChild(video);
+        }
+      }
+      if (els.assetLibraryDetailName) els.assetLibraryDetailName.value = item.name || assetFileLabel(item.file);
+      renderAssetLibraryCategorySelect(els.assetLibraryDetailCategory, assetPrimaryCategory(item));
+      if (els.assetLibraryDetailNote) els.assetLibraryDetailNote.value = item.note || '';
+      setAssetLibraryDetailDirty(false);
+    }
+
+    function fitAssetDetailPreviewMedia(media) {
+      if (!media || !els.assetLibraryDetailPreview) return;
+      const stageRect = els.assetLibraryDetailPreview.getBoundingClientRect();
+      const stageWidth = Math.max(1, stageRect.width - 16);
+      const stageHeight = Math.max(1, stageRect.height - 16);
+      const naturalWidth = Number(media.naturalWidth || media.videoWidth || 0);
+      const naturalHeight = Number(media.naturalHeight || media.videoHeight || 0);
+      if (!naturalWidth || !naturalHeight) return;
+      const stageRatio = stageWidth / stageHeight;
+      const mediaRatio = naturalWidth / naturalHeight;
+      media.classList.remove('fit-height', 'fit-width');
+      if (mediaRatio <= stageRatio) {
+        media.classList.add('fit-height');
+      } else {
+        media.classList.add('fit-width');
+      }
+    }
+
+    function closeAssetLibraryDetail(options = {}) {
+      if (!options.force && !confirmDiscardAssetLibraryDetailChanges()) return;
+      selectedAssetLibraryId = '';
+      assetLibraryDetailDirty = false;
+      if (els.assetLibraryDetail) els.assetLibraryDetail.hidden = true;
+      renderAssetLibrary();
+    }
+
+    function handleAssetLibraryBlankClick(event) {
+      if (document.body.dataset.view !== 'assets') return;
+      if (!els.assetLibraryDetail || els.assetLibraryDetail.hidden || !selectedAssetLibraryId) return;
+      const target = event.target;
+      if (!target || !(target instanceof Element)) return;
+      if (target.closest('#assetLibraryDetail')) return;
+      if (target.closest('.asset-library-card')) return;
+      if (target.closest('#assetImportModal')) return;
+      if (target.closest('#assetLightbox')) return;
+      if (target.closest('button, input, select, textarea, a, label, summary')) return;
+      closeAssetLibraryDetail();
+    }
+
+    async function saveAssetLibraryDetail() {
+      const item = assetLibrarySelectedItem();
+      if (!item) return;
+      const mediaTag = item.kind || (isImageFile(item.file) ? 'image' : 'video');
+      const category = els.assetLibraryDetailCategory?.value || defaultAssetCategoryForSection();
+      await updateAssetMetadata(
+        item.id,
+        normalizeAssetTags([mediaTag, category]),
+        els.assetLibraryDetailNote?.value || '',
+        els.assetLibraryDetailName?.value || ''
+      );
+      selectedAssetLibraryId = String(item.id || '');
+      assetLibraryDetailDirty = false;
+      renderAssetLibraryDetail(assetLibrarySelectedItem());
+    }
+
+    async function deleteAssetLibraryItem(item = assetLibrarySelectedItem()) {
+      if (!item) return;
+      if (!confirmDiscardAssetLibraryDetailChanges()) return;
+      const label = item.name || item.label || item.file || 'asset';
+      if (!window.confirm('确定删除这个素材吗？\n' + label)) return;
+      await unfavoriteAsset('', item);
+      if (String(selectedAssetLibraryId || '') === String(item.id || '')) {
+        selectedAssetLibraryId = '';
+        assetLibraryDetailDirty = false;
+        if (els.assetLibraryDetail) els.assetLibraryDetail.hidden = true;
+      }
+      renderAssetLibrary();
+    }
+
+    function openAssetImportModal() {
+      if (!els.assetImportModal) return;
+      if (els.assetImportTitle) els.assetImportTitle.textContent = assetLibraryAddLabel();
+      if (els.assetImportFile) els.assetImportFile.value = '';
+      if (els.assetImportName) els.assetImportName.value = '';
+      if (els.assetImportNote) els.assetImportNote.value = '';
+      renderAssetLibraryCategorySelect(els.assetImportCategory, defaultAssetCategoryForSection());
+      if (els.assetImportStatus) els.assetImportStatus.textContent = '';
+      els.assetImportModal.hidden = false;
+    }
+
+    function closeAssetImportModal() {
+      if (els.assetImportModal) els.assetImportModal.hidden = true;
+    }
+
+    async function importAssetLibraryFile() {
+      const file = els.assetImportFile?.files && els.assetImportFile.files[0];
+      if (!file) {
+        if (els.assetImportStatus) els.assetImportStatus.textContent = '请选择一个图片或视频文件。';
+        return;
+      }
+      if (!isImageFile(file.name || '') && !isVideoFile(file.name || '') && !String(file.type || '').match(/^(image|video)\//)) {
+        if (els.assetImportStatus) els.assetImportStatus.textContent = '只支持图片或视频文件。';
+        return;
+      }
+      try {
+        if (els.assetImportSaveBtn) els.assetImportSaveBtn.disabled = true;
+        if (els.assetImportStatus) els.assetImportStatus.textContent = `正在导入：${file.name}`;
+        const category = els.assetImportCategory?.value || defaultAssetCategoryForSection();
+        const mediaTag = (isImageFile(file.name || '') || String(file.type || '').startsWith('image/')) ? 'image' : 'video';
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/import-asset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+            name: els.assetImportName?.value || '',
+            note: els.assetImportNote?.value || '',
+            tags: normalizeAssetTags([mediaTag, category]),
+          }),
+        });
+        closeAssetImportModal();
+        await loadAssetLibrary();
+        if (result.asset?.id) selectAssetLibraryItem(result.asset.id);
+        setStatus(`已导入素材：${result.asset?.name || file.name}`, false);
+      } catch (err) {
+        if (els.assetImportStatus) els.assetImportStatus.textContent = err.message || '导入失败';
+        setStatus(err.message || '导入失败', true);
+      } finally {
+        if (els.assetImportSaveBtn) els.assetImportSaveBtn.disabled = false;
+      }
+    }
+
+    function goComfyDebugFromAssetLibrary() {
+      closeAssetImportModal();
+      showView('comfyDebug');
     }
 
     function normalizeAssetPreviewItems(items) {
@@ -6663,6 +8284,14 @@ INDEX_HTML = r"""<!doctype html>
         video.autoplay = true;
         video.playsInline = true;
         video.preload = 'metadata';
+        video.tabIndex = 0;
+        video.onkeydown = event => {
+          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+            event.preventDefault();
+            event.stopPropagation();
+            moveAssetLightbox(event.key === 'ArrowLeft' ? -1 : 1);
+          }
+        };
         video.onloadedmetadata = () => fitAssetLightboxMedia(video);
         els.assetLightboxStage.appendChild(video);
       }
@@ -6741,11 +8370,11 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function isMediaFile(file) {
-      return /\.(mp4|mov|webm|m4v|mp3|wav|aac|m4a|png|jpg|jpeg|webp)$/i.test(String(file || ''));
+      return /\.(mp4|mov|webm|m4v|mp3|wav|aac|m4a|png|jpg|jpeg|jpe|jfif|pjpeg|pjp|webp|bmp|dib|gif|tif|tiff|avif|heic|heif)$/i.test(String(file || ''));
     }
 
     function isImageFile(file) {
-      return /\.(png|jpg|jpeg|webp)$/i.test(String(file || ''));
+      return /\.(png|jpg|jpeg|jpe|jfif|pjpeg|pjp|webp|bmp|dib|gif|tif|tiff|avif|heic|heif)$/i.test(String(file || ''));
     }
 
     function isVideoFile(file) {
@@ -6837,13 +8466,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function preferredVideoFile(files) {
-      const videos = files.filter(file => /\.(mp4|mov|webm|m4v)$/i.test(file));
-      if (!videos.length) return '';
-      return (
-        videos.find(file => /(^|\/)(long_video_final|final_video)\.mp4$/i.test(file)) ||
-        videos.find(file => !file.startsWith('export_package/')) ||
-        videos[0]
-      );
+      const list = Array.isArray(files) ? files : [];
+      return list.find(file => /(^|\/)(long_video_final|final_video)\.mp4$/i.test(String(file || ''))) || '';
     }
 
     function visibleTaskFiles(files) {
@@ -6894,21 +8518,25 @@ INDEX_HTML = r"""<!doctype html>
       const running = Boolean(currentRunId && ['queued', 'running'].includes(currentRunStatus));
       const confirmStep = awaitingConfirmationStep();
       const isConfirmingCurrentStep = Boolean(confirmStep && selectedFile === stepOutputFileForStep(confirmStep));
+      const isAwaitingStepConfirmation = Boolean(confirmStep);
+      const comfyGateActive = activeComfyDebugGate();
+      const taskStopped = selectedTaskIsStopped();
       const actionSet = new Set(selectedTaskAllowedActions || []);
       const hasStructuredActions = actionSet.size > 0;
       els.saveFileBtn.disabled = running || !hasFile;
       els.rebuildFinalBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('rebuild_final'));
       els.exportTaskBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('export'));
-      els.resumeTaskBtn.hidden = Boolean(confirmStep);
+      els.resumeTaskBtn.hidden = false;
       els.resumeTaskBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('resume'));
       els.resumeTaskBtn.textContent = els.workflowAdvanceMode.value === 'step_confirm' ? '继续下一步' : '继续任务';
       if (els.outputCancelRunBtn) {
-        els.outputCancelRunBtn.hidden = !running;
-        els.outputCancelRunBtn.disabled = !running;
+        const canCancel = !taskStopped && (running || actionSet.has('cancel'));
+        els.outputCancelRunBtn.hidden = !canCancel;
+        els.outputCancelRunBtn.disabled = !canCancel;
       }
       els.rerunStepBtn.disabled = running || !hasFile || !stepNumberFromFile(selectedFile) || (hasStructuredActions && !actionSet.has('rerun_step'));
-      els.confirmStepContinueBtn.disabled = running || !isConfirmingCurrentStep || (hasStructuredActions && !actionSet.has('confirm_step'));
-      els.confirmStepRerunBtn.disabled = running || !isConfirmingCurrentStep || (hasStructuredActions && !actionSet.has('rerun_step'));
+      els.confirmStepContinueBtn.disabled = taskStopped || running || comfyGateActive || !isAwaitingStepConfirmation || (hasStructuredActions && !actionSet.has('confirm_step'));
+      els.confirmStepRerunBtn.disabled = taskStopped || running || !isConfirmingCurrentStep || (hasStructuredActions && !actionSet.has('rerun_step'));
     }
 
     function stepNumberFromFile(file) {
@@ -7174,6 +8802,10 @@ INDEX_HTML = r"""<!doctype html>
         mode: els.autoProductionMode.value,
         workflow_advance_mode: els.workflowAdvanceMode.value,
         step_confirmation: els.workflowAdvanceMode.value === 'step_confirm',
+        comfy_debug_gate: {
+          enabled: els.comfyDebugGate.value === 'on',
+          order: 'debug_workflow_order',
+        },
         image_config: imageConfig,
         video_config: videoConfig,
         voice_config: {
@@ -7246,8 +8878,17 @@ INDEX_HTML = r"""<!doctype html>
       if (!els.comfyDebugWorkflowList) return;
       try {
         const data = await api('/api/comfy-debug-workflows');
-        comfyDebugWorkflows = Array.isArray(data.workflows) ? data.workflows : [];
+        comfyDebugWorkflows = Array.isArray(data.workflows)
+          ? data.workflows.map(normalizeComfyDebugWorkflowDefinition)
+          : [];
         ensureComfyDebugWorkflowsInLibrary();
+        comfyDebugWorkflows.forEach(workflow => {
+          normalizeComfyDebugWorkflowSavedConfig(getComfyWorkflowLibraryItemById(workflow.id), workflow);
+          if (comfyDebugStateByWorkflowId.has(workflow.id)) {
+            comfyDebugStateByWorkflowId.set(workflow.id, normalizeComfyDebugWorkflowState(comfyDebugStateByWorkflowId.get(workflow.id), workflow));
+          }
+        });
+        saveSettings();
         if (!activeComfyDebugWorkflowId && comfyDebugWorkflows.length) {
           activeComfyDebugWorkflowId = comfyDebugWorkflows[0].id;
         }
@@ -7268,7 +8909,67 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function renderComfyDebugWorkflows() {
+    function formatComfyDebugElapsed(seconds) {
+      const total = Math.max(0, Math.floor(Number(seconds) || 0));
+      const hours = Math.floor(total / 3600);
+      const minutes = Math.floor((total % 3600) / 60);
+      const secs = total % 60;
+      if (hours > 0) return `${hours}小时${String(minutes).padStart(2, '0')}分`;
+      if (minutes > 0) return `${minutes}分${String(secs).padStart(2, '0')}秒`;
+      return `${secs}秒`;
+    }
+
+    function comfyDebugElapsedSeconds(state = {}, job = null) {
+      const explicit = Number(state.elapsedSeconds || state.elapsed_seconds || job?.elapsed_seconds || 0);
+      if (explicit > 0) return explicit;
+      const started = Number(state.startedAt || state.started_at || job?.started_at || job?.created_at || 0);
+      if (!started) return 0;
+      const finished = Number(state.finishedAt || state.finished_at || job?.finished_at || 0);
+      const end = finished || (Date.now() / 1000);
+      return Math.max(0, end - started);
+    }
+
+    function comfyDebugElapsedLabel(state = {}, job = null) {
+      const seconds = comfyDebugElapsedSeconds(state, job);
+      return seconds > 0 ? `耗时 ${formatComfyDebugElapsed(seconds)}` : '';
+    }
+
+    function comfyDebugTimingFromJob(job = {}, fallback = {}) {
+      const startedAt = Number(job.started_at || job.created_at || fallback.startedAt || fallback.started_at || 0);
+      const finishedAt = Number(job.finished_at || fallback.finishedAt || fallback.finished_at || 0);
+      const elapsedSeconds = Number(job.elapsed_seconds || fallback.elapsedSeconds || fallback.elapsed_seconds || 0);
+      return { startedAt, finishedAt, elapsedSeconds };
+    }
+
+    function refreshComfyDebugElapsedDisplay() {
+      let hasRunning = false;
+      for (const state of comfyDebugStateByWorkflowId.values()) {
+        if (state?.running) {
+          hasRunning = true;
+          break;
+        }
+      }
+      if (!hasRunning) {
+        if (comfyDebugElapsedTimer) {
+          clearInterval(comfyDebugElapsedTimer);
+          comfyDebugElapsedTimer = null;
+        }
+        return;
+      }
+      renderComfyDebugWorkflows({ refreshForm: false });
+      const activeState = comfyDebugStateByWorkflowId.get(activeComfyDebugWorkflowId) || {};
+      if (activeState.running) {
+        renderComfyDebugRunningAsync(activeComfyDebugWorkflow(), activeState);
+      }
+    }
+
+    function ensureComfyDebugElapsedTimer() {
+      if (comfyDebugElapsedTimer) return;
+      comfyDebugElapsedTimer = setInterval(refreshComfyDebugElapsedDisplay, 1000);
+    }
+
+    function renderComfyDebugWorkflows(options = {}) {
+      const refreshForm = options.refreshForm !== false;
       if (!els.comfyDebugWorkflowList) return;
       els.comfyDebugWorkflowList.innerHTML = '';
       if (!comfyDebugWorkflows.length) {
@@ -7305,10 +9006,12 @@ INDEX_HTML = r"""<!doctype html>
         const statusKind = runState.running ? 'running' : (runState.status === 'completed' ? 'completed' : (runState.error || runState.status === 'failed' ? 'failed' : 'idle'));
         status.className = `comfy-debug-run-state ${statusKind}`;
         if (statusKind === 'running') {
-          status.textContent = `运行中${runState.runId ? ' · ' + String(runState.runId).slice(-8) : ''}`;
+          const elapsed = comfyDebugElapsedLabel(runState);
+          status.textContent = `运行中${runState.runId ? ' · ' + String(runState.runId).slice(-8) : ''}${elapsed ? ' · ' + elapsed : ''}`;
         } else if (statusKind === 'completed') {
           const count = Array.isArray(runState.results) ? runState.results.length : 0;
-          status.textContent = `运行完成${count ? ' · ' + count + ' 个结果' : ''}`;
+          const elapsed = comfyDebugElapsedLabel(runState);
+          status.textContent = `运行完成${count ? ' · ' + count + ' 个结果' : ''}${elapsed ? ' · ' + elapsed : ''}`;
         } else if (statusKind === 'failed') {
           status.textContent = '运行失败';
         } else {
@@ -7324,7 +9027,7 @@ INDEX_HTML = r"""<!doctype html>
       });
       const active = activeComfyDebugWorkflow();
       if (els.comfyDebugSelectedMeta) els.comfyDebugSelectedMeta.textContent = active ? `当前：${active.name || active.id}` : '单选调试';
-      if (active) applyComfyDebugWorkflowDefaults(active, false);
+      if (active && refreshForm) applyComfyDebugWorkflowDefaults(active, false);
     }
 
     function applyComfyDebugWorkflowDefaults(item, force = false) {
@@ -7334,12 +9037,17 @@ INDEX_HTML = r"""<!doctype html>
       const nodeInfo = savedConfig?.nodeInfoList || item.default_node_info || '[]';
       const width = savedConfig?.defaultWidth || item.default_width || '';
       const height = savedConfig?.defaultHeight || item.default_height || '';
+      const duration = savedConfig?.defaultDuration || item.default_duration || '';
+      const fps = savedConfig?.defaultFps || item.default_fps || '';
       const pollTimeout = savedConfig?.pollTimeout || item.poll_timeout_seconds || item.default_poll_timeout || '3600';
       if (force || !els.comfyDebugWidth.value.trim()) els.comfyDebugWidth.value = width;
       if (force || !els.comfyDebugHeight.value.trim()) els.comfyDebugHeight.value = height;
+      if (force || !els.comfyDebugDuration.value.trim()) els.comfyDebugDuration.value = duration;
+      if (force || !els.comfyDebugFps.value.trim()) els.comfyDebugFps.value = fps;
       if (force || !els.comfyDebugEndpoint.value.trim()) els.comfyDebugEndpoint.value = endpoint;
       if (force || !els.comfyDebugNodeInfoList.value.trim()) els.comfyDebugNodeInfoList.value = nodeInfo;
       if (force || !els.comfyDebugPollTimeout.value) setIfExists(els.comfyDebugPollTimeout, String(pollTimeout));
+      updateComfyDebugMediaFields();
       els.comfyDebugEndpoint.placeholder = endpoint || '/run/workflow/xxx 或 /run/ai-app/xxx';
       els.comfyDebugNodeInfoList.placeholder = nodeInfo || '[]';
     }
@@ -7362,12 +9070,19 @@ INDEX_HTML = r"""<!doctype html>
           nodeInfoList: '[]',
           pollTimeout: '3600',
           defaultReference: '',
+          defaultMiddleFrameReference: '',
+          defaultLastFrameReference: '',
           defaultSeed: '',
           defaultDuration: '',
+          defaultFps: '',
           defaultPrompt: '',
           defaultNegative: '',
           defaultAssetReference: '',
+          defaultMiddleFrameAssetReference: '',
+          defaultLastFrameAssetReference: '',
           defaultReferenceHint: '',
+          defaultMiddleFrameReferenceHint: '',
+          defaultLastFrameReferenceHint: '',
           debugWorkflow: true,
         };
         comfyWorkflowLibrary.push(item);
@@ -7381,13 +9096,21 @@ INDEX_HTML = r"""<!doctype html>
       item.defaultWidth = els.comfyDebugWidth.value.trim();
       item.defaultHeight = els.comfyDebugHeight.value.trim();
       item.defaultReference = els.comfyDebugReference.value.trim();
+      item.defaultMiddleFrameReference = els.comfyDebugMiddleFrameReference?.value.trim() || '';
+      item.defaultLastFrameReference = els.comfyDebugLastFrameReference?.value.trim() || '';
       item.defaultSeed = els.comfyDebugSeed.value.trim();
-      item.defaultDuration = els.comfyDebugDuration.value.trim();
+      item.defaultDuration = workflow.type === 'video' ? els.comfyDebugDuration.value.trim() : '';
+      item.defaultFps = workflow.type === 'video' ? els.comfyDebugFps.value.trim() : '';
+      item.defaultWorkflowMode = els.comfyDebugWorkflowMode?.value || '';
       item.defaultImageTaskType = workflow.default_image_task_type || item.defaultImageTaskType || workflow.default_task_type || '';
       item.defaultPrompt = els.comfyDebugPrompt.value;
       item.defaultNegative = els.comfyDebugNegative.value;
       item.defaultAssetReference = els.comfyDebugAssetReference.value || '';
+      item.defaultMiddleFrameAssetReference = els.comfyDebugMiddleFrameAssetReference?.value || '';
+      item.defaultLastFrameAssetReference = els.comfyDebugLastFrameAssetReference?.value || '';
       item.defaultReferenceHint = els.comfyDebugReferenceHint.textContent || '';
+      item.defaultMiddleFrameReferenceHint = els.comfyDebugMiddleFrameReferenceHint?.textContent || '';
+      item.defaultLastFrameReferenceHint = els.comfyDebugLastFrameReferenceHint?.textContent || '';
       item.debugWorkflow = true;
       els.comfyDebugNodeInfoList.value = item.nodeInfoList;
       const previousState = comfyDebugStateByWorkflowId.get(workflow.id) || {};
@@ -7396,64 +9119,18 @@ INDEX_HTML = r"""<!doctype html>
         ...readComfyDebugFormState(),
         results: Array.isArray(previousState.results) ? previousState.results : [],
       });
-      renderComfyDebugWorkflows();
-      renderComfyWorkflowLibrary();
       saveSettings();
-      if (showMessage) setStatus(`已保存调试工作流配置：${item.name}`);
+      if (showMessage) {
+        renderComfyDebugWorkflows();
+        renderComfyWorkflowLibrary();
+        setStatus(`已保存调试工作流配置：${item.name}`);
+      }
       return true;
     }
 
-    function clearActiveComfyDebugWorkflowConfig() {
-      const workflow = activeComfyDebugWorkflow();
-      const item = workflow ? getComfyWorkflowLibraryItemById(workflow.id) : null;
-      if (!workflow || !item) {
-        setStatus('请先在左侧选择一个调试工作流', true);
-        return;
-      }
-      item.endpoint = '';
-      item.nodeInfoList = workflow.default_node_info || '[]';
-      item.pollTimeout = String(workflow.poll_timeout_seconds || workflow.default_poll_timeout || '3600');
-      item.defaultWidth = String(workflow.default_width || '');
-      item.defaultHeight = String(workflow.default_height || '');
-      item.defaultReference = '';
-      item.defaultSeed = '';
-      item.defaultDuration = '';
-      item.defaultImageTaskType = workflow.default_image_task_type || workflow.default_task_type || '';
-      item.defaultPrompt = '';
-      item.defaultNegative = '';
-      item.defaultAssetReference = '';
-      item.defaultReferenceHint = '';
-      comfyDebugStateByWorkflowId.delete(workflow.id);
-      applyComfyDebugWorkflowDefaults(workflow, true);
-      saveCurrentComfyDebugUiState();
-      renderComfyDebugWorkflows();
-      renderComfyWorkflowLibrary();
-      saveSettings();
-      setStatus(`已清空调试工作流配置：${item.name || workflow.name}`);
-    }
-
-    function fillComfyDebugSample() {
-      const selected = activeComfyDebugWorkflow();
-      const isVideo = selected?.type === 'video';
-      const hasReference = Boolean(els.comfyDebugReference?.value?.trim());
-      if (selected?.id === 'reference_keyframe') {
-        els.comfyDebugPrompt.value = hasReference
-          ? '基于参考图生成竖屏视频关键帧：保持参考图人物/产品/场景主体一致，构图更适合后续图生视频，写实商业风格，干净光线，无文字水印。'
-          : '生成一组可复用的竖屏基础素材图：统一风格的专业人物角色、产品主体、办公/科技场景，写实商业质感，蓝绿色科技光效，干净背景，无文字水印。';
-      } else {
-        els.comfyDebugPrompt.value = isVideo
-          ? '写实商业短视频镜头：AI 自动化工作台界面发光，镜头缓慢推进，干净科技感，稳定运动，无文字水印。'
-          : '写实商业关键帧：AI 自动化服务场景，干净办公室，专业人物，蓝绿色科技光效，竖版构图，无文字水印。';
-      }
-      if (selected?.type === 'image') {
-        els.comfyDebugPrompt.value = imageTaskDefinitionForWorkflow(selected).prompt;
-      }
-      els.comfyDebugNegative.value = '文字，水印，logo，畸形手，脸部变形，低清晰度，闪烁，过曝，噪点';
-      if (!els.comfyDebugWidth.value.trim()) els.comfyDebugWidth.value = selected?.default_width || (isVideo ? '960' : '1080');
-      if (!els.comfyDebugHeight.value.trim()) els.comfyDebugHeight.value = selected?.default_height || (isVideo ? '544' : '1920');
-      saveCurrentComfyDebugUiState();
-      saveSettings();
-      setStatus('已填入 ComfyUI 调试提示词', false, false);
+    function autoSaveActiveComfyDebugWorkflowConfig() {
+      if (!activeComfyDebugWorkflow()) return;
+      saveActiveComfyDebugWorkflowConfig(false);
     }
 
     async function runComfyDebug() {
@@ -7467,10 +9144,26 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请输入调试提示词', true);
         return;
       }
-      const imageTaskDef = imageTaskDefinitionForWorkflow(selected);
+      const workflowModeDef = selectedWorkflowModeDefinition(selected);
+      const imageTaskDef = workflowModeDef ? {
+        value: workflowModeDef.value,
+        label: workflowModeDef.label,
+        taskType: workflowModeDef.task_type,
+        controlMode: workflowModeDef.control_mode,
+        requiresReference: Boolean(workflowModeDef.requires_reference),
+        assetTag: workflowModeDef.asset_tag || selected.asset_tag || selected.id,
+      } : imageTaskDefinitionForWorkflow(selected);
       const referenceValue = els.comfyDebugReference.value.trim();
-      if (selected.type === 'image' && imageTaskDef.requiresReference && !referenceValue) {
+      const lastFrameValue = els.comfyDebugLastFrameReference?.value.trim() || '';
+      const referenceSupport = comfyDebugReferenceSupport();
+      const submitReferenceValue = referenceSupport.hasReference ? referenceValue : '';
+      const submitLastFrameValue = referenceSupport.hasLastFrame ? lastFrameValue : '';
+      if (referenceSupport.hasReference && imageTaskDef.requiresReference && !referenceValue) {
         setStatus(imageTaskDef.label + ' 需要先选择或上传参考图', true);
+        return;
+      }
+      if (referenceSupport.hasLastFrame && (!submitReferenceValue || !submitLastFrameValue)) {
+        setStatus('首尾帧视频需要同时选择首帧和尾帧两张图', true);
         return;
       }
       saveActiveComfyDebugWorkflowConfig(false);
@@ -7497,14 +9190,20 @@ INDEX_HTML = r"""<!doctype html>
             poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
             prompt,
             negative_prompt: els.comfyDebugNegative.value.trim(),
-            reference_image: referenceValue,
-            task_type: selected.type === 'image' ? imageTaskDef.taskType : '',
-            control_mode: selected.type === 'image' ? imageTaskDef.controlMode : '',
+            reference_image: submitReferenceValue,
+            last_frame_image: submitLastFrameValue,
+            task_type: imageTaskDef.taskType || '',
+            control_mode: imageTaskDef.controlMode || '',
             image_task_mode: selected.type === 'image' ? imageTaskDef.value : '',
+            video_task_mode: selected.type === 'video' ? imageTaskDef.value : '',
+            workflow_mode: workflowModeDef?.value || '',
+            asset_tag: imageTaskDef.assetTag || selected.asset_tag || selected.id,
             seed: els.comfyDebugSeed.value.trim(),
             width: els.comfyDebugWidth.value.trim(),
             height: els.comfyDebugHeight.value.trim(),
-            duration: els.comfyDebugDuration.value.trim(),
+            duration: selected.type === 'video' ? els.comfyDebugDuration.value.trim() : '',
+            fps: selected.type === 'video' ? els.comfyDebugFps.value.trim() : '',
+            frame_count: selected.type === 'video' ? computedComfyDebugFrameCount() : '',
           }),
         });
         comfyDebugLastResults = Array.isArray(data.results) ? data.results : [];
@@ -7515,7 +9214,7 @@ INDEX_HTML = r"""<!doctype html>
         results: compactComfyDebugResults(comfyDebugLastResults),
       });
       saveSettings();
-        renderComfyDebugResults(comfyDebugLastResults);
+        renderComfyDebugResults(comfyDebugLastResults, data);
         els.comfyDebugStatus.textContent = `调试完成：${comfyDebugLastResults.length} 个结果`;
         els.runComfyDebugBtn.style.setProperty('--run-progress', '100%');
         setStatus('ComfyUI 调试完成', false);
@@ -7559,7 +9258,7 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = '运行中，等待结果返回...';
     }
 
-    function renderComfyDebugResults(results) {
+    function renderComfyDebugResults(results, runMeta = null) {
       if (!els.comfyDebugResults) return;
       els.comfyDebugResults.innerHTML = '';
       if (!results.length) {
@@ -7613,10 +9312,22 @@ INDEX_HTML = r"""<!doctype html>
         log.className = 'comfy-debug-log';
         log.textContent = result.error || JSON.stringify(result.manifest || {}, null, 2).slice(0, 3000);
         card.appendChild(gallery);
+        const libraryAssets = Array.isArray(result.library_assets) ? result.library_assets : [];
+        if (libraryAssets.length) {
+          const libraryMeta = document.createElement('div');
+          libraryMeta.className = 'muted small';
+          const okCount = libraryAssets.filter(item => item && !item.error).length;
+          const errorCount = libraryAssets.length - okCount;
+          libraryMeta.textContent = errorCount
+            ? `素材库：已入库 ${okCount} 个，${errorCount} 个失败`
+            : `素材库：已自动入库 ${okCount} 个`;
+          card.appendChild(libraryMeta);
+        }
         card.appendChild(log);
         els.comfyDebugResults.appendChild(card);
       });
-      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = `${results.length} 个工作流 · ${mediaCount} 个媒体`;
+      const elapsed = comfyDebugElapsedLabel(runMeta || {});
+      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = `${results.length} 个工作流 · ${mediaCount} 个媒体${elapsed ? ' · ' + elapsed : ''}`;
     }
 
     async function runWorkflow() {
@@ -7624,7 +9335,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       await loadAssetLibrary();
       const rawInput = els.userInput.value.trim();
-      const input = `${rawInput}${contentColumnContextText(rawInput)}${assetLibraryContextText()}`.trim();
+      const input = `${rawInput}${assetLibraryContextText()}`.trim();
       if (!input) {
         setStatus('请输入原始需求', true);
         return;
@@ -7634,8 +9345,6 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请输入自定义模型名', true);
         return;
       }
-      const selectedColumn = contentColumns.find(item => item.id === els.contentColumn?.value);
-      if (selectedColumn) setStatus(`已应用内容栏目：${selectedColumn.name}`, false, false);
       const titleFromInput = (rawInput || input).replace(/\s+/g, '').slice(0, 18);
       els.taskTitle.value = els.taskTitle.value.trim() || (titleFromInput ? `${titleFromInput}长视频` : '长视频任务');
       els.runBtn.disabled = true;
@@ -7727,7 +9436,7 @@ INDEX_HTML = r"""<!doctype html>
         event.preventDefault();
         moveAssetLightbox(1);
       }
-    });
+    }, true);
     window.addEventListener('resize', () => {
       if (!els.assetLightbox || els.assetLightbox.hidden) return;
       const media = els.assetLightboxStage?.querySelector('img, video');
@@ -7743,6 +9452,9 @@ INDEX_HTML = r"""<!doctype html>
     els.resetComfyWorkflowPresetBtn.onclick = resetSelectedComfyWorkflowPreset;
     navButtons.forEach(button => {
       button.onclick = () => {
+        if (document.body.dataset.view === 'assets' && button.dataset.viewTarget !== 'assets' && !confirmDiscardAssetLibraryDetailChanges()) {
+          return;
+        }
         autoFocusOutputDuringRun = false;
         showView(button.dataset.viewTarget);
       };
@@ -7786,6 +9498,7 @@ INDEX_HTML = r"""<!doctype html>
       renderStepConfirmBar();
       syncOutputButtons();
     };
+    els.comfyDebugGate.onchange = saveSettings;
     els.showDebugFiles.onchange = () => {
       renderFiles(currentTaskFiles);
     };
@@ -7845,99 +9558,100 @@ INDEX_HTML = r"""<!doctype html>
       const endpoint = state?.endpoint || els.comfyDebugEndpoint.value.trim() || '使用当前工作流保存的接口地址';
       const runId = state?.runId ? `任务：${state.runId}` : '正在提交任务';
       const statusText = state?.status || 'running';
+      const elapsedText = comfyDebugElapsedLabel(state);
       els.comfyDebugResults.innerHTML = `
         <div class="comfy-debug-running">
           <div class="comfy-debug-running-bar"></div>
           <strong>正在调用：${escapeHtml(workflow?.name || workflow?.id || '当前工作流')}</strong>
           <div class="muted small">${escapeHtml(endpoint)}</div>
-          <div class="muted small">${escapeHtml(runId)} · ${escapeHtml(statusText)}</div>
+          <div class="muted small">${escapeHtml(runId)} · ${escapeHtml(statusText)}${elapsedText ? ' · ' + escapeHtml(elapsedText) : ''}</div>
           <div class="muted small">已转为后台任务，页面会自动轮询结果。你可以切换左侧其他工作流继续调试。</div>
         </div>
       `;
-      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = '运行中，等待结果返回...';
+      if (els.comfyDebugResultMeta) els.comfyDebugResultMeta.textContent = `运行中，等待结果返回${elapsedText ? ' · ' + elapsedText : '...'}`;
     }
 
-    async function runComfyDebugAsync() {
-      const selected = activeComfyDebugWorkflow();
-      if (!selected) {
-        setStatus('请选择一个 ComfyUI 调试工作流', true);
-        return;
+    function comfyDebugModePayload(selected, overrides = {}) {
+      if (!selected) throw new Error('????? ComfyUI ?????');
+      const prompt = String(overrides.prompt ?? els.comfyDebugPrompt.value).trim();
+      if (!prompt) throw new Error('????????');
+      const workflowModeDef = selectedWorkflowModeDefinition(selected);
+      const imageTaskDef = workflowModeDef ? {
+        value: workflowModeDef.value,
+        label: workflowModeDef.label,
+        taskType: workflowModeDef.task_type,
+        controlMode: workflowModeDef.control_mode,
+        requiresReference: Boolean(workflowModeDef.requires_reference),
+        assetTag: workflowModeDef.asset_tag || selected.asset_tag || selected.id,
+      } : imageTaskDefinitionForWorkflow(selected);
+      const referenceSupport = comfyDebugReferenceSupport();
+      const referenceValue = String(overrides.reference_image ?? els.comfyDebugReference.value).trim();
+      const middleFrameValue = String(overrides.middle_frame_image ?? (els.comfyDebugMiddleFrameReference?.value || '')).trim();
+      const lastFrameValue = String(overrides.last_frame_image ?? (els.comfyDebugLastFrameReference?.value || '')).trim();
+      const submitReferenceValue = referenceSupport.hasReference ? referenceValue : '';
+      const submitMiddleFrameValue = referenceSupport.hasMiddleFrame ? middleFrameValue : '';
+      const submitLastFrameValue = referenceSupport.hasLastFrame ? lastFrameValue : '';
+      if (referenceSupport.hasReference && imageTaskDef.requiresReference && !submitReferenceValue) {
+        throw new Error(`${imageTaskDef.label || '当前模式'} 需要参考图`);
       }
-      const prompt = els.comfyDebugPrompt.value.trim();
-      if (!prompt) {
-        setStatus('请输入调试提示词', true);
-        return;
+      if (referenceSupport.hasMiddleFrame && (!submitReferenceValue || !submitMiddleFrameValue || !submitLastFrameValue)) {
+        throw new Error('首中尾帧模式必须同时提供首帧、中帧和尾帧');
       }
-      const imageTaskDef = imageTaskDefinitionForWorkflow(selected);
-      const referenceValue = els.comfyDebugReference.value.trim();
-      if (selected.type === 'image' && imageTaskDef.requiresReference && !referenceValue) {
-        setStatus(imageTaskDef.label + ' 需要先选择或上传参考图', true);
-        return;
+      if (!referenceSupport.hasMiddleFrame && referenceSupport.hasLastFrame && (!submitReferenceValue || !submitLastFrameValue)) {
+        throw new Error('首尾帧模式必须同时提供首帧和尾帧');
       }
+      return {
+        workflows: [selected.id],
+        api_key: els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim(),
+        base_url: els.comfyDebugBaseUrl.value.trim() || els.comfyBaseUrl.value.trim(),
+        endpoint: els.comfyDebugEndpoint.value.trim(),
+        node_info_list_json: els.comfyDebugNodeInfoList.value.trim(),
+        workflow_library: getComfyWorkflowLibraryPayload(),
+        poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
+        prompt,
+        negative_prompt: els.comfyDebugNegative.value.trim(),
+        reference_image: submitReferenceValue,
+        middle_frame_image: submitMiddleFrameValue,
+        last_frame_image: submitLastFrameValue,
+        task_type: imageTaskDef.taskType || '',
+        control_mode: imageTaskDef.controlMode || '',
+        image_task_mode: selected.type === 'image' ? imageTaskDef.value : '',
+        video_task_mode: selected.type === 'video' ? imageTaskDef.value : '',
+        workflow_mode: workflowModeDef?.value || '',
+        asset_tag: imageTaskDef.assetTag || selected.asset_tag || selected.id,
+        seed: String(overrides.seed ?? els.comfyDebugSeed.value).trim(),
+        width: els.comfyDebugWidth.value.trim(),
+        height: els.comfyDebugHeight.value.trim(),
+        duration: selected.type === 'video' ? els.comfyDebugDuration.value.trim() : '',
+        fps: selected.type === 'video' ? els.comfyDebugFps.value.trim() : '',
+        frame_count: selected.type === 'video' ? computedComfyDebugFrameCount() : '',
+      };
+    }
+
+    function startComfyDebugWorkflowRunState(selected, statusText) {
       const existingState = comfyDebugStateByWorkflowId.get(selected.id) || {};
-      if (existingState.running) {
-        renderComfyDebugRunningAsync(selected, existingState);
-        syncComfyDebugRunButton();
-        return;
-      }
-      saveActiveComfyDebugWorkflowConfig(false);
+      const startedAt = Date.now() / 1000;
       const startState = {
         ...existingState,
         ...readComfyDebugFormState(),
         running: true,
         runId: '',
         status: 'starting',
+        startedAt,
+        finishedAt: 0,
+        elapsedSeconds: 0,
         error: '',
       };
       comfyDebugStateByWorkflowId.set(selected.id, startState);
+      ensureComfyDebugElapsedTimer();
       syncComfyDebugRunButton();
-      renderComfyDebugWorkflows();
+      renderComfyDebugWorkflows({ refreshForm: false });
       if (els.comfyDebugStatus) {
-        els.comfyDebugStatus.textContent = `调试中：${selected.name || selected.id}`;
+        els.comfyDebugStatus.textContent = statusText || `调试中：${selected.name || selected.id}`;
         els.comfyDebugStatus.classList.remove('error');
       }
       renderComfyDebugRunningAsync(selected, startState);
-      setStatus(`ComfyUI 调试已开始：${selected.name || selected.id}`, false);
-      try {
-        const job = await api('/api/comfy-debug-run', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            workflows: [selected.id],
-            api_key: els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim(),
-            base_url: els.comfyDebugBaseUrl.value.trim() || els.comfyBaseUrl.value.trim(),
-            endpoint: els.comfyDebugEndpoint.value.trim(),
-            node_info_list_json: els.comfyDebugNodeInfoList.value.trim(),
-            workflow_library: getComfyWorkflowLibraryPayload(),
-            poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
-            prompt,
-            negative_prompt: els.comfyDebugNegative.value.trim(),
-            reference_image: referenceValue,
-            task_type: selected.type === 'image' ? imageTaskDef.taskType : '',
-            control_mode: selected.type === 'image' ? imageTaskDef.controlMode : '',
-            image_task_mode: selected.type === 'image' ? imageTaskDef.value : '',
-            seed: els.comfyDebugSeed.value.trim(),
-            width: els.comfyDebugWidth.value.trim(),
-            height: els.comfyDebugHeight.value.trim(),
-            duration: els.comfyDebugDuration.value.trim(),
-          }),
-        });
-        const runId = job.run_id || job.id || '';
-        const currentState = comfyDebugStateByWorkflowId.get(selected.id) || startState;
-        comfyDebugStateByWorkflowId.set(selected.id, {
-          ...currentState,
-          running: true,
-          runId,
-          status: job.status || 'queued',
-          error: '',
-        });
-        saveSettings();
-        renderComfyDebugWorkflows();
-        renderComfyDebugRunningAsync(selected, comfyDebugStateByWorkflowId.get(selected.id));
-        pollComfyDebugRun(selected.id, runId);
-      } catch (err) {
-        markComfyDebugRunFailed(selected.id, err.message || '运行失败');
-      }
+      return startState;
     }
 
     function pollComfyDebugRun(workflowId, runId) {
@@ -7955,13 +9669,15 @@ INDEX_HTML = r"""<!doctype html>
           const state = comfyDebugStateByWorkflowId.get(workflowId) || {};
           if (state.runId && state.runId !== runId) return;
           const status = job.status || '';
+          const timing = comfyDebugTimingFromJob(job, state);
           comfyDebugStateByWorkflowId.set(workflowId, {
             ...state,
+            ...timing,
             running: !['completed', 'failed', 'cancelled', 'paused'].includes(status),
             status,
             error: status === 'failed' ? (job.error || '运行失败') : '',
           });
-          renderComfyDebugWorkflows();
+          renderComfyDebugWorkflows({ refreshForm: false });
           if (activeComfyDebugWorkflowId === workflowId) {
             renderComfyDebugStatePreview(activeComfyDebugWorkflow());
             syncComfyDebugRunButton();
@@ -7971,20 +9687,24 @@ INDEX_HTML = r"""<!doctype html>
             const results = Array.isArray(result.results) ? result.results : (Array.isArray(job.results) ? job.results : []);
             comfyDebugLastResults = results;
             const finalState = comfyDebugStateByWorkflowId.get(workflowId) || {};
+            const finalTiming = comfyDebugTimingFromJob(job, finalState);
             comfyDebugStateByWorkflowId.set(workflowId, {
               ...finalState,
+              ...finalTiming,
               running: false,
               status,
               error: '',
               results: compactComfyDebugResults(results),
             });
             comfyDebugPollTimers.delete(workflowId);
+            await loadAssetLibrary().catch(() => {});
             saveSettings();
-            renderComfyDebugWorkflows();
+            renderComfyDebugWorkflows({ refreshForm: false });
             if (activeComfyDebugWorkflowId === workflowId) {
-              renderComfyDebugResults(results);
+              renderComfyDebugResults(results, comfyDebugStateByWorkflowId.get(workflowId));
               if (els.comfyDebugStatus) {
-                els.comfyDebugStatus.textContent = `调试完成：${results.length} 个结果`;
+                const elapsed = comfyDebugElapsedLabel(comfyDebugStateByWorkflowId.get(workflowId));
+                els.comfyDebugStatus.textContent = `?????${results.length} ???${elapsed ? ' ? ' + elapsed : ''}`;
                 els.comfyDebugStatus.classList.remove('error');
               }
               setStatus('ComfyUI 调试完成', false);
@@ -8010,6 +9730,7 @@ INDEX_HTML = r"""<!doctype html>
     function resumeComfyDebugPolls() {
       for (const [workflowId, state] of comfyDebugStateByWorkflowId.entries()) {
         if (state?.running && state?.runId && !comfyDebugPollTimers.has(workflowId)) {
+          ensureComfyDebugElapsedTimer();
           pollComfyDebugRun(workflowId, state.runId);
         }
       }
@@ -8018,14 +9739,18 @@ INDEX_HTML = r"""<!doctype html>
 
     function markComfyDebugRunFailed(workflowId, message) {
       const state = comfyDebugStateByWorkflowId.get(workflowId) || {};
+      const finishedAt = state.finishedAt || Date.now() / 1000;
+      const elapsedSeconds = state.elapsedSeconds || comfyDebugElapsedSeconds({ ...state, finishedAt });
       comfyDebugStateByWorkflowId.set(workflowId, {
         ...state,
         running: false,
         status: 'failed',
+        finishedAt,
+        elapsedSeconds,
         error: message || '运行失败',
       });
       saveSettings();
-      renderComfyDebugWorkflows();
+      renderComfyDebugWorkflows({ refreshForm: false });
       if (activeComfyDebugWorkflowId === workflowId) {
         renderComfyDebugError(message);
         syncComfyDebugRunButton();
@@ -8046,22 +9771,61 @@ INDEX_HTML = r"""<!doctype html>
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
     els.refreshHealthBtn.onclick = loadSystemHealth;
     els.productTemplate.onchange = () => applyProductTemplate(false);
-    els.contentColumn.onchange = saveSettings;
-    els.applyContentColumnBtn.onclick = applySelectedContentColumn;
     els.refreshAssetLibraryBtn.onclick = loadAssetLibrary;
+    if (els.assetLibraryTabs) {
+      els.assetLibraryTabs.onclick = event => {
+        const button = event.target?.closest?.('[data-asset-section]');
+        if (!button) return;
+        if (!confirmDiscardAssetLibraryDetailChanges()) return;
+        assetLibrarySection = button.dataset.assetSection || 'all';
+        selectedAssetLibraryId = '';
+        assetLibraryDetailDirty = false;
+        if (els.assetLibraryDetail) els.assetLibraryDetail.hidden = true;
+        renderAssetLibrary();
+      };
+    }
+    if (els.assetLibraryDetailCloseBtn) els.assetLibraryDetailCloseBtn.onclick = () => closeAssetLibraryDetail();
+    if (els.assetLibraryDetailSaveBtn) els.assetLibraryDetailSaveBtn.onclick = saveAssetLibraryDetail;
+    if (els.assetLibraryDetailDeleteBtn) els.assetLibraryDetailDeleteBtn.onclick = () => deleteAssetLibraryItem();
+    if (els.assetLibraryDetailOpenBtn) {
+      els.assetLibraryDetailOpenBtn.onclick = () => {
+        const item = assetLibrarySelectedItem();
+        if (!item) return;
+        const items = assetLibraryFilteredItems().map(asset => ({
+          ...asset,
+          library: true,
+          label: asset.name || assetFileLabel(asset.file),
+          kind: asset.kind || (isImageFile(asset.file) ? 'image' : 'video'),
+        }));
+        const index = Math.max(0, items.findIndex(asset => String(asset.id || '') === String(item.id || '')));
+        openAssetLightboxFromItems('', items.length ? items : [item], index);
+      };
+    }
+    [els.assetLibraryDetailName, els.assetLibraryDetailCategory, els.assetLibraryDetailNote].filter(Boolean).forEach(control => {
+      control.addEventListener('input', () => setAssetLibraryDetailDirty(true));
+      control.addEventListener('change', () => setAssetLibraryDetailDirty(true));
+    });
+    if (els.assetImportCloseBtn) els.assetImportCloseBtn.onclick = closeAssetImportModal;
+    if (els.assetImportSaveBtn) els.assetImportSaveBtn.onclick = importAssetLibraryFile;
+    if (els.assetImportComfyBtn) els.assetImportComfyBtn.onclick = goComfyDebugFromAssetLibrary;
+    if (els.assetImportModal) {
+      els.assetImportModal.onclick = event => {
+        if (event.target === els.assetImportModal) closeAssetImportModal();
+      };
+    }
+    document.addEventListener('click', handleAssetLibraryBlankClick);
     els.refreshComfyDebugBtn.onclick = loadComfyDebugWorkflows;
-    els.fillComfyDebugSampleBtn.onclick = fillComfyDebugSample;
     els.runComfyDebugBtn.onclick = runComfyDebugAsync;
     els.comfyDebugApiWorkflowFile.onchange = analyzeComfyDebugApiWorkflowFile;
-    els.saveComfyDebugWorkflowBtn.onclick = () => saveActiveComfyDebugWorkflowConfig(true);
-    els.clearComfyDebugWorkflowBtn.onclick = clearActiveComfyDebugWorkflowConfig;
     [
       els.comfyDebugEndpoint,
       els.comfyDebugReference,
+      els.comfyDebugWorkflowMode,
       els.comfyDebugSeed,
       els.comfyDebugWidth,
       els.comfyDebugHeight,
       els.comfyDebugDuration,
+      els.comfyDebugFps,
       els.comfyDebugPrompt,
       els.comfyDebugNegative,
       els.comfyDebugNodeInfoList,
@@ -8069,12 +9833,22 @@ INDEX_HTML = r"""<!doctype html>
     ].forEach(control => {
       if (!control) return;
       control.addEventListener('input', () => {
+        if (control === els.comfyDebugDuration || control === els.comfyDebugFps) updateComfyDebugFrameCountHint();
+        if (control === els.comfyDebugNodeInfoList) updateComfyDebugReferencePreviews();
         saveCurrentComfyDebugUiState();
         saveSettings();
       });
       control.addEventListener('change', () => {
+        if (control === els.comfyDebugDuration || control === els.comfyDebugFps) updateComfyDebugFrameCountHint();
+        if (control === els.comfyDebugNodeInfoList) updateComfyDebugReferencePreviews();
         saveCurrentComfyDebugUiState();
         saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+      });
+      control.addEventListener('blur', () => {
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
       });
     });
     els.comfyDebugAssetReference.onchange = () => {
@@ -8083,7 +9857,28 @@ INDEX_HTML = r"""<!doctype html>
       setComfyDebugReference(value, value ? `已选择素材库参考：${value}` : '');
       saveCurrentComfyDebugUiState();
       saveSettings();
+      autoSaveActiveComfyDebugWorkflowConfig();
     };
+    if (els.comfyDebugMiddleFrameAssetReference) {
+      els.comfyDebugMiddleFrameAssetReference.onchange = () => {
+        const value = els.comfyDebugMiddleFrameAssetReference.value;
+        if (value && els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
+        setComfyDebugMiddleFrameReference(value, value ? `素材库中帧：${value.split('/').pop()}` : '');
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+      };
+    }
+    if (els.comfyDebugLastFrameAssetReference) {
+      els.comfyDebugLastFrameAssetReference.onchange = () => {
+        const value = els.comfyDebugLastFrameAssetReference.value;
+        if (value && els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
+        setComfyDebugLastFrameReference(value, value ? `已选择尾帧素材：${value.split('/').pop()}` : '');
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+      };
+    }
     if (els.assetLibraryTagFilter) {
       els.assetLibraryTagFilter.onchange = () => {
         renderAssetLibrary();
@@ -8092,16 +9887,62 @@ INDEX_HTML = r"""<!doctype html>
     if (els.comfyDebugAssetTagFilter) {
       els.comfyDebugAssetTagFilter.onchange = () => {
         if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+        if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
+        if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
         renderComfyDebugAssetReferenceOptions();
       };
     }
+    if (els.comfyDebugWorkflowMode) {
+      els.comfyDebugWorkflowMode.onchange = () => {
+        updateComfyImageTaskHint();
+        updateComfyDebugReferencePreviews();
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+      };
+    }
     els.comfyDebugReferenceFile.onchange = uploadComfyDebugReferenceFile;
+    if (els.comfyDebugMiddleFrameReferenceFile) {
+      els.comfyDebugMiddleFrameReferenceFile.onchange = uploadComfyDebugMiddleFrameReferenceFile;
+    }
+    if (els.comfyDebugLastFrameReferenceFile) {
+      els.comfyDebugLastFrameReferenceFile.onchange = uploadComfyDebugLastFrameReferenceFile;
+    }
+    if (els.comfyDebugReferenceReuploadBtn) {
+      els.comfyDebugReferenceReuploadBtn.onclick = () => {
+        if (els.comfyDebugReferenceFile) {
+          els.comfyDebugReferenceFile.value = '';
+          els.comfyDebugReferenceFile.click();
+        }
+      };
+    }
+    if (els.comfyDebugMiddleFrameReuploadBtn) {
+      els.comfyDebugMiddleFrameReuploadBtn.onclick = () => {
+        if (els.comfyDebugMiddleFrameReferenceFile) {
+          els.comfyDebugMiddleFrameReferenceFile.value = '';
+          els.comfyDebugMiddleFrameReferenceFile.click();
+        }
+      };
+    }
+    if (els.comfyDebugLastFrameReuploadBtn) {
+      els.comfyDebugLastFrameReuploadBtn.onclick = () => {
+        if (els.comfyDebugLastFrameReferenceFile) {
+          els.comfyDebugLastFrameReferenceFile.value = '';
+          els.comfyDebugLastFrameReferenceFile.click();
+        }
+      };
+    }
     els.clearComfyDebugReferenceBtn.onclick = () => {
       if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+      if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
       if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+      if (els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
       setComfyDebugReference('', '');
+      setComfyDebugMiddleFrameReference('', '');
+      setComfyDebugLastFrameReference('', '');
       saveCurrentComfyDebugUiState();
       saveSettings();
+      autoSaveActiveComfyDebugWorkflowConfig();
     };
     els.model.onchange = () => {
       syncCustomModelState();
@@ -8132,7 +9973,7 @@ INDEX_HTML = r"""<!doctype html>
       fillLongVideoSample();
     };
     els.clearSettingsBtn.onclick = () => {
-      if (!confirm('确定清除本浏览器保存的 API Key、Base URL、模型、生图配置和视频配置？')) return;
+      if (!confirm('确定清除本浏览器保存的 API Key、Base URL、模型和工作流配置？')) return;
       localStorage.removeItem(SETTINGS_KEY);
       els.productTemplate.value = 'long_video';
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
@@ -8199,13 +10040,14 @@ INDEX_HTML = r"""<!doctype html>
     bindSettingsPersistence();
     bindButtonClickFeedback();
     moveConfigSections();
+    document.addEventListener('DOMContentLoaded', moveConfigSections);
+    window.addEventListener('load', moveConfigSections);
     renderReferenceFiles();
     renderOutputOverview(null);
 
     (async function init() {
       try {
         await loadConfig();
-        await loadContentColumns();
         restoreSettings();
         await loadAssetLibrary();
         await loadComfyDebugWorkflows();
@@ -8239,8 +10081,6 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._system_health())
             elif parsed.path == "/api/tasks":
                 self._send_json({"tasks": self._tasks()})
-            elif parsed.path == "/api/content-columns":
-                self._send_json({"columns": CONTENT_COLUMNS})
             elif parsed.path == "/api/asset-library":
                 self._send_json({"assets": self._asset_library()})
             elif parsed.path == "/api/comfy-debug-workflows":
@@ -8264,6 +10104,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query)
                 detail = self._task_detail(self._single(query, "name"))
                 self._send_json({"name": detail["name"], "task_status": detail["task_status"]})
+            elif parsed.path == "/api/task-comfy-debug-plan":
+                query = parse_qs(parsed.query)
+                task_dir = self._safe_task_dir(self._single(query, "name"))
+                self._send_json(self._task_comfy_debug_status(task_dir))
             elif parsed.path == "/api/file":
                 query = parse_qs(parsed.query)
                 self._send_json(self._file_content(self._single(query, "task"), self._single(query, "file")))
@@ -8273,6 +10117,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/asset-library-media":
                 query = parse_qs(parsed.query)
                 self._send_asset_library_media(self._single(query, "id"))
+            elif parsed.path == "/api/reference-media":
+                query = parse_qs(parsed.query)
+                self._send_reference_media(self._single(query, "file"))
             elif parsed.path == "/api/run-status":
                 query = parse_qs(parsed.query)
                 self._send_json(self._run_status(self._single(query, "id")))
@@ -8320,8 +10167,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._update_asset_metadata(payload))
                 return
 
+            if parsed.path == "/api/import-asset":
+                self._send_json(self._import_asset(payload))
+                return
+
             if parsed.path == "/api/comfy-debug-run":
                 self._send_json(self._start_comfy_debug(payload))
+                return
+
+            if parsed.path == "/api/task-comfy-debug-run":
+                self._send_json(self._start_task_comfy_debug(payload))
+                return
+
+            if parsed.path == "/api/task-comfy-debug-confirm":
+                self._send_json(self._confirm_task_comfy_debug(payload))
                 return
 
             if parsed.path == "/api/test-model":
@@ -8772,35 +10631,61 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     def _stop_run(self, payload: dict, paused: bool) -> dict:
         run_id = str(payload.get("run_id") or payload.get("id") or "").strip()
-        if not run_id:
-            raise ValueError("run_id is required")
+        task_name = str(payload.get("task_name") or payload.get("task") or "").strip()
         with RUN_JOBS_LOCK:
-            job = RUN_JOBS.get(run_id)
+            job = RUN_JOBS.get(run_id) if run_id else None
+            if not job and task_name:
+                for candidate in RUN_JOBS.values():
+                    if str(candidate.get("task_name") or "") == task_name or Path(str(candidate.get("task_dir") or "")).name == task_name:
+                        job = candidate
+                        run_id = str(candidate.get("run_id") or run_id)
+                        break
             if not job:
-                raise FileNotFoundError(f"Run not found: {run_id}")
-            if job.get("status") in {"completed", "failed", "cancelled", "paused"}:
+                if not run_id and not task_name:
+                    raise ValueError("run_id or task_name is required")
+                raise FileNotFoundError(f"Run not found: {run_id or task_name}")
+            status = str(job.get("status") or "")
+            if status in {"completed", "failed", "cancelled"} or (paused and status == "paused"):
                 job["updated_at"] = time.time()
-                job["message"] = "任务已经结束"
+                job["message"] = "任务已停止"
                 return json.loads(json.dumps(job, ensure_ascii=False))
             job["cancel_requested"] = True
             job["pause_requested"] = bool(paused)
             job["status"] = "paused" if paused else "cancelled"
-            job["error"] = "用户已暂停任务，可断点继续" if paused else "用户已终止任务"
-            job["current_message"] = "用户已暂停任务，正在停止后续步骤" if paused else "用户已终止任务，正在停止后续步骤"
+            job["awaiting_confirmation"] = False
+            job.pop("awaiting_confirmation_step", None)
+            job["error"] = "任务已暂停，可稍后继续" if paused else "任务已终止"
+            job["current_message"] = "任务已暂停，可稍后继续" if paused else "任务已终止，可从任务输出继续"
             for step in job.get("steps", []):
                 if step.get("status") == "active":
                     step["status"] = "error"
-                    step["message"] = "用户已暂停" if paused else "用户已终止"
+                    step["message"] = "已暂停" if paused else "已终止"
             self._append_detail_event(
                 job,
                 {
                     "step": job.get("current_step") or 1,
-                    "message": "浏览器刷新/关闭，任务自动暂停" if paused else "用户点击终止任务",
+                    "message": "用户暂停任务" if paused else "用户终止任务",
                     "kind": "error",
                 },
             )
             job["updated_at"] = time.time()
-            job["message"] = "已发送暂停请求" if paused else "已发送终止请求"
+            job["message"] = "任务已暂停" if paused else "任务已终止"
+            task_dir_text = str(job.get("task_dir") or "").strip()
+            if task_dir_text:
+                summary_path = Path(task_dir_text) / "run_summary.json"
+                if summary_path.is_file():
+                    try:
+                        summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+                    except Exception:
+                        summary = {}
+                    if isinstance(summary, dict):
+                        summary["awaiting_confirmation"] = False
+                        summary.pop("awaiting_confirmation_step", None)
+                        summary.pop("blocked_step", None)
+                        summary["status"] = "paused" if paused else "cancelled"
+                        summary["blocked_reason"] = "任务已暂停，可继续任务" if paused else ""
+                        summary["updated_at"] = time.time()
+                        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
             return json.loads(json.dumps(job, ensure_ascii=False))
 
     @staticmethod
@@ -8946,6 +10831,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 job["current_message"] = event.get("message", "")
                 cls._append_detail_event(job, {"step": 0, "message": event.get("message", ""), "kind": "active"})
             elif kind == "completed":
+                if job.get("awaiting_confirmation"):
+                    job["status"] = "paused"
+                    job["current_message"] = job.get("current_message") or "当前步骤已完成，等待确认"
+                    job["updated_at"] = time.time()
+                    return
                 if cls._has_running_remote_jobs(job):
                     job["status"] = "running"
                     job["current_message"] = "RunningHub 远程任务仍在运行，继续等待素材结果"
@@ -9316,9 +11206,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
             except json.JSONDecodeError:
                 summary = {}
-        task_state = self._task_state(summary, files)
         production_jobs = self._production_jobs(task_dir)
         assets = self._task_assets(task_dir, files)
+        comfy_debug = self._task_comfy_debug_status(task_dir)
+        task_state = self._task_state(summary, files, comfy_debug)
         allowed_actions = self._allowed_task_actions(task_state, summary, files)
         task_status = self._task_status(task_dir, name, summary, files, task_state, allowed_actions, assets, production_jobs)
         return {
@@ -9329,6 +11220,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "allowed_actions": allowed_actions,
             "assets": assets,
             "production_jobs": production_jobs,
+            "comfy_debug": comfy_debug,
             "task_status": task_status,
         }
 
@@ -9419,6 +11311,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         active_job = cls._active_job_for_task(task_name, task_dir)
         steps = cls._task_status_steps(task_dir, summary, files, active_job)
         production = cls._task_status_production(task_dir, summary, production_jobs)
+        comfy_debug = cls._task_comfy_debug_status(task_dir)
         diagnostics = cls._task_status_diagnostics(task_dir, summary, files, task_state, steps, production)
         workflow_state = cls._task_status_workflow(summary, steps, active_job, task_state)
         return {
@@ -9427,6 +11320,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "workflow": workflow_state,
             "steps": steps,
             "production": production,
+            "comfy_debug": comfy_debug,
             "assets": assets,
             "allowed_actions": allowed_actions,
             "diagnostics": diagnostics,
@@ -9570,7 +11464,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             message = str(active_job.get("current_message") or active_job.get("error") or "")
         else:
             run_status = task_state
-            current_step = int(summary.get("blocked_step") or summary.get("resume_step") or 0)
+            current_step = int(summary.get("blocked_step") or summary.get("resume_step") or summary.get("resume_from_step") or 0)
             completed_steps = len([step for step in steps if step.get("status") == "completed"])
             message = str(summary.get("blocked_reason") or "")
         return {
@@ -9605,22 +11499,28 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if summary.get("blocked_reason"):
             diagnostics.append({"level": "warn", "code": "task_blocked", "message": str(summary.get("blocked_reason"))})
         if task_state == "completed" and not any(file in {"long_video_final.mp4", "final_video.mp4"} for file in files):
-            final_video = any(str(file).lower().endswith((".mp4", ".mov", ".webm", ".m4v")) for file in files)
-            if not final_video:
-                diagnostics.append({"level": "info", "code": "no_final_media", "message": "任务已有文本结果，但尚未发现最终视频文件。"})
+            diagnostics.append({"level": "info", "code": "no_final_media", "message": "任务已有文本结果，但尚未发现最终视频文件。"})
         missing_outputs = [step["step"] for step in steps if step.get("status") in {"completed", "awaiting_confirmation"} and not step.get("has_output")]
         if missing_outputs:
             diagnostics.append({"level": "warn", "code": "missing_step_outputs", "message": f"步骤状态已完成但缺少 output.md：{missing_outputs}"})
         return diagnostics
 
     @classmethod
-    def _task_state(cls, summary: dict, files: list[str]) -> str:
+    def _task_state(cls, summary: dict, files: list[str], comfy_debug: dict | None = None) -> str:
         if summary.get("awaiting_confirmation"):
             return "awaiting_confirmation"
+        summary_status = str(summary.get("status") or "").strip().lower()
+        if summary_status in {"cancelled", "canceled"}:
+            return "cancelled"
         blocked_reason = str(summary.get("blocked_reason") or "").strip()
         if blocked_reason:
             return "blocked"
         production_status = str(summary.get("production_status") or "").strip().lower()
+        if production_status.startswith("awaiting_comfyui_"):
+            debug_status = comfy_debug if isinstance(comfy_debug, dict) else {}
+            if debug_status.get("enabled") and debug_status.get("complete"):
+                return "partial"
+            return "blocked"
         if production_status and cls._is_failed_production_status(production_status):
             return "failed"
         if (summary.get("final_output") or "final_output.md" in files) and summary:
@@ -9636,10 +11536,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             actions.add("rebuild_final")
         if any(file.startswith("step_") and file.endswith("/output.md") for file in files):
             actions.add("rerun_step")
-        if task_state in {"awaiting_confirmation", "blocked", "failed", "partial"}:
+        if task_state in {"awaiting_confirmation", "blocked", "failed", "partial", "cancelled"}:
             actions.add("resume")
         if summary.get("awaiting_confirmation"):
             actions.add("confirm_step")
+            actions.add("cancel")
+        if task_state in {"awaiting_confirmation", "blocked"}:
+            actions.add("cancel")
         return sorted(actions)
 
     @staticmethod
@@ -9661,9 +11564,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "mtime": path.stat().st_mtime,
             }
             suffix = path.suffix.lower()
-            if suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+            if suffix in IMAGE_EXTENSIONS:
                 images.append(item)
-            elif suffix in {".mp4", ".mov", ".webm", ".m4v"}:
+            elif suffix in VIDEO_EXTENSIONS:
                 videos.append(item)
         images.sort(key=lambda item: WorkflowWebHandler._asset_sort_key(item["file"]))
         videos.sort(key=lambda item: WorkflowWebHandler._asset_sort_key(item["file"]))
@@ -9679,7 +11582,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not name or name.startswith("export_package/") or name.startswith("step_"):
             return False
         suffix = Path(name).suffix.lower()
-        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".m4v"}:
+        if suffix not in MEDIA_EXTENSIONS:
             return False
         if include_nested:
             return True
@@ -9737,10 +11640,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             ".wav",
             ".aac",
             ".m4a",
-            ".png",
-            ".jpg",
-            ".jpeg",
-            ".webp",
+            *IMAGE_EXTENSIONS,
         }
         if suffix not in allowed:
             raise ValueError(f"Unsupported media file type: {suffix}")
@@ -9774,14 +11674,422 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             item = dict(item)
             item["size"] = path.stat().st_size
             item["mtime"] = path.stat().st_mtime
-            item["kind"] = "image" if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} else "video"
+            item["kind"] = "image" if path.suffix.lower() in IMAGE_EXTENSIONS else "video"
             cleaned.append(item)
         cleaned.sort(key=lambda item: float(item.get("created_at") or item.get("mtime") or 0), reverse=True)
         if changed:
             self._write_asset_library_index(cleaned)
         return cleaned
 
-    def _comfy_debug_workflows(self) -> list[dict]:
+    @classmethod
+    def _task_comfy_debug_status(cls, task_dir: Path) -> dict:
+        payload_path = task_dir / "comfyui" / "comfyui_payload.json"
+        manifest_path = task_dir / "production_manifest.json"
+        state_path = task_dir / "comfyui" / "manual_debug_state.json"
+        manifest = cls._read_json_file(manifest_path)
+        payload = cls._read_json_file(payload_path)
+        state = cls._read_json_file(state_path)
+        composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
+        production_status = str(manifest.get("status") or "").strip()
+        stage = str(composition.get("manual_debug_stage") or "").strip().lower()
+        if not stage:
+            if "image" in production_status:
+                stage = "image"
+            elif "video" in production_status:
+                stage = "video"
+            else:
+                stage = "all"
+        leaf_items = cls._task_comfy_debug_items(payload, state, stage=stage)
+        items = cls._task_comfy_debug_groups(leaf_items)
+        enabled = bool(items) and (
+            production_status.startswith("awaiting_comfyui_")
+            or production_status in {"comfyui_manual_approved", "comfyui_image_manual_approved", "comfyui_video_manual_approved"}
+            or bool(composition.get("manual_debug_enabled"))
+        )
+        approved = len([item for item in items if item.get("status") == "approved"])
+        current = next((item for item in items if item.get("status") != "approved"), None)
+        return {
+            "enabled": enabled,
+            "state_file": str(state_path) if payload_path.is_file() else "",
+            "payload_file": str(payload_path) if payload_path.is_file() else "",
+            "total": len(items),
+            "approved": approved,
+            "complete": bool(items and approved >= len(items)),
+            "stage": stage,
+            "current_item_id": current.get("id") if current else "",
+            "items": items,
+        }
+
+    @classmethod
+    def _task_comfy_debug_items(cls, payload: dict, state: dict, stage: str = "all") -> list[dict]:
+        if not isinstance(payload, dict):
+            return []
+        workflows = cls._comfy_debug_workflows()
+        workflow_by_id = {str(item.get("id") or ""): item for item in workflows}
+        workflow_order = {str(item.get("id") or ""): index for index, item in enumerate(workflows, 1)}
+        state_items = state.get("items") if isinstance(state.get("items"), dict) else {}
+        raw_items: list[dict] = []
+        stage = str(stage or "all").strip().lower()
+        source_specs = []
+        if stage in {"all", "image"}:
+            source_specs.append(("image_prompts", "01_base_asset_image", "image"))
+        if stage in {"all", "video"}:
+            source_specs.append(("video_prompts", "06_i2v_first_frame", "video"))
+        for source_key, default_workflow, item_stage in source_specs:
+            values = payload.get(source_key)
+            if not isinstance(values, list):
+                continue
+            for source_index, raw in enumerate(values, 1):
+                entry = raw if isinstance(raw, dict) else {"prompt": str(raw)}
+                workflow_id = cls._infer_debug_workflow_id(entry, default_workflow, workflow_by_id)
+                workflow_mode = str(entry.get("workflow_mode") or entry.get("image_task_mode") or entry.get("video_task_mode") or entry.get("task_type") or entry.get("asset_tag") or "").strip()
+                source_id = str(entry.get("id") or entry.get("shot_id") or entry.get("scene_id") or f"{source_key}_{source_index:03d}").strip()
+                item_id = f"{workflow_id}:{workflow_mode or 'default'}:{source_id}"
+                item_state = state_items.get(item_id) if isinstance(state_items.get(item_id), dict) else {}
+                run_id = str(item_state.get("run_id") or "")
+                run_job = cls._run_status_optional(run_id) if run_id else {}
+                status = str(item_state.get("status") or "pending")
+                files = [str(file) for file in (item_state.get("files") or []) if file]
+                item_error = str(item_state.get("error") or "")
+                if status == "approved" and item_state.get("prompt_version") != 2:
+                    status = "failed"
+                    item_error = "该素材由旧版调试提示词生成，可能把用途说明画进图里，请重新运行当前项"
+                if status == "running" and run_id and not run_job:
+                    status = "failed"
+                    item_error = item_error or "ComfyUI 调试运行状态已丢失，请重新运行当前项"
+                elif run_job:
+                    job_status = str(run_job.get("status") or "")
+                    result_error = cls._comfy_debug_job_error(run_job)
+                    result_files = cls._files_from_comfy_debug_job(run_job)
+                    if status == "approved" and result_error:
+                        status = "failed"
+                        files = result_files
+                        item_error = result_error
+                    if job_status in {"queued", "running"} and status != "approved":
+                        status = "running"
+                    elif job_status == "completed" and status != "approved":
+                        files = result_files
+                        status = "failed" if result_error else "completed"
+                        item_error = result_error
+                    elif job_status == "failed" and status != "approved":
+                        status = "failed"
+                        item_error = result_error or str(run_job.get("error") or "")
+                if status in {"approved", "completed", "success"} and not files:
+                    status = "failed"
+                    item_error = item_error or "ComfyUI 调试没有生成图片/视频素材"
+                workflow = workflow_by_id.get(workflow_id) or {}
+                raw_items.append(
+                    {
+                        "id": item_id,
+                        "workflow_id": workflow_id,
+                        "workflow_name": workflow.get("name") or workflow_id,
+                        "workflow_mode": workflow_mode,
+                        "asset_tag": str(entry.get("asset_tag") or ""),
+                        "source": source_key,
+                        "stage": item_stage,
+                        "source_index": source_index,
+                        "material_id": source_id,
+                        "prompt": cls._prompt_from_material_item(entry),
+                        "reference_image": cls._reference_from_material_item(entry),
+                        "middle_frame_image": cls._middle_frame_from_material_item(entry),
+                        "last_frame_image": cls._last_frame_from_material_item(entry),
+                        "reference_images": cls._reference_images_from_material_item(entry),
+                        "width": cls._debug_material_value(entry, "width"),
+                        "height": cls._debug_material_value(entry, "height"),
+                        "duration": cls._debug_material_value(entry, "duration") if item_stage == "video" else "",
+                        "fps": cls._debug_material_value(entry, "fps") if item_stage == "video" else "",
+                        "status": status,
+                        "run_id": run_id,
+                        "files": files,
+                        "error": item_error,
+                        "_workflow_order": cls._debug_queue_order(workflow_id, workflow_mode, entry, workflow_order),
+                    }
+                )
+        cls._normalize_shared_debug_run_files(raw_items)
+        raw_items.sort(key=lambda item: (item["_workflow_order"], item["source_index"], item["id"]))
+        for index, item in enumerate(raw_items, 1):
+            item["order"] = index
+            item.pop("_workflow_order", None)
+        return raw_items
+
+    @staticmethod
+    def _normalize_shared_debug_run_files(items: list[dict]) -> None:
+        groups: dict[tuple[str, str, str, str], list[dict]] = {}
+        for item in items:
+            run_id = str(item.get("run_id") or "").strip()
+            files = [str(file) for file in (item.get("files") or []) if file]
+            if not run_id or len(files) <= 1:
+                continue
+            key = (
+                run_id,
+                str(item.get("workflow_id") or ""),
+                str(item.get("workflow_mode") or ""),
+                str(item.get("source") or ""),
+            )
+            groups.setdefault(key, []).append(item)
+        for siblings in groups.values():
+            if len(siblings) <= 1:
+                continue
+            siblings.sort(key=lambda item: (int(item.get("source_index") or 0), str(item.get("id") or "")))
+            shared_files = [str(file) for file in (siblings[0].get("files") or []) if file]
+            if len(shared_files) < len(siblings):
+                continue
+            if not all([str(file) for file in (item.get("files") or []) if file] == shared_files for item in siblings):
+                continue
+            for index, item in enumerate(siblings):
+                item["files"] = [shared_files[index]]
+
+    @staticmethod
+    def _task_comfy_debug_groups(items: list[dict]) -> list[dict]:
+        groups: list[dict] = []
+        group_map: dict[str, dict] = {}
+        status_rank = {"running": 0, "failed": 1, "pending": 2, "completed": 3, "success": 3, "approved": 4}
+        for item in items:
+            workflow_id = str(item.get("workflow_id") or "")
+            workflow_mode = str(item.get("workflow_mode") or item.get("asset_tag") or "default")
+            group_id = f"group:{workflow_id}:{workflow_mode}"
+            group = group_map.get(group_id)
+            if not group:
+                group = {
+                    "id": group_id,
+                    "group": True,
+                    "workflow_id": workflow_id,
+                    "workflow_name": item.get("workflow_name") or workflow_id,
+                    "workflow_mode": workflow_mode,
+                    "asset_tag": item.get("asset_tag") or "",
+                    "source": item.get("source") or "",
+                    "stage": item.get("stage") or "",
+                    "children": [],
+                    "files": [],
+                    "error": "",
+                    "_sort": item.get("order") or 999,
+                }
+                group_map[group_id] = group
+                groups.append(group)
+            group["children"].append(item)
+            group["files"].extend([file for file in (item.get("files") or []) if file])
+        for index, group in enumerate(groups, 1):
+            children = group.get("children") or []
+            statuses = [str(child.get("status") or "pending") for child in children]
+            errors = [str(child.get("error") or "") for child in children if child.get("error")]
+            if any(status == "running" for status in statuses):
+                status = "running"
+            elif any(status == "failed" for status in statuses):
+                status = "failed"
+            elif children and all(status == "approved" for status in statuses):
+                status = "approved"
+            elif children and all(status in {"completed", "success", "approved"} for status in statuses):
+                status = "completed"
+            else:
+                status = "pending"
+            group["status"] = status
+            group["error"] = "；".join(errors[:3])
+            group["order"] = index
+            group["child_count"] = len(children)
+            group["completed_count"] = len([child for child in children if str(child.get("status") or "") in {"completed", "success", "approved"} or [file for file in (child.get("files") or []) if file]])
+            group["approved_count"] = len([child for child in children if str(child.get("status") or "") == "approved"])
+            group["file_count"] = len(group.get("files") or [])
+            group.pop("_sort", None)
+        groups.sort(key=lambda group: (group.get("children") or [{}])[0].get("order") or 999)
+        for index, group in enumerate(groups, 1):
+            group["order"] = index
+        return groups
+
+    @staticmethod
+    def _debug_queue_order(workflow_id: str, workflow_mode: str, entry: dict, workflow_order: dict) -> int:
+        key = str(workflow_mode or entry.get("asset_tag") or entry.get("task_type") or workflow_id or "").strip()
+        preferred = {
+            "01_base_asset_image": 10,
+            "character_base": 10,
+            "product_base": 11,
+            "scene_base": 12,
+            "02_turnaround": 20,
+            "character_turnaround": 20,
+            "product_turnaround": 21,
+            "03_style_cover_image": 30,
+            "style_reference": 30,
+            "cover_key_visual": 31,
+            "04_keyframe": 40,
+            "keyframe": 40,
+            "05_image_repair_cutout": 50,
+            "image_inpaint_fix": 50,
+            "background_remove": 51,
+            "06_i2v": 60,
+            "06_i2v_first_frame": 60,
+            "i2v_first_frame": 60,
+            "06_i2v_first_last_frame": 61,
+            "i2v_first_last_frame": 61,
+            "07_live_to_anime": 70,
+            "live_to_anime": 70,
+            "08_motion_transfer": 80,
+            "motion_transfer": 80,
+            "09_talking_image": 90,
+            "talking_image": 90,
+            "10_broll_transition_video": 100,
+            "broll_scene_video": 100,
+            "empty_transition_video": 101,
+            "11_video_enhance": 110,
+            "video_upscale": 110,
+            "frame_interpolation": 111,
+            "video_deflicker_stabilize": 112,
+            "12_video_inpaint_fix": 120,
+            "video_inpaint_fix": 120,
+        }
+        return preferred.get(key, preferred.get(workflow_id, workflow_order.get(workflow_id, 999)))
+
+    @staticmethod
+    def _read_json_file(path: Path) -> dict:
+        if not path.is_file():
+            return {}
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def _infer_debug_workflow_id(entry: dict, default_workflow: str, workflow_by_id: dict) -> str:
+        explicit = str(entry.get("workflow_id") or entry.get("workflow") or "").strip()
+        if explicit in workflow_by_id:
+            return explicit
+        mode = str(entry.get("workflow_mode") or entry.get("image_task_mode") or entry.get("video_task_mode") or entry.get("task_type") or entry.get("asset_tag") or "").strip()
+        for workflow_id, workflow in workflow_by_id.items():
+            modes = workflow.get("modes") if isinstance(workflow.get("modes"), list) else []
+            if any(isinstance(item, dict) and str(item.get("value") or "") == mode for item in modes):
+                return workflow_id
+        return explicit or default_workflow
+
+    @staticmethod
+    def _prompt_from_material_item(entry: dict) -> str:
+        for key in ("positive", "positive_prompt", "image_prompt", "video_prompt", "visual_prompt", "prompt", "description"):
+            value = str(entry.get(key) or "").strip()
+            if value:
+                return WorkflowWebHandler._clean_material_prompt(value)
+        return json.dumps(entry, ensure_ascii=False)
+
+    @staticmethod
+    def _clean_material_prompt(value: str) -> str:
+        text_value = str(value or "").strip()
+        if not text_value:
+            return ""
+        try:
+            parsed = json.loads(text_value)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict):
+            for key in ("positive", "positive_prompt", "image_prompt", "video_prompt", "visual_prompt", "prompt", "description"):
+                candidate = str(parsed.get(key) or "").strip()
+                if candidate:
+                    return candidate
+        return text_value
+
+    @staticmethod
+    def _debug_material_value(entry: dict, key: str) -> str:
+        if not isinstance(entry, dict):
+            return ""
+        value = entry.get(key)
+        if value is None:
+            return ""
+        return str(value).strip()
+
+    @classmethod
+    def _debug_dimension_payload(cls, item: dict) -> dict:
+        if not isinstance(item, dict):
+            return {}
+        result = {}
+        for key in ("width", "height", "duration", "fps"):
+            value = cls._debug_material_value(item, key)
+            if value:
+                result[key] = value
+        return result
+
+    @staticmethod
+    def _reference_from_material_item(entry: dict) -> str:
+        for key in ("reference_image", "first_frame_image", "reference_video", "reference_audio"):
+            value = str(entry.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _last_frame_from_material_item(entry: dict) -> str:
+        for key in ("last_frame_image", "end_frame_image"):
+            value = str(entry.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _middle_frame_from_material_item(entry: dict) -> str:
+        for key in ("middle_frame_image", "mid_frame_image", "middle_keyframe", "middle_frame"):
+            value = str(entry.get(key) or "").strip()
+            if value:
+                return value
+        return ""
+
+    @staticmethod
+    def _reference_images_from_material_item(entry: dict) -> list[dict | str]:
+        if not isinstance(entry, dict):
+            return []
+        values = entry.get("reference_images")
+        if isinstance(values, list):
+            return [item for item in values if item]
+        return []
+
+    @staticmethod
+    def _run_status_optional(run_id: str) -> dict:
+        with RUN_JOBS_LOCK:
+            job = RUN_JOBS.get(run_id)
+            return json.loads(json.dumps(job, ensure_ascii=False)) if job else {}
+
+    @staticmethod
+    def _files_from_comfy_debug_job(job: dict) -> list[str]:
+        files: list[str] = []
+        for result in job.get("results") or []:
+            if isinstance(result, dict):
+                result_files = [str(file) for file in (result.get("files") or []) if file]
+                if result_files and str(result.get("task") or "") != COMFY_DEBUG_TASK:
+                    files.extend(result_files)
+                    continue
+                manifest = result.get("manifest") if isinstance(result.get("manifest"), dict) else {}
+                downloaded = manifest.get("downloaded_files") if isinstance(manifest.get("downloaded_files"), list) else []
+                if downloaded:
+                    files.extend(str(file) for file in downloaded if file)
+                else:
+                    files.extend(str(COMFY_DEBUG_ROOT / str(file)) for file in (result.get("files") or []) if file)
+        return files
+
+    @staticmethod
+    def _comfy_debug_job_error(job: dict) -> str:
+        if not isinstance(job, dict):
+            return ""
+        if str(job.get("status") or "") == "failed" and job.get("error"):
+            return str(job.get("error") or "")
+        results = job.get("results") if isinstance(job.get("results"), list) else []
+        if not results:
+            return str(job.get("error") or "")
+        errors = []
+        has_success = False
+        has_files = False
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            status = str(result.get("status") or "").strip().lower()
+            files = [file for file in (result.get("files") or []) if file]
+            if files:
+                has_files = True
+            if status in {"success", "completed", "partial_success"}:
+                has_success = True
+            if status in {"failed", "error"} or result.get("error"):
+                errors.append(str(result.get("error") or status or "ComfyUI debug failed"))
+        if errors:
+            return "；".join(errors)
+        if has_success and not has_files:
+            return "ComfyUI 调试完成但没有下载到图片/视频素材"
+        return ""
+
+    @classmethod
+    def _comfy_debug_workflows(cls) -> list[dict]:
         workflows = [dict(item) for item in COMFY_DEBUG_WORKFLOWS]
         seen = set()
         unique = []
@@ -9789,9 +12097,32 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             item_id = str(item.get("id") or "").strip()
             if not item_id or item_id in seen:
                 continue
+            default_node_info = str(item.get("default_node_info") or "").strip()
+            if not default_node_info or default_node_info == "[]":
+                item["default_node_info"] = cls._default_comfy_debug_node_info(item_id)
             seen.add(item_id)
             unique.append(item)
         return unique
+
+    @classmethod
+    def _default_comfy_debug_node_info(cls, workflow_id: str) -> str:
+        preset_map = {
+            "01_character_base": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
+            "02_product_base": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
+            "03_scene_base": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
+            "06_style_reference": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
+            "07_keyframe": "04_keyframe_image/runninghub_node_info_list_preset.json",
+            "08_cover_key_visual": "04_keyframe_image/runninghub_node_info_list_preset.json",
+            "01_base_asset_image": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
+            "02_turnaround": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
+            "03_style_cover_image": "04_keyframe_image/runninghub_node_info_list_preset.json",
+            "04_keyframe": "04_keyframe_image/runninghub_node_info_list_preset.json",
+            "06_i2v_first_frame": "02_ltx_video_2_3/runninghub_node_info_list_preset.json",
+            "06_i2v_first_last_frame": "06_i2v_first_last_frame_ltx_2_3/runninghub_node_info_list_preset.json",
+            "06_i2v_first_middle_last_frame": "06_i2v_first_middle_last_frame_ltx_2_3/runninghub_node_info_list_preset.json",
+            "10_broll_transition_video": "04_broll_material/runninghub_node_info_list_preset.json",
+        }
+        return cls._read_workflow_library_text(preset_map.get(str(workflow_id or "").strip(), ""))
 
     @staticmethod
     def _read_workflow_library_text(relative_path: object) -> str:
@@ -9803,6 +12134,373 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not target.is_file() or not WorkflowWebHandler._is_relative_to(target, root):
             return "[]"
         return target.read_text(encoding="utf-8-sig", errors="replace").strip() or "[]"
+
+    def _start_task_comfy_debug(self, payload: dict) -> dict:
+        task_name = str(payload.get("task") or "").strip()
+        item_id = str(payload.get("item_id") or "").strip()
+        if not task_name or not item_id:
+            raise ValueError("task and item_id are required")
+        task_dir = self._safe_task_dir(task_name)
+        status = self._task_comfy_debug_status(task_dir)
+        items = status.get("items") if isinstance(status.get("items"), list) else []
+        current_id = str(status.get("current_item_id") or "")
+        item = next((entry for entry in items if isinstance(entry, dict) and entry.get("id") == item_id), None)
+        if not item:
+            raise ValueError("ComfyUI debug item not found")
+        item_status = str(item.get("status") or "").lower()
+        can_rerun = item_status in {"failed", "completed", "success", "approved"}
+        if item_id != current_id and not can_rerun:
+            raise ValueError("请按 ComfyUI 调试队列顺序运行当前项")
+        if item.get("group"):
+            return self._start_task_comfy_debug_group(task_dir, status, item, payload)
+        debug_payload = {
+            "workflows": [item.get("workflow_id")],
+            "workflow_mode": item.get("workflow_mode") or "",
+            "prompt": item.get("prompt") or "",
+            "material_id": item.get("material_id") or item_id,
+            "reference_image": self._resolve_task_comfy_debug_reference(task_dir, status, item.get("reference_image") or ""),
+            "middle_frame_image": self._resolve_task_comfy_debug_reference(task_dir, status, item.get("middle_frame_image") or ""),
+            "last_frame_image": self._resolve_task_comfy_debug_reference(task_dir, status, item.get("last_frame_image") or ""),
+            "reference_images": self._resolve_task_comfy_debug_references(task_dir, status, item.get("reference_images") or []),
+            "api_key": str(payload.get("api_key") or "").strip(),
+            "base_url": str(payload.get("base_url") or "").strip(),
+            "workflow_library": payload.get("workflow_library") if isinstance(payload.get("workflow_library"), list) else [],
+            "output_task": task_name,
+            "output_subdir": "comfyui/manual_debug",
+        }
+        debug_payload.update(self._debug_dimension_payload(item))
+        if not debug_payload["prompt"]:
+            raise ValueError("当前调试项缺少 prompt")
+        job = self._start_comfy_debug(debug_payload)
+        self._update_task_comfy_debug_state(
+            task_dir,
+            item_id,
+            {
+                "status": "running",
+                "run_id": job.get("run_id") or "",
+                "started_at": time.time(),
+                "workflow_id": item.get("workflow_id") or "",
+                "workflow_mode": item.get("workflow_mode") or "",
+                "prompt_version": 2,
+                "files": [],
+                "error": "",
+            },
+        )
+        return job
+
+    def _start_task_comfy_debug_group(self, task_dir: Path, status: dict, group: dict, payload: dict) -> dict:
+        children = [child for child in (group.get("children") or []) if isinstance(child, dict)]
+        runnable = [
+            child
+            for child in children
+            if str(child.get("status") or "").lower() in {"pending", "failed", "completed", "success", "approved"}
+        ]
+        if not runnable:
+            raise ValueError("当前组没有可运行的调试项")
+        self._delete_task_comfy_debug_group_files(task_dir, children)
+        run_id = "comfy_debug_group_" + uuid4().hex
+        now = time.time()
+        job = {
+            "run_id": run_id,
+            "status": "queued",
+            "workflow": COMFY_DEBUG_TASK,
+            "workflow_name": group.get("workflow_name") or group.get("workflow_id") or "ComfyUI Group",
+            "task_title": "ComfyUI Debug Group",
+            "task_name": task_dir.name,
+            "created_at": now,
+            "updated_at": now,
+            "total_steps": len(runnable),
+            "completed_steps": 0,
+            "current_step": 1,
+            "current_message": "ComfyUI debug group queued",
+            "steps": [],
+            "cancel_requested": False,
+            "pause_requested": False,
+            "debug_type": "comfy_debug",
+            "active_workflow_id": group.get("workflow_id") or "",
+            "result": None,
+            "results": [],
+            "error": "",
+        }
+        with RUN_JOBS_LOCK:
+            RUN_JOBS[run_id] = job
+        for child in runnable:
+            self._update_task_comfy_debug_state(
+                task_dir,
+                str(child.get("id") or ""),
+                {
+                    "status": "running",
+                    "run_id": run_id,
+                    "started_at": now,
+                    "workflow_id": child.get("workflow_id") or "",
+                    "workflow_mode": child.get("workflow_mode") or "",
+                    "prompt_version": 2,
+                    "files": [],
+                    "error": "",
+                },
+            )
+        worker = threading.Thread(target=self._run_task_comfy_debug_group_job, args=(run_id, task_dir, status, runnable, payload), daemon=True)
+        worker.start()
+        return json.loads(json.dumps(job, ensure_ascii=False))
+
+    @staticmethod
+    def _delete_task_comfy_debug_group_files(task_dir: Path, items: list[dict]) -> None:
+        task_root = task_dir.resolve()
+        for item in items:
+            for file in item.get("files") or []:
+                try:
+                    target = (task_dir / str(file)).resolve()
+                    if target.is_file() and WorkflowWebHandler._is_relative_to(target, task_root):
+                        target.unlink()
+                except Exception:
+                    continue
+
+    def _run_task_comfy_debug_group_job(self, run_id: str, task_dir: Path, status: dict, items: list[dict], payload: dict) -> None:
+        all_results: list[dict] = []
+        errors: list[str] = []
+        for index, item in enumerate(items, 1):
+            item_id = str(item.get("id") or "")
+            self._update_job(
+                run_id,
+                {
+                    "status": "running",
+                    "current_step": index,
+                    "completed_steps": index - 1,
+                    "current_message": f"Running ComfyUI debug item {index}/{len(items)}",
+                },
+            )
+            debug_payload = {
+                "workflows": [item.get("workflow_id")],
+                "workflow_mode": item.get("workflow_mode") or "",
+                "prompt": item.get("prompt") or "",
+                "material_id": item.get("material_id") or item_id,
+                "reference_image": self._resolve_task_comfy_debug_reference(task_dir, status, item.get("reference_image") or ""),
+                "middle_frame_image": self._resolve_task_comfy_debug_reference(task_dir, status, item.get("middle_frame_image") or ""),
+                "last_frame_image": self._resolve_task_comfy_debug_reference(task_dir, status, item.get("last_frame_image") or ""),
+                "reference_images": self._resolve_task_comfy_debug_references(task_dir, status, item.get("reference_images") or []),
+                "api_key": str(payload.get("api_key") or "").strip(),
+                "base_url": str(payload.get("base_url") or "").strip(),
+                "workflow_library": payload.get("workflow_library") if isinstance(payload.get("workflow_library"), list) else [],
+                "output_task": task_dir.name,
+                "output_subdir": "comfyui/manual_debug",
+            }
+            debug_payload.update(self._debug_dimension_payload(item))
+            try:
+                result = self._run_comfy_debug(debug_payload)
+                result_job = {"status": "completed", "results": result.get("results", []) if isinstance(result, dict) else []}
+                result_error = self._comfy_debug_job_error(result_job)
+                files = self._files_from_comfy_debug_job(result_job)
+                friendly_files: list[str] = []
+                for result_entry in result.get("results", []) if isinstance(result, dict) else []:
+                    if not isinstance(result_entry, dict):
+                        continue
+                    for asset in result_entry.get("friendly_assets") or []:
+                        if isinstance(asset, dict) and asset.get("friendly_file"):
+                            friendly_files.append(str(asset.get("friendly_file") or ""))
+                all_results.extend(result.get("results", []) if isinstance(result, dict) else [])
+                self._update_task_comfy_debug_state(
+                    task_dir,
+                    item_id,
+                    {
+                        "status": "failed" if result_error else "completed",
+                        "run_id": run_id,
+                        "completed_at": time.time(),
+                        "files": files,
+                        "friendly_files": friendly_files,
+                        "error": result_error,
+                        "workflow_id": item.get("workflow_id") or "",
+                        "workflow_mode": item.get("workflow_mode") or "",
+                        "prompt_version": 2,
+                    },
+                )
+                if result_error:
+                    errors.append(f"{item_id}: {result_error}")
+            except Exception as exc:
+                errors.append(f"{item_id}: {exc}")
+                self._update_task_comfy_debug_state(
+                    task_dir,
+                    item_id,
+                    {
+                        "status": "failed",
+                        "run_id": run_id,
+                        "completed_at": time.time(),
+                        "files": [],
+                        "error": str(exc),
+                        "workflow_id": item.get("workflow_id") or "",
+                        "workflow_mode": item.get("workflow_mode") or "",
+                        "prompt_version": 2,
+                    },
+                )
+        final_error = "；".join(errors[:5])
+        self._update_job(
+            run_id,
+            {
+                "status": "failed" if final_error else "completed",
+                "completed_steps": len(items) - len(errors),
+                "current_step": len(items),
+                "current_message": final_error or "ComfyUI debug group completed",
+                "results": all_results,
+                "result": {"ok": not bool(final_error), "task": task_dir.name, "results": all_results},
+                "error": final_error,
+            },
+        )
+
+    def _confirm_task_comfy_debug(self, payload: dict) -> dict:
+        task_name = str(payload.get("task") or "").strip()
+        item_id = str(payload.get("item_id") or "").strip()
+        if not task_name or not item_id:
+            raise ValueError("task and item_id are required")
+        task_dir = self._safe_task_dir(task_name)
+        status = self._task_comfy_debug_status(task_dir)
+        items = status.get("items") if isinstance(status.get("items"), list) else []
+        current_id = str(status.get("current_item_id") or "")
+        if item_id != current_id:
+            raise ValueError("请按 ComfyUI 调试队列顺序确认当前项")
+        item = next((entry for entry in items if isinstance(entry, dict) and entry.get("id") == item_id), None)
+        if not item:
+            raise ValueError("ComfyUI debug item not found")
+        if item.get("group"):
+            children = [child for child in (item.get("children") or []) if isinstance(child, dict)]
+            if not children:
+                raise ValueError("当前组没有调试项")
+            not_ready = [child for child in children if str(child.get("status") or "") not in {"completed", "success", "approved"} or child.get("error") or not [file for file in (child.get("files") or []) if file]]
+            if not_ready:
+                raise ValueError("当前组还有未成功生成素材的调试项，不能确认满意")
+            for child in children:
+                self._update_task_comfy_debug_state(
+                    task_dir,
+                    str(child.get("id") or ""),
+                    {
+                        "status": "approved",
+                        "approved_at": time.time(),
+                        "run_id": child.get("run_id") or "",
+                        "files": child.get("files") or [],
+                        "workflow_id": child.get("workflow_id") or "",
+                        "workflow_mode": child.get("workflow_mode") or "",
+                        "prompt_version": 2,
+                    },
+                )
+            return self._task_comfy_debug_status(task_dir)
+        if str(item.get("status") or "") not in {"completed", "success", "approved"}:
+            raise ValueError("当前调试项尚未成功完成，不能确认满意")
+        if item.get("error"):
+            raise ValueError(f"当前调试项失败：{item.get('error')}")
+        if not [file for file in (item.get("files") or []) if file]:
+            raise ValueError("当前调试项没有生成图片/视频素材，不能确认满意")
+        self._update_task_comfy_debug_state(
+            task_dir,
+            item_id,
+            {
+                "status": "approved",
+                "approved_at": time.time(),
+                "run_id": item.get("run_id") or "",
+                "files": item.get("files") or [],
+                "workflow_id": item.get("workflow_id") or "",
+                "workflow_mode": item.get("workflow_mode") or "",
+                "prompt_version": 2,
+            },
+        )
+        return self._task_comfy_debug_status(task_dir)
+
+    @staticmethod
+    def _update_task_comfy_debug_state(task_dir: Path, item_id: str, patch: dict) -> None:
+        state_path = task_dir / "comfyui" / "manual_debug_state.json"
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8-sig")) if state_path.is_file() else {}
+        except Exception:
+            state = {}
+        if not isinstance(state, dict):
+            state = {}
+        items = state.setdefault("items", {})
+        if not isinstance(items, dict):
+            items = {}
+            state["items"] = items
+        current = items.get(item_id) if isinstance(items.get(item_id), dict) else {}
+        current.update(patch)
+        items[item_id] = current
+        state["updated_at"] = time.time()
+        state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _resolve_task_comfy_debug_reference(task_dir: Path, status: dict, reference_text: str) -> str:
+        text_value = str(reference_text or "").strip()
+        if not text_value:
+            return ""
+        parts = [part.strip() for part in re.split(r"[,，;；\n]+", text_value) if part.strip()]
+        if not parts:
+            return text_value
+        items = status.get("items") if isinstance(status.get("items"), list) else []
+        resolved: list[str] = []
+        for part in parts:
+            match = next(
+                (
+                    item
+                    for item in items
+                    if isinstance(item, dict)
+                    and item.get("status") == "approved"
+                    and (
+                        str(item.get("material_id") or "") == part
+                        or str(item.get("id") or "") == part
+                        or str(item.get("id") or "").endswith(":" + part)
+                    )
+                ),
+                None,
+            )
+            files = [str(file) for file in ((match or {}).get("files") or []) if file]
+            if files:
+                candidate = task_dir / files[0]
+                resolved.append(str(candidate if candidate.is_file() else files[0]))
+            else:
+                alias = WorkflowWebHandler._task_relative_reference_alias(task_dir, part)
+                resolved.append(alias or part)
+        return ", ".join(resolved)
+
+    @staticmethod
+    def _task_relative_reference_alias(task_dir: Path, value: str) -> str:
+        text = str(value or "").strip()
+        if not text or text.startswith(("http://", "https://", "data:image/")):
+            return ""
+        normalized = text.replace("\\", "/").lstrip("/")
+        aliases = [normalized]
+        if normalized.startswith("comfyui_manual_debug/"):
+            aliases.append("comfyui/manual_debug/" + normalized[len("comfyui_manual_debug/") :])
+        if normalized.startswith("comfyui/manual_debug/"):
+            aliases.append("comfyui_manual_debug/" + normalized[len("comfyui/manual_debug/") :])
+        for candidate_text in aliases:
+            candidate = (task_dir / candidate_text).resolve()
+            try:
+                if candidate.is_file() and WorkflowWebHandler._is_relative_to(candidate, task_dir.resolve()):
+                    return str(candidate)
+            except OSError:
+                continue
+        return ""
+
+    @classmethod
+    def _resolve_task_comfy_debug_references(cls, task_dir: Path, status: dict, references: list) -> list[dict | str]:
+        if not isinstance(references, list):
+            return []
+        resolved: list[dict | str] = []
+        for item in references:
+            if isinstance(item, str):
+                value = cls._resolve_task_comfy_debug_reference(task_dir, status, item)
+                if value:
+                    resolved.append(value)
+                continue
+            if isinstance(item, dict):
+                copied = dict(item)
+                source_value = ""
+                source_key = ""
+                for key in ("image", "reference_image", "path", "file", "url"):
+                    value = str(copied.get(key) or "").strip()
+                    if value:
+                        source_value = value
+                        source_key = key
+                        break
+                if source_value:
+                    copied[source_key or "image"] = cls._resolve_task_comfy_debug_reference(task_dir, status, source_value)
+                    resolved.append(copied)
+        return resolved
 
     def _start_comfy_debug(self, payload: dict) -> dict:
         workflow_ids = payload.get("workflows") if isinstance(payload.get("workflows"), list) else []
@@ -9826,6 +12524,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "task_name": COMFY_DEBUG_TASK,
             "created_at": now,
             "updated_at": now,
+            "started_at": 0,
+            "finished_at": 0,
+            "elapsed_seconds": 0,
             "total_steps": 1,
             "completed_steps": 0,
             "current_step": 1,
@@ -9854,10 +12555,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return json.loads(json.dumps(job, ensure_ascii=False))
 
     def _run_comfy_debug_job(self, run_id: str, payload: dict) -> None:
+        started_at = time.time()
         self._update_job(
             run_id,
             {
                 "status": "running",
+                "started_at": started_at,
+                "finished_at": 0,
+                "elapsed_seconds": 0,
                 "current_message": "Calling RunningHub / ComfyUI",
                 "steps": [
                     {
@@ -9872,31 +12577,41 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         )
         try:
             result = self._run_comfy_debug(payload)
+            result_job = {"status": "completed", "results": result.get("results", []) if isinstance(result, dict) else []}
+            result_error = self._comfy_debug_job_error(result_job)
+            finished_at = time.time()
+            elapsed_seconds = round(float(result.get("elapsed_seconds", finished_at - started_at)) if isinstance(result, dict) else finished_at - started_at, 1)
             self._update_job(
                 run_id,
                 {
-                    "status": "completed",
-                    "completed_steps": 1,
-                    "current_message": "ComfyUI debug completed",
+                    "status": "failed" if result_error else "completed",
+                    "completed_steps": 0 if result_error else 1,
+                    "finished_at": finished_at,
+                    "elapsed_seconds": elapsed_seconds,
+                    "current_message": result_error or "ComfyUI debug completed",
                     "result": result,
                     "results": result.get("results", []) if isinstance(result, dict) else [],
+                    "error": result_error,
                     "steps": [
                         {
                             "step": 1,
-                            "status": "done",
+                            "status": "error" if result_error else "done",
                             "agent_id": "comfy_debug",
                             "agent_name": "ComfyUI Debug",
-                            "message": "Completed",
+                            "message": result_error or "Completed",
                         }
                     ],
                 },
             )
         except Exception as exc:
+            finished_at = time.time()
             self._update_job(
                 run_id,
                 {
                     "status": "failed",
                     "completed_steps": 0,
+                    "finished_at": finished_at,
+                    "elapsed_seconds": round(finished_at - started_at, 1),
                     "current_message": str(exc),
                     "error": str(exc),
                     "steps": [
@@ -9912,6 +12627,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             )
 
     def _run_comfy_debug(self, payload: dict) -> dict:
+        started_at = time.time()
         workflow_ids = payload.get("workflows") if isinstance(payload.get("workflows"), list) else []
         selected_ids = [str(item).strip() for item in workflow_ids if str(item).strip()]
         if not selected_ids:
@@ -9925,14 +12641,23 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         node_info_override = str(payload.get("node_info_list_json") or "").strip()
         poll_timeout = self._safe_int(payload.get("poll_timeout_seconds"), default=3600, minimum=60, maximum=7200)
         reference_image = str(payload.get("reference_image") or "").strip()
+        middle_frame_image = str(payload.get("middle_frame_image") or payload.get("mid_frame_image") or "").strip()
+        last_frame_image = str(payload.get("last_frame_image") or "").strip()
+        reference_images_input = payload.get("reference_images") if isinstance(payload.get("reference_images"), list) else []
+        has_any_reference = bool(reference_image or middle_frame_image or last_frame_image or reference_images_input)
         seed = str(payload.get("seed") or "").strip()
         width = str(payload.get("width") or "").strip()
         height = str(payload.get("height") or "").strip()
         duration = str(payload.get("duration") or "").strip()
+        fps = str(payload.get("fps") or "").strip()
+        frame_count = str(payload.get("frame_count") or payload.get("frames") or "").strip()
         negative_prompt = str(payload.get("negative_prompt") or "").strip()
         task_type_override = str(payload.get("task_type") or "").strip()
         control_mode_override = str(payload.get("control_mode") or "").strip()
         image_task_mode = str(payload.get("image_task_mode") or "").strip()
+        video_task_mode = str(payload.get("video_task_mode") or "").strip()
+        workflow_mode = str(payload.get("workflow_mode") or "").strip()
+        asset_tag_override = str(payload.get("asset_tag") or "").strip()
         workflows = {item["id"]: item for item in self._comfy_debug_workflows()}
         frontend_library = payload.get("workflow_library") if isinstance(payload.get("workflow_library"), list) else []
         for library_item in frontend_library:
@@ -9948,16 +12673,46 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             node_info_value = str(library_item.get("nodeInfoList") or library_item.get("node_info_list_json") or "").strip()
             poll_timeout_value = str(library_item.get("pollTimeout") or library_item.get("poll_timeout_seconds") or "").strip()
             image_task_type_value = str(library_item.get("defaultImageTaskType") or library_item.get("default_image_task_type") or "").strip()
+            workflow_mode_value = str(library_item.get("defaultWorkflowMode") or library_item.get("default_workflow_mode") or "").strip()
+            width_value = str(library_item.get("width") or library_item.get("defaultWidth") or library_item.get("default_width") or "").strip()
+            height_value = str(library_item.get("height") or library_item.get("defaultHeight") or library_item.get("default_height") or "").strip()
+            duration_value = str(library_item.get("duration") or library_item.get("defaultDuration") or library_item.get("default_duration") or "").strip()
+            fps_value = str(library_item.get("fps") or library_item.get("defaultFps") or library_item.get("default_fps") or "").strip()
             if endpoint_value:
                 target["default_endpoint"] = endpoint_value
-            if node_info_value:
+            if node_info_value and node_info_value != "[]":
                 target["default_node_info"] = node_info_value
             if poll_timeout_value:
                 target["poll_timeout_seconds"] = poll_timeout_value
             if image_task_type_value:
                 target["default_image_task_type"] = image_task_type_value
+            if workflow_mode_value:
+                target["default_workflow_mode"] = workflow_mode_value
+            if width_value:
+                target["default_width"] = width_value
+            if height_value:
+                target["default_height"] = height_value
+            if duration_value:
+                target["default_duration"] = duration_value
+            if fps_value:
+                target["default_fps"] = fps_value
         run_id = time.strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
-        run_root = COMFY_DEBUG_ROOT / run_id
+        output_task_name = str(payload.get("output_task") or "").strip()
+        output_task_dir = self._safe_task_dir(output_task_name) if output_task_name else None
+        output_subdir = str(payload.get("output_subdir") or "comfyui/manual_debug").strip().strip("/\\") or "comfyui/manual_debug"
+        output_subdir_path = Path(*[part for part in Path(output_subdir).parts if part not in {"", "."}])
+        if output_subdir_path.is_absolute() or ".." in output_subdir_path.parts:
+            raise ValueError("invalid output_subdir")
+        if output_task_dir:
+            run_root = (output_task_dir / output_subdir_path / run_id).resolve()
+            if not self._is_relative_to(run_root, output_task_dir):
+                raise ValueError("invalid output_subdir")
+            result_file_root = output_task_dir
+            result_task_name = output_task_name
+        else:
+            run_root = COMFY_DEBUG_ROOT / run_id
+            result_file_root = COMFY_DEBUG_ROOT
+            result_task_name = COMFY_DEBUG_TASK
         run_root.mkdir(parents=True, exist_ok=True)
         results = []
         image_task_modes = {
@@ -9966,7 +12721,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "scene_generation": ("scene_generation", "none", False),
             "character_turnaround": ("character_turnaround", "character_reference", True),
             "product_turnaround": ("product_turnaround", "product_reference", True),
-            "keyframe": ("keyframe", "keyframe_reference", True),
+            "keyframe": ("keyframe", "none", False),
             "cover_key_visual": ("cover_key_visual", "style_reference", False),
             "style_reference": ("style_reference", "none", False),
             "inpaint_fix": ("inpaint_fix", "mask_inpaint", True),
@@ -9995,59 +12750,139 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             task_type = str(item.get("default_task_type") or "").strip()
             control_mode = str(item.get("default_control_mode") or "").strip()
             job_type = "video" if str(item.get("type") or "").lower() == "video" else "image"
-            mode = image_task_mode or str(item.get("default_image_task_type") or "").strip()
+            mode = workflow_mode or image_task_mode or video_task_mode or str(item.get("default_workflow_mode") or item.get("default_image_task_type") or "").strip()
+            mode_item = None
+            if isinstance(item.get("modes"), list):
+                mode_item = next((entry for entry in item["modes"] if isinstance(entry, dict) and str(entry.get("value") or "") == mode), None)
+                if mode_item:
+                    task_type = str(mode_item.get("task_type") or task_type)
+                    control_mode = str(mode_item.get("control_mode") or control_mode)
+                    if mode_item.get("requires_reference") and not has_any_reference:
+                        raise ValueError(f"{mode} requires reference_image")
             if job_type == "image" and mode in image_task_modes:
                 task_type, control_mode, requires_reference = image_task_modes[mode]
-                if requires_reference and not reference_image:
+                if requires_reference and not has_any_reference:
                     raise ValueError(f"{mode} requires reference_image")
+            if mode == "i2v_first_middle_last_frame" or workflow_id == "06_i2v_first_middle_last_frame":
+                if not reference_image or not middle_frame_image or not last_frame_image:
+                    raise ValueError("i2v_first_middle_last_frame requires reference_image, middle_frame_image and last_frame_image")
+            elif mode == "i2v_first_last_frame" or workflow_id == "06_i2v_first_last_frame":
+                if not reference_image or not last_frame_image:
+                    raise ValueError("i2v_first_last_frame requires reference_image and last_frame_image")
             if task_type_override:
                 task_type = task_type_override
             if control_mode_override:
                 control_mode = control_mode_override
+            if workflow_id == "04_keyframe" or mode == "keyframe":
+                reference_image = ""
+                middle_frame_image = ""
+                last_frame_image = ""
+                reference_images_input = []
             request_payload = {
                 "prompt": prompt,
                 "negative_prompt": negative_prompt,
                 "reference_image": reference_image,
+                "middle_frame_image": middle_frame_image,
+                "last_frame_image": last_frame_image,
+                "reference_images": reference_images_input,
                 "seed": seed,
                 "width": width or item.get("default_width") or "",
                 "height": height or item.get("default_height") or "",
-                "duration": duration,
                 "task_type": task_type,
                 "control_mode": control_mode,
                 "image_task_mode": mode,
+                "video_task_mode": mode if job_type == "video" else "",
+                "workflow_mode": mode,
+                "asset_tag": asset_tag_override or str((mode_item or {}).get("asset_tag") or item.get("asset_tag") or workflow_id),
                 "image_task_type": task_type if job_type == "image" else "",
                 "video_task_type": task_type if job_type == "video" else "",
             }
             if job_type == "video":
                 request_payload["video_prompt"] = prompt
+                request_payload["duration"] = duration or item.get("default_duration") or ""
+                request_payload["fps"] = fps or item.get("default_fps") or ""
+                request_payload["frame_count"] = frame_count
             else:
                 request_payload["image_prompt"] = prompt
             try:
                 adapter = CloudComfyUIAdapter(base_url, api_key, endpoint, progress_callback=None)
-                adapter._reference_search_dirs = [COMFY_DEBUG_ROOT, OUTPUT_ROOT, WORKSPACE_ROOT]  # type: ignore[attr-defined]
-                if reference_image:
-                    uploaded_reference = adapter._reference_image_value(reference_image)  # type: ignore[attr-defined]
+                search_dirs = [run_root]
+                if output_task_dir:
+                    search_dirs.append(output_task_dir)
+                search_dirs.extend([COMFY_DEBUG_ROOT, OUTPUT_ROOT, WORKSPACE_ROOT])
+                adapter._reference_search_dirs = search_dirs  # type: ignore[attr-defined]
+                uploaded_reference_images = []
+                for ref_item in reference_images_input:
+                    ref_value = ""
+                    if isinstance(ref_item, str):
+                        ref_value = ref_item.strip()
+                    elif isinstance(ref_item, dict):
+                        for key in ("image", "reference_image", "path", "file", "url"):
+                            value = str(ref_item.get(key) or "").strip()
+                            if value:
+                                ref_value = value
+                                break
+                    if ref_value:
+                        ref_value = self._ensure_comfy_safe_reference_file(ref_value)
+                        uploaded_reference_images.append(adapter._reference_image_value(ref_value))  # type: ignore[attr-defined]
+                if not uploaded_reference_images and reference_image:
+                    safe_reference_image = self._ensure_comfy_safe_reference_file(reference_image)
+                    uploaded_reference_images.append(adapter._reference_image_value(safe_reference_image))  # type: ignore[attr-defined]
+                if middle_frame_image:
+                    safe_middle_frame_image = self._ensure_comfy_safe_reference_file(middle_frame_image)
+                    uploaded_middle_frame = adapter._reference_image_value(safe_middle_frame_image)  # type: ignore[attr-defined]
+                    if uploaded_middle_frame and uploaded_middle_frame not in uploaded_reference_images:
+                        uploaded_reference_images.append(uploaded_middle_frame)
+                if last_frame_image:
+                    safe_last_frame_image = self._ensure_comfy_safe_reference_file(last_frame_image)
+                    uploaded_last_frame = adapter._reference_image_value(safe_last_frame_image)  # type: ignore[attr-defined]
+                    if uploaded_last_frame and uploaded_last_frame not in uploaded_reference_images:
+                        uploaded_reference_images.append(uploaded_last_frame)
+                if uploaded_reference_images:
+                    uploaded_reference = uploaded_reference_images[0]
                     request_payload["reference_image"] = uploaded_reference
+                    request_payload["reference_images"] = uploaded_reference_images
+                    if middle_frame_image and len(uploaded_reference_images) > 1:
+                        request_payload["middle_frame_image"] = uploaded_reference_images[1]
+                    if last_frame_image and len(uploaded_reference_images) > 1:
+                        request_payload["last_frame_image"] = uploaded_reference_images[-1]
                 manifest = adapter.run(request_payload, config, output_dir)
                 downloaded = [Path(path) for path in manifest.get("downloaded_files", []) if path]
                 files = []
                 for path in downloaded:
                     try:
                         resolved = path.resolve()
-                        if resolved.is_file() and self._is_relative_to(resolved, COMFY_DEBUG_ROOT):
-                            files.append(resolved.relative_to(COMFY_DEBUG_ROOT).as_posix())
+                        if resolved.is_file() and self._is_relative_to(resolved, result_file_root):
+                            files.append(resolved.relative_to(result_file_root).as_posix())
                     except OSError:
                         continue
+                library_assets = self._auto_favorite_comfy_debug_assets(
+                    result_task_name,
+                    files,
+                    item.get("name") or workflow_id,
+                    request_payload.get("asset_tag") or item.get("asset_tag") or workflow_id,
+                )
+                friendly_assets = self._sync_task_generated_assets(
+                    result_task_name,
+                    files,
+                    workflow_id=workflow_id,
+                    workflow_name=item.get("name") or workflow_id,
+                    asset_tag=request_payload.get("asset_tag") or item.get("asset_tag") or workflow_id,
+                    material_id=str(payload.get("material_id") or "").strip(),
+                    run_id=run_id,
+                )
                 results.append(
                     {
                         "id": workflow_id,
                         "name": item.get("name") or workflow_id,
                         "type": item.get("type") or "",
-                        "asset_tag": item.get("asset_tag") or workflow_id,
+                        "asset_tag": request_payload.get("asset_tag") or item.get("asset_tag") or workflow_id,
                         "status": manifest.get("status", "unknown"),
                         "endpoint": endpoint,
-                        "task": COMFY_DEBUG_TASK,
+                        "task": result_task_name,
                         "files": files,
+                        "library_assets": library_assets,
+                        "friendly_assets": friendly_assets,
                         "manifest": manifest,
                     }
                 )
@@ -10060,11 +12895,28 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     "error": str(exc),
                 }
                 (output_dir / "debug_error.json").write_text(json.dumps(error_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-                results.append({**error_manifest, "type": item.get("type") or "", "asset_tag": item.get("asset_tag") or workflow_id, "task": COMFY_DEBUG_TASK, "files": []})
+                results.append({**error_manifest, "type": item.get("type") or "", "asset_tag": asset_tag_override or item.get("asset_tag") or workflow_id, "task": result_task_name, "files": []})
 
-        manifest = {"run_id": run_id, "created_at": time.time(), "results": results}
+        finished_at = time.time()
+        elapsed_seconds = round(finished_at - started_at, 1)
+        manifest = {
+            "run_id": run_id,
+            "created_at": started_at,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "elapsed_seconds": elapsed_seconds,
+            "results": results,
+        }
         (run_root / "comfy_debug_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-        return {"ok": True, "run_id": run_id, "task": COMFY_DEBUG_TASK, "results": results}
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "task": result_task_name,
+            "started_at": started_at,
+            "finished_at": finished_at,
+            "elapsed_seconds": elapsed_seconds,
+            "results": results,
+        }
 
     def _favorite_asset(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
@@ -10073,7 +12925,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
         source_path, _ = self._safe_task_file(task, file_name, must_exist=True)
         suffix = source_path.suffix.lower()
-        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".mp4", ".mov", ".webm", ".m4v"}:
+        if suffix not in MEDIA_EXTENSIONS:
             raise ValueError(f"Unsupported asset type: {suffix}")
         ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
         clean_tags = [str(tag).strip() for tag in tags if str(tag).strip()]
@@ -10100,7 +12952,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "name": label or self._asset_label(file_name),
             "source_task": task,
             "source_file": file_name,
-            "kind": "image" if suffix in {".png", ".jpg", ".jpeg", ".webp"} else "video",
+            "kind": "image" if suffix in IMAGE_EXTENSIONS else "video",
             "tags": clean_tags,
             "created_at": time.time(),
             "size": target.stat().st_size,
@@ -10110,11 +12962,242 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         self._write_asset_library_index(items)
         return {"ok": True, "asset": item}
 
+    def _auto_favorite_comfy_debug_assets(self, task: str, files: list[str], workflow_name: str, asset_tag: str) -> list[dict]:
+        assets: list[dict] = []
+        clean_tag = str(asset_tag or "comfy_debug").strip() or "comfy_debug"
+        for file_name in files:
+            suffix = Path(str(file_name or "")).suffix.lower()
+            if suffix not in MEDIA_EXTENSIONS:
+                continue
+            kind_tag = "image" if suffix in IMAGE_EXTENSIONS else "video"
+            label = f"{workflow_name} · {Path(file_name).name}"
+            try:
+                result = self._favorite_asset(
+                    {
+                        "task": task,
+                        "file": file_name,
+                        "label": label,
+                        "tags": [kind_tag, clean_tag],
+                    }
+                )
+                asset = result.get("asset") if isinstance(result, dict) else None
+                if isinstance(asset, dict):
+                    assets.append(asset)
+            except Exception as exc:
+                assets.append(
+                    {
+                        "source_task": task,
+                        "source_file": file_name,
+                        "error": str(exc),
+                    }
+                )
+        return assets
+
+    def _sync_task_generated_assets(
+        self,
+        task: str,
+        files: list[str],
+        *,
+        workflow_id: str,
+        workflow_name: str,
+        asset_tag: str,
+        material_id: str = "",
+        run_id: str = "",
+    ) -> list[dict]:
+        if not task or task == COMFY_DEBUG_TASK:
+            return []
+        try:
+            task_dir = self._safe_task_dir(task)
+        except Exception:
+            return []
+        task_root = task_dir.resolve()
+        index_root = (task_dir / "assets" / "generated").resolve()
+        if not self._is_relative_to(index_root, task_root):
+            return []
+        copied: list[dict] = []
+        index_items = self._read_task_generated_asset_index(index_root)
+        seen_sources = {
+            str(item.get("source_file") or "")
+            for item in index_items
+            if isinstance(item, dict)
+        }
+        for file_name in files:
+            relative_file = str(file_name or "").strip().replace("\\", "/")
+            suffix = Path(relative_file).suffix.lower()
+            if not relative_file or suffix not in MEDIA_EXTENSIONS:
+                continue
+            try:
+                source = (task_dir / relative_file).resolve()
+            except OSError:
+                continue
+            if not source.is_file() or not self._is_relative_to(source, task_root):
+                continue
+            kind = "image" if suffix in IMAGE_EXTENSIONS else "video"
+            category = self._generated_asset_category(kind, asset_tag, workflow_id)
+            folder = (index_root / category).resolve()
+            if not self._is_relative_to(folder, index_root):
+                continue
+            folder.mkdir(parents=True, exist_ok=True)
+            source_hash = hashlib.sha1(relative_file.encode("utf-8", errors="ignore")).hexdigest()[:8]
+            label_parts = [
+                material_id,
+                asset_tag,
+                Path(relative_file).stem,
+                source_hash,
+            ]
+            safe_name = self._safe_asset_stem("_".join(part for part in label_parts if part))
+            target = (folder / f"{safe_name}{suffix}").resolve()
+            if not self._is_relative_to(target, index_root):
+                continue
+            if source != target:
+                shutil.copy2(source, target)
+            friendly_file = target.relative_to(task_dir).as_posix()
+            entry = {
+                "friendly_file": friendly_file,
+                "source_file": relative_file,
+                "kind": kind,
+                "category": category,
+                "workflow_id": workflow_id,
+                "workflow_name": workflow_name,
+                "asset_tag": asset_tag,
+                "material_id": material_id,
+                "run_id": run_id,
+                "size": target.stat().st_size,
+                "mtime": target.stat().st_mtime,
+                "synced_at": time.time(),
+            }
+            copied.append(entry)
+            if relative_file not in seen_sources:
+                index_items.insert(0, entry)
+                seen_sources.add(relative_file)
+            else:
+                for existing in index_items:
+                    if isinstance(existing, dict) and str(existing.get("source_file") or "") == relative_file:
+                        existing.update(entry)
+                        break
+        if copied:
+            self._write_task_generated_asset_index(index_root, index_items)
+            self._write_task_generated_asset_readme(index_root)
+        return copied
+
+    @staticmethod
+    def _generated_asset_category(kind: str, asset_tag: str, workflow_id: str) -> str:
+        clean_tag = WorkflowWebHandler._safe_asset_stem(asset_tag or workflow_id or "other").lower()
+        tag_aliases = {
+            "character_generation": "character_base",
+            "product_generation": "product_base",
+            "scene_generation": "scene_base",
+            "character_reference": "character_turnaround",
+            "product_reference": "product_turnaround",
+            "first_frame": "i2v_first_frame",
+            "first_last_frame": "i2v_first_last_frame",
+            "first_middle_last_frame": "i2v_first_middle_last_frame",
+            "img2video": "i2v_first_frame",
+            "first_last_frame_video": "i2v_first_last_frame",
+            "first_middle_last_frame_video": "i2v_first_middle_last_frame",
+            "txt2video": "broll_scene_video",
+            "transition_video": "empty_transition_video",
+        }
+        clean_tag = tag_aliases.get(clean_tag, clean_tag)
+        folder = ASSET_LIBRARY_TAG_FOLDERS.get(clean_tag, clean_tag)
+        if folder.startswith("07_keyframe"):
+            return "images/07_keyframe"
+        if kind == "image":
+            return f"images/{folder}"
+        return f"videos/{folder}"
+
+    @staticmethod
+    def _read_task_generated_asset_index(index_root: Path) -> list[dict]:
+        path = index_root / "asset_index.json"
+        if not path.is_file():
+            return []
+        try:
+            data = json.loads(path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return []
+        if isinstance(data, dict) and isinstance(data.get("items"), list):
+            return [item for item in data["items"] if isinstance(item, dict)]
+        return []
+
+    @staticmethod
+    def _write_task_generated_asset_index(index_root: Path, items: list[dict]) -> None:
+        index_root.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "version": 1,
+            "updated_at": time.time(),
+            "items": items,
+        }
+        (index_root / "asset_index.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _write_task_generated_asset_readme(index_root: Path) -> None:
+        text = (
+            "# Generated Assets\n\n"
+            "This folder is a human-friendly copy of generated task media.\n"
+            "Original debug files stay in their source folders so task state remains valid.\n\n"
+            "- images/: generated still assets and keyframes\n"
+            "- videos/: generated video clips, first-frame clips, first/last-frame clips, and transitions\n"
+            "- asset_index.json: mapping from friendly files back to original source files\n"
+        )
+        (index_root / "README.md").write_text(text, encoding="utf-8")
+
+    def _import_asset(self, payload: dict) -> dict:
+        filename = str(payload.get("filename") or "").strip()
+        content_base64 = str(payload.get("content_base64") or "").strip()
+        if not filename or not content_base64:
+            raise ValueError("filename and content_base64 are required")
+        suffix = Path(filename).suffix.lower()
+        if suffix not in MEDIA_EXTENSIONS:
+            raise ValueError(f"Unsupported asset type: {suffix}")
+        file_bytes = base64.b64decode(content_base64, validate=True)
+        if suffix in IMAGE_EXTENSIONS:
+            file_bytes, suffix = self._normalize_comfy_image_bytes(file_bytes, suffix)
+        tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+        clean_tags: list[str] = []
+        for tag in tags:
+            value = str(tag or "").strip()
+            if value and value not in clean_tags:
+                clean_tags.append(value)
+        if not any(tag in {"image", "video"} for tag in clean_tags):
+            clean_tags.insert(0, "image" if suffix in IMAGE_EXTENSIONS else "video")
+        folder_name = next((ASSET_LIBRARY_TAG_FOLDERS[tag] for tag in clean_tags if tag in ASSET_LIBRARY_TAG_FOLDERS), "uncategorized")
+        ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
+        target_dir = (ASSET_LIBRARY_ROOT / folder_name).resolve()
+        if not self._is_relative_to(target_dir, ASSET_LIBRARY_ROOT):
+            raise ValueError("Invalid asset library folder")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        asset_id = uuid4().hex
+        safe_stem = self._safe_asset_stem(Path(filename).stem or "asset")
+        library_name = f"{asset_id}_{safe_stem}{suffix}"
+        target = (target_dir / library_name).resolve()
+        if not self._is_relative_to(target, ASSET_LIBRARY_ROOT):
+            raise ValueError("Invalid asset path")
+        target.write_bytes(file_bytes)
+        item = {
+            "id": asset_id,
+            "file": f"{folder_name}/{library_name}",
+            "name": str(payload.get("name") or "").strip() or Path(filename).stem or filename,
+            "source_task": "",
+            "source_file": filename,
+            "kind": "image" if suffix in IMAGE_EXTENSIONS else "video",
+            "tags": clean_tags,
+            "note": str(payload.get("note") or "").strip(),
+            "created_at": time.time(),
+            "updated_at": time.time(),
+            "size": target.stat().st_size,
+            "mtime": target.stat().st_mtime,
+        }
+        items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
+        items.insert(0, item)
+        self._write_asset_library_index(items)
+        return {"ok": True, "asset": item}
+
     def _update_asset_metadata(self, payload: dict) -> dict:
         asset_id = str(payload.get("id") or "").strip()
         if not asset_id:
             raise ValueError("Missing asset id")
         tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
+        name = str(payload.get("name") or "").strip()
         note = str(payload.get("note") or "").strip()
         clean_tags: list[str] = []
         for tag in tags:
@@ -10126,6 +13209,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         for item in items:
             if str(item.get("id") or "") == asset_id:
                 old_file = str(item.get("file") or "").strip()
+                if name:
+                    item["name"] = name
                 item["tags"] = clean_tags
                 item["note"] = note
                 item["updated_at"] = time.time()
@@ -10188,8 +13273,29 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not target.is_file() or not self._is_relative_to(target, ASSET_LIBRARY_ROOT):
             raise FileNotFoundError(asset_id)
         suffix = target.suffix.lower()
-        if suffix not in {".mp4", ".mov", ".webm", ".m4v", ".png", ".jpg", ".jpeg", ".webp"}:
+        if suffix not in MEDIA_EXTENSIONS:
             raise ValueError(f"Unsupported media file type: {suffix}")
+        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+        data = target.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_reference_media(self, file_name: str) -> None:
+        name = str(file_name or "").replace("\\", "/").strip().lstrip("/")
+        if name.startswith("my_workspace/"):
+            name = name[len("my_workspace/") :]
+        if name.startswith("my_reference_images/"):
+            name = name[len("my_reference_images/") :]
+        target = (REFERENCE_ROOT / name).resolve()
+        if not target.is_file() or not self._is_relative_to(target, REFERENCE_ROOT):
+            raise FileNotFoundError(file_name)
+        suffix = target.suffix.lower()
+        if suffix not in MEDIA_EXTENSIONS:
+            raise ValueError(f"Unsupported reference media file type: {suffix}")
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
         data = target.read_bytes()
         self.send_response(200)
@@ -10226,6 +13332,42 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             number = default
         return max(minimum, min(maximum, number))
+
+    @staticmethod
+    def _normalize_comfy_image_bytes(file_bytes: bytes, suffix: str) -> tuple[bytes, str]:
+        suffix = str(suffix or "").lower()
+        if suffix not in IMAGE_EXTENSIONS or suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+            return file_bytes, suffix
+        with Image.open(BytesIO(file_bytes)) as image:
+            if image.mode not in {"RGB", "RGBA"}:
+                image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
+            buffer = BytesIO()
+            image.save(buffer, format="PNG")
+            return buffer.getvalue(), ".png"
+
+    def _ensure_comfy_safe_reference_file(self, value: str) -> str:
+        text = str(value or "").strip()
+        if not text or text.startswith(("http://", "https://", "data:image/")):
+            return text
+        normalized = text.replace("\\", "/").lstrip("/")
+        if normalized.startswith("comfyui_manual_debug/"):
+            normalized = "comfyui/manual_debug/" + normalized[len("comfyui_manual_debug/") :]
+        if normalized.startswith("my_workspace/"):
+            normalized = normalized[len("my_workspace/") :]
+        candidate = (WORKSPACE_ROOT / normalized).resolve()
+        if not candidate.is_file() or not self._is_relative_to(candidate, WORKSPACE_ROOT):
+            return text
+        suffix = candidate.suffix.lower()
+        if suffix not in IMAGE_EXTENSIONS or suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+            return text
+        converted_dir = REFERENCE_ROOT / "comfy_debug" / "converted"
+        converted_dir.mkdir(parents=True, exist_ok=True)
+        target = converted_dir / f"{self._safe_asset_stem(candidate.stem)[:80]}_{uuid4().hex[:8]}.png"
+        converted_bytes, converted_suffix = self._normalize_comfy_image_bytes(candidate.read_bytes(), suffix)
+        if converted_suffix != ".png":
+            return text
+        target.write_bytes(converted_bytes)
+        return target.relative_to(WORKSPACE_ROOT).as_posix()
 
     def _save_file(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
@@ -10339,6 +13481,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
             except json.JSONDecodeError:
                 summary = {}
+        debug_status = self._task_comfy_debug_status(task_dir)
+        if debug_status.get("enabled") and not debug_status.get("complete"):
+            total = int(debug_status.get("total") or 0)
+            approved = int(debug_status.get("approved") or 0)
+            raise ValueError(f"ComfyUI 调试队列尚未全部确认（{approved}/{total}）。请先运行并确认下方调试队列，再继续主流程。")
         run_id = uuid4().hex
         job = {
             "run_id": run_id,
@@ -10722,11 +13869,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("filename and content_base64 are required")
 
         suffix = Path(filename).suffix.lower()
-        allowed = {".jpg", ".jpeg", ".png", ".webp"}
-        if suffix not in allowed:
+        if suffix not in IMAGE_EXTENSIONS:
             raise ValueError(f"Unsupported image type: {suffix}")
 
         image_bytes = base64.b64decode(content_base64, validate=True)
+        image_bytes, suffix = self._normalize_comfy_image_bytes(image_bytes, suffix)
         if len(image_bytes) > 12 * 1024 * 1024:
             raise ValueError("Reference image is too large; max size is 12 MB")
 
@@ -10751,11 +13898,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("filename and content_base64 are required")
 
         suffix = Path(filename).suffix.lower()
-        allowed = {".jpg", ".jpeg", ".png", ".webp", ".mp4", ".webm", ".mov", ".m4v"}
-        if suffix not in allowed:
+        if suffix not in IMAGE_EXTENSIONS:
             raise ValueError(f"Unsupported ComfyUI debug reference type: {suffix}")
 
         file_bytes = base64.b64decode(content_base64, validate=True)
+        file_bytes, suffix = self._normalize_comfy_image_bytes(file_bytes, suffix)
         if len(file_bytes) > 200 * 1024 * 1024:
             raise ValueError("ComfyUI debug reference is too large; max size is 200 MB")
 

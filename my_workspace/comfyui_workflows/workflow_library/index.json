@@ -28,5 +28,71 @@
     "node_info_extended_example": "02_all_in_one_video/node_info_extended_example.json",
     "supports_reference_image": true,
     "supports_control_mode": true
+  },
+  {
+    "id": "04_keyframe_image",
+    "title": "Keyframe Image / Txt2Img Z-Image",
+    "purpose": "Default keyframe generation uses plain text-to-image. Reference images are not required or passed by default.",
+    "material_types": [
+      "image"
+    ],
+    "api_template": "04_keyframe_image/api_template.json",
+    "workflow_canvas": "04_keyframe_image/workflow_canvas.json",
+    "node_info_preset": "04_keyframe_image/runninghub_node_info_list_preset.json",
+    "supports_reference_image": false,
+    "supports_control_mode": true,
+    "workflow_id": "04_keyframe",
+    "workflow_mode": "keyframe",
+    "asset_tag": "keyframe",
+    "supports_multi_reference_images": false,
+    "supports_face_identity_reference": false,
+    "production_ready_canvas": "04_keyframe_image/keyframe_txt2img_canvas.json",
+    "production_ready_node_info_preset": "04_keyframe_image/keyframe_txt2img_nodeinfo.json",
+    "readme": "04_keyframe_image/keyframe_production_ready_README.md",
+    "multi_reference_canvas": "04_keyframe_image/keyframe_multi_reference_canvas.json",
+    "multi_reference_node_info_preset": "04_keyframe_image/keyframe_multi_reference_nodeinfo.json",
+    "optional_references": [],
+    "required_references": [],
+    "experimental_handwired_canvas": "04_keyframe_image/keyframe_experimental_handwired_canvas.json",
+    "experimental_handwired_node_info_preset": "04_keyframe_image/keyframe_experimental_handwired_nodeinfo.json"
+  },
+  {
+    "id": "06_i2v_first_last_frame_ltx_2_3",
+    "name": "LTX 2.3 First/Last Guide I2V 4s Stable",
+    "purpose": "纯 LTX 2.3 首尾帧 guide 图生视频：reference_image + last_frame_image -> 4s stable video，用于 06_i2v_first_last_frame。",
+    "materialTypes": [
+      "video"
+    ],
+    "api_template": "",
+    "workflow_canvas": "06_i2v_first_last_frame_ltx_2_3/workflow_canvas.json",
+    "node_info_preset": "06_i2v_first_last_frame_ltx_2_3/runninghub_node_info_list_preset.json",
+    "workflow_contract": "06_i2v_first_last_frame_ltx_2_3/workflow_contract.json",
+    "readme": "06_i2v_first_last_frame_ltx_2_3/README.md",
+    "supports_reference_image": true,
+    "supports_last_frame_image": true,
+    "workflow_id": "06_i2v_first_last_frame",
+    "workflow_mode": "i2v_first_last_frame",
+    "asset_tag": "i2v_first_last_frame",
+    "status": "pure_ltx23_dual_reference_canvas"
+  },
+  {
+    "id": "06_i2v_first_middle_last_frame_ltx_2_3",
+    "name": "LTX 2.3 First/Middle/Last Guide I2V 4s Experimental",
+    "purpose": "Independent experimental three-reference image-to-video workflow: reference_image + middle_frame_image + last_frame_image. It does not replace 06B first/last-frame mode.",
+    "materialTypes": [
+      "video"
+    ],
+    "api_template": "",
+    "workflow_canvas": "06_i2v_first_middle_last_frame_ltx_2_3/workflow_canvas.json",
+    "node_info_preset": "06_i2v_first_middle_last_frame_ltx_2_3/runninghub_node_info_list_preset.json",
+    "workflow_contract": "06_i2v_first_middle_last_frame_ltx_2_3/workflow_contract.json",
+    "readme": "06_i2v_first_middle_last_frame_ltx_2_3/README.md",
+    "supports_reference_image": true,
+    "supports_middle_frame_image": true,
+    "supports_last_frame_image": true,
+    "workflow_id": "06_i2v_first_middle_last_frame",
+    "workflow_mode": "i2v_first_middle_last_frame",
+    "asset_tag": "i2v_first_last_frame",
+    "status": "experimental_ltx23_three_reference_guide"
   }
 ]

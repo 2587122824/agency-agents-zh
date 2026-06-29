@@ -81,11 +81,17 @@ class WorkflowEngine:
         previous_outputs: list[dict[str, str]] = []
         step_outputs: list[dict[str, str]] = []
         provider_used = "offline"
+        image_assets_context_added = False
 
         for step in steps:
             step_no = int(step["step"])
             agent = self.staff_loader.resolve_agent(agents, step["agent"])
             step_dir = task_dir / f"step_{step_no:02d}_{agent.agent_id}"
+            if self._should_inject_manual_image_assets(agent.agent_id, image_assets_context_added):
+                image_assets_context = self._manual_debug_assets_output(task_dir, "image")
+                if image_assets_context:
+                    previous_outputs.append(image_assets_context)
+                    image_assets_context_added = True
             prompt = self._build_step_prompt(workflow, step, user_input, previous_outputs, production_config)
             if progress_callback:
                 progress_callback(
@@ -466,6 +472,12 @@ class WorkflowEngine:
                 )
 
         previous_outputs = self._collect_step_outputs(workflow, task_dir, before_step=resume_step) if resume_step else []
+        image_assets_context_added = False
+        if resume_step and self._step_number_for_agent_prefix(workflow, "07_") == resume_step:
+            image_assets_context = self._manual_debug_assets_output(task_dir, "image")
+            if image_assets_context:
+                previous_outputs.append(image_assets_context)
+                image_assets_context_added = True
         provider_used = self._summary_value(task_dir, "provider") or "offline"
 
         for step in steps:
@@ -474,6 +486,11 @@ class WorkflowEngine:
                 continue
             agent = self.staff_loader.resolve_agent(agents, step["agent"])
             step_dir = self._step_dir(task_dir, step_no, agent.agent_id)
+            if self._should_inject_manual_image_assets(agent.agent_id, image_assets_context_added):
+                image_assets_context = self._manual_debug_assets_output(task_dir, "image")
+                if image_assets_context:
+                    previous_outputs.append(image_assets_context)
+                    image_assets_context_added = True
             prompt = self._build_step_prompt(workflow, step, user_input, previous_outputs, production_config)
             if progress_callback:
                 progress_callback(
@@ -664,6 +681,10 @@ class WorkflowEngine:
             return False
         if str(production_config.get("mode") or "").strip() != "comfy_full":
             return False
+        gate = production_config.get("comfy_debug_gate") if isinstance(production_config.get("comfy_debug_gate"), dict) else {}
+        if gate.get("enabled"):
+            agent = str(step.get("agent") or "")
+            return agent.startswith(("06_", "07_"))
         gate_step_no = self._material_step_number(workflow)
         return bool(gate_step_no and int(step.get("step") or 0) == gate_step_no)
 
@@ -696,13 +717,16 @@ class WorkflowEngine:
         final_output = self._build_final_output(workflow, user_input, step_outputs)
         final_path = task_dir / "final_output.md"
         self.storage.write_text(final_path, final_output)
+        gate_stage = self._material_gate_stage_for_step(step)
+        gate_production_config = self._production_config_for_material_gate(production_config, gate_stage)
         production_manifest = run_auto_production(
             task_dir,
             step_outputs,
-            production_config,
+            gate_production_config,
             progress_callback=progress_callback,
             stop_after_comfyui=True,
         )
+        step_dir = self._step_dir(task_dir, step_no, agent.agent_id)
         if self._material_gate_passed(production_manifest):
             if progress_callback:
                 progress_callback(
@@ -715,8 +739,45 @@ class WorkflowEngine:
                 )
             return
 
+        if self._manual_comfy_debug_waiting(production_manifest, gate_production_config):
+            summary = self._read_summary(task_dir)
+            summary.update(
+                {
+                    "task_dir": str(task_dir),
+                    "workflow": workflow_name,
+                    "task_title": task_title,
+                    "provider": provider_used,
+                    "step_count": len(step_outputs),
+                    "final_output": str(final_path),
+                    "production_manifest": production_manifest.get("files", {}).get("manifest", "") if production_manifest else "",
+                    "production_status": production_manifest.get("status") if production_manifest else "off",
+                    "awaiting_confirmation": True,
+                    "awaiting_confirmation_step": step_no,
+                    "workflow_advance_mode": "step_confirm",
+                    "blocked_step": step_no,
+                    "blocked_reason": f"ComfyUI {gate_stage or 'all'} 调试队列等待人工确认；请按调试台顺序运行并确认满意后继续下一步",
+                    "resume_from_step": step_no,
+                    "resume_step": resume_step,
+                    "last_step_output": str(step_dir / "output.md"),
+                    "paused_at": datetime.now().isoformat(timespec="seconds"),
+                }
+            )
+            self._write_summary(task_dir, summary)
+            message = "ComfyUI 调试队列等待人工确认。请在任务输出页按顺序运行调试项，满意后继续下一步。"
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "checkpoint",
+                        "step": step_no,
+                        "message": message,
+                        "output_path": str(step_dir / "output.md"),
+                        "total_steps": len(workflow.get("steps", [])),
+                        "awaiting_confirmation": True,
+                    }
+                )
+            raise WorkflowCheckpointPause(message)
+
         blocker = self._material_gate_blocker_text(production_manifest)
-        step_dir = self._step_dir(task_dir, step_no, agent.agent_id)
         self.storage.write_text(step_dir / "output.md", blocker)
         self.storage.write_json(
             step_dir / "error.json",
@@ -775,6 +836,9 @@ class WorkflowEngine:
     def _material_gate_passed(production_manifest: dict | None) -> bool:
         if not isinstance(production_manifest, dict):
             return False
+        if production_manifest.get("status") in {"comfyui_manual_approved", "comfyui_image_manual_approved", "comfyui_video_manual_approved"}:
+            composition = production_manifest.get("composition") or {}
+            return bool(composition.get("manual_debug_completed"))
         composition = production_manifest.get("composition") or {}
         if composition.get("adapter_status") != "success":
             return False
@@ -792,6 +856,35 @@ class WorkflowEngine:
         success_count = int(adapter_manifest.get("success_count") or 0)
         failed_count = int(adapter_manifest.get("failed_count") or 0)
         return job_count > 0 and success_count == job_count and failed_count == 0
+
+    @staticmethod
+    def _manual_comfy_debug_waiting(production_manifest: dict | None, production_config: dict | None) -> bool:
+        if not isinstance(production_manifest, dict) or not isinstance(production_config, dict):
+            return False
+        gate = production_config.get("comfy_debug_gate") if isinstance(production_config.get("comfy_debug_gate"), dict) else {}
+        return (
+            bool(gate.get("enabled"))
+            and str(production_manifest.get("status") or "").startswith("awaiting_comfyui_")
+        )
+
+    @staticmethod
+    def _material_gate_stage_for_step(step: dict) -> str:
+        agent = str(step.get("agent") or "")
+        if agent.startswith("06_"):
+            return "image"
+        if agent.startswith("07_"):
+            return "video"
+        return "all"
+
+    @staticmethod
+    def _production_config_for_material_gate(production_config: dict | None, stage: str) -> dict | None:
+        if not isinstance(production_config, dict):
+            return production_config
+        cloned = json.loads(json.dumps(production_config, ensure_ascii=False))
+        gate = cloned.setdefault("comfy_debug_gate", {})
+        if isinstance(gate, dict):
+            gate["stage"] = stage or "all"
+        return cloned
 
     @staticmethod
     def _material_gate_blocker_text(production_manifest: dict | None) -> str:
@@ -1060,6 +1153,8 @@ class WorkflowEngine:
     @classmethod
     def _first_incomplete_step(cls, workflow: dict, task_dir: Path) -> int | None:
         material_step_no = cls._material_step_number(workflow)
+        image_step_no = cls._step_number_for_agent_prefix(workflow, "06_")
+        video_step_no = cls._step_number_for_agent_prefix(workflow, "07_")
         if material_step_no:
             summary_path = task_dir / "run_summary.json"
             if summary_path.exists():
@@ -1071,7 +1166,11 @@ class WorkflowEngine:
                 blocked_reason = str(summary.get("blocked_reason") or "")
                 blocked_reason_lower = blocked_reason.lower()
                 production_status = str(summary.get("production_status") or "").strip().lower()
-                if production_status in {"comfyui_partial_failed", "comfyui_adapter_failed", "quality_failed"}:
+                if production_status == "awaiting_comfyui_image_debug":
+                    return cls._next_step_number(workflow, image_step_no) if cls._manual_debug_stage_complete(task_dir, "image") else image_step_no
+                if production_status == "awaiting_comfyui_video_debug":
+                    return cls._next_step_number(workflow, video_step_no) if cls._manual_debug_stage_complete(task_dir, "video") else video_step_no
+                if production_status in {"awaiting_comfyui_debug", "comfyui_partial_failed", "comfyui_adapter_failed", "quality_failed"}:
                     return material_step_no
                 if blocked_step >= material_step_no and "comfyui" in blocked_reason_lower and ("素材" in blocked_reason or "material" in blocked_reason_lower):
                     return material_step_no
@@ -1119,6 +1218,82 @@ class WorkflowEngine:
                 step_no = int(step.get("step") or 0)
                 return step_no or None
         return None
+
+    @staticmethod
+    def _step_number_for_agent_prefix(workflow: dict, prefix: str) -> int | None:
+        for step in workflow.get("steps", []):
+            if str(step.get("agent") or "").startswith(prefix):
+                step_no = int(step.get("step") or 0)
+                return step_no or None
+        return None
+
+    @staticmethod
+    def _next_step_number(workflow: dict, current_step_no: int | None) -> int | None:
+        if not current_step_no:
+            return None
+        later = sorted(int(step.get("step") or 0) for step in workflow.get("steps", []) if int(step.get("step") or 0) > current_step_no)
+        return later[0] if later else None
+
+    @staticmethod
+    def _manual_debug_stage_complete(task_dir: Path, stage: str) -> bool:
+        payload_path = task_dir / "comfyui" / "comfyui_payload.json"
+        state_path = task_dir / "comfyui" / "manual_debug_state.json"
+        try:
+            payload = json.loads(payload_path.read_text(encoding="utf-8-sig"))
+            state = json.loads(state_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return False
+        source_key = "image_prompts" if stage == "image" else "video_prompts"
+        values = payload.get(source_key) if isinstance(payload, dict) else []
+        if not isinstance(values, list) or not values:
+            return False
+        state_items = state.get("items") if isinstance(state, dict) and isinstance(state.get("items"), dict) else {}
+        for index, raw in enumerate(values, 1):
+            entry = raw if isinstance(raw, dict) else {"prompt": str(raw)}
+            workflow_id = str(entry.get("workflow_id") or entry.get("workflow") or ("01_base_asset_image" if stage == "image" else "06_i2v_first_frame")).strip()
+            mode = str(entry.get("workflow_mode") or entry.get("image_task_mode") or entry.get("video_task_mode") or entry.get("task_type") or entry.get("asset_tag") or "").strip()
+            item_id = str(entry.get("id") or entry.get("shot_id") or entry.get("scene_id") or f"{source_key}_{index:03d}").strip()
+            state_key = f"{workflow_id}:{mode or 'default'}:{item_id}"
+            if not isinstance(state_items.get(state_key), dict) or state_items[state_key].get("status") != "approved":
+                return False
+        return True
+
+    @staticmethod
+    def _should_inject_manual_image_assets(agent_id: str, already_added: bool) -> bool:
+        return (not already_added) and str(agent_id or "").startswith("07_")
+
+    @staticmethod
+    def _manual_debug_assets_output(task_dir: Path, stage: str) -> dict[str, str] | None:
+        state_path = task_dir / "comfyui" / "manual_debug_state.json"
+        try:
+            state = json.loads(state_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return None
+        state_items = state.get("items") if isinstance(state, dict) and isinstance(state.get("items"), dict) else {}
+        lines = []
+        for item_id, item in state_items.items():
+            if not isinstance(item, dict) or item.get("status") != "approved":
+                continue
+            if stage == "image" and not any(token in str(item_id) for token in ("image", "keyframe", "base", "turnaround", "style", "cover", "inpaint", "background")):
+                continue
+            files = [str(file) for file in item.get("files") or [] if file]
+            if files:
+                normalized_files = [file.replace("\\", "/").replace("comfyui_manual_debug/", "comfyui/manual_debug/") for file in files]
+                lines.append(f"- {item_id}: " + "；".join(normalized_files))
+        if not lines:
+            return None
+        return {
+            "step": "ComfyUI",
+            "agent": "comfyui_manual_debug",
+            "task": "已确认的 ComfyUI 图片素材",
+            "expected_output": "供后续视频生成员工引用的图片/关键帧路径",
+            "output_path": str(state_path),
+            "content": "## 已确认的 ComfyUI 图片素材\n\n"
+            + "\n".join(lines)
+            + "\n\n07_视频生成执行员必须原样引用这些已确认图片/关键帧路径作为 reference_image / first_frame_image / last_frame_image。"
+            + "路径必须保持 `comfyui/manual_debug/...`，不要改写成 `comfyui_manual_debug/...`，不要重新假设图片尚未生成。",
+            "action_results": "",
+        }
 
     @staticmethod
     def _append_rerun_summary(

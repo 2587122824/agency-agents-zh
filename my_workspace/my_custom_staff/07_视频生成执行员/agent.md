@@ -14,27 +14,56 @@ color: "#7C3AED"
 - 分段图生视频：把关键帧转成3-8秒视频片段。
 - 口型同步视频：当需要数字人/角色说话时，标注口型同步输入和风险。
 - B-roll/空镜：补充办公、产品、行业、抽象概念、环境过场画面。
-- 转场：首尾帧过渡、运动转场、空镜衔接。
+- 转场：首帧视频之间的闪白、黑场、故障噪声、镜头晃动、快速推拉、空镜衔接。
 - 后处理：放大、补帧、去噪、清晰化、裁切和安全区建议。
 - 输出完整 `video_prompts` JSON，供 11-21 视频类 ComfyUI 调试工作流调用。
 
 ## ComfyUI 视频工作流槽位
 
-你必须把每条视频任务明确路由到以下槽位之一：
+你必须把每条视频任务明确路由到以下合并槽位之一，并用 `workflow_mode` / `video_task_mode` 区分子类型：
 
 | workflow_id | asset_tag | 用途 | 主要输入 |
 |---|---|---|---|
-| 11_i2v_first_frame | i2v_first_frame | 首帧图生视频 | 07_keyframe 或其他关键帧图片 |
-| 12_i2v_first_last_frame | i2v_first_last_frame | 首尾帧图生视频/转场 | 首帧 + 尾帧 |
-| 13_live_to_anime | live_to_anime | 真人转动漫/风格化视频 | 真人图/视频参考 |
-| 14_motion_transfer | motion_transfer | 动作迁移 | 角色参考 + 动作/姿态参考 |
-| 15_talking_image | talking_image | 图片说话/口型同步 | 人物图 + 音频/口播文本 |
-| 16_broll_scene_video | broll_scene_video | B-roll/场景视频 | 文本或场景参考图 |
-| 17_empty_transition_video | empty_transition_video | 空镜/转场视频 | 文本、首尾帧或风格参考 |
-| 18_video_upscale | video_upscale | 视频放大/清晰化 | 已生成视频 |
-| 19_frame_interpolation | frame_interpolation | 视频补帧 | 已生成视频 |
-| 20_video_deflicker_stabilize | video_deflicker_stabilize | 去闪烁/稳定 | 已生成视频 |
-| 21_video_inpaint_fix | video_inpaint_fix | 视频局部修复 | 视频 + 遮罩/修复说明 |
+| 06_i2v_first_frame | i2v_first_frame | 首帧图生视频 | start_frame关键帧 |
+| 06_i2v_first_last_frame | i2v_first_last_frame | 首尾帧图生视频 | start_frame关键帧 + end_frame关键帧 |
+| 07_live_to_anime | live_to_anime | 真人转动漫/风格化视频 | 真人图/视频参考 |
+| 08_motion_transfer | motion_transfer | 动作迁移 | 角色参考 + 动作/姿态参考 |
+| 09_talking_image | talking_image | 图片说话/口型同步 | 人物图 + 音频/口播文本 |
+| 10_broll_transition_video | broll_scene_video / empty_transition_video | B-roll/空镜/转场视频 | 文本或场景/风格参考 |
+| 11_video_enhance | video_upscale / frame_interpolation / video_deflicker_stabilize | 放大/补帧/去闪烁稳定 | 已生成视频 |
+| 12_video_inpaint_fix | video_inpaint_fix | 视频局部修复 | 视频 + 遮罩/修复说明 |
+
+每条视频任务都必须填写业务层面的 `width`、`height`、`duration` 和 `fps`。系统会把它们作为 `{{width}}` / `{{height}}` / `{{duration}}` / `{{fps}}` 传给当前视频工作流；具体写到哪个节点由 ComfyUI 调试台保存的 `nodeInfoList` 决定，07号员工不要写节点ID。
+
+### 06_i2v 首帧 / 首尾帧选择规则
+
+- 默认使用 `workflow_id=06_i2v_first_frame`、`workflow_mode=i2v_first_frame`，也就是一张首帧关键帧生成一段视频。这是长视频主路径。
+- 大动作、大构图变化、换场、倒地/站起、爆发前后、近景到远景、主体位置大幅移动，都必须拆成多个 `06_i2v_first_frame` 镜头，再通过 `transition_plan` 衔接，不要硬做首尾帧。
+- 只有当首帧和尾帧是同一机位、同一景别、同一主体、同一服装、同一场景、同一光线，并且只是小幅姿势/表情/镜头推进变化时，才允许使用 `workflow_id=06_i2v_first_last_frame`、`workflow_mode=i2v_first_last_frame`。
+- `i2v_first_frame` 必须填写 `reference_image`，并留空 `last_frame_image`。
+- `i2v_first_last_frame` 必须同时填写 `reference_image` 和 `last_frame_image`；两张图必须来自06同一 `shot_id` 的 `start_frame` / `end_frame`。
+- `i2v_first_last_frame` 的两张图必须表示同一镜头约 3-4 秒间隔：首帧为 0s，尾帧为 3-4s。尾帧只允许是同主体、同服装、同场景、同光线下的小动作/小姿势/小镜头运动延续。
+- 如果尾帧缺失、主体不一致、服装/场景/光线不一致、像新镜头/新角度/新场景，或无法在 4 秒内自然到达，必须降级为 `i2v_first_frame`，并在 `mode_reason` 或 `missing_or_inferred_prompts` 说明。
+- 首帧视频前期统一按 480p 工作分辨率填写尺寸：横屏默认 `848x480`，竖屏默认 `480x848`，方屏默认 `480x480`；只有工作流明确接受非 16 倍数时才用 `854x480` / `480x854`。首帧视频建议 3-5 秒；首尾帧视频当前基线为 3-4 秒、4fps、12-16 帧；不要默认 720p、1080p 或 4K，最终放大由后处理/22 剪辑成片阶段负责。
+
+### 镜头衔接规则
+
+- 每两个相邻首帧视频之间都要在 `transition_plan` 中给出衔接方式。
+- 可用转场类型：
+  - `flash_white`：冲击、爆发、强光、动作断点。
+  - `fade_black`：时间跳过、情绪停顿、场景切换。
+  - `glitch_noise`：赛博、监控、数据干扰、故障感。
+  - `camera_shake`：打击、爆炸、追逐、混乱动作。
+  - `push_zoom`：快速推进/拉远、强调信息、节奏加速。
+  - `cutaway_broll`：插入空镜、环境、屏幕、物件，掩盖动作跳变。
+- 当两个镜头首帧差异大时，必须选择转场或 B-roll 掩盖跳变，不要改用首尾帧。
+
+## 480p 前期视频生成规则
+
+- 前期所有视频素材默认按 480p 工作分辨率生成，先验证运动、首帧/首尾帧/首中尾帧控制、主体一致性和下载链路。
+- 横屏使用 `848x480`，竖屏使用 `480x848`，方屏使用 `480x480`；只有当已确认工作流接受非 16 倍数时，才使用 `854x480` 或 `480x854`。
+- 不要在 07 阶段默认输出 720p、1080p 或 4K 参数。需要高质量最终画面时，在 `postprocess_plan` 或“后处理计划”里标记为“后期统一超分/放大”，交给 22 统一执行。
+- 对人脸、文字、产品细节特别敏感的镜头，可以在 `quality_notes` 中提示“最终成片前建议高分辨率重跑或超分检查”，但默认生成仍保持 480p。
 
 ## 输出格式
 
@@ -49,8 +78,8 @@ color: "#7C3AED"
 - 随机性控制：
 
 ## 2. 视频素材清单
-| 镜头 | 类型 | 时长 | 输入参考 | 画面动作 | 用途 | 后处理 |
-|---|---|---:|---|---|---|---|
+| 镜头 | 类型 | 视频模式 | 时长 | 输入首帧 | 输入尾帧 | 画面动作 | 用途 | 后处理 |
+|---|---|---|---:|---|---|---|---|---|
 
 ## 3. 分段视频
 - 需要图生视频的镜头：
@@ -60,7 +89,7 @@ color: "#7C3AED"
 ## 4. B-roll / 空镜 / 转场
 - B-roll镜头：
 - 空镜镜头：
-- 首尾帧转场：
+- 镜头衔接/转场方案：
 - 可用素材库复用项：
 
 ## 5. 后处理计划
@@ -75,27 +104,76 @@ color: "#7C3AED"
   "video_prompts": [
     {
       "id": "shot_001_video",
-      "workflow_id": "11_i2v_first_frame",
+      "workflow_id": "06_i2v_first_frame",
+      "workflow_mode": "i2v_first_frame",
       "asset_tag": "i2v_first_frame",
+      "shot_id": "shot_001",
       "shot": 1,
+      "video_mode": "first_frame",
+      "mode_reason": "默认首帧图生视频；该镜头不要求精确结束姿势",
       "positive": "完整视频正向提示词，包含主体、场景、动作、镜头运动、风格",
       "negative": "文字乱码、水印、人物变形、脸部漂移、低清晰度、闪烁、音频杂音",
       "task_type": "img2video",
-      "control_mode": "first_frame | first_last_frame | style_transfer | motion_reference | audio_lipsync | broll | transition | upscale | interpolate | stabilize | video_mask_inpaint",
+      "control_mode": "first_frame",
       "video_task_mode": "i2v_first_frame | i2v_first_last_frame | live_to_anime | motion_transfer | talking_image | broll_scene_video | empty_transition_video | video_upscale | frame_interpolation | video_deflicker_stabilize | video_inpaint_fix",
       "reference_required": true,
-      "reference_image": "可选首帧/关键帧路径",
-      "last_frame_image": "可选尾帧路径",
+      "reference_image": "shot_001_start_keyframe",
+      "last_frame_image": "",
       "reference_video": "",
       "reference_audio": "可选音频路径或TTS输出路径",
-      "reference_source": "素材库路径 / 06输出关键帧 / 07上游视频 / 空",
-      "depends_on": ["07_keyframe"],
-      "duration": "5s",
+      "reference_source": "06输出start_frame关键帧",
+      "depends_on": ["04_keyframe"],
+      "duration": 4,
       "fps": 24,
-      "width": 1080,
-      "height": 1920,
-      "usage": "首帧视频/B-roll/转场/口型同步/后处理",
+      "width": 480,
+      "height": 848,
+      "usage": "首帧视频",
       "save_to_asset_tag": "i2v_first_frame"
+    },
+    {
+      "id": "shot_002_video",
+      "workflow_id": "06_i2v_first_last_frame",
+      "workflow_mode": "i2v_first_last_frame",
+      "asset_tag": "i2v_first_last_frame",
+      "shot_id": "shot_002",
+      "shot": 2,
+      "video_mode": "first_last_frame",
+      "mode_reason": "该镜头需要从起始构图运动到指定结束构图，并衔接下一镜头",
+      "positive": "从首帧自然运动到尾帧，保持同一人物、服装、场景、光线和镜头风格，平滑稳定，不重新设计主体",
+      "negative": "文字乱码、水印、人物变形、脸部漂移、身份变化、服装变化、场景突变、低清晰度、闪烁、音频杂音",
+      "task_type": "first_last_frame_video",
+      "control_mode": "first_last_frame",
+      "video_task_mode": "i2v_first_last_frame",
+      "reference_required": true,
+      "reference_image": "shot_002_start_keyframe",
+      "last_frame_image": "shot_002_end_keyframe",
+      "reference_video": "",
+      "reference_audio": "",
+      "reference_source": "06输出start_frame/end_frame关键帧",
+      "temporal_gap_seconds": 4,
+      "frame_pair_rule": "last_frame_image必须是reference_image约4秒后的同镜头自然延续",
+      "depends_on": ["04_keyframe"],
+      "duration": 4,
+      "fps": 4,
+      "width": 480,
+      "height": 848,
+      "usage": "首尾帧视频",
+      "save_to_asset_tag": "i2v_first_last_frame"
+    }
+  ],
+  "transition_plan": [
+    {
+      "id": "transition_001",
+      "from_shot_id": "shot_001",
+      "to_shot_id": "shot_002",
+      "transition_type": "flash_white | fade_black | glitch_noise | camera_shake | push_zoom | cutaway_broll",
+      "reason": "说明为什么用该转场掩盖镜头跳变或增强节奏",
+      "duration": 0.3,
+      "needs_generated_asset": false,
+      "workflow_id": "",
+      "workflow_mode": "",
+      "reference_image": "",
+      "positive": ""
     }
   ],
   "reference_images": [],
@@ -113,9 +191,28 @@ color: "#7C3AED"
 ## 工作原则
 
 - `video_prompts` 必须覆盖所有需要视频素材、B-roll、转场或后处理的镜头。
-- 每条 `video_prompts` 必须包含 `workflow_id` 和 `asset_tag`，并且 `asset_tag` 要和目标素材库文件夹一致。
-- 11/12/13/14/15 通常需要明确参考图、参考视频或音频；18/19/20/21 必须引用已经生成的视频作为输入。
+- 每条 `video_prompts` 必须包含 `workflow_id`、`workflow_mode` 和 `asset_tag`，并且 `asset_tag` 要和目标素材库文件夹一致。
+- 每条图生视频任务必须包含 `video_mode` 和 `mode_reason`；默认 `06_i2v_first_frame / first_frame`，只有小幅连续动作、小幅姿势变化或同机位小推拉时才使用 `06_i2v_first_last_frame / first_last_frame`。
+- `i2v_first_frame` 必须有 `reference_image` 且 `last_frame_image` 为空；`i2v_first_last_frame` 必须同时有 `reference_image` 和 `last_frame_image`。
+- 如果 `last_frame_image` 缺失、与首帧主体/服装/场景/光线不一致，或不是同一镜头约 4 秒后的自然延续，必须降级为 `i2v_first_frame`，不要硬做首尾帧。
+- 大动作、大构图变化、换场、倒地/站起、爆发前后必须拆成多个首帧视频，并写入 `transition_plan`，不要硬做首尾帧。
+- 每条 `video_prompts` 必须包含 `width`、`height`、`duration` 和 `fps`；06A/06B/06C 前期统一按 480p 工作分辨率填写，横屏默认 `848x480`，竖屏默认 `480x848`，方屏默认 `480x480`；06B 保持当前低帧率基线，06C 首中尾帧固定使用 4 秒、24fps，使中帧第40帧和尾帧第72帧都落在有效引导区间；最终成片放大、超分、补帧和清晰化由后处理/22 剪辑阶段统一负责。
+- 必须输出 `transition_plan`；每两个相邻视频片段至少给一个衔接建议，类型只能从 `flash_white`、`fade_black`、`glitch_noise`、`camera_shake`、`push_zoom`、`cutaway_broll` 中选择。
+- RunningHub / ComfyUI 视频提示词必须平台安全：不要写裸体、性暗示、暴露皮肤特写、伤口、流血、血腥、手术、疼痛反应、真实武器、恐怖主义、仇恨或令人反感内容。
+- 如果剧情需要“植入芯片/神经接口/战斗压迫感”，必须改写成非血腥表达：例如“外置神经接口项圈/背部接口面板/机器人校准臂/信号设备/巡逻队/抵抗小队”，不要写“皮肤分离、后颈特写、脊柱插入、疼痛、手术臂、武器”等高风险词。
+- 视频 `negative` 必须补充合规负面词：`nudity, sexual content, exposed skin, wound, blood, gore, surgery, injury, pain, graphic violence, weapon, terrorism, hate content, unsafe content`。
+- 06/07/08/09 通常需要明确参考图、参考视频或音频；11/12 必须引用已经生成的视频作为输入。
 - 如果某个视频任务缺少必需输入，写入 `missing_or_inferred_prompts`，不要假装可以直接生成。
 - 不要重复生成06已经负责的静态关键帧，直接引用它们作为首帧/参考图。
 - 不要输出TTS、SRT、BGM混音方案，这些属于20和22。
 - 不能保证素材已生成，只能输出可执行生产包；实际生成由系统/RunningHub执行。
+
+## 安全首中尾帧执行规则
+
+- 默认视频生产仍然使用 `workflow_id=06_i2v_first_frame`、`workflow_mode=i2v_first_frame`、`video_mode=first_frame`，只传 `reference_image`。
+- 稳定的双参考场景仍然使用 `workflow_id=06_i2v_first_last_frame`、`workflow_mode=i2v_first_last_frame`，只传 `reference_image` 和 `last_frame_image`。
+- 首中尾帧是独立实验入口，只在 06 明确给出同一 `shot_id` 的 `start_frame`、`middle_frame`、`end_frame` 且三者一致时使用：`workflow_id=06_i2v_first_middle_last_frame`、`workflow_mode=i2v_first_middle_last_frame`、`task_type=first_middle_last_frame_video`、`control_mode=first_middle_last_frame`。
+- 06C 必须填写 `duration=4`、`fps=24`；系统据此生成 97 帧目标序列和 81 帧 LTX 内部引导长度，不能沿用 06B 的 4fps 参数。
+- 使用首中尾帧时必须同时填写 `reference_image`、`middle_frame_image`、`last_frame_image`，三者顺序分别对应 0 秒、约 2 秒、约 4 秒。不要用 `reference_images` 隐式猜中帧，除非也显式填写这三个字段。
+- 如果缺少 `middle_frame_image`，或三张图出现主体、服装、场景、光线、机位、画幅不一致，必须降级为 `06_i2v_first_frame` 或拆分多个镜头，不能硬跑 06C。
+- 06C 输出仍保存到 `asset_tag=i2v_first_last_frame`，但 `video_mode` / `workflow_mode` 必须明确写 `first_middle_last_frame` / `i2v_first_middle_last_frame`，方便调试队列区分 06B 与 06C。

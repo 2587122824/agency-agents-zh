@@ -38,6 +38,9 @@ def run_auto_production(
     compose_config = config.get("compose_config") or {}
     voice_config = config.get("voice_config") or {}
     quality_config = config.get("quality_config") or {}
+    comfy_debug_gate = config.get("comfy_debug_gate") if isinstance(config.get("comfy_debug_gate"), dict) else {}
+    manual_comfy_debug = mode == "comfy_full" and _as_bool(comfy_debug_gate.get("enabled"), default=False)
+    manual_comfy_stage = str(comfy_debug_gate.get("stage") or "all").strip().lower() or "all"
 
     paths = _create_output_dirs(task_dir)
     image_step = _find_step(step_outputs, "06_")
@@ -198,11 +201,66 @@ def run_auto_production(
         },
     }
 
+    def apply_manual_comfy_debug_gate() -> dict[str, Any]:
+        state_path = paths["comfyui"] / "manual_debug_state.json"
+        state = _read_json_object(state_path)
+        payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+        approval = _manual_comfy_debug_approval(payload, state, manual_comfy_stage, task_dir)
+        composition = manifest.setdefault("composition", {})
+        composition["manual_debug_enabled"] = True
+        composition["manual_debug_stage"] = manual_comfy_stage
+        composition["manual_debug_state_file"] = str(state_path)
+        composition["manual_debug_total"] = approval["total"]
+        composition["manual_debug_approved"] = approval["approved"]
+        composition["manual_debug_completed"] = approval["complete"]
+        composition["downloaded_files"] = approval["downloaded_files"]
+        composition["comfyui_downloaded_files"] = approval["downloaded_files"]
+        if approval["complete"]:
+            composition["adapter_status"] = "success"
+            composition["comfyui_adapter_status"] = "success"
+            composition["adapter_manifest"] = str(state_path)
+            composition["comfyui_adapter_manifest"] = str(state_path)
+            manifest["status"] = f"comfyui_{manual_comfy_stage}_manual_approved" if manual_comfy_stage in {"image", "video"} else "comfyui_manual_approved"
+            emit("ComfyUI 人工调试队列已全部确认，允许进入下一阶段", stage="comfyui", status="success")
+        else:
+            composition["adapter_status"] = "awaiting_confirmation"
+            composition["comfyui_adapter_status"] = "awaiting_confirmation"
+            composition["adapter_manifest"] = str(state_path)
+            composition["comfyui_adapter_manifest"] = str(state_path)
+            manifest["status"] = f"awaiting_comfyui_{manual_comfy_stage}_debug" if manual_comfy_stage in {"image", "video"} else "awaiting_comfyui_debug"
+            emit(
+                f"ComfyUI 人工调试队列等待确认：{manual_comfy_stage} {approval['approved']}/{approval['total']}",
+                stage="comfyui",
+                status="awaiting_confirmation",
+            )
+        return manifest
+
     def run_material_branch() -> tuple[str, dict[str, Any] | None]:
         if mode == "api_ready":
             emit("开始图片素材生成/匹配", stage="image")
             return "image", _run_image_adapter(image_content, image_config, paths["generated_images"])
         if mode == "comfy_full":
+            if manual_comfy_debug:
+                state_path = paths["comfyui"] / "manual_debug_state.json"
+                state = _read_json_object(state_path)
+                payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+                approval = _manual_comfy_debug_approval(payload, state, "all", task_dir)
+                if approval["complete"]:
+                    emit("复用已确认的 ComfyUI 调试素材", stage="comfyui", status="success")
+                    return "comfyui", {
+                        "status": "success",
+                        "manifest_file": str(state_path),
+                        "downloaded_files": approval["downloaded_files"],
+                        "quality_report": "",
+                        "quality_score": 100,
+                        "attempts": 1,
+                    }
+                return "comfyui", {
+                    "status": "failed",
+                    "manifest_file": str(state_path),
+                    "downloaded_files": approval["downloaded_files"],
+                    "error": "ComfyUI manual debug queue is not fully approved",
+                }
             emit("开始调用 ComfyUI 素材/预览工作流", stage="comfyui")
             return "comfyui", _run_comfyui_adapter_with_quality_gate(
                 comfyui_payload_path,
@@ -282,6 +340,14 @@ def run_auto_production(
             )
 
     if stop_after_comfyui:
+        if manual_comfy_debug:
+            return _finalize_production_manifest(
+                task_dir,
+                apply_manual_comfy_debug_gate(),
+                production_note_path,
+                emit,
+                "ComfyUI 人工调试门禁等待确认" if manifest.get("status") == "awaiting_comfyui_debug" else "ComfyUI 人工调试门禁完成",
+            )
         material_kind, material_result = run_material_branch()
         if material_kind == "image":
             apply_image_result(material_result)
@@ -819,6 +885,83 @@ def _load_comfyui_payload_with_fallback(path: Path) -> dict[str, Any]:
         return _salvage_comfyui_payload(text)
 
 
+def _read_json_object(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _manual_comfy_debug_approval(payload: dict[str, Any], state: dict[str, Any], stage: str = "all", task_dir: Path | None = None) -> dict[str, Any]:
+    items = _manual_comfy_debug_items(payload, stage=stage)
+    state_items = state.get("items") if isinstance(state.get("items"), dict) else {}
+    approved = 0
+    downloaded_files: list[str] = []
+    for item in items:
+        item_state = state_items.get(item["id"]) if isinstance(state_items.get(item["id"]), dict) else {}
+        if item_state.get("status") == "approved":
+            approved += 1
+            for file in item_state.get("files") or []:
+                if file:
+                    downloaded_files.append(_manual_debug_file_path(file, task_dir))
+    total = len(items)
+    return {
+        "total": total,
+        "approved": approved,
+        "complete": bool(total and approved >= total),
+        "downloaded_files": downloaded_files,
+    }
+
+
+def _manual_debug_file_path(file: Any, task_dir: Path | None) -> str:
+    path = Path(str(file))
+    if path.is_absolute() or task_dir is None:
+        return str(path)
+    return str(task_dir / path)
+
+
+def _manual_comfy_debug_items(payload: dict[str, Any], stage: str = "all") -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    items: list[dict[str, Any]] = []
+    stage = str(stage or "all").strip().lower()
+    source_specs = []
+    if stage in {"all", "image"}:
+        source_specs.append(("image_prompts", "01_base_asset_image", "image"))
+    if stage in {"all", "video"}:
+        source_specs.append(("video_prompts", "06_i2v_first_frame", "video"))
+    for source_key, default_workflow, item_stage in source_specs:
+        values = payload.get(source_key)
+        if not isinstance(values, list):
+            continue
+        for index, raw in enumerate(values, 1):
+            entry = raw if isinstance(raw, dict) else {"prompt": str(raw)}
+            workflow_id = str(entry.get("workflow_id") or entry.get("workflow") or default_workflow).strip()
+            mode = str(
+                entry.get("workflow_mode")
+                or entry.get("image_task_mode")
+                or entry.get("video_task_mode")
+                or entry.get("task_type")
+                or entry.get("asset_tag")
+                or ""
+            ).strip()
+            item_id = str(entry.get("id") or entry.get("shot_id") or entry.get("scene_id") or f"{source_key}_{index:03d}").strip()
+            items.append(
+                {
+                    "id": f"{workflow_id}:{mode or 'default'}:{item_id}",
+                    "workflow_id": workflow_id,
+                    "workflow_mode": mode,
+                    "source": source_key,
+                    "stage": item_stage,
+                    "source_index": index,
+                }
+            )
+    return items
+
+
 def _salvage_comfyui_payload(text: str) -> dict[str, Any]:
     image_section = _between_markers(text, '"image_prompts"', '"video_prompts"')
     video_section = _between_markers(text, '"video_prompts"', '"reference_images"')
@@ -886,6 +1029,7 @@ def _combined_comfyui_payload_text(
         output = source.get("output")
         if isinstance(output, dict):
             defaults.setdefault("output", {}).update(output)
+    _normalize_comfyui_canvas(defaults, video_config)
     defaults["payload_source"] = "merged_from_06_07"
     defaults["notes"] = "ComfyUI 参数包由 06 的 image_prompts 和 07 的 video_prompts 合并生成。"
     return json.dumps(defaults, ensure_ascii=False, indent=2) + "\n"
@@ -1269,11 +1413,96 @@ def _default_srt() -> str:
     return "1\n00:00:00,000 --> 00:00:03,000\n待从 20_语音字幕包装师输出中整理字幕。\n"
 
 
+def _normalize_comfyui_canvas(payload: dict[str, Any], video_config: dict[str, Any]) -> None:
+    width, height, aspect_ratio = _target_canvas_from_video_config(video_config, payload)
+    payload["width"] = width
+    payload["height"] = height
+    output = payload.setdefault("output", {})
+    if isinstance(output, dict):
+        output["aspect_ratio"] = aspect_ratio
+        output["width"] = width
+        output["height"] = height
+    for key in ("image_prompts", "video_prompts"):
+        items = payload.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                item["width"] = width
+                item["height"] = height
+
+
+def _target_canvas_from_video_config(
+    video_config: dict[str, Any],
+    payload: dict[str, Any] | None,
+) -> tuple[int, int, str]:
+    resolution = str(video_config.get("resolution") or video_config.get("size") or "").strip()
+    match = re.search(r"(\d{3,5})\s*[xX*×]\s*(\d{3,5})", resolution)
+    if match:
+        width = _safe_int(match.group(1), 1024, 256, 4096)
+        height = _safe_int(match.group(2), 576, 256, 4096)
+        return width, height, _aspect_ratio_label(width, height)
+
+    aspect_text = str(video_config.get("aspect_ratio") or "").strip().lower()
+    if any(token in aspect_text for token in ("9:16", "portrait", "vertical", "竖屏")):
+        return 576, 1024, "9:16"
+    if any(token in aspect_text for token in ("1:1", "square", "方屏")):
+        return 1024, 1024, "1:1"
+    if any(token in aspect_text for token in ("16:9", "landscape", "horizontal", "横屏")):
+        return 1024, 576, "16:9"
+
+    inferred = _infer_canvas_from_prompt_items(payload or {})
+    if inferred:
+        width, height = inferred
+        if width > height:
+            return 1024, 576, "16:9"
+        if width < height:
+            return 576, 1024, "9:16"
+        return 1024, 1024, "1:1"
+    return 1024, 576, "16:9"
+
+
+def _infer_canvas_from_prompt_items(payload: dict[str, Any]) -> tuple[int, int] | None:
+    votes: dict[str, int] = {"landscape": 0, "portrait": 0, "square": 0}
+    for key in ("image_prompts", "video_prompts"):
+        items = payload.get(key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            width = _safe_int(item.get("width"), 0, 0, 10000)
+            height = _safe_int(item.get("height"), 0, 0, 10000)
+            if width <= 0 or height <= 0:
+                continue
+            if width > height:
+                votes["landscape"] += 1
+            elif width < height:
+                votes["portrait"] += 1
+            else:
+                votes["square"] += 1
+    winner = max(votes, key=votes.get)
+    if votes[winner] <= 0:
+        return None
+    if winner == "landscape":
+        return 1024, 576
+    if winner == "portrait":
+        return 576, 1024
+    return 1024, 1024
+
+
+def _aspect_ratio_label(width: int, height: int) -> str:
+    if width == height:
+        return "1:1"
+    return "16:9" if width > height else "9:16"
+
+
 def _default_comfyui_payload(
     mode: str,
     final_video_name: str,
     video_config: dict[str, Any],
 ) -> str:
+    width, height, aspect_ratio = _target_canvas_from_video_config(video_config, None)
     payload = {
         "execution_mode": mode,
         "image_prompts": [],
@@ -1285,10 +1514,10 @@ def _default_comfyui_payload(
         "negative_prompt": video_config.get("negative_prompt") or "",
         "bgm_style": "",
         "seed": video_config.get("seed") or "",
-        "width": "",
-        "height": "",
+        "width": width,
+        "height": height,
         "output": {
-            "aspect_ratio": video_config.get("aspect_ratio") or "9:16",
+            "aspect_ratio": video_config.get("aspect_ratio") or aspect_ratio,
             "duration": video_config.get("duration") or "30s",
             "file_name": final_video_name,
         },
@@ -1318,6 +1547,7 @@ def _ensure_comfyui_payload_defaults(
             payload[key] = defaults.get(key, "")
     if not isinstance(payload.get("output"), dict):
         payload["output"] = defaults.get("output", {})
+    _normalize_comfyui_canvas(payload, video_config)
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 

@@ -1,0 +1,72 @@
+[
+  {
+    "nodeId": "2",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image}}"
+  },
+  {
+    "nodeId": "3",
+    "fieldName": "image",
+    "fieldValue": "{{last_frame_image}}"
+  },
+  {
+    "nodeId": "29",
+    "fieldName": "image",
+    "fieldValue": "{{middle_frame_image}}"
+  },
+  {
+    "nodeId": "17",
+    "fieldName": "frame_idx",
+    "fieldValue": "40"
+  },
+  {
+    "nodeId": "9",
+    "fieldName": "text",
+    "fieldValue": "{{prompt}}"
+  },
+  {
+    "nodeId": "10",
+    "fieldName": "text",
+    "fieldValue": "{{negative_prompt}}"
+  },
+  {
+    "nodeId": "15",
+    "fieldName": "width",
+    "fieldValue": "{{width}}"
+  },
+  {
+    "nodeId": "15",
+    "fieldName": "height",
+    "fieldValue": "{{height}}"
+  },
+  {
+    "nodeId": "15",
+    "fieldName": "length",
+    "fieldValue": "{{ltx_guide_frame_count}}"
+  },
+  {
+    "nodeId": "18",
+    "fieldName": "frames_number",
+    "fieldValue": "{{ltx_guide_frame_count}}"
+  },
+  {
+    "nodeId": "11",
+    "fieldName": "frame_rate",
+    "fieldValue": "{{fps}}"
+  },
+  {
+    "nodeId": "18",
+    "fieldName": "frame_rate",
+    "fieldValue": "{{fps}}"
+  },
+  {
+    "nodeId": "27",
+    "fieldName": "frame_rate",
+    "fieldValue": "{{fps}}"
+  },
+  {
+    "nodeId": "28",
+    "fieldName": "filename_prefix",
+    "fieldValue": "i2v_first_middle_last_frame"
+  }
+]

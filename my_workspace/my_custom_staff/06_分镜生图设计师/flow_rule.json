@@ -14,7 +14,7 @@
     "参考图计划",
     "关键帧总表",
     "ComfyUI image_prompts",
-    "交付给07的视频首帧说明"
+    "交付给07的视频首帧/尾帧说明"
   ],
   "handoff_to": [
     "07_视频生成执行员",
@@ -27,8 +27,18 @@
     "关键帧覆盖所有需要视频或剪辑支撑的镜头",
     "image_prompts是合法JSON对象",
     "image_prompts覆盖所有需要图片/关键帧的镜头",
-    "每条image_prompts都有workflow_id和asset_tag",
-    "需要参考图的04/05/07/09/10任务必须写清reference_image或进入missing_or_inferred_prompts",
-    "不包含API Key或具体节点ID"
+    "每条image_prompts都有workflow_id、workflow_mode和asset_tag",
+    "每条视频关键帧都有shot_id、frame_role、recommended_video_mode和mode_reason",
+    "默认recommended_video_mode为first_frame；只有需要明确结束姿势、A到B运动、衔接下一镜头或转场时才使用first_last_frame",
+    "first_last_frame镜头必须同时规划start_frame和end_frame，且两帧保持同一主体、服装、场景、光线和画幅",
+    "first_last_frame的end_frame必须是同一镜头约4秒后的自然延续，不得写成新镜头、新场景、新角度或大幅跳变",
+    "first_last_frame的start_frame建议标记temporal_offset_seconds=0，end_frame建议标记temporal_offset_seconds=4，并互相填写paired_start_frame_id/paired_end_frame_id",
+    "如果首帧到尾帧的动作/构图变化无法在4秒内自然完成，必须拆成多个镜头或降级为first_frame",
+    "每条image_prompts都有width和height，前期默认使用480p工作分辨率（横屏848x480、竖屏480x848、方屏480x480），且不把尺寸写成内部节点参数",
+    "02_turnaround/05_image_repair_cutout必须说明reference_image来源；04_keyframe当前为txt2img，不要求也不填写reference_image/reference_images",
+    "多人物关键帧当前仍走04_keyframe纯文生图，必须在prompt里明确角色位置、动作和身份，暂不使用reference_images",
+    "02_turnaround必须按角色/产品一条任务生成4张四视图，只传reference_image和业务提示词，不拆成多条视角任务，不写工作流内部节点参数",
+    "不包含API Key或具体节点ID",
+    "不在06阶段默认输出720p、1080p或4K；最终720p/1080p/4K放大交给22剪辑成片阶段统一处理"
   ]
 }

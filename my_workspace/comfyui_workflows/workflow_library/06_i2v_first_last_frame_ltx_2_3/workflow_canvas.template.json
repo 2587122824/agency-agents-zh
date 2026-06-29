@@ -1,0 +1,137 @@
+{
+  "id": "06_i2v_first_last_frame_ltx_2_3_template",
+  "revision": 0,
+  "last_node_id": 9,
+  "last_link_id": 0,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "MarkdownNote",
+      "pos": [40, 40],
+      "size": [520, 260],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "widgets_values": [
+        "# LTX 2.3 首尾帧 I2V 模板\n\n这是接线骨架，不是最终可运行图。\n\n必须加入你本机 LTX 节点包里真正支持双图输入的 first/last-frame condition 节点。\n\nStart LoadImage -> start image input\nEnd LoadImage -> end image input\nPrompt/Negative -> conditioning\nLTX sampler/decode -> single SaveVideo\n\n不要保留音频分支；不要保留多个 SaveVideo。"
+      ]
+    },
+    {
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [40, 340],
+      "size": [320, 320],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": []},
+        {"name": "MASK", "type": "MASK", "links": []}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["upload_start_frame.png", "image"]
+    },
+    {
+      "id": 3,
+      "type": "LoadImage",
+      "pos": [400, 340],
+      "size": [320, 320],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {"name": "IMAGE", "type": "IMAGE", "links": []},
+        {"name": "MASK", "type": "MASK", "links": []}
+      ],
+      "properties": {"Node name for S&R": "LoadImage"},
+      "widgets_values": ["upload_end_frame.png", "image"]
+    },
+    {
+      "id": 4,
+      "type": "PrimitiveString",
+      "title": "Positive Prompt",
+      "pos": [760, 340],
+      "size": [420, 120],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [{"name": "value", "type": "STRING", "link": null}],
+      "outputs": [{"name": "STRING", "type": "STRING", "links": []}],
+      "widgets_values": ["Move naturally from the start frame to the end frame. Preserve the same identity, outfit, scene, lighting and camera style."]
+    },
+    {
+      "id": 5,
+      "type": "PrimitiveString",
+      "title": "Negative Prompt",
+      "pos": [760, 500],
+      "size": [420, 120],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [{"name": "value", "type": "STRING", "link": null}],
+      "outputs": [{"name": "STRING", "type": "STRING", "links": []}],
+      "widgets_values": ["different person, changed outfit, changed scene, identity drift, distorted body, bad hands, flicker, watermark, text"]
+    },
+    {
+      "id": 6,
+      "type": "PrimitiveInt",
+      "title": "Frame Count",
+      "pos": [1220, 340],
+      "size": [260, 80],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [{"name": "value", "type": "INT", "link": null}],
+      "outputs": [{"name": "INT", "type": "INT", "links": []}],
+      "widgets_values": [73, "fixed"]
+    },
+    {
+      "id": 7,
+      "type": "PrimitiveFloat",
+      "title": "FPS",
+      "pos": [1220, 460],
+      "size": [260, 80],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [{"name": "value", "type": "FLOAT", "link": null}],
+      "outputs": [{"name": "FLOAT", "type": "FLOAT", "links": []}],
+      "widgets_values": [24]
+    },
+    {
+      "id": 8,
+      "type": "PrimitiveInt",
+      "title": "Width",
+      "pos": [1220, 580],
+      "size": [260, 80],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [{"name": "value", "type": "INT", "link": null}],
+      "outputs": [{"name": "INT", "type": "INT", "links": []}],
+      "widgets_values": [576, "fixed"]
+    },
+    {
+      "id": 9,
+      "type": "PrimitiveInt",
+      "title": "Height",
+      "pos": [1220, 700],
+      "size": [260, 80],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [{"name": "value", "type": "INT", "link": null}],
+      "outputs": [{"name": "INT", "type": "INT", "links": []}],
+      "widgets_values": [1024, "fixed"]
+    }
+  ],
+  "links": [],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}

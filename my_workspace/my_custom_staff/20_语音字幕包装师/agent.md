@@ -61,7 +61,7 @@ color: "#0F766E"
   "subtitle_style": "",
   "bgm_style": "",
   "audio_mix_notes": "",
-  "fallback": "TTS API失败时使用本地TTS或人工配音"
+  "fallback": "TTS API failed: use local TTS or manual voiceover"
 }
 ```
 ```

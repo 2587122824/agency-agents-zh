@@ -16,6 +16,7 @@ class CloudComfyUIAdapter:
 
     MAX_RESPONSE_BYTES = 4_000_000
     DOWNLOAD_TYPES = {"mp4", "mov", "webm", "m4v", "mp3", "wav", "aac", "png", "jpg", "jpeg", "webp"}
+    NETWORK_RETRY_ATTEMPTS = 3
 
     def __init__(self, base_url: str, api_key: str, endpoint: str, progress_callback=None) -> None:
         self.base_url = base_url.strip().rstrip("/")
@@ -89,12 +90,19 @@ class CloudComfyUIAdapter:
             job_config = self._compose_config_for_job(job, compose_config)
             if job_type in {"image", "video"}:
                 job = dict(job)
-                reference_image = str(job.get("reference_image") or "").strip()
-                resolved_reference = self._resolve_reference_image(reference_image, generated_reference_map)
-                if resolved_reference:
-                    job["reference_image"] = self._reference_image_value(resolved_reference)
+                reference_images = self._reference_images(job)
+                resolved_references = [self._resolve_reference_image(ref, generated_reference_map) or ref for ref in reference_images]
+                resolved_references = [ref for ref in resolved_references if str(ref or "").strip()]
+                if resolved_references:
+                    uploaded_references = [self._reference_image_value(ref) for ref in resolved_references]
+                    job["reference_images"] = uploaded_references
+                    job["reference_image"] = uploaded_references[0]
+                    if job.get("middle_frame_image") and len(uploaded_references) > 1:
+                        job["middle_frame_image"] = uploaded_references[1]
+                    if job.get("last_frame_image") and len(uploaded_references) > 1:
+                        job["last_frame_image"] = uploaded_references[-1]
                     self._emit(
-                        f"已把{job_type}素材 {index}/{len(selected_jobs)} 的参考图映射到本地生成图片",
+                        f"已为{job_type}素材 {index}/{len(selected_jobs)} 解析 {len(uploaded_references)} 张参考图",
                         total_jobs=len(selected_jobs),
                         completed_jobs=index - 1,
                         current_job=index,
@@ -107,6 +115,7 @@ class CloudComfyUIAdapter:
                 elif job_type == "video" and generated_reference_images:
                     paired_index = min(video_job_index, len(generated_reference_images) - 1)
                     job["reference_image"] = self._reference_image_value(generated_reference_images[paired_index])
+                    job["reference_images"] = [job["reference_image"]]
                     self._emit(
                         f"已把第 {paired_index + 1} 张生图作为视频素材 {index}/{len(selected_jobs)} 的参考图",
                         total_jobs=len(selected_jobs),
@@ -121,6 +130,7 @@ class CloudComfyUIAdapter:
                 elif job_type == "image" and generated_reference_images:
                     previous_index = len(generated_reference_images) - 1
                     job["reference_image"] = self._reference_image_value(generated_reference_images[previous_index])
+                    job["reference_images"] = [job["reference_image"]]
                     self._emit(
                         f"已把上一张生图作为生图素材 {index}/{len(selected_jobs)} 的参考图",
                         total_jobs=len(selected_jobs),
@@ -133,9 +143,9 @@ class CloudComfyUIAdapter:
                         job_type=job_type,
                     )
                 else:
-                    if reference_image:
+                    if reference_images:
                         self._emit(
-                            f"忽略未解析的参考图：{reference_image}",
+                            f"忽略未解析的参考图：{', '.join(reference_images[:3])}",
                             total_jobs=len(selected_jobs),
                             completed_jobs=index - 1,
                             current_job=index,
@@ -146,6 +156,7 @@ class CloudComfyUIAdapter:
                             job_type=job_type,
                         )
                     job["reference_image"] = ""
+                    job["reference_images"] = []
                 if job_type == "video":
                     video_job_index += 1
             job_payload = self._payload_for_material_job(job["base_payload"], job, index)
@@ -296,9 +307,12 @@ class CloudComfyUIAdapter:
         return manifest
 
     def _run_runninghub(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        comfyui_payload = self._prepare_runninghub_payload(comfyui_payload)
         payload = self._build_runninghub_payload(comfyui_payload, compose_config)
         endpoint = self._effective_endpoint(compose_config)
         self._emit(f"提交 RunningHub 请求：{endpoint}", endpoint=endpoint)
+        request_path = output_dir / "runninghub_comfyui_request_payload.json"
+        self._write_json(request_path, self._redact_response(payload))
         submit_response = self._post_json(self._endpoint_url(endpoint), payload)
         submit_path = output_dir / "runninghub_comfyui_submit_response.json"
         self._write_json(submit_path, self._redact_response(submit_response))
@@ -315,7 +329,25 @@ class CloudComfyUIAdapter:
         query_response: dict[str, Any] = submit_response
 
         while time.time() < deadline:
-            query_response = self._post_json(query_url, {"taskId": task_id})
+            try:
+                query_response = self._post_json(query_url, {"taskId": task_id})
+            except ValueError as exc:
+                if not self._is_connection_error(exc):
+                    raise
+                query_response = {
+                    "taskId": task_id,
+                    "status": "RUNNING",
+                    "transientError": str(exc),
+                }
+                self._emit(
+                    f"RunningHub 查询暂时失败，继续等待：{exc}",
+                    endpoint=endpoint,
+                    task_id=task_id,
+                    remote_status="RUNNING",
+                    error=str(exc),
+                )
+                time.sleep(poll_interval)
+                continue
             status = self._status(query_response)
             self._emit(f"RunningHub 任务 {task_id} 状态：{status or 'UNKNOWN'}", endpoint=endpoint, task_id=task_id, remote_status=status)
             if status == "SUCCESS":
@@ -383,6 +415,7 @@ class CloudComfyUIAdapter:
             "status": "success" if status == "SUCCESS" else "failed" if status != "TIMEOUT" else "timeout",
             "taskId": task_id,
             "endpoint": endpoint,
+            "request_payload_file": str(request_path),
             "submit_response_file": str(submit_path),
             "query_response_file": str(query_path),
             "result_count": len(result_items),
@@ -420,6 +453,7 @@ class CloudComfyUIAdapter:
 
     def _build_runninghub_payload(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any]) -> dict[str, Any]:
         node_info = self._parse_node_info_list(compose_config)
+        seed_value = self._seed_value(comfyui_payload)
         replacements = {
             "{{payload}}": json.dumps(comfyui_payload, ensure_ascii=False),
             "{{negative_prompt}}": str(comfyui_payload.get("negative_prompt") or ""),
@@ -427,7 +461,11 @@ class CloudComfyUIAdapter:
             "{{video_prompt}}": self._first_list_or_value(comfyui_payload, "video_prompts", "video_prompt"),
             "{{reference_image}}": self._first_reference_image(comfyui_payload),
             "{{has_reference_image}}": bool(self._first_reference_image(comfyui_payload)),
-            "{{seed}}": str(comfyui_payload.get("seed") or ""),
+            "{{middle_frame_image}}": self._middle_frame_image(comfyui_payload),
+            "{{has_middle_frame_image}}": bool(self._middle_frame_image(comfyui_payload)),
+            "{{last_frame_image}}": self._last_frame_image(comfyui_payload),
+            "{{has_last_frame_image}}": bool(self._last_frame_image(comfyui_payload)),
+            "{{seed}}": seed_value,
             "{{width}}": str(comfyui_payload.get("width") or ""),
             "{{height}}": str(comfyui_payload.get("height") or ""),
             "{{task_type}}": str(comfyui_payload.get("task_type") or ""),
@@ -435,6 +473,8 @@ class CloudComfyUIAdapter:
             "{{control_mode}}": str(comfyui_payload.get("control_mode") or ""),
             "{{duration}}": str(comfyui_payload.get("duration") or ""),
             "{{fps}}": str(comfyui_payload.get("fps") or ""),
+            "{{frame_count}}": self._frame_count(comfyui_payload),
+            "{{ltx_guide_frame_count}}": self._ltx_guide_frame_count(comfyui_payload),
             "{{denoise}}": str(comfyui_payload.get("denoise") or ""),
             "{{ipadapter_weight}}": str(comfyui_payload.get("ipadapter_weight") or ""),
             "{{reference_strength}}": str(comfyui_payload.get("reference_strength") or ""),
@@ -442,8 +482,15 @@ class CloudComfyUIAdapter:
             "{{pose_video}}": str(comfyui_payload.get("pose_video") or ""),
             "{{prompt}}": self._first_prompt(comfyui_payload),
         }
+        reference_images = self._reference_image_list_values(comfyui_payload)
+        for index in range(1, 5):
+            reference_value = reference_images[index - 1] if len(reference_images) >= index else ""
+            replacements[f"{{{{reference_image_{index}}}}}"] = reference_value
+            replacements[f"{{{{has_reference_image_{index}}}}}"] = bool(reference_value)
         if node_info:
             node_info = self._replace_placeholders(node_info, replacements)
+            node_info = self._override_dimension_node_info(node_info, comfyui_payload)
+            node_info = self._normalize_numeric_node_info(node_info, seed_value)
             node_info = self._drop_empty_image_node_info(node_info)
         payload: dict[str, Any] = {
             "apiKey": self.api_key,
@@ -456,6 +503,151 @@ class CloudComfyUIAdapter:
         if app_id:
             payload["webappId"] = app_id
         return payload
+
+    @classmethod
+    def _seed_value(cls, payload: dict[str, Any]) -> int:
+        seed = cls._clean_int_value(payload.get("seed"), minimum=0)
+        if seed is not None:
+            return seed
+        seed = cls._clean_int_value(payload.get("noise_seed"), minimum=0)
+        if seed is not None:
+            return seed
+        return int(time.time() * 1000) % 2_147_483_647
+
+    def _prepare_runninghub_payload(self, comfyui_payload: dict[str, Any]) -> dict[str, Any]:
+        payload = json.loads(json.dumps(comfyui_payload, ensure_ascii=False))
+        if not self._looks_like_video_payload(payload):
+            return payload
+        prompt = self._runninghub_safe_video_prompt(str(payload.get("prompt") or self._first_prompt(payload) or ""))
+        negative = self._runninghub_safe_video_negative(str(payload.get("negative_prompt") or ""))
+        payload["prompt"] = prompt
+        payload["negative_prompt"] = negative
+        payload["video_prompt"] = prompt
+        prompts = payload.get("video_prompts")
+        if isinstance(prompts, list):
+            for group in prompts:
+                self._rewrite_prompt_container(group, prompt, negative)
+        return payload
+
+    @staticmethod
+    def _looks_like_video_payload(payload: dict[str, Any]) -> bool:
+        if str(payload.get("video_prompt") or "").strip():
+            return True
+        if str(payload.get("video_task_mode") or "").strip():
+            return True
+        type_values = (
+            payload.get("workflow_item_type"),
+            payload.get("video_task_type"),
+            payload.get("task_type"),
+        )
+        if payload.get("video_prompts"):
+            return True
+        return any(str(value or "").strip().lower() in {"video", "img2video", "txt2video", "first_last_frame_video", "first_middle_last_frame_video"} for value in type_values)
+
+    @classmethod
+    def _rewrite_prompt_container(cls, value: Any, prompt: str, negative: str) -> None:
+        if isinstance(value, dict):
+            for key, item in list(value.items()):
+                lowered = str(key).strip().lower()
+                if lowered in {"positive", "prompt", "video_prompt", "text"} and isinstance(item, str):
+                    value[key] = prompt
+                elif lowered in {"negative", "negative_prompt"} and isinstance(item, str):
+                    value[key] = negative
+                else:
+                    cls._rewrite_prompt_container(item, prompt, negative)
+        elif isinstance(value, list):
+            for item in value:
+                cls._rewrite_prompt_container(item, prompt, negative)
+
+    @classmethod
+    def _runninghub_safe_video_prompt(cls, prompt: str) -> str:
+        text = str(prompt or "").strip()
+        text = re.sub(
+            r"(?i)^safe non-graphic anime sci-fi video,\s*fully clothed subjects,.*?no hate content,\s*",
+            "",
+            text,
+        )
+        text = re.sub(
+            r"(?i)^platform-safe non-graphic anime sci-fi video,\s*fully clothed subjects,\s*clean synthetic surfaces,\s*family-safe action tone,\s*",
+            "",
+            text,
+        )
+        replacements = (
+            (r"(?i)extreme close-up macro shot of human nape and upper neck", "clinical sci-fi close-up of an external neural interface collar on a synthetic mannequin subject"),
+            (r"(?i)close-up macro shot of human nape and upper neck", "clinical sci-fi close-up of an external neural interface collar"),
+            (r"(?i)\bnape\b", "external collar area"),
+            (r"(?i)\bupper neck\b", "external collar area"),
+            (r"(?i)\bpale skin\b", "smooth synthetic surface"),
+            (r"(?i)smooth synthetic surface separated by precise robotic robotic calibration arm", "external collar module adjusted by a robotic calibration arm"),
+            (r"(?i)smooth synthetic surface separated by precise robotic calibration arm", "external collar module adjusted by a robotic calibration arm"),
+            (r"(?i)skin separated by precise robotic surgical arm", "external collar module adjusted by a robotic calibration arm"),
+            (r"(?i)\bskin separated\b", "external module opened"),
+            (r"(?i)\bskin shows pain response\b", "subject remains calm and expressionless"),
+            (r"(?i)\bpain response\b", "calm response"),
+            (r"(?i)\bspinal area\b", "back-mounted interface panel"),
+            (r"(?i)\bsurgical arm\b", "robotic calibration arm"),
+            (r"(?i)\bsurgery\b", "clinical calibration"),
+            (r"(?i)\bsurgical\b", "clinical"),
+            (r"(?i)\binserted into\b", "attached onto"),
+            (r"(?i)\bskin pores\b", "fine material detail"),
+            (r"(?i)\bwound(s)?\b", "surface mark"),
+            (r"(?i)\bblood\b", "red warning light"),
+            (r"(?i)\bgore\b", "non-graphic detail"),
+            (r"(?i)\bnude|nudity|erotic|sexual\b", "fully clothed non-sexual"),
+            (r"(?i)\bmake-shift weapon\b", "improvised signal tool"),
+            (r"(?i)\bweapon(s)?\b", "equipment"),
+            (r"(?i)\bEMP disruptor\b", "blue signal device"),
+            (r"(?i)\bEMP cannon\b", "blue signal projector"),
+            (r"(?i)\brebels\b", "resistance team"),
+            (r"(?i)\brebel\b", "resistance member"),
+            (r"(?i)\bmilitary formation\b", "robot patrol formation"),
+            (r"(?i)\bterrorism|terrorist(s)?\b", "public safety threat"),
+        )
+        for pattern, replacement in replacements:
+            text = re.sub(pattern, replacement, text)
+        text = re.sub(r"(?i)\brobot robot patrol formation\b", "robot patrol formation", text)
+        text = re.sub(r"(?i)\bblue signal device device\b", "blue signal device", text)
+        text = re.sub(r"(?i)\brobotic robotic calibration arm\b", "robotic calibration arm", text)
+        text = re.sub(r"\s+", " ", text).strip(" ,")
+        safety_prefix = (
+            "platform-safe non-graphic anime sci-fi video, fully clothed subjects, "
+            "clean synthetic surfaces, family-safe action tone, "
+        )
+        if not text.lower().startswith("platform-safe non-graphic"):
+            text = safety_prefix + text
+        return text
+
+    @classmethod
+    def _runninghub_safe_video_negative(cls, negative: str) -> str:
+        base_terms = [
+            "nudity",
+            "sexual content",
+            "erotic",
+            "exposed skin",
+            "wound",
+            "blood",
+            "gore",
+            "surgery",
+            "injury",
+            "pain",
+            "graphic violence",
+            "weapon",
+            "terrorism",
+            "hate content",
+            "offensive content",
+            "unsafe content",
+            "distorted body",
+            "distorted face",
+            "flicker",
+            "low quality",
+        ]
+        existing = [part.strip() for part in str(negative or "").split(",") if part.strip()]
+        seen = {part.lower() for part in existing}
+        for term in base_terms:
+            if term.lower() not in seen:
+                existing.append(term)
+                seen.add(term.lower())
+        return ", ".join(existing)
 
     @staticmethod
     def _drop_empty_image_node_info(node_info: list[Any]) -> list[Any]:
@@ -584,6 +776,7 @@ class CloudComfyUIAdapter:
                     "prompt": direct_value.strip(),
                     "negative_prompt": str(payload.get("negative_prompt") or ""),
                     "reference_image": self._first_reference_image(payload),
+                    "reference_images": self._reference_images(payload),
                     "base_payload": payload,
                     "source": value_key,
                     "group": {},
@@ -601,6 +794,7 @@ class CloudComfyUIAdapter:
                         "prompt": group.strip(),
                         "negative_prompt": str(payload.get("negative_prompt") or ""),
                         "reference_image": self._first_reference_image(payload),
+                        "reference_images": self._reference_images(payload),
                         "base_payload": payload,
                         "source": group_key,
                         "group": {},
@@ -672,12 +866,36 @@ class CloudComfyUIAdapter:
             or cls._first_reference_image(base_payload)
             or ""
         ).strip()
+        last_frame_image = str(
+            prompt_data.get("last_frame_image")
+            or prompt_data.get("end_frame_image")
+            or group.get("last_frame_image")
+            or ""
+        ).strip()
+        middle_frame_image = str(
+            prompt_data.get("middle_frame_image")
+            or prompt_data.get("mid_frame_image")
+            or prompt_data.get("middle_frame")
+            or group.get("middle_frame_image")
+            or group.get("mid_frame_image")
+            or ""
+        ).strip()
+        reference_images = cls._reference_images(prompt_data) or cls._reference_images(group) or cls._reference_images(base_payload)
+        if reference_image and reference_image not in reference_images:
+            reference_images = [reference_image, *reference_images]
+        if middle_frame_image and middle_frame_image not in reference_images:
+            reference_images.append(middle_frame_image)
+        if last_frame_image and last_frame_image not in reference_images:
+            reference_images.append(last_frame_image)
         return {
             "type": job_type,
             "name": name,
             "prompt": prompt,
             "negative_prompt": negative,
             "reference_image": reference_image,
+            "middle_frame_image": middle_frame_image,
+            "last_frame_image": last_frame_image,
+            "reference_images": reference_images,
             "seed": prompt_data.get("seed", group.get("seed", base_payload.get("seed", ""))),
             "width": prompt_data.get("width", group.get("width", base_payload.get("width", ""))),
             "height": prompt_data.get("height", group.get("height", base_payload.get("height", ""))),
@@ -719,10 +937,17 @@ class CloudComfyUIAdapter:
             return direct
         if direct.is_absolute():
             return None
+        candidates = [text]
+        normalized = text.replace("\\", "/").lstrip("/")
+        if normalized.startswith("comfyui_manual_debug/"):
+            candidates.append("comfyui/manual_debug/" + normalized[len("comfyui_manual_debug/") :])
+        if normalized.startswith("comfyui/manual_debug/"):
+            candidates.append("comfyui_manual_debug/" + normalized[len("comfyui/manual_debug/") :])
         for base in getattr(self, "_reference_search_dirs", []) or []:
-            candidate = (Path(base) / text).resolve()
-            if candidate.is_file():
-                return candidate
+            for candidate_text in candidates:
+                candidate = (Path(base) / candidate_text).resolve()
+                if candidate.is_file():
+                    return candidate
             name_candidate = (Path(base) / direct.name).resolve()
             if name_candidate.is_file():
                 return name_candidate
@@ -765,12 +990,13 @@ class CloudComfyUIAdapter:
             stem.lower(),
         }
 
-    @staticmethod
-    def _payload_for_material_job(base_payload: dict[str, Any], job: dict[str, Any], index: int) -> dict[str, Any]:
+    def _payload_for_material_job(self, base_payload: dict[str, Any], job: dict[str, Any], index: int) -> dict[str, Any]:
         payload = json.loads(json.dumps(base_payload, ensure_ascii=False))
         prompt = str(job.get("prompt") or "").strip()
         negative = str(job.get("negative_prompt") or "").strip()
         reference_image = str(job.get("reference_image") or "").strip()
+        middle_frame_image = str(job.get("middle_frame_image") or "").strip()
+        last_frame_image = str(job.get("last_frame_image") or "").strip()
         job_type = str(job.get("type") or "material")
         prompt_data = job.get("prompt_data") if isinstance(job.get("prompt_data"), dict) else {}
         group = job.get("group") if isinstance(job.get("group"), dict) else {}
@@ -793,6 +1019,9 @@ class CloudComfyUIAdapter:
             or base_payload.get("control_mode")
             or ("first_frame" if job_type == "video" and reference_image else "reference_image" if reference_image else "none")
         )
+        if job_type == "video":
+            prompt = self._runninghub_safe_video_prompt(prompt)
+            negative = self._runninghub_safe_video_negative(negative)
         payload["prompt"] = prompt
         payload["negative_prompt"] = negative
         if job_type == "video":
@@ -821,13 +1050,37 @@ class CloudComfyUIAdapter:
                     },
                 }
             ]
-        if reference_image:
+        reference_images = self._reference_image_list_values(job)
+        if reference_images:
+            payload["reference_images"] = reference_images
+            if reference_image:
+                payload["reference_image"] = reference_image
+            else:
+                payload["reference_image"] = reference_images[0]
+            if last_frame_image:
+                payload["last_frame_image"] = last_frame_image
+            if middle_frame_image:
+                payload["middle_frame_image"] = middle_frame_image
+            elif len(reference_images) > 2:
+                payload["middle_frame_image"] = reference_images[1]
+            if not payload.get("last_frame_image") and len(reference_images) > 1:
+                payload["last_frame_image"] = reference_images[-1]
+        elif reference_image:
             payload["reference_image"] = reference_image
+            if middle_frame_image:
+                payload["middle_frame_image"] = middle_frame_image
+            if last_frame_image:
+                payload["last_frame_image"] = last_frame_image
+            payload.pop("reference_images", None)
         else:
             payload.pop("reference_image", None)
+            payload.pop("middle_frame_image", None)
+            payload.pop("last_frame_image", None)
             payload.pop("reference_images", None)
-        payload["has_reference_image"] = bool(reference_image)
-        for key in ("seed", "width", "height", "duration", "fps", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "pose_video", "image_task_mode"):
+        payload["has_reference_image"] = bool(payload.get("reference_image"))
+        payload["has_middle_frame_image"] = bool(payload.get("middle_frame_image"))
+        payload["has_last_frame_image"] = bool(payload.get("last_frame_image"))
+        for key in ("seed", "width", "height", "duration", "fps", "frame_count", "frames", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "pose_video", "image_task_mode"):
             value = (
                 prompt_data.get(key)
                 if key in prompt_data
@@ -896,8 +1149,7 @@ class CloudComfyUIAdapter:
             method="POST",
         )
         try:
-            with urllib_request.urlopen(req, timeout=120) as response:
-                raw = response.read(self.MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
+            raw = self._read_request(req, timeout=120, label="RunningHub media upload", max_bytes=self.MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
         except urllib_error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:1200]
             raise ValueError(f"RunningHub media upload HTTP {exc.code}: {detail}") from exc
@@ -970,18 +1222,49 @@ class CloudComfyUIAdapter:
             method="POST",
         )
         try:
-            with urllib_request.urlopen(req, timeout=120) as response:
-                raw = response.read(self.MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
+            raw = self._read_request(req, timeout=120, label="ComfyUI workflow request", max_bytes=self.MAX_RESPONSE_BYTES).decode("utf-8", errors="replace")
         except urllib_error.HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")[:1200]
             raise ValueError(f"ComfyUI workflow HTTP {exc.code}: {detail}") from exc
-        except urllib_error.URLError as exc:
-            raise ValueError(f"ComfyUI workflow connection failed: {exc.reason}") from exc
+        except (urllib_error.URLError, TimeoutError, OSError) as exc:
+            raise ValueError(f"ComfyUI workflow connection failed: {self._connection_error_message(exc)}") from exc
         try:
             parsed = json.loads(raw)
         except json.JSONDecodeError:
             parsed = {"raw": raw}
         return parsed if isinstance(parsed, dict) else {"data": parsed}
+
+    def _read_request(self, req: urllib_request.Request, timeout: int, label: str, max_bytes: int | None = None) -> bytes:
+        last_exc: BaseException | None = None
+        for attempt in range(1, self.NETWORK_RETRY_ATTEMPTS + 1):
+            try:
+                with urllib_request.urlopen(req, timeout=timeout) as response:
+                    return response.read(max_bytes) if max_bytes else response.read()
+            except urllib_error.HTTPError:
+                raise
+            except (urllib_error.URLError, TimeoutError, OSError) as exc:
+                last_exc = exc
+                if attempt >= self.NETWORK_RETRY_ATTEMPTS:
+                    break
+                self._emit(
+                    f"{label} 网络连接暂时失败，重试 {attempt}/{self.NETWORK_RETRY_ATTEMPTS - 1}：{self._connection_error_message(exc)}",
+                    error=self._connection_error_message(exc),
+                    retry_attempt=attempt,
+                )
+                time.sleep(min(8, attempt * 2))
+        if last_exc:
+            raise last_exc
+        raise ValueError(f"{label} failed without response")
+
+    @staticmethod
+    def _connection_error_message(exc: BaseException) -> str:
+        reason = getattr(exc, "reason", None)
+        return str(reason or exc)
+
+    @classmethod
+    def _is_connection_error(cls, exc: BaseException) -> bool:
+        message = str(exc).lower()
+        return "connection failed" in message or "timed out" in message or "timeout" in message or "ssl" in message
 
     @staticmethod
     def _app_id_from_endpoint(endpoint: str) -> str:
@@ -1001,6 +1284,84 @@ class CloudComfyUIAdapter:
         if isinstance(value, dict):
             return {key: cls._replace_placeholders(item, replacements) for key, item in value.items()}
         return value
+
+    @classmethod
+    def _override_dimension_node_info(cls, node_info: list[Any], payload: dict[str, Any]) -> list[Any]:
+        width = cls._clean_dimension_value(payload.get("width"))
+        height = cls._clean_dimension_value(payload.get("height"))
+        if width is None and height is None:
+            return node_info
+
+        def replace_item(item: Any) -> Any:
+            if isinstance(item, list):
+                return [replace_item(child) for child in item]
+            if not isinstance(item, dict):
+                return item
+            updated = {key: replace_item(value) for key, value in item.items()}
+            field_name = str(updated.get("fieldName") or updated.get("field_name") or "").strip().lower()
+            if field_name == "width" and width is not None:
+                updated["fieldValue"] = width
+            elif field_name == "height" and height is not None:
+                updated["fieldValue"] = height
+            return updated
+
+        return [replace_item(item) for item in node_info]
+
+    @classmethod
+    def _normalize_numeric_node_info(cls, node_info: list[Any], seed_value: int) -> list[Any]:
+        integer_fields = {
+            "seed",
+            "noise_seed",
+            "width",
+            "height",
+            "length",
+            "frames",
+            "frame_count",
+            "frames_number",
+            "batch_size",
+            "steps",
+            "frame_rate",
+            "fps",
+        }
+
+        def replace_item(item: Any) -> Any:
+            if isinstance(item, list):
+                return [replace_item(child) for child in item]
+            if not isinstance(item, dict):
+                return item
+            updated = {key: replace_item(value) for key, value in item.items()}
+            field_name = str(updated.get("fieldName") or updated.get("field_name") or "").strip().lower()
+            if field_name in {"seed", "noise_seed"}:
+                updated["fieldValue"] = seed_value
+            elif field_name in integer_fields:
+                number = cls._clean_int_value(updated.get("fieldValue"), minimum=1)
+                if number is not None:
+                    updated["fieldValue"] = number
+            return updated
+
+        return [replace_item(item) for item in node_info]
+
+    @staticmethod
+    def _clean_dimension_value(value: Any) -> int | str | None:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            number = int(float(text))
+        except ValueError:
+            return text
+        return number if number > 0 else None
+
+    @staticmethod
+    def _clean_int_value(value: Any, minimum: int = 0) -> int | None:
+        text = str(value or "").strip()
+        if not text or text in {"\\", "/", "None", "null", "undefined"}:
+            return None
+        try:
+            number = int(float(text))
+        except ValueError:
+            return None
+        return number if number >= minimum else None
 
     @staticmethod
     def _parse_node_info_list(compose_config: dict[str, Any]) -> list[Any]:
@@ -1039,15 +1400,13 @@ class CloudComfyUIAdapter:
                 deduped.append(url)
         return deduped[:30]
 
-    @staticmethod
-    def _download_file(url: str, output_dir: Path, stem: str, output_type: str) -> Path:
+    def _download_file(self, url: str, output_dir: Path, stem: str, output_type: str) -> Path:
         suffix = f".{output_type.lstrip('.')}" if output_type else Path(urlparse(url).path).suffix.lower()
         if suffix.lower().lstrip(".") not in CloudComfyUIAdapter.DOWNLOAD_TYPES:
             suffix = ".mp4"
         target = output_dir / f"{stem}{suffix}"
         req = urllib_request.Request(url, headers={"User-Agent": "agency-agents-zh-comfyui-adapter/1.0"})
-        with urllib_request.urlopen(req, timeout=300) as response:
-            target.write_bytes(response.read())
+        target.write_bytes(self._read_request(req, timeout=300, label="RunningHub result download"))
         return target
 
     @staticmethod
@@ -1079,17 +1438,115 @@ class CloudComfyUIAdapter:
         value = payload.get("reference_image")
         if isinstance(value, str) and value.strip():
             return value.strip()
-        values = payload.get("reference_images")
-        if isinstance(values, list) and values:
-            first = values[0]
-            if isinstance(first, str):
-                return first.strip()
-            if isinstance(first, dict):
-                for key in ("url", "path", "file", "image"):
-                    item = first.get(key)
-                    if isinstance(item, str) and item.strip():
-                        return item.strip()
+        values = CloudComfyUIAdapter._reference_images(payload)
+        if values:
+            return values[0]
         return ""
+
+    @staticmethod
+    def _last_frame_image(payload: dict[str, Any]) -> str:
+        value = payload.get("last_frame_image") or payload.get("end_frame_image")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        values = CloudComfyUIAdapter._reference_image_list_values(payload)
+        if len(values) > 2:
+            return values[-1]
+        if len(values) > 1:
+            return values[1]
+        return ""
+
+    @staticmethod
+    def _middle_frame_image(payload: dict[str, Any]) -> str:
+        value = payload.get("middle_frame_image") or payload.get("mid_frame_image") or payload.get("middle_keyframe")
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        values = CloudComfyUIAdapter._reference_image_list_values(payload)
+        if len(values) > 2:
+            return values[1]
+        return ""
+
+    @staticmethod
+    def _frame_count(payload: dict[str, Any]) -> str:
+        explicit = payload.get("frame_count") or payload.get("frames")
+        if explicit not in (None, "", []):
+            return str(explicit)
+        try:
+            duration = float(str(payload.get("duration") or "").strip())
+            fps = float(str(payload.get("fps") or "").strip())
+        except ValueError:
+            return ""
+        if duration <= 0 or fps <= 0:
+            return ""
+        return str(max(1, int(round(duration * fps)) + 1))
+
+    @staticmethod
+    def _ltx_guide_frame_count(payload: dict[str, Any]) -> str:
+        value = CloudComfyUIAdapter._frame_count(payload)
+        if not value:
+            return ""
+        try:
+            target = int(float(value))
+        except ValueError:
+            return value
+        # LTX guide nodes add latent context frames. For the first/last-frame
+        # guide workflow, use a shorter internal length so the exported video
+        # lands closer to the requested duration.
+        internal = max(9, target - 16)
+        return str(internal)
+
+    @staticmethod
+    def _reference_images(payload: dict[str, Any]) -> list[str]:
+        if not isinstance(payload, dict):
+            return []
+        result: list[str] = []
+        value = payload.get("reference_image")
+        if isinstance(value, str) and value.strip():
+            parts = [part.strip() for part in re.split("[,\uFF0C;\uFF1B\n]+", value) if part.strip()]
+            result.extend(parts or [value.strip()])
+        last_frame = payload.get("last_frame_image") or payload.get("end_frame_image")
+        if isinstance(last_frame, str) and last_frame.strip():
+            result.append(last_frame.strip())
+        middle_frame = payload.get("middle_frame_image") or payload.get("mid_frame_image") or payload.get("middle_keyframe")
+        if isinstance(middle_frame, str) and middle_frame.strip():
+            insert_at = 1 if result else 0
+            result.insert(insert_at, middle_frame.strip())
+        result.extend(CloudComfyUIAdapter._reference_image_list_values(payload))
+        deduped: list[str] = []
+        seen = set()
+        for item in result:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped.append(item)
+        return deduped
+
+    @staticmethod
+    def _reference_image_list_values(payload: dict[str, Any]) -> list[str]:
+        if not isinstance(payload, dict):
+            return []
+        result: list[str] = []
+        values = payload.get("reference_images")
+        if isinstance(values, list):
+            for item in values:
+                candidate = ""
+                if isinstance(item, str):
+                    candidate = item.strip()
+                elif isinstance(item, dict):
+                    for key in ("url", "path", "file", "image", "reference_image"):
+                        raw_value = item.get(key)
+                        if isinstance(raw_value, str) and raw_value.strip():
+                            candidate = raw_value.strip()
+                            break
+                if candidate:
+                    result.append(candidate)
+        deduped: list[str] = []
+        seen = set()
+        for item in result:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped.append(item)
+        return deduped
 
     @staticmethod
     def _status(data: dict[str, Any]) -> str:

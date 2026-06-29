@@ -1,0 +1,77 @@
+{
+  "2483": {
+    "inputs": {
+      "text": "{{prompt}}"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive_prompt"
+    }
+  },
+  "2612": {
+    "inputs": {
+      "text": "{{negative_prompt}}"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative_prompt"
+    }
+  },
+  "4977": {
+    "inputs": {
+      "value": true
+    },
+    "class_type": "PrimitiveBoolean",
+    "_meta": {
+      "title": "bypass_i2v_reference_for_txt2video"
+    }
+  },
+  "3159": {
+    "inputs": {
+      "strength": 0.0
+    },
+    "class_type": "LTXVImgToVideoConditionOnly",
+    "_meta": {
+      "title": "i2v_reference_disabled"
+    }
+  },
+  "4979": {
+    "inputs": {
+      "value": 97
+    },
+    "class_type": "PrimitiveInt",
+    "_meta": {
+      "title": "frame_count"
+    }
+  },
+  "3059": {
+    "inputs": {
+      "width": 1024,
+      "height": 576,
+      "length": 97,
+      "batch_size": 1
+    },
+    "class_type": "EmptyLTXVLatentVideo",
+    "_meta": {
+      "title": "video_size_and_length"
+    }
+  },
+  "4823": {
+    "inputs": {
+      "filename_prefix": "ltx_2_3_txt2video"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "save_video_f"
+    }
+  },
+  "4852": {
+    "inputs": {
+      "filename_prefix": "ltx_2_3_txt2video"
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "save_video_d"
+    }
+  }
+}

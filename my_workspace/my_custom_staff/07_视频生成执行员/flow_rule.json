@@ -15,7 +15,8 @@
     "分段视频计划",
     "B-roll/空镜/转场计划",
     "后处理计划",
-    "ComfyUI video_prompts"
+    "ComfyUI video_prompts",
+    "transition_plan"
   ],
   "handoff_to": [
     "22_剪辑成片执行师",
@@ -26,10 +27,25 @@
     "video_prompts是合法JSON对象",
     "video_prompts覆盖所有需要视频素材的镜头",
     "每条视频任务有task_type和control_mode",
-    "每条video_prompts都有workflow_id和asset_tag",
-    "11-21各类视频任务的必需输入来源明确，缺失时进入missing_or_inferred_prompts",
+    "每条video_prompts都有workflow_id、workflow_mode和asset_tag",
+    "每条图生视频任务都有video_mode和mode_reason，默认使用06_i2v_first_frame/first_frame，只有小幅连续动作、小幅姿势变化或同机位小推拉时才使用06_i2v_first_last_frame/first_last_frame",
+    "06_i2v_first_frame必须有reference_image且last_frame_image为空；06_i2v_first_last_frame必须同时有reference_image和last_frame_image",
+    "06_i2v_first_last_frame的last_frame_image必须是reference_image约4秒后的同镜头自然延续，不得是新镜头、新角度、新场景或大幅跳变",
+    "06_i2v_first_last_frame建议填写temporal_gap_seconds=4和frame_pair_rule，明确首尾帧是0秒到4秒的同镜头配对",
+    "last_frame_image缺失、与首帧主体/服装/场景/光线不一致或无法在4秒内自然到达时，必须降级为i2v_first_frame",
+    "大动作、大构图变化、换场、倒地/站起、爆发前后必须拆成多个首帧视频，并用transition_plan衔接，不得硬做首尾帧",
+    "每条video_prompts都有width、height、duration和fps，前期默认使用480p工作分辨率（横屏848x480、竖屏480x848、方屏480x480），且不把尺寸/时长/帧率写成内部节点参数",
+    "必须输出transition_plan；每两个相邻视频片段至少给一个衔接建议，类型限定为flash_white、fade_black、glitch_noise、camera_shake、push_zoom、cutaway_broll",
+    "视频提示词必须平台安全，不包含裸体、性暗示、暴露皮肤特写、伤口、流血、血腥、手术、疼痛反应、真实武器、恐怖主义、仇恨或令人反感内容",
+    "06-12各类视频任务的必需输入来源明确，缺失时进入missing_or_inferred_prompts",
     "参考图/首帧来源清楚",
     "B-roll、转场、后处理需求明确",
-    "不混入TTS、字幕或最终剪辑职责"
+    "不混入TTS、字幕或最终剪辑职责",
+    "不在07阶段默认输出720p、1080p或4K；最终放大、超分、补帧和清晰化交给22剪辑成片阶段统一处理",
+    "06_i2v_first_middle_last_frame是独立实验入口，不得覆盖06_i2v_first_last_frame，也不得替代默认06_i2v_first_frame",
+    "first_middle_last_frame_video必须同时填写reference_image、middle_frame_image、last_frame_image，且三者来自同一shot_id的start/middle/end keyframe",
+    "middle_frame_image或last_frame_image缺失，或三帧主体/服装/场景/光线/机位不一致时，必须降级为i2v_first_frame，不能硬跑06C",
+    "06C必须明确workflow_mode=i2v_first_middle_last_frame、control_mode=first_middle_last_frame；asset_tag可继续使用i2v_first_last_frame以兼容素材目录",
+    "06C首中尾帧必须使用duration=4、fps=24，不能沿用06B低帧率参数，以确保中帧第40帧和尾帧第72帧位于有效引导序列内"
   ]
 }

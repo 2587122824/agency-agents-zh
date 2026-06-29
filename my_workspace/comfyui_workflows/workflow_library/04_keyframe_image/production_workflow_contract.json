@@ -1,0 +1,77 @@
+{
+  "workflow_id": "04_keyframe",
+  "workflow_mode": "keyframe",
+  "name": "生产级关键帧工作流约定",
+  "goal": "生成可直接交给 07 图生视频作为首帧的高稳定关键帧，优先保证人物身份、服装、构图、场景和后续延展稳定性。",
+  "required_architecture": {
+    "main_latent_path": {
+      "txt2img_branch": "EmptyLatent -> Switch.on_false -> KSampler.latent_image",
+      "img2img_branch": "LoadImage MainReference -> VAEEncode -> Switch.on_true -> KSampler.latent_image",
+      "switch_control": "{{has_reference_image}}"
+    },
+    "identity_control": [
+      "Character A reference -> FaceID / InstantID / IPAdapter FaceID -> MODEL",
+      "Character B reference -> FaceID / InstantID / IPAdapter FaceID -> MODEL"
+    ],
+    "style_scene_control": [
+      "Scene or style reference -> IPAdapter / Reference branch -> MODEL"
+    ],
+    "final_sampling": [
+      "MODEL(after all identity/style branches) -> KSampler -> VAEDecode -> SaveImage"
+    ]
+  },
+  "inputs": {
+    "prompt": {
+      "required": true,
+      "description": "关键帧正向提示词，描述主体、动作、镜头、构图、景别、光线和气氛。"
+    },
+    "negative_prompt": {
+      "required": true,
+      "description": "关键帧负向提示词，用于限制串脸、畸形、文字、水印等问题。"
+    },
+    "reference_image": {
+      "required": false,
+      "description": "主参考图。单人物时通常等于 reference_image_1；多人物时建议是最接近目标构图的主参考。"
+    },
+    "reference_image_1": {
+      "required": false,
+      "description": "角色A主参考图。"
+    },
+    "reference_image_2": {
+      "required": false,
+      "description": "角色B主参考图。"
+    },
+    "reference_image_3": {
+      "required": false,
+      "description": "场景或风格参考图。"
+    },
+    "reference_image_4": {
+      "required": false,
+      "description": "产品、道具或额外角色参考图。"
+    },
+    "width": {
+      "required": true,
+      "description": "输出宽度。长视频竖屏通常 1080。"
+    },
+    "height": {
+      "required": true,
+      "description": "输出高度。长视频竖屏通常 1920。"
+    },
+    "seed": {
+      "required": false,
+      "description": "固定 seed 用于复现。"
+    }
+  },
+  "outputs": {
+    "image_count": 1,
+    "type": "image",
+    "description": "一张生产可用关键帧，供 07 图生视频直接作为首帧或首帧控制图。"
+  },
+  "production_rules": [
+    "关键帧工作流必须支持真正的 img2img 主链，不能只靠 IPAdapter / FaceID 做弱条件引导。",
+    "多人物同镜头必须使用多参考图，不能只靠一张拼图或 prompt 描述。",
+    "人物身份稳定优先级高于局部视觉花哨效果。",
+    "关键帧输出要为后续图生视频服务，而不是单独追求静态海报感。",
+    "如果底模与 FaceID / IPAdapter 模型体系不一致，必须先统一模型体系再上线。"
+  ]
+}

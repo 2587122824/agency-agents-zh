@@ -1,0 +1,59 @@
+{
+  "10": {
+    "inputs": {
+      "text": "{{prompt}}"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "positive_prompt"
+    }
+  },
+  "11": {
+    "inputs": {
+      "text": "{{negative_prompt}}"
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "negative_prompt"
+    }
+  },
+  "12": {
+    "inputs": {
+      "image": "{{reference_image}}",
+      "upload": "image"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "reference_image"
+    }
+  },
+  "63": {
+    "inputs": {
+      "switch": "{{has_reference_image}}"
+    },
+    "class_type": "Switch",
+    "_meta": {
+      "title": "enable_reference_image"
+    }
+  },
+  "20": {
+    "inputs": {
+      "width": 1080,
+      "height": 1920,
+      "batch_size": 1
+    },
+    "class_type": "EmptySD3LatentImage",
+    "_meta": {
+      "title": "image_size"
+    }
+  },
+  "40": {
+    "inputs": {
+      "filename_prefix": "all_in_one_image"
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "save_image"
+    }
+  }
+}

@@ -1,0 +1,80 @@
+[
+  {
+    "nodeId": "10",
+    "fieldName": "text",
+    "fieldValue": "{{prompt}}",
+    "description": "正向提示词"
+  },
+  {
+    "nodeId": "11",
+    "fieldName": "text",
+    "fieldValue": "{{negative_prompt}}",
+    "description": "反向提示词"
+  },
+  {
+    "nodeId": "12",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image}}",
+    "description": "主参考图，用于 img2img 构图约束"
+  },
+  {
+    "nodeId": "13",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image_1}}",
+    "description": "角色 A FaceID 参考图"
+  },
+  {
+    "nodeId": "14",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image_2}}",
+    "description": "Character B reference slot; not wired in default safe canvas"
+  },
+  {
+    "nodeId": "15",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image_3}}",
+    "description": "Scene/style reference slot; not wired in default safe canvas"
+  },
+  {
+    "nodeId": "20",
+    "fieldName": "height",
+    "fieldValue": "{{height}}",
+    "description": "输出高度"
+  },
+  {
+    "nodeId": "20",
+    "fieldName": "width",
+    "fieldValue": "{{width}}",
+    "description": "输出宽度"
+  },
+  {
+    "nodeId": "50",
+    "fieldName": "seed",
+    "fieldValue": "{{seed}}",
+    "description": "随机种子"
+  },
+  {
+    "nodeId": "66",
+    "fieldName": "switch",
+    "fieldValue": "{{has_reference_image_3}}",
+    "description": "false bypass scene/style IPAdapter, true apply scene/style reference"
+  },
+  {
+    "nodeId": "67",
+    "fieldName": "switch",
+    "fieldValue": "{{has_reference_image_2}}",
+    "description": "false bypass Character B FaceID, true apply Character B FaceID"
+  },
+  {
+    "nodeId": "68",
+    "fieldName": "switch",
+    "fieldValue": "{{has_reference_image_1}}",
+    "description": "false bypass FaceID A, true apply Character A FaceID"
+  },
+  {
+    "nodeId": "69",
+    "fieldName": "switch",
+    "fieldValue": "{{has_reference_image}}",
+    "description": "false 走空 latent，true 走 img2img latent"
+  }
+]

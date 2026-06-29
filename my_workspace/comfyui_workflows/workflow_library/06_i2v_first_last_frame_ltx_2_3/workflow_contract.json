@@ -1,0 +1,62 @@
+{
+  "id": "06_i2v_first_last_frame_ltx_2_3",
+  "workflow_id": "06_i2v_first_last_frame",
+  "workflow_mode": "i2v_first_last_frame",
+  "asset_tag": "i2v_first_last_frame",
+  "material_type": "video",
+  "model_family": "LTX Video 2.3",
+  "status": "pure_ltx23_first_last_guide_canvas",
+  "inputs": {
+    "reference_image": {
+      "required": true,
+      "description": "Start frame / first frame image."
+    },
+    "last_frame_image": {
+      "required": true,
+      "description": "End frame / last frame image."
+    },
+    "prompt": {
+      "required": true
+    },
+    "negative_prompt": {
+      "required": false
+    },
+    "width": {
+      "default": 576
+    },
+    "height": {
+      "default": 1024
+    },
+    "fps": {
+      "default": 24
+    },
+    "duration": {
+      "default": 4
+    },
+    "frame_count": {
+      "default": 81
+    }
+  },
+  "runninghub_placeholders": [
+    "{{reference_image}}",
+    "{{last_frame_image}}",
+    "{{has_reference_image}}",
+    "{{has_last_frame_image}}",
+    "{{prompt}}",
+    "{{negative_prompt}}",
+    "{{width}}",
+    "{{height}}",
+    "{{fps}}",
+    "{{duration}}",
+    "{{frame_count}}",
+    "{{ltx_guide_frame_count}}",
+    "{{seed}}"
+  ],
+  "notes": [
+    "Default request is 4 seconds at 24fps; the LTX guide canvas uses an internal length of 81 so the exported video lands near 97 frames.",
+    "This canvas contains only LTX 2.3 and generic ComfyUI nodes; no Wan nodes are used.",
+    "Start frame maps to LoadImage node 2, end frame maps to LoadImage node 3.",
+    "Start frame uses LTXVImgToVideoAdvanced at index 0 plus an extra light LTXVAddGuideAdvanced hold guide at frame_idx=8; end frame uses one weak low-attention LTXVAddGuideAdvancedAttention at frame_idx=72.",
+    "Keep a single SaveVideo output."
+  ]
+}

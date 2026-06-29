@@ -12,12 +12,12 @@
   {
     "nodeId": "20",
     "fieldName": "width",
-    "fieldValue": 1080
+    "fieldValue": "{{width}}"
   },
   {
     "nodeId": "20",
     "fieldName": "height",
-    "fieldValue": 1920
+    "fieldValue": "{{height}}"
   },
   {
     "nodeId": "40",

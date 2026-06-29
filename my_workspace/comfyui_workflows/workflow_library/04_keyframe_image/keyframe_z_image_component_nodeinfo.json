@@ -1,0 +1,20 @@
+[
+  {
+    "nodeId": "57",
+    "fieldName": "text",
+    "fieldValue": "{{prompt}}",
+    "description": "keyframe prompt for the verified Z-Image component"
+  },
+  {
+    "nodeId": "12",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image}}",
+    "description": "optional keyframe visual reference"
+  },
+  {
+    "nodeId": "9",
+    "fieldName": "filename_prefix",
+    "fieldValue": "keyframe_z_image",
+    "description": "output filename prefix"
+  }
+]

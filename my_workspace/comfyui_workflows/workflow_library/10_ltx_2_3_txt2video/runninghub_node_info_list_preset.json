@@ -10,24 +10,19 @@
     "fieldValue": "{{negative_prompt}}"
   },
   {
-    "nodeId": "2004",
-    "fieldName": "image",
-    "fieldValue": "{{reference_image}}"
-  },
-  {
     "nodeId": "4977",
     "fieldName": "value",
-    "fieldValue": false
+    "fieldValue": true
   },
   {
     "nodeId": "3159",
     "fieldName": "strength",
-    "fieldValue": 0.9
+    "fieldValue": 0.0
   },
   {
     "nodeId": "4979",
     "fieldName": "value",
-    "fieldValue": 121
+    "fieldValue": "{{frame_count}}"
   },
   {
     "nodeId": "3059",
@@ -47,11 +42,11 @@
   {
     "nodeId": "4823",
     "fieldName": "filename_prefix",
-    "fieldValue": "broll_material_ltx_video"
+    "fieldValue": "ltx_2_3_txt2video"
   },
   {
     "nodeId": "4852",
     "fieldName": "filename_prefix",
-    "fieldValue": "broll_material_ltx_video"
+    "fieldValue": "ltx_2_3_txt2video"
   }
 ]

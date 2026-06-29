@@ -3,5 +3,29 @@ integrations/
 .claude/
 .codex/
 
+# Python/runtime validation caches
+__pycache__/
+*.py[cod]
+.pycache_codex_check/
+
+# Local generated/debug output
+tmp/
+my_workspace/my_task_output/
+my_workspace/my_voice_samples/
+
+# Asset-library metadata is tracked, generated media is local-only
+my_workspace/my_asset_library/**/*.png
+my_workspace/my_asset_library/**/*.jpg
+my_workspace/my_asset_library/**/*.jpeg
+my_workspace/my_asset_library/**/*.webp
+my_workspace/my_asset_library/**/*.gif
+my_workspace/my_asset_library/**/*.mp4
+my_workspace/my_asset_library/**/*.mov
+my_workspace/my_asset_library/**/*.webm
+my_workspace/my_asset_library/**/*.m4v
+my_workspace/my_asset_library/**/*.mp3
+my_workspace/my_asset_library/**/*.wav
+my_workspace/my_asset_library/**/*.aac
+
 # macOS
 .DS_Store

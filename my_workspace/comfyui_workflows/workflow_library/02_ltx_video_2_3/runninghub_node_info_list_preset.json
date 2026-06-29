@@ -32,17 +32,17 @@
   {
     "nodeId": "3059",
     "fieldName": "width",
-    "fieldValue": 960
+    "fieldValue": "{{width}}"
   },
   {
     "nodeId": "3059",
     "fieldName": "height",
-    "fieldValue": 544
+    "fieldValue": "{{height}}"
   },
   {
     "nodeId": "3059",
     "fieldName": "length",
-    "fieldValue": 121
+    "fieldValue": "{{frame_count}}"
   },
   {
     "nodeId": "4823",
