@@ -6031,10 +6031,10 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function deleteTask(name) {
-      if (!confirm(`确定删除任务输出？\n\n${name}`)) return;
+      if (!confirm(`确定删除任务输出？\n\n${name}\n\n素材库中来源于该任务的素材也会同步删除。`)) return;
       setStatus('正在删除任务');
       try {
-        await api('/api/delete-task', {
+        const result = await api('/api/delete-task', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name }),
@@ -6052,8 +6052,9 @@ INDEX_HTML = r"""<!doctype html>
           renderOutputOverview(null);
           syncOutputButtons();
         }
-        setStatus('任务已删除');
-        await loadTasks();
+        const removedAssets = Number(result?.removed_assets || 0);
+        setStatus(removedAssets ? `任务已删除，并清理 ${removedAssets} 个素材库素材` : '任务已删除');
+        await Promise.all([loadTasks(), loadAssetLibrary()]);
       } catch (err) {
         setStatus(err.message, true);
       }
@@ -10258,8 +10259,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             if parsed.path == "/api/delete-task":
-                self._delete_task(str(payload.get("name") or "").strip())
-                self._send_json({"ok": True})
+                self._send_json(self._delete_task(str(payload.get("name") or "").strip()))
                 return
 
             if parsed.path == "/api/upload-reference-image":
@@ -14166,10 +14166,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         lines.append("执行要求：如果视频工具支持参考图或图生视频，应在镜头提示词中明确使用这些参考图保持人物、产品或视觉风格一致；不要声称已经分析图片内容。")
         return f"{user_input}\n\n" + "\n".join(lines) + "\n"
 
-    def _delete_task(self, name: str) -> None:
+    def _delete_task(self, name: str) -> dict:
         task_dir = self._safe_task_dir(name)
         if task_dir == OUTPUT_ROOT.resolve():
             raise ValueError("Refusing to delete output root")
+
+        removed_assets = self._delete_asset_library_items_for_task(name)
 
         for path in sorted(task_dir.rglob("*"), key=lambda p: len(p.parts), reverse=True):
             if path.is_file() or path.is_symlink():
@@ -14177,6 +14179,35 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif path.is_dir():
                 path.rmdir()
         task_dir.rmdir()
+        return {
+            "ok": True,
+            "task": name,
+            "removed_assets": len(removed_assets),
+            "removed_asset_ids": [str(item.get("id") or "") for item in removed_assets],
+        }
+
+    def _delete_asset_library_items_for_task(self, task_name: str) -> list[dict]:
+        clean_task_name = str(task_name or "").strip()
+        if not clean_task_name:
+            return []
+        items = [item for item in self._read_asset_library_index() if isinstance(item, dict)]
+        removed = [item for item in items if str(item.get("source_task") or "").strip() == clean_task_name]
+        if not removed:
+            return []
+        kept = [item for item in items if str(item.get("source_task") or "").strip() != clean_task_name]
+        library_root = ASSET_LIBRARY_ROOT.resolve()
+        for item in removed:
+            library_file = str(item.get("file") or "").strip()
+            if not library_file:
+                continue
+            target = (library_root / library_file).resolve()
+            if target.is_file() and self._is_relative_to(target, library_root):
+                try:
+                    target.unlink()
+                except OSError:
+                    pass
+        self._write_asset_library_index(kept)
+        return removed
 
     def _append_long_term_memory(self, user_input: str) -> str:
         context = self._long_term_memory_context()
