@@ -47,15 +47,15 @@ color: "#0F766E"
 - Multi-character keyframes are also prompt-only for now. Re-enable reference_images later when identity consistency is optimized.
 - Do not write ComfyUI / RunningHub node IDs; only write business-level fields.
 
-### start/end keyframe planning for video
+### start/middle/end keyframe planning for video
 
 - Default video mode is `first_frame`: generate one `start_frame` keyframe per video shot.
-- Use `first_last_frame` only when the storyboard requires a controlled end pose, a precise A-to-B camera move, a transition handoff, or a shot that must end on a specific composition.
-- For `first_last_frame`, generate two related keyframe prompts for the same `shot_id`: one `frame_role=start_frame`, one `frame_role=end_frame`.
-- Treat the pair as the same shot about 4 seconds apart: `start_frame` is time 0s, `end_frame` is time 4s. The end frame must be a plausible continuation of the same camera move/action, not a new shot, new angle, new scene, or a different pose jump.
-- Keep the change between start and end moderate enough for a 4-second transition. If the storyboard needs a large location/costume/identity/composition change, split it into separate shots instead of forcing `first_last_frame`.
-- End-frame prompts must preserve the same character, outfit, scene, lighting, camera style, and aspect ratio as the start frame; only change the required final pose, distance, position, or composition.
-- If the end frame cannot be made consistent, set `recommended_video_mode=first_frame` and explain the risk in `mode_reason` instead of forcing first-last-frame.
+- Do not plan `first_last_frame` for the current production path. When one keyframe is insufficient, use `first_middle_last_frame` instead.
+- For `first_middle_last_frame`, generate three related keyframe prompts for the same `shot_id`: `frame_role=start_frame`, `frame_role=middle_frame`, and `frame_role=end_frame`.
+- Treat the three frames as the same continuous 4-second shot: start at 0s, middle at about 2s, end at about 4s. Middle and end must be plausible phases of one action/camera move, not new shots, angles, scenes, or identity changes.
+- Keep both start-to-middle and middle-to-end changes moderate. If either interval needs a large location/costume/identity/composition jump, split it into separate shots instead of forcing three-frame control.
+- Middle/end prompts must preserve the same character, outfit, scene, lighting, camera style, and aspect ratio as the start frame; only action phase, expression, gesture, position, or small composition changes may differ.
+- If a consistent middle or end frame cannot be planned, set `recommended_video_mode=first_frame` and explain the risk in `mode_reason`.
 
 ### 02_turnaround 四视图传参规则
 
@@ -136,8 +136,8 @@ color: "#0F766E"
       "shot_id": "shot_002",
       "shot": 2,
       "frame_role": "start_frame",
-      "recommended_video_mode": "first_last_frame",
-      "mode_reason": "该镜头需要从起始构图自然运动到指定结束构图",
+      "recommended_video_mode": "first_middle_last_frame",
+      "mode_reason": "该镜头需要锁定0秒、约2秒和约4秒三个连续动作阶段",
       "positive": "start keyframe for shot_002 at 0 seconds, same character, outfit, scene, lighting and aspect ratio, beginning pose/composition required by storyboard",
       "negative": "different person, changed outfit, changed scene, text, watermark, bad hands, deformed face, low quality",
       "task_type": "keyframe",
@@ -149,6 +149,34 @@ color: "#0F766E"
       "width": 480,
       "height": 848,
       "temporal_offset_seconds": 0,
+      "paired_middle_frame_id": "shot_002_middle_keyframe",
+      "paired_end_frame_id": "shot_002_end_keyframe",
+      "reference_source": "",
+      "save_to_asset_tag": "keyframe"
+    },
+    {
+      "id": "shot_002_middle_keyframe",
+      "workflow_id": "04_keyframe",
+      "workflow_mode": "keyframe",
+      "asset_tag": "keyframe",
+      "shot_id": "shot_002",
+      "shot": 2,
+      "frame_role": "middle_frame",
+      "recommended_video_mode": "first_middle_last_frame",
+      "only_if_video_mode": "first_middle_last_frame",
+      "mode_reason": "同一镜头约2秒处的动作中间状态",
+      "positive": "matching middle keyframe for shot_002 at about 2 seconds, same character, outfit, scene, lighting, camera and aspect ratio, natural intermediate action state",
+      "negative": "different person, changed outfit, changed scene, new camera angle, text, watermark, bad hands, deformed face, low quality",
+      "task_type": "keyframe",
+      "control_mode": "none",
+      "image_task_mode": "keyframe",
+      "reference_required": false,
+      "reference_image": "",
+      "reference_images": [],
+      "width": 480,
+      "height": 848,
+      "temporal_offset_seconds": 2,
+      "paired_start_frame_id": "shot_002_start_keyframe",
       "paired_end_frame_id": "shot_002_end_keyframe",
       "reference_source": "",
       "save_to_asset_tag": "keyframe"
@@ -161,8 +189,8 @@ color: "#0F766E"
       "shot_id": "shot_002",
       "shot": 2,
       "frame_role": "end_frame",
-      "recommended_video_mode": "first_last_frame",
-      "only_if_video_mode": "first_last_frame",
+      "recommended_video_mode": "first_middle_last_frame",
+      "only_if_video_mode": "first_middle_last_frame",
       "mode_reason": "该镜头需要精确结束构图或衔接下一镜头",
       "positive": "matching end keyframe for shot_002, same character, same outfit, same scene and lighting, final pose/composition required by storyboard",
       "negative": "different person, changed outfit, changed scene, text, watermark, bad hands, deformed face, low quality",
@@ -176,6 +204,7 @@ color: "#0F766E"
       "height": 848,
       "temporal_offset_seconds": 4,
       "paired_start_frame_id": "shot_002_start_keyframe",
+      "paired_middle_frame_id": "shot_002_middle_keyframe",
       "reference_source": "",
       "save_to_asset_tag": "keyframe"
     }
@@ -186,9 +215,10 @@ color: "#0F766E"
 
 ## 5. 交付给07
 - 可作为首帧的关键帧：
+- 可作为中帧的关键帧：
 - 可作为尾帧的关键帧：
 - 推荐首帧模式的镜头：
-- 推荐首尾帧模式的镜头：
+- 推荐首中尾帧模式的镜头：
 - 必须锁定角色/产品的镜头：
 - 不建议生成视频、只建议静态图或后期动画的镜头：
 ```
@@ -198,10 +228,10 @@ color: "#0F766E"
 - 所有需要图片/关键帧的镜头都必须进入 `image_prompts`，不能只写重点镜头。
 - 每条 `image_prompts` 必须包含 `workflow_id`、`workflow_mode` 和 `asset_tag`，并且 `asset_tag` 要和目标素材库文件夹一致。
 - 每条视频关键帧必须包含 `shot_id`、`frame_role`、`recommended_video_mode` 和 `mode_reason`。
-- `frame_role` 只能使用 `start_frame`、`end_frame`、`style_reference`、`cover_key_visual` 或 `support_asset`。
-- 默认只生成 `start_frame`；只有明确需要结束姿势、A到B运动、衔接下一镜头或转场时，才额外生成 `end_frame`。
-- `end_frame` 必须写成同一镜头约 4 秒后的画面：同主体、同服装、同场景、同光线、同画幅，只允许姿势、视线、手部动作、镜头推进/平移、景深或少量构图变化。
-- 如果 4 秒内无法自然完成首帧到尾帧的变化，必须改成多个镜头或降级为只输出 `start_frame`，不要硬凑首尾帧。
+- `frame_role` 只能使用 `start_frame`、`middle_frame`、`end_frame`、`style_reference`、`cover_key_visual` 或 `support_asset`。
+- 默认只生成 `start_frame`；需要多帧控制时必须同时生成 `middle_frame` 和 `end_frame`，不再生成仅首尾两帧的组合。
+- `middle_frame` / `end_frame` 必须写成同一镜头约 2 秒 / 4 秒处的连续画面：同主体、同服装、同场景、同光线、同机位、同画幅，只允许动作阶段、姿势、视线、手势或少量构图变化。
+- 如果任一相邻阶段无法自然衔接，必须改成多个镜头或降级为只输出 `start_frame`，不要硬凑首中尾帧。
 - 每条 `image_prompts` 必须包含 `width` 和 `height`；前期统一按 480p 生成参数填写：横屏默认 `848x480`，竖屏默认 `480x848`，方屏默认 `480x480`。如果目标平台或工作流明确支持非 16 倍数，可用 `854x480` / `480x854`；最终 720p/1080p/4K 放大由 22 剪辑成片阶段统一处理。
 - 01_base_asset_image、03_style_cover_image、04_keyframe 可以没有参考图；02_turnaround、05_image_repair_cutout 必须说明参考图来源，如果没有来源，写入 `missing_or_inferred_prompts`，不要硬生成。
 - 当前 04_keyframe 是纯文生图；多人物关键帧也不要填写 `reference_images`，只在正向提示词里明确每个角色的位置、动作和身份，避免串脸。
@@ -213,8 +243,8 @@ color: "#0F766E"
 
 ## 安全首中尾帧补充规则
 
-- 默认仍然只为每个视频镜头生成 `start_frame`，并设置 `recommended_video_mode=first_frame`。不要因为系统支持首中尾帧就默认多生图。
-- 只有当分镜明确要求同一镜头内的连续动作、同一机位的小幅运动控制、同一主体在 0s/2s/4s 三个状态都需要锁定时，才允许推荐 `recommended_video_mode=first_middle_last_frame`。
+- 默认仍然只为每个视频镜头生成 `start_frame`，并设置 `recommended_video_mode=first_frame`。需要多帧控制时一律使用 `first_middle_last_frame`，当前阶段禁止推荐 `first_last_frame`。
+- 当分镜要求同一镜头内的连续动作、同一机位的小幅运动控制或指定结束构图时，推荐 `recommended_video_mode=first_middle_last_frame`。
 - `first_middle_last_frame` 必须为同一个 `shot_id` 输出三张配对关键帧：`frame_role=start_frame`、`frame_role=middle_frame`、`frame_role=end_frame`。建议时间分别是 0 秒、2 秒、4 秒。
 - 三张关键帧必须保持同一主体、同一服装、同一场景、同一光线、同一画幅、同一镜头语言，只允许动作阶段、表情、手势、主体位置或小幅构图变化。
 - 如果中帧或尾帧会变成新镜头、新角度、新场景、大幅位移、换装、换身份，必须降级为 `first_frame` 或拆成多个镜头，不能硬做首中尾帧。
