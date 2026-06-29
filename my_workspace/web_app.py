@@ -7664,7 +7664,7 @@ INDEX_HTML = r"""<!doctype html>
       renderComfyReferencePreview(els.comfyDebugMiddleFramePreview, middleFrameValue, '中帧参考图');
       renderComfyReferencePreview(els.comfyDebugLastFramePreview, lastFrameValue, '尾帧参考图');
       if (els.comfyDebugReferencePreviewMeta) {
-        els.comfyDebugReferencePreviewMeta.textContent = referenceValue ? (referenceValue.split('/').pop() || '???') : '???';
+        els.comfyDebugReferencePreviewMeta.textContent = referenceValue ? (referenceValue.split('/').pop() || '已选择参考') : '未选择参考';
       }
       if (!showMiddleFrame && middleFrameValue && els.comfyDebugMiddleFrameReference) {
         els.comfyDebugMiddleFrameReference.value = '';
@@ -9572,9 +9572,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function comfyDebugModePayload(selected, overrides = {}) {
-      if (!selected) throw new Error('????? ComfyUI ?????');
+      if (!selected) throw new Error('请选择一个 ComfyUI 调试工作流');
       const prompt = String(overrides.prompt ?? els.comfyDebugPrompt.value).trim();
-      if (!prompt) throw new Error('????????');
+      if (!prompt) throw new Error('请输入调试提示词');
       const workflowModeDef = selectedWorkflowModeDefinition(selected);
       const imageTaskDef = workflowModeDef ? {
         value: workflowModeDef.value,
@@ -9704,7 +9704,7 @@ INDEX_HTML = r"""<!doctype html>
               renderComfyDebugResults(results, comfyDebugStateByWorkflowId.get(workflowId));
               if (els.comfyDebugStatus) {
                 const elapsed = comfyDebugElapsedLabel(comfyDebugStateByWorkflowId.get(workflowId));
-                els.comfyDebugStatus.textContent = `?????${results.length} ???${elapsed ? ' ? ' + elapsed : ''}`;
+                els.comfyDebugStatus.textContent = `调试完成：${results.length} 个结果${elapsed ? ' · ' + elapsed : ''}`;
                 els.comfyDebugStatus.classList.remove('error');
               }
               setStatus('ComfyUI 调试完成', false);
@@ -9756,6 +9756,65 @@ INDEX_HTML = r"""<!doctype html>
         syncComfyDebugRunButton();
       }
       setStatus(message || 'ComfyUI 调试失败', true);
+    }
+
+    async function runComfyDebugAsync() {
+      const selected = activeComfyDebugWorkflow();
+      if (!selected) {
+        setStatus('请选择一个 ComfyUI 调试工作流', true);
+        return;
+      }
+
+      let payload;
+      try {
+        payload = comfyDebugModePayload(selected);
+      } catch (err) {
+        const message = err?.message || '调试参数不完整';
+        setStatus(message, true);
+        if (els.comfyDebugStatus) {
+          els.comfyDebugStatus.textContent = message;
+          els.comfyDebugStatus.classList.add('error');
+        }
+        return;
+      }
+
+      saveActiveComfyDebugWorkflowConfig(false);
+      const startState = startComfyDebugWorkflowRunState(
+        selected,
+        `正在提交：${selected.name || selected.id}`,
+      );
+      setStatus(`ComfyUI 调试已开始：${selected.name || selected.id}`, false);
+
+      try {
+        const job = await api('/api/comfy-debug-run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const runId = String(job?.run_id || '').trim();
+        if (!runId) throw new Error('后端没有返回调试任务 ID');
+
+        const currentState = comfyDebugStateByWorkflowId.get(selected.id) || startState;
+        const timing = comfyDebugTimingFromJob(job, currentState);
+        comfyDebugStateByWorkflowId.set(selected.id, {
+          ...currentState,
+          ...timing,
+          running: true,
+          runId,
+          status: job.status || 'queued',
+          endpoint: payload.endpoint || '',
+          error: '',
+        });
+        saveSettings();
+        renderComfyDebugWorkflows({ refreshForm: false });
+        if (activeComfyDebugWorkflowId === selected.id) {
+          renderComfyDebugStatePreview(selected);
+          syncComfyDebugRunButton();
+        }
+        pollComfyDebugRun(selected.id, runId);
+      } catch (err) {
+        markComfyDebugRunFailed(selected.id, err?.message || 'ComfyUI 调试提交失败');
+      }
     }
 
     els.autoProductionMode.onchange = () => {
