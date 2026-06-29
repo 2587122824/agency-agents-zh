@@ -2989,10 +2989,10 @@ INDEX_HTML = r"""<!doctype html>
                 <label>接口地址
                   <input id="comfyDebugEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/xxx 或 /run/ai-app/xxx；留空用槽位配置" />
                 </label>
-                <label>参考图/视频路径
+                <label id="comfyDebugReferencePathField">参考图/视频路径
                   <input id="comfyDebugReference" autocomplete="off" spellcheck="false" placeholder="可填 my_workspace/my_asset_library/xxx.png 或任务输出里的相对路径" />
                 </label>
-                <label>素材标签筛选
+                <label id="comfyDebugAssetTagFilterField">素材标签筛选
                   <select id="comfyDebugAssetTagFilter">
                     <option value="">全部素材</option>
                   </select>
@@ -3098,10 +3098,10 @@ INDEX_HTML = r"""<!doctype html>
                   <input id="comfyDebugSeed" autocomplete="off" spellcheck="false" placeholder="留空随机；固定 seed 方便复现" />
                 </label>
                 <label>宽度
-                  <input id="comfyDebugWidth" autocomplete="off" spellcheck="false" placeholder="例如 1080 / 960" />
+                  <input id="comfyDebugWidth" autocomplete="off" spellcheck="false" placeholder="横屏 848 / 竖屏 480" />
                 </label>
                 <label>高度
-                  <input id="comfyDebugHeight" autocomplete="off" spellcheck="false" placeholder="例如 1920 / 544" />
+                  <input id="comfyDebugHeight" autocomplete="off" spellcheck="false" placeholder="横屏 480 / 竖屏 848" />
                 </label>
                 <label id="comfyDebugDurationField">视频时长（秒）
                   <input id="comfyDebugDuration" type="number" min="0.5" step="0.5" autocomplete="off" spellcheck="false" placeholder="例如 4，表示 4 秒" />
@@ -3465,6 +3465,8 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugBaseUrl: document.getElementById('comfyDebugBaseUrl'),
       comfyDebugPollTimeout: document.getElementById('comfyDebugPollTimeout'),
       comfyDebugEndpoint: document.getElementById('comfyDebugEndpoint'),
+      comfyDebugReferencePathField: document.getElementById('comfyDebugReferencePathField'),
+      comfyDebugAssetTagFilterField: document.getElementById('comfyDebugAssetTagFilterField'),
       comfyDebugReferenceGrid: document.getElementById('comfyDebugReferenceGrid'),
       comfyDebugStartFrameCard: document.getElementById('comfyDebugStartFrameCard'),
       comfyDebugReference: document.getElementById('comfyDebugReference'),
@@ -7287,8 +7289,53 @@ INDEX_HTML = r"""<!doctype html>
       return item;
     }
 
+    function usesComfyDebug480pDefaults(workflow) {
+      const match = String(workflow?.id || '').match(/^(\d{2})/);
+      const index = match ? Number(match[1]) : 0;
+      return index >= 1 && index <= 10;
+    }
+
+    function normalizedComfyDebug480pSize(width, height, workflow) {
+      const rawWidth = String(width || '').trim();
+      const rawHeight = String(height || '').trim();
+      if (!usesComfyDebug480pDefaults(workflow)) {
+        return { width: rawWidth, height: rawHeight };
+      }
+      const numericWidth = Number(rawWidth || 0);
+      const numericHeight = Number(rawHeight || 0);
+      const legacyPairs = new Set([
+        '1920x1080', '1080x1920', '1280x720', '720x1280',
+        '1024x576', '576x1024', '960x544', '544x960',
+      ]);
+      const isLegacy = legacyPairs.has(`${numericWidth}x${numericHeight}`);
+      if (rawWidth && rawHeight && !isLegacy) {
+        return { width: rawWidth, height: rawHeight };
+      }
+      const portrait = numericHeight > numericWidth;
+      return portrait
+        ? { width: '480', height: '848' }
+        : {
+            width: String(workflow?.default_width || 848),
+            height: String(workflow?.default_height || 480),
+          };
+    }
+
+    function comfyDebugModeDisablesReference(workflow = activeComfyDebugWorkflow()) {
+      const mode = selectedWorkflowModeDefinition(workflow);
+      if (!mode || Boolean(mode.requires_reference)) return false;
+      return ['none', 'broll', 'transition'].includes(String(mode.control_mode || '').trim().toLowerCase());
+    }
+
     function normalizeComfyDebugWorkflowSavedConfig(item, workflow) {
       if (!item || !workflow) return;
+      const normalizedSize = normalizedComfyDebug480pSize(item.defaultWidth, item.defaultHeight, workflow);
+      item.defaultWidth = normalizedSize.width;
+      item.defaultHeight = normalizedSize.height;
+      if (workflow.id === '01_base_asset_image') {
+        item.defaultReference = '';
+        item.defaultAssetReference = '';
+        item.defaultReferenceHint = '';
+      }
       if (workflow.id === '04_keyframe') {
         item.defaultWorkflowMode = 'keyframe';
         item.defaultImageTaskType = 'keyframe';
@@ -7307,6 +7354,14 @@ INDEX_HTML = r"""<!doctype html>
 
     function normalizeComfyDebugWorkflowState(state, workflow) {
       const next = { ...(state || {}) };
+      const normalizedSize = normalizedComfyDebug480pSize(next.width, next.height, workflow);
+      next.width = normalizedSize.width;
+      next.height = normalizedSize.height;
+      if (workflow?.id === '01_base_asset_image') {
+        next.reference = '';
+        next.assetReference = '';
+        next.referenceHint = '';
+      }
       if (workflow?.id === '04_keyframe') {
         next.workflowMode = 'keyframe';
         next.reference = '';
@@ -7548,6 +7603,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function comfyDebugReferenceSupport() {
+      if (comfyDebugModeDisablesReference()) {
+        return { hasReference: false, hasMiddleFrame: false, hasLastFrame: false };
+      }
       const text = comfyDebugNodeInfoText();
       const hasReference = /\{\{\s*(reference_image|reference_image_[1-4]|has_reference_image|has_reference_image_[1-4])\s*\}\}/i.test(text);
       const hasMiddleFrame = /\{\{\s*(middle_frame_image|mid_frame_image|has_middle_frame_image)\s*\}\}/i.test(text);
@@ -7656,6 +7714,8 @@ INDEX_HTML = r"""<!doctype html>
       const showReference = support.hasReference;
       const showMiddleFrame = support.hasMiddleFrame;
       const showLastFrame = support.hasLastFrame;
+      if (els.comfyDebugReferencePathField) els.comfyDebugReferencePathField.hidden = !showReference;
+      if (els.comfyDebugAssetTagFilterField) els.comfyDebugAssetTagFilterField.hidden = !showReference;
       if (els.comfyDebugStartFrameCard) els.comfyDebugStartFrameCard.hidden = !showReference;
       if (els.comfyDebugReferenceGrid) els.comfyDebugReferenceGrid.hidden = !(showReference || showMiddleFrame || showLastFrame);
       if (els.comfyDebugMiddleFrameCard) els.comfyDebugMiddleFrameCard.hidden = !showMiddleFrame;
@@ -7665,6 +7725,10 @@ INDEX_HTML = r"""<!doctype html>
       renderComfyReferencePreview(els.comfyDebugLastFramePreview, lastFrameValue, '尾帧参考图');
       if (els.comfyDebugReferencePreviewMeta) {
         els.comfyDebugReferencePreviewMeta.textContent = referenceValue ? (referenceValue.split('/').pop() || '已选择参考') : '未选择参考';
+      }
+      if (!showReference && referenceValue && els.comfyDebugReference) {
+        els.comfyDebugReference.value = '';
+        if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
       }
       if (!showMiddleFrame && middleFrameValue && els.comfyDebugMiddleFrameReference) {
         els.comfyDebugMiddleFrameReference.value = '';
