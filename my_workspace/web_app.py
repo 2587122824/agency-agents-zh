@@ -1177,6 +1177,15 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       gap: 8px;
     }
+    .template-fixed-output {
+      display: grid;
+      gap: 6px;
+    }
+    .template-fixed-output textarea {
+      min-height: 150px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
     .output-sections {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -7282,6 +7291,59 @@ INDEX_HTML = r"""<!doctype html>
         info.innerHTML = `<strong>编译提示 / 参数覆盖</strong><span class="muted small">${escapeHtml([overrideText, ...notes.slice(0, 3)].filter(Boolean).join(' · ') || '无')}</span>`;
         jobsTarget.appendChild(info);
       }
+      const diagnostics = Array.isArray(preview.diagnostics) ? preview.diagnostics : [];
+      const suggestions = Array.isArray(preview.fix_suggestions) ? preview.fix_suggestions : [];
+      if (diagnostics.length) {
+        const box = document.createElement('div');
+        box.className = 'production-job-row';
+        const title = document.createElement('strong');
+        title.textContent = `诊断问题 ${diagnostics.length} 个`;
+        box.appendChild(title);
+        diagnostics.slice(0, 12).forEach(item => {
+          const line = document.createElement('span');
+          line.className = 'muted small';
+          line.textContent = `${item.level || 'info'} · ${item.code || ''} · ${item.message || ''}`;
+          box.appendChild(line);
+        });
+        if (suggestions.length) {
+          const line = document.createElement('span');
+          line.className = 'muted small';
+          line.textContent = `修复建议：${suggestions.slice(0, 5).map(item => item.suggestion).filter(Boolean).join('；')}`;
+          box.appendChild(line);
+        }
+        jobsTarget.appendChild(box);
+      }
+      if (preview.fixed_outputs && typeof preview.fixed_outputs === 'object') {
+        const fixed = document.createElement('details');
+        fixed.className = 'template-fixed-output';
+        const summary = document.createElement('summary');
+        summary.innerHTML = '<strong>修正版员工 JSON（可复制，不会自动改原任务）</strong>';
+        fixed.appendChild(summary);
+        Object.entries(preview.fixed_outputs).forEach(([key, value]) => {
+          const label = document.createElement('label');
+          label.textContent = key;
+          const textarea = document.createElement('textarea');
+          textarea.readOnly = true;
+          textarea.value = String(value || '');
+          const copy = document.createElement('button');
+          copy.type = 'button';
+          copy.textContent = '复制';
+          copy.onclick = async () => {
+            try {
+              await navigator.clipboard.writeText(textarea.value);
+              setStatus(`已复制：${key}`, false);
+            } catch (err) {
+              textarea.select();
+              document.execCommand('copy');
+              setStatus(`已复制：${key}`, false);
+            }
+          };
+          label.appendChild(textarea);
+          label.appendChild(copy);
+          fixed.appendChild(label);
+        });
+        jobsTarget.appendChild(fixed);
+      }
       const jobs = Array.isArray(preview.jobs) ? preview.jobs : [];
       if (!jobs.length) {
         const empty = document.createElement('div');
@@ -12823,7 +12885,159 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             video_config=video_config,
         )
         graph = {"jobs": plan.get("visual_jobs") if isinstance(plan.get("visual_jobs"), list) else []}
-        return {"ok": True, "plan": plan, "preview": self._production_plan_preview(plan, graph, {}, task_name="template_preview")}
+        preview = self._production_plan_preview(plan, graph, {}, task_name="template_preview")
+        diagnosis = self._diagnose_production_template(
+            plan=plan,
+            route_content=route_content,
+            image_content=image_content,
+            video_content=video_content,
+            audio_content=audio_content,
+            package_content=package_content,
+            preview=preview,
+        )
+        preview.update(diagnosis)
+        return {"ok": True, "plan": plan, "preview": preview}
+
+    @classmethod
+    def _diagnose_production_template(
+        cls,
+        *,
+        plan: dict,
+        route_content: str,
+        image_content: str,
+        video_content: str,
+        audio_content: str,
+        package_content: str,
+        preview: dict,
+    ) -> dict:
+        route_payload = cls._json_object_from_text(route_content)
+        image_payload = cls._json_object_from_text(image_content)
+        video_payload = cls._json_object_from_text(video_content)
+        audio_payload = cls._json_object_from_text(audio_content)
+        package_payload = cls._json_object_from_text(package_content)
+        route = plan.get("route") if isinstance(plan.get("route"), dict) else {}
+        production_type = str(route.get("production_type") or route_payload.get("production_type") or "").strip()
+        image_intents = cls._production_intent_list(image_payload, "image")
+        video_intents = cls._production_intent_list(video_payload, "video")
+        audio_intents = cls._production_intent_list(audio_payload, "audio")
+        package_intents = cls._production_intent_list(package_payload, "package")
+        diagnostics: list[dict] = []
+        suggestions: list[dict] = []
+        fixed_route = dict(route_payload) if route_payload else {}
+        fixed_image = json.loads(json.dumps(image_payload if image_payload else {"production_intents": {"image": []}}, ensure_ascii=False))
+        fixed_video = json.loads(json.dumps(video_payload if video_payload else {"production_intents": {"video": []}}, ensure_ascii=False))
+        fixed_audio = json.loads(json.dumps(audio_payload if audio_payload else {"production_intents": {"audio": []}}, ensure_ascii=False))
+        fixed_package = json.loads(json.dumps(package_payload if package_payload else {"production_intents": {"package": []}}, ensure_ascii=False))
+
+        def add(level: str, code: str, message: str, fix: str = "", target: str = "") -> None:
+            diagnostics.append({"level": level, "code": code, "message": message, "target": target})
+            if fix:
+                suggestions.append({"code": code, "target": target, "suggestion": fix})
+
+        if not route_payload.get("production_type"):
+            fixed_route.setdefault("production_type", production_type or "custom")
+            fixed_route.setdefault("aspect_ratio", route.get("aspect_ratio") or "16:9")
+            fixed_route.setdefault("needs_voiceover", bool(route.get("needs_voiceover", True)))
+            fixed_route.setdefault("needs_final_video", bool(route.get("needs_final_video", production_type != "asset_only")))
+            fixed_route.setdefault("quality_mode", route.get("quality_mode") or "standard")
+            add("error", "missing_production_type", "01 输出缺少 production_type。", "在 01 路由 JSON 中补 production_type、aspect_ratio、needs_voiceover、needs_final_video、quality_mode。", "01")
+
+        if not image_intents and not image_payload.get("image_prompts"):
+            add("warn", "missing_image_intents", "06 输出没有 production_intents.image。", "补充 generate_base_asset / generate_keyframe / generate_three_frame_shot 等图片生产意图。", "06")
+        if not video_intents and production_type != "asset_only":
+            add("warn", "missing_video_intents", "07 输出没有 production_intents.video。", "补充 generate_i2v_clip / generate_three_frame_i2v_clip / generate_broll_clip / enhance_video 等视频意图。", "07")
+
+        entity_required = production_type in {"drama_story", "talking_avatar", "product_promo"}
+        for group_name, intents in (("image", image_intents), ("video", video_intents)):
+            for item in intents:
+                intent_id = str(item.get("intent_id") or item.get("id") or item.get("intent") or "")
+                if entity_required and production_type != "product_promo" and not item.get("character_id"):
+                    item["entity_missing"] = True
+                    add("warn", "missing_character_id", f"{group_name} 意图 {intent_id} 缺少 character_id。", "引用正式角色实体 ID，或先在实体库中新建角色。", intent_id)
+                if entity_required and not item.get("style_id"):
+                    item["entity_missing"] = True
+                    add("warn", "missing_style_id", f"{group_name} 意图 {intent_id} 缺少 style_id。", "引用正式风格实体 ID，或先在实体库中新建风格。", intent_id)
+                if production_type == "product_promo" and not item.get("product_id"):
+                    item["entity_missing"] = True
+                    add("warn", "missing_product_id", f"{group_name} 意图 {intent_id} 缺少 product_id。", "引用正式产品实体 ID，或先在实体库中新建产品。", intent_id)
+                low_level = [key for key in ("workflow_id", "workflow_mode", "input_bindings") if key in item]
+                if low_level:
+                    add("info", "low_level_fields_in_intent", f"{group_name} 意图 {intent_id} 仍包含底层兼容字段：{', '.join(low_level)}。", "保留为 compatibility 可用，但长期主语义应放在 intent、实体 ID、source_intent_ids。", intent_id)
+
+        three_frame_ids = [str(item.get("intent_id") or item.get("id") or "") for item in image_intents if item.get("intent") == "generate_three_frame_shot"]
+        for item in image_intents:
+            if item.get("intent") != "generate_three_frame_shot":
+                continue
+            intent_id = str(item.get("intent_id") or item.get("id") or "")
+            roles = {str(frame.get("role") or "").lower() for frame in item.get("frame_set", []) if isinstance(frame, dict)}
+            if not {"start", "middle", "end"}.issubset(roles):
+                add("error", "incomplete_three_frame_set", f"06 的 {intent_id} 首中尾帧不完整。", "frame_set 必须包含 start / middle / end 三个 role。", intent_id)
+
+        for item in video_intents:
+            if item.get("intent") != "generate_three_frame_i2v_clip":
+                continue
+            intent_id = str(item.get("intent_id") or item.get("id") or "")
+            source_ids = cls._string_list(item.get("source_intent_ids"))
+            if not source_ids:
+                if three_frame_ids:
+                    item["source_intent_ids"] = [three_frame_ids[0]]
+                add("error", "missing_three_frame_source", f"07 的 {intent_id} 缺少 source_intent_ids。", f"把 source_intent_ids 设为对应 06 首中尾帧意图，例如 {three_frame_ids[0] if three_frame_ids else 'shot_xxx_three_frame'}。", intent_id)
+            elif source_ids[0] not in three_frame_ids:
+                add("warn", "unmatched_three_frame_source", f"07 的 {intent_id} 引用的 source_intent_ids 没有匹配 06 generate_three_frame_shot。", "确认 07 的 source_intent_ids 与 06 的 intent_id 完全一致。", intent_id)
+
+        has_talking = any(item.get("intent") == "generate_talking_image" for item in video_intents)
+        has_voiceover = any(item.get("intent") == "generate_voiceover" for item in audio_intents)
+        if has_talking and not has_voiceover:
+            fixed_audio.setdefault("production_intents", {}).setdefault("audio", []).append(
+                {"intent": "generate_voiceover", "intent_id": "local_tts_voiceover", "text_source": "20_语音字幕包装师口播稿"}
+            )
+            add("warn", "talking_image_without_voiceover", "07 有 talking_image，但 20 没有 generate_voiceover。", "补充 20 的 generate_voiceover；系统会在编译阶段把最终 WAV 绑定给 talking_image。", "20/07")
+
+        overrides = preview.get("parameter_overrides") if isinstance(preview.get("parameter_overrides"), list) else []
+        for item in overrides[:8]:
+            add("info", "parameter_locked_override", f"参数锁覆盖：{item.get('intent_id') or ''}.{item.get('field') or ''} 从 {item.get('from')} 改为 {item.get('to')}。", "这是正常护栏；如果不想被覆盖，需要改全局上下文/模板，而不是单个节点。", item.get("intent_id") or "")
+        for note in preview.get("compile_notes") or []:
+            if "未找到" in str(note):
+                add("warn", "unresolved_entity", str(note), "去资产库的生产实体管理中新建或修正对应实体 ID。", "entities")
+
+        fixed_image.setdefault("production_intents", {})["image"] = image_intents
+        fixed_video.setdefault("production_intents", {})["video"] = video_intents
+        fixed_package.setdefault("production_intents", {}).setdefault("package", package_intents)
+        return {
+            "diagnostics": diagnostics,
+            "fix_suggestions": suggestions,
+            "fixed_outputs": {
+                "route_json": json.dumps(fixed_route, ensure_ascii=False, indent=2),
+                "image_json": json.dumps(fixed_image, ensure_ascii=False, indent=2),
+                "video_json": json.dumps(fixed_video, ensure_ascii=False, indent=2),
+                "audio_json": json.dumps(fixed_audio, ensure_ascii=False, indent=2),
+                "package_json": json.dumps(fixed_package, ensure_ascii=False, indent=2),
+            },
+        }
+
+    @staticmethod
+    def _json_object_from_text(text: str) -> dict:
+        raw = str(text or "")
+        candidates = []
+        candidates.extend(match.group(1) for match in re.finditer(r"```(?:json)?\s*(\{.*?\})\s*```", raw, re.DOTALL | re.IGNORECASE))
+        start = raw.find("{")
+        end = raw.rfind("}")
+        if start >= 0 and end > start:
+            candidates.append(raw[start : end + 1])
+        for candidate in candidates:
+            try:
+                value = json.loads(candidate)
+            except Exception:
+                continue
+            if isinstance(value, dict):
+                return value
+        return {}
+
+    @staticmethod
+    def _production_intent_list(payload: dict, group: str) -> list[dict]:
+        production_intents = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+        values = production_intents.get(group) if isinstance(production_intents, dict) else []
+        return [item for item in values if isinstance(item, dict)] if isinstance(values, list) else []
 
     @classmethod
     def _production_plan_preview(cls, plan: dict, graph: dict | None = None, manifest: dict | None = None, *, task_name: str = "") -> dict:
