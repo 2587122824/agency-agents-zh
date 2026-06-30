@@ -1954,25 +1954,30 @@ def _target_canvas_from_video_config(
     if match:
         width = _safe_int(match.group(1), 1024, 256, 4096)
         height = _safe_int(match.group(2), 576, 256, 4096)
-        return width, height, _aspect_ratio_label(width, height)
+        aspect = _aspect_ratio_label(width, height)
+        if aspect == "9:16":
+            return 480, 848, "9:16"
+        if aspect == "1:1":
+            return 480, 480, "1:1"
+        return 848, 480, "16:9"
 
     aspect_text = str(video_config.get("aspect_ratio") or "").strip().lower()
     if any(token in aspect_text for token in ("9:16", "portrait", "vertical", "竖屏")):
-        return 576, 1024, "9:16"
+        return 480, 848, "9:16"
     if any(token in aspect_text for token in ("1:1", "square", "方屏")):
-        return 1024, 1024, "1:1"
+        return 480, 480, "1:1"
     if any(token in aspect_text for token in ("16:9", "landscape", "horizontal", "横屏")):
-        return 1024, 576, "16:9"
+        return 848, 480, "16:9"
 
     inferred = _infer_canvas_from_prompt_items(payload or {})
     if inferred:
         width, height = inferred
         if width > height:
-            return 1024, 576, "16:9"
+            return 848, 480, "16:9"
         if width < height:
-            return 576, 1024, "9:16"
-        return 1024, 1024, "1:1"
-    return 1024, 576, "16:9"
+            return 480, 848, "9:16"
+        return 480, 480, "1:1"
+    return 848, 480, "16:9"
 
 
 def _infer_canvas_from_prompt_items(payload: dict[str, Any]) -> tuple[int, int] | None:

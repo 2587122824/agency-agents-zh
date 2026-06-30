@@ -12,6 +12,11 @@ from .production_entities import (
     entity_context_for_ids,
     load_production_entities,
 )
+from .production_parameter_policy import (
+    apply_locked_parameters_to_intent,
+    attach_parameter_lock_metadata,
+    normalize_parameter_policy_context,
+)
 
 
 PLAN_SCHEMA_VERSION = 1
@@ -81,8 +86,10 @@ def compile_production_plan(
         [route_payload, image_payload, video_payload, audio_payload, package_payload, existing_payload or {}],
     )
     global_context, resolved_entities, entity_notes = enrich_global_context_with_entities(global_context, entity_registry, entity_references)
+    global_context = normalize_parameter_policy_context(global_context, route=route, video_config=video_config or {})
     compat_payload = json.loads(json.dumps(existing_payload or {}, ensure_ascii=False))
     compile_notes: list[str] = [*entity_notes]
+    parameter_overrides: list[dict[str, Any]] = []
 
     image_prompts, image_jobs = _compile_image_intents(
         production_intents["image"],
@@ -90,6 +97,7 @@ def compile_production_plan(
         global_context,
         resolved_entities,
         compile_notes,
+        parameter_overrides,
     )
     video_prompts, video_jobs = _compile_video_intents(
         production_intents["video"],
@@ -98,6 +106,7 @@ def compile_production_plan(
         resolved_entities,
         image_jobs,
         compile_notes,
+        parameter_overrides,
     )
 
     _merge_compat_list(compat_payload, "image_prompts", image_payload.get("image_prompts"))
@@ -117,7 +126,17 @@ def compile_production_plan(
     compat_payload["production_type"] = production_type
     compat_payload["production_route"] = route
     compat_payload["production_intents"] = production_intents
-    compat_payload["global_context"] = _deep_merge_dict(global_context, compat_payload.get("global_context") if isinstance(compat_payload.get("global_context"), dict) else {})
+    legacy_global_context = compat_payload.get("global_context") if isinstance(compat_payload.get("global_context"), dict) else {}
+    compat_payload["global_context"] = _deep_merge_dict(legacy_global_context, global_context)
+    render = compat_payload["global_context"].get("render") if isinstance(compat_payload["global_context"].get("render"), dict) else {}
+    compat_payload["width"] = _positive_int(render.get("working_width"), 848)
+    compat_payload["height"] = _positive_int(render.get("working_height"), 480)
+    compat_payload["fps"] = _positive_int(render.get("frame_rate"), 24)
+    if parameter_overrides:
+        compat_payload["parameter_overrides"] = parameter_overrides
+        policy = compat_payload["global_context"].get("parameter_policy") if isinstance(compat_payload["global_context"].get("parameter_policy"), dict) else {}
+        policy["overrides"] = parameter_overrides
+        compat_payload["global_context"]["parameter_policy"] = policy
     compat_payload["payload_source"] = "production_plan_compiler"
     compat_payload["notes"] = "由数字员工production_intents编译生成，并保留image_prompts/video_prompts兼容现有执行链路。"
 
@@ -167,6 +186,8 @@ def compile_production_plan(
         "audio_intents": production_intents["audio"],
         "package_intents": production_intents["package"],
         "compile_notes": compile_notes,
+        "parameter_policy": compat_payload["global_context"].get("parameter_policy") if isinstance(compat_payload["global_context"].get("parameter_policy"), dict) else {},
+        "parameter_overrides": parameter_overrides,
         "compatibility": {
             "image_prompts_count": len(compat_payload.get("image_prompts") if isinstance(compat_payload.get("image_prompts"), list) else []),
             "video_prompts_count": len(compat_payload.get("video_prompts") if isinstance(compat_payload.get("video_prompts"), list) else []),
@@ -281,6 +302,7 @@ def _compile_image_intents(
     global_context: dict[str, Any],
     resolved_entities: dict[str, Any],
     notes: list[str],
+    parameter_overrides: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     prompts: list[dict[str, Any]] = []
     jobs: list[dict[str, Any]] = []
@@ -291,6 +313,15 @@ def _compile_image_intents(
         intent_id = _safe_id(intent.get("intent_id") or intent.get("id") or f"image_intent_{index:03d}")
         contract = contracts.get(intent_name) if isinstance(contracts.get(intent_name), dict) else {}
         compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
+        locked_intent, overrides = apply_locked_parameters_to_intent(
+            intent,
+            global_context=global_context,
+            intent_kind="image",
+            intent_name=intent_name,
+            notes=notes,
+        )
+        intent = locked_intent
+        parameter_overrides.extend(_tag_overrides(overrides, intent_id, "image"))
         if intent_name == "generate_three_frame_shot":
             frame_set = intent.get("frame_set") if isinstance(intent.get("frame_set"), list) else []
             if not frame_set:
@@ -318,6 +349,13 @@ def _compile_image_intents(
                     asset_tag=f"{intent_id}_{role}",
                     resolved_entities=resolved_entities,
                 )
+                attach_parameter_lock_metadata(
+                    item,
+                    global_context=global_context,
+                    intent_kind="image",
+                    intent_name=intent_name,
+                    overrides=overrides,
+                )
                 item["frame_role"] = role
                 prompts.append(item)
                 jobs.append({"job_id": job_id, "intent_id": intent_id, "frame_role": role, **item})
@@ -336,6 +374,13 @@ def _compile_image_intents(
             asset_tag=str(intent.get("asset_role") or intent.get("asset_tag") or intent_name or intent_id),
             resolved_entities=resolved_entities,
         )
+        attach_parameter_lock_metadata(
+            item,
+            global_context=global_context,
+            intent_kind="image",
+            intent_name=intent_name,
+            overrides=overrides,
+        )
         prompts.append(item)
         jobs.append({"job_id": intent_id, "intent_id": intent_id, **item})
     return prompts, jobs
@@ -348,6 +393,7 @@ def _compile_video_intents(
     resolved_entities: dict[str, Any],
     image_jobs: list[dict[str, Any]],
     notes: list[str],
+    parameter_overrides: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     prompts: list[dict[str, Any]] = []
     jobs: list[dict[str, Any]] = []
@@ -359,6 +405,15 @@ def _compile_video_intents(
         intent_id = _safe_id(intent.get("intent_id") or intent.get("id") or f"video_intent_{index:03d}")
         contract = contracts.get(intent_name) if isinstance(contracts.get(intent_name), dict) else {}
         compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
+        locked_intent, overrides = apply_locked_parameters_to_intent(
+            intent,
+            global_context=global_context,
+            intent_kind="video",
+            intent_name=intent_name,
+            notes=notes,
+        )
+        intent = locked_intent
+        parameter_overrides.extend(_tag_overrides(overrides, intent_id, "video"))
         prompt = str(intent.get("prompt") or intent.get("motion_plan") or intent.get("description") or intent.get("edit_note") or "").strip()
         if not prompt and intent_name == "enhance_video":
             prompt = "对上游视频进行补帧、放大、稳定和画质增强。"
@@ -399,6 +454,13 @@ def _compile_video_intents(
         if entity_context:
             item["entity_context"] = entity_context
             _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
+        attach_parameter_lock_metadata(
+            item,
+            global_context=global_context,
+            intent_kind="video",
+            intent_name=intent_name,
+            overrides=overrides,
+        )
         if intent_name == "generate_three_frame_i2v_clip":
             _bind_three_frames(item, image_job_ids)
         elif intent_name in {"generate_i2v_clip", "enhance_video", "repair_video"}:
@@ -554,6 +616,18 @@ def _identity_for_item(item: Any) -> str:
     if isinstance(item, dict):
         return str(item.get("job_id") or item.get("id") or item.get("prompt_id") or item.get("asset_tag") or "").strip()
     return str(item).strip()
+
+
+def _tag_overrides(overrides: list[dict[str, Any]], intent_id: str, intent_kind: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "intent_id": intent_id,
+            "intent_kind": intent_kind,
+            **override,
+        }
+        for override in overrides
+        if isinstance(override, dict)
+    ]
 
 
 def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:

@@ -11,6 +11,7 @@ from urllib import request as urllib_request
 from urllib.parse import urljoin, urlparse
 
 from .production_graph import artifact_record, build_production_graph, read_json, stable_job_hash, write_json
+from .production_parameter_policy import apply_locked_parameters_to_payload
 
 
 class CloudComfyUIAdapter:
@@ -1476,6 +1477,7 @@ class CloudComfyUIAdapter:
         payload["delivery_width"] = render.get("delivery_width") or 1920
         payload["delivery_height"] = render.get("delivery_height") or 1080
         payload["global_style_weight"] = payload.get("global_style_weight") or style.get("weight") or ""
+        apply_locked_parameters_to_payload(payload, job_type=job_type, mode=str(job.get("mode") or ""))
         return payload
 
     def _reference_media_value(self, value: str) -> str:

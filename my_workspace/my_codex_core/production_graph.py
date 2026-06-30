@@ -6,6 +6,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .production_parameter_policy import normalize_parameter_policy_context
+
 
 GRAPH_SCHEMA_VERSION = 1
 SEMANTIC_INPUT_ALIASES = {
@@ -31,6 +33,7 @@ def normalize_global_context(payload: dict[str, Any], video_config: dict[str, An
         "scenes": source.get("scenes") if isinstance(source.get("scenes"), list) else [],
         "resolved_entities": source.get("resolved_entities") if isinstance(source.get("resolved_entities"), dict) else {},
         "style": source.get("style") if isinstance(source.get("style"), dict) else {},
+        "parameter_policy": source.get("parameter_policy") if isinstance(source.get("parameter_policy"), dict) else {},
         "render": {
             "working_width": width,
             "working_height": height,
@@ -44,7 +47,7 @@ def normalize_global_context(payload: dict[str, Any], video_config: dict[str, An
     style.setdefault("style_id", str(payload.get("style_id") or ""))
     style.setdefault("reference_asset", str(payload.get("input_reference_style") or payload.get("reference_style") or ""))
     style.setdefault("weight", payload.get("global_style_weight") or payload.get("style_weight") or "")
-    return context
+    return normalize_parameter_policy_context(context, route={"aspect_ratio": context["render"].get("aspect_ratio")}, video_config=video)
 
 
 def build_production_graph(
@@ -74,6 +77,8 @@ def build_production_graph(
                 "depends_on": _string_list(source.get("depends_on")),
                 "inputs": source.get("input_bindings") if isinstance(source.get("input_bindings"), dict) else {},
                 "params": source.get("params") if isinstance(source.get("params"), dict) else {},
+                "parameter_locks": source.get("parameter_locks") if isinstance(source.get("parameter_locks"), dict) else {},
+                "locked_fields": source.get("locked_fields") if isinstance(source.get("locked_fields"), list) else [],
                 "outputs": outputs,
                 "resource_class": "video" if job_type == "video" else "image",
                 "retry": {"max_attempts": 3, "retry_on": ["network", "timeout", "provider_busy", "download"]},

@@ -15,6 +15,16 @@
       "network_max_attempts": 3,
       "configuration_max_attempts": 1,
       "resource_oom_max_attempts": 1
+    },
+    "parameter_policy": {
+      "render_lock": "visual_chain_480p_working_canvas",
+      "style_lock": "inherit_from_global_style_entity",
+      "character_identity_lock": "inherit_from_character_entity_reference_pack",
+      "composition_lock": "same_shot_allows_motion_only",
+      "first_middle_last_video": {
+        "duration_seconds": 4,
+        "fps": 24
+      }
     }
   },
   "workflow_contracts": {

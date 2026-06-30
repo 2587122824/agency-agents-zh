@@ -74,6 +74,7 @@
 
 - 读取员工输出中的 `production_type` 和 `production_intents`。
 - 选择生产模板。
+- 应用参数继承和锁定机制，统一角色身份、风格、构图、480p 工作尺寸、24fps 全局帧率和首中尾帧视频规格。
 - 把意图编译为：
   - `production_plan.json`
   - 兼容 `image_prompts`
@@ -86,6 +87,9 @@
 
 - `generate_three_frame_shot` 会展开为 start / middle / end 三张关键帧。
 - `generate_three_frame_i2v_clip` 会自动绑定对应三帧的上游输出。
+- `generate_three_frame_i2v_clip` 固定锁定为 4 秒 / 24fps；如果员工输出不同值，编译器会覆盖并写入 `parameter_overrides`。
+- 视觉生成链路固定锁定 480p 工作尺寸：16:9 为 `848x480`，9:16 为 `480x848`，1:1 为 `480x480`；1080p 交付尺寸留给后期增强 / 导出阶段。
+- 角色和风格只通过正式实体 ID 继承；员工若重复描述或试图修改锁定字段，编译器以 `global_context.parameter_policy` 为准。
 - `generate_talking_image` 会声明依赖 `local_tts`，最终 WAV 仍由系统运行阶段注入。
 - 如果员工已经输出旧 `image_prompts` / `video_prompts`，编译器保留并去重合并。
 
