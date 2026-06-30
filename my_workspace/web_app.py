@@ -3745,16 +3745,13 @@ INDEX_HTML = r"""<!doctype html>
     const comfyDebugStateByWorkflowId = new Map();
     const comfyDebugCollapsedCapabilityGroups = new Set();
     const COMFY_DEBUG_CAPABILITY_GROUPS = [
-      { id: 'image_generate', label: '图片生成', modes: ['character_base', 'product_base', 'scene_base', 'style_reference', 'cover_key_visual', 'keyframe'] },
-      { id: 'image_multiview', label: '多视图', modes: ['character_turnaround', 'product_turnaround'] },
-      { id: 'image_edit', label: '图片编辑', modes: ['image_inpaint_fix', 'background_remove'] },
-      { id: 'video_i2v', label: '图生视频', modes: ['i2v_first_frame', 'i2v_first_middle_last_frame', 'i2v_first_last_frame'] },
-      { id: 'video_reference', label: '参考生视频', modes: ['live_to_anime'] },
-      { id: 'video_motion', label: '动作控制', modes: ['motion_transfer'] },
-      { id: 'video_avatar', label: '数字人口播', modes: ['talking_image'] },
-      { id: 'video_generate', label: '视频生成', modes: ['broll_scene_video', 'empty_transition_video'] },
-      { id: 'video_enhance', label: '视频增强', modes: ['video_upscale', 'frame_interpolation', 'video_deflicker_stabilize'] },
-      { id: 'video_edit', label: '视频编辑', modes: ['video_inpaint_fix'] },
+      { id: 'asset_image', label: '01 基础资产', modes: ['character_base', 'product_base', 'scene_base', 'style_reference', 'character_turnaround', 'product_turnaround', 'cover_key_visual'] },
+      { id: 'storyboard_keyframe', label: '02 分镜关键帧', modes: ['keyframe'] },
+      { id: 'image_post', label: '03 图片处理', modes: ['image_inpaint_fix', 'background_remove'] },
+      { id: 'video_creation', label: '04 视频生成', modes: ['i2v_first_frame', 'i2v_first_middle_last_frame', 'i2v_first_last_frame', 'broll_scene_video', 'empty_transition_video'] },
+      { id: 'video_control', label: '05 视频控制', modes: ['live_to_anime', 'motion_transfer'] },
+      { id: 'digital_human', label: '06 数字人口播', modes: ['talking_image'] },
+      { id: 'video_post', label: '07 视频后期', modes: ['video_upscale', 'frame_interpolation', 'video_deflicker_stabilize', 'video_inpaint_fix'] },
     ];
     let comfyDebugFormHydrated = false;
     const comfyDebugPollTimers = new Map();
@@ -9221,7 +9218,9 @@ INDEX_HTML = r"""<!doctype html>
         modes.forEach(mode => leaves.push({ workflow, mode }));
       });
       COMFY_DEBUG_CAPABILITY_GROUPS.forEach(group => {
-        const groupLeaves = leaves.filter(leaf => group.modes.includes(leaf.mode.value));
+        const groupLeaves = leaves
+          .filter(leaf => group.modes.includes(leaf.mode.value))
+          .sort((left, right) => group.modes.indexOf(left.mode.value) - group.modes.indexOf(right.mode.value));
         if (!groupLeaves.length) return;
         const isCollapsed = comfyDebugCollapsedCapabilityGroups.has(group.id);
         const groupNode = document.createElement('section');

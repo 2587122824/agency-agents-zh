@@ -47,6 +47,7 @@
 
 ## Recent Fixes
 
+- ComfyUI 调试台分类按生产顺序由 10 组精简为 7 组：`01 基础资产`、`02 分镜关键帧`、`03 图片处理`、`04 视频生成`、`05 视频控制`、`06 数字人口播`、`07 视频后期`。只改变导航归类和显示顺序，不改变子模式值、独立配置或员工兼容路由。
 - ComfyUI 调试台的功能组标题现在可点击展开/收起，箭头和 `aria-expanded` 会同步变化，收起状态保存在本地设置中，刷新页面后仍会保留。
 - ComfyUI 调试台改为按功能组织的两级树（功能组 → 可运行子模式），桌面端不再重复显示子模式下拉框。每个叶子子模式独立保存接口、nodeInfoList、尺寸、提示词、参考素材、运行状态与结果；旧的工作流级配置和状态会作为首次迁移回退。06/07 员工现以 `capability + mode` 为主路由，并继续输出 `workflow_id + workflow_mode` 兼容现有生产链路。
 - The current long-video workflow no longer runs `21_ComfyUI素材编排师` as a separate step. Its responsibilities are integrated into `06_分镜生图设计师` (`image_prompts`) and `07_视频生成执行员` (`video_prompts`). `production_pipeline.py` now merges the first JSON blocks from 06/07 into `comfyui/comfyui_payload.json`, and the ComfyUI material gate falls back to the 07 step when no 21 step exists.
