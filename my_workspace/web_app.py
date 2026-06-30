@@ -4152,8 +4152,10 @@ INDEX_HTML = r"""<!doctype html>
       if (viewName === 'output') {
         loadTasks()
           .then(tasks => {
+            if (autoFocusOutputDuringRun && !selectedTask) return null;
             if (!selectedTask && tasks.length) return selectTask(tasks[0].name);
             if (selectedTask) return refreshSelectedTaskDetail({ openMissingFile: true });
+            return null;
           })
           .catch(err => setStatus(err.message, true));
       }
@@ -6401,14 +6403,15 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadTasks() {
       const data = await api('/api/tasks');
-      if (!data.tasks.length) {
+      const visibleTasks = (data.tasks || []).filter(task => task?.name !== '__comfy_debug__');
+      if (!visibleTasks.length) {
         els.taskList.innerHTML = '<div class="muted small">暂无任务输出</div>';
         syncInheritTaskOptions([]);
         return [];
       }
       els.taskList.innerHTML = '';
-      syncInheritTaskOptions(data.tasks);
-      const tasks = [...data.tasks].sort((a, b) => {
+      syncInheritTaskOptions(visibleTasks);
+      const tasks = [...visibleTasks].sort((a, b) => {
         if (activeRunTaskName && a.name === activeRunTaskName) return -1;
         if (activeRunTaskName && b.name === activeRunTaskName) return 1;
         return 0;
@@ -6426,7 +6429,7 @@ INDEX_HTML = r"""<!doctype html>
         };
         els.taskList.appendChild(btn);
       }
-      return data.tasks;
+      return visibleTasks;
     }
 
     function syncInheritTaskOptions(tasks) {
@@ -6871,6 +6874,10 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function selectTask(name) {
+      if (name === '__comfy_debug__') {
+        setStatus('独立 ComfyUI 调试输出不再作为正式任务打开，请在调试台查看。', true);
+        return;
+      }
       selectedTask = name;
       showView('output');
       selectedFile = null;
@@ -6893,6 +6900,17 @@ INDEX_HTML = r"""<!doctype html>
 
     async function refreshSelectedTaskDetail(options = {}) {
       if (!selectedTask) return;
+      if (selectedTask === '__comfy_debug__') {
+        selectedTask = null;
+        selectedFile = null;
+        selectedTaskSummary = {};
+        selectedTaskStatus = null;
+        selectedTaskAllowedActions = [];
+        currentTaskFiles = [];
+        renderOutputOverview(null);
+        syncOutputButtons();
+        return;
+      }
       const data = await api(`/api/task?name=${encodeURIComponent(selectedTask)}`);
       selectedTaskSummary = data.summary || {};
       selectedTaskStatus = canonicalTaskStatus(data);
@@ -6996,6 +7014,7 @@ INDEX_HTML = r"""<!doctype html>
 
     async function selectTaskAndOpenJobOutput(job) {
       if (!job?.task_name) return;
+      if (job.task_name === '__comfy_debug__') return;
       await selectTask(job.task_name);
       const preferred = job.status === 'completed' && !job.rerun_result
         ? preferredCompletedTaskFile()
@@ -7005,6 +7024,7 @@ INDEX_HTML = r"""<!doctype html>
 
     async function selectActiveRunTask(job) {
       if (!job?.task_name || activeRunTaskName === job.task_name) return;
+      if (job.task_name === '__comfy_debug__') return;
       activeRunTaskName = job.task_name;
       await loadTasks();
       if (selectedTask !== job.task_name) {
@@ -12298,6 +12318,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         for path in sorted(OUTPUT_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if not path.is_dir():
                 continue
+            if path.name == COMFY_DEBUG_TASK:
+                continue
             summary_path = path / "run_summary.json"
             summary = {}
             if summary_path.exists():
@@ -12317,6 +12339,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return tasks
 
     def _task_detail(self, name: str) -> dict:
+        if name == COMFY_DEBUG_TASK:
+            raise FileNotFoundError("Standalone ComfyUI debug output is not a production task")
         task_dir = self._safe_task_dir(name)
         files = []
         for path in sorted(task_dir.rglob("*")):
@@ -12858,6 +12882,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return {"ok": True, "entities": entities}
 
     def _production_plan_preview_for_task(self, task_name: str) -> dict:
+        if task_name == COMFY_DEBUG_TASK:
+            raise FileNotFoundError("Standalone ComfyUI debug output has no production plan preview")
         task_dir = self._safe_task_dir(task_name)
         plan = self._read_json_file(task_dir / "production_plan.json")
         graph = self._read_json_file(task_dir / "production_graph.json")
