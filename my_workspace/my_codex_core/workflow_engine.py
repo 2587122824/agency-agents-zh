@@ -10,6 +10,14 @@ from typing import Callable
 from .codex_api import CodexAPI
 from .action_executor import ActionExecutor
 from .production_pipeline import run_auto_production
+from .requirement_guard import (
+    build_requirement_lock,
+    correction_prompt,
+    declares_human_confirmation,
+    extract_original_requirement,
+    requirement_lock_prompt,
+    validate_requirement_alignment,
+)
 from .staff_loader import StaffLoader
 from .task_storage import TaskStorage
 
@@ -27,6 +35,10 @@ class WorkflowRunResult:
 
 class WorkflowCheckpointPause(RuntimeError):
     """Raised when step-by-step confirmation mode pauses after a completed step."""
+
+
+class RequirementAlignmentError(RuntimeError):
+    """Raised when a model output still violates the locked requirement after correction."""
 
 
 class WorkflowEngine:
@@ -67,6 +79,7 @@ class WorkflowEngine:
 
         self.storage.write_json(task_dir / "workflow.json", workflow)
         self.storage.write_text(task_dir / "input.md", user_input)
+        self.storage.write_json(task_dir / "task_brief.json", build_requirement_lock(user_input))
         if progress_callback:
             progress_callback(
                 {
@@ -136,7 +149,7 @@ class WorkflowEngine:
                             "total_steps": len(steps),
                         }
                     )
-                result = self.api.run(agent.prompt, prompt)
+                result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir)
             except Exception as exc:
                 error_text = (
                     "# 当前步骤执行失败\n\n"
@@ -187,6 +200,17 @@ class WorkflowEngine:
             }
             previous_outputs.append(step_record)
             step_outputs.append(step_record)
+            self._pause_for_declared_human_confirmation(
+                task_dir,
+                workflow_name,
+                task_title,
+                provider_used,
+                step_no,
+                len(steps),
+                str(step_dir / "output.md"),
+                result.content,
+                progress_callback,
+            )
             if self._requires_material_gate(workflow, step, production_config):
                 self._run_material_gate_or_block(
                     task_dir,
@@ -358,7 +382,7 @@ class WorkflowEngine:
             },
         )
 
-        result = self.api.run(agent.prompt, prompt)
+        result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, target_step, step_dir)
         self.storage.write_text(output_path, result.content)
         action_results = self.action_executor.execute_from_text(result.content, task_dir)
         self.storage.write_json(
@@ -433,6 +457,7 @@ class WorkflowEngine:
         workflow_name = workflow.get("name") or task_dir.name
         task_title = self._summary_value(task_dir, "task_title")
         user_input = input_path.read_text(encoding="utf-8", errors="replace")
+        self.storage.write_json(task_dir / "task_brief.json", build_requirement_lock(user_input))
         steps = workflow.get("steps", [])
         agents = self.staff_loader.load_all()
         self._confirm_pending_step_checkpoint(task_dir, production_config)
@@ -536,7 +561,7 @@ class WorkflowEngine:
                             "total_steps": len(steps),
                         }
                     )
-                result = self.api.run(agent.prompt, prompt)
+                result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir)
             except Exception as exc:
                 error_text = (
                     "# 当前步骤执行失败\n\n"
@@ -589,6 +614,18 @@ class WorkflowEngine:
                 "action_results": json.dumps(action_results, ensure_ascii=False),
             }
             previous_outputs.append(step_record)
+            self._pause_for_declared_human_confirmation(
+                task_dir,
+                workflow_name,
+                task_title,
+                provider_used,
+                step_no,
+                len(steps),
+                str(step_dir / "output.md"),
+                result.content,
+                progress_callback,
+                resume_step=resume_step,
+            )
             if self._requires_material_gate(workflow, step, production_config):
                 self._run_material_gate_or_block(
                     task_dir,
@@ -935,6 +972,51 @@ class WorkflowEngine:
         available = ", ".join(path.stem for path in sorted(self.workflow_root.glob("*.json")))
         raise FileNotFoundError(f"Workflow not found: {workflow_key}. Available: {available}")
 
+    def _run_model_with_requirement_guard(
+        self,
+        system_prompt: str,
+        prompt: str,
+        user_input: str,
+        step: dict,
+        step_dir: Path,
+    ):
+        step_no = int(step.get("step") or 0)
+        lock = build_requirement_lock(user_input)
+        attempts: list[dict] = []
+        result = self.api.run(system_prompt, prompt)
+        if result.provider == "offline":
+            return result
+
+        validation = validate_requirement_alignment(lock, result.content, step_no)
+        attempts.append(validation)
+        if validation.get("passed"):
+            self.storage.write_json(step_dir / "requirement_validation.json", {"passed": True, "attempts": attempts})
+            return result
+
+        rejected_path = step_dir / f"output_rejected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        self.storage.write_text(rejected_path, result.content)
+        retry_prompt = correction_prompt(prompt, lock, result.content, validation.get("issues") or [])
+        self.storage.write_text(step_dir / "prompt_retry_requirement.md", retry_prompt)
+        retry_result = self.api.run(system_prompt, retry_prompt)
+        retry_validation = validate_requirement_alignment(lock, retry_result.content, step_no)
+        attempts.append(retry_validation)
+        self.storage.write_json(
+            step_dir / "requirement_validation.json",
+            {
+                "passed": bool(retry_validation.get("passed")),
+                "auto_retry_count": 1,
+                "rejected_output": rejected_path.name,
+                "attempts": attempts,
+            },
+        )
+        if retry_validation.get("passed"):
+            return retry_result
+
+        second_rejected_path = step_dir / f"output_rejected_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
+        self.storage.write_text(second_rejected_path, retry_result.content)
+        issues = "；".join(str(item) for item in (retry_validation.get("issues") or []))
+        raise RequirementAlignmentError(f"需求一致性校验连续两次未通过：{issues}")
+
     @staticmethod
     def _build_step_prompt(
         workflow: dict,
@@ -949,6 +1031,10 @@ class WorkflowEngine:
         if not previous_text:
             previous_text = "无。"
         scoped_context = WorkflowEngine._scoped_video_context(step, production_config)
+        step_no = int(step.get("step") or 0)
+        lock = build_requirement_lock(user_input)
+        prompt_input = extract_original_requirement(user_input) if step_no <= 3 else user_input
+        locked_context = requirement_lock_prompt(lock)
 
         return f"""# 工作流执行任务
 
@@ -957,7 +1043,9 @@ class WorkflowEngine:
 - 说明：{workflow.get("description")}
 
 ## 用户原始需求
-{user_input}
+{prompt_input}
+
+{locked_context}
 
 ## 当前步骤
 - 步骤：{step.get("step")}
@@ -972,9 +1060,11 @@ class WorkflowEngine:
 ## 执行要求
 1. 只完成当前步骤，不要代替后续员工完成全部流程。
 2. 严格按你的 `agent.md` 中定义的职责和输出格式交付。
-3. 如果信息不足，使用合理默认假设，并在输出中列出“待确认信息”。
+3. 不要笼统输出“待确认信息”。能够合理推断且不改变主题、主体、合规边界或最终交付的缺省项，由你直接采用合理默认值，并列在“自动采用的默认值”中。
 4. 输出必须是中文 Markdown，可直接交给下一位员工继续处理。
-5. 如果需要执行受控动作，只能在输出末尾提供一个 JSON 代码块，格式为：
+5. 只有会改变主题、平台硬规格、品牌/产品、预算、人物身份、版权合规或最终交付的决定才需要人工确认。此时必须输出 `human_confirmation_required: true` 和标题 `## 人工确认（阻塞）`；否则不要向用户提问。
+6. 输出前自检：核心主题、时长、风格和显式结构必须与“锁定需求”一致；上游若跑题必须纠正，不能继续继承。
+7. 如果需要执行受控动作，只能在输出末尾提供一个 JSON 代码块，格式为：
 ```json
 {{"actions":[{{"action":"mkdir","params":{{"path":"demo"}}}},{{"action":"create_file","params":{{"path":"demo/readme.md","content":"内容","overwrite":false}}}},{{"action":"open_url","params":{{"url":"https://example.com"}}}},{{"action":"fetch_url","params":{{"url":"https://example.com","path":"web/example.txt","overwrite":true}}}}]}}
 ```
@@ -1149,6 +1239,57 @@ class WorkflowEngine:
                 }
             )
         raise WorkflowCheckpointPause(message)
+
+    def _pause_for_declared_human_confirmation(
+        self,
+        task_dir: Path,
+        workflow_name: str,
+        task_title: str,
+        provider: str,
+        step_no: int,
+        total_steps: int,
+        output_path: str,
+        content: str,
+        progress_callback: Callable[[dict], None] | None,
+        resume_step: int | None = None,
+    ) -> None:
+        if not declares_human_confirmation(content):
+            return
+        summary = self._read_summary(task_dir)
+        reason = f"第 {step_no} 步声明了会改变生产方向的阻塞型人工确认"
+        summary.update(
+            {
+                "status": "blocked",
+                "task_dir": str(task_dir),
+                "workflow": workflow_name,
+                "task_title": task_title,
+                "provider": provider,
+                "step_count": step_no,
+                "awaiting_confirmation": True,
+                "awaiting_confirmation_step": step_no,
+                "confirmation_kind": "human_required",
+                "blocked_step": step_no,
+                "blocked_reason": reason,
+                "resume_from_step": step_no + 1 if step_no < total_steps else None,
+                "resume_step": resume_step,
+                "last_step_output": output_path,
+                "paused_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        self._write_summary(task_dir, summary)
+        if progress_callback:
+            progress_callback(
+                {
+                    "event": "checkpoint",
+                    "step": step_no,
+                    "message": reason,
+                    "output_path": output_path,
+                    "total_steps": total_steps,
+                    "awaiting_confirmation": True,
+                    "confirmation_kind": "human_required",
+                }
+            )
+        raise WorkflowCheckpointPause(reason)
 
     @classmethod
     def _first_incomplete_step(cls, workflow: dict, task_dir: Path) -> int | None:
