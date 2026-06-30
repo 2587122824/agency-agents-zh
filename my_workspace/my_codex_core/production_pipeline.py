@@ -13,6 +13,7 @@ from .cloud_video_adapter import CloudVideoAdapter
 from .local_ffmpeg_adapter import LocalFFmpegAdapter
 from .local_tts_adapter import LocalTTSAdapter
 from .production_graph import build_production_graph, normalize_global_context, write_json as write_graph_json
+from .production_plan_compiler import compile_production_plan, write_production_plan
 
 
 def run_auto_production(
@@ -44,10 +45,12 @@ def run_auto_production(
     manual_comfy_stage = str(comfy_debug_gate.get("stage") or "all").strip().lower() or "all"
 
     paths = _create_output_dirs(task_dir)
+    route_step = _find_step(step_outputs, "01_")
     image_step = _find_step(step_outputs, "06_")
     video_step = _find_step(step_outputs, "07_")
     audio_step = _find_step(step_outputs, "20_")
     edit_step = _find_step(step_outputs, "22_")
+    route_content = route_step.get("content", "") if route_step else ""
     image_content = image_step.get("content", "") if image_step else ""
     video_content = video_step.get("content", "") if video_step else ""
     audio_content = audio_step.get("content", "") if audio_step else ""
@@ -61,6 +64,7 @@ def run_auto_production(
     subtitles_path = task_dir / "subtitles.srt"
     comfyui_plan_path = paths["comfyui"] / "comfyui_plan.md"
     comfyui_payload_path = paths["comfyui"] / "comfyui_payload.json"
+    production_plan_path = task_dir / "production_plan.json"
     production_graph_path = task_dir / "production_graph.json"
     edit_plan_path = task_dir / "final_edit_plan.md"
     checklist_path = task_dir / "edit_checklist.md"
@@ -90,8 +94,25 @@ def run_auto_production(
         _ensure_comfyui_payload_defaults(comfyui_payload_text, mode, final_video_name, video_config),
     )
     comfyui_payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+    production_plan = compile_production_plan(
+        task_id=task_dir.name,
+        route_content=route_content,
+        image_content=image_content,
+        video_content=video_content,
+        audio_content=audio_content,
+        package_content=edit_content,
+        existing_payload=comfyui_payload,
+        video_config=video_config,
+        voice_config=voice_config,
+    )
+    compiled_payload = production_plan.get("compiled_payload") if isinstance(production_plan.get("compiled_payload"), dict) else {}
+    if compiled_payload:
+        comfyui_payload = compiled_payload
     global_context = normalize_global_context(comfyui_payload, video_config)
     comfyui_payload["global_context"] = global_context
+    production_plan["global_context"] = global_context
+    production_plan["compiled_payload"] = comfyui_payload
+    write_production_plan(production_plan_path, production_plan)
     _write_text(comfyui_payload_path, json.dumps(comfyui_payload, ensure_ascii=False, indent=2) + "\n")
     packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config)
     write_graph_json(production_graph_path, build_production_graph(task_dir.name, [], global_context, packaging_jobs))
@@ -118,7 +139,10 @@ def run_auto_production(
         "mode": mode,
         "status": initial_status,
         "task_dir": str(task_dir),
+        "production_plan": str(production_plan_path),
         "production_graph": str(production_graph_path),
+        "architecture_layers": production_plan.get("architecture_layers") if isinstance(production_plan.get("architecture_layers"), list) else [],
+        "selected_template": production_plan.get("selected_template") if isinstance(production_plan.get("selected_template"), dict) else {},
         "global_context": global_context,
         "production_nodes": [],
         "image_generation": {
@@ -215,6 +239,7 @@ def run_auto_production(
             "subtitles": str(subtitles_path),
             "comfyui_plan": str(comfyui_plan_path),
             "comfyui_payload": str(comfyui_payload_path),
+            "production_plan": str(production_plan_path),
             "final_edit_plan": str(edit_plan_path),
             "edit_checklist": str(checklist_path),
             "production_graph": str(production_graph_path),

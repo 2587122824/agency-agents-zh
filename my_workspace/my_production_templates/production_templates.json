@@ -1,0 +1,270 @@
+{
+  "schema_version": 1,
+  "name": "数字员工通用视频生产模板库",
+  "description": "第二层生产模板：把01识别出的production_type映射为默认阶段、默认意图和推荐工作流。数字员工只输出意图；编译器可用本模板补齐兼容payload与生产DAG。",
+  "global_defaults": {
+    "render": {
+      "working_width": 848,
+      "working_height": 480,
+      "delivery_width": 1920,
+      "delivery_height": 1080,
+      "frame_rate": 24,
+      "aspect_ratio": "16:9"
+    },
+    "retry": {
+      "network_max_attempts": 3,
+      "configuration_max_attempts": 1,
+      "resource_oom_max_attempts": 1
+    }
+  },
+  "workflow_contracts": {
+    "image": {
+      "generate_base_asset": {
+        "workflow_id": "01_all_in_one_image",
+        "workflow_mode": "base_asset",
+        "capability": "image_generate",
+        "outputs": [
+          "output_final_image"
+        ]
+      },
+      "generate_turnaround": {
+        "workflow_id": "01_all_in_one_image",
+        "workflow_mode": "turnaround",
+        "capability": "image_generate",
+        "outputs": [
+          "output_final_image"
+        ]
+      },
+      "generate_keyframe": {
+        "workflow_id": "04_keyframe_image",
+        "workflow_mode": "keyframe",
+        "capability": "image_generate",
+        "outputs": [
+          "output_final_image"
+        ]
+      },
+      "generate_three_frame_shot": {
+        "workflow_id": "04_keyframe_image",
+        "workflow_mode": "keyframe",
+        "capability": "image_generate",
+        "outputs": [
+          "output_final_image"
+        ],
+        "expands_to_frames": [
+          "start",
+          "middle",
+          "end"
+        ]
+      },
+      "generate_cover_key_visual": {
+        "workflow_id": "01_all_in_one_image",
+        "workflow_mode": "cover_key_visual",
+        "capability": "image_generate",
+        "outputs": [
+          "output_final_image"
+        ]
+      },
+      "repair_or_cutout_image": {
+        "workflow_id": "01_all_in_one_image",
+        "workflow_mode": "image_edit",
+        "capability": "image_edit",
+        "outputs": [
+          "output_final_image",
+          "output_mask_alpha"
+        ]
+      }
+    },
+    "video": {
+      "generate_i2v_clip": {
+        "workflow_id": "02_ltx_video_2_3",
+        "workflow_mode": "i2v_first_frame",
+        "capability": "video_generate",
+        "outputs": [
+          "output_final_video"
+        ]
+      },
+      "generate_three_frame_i2v_clip": {
+        "workflow_id": "06_i2v_first_middle_last_frame_ltx_2_3",
+        "workflow_mode": "first_middle_last_frame",
+        "capability": "video_generate",
+        "duration_seconds": 4,
+        "fps": 24,
+        "outputs": [
+          "output_final_video"
+        ]
+      },
+      "generate_broll_clip": {
+        "workflow_id": "04_broll_material",
+        "workflow_mode": "broll",
+        "capability": "video_generate",
+        "outputs": [
+          "output_final_video"
+        ]
+      },
+      "generate_talking_image": {
+        "workflow_id": "02_all_in_one_video",
+        "workflow_mode": "talking_image",
+        "capability": "video_generate",
+        "requires_audio": true,
+        "outputs": [
+          "output_final_video"
+        ]
+      },
+      "enhance_video": {
+        "workflow_id": "02_all_in_one_video",
+        "workflow_mode": "enhance_video",
+        "capability": "video_enhance",
+        "outputs": [
+          "output_final_video"
+        ]
+      },
+      "repair_video": {
+        "workflow_id": "02_all_in_one_video",
+        "workflow_mode": "repair_video",
+        "capability": "video_edit",
+        "outputs": [
+          "output_final_video"
+        ]
+      }
+    },
+    "audio": {
+      "generate_voiceover": {
+        "stage": "08_audio_visual_packaging",
+        "mode": "local_tts"
+      },
+      "build_subtitles": {
+        "stage": "08_audio_visual_packaging",
+        "mode": "subtitle_build"
+      },
+      "select_bgm": {
+        "stage": "08_audio_visual_packaging",
+        "mode": "bgm_select"
+      },
+      "audio_mix_guidance": {
+        "stage": "08_audio_visual_packaging",
+        "mode": "ffmpeg_compose"
+      }
+    },
+    "package": {
+      "build_edit_timeline": {
+        "stage": "08_audio_visual_packaging",
+        "mode": "edit_timeline"
+      },
+      "package_final_video": {
+        "stage": "08_audio_visual_packaging",
+        "mode": "ffmpeg_compose"
+      },
+      "apply_delivery_spec": {
+        "stage": "08_audio_visual_packaging",
+        "mode": "format_export"
+      },
+      "review_missing_assets": {
+        "stage": "review",
+        "mode": "blocking_check"
+      }
+    }
+  },
+  "templates": {
+    "drama_story": {
+      "name": "漫剧剧情生产模板",
+      "description": "适合角色连续、多镜头剧情和首中尾帧约束的视频。",
+      "default_image_intents": [
+        "generate_base_asset",
+        "generate_keyframe",
+        "generate_three_frame_shot"
+      ],
+      "default_video_intents": [
+        "generate_three_frame_i2v_clip",
+        "enhance_video"
+      ],
+      "default_audio_intents": [
+        "generate_voiceover",
+        "build_subtitles",
+        "select_bgm"
+      ],
+      "default_package_intents": [
+        "build_edit_timeline",
+        "package_final_video",
+        "apply_delivery_spec"
+      ],
+      "notes": "优先保证角色一致性、风格母版和镜头连贯。"
+    },
+    "product_promo": {
+      "name": "带货短视频生产模板",
+      "description": "适合产品图、展示关键帧、B-roll和成片封装。",
+      "default_image_intents": [
+        "generate_base_asset",
+        "generate_keyframe",
+        "generate_cover_key_visual"
+      ],
+      "default_video_intents": [
+        "generate_i2v_clip",
+        "generate_broll_clip",
+        "enhance_video"
+      ],
+      "default_audio_intents": [
+        "generate_voiceover",
+        "build_subtitles",
+        "select_bgm"
+      ],
+      "default_package_intents": [
+        "build_edit_timeline",
+        "package_final_video",
+        "apply_delivery_spec"
+      ],
+      "notes": "优先保证产品清晰、卖点节奏、字幕安全区和BGM情绪匹配。"
+    },
+    "talking_avatar": {
+      "name": "数字人口播生产模板",
+      "description": "适合人物图、最终WAV驱动口型、字幕和剪辑封装。",
+      "default_image_intents": [
+        "generate_base_asset",
+        "generate_cover_key_visual"
+      ],
+      "default_video_intents": [
+        "generate_talking_image",
+        "enhance_video"
+      ],
+      "default_audio_intents": [
+        "generate_voiceover",
+        "build_subtitles",
+        "select_bgm"
+      ],
+      "default_package_intents": [
+        "build_edit_timeline",
+        "package_final_video",
+        "apply_delivery_spec"
+      ],
+      "notes": "普通视觉镜头不带音频；只有talking_image等待最终WAV。"
+    },
+    "asset_only": {
+      "name": "素材生产模板",
+      "description": "只生产静态图、关键帧或视频片段，不强制最终成片。",
+      "default_image_intents": [
+        "generate_base_asset",
+        "generate_keyframe",
+        "generate_turnaround"
+      ],
+      "default_video_intents": [
+        "generate_i2v_clip",
+        "generate_broll_clip"
+      ],
+      "default_audio_intents": [],
+      "default_package_intents": [
+        "review_missing_assets"
+      ],
+      "notes": "needs_final_video=false时，22只整理素材交付清单。"
+    },
+    "custom": {
+      "name": "自定义生产模板",
+      "description": "混合任务或无法归类任务。编译器只编译员工明确给出的production_intents，不强行补齐默认意图。",
+      "default_image_intents": [],
+      "default_video_intents": [],
+      "default_audio_intents": [],
+      "default_package_intents": [
+        "review_missing_assets"
+      ],
+      "notes": "保持保守，避免系统猜测过多。"
+    }
+  }
+}
