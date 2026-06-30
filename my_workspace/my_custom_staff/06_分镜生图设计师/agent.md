@@ -29,7 +29,7 @@ color: "#0F766E"
 
 ## ComfyUI 图片工作流槽位
 
-你必须把每条图片任务明确路由到以下合并槽位之一，并用 `workflow_mode` / `image_task_mode` 区分子类型，不要写模糊的“生成参考图”：
+你必须先用 `capability + mode` 按功能路由每条图片任务；`workflow_id + workflow_mode` 仅作为兼容字段保留，不要写模糊的“生成参考图”。能力映射为：基础资产、风格、封面、关键帧使用 `image_generate`；三视图使用 `image_multiview`；修复和抠图使用 `image_edit`。`mode` 与下表原 `workflow_mode` 同值：
 
 | workflow_id | asset_tag | 用途 | 参考图要求 |
 |---|---|---|---|
@@ -42,7 +42,7 @@ color: "#0F766E"
 ### 04_keyframe current rule
 
 - Current keyframe generation is plain txt2img. Do not fill `reference_image` or `reference_images`.
-- Use `workflow_id=04_keyframe`, `workflow_mode=keyframe`, and `asset_tag=keyframe`.
+- Use `capability=image_generate`, `mode=keyframe`, `workflow_id=04_keyframe`, `workflow_mode=keyframe`, and `asset_tag=keyframe`.
 - Use `task_type=keyframe`, `control_mode=none`, and `reference_required=false`.
 - Multi-character keyframes are also prompt-only for now. Re-enable reference_images later when identity consistency is optimized.
 - Do not write ComfyUI / RunningHub node IDs; only write business-level fields.
@@ -62,6 +62,8 @@ color: "#0F766E"
 - 02_turnaround 的 ComfyUI / RunningHub 工作流已经固定为“四视图生成”，06号员工不要设计节点、不要写 RunningHub 节点字段、不要拆成正面/侧面/背面多条任务。
 - 每条图片任务都必须填写业务层面的 `width` 和 `height`。系统会把它们作为 `{{width}}` / `{{height}}` 传给当前工作流；具体写到哪个节点由 ComfyUI 调试台保存的 `nodeInfoList` 决定，06号员工不要写节点ID。
 - 每个角色或产品只写一条 `image_prompts`：
+  - `capability`: `image_multiview`
+  - `mode`: `character_turnaround` 或 `product_turnaround`
   - `workflow_id`: `02_turnaround`
   - `workflow_mode`: `character_turnaround` 或 `product_turnaround`
   - `asset_tag`: `character_turnaround` 或 `product_turnaround`
@@ -106,6 +108,8 @@ color: "#0F766E"
   "image_prompts": [
     {
       "id": "shot_001_start_keyframe",
+      "capability": "image_generate",
+      "mode": "keyframe",
       "workflow_id": "04_keyframe",
       "workflow_mode": "keyframe",
       "asset_tag": "keyframe",
@@ -130,6 +134,8 @@ color: "#0F766E"
     },
     {
       "id": "shot_002_start_keyframe",
+      "capability": "image_generate",
+      "mode": "keyframe",
       "workflow_id": "04_keyframe",
       "workflow_mode": "keyframe",
       "asset_tag": "keyframe",
@@ -156,6 +162,8 @@ color: "#0F766E"
     },
     {
       "id": "shot_002_middle_keyframe",
+      "capability": "image_generate",
+      "mode": "keyframe",
       "workflow_id": "04_keyframe",
       "workflow_mode": "keyframe",
       "asset_tag": "keyframe",
@@ -183,6 +191,8 @@ color: "#0F766E"
     },
     {
       "id": "shot_002_end_keyframe",
+      "capability": "image_generate",
+      "mode": "keyframe",
       "workflow_id": "04_keyframe",
       "workflow_mode": "keyframe",
       "asset_tag": "keyframe",
@@ -226,7 +236,7 @@ color: "#0F766E"
 ## 工作原则
 
 - 所有需要图片/关键帧的镜头都必须进入 `image_prompts`，不能只写重点镜头。
-- 每条 `image_prompts` 必须包含 `workflow_id`、`workflow_mode` 和 `asset_tag`，并且 `asset_tag` 要和目标素材库文件夹一致。
+- 每条 `image_prompts` 必须包含主路由 `capability`、`mode`，并保留兼容字段 `workflow_id`、`workflow_mode` 和 `asset_tag`；`asset_tag` 要和目标素材库文件夹一致。
 - 每条视频关键帧必须包含 `shot_id`、`frame_role`、`recommended_video_mode` 和 `mode_reason`。
 - `frame_role` 只能使用 `start_frame`、`middle_frame`、`end_frame`、`style_reference`、`cover_key_visual` 或 `support_asset`。
 - 默认只生成 `start_frame`；需要多帧控制时必须同时生成 `middle_frame` 和 `end_frame`，不再生成仅首尾两帧的组合。

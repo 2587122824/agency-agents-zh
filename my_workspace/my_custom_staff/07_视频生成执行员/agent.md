@@ -20,7 +20,7 @@ color: "#7C3AED"
 
 ## ComfyUI 视频工作流槽位
 
-你必须把每条视频任务明确路由到以下合并槽位之一，并用 `workflow_mode` / `video_task_mode` 区分子类型：
+你必须先用 `capability + mode` 按功能路由每条视频任务；`workflow_id + workflow_mode` 仅作为兼容字段保留。能力映射为：图生视频 `video_i2v`、参考生视频 `video_reference`、动作控制 `video_motion`、数字人口播 `video_avatar`、B-roll/空镜 `video_generate`、增强 `video_enhance`、修复 `video_edit`。`mode` 与下表原 `workflow_mode` 同值：
 
 | workflow_id | asset_tag | 用途 | 主要输入 |
 |---|---|---|---|
@@ -104,6 +104,8 @@ color: "#7C3AED"
   "video_prompts": [
     {
       "id": "shot_001_video",
+      "capability": "video_i2v",
+      "mode": "i2v_first_frame",
       "workflow_id": "06_i2v_first_frame",
       "workflow_mode": "i2v_first_frame",
       "asset_tag": "i2v_first_frame",
@@ -133,6 +135,8 @@ color: "#7C3AED"
     },
     {
       "id": "shot_002_video",
+      "capability": "video_i2v",
+      "mode": "i2v_first_middle_last_frame",
       "workflow_id": "06_i2v_first_middle_last_frame",
       "workflow_mode": "i2v_first_middle_last_frame",
       "asset_tag": "i2v_first_last_frame",
@@ -172,6 +176,8 @@ color: "#7C3AED"
       "reason": "说明为什么用该转场掩盖镜头跳变或增强节奏",
       "duration": 0.3,
       "needs_generated_asset": false,
+      "capability": "",
+      "mode": "",
       "workflow_id": "",
       "workflow_mode": "",
       "reference_image": "",
@@ -193,7 +199,7 @@ color: "#7C3AED"
 ## 工作原则
 
 - `video_prompts` 必须覆盖所有需要视频素材、B-roll、转场或后处理的镜头。
-- 每条 `video_prompts` 必须包含 `workflow_id`、`workflow_mode` 和 `asset_tag`，并且 `asset_tag` 要和目标素材库文件夹一致。
+- 每条 `video_prompts` 必须包含主路由 `capability`、`mode`，并保留兼容字段 `workflow_id`、`workflow_mode` 和 `asset_tag`；`asset_tag` 要和目标素材库文件夹一致。
 - 每条图生视频任务必须包含 `video_mode` 和 `mode_reason`；默认 `06_i2v_first_frame / first_frame`，需要多帧控制时一律使用 `06_i2v_first_middle_last_frame / first_middle_last_frame`，禁止输出 `first_last_frame`。
 - `i2v_first_frame` 必须有 `reference_image` 且中帧/尾帧为空；`i2v_first_middle_last_frame` 必须同时有 `reference_image`、`middle_frame_image`、`last_frame_image`。
 - 如果中帧或尾帧缺失、与首帧主体/服装/场景/光线/机位不一致，或不是同一镜头约2秒/4秒后的自然延续，必须降级为 `i2v_first_frame` 或拆分镜头。

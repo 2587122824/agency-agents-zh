@@ -2049,6 +2049,29 @@ INDEX_HTML = r"""<!doctype html>
       overflow: auto;
       padding-right: 4px;
     }
+    .comfy-debug-tree-group {
+      display: grid;
+      gap: 6px;
+      padding: 7px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #f8fafc;
+    }
+    .comfy-debug-tree-group-title {
+      padding: 2px 4px;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .04em;
+    }
+    .comfy-debug-tree-children { display: grid; gap: 6px; }
+    .comfy-debug-tree-leaf { background: #fff; }
+    button.comfy-debug-tree-leaf {
+      width: 100%;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+    }
     .comfy-debug-card {
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -3091,7 +3114,7 @@ INDEX_HTML = r"""<!doctype html>
                 <span class="muted small" id="comfyDebugReferenceHint">可直接输入路径、选择素材库资产，或上传本地参考图/视频。</span>
               </div>
               <div class="provider-grid">
-                <label>工作流子类型
+                <label hidden>工作流子类型
                   <select id="comfyDebugWorkflowMode"></select>
                 </label>
                 <label>随机种子
@@ -3707,7 +3730,20 @@ INDEX_HTML = r"""<!doctype html>
     ];
     let comfyDebugWorkflows = [];
     let activeComfyDebugWorkflowId = '';
+    let activeComfyDebugWorkflowMode = '';
     const comfyDebugStateByWorkflowId = new Map();
+    const COMFY_DEBUG_CAPABILITY_GROUPS = [
+      { id: 'image_generate', label: '图片生成', modes: ['character_base', 'product_base', 'scene_base', 'style_reference', 'cover_key_visual', 'keyframe'] },
+      { id: 'image_multiview', label: '多视图', modes: ['character_turnaround', 'product_turnaround'] },
+      { id: 'image_edit', label: '图片编辑', modes: ['image_inpaint_fix', 'background_remove'] },
+      { id: 'video_i2v', label: '图生视频', modes: ['i2v_first_frame', 'i2v_first_middle_last_frame', 'i2v_first_last_frame'] },
+      { id: 'video_reference', label: '参考生视频', modes: ['live_to_anime'] },
+      { id: 'video_motion', label: '动作控制', modes: ['motion_transfer'] },
+      { id: 'video_avatar', label: '数字人口播', modes: ['talking_image'] },
+      { id: 'video_generate', label: '视频生成', modes: ['broll_scene_video', 'empty_transition_video'] },
+      { id: 'video_enhance', label: '视频增强', modes: ['video_upscale', 'frame_interpolation', 'video_deflicker_stabilize'] },
+      { id: 'video_edit', label: '视频编辑', modes: ['video_inpaint_fix'] },
+    ];
     let comfyDebugFormHydrated = false;
     const comfyDebugPollTimers = new Map();
     let comfyDebugElapsedTimer = null;
@@ -4425,6 +4461,8 @@ INDEX_HTML = r"""<!doctype html>
           width: state.width || '',
           height: state.height || '',
           duration: state.duration || '',
+          fps: state.fps || '',
+          workflowMode: state.workflowMode || '',
           prompt: state.prompt || '',
           negative: state.negative || '',
           nodeInfoList: state.nodeInfoList || '[]',
@@ -4440,6 +4478,9 @@ INDEX_HTML = r"""<!doctype html>
           runId: state.runId || '',
           status: state.status || '',
           error: state.error || '',
+          startedAt: Number(state.startedAt || 0),
+          finishedAt: Number(state.finishedAt || 0),
+          elapsedSeconds: Number(state.elapsedSeconds || 0),
         };
       }
       return out;
@@ -4473,6 +4514,8 @@ INDEX_HTML = r"""<!doctype html>
           width: state.width || '',
           height: state.height || '',
           duration: state.duration || '',
+          fps: state.fps || '',
+          workflowMode: state.workflowMode || '',
           prompt: state.prompt || '',
           negative: state.negative || '',
           nodeInfoList: state.nodeInfoList || '[]',
@@ -4488,6 +4531,9 @@ INDEX_HTML = r"""<!doctype html>
           runId: state.runId || '',
           status: state.status || '',
           error: state.error || '',
+          startedAt: Number(state.startedAt || 0),
+          finishedAt: Number(state.finishedAt || 0),
+          elapsedSeconds: Number(state.elapsedSeconds || 0),
         });
       });
     }
@@ -4525,6 +4571,7 @@ INDEX_HTML = r"""<!doctype html>
         comfyWorkflowLibrary,
         comfyDebugStateByWorkflowId: serializeComfyDebugState(),
         activeComfyDebugWorkflowId,
+        activeComfyDebugWorkflowMode,
         comfyNodeInfoList: els.comfyNodeInfoList.value,
         comfyPollTimeout: els.comfyPollTimeout.value,
         assetQualityGate: els.assetQualityGate.value,
@@ -4671,6 +4718,7 @@ INDEX_HTML = r"""<!doctype html>
       comfyWorkflowLibrary = normalizeComfyWorkflowLibrary(settings.comfyWorkflowLibrary);
       restoreComfyDebugState(settings.comfyDebugStateByWorkflowId);
       activeComfyDebugWorkflowId = settings.activeComfyDebugWorkflowId || '';
+      activeComfyDebugWorkflowMode = settings.activeComfyDebugWorkflowMode || '';
       renderComfyWorkflowLibrary();
       setIfExists(els.comfyWorkflowPreset, settings.comfyWorkflowPreset || DEFAULT_COMFY_WORKFLOW_PRESET_ID);
       const selectedComfyWorkflow = getSelectedComfyWorkflowPreset();
@@ -4810,6 +4858,65 @@ INDEX_HTML = r"""<!doctype html>
       } catch {}
     }
 
+    function comfyDebugLeafKey(workflowId, mode = '') {
+      return `${String(workflowId || '')}::${String(mode || '')}`;
+    }
+
+    function activeComfyDebugStateKey() {
+      return comfyDebugLeafKey(activeComfyDebugWorkflowId, activeComfyDebugWorkflowMode || els.comfyDebugWorkflowMode?.value || '');
+    }
+
+    function comfyDebugCapabilityForMode(mode) {
+      return COMFY_DEBUG_CAPABILITY_GROUPS.find(group => group.modes.includes(String(mode || '')))?.id || 'other';
+    }
+
+    function normalizeComfyModeConfig(raw = {}, fallback = {}) {
+      const item = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      return {
+        endpoint: String(item.endpoint ?? fallback.endpoint ?? ''),
+        nodeInfoList: sanitizeComfyVisualNodeInfoList(String(item.nodeInfoList ?? item.node_info_list_json ?? fallback.nodeInfoList ?? '[]')),
+        pollTimeout: String(item.pollTimeout ?? item.poll_timeout_seconds ?? fallback.pollTimeout ?? '3600'),
+        defaultWidth: String(item.defaultWidth ?? item.default_width ?? fallback.defaultWidth ?? ''),
+        defaultHeight: String(item.defaultHeight ?? item.default_height ?? fallback.defaultHeight ?? ''),
+        defaultReference: String(item.defaultReference ?? item.default_reference ?? fallback.defaultReference ?? ''),
+        defaultMiddleFrameReference: String(item.defaultMiddleFrameReference ?? item.default_middle_frame_reference ?? fallback.defaultMiddleFrameReference ?? ''),
+        defaultLastFrameReference: String(item.defaultLastFrameReference ?? item.default_last_frame_reference ?? fallback.defaultLastFrameReference ?? ''),
+        defaultSeed: String(item.defaultSeed ?? item.default_seed ?? fallback.defaultSeed ?? ''),
+        defaultDuration: String(item.defaultDuration ?? item.default_duration ?? fallback.defaultDuration ?? ''),
+        defaultFps: String(item.defaultFps ?? item.default_fps ?? fallback.defaultFps ?? ''),
+        defaultPrompt: String(item.defaultPrompt ?? item.default_prompt ?? fallback.defaultPrompt ?? ''),
+        defaultNegative: String(item.defaultNegative ?? item.default_negative ?? fallback.defaultNegative ?? ''),
+        defaultAssetReference: String(item.defaultAssetReference ?? item.default_asset_reference ?? fallback.defaultAssetReference ?? ''),
+        defaultMiddleFrameAssetReference: String(item.defaultMiddleFrameAssetReference ?? item.default_middle_frame_asset_reference ?? fallback.defaultMiddleFrameAssetReference ?? ''),
+        defaultLastFrameAssetReference: String(item.defaultLastFrameAssetReference ?? item.default_last_frame_asset_reference ?? fallback.defaultLastFrameAssetReference ?? ''),
+        defaultReferenceHint: String(item.defaultReferenceHint ?? item.default_reference_hint ?? fallback.defaultReferenceHint ?? ''),
+        defaultMiddleFrameReferenceHint: String(item.defaultMiddleFrameReferenceHint ?? item.default_middle_frame_reference_hint ?? fallback.defaultMiddleFrameReferenceHint ?? ''),
+        defaultLastFrameReferenceHint: String(item.defaultLastFrameReferenceHint ?? item.default_last_frame_reference_hint ?? fallback.defaultLastFrameReferenceHint ?? ''),
+      };
+    }
+
+    function normalizeComfyModeConfigs(raw, fallback = {}, defaultMode = '') {
+      const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      const result = {};
+      Object.entries(source).forEach(([mode, config]) => {
+        if (mode) result[mode] = normalizeComfyModeConfig(config, fallback);
+      });
+      if (!Object.keys(result).length && defaultMode) result[defaultMode] = normalizeComfyModeConfig({}, fallback);
+      return result;
+    }
+
+    function getComfyWorkflowModeConfig(workflow, mode = activeComfyDebugWorkflowMode, create = true) {
+      if (!workflow) return null;
+      const item = getComfyWorkflowLibraryItemById(workflow.id);
+      if (!item) return null;
+      const selectedMode = String(mode || workflow.modes?.[0]?.value || item.defaultWorkflowMode || 'default');
+      if (!item.modeConfigs || typeof item.modeConfigs !== 'object') item.modeConfigs = {};
+      if (!item.modeConfigs[selectedMode] && create) {
+        item.modeConfigs[selectedMode] = normalizeComfyModeConfig({}, item);
+      }
+      return item.modeConfigs[selectedMode] || null;
+    }
+
     function normalizeComfyWorkflowLibrary(value) {
       const saved = Array.isArray(value) ? value : [];
       const byId = new Map(saved.filter(item => item && item.id).map(item => [item.id, item]));
@@ -4841,6 +4948,7 @@ INDEX_HTML = r"""<!doctype html>
           defaultMiddleFrameReferenceHint: String(item.defaultMiddleFrameReferenceHint || item.default_middle_frame_reference_hint || item.middleFrameReferenceHint || ''),
           defaultLastFrameReferenceHint: String(item.defaultLastFrameReferenceHint || item.default_last_frame_reference_hint || item.lastFrameReferenceHint || ''),
           defaultWorkflowMode: String(item.defaultWorkflowMode || item.default_workflow_mode || ''),
+          modeConfigs: normalizeComfyModeConfigs(item.modeConfigs || item.mode_configs, item, String(item.defaultWorkflowMode || item.default_workflow_mode || '')),
           defaultImageTaskType: String(item.defaultImageTaskType || item.default_image_task_type || defaultItem.defaultImageTaskType || ''),
           defaultFps: String(item.defaultFps || item.default_fps || ''),
           debugWorkflow: Boolean(item.debugWorkflow || item.debug_workflow),
@@ -4872,6 +4980,7 @@ INDEX_HTML = r"""<!doctype html>
           defaultMiddleFrameReferenceHint: String(item.defaultMiddleFrameReferenceHint || item.default_middle_frame_reference_hint || item.middleFrameReferenceHint || ''),
           defaultLastFrameReferenceHint: String(item.defaultLastFrameReferenceHint || item.default_last_frame_reference_hint || item.lastFrameReferenceHint || ''),
           defaultWorkflowMode: String(item.defaultWorkflowMode || item.default_workflow_mode || ''),
+          modeConfigs: normalizeComfyModeConfigs(item.modeConfigs || item.mode_configs, item, String(item.defaultWorkflowMode || item.default_workflow_mode || '')),
           defaultImageTaskType: String(item.defaultImageTaskType || item.default_image_task_type || ''),
           defaultFps: String(item.defaultFps || item.default_fps || ''),
           debugWorkflow: Boolean(item.debugWorkflow || item.debug_workflow),
@@ -4886,7 +4995,17 @@ INDEX_HTML = r"""<!doctype html>
       let changed = false;
       comfyDebugWorkflows.forEach(workflow => {
         const id = String(workflow.id || '').trim();
-        if (!id || byId.has(id)) return;
+        if (!id) return;
+        if (byId.has(id)) {
+          const existing = byId.get(id);
+          const modes = Array.isArray(workflow.modes) ? workflow.modes : [];
+          if (!existing.modeConfigs || typeof existing.modeConfigs !== 'object') existing.modeConfigs = {};
+          modes.forEach(mode => {
+            const value = String(mode?.value || '');
+            if (value && !existing.modeConfigs[value]) existing.modeConfigs[value] = normalizeComfyModeConfig({}, existing);
+          });
+          return;
+        }
         const item = {
           id,
           name: workflow.name || id,
@@ -4912,8 +5031,12 @@ INDEX_HTML = r"""<!doctype html>
           defaultReferenceHint: '',
           defaultMiddleFrameReferenceHint: '',
           defaultLastFrameReferenceHint: '',
+          modeConfigs: {},
           debugWorkflow: true,
         };
+        (Array.isArray(workflow.modes) ? workflow.modes : []).forEach(mode => {
+          if (mode?.value) item.modeConfigs[mode.value] = normalizeComfyModeConfig({}, item);
+        });
         comfyWorkflowLibrary.push(item);
         byId.set(id, item);
         changed = true;
@@ -4962,8 +5085,9 @@ INDEX_HTML = r"""<!doctype html>
     function saveCurrentComfyDebugUiState() {
       if (!comfyDebugFormHydrated) return;
       if (!activeComfyDebugWorkflowId || !els.comfyDebugEndpoint) return;
-      const previous = comfyDebugStateByWorkflowId.get(activeComfyDebugWorkflowId) || {};
-      comfyDebugStateByWorkflowId.set(activeComfyDebugWorkflowId, {
+      const stateKey = activeComfyDebugStateKey();
+      const previous = comfyDebugStateByWorkflowId.get(stateKey) || {};
+      comfyDebugStateByWorkflowId.set(stateKey, {
         ...previous,
         ...readComfyDebugFormState(),
       });
@@ -5005,30 +5129,32 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugFormHydrated = true;
     }
 
-    function defaultComfyDebugStateForWorkflow(workflow) {
+    function defaultComfyDebugStateForWorkflow(workflow, mode = activeComfyDebugWorkflowMode) {
       const savedConfig = workflow ? getComfyWorkflowLibraryItemById(workflow.id) : null;
       normalizeComfyDebugWorkflowSavedConfig(savedConfig, workflow);
+      const selectedMode = String(mode || workflow?.modes?.[0]?.value || savedConfig?.defaultWorkflowMode || '');
+      const modeConfig = getComfyWorkflowModeConfig(workflow, selectedMode, true) || savedConfig || {};
       return {
-        endpoint: savedConfig?.endpoint || workflow?.default_endpoint || '',
-        reference: savedConfig?.defaultReference || '',
-        middleFrameReference: savedConfig?.defaultMiddleFrameReference || '',
-        lastFrameReference: savedConfig?.defaultLastFrameReference || '',
-        seed: savedConfig?.defaultSeed || '',
-        width: String(savedConfig?.defaultWidth || workflow?.default_width || ''),
-        height: String(savedConfig?.defaultHeight || workflow?.default_height || ''),
-        duration: String(savedConfig?.defaultDuration || workflow?.default_duration || ''),
-        fps: String(savedConfig?.defaultFps || workflow?.default_fps || ''),
-        workflowMode: savedConfig?.defaultWorkflowMode || '',
-        prompt: savedConfig?.defaultPrompt || '',
-        negative: savedConfig?.defaultNegative || '',
-        nodeInfoList: savedConfig?.nodeInfoList || workflow?.default_node_info || '[]',
-        pollTimeout: String(savedConfig?.pollTimeout || workflow?.poll_timeout_seconds || workflow?.default_poll_timeout || '3600'),
-        assetReference: savedConfig?.defaultAssetReference || '',
-        middleFrameAssetReference: savedConfig?.defaultMiddleFrameAssetReference || '',
-        lastFrameAssetReference: savedConfig?.defaultLastFrameAssetReference || '',
-        middleFrameReferenceHint: savedConfig?.defaultMiddleFrameReferenceHint || '',
-        lastFrameReferenceHint: savedConfig?.defaultLastFrameReferenceHint || '',
-        referenceHint: savedConfig?.defaultReferenceHint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。',
+        endpoint: modeConfig.endpoint || workflow?.default_endpoint || '',
+        reference: modeConfig.defaultReference || '',
+        middleFrameReference: modeConfig.defaultMiddleFrameReference || '',
+        lastFrameReference: modeConfig.defaultLastFrameReference || '',
+        seed: modeConfig.defaultSeed || '',
+        width: String(modeConfig.defaultWidth || workflow?.default_width || ''),
+        height: String(modeConfig.defaultHeight || workflow?.default_height || ''),
+        duration: String(modeConfig.defaultDuration || workflow?.default_duration || ''),
+        fps: String(modeConfig.defaultFps || workflow?.default_fps || ''),
+        workflowMode: selectedMode,
+        prompt: modeConfig.defaultPrompt || '',
+        negative: modeConfig.defaultNegative || '',
+        nodeInfoList: modeConfig.nodeInfoList || workflow?.default_node_info || '[]',
+        pollTimeout: String(modeConfig.pollTimeout || workflow?.poll_timeout_seconds || workflow?.default_poll_timeout || '3600'),
+        assetReference: modeConfig.defaultAssetReference || '',
+        middleFrameAssetReference: modeConfig.defaultMiddleFrameAssetReference || '',
+        lastFrameAssetReference: modeConfig.defaultLastFrameAssetReference || '',
+        middleFrameReferenceHint: modeConfig.defaultMiddleFrameReferenceHint || '',
+        lastFrameReferenceHint: modeConfig.defaultLastFrameReferenceHint || '',
+        referenceHint: modeConfig.defaultReferenceHint || '可直接输入路径、选择素材库资产，或上传本地参考图/视频。',
         results: [],
         running: false,
         runId: '',
@@ -5037,18 +5163,23 @@ INDEX_HTML = r"""<!doctype html>
       };
     }
 
-    function setActiveComfyDebugWorkflow(id, forceLoad = true) {
+    function setActiveComfyDebugWorkflow(id, forceLoad = true, mode = '') {
       saveCurrentComfyDebugUiState();
       const workflow = comfyDebugWorkflows.find(item => item.id === id) || comfyDebugWorkflows[0] || null;
       if (!workflow) return null;
       activeComfyDebugWorkflowId = workflow.id;
-      if (!comfyDebugStateByWorkflowId.has(workflow.id)) {
-        comfyDebugStateByWorkflowId.set(workflow.id, defaultComfyDebugStateForWorkflow(workflow));
+      activeComfyDebugWorkflowMode = String(mode || activeComfyDebugWorkflowMode || workflow.modes?.[0]?.value || '');
+      if (!workflow.modes?.some(entry => entry?.value === activeComfyDebugWorkflowMode)) activeComfyDebugWorkflowMode = workflow.modes?.[0]?.value || '';
+      const stateKey = activeComfyDebugStateKey();
+      if (!comfyDebugStateByWorkflowId.has(stateKey)) {
+        const legacyState = comfyDebugStateByWorkflowId.get(workflow.id);
+        comfyDebugStateByWorkflowId.set(stateKey, legacyState ? { ...legacyState, workflowMode: activeComfyDebugWorkflowMode } : defaultComfyDebugStateForWorkflow(workflow, activeComfyDebugWorkflowMode));
+        if (legacyState) comfyDebugStateByWorkflowId.delete(workflow.id);
       } else {
-        comfyDebugStateByWorkflowId.set(workflow.id, normalizeComfyDebugWorkflowState(comfyDebugStateByWorkflowId.get(workflow.id), workflow));
+        comfyDebugStateByWorkflowId.set(stateKey, normalizeComfyDebugWorkflowState(comfyDebugStateByWorkflowId.get(stateKey), workflow));
       }
       if (forceLoad) {
-        writeComfyDebugFormState(comfyDebugStateByWorkflowId.get(workflow.id));
+        writeComfyDebugFormState(comfyDebugStateByWorkflowId.get(stateKey));
         renderComfyDebugStatePreview(workflow);
       } else {
         applyComfyDebugWorkflowDefaults(workflow, false);
@@ -5210,6 +5341,21 @@ INDEX_HTML = r"""<!doctype html>
         default_negative: item.defaultNegative || '',
         default_asset_reference: item.defaultAssetReference || '',
         default_reference_hint: item.defaultReferenceHint || '',
+        mode_configs: Object.fromEntries(Object.entries(item.modeConfigs || {}).map(([mode, config]) => [mode, {
+          endpoint: config.endpoint || '',
+          node_info_list_json: config.nodeInfoList || '[]',
+          poll_timeout_seconds: Number(config.pollTimeout || 3600),
+          default_width: config.defaultWidth || '',
+          default_height: config.defaultHeight || '',
+          default_reference: config.defaultReference || '',
+          default_middle_frame_reference: config.defaultMiddleFrameReference || '',
+          default_last_frame_reference: config.defaultLastFrameReference || '',
+          default_seed: config.defaultSeed || '',
+          default_duration: config.defaultDuration || '',
+          default_fps: config.defaultFps || '',
+          default_prompt: config.defaultPrompt || '',
+          default_negative: config.defaultNegative || '',
+        }])),
         debug_workflow: Boolean(item.debugWorkflow),
         endpoint_configured: Boolean(item.endpoint),
         node_mapping_configured: Boolean(item.nodeInfoList && item.nodeInfoList !== '[]'),
@@ -5801,7 +5947,8 @@ INDEX_HTML = r"""<!doctype html>
     function renderSystemHealth(checks) {
       els.healthGrid.innerHTML = '';
       for (const check of checks) {
-        const card = document.createElement('div');
+        const card = document.createElement('button');
+        card.type = 'button';
         card.className = `health-card ${check.status || 'warn'}`;
         const title = document.createElement('strong');
         title.textContent = check.name || '';
@@ -7351,6 +7498,20 @@ INDEX_HTML = r"""<!doctype html>
       if (!item.defaultImageTaskType) {
         item.defaultImageTaskType = workflow.default_image_task_type || workflow.default_task_type || '';
       }
+      if (!item.modeConfigs || typeof item.modeConfigs !== 'object') item.modeConfigs = {};
+      workflowModesForWorkflow(workflow).forEach(mode => {
+        const config = item.modeConfigs[mode.value] || normalizeComfyModeConfig({}, item);
+        const size = normalizedComfyDebug480pSize(config.defaultWidth, config.defaultHeight, workflow);
+        config.defaultWidth = size.width;
+        config.defaultHeight = size.height;
+        if (!mode.requires_reference) {
+          config.defaultReference = '';
+          config.defaultMiddleFrameReference = '';
+          config.defaultLastFrameReference = '';
+          config.defaultAssetReference = '';
+        }
+        item.modeConfigs[mode.value] = config;
+      });
     }
 
     function normalizeComfyDebugWorkflowState(state, workflow) {
@@ -8010,8 +8171,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function assetLibraryAddCard() {
-      const card = document.createElement('button');
-      card.type = 'button';
+      const card = document.createElement('div');
       card.className = 'asset-library-card asset-library-add';
       card.onclick = () => openAssetImportModal();
       const media = document.createElement('span');
@@ -8949,16 +9109,13 @@ INDEX_HTML = r"""<!doctype html>
         ensureComfyDebugWorkflowsInLibrary();
         comfyDebugWorkflows.forEach(workflow => {
           normalizeComfyDebugWorkflowSavedConfig(getComfyWorkflowLibraryItemById(workflow.id), workflow);
-          if (comfyDebugStateByWorkflowId.has(workflow.id)) {
-            comfyDebugStateByWorkflowId.set(workflow.id, normalizeComfyDebugWorkflowState(comfyDebugStateByWorkflowId.get(workflow.id), workflow));
-          }
         });
         saveSettings();
         if (!activeComfyDebugWorkflowId && comfyDebugWorkflows.length) {
           activeComfyDebugWorkflowId = comfyDebugWorkflows[0].id;
         }
         if (activeComfyDebugWorkflowId) {
-          setActiveComfyDebugWorkflow(activeComfyDebugWorkflowId, true);
+          setActiveComfyDebugWorkflow(activeComfyDebugWorkflowId, true, activeComfyDebugWorkflowMode);
         }
         renderComfyDebugWorkflows();
         resumeComfyDebugPolls();
@@ -9022,7 +9179,7 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       renderComfyDebugWorkflows({ refreshForm: false });
-      const activeState = comfyDebugStateByWorkflowId.get(activeComfyDebugWorkflowId) || {};
+      const activeState = comfyDebugStateByWorkflowId.get(activeComfyDebugStateKey()) || {};
       if (activeState.running) {
         renderComfyDebugRunningAsync(activeComfyDebugWorkflow(), activeState);
       }
@@ -9041,13 +9198,35 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyDebugWorkflowList.innerHTML = '<div class="muted small">暂无调试工作流。</div>';
         return;
       }
-      comfyDebugWorkflows.forEach(item => {
-        const savedConfig = getComfyWorkflowLibraryItemById(item.id);
-        const runState = comfyDebugStateByWorkflowId.get(item.id) || {};
-        const isConfigured = Boolean(savedConfig?.endpoint && savedConfig?.nodeInfoList && savedConfig.nodeInfoList !== '[]');
-        const isActiveEditor = activeComfyDebugWorkflowId === item.id;
-        const card = document.createElement('div');
-        card.className = `comfy-debug-card ${isActiveEditor ? 'active editing' : ''}`;
+      const leaves = [];
+      comfyDebugWorkflows.forEach(workflow => {
+        const modes = workflowModesForWorkflow(workflow);
+        modes.forEach(mode => leaves.push({ workflow, mode }));
+      });
+      COMFY_DEBUG_CAPABILITY_GROUPS.forEach(group => {
+        const groupLeaves = leaves.filter(leaf => group.modes.includes(leaf.mode.value));
+        if (!groupLeaves.length) return;
+        const groupNode = document.createElement('section');
+        groupNode.className = 'comfy-debug-tree-group';
+        groupNode.dataset.capability = group.id;
+        const groupTitle = document.createElement('div');
+        groupTitle.className = 'comfy-debug-tree-group-title';
+        groupTitle.textContent = group.label;
+        groupNode.appendChild(groupTitle);
+        const children = document.createElement('div');
+        children.className = 'comfy-debug-tree-children';
+        groupLeaves.forEach(({ workflow: item, mode }) => {
+        const modeConfig = getComfyWorkflowModeConfig(item, mode.value, true) || {};
+        const stateKey = comfyDebugLeafKey(item.id, mode.value);
+        const runState = comfyDebugStateByWorkflowId.get(stateKey) || {};
+        const isConfigured = Boolean(modeConfig.endpoint && modeConfig.nodeInfoList && modeConfig.nodeInfoList !== '[]');
+        const isActiveEditor = activeComfyDebugWorkflowId === item.id && activeComfyDebugWorkflowMode === mode.value;
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = `comfy-debug-card comfy-debug-tree-leaf ${isActiveEditor ? 'active editing' : ''}`;
+        card.dataset.workflowId = item.id;
+        card.dataset.workflowMode = mode.value;
+        card.dataset.comfyLeafKey = stateKey;
         const head = document.createElement('div');
         head.className = 'comfy-debug-card-head';
         const marker = document.createElement('span');
@@ -9057,14 +9236,14 @@ INDEX_HTML = r"""<!doctype html>
         const titleWrap = document.createElement('div');
         titleWrap.className = 'comfy-debug-card-title';
         titleWrap.innerHTML = `
-          <strong>${escapeHtml(item.name || item.id)}</strong>
+          <strong>${escapeHtml(mode.label || mode.value)}</strong>
           <span class="muted small">${escapeHtml(item.purpose || '')}</span>
         `;
         head.appendChild(marker);
         head.appendChild(titleWrap);
         const type = document.createElement('span');
         type.className = `comfy-debug-type ${isConfigured ? 'configured' : ''}`;
-        type.textContent = `${item.type || 'workflow'} · ${item.stage || 'debug'}${isConfigured ? ' · 已配置' : ''}`;
+        type.textContent = `${mode.value === 'i2v_first_last_frame' ? '兼容模式 · ' : ''}${item.type || 'workflow'}${isConfigured ? ' · 已配置' : ''}`;
         card.appendChild(head);
         card.appendChild(type);
         const status = document.createElement('span');
@@ -9084,27 +9263,33 @@ INDEX_HTML = r"""<!doctype html>
         }
         card.appendChild(status);
         card.onclick = () => {
-          setActiveComfyDebugWorkflow(item.id, true);
+          setActiveComfyDebugWorkflow(item.id, true, mode.value);
           renderComfyDebugWorkflows();
           saveSettings();
         };
-        els.comfyDebugWorkflowList.appendChild(card);
+        children.appendChild(card);
+        });
+        groupNode.appendChild(children);
+        els.comfyDebugWorkflowList.appendChild(groupNode);
       });
       const active = activeComfyDebugWorkflow();
-      if (els.comfyDebugSelectedMeta) els.comfyDebugSelectedMeta.textContent = active ? `当前：${active.name || active.id}` : '单选调试';
+      const activeMode = selectedWorkflowModeDefinition(active);
+      const group = COMFY_DEBUG_CAPABILITY_GROUPS.find(entry => entry.id === comfyDebugCapabilityForMode(activeMode?.value));
+      if (els.comfyDebugSelectedMeta) els.comfyDebugSelectedMeta.textContent = active ? `当前：${group?.label || '其他'} / ${activeMode?.label || active.name || active.id}` : '单选调试';
       if (active && refreshForm) applyComfyDebugWorkflowDefaults(active, false);
     }
 
     function applyComfyDebugWorkflowDefaults(item, force = false) {
       if (!item) return;
       const savedConfig = getComfyWorkflowLibraryItemById(item.id);
-      const endpoint = savedConfig?.endpoint || item.default_endpoint || '';
-      const nodeInfo = savedConfig?.nodeInfoList || item.default_node_info || '[]';
-      const width = savedConfig?.defaultWidth || item.default_width || '';
-      const height = savedConfig?.defaultHeight || item.default_height || '';
-      const duration = savedConfig?.defaultDuration || item.default_duration || '';
-      const fps = savedConfig?.defaultFps || item.default_fps || '';
-      const pollTimeout = savedConfig?.pollTimeout || item.poll_timeout_seconds || item.default_poll_timeout || '3600';
+      const modeConfig = getComfyWorkflowModeConfig(item, activeComfyDebugWorkflowMode, true) || savedConfig || {};
+      const endpoint = modeConfig.endpoint || item.default_endpoint || '';
+      const nodeInfo = modeConfig.nodeInfoList || item.default_node_info || '[]';
+      const width = modeConfig.defaultWidth || item.default_width || '';
+      const height = modeConfig.defaultHeight || item.default_height || '';
+      const duration = modeConfig.defaultDuration || item.default_duration || '';
+      const fps = modeConfig.defaultFps || item.default_fps || '';
+      const pollTimeout = modeConfig.pollTimeout || item.poll_timeout_seconds || item.default_poll_timeout || '3600';
       if (force || !els.comfyDebugWidth.value.trim()) els.comfyDebugWidth.value = width;
       if (force || !els.comfyDebugHeight.value.trim()) els.comfyDebugHeight.value = height;
       if (force || !els.comfyDebugDuration.value.trim()) els.comfyDebugDuration.value = duration;
@@ -9155,31 +9340,36 @@ INDEX_HTML = r"""<!doctype html>
       item.name = workflow.name || item.name || workflow.id;
       item.purpose = workflow.purpose || item.purpose || '';
       item.materialTypes = workflow.type ? [workflow.type] : item.materialTypes || [];
-      item.endpoint = els.comfyDebugEndpoint.value.trim();
-      item.nodeInfoList = sanitizeComfyVisualNodeInfoList(els.comfyDebugNodeInfoList.value.trim() || '[]');
-      item.pollTimeout = els.comfyDebugPollTimeout.value || '3600';
-      item.defaultWidth = els.comfyDebugWidth.value.trim();
-      item.defaultHeight = els.comfyDebugHeight.value.trim();
-      item.defaultReference = els.comfyDebugReference.value.trim();
-      item.defaultMiddleFrameReference = els.comfyDebugMiddleFrameReference?.value.trim() || '';
-      item.defaultLastFrameReference = els.comfyDebugLastFrameReference?.value.trim() || '';
-      item.defaultSeed = els.comfyDebugSeed.value.trim();
-      item.defaultDuration = workflow.type === 'video' ? els.comfyDebugDuration.value.trim() : '';
-      item.defaultFps = workflow.type === 'video' ? els.comfyDebugFps.value.trim() : '';
-      item.defaultWorkflowMode = els.comfyDebugWorkflowMode?.value || '';
+      const mode = activeComfyDebugWorkflowMode || els.comfyDebugWorkflowMode?.value || workflow.modes?.[0]?.value || '';
+      if (!item.modeConfigs || typeof item.modeConfigs !== 'object') item.modeConfigs = {};
+      const modeConfig = item.modeConfigs[mode] || normalizeComfyModeConfig({}, item);
+      modeConfig.endpoint = els.comfyDebugEndpoint.value.trim();
+      modeConfig.nodeInfoList = sanitizeComfyVisualNodeInfoList(els.comfyDebugNodeInfoList.value.trim() || '[]');
+      modeConfig.pollTimeout = els.comfyDebugPollTimeout.value || '3600';
+      modeConfig.defaultWidth = els.comfyDebugWidth.value.trim();
+      modeConfig.defaultHeight = els.comfyDebugHeight.value.trim();
+      modeConfig.defaultReference = els.comfyDebugReference.value.trim();
+      modeConfig.defaultMiddleFrameReference = els.comfyDebugMiddleFrameReference?.value.trim() || '';
+      modeConfig.defaultLastFrameReference = els.comfyDebugLastFrameReference?.value.trim() || '';
+      modeConfig.defaultSeed = els.comfyDebugSeed.value.trim();
+      modeConfig.defaultDuration = workflow.type === 'video' ? els.comfyDebugDuration.value.trim() : '';
+      modeConfig.defaultFps = workflow.type === 'video' ? els.comfyDebugFps.value.trim() : '';
+      item.defaultWorkflowMode = mode;
       item.defaultImageTaskType = workflow.default_image_task_type || item.defaultImageTaskType || workflow.default_task_type || '';
-      item.defaultPrompt = els.comfyDebugPrompt.value;
-      item.defaultNegative = els.comfyDebugNegative.value;
-      item.defaultAssetReference = els.comfyDebugAssetReference.value || '';
-      item.defaultMiddleFrameAssetReference = els.comfyDebugMiddleFrameAssetReference?.value || '';
-      item.defaultLastFrameAssetReference = els.comfyDebugLastFrameAssetReference?.value || '';
-      item.defaultReferenceHint = els.comfyDebugReferenceHint.textContent || '';
-      item.defaultMiddleFrameReferenceHint = els.comfyDebugMiddleFrameReferenceHint?.textContent || '';
-      item.defaultLastFrameReferenceHint = els.comfyDebugLastFrameReferenceHint?.textContent || '';
+      modeConfig.defaultPrompt = els.comfyDebugPrompt.value;
+      modeConfig.defaultNegative = els.comfyDebugNegative.value;
+      modeConfig.defaultAssetReference = els.comfyDebugAssetReference.value || '';
+      modeConfig.defaultMiddleFrameAssetReference = els.comfyDebugMiddleFrameAssetReference?.value || '';
+      modeConfig.defaultLastFrameAssetReference = els.comfyDebugLastFrameAssetReference?.value || '';
+      modeConfig.defaultReferenceHint = els.comfyDebugReferenceHint.textContent || '';
+      modeConfig.defaultMiddleFrameReferenceHint = els.comfyDebugMiddleFrameReferenceHint?.textContent || '';
+      modeConfig.defaultLastFrameReferenceHint = els.comfyDebugLastFrameReferenceHint?.textContent || '';
+      item.modeConfigs[mode] = modeConfig;
       item.debugWorkflow = true;
-      els.comfyDebugNodeInfoList.value = item.nodeInfoList;
-      const previousState = comfyDebugStateByWorkflowId.get(workflow.id) || {};
-      comfyDebugStateByWorkflowId.set(workflow.id, {
+      els.comfyDebugNodeInfoList.value = modeConfig.nodeInfoList;
+      const stateKey = comfyDebugLeafKey(workflow.id, mode);
+      const previousState = comfyDebugStateByWorkflowId.get(stateKey) || {};
+      comfyDebugStateByWorkflowId.set(stateKey, {
         ...previousState,
         ...readComfyDebugFormState(),
         results: Array.isArray(previousState.results) ? previousState.results : [],
@@ -9272,8 +9462,9 @@ INDEX_HTML = r"""<!doctype html>
           }),
         });
         comfyDebugLastResults = Array.isArray(data.results) ? data.results : [];
-      const currentState = comfyDebugStateByWorkflowId.get(selected.id) || readComfyDebugFormState();
-      comfyDebugStateByWorkflowId.set(selected.id, {
+      const stateKey = activeComfyDebugStateKey();
+      const currentState = comfyDebugStateByWorkflowId.get(stateKey) || readComfyDebugFormState();
+      comfyDebugStateByWorkflowId.set(stateKey, {
         ...currentState,
         ...readComfyDebugFormState(),
         results: compactComfyDebugResults(comfyDebugLastResults),
@@ -9569,7 +9760,7 @@ INDEX_HTML = r"""<!doctype html>
     };
     function activeComfyDebugState() {
       const workflow = activeComfyDebugWorkflow();
-      return workflow ? comfyDebugStateByWorkflowId.get(workflow.id) : null;
+      return workflow ? comfyDebugStateByWorkflowId.get(activeComfyDebugStateKey()) : null;
     }
 
     function syncComfyDebugRunButton() {
@@ -9589,7 +9780,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function renderComfyDebugStatePreview(workflow) {
-      const state = workflow ? comfyDebugStateByWorkflowId.get(workflow.id) : null;
+      const state = workflow ? comfyDebugStateByWorkflowId.get(activeComfyDebugStateKey()) : null;
       if (state?.running) {
         renderComfyDebugRunningAsync(workflow, state);
       } else if (state?.error) {
@@ -9694,7 +9885,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function startComfyDebugWorkflowRunState(selected, statusText) {
-      const existingState = comfyDebugStateByWorkflowId.get(selected.id) || {};
+      const stateKey = activeComfyDebugStateKey();
+      const existingState = comfyDebugStateByWorkflowId.get(stateKey) || {};
       const startedAt = Date.now() / 1000;
       const startState = {
         ...existingState,
@@ -9707,7 +9899,7 @@ INDEX_HTML = r"""<!doctype html>
         elapsedSeconds: 0,
         error: '',
       };
-      comfyDebugStateByWorkflowId.set(selected.id, startState);
+      comfyDebugStateByWorkflowId.set(stateKey, startState);
       ensureComfyDebugElapsedTimer();
       syncComfyDebugRunButton();
       renderComfyDebugWorkflows({ refreshForm: false });
@@ -9719,23 +9911,23 @@ INDEX_HTML = r"""<!doctype html>
       return startState;
     }
 
-    function pollComfyDebugRun(workflowId, runId) {
-      if (!workflowId || !runId) {
-        markComfyDebugRunFailed(workflowId, '后端没有返回运行任务 ID');
+    function pollComfyDebugRun(stateKey, runId) {
+      if (!stateKey || !runId) {
+        markComfyDebugRunFailed(stateKey, '后端没有返回运行任务 ID');
         return;
       }
-      if (comfyDebugPollTimers.has(workflowId)) {
-        clearTimeout(comfyDebugPollTimers.get(workflowId));
-        comfyDebugPollTimers.delete(workflowId);
+      if (comfyDebugPollTimers.has(stateKey)) {
+        clearTimeout(comfyDebugPollTimers.get(stateKey));
+        comfyDebugPollTimers.delete(stateKey);
       }
       const tick = async () => {
         try {
           const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
-          const state = comfyDebugStateByWorkflowId.get(workflowId) || {};
+          const state = comfyDebugStateByWorkflowId.get(stateKey) || {};
           if (state.runId && state.runId !== runId) return;
           const status = job.status || '';
           const timing = comfyDebugTimingFromJob(job, state);
-          comfyDebugStateByWorkflowId.set(workflowId, {
+          comfyDebugStateByWorkflowId.set(stateKey, {
             ...state,
             ...timing,
             running: !['completed', 'failed', 'cancelled', 'paused'].includes(status),
@@ -9743,7 +9935,7 @@ INDEX_HTML = r"""<!doctype html>
             error: status === 'failed' ? (job.error || '运行失败') : '',
           });
           renderComfyDebugWorkflows({ refreshForm: false });
-          if (activeComfyDebugWorkflowId === workflowId) {
+          if (activeComfyDebugStateKey() === stateKey) {
             renderComfyDebugStatePreview(activeComfyDebugWorkflow());
             syncComfyDebugRunButton();
           }
@@ -9751,9 +9943,9 @@ INDEX_HTML = r"""<!doctype html>
             const result = job.result || {};
             const results = Array.isArray(result.results) ? result.results : (Array.isArray(job.results) ? job.results : []);
             comfyDebugLastResults = results;
-            const finalState = comfyDebugStateByWorkflowId.get(workflowId) || {};
+            const finalState = comfyDebugStateByWorkflowId.get(stateKey) || {};
             const finalTiming = comfyDebugTimingFromJob(job, finalState);
-            comfyDebugStateByWorkflowId.set(workflowId, {
+            comfyDebugStateByWorkflowId.set(stateKey, {
               ...finalState,
               ...finalTiming,
               running: false,
@@ -9761,14 +9953,14 @@ INDEX_HTML = r"""<!doctype html>
               error: '',
               results: compactComfyDebugResults(results),
             });
-            comfyDebugPollTimers.delete(workflowId);
+            comfyDebugPollTimers.delete(stateKey);
             await loadAssetLibrary().catch(() => {});
             saveSettings();
             renderComfyDebugWorkflows({ refreshForm: false });
-            if (activeComfyDebugWorkflowId === workflowId) {
-              renderComfyDebugResults(results, comfyDebugStateByWorkflowId.get(workflowId));
+            if (activeComfyDebugStateKey() === stateKey) {
+              renderComfyDebugResults(results, comfyDebugStateByWorkflowId.get(stateKey));
               if (els.comfyDebugStatus) {
-                const elapsed = comfyDebugElapsedLabel(comfyDebugStateByWorkflowId.get(workflowId));
+                const elapsed = comfyDebugElapsedLabel(comfyDebugStateByWorkflowId.get(stateKey));
                 els.comfyDebugStatus.textContent = `调试完成：${results.length} 个结果${elapsed ? ' · ' + elapsed : ''}`;
                 els.comfyDebugStatus.classList.remove('error');
               }
@@ -9779,34 +9971,34 @@ INDEX_HTML = r"""<!doctype html>
           }
           if (['failed', 'cancelled', 'paused'].includes(status)) {
             const message = job.error || job.message || `运行结束：${status}`;
-            markComfyDebugRunFailed(workflowId, message);
-            comfyDebugPollTimers.delete(workflowId);
+            markComfyDebugRunFailed(stateKey, message);
+            comfyDebugPollTimers.delete(stateKey);
             return;
           }
-          comfyDebugPollTimers.set(workflowId, setTimeout(tick, 1800));
+          comfyDebugPollTimers.set(stateKey, setTimeout(tick, 1800));
         } catch (err) {
-          markComfyDebugRunFailed(workflowId, err.message || '轮询运行状态失败');
-          comfyDebugPollTimers.delete(workflowId);
+          markComfyDebugRunFailed(stateKey, err.message || '轮询运行状态失败');
+          comfyDebugPollTimers.delete(stateKey);
         }
       };
-      comfyDebugPollTimers.set(workflowId, setTimeout(tick, 800));
+      comfyDebugPollTimers.set(stateKey, setTimeout(tick, 800));
     }
 
     function resumeComfyDebugPolls() {
-      for (const [workflowId, state] of comfyDebugStateByWorkflowId.entries()) {
-        if (state?.running && state?.runId && !comfyDebugPollTimers.has(workflowId)) {
+      for (const [stateKey, state] of comfyDebugStateByWorkflowId.entries()) {
+        if (state?.running && state?.runId && !comfyDebugPollTimers.has(stateKey)) {
           ensureComfyDebugElapsedTimer();
-          pollComfyDebugRun(workflowId, state.runId);
+          pollComfyDebugRun(stateKey, state.runId);
         }
       }
       syncComfyDebugRunButton();
     }
 
-    function markComfyDebugRunFailed(workflowId, message) {
-      const state = comfyDebugStateByWorkflowId.get(workflowId) || {};
+    function markComfyDebugRunFailed(stateKey, message) {
+      const state = comfyDebugStateByWorkflowId.get(stateKey) || {};
       const finishedAt = state.finishedAt || Date.now() / 1000;
       const elapsedSeconds = state.elapsedSeconds || comfyDebugElapsedSeconds({ ...state, finishedAt });
-      comfyDebugStateByWorkflowId.set(workflowId, {
+      comfyDebugStateByWorkflowId.set(stateKey, {
         ...state,
         running: false,
         status: 'failed',
@@ -9816,7 +10008,7 @@ INDEX_HTML = r"""<!doctype html>
       });
       saveSettings();
       renderComfyDebugWorkflows({ refreshForm: false });
-      if (activeComfyDebugWorkflowId === workflowId) {
+      if (activeComfyDebugStateKey() === stateKey) {
         renderComfyDebugError(message);
         syncComfyDebugRunButton();
       }
@@ -9844,6 +10036,7 @@ INDEX_HTML = r"""<!doctype html>
       }
 
       saveActiveComfyDebugWorkflowConfig(false);
+      const runStateKey = activeComfyDebugStateKey();
       const startState = startComfyDebugWorkflowRunState(
         selected,
         `正在提交：${selected.name || selected.id}`,
@@ -9859,9 +10052,10 @@ INDEX_HTML = r"""<!doctype html>
         const runId = String(job?.run_id || '').trim();
         if (!runId) throw new Error('后端没有返回调试任务 ID');
 
-        const currentState = comfyDebugStateByWorkflowId.get(selected.id) || startState;
+        const stateKey = runStateKey;
+        const currentState = comfyDebugStateByWorkflowId.get(stateKey) || startState;
         const timing = comfyDebugTimingFromJob(job, currentState);
-        comfyDebugStateByWorkflowId.set(selected.id, {
+        comfyDebugStateByWorkflowId.set(stateKey, {
           ...currentState,
           ...timing,
           running: true,
@@ -9872,13 +10066,13 @@ INDEX_HTML = r"""<!doctype html>
         });
         saveSettings();
         renderComfyDebugWorkflows({ refreshForm: false });
-        if (activeComfyDebugWorkflowId === selected.id) {
+        if (activeComfyDebugStateKey() === stateKey) {
           renderComfyDebugStatePreview(selected);
           syncComfyDebugRunButton();
         }
-        pollComfyDebugRun(selected.id, runId);
+        pollComfyDebugRun(stateKey, runId);
       } catch (err) {
-        markComfyDebugRunFailed(selected.id, err?.message || 'ComfyUI 调试提交失败');
+        markComfyDebugRunFailed(runStateKey, err?.message || 'ComfyUI 调试提交失败');
       }
     }
 
@@ -12801,6 +12995,16 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             height_value = str(library_item.get("height") or library_item.get("defaultHeight") or library_item.get("default_height") or "").strip()
             duration_value = str(library_item.get("duration") or library_item.get("defaultDuration") or library_item.get("default_duration") or "").strip()
             fps_value = str(library_item.get("fps") or library_item.get("defaultFps") or library_item.get("default_fps") or "").strip()
+            mode_configs = library_item.get("modeConfigs") or library_item.get("mode_configs")
+            mode_config = mode_configs.get(workflow_mode) if isinstance(mode_configs, dict) and isinstance(mode_configs.get(workflow_mode), dict) else None
+            if mode_config:
+                endpoint_value = str(mode_config.get("endpoint") or endpoint_value).strip()
+                node_info_value = str(mode_config.get("nodeInfoList") or mode_config.get("node_info_list_json") or node_info_value).strip()
+                poll_timeout_value = str(mode_config.get("pollTimeout") or mode_config.get("poll_timeout_seconds") or poll_timeout_value).strip()
+                width_value = str(mode_config.get("defaultWidth") or mode_config.get("default_width") or width_value).strip()
+                height_value = str(mode_config.get("defaultHeight") or mode_config.get("default_height") or height_value).strip()
+                duration_value = str(mode_config.get("defaultDuration") or mode_config.get("default_duration") or duration_value).strip()
+                fps_value = str(mode_config.get("defaultFps") or mode_config.get("default_fps") or fps_value).strip()
             if endpoint_value:
                 target["default_endpoint"] = endpoint_value
             if node_info_value and node_info_value != "[]":
