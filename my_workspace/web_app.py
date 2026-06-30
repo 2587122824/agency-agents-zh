@@ -3917,6 +3917,7 @@ INDEX_HTML = r"""<!doctype html>
     let autoFocusOutputDuringRun = false;
     let activeRunTaskName = "";
     let workflowInteractionLocked = false;
+    let outputSelectionVersion = 0;
     let lastTaskDetailRefreshAt = 0;
     let assetPreviewItems = [];
     let assetPreviewTaskName = "";
@@ -6888,16 +6889,23 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    async function selectTask(name) {
+    async function selectTask(name, options = {}) {
       if (name === '__comfy_debug__') {
         setStatus('独立 ComfyUI 调试输出不再作为正式任务打开，请在调试台查看。', true);
         return;
       }
+      const allowDuringRun = Boolean(options.allowDuringRun);
+      if (!allowDuringRun && (autoFocusOutputDuringRun || currentRunId)) {
+        return;
+      }
+      const selectionVersion = outputSelectionVersion;
       selectedTask = name;
       showView('output');
       selectedFile = null;
       await loadTasks();
       const data = await api(`/api/task?name=${encodeURIComponent(name)}`);
+      if (!allowDuringRun && selectionVersion !== outputSelectionVersion) return;
+      if (!allowDuringRun && (autoFocusOutputDuringRun || currentRunId)) return;
       selectedTaskSummary = data.summary || {};
       selectedTaskStatus = canonicalTaskStatus(data);
       selectedTaskAllowedActions = Array.isArray(selectedTaskStatus?.allowed_actions)
@@ -6957,6 +6965,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function prepareOutputForPendingRun(title) {
+      outputSelectionVersion += 1;
       selectedTask = null;
       selectedFile = null;
       selectedTaskSummary = {};
@@ -7030,7 +7039,7 @@ INDEX_HTML = r"""<!doctype html>
     async function selectTaskAndOpenJobOutput(job) {
       if (!job?.task_name) return;
       if (job.task_name === '__comfy_debug__') return;
-      await selectTask(job.task_name);
+      await selectTask(job.task_name, { allowDuringRun: true });
       const preferred = job.status === 'completed' && !job.rerun_result
         ? preferredCompletedTaskFile()
         : preferredStepOutputFromJob(job);
@@ -7043,7 +7052,7 @@ INDEX_HTML = r"""<!doctype html>
       activeRunTaskName = job.task_name;
       await loadTasks();
       if (selectedTask !== job.task_name) {
-        await selectTask(job.task_name);
+        await selectTask(job.task_name, { allowDuringRun: true });
       }
     }
 
