@@ -1679,6 +1679,36 @@ INDEX_HTML = r"""<!doctype html>
       justify-content: flex-end;
       gap: 8px;
     }
+    .asset-detail-relation {
+      display: grid;
+      gap: 6px;
+      padding: 10px;
+      border: 1px solid rgba(148, 163, 184, .26);
+      border-radius: 10px;
+      background: rgba(248, 250, 252, .72);
+      color: #475569;
+      font-size: 12px;
+    }
+    .asset-detail-relation[hidden] {
+      display: none;
+    }
+    .asset-detail-relation-title {
+      color: #0f172a;
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .asset-detail-relation-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 6px 10px;
+    }
+    .asset-detail-relation-row {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .asset-detail-relation-row span {
+      color: #64748b;
+    }
     .asset-import-modal {
       position: fixed;
       inset: 0;
@@ -2956,6 +2986,7 @@ INDEX_HTML = r"""<!doctype html>
             <label>备注
               <textarea id="assetLibraryDetailNote" spellcheck="false" placeholder="写下这个素材适合怎么复用。"></textarea>
             </label>
+            <div class="asset-detail-relation" id="assetLibraryDetailRelation"></div>
             <div class="asset-detail-actions">
               <button id="assetLibraryDetailOpenBtn" type="button">打开预览</button>
               <button class="danger" id="assetLibraryDetailDeleteBtn" type="button">删除</button>
@@ -3502,6 +3533,7 @@ INDEX_HTML = r"""<!doctype html>
       assetLibraryDetailName: document.getElementById('assetLibraryDetailName'),
       assetLibraryDetailCategory: document.getElementById('assetLibraryDetailCategory'),
       assetLibraryDetailNote: document.getElementById('assetLibraryDetailNote'),
+      assetLibraryDetailRelation: document.getElementById('assetLibraryDetailRelation'),
       assetLibraryDetailMeta: document.getElementById('assetLibraryDetailMeta'),
       assetLibraryDetailCloseBtn: document.getElementById('assetLibraryDetailCloseBtn'),
       assetLibraryDetailOpenBtn: document.getElementById('assetLibraryDetailOpenBtn'),
@@ -8379,7 +8411,48 @@ INDEX_HTML = r"""<!doctype html>
       if (els.assetLibraryDetailName) els.assetLibraryDetailName.value = item.name || assetFileLabel(item.file);
       renderAssetLibraryCategorySelect(els.assetLibraryDetailCategory, assetPrimaryCategory(item));
       if (els.assetLibraryDetailNote) els.assetLibraryDetailNote.value = item.note || '';
+      renderAssetLibraryRelation(item);
       setAssetLibraryDetailDirty(false);
+    }
+
+    function renderAssetLibraryRelation(item) {
+      const box = els.assetLibraryDetailRelation;
+      if (!box) return;
+      box.innerHTML = '';
+      const relationRows = [
+        ['资产 ID', item.asset_id || item.id || ''],
+        ['来源任务', item.source_task_id || item.source_task || '手动导入'],
+        ['生产节点', item.producer_job_id || '未记录'],
+        ['父资产', Array.isArray(item.parent_asset_ids) && item.parent_asset_ids.length ? item.parent_asset_ids.join(', ') : '无'],
+        ['角色', item.character_id || '未绑定'],
+        ['风格', item.style_id || '未绑定'],
+        ['场景/镜头', item.scene_id || '未绑定'],
+        ['版本', item.version ? `v${item.version}` : 'v1'],
+        ['已批准', item.approved ? '是' : '否'],
+        ['使用次数', String(Number(item.usage_count || 0))],
+      ];
+      const hasRelation = relationRows.some(([label, value]) => value && !['未记录', '无', '未绑定', '否', '0'].includes(String(value)));
+      if (!hasRelation) {
+        box.hidden = true;
+        return;
+      }
+      box.hidden = false;
+      const title = document.createElement('div');
+      title.className = 'asset-detail-relation-title';
+      title.textContent = '资产关系';
+      const grid = document.createElement('div');
+      grid.className = 'asset-detail-relation-grid';
+      relationRows.forEach(([label, value]) => {
+        const row = document.createElement('div');
+        row.className = 'asset-detail-relation-row';
+        const key = document.createElement('span');
+        key.textContent = `${label}：`;
+        row.appendChild(key);
+        row.appendChild(document.createTextNode(value || '—'));
+        grid.appendChild(row);
+      });
+      box.appendChild(title);
+      box.appendChild(grid);
     }
 
     function fitAssetDetailPreviewMedia(media) {
@@ -8405,6 +8478,10 @@ INDEX_HTML = r"""<!doctype html>
       selectedAssetLibraryId = '';
       assetLibraryDetailDirty = false;
       if (els.assetLibraryDetail) els.assetLibraryDetail.hidden = true;
+      if (els.assetLibraryDetailRelation) {
+        els.assetLibraryDetailRelation.hidden = true;
+        els.assetLibraryDetailRelation.innerHTML = '';
+      }
       renderAssetLibrary();
     }
 
@@ -12160,7 +12237,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if not path.is_file() or not self._is_relative_to(path, ASSET_LIBRARY_ROOT):
                 changed = True
                 continue
-            item = dict(item)
+            original_item = dict(item)
+            item = self._normalize_asset_library_item(original_item, path=path)
+            if item != original_item:
+                changed = True
             item["size"] = path.stat().st_size
             item["mtime"] = path.stat().st_mtime
             suffix = path.suffix.lower()
@@ -12170,6 +12250,299 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if changed:
             self._write_asset_library_index(cleaned)
         return cleaned
+
+    @staticmethod
+    def _normalize_asset_library_item(item: dict, path: Path | None = None) -> dict:
+        normalized = dict(item)
+        asset_id = str(normalized.get("asset_id") or normalized.get("id") or "").strip() or uuid4().hex
+        normalized["id"] = str(normalized.get("id") or asset_id).strip() or asset_id
+        normalized["asset_id"] = asset_id
+        source_task = str(normalized.get("source_task_id") or normalized.get("source_task") or "").strip()
+        normalized["source_task"] = source_task
+        normalized["source_task_id"] = source_task
+        normalized["producer_job_id"] = str(normalized.get("producer_job_id") or normalized.get("job_id") or "").strip()
+        parent_ids = normalized.get("parent_asset_ids")
+        if isinstance(parent_ids, str):
+            parent_ids = [part.strip() for part in parent_ids.split(",") if part.strip()]
+        elif isinstance(parent_ids, list):
+            parent_ids = [str(part).strip() for part in parent_ids if str(part).strip()]
+        else:
+            parent_ids = []
+        normalized["parent_asset_ids"] = list(dict.fromkeys(parent_ids))
+        for key in ("character_id", "style_id", "scene_id"):
+            normalized[key] = str(normalized.get(key) or "").strip()
+        normalized["version"] = max(1, WorkflowWebHandler._safe_int(normalized.get("version"), default=1, minimum=1, maximum=999999))
+        normalized["approved"] = bool(normalized.get("approved", False))
+        normalized["usage_count"] = max(0, WorkflowWebHandler._safe_int(normalized.get("usage_count"), default=0, minimum=0, maximum=999999999))
+        normalized["derived_asset_ids"] = normalized.get("derived_asset_ids") if isinstance(normalized.get("derived_asset_ids"), list) else []
+        normalized["checksum"] = str(normalized.get("checksum") or normalized.get("sha256") or "").strip()
+        normalized["updated_at"] = float(normalized.get("updated_at") or normalized.get("created_at") or time.time())
+        return normalized
+
+    @staticmethod
+    def _new_asset_library_item(
+        *,
+        asset_id: str,
+        file: str,
+        name: str,
+        source_task: str,
+        source_file: str,
+        kind: str,
+        tags: list[str],
+        path: Path,
+        note: str = "",
+        producer_job_id: str = "",
+        parent_asset_ids: list[str] | None = None,
+        character_id: str = "",
+        style_id: str = "",
+        scene_id: str = "",
+        version: int = 1,
+        approved: bool = False,
+        usage_count: int = 0,
+    ) -> dict:
+        now = time.time()
+        item = {
+            "id": asset_id,
+            "asset_id": asset_id,
+            "file": file,
+            "name": name,
+            "source_task": source_task,
+            "source_task_id": source_task,
+            "source_file": source_file,
+            "producer_job_id": producer_job_id,
+            "parent_asset_ids": parent_asset_ids or [],
+            "character_id": character_id,
+            "style_id": style_id,
+            "scene_id": scene_id,
+            "version": version,
+            "approved": approved,
+            "usage_count": usage_count,
+            "kind": kind,
+            "tags": tags,
+            "note": note,
+            "created_at": now,
+            "updated_at": now,
+            "size": path.stat().st_size,
+            "mtime": path.stat().st_mtime,
+            "checksum": WorkflowWebHandler._file_sha256(path),
+        }
+        return WorkflowWebHandler._normalize_asset_library_item(item, path=path)
+
+    def _asset_relation_from_task_file(self, task: str, file_name: str) -> dict:
+        if not task or not file_name:
+            return {}
+        try:
+            task_dir = self._safe_task_dir(task)
+        except Exception:
+            return {}
+        normalized_file = str(file_name or "").replace("\\", "/").strip()
+        manifest = self._read_json_file(task_dir / "production_manifest.json")
+        graph = self._read_json_file(task_dir / "production_graph.json")
+        plan = self._read_json_file(task_dir / "production_plan.json")
+        job_id = self._producer_job_id_for_file(normalized_file, manifest)
+        if not job_id:
+            job_id = self._producer_job_id_for_file(normalized_file, self._read_json_file(task_dir / "production_job_state.json"))
+        job = self._production_job_definition(job_id, graph, plan)
+        source_intent = self._production_prompt_item_for_job(job_id, plan)
+        character_id = str(job.get("character_id") or source_intent.get("character_id") or "").strip()
+        style_id = str(job.get("style_id") or source_intent.get("style_id") or "").strip()
+        scene_id = str(job.get("scene_id") or source_intent.get("scene_id") or source_intent.get("shot_id") or "").strip()
+        parent_asset_ids = self._parent_asset_ids_from_job(task, job)
+        return {
+            "producer_job_id": job_id,
+            "parent_asset_ids": parent_asset_ids,
+            "character_id": character_id,
+            "style_id": style_id,
+            "scene_id": scene_id,
+        }
+
+    @classmethod
+    def _producer_job_id_for_file(cls, file_name: str, data: dict) -> str:
+        if not isinstance(data, dict):
+            return ""
+        normalized_file = str(file_name or "").replace("\\", "/").strip()
+        candidates = cls._file_match_candidates(normalized_file)
+        for node in data.get("production_nodes") or []:
+            if not isinstance(node, dict):
+                continue
+            outputs = node.get("outputs") if isinstance(node.get("outputs"), list) else []
+            if any(candidates & cls._file_match_candidates(output) for output in outputs):
+                return str(node.get("job_id") or "").strip()
+        for artifact in data.get("artifacts") or []:
+            if not isinstance(artifact, dict):
+                continue
+            path = artifact.get("path") or artifact.get("file")
+            if candidates & cls._file_match_candidates(path):
+                return str(artifact.get("producer_job_id") or artifact.get("job_id") or "").strip()
+        jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
+        for job_id, state in jobs.items():
+            if not isinstance(state, dict):
+                continue
+            outputs = []
+            for key in ("downloaded_files", "outputs", "files"):
+                if isinstance(state.get(key), list):
+                    outputs.extend(state[key])
+            artifacts = state.get("artifacts") if isinstance(state.get("artifacts"), list) else []
+            outputs.extend(item.get("path") for item in artifacts if isinstance(item, dict))
+            if any(candidates & cls._file_match_candidates(output) for output in outputs):
+                return str(job_id).strip()
+        return ""
+
+    @staticmethod
+    def _file_match_candidates(value: object) -> set[str]:
+        text = str(value or "").replace("\\", "/").strip()
+        if not text:
+            return set()
+        path = Path(text)
+        parts = {text, text.lstrip("/"), path.name}
+        for marker in ("/my_task_output/", "/my_workspace/"):
+            if marker in text:
+                parts.add(text.split(marker, 1)[1])
+        for prefix in ("my_workspace/", "my_task_output/"):
+            if text.startswith(prefix):
+                parts.add(text[len(prefix) :])
+        if "/" in text:
+            segments = text.split("/")
+            for index, segment in enumerate(segments):
+                if segment in {"generated_images", "video_clips", "comfyui", "assets", "audio"}:
+                    parts.add("/".join(segments[index:]))
+        return {part for part in parts if part}
+
+    @staticmethod
+    def _production_job_definition(job_id: str, graph: dict, plan: dict) -> dict:
+        if not job_id:
+            return {}
+        for source in (graph.get("jobs") if isinstance(graph.get("jobs"), list) else []):
+            if isinstance(source, dict) and str(source.get("job_id") or "") == job_id:
+                return dict(source)
+        for source in (plan.get("visual_jobs") if isinstance(plan.get("visual_jobs"), list) else []):
+            if isinstance(source, dict) and str(source.get("job_id") or "") == job_id:
+                return dict(source)
+        compiled = plan.get("compiled_payload") if isinstance(plan.get("compiled_payload"), dict) else {}
+        for key in ("image_prompts", "video_prompts"):
+            for source in compiled.get(key) or []:
+                if isinstance(source, dict) and str(source.get("job_id") or source.get("id") or "") == job_id:
+                    return dict(source)
+        return {}
+
+    @staticmethod
+    def _production_prompt_item_for_job(job_id: str, plan: dict) -> dict:
+        if not job_id or not isinstance(plan, dict):
+            return {}
+        compiled = plan.get("compiled_payload") if isinstance(plan.get("compiled_payload"), dict) else {}
+        for key in ("image_prompts", "video_prompts"):
+            for source in compiled.get(key) or []:
+                if isinstance(source, dict) and str(source.get("job_id") or source.get("id") or "") == job_id:
+                    return dict(source)
+        return {}
+
+    def _parent_asset_ids_from_job(self, task: str, job: dict) -> list[str]:
+        if not isinstance(job, dict):
+            return []
+        parent_ids: list[str] = []
+        bindings = job.get("input_bindings") or job.get("inputs")
+        if isinstance(bindings, dict):
+            for spec in bindings.values():
+                if isinstance(spec, dict):
+                    from_job = str(spec.get("from_job") or "").strip()
+                    if from_job:
+                        parent_ids.extend(self._asset_ids_for_task_job(task, from_job))
+                    asset_id = str(spec.get("asset_id") or "").strip()
+                    if asset_id:
+                        parent_ids.append(asset_id)
+                elif isinstance(spec, str):
+                    parent_ids.extend(self._asset_ids_for_source_file(task, spec))
+        for dependency in self._string_list(job.get("depends_on")):
+            parent_ids.extend(self._asset_ids_for_task_job(task, dependency))
+        return list(dict.fromkeys(parent_ids))
+
+    def _asset_ids_for_task_job(self, task: str, job_id: str) -> list[str]:
+        if not task or not job_id:
+            return []
+        ids = []
+        for item in self._read_asset_library_index():
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("source_task_id") or item.get("source_task") or "").strip() == task and str(item.get("producer_job_id") or "").strip() == job_id:
+                ids.append(str(item.get("asset_id") or item.get("id") or "").strip())
+        return [item for item in ids if item]
+
+    def _asset_ids_for_source_file(self, task: str, source_file: str) -> list[str]:
+        normalized = str(source_file or "").replace("\\", "/").strip()
+        if not normalized:
+            return []
+        ids = []
+        candidates = self._file_match_candidates(normalized)
+        for item in self._read_asset_library_index():
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("source_task_id") or item.get("source_task") or "").strip() != task:
+                continue
+            if candidates & self._file_match_candidates(item.get("source_file")):
+                ids.append(str(item.get("asset_id") or item.get("id") or "").strip())
+        return [item for item in ids if item]
+
+    @staticmethod
+    def _link_parent_asset_records(items: list[dict], item: dict) -> None:
+        child_id = str(item.get("asset_id") or item.get("id") or "").strip()
+        if not child_id:
+            return
+        parent_ids = [str(parent).strip() for parent in (item.get("parent_asset_ids") or []) if str(parent).strip()]
+        if not parent_ids:
+            return
+        for parent in items:
+            parent_id = str(parent.get("asset_id") or parent.get("id") or "").strip()
+            if parent_id not in parent_ids:
+                continue
+            derived = parent.get("derived_asset_ids") if isinstance(parent.get("derived_asset_ids"), list) else []
+            if child_id not in derived:
+                parent["derived_asset_ids"] = [*derived, child_id]
+                parent["updated_at"] = time.time()
+
+    @staticmethod
+    def _unlink_removed_asset_records(items: list[dict], removed: list[dict]) -> None:
+        removed_ids = {
+            str(item.get("asset_id") or item.get("id") or "").strip()
+            for item in removed
+            if isinstance(item, dict) and str(item.get("asset_id") or item.get("id") or "").strip()
+        }
+        if not removed_ids:
+            return
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            for key in ("parent_asset_ids", "derived_asset_ids"):
+                values = item.get(key) if isinstance(item.get(key), list) else []
+                filtered = [str(value).strip() for value in values if str(value).strip() and str(value).strip() not in removed_ids]
+                if filtered != values:
+                    item[key] = filtered
+                    item["updated_at"] = time.time()
+
+    @staticmethod
+    def _next_asset_version(items: list[dict], character_id: str, style_id: str, scene_id: str, tags: list[str]) -> int:
+        key_tags = set(tags or [])
+        related_versions = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if character_id and str(item.get("character_id") or "") != character_id:
+                continue
+            if style_id and str(item.get("style_id") or "") != style_id:
+                continue
+            if scene_id and str(item.get("scene_id") or "") != scene_id:
+                continue
+            if not any(tag in set(item.get("tags") or []) for tag in key_tags):
+                continue
+            related_versions.append(WorkflowWebHandler._safe_int(item.get("version"), default=1, minimum=1, maximum=999999))
+        return (max(related_versions) + 1) if related_versions else 1
+
+    @staticmethod
+    def _file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     @classmethod
     def _task_comfy_debug_status(cls, task_dir: Path) -> dict:
@@ -13454,7 +13827,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         target_dir.mkdir(parents=True, exist_ok=True)
         items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
         for existing in items:
-            if str(existing.get("source_task") or "") == task and str(existing.get("source_file") or "") == file_name:
+            if str(existing.get("source_task_id") or existing.get("source_task") or "") == task and str(existing.get("source_file") or "") == file_name:
                 return {"ok": True, "asset": existing, "duplicate": True}
         asset_id = uuid4().hex
         safe_stem = self._safe_asset_stem(Path(file_name).stem or "asset")
@@ -13464,18 +13837,25 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not self._is_relative_to(target, ASSET_LIBRARY_ROOT):
             raise ValueError("Invalid asset path")
         shutil.copy2(source_path, target)
-        item = {
-            "id": asset_id,
-            "file": relative_library_name,
-            "name": label or self._asset_label(file_name),
-            "source_task": task,
-            "source_file": file_name,
-            "kind": "image" if suffix in IMAGE_EXTENSIONS else ("audio" if suffix in AUDIO_EXTENSIONS else "video"),
-            "tags": clean_tags,
-            "created_at": time.time(),
-            "size": target.stat().st_size,
-            "mtime": target.stat().st_mtime,
-        }
+        relation = self._asset_relation_from_task_file(task, file_name)
+        item = self._new_asset_library_item(
+            asset_id=asset_id,
+            file=relative_library_name,
+            name=label or self._asset_label(file_name),
+            source_task=task,
+            source_file=file_name,
+            kind="image" if suffix in IMAGE_EXTENSIONS else ("audio" if suffix in AUDIO_EXTENSIONS else "video"),
+            tags=clean_tags,
+            path=target,
+            producer_job_id=str(payload.get("producer_job_id") or relation.get("producer_job_id") or ""),
+            parent_asset_ids=payload.get("parent_asset_ids") if isinstance(payload.get("parent_asset_ids"), list) else relation.get("parent_asset_ids") or [],
+            character_id=str(payload.get("character_id") or relation.get("character_id") or ""),
+            style_id=str(payload.get("style_id") or relation.get("style_id") or ""),
+            scene_id=str(payload.get("scene_id") or relation.get("scene_id") or ""),
+            version=self._next_asset_version(items, str(payload.get("character_id") or relation.get("character_id") or ""), str(payload.get("style_id") or relation.get("style_id") or ""), str(payload.get("scene_id") or relation.get("scene_id") or ""), clean_tags),
+            approved=bool(payload.get("approved", False)),
+        )
+        self._link_parent_asset_records(items, item)
         items.insert(0, item)
         self._write_asset_library_index(items)
         return {"ok": True, "asset": item}
@@ -13496,6 +13876,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                         "file": file_name,
                         "label": label,
                         "tags": [kind_tag, clean_tag],
+                        "approved": True,
                     }
                 )
                 asset = result.get("asset") if isinstance(result, dict) else None
@@ -13691,21 +14072,27 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not self._is_relative_to(target, ASSET_LIBRARY_ROOT):
             raise ValueError("Invalid asset path")
         target.write_bytes(file_bytes)
-        item = {
-            "id": asset_id,
-            "file": f"{folder_name}/{library_name}",
-            "name": str(payload.get("name") or "").strip() or Path(filename).stem or filename,
-            "source_task": "",
-            "source_file": filename,
-            "kind": "image" if suffix in IMAGE_EXTENSIONS else ("audio" if suffix in AUDIO_EXTENSIONS else "video"),
-            "tags": clean_tags,
-            "note": str(payload.get("note") or "").strip(),
-            "created_at": time.time(),
-            "updated_at": time.time(),
-            "size": target.stat().st_size,
-            "mtime": target.stat().st_mtime,
-        }
         items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
+        item = self._new_asset_library_item(
+            asset_id=asset_id,
+            file=f"{folder_name}/{library_name}",
+            name=str(payload.get("name") or "").strip() or Path(filename).stem or filename,
+            source_task=str(payload.get("source_task_id") or payload.get("source_task") or "").strip(),
+            source_file=filename,
+            kind="image" if suffix in IMAGE_EXTENSIONS else ("audio" if suffix in AUDIO_EXTENSIONS else "video"),
+            tags=clean_tags,
+            path=target,
+            note=str(payload.get("note") or "").strip(),
+            producer_job_id=str(payload.get("producer_job_id") or "").strip(),
+            parent_asset_ids=payload.get("parent_asset_ids") if isinstance(payload.get("parent_asset_ids"), list) else [],
+            character_id=str(payload.get("character_id") or "").strip(),
+            style_id=str(payload.get("style_id") or "").strip(),
+            scene_id=str(payload.get("scene_id") or "").strip(),
+            version=max(1, self._safe_int(payload.get("version"), default=1, minimum=1, maximum=999999)),
+            approved=bool(payload.get("approved", False)),
+            usage_count=max(0, self._safe_int(payload.get("usage_count"), default=0, minimum=0, maximum=999999999)),
+        )
+        self._link_parent_asset_records(items, item)
         items.insert(0, item)
         self._write_asset_library_index(items)
         return {"ok": True, "asset": item}
@@ -13717,6 +14104,16 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         tags = payload.get("tags") if isinstance(payload.get("tags"), list) else []
         name = str(payload.get("name") or "").strip()
         note = str(payload.get("note") or "").strip()
+        relation_fields = {
+            "producer_job_id": str(payload.get("producer_job_id") or "").strip(),
+            "parent_asset_ids": payload.get("parent_asset_ids") if isinstance(payload.get("parent_asset_ids"), list) else None,
+            "character_id": str(payload.get("character_id") or "").strip(),
+            "style_id": str(payload.get("style_id") or "").strip(),
+            "scene_id": str(payload.get("scene_id") or "").strip(),
+            "version": payload.get("version"),
+            "approved": payload.get("approved") if "approved" in payload else None,
+            "usage_count": payload.get("usage_count"),
+        }
         clean_tags: list[str] = []
         for tag in tags:
             value = str(tag or "").strip()
@@ -13724,7 +14121,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 clean_tags.append(value)
         items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
         updated: dict | None = None
-        for item in items:
+        for item_index, item in enumerate(items):
             if str(item.get("id") or "") == asset_id:
                 old_file = str(item.get("file") or "").strip()
                 if name:
@@ -13732,6 +14129,19 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 item["tags"] = clean_tags
                 item["note"] = note
                 item["updated_at"] = time.time()
+                if relation_fields["producer_job_id"]:
+                    item["producer_job_id"] = relation_fields["producer_job_id"]
+                if relation_fields["parent_asset_ids"] is not None:
+                    item["parent_asset_ids"] = self._string_list(relation_fields["parent_asset_ids"])
+                for relation_key in ("character_id", "style_id", "scene_id"):
+                    if relation_fields[relation_key]:
+                        item[relation_key] = relation_fields[relation_key]
+                if relation_fields["version"] not in (None, ""):
+                    item["version"] = max(1, self._safe_int(relation_fields["version"], default=1, minimum=1, maximum=999999))
+                if relation_fields["approved"] is not None:
+                    item["approved"] = bool(relation_fields["approved"])
+                if relation_fields["usage_count"] not in (None, ""):
+                    item["usage_count"] = max(0, self._safe_int(relation_fields["usage_count"], default=0, minimum=0, maximum=999999999))
                 folder_name = next((ASSET_LIBRARY_TAG_FOLDERS[tag] for tag in clean_tags if tag in ASSET_LIBRARY_TAG_FOLDERS), "uncategorized")
                 if old_file:
                     old_path = (ASSET_LIBRARY_ROOT / old_file).resolve()
@@ -13746,10 +14156,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                             item["file"] = f"{folder_name}/{old_path.name}"
                             item["size"] = new_path.stat().st_size
                             item["mtime"] = new_path.stat().st_mtime
+                            item["checksum"] = self._file_sha256(new_path)
+                        item = self._normalize_asset_library_item(item, path=new_path)
+                    else:
+                        item = self._normalize_asset_library_item(item)
+                else:
+                    item = self._normalize_asset_library_item(item)
+                items[item_index] = item
                 updated = item
                 break
         if updated is None:
             raise FileNotFoundError(asset_id)
+        self._link_parent_asset_records(items, updated)
         self._write_asset_library_index(items)
         return {"ok": True, "asset": updated}
 
@@ -13762,7 +14180,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         kept: list[dict] = []
         for item in items:
             matches_id = asset_id and str(item.get("id") or "") == asset_id
-            matches_source = task and file_name and str(item.get("source_task") or "") == task and str(item.get("source_file") or "") == file_name
+            matches_source = task and file_name and str(item.get("source_task_id") or item.get("source_task") or "") == task and str(item.get("source_file") or "") == file_name
             if matches_id or matches_source:
                 removed.append(item)
             else:
@@ -13779,6 +14197,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     target.unlink()
                 except OSError:
                     pass
+        self._unlink_removed_asset_records(kept, removed)
         self._write_asset_library_index(kept)
         return {"ok": True, "removed": len(removed), "assets": removed}
 
@@ -13850,6 +14269,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         except (TypeError, ValueError):
             number = default
         return max(minimum, min(maximum, number))
+
+    @staticmethod
+    def _string_list(value: object) -> list[str]:
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list):
+            return [str(part).strip() for part in value if str(part).strip()]
+        return []
 
     @staticmethod
     def _normalize_comfy_image_bytes(file_bytes: bytes, suffix: str) -> tuple[bytes, str]:
@@ -14586,10 +15013,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not clean_task_name:
             return []
         items = [item for item in self._read_asset_library_index() if isinstance(item, dict)]
-        removed = [item for item in items if str(item.get("source_task") or "").strip() == clean_task_name]
+        removed = [item for item in items if str(item.get("source_task_id") or item.get("source_task") or "").strip() == clean_task_name]
         if not removed:
             return []
-        kept = [item for item in items if str(item.get("source_task") or "").strip() != clean_task_name]
+        kept = [item for item in items if str(item.get("source_task_id") or item.get("source_task") or "").strip() != clean_task_name]
         library_root = ASSET_LIBRARY_ROOT.resolve()
         for item in removed:
             library_file = str(item.get("file") or "").strip()
@@ -14601,6 +15028,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     target.unlink()
                 except OSError:
                     pass
+        self._unlink_removed_asset_records(kept, removed)
         self._write_asset_library_index(kept)
         return removed
 
