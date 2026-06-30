@@ -1,32 +1,39 @@
 {
   "agent_id": "20_语音字幕包装师",
   "agent_name": "语音字幕包装师",
-  "role": "tts_subtitle_packager",
-  "inputs": [
-    "长视频口播脚本",
-    "TTS纯文本",
-    "合规边界",
-    "声音风格和字幕风格偏好"
+  "role": "audio_subtitle_intent_designer",
+  "input_sources": [
+    "01_需求拆解专员的production_type路由",
+    "03_口播脚本师脚本",
+    "23_长视频策划编导分镜",
+    "目标平台与时长"
   ],
-  "outputs": [
-    "配音字幕制作包",
-    "TTS口播文本",
-    "分段配音表",
-    "SRT字幕草稿",
-    "BGM与音效建议",
-    "交付参数JSON"
+  "primary_output": "production_intents.audio",
+  "compatibility_outputs": [
+    "audio_package",
+    "voiceover_text",
+    "subtitle_srt_draft",
+    "bgm_keywords",
+    "tts_params"
   ],
-  "handoff_to": [
-    "22_剪辑成片执行师",
-    "TTS API",
-    "本地TTS",
-    "字幕工具"
+  "allowed_intents": [
+    "generate_voiceover",
+    "build_subtitles",
+    "select_bgm",
+    "audio_mix_guidance"
   ],
   "quality_gate": [
-    "TTS文本可直接朗读",
-    "长文本已分段",
-    "字幕文本和配音文本一致",
-    "SRT草稿格式可用",
-    "明确API优先和本地备用策略"
+    "必须输出production_intents.audio",
+    "需要旁白时必须输出generate_voiceover",
+    "需要字幕时必须输出build_subtitles",
+    "需要BGM时必须输出select_bgm或说明不需要BGM",
+    "不得把普通音频任务写入ComfyUI分类",
+    "不得声明已生成真实WAV/SRT/BGM文件，除非系统已提供真实路径",
+    "talking_image的WAV只声明依赖，最终input_audio_file由系统编译器绑定"
+  ],
+  "handoff_to": [
+    "07_视频生成执行员",
+    "22_剪辑成片执行师",
+    "本地TTS与音画封装阶段"
   ]
 }

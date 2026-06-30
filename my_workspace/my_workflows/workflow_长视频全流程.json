@@ -1,9 +1,9 @@
 {
   "workflow_id": "workflow_长视频全流程",
-  "name": "长视频全流程",
-  "description": "按稳定生产顺序组织：需求Brief → 视频脚本 → 分镜设计 → 角色/参考图/关键帧 → 配音字幕 → 分段视频/B-roll/转场/后处理 → 标题封面 → 合规复核 → 拼接输出。",
+  "name": "通用视频生产主流程",
+  "description": "通用视频生产主工作流：数字员工负责需求拆解、脚本、分镜、生产意图、语音字幕和剪辑封装；系统编译器后续把 production_intents 编译为具体 ComfyUI / 本地 TTS / FFmpeg 生产图。第一版继续双轨输出，保留 image_prompts、video_prompts、语音字幕包和剪辑时间线兼容现有生产链路。",
   "input_required": [
-    "长视频主题或产品信息",
+    "视频主题或产品信息",
     "目标平台",
     "目标观众",
     "目标时长",
@@ -13,78 +13,94 @@
   ],
   "steps": [
     {
-      "step": 1,
-      "agent": "01_需求拆解专员",
-      "task": "把用户原始需求整理成可执行的长视频生产Brief，明确内容目标、受众、平台、栏目方向、可复用素材、禁区和验收标准。",
-      "output": "长视频内容生产Brief"
+      "order": 1,
+      "agent_id": "01_需求拆解专员",
+      "title": "需求拆解与生产类型路由",
+      "task": "拆解用户目标、受众、时长、平台和素材约束，并判断 production_type。必须输出 production_type：drama_story | product_promo | talking_avatar | asset_only | custom，同时输出 target_platform、aspect_ratio、needs_voiceover、needs_final_video、quality_mode。不要决定具体 ComfyUI 工作流、RunningHub 节点或 FFmpeg 命令。",
+      "output": "长视频内容生产 Brief；生产类型路由；任务边界、素材需求、质量模式和后续员工约束。"
     },
     {
-      "step": 2,
-      "agent": "03_口播脚本师",
-      "task": "基于Brief直接产出完整长视频口播脚本：开场钩子、章节正文、过渡语、结尾CTA、可供TTS使用的纯口播文本。",
-      "output": "长视频口播脚本与TTS口播文本"
+      "order": 2,
+      "agent_id": "03_口播脚本师",
+      "title": "脚本与旁白文案",
+      "task": "根据 Brief 生成可拍摄、可配音、可切分镜头的脚本。若 production_type 为 asset_only，可只输出素材说明和必要提示词，不强制生成完整口播稿。",
+      "output": "口播稿、场景脚本、镜头文本、字幕草稿。"
     },
     {
-      "step": 3,
-      "agent": "23_长视频策划编导",
-      "task": "围绕已定稿脚本做分镜设计：章节节奏、镜头表、角色/主体定义、场景与素材需求、哪些画面需要关键帧/视频/B-roll。",
-      "output": "长视频分镜设计与角色主体定义"
+      "order": 3,
+      "agent_id": "23_长视频策划编导",
+      "title": "长视频结构与分镜规划",
+      "task": "把脚本拆成章节、镜头和节奏段，定义每个镜头的叙事目的、画面内容、角色/产品/场景引用和预计时长。",
+      "output": "分镜脚本、镜头清单、节奏规划、素材需求清单。"
     },
     {
-      "step": 4,
-      "agent": "06_分镜生图设计师",
-      "task": "基于分镜与角色主体定义，输出图片生成方案：没有参考图时先生成角色图、产品图、场景图等基础素材；已有参考图或素材库路径时可生成角色/产品三视图、关键帧和封面关键视觉。生成完整 image_prompts JSON，并明确每项 task_type、image_task_mode、control_mode、reference_image。",
-      "output": "参考图/关键帧生成方案与 image_prompts"
+      "order": 4,
+      "agent_id": "06_分镜生图设计师",
+      "title": "图片与关键帧生产意图",
+      "task": "输出 production_intents.image，描述要生成的基础资产、角色/产品/场景图、封面 KV、关键帧、首中尾帧等生产意图。使用 intent 作为主语义，例如 generate_base_asset、generate_keyframe、generate_three_frame_shot。保留 image_prompts 作为兼容输出，但 workflow_id、workflow_mode、asset_tag、job_id、depends_on、input_bindings 仅作为兼容字段，不再要求员工承担最终 DAG 文件流转。",
+      "output": "production_intents.image；兼容 image_prompts；角色/风格/尺寸/参考资产约束。"
     },
     {
-      "step": 5,
-      "agent": "20_语音字幕包装师",
-      "task": "基于口播脚本生成配音制作包、TTS参数、SRT字幕草稿和音效/BGM建议。配音只依赖口播文本，可与视觉素材生成并行。",
-      "output": "配音字幕制作包"
+      "order": 5,
+      "agent_id": "20_语音字幕包装师",
+      "title": "语音字幕生产意图",
+      "task": "输出 production_intents.audio，描述 generate_voiceover、build_subtitles、select_bgm 等意图。音频继续由本地 TTS、素材库和剪辑阶段处理，不进入 ComfyUI；只有 talking_image 会在系统编译阶段把最终 WAV 绑定给 ComfyUI 的 input_audio_file。",
+      "output": "production_intents.audio；兼容语音字幕包；TTS 文案、字幕草稿、BGM 情绪标签。"
     },
     {
-      "step": 6,
-      "agent": "07_视频生成执行员",
-      "task": "基于06的关键帧/参考图和03/23的分镜，输出分段图生视频、口型同步视频、B-roll、空镜转场、放大补帧/清晰化的制作包，并生成完整 video_prompts JSON。",
-      "output": "视频素材生成制作包与 video_prompts"
+      "order": 6,
+      "agent_id": "07_视频生成执行员",
+      "title": "视频镜头与后处理生产意图",
+      "task": "输出 production_intents.video，描述要生成的 I2V 镜头、首中尾帧镜头、B-roll、口播视频和画质增强意图。使用 intent 作为主语义，例如 generate_i2v_clip、generate_three_frame_i2v_clip、generate_broll_clip、generate_talking_image、enhance_video。保留 video_prompts 兼容现有生产，但不要把 workflow_id、workflow_mode、input_bindings 当作长期主职责。",
+      "output": "production_intents.video；兼容 video_prompts；镜头时长、帧率、首中尾帧需求、口播/后处理需求。"
     },
     {
-      "step": 7,
-      "agent": "04_标题封面优化师",
-      "task": "基于脚本、分镜和关键视觉，生成长视频标题、封面文案、章节标题、简介、标签和封面视觉建议。",
-      "output": "标题封面与发布包装方案"
+      "order": 7,
+      "agent_id": "04_标题封面优化师",
+      "title": "标题封面与发布包装",
+      "task": "根据目标平台、受众和视频内容生成标题、封面文案、简介、标签和发布钩子。可引用 06 的封面 KV 意图，但不直接调度图片工作流。",
+      "output": "标题组、封面文案、简介、标签、发布建议。"
     },
     {
-      "step": 8,
-      "agent": "05_内容合规审核官",
-      "task": "对脚本、标题封面、字幕、关键视觉和AI素材使用风险做最终合规复核，输出必须修改项和发布前检查清单。",
-      "output": "长视频最终合规复核报告"
+      "order": 8,
+      "agent_id": "05_内容合规审核官",
+      "title": "内容合规与风险检查",
+      "task": "检查脚本、画面意图、字幕、标题和发布包装中的平台风险、行业限制、虚假承诺、版权与隐私问题。",
+      "output": "合规审查报告、需修改项、替代表达。"
     },
     {
-      "step": 9,
-      "agent": "22_剪辑成片执行师",
-      "task": "整合脚本、素材、配音、字幕、标题封面与合规意见，输出可交给FFmpeg/剪映/CapCut/Premiere执行的剪辑时间线、素材清单和最终导出方案。",
-      "output": "剪辑成片执行方案"
+      "order": 9,
+      "agent_id": "22_剪辑成片执行师",
+      "title": "剪辑意图与成片规格",
+      "task": "输出 production_intents.package，描述 edit_timeline、package_final_video、delivery_spec 等剪辑封装意图。只说明镜头顺序、节奏、字幕/BGM/旁白关系、输出规格和缺失素材，不写具体 FFmpeg filter 命令或底层执行细节。",
+      "output": "production_intents.package；兼容 edit_timeline；成片规格、缺失素材清单、返工建议。"
     }
   ],
+  "compatibility_rules": [
+    "第一版必须双轨输出：新字段 production_intents 与旧字段 image_prompts / video_prompts / 语音字幕包 / edit_timeline 同时保留。",
+    "后端未完全切换到 production_plan.json 前，旧字段继续驱动现有生产链路。",
+    "workflow_id、workflow_mode、asset_tag、job_id、depends_on、input_bindings 保留为兼容字段，不再作为数字员工的主要决策字段。",
+    "21_ComfyUI成片编排师继续作为兼容备用员工，不重新放回主流程。"
+  ],
   "final_outputs": [
-    "长视频内容生产Brief",
-    "长视频口播脚本与TTS口播文本",
-    "长视频分镜设计与角色主体定义",
-    "参考图/关键帧生成方案与 image_prompts",
-    "配音字幕制作包",
-    "视频素材生成制作包与 video_prompts",
-    "标题封面与发布包装方案",
-    "长视频最终合规复核报告",
-    "剪辑成片执行方案"
+    "长视频内容生产 Brief",
+    "production_type 路由结果",
+    "脚本与字幕草稿",
+    "分镜脚本与镜头清单",
+    "production_intents.image",
+    "production_intents.video",
+    "production_intents.audio",
+    "production_intents.package",
+    "兼容 image_prompts / video_prompts / edit_timeline",
+    "标题封面与发布包装",
+    "合规审查报告"
   ],
   "acceptance_criteria": [
-    "脚本先定稿，后续视觉和配音都围绕脚本执行",
-    "分镜表覆盖完整视频结构，并明确角色、主体、场景和素材类型",
-    "06输出完整image_prompts：无参考图时生成角色/产品/场景基础图，有参考图时生成三视图、关键帧或封面关键视觉，并明确task_type/image_task_mode/control_mode",
-    "20输出可直接用于TTS的口播文本和SRT字幕草稿",
-    "07输出完整video_prompts，覆盖分段视频、口型、B-roll、转场和后处理需求",
-    "合规复核在最终拼接前完成，风险项有明确修改建议",
-    "22输出的时间线、素材清单、音频字幕和导出规格可被剪辑工具或FFmpeg执行"
+    "01 必须选择 production_type，或在混合/不明确时标记 custom 并说明原因。",
+    "06、07、20、22 必须输出 production_intents，并同时保留对应兼容字段。",
+    "06/07 的主语义必须是 intent，不是具体 workflow_id。",
+    "20 不把普通音频任务放进 ComfyUI；只有 talking_image 在编译阶段绑定最终 WAV。",
+    "22 只描述剪辑意图和交付规格，不输出底层 FFmpeg filter 命令。",
+    "旧版 image_prompts / video_prompts 仍可被现有引擎读取，任务输出页生产状态不应因缺字段报错。"
   ]
 }

@@ -1,46 +1,49 @@
 {
   "agent_id": "06_分镜生图设计师",
   "agent_name": "分镜生图设计师",
-  "role": "reference_keyframe_image_designer",
-  "inputs": [
-    "长视频内容生产Brief",
-    "长视频口播脚本",
-    "长视频分镜设计与角色主体定义",
-    "素材库可复用素材",
-    "图片/关键帧生成配置"
+  "role": "image_production_intent_designer",
+  "input_sources": [
+    "01_需求拆解专员的production_type路由",
+    "03_口播脚本师脚本",
+    "23_长视频策划编导分镜",
+    "素材库中的角色/产品/场景/风格参考"
   ],
-  "outputs": [
-    "参考图与关键帧生成方案",
-    "参考图计划",
-    "关键帧总表",
-    "ComfyUI image_prompts",
-    "交付给07的视频首帧/尾帧说明"
+  "primary_output": "production_intents.image",
+  "compatibility_outputs": [
+    "image_prompts"
+  ],
+  "allowed_intents": [
+    "generate_base_asset",
+    "generate_turnaround",
+    "generate_keyframe",
+    "generate_three_frame_shot",
+    "generate_cover_key_visual",
+    "repair_or_cutout_image"
+  ],
+  "compatibility_fields": [
+    "workflow_id",
+    "workflow_mode",
+    "asset_tag",
+    "job_id",
+    "depends_on",
+    "input_bindings",
+    "reference_image",
+    "reference_images"
+  ],
+  "quality_gate": [
+    "必须输出production_intents.image",
+    "每条图片意图必须包含intent和intent_id",
+    "intent必须来自allowed_intents，除非明确标记custom并说明原因",
+    "必须保留image_prompts兼容旧生产链",
+    "workflow_id/workflow_mode/asset_tag只能作为兼容字段，不作为主语义",
+    "不要强制员工填写input_bindings或底层DAG文件流转",
+    "多帧镜头只能规划start/middle/end三帧，不得规划first_last_frame",
+    "默认工作尺寸为848x480或同等级480p画布，最终1080p交给后期/成片阶段",
+    "不得输出ComfyUI数字节点ID或RunningHub节点映射"
   ],
   "handoff_to": [
     "07_视频生成执行员",
     "22_剪辑成片执行师",
-    "RunningHub / ComfyUI 全能图片API"
-  ],
-  "quality_gate": [
-    "角色/产品/风格一致性要求明确",
-    "参考图计划明确",
-    "关键帧覆盖所有需要视频或剪辑支撑的镜头",
-    "image_prompts是合法JSON对象",
-    "image_prompts覆盖所有需要图片/关键帧的镜头",
-    "每条image_prompts都以capability+mode作为主路由，并保留workflow_id、workflow_mode和asset_tag作为兼容字段",
-    "每条image_prompts都有唯一job_id、depends_on、input_bindings、character_id和style_id；上游素材必须通过input_bindings显式绑定，不得依赖任务顺序猜测",
-    "capability只能按功能填写：image_generate、image_multiview或image_edit；mode必须是调试台树状菜单中的可运行子模式",
-    "每条视频关键帧都有shot_id、frame_role、recommended_video_mode和mode_reason",
-    "默认recommended_video_mode为first_frame；需要多帧控制时一律使用first_middle_last_frame，当前阶段禁止输出first_last_frame",
-    "first_middle_last_frame镜头必须同时规划start_frame、middle_frame和end_frame，且三帧保持同一主体、服装、场景、光线、机位和画幅",
-    "first_middle_last_frame的middle_frame和end_frame必须是同一镜头约2秒和4秒处的自然延续，不得写成新镜头、新场景、新角度或大幅跳变",
-    "first_middle_last_frame建议标记temporal_offset_seconds=0/2/4，并互相填写paired_start_frame_id、paired_middle_frame_id、paired_end_frame_id",
-    "如果首到中或中到尾的动作/构图变化无法自然完成，必须拆成多个镜头或降级为first_frame",
-    "每条image_prompts都有width和height，前期默认使用480p工作分辨率（横屏848x480、竖屏480x848、方屏480x480），且不把尺寸写成内部节点参数",
-    "02_turnaround/05_image_repair_cutout必须说明reference_image来源；04_keyframe当前为txt2img，不要求也不填写reference_image/reference_images",
-    "多人物关键帧当前仍走04_keyframe纯文生图，必须在prompt里明确角色位置、动作和身份，暂不使用reference_images",
-    "02_turnaround必须按角色/产品一条任务生成4张四视图，只传reference_image和业务提示词，不拆成多条视角任务，不写工作流内部节点参数",
-    "不包含API Key或具体节点ID",
-    "不在06阶段默认输出720p、1080p或4K；最终720p/1080p/4K放大交给22剪辑成片阶段统一处理"
+    "系统生产图编译器"
   ]
 }

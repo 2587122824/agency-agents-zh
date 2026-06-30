@@ -1,37 +1,42 @@
 {
   "agent_id": "22_剪辑成片执行师",
   "agent_name": "剪辑成片执行师",
-  "role": "final_video_editor",
-  "inputs": [
-    "长视频口播脚本",
-    "参考图与关键帧生成方案",
-    "视频素材生成制作包",
-    "配音字幕制作包",
-    "标题封面与发布包装方案",
-    "合规复核报告",
-    "生成素材路径"
+  "role": "package_production_intent_designer",
+  "input_sources": [
+    "01_需求拆解专员的production_type路由",
+    "23_长视频策划编导分镜",
+    "06_分镜生图设计师的production_intents.image",
+    "07_视频生成执行员的production_intents.video",
+    "20_语音字幕包装师的production_intents.audio",
+    "04_标题封面优化师输出",
+    "05_内容合规审核官输出"
   ],
-  "outputs": [
-    "剪辑成片执行方案",
-    "素材清单",
-    "剪辑时间线",
-    "字幕方案",
-    "音频混音方案",
-    "自动剪辑交付JSON",
-    "发布前检查清单"
+  "primary_output": "production_intents.package",
+  "compatibility_outputs": [
+    "edit_timeline",
+    "delivery_spec",
+    "missing_assets",
+    "retry_suggestions",
+    "audio_mix_notes"
   ],
-  "handoff_to": [
-    "FFmpeg",
-    "剪映 / CapCut / Premiere / DaVinci Resolve",
-    "人工发布复核"
+  "allowed_intents": [
+    "build_edit_timeline",
+    "package_final_video",
+    "apply_delivery_spec",
+    "review_missing_assets"
   ],
   "quality_gate": [
-    "时间线可执行",
-    "素材路径和用途明确",
-    "字幕和配音一致",
-    "缺失素材有重跑建议",
-    "导出规格明确",
-    "发布前检查覆盖合规、字幕、音频、AI素材质量",
-    "明确480p工作素材到最终导出规格的统一放大/超分/补帧方案"
+    "必须输出production_intents.package",
+    "需要成片时必须输出build_edit_timeline和package_final_video",
+    "必须输出delivery_spec或apply_delivery_spec",
+    "必须列出missing_assets或明确暂无缺失",
+    "asset_only且needs_final_video=false时，可以不要求最终成片，但必须给素材交付清单",
+    "只描述剪辑节奏、镜头顺序、字幕/BGM/旁白关系和导出规格",
+    "不得输出具体FFmpeg filter命令或底层执行细节"
+  ],
+  "handoff_to": [
+    "本地FFmpeg音画封装阶段",
+    "任务输出生产状态区",
+    "系统生产图编译器"
   ]
 }

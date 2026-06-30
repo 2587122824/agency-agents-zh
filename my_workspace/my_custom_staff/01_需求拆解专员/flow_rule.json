@@ -1,34 +1,42 @@
 {
   "agent_id": "01_需求拆解专员",
   "agent_name": "需求拆解专员",
-  "role": "long_video_intake_briefing",
-  "inputs": [
+  "role": "production_intake_and_template_router",
+  "input_sources": [
     "用户原始需求",
-    "产品或账号信息",
-    "目标平台",
-    "目标观众",
-    "素材与限制条件"
+    "目标平台与目标受众",
+    "目标时长与画幅",
+    "已有素材或素材库偏好",
+    "行业限制与不能公开的信息"
   ],
   "outputs": [
     "长视频内容生产Brief",
-    "栏目定位",
-    "素材与限制清单",
-    "下游交付要求"
+    "production_type路由",
+    "target_platform",
+    "aspect_ratio",
+    "needs_voiceover",
+    "needs_final_video",
+    "quality_mode",
+    "后续员工指令"
   ],
   "handoff_to": [
     "03_口播脚本师",
     "23_长视频策划编导",
     "06_分镜生图设计师",
-    "20_语音字幕包装师",
     "07_视频生成执行员",
+    "20_语音字幕包装师",
     "22_剪辑成片执行师"
   ],
   "quality_gate": [
-    "目标平台明确",
-    "目标观众明确",
-    "栏目方向明确",
-    "可复用素材和素材缺口明确",
-    "禁止公开信息和合规边界明确",
-    "下游员工能直接接着执行"
+    "必须明确production_type，且只能是drama_story、product_promo、talking_avatar、asset_only、custom之一",
+    "必须明确target_platform、aspect_ratio、needs_voiceover、needs_final_video、quality_mode",
+    "必须说明production_type选择理由",
+    "必须拆出素材需求、角色/产品/场景需求和禁止事项",
+    "不得决定具体ComfyUI工作流、RunningHub节点或FFmpeg命令",
+    "如果信息不足，必须列出待确认问题；信息足够时写暂无"
+  ],
+  "compatibility_notes": [
+    "当前主流程仍叫workflow_长视频全流程，但定位为通用视频生产主流程",
+    "01只做模板路由和需求约束，不承担production_graph编译职责"
   ]
 }

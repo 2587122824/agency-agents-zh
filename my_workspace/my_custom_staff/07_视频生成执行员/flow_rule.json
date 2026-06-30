@@ -1,53 +1,50 @@
 {
   "agent_id": "07_视频生成执行员",
   "agent_name": "视频生成执行员",
-  "role": "video_material_generation_operator",
-  "inputs": [
-    "长视频分镜设计与角色主体定义",
-    "参考图与关键帧生成方案",
-    "image_prompts",
-    "素材库可复用素材",
-    "视频生成配置"
+  "role": "video_production_intent_designer",
+  "input_sources": [
+    "01_需求拆解专员的production_type路由",
+    "23_长视频策划编导分镜",
+    "06_分镜生图设计师的production_intents.image",
+    "20_语音字幕包装师的production_intents.audio"
   ],
-  "outputs": [
-    "视频素材生成制作包",
-    "视频素材清单",
-    "分段视频计划",
-    "B-roll/空镜/转场计划",
-    "后处理计划",
-    "ComfyUI video_prompts",
-    "transition_plan"
+  "primary_output": "production_intents.video",
+  "compatibility_outputs": [
+    "video_prompts"
+  ],
+  "allowed_intents": [
+    "generate_i2v_clip",
+    "generate_three_frame_i2v_clip",
+    "generate_broll_clip",
+    "generate_talking_image",
+    "enhance_video",
+    "repair_video"
+  ],
+  "compatibility_fields": [
+    "workflow_id",
+    "workflow_mode",
+    "asset_tag",
+    "job_id",
+    "depends_on",
+    "input_bindings",
+    "reference_image",
+    "middle_frame_image",
+    "last_frame_image"
+  ],
+  "quality_gate": [
+    "必须输出production_intents.video",
+    "每条视频意图必须包含intent和intent_id",
+    "intent必须来自allowed_intents，除非明确标记custom并说明原因",
+    "必须保留video_prompts兼容旧生产链",
+    "workflow_id/workflow_mode/asset_tag只能作为兼容字段，不作为主语义",
+    "不要强制员工填写input_bindings或最终DAG文件流转",
+    "多帧视频只能规划start/middle/end三帧，不得规划first_last_frame",
+    "普通I2V镜头不得携带音频；只有generate_talking_image可声明等待最终WAV",
+    "默认工作尺寸为848x480或同等级480p画布，最终1080p由enhance_video或22负责",
+    "不得输出ComfyUI数字节点ID或RunningHub节点映射"
   ],
   "handoff_to": [
     "22_剪辑成片执行师",
-    "RunningHub / ComfyUI 全能视频API",
-    "人工素材复核"
-  ],
-  "quality_gate": [
-    "video_prompts是合法JSON对象",
-    "video_prompts覆盖所有需要视频素材的镜头",
-    "每条视频任务有task_type和control_mode",
-    "每条video_prompts都以capability+mode作为主路由，并保留workflow_id、workflow_mode和asset_tag作为兼容字段",
-    "每条video_prompts都有唯一job_id、depends_on、input_bindings、character_id和style_id；关键帧、动作参考和口型音频必须显式绑定上游job_id及输出名",
-    "capability只能按功能填写：video_i2v、video_reference、video_motion、video_avatar、video_generate、video_enhance或video_edit；mode必须是调试台树状菜单中的可运行子模式",
-    "每条图生视频任务都有video_mode和mode_reason，默认使用06_i2v_first_frame/first_frame，需要多帧控制时一律使用06_i2v_first_middle_last_frame/first_middle_last_frame，禁止使用first_last_frame",
-    "06_i2v_first_frame必须有reference_image且middle_frame_image/last_frame_image为空；06_i2v_first_middle_last_frame必须同时有reference_image、middle_frame_image、last_frame_image",
-    "06_i2v_first_middle_last_frame的中帧和尾帧必须是首帧约2秒、4秒后的同镜头自然延续，不得是新镜头、新角度、新场景或大幅跳变",
-    "06_i2v_first_middle_last_frame建议填写temporal_offsets_seconds=[0,2,4]和frame_sequence_rule，明确三帧是同镜头连续状态",
-    "middle_frame_image或last_frame_image缺失、与首帧主体/服装/场景/光线/机位不一致时，必须降级为i2v_first_frame或拆分镜头",
-    "大动作、大构图变化、换场、倒地/站起、爆发前后必须拆成多个首帧视频，并用transition_plan衔接，不得硬做首中尾帧",
-    "每条video_prompts都有width、height、duration和fps，前期默认使用480p工作分辨率（横屏848x480、竖屏480x848、方屏480x480），且不把尺寸/时长/帧率写成内部节点参数",
-    "必须输出transition_plan；每两个相邻视频片段至少给一个衔接建议，类型限定为flash_white、fade_black、glitch_noise、camera_shake、push_zoom、cutaway_broll",
-    "视频提示词必须平台安全，不包含裸体、性暗示、暴露皮肤特写、伤口、流血、血腥、手术、疼痛反应、真实武器、恐怖主义、仇恨或令人反感内容",
-    "06-12各类视频任务的必需输入来源明确，缺失时进入missing_or_inferred_prompts",
-    "参考图/首帧来源清楚",
-    "B-roll、转场、后处理需求明确",
-    "不混入TTS、字幕或最终剪辑职责",
-    "不在07阶段默认输出720p、1080p或4K；最终放大、超分、补帧和清晰化交给22剪辑成片阶段统一处理",
-    "06_i2v_first_middle_last_frame是当前唯一多帧控制入口；06_i2v_first_last_frame保留兼容但07员工禁止调度，默认单帧入口仍为06_i2v_first_frame",
-    "first_middle_last_frame_video必须同时填写reference_image、middle_frame_image、last_frame_image，且三者来自同一shot_id的start/middle/end keyframe",
-    "middle_frame_image或last_frame_image缺失，或三帧主体/服装/场景/光线/机位不一致时，必须降级为i2v_first_frame，不能硬跑06C",
-    "06C必须明确workflow_mode=i2v_first_middle_last_frame、control_mode=first_middle_last_frame；asset_tag可继续使用i2v_first_last_frame以兼容素材目录",
-    "06C首中尾帧必须使用duration=4、fps=24，不能沿用06B低帧率参数，以确保中帧第40帧和尾帧第72帧位于有效引导序列内"
+    "系统生产图编译器"
   ]
 }
