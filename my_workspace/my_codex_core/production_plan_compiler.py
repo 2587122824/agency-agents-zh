@@ -6,9 +6,17 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .production_entities import (
+    collect_entity_references,
+    enrich_global_context_with_entities,
+    entity_context_for_ids,
+    load_production_entities,
+)
+
 
 PLAN_SCHEMA_VERSION = 1
 DEFAULT_TEMPLATE_PATH = Path("my_workspace/my_production_templates/production_templates.json")
+DEFAULT_ENTITY_PATH = Path("my_workspace/my_production_entities/production_entities.json")
 PRODUCTION_TYPES = {"drama_story", "product_promo", "talking_avatar", "asset_only", "custom"}
 FRAME_ROLE_SUFFIX = {
     "start": "start_frame",
@@ -32,6 +40,7 @@ def compile_production_plan(
     video_config: dict[str, Any] | None = None,
     voice_config: dict[str, Any] | None = None,
     template_path: Path | None = None,
+    entity_path: Path | None = None,
 ) -> dict[str, Any]:
     """Compile digital-staff production intents into a conservative production plan.
 
@@ -66,19 +75,27 @@ def compile_production_plan(
         "audio": _intent_list(audio_payload, "audio"),
         "package": _intent_list(package_payload, "package"),
     }
+    entity_registry = load_production_entities(entity_path or DEFAULT_ENTITY_PATH)
+    entity_references = collect_entity_references(
+        production_intents,
+        [route_payload, image_payload, video_payload, audio_payload, package_payload, existing_payload or {}],
+    )
+    global_context, resolved_entities, entity_notes = enrich_global_context_with_entities(global_context, entity_registry, entity_references)
     compat_payload = json.loads(json.dumps(existing_payload or {}, ensure_ascii=False))
-    compile_notes: list[str] = []
+    compile_notes: list[str] = [*entity_notes]
 
     image_prompts, image_jobs = _compile_image_intents(
         production_intents["image"],
         templates,
         global_context,
+        resolved_entities,
         compile_notes,
     )
     video_prompts, video_jobs = _compile_video_intents(
         production_intents["video"],
         templates,
         global_context,
+        resolved_entities,
         image_jobs,
         compile_notes,
     )
@@ -143,6 +160,7 @@ def compile_production_plan(
         },
         "route": route,
         "global_context": global_context,
+        "resolved_entities": resolved_entities,
         "production_intents": production_intents,
         "compiled_payload": compat_payload,
         "visual_jobs": visual_jobs,
@@ -261,6 +279,7 @@ def _compile_image_intents(
     intents: list[dict[str, Any]],
     templates: dict[str, Any],
     global_context: dict[str, Any],
+    resolved_entities: dict[str, Any],
     notes: list[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     prompts: list[dict[str, Any]] = []
@@ -297,6 +316,7 @@ def _compile_image_intents(
                     compatibility=compatibility,
                     render=render,
                     asset_tag=f"{intent_id}_{role}",
+                    resolved_entities=resolved_entities,
                 )
                 item["frame_role"] = role
                 prompts.append(item)
@@ -314,6 +334,7 @@ def _compile_image_intents(
             compatibility=compatibility,
             render=render,
             asset_tag=str(intent.get("asset_role") or intent.get("asset_tag") or intent_name or intent_id),
+            resolved_entities=resolved_entities,
         )
         prompts.append(item)
         jobs.append({"job_id": intent_id, "intent_id": intent_id, **item})
@@ -324,6 +345,7 @@ def _compile_video_intents(
     intents: list[dict[str, Any]],
     templates: dict[str, Any],
     global_context: dict[str, Any],
+    resolved_entities: dict[str, Any],
     image_jobs: list[dict[str, Any]],
     notes: list[str],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -343,6 +365,13 @@ def _compile_video_intents(
         if not prompt:
             notes.append(f"video intent {intent_id} skipped because prompt is empty")
             continue
+        entity_context = entity_context_for_ids(
+            resolved_entities,
+            character_id=str(intent.get("character_id") or ""),
+            style_id=str(intent.get("style_id") or ""),
+            product_id=str(intent.get("product_id") or ""),
+            scene_id=str(intent.get("scene_id") or intent.get("shot_id") or ""),
+        )
         item = {
             "id": intent_id,
             "job_id": intent_id,
@@ -360,11 +389,16 @@ def _compile_video_intents(
             "height": _positive_int(intent.get("height") or render.get("working_height"), 480),
             "character_id": str(intent.get("character_id") or ""),
             "style_id": str(intent.get("style_id") or ""),
+            "product_id": str(intent.get("product_id") or ""),
+            "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
             "asset_tag": str(intent.get("asset_tag") or intent_name or intent_id),
             "source_intent_ids": _string_list(intent.get("source_intent_ids")),
             "depends_on": _string_list(intent.get("depends_on")),
             "input_bindings": intent.get("input_bindings") if isinstance(intent.get("input_bindings"), dict) else {},
         }
+        if entity_context:
+            item["entity_context"] = entity_context
+            _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
         if intent_name == "generate_three_frame_i2v_clip":
             _bind_three_frames(item, image_job_ids)
         elif intent_name in {"generate_i2v_clip", "enhance_video", "repair_video"}:
@@ -388,8 +422,16 @@ def _image_prompt_item(
     compatibility: dict[str, Any],
     render: dict[str, Any],
     asset_tag: str,
+    resolved_entities: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
+    entity_context = entity_context_for_ids(
+        resolved_entities,
+        character_id=str(intent.get("character_id") or ""),
+        style_id=str(intent.get("style_id") or ""),
+        product_id=str(intent.get("product_id") or ""),
+        scene_id=str(intent.get("scene_id") or intent.get("shot_id") or ""),
+    )
+    item = {
         "id": job_id,
         "job_id": job_id,
         "task_type": "image",
@@ -405,12 +447,18 @@ def _image_prompt_item(
         "height": _positive_int(intent.get("height") or render.get("working_height"), 480),
         "character_id": str(intent.get("character_id") or ""),
         "style_id": str(intent.get("style_id") or ""),
+        "product_id": str(intent.get("product_id") or ""),
+        "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
         "asset_tag": asset_tag,
         "depends_on": _string_list(intent.get("depends_on")),
         "input_bindings": intent.get("input_bindings") if isinstance(intent.get("input_bindings"), dict) else {},
         "reference_image": str(intent.get("reference_image") or intent.get("input_base_image") or ""),
         "reference_images": intent.get("reference_images") if isinstance(intent.get("reference_images"), list) else [],
     }
+    if entity_context:
+        item["entity_context"] = entity_context
+        _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
+    return item
 
 
 def _bind_three_frames(item: dict[str, Any], image_job_ids: set[str]) -> None:

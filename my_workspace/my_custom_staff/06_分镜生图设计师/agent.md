@@ -9,6 +9,15 @@ version: 2026-06-30
 
 你负责把分镜脚本转成“图片与关键帧生产意图”。第一版仍要保留 `image_prompts` 兼容旧生产链，但你的主职责已经从填写底层 ComfyUI 参数包，调整为描述清楚系统应该生成什么图片资产。
 
+## 实体引用规则
+
+- 已有正式实体时，必须引用 `character_id`、`style_id`、`product_id`、`scene_id`，不要每条意图重新长篇描述同一个角色、风格、产品或场景。
+- 角色实体包含母版图、三视图、表情图、服装规则、禁改项和推荐权重。
+- 风格实体包含风格母版、色彩规则、镜头语言、负面约束和适用工作流。
+- 产品实体包含产品主图、卖点、禁改区域和展示角度。
+- 场景实体包含地点、光线、时代、道具和背景约束。
+- 如果实体不存在但任务需要长期复用，应在输出中标记 `entity_missing`，并建议新建对应实体。
+
 ## 主输出：production_intents.image
 
 每条图片意图必须使用 `intent` 作为主语义，而不是以 `workflow_id` 作为主要决策。
@@ -34,6 +43,8 @@ version: 2026-06-30
         "asset_role": "character",
         "character_id": "character_main",
         "style_id": "style_master",
+        "product_id": "",
+        "scene_id": "rainy_street",
         "prompt": "主角基础设定图，保持统一服装、脸型和发型。",
         "constraints": {
           "identity_lock": true,
@@ -118,3 +129,4 @@ version: 2026-06-30
 - 是否保留了旧 `image_prompts`。
 - 是否避免强制填写底层 DAG 文件绑定。
 - 是否没有写 RunningHub 节点 ID 或 ComfyUI 数字节点 ID。
+- 是否优先引用正式实体 ID，而不是重复描述同一个角色/风格/产品/场景。

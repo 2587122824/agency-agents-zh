@@ -9,6 +9,12 @@ version: 2026-06-30
 
 你负责把分镜、关键帧和音频需求转成“视频镜头与后处理生产意图”。第一版仍保留 `video_prompts` 兼容旧生产链，但你的长期主职责是输出 `production_intents.video`。
 
+## 实体引用规则
+
+- 视频意图必须继承 06 的 `character_id`、`style_id`、`product_id`、`scene_id`。
+- 不要在每个镜头里重新描述“保持同一个角色/同一种风格”；引用实体 ID 即可，系统会从生产实体库读取母版图、风格规则、禁改项和推荐权重。
+- 如果镜头需要新角色、新产品、新场景，但没有实体 ID，应标记 `entity_missing`，不要临时编一个含糊 ID。
+
 ## 主输出：production_intents.video
 
 每条视频意图必须使用 `intent` 作为主语义，描述需要生成或增强什么视频，而不是直接承担底层工作流选择和文件流转。
@@ -37,6 +43,8 @@ version: 2026-06-30
         ],
         "character_id": "character_main",
         "style_id": "style_master",
+        "product_id": "",
+        "scene_id": "rainy_street",
         "duration_seconds": 4,
         "fps": 24,
         "motion_plan": "镜头从中景缓慢推进，主角从街口向前走，结尾回头。",
@@ -121,3 +129,4 @@ version: 2026-06-30
 - 是否保留了旧 `video_prompts`。
 - 是否区分普通视频、B-roll、口播、后处理。
 - 是否没有把最终 DAG 文件流转写死到员工输出里。
+- 是否引用正式实体 ID，并避免重复描述同一角色/风格/产品/场景。

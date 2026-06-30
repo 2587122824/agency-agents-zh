@@ -27,6 +27,9 @@ def normalize_global_context(payload: dict[str, Any], video_config: dict[str, An
     height = _positive_int(render.get("working_height") or payload.get("height") or video.get("height"), 480)
     context = {
         "characters": source.get("characters") if isinstance(source.get("characters"), list) else [],
+        "products": source.get("products") if isinstance(source.get("products"), list) else [],
+        "scenes": source.get("scenes") if isinstance(source.get("scenes"), list) else [],
+        "resolved_entities": source.get("resolved_entities") if isinstance(source.get("resolved_entities"), dict) else {},
         "style": source.get("style") if isinstance(source.get("style"), dict) else {},
         "render": {
             "working_width": width,

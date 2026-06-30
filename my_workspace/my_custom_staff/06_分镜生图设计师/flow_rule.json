@@ -35,6 +35,8 @@
     "每条图片意图必须包含intent和intent_id",
     "intent必须来自allowed_intents，除非明确标记custom并说明原因",
     "必须保留image_prompts兼容旧生产链",
+    "跨镜头复用对象必须优先填写character_id/style_id/product_id/scene_id",
+    "如果缺少正式实体但需要长期复用，必须标记entity_missing并建议新建实体",
     "workflow_id/workflow_mode/asset_tag只能作为兼容字段，不作为主语义",
     "不要强制员工填写input_bindings或底层DAG文件流转",
     "多帧镜头只能规划start/middle/end三帧，不得规划first_last_frame",

@@ -574,6 +574,9 @@ class CloudComfyUIAdapter:
             "{{duration}}": str(comfyui_payload.get("duration") or ""),
             "{{fps}}": str(comfyui_payload.get("fps") or ""),
             "{{global_character_id}}": str(comfyui_payload.get("character_id") or ""),
+            "{{product_id}}": str(comfyui_payload.get("product_id") or ""),
+            "{{scene_id}}": str(comfyui_payload.get("scene_id") or ""),
+            "{{entity_context}}": json.dumps(comfyui_payload.get("entity_context") if isinstance(comfyui_payload.get("entity_context"), dict) else {}, ensure_ascii=False),
             "{{global_style_weight}}": str(comfyui_payload.get("global_style_weight") or style_context.get("weight") or ""),
             "{{working_width}}": str(render_context.get("working_width") or comfyui_payload.get("width") or ""),
             "{{working_height}}": str(render_context.get("working_height") or comfyui_payload.get("height") or ""),
@@ -1238,6 +1241,9 @@ class CloudComfyUIAdapter:
             "input_bindings": prompt_data.get("input_bindings") if isinstance(prompt_data.get("input_bindings"), dict) else group.get("input_bindings") if isinstance(group.get("input_bindings"), dict) else {},
             "character_id": str(prompt_data.get("character_id") or group.get("character_id") or "").strip(),
             "style_id": str(prompt_data.get("style_id") or group.get("style_id") or "").strip(),
+            "product_id": str(prompt_data.get("product_id") or group.get("product_id") or "").strip(),
+            "scene_id": str(prompt_data.get("scene_id") or group.get("scene_id") or "").strip(),
+            "entity_context": prompt_data.get("entity_context") if isinstance(prompt_data.get("entity_context"), dict) else group.get("entity_context") if isinstance(group.get("entity_context"), dict) else {},
             "prompt": prompt,
             "negative_prompt": negative,
             "reference_image": reference_image,
@@ -1357,6 +1363,10 @@ class CloudComfyUIAdapter:
         payload["workflow_mode"] = str(job.get("mode") or "")
         payload["character_id"] = str(job.get("character_id") or "")
         payload["style_id"] = str(job.get("style_id") or "")
+        payload["product_id"] = str(job.get("product_id") or "")
+        payload["scene_id"] = str(job.get("scene_id") or "")
+        if isinstance(job.get("entity_context"), dict):
+            payload["entity_context"] = job["entity_context"]
         payload["workflow_item_name"] = str(job.get("name") or f"material_{index:02d}")
         payload["workflow_item_type"] = job_type
         payload["task_type"] = str(

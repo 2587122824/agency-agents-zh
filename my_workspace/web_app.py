@@ -21,6 +21,7 @@ from uuid import uuid4
 from PIL import Image
 
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
+from my_codex_core.production_entities import load_production_entities, write_production_entities
 from my_codex_core.production_pipeline import retry_production_job
 from my_codex_core.workflow_engine import WorkflowCheckpointPause, WorkflowEngine
 
@@ -35,6 +36,7 @@ VOICE_SAMPLE_ROOT = WORKSPACE_ROOT / "my_voice_samples"
 KNOWLEDGE_ROOT = WORKSPACE_ROOT / "my_knowledge_base"
 ASSET_LIBRARY_ROOT = WORKSPACE_ROOT / "my_asset_library"
 ASSET_LIBRARY_INDEX = ASSET_LIBRARY_ROOT / "library.json"
+PRODUCTION_ENTITIES_PATH = WORKSPACE_ROOT / "my_production_entities" / "production_entities.json"
 ASSET_LIBRARY_TAG_FOLDERS = {
     "character_base": "01_character_base",
     "product_base": "02_product_base",
@@ -10625,6 +10627,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"tasks": self._tasks()})
             elif parsed.path == "/api/asset-library":
                 self._send_json({"assets": self._asset_library()})
+            elif parsed.path == "/api/production-entities":
+                self._send_json({"entities": self._production_entities()})
             elif parsed.path == "/api/comfy-debug-workflows":
                 self._send_json({"workflows": self._comfy_debug_workflows()})
             elif parsed.path == "/api/knowledge":
@@ -10706,6 +10710,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/update-asset-metadata":
                 self._send_json(self._update_asset_metadata(payload))
+                return
+
+            if parsed.path == "/api/save-production-entities":
+                self._send_json(self._save_production_entities(payload))
                 return
 
             if parsed.path == "/api/import-asset":
@@ -12250,6 +12258,16 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if changed:
             self._write_asset_library_index(cleaned)
         return cleaned
+
+    @staticmethod
+    def _production_entities() -> dict:
+        return load_production_entities(PRODUCTION_ENTITIES_PATH)
+
+    @staticmethod
+    def _save_production_entities(payload: dict) -> dict:
+        raw = payload.get("entities") if isinstance(payload.get("entities"), dict) else payload
+        entities = write_production_entities(PRODUCTION_ENTITIES_PATH, raw if isinstance(raw, dict) else {})
+        return {"ok": True, "entities": entities}
 
     @staticmethod
     def _normalize_asset_library_item(item: dict, path: Path | None = None) -> dict:
