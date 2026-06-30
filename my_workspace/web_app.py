@@ -3929,6 +3929,8 @@ INDEX_HTML = r"""<!doctype html>
     let autoFocusOutputDuringRun = false;
     let activeRunTaskName = "";
     let workflowInteractionLocked = false;
+    const ACTIVE_RUN_STATUSES = new Set(['queued', 'running']);
+    const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'canceled', 'paused']);
     let outputSelectionVersion = 0;
     let lastTaskDetailRefreshAt = 0;
     let assetPreviewItems = [];
@@ -4208,7 +4210,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function syncRunControlButtons() {
-      const hasRun = Boolean(currentRunId && ['queued', 'running'].includes(currentRunStatus));
+      const hasRun = Boolean(currentRunId && ACTIVE_RUN_STATUSES.has(currentRunStatus));
       if (els.cancelRunBtn) {
         els.cancelRunBtn.hidden = true;
         els.cancelRunBtn.disabled = true;
@@ -4217,6 +4219,18 @@ INDEX_HTML = r"""<!doctype html>
         els.outputCancelRunBtn.hidden = !hasRun;
         els.outputCancelRunBtn.disabled = !hasRun;
       }
+    }
+
+    function ensureRunControlsUnlockedWhenIdle() {
+      if (!workflowInteractionLocked) return;
+      if (currentRunId && ACTIVE_RUN_STATUSES.has(currentRunStatus)) return;
+      autoFocusOutputDuringRun = false;
+      if (progressTimer) {
+        clearTimeout(progressTimer);
+        progressTimer = null;
+      }
+      trackRun("");
+      setWorkflowInteractionLocked(false);
     }
 
     function maybeShowOutput() {
@@ -4570,6 +4584,12 @@ INDEX_HTML = r"""<!doctype html>
       if (currentRunId && currentRunId !== runId) return;
       if (!currentRunId && !autoFocusOutputDuringRun) return;
       renderProgress(job);
+      const terminalRunStatus = TERMINAL_RUN_STATUSES.has(String(job.status || '').toLowerCase());
+      if (terminalRunStatus) {
+        finishRunInteraction({
+          delayedProgressReset: job.status === 'completed' || job.status === 'paused',
+        });
+      }
       if (job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
         if (maybeShowOutput()) {
           await selectActiveRunTask(job);
@@ -9541,9 +9561,10 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function syncOutputButtons() {
+      ensureRunControlsUnlockedWhenIdle();
       const hasTask = Boolean(selectedTask);
       const hasFile = Boolean(selectedTask && selectedFile);
-      const running = Boolean(currentRunId && ['queued', 'running'].includes(currentRunStatus));
+      const running = Boolean(currentRunId && ACTIVE_RUN_STATUSES.has(currentRunStatus));
       const confirmStep = awaitingConfirmationStep();
       const isConfirmingCurrentStep = Boolean(confirmStep && selectedFile === stepOutputFileForStep(confirmStep));
       const isAwaitingStepConfirmation = Boolean(confirmStep);
