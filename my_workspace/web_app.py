@@ -5097,13 +5097,9 @@ INDEX_HTML = r"""<!doctype html>
         clearTimeout(progressTimer);
         progressTimer = null;
       }
-      autoFocusOutputDuringRun = false;
       setStatus('正在终止任务...');
-      trackRun("");
       selectedTaskAllowedActions = (selectedTaskAllowedActions || []).filter(action => action !== 'cancel');
-      setWorkflowInteractionLocked(false);
-      setRunButtonProgress(0);
-      syncOutputButtons();
+      finishRunInteraction();
       try {
         if (els.cancelRunBtn) els.cancelRunBtn.disabled = true;
         if (els.outputCancelRunBtn) els.outputCancelRunBtn.disabled = true;
@@ -5114,20 +5110,17 @@ INDEX_HTML = r"""<!doctype html>
         });
         setStatus(result.message || '任务已终止');
         renderProgress(result);
-        setWorkflowInteractionLocked(false);
-        setRunButtonProgress(0);
-        trackRun("");
         await refreshSelectedTaskDetail({ openMissingFile: true }).catch(() => {});
         selectedTaskAllowedActions = (selectedTaskAllowedActions || []).filter(action => action !== 'cancel');
-        syncOutputButtons();
-        if (['cancelled', 'failed', 'paused', 'completed'].includes(result.status)) {
-          progressTimer = null;
-        }
       } catch (err) {
         setStatus(err.message, true);
-        setWorkflowInteractionLocked(false);
-        setRunButtonProgress(0);
-        syncOutputButtons();
+      } finally {
+        finishRunInteraction();
+        await loadTasks().catch(() => {});
+        if (selectedTask) {
+          await refreshSelectedTaskDetail({ openMissingFile: true }).catch(() => {});
+        }
+        finishRunInteraction();
       }
     }
 
@@ -7014,6 +7007,7 @@ INDEX_HTML = r"""<!doctype html>
 
     function awaitingConfirmationStep(summary = selectedTaskSummary) {
       if (!summary || !summary.awaiting_confirmation) return 0;
+      if (['cancelled', 'canceled', 'completed'].includes(String(summary.status || '').toLowerCase())) return 0;
       return Number(summary.awaiting_confirmation_step || summary.blocked_step || summary.resume_step || 0);
     }
 
@@ -11844,9 +11838,41 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if not job:
                 if not run_id and not task_name:
                     raise ValueError("run_id or task_name is required")
-                raise FileNotFoundError(f"Run not found: {run_id or task_name}")
+                if task_name:
+                    task_dir = self._safe_task_dir(task_name)
+                    summary_path = task_dir / "run_summary.json"
+                    summary: dict = {}
+                    if summary_path.is_file():
+                        try:
+                            loaded = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+                            summary = loaded if isinstance(loaded, dict) else {}
+                        except Exception:
+                            summary = {}
+                    job = {
+                        "run_id": "",
+                        "status": "paused" if paused else "cancelled",
+                        "task_name": task_name,
+                        "task_dir": str(task_dir),
+                        "task_title": str(summary.get("task_title") or ""),
+                        "workflow_name": str(summary.get("workflow") or ""),
+                        "provider": str(summary.get("provider") or ""),
+                        "completed_steps": int(summary.get("step_count") or 0),
+                        "total_steps": int(summary.get("total_steps") or 0),
+                        "awaiting_confirmation": False,
+                        "error": "任务已暂停，可稍后继续" if paused else "任务已终止",
+                        "current_message": "任务已暂停，可稍后继续" if paused else "任务已终止，可从任务输出继续",
+                        "message": "任务已暂停" if paused else "任务已终止",
+                        "updated_at": time.time(),
+                    }
+                    self._persist_stopped_run_state(job, paused=paused)
+                    return json.loads(json.dumps(job, ensure_ascii=False))
+                raise FileNotFoundError(f"Run not found: {run_id}")
             status = str(job.get("status") or "")
             if status in {"completed", "failed", "cancelled"} or (paused and status == "paused"):
+                if status == "cancelled":
+                    self._persist_stopped_run_state(job, paused=False)
+                elif paused and status == "paused":
+                    self._persist_stopped_run_state(job, paused=True)
                 job["updated_at"] = time.time()
                 job["message"] = "任务已停止"
                 return json.loads(json.dumps(job, ensure_ascii=False))
@@ -11871,23 +11897,46 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             )
             job["updated_at"] = time.time()
             job["message"] = "任务已暂停" if paused else "任务已终止"
-            task_dir_text = str(job.get("task_dir") or "").strip()
-            if task_dir_text:
-                summary_path = Path(task_dir_text) / "run_summary.json"
-                if summary_path.is_file():
-                    try:
-                        summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
-                    except Exception:
-                        summary = {}
-                    if isinstance(summary, dict):
-                        summary["awaiting_confirmation"] = False
-                        summary.pop("awaiting_confirmation_step", None)
-                        summary.pop("blocked_step", None)
-                        summary["status"] = "paused" if paused else "cancelled"
-                        summary["blocked_reason"] = "任务已暂停，可继续任务" if paused else ""
-                        summary["updated_at"] = time.time()
-                        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+            self._persist_stopped_run_state(job, paused=paused)
             return json.loads(json.dumps(job, ensure_ascii=False))
+
+    @staticmethod
+    def _persist_stopped_run_state(job: dict, paused: bool) -> None:
+        job["awaiting_confirmation"] = False
+        job.pop("awaiting_confirmation_step", None)
+        job.pop("blocked_step", None)
+        task_dir_text = str(job.get("task_dir") or "").strip()
+        if not task_dir_text:
+            return
+        task_dir = Path(task_dir_text)
+        if not task_dir.is_dir():
+            return
+        summary_path = task_dir / "run_summary.json"
+        summary: dict = {}
+        if summary_path.is_file():
+            try:
+                loaded = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+                summary = loaded if isinstance(loaded, dict) else {}
+            except Exception:
+                summary = {}
+        summary.update(
+            {
+                "status": "paused" if paused else "cancelled",
+                "task_dir": str(task_dir),
+                "workflow": str(job.get("workflow_name") or job.get("workflow") or summary.get("workflow") or ""),
+                "task_title": str(job.get("task_title") or summary.get("task_title") or ""),
+                "provider": str(job.get("provider") or summary.get("provider") or ""),
+                "step_count": int(job.get("completed_steps") or summary.get("step_count") or 0),
+                "total_steps": int(job.get("total_steps") or summary.get("total_steps") or 0),
+                "awaiting_confirmation": False,
+                "blocked_reason": "任务已暂停，可继续任务" if paused else "",
+                "updated_at": time.time(),
+            }
+        )
+        summary.pop("awaiting_confirmation_step", None)
+        summary.pop("blocked_step", None)
+        summary.pop("confirmation_kind", None)
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
     def _stop_requested(run_id: str) -> str:
@@ -12794,11 +12843,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     @classmethod
     def _task_state(cls, summary: dict, files: list[str], comfy_debug: dict | None = None) -> str:
-        if summary.get("awaiting_confirmation"):
-            return "awaiting_confirmation"
         summary_status = str(summary.get("status") or "").strip().lower()
         if summary_status in {"cancelled", "canceled"}:
             return "cancelled"
+        if summary.get("awaiting_confirmation"):
+            return "awaiting_confirmation"
         blocked_reason = str(summary.get("blocked_reason") or "").strip()
         if blocked_reason:
             return "blocked"
@@ -12825,7 +12874,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             actions.add("rerun_step")
         if task_state in {"awaiting_confirmation", "blocked", "failed", "partial", "cancelled"}:
             actions.add("resume")
-        if summary.get("awaiting_confirmation"):
+        if summary.get("awaiting_confirmation") and task_state not in {"cancelled", "completed"}:
             actions.add("confirm_step")
             actions.add("cancel")
         if task_state in {"awaiting_confirmation", "blocked"}:

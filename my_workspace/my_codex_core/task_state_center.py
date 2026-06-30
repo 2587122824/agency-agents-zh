@@ -92,13 +92,13 @@ class TaskStateCenter:
             return "running"
         if active_status == "paused":
             return "paused"
-        if self.summary.get("awaiting_confirmation"):
-            return "awaiting_confirmation"
         summary_status = str(self.summary.get("status") or "").strip().lower()
         if summary_status in {"cancelled", "canceled"}:
             return "cancelled"
         if summary_status in {"failed", "error"}:
             return "failed"
+        if self.summary.get("awaiting_confirmation"):
+            return "awaiting_confirmation"
         if str(self.summary.get("blocked_reason") or "").strip():
             return "blocked"
         production_status = str(self.summary.get("production_status") or "").strip().lower()
@@ -262,7 +262,7 @@ class TaskStateCenter:
             actions.add("rerun_step")
         if state in {"awaiting_confirmation", "blocked", "failed", "partial", "cancelled"}:
             actions.add("resume")
-        if self.summary.get("awaiting_confirmation"):
+        if self.summary.get("awaiting_confirmation") and state not in {"cancelled", "completed"}:
             actions.update({"confirm_step", "cancel"})
         if state in {"awaiting_confirmation", "blocked"}:
             actions.add("cancel")
@@ -286,7 +286,7 @@ class TaskStateCenter:
     ) -> dict[str, Any]:
         if manual_debug.get("status") == "awaiting_confirmation":
             return {"action": "run_comfy_debug", "label": "运行并确认 ComfyUI 调试队列", "reason": "manual_debug_awaiting_confirmation"}
-        if self.summary.get("awaiting_confirmation"):
+        if self.summary.get("awaiting_confirmation") and state not in {"cancelled", "completed"}:
             return {"action": "confirm_step", "label": "确认当前步骤并继续", "reason": "workflow_awaiting_confirmation", "step": workflow.get("awaiting_confirmation_step")}
         failed_or_blocked = production.get("dag", {}).get("blocked_nodes", []) + production.get("dag", {}).get("failed_nodes", [])
         if failed_or_blocked:
