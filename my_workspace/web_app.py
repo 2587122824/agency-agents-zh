@@ -12145,6 +12145,39 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                             elif stopped:
                                 step["message"] = "用户已终止"
                     job["updated_at"] = time.time()
+                    self._write_failed_run_summary(job)
+
+    @staticmethod
+    def _write_failed_run_summary(job: dict) -> None:
+        task_dir_text = str(job.get("task_dir") or "").strip()
+        if not task_dir_text:
+            return
+        task_dir = Path(task_dir_text)
+        if not task_dir.is_dir():
+            return
+        summary_path = task_dir / "run_summary.json"
+        summary = {}
+        if summary_path.is_file():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except json.JSONDecodeError:
+                summary = {}
+        summary.update(
+            {
+                "status": str(job.get("status") or "failed"),
+                "workflow": str(job.get("workflow_name") or job.get("workflow") or ""),
+                "task_title": str(job.get("task_title") or ""),
+                "task_dir": str(task_dir),
+                "provider": str(job.get("provider") or ""),
+                "step_count": int(job.get("completed_steps") or 0),
+                "total_steps": int(job.get("total_steps") or 0),
+                "current_step": int(job.get("current_step") or 0),
+                "error": str(job.get("error") or ""),
+                "traceback": str(job.get("traceback") or ""),
+                "failed_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _run_resume_job(
         self,
@@ -12521,7 +12554,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 reverse=True,
             )
             for job in jobs:
-                if job.get("status") not in {"queued", "running", "paused"}:
+                if job.get("status") not in {"queued", "running", "paused", "failed", "cancelled", "canceled"}:
                     continue
                 if str(job.get("task_name") or "") == task_name or str(job.get("task_dir") or "") == str(task_dir):
                     return json.loads(json.dumps(job, ensure_ascii=False))
@@ -12594,7 +12627,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             return []
         steps = workflow.get("steps") if isinstance(workflow, dict) else []
-        return steps if isinstance(steps, list) else []
+        if not isinstance(steps, list):
+            return []
+        return [cls._normalize_workflow_step(step, index) for index, step in enumerate(steps, start=1) if isinstance(step, dict)]
+
+    @staticmethod
+    def _normalize_workflow_step(step: dict, index: int) -> dict:
+        normalized = dict(step)
+        normalized["step"] = int(normalized.get("step") or normalized.get("order") or index)
+        normalized["agent"] = str(normalized.get("agent") or normalized.get("agent_id") or "").strip()
+        normalized["task"] = str(normalized.get("task") or normalized.get("instruction") or "").strip()
+        normalized["output"] = str(normalized.get("output") or normalized.get("expected_output") or "").strip()
+        return normalized
 
     @staticmethod
     def _step_metadata(task_dir: Path, step_no: int) -> dict:

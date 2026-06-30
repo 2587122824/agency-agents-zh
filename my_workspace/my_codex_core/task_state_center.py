@@ -83,11 +83,22 @@ class TaskStateCenter:
         }
 
     def _task_state(self, comfy_debug: dict[str, Any]) -> str:
+        active_status = str((self.active_job or {}).get("status") or "").strip().lower()
+        if active_status in {"failed", "error"}:
+            return "failed"
+        if active_status in {"cancelled", "canceled"}:
+            return "cancelled"
+        if active_status in {"queued", "running"}:
+            return "running"
+        if active_status == "paused":
+            return "paused"
         if self.summary.get("awaiting_confirmation"):
             return "awaiting_confirmation"
         summary_status = str(self.summary.get("status") or "").strip().lower()
         if summary_status in {"cancelled", "canceled"}:
             return "cancelled"
+        if summary_status in {"failed", "error"}:
+            return "failed"
         if str(self.summary.get("blocked_reason") or "").strip():
             return "blocked"
         production_status = str(self.summary.get("production_status") or "").strip().lower()
@@ -133,6 +144,8 @@ class TaskStateCenter:
                 status = "blocked"
             elif active_step == index and (self.active_job or {}).get("status") in {"queued", "running"}:
                 status = "running"
+            elif active_step == index and (self.active_job or {}).get("status") in {"failed", "error"}:
+                status = "failed"
             elif has_output or index <= completed_steps:
                 status = "completed"
             else:
@@ -295,6 +308,8 @@ class TaskStateCenter:
         diagnostics: list[dict[str, str]] = []
         if not steps and self.files:
             diagnostics.append({"level": "warn", "code": "missing_workflow_steps", "message": "任务有文件，但没有可识别的工作流步骤。"})
+        if self.active_job and str(self.active_job.get("error") or "").strip():
+            diagnostics.append({"level": "error", "code": "run_failed", "message": str(self.active_job.get("error") or "").strip()})
         if production.get("manifest_error"):
             diagnostics.append({"level": "error", "code": "invalid_production_manifest", "message": production["manifest_error"]})
         production_status = str(production.get("status") or "").lower()
@@ -455,7 +470,23 @@ class TaskStateCenter:
         except json.JSONDecodeError:
             return []
         steps = workflow.get("steps") if isinstance(workflow, dict) else []
-        return steps if isinstance(steps, list) else []
+        if not isinstance(steps, list):
+            return []
+        return self._normalize_workflow_steps(steps)
+
+    @staticmethod
+    def _normalize_workflow_steps(steps: list[Any]) -> list[dict[str, Any]]:
+        normalized: list[dict[str, Any]] = []
+        for index, raw_step in enumerate(steps, start=1):
+            if not isinstance(raw_step, dict):
+                continue
+            step = dict(raw_step)
+            step["step"] = int(step.get("step") or step.get("order") or index)
+            step["agent"] = str(step.get("agent") or step.get("agent_id") or "").strip()
+            step["task"] = str(step.get("task") or step.get("instruction") or "").strip()
+            step["output"] = str(step.get("output") or step.get("expected_output") or "").strip()
+            normalized.append(step)
+        return normalized
 
     def _step_metadata(self, step_no: int) -> dict[str, Any]:
         matches = sorted(self.task_dir.glob(f"step_{step_no:02d}_*/metadata.json"))

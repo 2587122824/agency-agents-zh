@@ -58,7 +58,7 @@ class WorkflowEngine:
         progress_callback: Callable[[dict], None] | None = None,
     ) -> WorkflowRunResult:
         workflow_path = self._resolve_workflow_path(workflow_key)
-        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        workflow = self._load_workflow(workflow_path)
         workflow_name = workflow.get("name") or workflow_path.stem
         task_title = (task_title or "").strip()
         steps = workflow.get("steps", [])
@@ -280,7 +280,7 @@ class WorkflowEngine:
         if not input_path.is_file():
             raise FileNotFoundError("input.md")
 
-        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        workflow = self._load_workflow(workflow_path)
         workflow_name = workflow.get("name") or task_dir.name
         task_title = self._summary_value(task_dir, "task_title")
         steps = workflow.get("steps", [])
@@ -429,7 +429,7 @@ class WorkflowEngine:
         if not input_path.is_file():
             raise FileNotFoundError("input.md")
 
-        workflow = json.loads(workflow_path.read_text(encoding="utf-8"))
+        workflow = self._load_workflow(workflow_path)
         workflow_name = workflow.get("name") or task_dir.name
         task_title = self._summary_value(task_dir, "task_title")
         user_input = input_path.read_text(encoding="utf-8", errors="replace")
@@ -1226,6 +1226,38 @@ class WorkflowEngine:
                 step_no = int(step.get("step") or 0)
                 return step_no or None
         return None
+
+    @staticmethod
+    def _normalize_workflow(workflow: dict) -> dict:
+        if not isinstance(workflow, dict):
+            raise ValueError("Workflow JSON must be an object")
+        normalized = dict(workflow)
+        raw_steps = normalized.get("steps") if isinstance(normalized.get("steps"), list) else []
+        steps: list[dict] = []
+        for index, raw_step in enumerate(raw_steps, start=1):
+            if not isinstance(raw_step, dict):
+                raise ValueError(f"Workflow step {index} must be an object")
+            step_no = int(raw_step.get("step") or raw_step.get("order") or index)
+            agent = str(raw_step.get("agent") or raw_step.get("agent_id") or "").strip()
+            task = str(raw_step.get("task") or raw_step.get("instruction") or "").strip()
+            output = str(raw_step.get("output") or raw_step.get("expected_output") or "").strip()
+            if not agent:
+                raise ValueError(f"Workflow step {index} is missing agent/agent_id")
+            if not task:
+                raise ValueError(f"Workflow step {index} is missing task/instruction")
+            if not output:
+                raise ValueError(f"Workflow step {index} is missing output/expected_output")
+            step = dict(raw_step)
+            step["step"] = step_no
+            step["agent"] = agent
+            step["task"] = task
+            step["output"] = output
+            steps.append(step)
+        normalized["steps"] = steps
+        return normalized
+
+    def _load_workflow(self, workflow_path: Path) -> dict:
+        return self._normalize_workflow(json.loads(workflow_path.read_text(encoding="utf-8-sig")))
 
     @staticmethod
     def _next_step_number(workflow: dict, current_step_no: int | None) -> int | None:
