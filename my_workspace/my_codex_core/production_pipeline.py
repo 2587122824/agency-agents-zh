@@ -10,10 +10,12 @@ from typing import Any
 from .cloud_comfyui_adapter import CloudComfyUIAdapter
 from .cloud_image_adapter import CloudImageAdapter
 from .cloud_video_adapter import CloudVideoAdapter
+from .comfy_mcp_adapter import ComfyMCPAdapter
 from .local_ffmpeg_adapter import LocalFFmpegAdapter
 from .local_tts_adapter import LocalTTSAdapter
 from .production_graph import build_production_graph, normalize_global_context, write_json as write_graph_json
 from .production_plan_compiler import compile_production_plan, write_production_plan
+from .visual_provider_router import build_visual_provider_profile
 
 
 def run_auto_production(
@@ -70,6 +72,9 @@ def run_auto_production(
     checklist_path = task_dir / "edit_checklist.md"
     production_note_path = task_dir / "auto_production.md"
     final_video_name = _safe_file_name(str(compose_config.get("final_video_name") or "final_video.mp4"))
+    visual_provider_profile = build_visual_provider_profile(compose_config)
+    compose_config["visual_provider"] = visual_provider_profile["provider"]
+    compose_config["visual_provider_profile"] = visual_provider_profile
     emit("正在整理制作包：提示词、配音文案、字幕、ComfyUI 参数和剪辑方案", stage="package")
 
     _write_text(image_prompt_path, image_content or "# 分镜生图提示词\n\n未找到 06_分镜生图设计师输出。\n")
@@ -195,6 +200,10 @@ def run_auto_production(
             "tool": compose_config.get("tool") or "ffmpeg",
             "execution_mode": compose_config.get("execution_mode") or mode,
             "target_file": str(task_dir / final_video_name),
+            "visual_provider": visual_provider_profile["provider"],
+            "visual_provider_status": "pending" if visual_provider_profile["supported"] else "blocked",
+            "visual_provider_reason": visual_provider_profile["reason"],
+            "visual_provider_details": visual_provider_profile,
             "subtitles_file": str(subtitles_path),
             "voiceover_file": str(voiceover_path),
             "audio_package_file": str(audio_package_path),
@@ -362,6 +371,10 @@ def run_auto_production(
             manifest["composition"]["comfyui_adapter_status"] = comfyui_adapter_result["status"]
             manifest["composition"]["comfyui_adapter_manifest"] = comfyui_adapter_result.get("manifest_file", "")
             manifest["composition"]["comfyui_downloaded_files"] = comfyui_adapter_result.get("downloaded_files", [])
+            manifest["composition"]["visual_provider_status"] = comfyui_adapter_result["status"]
+            manifest["composition"]["visual_provider_reason"] = comfyui_adapter_result.get("reason", "")
+            if comfyui_adapter_result.get("provider"):
+                manifest["composition"]["visual_provider"] = comfyui_adapter_result.get("provider", manifest["composition"].get("visual_provider", ""))
             manifest["composition"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
             manifest["composition"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
             manifest["composition"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
@@ -1054,12 +1067,25 @@ def _run_comfyui_adapter(
     output_dir: Path,
     progress_callback=None,
 ) -> dict[str, Any] | None:
-    tool = str(compose_config.get("tool") or "").strip().lower()
-    if tool in {"", "manual", "jianying"}:
-        return {"status": "skipped", "reason": "compose tool is not a cloud ComfyUI provider"}
+    provider_profile = build_visual_provider_profile(compose_config)
+    provider = provider_profile["provider"]
     api_key = str(compose_config.get("api_key") or "").strip()
     base_url = str(compose_config.get("base_url") or "").strip()
     endpoint = str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()
+    if provider == "comfy_mcp":
+        return ComfyMCPAdapter(
+            mcp_url=str(compose_config.get("comfy_mcp_url") or compose_config.get("mcp_url") or ""),
+            api_key=api_key,
+            progress_callback=progress_callback,
+        ).run(_load_comfyui_payload_with_fallback(comfyui_payload_path), compose_config, output_dir)
+    if provider == "local_comfyui":
+        if not base_url:
+            return {"status": "skipped", "reason": "local_comfyui provider requires a base URL"}
+        if not endpoint:
+            endpoint = "/prompt"
+    tool = str(compose_config.get("tool") or "").strip().lower()
+    if tool in {"", "manual", "jianying"} and provider != "runninghub":
+        return {"status": "skipped", "reason": "compose tool is not a cloud ComfyUI provider"}
     if not api_key or not base_url or not endpoint:
         return {"status": "skipped", "reason": "ComfyUI API key, base URL, or workflow endpoint is missing"}
 
@@ -1081,6 +1107,7 @@ def _run_comfyui_adapter(
         return {"status": "failed", "error": str(exc), "manifest_file": str(error_path)}
 
     return {
+        "provider": provider,
         "status": manifest.get("status") or "success",
         "manifest_file": str(output_dir / "cloud_comfyui_manifest.json"),
         "downloaded_files": manifest.get("downloaded_files", []),

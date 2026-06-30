@@ -29,11 +29,12 @@ class CloudComfyUIAdapter:
         self._media_upload_cache: dict[str, str] = {}
         if not self.base_url:
             raise ValueError("ComfyUI base URL is required")
-        if not self.api_key:
+        parsed = urlparse(self.base_url)
+        local_base = parsed.hostname in {"127.0.0.1", "localhost"} or self.base_url.lower().startswith(("http://127.0.0.1", "http://localhost", "https://127.0.0.1", "https://localhost"))
+        if not self.api_key and not local_base:
             raise ValueError("ComfyUI API key is required")
         if not self.endpoint:
             raise ValueError("ComfyUI workflow endpoint is required")
-        parsed = urlparse(self.base_url)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("ComfyUI base URL must be an http/https URL")
 
@@ -57,7 +58,7 @@ class CloudComfyUIAdapter:
         return self._run_generic(comfyui_payload, compose_config, output_dir)
 
     def _provider(self, compose_config: dict[str, Any]) -> str:
-        provider = str(compose_config.get("provider") or "").strip().lower()
+        provider = str(compose_config.get("visual_provider") or compose_config.get("provider") or "").strip().lower()
         if provider:
             return provider
         base_url = self.base_url.lower()
@@ -531,7 +532,7 @@ class CloudComfyUIAdapter:
             for index, url in enumerate(urls, start=1)
         ]
         manifest = {
-            "provider": str(compose_config.get("provider") or "generic"),
+            "provider": str(compose_config.get("visual_provider") or compose_config.get("provider") or "generic"),
             "status": "submitted" if not downloaded else "downloaded",
             "endpoint": endpoint,
             "response_file": str(response_path),
@@ -1541,7 +1542,7 @@ class CloudComfyUIAdapter:
             url,
             data=body,
             headers={
-                "Authorization": f"Bearer {self.api_key}",
+                **({"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}),
                 "Content-Type": f"multipart/form-data; boundary={boundary}",
                 "Accept": "application/json",
             },
@@ -1615,8 +1616,14 @@ class CloudComfyUIAdapter:
             headers={
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-                "X-API-Key": self.api_key,
+                **(
+                    {
+                        "Authorization": f"Bearer {self.api_key}",
+                        "X-API-Key": self.api_key,
+                    }
+                    if self.api_key
+                    else {}
+                ),
             },
             method="POST",
         )

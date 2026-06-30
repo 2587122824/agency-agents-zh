@@ -2805,11 +2805,21 @@ INDEX_HTML = r"""<!doctype html>
               </label>
             </div>
             <div class="provider-grid config-card" data-title="ComfyUI 连接" data-desc="配置 RunningHub/云端 ComfyUI 的密钥、基础地址和当前编辑槽位接口">
+              <label>视觉后端
+                <select id="visualProvider">
+                  <option value="runninghub" selected>RunningHub / 云端 ComfyUI</option>
+                  <option value="comfy_mcp">Comfy MCP（模板发现优先）</option>
+                  <option value="local_comfyui">本地 ComfyUI</option>
+                </select>
+              </label>
               <label>ComfyUI 平台密钥
                 <input id="comfyApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="RunningHub 或云端 ComfyUI API Key" />
               </label>
               <label>ComfyUI 平台接口地址
                 <input id="comfyBaseUrl" autocomplete="off" spellcheck="false" placeholder="RunningHub: https://www.runninghub.cn/openapi/v2" />
+              </label>
+              <label>Comfy MCP 地址
+                <input id="comfyMcpUrl" autocomplete="off" spellcheck="false" placeholder="https://cloud.comfy.org/mcp" />
               </label>
               <label>当前编辑槽位接口
                 <input id="comfyWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/你的素材预览工作流ID 或 /run/ai-app/你的应用ID" />
@@ -3564,8 +3574,10 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugGate: document.getElementById('comfyDebugGate'),
       composeTool: document.getElementById('composeTool'),
       finalVideoName: document.getElementById('finalVideoName'),
+      visualProvider: document.getElementById('visualProvider'),
       comfyApiKey: document.getElementById('comfyApiKey'),
       comfyBaseUrl: document.getElementById('comfyBaseUrl'),
+      comfyMcpUrl: document.getElementById('comfyMcpUrl'),
       comfyWorkflowEndpoint: document.getElementById('comfyWorkflowEndpoint'),
       comfyWorkflowPreset: document.getElementById('comfyWorkflowPreset'),
       comfyWorkflowPresetNote: document.getElementById('comfyWorkflowPresetNote'),
@@ -4850,8 +4862,10 @@ INDEX_HTML = r"""<!doctype html>
         comfyDebugGate: els.comfyDebugGate.value,
         composeTool: els.composeTool.value,
         finalVideoName: els.finalVideoName.value,
+        visualProvider: els.visualProvider.value,
         comfyApiKey: els.comfyApiKey.value,
         comfyBaseUrl: els.comfyBaseUrl.value,
+        comfyMcpUrl: els.comfyMcpUrl.value,
         comfyWorkflowEndpoint: els.comfyWorkflowEndpoint.value,
         comfyWorkflowPreset: els.comfyWorkflowPreset.value,
         comfyWorkflowPresetNote: els.comfyWorkflowPresetNote.value,
@@ -5000,8 +5014,10 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.comfyDebugGate, settings.comfyDebugGate || 'on');
       setIfExists(els.composeTool, settings.composeTool);
       els.finalVideoName.value = settings.finalVideoName || '';
+      setIfExists(els.visualProvider, settings.visualProvider || 'runninghub');
       els.comfyApiKey.value = settings.comfyApiKey || '';
       els.comfyBaseUrl.value = settings.comfyBaseUrl || '';
+      els.comfyMcpUrl.value = settings.comfyMcpUrl || '';
       els.comfyWorkflowEndpoint.value = settings.comfyWorkflowEndpoint || '';
       comfyWorkflowLibrary = normalizeComfyWorkflowLibrary(settings.comfyWorkflowLibrary);
       restoreComfyDebugState(settings.comfyDebugStateByWorkflowId);
@@ -9829,9 +9845,11 @@ INDEX_HTML = r"""<!doctype html>
           tool: els.composeTool.value,
           execution_mode: els.autoProductionMode.value,
           final_video_name: els.finalVideoName.value.trim() || 'final_video.mp4',
+          visual_provider: els.visualProvider.value,
           api_key_provided: Boolean(els.comfyApiKey.value.trim()),
           base_url_provided: Boolean(els.comfyBaseUrl.value.trim()),
           base_url: els.comfyBaseUrl.value.trim(),
+          comfy_mcp_url: els.comfyMcpUrl.value.trim(),
           workflow_endpoint: els.comfyWorkflowEndpoint.value.trim(),
           node_info_list_json: els.comfyNodeInfoList.value.trim(),
           poll_timeout_seconds: Number(els.comfyPollTimeout.value || 3600),
@@ -11176,8 +11194,10 @@ INDEX_HTML = r"""<!doctype html>
       els.autoProductionMode.value = 'off';
       els.composeTool.value = 'ffmpeg';
       els.finalVideoName.value = 'long_video_final.mp4';
+      els.visualProvider.value = 'runninghub';
       els.comfyApiKey.value = '';
       els.comfyBaseUrl.value = '';
+      els.comfyMcpUrl.value = '';
       els.comfyWorkflowEndpoint.value = '';
       els.comfyNodeInfoList.value = '[]';
       els.comfyPollTimeout.value = '3600';
