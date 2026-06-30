@@ -58,6 +58,7 @@ ASSET_LIBRARY_TAG_FOLDERS = {
     "frame_interpolation": "19_frame_interpolation",
     "video_deflicker_stabilize": "20_video_deflicker_stabilize",
     "video_inpaint_fix": "21_video_inpaint_fix",
+    "bgm": "22_bgm",
 }
 COMFY_DEBUG_TASK = "__comfy_debug__"
 COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
@@ -83,7 +84,8 @@ IMAGE_EXTENSIONS = {
     ".heif",
 }
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm", ".m4v"}
-MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".aac", ".m4a", ".flac", ".ogg"}
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 mimetypes.add_type("image/jpeg", ".jfif")
 mimetypes.add_type("image/jpeg", ".jpe")
 mimetypes.add_type("image/jpeg", ".pjpeg")
@@ -144,6 +146,23 @@ for _workflow in COMFY_DEBUG_WORKFLOWS:
         _workflow["default_height"] = 480
     if _workflow.get("id") == "06_i2v_first_middle_last_frame":
         _workflow["default_fps"] = 24
+    for _mode in _workflow.get("modes") or []:
+        _mode_value = str(_mode.get("value") or "")
+        _required_inputs = []
+        if _mode.get("requires_reference"):
+            _required_inputs.append("input_base_image")
+        if _mode_value == "i2v_first_middle_last_frame":
+            _required_inputs.extend(["input_middle_frame", "input_last_frame"])
+        elif _mode_value == "i2v_first_last_frame":
+            _required_inputs.append("input_last_frame")
+        if _mode_value in {"image_inpaint_fix", "video_inpaint_fix"}:
+            _required_inputs.append("input_mask_image")
+        if _mode_value == "talking_image":
+            _required_inputs.append("input_audio_file")
+        _mode["required_inputs"] = list(dict.fromkeys(_required_inputs))
+        _mode["outputs"] = ["output_final_video" if _workflow.get("type") == "video" else "output_final_image"]
+        if _mode_value == "background_remove":
+            _mode["outputs"].append("output_mask_alpha")
 
 
 INDEX_HTML = r"""<!doctype html>
@@ -1298,7 +1317,8 @@ INDEX_HTML = r"""<!doctype html>
       font-size: 12px;
     }
     .asset-card-media img,
-    .asset-card-media video {
+    .asset-card-media video,
+    .asset-card-media audio {
       width: 100%;
       height: 100%;
       object-fit: cover;
@@ -2952,7 +2972,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <div class="asset-import-grid">
               <label>本地图片/视频
-                <input id="assetImportFile" type="file" accept="image/*,video/*" />
+                <input id="assetImportFile" type="file" accept="image/*,video/*,audio/*" />
               </label>
               <label>名称
                 <input id="assetImportName" autocomplete="off" spellcheck="false" placeholder="留空则使用文件名" />
@@ -3030,6 +3050,12 @@ INDEX_HTML = r"""<!doctype html>
                   <select id="comfyDebugAssetTagFilter">
                     <option value="">全部素材</option>
                   </select>
+                </label>
+                <label id="comfyDebugMaskImageField" hidden>蒙版路径
+                  <input id="comfyDebugMaskImage" autocomplete="off" spellcheck="false" placeholder="input_mask_image：局部修复使用的黑白蒙版" />
+                </label>
+                <label id="comfyDebugAudioFileField" hidden>口型音频路径
+                  <input id="comfyDebugAudioFile" autocomplete="off" spellcheck="false" placeholder="input_audio_file：本地 TTS 生成的最终 WAV" />
                 </label>
               </div>
               <input id="comfyDebugMiddleFrameReference" type="hidden" />
@@ -3506,6 +3532,10 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugReference: document.getElementById('comfyDebugReference'),
       comfyDebugMiddleFrameReference: document.getElementById('comfyDebugMiddleFrameReference'),
       comfyDebugLastFrameReference: document.getElementById('comfyDebugLastFrameReference'),
+      comfyDebugMaskImageField: document.getElementById('comfyDebugMaskImageField'),
+      comfyDebugMaskImage: document.getElementById('comfyDebugMaskImage'),
+      comfyDebugAudioFileField: document.getElementById('comfyDebugAudioFileField'),
+      comfyDebugAudioFile: document.getElementById('comfyDebugAudioFile'),
       comfyDebugReferencePreview: document.getElementById('comfyDebugReferencePreview'),
       comfyDebugReferencePreviewMeta: document.getElementById('comfyDebugReferencePreviewMeta'),
       comfyDebugMiddleFrameCard: document.getElementById('comfyDebugMiddleFrameCard'),
@@ -3693,7 +3723,7 @@ INDEX_HTML = r"""<!doctype html>
     let assetLibraryDetailDirty = false;
     const ASSET_LIBRARY_SECTIONS = [
       { value: 'all', label: '全部', addLabel: '新增资产', tags: [] },
-      { value: 'material', label: '素材', addLabel: '新增素材', tags: ['scene', 'broll', 'cover', 'scene_base', 'cover_key_visual', 'image_inpaint_fix', 'background_remove', 'broll_scene_video', 'empty_transition_video', 'video_upscale', 'frame_interpolation', 'video_deflicker_stabilize', 'video_inpaint_fix'] },
+      { value: 'material', label: '素材', addLabel: '新增素材', tags: ['scene', 'broll', 'bgm', 'music', 'cover', 'scene_base', 'cover_key_visual', 'image_inpaint_fix', 'background_remove', 'broll_scene_video', 'empty_transition_video', 'video_upscale', 'frame_interpolation', 'video_deflicker_stabilize', 'video_inpaint_fix'] },
       { value: 'character', label: '角色', addLabel: '新增角色', tags: ['person', 'character_base', 'character_turnaround', 'character_generation'] },
       { value: 'product', label: '商品', addLabel: '新增商品', tags: ['product', 'product_base', 'product_turnaround', 'product_generation'] },
       { value: 'reference', label: '参考', addLabel: '新增参考', tags: ['style', 'style_reference', 'keyframe', 'reference', 'i2v_first_frame', 'i2v_first_last_frame', 'i2v_first_middle_last_frame', 'live_to_anime', 'motion_transfer', 'talking_image'] },
@@ -3703,6 +3733,7 @@ INDEX_HTML = r"""<!doctype html>
       { value: 'product', label: '产品' },
       { value: 'scene', label: '场景' },
       { value: 'broll', label: 'B-roll' },
+      { value: 'bgm', label: 'BGM 配乐' },
       { value: 'cover', label: '封面' },
       { value: 'style', label: '风格参考' },
       { value: 'keyframe', label: '关键帧' },
@@ -4466,6 +4497,8 @@ INDEX_HTML = r"""<!doctype html>
           reference: state.reference || '',
           middleFrameReference: state.middleFrameReference || '',
           lastFrameReference: state.lastFrameReference || '',
+          maskImage: state.maskImage || '',
+          audioFile: state.audioFile || '',
           seed: state.seed || '',
           width: state.width || '',
           height: state.height || '',
@@ -4519,6 +4552,8 @@ INDEX_HTML = r"""<!doctype html>
           reference: state.reference || '',
           middleFrameReference: state.middleFrameReference || '',
           lastFrameReference: state.lastFrameReference || '',
+          maskImage: state.maskImage || '',
+          audioFile: state.audioFile || '',
           seed: state.seed || '',
           width: state.width || '',
           height: state.height || '',
@@ -5074,6 +5109,8 @@ INDEX_HTML = r"""<!doctype html>
         reference: els.comfyDebugReference?.value || '',
         middleFrameReference: els.comfyDebugMiddleFrameReference?.value || '',
         lastFrameReference: els.comfyDebugLastFrameReference?.value || '',
+        maskImage: els.comfyDebugMaskImage?.value || '',
+        audioFile: els.comfyDebugAudioFile?.value || '',
         seed: els.comfyDebugSeed?.value || '',
         width: els.comfyDebugWidth?.value || '',
         height: els.comfyDebugHeight?.value || '',
@@ -5111,6 +5148,8 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugReference) els.comfyDebugReference.value = state.reference || '';
       if (els.comfyDebugMiddleFrameReference) els.comfyDebugMiddleFrameReference.value = state.middleFrameReference || '';
       if (els.comfyDebugLastFrameReference) els.comfyDebugLastFrameReference.value = state.lastFrameReference || '';
+      if (els.comfyDebugMaskImage) els.comfyDebugMaskImage.value = state.maskImage || '';
+      if (els.comfyDebugAudioFile) els.comfyDebugAudioFile.value = state.audioFile || '';
       if (els.comfyDebugSeed) els.comfyDebugSeed.value = state.seed || '';
       if (els.comfyDebugWidth) els.comfyDebugWidth.value = state.width || '';
       if (els.comfyDebugHeight) els.comfyDebugHeight.value = state.height || '';
@@ -5150,6 +5189,8 @@ INDEX_HTML = r"""<!doctype html>
         reference: modeConfig.defaultReference || '',
         middleFrameReference: modeConfig.defaultMiddleFrameReference || '',
         lastFrameReference: modeConfig.defaultLastFrameReference || '',
+        maskImage: '',
+        audioFile: '',
         seed: modeConfig.defaultSeed || '',
         width: String(modeConfig.defaultWidth || workflow?.default_width || ''),
         height: String(modeConfig.defaultHeight || workflow?.default_height || ''),
@@ -5549,6 +5590,12 @@ INDEX_HTML = r"""<!doctype html>
         '{{image_prompt}}': '生图提示词',
         '{{video_prompt}}': '视频提示词',
         '{{reference_image}}': '参考图文件名/URL',
+        '{{input_base_image}}': '语义槽位：主底图',
+        '{{input_middle_frame}}': '语义槽位：中帧',
+        '{{input_last_frame}}': '语义槽位：尾帧',
+        '{{input_mask_image}}': '语义槽位：修复蒙版',
+        '{{input_reference_style}}': '语义槽位：风格参考',
+        '{{input_audio_file}}': '语义槽位：口型音频',
         '{{payload}}': '完整参数包',
       };
       return labels[value] || value;
@@ -5660,7 +5707,7 @@ INDEX_HTML = r"""<!doctype html>
       const panel = document.createElement('div');
       panel.className = 'comfy-parameter-panel';
       panel.appendChild(head);
-      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{reference_image}}', '{{payload}}'];
+      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{input_base_image}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{payload}}'];
       comfyParameterCandidates.forEach((candidate, index) => {
         const item = document.createElement('div');
         item.className = 'comfy-parameter-row';
@@ -6922,11 +6969,14 @@ INDEX_HTML = r"""<!doctype html>
         const detail = document.createElement('div');
         detail.className = 'muted small';
         const outputCount = Array.isArray(job.outputs) ? job.outputs.filter(Boolean).length : 0;
-        detail.textContent = outputCount ? `${outputCount} 个输出` : compactPath(job.detail || '');
+        const dependencyText = Array.isArray(job.depends_on) && job.depends_on.length ? `依赖：${job.depends_on.join(', ')}` : '';
+        const attemptText = Number(job.attempts || 0) > 1 ? `尝试 ${job.attempts} 次` : '';
+        const cacheText = job.cache_hit ? '缓存命中' : '';
+        detail.textContent = [outputCount ? `${outputCount} 个输出` : compactPath(job.detail || ''), dependencyText, attemptText, cacheText].filter(Boolean).join(' · ');
         card.appendChild(label);
         card.appendChild(value);
         if (detail.textContent) card.appendChild(detail);
-        const retryAction = productionRetryAction(job.id);
+        const retryAction = productionRetryAction(job.id, job.status);
         if (retryAction) {
           const action = document.createElement('button');
           action.type = 'button';
@@ -7076,11 +7126,11 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function productionRetryAction(jobId) {
+    function productionRetryAction(jobId, status = '') {
       if (jobId === 'material') return '重试素材';
       if (jobId === 'tts') return '重试配音';
       if (jobId === 'ffmpeg') return '重新合成';
-      return '';
+      return ['failed', 'blocked', 'quality_failed'].includes(String(status || '').toLowerCase()) ? '重试节点' : '';
     }
 
     function productionStatusLabel(status) {
@@ -7328,6 +7378,7 @@ INDEX_HTML = r"""<!doctype html>
       return [
         { value: 'scene', label: '素材 / 场景' },
         { value: 'broll', label: '素材 / B-roll' },
+        { value: 'bgm', label: '素材 / BGM 配乐' },
         { value: 'cover', label: '素材 / 封面' },
         { value: 'person', label: '角色 / 人物' },
         { value: 'character_base', label: '角色 / 基础图' },
@@ -7381,6 +7432,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function assetLibraryKindLabel(item) {
+      if (item?.kind === 'audio' || isAudioFile(item?.file || '')) return '音频';
       return (item?.kind === 'video' || isVideoFile(item?.file || '')) ? '视频' : '图片';
     }
 
@@ -7443,6 +7495,8 @@ INDEX_HTML = r"""<!doctype html>
           task_type: 'keyframe',
           control_mode: 'none',
           requires_reference: false,
+          required_inputs: [],
+          outputs: ['output_final_image'],
         }];
       }
       return item;
@@ -7608,6 +7662,10 @@ INDEX_HTML = r"""<!doctype html>
         if (els.comfyDebugDuration) els.comfyDebugDuration.value = '';
         if (els.comfyDebugFps) els.comfyDebugFps.value = '';
       }
+      const mode = selectedWorkflowModeDefinition(selected);
+      const requiredInputs = Array.isArray(mode?.required_inputs) ? mode.required_inputs : [];
+      if (els.comfyDebugMaskImageField) els.comfyDebugMaskImageField.hidden = !requiredInputs.includes('input_mask_image');
+      if (els.comfyDebugAudioFileField) els.comfyDebugAudioFileField.hidden = !requiredInputs.includes('input_audio_file');
       updateComfyDebugFrameCountHint();
       updateComfyDebugReferencePreviews();
     }
@@ -8101,7 +8159,7 @@ INDEX_HTML = r"""<!doctype html>
       save.onclick = async event => {
         event.preventDefault();
         event.stopPropagation();
-        const mediaTag = item.kind || (isImageFile(item.file) ? 'image' : 'video');
+        const mediaTag = item.kind || (isImageFile(item.file) ? 'image' : (isAudioFile(item.file) ? 'audio' : 'video'));
         const tags = normalizeAssetTags([mediaTag, category.value]);
         await updateAssetMetadata(item.id, tags, note.value);
       };
@@ -8138,7 +8196,7 @@ INDEX_HTML = r"""<!doctype html>
         ...item,
         library: true,
         label: item.name || assetFileLabel(item.file),
-        kind: item.kind || (isImageFile(item.file) ? 'image' : 'video'),
+        kind: item.kind || (isImageFile(item.file) ? 'image' : (isAudioFile(item.file) ? 'audio' : 'video')),
       }));
       previewItems.forEach((item, index) => {
         const card = assetLibraryCard(item, index, previewItems);
@@ -8218,13 +8276,19 @@ INDEX_HTML = r"""<!doctype html>
         img.alt = item.name || assetFileLabel(item.file);
         img.src = previewUrl;
         media.appendChild(img);
-      } else {
+      } else if (assetLibraryKindLabel(item) === '视频') {
         const video = document.createElement('video');
         video.muted = true;
         video.playsInline = true;
         video.preload = 'metadata';
         video.src = previewUrl;
         media.appendChild(video);
+      } else {
+        const audio = document.createElement('audio');
+        audio.controls = true;
+        audio.preload = 'metadata';
+        audio.src = previewUrl;
+        media.appendChild(audio);
       }
       const actions = document.createElement('span');
       actions.className = 'asset-library-card-actions';
@@ -8295,7 +8359,7 @@ INDEX_HTML = r"""<!doctype html>
           img.onload = () => fitAssetDetailPreviewMedia(img);
           if (img.complete && img.naturalWidth) fitAssetDetailPreviewMedia(img);
           els.assetLibraryDetailPreview.appendChild(img);
-        } else {
+        } else if (assetLibraryKindLabel(item) === '视频') {
           const video = document.createElement('video');
           video.className = 'asset-detail-media';
           video.controls = true;
@@ -8303,6 +8367,13 @@ INDEX_HTML = r"""<!doctype html>
           video.src = url;
           video.onloadedmetadata = () => fitAssetDetailPreviewMedia(video);
           els.assetLibraryDetailPreview.appendChild(video);
+        } else {
+          const audio = document.createElement('audio');
+          audio.className = 'asset-detail-media';
+          audio.controls = true;
+          audio.preload = 'metadata';
+          audio.src = url;
+          els.assetLibraryDetailPreview.appendChild(audio);
         }
       }
       if (els.assetLibraryDetailName) els.assetLibraryDetailName.value = item.name || assetFileLabel(item.file);
@@ -8353,7 +8424,7 @@ INDEX_HTML = r"""<!doctype html>
     async function saveAssetLibraryDetail() {
       const item = assetLibrarySelectedItem();
       if (!item) return;
-      const mediaTag = item.kind || (isImageFile(item.file) ? 'image' : 'video');
+      const mediaTag = item.kind || (isImageFile(item.file) ? 'image' : (isAudioFile(item.file) ? 'audio' : 'video'));
       const category = els.assetLibraryDetailCategory?.value || defaultAssetCategoryForSection();
       await updateAssetMetadata(
         item.id,
@@ -8398,18 +8469,20 @@ INDEX_HTML = r"""<!doctype html>
     async function importAssetLibraryFile() {
       const file = els.assetImportFile?.files && els.assetImportFile.files[0];
       if (!file) {
-        if (els.assetImportStatus) els.assetImportStatus.textContent = '请选择一个图片或视频文件。';
+        if (els.assetImportStatus) els.assetImportStatus.textContent = '请选择一个图片、视频或音频文件。';
         return;
       }
-      if (!isImageFile(file.name || '') && !isVideoFile(file.name || '') && !String(file.type || '').match(/^(image|video)\//)) {
-        if (els.assetImportStatus) els.assetImportStatus.textContent = '只支持图片或视频文件。';
+      if (!isImageFile(file.name || '') && !isVideoFile(file.name || '') && !isAudioFile(file.name || '') && !String(file.type || '').match(/^(image|video|audio)\//)) {
+        if (els.assetImportStatus) els.assetImportStatus.textContent = '只支持图片、视频或音频文件。';
         return;
       }
       try {
         if (els.assetImportSaveBtn) els.assetImportSaveBtn.disabled = true;
         if (els.assetImportStatus) els.assetImportStatus.textContent = `正在导入：${file.name}`;
         const category = els.assetImportCategory?.value || defaultAssetCategoryForSection();
-        const mediaTag = (isImageFile(file.name || '') || String(file.type || '').startsWith('image/')) ? 'image' : 'video';
+        const mediaTag = (isImageFile(file.name || '') || String(file.type || '').startsWith('image/'))
+          ? 'image'
+          : ((isAudioFile(file.name || '') || String(file.type || '').startsWith('audio/')) ? 'audio' : 'video');
         const contentBase64 = await fileToBase64(file);
         const result = await api('/api/import-asset', {
           method: 'POST',
@@ -8448,9 +8521,9 @@ INDEX_HTML = r"""<!doctype html>
           file,
           label: typeof item === 'string' ? assetFileLabel(file) : (item.label || assetFileLabel(file)),
           name: typeof item === 'string' ? String(file).split('/').pop() : (item.name || String(file).split('/').pop()),
-          kind: isImageFile(file) ? 'image' : 'video',
+          kind: isImageFile(file) ? 'image' : (isAudioFile(file) ? 'audio' : 'video'),
         };
-      }).filter(item => item && item.file && (isImageFile(item.file) || isVideoFile(item.file)));
+      }).filter(item => item && item.file && (isImageFile(item.file) || isVideoFile(item.file) || isAudioFile(item.file)));
     }
 
     function openAssetLightboxFromItems(taskName, items, index = 0) {
@@ -8484,6 +8557,7 @@ INDEX_HTML = r"""<!doctype html>
         return tag === 'button'
           || tag === 'img'
           || tag === 'video'
+          || tag === 'audio'
           || classList?.contains?.('asset-lightbox-head')
           || classList?.contains?.('asset-lightbox-foot');
       });
@@ -8512,7 +8586,7 @@ INDEX_HTML = r"""<!doctype html>
         img.onload = () => fitAssetLightboxMedia(img);
         els.assetLightboxStage.appendChild(img);
         if (img.complete && img.naturalWidth) fitAssetLightboxMedia(img);
-      } else {
+      } else if (isVideoFile(item.file)) {
         const video = document.createElement('video');
         video.className = 'asset-lightbox-media';
         video.src = url;
@@ -8530,6 +8604,14 @@ INDEX_HTML = r"""<!doctype html>
         };
         video.onloadedmetadata = () => fitAssetLightboxMedia(video);
         els.assetLightboxStage.appendChild(video);
+      } else {
+        const audio = document.createElement('audio');
+        audio.className = 'asset-lightbox-media';
+        audio.src = url;
+        audio.controls = true;
+        audio.autoplay = true;
+        audio.preload = 'metadata';
+        els.assetLightboxStage.appendChild(audio);
       }
       els.assetLightboxTitle.textContent = item.label || assetFileLabel(item.file);
       els.assetLightboxMeta.textContent = item.file;
@@ -8615,6 +8697,10 @@ INDEX_HTML = r"""<!doctype html>
 
     function isVideoFile(file) {
       return /\.(mp4|mov|webm|m4v)$/i.test(String(file || ''));
+    }
+
+    function isAudioFile(file) {
+      return /\.(mp3|wav|aac|m4a|flac|ogg)$/i.test(String(file || ''));
     }
 
     function assetFileLabel(file) {
@@ -9883,6 +9969,17 @@ INDEX_HTML = r"""<!doctype html>
       if (!referenceSupport.hasMiddleFrame && referenceSupport.hasLastFrame && (!submitReferenceValue || !submitLastFrameValue)) {
         throw new Error('首尾帧模式必须同时提供首帧和尾帧');
       }
+      const requiredInputs = Array.isArray(workflowModeDef?.required_inputs) ? workflowModeDef.required_inputs : [];
+      const semanticValues = {
+        input_base_image: submitReferenceValue,
+        input_middle_frame: submitMiddleFrameValue,
+        input_last_frame: submitLastFrameValue,
+        input_mask_image: els.comfyDebugMaskImage?.value.trim() || '',
+        input_audio_file: els.comfyDebugAudioFile?.value.trim() || '',
+      };
+      const missingInputs = requiredInputs.filter(slot => !semanticValues[slot]);
+      if (missingInputs.length) throw new Error(`当前子模式缺少必填输入：${missingInputs.join(', ')}`);
+      validateComfyDebugSemanticContract(requiredInputs, els.comfyDebugEndpoint.value.trim(), els.comfyDebugNodeInfoList.value.trim());
       return {
         workflows: [selected.id],
         api_key: els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim(),
@@ -9896,6 +9993,11 @@ INDEX_HTML = r"""<!doctype html>
         reference_image: submitReferenceValue,
         middle_frame_image: submitMiddleFrameValue,
         last_frame_image: submitLastFrameValue,
+        input_base_image: submitReferenceValue,
+        input_middle_frame: submitMiddleFrameValue,
+        input_last_frame: submitLastFrameValue,
+        input_mask_image: els.comfyDebugMaskImage?.value.trim() || '',
+        input_audio_file: els.comfyDebugAudioFile?.value.trim() || '',
         task_type: imageTaskDef.taskType || '',
         control_mode: imageTaskDef.controlMode || '',
         image_task_mode: selected.type === 'image' ? imageTaskDef.value : '',
@@ -9909,6 +10011,22 @@ INDEX_HTML = r"""<!doctype html>
         fps: selected.type === 'video' ? els.comfyDebugFps.value.trim() : '',
         frame_count: selected.type === 'video' ? computedComfyDebugFrameCount() : '',
       };
+    }
+
+    function validateComfyDebugSemanticContract(requiredInputs, endpoint, nodeInfoText) {
+      if (!String(endpoint || '').startsWith('/run/')) return;
+      const text = String(nodeInfoText || '').trim();
+      if (!text || text === '[]') throw new Error('RunningHub 子模式尚未配置 nodeInfoList');
+      const aliases = {
+        input_base_image: ['{{input_base_image}}', '{{reference_image}}'],
+        input_middle_frame: ['{{input_middle_frame}}', '{{middle_frame_image}}'],
+        input_last_frame: ['{{input_last_frame}}', '{{last_frame_image}}'],
+        input_mask_image: ['{{input_mask_image}}', '{{mask_image}}'],
+        input_reference_style: ['{{input_reference_style}}', '{{reference_style}}'],
+        input_audio_file: ['{{input_audio_file}}', '{{audio_file}}'],
+      };
+      const missingMappings = requiredInputs.filter(slot => !(aliases[slot] || [`{{${slot}}}`]).some(token => text.includes(token)));
+      if (missingMappings.length) throw new Error(`nodeInfoList 缺少语义槽位映射：${missingMappings.join(', ')}`);
     }
 
     function startComfyDebugWorkflowRunState(selected, statusText) {
@@ -10165,6 +10283,8 @@ INDEX_HTML = r"""<!doctype html>
     [
       els.comfyDebugEndpoint,
       els.comfyDebugReference,
+      els.comfyDebugMaskImage,
+      els.comfyDebugAudioFile,
       els.comfyDebugWorkflowMode,
       els.comfyDebugSeed,
       els.comfyDebugWidth,
@@ -11638,6 +11758,31 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "outputs": ffmpeg_outputs,
             },
         ]
+        node_labels = {
+            "local_tts": "08 本地配音",
+            "subtitle_build": "08 字幕生成",
+            "bgm_select": "08 BGM 匹配",
+            "ffmpeg_compose": "08 音画合成",
+            "format_export": "08 格式导出",
+        }
+        production_nodes = manifest.get("production_nodes") if isinstance(manifest.get("production_nodes"), list) else []
+        for node in production_nodes:
+            if not isinstance(node, dict) or not node.get("job_id"):
+                continue
+            node_id = str(node.get("job_id"))
+            jobs.append(
+                {
+                    "id": node_id,
+                    "label": node_labels.get(node_id) or str(node.get("mode") or node_id),
+                    "status": "success" if node.get("status") == "cached" else str(node.get("status") or "pending"),
+                    "detail": str(node.get("blocked_reason") or node.get("error") or ("缓存命中" if node.get("cache_hit") else "")),
+                    "outputs": [str(value) for value in (node.get("outputs") or []) if value],
+                    "depends_on": [str(value) for value in (node.get("depends_on") or []) if value],
+                    "attempts": int(node.get("attempts") or 1),
+                    "cache_hit": bool(node.get("cache_hit")),
+                    "stage": str(node.get("stage") or ""),
+                }
+            )
         return jobs
 
     @classmethod
@@ -12018,7 +12163,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             item = dict(item)
             item["size"] = path.stat().st_size
             item["mtime"] = path.stat().st_mtime
-            item["kind"] = "image" if path.suffix.lower() in IMAGE_EXTENSIONS else "video"
+            suffix = path.suffix.lower()
+            item["kind"] = "image" if suffix in IMAGE_EXTENSIONS else ("audio" if suffix in AUDIO_EXTENSIONS else "video")
             cleaned.append(item)
         cleaned.sort(key=lambda item: float(item.get("created_at") or item.get("mtime") or 0), reverse=True)
         if changed:
@@ -12987,6 +13133,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         reference_image = str(payload.get("reference_image") or "").strip()
         middle_frame_image = str(payload.get("middle_frame_image") or payload.get("mid_frame_image") or "").strip()
         last_frame_image = str(payload.get("last_frame_image") or "").strip()
+        mask_image = str(payload.get("input_mask_image") or payload.get("mask_image") or "").strip()
+        audio_file = str(payload.get("input_audio_file") or payload.get("audio_file") or "").strip()
         reference_images_input = payload.get("reference_images") if isinstance(payload.get("reference_images"), list) else []
         has_any_reference = bool(reference_image or middle_frame_image or last_frame_image or reference_images_input)
         seed = str(payload.get("seed") or "").strip()
@@ -13113,6 +13261,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     control_mode = str(mode_item.get("control_mode") or control_mode)
                     if mode_item.get("requires_reference") and not has_any_reference:
                         raise ValueError(f"{mode} requires reference_image")
+                    required_inputs = mode_item.get("required_inputs") if isinstance(mode_item.get("required_inputs"), list) else []
+                    if "input_mask_image" in required_inputs and not mask_image:
+                        raise ValueError(f"{mode} requires input_mask_image")
+                    if "input_audio_file" in required_inputs and not audio_file:
+                        raise ValueError(f"{mode} requires input_audio_file")
             if job_type == "image" and mode in image_task_modes:
                 task_type, control_mode, requires_reference = image_task_modes[mode]
                 if requires_reference and not has_any_reference:
@@ -13138,6 +13291,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "reference_image": reference_image,
                 "middle_frame_image": middle_frame_image,
                 "last_frame_image": last_frame_image,
+                "input_base_image": reference_image,
+                "input_middle_frame": middle_frame_image,
+                "input_last_frame": last_frame_image,
+                "input_mask_image": mask_image,
+                "input_audio_file": audio_file,
                 "reference_images": reference_images_input,
                 "seed": seed,
                 "width": width or item.get("default_width") or "",
@@ -13192,6 +13350,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     uploaded_last_frame = adapter._reference_image_value(safe_last_frame_image)  # type: ignore[attr-defined]
                     if uploaded_last_frame and uploaded_last_frame not in uploaded_reference_images:
                         uploaded_reference_images.append(uploaded_last_frame)
+                if mask_image:
+                    safe_mask_image = self._ensure_comfy_safe_reference_file(mask_image)
+                    request_payload["input_mask_image"] = adapter._reference_image_value(safe_mask_image)  # type: ignore[attr-defined]
+                if audio_file:
+                    safe_audio_file = self._ensure_comfy_safe_reference_file(audio_file)
+                    request_payload["input_audio_file"] = adapter._reference_media_value(safe_audio_file)  # type: ignore[attr-defined]
                 if uploaded_reference_images:
                     uploaded_reference = uploaded_reference_images[0]
                     request_payload["reference_image"] = uploaded_reference
@@ -13306,7 +13470,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "name": label or self._asset_label(file_name),
             "source_task": task,
             "source_file": file_name,
-            "kind": "image" if suffix in IMAGE_EXTENSIONS else "video",
+            "kind": "image" if suffix in IMAGE_EXTENSIONS else ("audio" if suffix in AUDIO_EXTENSIONS else "video"),
             "tags": clean_tags,
             "created_at": time.time(),
             "size": target.stat().st_size,
@@ -13512,8 +13676,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             value = str(tag or "").strip()
             if value and value not in clean_tags:
                 clean_tags.append(value)
-        if not any(tag in {"image", "video"} for tag in clean_tags):
-            clean_tags.insert(0, "image" if suffix in IMAGE_EXTENSIONS else "video")
+        if not any(tag in {"image", "video", "audio"} for tag in clean_tags):
+            clean_tags.insert(0, "image" if suffix in IMAGE_EXTENSIONS else ("audio" if suffix in AUDIO_EXTENSIONS else "video"))
         folder_name = next((ASSET_LIBRARY_TAG_FOLDERS[tag] for tag in clean_tags if tag in ASSET_LIBRARY_TAG_FOLDERS), "uncategorized")
         ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
         target_dir = (ASSET_LIBRARY_ROOT / folder_name).resolve()
@@ -13533,7 +13697,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "name": str(payload.get("name") or "").strip() or Path(filename).stem or filename,
             "source_task": "",
             "source_file": filename,
-            "kind": "image" if suffix in IMAGE_EXTENSIONS else "video",
+            "kind": "image" if suffix in IMAGE_EXTENSIONS else ("audio" if suffix in AUDIO_EXTENSIONS else "video"),
             "tags": clean_tags,
             "note": str(payload.get("note") or "").strip(),
             "created_at": time.time(),
@@ -13879,9 +14043,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     def _retry_production_job(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
-        retry_job = str(payload.get("job") or "").strip().lower()
-        if retry_job not in {"material", "tts", "ffmpeg"}:
-            raise ValueError("job must be one of: material, tts, ffmpeg")
+        retry_job = str(payload.get("job_id") or payload.get("job") or "").strip()
+        if not retry_job:
+            raise ValueError("job or job_id is required")
         task_dir = self._safe_task_dir(task)
         production_config = payload.get("production_config") or {}
         if isinstance(production_config, dict):

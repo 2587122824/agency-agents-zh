@@ -10,6 +10,8 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import urljoin, urlparse
 
+from .production_graph import artifact_record, build_production_graph, read_json, stable_job_hash, write_json
+
 
 class CloudComfyUIAdapter:
     """Call a cloud ComfyUI final-production workflow and persist returned assets."""
@@ -72,7 +74,28 @@ class CloudComfyUIAdapter:
         output_dir: Path,
     ) -> dict[str, Any]:
         max_jobs = self._safe_int(compose_config.get("max_material_jobs"), default=50, minimum=1, maximum=50)
-        selected_jobs = material_jobs[:max_jobs]
+        selected_jobs = self._prepare_graph_jobs(material_jobs[:max_jobs])
+        packaging_jobs = [dict(item) for item in (compose_config.get("packaging_jobs") or []) if isinstance(item, dict)]
+        visual_job_ids = [str(item.get("job_id") or "") for item in selected_jobs]
+        for item in packaging_jobs:
+            if item.get("depends_on_visual"):
+                item["depends_on"] = list(dict.fromkeys([*self._string_list(item.get("depends_on")), *visual_job_ids]))
+        global_context = compose_config.get("global_context") if isinstance(compose_config.get("global_context"), dict) else {}
+        global_context = self._enrich_global_context(global_context, selected_jobs)
+        graph = build_production_graph(
+            str(compose_config.get("production_task_id") or output_dir.parent.name),
+            selected_jobs,
+            global_context,
+            packaging_jobs,
+        )
+        graph_path = Path(str(compose_config.get("production_graph_path") or output_dir.parent / "production_graph.json"))
+        write_json(graph_path, graph)
+        state_path = output_dir / "production_job_state.json"
+        job_state = read_json(state_path)
+        job_state.setdefault("schema_version", 1)
+        job_state.setdefault("task_id", graph.get("task_id") or output_dir.parent.name)
+        job_state.setdefault("jobs", {})
+        job_state.setdefault("artifacts", [])
         job_results = []
         downloaded_files = []
         generated_reference_images: list[str] = []
@@ -80,16 +103,48 @@ class CloudComfyUIAdapter:
         video_job_index = 0
         success_count = 0
         self._reference_search_dirs = [output_dir, output_dir.parent]
+        selected_jobs = self._topological_material_jobs(selected_jobs)
         self._emit(f"ComfyUI 素材批量任务开始：{len(selected_jobs)} 个", total_jobs=len(selected_jobs), completed_jobs=0)
 
         for index, job in enumerate(selected_jobs, start=1):
+            job = dict(job)
+            job_id = str(job.get("job_id") or f"material_{index:03d}")
             job_name = str(job.get("name") or f"material_{index:02d}")
             job_type = str(job.get("type") or "material")
-            job_dir = output_dir / f"material_{index:02d}_{self._safe_name(job_name)}"
+            job_dir = output_dir / f"job_{self._safe_name(job_id)}"
             job_dir.mkdir(parents=True, exist_ok=True)
             job_config = self._compose_config_for_job(job, compose_config)
+            job, resolved_inputs, missing_inputs = self._apply_explicit_input_bindings(job, job_state)
+            failed_dependencies = [
+                dependency
+                for dependency in self._string_list(job.get("depends_on"))
+                if str((job_state.get("jobs") or {}).get(dependency, {}).get("status") or "") not in {"success", "cached", "downloaded", "submitted"}
+                and dependency != "local_tts"
+            ]
+            if missing_inputs or failed_dependencies:
+                reason = "; ".join(
+                    [
+                        *(f"missing input: {item}" for item in missing_inputs),
+                        *(f"dependency not completed: {item}" for item in failed_dependencies),
+                    ]
+                )
+                blocked = {
+                    "index": index,
+                    "job_id": job_id,
+                    "name": job_name,
+                    "type": job_type,
+                    "status": "blocked",
+                    "depends_on": self._string_list(job.get("depends_on")),
+                    "cache_hit": False,
+                    "error": reason,
+                    "downloaded_files": [],
+                }
+                job_results.append(blocked)
+                job_state["jobs"][job_id] = {**blocked, "updated_at": time.time()}
+                write_json(state_path, job_state)
+                continue
+            explicit_graph_inputs = bool(job.get("depends_on") or job.get("input_bindings"))
             if job_type in {"image", "video"}:
-                job = dict(job)
                 reference_images = self._reference_images(job)
                 resolved_references = [self._resolve_reference_image(ref, generated_reference_map) or ref for ref in reference_images]
                 resolved_references = [ref for ref in resolved_references if str(ref or "").strip()]
@@ -112,7 +167,7 @@ class CloudComfyUIAdapter:
                         material_type=job_type,
                         job_type=job_type,
                     )
-                elif job_type == "video" and generated_reference_images:
+                elif not explicit_graph_inputs and job_type == "video" and generated_reference_images:
                     paired_index = min(video_job_index, len(generated_reference_images) - 1)
                     job["reference_image"] = self._reference_image_value(generated_reference_images[paired_index])
                     job["reference_images"] = [job["reference_image"]]
@@ -127,7 +182,7 @@ class CloudComfyUIAdapter:
                         material_type=job_type,
                         job_type=job_type,
                     )
-                elif job_type == "image" and generated_reference_images:
+                elif not explicit_graph_inputs and job_type == "image" and generated_reference_images:
                     previous_index = len(generated_reference_images) - 1
                     job["reference_image"] = self._reference_image_value(generated_reference_images[previous_index])
                     job["reference_images"] = [job["reference_image"]]
@@ -161,6 +216,39 @@ class CloudComfyUIAdapter:
                     video_job_index += 1
             job_payload = self._payload_for_material_job(job["base_payload"], job, index)
             self._write_json(job_dir / "comfyui_payload.json", job_payload)
+            input_hash = stable_job_hash(job_payload, job_config, resolved_inputs)
+            cached_state = (job_state.get("jobs") or {}).get(job_id, {})
+            cached_files = [str(path) for path in cached_state.get("downloaded_files", []) if Path(str(path)).is_file()]
+            force_retry = str(compose_config.get("force_retry_job_id") or "") == job_id
+            if not force_retry and cached_state.get("status") in {"success", "cached", "downloaded", "submitted"} and cached_state.get("input_hash") == input_hash and cached_files:
+                success_count += 1
+                downloaded_files.extend(cached_files)
+                if job_type == "image":
+                    self._register_generated_images(job, cached_files, generated_reference_images, generated_reference_map)
+                cached_result = {
+                    "index": index,
+                    "job_id": job_id,
+                    "name": job_name,
+                    "type": job_type,
+                    "status": "cached",
+                    "depends_on": self._string_list(job.get("depends_on")),
+                    "cache_hit": True,
+                    "attempts": int(cached_state.get("attempts") or 1),
+                    "input_hash": input_hash,
+                    "downloaded_files": cached_files,
+                }
+                job_results.append(cached_result)
+                job_state["jobs"][job_id] = {**cached_state, **cached_result, "updated_at": time.time()}
+                write_json(state_path, job_state)
+                self._emit(
+                    f"复用 ComfyUI 节点缓存：{job_name}",
+                    job_id=job_id,
+                    job_status="cached",
+                    cache_hit=True,
+                    completed_jobs=index,
+                    total_jobs=len(selected_jobs),
+                )
+                continue
             self._emit(
                 f"提交 ComfyUI 素材 {index}/{len(selected_jobs)}：{job_type}",
                 total_jobs=len(selected_jobs),
@@ -174,38 +262,23 @@ class CloudComfyUIAdapter:
                 endpoint=str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint),
             )
             try:
-                if provider == "runninghub":
-                    manifest = self._run_runninghub(job_payload, job_config, job_dir)
-                else:
-                    manifest = self._run_generic(job_payload, job_config, job_dir)
+                manifest, attempts = self._run_job_with_retries(provider, job_payload, job_config, job_dir, job_id)
                 job_downloaded = [str(path) for path in manifest.get("downloaded_files", [])]
                 if manifest.get("status") in {"success", "downloaded", "submitted"}:
                     success_count += 1
                 downloaded_files.extend(job_downloaded)
                 if job_type == "image":
-                    generated_reference_images.extend(
-                        path
-                        for path in job_downloaded
-                        if Path(path).suffix.lower().lstrip(".") in {"png", "jpg", "jpeg", "webp"}
-                    )
-                    if job_downloaded:
-                        first_image = next(
-                            (
-                                path
-                                for path in job_downloaded
-                                if Path(path).suffix.lower().lstrip(".") in {"png", "jpg", "jpeg", "webp"}
-                            ),
-                            "",
-                        )
-                        if first_image:
-                            for key in self._reference_keys_for_job(job):
-                                generated_reference_map[key] = first_image
-                job_results.append(
-                    {
+                    self._register_generated_images(job, job_downloaded, generated_reference_images, generated_reference_map)
+                result_item = {
                         "index": index,
+                        "job_id": job_id,
                         "name": job_name,
                         "type": job_type,
                         "status": manifest.get("status", "unknown"),
+                        "depends_on": self._string_list(job.get("depends_on")),
+                        "cache_hit": False,
+                        "attempts": attempts,
+                        "input_hash": input_hash,
                         "prompt": str(job.get("prompt") or "")[:500],
                         "workflow_preset_id": str(job_config.get("workflow_preset_id") or ""),
                         "workflow_preset_name": str(job_config.get("workflow_preset_name") or ""),
@@ -213,7 +286,14 @@ class CloudComfyUIAdapter:
                         "manifest_file": str(job_dir / "cloud_comfyui_manifest.json"),
                         "downloaded_files": job_downloaded,
                     }
-                )
+                job_results.append(result_item)
+                state_item = {**result_item, "updated_at": time.time(), "artifacts": []}
+                for output_name, path in self._output_files_for_job(job, job_downloaded).items():
+                    record = artifact_record(path, str(job_state.get("task_id") or ""), job_id, output_name, str(job.get("name") or ""))
+                    state_item["artifacts"].append(record)
+                    job_state["artifacts"].append(record)
+                job_state["jobs"][job_id] = state_item
+                write_json(state_path, job_state)
                 self._emit(
                     f"ComfyUI 素材 {index}/{len(selected_jobs)} 完成：下载 {len(job_downloaded)} 个文件",
                     total_jobs=len(selected_jobs),
@@ -241,12 +321,16 @@ class CloudComfyUIAdapter:
                     "error": str(exc),
                 }
                 self._write_json(job_dir / "cloud_comfyui_manifest.json", error_manifest)
-                job_results.append(
-                    {
+                failed_item = {
                         "index": index,
+                        "job_id": job_id,
                         "name": job_name,
                         "type": job_type,
                         "status": "failed",
+                        "depends_on": self._string_list(job.get("depends_on")),
+                        "cache_hit": False,
+                        "attempts": int((job_state.get("jobs") or {}).get(job_id, {}).get("attempts") or 1),
+                        "input_hash": input_hash,
                         "prompt": str(job.get("prompt") or "")[:500],
                         "workflow_preset_id": str(job_config.get("workflow_preset_id") or ""),
                         "workflow_preset_name": str(job_config.get("workflow_preset_name") or ""),
@@ -254,8 +338,11 @@ class CloudComfyUIAdapter:
                         "manifest_file": str(job_dir / "cloud_comfyui_manifest.json"),
                         "downloaded_files": [],
                         "error": str(exc),
+                        "error_category": self._error_category(exc),
                     }
-                )
+                job_results.append(failed_item)
+                job_state["jobs"][job_id] = {**failed_item, "updated_at": time.time()}
+                write_json(state_path, job_state)
                 self._emit(
                     f"ComfyUI 素材 {index}/{len(selected_jobs)} 失败：{exc}",
                     total_jobs=len(selected_jobs),
@@ -290,6 +377,9 @@ class CloudComfyUIAdapter:
             "routing": "workflow_library_by_material_type" if self._uses_workflow_library(compose_config) else "selected_workflow",
             "downloaded_files": downloaded_files,
             "jobs": job_results,
+            "production_graph": str(graph_path),
+            "job_state_file": str(state_path),
+            "artifacts": job_state.get("artifacts", []),
             "note": "Each material prompt was submitted as a separate ComfyUI/RunningHub job.",
         }
         self._write_json(output_dir / "cloud_comfyui_manifest.json", manifest)
@@ -302,8 +392,6 @@ class CloudComfyUIAdapter:
             downloaded_count=len(downloaded_files),
             job_status=status,
         )
-        if success_count == 0:
-            raise ValueError("All ComfyUI material jobs failed")
         return manifest
 
     def _run_runninghub(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
@@ -454,16 +542,28 @@ class CloudComfyUIAdapter:
     def _build_runninghub_payload(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any]) -> dict[str, Any]:
         node_info = self._parse_node_info_list(compose_config)
         seed_value = self._seed_value(comfyui_payload)
+        global_context = comfyui_payload.get("global_context") if isinstance(comfyui_payload.get("global_context"), dict) else {}
+        render_context = global_context.get("render") if isinstance(global_context.get("render"), dict) else {}
+        style_context = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
+        base_image = str(comfyui_payload.get("input_base_image") or self._first_reference_image(comfyui_payload) or "")
+        middle_frame = str(comfyui_payload.get("input_middle_frame") or self._middle_frame_image(comfyui_payload) or "")
+        last_frame = str(comfyui_payload.get("input_last_frame") or self._last_frame_image(comfyui_payload) or "")
         replacements = {
             "{{payload}}": json.dumps(comfyui_payload, ensure_ascii=False),
             "{{negative_prompt}}": str(comfyui_payload.get("negative_prompt") or ""),
             "{{image_prompt}}": self._first_list_or_value(comfyui_payload, "image_prompts", "image_prompt"),
             "{{video_prompt}}": self._first_list_or_value(comfyui_payload, "video_prompts", "video_prompt"),
             "{{reference_image}}": self._first_reference_image(comfyui_payload),
+            "{{input_base_image}}": base_image,
             "{{has_reference_image}}": bool(self._first_reference_image(comfyui_payload)),
             "{{middle_frame_image}}": self._middle_frame_image(comfyui_payload),
+            "{{input_middle_frame}}": middle_frame,
             "{{has_middle_frame_image}}": bool(self._middle_frame_image(comfyui_payload)),
             "{{last_frame_image}}": self._last_frame_image(comfyui_payload),
+            "{{input_last_frame}}": last_frame,
+            "{{input_mask_image}}": str(comfyui_payload.get("input_mask_image") or comfyui_payload.get("mask_image") or ""),
+            "{{input_reference_style}}": str(comfyui_payload.get("input_reference_style") or comfyui_payload.get("reference_style") or style_context.get("reference_asset") or ""),
+            "{{input_audio_file}}": str(comfyui_payload.get("input_audio_file") or comfyui_payload.get("audio_file") or ""),
             "{{has_last_frame_image}}": bool(self._last_frame_image(comfyui_payload)),
             "{{seed}}": seed_value,
             "{{width}}": str(comfyui_payload.get("width") or ""),
@@ -473,6 +573,14 @@ class CloudComfyUIAdapter:
             "{{control_mode}}": str(comfyui_payload.get("control_mode") or ""),
             "{{duration}}": str(comfyui_payload.get("duration") or ""),
             "{{fps}}": str(comfyui_payload.get("fps") or ""),
+            "{{global_character_id}}": str(comfyui_payload.get("character_id") or ""),
+            "{{global_style_weight}}": str(comfyui_payload.get("global_style_weight") or style_context.get("weight") or ""),
+            "{{working_width}}": str(render_context.get("working_width") or comfyui_payload.get("width") or ""),
+            "{{working_height}}": str(render_context.get("working_height") or comfyui_payload.get("height") or ""),
+            "{{delivery_width}}": str(render_context.get("delivery_width") or comfyui_payload.get("delivery_width") or ""),
+            "{{delivery_height}}": str(render_context.get("delivery_height") or comfyui_payload.get("delivery_height") or ""),
+            "{{global_frame_rate}}": str(render_context.get("frame_rate") or comfyui_payload.get("fps") or ""),
+            "{{camera_motion}}": str(comfyui_payload.get("camera_motion") or ""),
             "{{frame_count}}": self._frame_count(comfyui_payload),
             "{{ltx_guide_frame_count}}": self._ltx_guide_frame_count(comfyui_payload),
             "{{denoise}}": str(comfyui_payload.get("denoise") or ""),
@@ -662,6 +770,206 @@ class CloudComfyUIAdapter:
             cleaned.append(item)
         return cleaned
 
+    def _prepare_graph_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        prepared: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        aliases: dict[str, str] = {}
+        for index, source in enumerate(jobs, 1):
+            job = dict(source)
+            base = self._safe_name(str(job.get("job_id") or job.get("name") or f"material_{index:03d}")) or f"material_{index:03d}"
+            job_id = base
+            suffix = 2
+            while job_id in seen:
+                job_id = f"{base}_{suffix}"
+                suffix += 1
+            seen.add(job_id)
+            job["job_id"] = job_id
+            prepared.append(job)
+            for value in (job_id, job.get("name"), (job.get("prompt_data") or {}).get("id") if isinstance(job.get("prompt_data"), dict) else ""):
+                for key in self._reference_lookup_keys(value):
+                    aliases[key] = job_id
+        for job in prepared:
+            dependencies = self._string_list(job.get("depends_on"))
+            bindings = dict(job.get("input_bindings") or {})
+            reference = str(job.get("reference_image") or "").strip()
+            if reference and "input_base_image" not in bindings:
+                upstream = next((aliases[key] for key in self._reference_lookup_keys(reference) if key in aliases and aliases[key] != job["job_id"]), "")
+                if upstream:
+                    bindings["input_base_image"] = {"from_job": upstream, "output": "output_final_image"}
+                    dependencies.append(upstream)
+            if str(job.get("mode") or "") == "talking_image" and "local_tts" not in dependencies:
+                dependencies.append("local_tts")
+            job["depends_on"] = list(dict.fromkeys(dependencies))
+            job["input_bindings"] = bindings
+        return prepared
+
+    @staticmethod
+    def _enrich_global_context(context: dict[str, Any], jobs: list[dict[str, Any]]) -> dict[str, Any]:
+        enriched = json.loads(json.dumps(context, ensure_ascii=False))
+        characters = enriched.get("characters") if isinstance(enriched.get("characters"), list) else []
+        by_id = {str(item.get("character_id") or ""): item for item in characters if isinstance(item, dict) and item.get("character_id")}
+        style = enriched.get("style") if isinstance(enriched.get("style"), dict) else {}
+        for job in jobs:
+            character_id = str(job.get("character_id") or "").strip()
+            if character_id:
+                item = by_id.setdefault(character_id, {"character_id": character_id, "reference_assets": [], "recommended_weight": ""})
+                for value in (job.get("reference_image"), *(job.get("reference_images") or [])):
+                    text = str(value or "").strip()
+                    if text and text not in item["reference_assets"]:
+                        item["reference_assets"].append(text)
+            style_id = str(job.get("style_id") or "").strip()
+            if style_id and not style.get("style_id"):
+                style["style_id"] = style_id
+        enriched["characters"] = list(by_id.values())
+        enriched["style"] = style
+        return enriched
+
+    def _topological_material_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        by_id = {str(job.get("job_id")): job for job in jobs}
+        ordered: list[dict[str, Any]] = []
+        visited: set[str] = set()
+        visiting: set[str] = set()
+
+        def visit(job_id: str) -> None:
+            if job_id in visited:
+                return
+            if job_id in visiting:
+                raise ValueError(f"production graph contains a dependency cycle at {job_id}")
+            visiting.add(job_id)
+            for dependency in self._string_list(by_id[job_id].get("depends_on")):
+                if dependency in by_id:
+                    visit(dependency)
+            visiting.remove(job_id)
+            visited.add(job_id)
+            ordered.append(by_id[job_id])
+
+        for item_id in by_id:
+            visit(item_id)
+        return ordered
+
+    def _apply_explicit_input_bindings(self, job: dict[str, Any], state: dict[str, Any]) -> tuple[dict[str, Any], dict[str, str], list[str]]:
+        bindings = job.get("input_bindings") if isinstance(job.get("input_bindings"), dict) else {}
+        resolved: dict[str, str] = {}
+        missing: list[str] = []
+        field_map = {
+            "input_base_image": "reference_image",
+            "input_middle_frame": "middle_frame_image",
+            "input_last_frame": "last_frame_image",
+            "input_mask_image": "mask_image",
+            "input_reference_style": "reference_style",
+            "input_audio_file": "audio_file",
+        }
+        state_jobs = state.get("jobs") if isinstance(state.get("jobs"), dict) else {}
+        for slot, spec in bindings.items():
+            value = ""
+            if isinstance(spec, str):
+                value = spec
+            elif isinstance(spec, dict):
+                upstream = str(spec.get("from_job") or "")
+                output_name = str(spec.get("output") or "")
+                upstream_state = state_jobs.get(upstream) if isinstance(state_jobs.get(upstream), dict) else {}
+                artifacts = upstream_state.get("artifacts") if isinstance(upstream_state.get("artifacts"), list) else []
+                match = next((item for item in artifacts if isinstance(item, dict) and (not output_name or item.get("output_name") == output_name)), None)
+                value = str((match or {}).get("path") or "")
+            if value and Path(value).is_file():
+                resolved[str(slot)] = value
+                target = field_map.get(str(slot), str(slot))
+                job[target] = value
+                if target == "reference_image":
+                    job["reference_images"] = [value]
+            elif isinstance(spec, dict) and spec.get("required", True):
+                missing.append(str(slot))
+        return job, resolved, missing
+
+    def _run_job_with_retries(
+        self,
+        provider: str,
+        payload: dict[str, Any],
+        config: dict[str, Any],
+        output_dir: Path,
+        job_id: str,
+    ) -> tuple[dict[str, Any], int]:
+        last_error: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                result = self._run_runninghub(payload, config, output_dir) if provider == "runninghub" else self._run_generic(payload, config, output_dir)
+                if not result.get("downloaded_files") and result.get("status") not in {"submitted"}:
+                    raise ValueError("ComfyUI download failed: no output files returned")
+                return result, attempt
+            except Exception as exc:
+                last_error = exc
+                category = self._error_category(exc)
+                if category not in {"network", "timeout", "provider_busy", "download"} or attempt >= 3:
+                    raise
+                self._emit(
+                    f"生产节点 {job_id} 暂时失败，准备重试 {attempt}/3：{exc}",
+                    job_id=job_id,
+                    retry_attempt=attempt,
+                    error_category=category,
+                )
+                time.sleep(min(8, 2 ** (attempt - 1)))
+        raise last_error or ValueError(f"production job failed: {job_id}")
+
+    @staticmethod
+    def _error_category(exc: BaseException) -> str:
+        text = str(exc).lower()
+        if any(marker in text for marker in ("out of memory", "cuda oom", "显存")):
+            return "resource_oom"
+        if any(marker in text for marker in ("timeout", "timed out")):
+            return "timeout"
+        if any(marker in text for marker in ("429", "busy", "queue full", "temporarily unavailable")):
+            return "provider_busy"
+        if any(marker in text for marker in ("download", "no output files")):
+            return "download"
+        if any(marker in text for marker in ("connection", "urlerror", "ssl", "network")):
+            return "network"
+        if any(marker in text for marker in ("missing input", "required", "nodeinfo", "invalid")):
+            return "configuration"
+        return "execution"
+
+    def _register_generated_images(
+        self,
+        job: dict[str, Any],
+        files: list[str],
+        generated_images: list[str],
+        generated_map: dict[str, str],
+    ) -> None:
+        images = [path for path in files if Path(path).suffix.lower().lstrip(".") in {"png", "jpg", "jpeg", "webp"}]
+        generated_images.extend(path for path in images if path not in generated_images)
+        if images:
+            for key in self._reference_keys_for_job(job) | self._reference_lookup_keys(job.get("job_id")):
+                generated_map[key] = images[0]
+
+    @staticmethod
+    def _output_files_for_job(job: dict[str, Any], files: list[str]) -> dict[str, str]:
+        result: dict[str, str] = {}
+        image = next((path for path in files if Path(path).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}), "")
+        video = next((path for path in files if Path(path).suffix.lower() in {".mp4", ".mov", ".webm", ".m4v"}), "")
+        if image:
+            result["output_final_image"] = image
+            if str(job.get("mode") or "") == "background_remove":
+                result["output_mask_alpha"] = image
+        if video:
+            result["output_final_video"] = video
+        return result
+
+    def _load_cached_artifacts(self, state: dict[str, Any], images: list[str], generated_map: dict[str, str]) -> None:
+        jobs = state.get("jobs") if isinstance(state.get("jobs"), dict) else {}
+        for job_id, item in jobs.items():
+            if not isinstance(item, dict) or item.get("status") not in {"success", "cached", "downloaded", "submitted"}:
+                continue
+            files = [str(path) for path in item.get("downloaded_files", []) if Path(str(path)).is_file()]
+            cached_job = {"job_id": job_id, "name": item.get("name") or job_id}
+            self._register_generated_images(cached_job, files, images, generated_map)
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list):
+            return [str(part).strip() for part in value if str(part).strip()]
+        return []
+
     def _expand_material_jobs(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any]) -> list[dict[str, Any]]:
         prompt_types = {"image", "video"} if self._uses_workflow_library(compose_config) else self._workflow_prompt_types(compose_config)
         jobs: list[dict[str, Any]] = []
@@ -695,6 +1003,14 @@ class CloudComfyUIAdapter:
         library = compose_config.get("workflow_library")
         if not isinstance(library, list):
             return None
+        workflow_id = str(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "").strip()
+        workflow_mode = str(job.get("mode") or (job.get("prompt_data") or {}).get("workflow_mode") or "").strip()
+        if workflow_id:
+            exact = next((item for item in library if isinstance(item, dict) and str(item.get("id") or "").strip() == workflow_id), None)
+            if exact:
+                exact = cls._library_item_with_mode_config(exact, workflow_mode)
+                if cls._is_configured_library_item(exact):
+                    return exact
         configured = [item for item in library if cls._is_configured_library_item(item)]
         if not configured:
             return None
@@ -709,6 +1025,17 @@ class CloudComfyUIAdapter:
         if job_type == "video":
             return cls._first_matching_preset(configured, ("all_in_one_video", "全能视频", "universal_video", "image_to_video", "ltx", "video", "broll", "视频", "图生视频", "生视频"))
         return cls._first_matching_preset(configured, ("all_in_one_image", "全能图片", "universal_image", "txt_img", "z_image", "image", "keyframe", "文生图", "生图", "关键帧", "配图"))
+
+    @staticmethod
+    def _library_item_with_mode_config(item: dict[str, Any], mode: str) -> dict[str, Any]:
+        merged = dict(item)
+        mode_configs = item.get("mode_configs") or item.get("modeConfigs")
+        config = mode_configs.get(mode) if isinstance(mode_configs, dict) and isinstance(mode_configs.get(mode), dict) else None
+        if config:
+            merged["endpoint"] = config.get("endpoint") or merged.get("endpoint") or ""
+            merged["node_info_list_json"] = config.get("node_info_list_json") or config.get("nodeInfoList") or merged.get("node_info_list_json") or "[]"
+            merged["poll_timeout_seconds"] = config.get("poll_timeout_seconds") or config.get("pollTimeout") or merged.get("poll_timeout_seconds")
+        return merged
 
     @classmethod
     def _library_item_supports_material_type(cls, item: dict[str, Any], material_type: str) -> bool:
@@ -727,7 +1054,17 @@ class CloudComfyUIAdapter:
             return False
         endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
         node_info = str(item.get("node_info_list_json") or item.get("nodeInfoList") or "").strip()
-        return bool(cls._is_usable_endpoint(endpoint) and node_info and node_info != "[]")
+        if cls._is_usable_endpoint(endpoint) and node_info and node_info != "[]":
+            return True
+        mode_configs = item.get("mode_configs") or item.get("modeConfigs")
+        if isinstance(mode_configs, dict):
+            return any(
+                isinstance(config, dict)
+                and cls._is_usable_endpoint(str(config.get("endpoint") or ""))
+                and str(config.get("node_info_list_json") or config.get("nodeInfoList") or "").strip() not in {"", "[]"}
+                for config in mode_configs.values()
+            )
+        return False
 
     @classmethod
     def _first_matching_preset(cls, presets: list[dict[str, Any]], keywords: tuple[str, ...]) -> dict[str, Any] | None:
@@ -880,6 +1217,9 @@ class CloudComfyUIAdapter:
             or group.get("mid_frame_image")
             or ""
         ).strip()
+        mask_image = str(prompt_data.get("input_mask_image") or prompt_data.get("mask_image") or group.get("input_mask_image") or group.get("mask_image") or "").strip()
+        reference_style = str(prompt_data.get("input_reference_style") or prompt_data.get("reference_style") or group.get("input_reference_style") or group.get("reference_style") or "").strip()
+        audio_file = str(prompt_data.get("input_audio_file") or prompt_data.get("audio_file") or group.get("input_audio_file") or group.get("audio_file") or base_payload.get("input_audio_file") or "").strip()
         reference_images = cls._reference_images(prompt_data) or cls._reference_images(group) or cls._reference_images(base_payload)
         if reference_image and reference_image not in reference_images:
             reference_images = [reference_image, *reference_images]
@@ -890,11 +1230,22 @@ class CloudComfyUIAdapter:
         return {
             "type": job_type,
             "name": name,
+            "job_id": str(prompt_data.get("job_id") or group.get("job_id") or prompt_data.get("id") or name).strip(),
+            "capability": str(prompt_data.get("capability") or group.get("capability") or "").strip(),
+            "mode": str(prompt_data.get("mode") or prompt_data.get("workflow_mode") or group.get("mode") or group.get("workflow_mode") or "").strip(),
+            "workflow_id": str(prompt_data.get("workflow_id") or group.get("workflow_id") or "").strip(),
+            "depends_on": cls._string_list(prompt_data.get("depends_on") or group.get("depends_on")),
+            "input_bindings": prompt_data.get("input_bindings") if isinstance(prompt_data.get("input_bindings"), dict) else group.get("input_bindings") if isinstance(group.get("input_bindings"), dict) else {},
+            "character_id": str(prompt_data.get("character_id") or group.get("character_id") or "").strip(),
+            "style_id": str(prompt_data.get("style_id") or group.get("style_id") or "").strip(),
             "prompt": prompt,
             "negative_prompt": negative,
             "reference_image": reference_image,
             "middle_frame_image": middle_frame_image,
             "last_frame_image": last_frame_image,
+            "mask_image": mask_image,
+            "reference_style": reference_style,
+            "audio_file": audio_file,
             "reference_images": reference_images,
             "seed": prompt_data.get("seed", group.get("seed", base_payload.get("seed", ""))),
             "width": prompt_data.get("width", group.get("width", base_payload.get("width", ""))),
@@ -1001,6 +1352,11 @@ class CloudComfyUIAdapter:
         prompt_data = job.get("prompt_data") if isinstance(job.get("prompt_data"), dict) else {}
         group = job.get("group") if isinstance(job.get("group"), dict) else {}
         payload["workflow_item_index"] = index
+        payload["job_id"] = str(job.get("job_id") or f"material_{index:03d}")
+        payload["capability"] = str(job.get("capability") or "")
+        payload["workflow_mode"] = str(job.get("mode") or "")
+        payload["character_id"] = str(job.get("character_id") or "")
+        payload["style_id"] = str(job.get("style_id") or "")
         payload["workflow_item_name"] = str(job.get("name") or f"material_{index:02d}")
         payload["workflow_item_type"] = job_type
         payload["task_type"] = str(
@@ -1080,7 +1436,18 @@ class CloudComfyUIAdapter:
         payload["has_reference_image"] = bool(payload.get("reference_image"))
         payload["has_middle_frame_image"] = bool(payload.get("middle_frame_image"))
         payload["has_last_frame_image"] = bool(payload.get("last_frame_image"))
-        for key in ("seed", "width", "height", "duration", "fps", "frame_count", "frames", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "pose_video", "image_task_mode"):
+        for semantic_key, job_key in (
+            ("input_base_image", "reference_image"),
+            ("input_middle_frame", "middle_frame_image"),
+            ("input_last_frame", "last_frame_image"),
+            ("input_mask_image", "mask_image"),
+            ("input_reference_style", "reference_style"),
+            ("input_audio_file", "audio_file"),
+        ):
+            value = str(job.get(job_key) or payload.get(semantic_key) or "").strip()
+            if value:
+                payload[semantic_key] = self._reference_media_value(value) if semantic_key == "input_audio_file" else value
+        for key in ("seed", "width", "height", "duration", "fps", "frame_count", "frames", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "camera_motion", "camera_path", "pose_video", "image_task_mode"):
             value = (
                 prompt_data.get(key)
                 if key in prompt_data
@@ -1090,7 +1457,26 @@ class CloudComfyUIAdapter:
             )
             if value not in (None, ""):
                 payload[key] = value
+        global_context = payload.get("global_context") if isinstance(payload.get("global_context"), dict) else {}
+        render = global_context.get("render") if isinstance(global_context.get("render"), dict) else {}
+        style = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
+        payload["width"] = payload.get("width") or render.get("working_width") or 848
+        payload["height"] = payload.get("height") or render.get("working_height") or 480
+        payload["fps"] = payload.get("fps") or render.get("frame_rate") or 24
+        payload["delivery_width"] = render.get("delivery_width") or 1920
+        payload["delivery_height"] = render.get("delivery_height") or 1080
+        payload["global_style_weight"] = payload.get("global_style_weight") or style.get("weight") or ""
         return payload
+
+    def _reference_media_value(self, value: str) -> str:
+        text = str(value or "").strip()
+        path = self._resolve_reference_path(text)
+        if not path or "runninghub" not in self.base_url.lower():
+            return text
+        cache_key = str(path.resolve())
+        if cache_key not in self._media_upload_cache:
+            self._media_upload_cache[cache_key] = self._upload_runninghub_media(path)
+        return self._media_upload_cache[cache_key]
 
     def _reference_image_value(self, value: str) -> str:
         text = str(value or "").strip()

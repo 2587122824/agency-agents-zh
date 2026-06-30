@@ -28,6 +28,7 @@
     "video_prompts覆盖所有需要视频素材的镜头",
     "每条视频任务有task_type和control_mode",
     "每条video_prompts都以capability+mode作为主路由，并保留workflow_id、workflow_mode和asset_tag作为兼容字段",
+    "每条video_prompts都有唯一job_id、depends_on、input_bindings、character_id和style_id；关键帧、动作参考和口型音频必须显式绑定上游job_id及输出名",
     "capability只能按功能填写：video_i2v、video_reference、video_motion、video_avatar、video_generate、video_enhance或video_edit；mode必须是调试台树状菜单中的可运行子模式",
     "每条图生视频任务都有video_mode和mode_reason，默认使用06_i2v_first_frame/first_frame，需要多帧控制时一律使用06_i2v_first_middle_last_frame/first_middle_last_frame，禁止使用first_last_frame",
     "06_i2v_first_frame必须有reference_image且middle_frame_image/last_frame_image为空；06_i2v_first_middle_last_frame必须同时有reference_image、middle_frame_image、last_frame_image",

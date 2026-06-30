@@ -82,11 +82,17 @@ class LocalFFmpegAdapter:
             ]
         )
         audio_file = self._find_audio_file(paths.get("audio"), manifest)
+        bgm_file = self._find_bgm_file(manifest)
         subtitles_file = Path(str(manifest.get("files", {}).get("subtitles") or ""))
         if not subtitles_file.is_absolute():
             subtitles_file = (task_dir / subtitles_file).resolve()
         burn_subtitles = subtitles_file.is_file() and _bool_or_default(compose_config.get("burn_subtitles"), True)
         subtitle_style = str(compose_config.get("subtitle_style") or DEFAULT_SUBTITLE_STYLE).strip()
+        render = manifest.get("global_context", {}).get("render", {}) if isinstance(manifest.get("global_context"), dict) else {}
+        delivery = render.get("delivery_resolution", {}) if isinstance(render.get("delivery_resolution"), dict) else {}
+        output_width = _int_or_default(compose_config.get("delivery_width") or delivery.get("width"), 1920)
+        output_height = _int_or_default(compose_config.get("delivery_height") or delivery.get("height"), 1080)
+        output_fps = _int_or_default(compose_config.get("fps") or render.get("fps"), 24)
 
         if video_files:
             command, input_files = self._build_video_concat_command(
@@ -94,8 +100,12 @@ class LocalFFmpegAdapter:
                 task_dir=task_dir,
                 video_files=video_files,
                 audio_file=audio_file,
+                bgm_file=bgm_file,
                 subtitles_file=subtitles_file if burn_subtitles else None,
                 subtitle_style=subtitle_style,
+                output_width=output_width,
+                output_height=output_height,
+                output_fps=output_fps,
                 output_file=output_file,
             )
         elif image_files:
@@ -104,16 +114,24 @@ class LocalFFmpegAdapter:
                 task_dir=task_dir,
                 image_files=image_files,
                 audio_file=audio_file,
+                bgm_file=bgm_file,
                 subtitles_file=subtitles_file if burn_subtitles else None,
                 subtitle_style=subtitle_style,
+                output_width=output_width,
+                output_height=output_height,
+                output_fps=output_fps,
                 output_file=output_file,
             )
         elif audio_file:
             command, input_files = self._build_audio_card_command(
                 ffmpeg_path=ffmpeg_path,
                 audio_file=audio_file,
+                bgm_file=bgm_file,
                 subtitles_file=subtitles_file if burn_subtitles else None,
                 subtitle_style=subtitle_style,
+                output_width=output_width,
+                output_height=output_height,
+                output_fps=output_fps,
                 output_file=output_file,
             )
         else:
@@ -134,6 +152,7 @@ class LocalFFmpegAdapter:
             video_files=video_files,
             image_files=image_files,
             audio_file=audio_file,
+            bgm_file=bgm_file,
             subtitles_file=subtitles_file if subtitles_file.is_file() else None,
             output_file=output_file,
             burn_subtitles=burn_subtitles,
@@ -147,9 +166,11 @@ class LocalFFmpegAdapter:
                 "video_files": [str(path) for path in video_files],
                 "image_files": [str(path) for path in image_files],
                 "audio_file": str(audio_file) if audio_file else "",
+                "bgm_file": str(bgm_file) if bgm_file else "",
                 "subtitles_file": str(subtitles_file) if subtitles_file.is_file() else "",
                 "subtitle_mode": "burned_in" if burn_subtitles else "sidecar_only",
                 "subtitle_style": subtitle_style if burn_subtitles else "",
+                "render": {"width": output_width, "height": output_height, "fps": output_fps},
                 "note": "Local FFmpeg creates an editable preview/final draft from available clips/images/audio. When subtitles.srt exists, subtitles are burned in by default.",
             }
         )
@@ -271,14 +292,26 @@ class LocalFFmpegAdapter:
                 return candidate
         return None
 
+    def _find_bgm_file(self, manifest: dict[str, Any]) -> Path | None:
+        configured = str(manifest.get("audio", {}).get("bgm_file") or "").strip()
+        if not configured:
+            return None
+        candidate = Path(configured)
+        candidate = candidate.resolve() if candidate.is_absolute() else (self.workspace_root / candidate).resolve()
+        return candidate if candidate.is_file() and candidate.suffix.lower() in AUDIO_EXTENSIONS else None
+
     def _build_video_concat_command(
         self,
         ffmpeg_path: str,
         task_dir: Path,
         video_files: list[Path],
         audio_file: Path | None,
+        bgm_file: Path | None,
         subtitles_file: Path | None,
         subtitle_style: str,
+        output_width: int,
+        output_height: int,
+        output_fps: int,
         output_file: Path,
     ) -> tuple[list[str], list[Path]]:
         concat_path = task_dir / "local_ffmpeg_video_inputs.txt"
@@ -298,9 +331,13 @@ class LocalFFmpegAdapter:
         ]
         input_files: list[Path] = [*video_files]
         if audio_file:
-            command.extend(["-i", str(audio_file), "-map", "0:v:0", "-map", "1:a:0", "-shortest"])
+            command.extend(["-i", str(audio_file)])
             input_files.append(audio_file)
-        command.extend(["-vf", self._video_filter(subtitles_file, subtitle_style), "-c:v", "libx264", "-c:a", "aac", str(output_file)])
+        if bgm_file:
+            command.extend(["-stream_loop", "-1", "-i", str(bgm_file)])
+            input_files.append(bgm_file)
+        command.extend(self._audio_mix_args(audio_file, bgm_file))
+        command.extend(["-vf", self._video_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps), "-c:v", "libx264", "-c:a", "aac", str(output_file)])
         return command, input_files
 
     def _build_image_slideshow_command(
@@ -309,8 +346,12 @@ class LocalFFmpegAdapter:
         task_dir: Path,
         image_files: list[Path],
         audio_file: Path | None,
+        bgm_file: Path | None,
         subtitles_file: Path | None,
         subtitle_style: str,
+        output_width: int,
+        output_height: int,
+        output_fps: int,
         output_file: Path,
     ) -> tuple[list[str], list[Path]]:
         concat_path = task_dir / "local_ffmpeg_image_inputs.txt"
@@ -333,12 +374,16 @@ class LocalFFmpegAdapter:
         ]
         input_files: list[Path] = [*image_files]
         if audio_file:
-            command.extend(["-i", str(audio_file), "-shortest"])
+            command.extend(["-i", str(audio_file)])
             input_files.append(audio_file)
+        if bgm_file:
+            command.extend(["-stream_loop", "-1", "-i", str(bgm_file)])
+            input_files.append(bgm_file)
+        command.extend(self._audio_mix_args(audio_file, bgm_file))
         command.extend(
             [
                 "-vf",
-                self._image_filter(subtitles_file, subtitle_style),
+                self._image_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps),
                 "-c:v",
                 "libx264",
                 "-c:a",
@@ -352,8 +397,12 @@ class LocalFFmpegAdapter:
     def _build_audio_card_command(
         ffmpeg_path: str,
         audio_file: Path,
+        bgm_file: Path | None,
         subtitles_file: Path | None,
         subtitle_style: str,
+        output_width: int,
+        output_height: int,
+        output_fps: int,
         output_file: Path,
     ) -> tuple[list[str], list[Path]]:
         command = [
@@ -362,34 +411,76 @@ class LocalFFmpegAdapter:
             "-f",
             "lavfi",
             "-i",
-            "color=c=black:s=1080x1920:r=30",
+            f"color=c=black:s={output_width}x{output_height}:r={output_fps}",
             "-i",
             str(audio_file),
-            "-shortest",
-            "-vf",
-            LocalFFmpegAdapter._audio_card_filter(subtitles_file, subtitle_style),
-            "-c:v",
-            "libx264",
-            "-c:a",
-            "aac",
-            str(output_file),
         ]
-        return command, [audio_file]
+        files = [audio_file]
+        if bgm_file:
+            command.extend(["-stream_loop", "-1", "-i", str(bgm_file)])
+            files.append(bgm_file)
+        command.extend(LocalFFmpegAdapter._audio_mix_args(audio_file, bgm_file))
+        command.extend(
+            [
+                "-vf",
+                LocalFFmpegAdapter._audio_card_filter(subtitles_file, subtitle_style),
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "aac",
+                str(output_file),
+            ]
+        )
+        return command, files
 
     @staticmethod
-    def _video_filter(subtitles_file: Path | None, subtitle_style: str) -> str:
-        filters = ["fps=30"]
+    def _audio_mix_args(audio_file: Path | None, bgm_file: Path | None) -> list[str]:
+        if audio_file and bgm_file:
+            return [
+                "-filter_complex",
+                "[2:a]volume=0.35[bgm];[bgm][1:a]sidechaincompress=threshold=0.015:ratio=8:attack=20:release=500[ducked];[1:a][ducked]amix=inputs=2:duration=first:normalize=0[aout]",
+                "-map",
+                "0:v:0",
+                "-map",
+                "[aout]",
+                "-shortest",
+            ]
+        if audio_file:
+            return ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        if bgm_file:
+            return ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+        return []
+
+    @staticmethod
+    def _video_filter(
+        subtitles_file: Path | None,
+        subtitle_style: str,
+        output_width: int,
+        output_height: int,
+        output_fps: int,
+    ) -> str:
+        filters = [
+            f"scale={output_width}:{output_height}:force_original_aspect_ratio=decrease",
+            f"pad={output_width}:{output_height}:(ow-iw)/2:(oh-ih)/2",
+            f"fps={output_fps}",
+        ]
         if subtitles_file:
             filters.append(_subtitle_filter(subtitles_file, subtitle_style))
         filters.append("format=yuv420p")
         return ",".join(filters)
 
     @staticmethod
-    def _image_filter(subtitles_file: Path | None, subtitle_style: str) -> str:
+    def _image_filter(
+        subtitles_file: Path | None,
+        subtitle_style: str,
+        output_width: int,
+        output_height: int,
+        output_fps: int,
+    ) -> str:
         filters = [
-            "scale=1080:1920:force_original_aspect_ratio=decrease",
-            "pad=1080:1920:(ow-iw)/2:(oh-ih)/2",
-            "fps=30",
+            f"scale={output_width}:{output_height}:force_original_aspect_ratio=decrease",
+            f"pad={output_width}:{output_height}:(ow-iw)/2:(oh-ih)/2",
+            f"fps={output_fps}",
         ]
         if subtitles_file:
             filters.append(_subtitle_filter(subtitles_file, subtitle_style))
@@ -409,6 +500,7 @@ class LocalFFmpegAdapter:
         video_files: list[Path],
         image_files: list[Path],
         audio_file: Path | None,
+        bgm_file: Path | None,
         subtitles_file: Path | None,
         output_file: Path,
         burn_subtitles: bool,
@@ -424,6 +516,7 @@ class LocalFFmpegAdapter:
             "timeline_mode": "video_concat" if video_files else "image_slideshow" if image_files else "audio_card",
             "clips": clips,
             "audio": {"file": str(audio_file) if audio_file else "", "role": "voiceover_or_main_audio"},
+            "bgm": {"file": str(bgm_file) if bgm_file else "", "role": "background_music", "ducking": bool(audio_file and bgm_file)},
             "subtitles": {
                 "file": str(subtitles_file) if subtitles_file else "",
                 "mode": "burned_in" if burn_subtitles and subtitles_file else "sidecar_only",
@@ -439,6 +532,8 @@ class LocalFFmpegAdapter:
             f"- 输出文件：{timeline.get('output_file') or ''}",
             f"- 合成模式：{timeline.get('timeline_mode') or ''}",
             f"- 主音频：{(timeline.get('audio') or {}).get('file') or '未找到'}",
+            f"- 背景音乐：{(timeline.get('bgm') or {}).get('file') or '未找到'}",
+            f"- 旁白自动压低 BGM：{'是' if (timeline.get('bgm') or {}).get('ducking') else '否'}",
             f"- 字幕：{(timeline.get('subtitles') or {}).get('file') or '未找到'}",
             f"- 字幕模式：{(timeline.get('subtitles') or {}).get('mode') or 'sidecar_only'}",
             f"- 字幕样式：{subtitle_style}",

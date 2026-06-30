@@ -108,6 +108,11 @@ color: "#0F766E"
   "image_prompts": [
     {
       "id": "shot_001_start_keyframe",
+      "job_id": "shot_001_start_keyframe",
+      "depends_on": [],
+      "input_bindings": {},
+      "character_id": "character_main",
+      "style_id": "style_master",
       "capability": "image_generate",
       "mode": "keyframe",
       "workflow_id": "04_keyframe",
@@ -134,6 +139,11 @@ color: "#0F766E"
     },
     {
       "id": "shot_002_start_keyframe",
+      "job_id": "shot_002_start_keyframe",
+      "depends_on": [],
+      "input_bindings": {},
+      "character_id": "character_main",
+      "style_id": "style_master",
       "capability": "image_generate",
       "mode": "keyframe",
       "workflow_id": "04_keyframe",
@@ -162,6 +172,11 @@ color: "#0F766E"
     },
     {
       "id": "shot_002_middle_keyframe",
+      "job_id": "shot_002_middle_keyframe",
+      "depends_on": ["shot_002_start_keyframe"],
+      "input_bindings": {},
+      "character_id": "character_main",
+      "style_id": "style_master",
       "capability": "image_generate",
       "mode": "keyframe",
       "workflow_id": "04_keyframe",
@@ -191,6 +206,11 @@ color: "#0F766E"
     },
     {
       "id": "shot_002_end_keyframe",
+      "job_id": "shot_002_end_keyframe",
+      "depends_on": ["shot_002_middle_keyframe"],
+      "input_bindings": {},
+      "character_id": "character_main",
+      "style_id": "style_master",
       "capability": "image_generate",
       "mode": "keyframe",
       "workflow_id": "04_keyframe",
@@ -237,6 +257,7 @@ color: "#0F766E"
 
 - 所有需要图片/关键帧的镜头都必须进入 `image_prompts`，不能只写重点镜头。
 - 每条 `image_prompts` 必须包含主路由 `capability`、`mode`，并保留兼容字段 `workflow_id`、`workflow_mode` 和 `asset_tag`；`asset_tag` 要和目标素材库文件夹一致。
+- 每条任务必须包含唯一 `job_id`、`depends_on`、`input_bindings`、`character_id`、`style_id`。引用上游素材时使用 `input_bindings.<slot>={"from_job":"上游job_id","output":"output_final_image"}`，不得依赖数组顺序或“上一张图”。
 - 每条视频关键帧必须包含 `shot_id`、`frame_role`、`recommended_video_mode` 和 `mode_reason`。
 - `frame_role` 只能使用 `start_frame`、`middle_frame`、`end_frame`、`style_reference`、`cover_key_visual` 或 `support_asset`。
 - 默认只生成 `start_frame`；需要多帧控制时必须同时生成 `middle_frame` 和 `end_frame`，不再生成仅首尾两帧的组合。

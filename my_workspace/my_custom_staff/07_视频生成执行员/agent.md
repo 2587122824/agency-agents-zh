@@ -104,6 +104,11 @@ color: "#7C3AED"
   "video_prompts": [
     {
       "id": "shot_001_video",
+      "job_id": "shot_001_video",
+      "depends_on": ["shot_001_start_keyframe"],
+      "input_bindings": {"input_base_image": {"from_job": "shot_001_start_keyframe", "output": "output_final_image"}},
+      "character_id": "character_main",
+      "style_id": "style_master",
       "capability": "video_i2v",
       "mode": "i2v_first_frame",
       "workflow_id": "06_i2v_first_frame",
@@ -135,6 +140,15 @@ color: "#7C3AED"
     },
     {
       "id": "shot_002_video",
+      "job_id": "shot_002_video",
+      "depends_on": ["shot_002_start_keyframe", "shot_002_middle_keyframe", "shot_002_end_keyframe"],
+      "input_bindings": {
+        "input_base_image": {"from_job": "shot_002_start_keyframe", "output": "output_final_image"},
+        "input_middle_frame": {"from_job": "shot_002_middle_keyframe", "output": "output_final_image"},
+        "input_last_frame": {"from_job": "shot_002_end_keyframe", "output": "output_final_image"}
+      },
+      "character_id": "character_main",
+      "style_id": "style_master",
       "capability": "video_i2v",
       "mode": "i2v_first_middle_last_frame",
       "workflow_id": "06_i2v_first_middle_last_frame",
@@ -200,6 +214,7 @@ color: "#7C3AED"
 
 - `video_prompts` 必须覆盖所有需要视频素材、B-roll、转场或后处理的镜头。
 - 每条 `video_prompts` 必须包含主路由 `capability`、`mode`，并保留兼容字段 `workflow_id`、`workflow_mode` 和 `asset_tag`；`asset_tag` 要和目标素材库文件夹一致。
+- 每条任务必须包含唯一 `job_id`、`depends_on`、`input_bindings`、`character_id`、`style_id`。首帧绑定 `input_base_image/output_final_image`，中尾帧分别绑定 `input_middle_frame`、`input_last_frame`；数字人口播额外绑定本地 `local_tts/output_voiceover_audio`。
 - 每条图生视频任务必须包含 `video_mode` 和 `mode_reason`；默认 `06_i2v_first_frame / first_frame`，需要多帧控制时一律使用 `06_i2v_first_middle_last_frame / first_middle_last_frame`，禁止输出 `first_last_frame`。
 - `i2v_first_frame` 必须有 `reference_image` 且中帧/尾帧为空；`i2v_first_middle_last_frame` 必须同时有 `reference_image`、`middle_frame_image`、`last_frame_image`。
 - 如果中帧或尾帧缺失、与首帧主体/服装/场景/光线/机位不一致，或不是同一镜头约2秒/4秒后的自然延续，必须降级为 `i2v_first_frame` 或拆分镜头。

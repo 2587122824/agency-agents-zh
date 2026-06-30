@@ -28,6 +28,7 @@
     "image_prompts是合法JSON对象",
     "image_prompts覆盖所有需要图片/关键帧的镜头",
     "每条image_prompts都以capability+mode作为主路由，并保留workflow_id、workflow_mode和asset_tag作为兼容字段",
+    "每条image_prompts都有唯一job_id、depends_on、input_bindings、character_id和style_id；上游素材必须通过input_bindings显式绑定，不得依赖任务顺序猜测",
     "capability只能按功能填写：image_generate、image_multiview或image_edit；mode必须是调试台树状菜单中的可运行子模式",
     "每条视频关键帧都有shot_id、frame_role、recommended_video_mode和mode_reason",
     "默认recommended_video_mode为first_frame；需要多帧控制时一律使用first_middle_last_frame，当前阶段禁止输出first_last_frame",

@@ -12,6 +12,7 @@ from .cloud_image_adapter import CloudImageAdapter
 from .cloud_video_adapter import CloudVideoAdapter
 from .local_ffmpeg_adapter import LocalFFmpegAdapter
 from .local_tts_adapter import LocalTTSAdapter
+from .production_graph import build_production_graph, normalize_global_context, write_json as write_graph_json
 
 
 def run_auto_production(
@@ -35,7 +36,7 @@ def run_auto_production(
 
     image_config = config.get("image_config") or {}
     video_config = config.get("video_config") or {}
-    compose_config = config.get("compose_config") or {}
+    compose_config = dict(config.get("compose_config") or {})
     voice_config = config.get("voice_config") or {}
     quality_config = config.get("quality_config") or {}
     comfy_debug_gate = config.get("comfy_debug_gate") if isinstance(config.get("comfy_debug_gate"), dict) else {}
@@ -60,6 +61,7 @@ def run_auto_production(
     subtitles_path = task_dir / "subtitles.srt"
     comfyui_plan_path = paths["comfyui"] / "comfyui_plan.md"
     comfyui_payload_path = paths["comfyui"] / "comfyui_payload.json"
+    production_graph_path = task_dir / "production_graph.json"
     edit_plan_path = task_dir / "final_edit_plan.md"
     checklist_path = task_dir / "edit_checklist.md"
     production_note_path = task_dir / "auto_production.md"
@@ -87,6 +89,20 @@ def run_auto_production(
         comfyui_payload_path,
         _ensure_comfyui_payload_defaults(comfyui_payload_text, mode, final_video_name, video_config),
     )
+    comfyui_payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+    global_context = normalize_global_context(comfyui_payload, video_config)
+    comfyui_payload["global_context"] = global_context
+    _write_text(comfyui_payload_path, json.dumps(comfyui_payload, ensure_ascii=False, indent=2) + "\n")
+    packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config)
+    write_graph_json(production_graph_path, build_production_graph(task_dir.name, [], global_context, packaging_jobs))
+    compose_config.update(
+        {
+            "production_graph_path": str(production_graph_path),
+            "production_task_id": task_dir.name,
+            "global_context": global_context,
+            "packaging_jobs": packaging_jobs,
+        }
+    )
     _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, None, edit_step, image_config, video_config, compose_config))
     emit("制作包已生成，开始按自动生成配置调用工具", stage="package")
 
@@ -98,10 +114,13 @@ def run_auto_production(
         initial_status = "package_ready"
 
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": mode,
         "status": initial_status,
         "task_dir": str(task_dir),
+        "production_graph": str(production_graph_path),
+        "global_context": global_context,
+        "production_nodes": [],
         "image_generation": {
             "tool": image_config.get("tool") or "",
             "positive_prompt": image_config.get("positive_prompt") or "",
@@ -198,8 +217,21 @@ def run_auto_production(
             "comfyui_payload": str(comfyui_payload_path),
             "final_edit_plan": str(edit_plan_path),
             "edit_checklist": str(checklist_path),
+            "production_graph": str(production_graph_path),
         },
     }
+    for packaging_job in packaging_jobs:
+        job_id = str(packaging_job.get("job_id") or "")
+        initial_node_status = "success" if job_id == "subtitle_build" and subtitles_path.is_file() else "pending"
+        _upsert_production_node(
+            manifest,
+            job_id,
+            stage="08_audio_visual_packaging",
+            mode=str(packaging_job.get("mode") or job_id),
+            status=initial_node_status,
+            depends_on=packaging_job.get("depends_on") or [],
+            outputs=([str(subtitles_path)] if job_id == "subtitle_build" and subtitles_path.is_file() else []),
+        )
 
     def apply_manual_comfy_debug_gate() -> dict[str, Any]:
         state_path = paths["comfyui"] / "manual_debug_state.json"
@@ -306,6 +338,23 @@ def run_auto_production(
             manifest["composition"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
             manifest["composition"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
             manifest["composition"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
+            manifest["composition"]["production_job_state"] = comfyui_adapter_result.get("job_state_file", "")
+            manifest["artifacts"] = comfyui_adapter_result.get("artifacts", [])
+            for node in comfyui_adapter_result.get("jobs", []):
+                if not isinstance(node, dict):
+                    continue
+                _upsert_production_node(
+                    manifest,
+                    str(node.get("job_id") or node.get("name") or "material"),
+                    stage="visual",
+                    mode=str(node.get("mode") or ""),
+                    status=str(node.get("status") or "unknown"),
+                    depends_on=node.get("depends_on") or [],
+                    outputs=node.get("downloaded_files") or [],
+                    attempts=int(node.get("attempts") or 1),
+                    cache_hit=bool(node.get("cache_hit")),
+                    error=str(node.get("error") or ""),
+                )
             if comfyui_adapter_result["status"] == "success":
                 manifest["status"] = "comfyui_generated"
             elif comfyui_adapter_result["status"] == "partial_success":
@@ -329,6 +378,15 @@ def run_auto_production(
             files = tts_adapter_result.get("downloaded_files") or []
             if files:
                 manifest["audio"]["voiceover_audio_file"] = str(files[0])
+            _upsert_production_node(
+                manifest,
+                "local_tts",
+                stage="08_audio_visual_packaging",
+                mode="local_tts",
+                status=str(tts_adapter_result.get("status") or "failed"),
+                outputs=files,
+                error=str(tts_adapter_result.get("error") or tts_adapter_result.get("reason") or ""),
+            )
             if tts_adapter_result.get("status") == "success" and manifest["status"] in {"package_ready", "comfyui_package_ready"}:
                 manifest["status"] = "audio_generated"
             elif tts_adapter_result.get("status") not in {"success", "skipped"}:
@@ -357,7 +415,31 @@ def run_auto_production(
 
     material_enabled = mode in {"api_ready", "comfy_full"}
     tts_enabled = str(voice_config.get("mode") or "").strip().lower() not in {"", "off"}
-    if material_enabled and tts_enabled:
+    talking_image_requires_audio = _payload_has_mode(comfyui_payload, "talking_image")
+    if material_enabled and tts_enabled and talking_image_requires_audio:
+        emit("检测到数字人口播：先生成最终 WAV，再执行口型工作流", stage="production")
+        tts_kind, tts_result = run_tts_branch()
+        if tts_kind == "tts":
+            apply_tts_result(tts_result)
+        voice_files = (tts_result or {}).get("downloaded_files") if isinstance(tts_result, dict) else []
+        if voice_files:
+            _inject_mode_audio_file(comfyui_payload_path, "talking_image", str(voice_files[0]))
+            material_kind, material_result = run_material_branch()
+            if material_kind == "image":
+                apply_image_result(material_result)
+            elif material_kind == "comfyui":
+                apply_comfyui_result(material_result)
+        else:
+            manifest["status"] = "talking_image_audio_blocked"
+            manifest["production_nodes"].append(
+                {
+                    "job_id": "talking_image",
+                    "stage": "visual",
+                    "status": "blocked",
+                    "blocked_reason": "input_audio_file is missing because local TTS did not produce a WAV file",
+                }
+            )
+    elif material_enabled and tts_enabled:
         emit("并行启动素材生成/匹配与本地配音", stage="production")
         with ThreadPoolExecutor(max_workers=2) as executor:
             material_future = executor.submit(run_material_branch)
@@ -382,7 +464,52 @@ def run_auto_production(
             if tts_kind == "tts":
                 apply_tts_result(tts_result)
 
+    bgm_result = _select_bgm_from_asset_library(task_dir, voice_config, comfyui_payload)
+    manifest["audio"]["bgm_file"] = bgm_result.get("file", "")
+    manifest["audio"]["bgm_asset_id"] = bgm_result.get("asset_id", "")
+    manifest["audio"]["bgm_status"] = bgm_result.get("status", "skipped")
+    _upsert_production_node(
+        manifest,
+        "bgm_select",
+        stage="08_audio_visual_packaging",
+        mode="bgm_select",
+        status=str(bgm_result.get("status") or "skipped"),
+        outputs=([bgm_result["file"]] if bgm_result.get("file") else []),
+        error=str(bgm_result.get("reason") or ""),
+    )
+
     emit("开始本地 FFmpeg 剪辑/预览合成", stage="ffmpeg")
+    ffmpeg_depends_on = _ffmpeg_dependency_ids(manifest, tts_enabled)
+    dependency_blockers = _packaging_dependency_blockers(manifest, tts_enabled, material_enabled)
+    if dependency_blockers:
+        blocked_reason = "; ".join(dependency_blockers)
+        manifest["status"] = "ffmpeg_dependency_blocked"
+        manifest["composition"]["adapter_status"] = "blocked"
+        manifest["composition"]["local_ffmpeg_status"] = "blocked"
+        manifest["composition"]["local_ffmpeg_blocked_reason"] = blocked_reason
+        _upsert_production_node(
+            manifest,
+            "ffmpeg_compose",
+            stage="08_audio_visual_packaging",
+            mode="ffmpeg_compose",
+            status="blocked",
+            depends_on=ffmpeg_depends_on,
+            outputs=[],
+            error=blocked_reason,
+        )
+        _upsert_production_node(
+            manifest,
+            "format_export",
+            stage="08_audio_visual_packaging",
+            mode="format_export",
+            status="blocked",
+            depends_on=["ffmpeg_compose"],
+            outputs=[],
+            error="ffmpeg_compose is blocked by upstream production dependencies",
+        )
+        emit("FFmpeg composition blocked by upstream dependencies", stage="ffmpeg", status="blocked", reason=blocked_reason)
+        return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "自动生成阶段完成")
+
     ffmpeg_adapter_result = _run_local_ffmpeg_adapter(task_dir, paths, compose_config, manifest)
     if ffmpeg_adapter_result:
         manifest["composition"]["adapter_status"] = ffmpeg_adapter_result.get("status") or "failed"
@@ -413,6 +540,28 @@ def run_auto_production(
             status=ffmpeg_adapter_result.get("status") or "",
             final_video=(files[0] if files else ""),
         )
+        _upsert_production_node(
+            manifest,
+            "ffmpeg_compose",
+            stage="08_audio_visual_packaging",
+            mode="ffmpeg_compose",
+            status=str(ffmpeg_adapter_result.get("status") or "failed"),
+            depends_on=ffmpeg_depends_on,
+            outputs=files,
+            error=str(ffmpeg_adapter_result.get("error") or ffmpeg_adapter_result.get("reason") or ""),
+        )
+        export_status = "success" if ffmpeg_adapter_result.get("status") == "success" and files else "blocked"
+        export_outputs = [*files, str(subtitles_path)] if files and subtitles_path.is_file() else files
+        _upsert_production_node(
+            manifest,
+            "format_export",
+            stage="08_audio_visual_packaging",
+            mode="format_export",
+            status=export_status,
+            depends_on=["ffmpeg_compose"],
+            outputs=export_outputs,
+            error="" if export_status == "success" else "ffmpeg_compose did not produce a final MP4",
+        )
 
     return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "自动生成阶段完成")
 
@@ -433,9 +582,10 @@ def retry_production_job(
     production_config: dict[str, Any] | None = None,
     progress_callback=None,
 ) -> dict[str, Any]:
-    retry_job = str(job or "").strip().lower()
-    if retry_job not in {"material", "tts", "ffmpeg"}:
-        raise ValueError("job must be one of: material, tts, ffmpeg")
+    requested_job_id = str(job or "").strip()
+    if not requested_job_id:
+        raise ValueError("job or job_id is required")
+    retry_job = requested_job_id.lower()
 
     manifest_path = task_dir / "production_manifest.json"
     if not manifest_path.is_file():
@@ -449,6 +599,15 @@ def retry_production_job(
     image_config = _retry_section_config(manifest, config, "image_config", "image_generation")
     voice_config = _retry_section_config(manifest, config, "voice_config", "audio")
     compose_config = _retry_section_config(manifest, config, "compose_config", "composition")
+    compose_config = dict(compose_config)
+    compose_config.update(
+        {
+            "production_graph_path": str(task_dir / "production_graph.json"),
+            "production_task_id": task_dir.name,
+            "global_context": manifest.get("global_context") if isinstance(manifest.get("global_context"), dict) else {},
+            "packaging_jobs": _packaging_graph_jobs({}, voice_config),
+        }
+    )
     quality_config = _retry_quality_config(manifest, config)
     paths = _create_output_dirs(task_dir)
     production_note_path = task_dir / "auto_production.md"
@@ -460,6 +619,23 @@ def retry_production_job(
     manifest.setdefault("video_generation", {})
     manifest.setdefault("composition", {})
     manifest.setdefault("audio", {})
+    known_node_ids = {
+        str(item.get("job_id") or "")
+        for item in (manifest.get("production_nodes") or [])
+        if isinstance(item, dict)
+    }
+    if retry_job not in {"material", "tts", "ffmpeg"}:
+        if requested_job_id not in known_node_ids:
+            raise ValueError(f"unknown production job_id: {requested_job_id}")
+        if requested_job_id == "local_tts":
+            retry_job = "tts"
+        elif requested_job_id == "bgm_select":
+            retry_job = "bgm"
+        elif requested_job_id in {"ffmpeg_compose", "format_export", "subtitle_build"}:
+            retry_job = "ffmpeg"
+        else:
+            retry_job = "material"
+            compose_config["force_retry_job_id"] = requested_job_id
 
     def emit(message: str, stage: str = "production", **extra: Any) -> None:
         if not progress_callback:
@@ -470,6 +646,7 @@ def retry_production_job(
 
     history_item: dict[str, Any] = {
         "job": retry_job,
+        "job_id": requested_job_id,
         "status": "running",
         "started_at": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
         "ended_at": "",
@@ -483,12 +660,62 @@ def retry_production_job(
             result = _retry_material_job(task_dir, paths, manifest, mode, image_config, compose_config, quality_config, emit, progress_callback)
         elif retry_job == "tts":
             result = _retry_tts_job(task_dir, paths, manifest, voice_config, emit)
+        elif retry_job == "bgm":
+            payload_path = paths["comfyui"] / "comfyui_payload.json"
+            payload = _load_comfyui_payload_with_fallback(payload_path) if payload_path.is_file() else {}
+            result = _select_bgm_from_asset_library(task_dir, voice_config, payload)
+            manifest.setdefault("audio", {})["bgm_file"] = result.get("file", "")
+            manifest["audio"]["bgm_asset_id"] = result.get("asset_id", "")
+            manifest["audio"]["bgm_status"] = result.get("status", "skipped")
+            result = {**result, "downloaded_files": ([result["file"]] if result.get("file") else [])}
         else:
             result = _retry_ffmpeg_job(task_dir, paths, manifest, compose_config, emit)
 
-        history_item["status"] = str(result.get("status") or "unknown")
-        history_item["outputs"] = [str(item) for item in (result.get("downloaded_files") or []) if item]
+        if retry_job == "material" and isinstance(result.get("jobs"), list):
+            for node in result["jobs"]:
+                if not isinstance(node, dict):
+                    continue
+                _upsert_production_node(
+                    manifest,
+                    str(node.get("job_id") or node.get("name") or "material"),
+                    stage="visual",
+                    mode=str(node.get("mode") or ""),
+                    status=str(node.get("status") or "unknown"),
+                    depends_on=node.get("depends_on") or [],
+                    outputs=node.get("downloaded_files") or [],
+                    attempts=int(node.get("attempts") or 1),
+                    cache_hit=bool(node.get("cache_hit")),
+                    error=str(node.get("error") or ""),
+                )
+            selected_result = next(
+                (node for node in result["jobs"] if isinstance(node, dict) and str(node.get("job_id") or "") == requested_job_id),
+                None,
+            )
+        else:
+            selected_result = None
+        result_for_history = selected_result or result
+        history_item["status"] = str(result_for_history.get("status") or "unknown")
+        history_item["outputs"] = [str(item) for item in (result_for_history.get("downloaded_files") or []) if item]
         history_item["ended_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+        if requested_job_id in known_node_ids:
+            existing_node = next(
+                (
+                    item
+                    for item in (manifest.get("production_nodes") or [])
+                    if isinstance(item, dict) and str(item.get("job_id") or "") == requested_job_id
+                ),
+                {},
+            )
+            _upsert_production_node(
+                manifest,
+                requested_job_id,
+                stage="08_audio_visual_packaging" if requested_job_id in {"local_tts", "subtitle_build", "bgm_select", "ffmpeg_compose", "format_export"} else "visual",
+                mode=requested_job_id,
+                status=history_item["status"],
+                depends_on=result_for_history.get("depends_on") or existing_node.get("depends_on") or [],
+                outputs=history_item["outputs"],
+                error=str(result.get("error") or result.get("reason") or ""),
+            )
         return _finalize_retry_manifest(task_dir, manifest, production_note_path, emit, f"production retry finished: {retry_job}")
     except Exception as exc:
         history_item["status"] = "failed"
@@ -611,6 +838,51 @@ def _retry_ffmpeg_job(
     emit,
 ) -> dict[str, Any]:
     emit("retrying local FFmpeg composition", stage="ffmpeg")
+    nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
+    tts_enabled = any(node.get("job_id") == "local_tts" for node in nodes)
+    if not tts_enabled:
+        tts_enabled = str((manifest.get("audio") or {}).get("adapter_status") or "").strip() not in {"", "off", "not_configured"}
+    material_enabled = any(str(node.get("stage") or "") == "visual" for node in nodes)
+    if not material_enabled:
+        material_enabled = any(
+            str(value or "").strip() not in {"", "pending", "not_configured", "skipped"}
+            for value in [
+                (manifest.get("image_generation") or {}).get("adapter_status"),
+                (manifest.get("composition") or {}).get("comfyui_adapter_status"),
+            ]
+        )
+    ffmpeg_depends_on = _ffmpeg_dependency_ids(manifest, tts_enabled)
+    dependency_blockers = _packaging_dependency_blockers(manifest, tts_enabled, material_enabled)
+    if dependency_blockers:
+        blocked_reason = "; ".join(dependency_blockers)
+        composition = manifest.setdefault("composition", {})
+        composition["adapter_status"] = "blocked"
+        composition["local_ffmpeg_status"] = "blocked"
+        composition["local_ffmpeg_blocked_reason"] = blocked_reason
+        manifest["status"] = "ffmpeg_dependency_blocked"
+        _upsert_production_node(
+            manifest,
+            "ffmpeg_compose",
+            stage="08_audio_visual_packaging",
+            mode="ffmpeg_compose",
+            status="blocked",
+            depends_on=ffmpeg_depends_on,
+            outputs=[],
+            error=blocked_reason,
+        )
+        _upsert_production_node(
+            manifest,
+            "format_export",
+            stage="08_audio_visual_packaging",
+            mode="format_export",
+            status="blocked",
+            depends_on=["ffmpeg_compose"],
+            outputs=[],
+            error="ffmpeg_compose is blocked by upstream production dependencies",
+        )
+        emit("FFmpeg composition retry blocked by upstream dependencies", stage="ffmpeg", status="blocked", reason=blocked_reason)
+        return {"status": "blocked", "error": blocked_reason, "downloaded_files": [], "depends_on": ffmpeg_depends_on}
+
     result = _run_local_ffmpeg_adapter(task_dir, paths, compose_config, manifest) or {"status": "skipped"}
     composition = manifest.setdefault("composition", {})
     files_section = manifest.setdefault("files", {})
@@ -785,6 +1057,10 @@ def _run_comfyui_adapter(
         "status": manifest.get("status") or "success",
         "manifest_file": str(output_dir / "cloud_comfyui_manifest.json"),
         "downloaded_files": manifest.get("downloaded_files", []),
+        "jobs": manifest.get("jobs", []),
+        "artifacts": manifest.get("artifacts", []),
+        "job_state_file": manifest.get("job_state_file", ""),
+        "production_graph": manifest.get("production_graph", ""),
     }
 
 
@@ -1026,6 +1302,9 @@ def _combined_comfyui_payload_text(
             value = source.get(key)
             if value not in (None, "", []):
                 defaults[key] = value
+        global_context = source.get("global_context")
+        if isinstance(global_context, dict):
+            defaults.setdefault("global_context", {}).update(global_context)
         output = source.get("output")
         if isinstance(output, dict):
             defaults.setdefault("output", {}).update(output)
@@ -1252,6 +1531,215 @@ def _create_output_dirs(task_dir: Path) -> dict[str, Path]:
     for path in paths.values():
         path.mkdir(parents=True, exist_ok=True)
     return paths
+
+
+def _packaging_graph_jobs(payload: dict[str, Any], voice_config: dict[str, Any]) -> list[dict[str, Any]]:
+    tts_enabled = str(voice_config.get("mode") or "").strip().lower() not in {"", "off"}
+    jobs: list[dict[str, Any]] = []
+    if tts_enabled:
+        jobs.append(
+            {
+                "job_id": "local_tts",
+                "mode": "local_tts",
+                "outputs": ["output_voiceover_audio"],
+                "resource_class": "local_audio",
+                "retry": {"max_attempts": 1, "retry_on": []},
+            }
+        )
+    jobs.extend(
+        [
+            {
+                "job_id": "subtitle_build",
+                "mode": "subtitle_build",
+                "outputs": ["output_subtitles"],
+                "resource_class": "local",
+            },
+            {
+                "job_id": "bgm_select",
+                "mode": "bgm_select",
+                "outputs": ["output_bgm_audio"],
+                "resource_class": "local",
+            },
+            {
+                "job_id": "ffmpeg_compose",
+                "mode": "ffmpeg_compose",
+                "depends_on": (["local_tts"] if tts_enabled else []) + ["subtitle_build", "bgm_select"],
+                "outputs": ["output_final_video"],
+                "resource_class": "local_ffmpeg",
+                "depends_on_visual": True,
+            },
+            {
+                "job_id": "format_export",
+                "mode": "format_export",
+                "depends_on": ["ffmpeg_compose"],
+                "outputs": ["output_mp4", "output_subtitles_sidecar"],
+                "resource_class": "local_ffmpeg",
+            },
+        ]
+    )
+    return jobs
+
+
+def _upsert_production_node(
+    manifest: dict[str, Any],
+    job_id: str,
+    *,
+    stage: str,
+    mode: str,
+    status: str,
+    depends_on: list[str] | None = None,
+    outputs: list[str] | None = None,
+    attempts: int = 1,
+    cache_hit: bool = False,
+    error: str = "",
+) -> None:
+    if not job_id:
+        return
+    nodes = manifest.setdefault("production_nodes", [])
+    node = next((item for item in nodes if isinstance(item, dict) and item.get("job_id") == job_id), None)
+    if node is None:
+        node = {"job_id": job_id}
+        nodes.append(node)
+    node.update(
+        {
+            "stage": stage,
+            "mode": mode,
+            "status": status,
+            "depends_on": [str(item) for item in (depends_on or []) if str(item)],
+            "outputs": [str(item) for item in (outputs or []) if str(item)],
+            "attempts": max(1, int(attempts or 1)),
+            "cache_hit": bool(cache_hit),
+            "error": error,
+            "blocked_reason": error if status == "blocked" else "",
+            "updated_at": time.time(),
+        }
+    )
+
+
+def _ffmpeg_dependency_ids(manifest: dict[str, Any], tts_enabled: bool) -> list[str]:
+    dependencies: list[str] = []
+    for node in manifest.get("production_nodes") or []:
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("stage") or "") == "visual":
+            job_id = str(node.get("job_id") or "").strip()
+            if job_id:
+                dependencies.append(job_id)
+    if tts_enabled:
+        dependencies.append("local_tts")
+    dependencies.extend(["subtitle_build", "bgm_select"])
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in dependencies:
+        if item and item not in seen:
+            deduped.append(item)
+            seen.add(item)
+    return deduped
+
+
+def _packaging_dependency_blockers(manifest: dict[str, Any], tts_enabled: bool, material_enabled: bool) -> list[str]:
+    ok_statuses = {"success", "cached", "downloaded", "submitted", "skipped", "not_configured"}
+    blockers: list[str] = []
+    nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
+    visual_nodes = [node for node in nodes if str(node.get("stage") or "") == "visual"]
+    for node in visual_nodes:
+        status = str(node.get("status") or "").strip()
+        if status not in ok_statuses:
+            job_id = str(node.get("job_id") or "visual")
+            reason = str(node.get("blocked_reason") or node.get("error") or status or "not completed")
+            blockers.append(f"{job_id}: {reason}")
+
+    if material_enabled and not visual_nodes:
+        image_status = str((manifest.get("image_generation") or {}).get("adapter_status") or "")
+        comfy_status = str((manifest.get("composition") or {}).get("comfyui_adapter_status") or "")
+        branch_status = comfy_status if comfy_status and comfy_status != "pending" else image_status
+        if branch_status and branch_status not in ok_statuses:
+            blockers.append(f"visual_material: {branch_status}")
+
+    if tts_enabled:
+        tts_node = next((node for node in nodes if node.get("job_id") == "local_tts"), None)
+        tts_status = str((tts_node or {}).get("status") or (manifest.get("audio") or {}).get("adapter_status") or "")
+        if tts_status not in ok_statuses:
+            reason = str((tts_node or {}).get("blocked_reason") or (tts_node or {}).get("error") or tts_status or "not completed")
+            blockers.append(f"local_tts: {reason}")
+        elif not str((manifest.get("audio") or {}).get("voiceover_audio_file") or "").strip() and tts_status not in {"skipped", "not_configured"}:
+            blockers.append("local_tts: voiceover WAV is missing")
+
+    return blockers
+
+
+def _select_bgm_from_asset_library(task_dir: Path, voice_config: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    workspace_root = task_dir.parent.parent
+    library_root = workspace_root / "my_asset_library"
+    library_path = library_root / "library.json"
+    if not library_path.is_file():
+        return {"status": "skipped", "reason": "asset library is unavailable", "file": "", "asset_id": ""}
+    try:
+        items = json.loads(library_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError):
+        return {"status": "skipped", "reason": "asset library JSON is invalid", "file": "", "asset_id": ""}
+    if not isinstance(items, list):
+        return {"status": "skipped", "reason": "asset library contains no assets", "file": "", "asset_id": ""}
+    output = payload.get("output") if isinstance(payload.get("output"), dict) else {}
+    requested = str(voice_config.get("bgm_style") or output.get("bgm_style") or payload.get("bgm_style") or "").strip().lower()
+    requested_tokens = {part for part in re.split(r"[\s,，/|]+", requested) if part}
+    candidates: list[tuple[int, dict[str, Any], Path]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        relative = str(item.get("file") or "").strip()
+        path = (library_root / relative).resolve()
+        if path.suffix.lower() not in {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"} or not path.is_file():
+            continue
+        tags = {str(tag).strip().lower() for tag in (item.get("tags") or []) if str(tag).strip()}
+        text = " ".join([str(item.get("name") or ""), str(item.get("note") or ""), *tags]).lower()
+        score = 10 if tags & {"bgm", "music", "音乐", "配乐"} else 0
+        score += sum(3 for token in requested_tokens if token in text)
+        candidates.append((score, item, path))
+    if not candidates:
+        return {"status": "skipped", "reason": "no reusable BGM audio asset was found", "file": "", "asset_id": ""}
+    _, item, path = max(candidates, key=lambda entry: (entry[0], float(entry[1].get("updated_at") or 0)))
+    return {"status": "success", "reason": "", "file": str(path), "asset_id": str(item.get("id") or "")}
+
+
+def _payload_has_mode(payload: dict[str, Any], mode: str) -> bool:
+    target = str(mode or "").strip()
+    for key in ("image_prompts", "video_prompts"):
+        values = payload.get(key) if isinstance(payload.get(key), list) else []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("mode") or item.get("workflow_mode") or item.get("video_task_mode") or "").strip() == target:
+                return True
+            prompts = item.get("prompts") if isinstance(item.get("prompts"), dict) else {}
+            if any(
+                isinstance(prompt, dict)
+                and str(prompt.get("mode") or prompt.get("workflow_mode") or prompt.get("video_task_mode") or "").strip() == target
+                for prompt in prompts.values()
+            ):
+                return True
+    return False
+
+
+def _inject_mode_audio_file(payload_path: Path, mode: str, audio_file: str) -> None:
+    payload = _load_comfyui_payload_with_fallback(payload_path)
+    for key in ("image_prompts", "video_prompts"):
+        values = payload.get(key) if isinstance(payload.get(key), list) else []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            item_mode = str(item.get("mode") or item.get("workflow_mode") or item.get("video_task_mode") or "").strip()
+            if item_mode == mode:
+                item["input_audio_file"] = audio_file
+            prompts = item.get("prompts") if isinstance(item.get("prompts"), dict) else {}
+            for prompt in prompts.values():
+                if not isinstance(prompt, dict):
+                    continue
+                prompt_mode = str(prompt.get("mode") or prompt.get("workflow_mode") or prompt.get("video_task_mode") or "").strip()
+                if prompt_mode == mode:
+                    prompt["input_audio_file"] = audio_file
+    payload["input_audio_file"] = audio_file
+    _write_text(payload_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
 
 
 def _find_step(step_outputs: list[dict[str, str]], prefix: str) -> dict[str, str] | None:
@@ -1516,6 +2004,18 @@ def _default_comfyui_payload(
         "seed": video_config.get("seed") or "",
         "width": width,
         "height": height,
+        "global_context": {
+            "characters": [],
+            "style": {"style_id": "", "reference_asset": "", "weight": ""},
+            "render": {
+                "working_width": 848,
+                "working_height": 480,
+                "delivery_width": 1920,
+                "delivery_height": 1080,
+                "frame_rate": 24,
+                "aspect_ratio": video_config.get("aspect_ratio") or aspect_ratio,
+            },
+        },
         "output": {
             "aspect_ratio": video_config.get("aspect_ratio") or aspect_ratio,
             "duration": video_config.get("duration") or "30s",
