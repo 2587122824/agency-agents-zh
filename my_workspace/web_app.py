@@ -4581,7 +4581,6 @@ INDEX_HTML = r"""<!doctype html>
         comfyDebugStateByWorkflowId: serializeComfyDebugState(),
         activeComfyDebugWorkflowId,
         activeComfyDebugWorkflowMode,
-        comfyDebugCollapsedCapabilityGroups: Array.from(comfyDebugCollapsedCapabilityGroups),
         comfyNodeInfoList: els.comfyNodeInfoList.value,
         comfyPollTimeout: els.comfyPollTimeout.value,
         assetQualityGate: els.assetQualityGate.value,
@@ -4730,9 +4729,7 @@ INDEX_HTML = r"""<!doctype html>
       activeComfyDebugWorkflowId = settings.activeComfyDebugWorkflowId || '';
       activeComfyDebugWorkflowMode = settings.activeComfyDebugWorkflowMode || '';
       comfyDebugCollapsedCapabilityGroups.clear();
-      (Array.isArray(settings.comfyDebugCollapsedCapabilityGroups) ? settings.comfyDebugCollapsedCapabilityGroups : []).forEach(id => {
-        if (COMFY_DEBUG_CAPABILITY_GROUPS.some(group => group.id === id)) comfyDebugCollapsedCapabilityGroups.add(id);
-      });
+      COMFY_DEBUG_CAPABILITY_GROUPS.forEach(group => comfyDebugCollapsedCapabilityGroups.add(group.id));
       renderComfyWorkflowLibrary();
       setIfExists(els.comfyWorkflowPreset, settings.comfyWorkflowPreset || DEFAULT_COMFY_WORKFLOW_PRESET_ID);
       const selectedComfyWorkflow = getSelectedComfyWorkflowPreset();
