@@ -32,6 +32,7 @@
   ],
   "quality_gate": [
     "必须输出production_intents.image",
+    "production_intents.image与image_prompts必须位于同一个可解析JSON对象中",
     "每条图片意图必须包含intent和intent_id",
     "intent必须来自allowed_intents，除非明确标记custom并说明原因",
     "必须保留image_prompts兼容旧生产链",
@@ -40,7 +41,8 @@
     "workflow_id/workflow_mode/asset_tag只能作为兼容字段，不作为主语义",
     "不要强制员工填写input_bindings或底层DAG文件流转",
     "多帧镜头只能规划start/middle/end三帧，不得规划first_last_frame",
-    "默认工作尺寸为848x480或同等级480p画布，最终1080p交给后期/成片阶段",
+    "横屏工作尺寸848x480，竖屏480x848，方形480x480，最终1080p交给后期/成片阶段",
+    "07所引用的每个输入帧必须在本步骤真实存在并使用稳定intent_id命名",
     "不得输出ComfyUI数字节点ID或RunningHub节点映射"
   ],
   "handoff_to": [

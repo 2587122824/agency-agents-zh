@@ -33,6 +33,7 @@
   ],
   "quality_gate": [
     "必须输出production_intents.video",
+    "production_intents.video与video_prompts必须位于同一个可解析JSON对象中",
     "每条视频意图必须包含intent和intent_id",
     "intent必须来自allowed_intents，除非明确标记custom并说明原因",
     "必须保留video_prompts兼容旧生产链",
@@ -41,8 +42,10 @@
     "workflow_id/workflow_mode/asset_tag只能作为兼容字段，不作为主语义",
     "不要强制员工填写input_bindings或最终DAG文件流转",
     "多帧视频只能规划start/middle/end三帧，不得规划first_last_frame",
+    "首中尾帧视频固定4秒24fps，长镜头必须拆段，禁止06B或first_last_frame",
+    "图片引用必须精确匹配06的真实intent_id或asset_tag，缺输入必须阻塞返工",
     "普通I2V镜头不得携带音频；只有generate_talking_image可声明等待最终WAV",
-    "默认工作尺寸为848x480或同等级480p画布，最终1080p由enhance_video或22负责",
+    "横屏工作尺寸848x480，竖屏480x848，方形480x480，最终1080p由enhance_video或22负责",
     "不得输出ComfyUI数字节点ID或RunningHub节点映射"
   ],
   "handoff_to": [

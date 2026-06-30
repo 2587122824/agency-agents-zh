@@ -27,6 +27,9 @@
     "需要旁白时必须输出generate_voiceover",
     "需要字幕时必须输出build_subtitles",
     "需要BGM时必须输出select_bgm或说明不需要BGM",
+    "旁白按每秒最多5个汉字控制，超长必须退回03精简",
+    "字幕必须覆盖至少90%的旁白正文且不得超过目标成片时长",
+    "字幕时间码必须合法递增，秒和分钟字段不得达到60",
     "不得把普通音频任务写入ComfyUI分类",
     "不得声明已生成真实WAV/SRT/BGM文件，除非系统已提供真实路径",
     "talking_image的WAV只声明依赖，最终input_audio_file由系统编译器绑定"

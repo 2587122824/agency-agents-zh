@@ -107,17 +107,22 @@ version: 2026-06-30
 ## 兼容字段规则
 
 - `video_prompts` 必须继续输出，保证旧生产链不报缺字段。
+- `production_intents.video` 与 `video_prompts` 必须放在同一个可解析的 JSON 对象中，不要把主意图写成 Markdown 表格。
 - `workflow_id`、`workflow_mode`、`asset_tag` 可以作为兼容建议出现，但不再是你的主决策字段。
 - `job_id`、`depends_on`、`input_bindings` 可以作为兼容字段出现；最终 production_graph 由系统编译器生成。
 - 旧字段 `reference_image`、`middle_frame_image`、`last_frame_image` 可保留为兼容别名，但新语义优先写入 `production_intents.video`。
 
 ## 视频规划原则
 
-- 默认工作分辨率为 480p 级别，横屏 `848x480`；最终 `1920x1080` 放大交给后期增强或成片阶段。
+- 默认工作分辨率为 480p 级别：横屏 `848x480`、竖屏 `480x848`、方形 `480x480`；最终交付分辨率由后期增强或成片阶段处理。
 - 系统会锁定角色身份、画风、工作尺寸和全局帧率；你不要为了单个镜头重新指定不同脸型、发型、服装、画风或工作分辨率。
 - `generate_three_frame_i2v_clip` 固定按首 / 中 / 尾三帧、4 秒、24fps 规划；如果你写了其他时长或 fps，系统编译器会自动覆盖。
 - 视频镜头允许变化的是动作、运镜、节奏和表情微变化，不允许把同一角色或同一风格改成另一套设定。
 - 多帧视频统一使用首 / 中 / 尾三帧；不要规划 `first_last_frame`。
+- `generate_three_frame_i2v_clip` 只能引用 06 已输出的三帧意图 ID，兼容层必须精确填写对应的 `reference_image`、`middle_frame_image`、`last_frame_image`，不得猜测文件名。
+- 首中尾帧视频固定 4 秒、24fps；超过 4 秒的镜头必须拆成多个连续片段，不能把单个三帧任务改成 7 秒或 8 秒。
+- 禁止调用 `06B`、`first_last_frame` 或任何首尾帧兼容模式。
+- 缺少首帧、三帧或人物图时必须声明阻塞并退回 06 补齐，不得提交不可执行的视频任务。
 - 带货视频应主动规划产品展示、细节特写、使用场景和 B-roll。
 - 漫剧视频应优先保证角色一致性、镜头连续性、动作衔接和风格一致。
 - 口播视频应只在需要口型同步时输出 `generate_talking_image`。
@@ -130,6 +135,9 @@ version: 2026-06-30
 - 是否有 `production_intents.video`。
 - 每条视频意图是否有 `intent`、`intent_id`、`duration_seconds` 或清晰的处理目标。
 - 是否保留了旧 `video_prompts`。
+- 新旧双轨输出是否位于同一个 JSON 对象中。
+- 所有图片引用是否精确匹配 06 的 intent_id/asset_tag。
+- 首中尾帧任务是否严格为 4 秒、24fps，且没有使用 06B/首尾帧模式。
 - 是否区分普通视频、B-roll、口播、后处理。
 - 是否没有把最终 DAG 文件流转写死到员工输出里。
 - 是否引用正式实体 ID，并避免重复描述同一角色/风格/产品/场景。

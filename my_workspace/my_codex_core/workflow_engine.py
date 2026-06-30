@@ -10,6 +10,7 @@ from typing import Callable
 from .codex_api import CodexAPI
 from .action_executor import ActionExecutor
 from .production_pipeline import run_auto_production
+from .production_output_validator import validate_production_output
 from .requirement_guard import (
     build_requirement_lock,
     correction_prompt,
@@ -149,7 +150,7 @@ class WorkflowEngine:
                             "total_steps": len(steps),
                         }
                     )
-                result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir)
+                result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir, previous_outputs)
             except Exception as exc:
                 error_text = (
                     "# 当前步骤执行失败\n\n"
@@ -259,6 +260,8 @@ class WorkflowEngine:
         self.storage.write_json(
             task_dir / "run_summary.json",
             {
+                "status": "completed",
+                "employee_workflow_status": "completed",
                 "task_dir": str(task_dir),
                 "workflow": workflow_name,
                 "task_title": task_title,
@@ -382,7 +385,7 @@ class WorkflowEngine:
             },
         )
 
-        result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, target_step, step_dir)
+        result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, target_step, step_dir, previous_outputs)
         self.storage.write_text(output_path, result.content)
         action_results = self.action_executor.execute_from_text(result.content, task_dir)
         self.storage.write_json(
@@ -561,7 +564,7 @@ class WorkflowEngine:
                             "total_steps": len(steps),
                         }
                     )
-                result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir)
+                result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir, previous_outputs)
             except Exception as exc:
                 error_text = (
                     "# 当前步骤执行失败\n\n"
@@ -979,6 +982,7 @@ class WorkflowEngine:
         user_input: str,
         step: dict,
         step_dir: Path,
+        previous_outputs: list[dict[str, str]] | None = None,
     ):
         step_no = int(step.get("step") or 0)
         lock = build_requirement_lock(user_input)
@@ -987,10 +991,11 @@ class WorkflowEngine:
         if result.provider == "offline":
             return result
 
-        validation = validate_requirement_alignment(lock, result.content, step_no)
+        validation = self._combined_output_validation(lock, result.content, step, previous_outputs or [])
         attempts.append(validation)
         if validation.get("passed"):
             self.storage.write_json(step_dir / "requirement_validation.json", {"passed": True, "attempts": attempts})
+            self.storage.write_json(step_dir / "production_contract_validation.json", validation.get("production_contract") or {})
             return result
 
         rejected_path = step_dir / f"output_rejected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
@@ -998,7 +1003,7 @@ class WorkflowEngine:
         retry_prompt = correction_prompt(prompt, lock, result.content, validation.get("issues") or [])
         self.storage.write_text(step_dir / "prompt_retry_requirement.md", retry_prompt)
         retry_result = self.api.run(system_prompt, retry_prompt)
-        retry_validation = validate_requirement_alignment(lock, retry_result.content, step_no)
+        retry_validation = self._combined_output_validation(lock, retry_result.content, step, previous_outputs or [])
         attempts.append(retry_validation)
         self.storage.write_json(
             step_dir / "requirement_validation.json",
@@ -1009,13 +1014,34 @@ class WorkflowEngine:
                 "attempts": attempts,
             },
         )
+        self.storage.write_json(step_dir / "production_contract_validation.json", retry_validation.get("production_contract") or {})
         if retry_validation.get("passed"):
             return retry_result
 
         second_rejected_path = step_dir / f"output_rejected_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
         self.storage.write_text(second_rejected_path, retry_result.content)
         issues = "；".join(str(item) for item in (retry_validation.get("issues") or []))
-        raise RequirementAlignmentError(f"需求一致性校验连续两次未通过：{issues}")
+        raise RequirementAlignmentError(f"员工输出校验连续两次未通过：{issues}")
+
+    @staticmethod
+    def _combined_output_validation(
+        lock: dict,
+        content: str,
+        step: dict,
+        previous_outputs: list[dict[str, str]],
+    ) -> dict:
+        requirement = validate_requirement_alignment(lock, content, int(step.get("step") or 0))
+        contract = validate_production_output(step, content, lock, previous_outputs)
+        issues = [*(requirement.get("issues") or []), *(contract.get("issues") or [])]
+        return {
+            "passed": not issues,
+            "step": int(step.get("step") or 0),
+            "agent": str(step.get("agent") or ""),
+            "issues": issues,
+            "core_topic": requirement.get("core_topic") or lock.get("core_topic") or "",
+            "requirement_alignment": requirement,
+            "production_contract": contract,
+        }
 
     @staticmethod
     def _build_step_prompt(
@@ -1520,6 +1546,8 @@ class WorkflowEngine:
                 summary = {}
         summary.update(
             {
+                "status": "completed",
+                "employee_workflow_status": "completed",
                 "task_dir": str(task_dir),
                 "workflow": workflow_name,
                 "task_title": task_title,

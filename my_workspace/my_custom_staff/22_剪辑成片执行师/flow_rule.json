@@ -30,6 +30,9 @@
     "需要成片时必须输出build_edit_timeline和package_final_video",
     "必须输出delivery_spec或apply_delivery_spec",
     "必须列出missing_assets或明确暂无缺失",
+    "时间线必须从0秒开始连续排列，无重叠无空档且总时长等于目标成片时长",
+    "横屏交付1920x1080，竖屏1080x1920，方形1080x1080，统一24fps",
+    "missing_assets非空时必须标记阻塞，不得声明生产就绪或无阻塞",
     "asset_only且needs_final_video=false时，可以不要求最终成片，但必须给素材交付清单",
     "只描述剪辑节奏、镜头顺序、字幕/BGM/旁白关系和导出规格",
     "不得输出具体FFmpeg filter命令或底层执行细节"
