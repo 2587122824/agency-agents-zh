@@ -47,6 +47,7 @@
 
 ## Recent Fixes
 
+- ComfyUI 调试台的功能组标题现在可点击展开/收起，箭头和 `aria-expanded` 会同步变化，收起状态保存在本地设置中，刷新页面后仍会保留。
 - ComfyUI 调试台改为按功能组织的两级树（功能组 → 可运行子模式），桌面端不再重复显示子模式下拉框。每个叶子子模式独立保存接口、nodeInfoList、尺寸、提示词、参考素材、运行状态与结果；旧的工作流级配置和状态会作为首次迁移回退。06/07 员工现以 `capability + mode` 为主路由，并继续输出 `workflow_id + workflow_mode` 兼容现有生产链路。
 - The current long-video workflow no longer runs `21_ComfyUI素材编排师` as a separate step. Its responsibilities are integrated into `06_分镜生图设计师` (`image_prompts`) and `07_视频生成执行员` (`video_prompts`). `production_pipeline.py` now merges the first JSON blocks from 06/07 into `comfyui/comfyui_payload.json`, and the ComfyUI material gate falls back to the 07 step when no 21 step exists.
 - Staff 06 and 07 now explicitly require full per-shot prompt expansion: every row in the storyboard / shot list must have a matching detailed prompt section, with no "same as above", "omitted", or "key shots only" shortcuts. Staff 21 now has a fallback requirement to cover all shot numbers in `image_prompts` / `video_prompts`, and to record inferred or missing prompts in `missing_or_inferred_prompts` instead of silently dropping shots.

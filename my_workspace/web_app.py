@@ -2058,12 +2058,23 @@ INDEX_HTML = r"""<!doctype html>
       background: #f8fafc;
     }
     .comfy-debug-tree-group-title {
+      width: 100%;
+      border: 0;
+      background: transparent;
       padding: 2px 4px;
       color: #334155;
       font-size: 12px;
       font-weight: 800;
       letter-spacing: .04em;
+      text-align: left;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
     }
+    .comfy-debug-tree-group-title:hover { color: var(--accent); }
+    .comfy-debug-tree-group-toggle { font-size: 11px; transition: transform .15s ease; }
+    .comfy-debug-tree-group.collapsed .comfy-debug-tree-group-toggle { transform: rotate(-90deg); }
     .comfy-debug-tree-children { display: grid; gap: 6px; }
     .comfy-debug-tree-leaf { background: #fff; }
     button.comfy-debug-tree-leaf {
@@ -3732,6 +3743,7 @@ INDEX_HTML = r"""<!doctype html>
     let activeComfyDebugWorkflowId = '';
     let activeComfyDebugWorkflowMode = '';
     const comfyDebugStateByWorkflowId = new Map();
+    const comfyDebugCollapsedCapabilityGroups = new Set();
     const COMFY_DEBUG_CAPABILITY_GROUPS = [
       { id: 'image_generate', label: '图片生成', modes: ['character_base', 'product_base', 'scene_base', 'style_reference', 'cover_key_visual', 'keyframe'] },
       { id: 'image_multiview', label: '多视图', modes: ['character_turnaround', 'product_turnaround'] },
@@ -4572,6 +4584,7 @@ INDEX_HTML = r"""<!doctype html>
         comfyDebugStateByWorkflowId: serializeComfyDebugState(),
         activeComfyDebugWorkflowId,
         activeComfyDebugWorkflowMode,
+        comfyDebugCollapsedCapabilityGroups: Array.from(comfyDebugCollapsedCapabilityGroups),
         comfyNodeInfoList: els.comfyNodeInfoList.value,
         comfyPollTimeout: els.comfyPollTimeout.value,
         assetQualityGate: els.assetQualityGate.value,
@@ -4719,6 +4732,10 @@ INDEX_HTML = r"""<!doctype html>
       restoreComfyDebugState(settings.comfyDebugStateByWorkflowId);
       activeComfyDebugWorkflowId = settings.activeComfyDebugWorkflowId || '';
       activeComfyDebugWorkflowMode = settings.activeComfyDebugWorkflowMode || '';
+      comfyDebugCollapsedCapabilityGroups.clear();
+      (Array.isArray(settings.comfyDebugCollapsedCapabilityGroups) ? settings.comfyDebugCollapsedCapabilityGroups : []).forEach(id => {
+        if (COMFY_DEBUG_CAPABILITY_GROUPS.some(group => group.id === id)) comfyDebugCollapsedCapabilityGroups.add(id);
+      });
       renderComfyWorkflowLibrary();
       setIfExists(els.comfyWorkflowPreset, settings.comfyWorkflowPreset || DEFAULT_COMFY_WORKFLOW_PRESET_ID);
       const selectedComfyWorkflow = getSelectedComfyWorkflowPreset();
@@ -9206,15 +9223,29 @@ INDEX_HTML = r"""<!doctype html>
       COMFY_DEBUG_CAPABILITY_GROUPS.forEach(group => {
         const groupLeaves = leaves.filter(leaf => group.modes.includes(leaf.mode.value));
         if (!groupLeaves.length) return;
+        const isCollapsed = comfyDebugCollapsedCapabilityGroups.has(group.id);
         const groupNode = document.createElement('section');
-        groupNode.className = 'comfy-debug-tree-group';
+        groupNode.className = `comfy-debug-tree-group ${isCollapsed ? 'collapsed' : ''}`;
         groupNode.dataset.capability = group.id;
-        const groupTitle = document.createElement('div');
+        const groupTitle = document.createElement('button');
+        groupTitle.type = 'button';
         groupTitle.className = 'comfy-debug-tree-group-title';
-        groupTitle.textContent = group.label;
+        groupTitle.dataset.comfyCapabilityToggle = group.id;
+        groupTitle.setAttribute('aria-expanded', String(!isCollapsed));
+        groupTitle.innerHTML = `<span>${escapeHtml(group.label)} <span class="muted">${groupLeaves.length}</span></span><span class="comfy-debug-tree-group-toggle" aria-hidden="true">▼</span>`;
+        groupTitle.onclick = () => {
+          if (comfyDebugCollapsedCapabilityGroups.has(group.id)) {
+            comfyDebugCollapsedCapabilityGroups.delete(group.id);
+          } else {
+            comfyDebugCollapsedCapabilityGroups.add(group.id);
+          }
+          renderComfyDebugWorkflows({ refreshForm: false });
+          saveSettings();
+        };
         groupNode.appendChild(groupTitle);
         const children = document.createElement('div');
         children.className = 'comfy-debug-tree-children';
+        children.hidden = isCollapsed;
         groupLeaves.forEach(({ workflow: item, mode }) => {
         const modeConfig = getComfyWorkflowModeConfig(item, mode.value, true) || {};
         const stateKey = comfyDebugLeafKey(item.id, mode.value);
