@@ -4689,6 +4689,25 @@ INDEX_HTML = r"""<!doctype html>
       return body;
     }
 
+    async function apiWithTimeout(path, options = {}, timeoutMs = 15000) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await api(path, { ...options, signal: controller.signal });
+      } catch (err) {
+        if (err?.name === 'AbortError') {
+          throw new Error(`请求超时：${path}`);
+        }
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    function setStartupProgressMeta(text) {
+      if (els.progressMeta) els.progressMeta.textContent = text;
+    }
+
     async function loadConfig() {
       const data = await api('/api/config');
       localModelPresets = data.local_model_presets || [];
@@ -6174,16 +6193,21 @@ INDEX_HTML = r"""<!doctype html>
     async function ensureLocalModelReady(model) {
       const isOllama = els.provider.value === 'openai' && els.baseUrl.value.trim().replace(/\/$/, '') === OLLAMA_BASE_URL;
       if (!isOllama) return;
-      setStatus(`正在检测本地模型：${model}`);
-      await api('/api/test-model', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          api_key: els.apiKey.value.trim() || 'local',
-          base_url: OLLAMA_BASE_URL,
-          model,
-        }),
-      });
+      setStatus(`\u6b63\u5728\u68c0\u6d4b\u672c\u5730\u6a21\u578b\uff1a${model}`);
+      setStartupProgressMeta(`\u68c0\u6d4b\u672c\u5730\u6a21\u578b/API\uff1a${model}`);
+      try {
+        await apiWithTimeout('/api/test-model', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: els.apiKey.value.trim() || 'local',
+            base_url: OLLAMA_BASE_URL,
+            model,
+          }),
+        }, 8000);
+      } catch (err) {
+        setStatus(`\u672c\u5730\u6a21\u578b\u9884\u68c0\u672a\u5b8c\u6210\uff0c\u5df2\u8df3\u8fc7\u9884\u68c0\u5e76\u7ee7\u7eed\u521b\u5efa\u4efb\u52a1\uff1a${err.message}`, false);
+      }
     }
 
     async function loadKnowledgeList() {
@@ -10392,10 +10416,14 @@ INDEX_HTML = r"""<!doctype html>
       prepareOutputForPendingRun(els.taskTitle.value.trim() || '正在创建长视频任务');
       showView('output');
       try {
+        setStartupProgressMeta('\u68c0\u67e5\u6a21\u578b/API\u914d\u7f6e');
         await ensureLocalModelReady(model);
+        setStartupProgressMeta('\u5904\u7406\u53c2\u8003\u7d20\u6750');
         const referenceImages = await uploadReferenceImages();
+        setStartupProgressMeta('\u8bfb\u53d6\u751f\u4ea7\u914d\u7f6e');
         const { imageConfig, videoConfig, productionConfig } = await collectProductionConfig();
-        const result = await api('/api/run', {
+        setStartupProgressMeta('\u521b\u5efa\u65b0\u4efb\u52a1');
+        const result = await apiWithTimeout('/api/run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -10422,7 +10450,7 @@ INDEX_HTML = r"""<!doctype html>
             comfy_api_key: els.comfyApiKey.value.trim(),
             comfy_base_url: els.comfyBaseUrl.value.trim(),
           }),
-        });
+        }, 20000);
         setStatus('工作流已开始，正在执行第 1 步');
         trackRun(result.run_id);
         renderProgress(result);
