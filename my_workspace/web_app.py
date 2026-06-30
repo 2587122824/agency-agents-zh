@@ -23,6 +23,7 @@ from PIL import Image
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
 from my_codex_core.production_entities import load_production_entities, write_production_entities
 from my_codex_core.production_pipeline import retry_production_job
+from my_codex_core.production_plan_compiler import compile_production_plan
 from my_codex_core.task_state_center import TaskStateCenter
 from my_codex_core.workflow_engine import WorkflowCheckpointPause, WorkflowEngine
 
@@ -1117,6 +1118,64 @@ INDEX_HTML = r"""<!doctype html>
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    .production-plan-grid,
+    .entity-manager-grid,
+    .template-debug-grid {
+      display: grid;
+      gap: 10px;
+    }
+    .production-plan-grid {
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+    .production-job-list,
+    .entity-list {
+      display: grid;
+      gap: 8px;
+      max-height: 260px;
+      overflow: auto;
+    }
+    .production-job-row,
+    .entity-row {
+      display: grid;
+      gap: 4px;
+      padding: 9px 10px;
+      border: 1px solid rgba(148, 163, 184, .24);
+      border-radius: 8px;
+      background: #fbfcfd;
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .entity-row {
+      text-align: left;
+      box-shadow: none;
+    }
+    .entity-row.active {
+      border-color: rgba(20, 184, 166, .55);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .production-job-row strong,
+    .entity-row strong {
+      color: #0f172a;
+      font-size: 13px;
+    }
+    .template-debug-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .template-debug-grid textarea,
+    .entity-manager-grid textarea {
+      min-height: 120px;
+      resize: vertical;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+    .entity-manager-grid {
+      grid-template-columns: 220px minmax(0, 1fr);
+    }
+    .entity-editor-fields {
+      display: grid;
+      gap: 8px;
     }
     .output-sections {
       display: grid;
@@ -2971,6 +3030,50 @@ INDEX_HTML = r"""<!doctype html>
             <div class="asset-library-grid" id="assetLibraryGrid">
               <div class="muted small">从“任务输出”的已生成素材里点击“收藏复用”，或点击新增资产导入本地图片/视频。</div>
             </div>
+            <div class="output-section">
+              <div class="output-section-head">
+                <strong>生产实体管理</strong>
+                <div class="inline-actions">
+                  <button id="newProductionEntityBtn" type="button">新建实体</button>
+                  <button class="primary" id="saveProductionEntityBtn" type="button">保存实体</button>
+                </div>
+              </div>
+              <div class="muted small">正式管理角色 / 风格 / 产品 / 场景。员工只引用实体 ID，系统从这里继承母版资产、禁改项和参数锁。</div>
+              <div class="entity-manager-grid">
+                <div>
+                  <label>实体类型
+                    <select id="productionEntityGroup">
+                      <option value="characters">角色</option>
+                      <option value="styles">风格</option>
+                      <option value="products">产品</option>
+                      <option value="scenes">场景</option>
+                    </select>
+                  </label>
+                  <div class="entity-list" id="productionEntityList"></div>
+                </div>
+                <div class="entity-editor-fields">
+                  <label>实体 ID
+                    <input id="productionEntityId" autocomplete="off" spellcheck="false" placeholder="例如 character_main / style_master" />
+                  </label>
+                  <label>名称
+                    <input id="productionEntityName" autocomplete="off" spellcheck="false" placeholder="实体显示名" />
+                  </label>
+                  <label>参考资产 / 母版图
+                    <input id="productionEntityReference" autocomplete="off" spellcheck="false" placeholder="my_workspace/my_asset_library/xxx.png 或资产ID" />
+                  </label>
+                  <label>推荐权重
+                    <input id="productionEntityWeight" autocomplete="off" spellcheck="false" placeholder="例如 0.75，可留空" />
+                  </label>
+                  <label>约束 / 禁改项（一行一条）
+                    <textarea id="productionEntityConstraints" spellcheck="false" placeholder="不要换脸&#10;不要换发型&#10;保持服装主色"></textarea>
+                  </label>
+                  <label>扩展 JSON
+                    <textarea id="productionEntityExtraJson" spellcheck="false" placeholder='{"aliases":[],"reference_assets":[]}'></textarea>
+                  </label>
+                  <span class="muted small" id="productionEntityStatus">未加载实体库</span>
+                </div>
+              </div>
+            </div>
           </section>
         </div>
         <div class="asset-library-detail" id="assetLibraryDetail" hidden>
@@ -3225,6 +3328,31 @@ INDEX_HTML = r"""<!doctype html>
               </div>
               <div class="comfy-debug-result-grid" id="comfyDebugResults"></div>
             </div>
+            <div class="output-section">
+              <div class="output-section-head">
+                <strong>生产模板调试器</strong>
+                <div class="inline-actions">
+                  <button class="primary" id="previewProductionTemplateBtn" type="button">编译预览</button>
+                </div>
+              </div>
+              <div class="muted small">粘贴 01/06/07/20/22 任意员工输出 JSON，预览会生成哪些 production jobs、参数锁和覆盖记录。</div>
+              <div class="template-debug-grid">
+                <label>01 路由 JSON / 文本
+                  <textarea id="templateDebugRoute" spellcheck="false" placeholder='{"production_type":"drama_story","aspect_ratio":"16:9"}'></textarea>
+                </label>
+                <label>06 图片意图 JSON / 文本
+                  <textarea id="templateDebugImage" spellcheck="false" placeholder='{"production_intents":{"image":[...]}}'></textarea>
+                </label>
+                <label>07 视频意图 JSON / 文本
+                  <textarea id="templateDebugVideo" spellcheck="false" placeholder='{"production_intents":{"video":[...]}}'></textarea>
+                </label>
+                <label>20/22 音频剪辑意图 JSON / 文本
+                  <textarea id="templateDebugPackage" spellcheck="false" placeholder='可粘贴 audio/package production_intents'></textarea>
+                </label>
+              </div>
+              <div class="production-plan-grid" id="templateDebugSummary"></div>
+              <div class="production-job-list" id="templateDebugJobs"></div>
+            </div>
           </section>
         </div>
       </div>
@@ -3259,6 +3387,16 @@ INDEX_HTML = r"""<!doctype html>
             <div class="progress-list" id="progressList"></div>
           </div>
           <div class="output-summary-grid" id="outputSummaryGrid" hidden></div>
+          <div class="output-section" id="productionPlanPanel" hidden>
+            <div class="output-section-head">
+              <strong>生产计划预览</strong>
+              <div class="inline-actions">
+                <button id="openProductionPlanFileBtn" type="button">打开 production_plan.json</button>
+              </div>
+            </div>
+            <div class="production-plan-grid" id="productionPlanSummary"></div>
+            <div class="production-job-list" id="productionPlanJobs"></div>
+          </div>
           <div class="video-preview" id="videoPreviewBox" hidden>
             <div class="output-section-head">
               <strong>最终视频预览</strong>
@@ -3509,6 +3647,10 @@ INDEX_HTML = r"""<!doctype html>
       fileTabs: document.getElementById('fileTabs'),
       fileContent: document.getElementById('fileContent'),
       outputSummaryGrid: document.getElementById('outputSummaryGrid'),
+      productionPlanPanel: document.getElementById('productionPlanPanel'),
+      productionPlanSummary: document.getElementById('productionPlanSummary'),
+      productionPlanJobs: document.getElementById('productionPlanJobs'),
+      openProductionPlanFileBtn: document.getElementById('openProductionPlanFileBtn'),
       videoPreviewBox: document.getElementById('videoPreviewBox'),
       videoPreview: document.getElementById('videoPreview'),
       videoPreviewMeta: document.getElementById('videoPreviewMeta'),
@@ -3552,6 +3694,17 @@ INDEX_HTML = r"""<!doctype html>
       assetImportComfyBtn: document.getElementById('assetImportComfyBtn'),
       assetImportSaveBtn: document.getElementById('assetImportSaveBtn'),
       assetImportStatus: document.getElementById('assetImportStatus'),
+      productionEntityGroup: document.getElementById('productionEntityGroup'),
+      productionEntityList: document.getElementById('productionEntityList'),
+      productionEntityId: document.getElementById('productionEntityId'),
+      productionEntityName: document.getElementById('productionEntityName'),
+      productionEntityReference: document.getElementById('productionEntityReference'),
+      productionEntityWeight: document.getElementById('productionEntityWeight'),
+      productionEntityConstraints: document.getElementById('productionEntityConstraints'),
+      productionEntityExtraJson: document.getElementById('productionEntityExtraJson'),
+      productionEntityStatus: document.getElementById('productionEntityStatus'),
+      newProductionEntityBtn: document.getElementById('newProductionEntityBtn'),
+      saveProductionEntityBtn: document.getElementById('saveProductionEntityBtn'),
       refreshComfyDebugBtn: document.getElementById('refreshComfyDebugBtn'),
       comfyDebugStatus: document.getElementById('comfyDebugStatus'),
       comfyDebugWorkflowList: document.getElementById('comfyDebugWorkflowList'),
@@ -3616,6 +3769,13 @@ INDEX_HTML = r"""<!doctype html>
       runComfyDebugBtn: document.getElementById('runComfyDebugBtn'),
       comfyDebugResults: document.getElementById('comfyDebugResults'),
       comfyDebugResultMeta: document.getElementById('comfyDebugResultMeta'),
+      templateDebugRoute: document.getElementById('templateDebugRoute'),
+      templateDebugImage: document.getElementById('templateDebugImage'),
+      templateDebugVideo: document.getElementById('templateDebugVideo'),
+      templateDebugPackage: document.getElementById('templateDebugPackage'),
+      previewProductionTemplateBtn: document.getElementById('previewProductionTemplateBtn'),
+      templateDebugSummary: document.getElementById('templateDebugSummary'),
+      templateDebugJobs: document.getElementById('templateDebugJobs'),
       packageOutputMeta: document.getElementById('packageOutputMeta'),
       packageOutputList: document.getElementById('packageOutputList'),
       stepConfirmBar: document.getElementById('stepConfirmBar'),
@@ -3826,6 +3986,8 @@ INDEX_HTML = r"""<!doctype html>
     let comfyDebugLastResults = [];
     const progressStepOpenState = new Map();
     const progressUserToggledSteps = new Set();
+    let productionEntities = { characters: {}, styles: {}, products: {}, scenes: {} };
+    let selectedProductionEntityId = '';
     let localModelPresets = [];
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
@@ -6893,6 +7055,7 @@ INDEX_HTML = r"""<!doctype html>
       els.outputSummaryGrid.innerHTML = '';
       if (!data) {
         renderProductionJobs([]);
+        renderProductionPlanPreview(null);
         renderTaskComfyDebugPanel({});
         els.stepOutputMeta.textContent = '0 个步骤';
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
@@ -6923,6 +7086,7 @@ INDEX_HTML = r"""<!doctype html>
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
       const videoFile = preferredVideoFile(files);
       renderProductionJobs(status.production?.jobs || data.production_jobs || [], status.diagnostics || [], status.next_action || null, status.blockers || []);
+      renderProductionPlanPreview(data.production_plan_preview || null);
       renderTaskComfyDebugPanel(status.comfy_debug || {});
       renderVideoPreview(data.name, files);
 
@@ -7064,6 +7228,118 @@ INDEX_HTML = r"""<!doctype html>
           card.appendChild(action);
         }
         els.outputSummaryGrid.appendChild(card);
+      }
+    }
+
+    function renderProductionPlanPreview(preview, options = {}) {
+      const panel = options.panel || els.productionPlanPanel;
+      const summaryTarget = options.summaryTarget || els.productionPlanSummary;
+      const jobsTarget = options.jobsTarget || els.productionPlanJobs;
+      if (!summaryTarget || !jobsTarget) return;
+      const available = Boolean(preview && preview.available);
+      if (panel) panel.hidden = !available;
+      summaryTarget.innerHTML = '';
+      jobsTarget.innerHTML = '';
+      if (!available) {
+        if (!panel && preview?.message) {
+          summaryTarget.innerHTML = `<div class="muted small">${escapeHtml(preview.message)}</div>`;
+        }
+        return;
+      }
+      const template = preview.selected_template || {};
+      const route = preview.route || {};
+      const render = preview.render || {};
+      const style = preview.style || {};
+      const overrides = Array.isArray(preview.parameter_overrides) ? preview.parameter_overrides : [];
+      const cards = [
+        ['生产类型', route.production_type || template.production_type || 'custom'],
+        ['模板', template.name || template.production_type || '未选择'],
+        ['工作尺寸', render.working_width && render.working_height ? `${render.working_width}×${render.working_height}` : '未锁定'],
+        ['交付尺寸', render.delivery_width && render.delivery_height ? `${render.delivery_width}×${render.delivery_height}` : '未指定'],
+        ['帧率', render.frame_rate ? `${render.frame_rate}fps` : '未指定'],
+        ['风格', style.style_id || '未绑定'],
+        ['视觉 Job', String(preview.job_count || 0)],
+        ['覆盖字段', String(overrides.length || 0)],
+      ];
+      cards.forEach(([labelText, valueText]) => {
+        const card = document.createElement('div');
+        card.className = 'output-card';
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = labelText;
+        const value = document.createElement('div');
+        value.className = 'value';
+        value.textContent = valueText || '—';
+        card.appendChild(label);
+        card.appendChild(value);
+        summaryTarget.appendChild(card);
+      });
+      const notes = Array.isArray(preview.compile_notes) ? preview.compile_notes.filter(Boolean) : [];
+      if (notes.length || overrides.length) {
+        const info = document.createElement('div');
+        info.className = 'production-job-row';
+        const overrideText = overrides.slice(0, 4).map(item => `${item.intent_id || ''}.${item.field || ''}: ${item.from ?? '空'} → ${item.to ?? ''}`).join('；');
+        info.innerHTML = `<strong>编译提示 / 参数覆盖</strong><span class="muted small">${escapeHtml([overrideText, ...notes.slice(0, 3)].filter(Boolean).join(' · ') || '无')}</span>`;
+        jobsTarget.appendChild(info);
+      }
+      const jobs = Array.isArray(preview.jobs) ? preview.jobs : [];
+      if (!jobs.length) {
+        const empty = document.createElement('div');
+        empty.className = 'muted small';
+        empty.textContent = '暂无 visual_jobs。';
+        jobsTarget.appendChild(empty);
+        return;
+      }
+      jobs.slice(0, 80).forEach(job => {
+        const row = document.createElement('div');
+        row.className = 'production-job-row';
+        const title = document.createElement('strong');
+        title.textContent = `${job.job_id || 'job'} · ${job.type || job.capability || ''}`;
+        const detail = document.createElement('span');
+        detail.className = 'muted small';
+        const sizeText = job.width && job.height ? `${job.width}×${job.height}` : '';
+        const timeText = job.duration || job.fps ? `${job.duration || '?'}秒 / ${job.fps || '?'}fps` : '';
+        const depText = Array.isArray(job.depends_on) && job.depends_on.length ? `依赖 ${job.depends_on.join(', ')}` : '';
+        const entityText = [job.character_id, job.style_id, job.product_id, job.scene_id].filter(Boolean).join(' / ');
+        detail.textContent = [job.workflow_id || '', job.mode || '', sizeText, timeText, depText, entityText, job.status ? productionStatusLabel(job.status) : ''].filter(Boolean).join(' · ');
+        row.appendChild(title);
+        row.appendChild(detail);
+        jobsTarget.appendChild(row);
+      });
+    }
+
+    async function previewProductionTemplate() {
+      if (!els.previewProductionTemplateBtn) return;
+      els.previewProductionTemplateBtn.disabled = true;
+      try {
+        const result = await api('/api/preview-production-template', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            route_content: els.templateDebugRoute?.value || '',
+            image_content: els.templateDebugImage?.value || '',
+            video_content: els.templateDebugVideo?.value || '',
+            audio_content: els.templateDebugPackage?.value || '',
+            package_content: els.templateDebugPackage?.value || '',
+            video_config: {
+              aspect_ratio: els.videoAspect?.value || '16:9',
+              resolution: els.videoResolution?.value || '',
+              fps: els.videoFps?.value || '',
+            },
+          }),
+        });
+        renderProductionPlanPreview(result.preview || null, {
+          panel: null,
+          summaryTarget: els.templateDebugSummary,
+          jobsTarget: els.templateDebugJobs,
+        });
+        setStatus('生产模板预览已编译', false);
+      } catch (err) {
+        if (els.templateDebugSummary) els.templateDebugSummary.innerHTML = `<div class="muted small error">${escapeHtml(err.message || '编译失败')}</div>`;
+        if (els.templateDebugJobs) els.templateDebugJobs.innerHTML = '';
+        setStatus(err.message || '生产模板预览失败', true);
+      } finally {
+        els.previewProductionTemplateBtn.disabled = false;
       }
     }
 
@@ -7870,6 +8146,173 @@ INDEX_HTML = r"""<!doctype html>
           els.assetLibraryStatus.classList.add('error');
         }
       }
+    }
+
+    async function loadProductionEntities() {
+      try {
+        const data = await api('/api/production-entities');
+        productionEntities = data.entities && typeof data.entities === 'object'
+          ? data.entities
+          : { characters: {}, styles: {}, products: {}, scenes: {} };
+        renderProductionEntityList();
+        if (els.productionEntityStatus) {
+          const total = productionEntityGroups().reduce((sum, group) => sum + Object.keys(productionEntities[group] || {}).length, 0);
+          els.productionEntityStatus.textContent = `已加载 ${total} 个生产实体`;
+          els.productionEntityStatus.classList.remove('error');
+        }
+      } catch (err) {
+        if (els.productionEntityStatus) {
+          els.productionEntityStatus.textContent = err.message || '实体库加载失败';
+          els.productionEntityStatus.classList.add('error');
+        }
+      }
+    }
+
+    function productionEntityGroups() {
+      return ['characters', 'styles', 'products', 'scenes'];
+    }
+
+    function productionEntityIdKey(group = activeProductionEntityGroup()) {
+      return {
+        characters: 'character_id',
+        styles: 'style_id',
+        products: 'product_id',
+        scenes: 'scene_id',
+      }[group] || 'id';
+    }
+
+    function activeProductionEntityGroup() {
+      return els.productionEntityGroup?.value || 'characters';
+    }
+
+    function productionEntityReferenceKey(group = activeProductionEntityGroup()) {
+      return {
+        characters: 'master_image',
+        styles: 'style_reference',
+        products: 'product_master_image',
+        scenes: 'scene_reference',
+      }[group] || 'reference_asset';
+    }
+
+    function productionEntityConstraintKey(group = activeProductionEntityGroup()) {
+      return {
+        characters: 'forbidden_changes',
+        styles: 'negative_constraints',
+        products: 'forbidden_regions',
+        scenes: 'background_constraints',
+      }[group] || 'negative_constraints';
+    }
+
+    function renderProductionEntityList() {
+      if (!els.productionEntityList) return;
+      const group = activeProductionEntityGroup();
+      const values = productionEntities[group] && typeof productionEntities[group] === 'object' ? productionEntities[group] : {};
+      els.productionEntityList.innerHTML = '';
+      Object.values(values).forEach(item => {
+        if (!item || typeof item !== 'object') return;
+        const id = String(item[productionEntityIdKey(group)] || item.id || '');
+        const row = document.createElement('button');
+        row.type = 'button';
+        row.className = 'entity-row';
+        row.classList.toggle('active', id === selectedProductionEntityId);
+        row.innerHTML = `<strong>${escapeHtml(item.name || id)}</strong><span class="muted small">${escapeHtml(id)}</span>`;
+        row.onclick = () => selectProductionEntity(id);
+        els.productionEntityList.appendChild(row);
+      });
+      if (!els.productionEntityList.children.length) {
+        const empty = document.createElement('div');
+        empty.className = 'muted small';
+        empty.textContent = '当前类型还没有实体。';
+        els.productionEntityList.appendChild(empty);
+      }
+    }
+
+    function selectProductionEntity(entityId) {
+      selectedProductionEntityId = String(entityId || '');
+      const group = activeProductionEntityGroup();
+      const item = (productionEntities[group] || {})[selectedProductionEntityId] || {};
+      fillProductionEntityEditor(item);
+      renderProductionEntityList();
+    }
+
+    function fillProductionEntityEditor(item = {}) {
+      const group = activeProductionEntityGroup();
+      const idKey = productionEntityIdKey(group);
+      const refKey = productionEntityReferenceKey(group);
+      const constraintKey = productionEntityConstraintKey(group);
+      if (els.productionEntityId) els.productionEntityId.value = item[idKey] || item.id || '';
+      if (els.productionEntityName) els.productionEntityName.value = item.name || '';
+      if (els.productionEntityReference) els.productionEntityReference.value = item[refKey] || '';
+      if (els.productionEntityWeight) els.productionEntityWeight.value = item.recommended_weight || '';
+      const constraints = Array.isArray(item[constraintKey]) ? item[constraintKey] : [];
+      if (els.productionEntityConstraints) els.productionEntityConstraints.value = constraints.join('\n');
+      const extra = { ...item };
+      delete extra[idKey];
+      delete extra.id;
+      delete extra.name;
+      delete extra[refKey];
+      delete extra.recommended_weight;
+      delete extra[constraintKey];
+      if (els.productionEntityExtraJson) els.productionEntityExtraJson.value = JSON.stringify(extra, null, 2);
+    }
+
+    function newProductionEntity() {
+      selectedProductionEntityId = '';
+      fillProductionEntityEditor({});
+      if (els.productionEntityId) els.productionEntityId.focus();
+      renderProductionEntityList();
+    }
+
+    async function saveProductionEntity() {
+      const group = activeProductionEntityGroup();
+      const idKey = productionEntityIdKey(group);
+      const refKey = productionEntityReferenceKey(group);
+      const constraintKey = productionEntityConstraintKey(group);
+      const id = String(els.productionEntityId?.value || '').trim();
+      if (!id) {
+        setStatus('请填写实体 ID', true);
+        return;
+      }
+      let extra = {};
+      const extraText = String(els.productionEntityExtraJson?.value || '').trim();
+      if (extraText) {
+        try {
+          extra = JSON.parse(extraText);
+        } catch (err) {
+          setStatus(`扩展 JSON 格式错误：${err.message}`, true);
+          return;
+        }
+      }
+      const constraints = String(els.productionEntityConstraints?.value || '')
+        .split(/\r?\n/)
+        .map(item => item.trim())
+        .filter(Boolean);
+      const item = {
+        ...(extra && typeof extra === 'object' ? extra : {}),
+        [idKey]: id,
+        id,
+        name: String(els.productionEntityName?.value || '').trim() || id,
+        [refKey]: String(els.productionEntityReference?.value || '').trim(),
+        recommended_weight: String(els.productionEntityWeight?.value || '').trim(),
+        [constraintKey]: constraints,
+      };
+      const next = JSON.parse(JSON.stringify(productionEntities || {}));
+      next[group] = next[group] && typeof next[group] === 'object' ? next[group] : {};
+      if (selectedProductionEntityId && selectedProductionEntityId !== id) {
+        delete next[group][selectedProductionEntityId];
+      }
+      next[group][id] = item;
+      const result = await api('/api/save-production-entities', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ entities: next }),
+      });
+      productionEntities = result.entities || next;
+      selectedProductionEntityId = id;
+      renderProductionEntityList();
+      fillProductionEntityEditor((productionEntities[group] || {})[id] || item);
+      if (els.productionEntityStatus) els.productionEntityStatus.textContent = `已保存实体：${id}`;
+      setStatus(`已保存生产实体：${id}`, false);
     }
 
     function setComfyDebugReference(value = '', hint = '') {
@@ -10356,7 +10799,26 @@ INDEX_HTML = r"""<!doctype html>
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
     els.refreshHealthBtn.onclick = loadSystemHealth;
     els.productTemplate.onchange = () => applyProductTemplate(false);
-    els.refreshAssetLibraryBtn.onclick = loadAssetLibrary;
+    els.refreshAssetLibraryBtn.onclick = async () => {
+      await loadAssetLibrary();
+      await loadProductionEntities();
+    };
+    if (els.openProductionPlanFileBtn) {
+      els.openProductionPlanFileBtn.onclick = () => {
+        if (!selectedTask || !currentTaskFiles.includes('production_plan.json')) return;
+        openFile('production_plan.json');
+      };
+    }
+    if (els.previewProductionTemplateBtn) els.previewProductionTemplateBtn.onclick = previewProductionTemplate;
+    if (els.productionEntityGroup) {
+      els.productionEntityGroup.onchange = () => {
+        selectedProductionEntityId = '';
+        fillProductionEntityEditor({});
+        renderProductionEntityList();
+      };
+    }
+    if (els.newProductionEntityBtn) els.newProductionEntityBtn.onclick = newProductionEntity;
+    if (els.saveProductionEntityBtn) els.saveProductionEntityBtn.onclick = saveProductionEntity;
     if (els.assetLibraryTabs) {
       els.assetLibraryTabs.onclick = event => {
         const button = event.target?.closest?.('[data-asset-section]');
@@ -10637,6 +11099,7 @@ INDEX_HTML = r"""<!doctype html>
         await loadConfig();
         restoreSettings();
         await loadAssetLibrary();
+        await loadProductionEntities();
         await loadComfyDebugWorkflows();
         await loadTasks();
         await loadStaffList();
@@ -10693,6 +11156,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 query = parse_qs(parsed.query)
                 detail = self._task_detail(self._single(query, "name"))
                 self._send_json({"name": detail["name"], "task_status": detail["task_status"]})
+            elif parsed.path == "/api/production-plan-preview":
+                query = parse_qs(parsed.query)
+                self._send_json(self._production_plan_preview_for_task(self._single(query, "name")))
             elif parsed.path == "/api/task-comfy-debug-plan":
                 query = parse_qs(parsed.query)
                 task_dir = self._safe_task_dir(self._single(query, "name"))
@@ -10757,6 +11223,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/save-production-entities":
                 self._send_json(self._save_production_entities(payload))
+                return
+
+            if parsed.path == "/api/preview-production-template":
+                self._send_json(self._preview_production_template(payload))
                 return
 
             if parsed.path == "/api/import-asset":
@@ -11800,6 +12270,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 summary = {}
         production_jobs = self._production_jobs(task_dir)
         assets = self._task_assets(task_dir, files)
+        production_plan_preview = self._production_plan_preview_for_task(name)
         active_job = self._active_job_for_task(name, task_dir)
         state_center = TaskStateCenter(
             task_dir=task_dir,
@@ -11822,6 +12293,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "allowed_actions": allowed_actions,
             "assets": assets,
             "production_jobs": production_jobs,
+            "production_plan_preview": production_plan_preview,
             "comfy_debug": comfy_debug,
             "task_status": task_status,
             "state_center": state_center,
@@ -12322,6 +12794,103 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         raw = payload.get("entities") if isinstance(payload.get("entities"), dict) else payload
         entities = write_production_entities(PRODUCTION_ENTITIES_PATH, raw if isinstance(raw, dict) else {})
         return {"ok": True, "entities": entities}
+
+    def _production_plan_preview_for_task(self, task_name: str) -> dict:
+        task_dir = self._safe_task_dir(task_name)
+        plan = self._read_json_file(task_dir / "production_plan.json")
+        graph = self._read_json_file(task_dir / "production_graph.json")
+        manifest = self._read_json_file(task_dir / "production_manifest.json")
+        return self._production_plan_preview(plan, graph, manifest, task_name=task_name)
+
+    def _preview_production_template(self, payload: dict) -> dict:
+        route_content = str(payload.get("route_content") or payload.get("route") or "")
+        image_content = str(payload.get("image_content") or payload.get("image") or "")
+        video_content = str(payload.get("video_content") or payload.get("video") or "")
+        audio_content = str(payload.get("audio_content") or payload.get("audio") or "")
+        package_content = str(payload.get("package_content") or payload.get("package") or "")
+        existing_payload = payload.get("existing_payload") if isinstance(payload.get("existing_payload"), dict) else {}
+        video_config = payload.get("video_config") if isinstance(payload.get("video_config"), dict) else {}
+        if not any(value.strip() for value in (route_content, image_content, video_content, audio_content, package_content)):
+            raise ValueError("请至少粘贴一个员工 JSON 或输出文本。")
+        plan = compile_production_plan(
+            task_id="template_preview",
+            route_content=route_content,
+            image_content=image_content,
+            video_content=video_content,
+            audio_content=audio_content,
+            package_content=package_content,
+            existing_payload=existing_payload,
+            video_config=video_config,
+        )
+        graph = {"jobs": plan.get("visual_jobs") if isinstance(plan.get("visual_jobs"), list) else []}
+        return {"ok": True, "plan": plan, "preview": self._production_plan_preview(plan, graph, {}, task_name="template_preview")}
+
+    @classmethod
+    def _production_plan_preview(cls, plan: dict, graph: dict | None = None, manifest: dict | None = None, *, task_name: str = "") -> dict:
+        if not isinstance(plan, dict) or not plan:
+            return {
+                "available": False,
+                "task_name": task_name,
+                "message": "尚未生成 production_plan.json。运行到自动生产阶段后会出现生产计划。",
+            }
+        graph = graph if isinstance(graph, dict) else {}
+        manifest = manifest if isinstance(manifest, dict) else {}
+        global_context = plan.get("global_context") if isinstance(plan.get("global_context"), dict) else {}
+        render = global_context.get("render") if isinstance(global_context.get("render"), dict) else {}
+        style = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
+        policy = plan.get("parameter_policy") if isinstance(plan.get("parameter_policy"), dict) else global_context.get("parameter_policy") if isinstance(global_context.get("parameter_policy"), dict) else {}
+        locks = policy.get("locks") if isinstance(policy.get("locks"), dict) else {}
+        visual_jobs = plan.get("visual_jobs") if isinstance(plan.get("visual_jobs"), list) else []
+        graph_jobs = graph.get("jobs") if isinstance(graph.get("jobs"), list) else []
+        production_nodes = manifest.get("production_nodes") if isinstance(manifest.get("production_nodes"), list) else []
+        node_status = {str(node.get("job_id") or ""): str(node.get("status") or "") for node in production_nodes if isinstance(node, dict)}
+        job_rows = []
+        for job in visual_jobs:
+            if not isinstance(job, dict):
+                continue
+            job_id = str(job.get("job_id") or "")
+            job_rows.append(
+                {
+                    "job_id": job_id,
+                    "type": str(job.get("type") or job.get("task_type") or ""),
+                    "capability": str(job.get("capability") or ""),
+                    "mode": str(job.get("mode") or job.get("workflow_mode") or ""),
+                    "workflow_id": str(job.get("workflow_id") or ""),
+                    "depends_on": cls._string_list(job.get("depends_on")),
+                    "input_bindings": job.get("input_bindings") if isinstance(job.get("input_bindings"), dict) else {},
+                    "character_id": str(job.get("character_id") or ""),
+                    "style_id": str(job.get("style_id") or ""),
+                    "product_id": str(job.get("product_id") or ""),
+                    "scene_id": str(job.get("scene_id") or ""),
+                    "width": job.get("width") or "",
+                    "height": job.get("height") or "",
+                    "duration": job.get("duration") or job.get("duration_seconds") or "",
+                    "fps": job.get("fps") or "",
+                    "status": node_status.get(job_id, ""),
+                    "locked_fields": job.get("locked_fields") if isinstance(job.get("locked_fields"), list) else [],
+                }
+            )
+        return {
+            "available": True,
+            "task_name": task_name,
+            "schema_version": plan.get("schema_version") or 0,
+            "selected_template": plan.get("selected_template") if isinstance(plan.get("selected_template"), dict) else {},
+            "route": plan.get("route") if isinstance(plan.get("route"), dict) else {},
+            "render": render,
+            "style": style,
+            "characters": global_context.get("characters") if isinstance(global_context.get("characters"), list) else [],
+            "resolved_entities": plan.get("resolved_entities") if isinstance(plan.get("resolved_entities"), dict) else global_context.get("resolved_entities") if isinstance(global_context.get("resolved_entities"), dict) else {},
+            "parameter_policy": policy,
+            "locks": locks,
+            "parameter_overrides": plan.get("parameter_overrides") if isinstance(plan.get("parameter_overrides"), list) else policy.get("overrides") if isinstance(policy.get("overrides"), list) else [],
+            "compile_notes": plan.get("compile_notes") if isinstance(plan.get("compile_notes"), list) else [],
+            "jobs": job_rows,
+            "job_count": len(job_rows),
+            "graph_job_count": len(graph_jobs),
+            "audio_intents": plan.get("audio_intents") if isinstance(plan.get("audio_intents"), list) else [],
+            "package_intents": plan.get("package_intents") if isinstance(plan.get("package_intents"), list) else [],
+            "compatibility": plan.get("compatibility") if isinstance(plan.get("compatibility"), dict) else {},
+        }
 
     @staticmethod
     def _normalize_asset_library_item(item: dict, path: Path | None = None) -> dict:

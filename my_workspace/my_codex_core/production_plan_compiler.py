@@ -572,6 +572,17 @@ def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
                     "workflow_id": str(item.get("workflow_id") or ""),
                     "depends_on": _string_list(item.get("depends_on")),
                     "input_bindings": item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {},
+                    "character_id": str(item.get("character_id") or ""),
+                    "style_id": str(item.get("style_id") or ""),
+                    "product_id": str(item.get("product_id") or ""),
+                    "scene_id": str(item.get("scene_id") or ""),
+                    "width": item.get("width") or "",
+                    "height": item.get("height") or "",
+                    "duration": item.get("duration") or item.get("duration_seconds") or "",
+                    "fps": item.get("fps") or "",
+                    "prompt": str(item.get("prompt") or "")[:500],
+                    "parameter_locks": item.get("parameter_locks") if isinstance(item.get("parameter_locks"), dict) else {},
+                    "locked_fields": item.get("locked_fields") if isinstance(item.get("locked_fields"), list) else [],
                 }
             )
     return jobs

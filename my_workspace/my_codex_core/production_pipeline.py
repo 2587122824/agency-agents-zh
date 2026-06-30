@@ -115,13 +115,15 @@ def run_auto_production(
     write_production_plan(production_plan_path, production_plan)
     _write_text(comfyui_payload_path, json.dumps(comfyui_payload, ensure_ascii=False, indent=2) + "\n")
     packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config)
-    write_graph_json(production_graph_path, build_production_graph(task_dir.name, [], global_context, packaging_jobs))
+    plan_visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
+    write_graph_json(production_graph_path, build_production_graph(task_dir.name, plan_visual_jobs, global_context, packaging_jobs))
     compose_config.update(
         {
             "production_graph_path": str(production_graph_path),
             "production_task_id": task_dir.name,
             "global_context": global_context,
             "packaging_jobs": packaging_jobs,
+            "production_plan_visual_jobs": plan_visual_jobs,
         }
     )
     _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, None, edit_step, image_config, video_config, compose_config))

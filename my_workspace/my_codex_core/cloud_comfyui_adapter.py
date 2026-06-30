@@ -83,9 +83,10 @@ class CloudComfyUIAdapter:
                 item["depends_on"] = list(dict.fromkeys([*self._string_list(item.get("depends_on")), *visual_job_ids]))
         global_context = compose_config.get("global_context") if isinstance(compose_config.get("global_context"), dict) else {}
         global_context = self._enrich_global_context(global_context, selected_jobs)
+        graph_jobs = compose_config.get("production_plan_visual_jobs") if isinstance(compose_config.get("production_plan_visual_jobs"), list) else selected_jobs
         graph = build_production_graph(
             str(compose_config.get("production_task_id") or output_dir.parent.name),
-            selected_jobs,
+            graph_jobs,
             global_context,
             packaging_jobs,
         )
