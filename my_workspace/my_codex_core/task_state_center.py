@@ -52,6 +52,9 @@ class TaskStateCenter:
         workflow = self._workflow(steps, state)
         manual_debug = self._manual_debug(comfy_debug)
         blockers = self._blockers(workflow, production, manual_debug)
+        if state in {"cancelled", "completed"}:
+            manual_debug["allowed_actions"] = []
+            blockers = []
         allowed_actions = self._allowed_actions(state, blockers, production, manual_debug)
         next_action = self._next_action(state, workflow, production, manual_debug, blockers, allowed_actions)
         diagnostics = self._diagnostics(state, steps, production, blockers)
@@ -266,7 +269,7 @@ class TaskStateCenter:
             actions.update({"confirm_step", "cancel"})
         if state in {"awaiting_confirmation", "blocked"}:
             actions.add("cancel")
-        if manual_debug.get("status") == "awaiting_confirmation":
+        if manual_debug.get("status") == "awaiting_confirmation" and state not in {"cancelled", "completed"}:
             actions.add("run_comfy_debug")
             actions.add("confirm_comfy_debug")
         for job_id in production.get("allowed_retries") or []:
@@ -284,7 +287,7 @@ class TaskStateCenter:
         blockers: list[dict[str, str]],
         allowed_actions: list[str],
     ) -> dict[str, Any]:
-        if manual_debug.get("status") == "awaiting_confirmation":
+        if manual_debug.get("status") == "awaiting_confirmation" and state not in {"cancelled", "completed"}:
             return {"action": "run_comfy_debug", "label": "运行并确认 ComfyUI 调试队列", "reason": "manual_debug_awaiting_confirmation"}
         if self.summary.get("awaiting_confirmation") and state not in {"cancelled", "completed"}:
             return {"action": "confirm_step", "label": "确认当前步骤并继续", "reason": "workflow_awaiting_confirmation", "step": workflow.get("awaiting_confirmation_step")}
