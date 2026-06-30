@@ -23,6 +23,7 @@ from PIL import Image
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
 from my_codex_core.production_entities import load_production_entities, write_production_entities
 from my_codex_core.production_pipeline import retry_production_job
+from my_codex_core.task_state_center import TaskStateCenter
 from my_codex_core.workflow_engine import WorkflowCheckpointPause, WorkflowEngine
 
 
@@ -6874,9 +6875,15 @@ INDEX_HTML = r"""<!doctype html>
         workflow: status.workflow || {},
         steps: Array.isArray(status.steps) ? status.steps : [],
         production: status.production || { jobs: data?.production_jobs || [] },
+        tts: status.tts || {},
+        ffmpeg: status.ffmpeg || {},
+        manual_debug: status.manual_debug || {},
         comfy_debug: status.comfy_debug || data?.comfy_debug || {},
         assets: status.assets || data?.assets || {},
+        blockers: Array.isArray(status.blockers) ? status.blockers : [],
         allowed_actions: Array.isArray(status.allowed_actions) ? status.allowed_actions : (data?.allowed_actions || []),
+        next_action: status.next_action || {},
+        recommended_next_operation: status.recommended_next_operation || '',
         diagnostics: Array.isArray(status.diagnostics) ? status.diagnostics : [],
       };
     }
@@ -6915,7 +6922,7 @@ INDEX_HTML = r"""<!doctype html>
       const assetItems = structuredAssetItems({ ...data, assets: status.assets });
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
       const videoFile = preferredVideoFile(files);
-      renderProductionJobs(status.production?.jobs || data.production_jobs || [], status.diagnostics || []);
+      renderProductionJobs(status.production?.jobs || data.production_jobs || [], status.diagnostics || [], status.next_action || null, status.blockers || []);
       renderTaskComfyDebugPanel(status.comfy_debug || {});
       renderVideoPreview(data.name, files);
 
@@ -6968,12 +6975,48 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function renderProductionJobs(jobs, diagnostics = []) {
+    function renderProductionJobs(jobs, diagnostics = [], nextAction = null, blockers = []) {
       const list = Array.isArray(jobs) ? jobs.filter(job => job && job.id) : [];
       const diagnosticList = Array.isArray(diagnostics) ? diagnostics.filter(item => item && item.message) : [];
+      const blockerList = Array.isArray(blockers) ? blockers.filter(item => item && item.message) : [];
+      const action = nextAction && typeof nextAction === 'object' ? nextAction : null;
       els.outputSummaryGrid.innerHTML = '';
-      els.outputSummaryGrid.hidden = !list.length && !diagnosticList.length;
-      if (!list.length && !diagnosticList.length) return;
+      els.outputSummaryGrid.hidden = !list.length && !diagnosticList.length && !blockerList.length && !action;
+      if (!list.length && !diagnosticList.length && !blockerList.length && !action) return;
+      if (action && (action.label || action.action)) {
+        const card = document.createElement('div');
+        card.className = 'output-card';
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = '下一步建议';
+        const value = document.createElement('div');
+        value.className = 'value';
+        value.textContent = action.label || action.action || '暂无推荐操作';
+        const detail = document.createElement('div');
+        detail.className = 'muted small';
+        detail.textContent = [action.reason || '', action.job_id ? `节点：${action.job_id}` : '', action.step ? `步骤：${action.step}` : ''].filter(Boolean).join(' · ');
+        card.appendChild(label);
+        card.appendChild(value);
+        if (detail.textContent) card.appendChild(detail);
+        els.outputSummaryGrid.appendChild(card);
+      }
+      for (const item of blockerList) {
+        const card = document.createElement('div');
+        card.className = 'output-card';
+        const label = document.createElement('div');
+        label.className = 'label';
+        label.textContent = item.source ? `阻塞：${item.source}` : '阻塞原因';
+        const value = document.createElement('div');
+        value.className = 'value';
+        value.textContent = item.code || 'blocked';
+        const detail = document.createElement('div');
+        detail.className = 'muted small';
+        detail.textContent = item.message || '';
+        card.appendChild(label);
+        card.appendChild(value);
+        card.appendChild(detail);
+        els.outputSummaryGrid.appendChild(card);
+      }
       for (const item of diagnosticList) {
         const card = document.createElement('div');
         card.className = 'output-card';
@@ -11757,10 +11800,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 summary = {}
         production_jobs = self._production_jobs(task_dir)
         assets = self._task_assets(task_dir, files)
-        comfy_debug = self._task_comfy_debug_status(task_dir)
-        task_state = self._task_state(summary, files, comfy_debug)
-        allowed_actions = self._allowed_task_actions(task_state, summary, files)
-        task_status = self._task_status(task_dir, name, summary, files, task_state, allowed_actions, assets, production_jobs)
+        active_job = self._active_job_for_task(name, task_dir)
+        state_center = TaskStateCenter(
+            task_dir=task_dir,
+            task_name=name,
+            summary=summary,
+            files=files,
+            assets=assets,
+            active_job=active_job,
+            comfy_debug_loader=self._task_comfy_debug_status,
+        ).build()
+        comfy_debug = state_center.get("comfy_debug") if isinstance(state_center.get("comfy_debug"), dict) else {}
+        task_state = str(state_center.get("state") or self._task_state(summary, files, comfy_debug))
+        allowed_actions = state_center.get("allowed_actions") if isinstance(state_center.get("allowed_actions"), list) else self._allowed_task_actions(task_state, summary, files)
+        task_status = state_center
         return {
             "name": name,
             "summary": summary,
@@ -11771,6 +11824,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "production_jobs": production_jobs,
             "comfy_debug": comfy_debug,
             "task_status": task_status,
+            "state_center": state_center,
         }
 
     @staticmethod
