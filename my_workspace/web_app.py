@@ -4279,6 +4279,23 @@ INDEX_HTML = r"""<!doctype html>
       syncOutputButtons();
     }
 
+    function finishRunInteraction(options = {}) {
+      if (progressTimer) {
+        clearTimeout(progressTimer);
+        progressTimer = null;
+      }
+      autoFocusOutputDuringRun = false;
+      els.runBtn.disabled = false;
+      trackRun("");
+      setWorkflowInteractionLocked(false);
+      if (options.delayedProgressReset) {
+        setTimeout(() => setRunButtonProgress(0), 900);
+      } else if (options.resetProgressButton !== false) {
+        setRunButtonProgress(0);
+      }
+      syncOutputButtons();
+    }
+
     function progressStepKey(job, stepNo) {
       return `${job.run_id || currentRunId || 'run'}:${stepNo}`;
     }
@@ -4636,11 +4653,7 @@ INDEX_HTML = r"""<!doctype html>
       progressTimer = setTimeout(() => {
         pollRunStatus(runId).catch(err => {
           setStatus(err.message, true);
-          els.runBtn.disabled = false;
-          setWorkflowInteractionLocked(false);
-          setRunButtonProgress(0);
-          syncOutputButtons();
-          progressTimer = null;
+          finishRunInteraction();
         });
       }, 1000);
     }
@@ -4648,7 +4661,10 @@ INDEX_HTML = r"""<!doctype html>
     async function restoreActiveRun() {
       const data = await api('/api/active-run');
       const job = data.run;
-      if (!job) return;
+      if (!job) {
+        finishRunInteraction();
+        return;
+      }
       showView('output');
       renderProgress(job);
       if (job.task_name) {
@@ -4661,8 +4677,7 @@ INDEX_HTML = r"""<!doctype html>
         trackRun(job.run_id);
         await pollRunStatus(job.run_id);
       } else {
-        setWorkflowInteractionLocked(false);
-        syncOutputButtons();
+        finishRunInteraction({ resetProgressButton: false });
       }
     }
 
@@ -9587,8 +9602,7 @@ INDEX_HTML = r"""<!doctype html>
         await pollRunStatus(result.run_id);
       } catch (err) {
         setStatus(err.message, true);
-        setWorkflowInteractionLocked(false);
-        setRunButtonProgress(0);
+        finishRunInteraction();
       } finally {
         syncOutputButtons();
       }
@@ -9646,9 +9660,7 @@ INDEX_HTML = r"""<!doctype html>
         }
       } catch (err) {
         setStatus(err.message, true);
-        setWorkflowInteractionLocked(false);
-        setRunButtonProgress(0);
-        syncOutputButtons();
+        finishRunInteraction();
       }
     }
 
@@ -9707,9 +9719,7 @@ INDEX_HTML = r"""<!doctype html>
         }
       } catch (err) {
         setStatus(err.message, true);
-        setWorkflowInteractionLocked(false);
-        setRunButtonProgress(0);
-        syncOutputButtons();
+        finishRunInteraction();
       }
     }
 
@@ -10412,9 +10422,7 @@ INDEX_HTML = r"""<!doctype html>
         await pollRunStatus(result.run_id);
       } catch (err) {
         setStatus(err.message, true);
-        els.runBtn.disabled = false;
-        setWorkflowInteractionLocked(false);
-        setRunButtonProgress(0);
+        finishRunInteraction();
       } finally {
       }
     }
