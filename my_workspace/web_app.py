@@ -9870,23 +9870,6 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
     }
 
-    function assetLibraryContextText() {
-      const items = Array.isArray(assetLibraryItems) ? assetLibraryItems.slice(0, 30) : [];
-      if (!items.length) return '';
-      const lines = items.map((item, index) => {
-        const path = 'my_workspace/my_asset_library/' + item.file;
-        const tags = normalizeAssetTags(item.tags).map(assetTagLabel).join('/');
-        const note = String(item.note || '').trim();
-        return `${index + 1}. ${item.name || item.file} | ${item.kind || ''} | 标签:${tags || '无'} | 备注:${note || '无'} | ${path}`;
-      });
-      return [
-        '',
-        '## 可复用素材库',
-        '优先复用以下已收藏的好素材；只有素材库不能覆盖的画面才新生成。需要参考图/参考视频时，可在 image_prompts/video_prompts 的 reference_image 字段引用这些路径。',
-        ...lines,
-      ].join('\n');
-    }
-
     async function loadComfyDebugWorkflows() {
       if (!els.comfyDebugWorkflowList) return;
       try {
@@ -10416,9 +10399,8 @@ INDEX_HTML = r"""<!doctype html>
     async function runWorkflow() {
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
-      await loadAssetLibrary();
       const rawInput = els.userInput.value.trim();
-      const input = `${rawInput}${assetLibraryContextText()}`.trim();
+      const input = rawInput;
       if (!input) {
         setStatus('请输入原始需求', true);
         return;
