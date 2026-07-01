@@ -7683,9 +7683,10 @@ INDEX_HTML = r"""<!doctype html>
     function normalizeStageStatus(value) {
       const text = String(value || '').toLowerCase();
       if (['completed', 'complete', 'success', 'succeeded', 'done', 'approved', 'cached', 'downloaded'].includes(text)) return 'done';
-      if (['running', 'queued', 'pending', 'submitted', 'processing'].includes(text)) return 'running';
+      if (['running', 'queued', 'submitted', 'processing'].includes(text)) return 'running';
       if (['failed', 'error', 'timeout', 'blocked', 'cancelled', 'canceled'].includes(text)) return 'failed';
       if (['skipped', 'skip'].includes(text)) return 'skipped';
+      if (['pending', 'waiting', 'not_started', 'not-started'].includes(text)) return 'waiting';
       if (['not_configured', 'off', 'disabled'].includes(text)) return 'waiting';
       return text || 'waiting';
     }
