@@ -4233,6 +4233,7 @@ INDEX_HTML = r"""<!doctype html>
 
     function ensureRunControlsUnlockedWhenIdle() {
       if (!workflowInteractionLocked) return;
+      if (autoFocusOutputDuringRun) return;
       if (currentRunId && ACTIVE_RUN_STATUSES.has(currentRunStatus)) return;
       autoFocusOutputDuringRun = false;
       if (progressTimer) {
@@ -7104,6 +7105,16 @@ INDEX_HTML = r"""<!doctype html>
       els.fileContent.value = '任务正在启动，后续步骤输出会自动显示在这里。';
       renderOutputOverview(null);
       syncOutputButtons();
+    }
+
+    function enterPendingRunOutput(title) {
+      prepareOutputForPendingRun(title);
+      showView('output');
+      setTimeout(() => {
+        if (autoFocusOutputDuringRun && document.body.dataset.view !== 'output') {
+          showView('output');
+        }
+      }, 80);
     }
 
     function stepOutputFileForStep(stepNo, files = currentTaskFiles) {
@@ -10523,8 +10534,7 @@ INDEX_HTML = r"""<!doctype html>
       setWorkflowInteractionLocked(true);
       showStartupProgress('启动中');
       setStatus('工作流运行中');
-      prepareOutputForPendingRun(taskTitle || '正在创建长视频任务');
-      showView('output');
+      enterPendingRunOutput(taskTitle || '正在创建长视频任务');
       try {
         setStartupProgressMeta('\u68c0\u67e5\u6a21\u578b/API\u914d\u7f6e');
         await ensureLocalModelReady(model);
