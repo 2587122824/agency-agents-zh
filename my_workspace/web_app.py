@@ -4818,6 +4818,7 @@ INDEX_HTML = r"""<!doctype html>
       const payload = currentRuntimeModelPayload();
       const hasAnyValue = Boolean(payload.provider || payload.model || payload.api_key || payload.base_url || payload.timeout);
       if (!hasAnyValue) return null;
+      if (options.remoteOnly && !looksLikeRemoteRuntimeModel(payload)) return null;
       if (options.requireComplete && (!payload.model || !payload.api_key)) {
         throw new Error('请先在系统配置填写模型名和 API Key');
       }
@@ -4828,10 +4829,20 @@ INDEX_HTML = r"""<!doctype html>
       }, options.timeoutMs || 8000);
     }
 
-    function queueRuntimeModelConfigSync() {
+    function looksLikeRemoteRuntimeModel(payload) {
+      const apiKey = String(payload?.api_key || '').trim().toLowerCase();
+      const baseUrl = String(payload?.base_url || '').trim().replace(/\/$/, '');
+      if (!payload?.model || !payload?.api_key) return false;
+      if (apiKey === 'local') return false;
+      if (baseUrl === OLLAMA_BASE_URL) return false;
+      return true;
+    }
+
+    function queueRuntimeModelConfigSync(options = {}) {
       const payload = currentRuntimeModelPayload();
       if (!payload.model || !payload.api_key) return;
-      syncRuntimeModelConfig({ timeoutMs: 8000 }).then((result) => {
+      if (options.remoteOnly && !looksLikeRemoteRuntimeModel(payload)) return;
+      syncRuntimeModelConfig({ timeoutMs: 8000, remoteOnly: Boolean(options.remoteOnly) }).then((result) => {
         if (result?.model && els.env) {
           els.env.textContent = `已缓存运行时模型：${result.provider || 'auto'} / ${result.model}`;
         }
@@ -4863,6 +4874,7 @@ INDEX_HTML = r"""<!doctype html>
       applyRuntimeModelConfig(data.runtime_model_config || {});
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
+      queueRuntimeModelConfigSync({ remoteOnly: true });
     }
 
     function readSettings() {
@@ -5137,7 +5149,7 @@ INDEX_HTML = r"""<!doctype html>
         else delete settings[key];
       });
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
-      queueRuntimeModelConfigSync();
+      queueRuntimeModelConfigSync({ remoteOnly: true });
     }
 
     function restoreSettings() {
