@@ -410,7 +410,8 @@ class CloudComfyUIAdapter:
 
         task_id = self._first_value(submit_response, ("taskId", "task_id"))
         if not task_id:
-            raise ValueError("RunningHub ComfyUI workflow did not return taskId")
+            message = self._runninghub_error_message(submit_response) or "RunningHub ComfyUI workflow did not return taskId"
+            raise ValueError(message)
         self._emit(f"RunningHub 已返回任务 ID：{task_id}", endpoint=endpoint, task_id=task_id, remote_status=self._status(submit_response))
 
         query_url = urljoin(f"{self.base_url}/", "query")
@@ -517,7 +518,7 @@ class CloudComfyUIAdapter:
         manifest_path = output_dir / "cloud_comfyui_manifest.json"
         self._write_json(manifest_path, manifest)
         if manifest["status"] != "success":
-            message = self._first_value(query_response, ("errorMessage", "message")) or query_response.get("failedReason") or status
+            message = self._runninghub_error_message(query_response) or status
             raise ValueError(f"RunningHub ComfyUI workflow failed: {message}")
         return manifest
 
@@ -1957,6 +1958,25 @@ class CloudComfyUIAdapter:
     @staticmethod
     def _status(data: dict[str, Any]) -> str:
         return str(CloudComfyUIAdapter._first_value(data, ("status",)) or "").upper()
+
+    @classmethod
+    def _runninghub_error_message(cls, data: Any) -> str:
+        if not isinstance(data, dict):
+            return ""
+        message = cls._first_value(data, ("errorMessage", "message", "msg", "failedReason"))
+        code = cls._first_value(data, ("errorCode", "code"))
+        failed_reason = data.get("failedReason")
+        if isinstance(failed_reason, dict) and failed_reason:
+            detail = json.dumps(failed_reason, ensure_ascii=False)
+            message = f"{message}; failedReason={detail}" if message else f"failedReason={detail}"
+        if code and message:
+            return f"RunningHub error {code}: {message}"
+        if message:
+            return f"RunningHub error: {message}"
+        nested = data.get("data")
+        if isinstance(nested, dict):
+            return cls._runninghub_error_message(nested)
+        return ""
 
     @staticmethod
     def _results(data: dict[str, Any]) -> list[Any]:
