@@ -11911,6 +11911,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if reference_images:
                 user_input = self._append_reference_images(user_input, reference_images)
             runtime_model = self._resolve_runtime_model_request(payload)
+            self._ensure_runtime_model_configured(runtime_model)
             provider = runtime_model["provider"]
             model = runtime_model["model"]
             api_key = runtime_model["api_key"]
@@ -12040,6 +12041,16 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "base_url": base_url,
             "timeout": timeout,
         }
+
+    @staticmethod
+    def _ensure_runtime_model_configured(runtime_model: dict) -> None:
+        import os
+
+        model = str(runtime_model.get("model") or os.getenv("OPENAI_MODEL") or "").strip()
+        api_key = str(runtime_model.get("api_key") or os.getenv("OPENAI_API_KEY") or "").strip()
+        if model and api_key:
+            return
+        raise ValueError("请先在系统配置填写模型/API Key，并点击测试模型或保存后再继续任务；当前不会自动回落到本地模型。")
 
     def _system_health(self) -> dict:
         ollama_models = self._ollama_model_names()
@@ -15896,6 +15907,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if step <= 0:
             raise ValueError("step is required")
         runtime_model = self._resolve_runtime_model_request(payload)
+        self._ensure_runtime_model_configured(runtime_model)
         task_dir = self._safe_task_dir(task)
         summary = {}
         summary_path = task_dir / "run_summary.json"
@@ -15957,6 +15969,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _resume_task(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
         runtime_model = self._resolve_runtime_model_request(payload)
+        self._ensure_runtime_model_configured(runtime_model)
         task_dir = self._safe_task_dir(task)
         production_config = payload.get("production_config") or {}
         if isinstance(production_config, dict):
