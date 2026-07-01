@@ -51,6 +51,17 @@ class ComfyMCPAdapter:
         "get_task_output",
         "get_history",
     )
+    WORKFLOW_DISCOVERY_TOOL_CANDIDATES = (
+        "list_workflows",
+        "search_workflows",
+        "get_workflows",
+        "list_templates",
+        "search_templates",
+        "get_templates",
+        "comfyui_list_workflows",
+        "comfyui_search_workflows",
+        "comfyui_list_templates",
+    )
 
     def __init__(self, mcp_url: str, api_key: str = "", progress_callback=None) -> None:
         self.mcp_url = str(mcp_url or "").strip().rstrip("/")
@@ -182,6 +193,62 @@ class ComfyMCPAdapter:
             "capabilities": self.capabilities(),
         }
 
+    def discover_workflows(self, query: str = "", limit: int = 80) -> dict[str, Any]:
+        discovery = self.discover()
+        tools = discovery.get("tools") if isinstance(discovery.get("tools"), list) else []
+        selected_tools = self._workflow_discovery_tools(tools)
+        workflow_items: list[dict[str, Any]] = []
+        errors: list[str] = []
+
+        for tool_name in selected_tools:
+            try:
+                response = self._call_tool(
+                    tool_name,
+                    {
+                        "query": query,
+                        "q": query,
+                        "limit": limit,
+                        "max_results": limit,
+                        "type": "workflow",
+                    },
+                )
+                workflow_items.extend(self._normalize_workflow_items(response, source_tool=tool_name))
+            except Exception as exc:
+                errors.append(f"{tool_name}: {exc}")
+
+        if not selected_tools:
+            for suffix in ("/workflows", "/templates", "/workflow-templates"):
+                try:
+                    response = self._get_json(self._url(suffix))
+                    workflow_items.extend(self._normalize_workflow_items(response, source_tool=f"GET {suffix}"))
+                except Exception as exc:
+                    errors.append(f"GET {suffix}: {exc}")
+
+        deduped: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for item in workflow_items:
+            key = str(item.get("workflow_id") or item.get("id") or item.get("name") or "").strip().lower()
+            if not key:
+                continue
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+            if len(deduped) >= limit:
+                break
+
+        return {
+            "provider": "comfy_mcp",
+            "status": "ready" if deduped else "empty",
+            "mcp_url": self.mcp_url,
+            "query": query,
+            "workflow_count": len(deduped),
+            "workflows": deduped,
+            "selected_tools": selected_tools,
+            "errors": errors[:10],
+            "discovery": discovery,
+        }
+
     def _build_tool_arguments(self, payload: dict[str, Any], compose_config: dict[str, Any]) -> dict[str, Any]:
         return {
             "workflow": payload,
@@ -263,6 +330,21 @@ class ComfyMCPAdapter:
             except Exception as exc:
                 errors.append(f"{label}: {exc}")
         return [], errors
+
+    def _workflow_discovery_tools(self, tools: list[dict[str, Any]]) -> list[str]:
+        names = [str(tool.get("name") or tool.get("id") or "").strip() for tool in tools if isinstance(tool, dict)]
+        lowered = {name.lower(): name for name in names if name}
+        selected: list[str] = []
+        for candidate in self.WORKFLOW_DISCOVERY_TOOL_CANDIDATES:
+            if candidate.lower() in lowered:
+                selected.append(lowered[candidate.lower()])
+        if selected:
+            return selected
+        for name in names:
+            lname = name.lower()
+            if any(token in lname for token in ("workflow", "template")) and any(token in lname for token in ("list", "search", "get", "find")):
+                selected.append(name)
+        return selected[:6]
 
     def _jsonrpc_tools_list(self) -> dict[str, Any]:
         return self._post_json(self.mcp_url, self._jsonrpc("tools/list", {}))
@@ -559,6 +641,90 @@ class ComfyMCPAdapter:
                 elif isinstance(item, dict):
                     tools.append(item)
         return tools
+
+    @classmethod
+    def _normalize_workflow_items(cls, response: Any, *, source_tool: str) -> list[dict[str, Any]]:
+        candidates: list[Any] = []
+
+        def collect(value: Any) -> None:
+            if isinstance(value, dict):
+                for key in ("workflows", "templates", "items", "data", "results"):
+                    child = value.get(key)
+                    if isinstance(child, list):
+                        candidates.extend(child)
+                    elif isinstance(child, dict):
+                        collect(child)
+                if any(str(key).lower() in {"id", "workflow_id", "workflowid", "name", "title"} for key in value.keys()):
+                    candidates.append(value)
+            elif isinstance(value, list):
+                candidates.extend(value)
+
+        collect(response)
+        normalized: list[dict[str, Any]] = []
+        for index, item in enumerate(candidates, start=1):
+            if isinstance(item, str):
+                text = item.strip()
+                if text:
+                    normalized.append(
+                        {
+                            "id": text,
+                            "workflow_id": text,
+                            "name": text,
+                            "source_tool": source_tool,
+                            "raw": item,
+                        }
+                    )
+                continue
+            if not isinstance(item, dict):
+                continue
+            workflow_id = str(
+                item.get("workflow_id")
+                or item.get("workflowId")
+                or item.get("id")
+                or item.get("uuid")
+                or item.get("slug")
+                or item.get("name")
+                or f"workflow_{index:03d}"
+            ).strip()
+            name = str(item.get("name") or item.get("title") or item.get("label") or workflow_id).strip()
+            material_type = cls._guess_material_type(item)
+            normalized.append(
+                {
+                    "id": workflow_id,
+                    "workflow_id": workflow_id,
+                    "name": name,
+                    "description": str(item.get("description") or item.get("summary") or "")[:1200],
+                    "material_type": material_type,
+                    "capability": str(item.get("capability") or item.get("category") or item.get("type") or "").strip(),
+                    "tags": cls._string_list(item.get("tags") or item.get("keywords") or item.get("categories")),
+                    "endpoint": str(item.get("endpoint") or item.get("url") or item.get("api") or "").strip(),
+                    "schema": item.get("schema") if isinstance(item.get("schema"), dict) else {},
+                    "inputs": item.get("inputs") if isinstance(item.get("inputs"), (list, dict)) else [],
+                    "outputs": item.get("outputs") if isinstance(item.get("outputs"), (list, dict)) else [],
+                    "source_tool": source_tool,
+                    "raw": item,
+                }
+            )
+        return normalized
+
+    @classmethod
+    def _guess_material_type(cls, item: dict[str, Any]) -> str:
+        text = json.dumps(item, ensure_ascii=False).lower()
+        if any(token in text for token in ("video", "mp4", "i2v", "t2v", "视频", "影片")):
+            return "video"
+        if any(token in text for token in ("image", "png", "jpg", "jpeg", "webp", "图片", "图像")):
+            return "image"
+        if any(token in text for token in ("audio", "wav", "mp3", "音频")):
+            return "audio"
+        return "unknown"
+
+    @staticmethod
+    def _string_list(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if isinstance(value, str):
+            return [item.strip() for item in re.split(r"[,;，；\s]+", value) if item.strip()]
+        return []
 
     @classmethod
     def _first_identifier(cls, data: Any) -> str:

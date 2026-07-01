@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import traceback
+from datetime import datetime
 from io import BytesIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -2822,6 +2823,11 @@ INDEX_HTML = r"""<!doctype html>
               <label>Comfy MCP 地址
                 <input id="comfyMcpUrl" autocomplete="off" spellcheck="false" placeholder="https://cloud.comfy.org/mcp" />
               </label>
+              <div class="row">
+                <button type="button" id="testComfyMcpBtn">测试 MCP 连接</button>
+                <button type="button" id="syncComfyMcpWorkflowsBtn">同步 MCP 工作流</button>
+                <span id="comfyMcpStatus" class="muted small">未测试</span>
+              </div>
               <label>当前编辑槽位接口
                 <input id="comfyWorkflowEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/你的素材预览工作流ID 或 /run/ai-app/你的应用ID" />
               </label>
@@ -3579,6 +3585,9 @@ INDEX_HTML = r"""<!doctype html>
       comfyApiKey: document.getElementById('comfyApiKey'),
       comfyBaseUrl: document.getElementById('comfyBaseUrl'),
       comfyMcpUrl: document.getElementById('comfyMcpUrl'),
+      testComfyMcpBtn: document.getElementById('testComfyMcpBtn'),
+      syncComfyMcpWorkflowsBtn: document.getElementById('syncComfyMcpWorkflowsBtn'),
+      comfyMcpStatus: document.getElementById('comfyMcpStatus'),
       comfyWorkflowEndpoint: document.getElementById('comfyWorkflowEndpoint'),
       comfyWorkflowPreset: document.getElementById('comfyWorkflowPreset'),
       comfyWorkflowPresetNote: document.getElementById('comfyWorkflowPresetNote'),
@@ -6218,6 +6227,68 @@ INDEX_HTML = r"""<!doctype html>
         setStatus(`模型接口可用：${result.model}`);
       } catch (err) {
         setStatus(`模型接口不可用：${err.message}`, true);
+      }
+    }
+
+    async function testComfyMcpConnection() {
+      const mcpUrl = (els.comfyMcpUrl?.value || '').trim();
+      if (!mcpUrl) {
+        setStatus('请先填写 Comfy MCP 地址', true);
+        return;
+      }
+      if (els.testComfyMcpBtn) els.testComfyMcpBtn.disabled = true;
+      if (els.comfyMcpStatus) els.comfyMcpStatus.textContent = '正在测试 MCP...';
+      try {
+        const result = await apiWithTimeout('/api/test-comfy-mcp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mcp_url: mcpUrl,
+            api_key: els.comfyApiKey.value.trim(),
+          }),
+        }, 15000);
+        const toolCount = Number(result.tool_count || 0);
+        const text = `MCP 可用：发现 ${toolCount} 个工具`;
+        if (els.comfyMcpStatus) els.comfyMcpStatus.textContent = text;
+        setStatus(text, false);
+      } catch (err) {
+        const message = `MCP 不可用：${err.message}`;
+        if (els.comfyMcpStatus) els.comfyMcpStatus.textContent = message;
+        setStatus(message, true);
+      } finally {
+        if (els.testComfyMcpBtn) els.testComfyMcpBtn.disabled = false;
+      }
+    }
+
+    async function syncComfyMcpWorkflows() {
+      const mcpUrl = (els.comfyMcpUrl?.value || '').trim();
+      if (!mcpUrl) {
+        setStatus('请先填写 Comfy MCP 地址', true);
+        return;
+      }
+      if (els.syncComfyMcpWorkflowsBtn) els.syncComfyMcpWorkflowsBtn.disabled = true;
+      if (els.comfyMcpStatus) els.comfyMcpStatus.textContent = '正在同步 MCP 工作流...';
+      try {
+        const result = await apiWithTimeout('/api/sync-comfy-mcp-workflows', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            mcp_url: mcpUrl,
+            api_key: els.comfyApiKey.value.trim(),
+            query: '',
+            limit: 80,
+          }),
+        }, 30000);
+        const workflowCount = Number(result.workflow_count || 0);
+        const text = `已同步 MCP 工作流：${workflowCount} 个`;
+        if (els.comfyMcpStatus) els.comfyMcpStatus.textContent = text;
+        setStatus(text, false);
+      } catch (err) {
+        const message = `同步 MCP 工作流失败：${err.message}`;
+        if (els.comfyMcpStatus) els.comfyMcpStatus.textContent = message;
+        setStatus(message, true);
+      } finally {
+        if (els.syncComfyMcpWorkflowsBtn) els.syncComfyMcpWorkflowsBtn.disabled = false;
       }
     }
 
@@ -10964,6 +11035,8 @@ INDEX_HTML = r"""<!doctype html>
     els.comfyApiWorkflowFile.onchange = analyzeComfyApiWorkflowFile;
     els.localOfflineBtn.onclick = applyLocalOfflineMode;
     els.testModelBtn.onclick = testModelConnection;
+    if (els.testComfyMcpBtn) els.testComfyMcpBtn.onclick = testComfyMcpConnection;
+    if (els.syncComfyMcpWorkflowsBtn) els.syncComfyMcpWorkflowsBtn.onclick = syncComfyMcpWorkflows;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
     els.refreshHealthBtn.onclick = loadSystemHealth;
     els.productTemplate.onchange = () => applyProductTemplate(false);
@@ -11426,6 +11499,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/test-comfy-mcp":
                 self._send_json(self._test_comfy_mcp(payload))
+                return
+
+            if parsed.path == "/api/sync-comfy-mcp-workflows":
+                self._send_json(self._sync_comfy_mcp_workflows(payload))
                 return
 
             if parsed.path == "/api/save-staff":
@@ -16074,6 +16151,45 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "health": discovery.get("health") or {},
             "errors": [*(discovery.get("health_errors") or []), *(discovery.get("tool_errors") or [])][:8],
             "capabilities": discovery.get("capabilities") or {},
+        }
+
+    def _sync_comfy_mcp_workflows(self, payload: dict) -> dict:
+        mcp_url = str(payload.get("mcp_url") or payload.get("comfy_mcp_url") or "").strip()
+        api_key = str(payload.get("api_key") or "").strip()
+        query = str(payload.get("query") or "").strip()
+        try:
+            limit = int(float(str(payload.get("limit") or 80)))
+        except ValueError:
+            limit = 80
+        limit = max(1, min(200, limit))
+        if not mcp_url:
+            raise ValueError("Comfy MCP URL is required")
+
+        result = ComfyMCPAdapter(mcp_url=mcp_url, api_key=api_key).discover_workflows(query=query, limit=limit)
+        registry_dir = WORKSPACE_ROOT / "comfyui_workflows"
+        registry_dir.mkdir(parents=True, exist_ok=True)
+        registry_path = registry_dir / "mcp_discovered_workflows.json"
+        saved = {
+            "schema_version": 1,
+            "provider": "comfy_mcp",
+            "mcp_url": mcp_url,
+            "query": query,
+            "workflow_count": result.get("workflow_count") or 0,
+            "workflows": result.get("workflows") or [],
+            "selected_tools": result.get("selected_tools") or [],
+            "errors": result.get("errors") or [],
+            "discovered_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        registry_path.write_text(json.dumps(saved, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return {
+            "ok": True,
+            "provider": "comfy_mcp",
+            "status": result.get("status") or "unknown",
+            "workflow_count": saved["workflow_count"],
+            "workflows": saved["workflows"][:50],
+            "selected_tools": saved["selected_tools"],
+            "errors": saved["errors"],
+            "registry_file": registry_path.relative_to(WORKSPACE_ROOT).as_posix(),
         }
 
     @staticmethod
