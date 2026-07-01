@@ -1069,6 +1069,12 @@ class CloudComfyUIAdapter:
         if not self._is_usable_endpoint(preset_endpoint):
             preset_endpoint = ""
         node_info = str(preset.get("node_info_list_json") or preset.get("nodeInfoList") or "[]").strip() or "[]"
+        node_info = self._repair_known_runninghub_node_info(
+            node_info,
+            endpoint=preset_endpoint,
+            workflow_id=str(preset.get("id") or "").strip(),
+            workflow_mode=str(preset.get("_matched_mode") or "").strip(),
+        )
         if not preset_endpoint:
             target = " / ".join(part for part in [str(preset.get("id") or "").strip(), str(preset.get("_matched_mode") or "").strip()] if part) or str(job.get("name") or job.get("job_id") or "当前生产节点")
             raise ValueError(f"ComfyUI 调试台未配置 endpoint：{target}")
@@ -1120,6 +1126,92 @@ class CloudComfyUIAdapter:
             merged["poll_timeout_seconds"] = config.get("poll_timeout_seconds") or config.get("pollTimeout") or merged.get("poll_timeout_seconds")
             merged["_matched_mode"] = mode
         return merged
+
+    @classmethod
+    def _repair_known_runninghub_node_info(
+        cls,
+        node_info_json: str,
+        *,
+        endpoint: str = "",
+        workflow_id: str = "",
+        workflow_mode: str = "",
+    ) -> str:
+        """Repair legacy debug-console nodeInfoList rows before submission.
+
+        Older local presets for the current RunningHub z_image/keyframe slots
+        used node ids from a previous workflow export. RunningHub rejects those
+        rows with NODE_INFO_MISMATCH before a task is created. Keep the repair
+        deliberately narrow: only touch known stale prompt/negative/size rows
+        that have already been observed failing against the user's configured
+        workflow endpoints.
+        """
+
+        text = str(node_info_json or "").strip()
+        if not text or text == "[]":
+            return text or "[]"
+        try:
+            rows = json.loads(text)
+        except Exception:
+            return text
+        if not isinstance(rows, list):
+            return text
+
+        endpoint_text = str(endpoint or "").strip()
+        workflow_key = str(workflow_id or "").strip()
+        mode_key = str(workflow_mode or "").strip()
+        stale_node_ids = {str(row.get("nodeId") or "") for row in rows if isinstance(row, dict)}
+
+        # The current z_image_turbo RunningHub workflow uses node 63 for the
+        # text prompt and node 64 for latent size. Some migrated scene modes
+        # still point to old nodes 10/11/20/40; replace those with the working
+        # image mapping used by the successfully generated base assets.
+        if (
+            endpoint_text.endswith("/2067423263386591234")
+            and {"10", "11", "20", "40"}.intersection(stale_node_ids)
+        ):
+            return json.dumps(cls._z_image_turbo_text_to_image_node_info(), ensure_ascii=False, indent=2)
+
+        # Keyframe/style presets copied a non-existent negative prompt node 60.
+        # Removing it preserves prompt/size/seed/output-prefix updates while
+        # avoiding RunningHub NODE_INFO_MISMATCH.
+        repaired = []
+        changed = False
+        for row in rows:
+            if isinstance(row, dict) and str(row.get("nodeId") or "") == "60" and str(row.get("fieldName") or "").lower() == "text":
+                changed = True
+                continue
+            repaired.append(row)
+        if changed and (
+            endpoint_text.endswith("/2069402773254397953")
+            or endpoint_text.endswith("/2067423263386591234")
+            or workflow_key in {"03_style_cover_image", "04_keyframe"}
+            or mode_key in {"style_reference", "cover_key_visual", "keyframe"}
+        ):
+            return json.dumps(repaired, ensure_ascii=False, indent=2)
+        return text
+
+    @staticmethod
+    def _z_image_turbo_text_to_image_node_info() -> list[dict[str, Any]]:
+        return [
+            {"nodeId": "63", "fieldName": "text", "fieldValue": "{{prompt}}"},
+            {"nodeId": "64", "fieldName": "width", "fieldValue": "{{width}}"},
+            {"nodeId": "64", "fieldName": "height", "fieldValue": "{{height}}"},
+            {"nodeId": "64", "fieldName": "batch_size", "fieldValue": 1},
+            {"nodeId": "66", "fieldName": "seed", "fieldValue": "{{seed}}"},
+            {"nodeId": "66", "fieldName": "steps", "fieldValue": 12},
+            {"nodeId": "66", "fieldName": "cfg", "fieldValue": 1.5},
+            {"nodeId": "66", "fieldName": "denoise", "fieldValue": 1},
+            {"nodeId": "9", "fieldName": "filename_prefix", "fieldValue": "z_image_turbo_keyframe"},
+            {"nodeId": "58", "fieldName": "clip_name", "fieldValue": "qwen_3_4b.safetensors"},
+            {"nodeId": "58", "fieldName": "type", "fieldValue": "lumina2"},
+            {"nodeId": "58", "fieldName": "device", "fieldValue": "default"},
+            {"nodeId": "59", "fieldName": "vae_name", "fieldValue": "z_image_turbo-vae.safetensors"},
+            {"nodeId": "62", "fieldName": "unet_name", "fieldValue": "z_image_turbo_bf16.safetensors"},
+            {"nodeId": "62", "fieldName": "weight_dtype", "fieldValue": "default"},
+            {"nodeId": "65", "fieldName": "shift", "fieldValue": 3},
+            {"nodeId": "66", "fieldName": "sampler_name", "fieldValue": "res_multistep"},
+            {"nodeId": "66", "fieldName": "scheduler", "fieldValue": "simple"},
+        ]
 
     @classmethod
     def _library_item_supports_material_type(cls, item: dict[str, Any], material_type: str) -> bool:
