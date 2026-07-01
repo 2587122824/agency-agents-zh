@@ -1182,12 +1182,33 @@ class CloudComfyUIAdapter:
             if isinstance(row, dict) and str(row.get("nodeId") or "") == "60" and str(row.get("fieldName") or "").lower() == "text":
                 changed = True
                 continue
+            if (
+                isinstance(row, dict)
+                and str(row.get("nodeId") or "") in {"177", "220"}
+                and str(row.get("fieldName") or "").lower() == "text"
+                and "young anime protagonist" in str(row.get("fieldValue") or "").lower()
+                and "countdown timer" in str(row.get("fieldValue") or "").lower()
+                and (
+                    endpoint_text.endswith("/2071735603636563970")
+                    or endpoint_text.endswith("/2067423263386591234")
+                    or workflow_key in {"02_ltx_video_2_3", "06_i2v_first_frame", "06_i2v_first_middle_last_frame_ltx_2_3"}
+                    or "i2v" in mode_key.lower()
+                    or "ltx" in workflow_key.lower()
+                )
+            ):
+                row = dict(row)
+                row["fieldValue"] = "{{prompt}}"
+                changed = True
             repaired.append(row)
         if changed and (
             endpoint_text.endswith("/2069402773254397953")
             or endpoint_text.endswith("/2067423263386591234")
+            or endpoint_text.endswith("/2071735603636563970")
             or workflow_key in {"03_style_cover_image", "04_keyframe"}
+            or workflow_key in {"02_ltx_video_2_3", "06_i2v_first_frame", "06_i2v_first_middle_last_frame_ltx_2_3"}
             or mode_key in {"style_reference", "cover_key_visual", "keyframe"}
+            or "i2v" in mode_key.lower()
+            or "ltx" in workflow_key.lower()
         ):
             return json.dumps(repaired, ensure_ascii=False, indent=2)
         return text
