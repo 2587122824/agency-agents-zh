@@ -7908,16 +7908,20 @@ INDEX_HTML = r"""<!doctype html>
       const imageAssetCount = Number(status?.assets?.images?.length || data?.assets?.images?.length || 0);
       const videoAssetCount = Number(status?.assets?.videos?.length || data?.assets?.videos?.length || 0);
       const jobsText = job => JSON.stringify(job || {}).toLowerCase();
-      const providerStatus = normalizeStageStatus(
-        status?.production?.composition?.visual_provider_status
-        || status?.production?.composition?.comfyui_adapter_status
+      const adapterStatus = normalizeStageStatus(
+        status?.production?.composition?.comfyui_adapter_status
         || status?.production?.composition?.adapter_status
         || status?.production?.status
       );
-      const visualSkipped = providerStatus === 'skipped';
-      const visualStatus = visualSkipped
-        ? 'skipped'
-        : jobListStatus(jobs, job => /material|comfy|runninghub|image|video|visual/.test(jobsText(job)));
+      const legacyProviderStatus = normalizeStageStatus(status?.production?.composition?.visual_provider_status);
+      const jobVisualStatus = jobListStatus(jobs, job => /material|comfy|runninghub|image|video|visual/.test(jobsText(job)));
+      const providerStatus = adapterStatus !== 'waiting'
+        ? adapterStatus
+        : legacyProviderStatus !== 'waiting'
+          ? legacyProviderStatus
+          : jobVisualStatus;
+      const visualSkipped = providerStatus === 'skipped' && imageAssetCount <= 0 && videoAssetCount <= 0;
+      const visualStatus = visualSkipped ? 'skipped' : (jobVisualStatus !== 'waiting' ? jobVisualStatus : providerStatus);
       const imageStatus = imageAssetCount > 0
         ? 'done'
         : visualSkipped

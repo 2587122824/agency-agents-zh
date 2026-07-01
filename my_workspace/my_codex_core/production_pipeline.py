@@ -844,6 +844,10 @@ def _retry_material_job(
         composition["comfyui_adapter_status"] = result.get("status") or "failed"
         composition["comfyui_adapter_manifest"] = result.get("manifest_file", "")
         composition["comfyui_downloaded_files"] = result.get("downloaded_files", [])
+        composition["visual_provider_status"] = result.get("status") or "failed"
+        composition["visual_provider_reason"] = "" if result.get("status") == "success" else str(result.get("error") or result.get("reason") or "")
+        if isinstance(compose_config.get("visual_provider_profile"), dict):
+            composition["visual_provider_details"] = compose_config["visual_provider_profile"]
         composition["quality_report"] = result.get("quality_report", "")
         composition["quality_score"] = result.get("quality_score", 0)
         composition["quality_attempts"] = result.get("attempts", 1)
