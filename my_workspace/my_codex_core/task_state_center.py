@@ -252,12 +252,14 @@ class TaskStateCenter:
         ffmpeg = self._stage_status(manifest, jobs, stage_id="ffmpeg", node_ids={"ffmpeg_compose", "format_export"})
         manual = self._stage_status(manifest, jobs, stage_id="manual_debug", node_ids=set())
         status = str(manifest.get("status") or self.summary.get("production_status") or "off")
+        composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
+        composition = self._normalized_composition_status(composition)
         return {
             "mode": str(manifest.get("mode") or "off"),
             "status": status,
             "manifest_file": str(manifest_path) if manifest_path.is_file() else "",
             "manifest_error": manifest_error,
-            "composition": manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {},
+            "composition": composition,
             "jobs": jobs,
             "history": history[-10:],
             "dag": dag,
@@ -266,6 +268,17 @@ class TaskStateCenter:
             "manual_debug": manual,
             "allowed_retries": self._allowed_retries(jobs, nodes),
         }
+
+    def _normalized_composition_status(self, composition: dict[str, Any]) -> dict[str, Any]:
+        normalized = dict(composition or {})
+        adapter_status = str(normalized.get("comfyui_adapter_status") or normalized.get("adapter_status") or "").strip()
+        legacy_provider_status = str(normalized.get("visual_provider_status") or "").strip()
+        if adapter_status and adapter_status not in {"pending", "not_configured"}:
+            if legacy_provider_status in {"", "pending", "skipped", "not_configured"} or adapter_status == "success":
+                normalized["visual_provider_status"] = adapter_status
+                if adapter_status == "success":
+                    normalized["visual_provider_reason"] = ""
+        return normalized
 
     def _manual_debug(self, comfy_debug: dict[str, Any]) -> dict[str, Any]:
         status = "not_configured"
