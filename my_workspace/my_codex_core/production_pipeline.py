@@ -124,7 +124,7 @@ def run_auto_production(
     production_plan["compiled_payload"] = comfyui_payload
     write_production_plan(production_plan_path, production_plan)
     _write_text(comfyui_payload_path, json.dumps(comfyui_payload, ensure_ascii=False, indent=2) + "\n")
-    packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config)
+    packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config, voice_text_quality.get("usable"))
     plan_visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
     required_workflow_slots = _required_workflow_slots(plan_visual_jobs)
     configured_workflow_slots = _configured_workflow_slots(compose_config.get("workflow_library"))
@@ -468,7 +468,7 @@ def run_auto_production(
         return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "ComfyUI 素材门禁完成")
 
     material_enabled = mode in {"api_ready", "comfy_full"}
-    tts_enabled = str(voice_config.get("mode") or "").strip().lower() not in {"", "off"}
+    tts_enabled = _voice_config_tts_enabled(voice_config) and bool(voice_text_quality.get("usable"))
     talking_image_requires_audio = _payload_has_mode(comfyui_payload, "talking_image")
     if material_enabled and tts_enabled and talking_image_requires_audio:
         emit("检测到数字人口播：先生成最终 WAV，再执行口型工作流", stage="production")
@@ -906,9 +906,18 @@ def _retry_ffmpeg_job(
 ) -> dict[str, Any]:
     emit("retrying local FFmpeg composition", stage="ffmpeg")
     nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
-    tts_enabled = any(node.get("job_id") == "local_tts" for node in nodes)
+    tts_enabled = _manifest_requires_tts_for_packaging(manifest)
     if not tts_enabled:
-        tts_enabled = str((manifest.get("audio") or {}).get("adapter_status") or "").strip() not in {"", "off", "not_configured"}
+        _mark_optional_audio_packaging_skipped(
+            manifest,
+            "local_tts",
+            "No usable voiceover text or generated WAV; composing a visual-only video.",
+        )
+        _mark_optional_audio_packaging_skipped(
+            manifest,
+            "bgm_select",
+            "No reusable BGM audio asset selected; composing without BGM.",
+        )
     material_enabled = any(str(node.get("stage") or "") == "visual" for node in nodes)
     if not material_enabled:
         material_enabled = any(
@@ -1087,7 +1096,8 @@ def _refresh_visual_plan_for_retry(
     write_production_plan(plan_path, production_plan)
     _write_text(payload_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
-    packaging_jobs = _packaging_graph_jobs(payload, voice_config)
+    voice_text_quality = _quality_check_voice_text(_extract_voice_text(audio_content))
+    packaging_jobs = _packaging_graph_jobs(payload, voice_config, voice_text_quality.get("usable"))
     write_graph_json(graph_path, build_production_graph(task_dir.name, visual_jobs, global_context, packaging_jobs))
     compose_config.update(
         {
@@ -1900,8 +1910,12 @@ def _create_output_dirs(task_dir: Path) -> dict[str, Path]:
     return paths
 
 
-def _packaging_graph_jobs(payload: dict[str, Any], voice_config: dict[str, Any]) -> list[dict[str, Any]]:
-    tts_enabled = str(voice_config.get("mode") or "").strip().lower() not in {"", "off"}
+def _packaging_graph_jobs(
+    payload: dict[str, Any],
+    voice_config: dict[str, Any],
+    voice_text_usable: bool | None = None,
+) -> list[dict[str, Any]]:
+    tts_enabled = _voice_config_tts_enabled(voice_config) and voice_text_usable is not False
     jobs: list[dict[str, Any]] = []
     if tts_enabled:
         jobs.append(
@@ -2004,6 +2018,59 @@ def _ffmpeg_dependency_ids(manifest: dict[str, Any], tts_enabled: bool) -> list[
             deduped.append(item)
             seen.add(item)
     return deduped
+
+
+def _voice_config_tts_enabled(voice_config: dict[str, Any]) -> bool:
+    return str((voice_config or {}).get("mode") or "").strip().lower() not in {"", "off"}
+
+
+def _manifest_requires_tts_for_packaging(manifest: dict[str, Any]) -> bool:
+    audio = manifest.get("audio") if isinstance(manifest.get("audio"), dict) else {}
+    voiceover_audio = str(audio.get("voiceover_audio_file") or "").strip()
+    if voiceover_audio:
+        return True
+
+    voice_text_status = str(audio.get("voice_text_status") or "").strip().lower()
+    voice_text_usable = voice_text_status in {"ok", "usable", "success"}
+    adapter_status = str(audio.get("adapter_status") or "").strip().lower()
+    nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
+    tts_node = next((node for node in nodes if node.get("job_id") == "local_tts"), None)
+    tts_node_status = str((tts_node or {}).get("status") or "").strip().lower()
+
+    if adapter_status == "success" or tts_node_status == "success":
+        return True
+    if not voice_text_usable:
+        return False
+    if tts_node and tts_node_status not in {"", "skipped", "not_configured"}:
+        return True
+    return adapter_status not in {"", "off", "not_configured", "skipped"}
+
+
+def _mark_optional_audio_packaging_skipped(manifest: dict[str, Any], job_id: str, reason: str) -> None:
+    nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
+    node = next((item for item in nodes if str(item.get("job_id") or "") == job_id), None)
+    current_status = str((node or {}).get("status") or "").strip().lower()
+    if current_status in {"pending", "blocked", ""}:
+        _upsert_production_node(
+            manifest,
+            job_id,
+            stage="08_audio_visual_packaging",
+            mode=job_id,
+            status="skipped",
+            depends_on=(node or {}).get("depends_on") or [],
+            outputs=(node or {}).get("outputs") or [],
+            error=reason,
+        )
+    if job_id == "local_tts":
+        audio = manifest.setdefault("audio", {})
+        if str(audio.get("adapter_status") or "").strip().lower() in {"", "pending"}:
+            audio["adapter_status"] = "skipped"
+            audio["skip_reason"] = reason
+    elif job_id == "bgm_select":
+        audio = manifest.setdefault("audio", {})
+        if str(audio.get("bgm_status") or "").strip().lower() in {"", "pending"}:
+            audio["bgm_status"] = "skipped"
+            audio["bgm_reason"] = reason
 
 
 def _packaging_dependency_blockers(manifest: dict[str, Any], tts_enabled: bool, material_enabled: bool) -> list[str]:
