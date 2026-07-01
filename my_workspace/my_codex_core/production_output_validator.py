@@ -210,8 +210,24 @@ def _validate_videos(
                     issues.append(f"视频意图 {intent_id or index} 引用了不存在的上游图片：{ref}")
     for index, item in enumerate(prompts, 1):
         label = f"video_prompts[{index}]"
-        _validate_work_resolution(item, expected, label, issues)
         mode_text = " ".join(str(item.get(key) or "") for key in ("video_task_mode", "workflow_id", "workflow_mode", "control_mode")).lower()
+        intent_text = " ".join(str(item.get(key) or "") for key in ("intent", "task_type", "capability", "asset_tag", "id", "job_id")).lower()
+        is_postprocess = any(
+            marker in f"{mode_text} {intent_text}"
+            for marker in (
+                "enhance",
+                "upscale",
+                "interpolation",
+                "deflicker",
+                "stabilize",
+                "postprocess",
+                "video_enhance",
+                "video_upscale",
+                "frame_interpolation",
+            )
+        )
+        if not is_postprocess:
+            _validate_work_resolution(item, expected, label, issues)
         if "first_last" in mode_text or "06b" in mode_text:
             issues.append(f"{label} 仍使用已禁用的首尾帧模式")
         if "first_middle_last" in mode_text or "06c" in mode_text or "three_frame" in mode_text:
