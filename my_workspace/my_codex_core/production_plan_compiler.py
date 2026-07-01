@@ -449,9 +449,9 @@ def _compile_video_intents(
             "depends_on": _string_list(intent.get("depends_on")),
             "input_bindings": intent.get("input_bindings") if isinstance(intent.get("input_bindings"), dict) else {},
         }
-        if _as_bool(
+        if _bool_or_default(
             intent.get("optional_when_unconfigured"),
-            default=_as_bool(contract.get("optional_when_unconfigured"), default=intent_name == "enhance_video"),
+            default=_bool_or_default(contract.get("optional_when_unconfigured"), default=intent_name == "enhance_video"),
         ):
             item["optional_when_unconfigured"] = True
         if entity_context:
@@ -584,7 +584,7 @@ def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
                     "duration": item.get("duration") or item.get("duration_seconds") or "",
                     "fps": item.get("fps") or "",
                     "prompt": str(item.get("prompt") or "")[:500],
-                    "optional_when_unconfigured": _as_bool(
+                    "optional_when_unconfigured": _bool_or_default(
                         item.get("optional_when_unconfigured"),
                         default=str(item.get("workflow_mode") or item.get("mode") or "").strip() == "enhance_video"
                         or str(item.get("capability") or "").strip() == "video_enhance",

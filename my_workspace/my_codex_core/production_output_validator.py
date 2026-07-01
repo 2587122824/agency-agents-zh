@@ -264,6 +264,16 @@ def _validate_package(
         if abs(total - duration) > 0.5:
             issues.append(f"兼容剪辑时间轴合计 {total:g} 秒，不等于目标 {duration} 秒")
     delivery = payload.get("delivery_spec") if isinstance(payload.get("delivery_spec"), dict) else {}
+    if not delivery:
+        delivery = next(
+            (
+                item
+                for item in intents
+                if isinstance(item, dict)
+                and str(item.get("intent") or "") in {"apply_delivery_spec", "delivery_spec"}
+            ),
+            {},
+        )
     resolution = _resolution(delivery.get("resolution") or delivery.get("delivery_resolution"))
     if resolution != expected_delivery:
         issues.append(f"交付分辨率必须为 {expected_delivery[0]}x{expected_delivery[1]}，当前为 {resolution[0]}x{resolution[1]}")
