@@ -124,6 +124,7 @@
         "workflow_id": "02_all_in_one_video",
         "workflow_mode": "enhance_video",
         "capability": "video_enhance",
+        "optional_when_unconfigured": true,
         "outputs": [
           "output_final_video"
         ]

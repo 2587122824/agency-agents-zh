@@ -103,6 +103,7 @@ class CloudComfyUIAdapter:
         generated_reference_map: dict[str, str] = {}
         video_job_index = 0
         success_count = 0
+        skipped_count = 0
         self._reference_search_dirs = [output_dir, output_dir.parent]
         selected_jobs = self._topological_material_jobs(selected_jobs)
         self._emit(f"ComfyUI 素材批量任务开始：{len(selected_jobs)} 个", total_jobs=len(selected_jobs), completed_jobs=0)
@@ -114,7 +115,41 @@ class CloudComfyUIAdapter:
             job_type = str(job.get("type") or "material")
             job_dir = output_dir / f"job_{self._safe_name(job_id)}"
             job_dir.mkdir(parents=True, exist_ok=True)
-            job_config = self._compose_config_for_job(job, compose_config)
+            try:
+                job_config = self._compose_config_for_job(job, compose_config)
+            except ValueError as exc:
+                if not self._is_optional_when_unconfigured(job):
+                    raise
+                skipped_count += 1
+                skipped = {
+                    "index": index,
+                    "job_id": job_id,
+                    "name": job_name,
+                    "type": job_type,
+                    "status": "skipped",
+                    "depends_on": self._string_list(job.get("depends_on")),
+                    "cache_hit": False,
+                    "skip_reason": str(exc),
+                    "downloaded_files": [],
+                }
+                job_results.append(skipped)
+                job_state["jobs"][job_id] = {**skipped, "updated_at": time.time()}
+                write_json(state_path, job_state)
+                self._write_json(job_dir / "cloud_comfyui_manifest.json", {"provider": provider, **skipped})
+                self._emit(
+                    f"跳过可选 ComfyUI 素材：{job_name}",
+                    total_jobs=len(selected_jobs),
+                    completed_jobs=index,
+                    current_job=index,
+                    job_index=index,
+                    job_count=len(selected_jobs),
+                    material_name=job_name,
+                    material_type=job_type,
+                    job_type=job_type,
+                    job_status="skipped",
+                    skip_reason=str(exc),
+                )
+                continue
             job, resolved_inputs, missing_inputs = self._apply_explicit_input_bindings(job, job_state)
             failed_dependencies = [
                 dependency
@@ -358,8 +393,11 @@ class CloudComfyUIAdapter:
                     error=str(exc),
                 )
 
-        failed_count = len(selected_jobs) - success_count
-        if success_count == len(selected_jobs):
+        required_job_count = max(0, len(selected_jobs) - skipped_count)
+        failed_count = required_job_count - success_count
+        if required_job_count == 0:
+            status = "skipped"
+        elif success_count == required_job_count:
             status = "success"
         elif success_count > 0:
             status = "partial_success"
@@ -369,8 +407,9 @@ class CloudComfyUIAdapter:
             "provider": provider,
             "status": status,
             "looped": True,
-            "job_count": len(selected_jobs),
+            "job_count": required_job_count,
             "source_job_count": len(material_jobs),
+            "skipped_count": skipped_count,
             "success_count": success_count,
             "failed_count": failed_count,
             "max_material_jobs": max_jobs,
@@ -394,6 +433,26 @@ class CloudComfyUIAdapter:
             job_status=status,
         )
         return manifest
+
+    @staticmethod
+    def _is_optional_when_unconfigured(job: dict[str, Any]) -> bool:
+        if CloudComfyUIAdapter._as_bool(job.get("optional_when_unconfigured"), default=False):
+            return True
+        prompt_data = job.get("prompt_data") if isinstance(job.get("prompt_data"), dict) else {}
+        text = " ".join(
+            str(value or "").strip()
+            for value in (
+                job.get("workflow_id"),
+                job.get("workflow_mode"),
+                job.get("mode"),
+                job.get("intent"),
+                job.get("asset_tag"),
+                job.get("capability"),
+                prompt_data.get("workflow_mode"),
+                prompt_data.get("capability"),
+            )
+        ).lower()
+        return "enhance_video" in text or "video_enhance" in text
 
     def _run_runninghub(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         comfyui_payload = self._prepare_runninghub_payload(comfyui_payload)
@@ -988,6 +1047,15 @@ class CloudComfyUIAdapter:
         return jobs
 
     def _compose_config_for_job(self, job: dict[str, Any], compose_config: dict[str, Any]) -> dict[str, Any]:
+        if (
+            self._is_optional_when_unconfigured(job)
+            and self._uses_workflow_library(compose_config)
+            and not self._has_exact_workflow_library_config_for_job(job, compose_config)
+        ):
+            workflow_id = str(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "").strip()
+            workflow_mode = str(job.get("mode") or (job.get("prompt_data") or {}).get("workflow_mode") or "").strip()
+            target = " / ".join(part for part in [workflow_id, workflow_mode] if part) or str(job.get("name") or job.get("job_id") or "当前可选节点")
+            raise ValueError(f"可选 ComfyUI 后处理未配置，已跳过：{target}")
         preset = self._workflow_library_preset_for_job(job, compose_config)
         if not preset:
             if self._uses_workflow_library(compose_config):
@@ -1093,6 +1161,28 @@ class CloudComfyUIAdapter:
             if any(keyword in text for keyword in lowered_keywords):
                 return item
         return presets[0] if presets else None
+
+    @classmethod
+    def _has_exact_workflow_library_config_for_job(cls, job: dict[str, Any], compose_config: dict[str, Any]) -> bool:
+        library = compose_config.get("workflow_library")
+        if not isinstance(library, list):
+            return False
+        workflow_id = str(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "").strip()
+        workflow_mode = str(job.get("mode") or job.get("workflow_mode") or (job.get("prompt_data") or {}).get("workflow_mode") or "").strip()
+        if not workflow_id:
+            return False
+        item = next((entry for entry in library if isinstance(entry, dict) and str(entry.get("id") or "").strip() == workflow_id), None)
+        if not item:
+            return False
+        if workflow_mode:
+            mode_configs = item.get("mode_configs") or item.get("modeConfigs")
+            config = mode_configs.get(workflow_mode) if isinstance(mode_configs, dict) and isinstance(mode_configs.get(workflow_mode), dict) else None
+            if not config:
+                return False
+            endpoint = str(config.get("endpoint") or config.get("workflow_endpoint") or "").strip()
+            node_info = str(config.get("node_info_list_json") or config.get("nodeInfoList") or "").strip()
+            return cls._is_usable_endpoint(endpoint) and node_info not in {"", "[]"}
+        return cls._is_configured_library_item(item)
 
     @classmethod
     def _uses_workflow_library(cls, compose_config: dict[str, Any]) -> bool:
@@ -1250,6 +1340,10 @@ class CloudComfyUIAdapter:
             "capability": str(prompt_data.get("capability") or group.get("capability") or "").strip(),
             "mode": str(prompt_data.get("mode") or prompt_data.get("workflow_mode") or group.get("mode") or group.get("workflow_mode") or "").strip(),
             "workflow_id": str(prompt_data.get("workflow_id") or group.get("workflow_id") or "").strip(),
+            "optional_when_unconfigured": cls._as_bool(
+                prompt_data.get("optional_when_unconfigured", group.get("optional_when_unconfigured", False)),
+                default=False,
+            ),
             "depends_on": cls._string_list(prompt_data.get("depends_on") or group.get("depends_on")),
             "input_bindings": prompt_data.get("input_bindings") if isinstance(prompt_data.get("input_bindings"), dict) else group.get("input_bindings") if isinstance(group.get("input_bindings"), dict) else {},
             "character_id": str(prompt_data.get("character_id") or group.get("character_id") or "").strip(),

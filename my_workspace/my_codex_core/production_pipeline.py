@@ -1648,6 +1648,8 @@ def _required_workflow_slots(jobs: Any) -> list[dict[str, str]]:
         workflow_id = str(job.get("workflow_id") or job.get("capability") or "").strip()
         mode = str(job.get("workflow_mode") or job.get("mode") or "").strip()
         material_type = str(job.get("type") or job.get("material_type") or "").strip()
+        if _optional_workflow_slot(job, workflow_id, mode):
+            continue
         if not workflow_id:
             continue
         key = (workflow_id, mode, material_type)
@@ -1710,6 +1712,24 @@ def _missing_workflow_slots(required: list[dict[str, str]], configured: list[dic
             continue
         missing.append(slot)
     return missing
+
+
+def _optional_workflow_slot(job: dict[str, Any], workflow_id: str = "", mode: str = "") -> bool:
+    if _as_bool(job.get("optional_when_unconfigured"), default=False):
+        return True
+    text = " ".join(
+        str(value or "").strip()
+        for value in (
+            workflow_id,
+            mode,
+            job.get("workflow_mode"),
+            job.get("mode"),
+            job.get("intent"),
+            job.get("asset_tag"),
+            job.get("capability"),
+        )
+    ).lower()
+    return "enhance_video" in text or "video_enhance" in text
 
 
 def _ensure_library_item_runninghub_endpoint(item: dict[str, Any]) -> None:
