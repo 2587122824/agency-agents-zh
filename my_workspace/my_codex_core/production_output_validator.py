@@ -151,11 +151,14 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
         issues.append(f"字幕结束于 {max_end:g} 秒，超过成片 {duration} 秒")
     if isinstance(voice, dict):
         voice_chars = len(re.findall(r"[\u4e00-\u9fff]", str(voice.get("voice_text") or "")))
-        subtitle_chars = sum(
-            len(re.findall(r"[\u4e00-\u9fff]", str(item.get("text") or "")))
+        subtitle_text = "\n".join(
+            str(item.get("text") or item.get("subtitle_text") or item.get("content") or item.get("line") or "")
             for item in subtitle_segments
             if isinstance(item, dict)
         )
+        if srt.strip():
+            subtitle_text = f"{subtitle_text}\n{_srt_dialogue_text(srt)}"
+        subtitle_chars = len(re.findall(r"[\u4e00-\u9fff]", subtitle_text))
         if voice_chars and subtitle_chars < voice_chars * 0.9:
             issues.append("字幕文本覆盖不足，少于旁白正文的 90%")
 
@@ -444,6 +447,16 @@ def _time_seconds(value: str) -> float | None:
     if minutes >= 60 or seconds >= 60:
         return None
     return hours * 3600 + minutes * 60 + seconds
+
+
+def _srt_dialogue_text(srt: str) -> str:
+    lines: list[str] = []
+    for raw in str(srt or "").replace("\\n", "\n").replace("\\r", "\r").splitlines():
+        line = raw.strip()
+        if not line or line.isdigit() or "-->" in line:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
 
 
 def _section_after(content: str, heading: str) -> str:
