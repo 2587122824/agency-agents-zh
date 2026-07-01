@@ -117,7 +117,13 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
         return
     max_end = 0.0
     invalid_times: list[str] = []
-    for segment in subtitles.get("segments") if isinstance(subtitles.get("segments"), list) else []:
+    subtitle_segments = subtitles.get("segments")
+    if not isinstance(subtitle_segments, list):
+        subtitle_segments = []
+    for segment in subtitle_segments:
+        if not isinstance(segment, dict):
+            issues.append("subtitle segments contains a non-object item")
+            continue
         for key in ("start_time", "end_time"):
             raw = str(segment.get(key) or "")
             parsed = _time_seconds(raw)
@@ -127,6 +133,8 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
                 max_end = max(max_end, parsed)
     srt = str(payload.get("audio_package", {}).get("subtitle_srt_draft") or "") if isinstance(payload.get("audio_package"), dict) else ""
     srt = srt.replace("\\n", "\n").replace("\\r", "\r")
+    if not subtitle_segments and not srt.strip():
+        issues.append("build_subtitles.segments 为空，且 audio_package.subtitle_srt_draft 未提供")
     for raw in re.findall(r"-->\s*([^\n\r]+)", srt):
         parsed = _time_seconds(raw.strip())
         if parsed is None:
@@ -141,7 +149,8 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
         voice_chars = len(re.findall(r"[\u4e00-\u9fff]", str(voice.get("voice_text") or "")))
         subtitle_chars = sum(
             len(re.findall(r"[\u4e00-\u9fff]", str(item.get("text") or "")))
-            for item in subtitles.get("segments") if isinstance(subtitles.get("segments"), list)
+            for item in subtitle_segments
+            if isinstance(item, dict)
         )
         if voice_chars and subtitle_chars < voice_chars * 0.9:
             issues.append("字幕文本覆盖不足，少于旁白正文的 90%")
