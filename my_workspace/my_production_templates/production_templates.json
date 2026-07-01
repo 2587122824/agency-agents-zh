@@ -30,23 +30,23 @@
   "workflow_contracts": {
     "image": {
       "generate_base_asset": {
-        "workflow_id": "01_all_in_one_image",
-        "workflow_mode": "base_asset",
+        "workflow_id": "01_base_asset_image",
+        "workflow_mode": "character_base",
         "capability": "image_generate",
         "outputs": [
           "output_final_image"
         ]
       },
       "generate_turnaround": {
-        "workflow_id": "01_all_in_one_image",
-        "workflow_mode": "turnaround",
+        "workflow_id": "02_turnaround",
+        "workflow_mode": "character_turnaround",
         "capability": "image_generate",
         "outputs": [
           "output_final_image"
         ]
       },
       "generate_keyframe": {
-        "workflow_id": "04_keyframe_image",
+        "workflow_id": "04_keyframe",
         "workflow_mode": "keyframe",
         "capability": "image_generate",
         "outputs": [
@@ -54,7 +54,7 @@
         ]
       },
       "generate_three_frame_shot": {
-        "workflow_id": "04_keyframe_image",
+        "workflow_id": "04_keyframe",
         "workflow_mode": "keyframe",
         "capability": "image_generate",
         "outputs": [
@@ -67,7 +67,7 @@
         ]
       },
       "generate_cover_key_visual": {
-        "workflow_id": "01_all_in_one_image",
+        "workflow_id": "03_style_cover_image",
         "workflow_mode": "cover_key_visual",
         "capability": "image_generate",
         "outputs": [
@@ -75,8 +75,8 @@
         ]
       },
       "repair_or_cutout_image": {
-        "workflow_id": "01_all_in_one_image",
-        "workflow_mode": "image_edit",
+        "workflow_id": "05_image_repair_cutout",
+        "workflow_mode": "image_inpaint_fix",
         "capability": "image_edit",
         "outputs": [
           "output_final_image",
@@ -86,7 +86,7 @@
     },
     "video": {
       "generate_i2v_clip": {
-        "workflow_id": "02_ltx_video_2_3",
+        "workflow_id": "06_i2v_first_frame",
         "workflow_mode": "i2v_first_frame",
         "capability": "video_generate",
         "outputs": [
@@ -94,8 +94,8 @@
         ]
       },
       "generate_three_frame_i2v_clip": {
-        "workflow_id": "06_i2v_first_middle_last_frame_ltx_2_3",
-        "workflow_mode": "first_middle_last_frame",
+        "workflow_id": "06_i2v_first_middle_last_frame",
+        "workflow_mode": "i2v_first_middle_last_frame",
         "capability": "video_generate",
         "duration_seconds": 4,
         "fps": 24,
@@ -104,15 +104,15 @@
         ]
       },
       "generate_broll_clip": {
-        "workflow_id": "04_broll_material",
-        "workflow_mode": "broll",
+        "workflow_id": "10_broll_transition_video",
+        "workflow_mode": "broll_scene_video",
         "capability": "video_generate",
         "outputs": [
           "output_final_video"
         ]
       },
       "generate_talking_image": {
-        "workflow_id": "02_all_in_one_video",
+        "workflow_id": "09_talking_image",
         "workflow_mode": "talking_image",
         "capability": "video_generate",
         "requires_audio": true,
@@ -121,8 +121,8 @@
         ]
       },
       "enhance_video": {
-        "workflow_id": "02_all_in_one_video",
-        "workflow_mode": "enhance_video",
+        "workflow_id": "11_video_enhance",
+        "workflow_mode": "video_upscale",
         "capability": "video_enhance",
         "optional_when_unconfigured": true,
         "outputs": [
@@ -130,8 +130,8 @@
         ]
       },
       "repair_video": {
-        "workflow_id": "02_all_in_one_video",
-        "workflow_mode": "repair_video",
+        "workflow_id": "12_video_inpaint_fix",
+        "workflow_mode": "video_inpaint_fix",
         "capability": "video_edit",
         "outputs": [
           "output_final_video"

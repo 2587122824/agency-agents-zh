@@ -33,6 +33,22 @@ FRAME_ROLE_SUFFIX = {
 }
 
 
+IMAGE_INTENT_ROUTES = {
+    "generate_keyframe": ("04_keyframe", "keyframe"),
+    "generate_three_frame_shot": ("04_keyframe", "keyframe"),
+    "generate_cover_key_visual": ("03_style_cover_image", "cover_key_visual"),
+    "repair_or_cutout_image": ("05_image_repair_cutout", "image_inpaint_fix"),
+}
+VIDEO_INTENT_ROUTES = {
+    "generate_i2v_clip": ("06_i2v_first_frame", "i2v_first_frame"),
+    "generate_three_frame_i2v_clip": ("06_i2v_first_middle_last_frame", "i2v_first_middle_last_frame"),
+    "generate_broll_clip": ("10_broll_transition_video", "broll_scene_video"),
+    "generate_talking_image": ("09_talking_image", "talking_image"),
+    "enhance_video": ("11_video_enhance", "video_upscale"),
+    "repair_video": ("12_video_inpaint_fix", "video_inpaint_fix"),
+}
+
+
 def compile_production_plan(
     *,
     task_id: str,
@@ -403,6 +419,7 @@ def _compile_video_intents(
         intent_id = _safe_id(intent.get("intent_id") or intent.get("id") or f"video_intent_{index:03d}")
         contract = contracts.get(intent_name) if isinstance(contracts.get(intent_name), dict) else {}
         compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
+        workflow_id, workflow_mode = _video_workflow_route(intent_name, contract, compatibility)
         locked_intent, overrides = apply_locked_parameters_to_intent(
             intent,
             global_context=global_context,
@@ -429,10 +446,10 @@ def _compile_video_intents(
             "id": intent_id,
             "job_id": intent_id,
             "task_type": "video",
-            "video_task_mode": str(compatibility.get("recommended_workflow_mode") or contract.get("workflow_mode") or intent_name),
-            "mode": str(compatibility.get("recommended_workflow_mode") or contract.get("workflow_mode") or intent_name),
-            "workflow_id": str(compatibility.get("recommended_workflow_id") or contract.get("workflow_id") or ""),
-            "workflow_mode": str(compatibility.get("recommended_workflow_mode") or contract.get("workflow_mode") or intent_name),
+            "video_task_mode": workflow_mode,
+            "mode": workflow_mode,
+            "workflow_id": workflow_id,
+            "workflow_mode": workflow_mode,
             "capability": str(contract.get("capability") or "video_generate"),
             "prompt": prompt,
             "negative_prompt": str(intent.get("negative_prompt") or ""),
@@ -489,6 +506,8 @@ def _image_prompt_item(
     asset_tag: str,
     resolved_entities: dict[str, Any],
 ) -> dict[str, Any]:
+    intent_name = str(intent.get("intent") or "").strip()
+    workflow_id, workflow_mode = _image_workflow_route(intent_name, intent, contract, compatibility)
     entity_context = entity_context_for_ids(
         resolved_entities,
         character_id=str(intent.get("character_id") or ""),
@@ -500,11 +519,11 @@ def _image_prompt_item(
         "id": job_id,
         "job_id": job_id,
         "task_type": "image",
-        "image_task_mode": str(compatibility.get("recommended_workflow_mode") or contract.get("workflow_mode") or intent.get("intent") or "image"),
+        "image_task_mode": workflow_mode,
         "control_mode": str(intent.get("control_mode") or "none"),
-        "mode": str(compatibility.get("recommended_workflow_mode") or contract.get("workflow_mode") or intent.get("intent") or "image"),
-        "workflow_id": str(compatibility.get("recommended_workflow_id") or contract.get("workflow_id") or ""),
-        "workflow_mode": str(compatibility.get("recommended_workflow_mode") or contract.get("workflow_mode") or intent.get("intent") or "image"),
+        "mode": workflow_mode,
+        "workflow_id": workflow_id,
+        "workflow_mode": workflow_mode,
         "capability": str(contract.get("capability") or "image_generate"),
         "prompt": prompt,
         "negative_prompt": str(intent.get("negative_prompt") or ""),
@@ -524,6 +543,55 @@ def _image_prompt_item(
         item["entity_context"] = entity_context
         _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
     return item
+
+
+def _image_workflow_route(
+    intent_name: str,
+    intent: dict[str, Any],
+    contract: dict[str, Any],
+    compatibility: dict[str, Any],
+) -> tuple[str, str]:
+    """Resolve semantic image intent to the active debug-console workflow slot.
+
+    Employee compatibility fields are legacy hints only.  Known production
+    intents always use the compiler-owned route so stale staff JSON cannot
+    point the DAG back to archived workflow IDs.
+    """
+
+    if intent_name == "generate_base_asset":
+        role = str(intent.get("asset_role") or "character").strip().lower()
+        if role in {"style", "style_reference"}:
+            return "03_style_cover_image", "style_reference"
+        if role == "product":
+            return "01_base_asset_image", "product_base"
+        if role == "scene":
+            return "01_base_asset_image", "scene_base"
+        return "01_base_asset_image", "character_base"
+    if intent_name == "generate_turnaround":
+        role = str(intent.get("asset_role") or "character").strip().lower()
+        mode = "product_turnaround" if role == "product" else "character_turnaround"
+        return "02_turnaround", mode
+    if intent_name in IMAGE_INTENT_ROUTES:
+        return IMAGE_INTENT_ROUTES[intent_name]
+    return (
+        str(contract.get("workflow_id") or compatibility.get("recommended_workflow_id") or ""),
+        str(contract.get("workflow_mode") or compatibility.get("recommended_workflow_mode") or intent_name or "image"),
+    )
+
+
+def _video_workflow_route(
+    intent_name: str,
+    contract: dict[str, Any],
+    compatibility: dict[str, Any],
+) -> tuple[str, str]:
+    """Resolve semantic video intent to the active debug-console workflow slot."""
+
+    if intent_name in VIDEO_INTENT_ROUTES:
+        return VIDEO_INTENT_ROUTES[intent_name]
+    return (
+        str(contract.get("workflow_id") or compatibility.get("recommended_workflow_id") or ""),
+        str(contract.get("workflow_mode") or compatibility.get("recommended_workflow_mode") or intent_name or "video"),
+    )
 
 
 def _bind_three_frames(item: dict[str, Any], image_job_ids: set[str]) -> None:
