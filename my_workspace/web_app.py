@@ -7180,7 +7180,7 @@ INDEX_HTML = r"""<!doctype html>
 
     function awaitingConfirmationStep(summary = selectedTaskSummary) {
       if (!summary || !summary.awaiting_confirmation) return 0;
-      if (['cancelled', 'canceled', 'completed'].includes(String(summary.status || '').toLowerCase())) return 0;
+      if (['failed', 'error', 'cancelled', 'canceled', 'completed'].includes(String(summary.status || '').toLowerCase())) return 0;
       return Number(summary.awaiting_confirmation_step || summary.blocked_step || summary.resume_step || 0);
     }
 
@@ -7210,6 +7210,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function selectedTaskCanBeCancelledByStatus() {
+      if (selectedTaskIsStopped()) return false;
       const stateValues = [
         selectedTaskState(),
         selectedTaskStatus?.state,
@@ -7222,7 +7223,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function selectedTaskIsStopped() {
-      return ['cancelled', 'canceled', 'completed'].includes(selectedTaskState());
+      return ['failed', 'error', 'cancelled', 'canceled', 'completed'].includes(selectedTaskState());
     }
 
     function preferredInitialTaskFile(data) {
@@ -12635,6 +12636,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     paused = bool(job.get("pause_requested"))
                     stopped = bool(job.get("cancel_requested"))
                     job["status"] = "paused" if paused else "cancelled" if stopped else "failed"
+                    job["pause_requested"] = False
+                    job["cancel_requested"] = False
+                    job["awaiting_confirmation"] = False
+                    job.pop("awaiting_confirmation_step", None)
+                    job.pop("blocked_step", None)
+                    job.pop("blocked_reason", None)
                     job["error"] = str(exc)
                     job["traceback"] = traceback.format_exc()
                     for step in job.get("steps", []):
@@ -12677,6 +12684,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "failed_at": datetime.now().isoformat(timespec="seconds"),
             }
         )
+        summary["awaiting_confirmation"] = False
+        summary.pop("awaiting_confirmation_step", None)
+        summary.pop("blocked_step", None)
+        summary.pop("blocked_reason", None)
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def _run_resume_job(
@@ -13073,11 +13084,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 by_step[step_no]["size"] = path.stat().st_size if path.is_file() else 0
                 by_step[step_no]["mtime"] = path.stat().st_mtime if path.is_file() else 0
 
-        max_step = max(
-            [int(item.get("step") or 0) for item in workflow_steps if isinstance(item, dict)] + list(by_step.keys()) + [0]
-        )
         active_step = int((active_job or {}).get("current_step") or 0)
         completed_steps = int((active_job or {}).get("completed_steps") or summary.get("step_count") or 0)
+        max_step = max(
+            [int(item.get("step") or 0) for item in workflow_steps if isinstance(item, dict)]
+            + list(by_step.keys())
+            + [active_step, completed_steps, 0]
+        )
         awaiting_step = int(summary.get("awaiting_confirmation_step") or 0) if summary.get("awaiting_confirmation") else 0
         blocked_step = int(summary.get("blocked_step") or 0) if summary.get("blocked_reason") else 0
 
@@ -13087,7 +13100,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             metadata = cls._step_metadata(task_dir, index)
             output_info = by_step.get(index, {})
             has_output = bool(output_info.get("has_output"))
-            if awaiting_step == index:
+            if active_step == index and (active_job or {}).get("status") in {"failed", "error"}:
+                status = "failed"
+            elif awaiting_step == index:
                 status = "awaiting_confirmation"
             elif blocked_step == index:
                 status = "blocked"
@@ -13240,6 +13255,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         summary_status = str(summary.get("status") or "").strip().lower()
         if summary_status in {"cancelled", "canceled"}:
             return "cancelled"
+        if summary_status in {"failed", "error"}:
+            return "failed"
         if summary.get("awaiting_confirmation"):
             return "awaiting_confirmation"
         blocked_reason = str(summary.get("blocked_reason") or "").strip()
@@ -13268,7 +13285,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             actions.add("rerun_step")
         if task_state in {"awaiting_confirmation", "blocked", "failed", "partial", "cancelled"}:
             actions.add("resume")
-        if summary.get("awaiting_confirmation") and task_state not in {"cancelled", "completed"}:
+        if summary.get("awaiting_confirmation") and task_state not in {"failed", "error", "cancelled", "completed"}:
             actions.add("confirm_step")
             actions.add("cancel")
         if task_state in {"running", "queued", "paused", "awaiting_confirmation", "blocked"}:

@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-01] Failed workflow runs are now treated as terminal immediately across persistence, the task state center, and the management UI. Failure clears stale pause/cancel/confirmation/block fields, marks the current step failed even when old confirmation metadata remains, removes `cancel`/`confirm_step` from allowed actions, unlocks the UI, and hides the stop button. Historical failed summaries with stale `awaiting_confirmation` data are also read safely as failed terminal tasks.
+
 - ComfyUI 调试台分类按生产顺序由 10 组精简为 7 组：`01 基础资产`、`02 分镜关键帧`、`03 图片处理`、`04 视频生成`、`05 视频控制`、`06 数字人口播`、`07 视频后期`。只改变导航归类和显示顺序，不改变子模式值、独立配置或员工兼容路由。
 - ComfyUI 调试台的功能组标题可点击展开/收起，箭头和 `aria-expanded` 会同步变化；每次刷新或重新打开页面时，所有功能组统一恢复为默认收起，当前页面内仍可自由展开。
 - ComfyUI 调试台改为按功能组织的两级树（功能组 → 可运行子模式），桌面端不再重复显示子模式下拉框。每个叶子子模式独立保存接口、nodeInfoList、尺寸、提示词、参考素材、运行状态与结果；旧的工作流级配置和状态会作为首次迁移回退。06/07 员工现以 `capability + mode` 为主路由，并继续输出 `workflow_id + workflow_mode` 兼容现有生产链路。

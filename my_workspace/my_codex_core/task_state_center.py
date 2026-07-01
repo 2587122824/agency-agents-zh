@@ -130,9 +130,13 @@ class TaskStateCenter:
                 by_step[step_no]["has_output"] = True
                 by_step[step_no]["size"] = path.stat().st_size if path.is_file() else 0
                 by_step[step_no]["mtime"] = path.stat().st_mtime if path.is_file() else 0
-        max_step = max([int(item.get("step") or 0) for item in workflow_steps if isinstance(item, dict)] + list(by_step.keys()) + [0])
         active_step = int((self.active_job or {}).get("current_step") or 0)
         completed_steps = int((self.active_job or {}).get("completed_steps") or self.summary.get("step_count") or 0)
+        max_step = max(
+            [int(item.get("step") or 0) for item in workflow_steps if isinstance(item, dict)]
+            + list(by_step.keys())
+            + [active_step, completed_steps, 0]
+        )
         awaiting_step = int(self.summary.get("awaiting_confirmation_step") or 0) if self.summary.get("awaiting_confirmation") else 0
         blocked_step = int(self.summary.get("blocked_step") or 0) if self.summary.get("blocked_reason") else 0
         steps: list[dict[str, Any]] = []
@@ -141,14 +145,14 @@ class TaskStateCenter:
             metadata = self._step_metadata(index)
             output_info = by_step.get(index, {})
             has_output = bool(output_info.get("has_output"))
-            if awaiting_step == index:
+            if active_step == index and (self.active_job or {}).get("status") in {"failed", "error"}:
+                status = "failed"
+            elif awaiting_step == index:
                 status = "awaiting_confirmation"
             elif blocked_step == index:
                 status = "blocked"
             elif active_step == index and (self.active_job or {}).get("status") in {"queued", "running"}:
                 status = "running"
-            elif active_step == index and (self.active_job or {}).get("status") in {"failed", "error"}:
-                status = "failed"
             elif has_output or index <= completed_steps:
                 status = "completed"
             else:
@@ -265,11 +269,11 @@ class TaskStateCenter:
             actions.add("rerun_step")
         if state in {"awaiting_confirmation", "blocked", "failed", "partial", "cancelled"}:
             actions.add("resume")
-        if self.summary.get("awaiting_confirmation") and state not in {"cancelled", "completed"}:
+        if self.summary.get("awaiting_confirmation") and state not in {"failed", "error", "cancelled", "completed"}:
             actions.update({"confirm_step", "cancel"})
         if state in {"running", "queued", "paused", "awaiting_confirmation", "blocked"}:
             actions.add("cancel")
-        if manual_debug.get("status") == "awaiting_confirmation" and state not in {"cancelled", "completed"}:
+        if manual_debug.get("status") == "awaiting_confirmation" and state not in {"failed", "error", "cancelled", "completed"}:
             actions.add("run_comfy_debug")
             actions.add("confirm_comfy_debug")
         for job_id in production.get("allowed_retries") or []:
@@ -287,9 +291,9 @@ class TaskStateCenter:
         blockers: list[dict[str, str]],
         allowed_actions: list[str],
     ) -> dict[str, Any]:
-        if manual_debug.get("status") == "awaiting_confirmation" and state not in {"cancelled", "completed"}:
+        if manual_debug.get("status") == "awaiting_confirmation" and state not in {"failed", "error", "cancelled", "completed"}:
             return {"action": "run_comfy_debug", "label": "运行并确认 ComfyUI 调试队列", "reason": "manual_debug_awaiting_confirmation"}
-        if self.summary.get("awaiting_confirmation") and state not in {"cancelled", "completed"}:
+        if self.summary.get("awaiting_confirmation") and state not in {"failed", "error", "cancelled", "completed"}:
             return {"action": "confirm_step", "label": "确认当前步骤并继续", "reason": "workflow_awaiting_confirmation", "step": workflow.get("awaiting_confirmation_step")}
         failed_or_blocked = production.get("dag", {}).get("blocked_nodes", []) + production.get("dag", {}).get("failed_nodes", [])
         if failed_or_blocked:
