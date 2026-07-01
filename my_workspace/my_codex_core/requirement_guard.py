@@ -174,9 +174,56 @@ def declares_human_confirmation(content: str) -> bool:
 
 
 def _mentions_duration(content: str, duration_seconds: int) -> bool:
-    if f"{duration_seconds}秒" in content or f"{duration_seconds} 秒" in content:
+    text = str(content or "")
+    if not duration_seconds:
+        return True
+    escaped = re.escape(str(duration_seconds))
+    if re.search(rf"(?<!\d){escaped}\s*(?:s|sec|secs|second|seconds|秒)(?![A-Za-z0-9])", text, flags=re.IGNORECASE):
         return True
     if duration_seconds % 60 == 0:
         minutes = duration_seconds // 60
-        return f"{minutes}分钟" in content or f"{minutes} 分钟" in content
+        if re.search(rf"(?<!\d){re.escape(str(minutes))}\s*(?:min|mins|minute|minutes|分钟)(?![A-Za-z0-9])", text, flags=re.IGNORECASE):
+            return True
+    if _timeline_reaches_duration(text, duration_seconds):
+        return True
+    if _segment_durations_sum_to_target(text, duration_seconds):
+        return True
     return False
+
+
+def _timeline_reaches_duration(content: str, duration_seconds: int) -> bool:
+    """Accept storyboard timelines such as 0-10s or 7.5-10s as proof of duration."""
+    target = float(duration_seconds)
+    for match in re.finditer(
+        r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:-|–|—|~|～|至|到)\s*(\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds|秒)?",
+        content,
+        flags=re.IGNORECASE,
+    ):
+        try:
+            start = float(match.group(1))
+            end = float(match.group(2))
+        except ValueError:
+            continue
+        if start <= target <= end + 0.25 or abs(end - target) <= 0.25:
+            return True
+    return False
+
+
+def _segment_durations_sum_to_target(content: str, duration_seconds: int) -> bool:
+    """Accept split-shot tables like four 2.5s shots for a 10-second task."""
+    values: list[float] = []
+    for match in re.finditer(
+        r"(?<![\d-])(\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds|秒)(?![A-Za-z0-9])",
+        content,
+        flags=re.IGNORECASE,
+    ):
+        try:
+            value = float(match.group(1))
+        except ValueError:
+            continue
+        if 0 < value <= max(duration_seconds, 1):
+            values.append(value)
+    if not values:
+        return False
+    total = sum(values)
+    return abs(total - float(duration_seconds)) <= 0.5
