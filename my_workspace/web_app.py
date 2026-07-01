@@ -71,8 +71,8 @@ COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
 RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
-DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = "/run/workflow/2048294089858228226"
-DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = "/run/ai-app/2066043648160133122"
+DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = ""
+DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = ""
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
 IMAGE_EXTENSIONS = {
@@ -4076,8 +4076,8 @@ INDEX_HTML = r"""<!doctype html>
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v2';
     let comfyWorkflowLibrary = [];
     const DEFAULT_COMFY_WORKFLOW_PRESET_ID = 'all_in_one_image';
-    const DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = '/run/workflow/2048294089858228226';
-    const DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = '/run/ai-app/2066043648160133122';
+    const DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = '';
+    const DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = '';
     const DEFAULT_COMFY_WORKFLOW_LIBRARY = [
       {
         id: 'all_in_one_image',
@@ -5902,7 +5902,7 @@ INDEX_HTML = r"""<!doctype html>
 
     function getComfyWorkflowLibraryPayload() {
       return comfyWorkflowLibrary.map(item => {
-        const endpoint = item.endpoint || defaultRunningHubEndpointForLibraryItem(item);
+        const endpoint = String(item.endpoint || '').trim();
         return {
           id: item.id,
           name: item.name,
@@ -10427,8 +10427,7 @@ INDEX_HTML = r"""<!doctype html>
       const defaultComfyBaseUrl = els.comfyBaseUrl.value.trim()
         || (els.visualProvider.value === 'runninghub' ? 'https://www.runninghub.cn/openapi/v2' : '');
       const defaultComposeEndpoint = els.comfyWorkflowEndpoint.value.trim()
-        || (selectedComfyPreset ? (selectedComfyPreset.endpoint || defaultRunningHubEndpointForLibraryItem(selectedComfyPreset)) : '')
-        || DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT;
+        || (selectedComfyPreset ? String(selectedComfyPreset.endpoint || '').trim() : '');
       const productionConfig = {
         mode: els.autoProductionMode.value,
         workflow_advance_mode: els.workflowAdvanceMode.value,

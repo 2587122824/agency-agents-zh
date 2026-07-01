@@ -18,8 +18,8 @@ from .production_plan_compiler import compile_production_plan, write_production_
 from .visual_provider_router import build_visual_provider_profile
 
 
-DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = "/run/workflow/2048294089858228226"
-DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = "/run/ai-app/2066043648160133122"
+DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = ""
+DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = ""
 
 
 def run_auto_production(
@@ -1596,18 +1596,13 @@ def _ensure_default_runninghub_workflow_endpoints(compose_config: dict[str, Any]
         compose_config["base_url"] = "https://www.runninghub.cn/openapi/v2"
 
     library = compose_config.get("workflow_library")
-    if isinstance(library, list):
-        for item in library:
-            if isinstance(item, dict):
-                _ensure_library_item_runninghub_endpoint(item)
-
     if not endpoint:
         selected_id = str(compose_config.get("workflow_preset_id") or "").strip()
         selected_endpoint = ""
         if isinstance(library, list) and selected_id:
             selected = next((item for item in library if isinstance(item, dict) and str(item.get("id") or "").strip() == selected_id), None)
             selected_endpoint = str((selected or {}).get("endpoint") or (selected or {}).get("workflow_endpoint") or "").strip()
-        compose_config["workflow_endpoint"] = selected_endpoint or _first_library_endpoint_for_type(library, "image") or DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT
+        compose_config["workflow_endpoint"] = selected_endpoint or _first_library_endpoint_for_type(library, "image")
 
 
 def _ensure_library_item_runninghub_endpoint(item: dict[str, Any]) -> None:
