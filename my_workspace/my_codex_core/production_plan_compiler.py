@@ -571,6 +571,8 @@ def _image_workflow_route(
         role = str(intent.get("asset_role") or "character").strip().lower()
         mode = "product_turnaround" if role == "product" else "character_turnaround"
         return "02_turnaround", mode
+    if intent_name == "generate_cover_key_visual" and str(intent.get("asset_role") or "").strip().lower() in {"style", "style_reference"}:
+        return "03_style_cover_image", "style_reference"
     if intent_name in IMAGE_INTENT_ROUTES:
         return IMAGE_INTENT_ROUTES[intent_name]
     return (

@@ -16476,16 +16476,28 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if isinstance(production_config, dict):
             production_image_config = production_config.get("image_config")
             if isinstance(production_image_config, dict):
-                production_image_config["api_key"] = str(payload.get("image_api_key") or "").strip()
-                production_image_config["base_url"] = str(payload.get("image_base_url") or "").strip()
+                image_api_key = str(payload.get("image_api_key") or "").strip()
+                image_base_url = str(payload.get("image_base_url") or "").strip()
+                if image_api_key:
+                    production_image_config["api_key"] = image_api_key
+                if image_base_url:
+                    production_image_config["base_url"] = image_base_url
             production_video_config = production_config.get("video_config")
             if isinstance(production_video_config, dict):
-                production_video_config["api_key"] = str(payload.get("video_api_key") or "").strip()
-                production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
+                video_api_key = str(payload.get("video_api_key") or "").strip()
+                video_base_url = str(payload.get("video_base_url") or "").strip()
+                if video_api_key:
+                    production_video_config["api_key"] = video_api_key
+                if video_base_url:
+                    production_video_config["base_url"] = video_base_url
             production_compose_config = production_config.get("compose_config")
             if isinstance(production_compose_config, dict):
-                production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
-                production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
+                comfy_api_key = str(payload.get("comfy_api_key") or "").strip()
+                comfy_base_url = str(payload.get("comfy_base_url") or "").strip()
+                if comfy_api_key:
+                    production_compose_config["api_key"] = comfy_api_key
+                if comfy_base_url:
+                    production_compose_config["base_url"] = comfy_base_url
             production_config = self._apply_runtime_comfy_config(production_config, payload)
         summary = {}
         summary_path = task_dir / "run_summary.json"
