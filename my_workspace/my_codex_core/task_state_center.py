@@ -267,7 +267,7 @@ class TaskStateCenter:
             actions.add("resume")
         if self.summary.get("awaiting_confirmation") and state not in {"cancelled", "completed"}:
             actions.update({"confirm_step", "cancel"})
-        if state in {"awaiting_confirmation", "blocked"}:
+        if state in {"running", "queued", "paused", "awaiting_confirmation", "blocked"}:
             actions.add("cancel")
         if manual_debug.get("status") == "awaiting_confirmation" and state not in {"cancelled", "completed"}:
             actions.add("run_comfy_debug")

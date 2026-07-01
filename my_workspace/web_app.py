@@ -4220,14 +4220,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function syncRunControlButtons() {
-      const hasRun = Boolean(currentRunId && ACTIVE_RUN_STATUSES.has(currentRunStatus));
       if (els.cancelRunBtn) {
         els.cancelRunBtn.hidden = true;
         els.cancelRunBtn.disabled = true;
-      }
-      if (els.outputCancelRunBtn) {
-        els.outputCancelRunBtn.hidden = !hasRun;
-        els.outputCancelRunBtn.disabled = !hasRun;
       }
     }
 
@@ -5132,7 +5127,13 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function cancelCurrentRun() {
-      const canCancelSelectedTask = Boolean(selectedTask && selectedTaskAllowedActions.includes('cancel'));
+      const canCancelSelectedTask = Boolean(
+        selectedTask
+        && (
+          selectedTaskAllowedActions.includes('cancel')
+          || selectedTaskCanBeCancelledByStatus()
+        )
+      );
       if (!currentRunId && !canCancelSelectedTask) {
         setStatus('当前没有可终止的任务', true);
         return;
@@ -7142,6 +7143,29 @@ INDEX_HTML = r"""<!doctype html>
         || selectedTaskSummary?.state
         || ''
       ).toLowerCase();
+    }
+
+    function selectedTaskHasActiveExecution() {
+      const stateValues = [
+        selectedTaskStatus?.state,
+        selectedTaskStatus?.workflow?.status,
+        selectedTaskStatus?.workflow?.state,
+      ].map(value => String(value || '').toLowerCase());
+      if (stateValues.some(value => ACTIVE_RUN_STATUSES.has(value))) return true;
+      const steps = Array.isArray(selectedTaskStatus?.steps) ? selectedTaskStatus.steps : [];
+      return steps.some(step => ACTIVE_RUN_STATUSES.has(String(step?.status || '').toLowerCase()));
+    }
+
+    function selectedTaskCanBeCancelledByStatus() {
+      const stateValues = [
+        selectedTaskState(),
+        selectedTaskStatus?.state,
+        selectedTaskStatus?.workflow?.status,
+        selectedTaskStatus?.workflow?.state,
+      ].map(value => String(value || '').toLowerCase());
+      if (stateValues.some(value => ['queued', 'running', 'paused', 'awaiting_confirmation', 'blocked'].includes(value))) return true;
+      const steps = Array.isArray(selectedTaskStatus?.steps) ? selectedTaskStatus.steps : [];
+      return steps.some(step => ['queued', 'running', 'paused', 'awaiting_confirmation'].includes(String(step?.status || '').toLowerCase()));
     }
 
     function selectedTaskIsStopped() {
@@ -9653,22 +9677,25 @@ INDEX_HTML = r"""<!doctype html>
       const isAwaitingStepConfirmation = Boolean(confirmStep);
       const comfyGateActive = activeComfyDebugGate();
       const taskStopped = selectedTaskIsStopped();
+      const taskActiveExecution = selectedTaskHasActiveExecution();
+      const taskCancellableByStatus = selectedTaskCanBeCancelledByStatus();
       const actionSet = new Set(selectedTaskAllowedActions || []);
       const hasStructuredActions = actionSet.size > 0;
-      els.saveFileBtn.disabled = running || !hasFile;
-      els.rebuildFinalBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('rebuild_final'));
-      els.exportTaskBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('export'));
+      const activelyRunning = running || taskActiveExecution;
+      els.saveFileBtn.disabled = activelyRunning || !hasFile;
+      els.rebuildFinalBtn.disabled = activelyRunning || !hasTask || (hasStructuredActions && !actionSet.has('rebuild_final'));
+      els.exportTaskBtn.disabled = activelyRunning || !hasTask || (hasStructuredActions && !actionSet.has('export'));
       els.resumeTaskBtn.hidden = false;
-      els.resumeTaskBtn.disabled = running || !hasTask || (hasStructuredActions && !actionSet.has('resume'));
+      els.resumeTaskBtn.disabled = activelyRunning || !hasTask || (hasStructuredActions && !actionSet.has('resume'));
       els.resumeTaskBtn.textContent = els.workflowAdvanceMode.value === 'step_confirm' ? '继续下一步' : '继续任务';
       if (els.outputCancelRunBtn) {
-        const canCancel = !taskStopped && (running || actionSet.has('cancel'));
+        const canCancel = !taskStopped && (running || actionSet.has('cancel') || taskCancellableByStatus);
         els.outputCancelRunBtn.hidden = !canCancel;
         els.outputCancelRunBtn.disabled = !canCancel;
       }
-      els.rerunStepBtn.disabled = running || !hasFile || !stepNumberFromFile(selectedFile) || (hasStructuredActions && !actionSet.has('rerun_step'));
-      els.confirmStepContinueBtn.disabled = taskStopped || running || comfyGateActive || !isAwaitingStepConfirmation || (hasStructuredActions && !actionSet.has('confirm_step'));
-      els.confirmStepRerunBtn.disabled = taskStopped || running || !isConfirmingCurrentStep || (hasStructuredActions && !actionSet.has('rerun_step'));
+      els.rerunStepBtn.disabled = activelyRunning || !hasFile || !stepNumberFromFile(selectedFile) || (hasStructuredActions && !actionSet.has('rerun_step'));
+      els.confirmStepContinueBtn.disabled = taskStopped || activelyRunning || comfyGateActive || !isAwaitingStepConfirmation || (hasStructuredActions && !actionSet.has('confirm_step'));
+      els.confirmStepRerunBtn.disabled = taskStopped || activelyRunning || !isConfirmingCurrentStep || (hasStructuredActions && !actionSet.has('rerun_step'));
     }
 
     function stepNumberFromFile(file) {
@@ -13010,7 +13037,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if summary.get("awaiting_confirmation") and task_state not in {"cancelled", "completed"}:
             actions.add("confirm_step")
             actions.add("cancel")
-        if task_state in {"awaiting_confirmation", "blocked"}:
+        if task_state in {"running", "queued", "paused", "awaiting_confirmation", "blocked"}:
             actions.add("cancel")
         return sorted(actions)
 
