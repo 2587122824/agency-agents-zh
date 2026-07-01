@@ -4887,16 +4887,57 @@ INDEX_HTML = r"""<!doctype html>
       const selectedComfyPreset = getSelectedComfyWorkflowPreset();
       return {
         visual_provider: els.visualProvider?.value || 'runninghub',
-        api_key: els.comfyApiKey?.value?.trim() || '',
-        base_url: els.comfyBaseUrl?.value?.trim() || '',
+        api_key: currentComfyApiKey(),
+        base_url: currentComfyBaseUrl(),
         comfy_mcp_url: els.comfyMcpUrl?.value?.trim() || '',
-        workflow_endpoint: els.comfyWorkflowEndpoint?.value?.trim() || '',
-        node_info_list_json: els.comfyNodeInfoList?.value?.trim() || '',
+        workflow_endpoint: currentComfyWorkflowEndpoint(),
+        node_info_list_json: currentComfyNodeInfoList(),
         poll_timeout_seconds: Number(els.comfyPollTimeout?.value || 3600),
         workflow_preset_id: selectedComfyPreset?.id || '',
         workflow_preset_name: selectedComfyPreset?.name || '',
         workflow_library: getComfyWorkflowLibraryPayload(),
       };
+    }
+
+    function savedComfySettingValue(key) {
+      const settings = readSettings();
+      return String(settings?.[key] || '').trim();
+    }
+
+    function currentComfyApiKey() {
+      return String(
+        els.comfyDebugApiKey?.value?.trim()
+        || els.comfyApiKey?.value?.trim()
+        || savedComfySettingValue('comfyApiKey')
+        || ''
+      ).trim();
+    }
+
+    function currentComfyBaseUrl() {
+      return String(
+        els.comfyDebugBaseUrl?.value?.trim()
+        || els.comfyBaseUrl?.value?.trim()
+        || savedComfySettingValue('comfyBaseUrl')
+        || ''
+      ).trim();
+    }
+
+    function currentComfyWorkflowEndpoint() {
+      return String(
+        els.comfyWorkflowEndpoint?.value?.trim()
+        || els.comfyDebugEndpoint?.value?.trim()
+        || savedComfySettingValue('comfyWorkflowEndpoint')
+        || ''
+      ).trim();
+    }
+
+    function currentComfyNodeInfoList() {
+      return String(
+        els.comfyNodeInfoList?.value?.trim()
+        || els.comfyDebugNodeInfoList?.value?.trim()
+        || savedComfySettingValue('comfyNodeInfoList')
+        || ''
+      ).trim();
     }
 
     async function syncRuntimeComfyConfig(options = {}) {
@@ -5128,8 +5169,8 @@ INDEX_HTML = r"""<!doctype html>
         composeTool: els.composeTool.value,
         finalVideoName: els.finalVideoName.value,
         visualProvider: els.visualProvider.value,
-        comfyApiKey: els.comfyApiKey.value,
-        comfyBaseUrl: els.comfyBaseUrl.value,
+        comfyApiKey: els.comfyApiKey.value || els.comfyDebugApiKey.value || previousSettings.comfyApiKey || '',
+        comfyBaseUrl: els.comfyBaseUrl.value || els.comfyDebugBaseUrl.value || previousSettings.comfyBaseUrl || '',
         comfyMcpUrl: els.comfyMcpUrl.value,
         comfyWorkflowEndpoint: els.comfyWorkflowEndpoint.value,
         comfyWorkflowPreset: els.comfyWorkflowPreset.value,
@@ -6606,7 +6647,7 @@ INDEX_HTML = r"""<!doctype html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             mcp_url: mcpUrl,
-            api_key: els.comfyApiKey.value.trim(),
+            api_key: currentComfyApiKey(),
           }),
         }, 15000);
         const toolCount = Number(result.tool_count || 0);
@@ -6636,7 +6677,7 @@ INDEX_HTML = r"""<!doctype html>
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             mcp_url: mcpUrl,
-            api_key: els.comfyApiKey.value.trim(),
+            api_key: currentComfyApiKey(),
             query: '',
             limit: 80,
           }),
@@ -8365,8 +8406,8 @@ INDEX_HTML = r"""<!doctype html>
           body: JSON.stringify({
             task: selectedTask,
             item_id: itemId,
-            api_key: els.comfyApiKey.value.trim(),
-            base_url: els.comfyBaseUrl.value.trim(),
+            api_key: currentComfyApiKey(),
+            base_url: currentComfyBaseUrl(),
             workflow_library: getComfyWorkflowLibraryPayload(),
             production_config: productionConfig,
           }),
@@ -10492,8 +10533,8 @@ INDEX_HTML = r"""<!doctype html>
             image_base_url: '',
             video_api_key: '',
             video_base_url: '',
-            comfy_api_key: els.comfyApiKey.value.trim(),
-            comfy_base_url: els.comfyBaseUrl.value.trim(),
+            comfy_api_key: currentComfyApiKey(),
+            comfy_base_url: currentComfyBaseUrl(),
           }),
         });
         setStatus(`任务已开始${resumeLabel}`);
@@ -10553,8 +10594,8 @@ INDEX_HTML = r"""<!doctype html>
             image_base_url: '',
             video_api_key: '',
             video_base_url: '',
-            comfy_api_key: els.comfyApiKey.value.trim(),
-            comfy_base_url: els.comfyBaseUrl.value.trim(),
+            comfy_api_key: currentComfyApiKey(),
+            comfy_base_url: currentComfyBaseUrl(),
           }),
         });
         trackRun(result.run_id);
@@ -10624,7 +10665,9 @@ INDEX_HTML = r"""<!doctype html>
         poll_timeout_seconds: 1800,
       };
       const selectedComfyPreset = getSelectedComfyWorkflowPreset();
-      const defaultComfyBaseUrl = els.comfyBaseUrl.value.trim()
+      const effectiveComfyApiKey = currentComfyApiKey();
+      const effectiveComfyBaseUrl = currentComfyBaseUrl();
+      const defaultComfyBaseUrl = effectiveComfyBaseUrl
         || (els.visualProvider.value === 'runninghub' ? 'https://www.runninghub.cn/openapi/v2' : '');
       const defaultComposeEndpoint = els.comfyWorkflowEndpoint.value.trim()
         || (selectedComfyPreset ? String(selectedComfyPreset.endpoint || '').trim() : '');
@@ -10653,7 +10696,7 @@ INDEX_HTML = r"""<!doctype html>
           execution_mode: els.autoProductionMode.value,
           final_video_name: els.finalVideoName.value.trim() || 'final_video.mp4',
           visual_provider: els.visualProvider.value,
-          api_key_provided: Boolean(els.comfyApiKey.value.trim()),
+          api_key_provided: Boolean(effectiveComfyApiKey),
           base_url_provided: Boolean(defaultComfyBaseUrl),
           base_url: defaultComfyBaseUrl,
           comfy_mcp_url: els.comfyMcpUrl.value.trim(),
@@ -11281,8 +11324,8 @@ INDEX_HTML = r"""<!doctype html>
             image_base_url: '',
             video_api_key: '',
             video_base_url: '',
-            comfy_api_key: els.comfyApiKey.value.trim(),
-            comfy_base_url: els.comfyBaseUrl.value.trim(),
+            comfy_api_key: currentComfyApiKey(),
+            comfy_base_url: currentComfyBaseUrl(),
           }),
         }, 20000);
         els.taskTitle.value = '';
@@ -12326,8 +12369,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
                 production_compose_config = production_config.get("compose_config")
                 if isinstance(production_compose_config, dict):
-                    production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
-                    production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
+                    comfy_api_key = str(payload.get("comfy_api_key") or "").strip()
+                    comfy_base_url = str(payload.get("comfy_base_url") or "").strip()
+                    if comfy_api_key:
+                        production_compose_config["api_key"] = comfy_api_key
+                    if comfy_base_url:
+                        production_compose_config["base_url"] = comfy_base_url
                 production_config = self._apply_runtime_comfy_config(production_config, payload)
             image_config = payload.get("image_config") or {}
             if isinstance(image_config, dict) and str(image_config.get("positive_prompt") or "").strip():
@@ -16713,8 +16760,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
             production_compose_config = production_config.get("compose_config")
             if isinstance(production_compose_config, dict):
-                production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
-                production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
+                comfy_api_key = str(payload.get("comfy_api_key") or "").strip()
+                comfy_base_url = str(payload.get("comfy_base_url") or "").strip()
+                if comfy_api_key:
+                    production_compose_config["api_key"] = comfy_api_key
+                if comfy_base_url:
+                    production_compose_config["base_url"] = comfy_base_url
             production_config = self._apply_runtime_comfy_config(production_config, payload)
 
         summary = {}
