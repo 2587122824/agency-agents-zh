@@ -4074,6 +4074,7 @@ INDEX_HTML = r"""<!doctype html>
     let selectedProductionEntityId = '';
     let localModelPresets = [];
     let runtimeModelConfigFromServer = {};
+    let runtimeComfyConfigFromServer = {};
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v2';
@@ -4913,11 +4914,16 @@ INDEX_HTML = r"""<!doctype html>
       ).trim();
     }
 
+    function hasSavedRuntimeComfyApiKey() {
+      return Boolean(runtimeComfyConfigFromServer?.has_api_key);
+    }
+
     function currentComfyBaseUrl() {
       return String(
         els.comfyDebugBaseUrl?.value?.trim()
         || els.comfyBaseUrl?.value?.trim()
         || savedComfySettingValue('comfyBaseUrl')
+        || runtimeComfyConfigFromServer?.base_url
         || ''
       ).trim();
     }
@@ -4927,6 +4933,7 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyWorkflowEndpoint?.value?.trim()
         || els.comfyDebugEndpoint?.value?.trim()
         || savedComfySettingValue('comfyWorkflowEndpoint')
+        || runtimeComfyConfigFromServer?.workflow_endpoint
         || ''
       ).trim();
     }
@@ -4936,6 +4943,7 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyNodeInfoList?.value?.trim()
         || els.comfyDebugNodeInfoList?.value?.trim()
         || savedComfySettingValue('comfyNodeInfoList')
+        || runtimeComfyConfigFromServer?.node_info_list_json
         || ''
       ).trim();
     }
@@ -4951,14 +4959,19 @@ INDEX_HTML = r"""<!doctype html>
         || payload.comfy_mcp_url
       );
       if (!hasAnyWorkflowConfig) return null;
-      if (options.requireRunningHub && payload.visual_provider === 'runninghub' && !payload.api_key) {
-        throw new Error('请先在系统配置填写 RunningHub API Key');
+      if (options.requireRunningHub && payload.visual_provider === 'runninghub' && !payload.api_key && !hasSavedRuntimeComfyApiKey()) {
+        throw new Error('请先在系统配置或 ComfyUI 调试台填写 RunningHub/ComfyUI API Key；这里不是 DeepSeek 模型 API Key');
       }
-      return apiWithTimeout('/api/runtime-comfy-config', {
+      const result = await apiWithTimeout('/api/runtime-comfy-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       }, options.timeoutMs || 8000);
+      if (result && typeof result === 'object') {
+        runtimeComfyConfigFromServer = result;
+        applyRuntimeComfyConfig(result);
+      }
+      return result;
     }
 
     async function saveRuntimeComfyConfigFromVisibleForm(options = {}) {
@@ -4992,6 +5005,7 @@ INDEX_HTML = r"""<!doctype html>
     async function loadConfig() {
       const data = await api('/api/config');
       runtimeModelConfigFromServer = data.runtime_model_config || {};
+      runtimeComfyConfigFromServer = data.runtime_comfy_config || {};
       localModelPresets = data.local_model_presets || [];
       staffOptions = (data.staff || []).filter(isActiveLongVideoStaff);
       if (data.runtime_model_saved && data.runtime_model_config?.model) {
@@ -5007,9 +5021,38 @@ INDEX_HTML = r"""<!doctype html>
       renderLocalModelPresets();
       restoreSettings();
       applyRuntimeModelConfig(data.runtime_model_config || {});
+      applyRuntimeComfyConfig(data.runtime_comfy_config || {});
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       queueRuntimeModelConfigSync({ remoteOnly: true });
+    }
+
+    function applyRuntimeComfyConfig(config) {
+      if (!config || typeof config !== 'object') return;
+      if (config.visual_provider) setIfExists(els.visualProvider, config.visual_provider);
+      if (config.base_url && !String(els.comfyBaseUrl?.value || '').trim()) {
+        els.comfyBaseUrl.value = config.base_url;
+      }
+      if (config.comfy_mcp_url && !String(els.comfyMcpUrl?.value || '').trim()) {
+        els.comfyMcpUrl.value = config.comfy_mcp_url;
+      }
+      if (config.workflow_endpoint && !String(els.comfyWorkflowEndpoint?.value || '').trim()) {
+        els.comfyWorkflowEndpoint.value = config.workflow_endpoint;
+      }
+      if (config.node_info_list_json && config.node_info_list_json !== '[]' && !String(els.comfyNodeInfoList?.value || '').trim()) {
+        els.comfyNodeInfoList.value = config.node_info_list_json;
+      }
+      if (config.poll_timeout_seconds && els.comfyPollTimeout && !String(els.comfyPollTimeout.value || '').trim()) {
+        els.comfyPollTimeout.value = String(config.poll_timeout_seconds);
+      }
+      if (Array.isArray(config.workflow_library) && config.workflow_library.length && !comfyWorkflowLibrary.length) {
+        comfyWorkflowLibrary = normalizeComfyWorkflowLibrary(config.workflow_library);
+        renderComfyWorkflowLibrary();
+      }
+      if (config.has_api_key && !String(els.comfyApiKey?.placeholder || '').includes('已保存')) {
+        els.comfyApiKey.placeholder = '已保存 RunningHub/ComfyUI API Key；留空继续使用已保存密钥';
+        els.comfyDebugApiKey.placeholder = '已保存平台密钥；留空继续使用已保存密钥';
+      }
     }
 
     function readSettings() {
@@ -5575,7 +5618,7 @@ INDEX_HTML = r"""<!doctype html>
       }
       const targetUrl = baseUrlText || (endpointText.startsWith('/run/') ? 'https://www.runninghub.cn/openapi/v2' : '');
       const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/i.test(targetUrl);
-      if (!apiKeyText && !isLocal) {
+      if (!apiKeyText && !isLocal && !hasSavedRuntimeComfyApiKey()) {
         throw new Error('请先在系统配置的 ComfyUI 连接里填写 RunningHub/ComfyUI API Key；模型 API Key 不能替代平台密钥');
       }
     }
@@ -15752,8 +15795,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         selected_ids = [str(item).strip() for item in workflow_ids if str(item).strip()]
         if not selected_ids:
             raise ValueError("请选择至少一个调试工作流")
-        api_key = str(payload.get("api_key") or "").strip()
-        base_url = str(payload.get("base_url") or "").strip() or "https://www.runninghub.cn/openapi/v2"
+        saved_runtime_comfy = self._read_runtime_comfy_config(redact=False)
+        api_key = str(payload.get("api_key") or "").strip() or str(saved_runtime_comfy.get("api_key") or "").strip()
+        base_url = (
+            str(payload.get("base_url") or "").strip()
+            or str(saved_runtime_comfy.get("base_url") or "").strip()
+            or "https://www.runninghub.cn/openapi/v2"
+        )
         prompt = str(payload.get("prompt") or "").strip()
         if not prompt:
             raise ValueError("prompt is required")
