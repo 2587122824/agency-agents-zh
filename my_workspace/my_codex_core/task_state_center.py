@@ -100,6 +100,10 @@ class TaskStateCenter:
             return "cancelled"
         if summary_status in {"failed", "error"}:
             return "failed"
+        if summary_status == "paused":
+            return "paused"
+        if summary_status in {"completed", "success"}:
+            return "completed"
         if self.summary.get("awaiting_confirmation"):
             return "awaiting_confirmation"
         if str(self.summary.get("blocked_reason") or "").strip():
@@ -113,7 +117,9 @@ class TaskStateCenter:
         manifest_status = str(manifest.get("status") or "").lower()
         if self._is_failed_status(manifest_status):
             return "failed"
-        if (self.summary.get("final_output") or "final_output.md" in self.files) and self.summary:
+        total_steps = int(self.summary.get("total_steps") or 0)
+        completed_steps = int(self.summary.get("completed_steps") or self.summary.get("step_count") or 0)
+        if (self.summary.get("final_output") or "final_output.md" in self.files) and self.summary and total_steps > 0 and completed_steps >= total_steps:
             return "completed"
         if any(file.startswith("step_") for file in self.files):
             return "partial"
@@ -154,6 +160,8 @@ class TaskStateCenter:
                 status = "blocked"
             elif active_step == index and run_status in {"queued", "running"}:
                 status = "running"
+            elif active_step == index and run_status == "paused":
+                status = "paused"
             elif has_output or index <= completed_steps:
                 status = "completed"
             else:
@@ -269,7 +277,7 @@ class TaskStateCenter:
             actions.add("rebuild_final")
         if any(file.startswith("step_") and file.endswith("/output.md") for file in self.files):
             actions.add("rerun_step")
-        if state in {"awaiting_confirmation", "blocked", "failed", "partial", "cancelled"}:
+        if state in {"awaiting_confirmation", "blocked", "failed", "partial", "cancelled", "paused"}:
             actions.add("resume")
         if self.summary.get("awaiting_confirmation") and state not in {"failed", "error", "cancelled", "completed"}:
             actions.update({"confirm_step", "cancel"})
@@ -303,10 +311,10 @@ class TaskStateCenter:
             job_id = str(first.get("job_id") or "")
             retry_action = f"retry:{job_id}" if job_id else "inspect_blockers"
             return {"action": retry_action, "label": f"处理生产节点：{job_id or '未知节点'}", "reason": str(first.get("blocked_reason") or first.get("error") or ""), "job_id": job_id}
+        if state in {"partial", "blocked", "failed", "cancelled", "paused"} and "resume" in allowed_actions:
+            return {"action": "resume", "label": "继续任务", "reason": state}
         if blockers:
             return {"action": "inspect_blockers", "label": "查看阻塞原因", "reason": blockers[0].get("message", "")}
-        if state in {"partial", "blocked", "failed", "cancelled"} and "resume" in allowed_actions:
-            return {"action": "resume", "label": "继续任务", "reason": state}
         if state == "completed":
             if any(file in {"long_video_final.mp4", "final_video.mp4"} for file in self.files):
                 return {"action": "review_output", "label": "查看最终输出", "reason": "completed"}
@@ -325,7 +333,8 @@ class TaskStateCenter:
         if self._is_failed_status(production_status):
             diagnostics.append({"level": "error", "code": "production_failed", "message": f"自动生产失败：{production.get('status')}"})
         composition = production.get("composition") if isinstance(production.get("composition"), dict) else {}
-        missing_slots = composition.get("missing_workflow_slots") if isinstance(composition.get("missing_workflow_slots"), list) else []
+        raw_missing_slots = composition.get("missing_workflow_slots") if isinstance(composition.get("missing_workflow_slots"), list) else []
+        missing_slots = [item for item in raw_missing_slots if isinstance(item, dict) and not self._is_optional_missing_workflow_slot(item)]
         if missing_slots:
             labels = [
                 str(item.get("label") or f"{item.get('workflow_id') or ''}{' / ' + str(item.get('mode')) if item.get('mode') else ''}").strip()
@@ -347,6 +356,20 @@ class TaskStateCenter:
         if missing_outputs:
             diagnostics.append({"level": "warn", "code": "missing_step_outputs", "message": f"步骤状态已完成但缺少 output.md：{', '.join(missing_outputs)}"})
         return diagnostics
+
+    @staticmethod
+    def _is_optional_missing_workflow_slot(item: dict[str, Any]) -> bool:
+        text = " ".join(
+            str(value or "").strip()
+            for value in (
+                item.get("workflow_id"),
+                item.get("mode"),
+                item.get("workflow_mode"),
+                item.get("label"),
+                item.get("capability"),
+            )
+        ).lower()
+        return "enhance_video" in text or "video_enhance" in text
 
     def _production_nodes(self, manifest: dict[str, Any]) -> list[dict[str, Any]]:
         nodes = []

@@ -4072,6 +4072,7 @@ INDEX_HTML = r"""<!doctype html>
     let productionEntities = { characters: {}, styles: {}, products: {}, scenes: {} };
     let selectedProductionEntityId = '';
     let localModelPresets = [];
+    let runtimeModelConfigFromServer = {};
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v2';
@@ -4825,7 +4826,10 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function syncRuntimeModelConfig(options = {}) {
-      const payload = currentRuntimeModelPayload();
+      const payload = {
+        ...currentRuntimeModelPayload(),
+        allow_local_override: Boolean(options.allowLocalOverride),
+      };
       const hasAnyValue = Boolean(payload.provider || payload.model || payload.api_key || payload.base_url || payload.timeout);
       if (!hasAnyValue) return null;
       if (options.remoteOnly && !looksLikeRemoteRuntimeModel(payload)) return null;
@@ -4867,7 +4871,11 @@ INDEX_HTML = r"""<!doctype html>
       if (!payload.model || !payload.api_key) {
         throw new Error('请先在系统配置填写模型名和 API Key');
       }
-      const result = await syncRuntimeModelConfig({ requireComplete: true, timeoutMs: options.timeoutMs || 12000 });
+      const result = await syncRuntimeModelConfig({
+        requireComplete: true,
+        timeoutMs: options.timeoutMs || 12000,
+        allowLocalOverride: Boolean(options.allowLocalOverride),
+      });
       if (result?.model && els.env) {
         els.env.textContent = `已缓存运行时模型：${result.provider || 'auto'} / ${result.model}`;
       }
@@ -4922,7 +4930,7 @@ INDEX_HTML = r"""<!doctype html>
       els.syncRuntimeModelBtn.disabled = true;
       els.syncRuntimeModelBtn.textContent = '正在保存...';
       try {
-        const result = await saveRuntimeModelConfigFromVisibleForm();
+        const result = await saveRuntimeModelConfigFromVisibleForm({ allowLocalOverride: true });
         setStatus(`运行模型配置已保存：${result.provider || 'auto'} / ${result.model}`);
         showToast('运行模型配置已保存');
         if (selectedTask) await refreshSelectedTaskDetail({ preserveFile: true });
@@ -4941,6 +4949,7 @@ INDEX_HTML = r"""<!doctype html>
 
     async function loadConfig() {
       const data = await api('/api/config');
+      runtimeModelConfigFromServer = data.runtime_model_config || {};
       localModelPresets = data.local_model_presets || [];
       staffOptions = (data.staff || []).filter(isActiveLongVideoStaff);
       if (data.runtime_model_saved && data.runtime_model_config?.model) {
@@ -4973,7 +4982,15 @@ INDEX_HTML = r"""<!doctype html>
       if (!config || typeof config !== 'object') return;
       const settings = readSettings();
       const hasLocalModelSettings = Boolean(settings.provider || settings.model || settings.customModel || settings.apiKey || settings.baseUrl);
-      if (hasLocalModelSettings) return;
+      const localSettingsPayload = {
+        provider: settings.provider || '',
+        model: settings.model === 'custom' ? settings.customModel : settings.model,
+        api_key: settings.apiKey || '',
+        base_url: settings.baseUrl || '',
+      };
+      const serverIsRemote = looksLikeRemoteRuntimeModel(config);
+      const localSettingsAreRemote = looksLikeRemoteRuntimeModel(localSettingsPayload);
+      if (hasLocalModelSettings && (!serverIsRemote || localSettingsAreRemote)) return;
       if (config.provider) setIfExists(els.provider, config.provider);
       if (config.model) {
         const knownOptions = Array.from(els.model.options || []).map(option => option.value);
@@ -12377,13 +12394,27 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     @classmethod
     def _resolve_runtime_model_request(cls, payload: dict) -> dict:
         saved = cls._read_runtime_model_config()
-        provider = str(payload.get("provider") or "").strip() or str(saved.get("provider") or "auto").strip() or "auto"
-        model = str(payload.get("model") or "").strip() or str(saved.get("model") or "").strip() or None
-        api_key = str(payload.get("api_key") or "").strip() or str(saved.get("api_key") or "").strip() or None
-        base_url = str(payload.get("base_url") or "").strip() or str(saved.get("base_url") or "").strip() or None
-        timeout = int(payload.get("timeout") or 0) or int(saved.get("timeout") or 0) or None
+        request_payload = dict(payload)
+        if (
+            cls._is_remote_runtime_model_config(saved)
+            and cls._is_local_runtime_model_config(request_payload)
+            and not cls._truthy(request_payload.get("allow_local_override"))
+        ):
+            request_payload = {
+                **request_payload,
+                "provider": saved.get("provider") or "auto",
+                "model": saved.get("model") or "",
+                "api_key": saved.get("api_key") or "",
+                "base_url": saved.get("base_url") or "",
+                "timeout": saved.get("timeout") or request_payload.get("timeout") or 900,
+            }
+        provider = str(request_payload.get("provider") or "").strip() or str(saved.get("provider") or "auto").strip() or "auto"
+        model = str(request_payload.get("model") or "").strip() or str(saved.get("model") or "").strip() or None
+        api_key = str(request_payload.get("api_key") or "").strip() or str(saved.get("api_key") or "").strip() or None
+        base_url = str(request_payload.get("base_url") or "").strip() or str(saved.get("base_url") or "").strip() or None
+        timeout = int(request_payload.get("timeout") or 0) or int(saved.get("timeout") or 0) or None
         if any(
-            str(payload.get(key) or "").strip()
+            str(request_payload.get(key) or "").strip()
             for key in ("provider", "model", "api_key", "base_url", "timeout")
         ):
             cls._write_runtime_model_config(
@@ -12402,6 +12433,24 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "base_url": base_url,
             "timeout": timeout,
         }
+
+    @staticmethod
+    def _truthy(value: object) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _is_local_runtime_model_config(config: dict) -> bool:
+        api_key = str(config.get("api_key") or "").strip().lower()
+        base_url = str(config.get("base_url") or "").strip().rstrip("/").lower()
+        return api_key == "local" or base_url == "http://127.0.0.1:11434/v1"
+
+    @classmethod
+    def _is_remote_runtime_model_config(cls, config: dict) -> bool:
+        model = str(config.get("model") or "").strip()
+        api_key = str(config.get("api_key") or "").strip()
+        return bool(model and api_key and not cls._is_local_runtime_model_config(config))
 
     @staticmethod
     def _ensure_runtime_model_configured(runtime_model: dict) -> None:
@@ -14589,6 +14638,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 entry = raw if isinstance(raw, dict) else {"prompt": str(raw)}
                 workflow_id = cls._infer_debug_workflow_id(entry, default_workflow, workflow_by_id)
                 workflow_mode = str(entry.get("workflow_mode") or entry.get("image_task_mode") or entry.get("video_task_mode") or entry.get("task_type") or entry.get("asset_tag") or "").strip()
+                if cls._is_optional_comfy_debug_item(entry, workflow_id, workflow_mode):
+                    continue
                 source_id = str(entry.get("id") or entry.get("shot_id") or entry.get("scene_id") or f"{source_key}_{source_index:03d}").strip()
                 item_id = f"{workflow_id}:{workflow_mode or 'default'}:{source_id}"
                 item_state = state_items.get(item_id) if isinstance(state_items.get(item_id), dict) else {}
@@ -14782,6 +14833,29 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "video_inpaint_fix": 120,
         }
         return preferred.get(key, preferred.get(workflow_id, workflow_order.get(workflow_id, 999)))
+
+    @staticmethod
+    def _is_optional_comfy_debug_item(entry: dict, workflow_id: str = "", workflow_mode: str = "") -> bool:
+        optional = entry.get("optional_when_unconfigured")
+        if isinstance(optional, bool) and optional:
+            return True
+        if isinstance(optional, str) and optional.strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+        text = " ".join(
+            str(value or "").strip()
+            for value in (
+                workflow_id,
+                workflow_mode,
+                entry.get("workflow_id"),
+                entry.get("workflow_mode"),
+                entry.get("mode"),
+                entry.get("intent"),
+                entry.get("asset_tag"),
+                entry.get("capability"),
+                entry.get("video_task_mode"),
+            )
+        ).lower()
+        return "enhance_video" in text or "video_enhance" in text
 
     @staticmethod
     def _read_json_file(path: Path) -> dict:
