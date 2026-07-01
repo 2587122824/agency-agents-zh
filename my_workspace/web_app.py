@@ -4279,8 +4279,8 @@ INDEX_HTML = r"""<!doctype html>
         clearTimeout(progressTimer);
         progressTimer = null;
       }
-      trackRun("");
-      setWorkflowInteractionLocked(false);
+      clearTrackedRun();
+      setWorkflowInteractionLocked(false, { skipOutputSync: true });
     }
 
     function maybeShowOutput() {
@@ -4291,7 +4291,7 @@ INDEX_HTML = r"""<!doctype html>
       return false;
     }
 
-    function setWorkflowInteractionLocked(locked) {
+    function setWorkflowInteractionLocked(locked, options = {}) {
       workflowInteractionLocked = Boolean(locked);
       const runView = document.querySelector('[data-view="run"]');
       const composer = document.querySelector('.run-composer');
@@ -4319,7 +4319,7 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (!workflowInteractionLocked && els.runBtn) els.runBtn.disabled = false;
       syncRunControlButtons();
-      syncOutputButtons();
+      if (!options.skipOutputSync) syncOutputButtons();
     }
 
     function showStartupProgress(label = '启动中') {
@@ -4347,16 +4347,28 @@ INDEX_HTML = r"""<!doctype html>
       setRunButtonProgress(0);
     }
 
+    function clearTrackedRun() {
+      if (currentRunId) {
+        progressStepOpenState.clear();
+        progressUserToggledSteps.clear();
+      }
+      currentRunId = "";
+      activeRunTaskName = "";
+      currentRunStatus = "";
+      syncRunControlButtons();
+    }
+
     function trackRun(runId) {
+      if (!runId) {
+        clearTrackedRun();
+        syncOutputButtons();
+        return;
+      }
       if (currentRunId !== (runId || "")) {
         progressStepOpenState.clear();
         progressUserToggledSteps.clear();
       }
-      currentRunId = runId || "";
-      if (!currentRunId) {
-        activeRunTaskName = "";
-        currentRunStatus = "";
-      }
+      currentRunId = runId;
       syncRunControlButtons();
       syncOutputButtons();
     }

@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-01] Fixed a frontend recursion that could break the Task Output page after switching views. `syncOutputButtons()` called idle-unlock logic, which called `trackRun("")`, which called `syncOutputButtons()` again until Chrome reported `Maximum call stack size exceeded`. Clearing tracked run state is now separated from full button resync, and `setWorkflowInteractionLocked()` can skip nested output sync when called from that idle-unlock path.
+
 - [2026-07-01] Model execution now has a no-silent-local-fallback guard. `/api/run`, `/api/resume-task`, and `/api/rerun-step` resolve the runtime model config first and then require a model plus API key from either the request, cached runtime config, or environment. If none exists, the request fails with a clear Chinese message telling the user to configure/test the model first, instead of silently falling back to the local offline Qwen path.
 
 - [2026-07-01] Resume/rerun no longer depend only on one browser tab's localStorage for model settings. The management app now caches the most recent explicit runtime model config (`provider` / `model` / `api_key` / `base_url` / `timeout`) in local ignored state under `tmp/`, `loadConfig()` hydrates empty model fields from that cached config, and `/api/run`, `/api/resume-task`, `/api/rerun-step`, and `/api/test-model` all resolve blank requests through the saved runtime config before falling back. This prevents `继续任务` from silently dropping back to the local offline `qwen3:8b-q4_K_M` path after refresh, browser-context changes, or service restart.
