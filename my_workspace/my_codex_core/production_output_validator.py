@@ -128,9 +128,11 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
         if not isinstance(segment, dict):
             issues.append("subtitle segments contains a non-object item")
             continue
-        for key in ("start_time", "end_time"):
-            raw = str(segment.get(key) or "")
-            parsed = _time_seconds(raw)
+        for key, aliases in (
+            ("start_time", ("start_time", "start", "start_timecode", "start_time_seconds", "start_seconds")),
+            ("end_time", ("end_time", "end", "end_timecode", "end_time_seconds", "end_seconds")),
+        ):
+            raw, parsed = _segment_time_seconds(segment, aliases)
             if parsed is None:
                 invalid_times.append(raw or "空")
             elif key == "end_time":
@@ -447,6 +449,28 @@ def _time_seconds(value: str) -> float | None:
     if minutes >= 60 or seconds >= 60:
         return None
     return hours * 3600 + minutes * 60 + seconds
+
+
+def _segment_time_seconds(segment: dict[str, Any], aliases: tuple[str, ...]) -> tuple[str, float | None]:
+    for alias in aliases:
+        if alias not in segment:
+            continue
+        value = segment.get(alias)
+        if isinstance(value, (int, float)):
+            parsed = float(value)
+            return str(value), parsed if parsed >= 0 else None
+        raw = str(value or "").strip()
+        if not raw:
+            return "", None
+        parsed = _time_seconds(raw)
+        if parsed is not None:
+            return raw, parsed
+        try:
+            numeric = float(raw)
+        except ValueError:
+            return raw, None
+        return raw, numeric if numeric >= 0 else None
+    return "", None
 
 
 def _srt_dialogue_text(srt: str) -> str:
