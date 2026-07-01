@@ -16,6 +16,29 @@ FAILED_STATUS_MARKERS = (
 )
 
 
+COMFY_WORKFLOW_SLOT_LABELS: dict[tuple[str, str], str] = {
+    ("01_base_asset_image", "character_base"): "01 基础资产 / 角色基础图",
+    ("01_base_asset_image", "product_base"): "01 基础资产 / 产品基础图",
+    ("01_base_asset_image", "scene_base"): "01 基础资产 / 场景基础图",
+    ("02_turnaround", "character_turnaround"): "01 基础资产 / 角色三视图",
+    ("02_turnaround", "product_turnaround"): "01 基础资产 / 产品三视图",
+    ("03_style_cover_image", "style_reference"): "01 基础资产 / 风格参考图",
+    ("03_style_cover_image", "cover_key_visual"): "01 基础资产 / 封面关键视觉",
+    ("04_keyframe", "keyframe"): "02 分镜关键帧 / 关键帧",
+    ("05_image_repair_cutout", "image_inpaint_fix"): "03 图片处理 / 局部修复",
+    ("05_image_repair_cutout", "background_remove"): "03 图片处理 / 抠图去背景",
+    ("06_i2v_first_frame", "i2v_first_frame"): "04 视频生成 / 首帧图生视频",
+    ("06_i2v_first_middle_last_frame", "i2v_first_middle_last_frame"): "04 视频生成 / 首中尾帧图生视频",
+    ("10_broll_transition_video", "broll_scene_video"): "04 视频生成 / B-roll 场景视频",
+    ("10_broll_transition_video", "empty_transition_video"): "04 视频生成 / 空镜转场视频",
+    ("09_talking_image", "talking_image"): "06 数字人口播 / 图片口播",
+    ("11_video_enhance", "video_upscale"): "07 视频后期 / 视频放大",
+    ("11_video_enhance", "frame_interpolation"): "07 视频后期 / 补帧",
+    ("11_video_enhance", "video_deflicker_stabilize"): "07 视频后期 / 去闪烁稳定",
+    ("12_video_inpaint_fix", "video_inpaint_fix"): "07 视频后期 / 视频局部修复",
+}
+
+
 class TaskStateCenter:
     """Unified read model for task progress and production state.
 
@@ -321,8 +344,8 @@ class TaskStateCenter:
             return {"action": "review_or_export", "label": "检查输出或导出任务", "reason": "completed_without_final_media"}
         return {"action": "none", "label": "暂无推荐操作", "reason": state}
 
-    def _diagnostics(self, state: str, steps: list[dict[str, Any]], production: dict[str, Any], blockers: list[dict[str, str]]) -> list[dict[str, str]]:
-        diagnostics: list[dict[str, str]] = []
+    def _diagnostics(self, state: str, steps: list[dict[str, Any]], production: dict[str, Any], blockers: list[dict[str, str]]) -> list[dict[str, Any]]:
+        diagnostics: list[dict[str, Any]] = []
         if not steps and self.files:
             diagnostics.append({"level": "warn", "code": "missing_workflow_steps", "message": "任务有文件，但没有可识别的工作流步骤。"})
         if self.active_job and str(self.active_job.get("error") or "").strip():
@@ -336,16 +359,15 @@ class TaskStateCenter:
         raw_missing_slots = composition.get("missing_workflow_slots") if isinstance(composition.get("missing_workflow_slots"), list) else []
         missing_slots = [item for item in raw_missing_slots if isinstance(item, dict) and not self._is_optional_missing_workflow_slot(item)]
         if missing_slots:
-            labels = [
-                str(item.get("label") or f"{item.get('workflow_id') or ''}{' / ' + str(item.get('mode')) if item.get('mode') else ''}").strip()
-                for item in missing_slots
-                if isinstance(item, dict)
-            ]
+            details = [self._workflow_slot_detail(item) for item in missing_slots]
+            labels = [item["display_label"] for item in details if item.get("display_label")]
             diagnostics.append(
                 {
                     "level": "warn",
                     "code": "missing_comfy_workflow_slots",
-                    "message": "ComfyUI 调试台缺少生产槽位配置：" + "、".join(label for label in labels if label),
+                    "message": "ComfyUI 调试台缺少生产槽位配置：" + "、".join(labels),
+                    "details": details,
+                    "suggestion": "请到 ComfyUI 调试台展开对应分类，为这些子模式保存 endpoint 和 nodeInfoList；配置后回到任务输出点击“重试素材”。",
                 }
             )
         for blocker in blockers:
@@ -356,6 +378,24 @@ class TaskStateCenter:
         if missing_outputs:
             diagnostics.append({"level": "warn", "code": "missing_step_outputs", "message": f"步骤状态已完成但缺少 output.md：{', '.join(missing_outputs)}"})
         return diagnostics
+
+    @staticmethod
+    def _workflow_slot_detail(item: dict[str, Any]) -> dict[str, str]:
+        workflow_id = str(item.get("workflow_id") or "").strip()
+        mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
+        raw_label = str(item.get("label") or "").strip()
+        zh_label = COMFY_WORKFLOW_SLOT_LABELS.get((workflow_id, mode), "")
+        fallback = raw_label or f"{workflow_id}{' / ' + mode if mode else ''}".strip()
+        display_label = zh_label
+        if fallback and fallback != zh_label:
+            display_label = f"{zh_label}（{workflow_id} / {mode}）" if zh_label else fallback
+        return {
+            "workflow_id": workflow_id,
+            "mode": mode,
+            "label": raw_label,
+            "display_label": display_label,
+            "debug_console_path": zh_label,
+        }
 
     @staticmethod
     def _is_optional_missing_workflow_slot(item: dict[str, Any]) -> bool:
