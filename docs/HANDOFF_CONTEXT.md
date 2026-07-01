@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-01] Browser end-to-end smoke testing found that local Qwen3 employee calls could spend several minutes in default thinking mode because the OpenAI-compatible Ollama request had no local reasoning/output controls. `CodexAPI` now sends `think=false` and `max_tokens=4096` only to local Ollama endpoints. The same pass keeps top navigation enabled while a run locks task/config inputs, treats future `pending` workflow steps as waiting rather than running in the production-stage card, and no longer marks the production plan compiled merely because placeholder production status cards exist.
+
 - [2026-07-01] Failed workflow runs are now treated as terminal immediately across persistence, the task state center, and the management UI. Failure clears stale pause/cancel/confirmation/block fields, marks the current step failed even when old confirmation metadata remains, removes `cancel`/`confirm_step` from allowed actions, unlocks the UI, and hides the stop button. Historical failed summaries with stale `awaiting_confirmation` data are also read safely as failed terminal tasks.
 
 - ComfyUI 调试台分类按生产顺序由 10 组精简为 7 组：`01 基础资产`、`02 分镜关键帧`、`03 图片处理`、`04 视频生成`、`05 视频控制`、`06 数字人口播`、`07 视频后期`。只改变导航归类和显示顺序，不改变子模式值、独立配置或员工兼容路由。

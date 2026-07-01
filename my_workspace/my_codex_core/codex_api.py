@@ -82,6 +82,12 @@ class CodexAPI:
             ],
             "temperature": 0.4,
         }
+        if self._is_local_ollama():
+            # Qwen3 enables long chain-of-thought by default in Ollama. Employee
+            # steps need bounded, structured production output instead of a
+            # multi-minute reasoning transcript.
+            payload["think"] = False
+            payload["max_tokens"] = 4096
         request = urllib.request.Request(
             url=f"{self.base_url}/chat/completions",
             data=json.dumps(payload).encode("utf-8"),
@@ -105,3 +111,6 @@ class CodexAPI:
 
         content = raw["choices"][0]["message"]["content"]
         return LLMResult(provider="openai", model=self.model, content=content, raw=raw)
+
+    def _is_local_ollama(self) -> bool:
+        return "127.0.0.1:11434" in self.base_url or "localhost:11434" in self.base_url

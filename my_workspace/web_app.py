@@ -4310,6 +4310,11 @@ INDEX_HTML = r"""<!doctype html>
       for (const control of document.querySelectorAll('[data-config-section] input, [data-config-section] select, [data-config-section] textarea, [data-config-section] button')) {
         control.disabled = workflowInteractionLocked;
       }
+      // Navigation remains available while a job runs. Only task/config inputs
+      // are locked; users must still be able to inspect status and outputs.
+      for (const button of navButtons) {
+        button.disabled = false;
+      }
       if (!workflowInteractionLocked && els.runBtn) els.runBtn.disabled = false;
       syncRunControlButtons();
       syncOutputButtons();
@@ -7446,13 +7451,14 @@ INDEX_HTML = r"""<!doctype html>
 
     function statusFromWorkflowStep(step) {
       if (!step) return 'waiting';
-      return normalizeStageStatus(step.status || step.state || (step.has_output ? 'completed' : 'waiting'));
+      const value = String(step.status || step.state || (step.has_output ? 'completed' : 'waiting')).toLowerCase();
+      if (value === 'pending') return 'waiting';
+      return normalizeStageStatus(value);
     }
 
     function hasPlanCompiled(data, status) {
       if (data?.production_plan_preview?.available) return true;
       const production = status?.production || {};
-      if (Array.isArray(production.jobs) && production.jobs.length) return true;
       const dagJobs = production?.dag?.jobs;
       if (Array.isArray(dagJobs) && dagJobs.length) return true;
       return false;
