@@ -4221,6 +4221,7 @@ INDEX_HTML = r"""<!doctype html>
       if (viewName === 'config') {
         moveConfigSections();
         queueRuntimeModelConfigSync({ remoteOnly: true });
+        queueRuntimeComfyConfigSync();
       }
       for (const view of views) {
         view.hidden = view.dataset.view !== viewName;
@@ -4974,6 +4975,23 @@ INDEX_HTML = r"""<!doctype html>
       return result;
     }
 
+    function queueRuntimeComfyConfigSync(options = {}) {
+      const payload = currentRuntimeComfyPayload();
+      const hasAnyWorkflowConfig = Boolean(
+        payload.api_key
+        || payload.base_url
+        || payload.workflow_endpoint
+        || payload.node_info_list_json
+        || (Array.isArray(payload.workflow_library) && payload.workflow_library.length)
+        || payload.comfy_mcp_url
+      );
+      if (!hasAnyWorkflowConfig) return;
+      if (options.requireRunningHub && payload.visual_provider === 'runninghub' && !payload.api_key && !hasSavedRuntimeComfyApiKey()) return;
+      syncRuntimeComfyConfig({ timeoutMs: 8000 }).catch((err) => {
+        console.warn('runtime comfy config sync failed', err);
+      });
+    }
+
     async function saveRuntimeComfyConfigFromVisibleForm(options = {}) {
       saveSettings();
       return syncRuntimeComfyConfig({ timeoutMs: options.timeoutMs || 12000, requireRunningHub: Boolean(options.requireRunningHub) });
@@ -5025,6 +5043,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       queueRuntimeModelConfigSync({ remoteOnly: true });
+      queueRuntimeComfyConfigSync();
     }
 
     function applyRuntimeComfyConfig(config) {
@@ -5336,6 +5355,7 @@ INDEX_HTML = r"""<!doctype html>
       });
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
       queueRuntimeModelConfigSync({ remoteOnly: true });
+      queueRuntimeComfyConfigSync();
     }
 
     function restoreSettings() {
