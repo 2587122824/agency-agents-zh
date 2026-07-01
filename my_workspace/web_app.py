@@ -13647,6 +13647,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             with RUN_JOBS_LOCK:
                 job = RUN_JOBS.get(run_id)
                 if job:
+                    if self._is_failed_production_status(production_status.lower()):
+                        job["status"] = "failed"
+                        job["error"] = f"自动生成失败：{production_status}"
+                    else:
+                        job["status"] = "completed"
+                        job.pop("error", None)
+                        job.pop("traceback", None)
                     job["production_retry"] = True
                     job["production_retry_job"] = retry_job
                     job["production_status"] = production_status
