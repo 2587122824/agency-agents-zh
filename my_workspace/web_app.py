@@ -1121,6 +1121,48 @@ INDEX_HTML = r"""<!doctype html>
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .output-card.stage-card {
+      grid-column: 1 / -1;
+    }
+    .stage-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 8px;
+    }
+    .stage-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px 9px;
+      background: #fff;
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+    .stage-item .stage-name {
+      font-size: 13px;
+      font-weight: 750;
+      color: var(--text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .stage-item .stage-state {
+      font-size: 12px;
+      color: var(--muted);
+    }
+    .stage-item.done {
+      border-color: rgba(20, 184, 166, .35);
+      background: #f0fdfa;
+    }
+    .stage-item.running {
+      border-color: rgba(14, 165, 233, .45);
+      background: #f0f9ff;
+    }
+    .stage-item.blocked,
+    .stage-item.failed {
+      border-color: rgba(239, 68, 68, .35);
+      background: #fff1f2;
+    }
     .production-plan-grid,
     .entity-manager-grid,
     .template-debug-grid {
@@ -7105,6 +7147,17 @@ INDEX_HTML = r"""<!doctype html>
       els.fileTabs.innerHTML = '';
       els.fileContent.value = '任务正在启动，后续步骤输出会自动显示在这里。';
       renderOutputOverview(null);
+      renderProductionJobs(
+        [],
+        [],
+        { label: '员工规划中', reason: '任务已提交，正在等待员工输出和生产计划编译。' },
+        [],
+        productionExecutionStages(
+          { state: 'running', workflow: { current_step: 1 }, steps: [], assets: {} },
+          { summary: { status: 'running' }, files: [] },
+          [],
+        ),
+      );
       syncOutputButtons();
     }
 
@@ -7300,7 +7353,9 @@ INDEX_HTML = r"""<!doctype html>
       const assetItems = structuredAssetItems({ ...data, assets: status.assets });
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
       const videoFile = preferredVideoFile(files);
-      renderProductionJobs(status.production?.jobs || data.production_jobs || [], status.diagnostics || [], status.next_action || null, status.blockers || []);
+      const productionJobs = status.production?.jobs || data.production_jobs || [];
+      const executionStages = productionExecutionStages(status, data, productionJobs);
+      renderProductionJobs(productionJobs, status.diagnostics || [], status.next_action || null, status.blockers || [], executionStages);
       renderProductionPlanPreview(data.production_plan_preview || null);
       renderTaskComfyDebugPanel(status.comfy_debug || {});
       renderVideoPreview(data.name, files);
@@ -7354,14 +7409,193 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function renderProductionJobs(jobs, diagnostics = [], nextAction = null, blockers = []) {
+    function normalizeStageStatus(value) {
+      const text = String(value || '').toLowerCase();
+      if (['completed', 'complete', 'success', 'succeeded', 'done', 'approved', 'cached', 'downloaded'].includes(text)) return 'done';
+      if (['running', 'queued', 'pending', 'submitted', 'processing'].includes(text)) return 'running';
+      if (['failed', 'error', 'timeout', 'blocked', 'cancelled', 'canceled'].includes(text)) return 'failed';
+      if (['skipped', 'off', 'disabled'].includes(text)) return 'waiting';
+      return text || 'waiting';
+    }
+
+    function stageStateLabel(state) {
+      const normalized = normalizeStageStatus(state);
+      if (normalized === 'done') return '已完成';
+      if (normalized === 'running') return '进行中';
+      if (normalized === 'failed') return '异常/阻塞';
+      return '等待中';
+    }
+
+    function stepMatches(step, patterns) {
+      const text = [
+        step?.name,
+        step?.agent_name,
+        step?.agent_id,
+        step?.title,
+        step?.label,
+        step?.step,
+      ].map(value => String(value || '')).join(' ');
+      return patterns.some(pattern => pattern.test(text));
+    }
+
+    function findWorkflowStep(status, patterns) {
+      const steps = Array.isArray(status?.steps) ? status.steps : [];
+      return steps.find(step => stepMatches(step, patterns)) || null;
+    }
+
+    function statusFromWorkflowStep(step) {
+      if (!step) return 'waiting';
+      return normalizeStageStatus(step.status || step.state || (step.has_output ? 'completed' : 'waiting'));
+    }
+
+    function hasPlanCompiled(data, status) {
+      if (data?.production_plan_preview?.available) return true;
+      const production = status?.production || {};
+      if (Array.isArray(production.jobs) && production.jobs.length) return true;
+      const dagJobs = production?.dag?.jobs;
+      if (Array.isArray(dagJobs) && dagJobs.length) return true;
+      return false;
+    }
+
+    function jobListStatus(jobs, predicate) {
+      const items = (Array.isArray(jobs) ? jobs : []).filter(predicate);
+      if (!items.length) return 'waiting';
+      const states = items.map(item => normalizeStageStatus(item.status || item.state)).filter(Boolean);
+      if (states.some(state => state === 'failed')) return 'failed';
+      if (states.some(state => state === 'running')) return 'running';
+      if (states.every(state => state === 'done')) return 'done';
+      return 'waiting';
+    }
+
+    function objectStageStatus(item) {
+      if (!item || typeof item !== 'object') return 'waiting';
+      return normalizeStageStatus(item.status || item.adapter_status || item.local_ffmpeg_status || item.comfyui_adapter_status || item.state);
+    }
+
+    function productionExecutionStages(status, data, jobs = []) {
+      const currentState = normalizeStageStatus(status?.state || data?.task_state || data?.summary?.status);
+      const step06 = findWorkflowStep(status, [/^6\b|^06\b/, /06_/, /分镜生图/, /生图设计/]);
+      const step07 = findWorkflowStep(status, [/^7\b|^07\b/, /07_/, /视频生成/]);
+      const step20 = findWorkflowStep(status, [/^20\b/, /20_/, /语音/, /字幕/]);
+      const imageAssetCount = Number(status?.assets?.images?.length || data?.assets?.images?.length || 0);
+      const videoAssetCount = Number(status?.assets?.videos?.length || data?.assets?.videos?.length || 0);
+      const jobsText = job => JSON.stringify(job || {}).toLowerCase();
+      const visualStatus = jobListStatus(jobs, job => /material|comfy|runninghub|image|video|visual/.test(jobsText(job)));
+      const imageStatus = imageAssetCount > 0 ? 'done' : jobListStatus(jobs, job => /image|keyframe|base_asset|visual/.test(jobsText(job)));
+      const videoStatus = videoAssetCount > 0 ? 'done' : jobListStatus(jobs, job => /video|i2v|clip|visual/.test(jobsText(job)));
+      const ttsStatus = objectStageStatus(status?.tts || status?.production?.tts);
+      const ffmpegStatus = objectStageStatus(status?.ffmpeg || status?.production?.ffmpeg);
+      const finalReady = currentState === 'done' || Boolean(data?.summary?.final_output) || Boolean((data?.files || []).some(file => /(?:final|long_video).*\.mp4$/i.test(file)));
+
+      const stages = [
+        {
+          name: '员工规划中',
+          status: currentState === 'failed' ? 'failed' : statusFromWorkflowStep(step06) === 'waiting' ? 'running' : 'done',
+          detail: status?.workflow?.current_step ? `当前第 ${status.workflow.current_step} 步` : '',
+        },
+        {
+          name: '等待 06 输出',
+          status: statusFromWorkflowStep(step06),
+          detail: step06?.agent_name || step06?.name || '',
+        },
+        {
+          name: '等待 07 输出',
+          status: statusFromWorkflowStep(step07),
+          detail: step07?.agent_name || step07?.name || '',
+        },
+        {
+          name: '生产计划已编译',
+          status: hasPlanCompiled(data, status) ? 'done' : 'waiting',
+          detail: data?.production_plan_preview?.selected_template?.name || data?.production_plan_preview?.route?.production_type || '',
+        },
+        {
+          name: 'Comfy MCP/RunningHub 等待调用',
+          status: visualStatus,
+          detail: (status?.production?.visual_provider || data?.summary?.visual_provider || '').toString(),
+        },
+        {
+          name: '正在生成成图',
+          status: imageStatus,
+          detail: imageAssetCount ? `${imageAssetCount} 个图片素材` : '',
+        },
+        {
+          name: '正在生成视频',
+          status: videoStatus,
+          detail: videoAssetCount ? `${videoAssetCount} 个视频素材` : '',
+        },
+        {
+          name: '等待 TTS',
+          status: ttsStatus,
+          detail: status?.tts?.reason || status?.tts?.detail || '',
+        },
+        {
+          name: '等待 FFmpeg',
+          status: ffmpegStatus,
+          detail: status?.ffmpeg?.reason || status?.ffmpeg?.detail || '',
+        },
+        {
+          name: '完成',
+          status: finalReady ? 'done' : currentState === 'failed' ? 'failed' : 'waiting',
+          detail: finalReady ? '最终产物已生成' : '',
+        },
+      ];
+
+      if (statusFromWorkflowStep(step20) !== 'waiting' && ttsStatus === 'waiting') {
+        const ttsStage = stages.find(stage => stage.name === '等待 TTS');
+        if (ttsStage) {
+          ttsStage.status = statusFromWorkflowStep(step20);
+          ttsStage.detail = step20?.agent_name || step20?.name || '';
+        }
+      }
+      return stages;
+    }
+
+    function renderProductionExecutionStages(stages) {
+      const list = Array.isArray(stages) ? stages : [];
+      if (!list.length) return;
+      const card = document.createElement('div');
+      card.className = 'output-card stage-card';
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = '生产执行层阶段';
+      const value = document.createElement('div');
+      value.className = 'value';
+      const active = list.find(item => normalizeStageStatus(item.status) === 'running')
+        || list.find(item => normalizeStageStatus(item.status) === 'failed')
+        || list.find(item => normalizeStageStatus(item.status) === 'waiting');
+      value.textContent = active ? `${active.name} · ${stageStateLabel(active.status)}` : '阶段状态';
+      const stageList = document.createElement('div');
+      stageList.className = 'stage-list';
+      list.forEach(item => {
+        const state = normalizeStageStatus(item.status);
+        const row = document.createElement('div');
+        row.className = `stage-item ${state}`;
+        const name = document.createElement('div');
+        name.className = 'stage-name';
+        name.textContent = item.name || '阶段';
+        const stageState = document.createElement('div');
+        stageState.className = 'stage-state';
+        stageState.textContent = [stageStateLabel(state), item.detail || ''].filter(Boolean).join(' · ');
+        row.appendChild(name);
+        row.appendChild(stageState);
+        stageList.appendChild(row);
+      });
+      card.appendChild(label);
+      card.appendChild(value);
+      card.appendChild(stageList);
+      els.outputSummaryGrid.appendChild(card);
+    }
+
+    function renderProductionJobs(jobs, diagnostics = [], nextAction = null, blockers = [], stages = []) {
       const list = Array.isArray(jobs) ? jobs.filter(job => job && job.id) : [];
       const diagnosticList = Array.isArray(diagnostics) ? diagnostics.filter(item => item && item.message) : [];
       const blockerList = Array.isArray(blockers) ? blockers.filter(item => item && item.message) : [];
       const action = nextAction && typeof nextAction === 'object' ? nextAction : null;
+      const stageList = Array.isArray(stages) ? stages : [];
       els.outputSummaryGrid.innerHTML = '';
-      els.outputSummaryGrid.hidden = !list.length && !diagnosticList.length && !blockerList.length && !action;
-      if (!list.length && !diagnosticList.length && !blockerList.length && !action) return;
+      els.outputSummaryGrid.hidden = !stageList.length && !list.length && !diagnosticList.length && !blockerList.length && !action;
+      if (!stageList.length && !list.length && !diagnosticList.length && !blockerList.length && !action) return;
+      renderProductionExecutionStages(stageList);
       if (action && (action.label || action.action)) {
         const card = document.createElement('div');
         card.className = 'output-card';
