@@ -130,8 +130,9 @@ class TaskStateCenter:
                 by_step[step_no]["has_output"] = True
                 by_step[step_no]["size"] = path.stat().st_size if path.is_file() else 0
                 by_step[step_no]["mtime"] = path.stat().st_mtime if path.is_file() else 0
-        active_step = int((self.active_job or {}).get("current_step") or 0)
+        active_step = int((self.active_job or {}).get("current_step") or self.summary.get("current_step") or 0)
         completed_steps = int((self.active_job or {}).get("completed_steps") or self.summary.get("step_count") or 0)
+        run_status = str((self.active_job or {}).get("status") or self.summary.get("status") or "").lower()
         max_step = max(
             [int(item.get("step") or 0) for item in workflow_steps if isinstance(item, dict)]
             + list(by_step.keys())
@@ -145,13 +146,13 @@ class TaskStateCenter:
             metadata = self._step_metadata(index)
             output_info = by_step.get(index, {})
             has_output = bool(output_info.get("has_output"))
-            if active_step == index and (self.active_job or {}).get("status") in {"failed", "error"}:
+            if active_step == index and run_status in {"failed", "error"}:
                 status = "failed"
             elif awaiting_step == index:
                 status = "awaiting_confirmation"
             elif blocked_step == index:
                 status = "blocked"
-            elif active_step == index and (self.active_job or {}).get("status") in {"queued", "running"}:
+            elif active_step == index and run_status in {"queued", "running"}:
                 status = "running"
             elif has_output or index <= completed_steps:
                 status = "completed"
@@ -184,7 +185,7 @@ class TaskStateCenter:
             message = str(self.active_job.get("current_message") or self.active_job.get("error") or "")
         else:
             run_status = state
-            current_step = int(self.summary.get("blocked_step") or self.summary.get("resume_step") or self.summary.get("resume_from_step") or 0)
+            current_step = int(self.summary.get("current_step") or self.summary.get("blocked_step") or self.summary.get("resume_step") or self.summary.get("resume_from_step") or 0)
             completed_steps = len([step for step in steps if step.get("status") == "completed"])
             message = str(self.summary.get("blocked_reason") or "")
         return {

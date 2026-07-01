@@ -13084,8 +13084,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 by_step[step_no]["size"] = path.stat().st_size if path.is_file() else 0
                 by_step[step_no]["mtime"] = path.stat().st_mtime if path.is_file() else 0
 
-        active_step = int((active_job or {}).get("current_step") or 0)
+        active_step = int((active_job or {}).get("current_step") or summary.get("current_step") or 0)
         completed_steps = int((active_job or {}).get("completed_steps") or summary.get("step_count") or 0)
+        run_status = str((active_job or {}).get("status") or summary.get("status") or "").lower()
         max_step = max(
             [int(item.get("step") or 0) for item in workflow_steps if isinstance(item, dict)]
             + list(by_step.keys())
@@ -13100,13 +13101,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             metadata = cls._step_metadata(task_dir, index)
             output_info = by_step.get(index, {})
             has_output = bool(output_info.get("has_output"))
-            if active_step == index and (active_job or {}).get("status") in {"failed", "error"}:
+            if active_step == index and run_status in {"failed", "error"}:
                 status = "failed"
             elif awaiting_step == index:
                 status = "awaiting_confirmation"
             elif blocked_step == index:
                 status = "blocked"
-            elif active_step == index and (active_job or {}).get("status") in {"queued", "running"}:
+            elif active_step == index and run_status in {"queued", "running"}:
                 status = "running"
             elif has_output or index <= completed_steps:
                 status = "completed"
@@ -13209,7 +13210,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             message = str(active_job.get("current_message") or active_job.get("error") or "")
         else:
             run_status = task_state
-            current_step = int(summary.get("blocked_step") or summary.get("resume_step") or summary.get("resume_from_step") or 0)
+            current_step = int(summary.get("current_step") or summary.get("blocked_step") or summary.get("resume_step") or summary.get("resume_from_step") or 0)
             completed_steps = len([step for step in steps if step.get("status") == "completed"])
             message = str(summary.get("blocked_reason") or "")
         return {
