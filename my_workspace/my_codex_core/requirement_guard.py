@@ -167,6 +167,18 @@ def correction_prompt(prompt: str, lock: dict[str, Any], rejected_content: str, 
 
 def declares_human_confirmation(content: str) -> bool:
     text = str(content or "")
+    explicit_values = [
+        match.group(1).strip().lower()
+        for match in re.finditer(
+            r"human_confirmation_required\s*[:：]\s*`?\s*(true|false)\s*`?",
+            text,
+            flags=re.IGNORECASE,
+        )
+    ]
+    if any(value == "true" for value in explicit_values):
+        return True
+    if any(value == "false" for value in explicit_values):
+        return False
     return bool(
         re.search(r"human_confirmation_required\s*[:：]\s*true", text, flags=re.IGNORECASE)
         or re.search(r"^##\s*人工确认[（(]?阻塞[）)]?", text, flags=re.MULTILINE)
