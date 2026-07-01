@@ -1001,6 +1001,10 @@ def _update_run_summary_production_status(task_dir: Path, manifest: dict[str, An
     summary["production_status"] = manifest.get("status", "")
     summary["production_manifest"] = str(task_dir / "production_manifest.json")
     summary["updated_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+    if str(summary.get("status") or "").strip().lower() == "completed":
+        summary.pop("error", None)
+        summary.pop("traceback", None)
+        summary.pop("failed_at", None)
     if str(manifest.get("status") or "") == "final_video_generated":
         final_video = manifest.get("files", {}).get("final_video") if isinstance(manifest.get("files"), dict) else ""
         if final_video:
@@ -1011,12 +1015,16 @@ def _update_run_summary_production_status(task_dir: Path, manifest: dict[str, An
 def _retry_mode(manifest: dict[str, Any], config: dict[str, Any], requested_job: str = "") -> str:
     configured = str(config.get("mode") or "").strip()
     saved = str(manifest.get("mode") or "").strip()
+    composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
+    saved_execution = str(composition.get("execution_mode") or "").strip()
     if str(requested_job or "").strip().lower() == "material":
         material_modes = {"api_ready", "comfy_full"}
         if configured in material_modes:
             return configured
         if saved in material_modes:
             return saved
+        if saved_execution in material_modes:
+            return saved_execution
     if configured and configured != "off":
         return configured
     return str(saved or configured or "off").strip()
