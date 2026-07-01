@@ -4051,6 +4051,7 @@ INDEX_HTML = r"""<!doctype html>
     let comfyDebugWorkflows = [];
     let activeComfyDebugWorkflowId = '';
     let activeComfyDebugWorkflowMode = '';
+    let pendingComfyDebugTarget = null;
     const comfyDebugStateByWorkflowId = new Map();
     const comfyDebugCollapsedCapabilityGroups = new Set();
     const COMFY_DEBUG_CAPABILITY_GROUPS = [
@@ -5676,6 +5677,26 @@ INDEX_HTML = r"""<!doctype html>
       return comfyDebugWorkflows.find(item => item.id === activeComfyDebugWorkflowId)
         || comfyDebugWorkflows[0]
         || null;
+    }
+
+    function focusComfyDebugSlot(workflowId = '', mode = '') {
+      const target = {
+        workflowId: String(workflowId || '').trim(),
+        mode: String(mode || '').trim(),
+      };
+      if (!target.workflowId) return;
+      pendingComfyDebugTarget = target;
+      activeComfyDebugWorkflowId = target.workflowId;
+      activeComfyDebugWorkflowMode = target.mode;
+      showView('comfyDebug');
+      if (Array.isArray(comfyDebugWorkflows) && comfyDebugWorkflows.length) {
+        const selected = setActiveComfyDebugWorkflow(target.workflowId, true, target.mode);
+        renderComfyDebugWorkflows();
+        if (selected) {
+          pendingComfyDebugTarget = null;
+          setStatus(`已打开 ComfyUI 调试槽位：${target.workflowId}${target.mode ? ' / ' + target.mode : ''}`);
+        }
+      }
     }
 
     function readComfyDebugFormState() {
@@ -7947,6 +7968,37 @@ INDEX_HTML = r"""<!doctype html>
         card.appendChild(label);
         card.appendChild(value);
         card.appendChild(detail);
+        if (item.code === 'missing_comfy_workflow_slots' && Array.isArray(item.details) && item.details.length) {
+          const slotList = document.createElement('div');
+          slotList.className = 'muted small';
+          slotList.style.marginTop = '8px';
+          item.details.slice(0, 8).forEach(slot => {
+            if (!slot || !slot.workflow_id) return;
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.justifyContent = 'space-between';
+            row.style.gap = '8px';
+            row.style.marginTop = '4px';
+            const text = document.createElement('span');
+            text.textContent = slot.display_label || slot.debug_console_path || `${slot.workflow_id}${slot.mode ? ' / ' + slot.mode : ''}`;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = '去配置';
+            button.onclick = () => focusComfyDebugSlot(slot.workflow_id, slot.mode || '');
+            row.appendChild(text);
+            row.appendChild(button);
+            slotList.appendChild(row);
+          });
+          card.appendChild(slotList);
+          if (item.suggestion) {
+            const suggestion = document.createElement('div');
+            suggestion.className = 'muted small';
+            suggestion.style.marginTop = '8px';
+            suggestion.textContent = item.suggestion;
+            card.appendChild(suggestion);
+          }
+        }
         els.outputSummaryGrid.appendChild(card);
       }
       for (const item of diagnosticList) {
@@ -7964,6 +8016,37 @@ INDEX_HTML = r"""<!doctype html>
         card.appendChild(label);
         card.appendChild(value);
         card.appendChild(detail);
+        if (item.code === 'missing_comfy_workflow_slots' && Array.isArray(item.details) && item.details.length) {
+          const slotList = document.createElement('div');
+          slotList.className = 'muted small';
+          slotList.style.marginTop = '8px';
+          item.details.slice(0, 8).forEach(slot => {
+            if (!slot || !slot.workflow_id) return;
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.justifyContent = 'space-between';
+            row.style.gap = '8px';
+            row.style.marginTop = '4px';
+            const text = document.createElement('span');
+            text.textContent = slot.display_label || slot.debug_console_path || `${slot.workflow_id}${slot.mode ? ' / ' + slot.mode : ''}`;
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = '去配置';
+            button.onclick = () => focusComfyDebugSlot(slot.workflow_id, slot.mode || '');
+            row.appendChild(text);
+            row.appendChild(button);
+            slotList.appendChild(row);
+          });
+          card.appendChild(slotList);
+          if (item.suggestion) {
+            const suggestion = document.createElement('div');
+            suggestion.className = 'muted small';
+            suggestion.style.marginTop = '8px';
+            suggestion.textContent = item.suggestion;
+            card.appendChild(suggestion);
+          }
+        }
         els.outputSummaryGrid.appendChild(card);
       }
       for (const job of list) {
@@ -10587,6 +10670,10 @@ INDEX_HTML = r"""<!doctype html>
           normalizeComfyDebugWorkflowSavedConfig(getComfyWorkflowLibraryItemById(workflow.id), workflow);
         });
         saveSettings();
+        if (pendingComfyDebugTarget?.workflowId) {
+          activeComfyDebugWorkflowId = pendingComfyDebugTarget.workflowId;
+          activeComfyDebugWorkflowMode = pendingComfyDebugTarget.mode || '';
+        }
         if (!activeComfyDebugWorkflowId && comfyDebugWorkflows.length) {
           activeComfyDebugWorkflowId = comfyDebugWorkflows[0].id;
         }
@@ -10594,6 +10681,10 @@ INDEX_HTML = r"""<!doctype html>
           setActiveComfyDebugWorkflow(activeComfyDebugWorkflowId, true, activeComfyDebugWorkflowMode);
         }
         renderComfyDebugWorkflows();
+        if (pendingComfyDebugTarget?.workflowId) {
+          setStatus(`已打开 ComfyUI 调试槽位：${pendingComfyDebugTarget.workflowId}${pendingComfyDebugTarget.mode ? ' / ' + pendingComfyDebugTarget.mode : ''}`);
+          pendingComfyDebugTarget = null;
+        }
         resumeComfyDebugPolls();
         if (els.comfyDebugStatus && !activeComfyDebugState()?.running) {
           els.comfyDebugStatus.textContent = `${comfyDebugWorkflows.length} 个调试模块`;
