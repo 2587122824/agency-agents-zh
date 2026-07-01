@@ -5679,6 +5679,32 @@ INDEX_HTML = r"""<!doctype html>
         || null;
     }
 
+    function prepareComfyDebugTargetState(target = {}) {
+      const workflowId = String(target.workflowId || '').trim();
+      const mode = String(target.mode || '').trim();
+      const workflow = comfyDebugWorkflows.find(item => item.id === workflowId);
+      if (!workflow || !mode) return;
+      activeComfyDebugWorkflowId = workflowId;
+      activeComfyDebugWorkflowMode = mode;
+      const stateKey = comfyDebugLeafKey(workflowId, mode);
+      const fresh = defaultComfyDebugStateForWorkflow(workflow, mode);
+      const previous = comfyDebugStateByWorkflowId.get(stateKey) || {};
+      comfyDebugStateByWorkflowId.set(stateKey, {
+        ...previous,
+        workflowMode: mode,
+        endpoint: fresh.endpoint || '',
+        nodeInfoList: fresh.nodeInfoList || '[]',
+        pollTimeout: fresh.pollTimeout || previous.pollTimeout || '3600',
+        width: fresh.width || previous.width || '',
+        height: fresh.height || previous.height || '',
+        duration: fresh.duration || previous.duration || '',
+        fps: fresh.fps || previous.fps || '',
+        referenceHint: fresh.referenceHint || previous.referenceHint || '',
+        middleFrameReferenceHint: fresh.middleFrameReferenceHint || previous.middleFrameReferenceHint || '',
+        lastFrameReferenceHint: fresh.lastFrameReferenceHint || previous.lastFrameReferenceHint || '',
+      });
+    }
+
     function focusComfyDebugSlot(workflowId = '', mode = '') {
       const target = {
         workflowId: String(workflowId || '').trim(),
@@ -5690,6 +5716,7 @@ INDEX_HTML = r"""<!doctype html>
       activeComfyDebugWorkflowMode = target.mode;
       showView('comfyDebug');
       if (Array.isArray(comfyDebugWorkflows) && comfyDebugWorkflows.length) {
+        prepareComfyDebugTargetState(target);
         const selected = setActiveComfyDebugWorkflow(target.workflowId, true, target.mode);
         renderComfyDebugWorkflows();
         if (selected) {
@@ -8864,7 +8891,9 @@ INDEX_HTML = r"""<!doctype html>
     function selectedWorkflowModeDefinition(workflow = activeComfyDebugWorkflow()) {
       const modes = workflowModesForWorkflow(workflow);
       if (!modes.length) return null;
-      const selected = els.comfyDebugWorkflowMode?.value || modes[0].value;
+      const selected = (workflow?.id === activeComfyDebugWorkflowId && activeComfyDebugWorkflowMode)
+        ? activeComfyDebugWorkflowMode
+        : (els.comfyDebugWorkflowMode?.value || modes[0].value);
       return modes.find(item => item.value === selected) || modes[0];
     }
 
@@ -8880,7 +8909,9 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyDebugWorkflowMode.disabled = true;
         return;
       }
-      const current = els.comfyDebugWorkflowMode.value || modes[0].value;
+      const current = (workflow?.id === activeComfyDebugWorkflowId && activeComfyDebugWorkflowMode)
+        ? activeComfyDebugWorkflowMode
+        : (els.comfyDebugWorkflowMode.value || modes[0].value);
       modes.forEach(mode => {
         const option = document.createElement('option');
         option.value = mode.value;
@@ -10673,6 +10704,7 @@ INDEX_HTML = r"""<!doctype html>
         if (pendingComfyDebugTarget?.workflowId) {
           activeComfyDebugWorkflowId = pendingComfyDebugTarget.workflowId;
           activeComfyDebugWorkflowMode = pendingComfyDebugTarget.mode || '';
+          prepareComfyDebugTargetState(pendingComfyDebugTarget);
         }
         if (!activeComfyDebugWorkflowId && comfyDebugWorkflows.length) {
           activeComfyDebugWorkflowId = comfyDebugWorkflows[0].id;
