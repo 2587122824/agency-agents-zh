@@ -984,6 +984,31 @@ def _retry_ffmpeg_job(
         manifest["status"] = "local_ffmpeg_skipped"
     else:
         manifest["status"] = "local_ffmpeg_failed"
+    _upsert_production_node(
+        manifest,
+        "ffmpeg_compose",
+        stage="08_audio_visual_packaging",
+        mode="ffmpeg_compose",
+        status=str(result.get("status") or "failed"),
+        depends_on=ffmpeg_depends_on,
+        outputs=outputs,
+        error=str(result.get("error") or result.get("reason") or ""),
+    )
+    export_status = "success" if result.get("status") == "success" and outputs else "blocked"
+    subtitles_path = Path(str(manifest.get("files", {}).get("subtitles") or ""))
+    if subtitles_path and not subtitles_path.is_absolute():
+        subtitles_path = (task_dir / subtitles_path).resolve()
+    export_outputs = [*outputs, str(subtitles_path)] if outputs and subtitles_path.is_file() else outputs
+    _upsert_production_node(
+        manifest,
+        "format_export",
+        stage="08_audio_visual_packaging",
+        mode="format_export",
+        status=export_status,
+        depends_on=["ffmpeg_compose"],
+        outputs=export_outputs,
+        error="" if export_status == "success" else "ffmpeg_compose did not produce a final MP4",
+    )
     emit("FFmpeg composition retry finished", stage="ffmpeg", status=result.get("status") or "")
     return result
 
