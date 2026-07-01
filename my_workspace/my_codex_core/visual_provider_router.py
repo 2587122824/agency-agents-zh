@@ -41,8 +41,10 @@ def build_visual_provider_profile(compose_config: dict[str, Any] | None) -> dict
         supported = False
         reason = "Comfy MCP provider selected but comfy_mcp_url is missing"
     elif provider == "runninghub" and not endpoint:
+        supported = False
         reason = "runninghub provider selected without a workflow endpoint"
     elif provider == "local_comfyui" and not base_url:
+        supported = False
         reason = "local_comfyui provider selected without a base URL"
 
     return {
