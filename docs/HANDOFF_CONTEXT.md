@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-01] Existing-task material retry now inherits the task's saved material-capable mode when the current UI happens to be set to `package_only`, preventing `Cannot retry material job when production mode is 'package_only'`. Before invoking the visual provider, retry recompiles `production_plan.json`, `comfyui_payload.json`, and `production_graph.json` from persisted 01/06/07/20/22 employee outputs, so compiler routing fixes also repair older tasks instead of replaying stale archived workflow IDs.
+
 - [2026-07-01] Production-plan compilation now treats employee `compatibility.recommended_workflow_*` values as legacy hints instead of authoritative routing. Known image/video intents map to the active function-based ComfyUI debug-console slots (`01_base_asset_image`, `03_style_cover_image`, `04_keyframe`, `06_i2v_first_frame`, and related modes); base assets also select character/product/scene modes from `asset_role`. This prevents completed employee JSON containing archived IDs such as `01_all_in_one_image`, `04_keyframe_image`, or `06A_i2v_first_frame` from being falsely reported as unconfigured. Optional video enhancement maps to `11_video_enhance/video_upscale` and remains skippable when that slot is not configured.
 
 - [2026-07-01] Task status now exposes a runtime-model sync diagnostic. When a task can be resumed but there is no backend runtime model cache and no active run, `/api/task-status` adds `runtime_model_not_synced`, sets the next action to `sync_runtime_model`, and explains that the user should refresh/save/test model config or continue with the visible form values. This prevents the Task Output page from looking silently ready while the backend would still reject resume for missing model/API Key.

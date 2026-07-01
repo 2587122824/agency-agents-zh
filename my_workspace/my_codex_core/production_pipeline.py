@@ -648,8 +648,9 @@ def retry_production_job(
         raise ValueError("production_manifest.json must contain a JSON object")
 
     config = production_config if isinstance(production_config, dict) else {}
-    mode = _retry_mode(manifest, config)
+    mode = _retry_mode(manifest, config, requested_job_id)
     image_config = _retry_section_config(manifest, config, "image_config", "image_generation")
+    video_config = _retry_section_config(manifest, config, "video_config", "video_generation")
     voice_config = _retry_section_config(manifest, config, "voice_config", "audio")
     compose_config = _retry_section_config(manifest, config, "compose_config", "composition")
     compose_config = dict(compose_config)
@@ -689,6 +690,8 @@ def retry_production_job(
         else:
             retry_job = "material"
             compose_config["force_retry_job_id"] = requested_job_id
+    if retry_job == "material":
+        mode = _retry_mode(manifest, config, "material")
 
     def emit(message: str, stage: str = "production", **extra: Any) -> None:
         if not progress_callback:
@@ -710,6 +713,14 @@ def retry_production_job(
 
     try:
         if retry_job == "material":
+            _refresh_visual_plan_for_retry(
+                task_dir,
+                paths,
+                manifest,
+                compose_config,
+                voice_config,
+                video_config,
+            )
             result = _retry_material_job(task_dir, paths, manifest, mode, image_config, compose_config, quality_config, emit, progress_callback)
         elif retry_job == "tts":
             result = _retry_tts_job(task_dir, paths, manifest, voice_config, emit)
@@ -997,11 +1008,102 @@ def _update_run_summary_production_status(task_dir: Path, manifest: dict[str, An
     summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _retry_mode(manifest: dict[str, Any], config: dict[str, Any]) -> str:
+def _retry_mode(manifest: dict[str, Any], config: dict[str, Any], requested_job: str = "") -> str:
     configured = str(config.get("mode") or "").strip()
+    saved = str(manifest.get("mode") or "").strip()
+    if str(requested_job or "").strip().lower() == "material":
+        material_modes = {"api_ready", "comfy_full"}
+        if configured in material_modes:
+            return configured
+        if saved in material_modes:
+            return saved
     if configured and configured != "off":
         return configured
-    return str(manifest.get("mode") or configured or "off").strip()
+    return str(saved or configured or "off").strip()
+
+
+def _refresh_visual_plan_for_retry(
+    task_dir: Path,
+    paths: dict[str, Path],
+    manifest: dict[str, Any],
+    compose_config: dict[str, Any],
+    voice_config: dict[str, Any],
+    video_config: dict[str, Any],
+) -> None:
+    """Recompile visual jobs before retrying an existing task.
+
+    Employee output is persistent, while compiler-owned workflow routing can
+    evolve.  A material retry must therefore rebuild the plan/payload/graph
+    instead of replaying an old payload containing archived workflow IDs.
+    """
+
+    step_outputs = _load_task_step_outputs(task_dir)
+    route_step = _find_step(step_outputs, "01_")
+    image_step = _find_step(step_outputs, "06_")
+    video_step = _find_step(step_outputs, "07_")
+    audio_step = _find_step(step_outputs, "20_")
+    edit_step = _find_step(step_outputs, "22_")
+    route_content = route_step.get("content", "") if route_step else ""
+    image_content = image_step.get("content", "") if image_step else ""
+    video_content = video_step.get("content", "") if video_step else ""
+    audio_content = audio_step.get("content", "") if audio_step else ""
+    edit_content = edit_step.get("content", "") if edit_step else ""
+    if not image_content and not video_content:
+        raise ValueError("cannot rebuild production plan: 06/07 employee outputs are missing")
+
+    payload_path = paths["comfyui"] / "comfyui_payload.json"
+    existing_payload = _load_comfyui_payload_with_fallback(payload_path) if payload_path.is_file() else {}
+    production_plan = compile_production_plan(
+        task_id=task_dir.name,
+        route_content=route_content,
+        image_content=image_content,
+        video_content=video_content,
+        audio_content=audio_content,
+        package_content=edit_content,
+        existing_payload=existing_payload,
+        video_config=video_config,
+        voice_config=voice_config,
+    )
+    compiled_payload = production_plan.get("compiled_payload") if isinstance(production_plan.get("compiled_payload"), dict) else {}
+    payload = compiled_payload or existing_payload
+    global_context = normalize_global_context(payload, video_config)
+    payload["global_context"] = global_context
+    production_plan["global_context"] = global_context
+    production_plan["compiled_payload"] = payload
+
+    plan_path = task_dir / "production_plan.json"
+    graph_path = task_dir / "production_graph.json"
+    write_production_plan(plan_path, production_plan)
+    _write_text(payload_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+    visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
+    packaging_jobs = _packaging_graph_jobs(payload, voice_config)
+    write_graph_json(graph_path, build_production_graph(task_dir.name, visual_jobs, global_context, packaging_jobs))
+    compose_config.update(
+        {
+            "production_graph_path": str(graph_path),
+            "production_task_id": task_dir.name,
+            "global_context": global_context,
+            "packaging_jobs": packaging_jobs,
+            "production_plan_visual_jobs": visual_jobs,
+        }
+    )
+
+    required = _required_workflow_slots(visual_jobs)
+    configured = _configured_workflow_slots(compose_config.get("workflow_library"))
+    composition = manifest.setdefault("composition", {})
+    composition["required_workflow_slots"] = required
+    composition["configured_workflow_slots"] = configured
+    composition["missing_workflow_slots"] = _missing_workflow_slots(required, configured)
+    composition["workflow_library"] = compose_config.get("workflow_library") if isinstance(compose_config.get("workflow_library"), list) else []
+    composition["comfyui_payload_file"] = str(payload_path)
+    manifest["production_plan"] = str(plan_path)
+    manifest["production_graph"] = str(graph_path)
+    manifest["selected_template"] = production_plan.get("selected_template") if isinstance(production_plan.get("selected_template"), dict) else {}
+    manifest["global_context"] = global_context
+    files = manifest.setdefault("files", {})
+    files["production_plan"] = str(plan_path)
+    files["production_graph"] = str(graph_path)
+    files["comfyui_payload"] = str(payload_path)
 
 
 def _retry_section_config(manifest: dict[str, Any], config: dict[str, Any], config_key: str, manifest_key: str) -> dict[str, Any]:
@@ -2001,6 +2103,25 @@ def _find_step(step_outputs: list[dict[str, str]], prefix: str) -> dict[str, str
         if str(item.get("agent", "")).startswith(prefix):
             return item
     return None
+
+
+def _load_task_step_outputs(task_dir: Path) -> list[dict[str, str]]:
+    outputs: list[dict[str, str]] = []
+    for step_dir in sorted(task_dir.glob("step_*")):
+        if not step_dir.is_dir():
+            continue
+        output_path = step_dir / "output.md"
+        if not output_path.is_file():
+            continue
+        parts = step_dir.name.split("_", 2)
+        agent = parts[2] if len(parts) == 3 else step_dir.name
+        outputs.append(
+            {
+                "agent": agent,
+                "content": output_path.read_text(encoding="utf-8", errors="replace"),
+            }
+        )
+    return outputs
 
 
 def _extract_srt(content: str) -> str:
