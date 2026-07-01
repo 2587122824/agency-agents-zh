@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-01] DeepSeek full-flow browser testing found that staff 20 correctly emitted all subtitle rows under the documented `build_subtitles.subtitle_segments` field, while the validator only counted the shorter `segments` alias and therefore rejected two otherwise complete outputs as less than 90% coverage. Audio contract validation now accepts both names and continues using the normalized list for timestamps and coverage.
+
 - [2026-07-01] Browser end-to-end smoke testing found that local Qwen3 employee calls could spend several minutes in default thinking mode because the OpenAI-compatible Ollama request had no local reasoning/output controls. `CodexAPI` now sends `think=false` and `max_tokens=4096` only to local Ollama endpoints. The same pass keeps top navigation enabled while a run locks task/config inputs, treats future `pending` workflow steps as waiting rather than running in the production-stage card, and no longer marks the production plan compiled merely because placeholder production status cards exist.
 
 - [2026-07-01] Failed workflow runs are now treated as terminal immediately across persistence, the task state center, and the management UI. Failure clears stale pause/cancel/confirmation/block fields, marks the current step failed even when old confirmation metadata remains, removes `cancel`/`confirm_step` from allowed actions, unlocks the UI, and hides the stop button. Historical failed summaries with stale `awaiting_confirmation` data are also read safely as failed terminal tasks.

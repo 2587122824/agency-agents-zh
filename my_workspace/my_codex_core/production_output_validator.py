@@ -119,6 +119,10 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
     invalid_times: list[str] = []
     subtitle_segments = subtitles.get("segments")
     if not isinstance(subtitle_segments, list):
+        # Employee 20's published contract and examples use
+        # `subtitle_segments`; keep `segments` as the concise canonical alias.
+        subtitle_segments = subtitles.get("subtitle_segments")
+    if not isinstance(subtitle_segments, list):
         subtitle_segments = []
     for segment in subtitle_segments:
         if not isinstance(segment, dict):
