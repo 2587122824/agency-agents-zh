@@ -86,7 +86,11 @@ class LocalFFmpegAdapter:
         subtitles_file = Path(str(manifest.get("files", {}).get("subtitles") or ""))
         if not subtitles_file.is_absolute():
             subtitles_file = (task_dir / subtitles_file).resolve()
-        burn_subtitles = subtitles_file.is_file() and _bool_or_default(compose_config.get("burn_subtitles"), True)
+        burn_subtitles = (
+            subtitles_file.is_file()
+            and _bool_or_default(compose_config.get("burn_subtitles"), True)
+            and self._subtitles_are_burnable(subtitles_file, manifest)
+        )
         subtitle_style = str(compose_config.get("subtitle_style") or DEFAULT_SUBTITLE_STYLE).strip()
         render = manifest.get("global_context", {}).get("render", {}) if isinstance(manifest.get("global_context"), dict) else {}
         delivery = render.get("delivery_resolution", {}) if isinstance(render.get("delivery_resolution"), dict) else {}
@@ -169,6 +173,7 @@ class LocalFFmpegAdapter:
                 "bgm_file": str(bgm_file) if bgm_file else "",
                 "subtitles_file": str(subtitles_file) if subtitles_file.is_file() else "",
                 "subtitle_mode": "burned_in" if burn_subtitles else "sidecar_only",
+                "subtitle_burn_skipped_reason": "" if burn_subtitles else self._subtitle_skip_reason(subtitles_file, manifest),
                 "subtitle_style": subtitle_style if burn_subtitles else "",
                 "render": {"width": output_width, "height": output_height, "fps": output_fps},
                 "note": "Local FFmpeg creates an editable preview/final draft from available clips/images/audio. When subtitles.srt exists, subtitles are burned in by default.",
@@ -522,6 +527,48 @@ class LocalFFmpegAdapter:
                 "mode": "burned_in" if burn_subtitles and subtitles_file else "sidecar_only",
             },
         }
+
+    @staticmethod
+    def _subtitles_are_burnable(subtitles_file: Path, manifest: dict[str, Any]) -> bool:
+        audio = manifest.get("audio") if isinstance(manifest.get("audio"), dict) else {}
+        subtitle_status = str(audio.get("subtitle_status") or "").strip().lower()
+        if subtitle_status and subtitle_status not in {"ok", "usable", "success"}:
+            return False
+        try:
+            text = subtitles_file.read_text(encoding="utf-8-sig", errors="replace")
+        except OSError:
+            return False
+        normalized = text.strip().lower()
+        if not normalized or "-->" not in normalized:
+            return False
+        placeholder_terms = [
+            "待从",
+            "整理字幕",
+            "语音字幕包装师",
+            "placeholder",
+            "todo",
+            "字幕稿",
+            "配音稿",
+            "寰呬粠",
+            "瀛楀箷",
+            "閰嶉煶",
+        ]
+        if any(term.lower() in normalized for term in placeholder_terms):
+            return False
+        return True
+
+    @staticmethod
+    def _subtitle_skip_reason(subtitles_file: Path, manifest: dict[str, Any]) -> str:
+        if not subtitles_file.is_file():
+            return "subtitle file is missing"
+        audio = manifest.get("audio") if isinstance(manifest.get("audio"), dict) else {}
+        subtitle_status = str(audio.get("subtitle_status") or "").strip()
+        subtitle_reason = str(audio.get("subtitle_reason") or "").strip()
+        if subtitle_status and subtitle_status.lower() not in {"ok", "usable", "success"}:
+            return subtitle_reason or f"subtitle_status is {subtitle_status}"
+        if not LocalFFmpegAdapter._subtitles_are_burnable(subtitles_file, manifest):
+            return "subtitle file looks empty, invalid, or placeholder-only"
+        return ""
 
     @staticmethod
     def _build_edit_plan(timeline: dict[str, Any], subtitle_style: str) -> str:
