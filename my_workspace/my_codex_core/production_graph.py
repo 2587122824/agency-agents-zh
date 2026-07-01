@@ -79,6 +79,7 @@ def build_production_graph(
                 "params": source.get("params") if isinstance(source.get("params"), dict) else {},
                 "parameter_locks": source.get("parameter_locks") if isinstance(source.get("parameter_locks"), dict) else {},
                 "locked_fields": source.get("locked_fields") if isinstance(source.get("locked_fields"), list) else [],
+                "optional_when_unconfigured": _as_bool(source.get("optional_when_unconfigured"), default=False),
                 "outputs": outputs,
                 "resource_class": "video" if job_type == "video" else "image",
                 "retry": {"max_attempts": 3, "retry_on": ["network", "timeout", "provider_busy", "download"]},
@@ -215,6 +216,16 @@ def _string_list(value: Any) -> list[str]:
     if isinstance(value, list):
         return [str(part).strip() for part in value if str(part).strip()]
     return []
+
+
+def _as_bool(value: Any, default: bool = False) -> bool:
+    if value in (None, ""):
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "y", "enabled", "启用", "是"}
 
 
 def _unique_job_id(value: Any, seen: set[str]) -> str:

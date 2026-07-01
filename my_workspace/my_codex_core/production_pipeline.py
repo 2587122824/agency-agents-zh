@@ -407,6 +407,7 @@ def run_auto_production(
                     attempts=int(node.get("attempts") or 1),
                     cache_hit=bool(node.get("cache_hit")),
                     error=str(node.get("error") or ""),
+                    optional_when_unconfigured=_as_bool(node.get("optional_when_unconfigured"), default=False),
                 )
             if comfyui_adapter_result["status"] == "success":
                 manifest["status"] = "comfyui_generated"
@@ -750,6 +751,7 @@ def retry_production_job(
                     attempts=int(node.get("attempts") or 1),
                     cache_hit=bool(node.get("cache_hit")),
                     error=str(node.get("error") or ""),
+                    optional_when_unconfigured=_as_bool(node.get("optional_when_unconfigured"), default=False),
                 )
             selected_result = next(
                 (node for node in result["jobs"] if isinstance(node, dict) and str(node.get("job_id") or "") == requested_job_id),
@@ -779,6 +781,7 @@ def retry_production_job(
                 depends_on=result_for_history.get("depends_on") or existing_node.get("depends_on") or [],
                 outputs=history_item["outputs"],
                 error=str(result.get("error") or result.get("reason") or ""),
+                optional_when_unconfigured=_as_bool(existing_node.get("optional_when_unconfigured"), default=False),
             )
         return _finalize_retry_manifest(task_dir, manifest, production_note_path, emit, f"production retry finished: {retry_job}")
     except Exception as exc:
@@ -1956,6 +1959,7 @@ def _upsert_production_node(
     attempts: int = 1,
     cache_hit: bool = False,
     error: str = "",
+    optional_when_unconfigured: bool = False,
 ) -> None:
     if not job_id:
         return
@@ -1973,6 +1977,7 @@ def _upsert_production_node(
             "outputs": [str(item) for item in (outputs or []) if str(item)],
             "attempts": max(1, int(attempts or 1)),
             "cache_hit": bool(cache_hit),
+            "optional_when_unconfigured": bool(optional_when_unconfigured),
             "error": error,
             "blocked_reason": error if status == "blocked" else "",
             "updated_at": time.time(),

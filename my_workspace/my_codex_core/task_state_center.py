@@ -399,6 +399,8 @@ class TaskStateCenter:
 
     @staticmethod
     def _is_optional_missing_workflow_slot(item: dict[str, Any]) -> bool:
+        if TaskStateCenter._as_bool(item.get("optional_when_unconfigured"), default=False):
+            return True
         text = " ".join(
             str(value or "").strip()
             for value in (
@@ -410,6 +412,16 @@ class TaskStateCenter:
             )
         ).lower()
         return "enhance_video" in text or "video_enhance" in text
+
+    @staticmethod
+    def _as_bool(value: Any, default: bool = False) -> bool:
+        if value in (None, ""):
+            return default
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return value != 0
+        return str(value).strip().lower() in {"1", "true", "yes", "on", "y", "enabled", "启用", "是"}
 
     def _production_nodes(self, manifest: dict[str, Any]) -> list[dict[str, Any]]:
         nodes = []
@@ -427,6 +439,7 @@ class TaskStateCenter:
                     "outputs": [str(value) for value in (node.get("outputs") or []) if value],
                     "attempts": int(node.get("attempts") or 1),
                     "cache_hit": bool(node.get("cache_hit")),
+                    "optional_when_unconfigured": self._as_bool(node.get("optional_when_unconfigured"), default=False),
                     "blocked_reason": str(node.get("blocked_reason") or ""),
                     "error": str(node.get("error") or ""),
                 }
@@ -481,6 +494,7 @@ class TaskStateCenter:
                     "depends_on": node.get("depends_on") or [],
                     "attempts": int(node.get("attempts") or 1),
                     "cache_hit": bool(node.get("cache_hit")),
+                    "optional_when_unconfigured": self._as_bool(node.get("optional_when_unconfigured"), default=False),
                     "stage": str(node.get("stage") or ""),
                 }
             )
