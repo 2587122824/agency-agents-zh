@@ -1,57 +1,97 @@
 [
   {
-    "nodeId": "2483",
+    "nodeId": "177",
     "fieldName": "text",
-    "fieldValue": "Use the reference image as strict person identity control. Keep the same face shape, facial features, hairstyle, body proportions, outfit, product appearance, color palette and subject silhouette. {{prompt}}"
+    "fieldValue": "{{prompt}}",
+    "description": "primary prompt text used by the prompt switch"
   },
   {
-    "nodeId": "2612",
+    "nodeId": "220",
     "fieldName": "text",
-    "fieldValue": "identity drift, different person, different face, changed facial features, changed hairstyle, changed outfit, inconsistent body proportions, distorted face, deformed body, bad hands, inconsistent product, {{negative_prompt}}"
+    "fieldValue": "{{prompt}}",
+    "description": "visible prompt passthrough feeding CLIPTextEncode"
   },
   {
-    "nodeId": "2004",
+    "nodeId": "182",
+    "fieldName": "text",
+    "fieldValue": "{{negative_prompt}}",
+    "description": "negative prompt"
+  },
+  {
+    "nodeId": "193",
     "fieldName": "image",
-    "fieldValue": "{{reference_image}}"
+    "fieldValue": "{{input_base_image}}",
+    "description": "first frame / base image"
   },
   {
-    "nodeId": "4977",
+    "nodeId": "186",
     "fieldName": "value",
-    "fieldValue": false
+    "fieldValue": "{{width}}",
+    "description": "reference resize long side"
   },
   {
-    "nodeId": "3159",
-    "fieldName": "strength",
-    "fieldValue": 1.0
-  },
-  {
-    "nodeId": "4979",
+    "nodeId": "192",
     "fieldName": "value",
-    "fieldValue": 121
+    "fieldValue": "{{duration}}",
+    "description": "clip duration in seconds"
   },
   {
-    "nodeId": "3059",
+    "nodeId": "154",
+    "fieldName": "value",
+    "fieldValue": "{{fps}}",
+    "description": "frame rate"
+  },
+  {
+    "nodeId": "180",
     "fieldName": "width",
-    "fieldValue": "{{width}}"
+    "fieldValue": "{{width}}",
+    "description": "latent width"
   },
   {
-    "nodeId": "3059",
+    "nodeId": "180",
     "fieldName": "height",
-    "fieldValue": "{{height}}"
+    "fieldValue": "{{height}}",
+    "description": "latent height"
   },
   {
-    "nodeId": "3059",
+    "nodeId": "180",
     "fieldName": "length",
-    "fieldValue": "{{frame_count}}"
+    "fieldValue": "{{frame_count}}",
+    "description": "latent frame count"
   },
   {
-    "nodeId": "4823",
-    "fieldName": "filename_prefix",
-    "fieldValue": "ltx_video_2_3_clip"
+    "nodeId": "181",
+    "fieldName": "frames_number",
+    "fieldValue": "{{frame_count}}",
+    "description": "audio latent frame count"
   },
   {
-    "nodeId": "4852",
+    "nodeId": "181",
+    "fieldName": "frame_rate",
+    "fieldValue": "{{fps}}",
+    "description": "audio latent frame rate"
+  },
+  {
+    "nodeId": "231",
+    "fieldName": "fps",
+    "fieldValue": "{{fps}}",
+    "description": "video container fps"
+  },
+  {
+    "nodeId": "155",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}",
+    "description": "first pass noise seed"
+  },
+  {
+    "nodeId": "156",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}",
+    "description": "upscale/refine pass noise seed"
+  },
+  {
+    "nodeId": "232",
     "fieldName": "filename_prefix",
-    "fieldValue": "ltx_video_2_3_clip"
+    "fieldValue": "video/ltx2.3-i2v"
   }
 ]

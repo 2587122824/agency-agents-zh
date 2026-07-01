@@ -6,7 +6,7 @@
     "description": "keyframe text prompt"
   },
   {
-    "nodeId": "60",
+    "nodeId": "72",
     "fieldName": "text",
     "fieldValue": "{{negative_prompt}}",
     "description": "negative prompt"

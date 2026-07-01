@@ -646,6 +646,8 @@ class CloudComfyUIAdapter:
             "{{global_frame_rate}}": str(render_context.get("frame_rate") or comfyui_payload.get("fps") or ""),
             "{{camera_motion}}": str(comfyui_payload.get("camera_motion") or ""),
             "{{frame_count}}": self._frame_count(comfyui_payload),
+            "{{middle_frame_index}}": self._middle_frame_index(comfyui_payload),
+            "{{last_frame_index}}": self._last_frame_index(comfyui_payload),
             "{{ltx_guide_frame_count}}": self._ltx_guide_frame_count(comfyui_payload),
             "{{denoise}}": str(comfyui_payload.get("denoise") or ""),
             "{{ipadapter_weight}}": str(comfyui_payload.get("ipadapter_weight") or ""),
@@ -1924,7 +1926,9 @@ class CloudComfyUIAdapter:
             "steps",
             "frame_rate",
             "fps",
+            "value",
         }
+        integer_fields_allow_negative = {"frame_idx", "frame_index"}
 
         def replace_item(item: Any) -> Any:
             if isinstance(item, list):
@@ -1935,6 +1939,10 @@ class CloudComfyUIAdapter:
             field_name = str(updated.get("fieldName") or updated.get("field_name") or "").strip().lower()
             if field_name in {"seed", "noise_seed"}:
                 updated["fieldValue"] = seed_value
+            elif field_name in integer_fields_allow_negative or field_name.startswith("frame_idx_"):
+                number = cls._clean_int_value(updated.get("fieldValue"), minimum=-1)
+                if number is not None:
+                    updated["fieldValue"] = number
             elif field_name in integer_fields:
                 number = cls._clean_int_value(updated.get("fieldValue"), minimum=1)
                 if number is not None:
@@ -2095,6 +2103,28 @@ class CloudComfyUIAdapter:
         # lands closer to the requested duration.
         internal = max(9, target - 16)
         return str(internal)
+
+    @staticmethod
+    def _middle_frame_index(payload: dict[str, Any]) -> str:
+        value = CloudComfyUIAdapter._frame_count(payload)
+        if not value:
+            return ""
+        try:
+            total = int(float(value))
+        except ValueError:
+            return ""
+        return str(max(1, total // 2))
+
+    @staticmethod
+    def _last_frame_index(payload: dict[str, Any]) -> str:
+        value = CloudComfyUIAdapter._frame_count(payload)
+        if not value:
+            return "-1"
+        try:
+            total = int(float(value))
+        except ValueError:
+            return "-1"
+        return str(max(0, total - 1))
 
     @staticmethod
     def _reference_images(payload: dict[str, Any]) -> list[str]:

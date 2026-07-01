@@ -1,72 +1,133 @@
 [
   {
-    "nodeId": "2",
+    "nodeId": "447",
     "fieldName": "image",
-    "fieldValue": "{{reference_image}}"
+    "fieldValue": "{{input_base_image}}",
+    "description": "first frame image"
   },
   {
-    "nodeId": "3",
+    "nodeId": "448",
     "fieldName": "image",
-    "fieldValue": "{{last_frame_image}}"
+    "fieldValue": "{{input_middle_frame}}",
+    "description": "middle frame image"
   },
   {
-    "nodeId": "29",
+    "nodeId": "449",
     "fieldName": "image",
-    "fieldValue": "{{middle_frame_image}}"
+    "fieldValue": "{{input_last_frame}}",
+    "description": "last frame image"
   },
   {
-    "nodeId": "17",
-    "fieldName": "frame_idx",
-    "fieldValue": "40"
+    "nodeId": "405",
+    "fieldName": "positive",
+    "fieldValue": "你是一个视频提示词生成助手。用户输入上中下三张图片：上面是视频首帧画面，中间是视频中段画面，下面是尾帧画面。请根据三张图生成具体的视频运动、转场、动作和运镜提示词，描述从首帧到中段再到尾帧的合理过渡。转场时必须包含 zhuanchang。镜头描述要使用明确、快速、有方向的动词，不要使用缓缓、轻微等弱动作词。额外遵守用户提示：{{prompt}}。直接输出视频提示词，不要解释，不要换行，不超过400字，用中文输出。",
+    "description": "QwenVL prompt-generation instruction with user motion prompt injected"
   },
   {
-    "nodeId": "9",
+    "nodeId": "422",
+    "fieldName": "value",
+    "fieldValue": "{{prompt}}",
+    "description": "fallback motion prompt when QwenVL prompt switch is disabled"
+  },
+  {
+    "nodeId": "417",
     "fieldName": "text",
-    "fieldValue": "{{prompt}}"
+    "fieldValue": "{{negative_prompt}}",
+    "description": "negative prompt"
   },
   {
-    "nodeId": "10",
-    "fieldName": "text",
-    "fieldValue": "{{negative_prompt}}"
+    "nodeId": "410",
+    "fieldName": "value",
+    "fieldValue": "{{width}}",
+    "description": "reference resize base size"
   },
   {
-    "nodeId": "15",
+    "nodeId": "436",
+    "fieldName": "value",
+    "fieldValue": "{{duration}}",
+    "description": "clip duration in seconds"
+  },
+  {
+    "nodeId": "412",
+    "fieldName": "value",
+    "fieldValue": "{{fps}}",
+    "description": "frame rate"
+  },
+  {
+    "nodeId": "424",
     "fieldName": "width",
-    "fieldValue": "{{width}}"
+    "fieldValue": "{{width}}",
+    "description": "latent width"
   },
   {
-    "nodeId": "15",
+    "nodeId": "424",
     "fieldName": "height",
-    "fieldValue": "{{height}}"
+    "fieldValue": "{{height}}",
+    "description": "latent height"
   },
   {
-    "nodeId": "15",
+    "nodeId": "424",
     "fieldName": "length",
-    "fieldValue": "{{ltx_guide_frame_count}}"
+    "fieldValue": "{{frame_count}}",
+    "description": "latent frame count"
   },
   {
-    "nodeId": "18",
+    "nodeId": "373",
     "fieldName": "frames_number",
-    "fieldValue": "{{ltx_guide_frame_count}}"
+    "fieldValue": "{{frame_count}}",
+    "description": "audio latent frame count"
   },
   {
-    "nodeId": "11",
+    "nodeId": "373",
     "fieldName": "frame_rate",
-    "fieldValue": "{{fps}}"
+    "fieldValue": "{{fps}}",
+    "description": "audio latent frame rate"
   },
   {
-    "nodeId": "18",
+    "nodeId": "413",
     "fieldName": "frame_rate",
-    "fieldValue": "{{fps}}"
+    "fieldValue": "{{fps}}",
+    "description": "video container frame rate"
   },
   {
-    "nodeId": "27",
-    "fieldName": "frame_rate",
-    "fieldValue": "{{fps}}"
+    "nodeId": "446",
+    "fieldName": "frame_idx_1",
+    "fieldValue": 0,
+    "description": "first frame guide index"
   },
   {
-    "nodeId": "28",
+    "nodeId": "446",
+    "fieldName": "frame_idx_2",
+    "fieldValue": "{{middle_frame_index}}",
+    "description": "middle frame guide index"
+  },
+  {
+    "nodeId": "446",
+    "fieldName": "frame_idx_3",
+    "fieldValue": "{{last_frame_index}}",
+    "description": "last frame guide index"
+  },
+  {
+    "nodeId": "426",
+    "fieldName": "seed",
+    "fieldValue": "{{seed}}",
+    "description": "QwenVL prompt generation seed"
+  },
+  {
+    "nodeId": "362",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}",
+    "description": "first pass noise seed"
+  },
+  {
+    "nodeId": "363",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}",
+    "description": "refine pass noise seed"
+  },
+  {
+    "nodeId": "413",
     "fieldName": "filename_prefix",
-    "fieldValue": "i2v_first_middle_last_frame"
+    "fieldValue": "3i2v-ltx23-aijuxi"
   }
 ]
