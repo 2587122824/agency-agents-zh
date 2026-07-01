@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from .codex_api import CodexAPI
+from .codex_api import CodexAPI, LLMResult
 from .action_executor import ActionExecutor
 from .production_pipeline import run_auto_production
 from .production_output_validator import validate_production_output
@@ -550,7 +550,21 @@ class WorkflowEngine:
             )
 
             try:
-                if progress_callback:
+                recovered_result = self._recover_valid_candidate_output(step, step_dir, user_input, previous_outputs)
+                if recovered_result and progress_callback:
+                    progress_callback(
+                        {
+                            "event": "step_update",
+                            "step": step_no,
+                            "agent_id": agent.agent_id,
+                            "agent_name": agent.name,
+                            "message": "已复用当前校验器确认通过的历史候选输出，跳过重复模型调用",
+                            "provider": recovered_result.provider,
+                            "model": recovered_result.model,
+                            "total_steps": len(steps),
+                        }
+                    )
+                if not recovered_result and progress_callback:
                     progress_callback(
                         {
                             "event": "step_update",
@@ -564,7 +578,7 @@ class WorkflowEngine:
                             "total_steps": len(steps),
                         }
                     )
-                result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir, previous_outputs)
+                result = recovered_result or self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir, previous_outputs)
             except Exception as exc:
                 error_text = (
                     "# 当前步骤执行失败\n\n"
@@ -1023,6 +1037,63 @@ class WorkflowEngine:
         issues = "；".join(str(item) for item in (retry_validation.get("issues") or []))
         raise RequirementAlignmentError(f"员工输出校验连续两次未通过：{issues}")
 
+    def _recover_valid_candidate_output(
+        self,
+        step: dict,
+        step_dir: Path,
+        user_input: str,
+        previous_outputs: list[dict[str, str]],
+    ) -> LLMResult | None:
+        """Promote a previously rejected candidate if current validators accept it.
+
+        This is intentionally limited to resume-time candidate files. It lets old
+        tasks benefit from validator/compiler fixes without spending another LLM
+        call, while still running the normal post-step production gate after the
+        recovered content is returned to the resume loop.
+        """
+
+        candidates = [
+            *step_dir.glob("output_rejected_retry_*.md"),
+            *step_dir.glob("output_rejected_*.md"),
+        ]
+        unique_candidates = sorted({path.resolve(): path for path in candidates}.values(), key=lambda path: path.stat().st_mtime, reverse=True)
+        if not unique_candidates:
+            return None
+
+        lock = build_requirement_lock(user_input)
+        for candidate in unique_candidates:
+            content = candidate.read_text(encoding="utf-8", errors="replace")
+            if not content.strip():
+                continue
+            validation = self._combined_output_validation(lock, content, step, previous_outputs)
+            if not validation.get("passed"):
+                continue
+
+            self.storage.write_text(step_dir / "output.md", content)
+            self.storage.write_json(
+                step_dir / "requirement_validation.json",
+                {
+                    "passed": True,
+                    "recovered_from": candidate.name,
+                    "recovered_at": datetime.now().isoformat(timespec="seconds"),
+                    "attempts": [validation],
+                },
+            )
+            self.storage.write_json(step_dir / "production_contract_validation.json", validation.get("production_contract") or {})
+            self.storage.write_json(
+                step_dir / "recovered_output.json",
+                {
+                    "source": candidate.name,
+                    "recovered_at": datetime.now().isoformat(timespec="seconds"),
+                    "reason": "previous rejected candidate passes current validators",
+                },
+            )
+            error_path = step_dir / "error.json"
+            if error_path.exists():
+                error_path.unlink()
+            return LLMResult(provider="recovered", model="validated-candidate", content=content)
+        return None
+
     @staticmethod
     def _combined_output_validation(
         lock: dict,
@@ -1323,6 +1394,8 @@ class WorkflowEngine:
         image_step_no = cls._step_number_for_agent_prefix(workflow, "06_")
         video_step_no = cls._step_number_for_agent_prefix(workflow, "07_")
         if material_step_no:
+            if cls._task_uses_comfy_full(task_dir) and cls._material_step_needs_gate_resume(task_dir, material_step_no):
+                return material_step_no
             summary_path = task_dir / "run_summary.json"
             if summary_path.exists():
                 try:
@@ -1370,6 +1443,27 @@ class WorkflowEngine:
             if not output_path.read_text(encoding="utf-8", errors="replace").strip():
                 return step_no
         return None
+
+    @staticmethod
+    def _task_uses_comfy_full(task_dir: Path) -> bool:
+        input_path = task_dir / "input.md"
+        if not input_path.exists():
+            return False
+        return "comfy_full" in input_path.read_text(encoding="utf-8", errors="replace")
+
+    @staticmethod
+    def _material_step_needs_gate_resume(task_dir: Path, material_step_no: int) -> bool:
+        manifest_path = task_dir / "production_manifest.json"
+        if manifest_path.exists():
+            return False
+        step_dirs = sorted(task_dir.glob(f"step_{material_step_no:02d}_*"))
+        if not step_dirs:
+            return False
+        step_dir = step_dirs[0]
+        if (step_dir / "error.json").exists():
+            return False
+        output_path = step_dir / "output.md"
+        return output_path.exists() and bool(output_path.read_text(encoding="utf-8", errors="replace").strip())
 
     @staticmethod
     def _material_step_number(workflow: dict) -> int | None:
