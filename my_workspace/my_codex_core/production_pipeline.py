@@ -1078,6 +1078,7 @@ def _run_comfyui_adapter(
     api_key = str(compose_config.get("api_key") or "").strip()
     base_url = str(compose_config.get("base_url") or "").strip()
     endpoint = str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()
+    has_workflow_library_config = _workflow_library_has_configured_slots(compose_config.get("workflow_library"))
     if provider == "comfy_mcp":
         return ComfyMCPAdapter(
             mcp_url=str(compose_config.get("comfy_mcp_url") or compose_config.get("mcp_url") or ""),
@@ -1092,8 +1093,11 @@ def _run_comfyui_adapter(
     tool = str(compose_config.get("tool") or "").strip().lower()
     if tool in {"", "manual", "jianying"} and provider != "runninghub":
         return {"status": "skipped", "reason": "compose tool is not a cloud ComfyUI provider"}
-    if not api_key or not base_url or not endpoint:
-        return {"status": "skipped", "reason": "ComfyUI API key, base URL, or workflow endpoint is missing"}
+    if not api_key or not base_url or (not endpoint and not has_workflow_library_config):
+        return {
+            "status": "skipped",
+            "reason": "ComfyUI/RunningHub 未配置：请先在 ComfyUI 调试台为对应子模式保存 endpoint 和 nodeInfoList",
+        }
 
     try:
         comfyui_payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
@@ -1595,17 +1599,34 @@ def _ensure_default_runninghub_workflow_endpoints(compose_config: dict[str, Any]
     if not str(compose_config.get("base_url") or "").strip():
         compose_config["base_url"] = "https://www.runninghub.cn/openapi/v2"
 
-    library = compose_config.get("workflow_library")
-    if not endpoint:
-        selected_id = str(compose_config.get("workflow_preset_id") or "").strip()
-        selected_endpoint = ""
-        if isinstance(library, list) and selected_id:
-            selected = next((item for item in library if isinstance(item, dict) and str(item.get("id") or "").strip() == selected_id), None)
-            selected_endpoint = str((selected or {}).get("endpoint") or (selected or {}).get("workflow_endpoint") or "").strip()
-        compose_config["workflow_endpoint"] = selected_endpoint or _first_library_endpoint_for_type(library, "image")
+    return
+
+
+def _workflow_library_has_configured_slots(library: Any) -> bool:
+    if not isinstance(library, list):
+        return False
+    for item in library:
+        if not isinstance(item, dict):
+            continue
+        endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
+        node_info = str(item.get("node_info_list_json") or item.get("nodeInfoList") or "").strip()
+        if endpoint and node_info and node_info != "[]":
+            return True
+        mode_configs = item.get("mode_configs") or item.get("modeConfigs")
+        if not isinstance(mode_configs, dict):
+            continue
+        for config in mode_configs.values():
+            if not isinstance(config, dict):
+                continue
+            endpoint = str(config.get("endpoint") or config.get("workflow_endpoint") or "").strip()
+            node_info = str(config.get("node_info_list_json") or config.get("nodeInfoList") or "").strip()
+            if endpoint and node_info and node_info != "[]":
+                return True
+    return False
 
 
 def _ensure_library_item_runninghub_endpoint(item: dict[str, Any]) -> None:
+    return
     endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
     if not endpoint:
         material_types = _string_set(item.get("material_types") or item.get("materialTypes") or item.get("types"))

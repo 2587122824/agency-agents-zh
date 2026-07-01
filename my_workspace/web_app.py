@@ -5930,7 +5930,7 @@ INDEX_HTML = r"""<!doctype html>
           default_asset_reference: item.defaultAssetReference || '',
           default_reference_hint: item.defaultReferenceHint || '',
           mode_configs: Object.fromEntries(Object.entries(item.modeConfigs || {}).map(([mode, config]) => [mode, {
-            endpoint: config.endpoint || endpoint,
+            endpoint: String(config.endpoint || '').trim(),
             node_info_list_json: config.nodeInfoList || '[]',
             poll_timeout_seconds: Number(config.pollTimeout || 3600),
             default_width: config.defaultWidth || '',

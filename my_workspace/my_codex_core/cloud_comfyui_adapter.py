@@ -33,8 +33,6 @@ class CloudComfyUIAdapter:
         local_base = parsed.hostname in {"127.0.0.1", "localhost"} or self.base_url.lower().startswith(("http://127.0.0.1", "http://localhost", "https://127.0.0.1", "https://localhost"))
         if not self.api_key and not local_base:
             raise ValueError("ComfyUI API key is required")
-        if not self.endpoint:
-            raise ValueError("ComfyUI workflow endpoint is required")
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             raise ValueError("ComfyUI base URL must be an http/https URL")
 
@@ -992,13 +990,25 @@ class CloudComfyUIAdapter:
     def _compose_config_for_job(self, job: dict[str, Any], compose_config: dict[str, Any]) -> dict[str, Any]:
         preset = self._workflow_library_preset_for_job(job, compose_config)
         if not preset:
+            if self._uses_workflow_library(compose_config):
+                workflow_id = str(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "").strip()
+                workflow_mode = str(job.get("mode") or (job.get("prompt_data") or {}).get("workflow_mode") or "").strip()
+                target = " / ".join(part for part in [workflow_id, workflow_mode] if part) or str(job.get("name") or job.get("job_id") or "当前生产节点")
+                raise ValueError(f"ComfyUI 调试台未配置：找不到生产节点对应槽位 {target}，请先在调试台保存 endpoint 和 nodeInfoList")
             return compose_config
         job_config = dict(compose_config)
         preset_endpoint = str(preset.get("endpoint") or "").strip()
         if not self._is_usable_endpoint(preset_endpoint):
             preset_endpoint = ""
-        job_config["workflow_endpoint"] = preset_endpoint or job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint
-        job_config["node_info_list_json"] = str(preset.get("node_info_list_json") or preset.get("nodeInfoList") or "[]").strip() or "[]"
+        node_info = str(preset.get("node_info_list_json") or preset.get("nodeInfoList") or "[]").strip() or "[]"
+        if not preset_endpoint:
+            target = " / ".join(part for part in [str(preset.get("id") or "").strip(), str(preset.get("_matched_mode") or "").strip()] if part) or str(job.get("name") or job.get("job_id") or "当前生产节点")
+            raise ValueError(f"ComfyUI 调试台未配置 endpoint：{target}")
+        if node_info in {"", "[]"}:
+            target = " / ".join(part for part in [str(preset.get("id") or "").strip(), str(preset.get("_matched_mode") or "").strip()] if part) or str(job.get("name") or job.get("job_id") or "当前生产节点")
+            raise ValueError(f"ComfyUI 调试台未配置 nodeInfoList：{target}")
+        job_config["workflow_endpoint"] = preset_endpoint
+        job_config["node_info_list_json"] = node_info
         job_config["poll_timeout_seconds"] = preset.get("poll_timeout_seconds") or preset.get("pollTimeout") or job_config.get("poll_timeout_seconds")
         job_config["workflow_preset_id"] = str(preset.get("id") or "").strip()
         job_config["workflow_preset_name"] = str(preset.get("name") or "").strip()
@@ -1015,9 +1025,7 @@ class CloudComfyUIAdapter:
         if workflow_id:
             exact = next((item for item in library if isinstance(item, dict) and str(item.get("id") or "").strip() == workflow_id), None)
             if exact:
-                exact = cls._library_item_with_mode_config(exact, workflow_mode)
-                if cls._is_configured_library_item(exact):
-                    return exact
+                return cls._library_item_with_mode_config(exact, workflow_mode)
         configured = [item for item in library if cls._is_configured_library_item(item)]
         if not configured:
             return None
@@ -1039,9 +1047,10 @@ class CloudComfyUIAdapter:
         mode_configs = item.get("mode_configs") or item.get("modeConfigs")
         config = mode_configs.get(mode) if isinstance(mode_configs, dict) and isinstance(mode_configs.get(mode), dict) else None
         if config:
-            merged["endpoint"] = config.get("endpoint") or merged.get("endpoint") or ""
-            merged["node_info_list_json"] = config.get("node_info_list_json") or config.get("nodeInfoList") or merged.get("node_info_list_json") or "[]"
+            merged["endpoint"] = config.get("endpoint") or ""
+            merged["node_info_list_json"] = config.get("node_info_list_json") or config.get("nodeInfoList") or "[]"
             merged["poll_timeout_seconds"] = config.get("poll_timeout_seconds") or config.get("pollTimeout") or merged.get("poll_timeout_seconds")
+            merged["_matched_mode"] = mode
         return merged
 
     @classmethod
