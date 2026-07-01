@@ -1091,8 +1091,34 @@ class WorkflowEngine:
             error_path = step_dir / "error.json"
             if error_path.exists():
                 error_path.unlink()
+            self._update_summary_after_candidate_recovery(step_dir.parent, step, candidate.name)
             return LLMResult(provider="recovered", model="validated-candidate", content=content)
         return None
+
+    def _update_summary_after_candidate_recovery(self, task_dir: Path, step: dict, source_name: str) -> None:
+        summary = self._read_summary(task_dir)
+        if not summary:
+            return
+        step_no = int(step.get("step") or 0)
+        summary.update(
+            {
+                "status": "paused",
+                "current_step": step_no,
+                "step_count": max(int(summary.get("step_count") or 0), step_no),
+                "resume_from_step": step_no,
+                "blocked_step": 0,
+                "blocked_reason": "",
+                "awaiting_confirmation": False,
+                "awaiting_confirmation_step": 0,
+                "error": "",
+                "traceback": "",
+                "recovered_step": step_no,
+                "recovered_output": source_name,
+                "recovered_at": datetime.now().isoformat(timespec="seconds"),
+                "updated_at": time.time(),
+            }
+        )
+        self._write_summary(task_dir, summary)
 
     @staticmethod
     def _combined_output_validation(
