@@ -71,6 +71,8 @@ COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
 RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
+DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = "/run/workflow/2048294089858228226"
+DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = "/run/ai-app/2066043648160133122"
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
 IMAGE_EXTENSIONS = {
@@ -4074,6 +4076,8 @@ INDEX_HTML = r"""<!doctype html>
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v2';
     let comfyWorkflowLibrary = [];
     const DEFAULT_COMFY_WORKFLOW_PRESET_ID = 'all_in_one_image';
+    const DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = '/run/workflow/2048294089858228226';
+    const DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = '/run/ai-app/2066043648160133122';
     const DEFAULT_COMFY_WORKFLOW_LIBRARY = [
       {
         id: 'all_in_one_image',
@@ -5423,6 +5427,57 @@ INDEX_HTML = r"""<!doctype html>
       return item.modeConfigs[selectedMode] || null;
     }
 
+    function comfyWorkflowLibraryEndpointForType(type) {
+      const materialType = String(type || '').trim().toLowerCase();
+      if (!materialType) return '';
+      const item = comfyWorkflowLibrary.find(entry =>
+        Array.isArray(entry.materialTypes)
+          && entry.materialTypes.map(value => String(value || '').toLowerCase()).includes(materialType)
+          && String(entry.endpoint || '').trim()
+      );
+      return String(item?.endpoint || '').trim();
+    }
+
+    function fallbackComfyDebugEndpoint(workflow, modeConfig = null) {
+      const workflowType = String(workflow?.type || '').trim().toLowerCase();
+      const configured = String(modeConfig?.endpoint || workflow?.default_endpoint || '').trim();
+      if (configured) return configured;
+      const libraryEndpoint = comfyWorkflowLibraryEndpointForType(workflowType);
+      if (libraryEndpoint) return libraryEndpoint;
+      if (workflowType === 'image') {
+        return String(els.comfyWorkflowEndpoint?.value || els.imageWorkflowEndpoint?.value || DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT).trim();
+      }
+      if (workflowType === 'video') {
+        return String(els.comfyWorkflowEndpoint?.value || els.videoWorkflowEndpoint?.value || DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT).trim();
+      }
+      return String(els.comfyWorkflowEndpoint?.value || '').trim();
+    }
+
+    function fallbackComfyDebugBaseUrl(endpoint = '') {
+      const explicit = String(els.comfyDebugBaseUrl?.value || els.comfyBaseUrl?.value || '').trim();
+      if (explicit) return explicit;
+      const endpointText = String(endpoint || '').trim();
+      if (endpointText.startsWith('/run/')) return 'https://www.runninghub.cn/openapi/v2';
+      return '';
+    }
+
+    function validateComfyDebugProviderConfig(endpoint, baseUrl, apiKey) {
+      const endpointText = String(endpoint || '').trim();
+      const baseUrlText = String(baseUrl || '').trim();
+      const apiKeyText = String(apiKey || '').trim();
+      if (!endpointText) {
+        throw new Error('请先填写 ComfyUI/RunningHub 工作流接口地址，例如 /run/workflow/xxx');
+      }
+      if (!baseUrlText && !endpointText.startsWith('/run/')) {
+        throw new Error('请先填写 ComfyUI/RunningHub Base URL');
+      }
+      const targetUrl = baseUrlText || (endpointText.startsWith('/run/') ? 'https://www.runninghub.cn/openapi/v2' : '');
+      const isLocal = /^https?:\/\/(127\.0\.0\.1|localhost)(:|\/|$)/i.test(targetUrl);
+      if (!apiKeyText && !isLocal) {
+        throw new Error('请先在系统配置的 ComfyUI 连接里填写 RunningHub/ComfyUI API Key；模型 API Key 不能替代平台密钥');
+      }
+    }
+
     function normalizeComfyWorkflowLibrary(value) {
       const saved = Array.isArray(value) ? value : [];
       const byId = new Map(saved.filter(item => item && item.id).map(item => [item.id, item]));
@@ -5644,8 +5699,9 @@ INDEX_HTML = r"""<!doctype html>
       normalizeComfyDebugWorkflowSavedConfig(savedConfig, workflow);
       const selectedMode = String(mode || workflow?.modes?.[0]?.value || savedConfig?.defaultWorkflowMode || '');
       const modeConfig = getComfyWorkflowModeConfig(workflow, selectedMode, true) || savedConfig || {};
+      const endpoint = fallbackComfyDebugEndpoint(workflow, modeConfig);
       return {
-        endpoint: modeConfig.endpoint || workflow?.default_endpoint || '',
+        endpoint,
         reference: modeConfig.defaultReference || '',
         middleFrameReference: modeConfig.defaultMiddleFrameReference || '',
         lastFrameReference: modeConfig.defaultLastFrameReference || '',
@@ -5977,7 +6033,7 @@ INDEX_HTML = r"""<!doctype html>
         els.imageBaseUrl.value = 'https://www.runninghub.cn/openapi/v2';
       }
       if (!els.imageWorkflowEndpoint.value.trim()) {
-        els.imageWorkflowEndpoint.value = '/run/workflow/2048294089858228226';
+        els.imageWorkflowEndpoint.value = DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT;
       }
       if (!els.imageNodeInfoList.value.trim()) {
         els.imageNodeInfoList.value = '[]';
@@ -5991,7 +6047,7 @@ INDEX_HTML = r"""<!doctype html>
         els.videoBaseUrl.value = 'https://www.runninghub.cn/openapi/v2';
       }
       if (!els.videoWorkflowEndpoint.value.trim()) {
-        els.videoWorkflowEndpoint.value = '/run/ai-app/2066043648160133122';
+        els.videoWorkflowEndpoint.value = DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT;
       }
       if (!els.videoNodeInfoList.value.trim()) {
         els.videoNodeInfoList.value = '[]';
@@ -10607,7 +10663,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!item) return;
       const savedConfig = getComfyWorkflowLibraryItemById(item.id);
       const modeConfig = getComfyWorkflowModeConfig(item, activeComfyDebugWorkflowMode, true) || savedConfig || {};
-      const endpoint = modeConfig.endpoint || item.default_endpoint || '';
+      const endpoint = fallbackComfyDebugEndpoint(item, modeConfig);
       const nodeInfo = modeConfig.nodeInfoList || item.default_node_info || '[]';
       const width = modeConfig.defaultWidth || item.default_width || '';
       const height = modeConfig.defaultHeight || item.default_height || '';
@@ -11215,12 +11271,17 @@ INDEX_HTML = r"""<!doctype html>
       };
       const missingInputs = requiredInputs.filter(slot => !semanticValues[slot]);
       if (missingInputs.length) throw new Error(`当前子模式缺少必填输入：${missingInputs.join(', ')}`);
-      validateComfyDebugSemanticContract(requiredInputs, els.comfyDebugEndpoint.value.trim(), els.comfyDebugNodeInfoList.value.trim());
+      const modeConfig = getComfyWorkflowModeConfig(selected, workflowModeDef?.value || activeComfyDebugWorkflowMode, true) || {};
+      const endpoint = String(els.comfyDebugEndpoint.value || fallbackComfyDebugEndpoint(selected, modeConfig)).trim();
+      const baseUrl = fallbackComfyDebugBaseUrl(endpoint);
+      const apiKey = String(els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim()).trim();
+      validateComfyDebugProviderConfig(endpoint, baseUrl, apiKey);
+      validateComfyDebugSemanticContract(requiredInputs, endpoint, els.comfyDebugNodeInfoList.value.trim());
       return {
         workflows: [selected.id],
-        api_key: els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim(),
-        base_url: els.comfyDebugBaseUrl.value.trim() || els.comfyBaseUrl.value.trim(),
-        endpoint: els.comfyDebugEndpoint.value.trim(),
+        api_key: apiKey,
+        base_url: baseUrl,
+        endpoint,
         node_info_list_json: els.comfyDebugNodeInfoList.value.trim(),
         workflow_library: getComfyWorkflowLibraryPayload(),
         poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
@@ -11413,6 +11474,7 @@ INDEX_HTML = r"""<!doctype html>
           els.comfyDebugStatus.textContent = message;
           els.comfyDebugStatus.classList.add('error');
         }
+        renderComfyDebugError(message);
         return;
       }
 
@@ -14711,6 +14773,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             item_id = str(item.get("id") or "").strip()
             if not item_id or item_id in seen:
                 continue
+            if not str(item.get("default_endpoint") or "").strip():
+                item_type = str(item.get("type") or "").strip().lower()
+                if item_type == "image":
+                    item["default_endpoint"] = DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT
+                elif item_type == "video":
+                    item["default_endpoint"] = DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT
             default_node_info = str(item.get("default_node_info") or "").strip()
             if not default_node_info or default_node_info == "[]":
                 item["default_node_info"] = cls._default_comfy_debug_node_info(item_id)
