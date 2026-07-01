@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-01] Fixed the next resume blocker after step 5. Staff 07's compatibility `video_prompts` can now inherit first/middle/last frame references from the same `production_intents.video` object when the old compatibility rows omit explicit frame IDs, so valid three-frame outputs are no longer rejected as missing references. `production_plan_compiler.py` now prefers compiler-generated `image_prompts` / `video_prompts` as the authoritative DAG input while preserving raw staff compatibility rows under `legacy_*`, ensuring compiled jobs keep their explicit `depends_on` and `input_bindings`. Resume failures also now clear stale pause/confirmation/block flags and rewrite `run_summary.json`, so Task Output shows the latest failed step instead of an old error after `继续任务`.
+
 - [2026-07-01] Browser verification confirmed failed employee runs now unlock top navigation, hide the stop button, and expose only the valid continue action. The production execution stage card now uses neutral stage names (`06 图片生产意图`, `生产计划编译`, `视觉后端调用`, `图片生成`, `TTS 配音`, and so on) so a waiting stage no longer misleadingly reads as already compiled or currently generating.
 
 - [2026-07-01] DeepSeek full-flow browser testing found that staff 20 correctly emitted all subtitle rows under the documented `build_subtitles.subtitle_segments` field, while the validator only counted the shorter `segments` alias and therefore rejected two otherwise complete outputs as less than 90% coverage. Audio contract validation now accepts both names and continues using the normalized list for timestamps and coverage.

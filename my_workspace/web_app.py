@@ -12739,6 +12739,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     paused = bool(job.get("pause_requested"))
                     stopped = bool(job.get("cancel_requested"))
                     job["status"] = "paused" if paused else "cancelled" if stopped else "failed"
+                    job["pause_requested"] = False
+                    job["cancel_requested"] = False
+                    job["awaiting_confirmation"] = False
+                    job.pop("awaiting_confirmation_step", None)
+                    job.pop("blocked_step", None)
+                    job.pop("blocked_reason", None)
                     job["error"] = str(exc)
                     job["traceback"] = traceback.format_exc()
                     for step in job.get("steps", []):
@@ -12749,6 +12755,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                             elif stopped:
                                 step["message"] = "用户已终止"
                     job["updated_at"] = time.time()
+                    self._write_failed_run_summary(job)
 
     def _run_rerun_step_job(
         self,

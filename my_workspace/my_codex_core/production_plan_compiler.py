@@ -109,10 +109,8 @@ def compile_production_plan(
         parameter_overrides,
     )
 
-    _merge_compat_list(compat_payload, "image_prompts", image_payload.get("image_prompts"))
-    _merge_compat_list(compat_payload, "video_prompts", video_payload.get("video_prompts"))
-    _merge_compat_list(compat_payload, "image_prompts", image_prompts)
-    _merge_compat_list(compat_payload, "video_prompts", video_prompts)
+    _prefer_compiled_compat_list(compat_payload, "image_prompts", image_prompts, image_payload.get("image_prompts"))
+    _prefer_compiled_compat_list(compat_payload, "video_prompts", video_prompts, video_payload.get("video_prompts"))
     _merge_compat_list(compat_payload, "reference_images", image_payload.get("reference_images"))
     _merge_compat_list(compat_payload, "reference_images", video_payload.get("reference_images"))
     _merge_compat_list(compat_payload, "reference_images", route_payload.get("reference_images"))
@@ -192,7 +190,7 @@ def compile_production_plan(
             "image_prompts_count": len(compat_payload.get("image_prompts") if isinstance(compat_payload.get("image_prompts"), list) else []),
             "video_prompts_count": len(compat_payload.get("video_prompts") if isinstance(compat_payload.get("video_prompts"), list) else []),
             "legacy_fields_preserved": True,
-            "compiler_is_authoritative_for_dag": False
+            "compiler_is_authoritative_for_dag": bool(image_prompts or video_prompts)
         }
     }
     return plan
@@ -621,6 +619,17 @@ def _merge_compat_list(target: dict[str, Any], key: str, values: Any) -> None:
         if identity:
             seen.add(identity)
     target[key] = current
+
+
+def _prefer_compiled_compat_list(target: dict[str, Any], key: str, compiled_values: Any, legacy_values: Any) -> None:
+    compiled_list = [item for item in compiled_values if isinstance(item, dict)] if isinstance(compiled_values, list) else []
+    legacy_list = [item for item in legacy_values if isinstance(item, dict)] if isinstance(legacy_values, list) else []
+    if compiled_list:
+        if legacy_list:
+            target[f"legacy_{key}"] = legacy_list
+        target[key] = compiled_list
+        return
+    _merge_compat_list(target, key, legacy_list)
 
 
 def _identity_for_item(item: Any) -> str:

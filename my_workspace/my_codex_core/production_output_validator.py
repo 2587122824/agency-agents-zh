@@ -216,6 +216,8 @@ def _validate_videos(
                 issues.append(f"{label} 的首中尾帧视频必须为 24fps")
             refs = _reference_ids(item)
             if len(set(refs)) < 3:
+                refs = _resolve_video_prompt_refs(item, index - 1, intents)
+            if len(set(refs)) < 3:
                 issues.append(f"{label} 缺少 start/middle/end 三帧引用")
             for ref in refs:
                 if upstream_ids and ref not in upstream_ids:
@@ -345,6 +347,38 @@ def _reference_ids(item: dict[str, Any]) -> list[str]:
         if str(value or "").strip():
             values.append(str(value).strip())
     return list(dict.fromkeys(values))
+
+
+def _resolve_video_prompt_refs(prompt_item: dict[str, Any], prompt_index: int, intents: list[dict[str, Any]]) -> list[str]:
+    prompt_keys = {
+        str(prompt_item.get("job_id") or "").strip(),
+        str(prompt_item.get("id") or "").strip(),
+        str(prompt_item.get("asset_tag") or "").strip(),
+    }
+    prompt_keys = {value for value in prompt_keys if value}
+    candidates: list[dict[str, Any]] = []
+    for intent in intents:
+        intent_keys = {
+            str(intent.get("intent_id") or "").strip(),
+            str(intent.get("job_id") or "").strip(),
+            str(intent.get("id") or "").strip(),
+            str(intent.get("asset_tag") or "").strip(),
+        }
+        intent_keys = {value for value in intent_keys if value}
+        if prompt_keys and (
+            prompt_keys & intent_keys
+            or any(key.startswith(other) or other.startswith(key) for key in prompt_keys for other in intent_keys)
+        ):
+            candidates.append(intent)
+    if 0 <= prompt_index < len(intents):
+        indexed_intent = intents[prompt_index]
+        if indexed_intent not in candidates:
+            candidates.append(indexed_intent)
+    for candidate in candidates:
+        refs = _reference_ids(candidate)
+        if len(set(refs)) >= 3:
+            return refs
+    return []
 
 
 def _string_list(value: Any) -> list[str]:
