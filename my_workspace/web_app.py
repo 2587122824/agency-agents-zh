@@ -71,6 +71,7 @@ COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
 RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
+RUNTIME_COMFY_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_comfy_config.json"
 DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = ""
 DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = ""
 RUN_JOBS: dict[str, dict] = {}
@@ -4871,6 +4872,48 @@ INDEX_HTML = r"""<!doctype html>
         els.env.textContent = `已缓存运行时模型：${result.provider || 'auto'} / ${result.model}`;
       }
       return result;
+    }
+
+    function currentRuntimeComfyPayload() {
+      const selectedComfyPreset = getSelectedComfyWorkflowPreset();
+      return {
+        visual_provider: els.visualProvider?.value || 'runninghub',
+        api_key: els.comfyApiKey?.value?.trim() || '',
+        base_url: els.comfyBaseUrl?.value?.trim() || '',
+        comfy_mcp_url: els.comfyMcpUrl?.value?.trim() || '',
+        workflow_endpoint: els.comfyWorkflowEndpoint?.value?.trim() || '',
+        node_info_list_json: els.comfyNodeInfoList?.value?.trim() || '',
+        poll_timeout_seconds: Number(els.comfyPollTimeout?.value || 3600),
+        workflow_preset_id: selectedComfyPreset?.id || '',
+        workflow_preset_name: selectedComfyPreset?.name || '',
+        workflow_library: getComfyWorkflowLibraryPayload(),
+      };
+    }
+
+    async function syncRuntimeComfyConfig(options = {}) {
+      const payload = currentRuntimeComfyPayload();
+      const hasAnyWorkflowConfig = Boolean(
+        payload.api_key
+        || payload.base_url
+        || payload.workflow_endpoint
+        || payload.node_info_list_json
+        || (Array.isArray(payload.workflow_library) && payload.workflow_library.length)
+        || payload.comfy_mcp_url
+      );
+      if (!hasAnyWorkflowConfig) return null;
+      if (options.requireRunningHub && payload.visual_provider === 'runninghub' && !payload.api_key) {
+        throw new Error('请先在系统配置填写 RunningHub API Key');
+      }
+      return apiWithTimeout('/api/runtime-comfy-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, options.timeoutMs || 8000);
+    }
+
+    async function saveRuntimeComfyConfigFromVisibleForm(options = {}) {
+      saveSettings();
+      return syncRuntimeComfyConfig({ timeoutMs: options.timeoutMs || 12000, requireRunningHub: Boolean(options.requireRunningHub) });
     }
 
     async function handleRuntimeModelConfigSave() {
@@ -10227,6 +10270,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         await ensureLocalModelReady(model);
         await saveRuntimeModelConfigFromVisibleForm();
+        await saveRuntimeComfyConfigFromVisibleForm();
         const result = await api('/api/rerun-step', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -10276,6 +10320,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         await ensureLocalModelReady(model);
         await saveRuntimeModelConfigFromVisibleForm();
+        await saveRuntimeComfyConfigFromVisibleForm();
         const { productionConfig } = await collectProductionConfig();
         const result = await api('/api/resume-task', {
           method: 'POST',
@@ -11042,6 +11087,7 @@ INDEX_HTML = r"""<!doctype html>
         setStartupProgressMeta('\u68c0\u67e5\u6a21\u578b/API\u914d\u7f6e');
         await ensureLocalModelReady(model);
         await saveRuntimeModelConfigFromVisibleForm();
+        await saveRuntimeComfyConfigFromVisibleForm();
         setStartupProgressMeta('\u5904\u7406\u53c2\u8003\u7d20\u6750');
         const referenceImages = await uploadReferenceImages();
         setStartupProgressMeta('\u8bfb\u53d6\u751f\u4ea7\u914d\u7f6e');
@@ -12021,6 +12067,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._save_runtime_model_config(payload))
                 return
 
+            if parsed.path == "/api/runtime-comfy-config":
+                self._send_json(self._save_runtime_comfy_config(payload))
+                return
+
             if parsed.path == "/api/test-comfy-mcp":
                 self._send_json(self._test_comfy_mcp(payload))
                 return
@@ -12114,6 +12164,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if isinstance(production_compose_config, dict):
                     production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
                     production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
+                production_config = self._apply_runtime_comfy_config(production_config, payload)
             image_config = payload.get("image_config") or {}
             if isinstance(image_config, dict) and str(image_config.get("positive_prompt") or "").strip():
                 user_input = self._append_image_config(user_input, image_config)
@@ -12177,6 +12228,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         workflows = self._workflow_list()
         staff = [path.name for path in sorted(STAFF_ROOT.iterdir()) if path.is_dir()]
         runtime_model_config = self._read_runtime_model_config()
+        runtime_comfy_config = self._read_runtime_comfy_config(redact=True)
         return {
             "workflows": workflows,
             "staff": staff,
@@ -12187,6 +12239,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "default_base_url": os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
             "runtime_model_config": runtime_model_config,
             "runtime_model_saved": bool(runtime_model_config.get("api_key") and runtime_model_config.get("model")),
+            "runtime_comfy_config": runtime_comfy_config,
+            "runtime_comfy_saved": bool(runtime_comfy_config.get("has_api_key") or runtime_comfy_config.get("workflow_library")),
         }
 
     @staticmethod
@@ -12229,6 +12283,96 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             }
         )
         RUNTIME_MODEL_CONFIG_PATH.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    @staticmethod
+    def _read_runtime_comfy_config(*, redact: bool = False) -> dict:
+        try:
+            data = json.loads(RUNTIME_COMFY_CONFIG_PATH.read_text(encoding="utf-8-sig")) if RUNTIME_COMFY_CONFIG_PATH.is_file() else {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        api_key = str(data.get("api_key") or "").strip()
+        result = {
+            "visual_provider": str(data.get("visual_provider") or "runninghub").strip() or "runninghub",
+            "api_key": "" if redact else api_key,
+            "has_api_key": bool(api_key),
+            "base_url": str(data.get("base_url") or "").strip(),
+            "comfy_mcp_url": str(data.get("comfy_mcp_url") or "").strip(),
+            "workflow_endpoint": str(data.get("workflow_endpoint") or "").strip(),
+            "node_info_list_json": str(data.get("node_info_list_json") or "").strip(),
+            "poll_timeout_seconds": int(data.get("poll_timeout_seconds") or 0) or 3600,
+            "workflow_preset_id": str(data.get("workflow_preset_id") or "").strip(),
+            "workflow_preset_name": str(data.get("workflow_preset_name") or "").strip(),
+            "workflow_library": data.get("workflow_library") if isinstance(data.get("workflow_library"), list) else [],
+            "updated_at": float(data.get("updated_at") or 0),
+        }
+        return result
+
+    @staticmethod
+    def _write_runtime_comfy_config(config: dict) -> None:
+        RUNTIME_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+        current = WorkflowWebHandler._read_runtime_comfy_config(redact=False)
+        workflow_library = config.get("workflow_library")
+        if not isinstance(workflow_library, list):
+            workflow_library = current.get("workflow_library") if isinstance(current.get("workflow_library"), list) else []
+        current.update(
+            {
+                "visual_provider": str(config.get("visual_provider") or current.get("visual_provider") or "runninghub").strip() or "runninghub",
+                "api_key": str(config.get("api_key") or current.get("api_key") or "").strip(),
+                "base_url": str(config.get("base_url") or current.get("base_url") or "").strip(),
+                "comfy_mcp_url": str(config.get("comfy_mcp_url") or current.get("comfy_mcp_url") or "").strip(),
+                "workflow_endpoint": str(config.get("workflow_endpoint") or current.get("workflow_endpoint") or "").strip(),
+                "node_info_list_json": str(config.get("node_info_list_json") or current.get("node_info_list_json") or "").strip(),
+                "poll_timeout_seconds": int(config.get("poll_timeout_seconds") or current.get("poll_timeout_seconds") or 3600),
+                "workflow_preset_id": str(config.get("workflow_preset_id") or current.get("workflow_preset_id") or "").strip(),
+                "workflow_preset_name": str(config.get("workflow_preset_name") or current.get("workflow_preset_name") or "").strip(),
+                "workflow_library": workflow_library,
+                "updated_at": time.time(),
+            }
+        )
+        RUNTIME_COMFY_CONFIG_PATH.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    def _save_runtime_comfy_config(self, payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be a JSON object")
+        self._write_runtime_comfy_config(payload)
+        return self._read_runtime_comfy_config(redact=True)
+
+    @classmethod
+    def _apply_runtime_comfy_config(cls, production_config: dict, payload: dict) -> dict:
+        if not isinstance(production_config, dict):
+            production_config = {}
+        compose_config = production_config.setdefault("compose_config", {})
+        if not isinstance(compose_config, dict):
+            compose_config = {}
+            production_config["compose_config"] = compose_config
+        saved = cls._read_runtime_comfy_config(redact=False)
+
+        api_key = str(payload.get("comfy_api_key") or compose_config.get("api_key") or "").strip() or str(saved.get("api_key") or "").strip()
+        base_url = str(payload.get("comfy_base_url") or compose_config.get("base_url") or "").strip() or str(saved.get("base_url") or "").strip()
+        if api_key:
+            compose_config["api_key"] = api_key
+        if base_url:
+            compose_config["base_url"] = base_url
+
+        for key in (
+            "visual_provider",
+            "comfy_mcp_url",
+            "workflow_endpoint",
+            "node_info_list_json",
+            "poll_timeout_seconds",
+            "workflow_preset_id",
+            "workflow_preset_name",
+        ):
+            value = compose_config.get(key)
+            if value in (None, "", [], {}):
+                saved_value = saved.get(key)
+                if saved_value not in (None, "", [], {}):
+                    compose_config[key] = saved_value
+        if not compose_config.get("workflow_library") and isinstance(saved.get("workflow_library"), list):
+            compose_config["workflow_library"] = saved["workflow_library"]
+        return production_config
 
     @classmethod
     def _resolve_runtime_model_request(cls, payload: dict) -> dict:
@@ -16268,6 +16412,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if isinstance(production_compose_config, dict):
                 production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
                 production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
+            production_config = self._apply_runtime_comfy_config(production_config, payload)
         summary = {}
         summary_path = task_dir / "run_summary.json"
         if summary_path.exists():
@@ -16337,6 +16482,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if isinstance(production_compose_config, dict):
                 production_compose_config["api_key"] = str(payload.get("comfy_api_key") or "").strip()
                 production_compose_config["base_url"] = str(payload.get("comfy_base_url") or "").strip()
+            production_config = self._apply_runtime_comfy_config(production_config, payload)
 
         summary = {}
         summary_path = task_dir / "run_summary.json"
