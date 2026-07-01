@@ -58,6 +58,7 @@ class TaskStateCenter:
         assets: dict[str, Any] | None = None,
         active_job: dict[str, Any] | None = None,
         comfy_debug_loader: Callable[[Path], dict[str, Any]] | None = None,
+        runtime_comfy_config: dict[str, Any] | None = None,
     ) -> None:
         self.task_dir = task_dir
         self.task_name = task_name
@@ -66,6 +67,7 @@ class TaskStateCenter:
         self.assets = assets if isinstance(assets, dict) else {}
         self.active_job = active_job if isinstance(active_job, dict) else None
         self.comfy_debug_loader = comfy_debug_loader
+        self.runtime_comfy_config = runtime_comfy_config if isinstance(runtime_comfy_config, dict) else {}
 
     def build(self) -> dict[str, Any]:
         comfy_debug = self._comfy_debug()
@@ -345,7 +347,7 @@ class TaskStateCenter:
                 "reason": "missing_comfy_workflow_slots",
             }
         visual_provider = str(composition.get("visual_provider") or composition.get("visual_provider_details", {}).get("provider") or "").strip().lower()
-        if visual_provider == "runninghub" and not self._as_bool(composition.get("api_key_provided"), default=False) and not has_final_media:
+        if visual_provider == "runninghub" and not self._has_runninghub_api_key(composition) and not has_final_media:
             return {
                 "action": "configure_runninghub_api_key",
                 "label": "配置 RunningHub API Key 后重试素材",
@@ -388,7 +390,7 @@ class TaskStateCenter:
                 }
             )
         visual_provider = str(composition.get("visual_provider") or composition.get("visual_provider_details", {}).get("provider") or "").strip().lower()
-        if visual_provider == "runninghub" and not self._as_bool(composition.get("api_key_provided"), default=False):
+        if visual_provider == "runninghub" and not self._has_runninghub_api_key(composition):
             diagnostics.append(
                 {
                     "level": "warn",
@@ -405,6 +407,13 @@ class TaskStateCenter:
         if missing_outputs:
             diagnostics.append({"level": "warn", "code": "missing_step_outputs", "message": f"步骤状态已完成但缺少 output.md：{', '.join(missing_outputs)}"})
         return diagnostics
+
+    def _has_runninghub_api_key(self, composition: dict[str, Any]) -> bool:
+        if self._as_bool(composition.get("api_key_provided"), default=False):
+            return True
+        if self._as_bool(self.runtime_comfy_config.get("has_api_key"), default=False):
+            return True
+        return bool(str(self.runtime_comfy_config.get("api_key") or "").strip())
 
     @staticmethod
     def _workflow_slot_detail(item: dict[str, Any]) -> dict[str, str]:

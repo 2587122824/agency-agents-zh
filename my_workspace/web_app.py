@@ -13725,6 +13725,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             assets=assets,
             active_job=active_job,
             comfy_debug_loader=self._task_comfy_debug_status,
+            runtime_comfy_config=self._read_runtime_comfy_config(redact=True),
         ).build()
         comfy_debug = state_center.get("comfy_debug") if isinstance(state_center.get("comfy_debug"), dict) else {}
         task_state = str(state_center.get("state") or self._task_state(summary, files, comfy_debug))
