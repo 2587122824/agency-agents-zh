@@ -18,6 +18,10 @@ from .production_plan_compiler import compile_production_plan, write_production_
 from .visual_provider_router import build_visual_provider_profile
 
 
+DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = "/run/workflow/2048294089858228226"
+DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = "/run/ai-app/2066043648160133122"
+
+
 def run_auto_production(
     task_dir: Path,
     step_outputs: list[dict[str, str]],
@@ -72,6 +76,7 @@ def run_auto_production(
     checklist_path = task_dir / "edit_checklist.md"
     production_note_path = task_dir / "auto_production.md"
     final_video_name = _safe_file_name(str(compose_config.get("final_video_name") or "final_video.mp4"))
+    _ensure_default_runninghub_workflow_endpoints(compose_config)
     visual_provider_profile = build_visual_provider_profile(compose_config)
     compose_config["visual_provider"] = visual_provider_profile["provider"]
     compose_config["visual_provider_profile"] = visual_provider_profile
@@ -1067,6 +1072,7 @@ def _run_comfyui_adapter(
     output_dir: Path,
     progress_callback=None,
 ) -> dict[str, Any] | None:
+    _ensure_default_runninghub_workflow_endpoints(compose_config)
     provider_profile = build_visual_provider_profile(compose_config)
     provider = provider_profile["provider"]
     api_key = str(compose_config.get("api_key") or "").strip()
@@ -1571,6 +1577,77 @@ def _run_image_adapter(
         "manifest_file": str(output_dir / "cloud_image_manifest.json"),
         "downloaded_files": manifest.get("downloaded_files", []),
     }
+
+
+def _ensure_default_runninghub_workflow_endpoints(compose_config: dict[str, Any]) -> None:
+    if not isinstance(compose_config, dict):
+        return
+    provider_hint = str(compose_config.get("visual_provider") or compose_config.get("provider") or "").strip().lower()
+    base_url = str(compose_config.get("base_url") or "").strip().lower()
+    endpoint = str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()
+    uses_runninghub = (
+        provider_hint in {"", "runninghub", "rh", "cloud_runninghub"}
+        or "runninghub" in base_url
+        or endpoint.startswith(("/run/workflow/", "/run/ai-app/"))
+    )
+    if not uses_runninghub:
+        return
+    if not str(compose_config.get("base_url") or "").strip():
+        compose_config["base_url"] = "https://www.runninghub.cn/openapi/v2"
+
+    library = compose_config.get("workflow_library")
+    if isinstance(library, list):
+        for item in library:
+            if isinstance(item, dict):
+                _ensure_library_item_runninghub_endpoint(item)
+
+    if not endpoint:
+        selected_id = str(compose_config.get("workflow_preset_id") or "").strip()
+        selected_endpoint = ""
+        if isinstance(library, list) and selected_id:
+            selected = next((item for item in library if isinstance(item, dict) and str(item.get("id") or "").strip() == selected_id), None)
+            selected_endpoint = str((selected or {}).get("endpoint") or (selected or {}).get("workflow_endpoint") or "").strip()
+        compose_config["workflow_endpoint"] = selected_endpoint or _first_library_endpoint_for_type(library, "image") or DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT
+
+
+def _ensure_library_item_runninghub_endpoint(item: dict[str, Any]) -> None:
+    endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
+    if not endpoint:
+        material_types = _string_set(item.get("material_types") or item.get("materialTypes") or item.get("types"))
+        item_id = str(item.get("id") or "").strip().lower()
+        text = " ".join(str(item.get(key) or "") for key in ("id", "name", "purpose")).lower()
+        if "video" in material_types or item_id in {"all_in_one_video"} or "video" in text or "视频" in text:
+            item["endpoint"] = DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT
+        elif "image" in material_types or item_id in {"all_in_one_image", "01_base_asset_image", "02_turnaround", "03_style_cover_image", "04_keyframe"}:
+            item["endpoint"] = DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT
+
+    mode_configs = item.get("mode_configs") or item.get("modeConfigs")
+    if isinstance(mode_configs, dict):
+        parent_endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
+        for config in mode_configs.values():
+            if isinstance(config, dict) and not str(config.get("endpoint") or config.get("workflow_endpoint") or "").strip() and parent_endpoint:
+                config["endpoint"] = parent_endpoint
+
+
+def _first_library_endpoint_for_type(library: Any, material_type: str) -> str:
+    if not isinstance(library, list):
+        return ""
+    target = str(material_type or "").strip().lower()
+    for item in library:
+        if not isinstance(item, dict):
+            continue
+        endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
+        if endpoint and target in _string_set(item.get("material_types") or item.get("materialTypes") or item.get("types")):
+            return endpoint
+    return ""
+
+
+def _string_set(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return {part.strip().lower() for part in value.split(",") if part.strip()}
+    if isinstance(value, list):
+        return {str(part).strip().lower() for part in value if str(part).strip()}
+    return set()
 
 
 def _create_output_dirs(task_dir: Path) -> dict[str, Path]:

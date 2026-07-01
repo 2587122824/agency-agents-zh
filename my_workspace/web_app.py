@@ -5882,52 +5882,73 @@ INDEX_HTML = r"""<!doctype html>
       setStatus(`已重置 ComfyUI 工作流槽位：${item.name}`);
     }
 
+    function defaultRunningHubEndpointForLibraryItem(item = {}) {
+      const materialTypes = Array.isArray(item.materialTypes)
+        ? item.materialTypes.map(value => String(value || '').toLowerCase())
+        : [];
+      const itemId = String(item.id || '').toLowerCase();
+      const text = [item.id, item.name, item.purpose].map(value => String(value || '').toLowerCase()).join(' ');
+      if (materialTypes.includes('video') || itemId === 'all_in_one_video' || text.includes('video') || text.includes('视频')) {
+        return DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT;
+      }
+      if (
+        materialTypes.includes('image')
+        || ['all_in_one_image', '01_base_asset_image', '02_turnaround', '03_style_cover_image', '04_keyframe'].includes(itemId)
+      ) {
+        return DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT;
+      }
+      return '';
+    }
+
     function getComfyWorkflowLibraryPayload() {
-      return comfyWorkflowLibrary.map(item => ({
-        id: item.id,
-        name: item.name,
-        purpose: item.purpose,
-        material_types: Array.isArray(item.materialTypes) ? item.materialTypes : [],
-        endpoint: item.endpoint || '',
-        node_info_list_json: item.nodeInfoList || '[]',
-        poll_timeout_seconds: Number(item.pollTimeout || 3600),
-        default_width: item.defaultWidth || '',
-        default_height: item.defaultHeight || '',
-        default_reference: item.defaultReference || '',
-        default_seed: item.defaultSeed || '',
-        default_duration: item.defaultDuration || '',
-        default_fps: item.defaultFps || '',
-        default_middle_frame_reference: item.defaultMiddleFrameReference || '',
-        default_middle_frame_asset_reference: item.defaultMiddleFrameAssetReference || '',
-        default_middle_frame_reference_hint: item.defaultMiddleFrameReferenceHint || '',
-        default_last_frame_reference: item.defaultLastFrameReference || '',
-        default_last_frame_asset_reference: item.defaultLastFrameAssetReference || '',
-        default_last_frame_reference_hint: item.defaultLastFrameReferenceHint || '',
-        default_workflow_mode: item.defaultWorkflowMode || '',
-        default_image_task_type: item.defaultImageTaskType || '',
-        default_prompt: item.defaultPrompt || '',
-        default_negative: item.defaultNegative || '',
-        default_asset_reference: item.defaultAssetReference || '',
-        default_reference_hint: item.defaultReferenceHint || '',
-        mode_configs: Object.fromEntries(Object.entries(item.modeConfigs || {}).map(([mode, config]) => [mode, {
-          endpoint: config.endpoint || '',
-          node_info_list_json: config.nodeInfoList || '[]',
-          poll_timeout_seconds: Number(config.pollTimeout || 3600),
-          default_width: config.defaultWidth || '',
-          default_height: config.defaultHeight || '',
-          default_reference: config.defaultReference || '',
-          default_middle_frame_reference: config.defaultMiddleFrameReference || '',
-          default_last_frame_reference: config.defaultLastFrameReference || '',
-          default_seed: config.defaultSeed || '',
-          default_duration: config.defaultDuration || '',
-          default_fps: config.defaultFps || '',
-          default_prompt: config.defaultPrompt || '',
-          default_negative: config.defaultNegative || '',
-        }])),
-        debug_workflow: Boolean(item.debugWorkflow),
-        endpoint_configured: Boolean(item.endpoint),
-        node_mapping_configured: Boolean(item.nodeInfoList && item.nodeInfoList !== '[]'),
-      }));
+      return comfyWorkflowLibrary.map(item => {
+        const endpoint = item.endpoint || defaultRunningHubEndpointForLibraryItem(item);
+        return {
+          id: item.id,
+          name: item.name,
+          purpose: item.purpose,
+          material_types: Array.isArray(item.materialTypes) ? item.materialTypes : [],
+          endpoint,
+          node_info_list_json: item.nodeInfoList || '[]',
+          poll_timeout_seconds: Number(item.pollTimeout || 3600),
+          default_width: item.defaultWidth || '',
+          default_height: item.defaultHeight || '',
+          default_reference: item.defaultReference || '',
+          default_seed: item.defaultSeed || '',
+          default_duration: item.defaultDuration || '',
+          default_fps: item.defaultFps || '',
+          default_middle_frame_reference: item.defaultMiddleFrameReference || '',
+          default_middle_frame_asset_reference: item.defaultMiddleFrameAssetReference || '',
+          default_middle_frame_reference_hint: item.defaultMiddleFrameReferenceHint || '',
+          default_last_frame_reference: item.defaultLastFrameReference || '',
+          default_last_frame_asset_reference: item.defaultLastFrameAssetReference || '',
+          default_last_frame_reference_hint: item.defaultLastFrameReferenceHint || '',
+          default_workflow_mode: item.defaultWorkflowMode || '',
+          default_image_task_type: item.defaultImageTaskType || '',
+          default_prompt: item.defaultPrompt || '',
+          default_negative: item.defaultNegative || '',
+          default_asset_reference: item.defaultAssetReference || '',
+          default_reference_hint: item.defaultReferenceHint || '',
+          mode_configs: Object.fromEntries(Object.entries(item.modeConfigs || {}).map(([mode, config]) => [mode, {
+            endpoint: config.endpoint || endpoint,
+            node_info_list_json: config.nodeInfoList || '[]',
+            poll_timeout_seconds: Number(config.pollTimeout || 3600),
+            default_width: config.defaultWidth || '',
+            default_height: config.defaultHeight || '',
+            default_reference: config.defaultReference || '',
+            default_middle_frame_reference: config.defaultMiddleFrameReference || '',
+            default_last_frame_reference: config.defaultLastFrameReference || '',
+            default_seed: config.defaultSeed || '',
+            default_duration: config.defaultDuration || '',
+            default_fps: config.defaultFps || '',
+            default_prompt: config.defaultPrompt || '',
+            default_negative: config.defaultNegative || '',
+          }])),
+          debug_workflow: Boolean(item.debugWorkflow),
+          endpoint_configured: Boolean(endpoint),
+          node_mapping_configured: Boolean(item.nodeInfoList && item.nodeInfoList !== '[]'),
+        };
+      });
     }
 
     function setIfExists(control, value) {
@@ -10402,6 +10423,12 @@ INDEX_HTML = r"""<!doctype html>
         node_info_list_json: '',
         poll_timeout_seconds: 1800,
       };
+      const selectedComfyPreset = getSelectedComfyWorkflowPreset();
+      const defaultComfyBaseUrl = els.comfyBaseUrl.value.trim()
+        || (els.visualProvider.value === 'runninghub' ? 'https://www.runninghub.cn/openapi/v2' : '');
+      const defaultComposeEndpoint = els.comfyWorkflowEndpoint.value.trim()
+        || (selectedComfyPreset ? (selectedComfyPreset.endpoint || defaultRunningHubEndpointForLibraryItem(selectedComfyPreset)) : '')
+        || DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT;
       const productionConfig = {
         mode: els.autoProductionMode.value,
         workflow_advance_mode: els.workflowAdvanceMode.value,
@@ -10428,14 +10455,14 @@ INDEX_HTML = r"""<!doctype html>
           final_video_name: els.finalVideoName.value.trim() || 'final_video.mp4',
           visual_provider: els.visualProvider.value,
           api_key_provided: Boolean(els.comfyApiKey.value.trim()),
-          base_url_provided: Boolean(els.comfyBaseUrl.value.trim()),
-          base_url: els.comfyBaseUrl.value.trim(),
+          base_url_provided: Boolean(defaultComfyBaseUrl),
+          base_url: defaultComfyBaseUrl,
           comfy_mcp_url: els.comfyMcpUrl.value.trim(),
-          workflow_endpoint: els.comfyWorkflowEndpoint.value.trim(),
+          workflow_endpoint: defaultComposeEndpoint,
           node_info_list_json: els.comfyNodeInfoList.value.trim(),
           poll_timeout_seconds: Number(els.comfyPollTimeout.value || 3600),
-          workflow_preset_id: getSelectedComfyWorkflowPreset()?.id || '',
-          workflow_preset_name: getSelectedComfyWorkflowPreset()?.name || '',
+          workflow_preset_id: selectedComfyPreset?.id || '',
+          workflow_preset_name: selectedComfyPreset?.name || '',
           workflow_preset_purpose: els.comfyWorkflowPresetNote.value.trim(),
           workflow_library: getComfyWorkflowLibraryPayload(),
         },
