@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-01] Fixed a model-config persistence gap where the System Config page could show a filled DeepSeek/custom model setup while the backend runtime cache was still empty unless the user clicked the model-test button. The frontend now syncs the runtime model config to `/api/runtime-model-config` on settings save and immediately before new-run/resume/rerun calls; the backend saves provider/model/API key/base URL/timeout but only returns a `has_api_key` flag. Initialization no longer restores localStorage a second time after loading backend config, preventing saved runtime model values from being overwritten by stale browser settings.
+
 - [2026-07-01] Fixed a frontend recursion that could break the Task Output page after switching views. `syncOutputButtons()` called idle-unlock logic, which called `trackRun("")`, which called `syncOutputButtons()` again until Chrome reported `Maximum call stack size exceeded`. Clearing tracked run state is now separated from full button resync, and `setWorkflowInteractionLocked()` can skip nested output sync when called from that idle-unlock path.
 
 - [2026-07-01] Model execution now has a no-silent-local-fallback guard. `/api/run`, `/api/resume-task`, and `/api/rerun-step` resolve the runtime model config first and then require a model plus API key from either the request, cached runtime config, or environment. If none exists, the request fails with a clear Chinese message telling the user to configure/test the model first, instead of silently falling back to the local offline Qwen path.

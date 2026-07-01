@@ -4803,6 +4803,43 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function currentRuntimeModelPayload() {
+      const model = els.model.value === 'custom' ? els.customModel.value.trim() : els.model.value;
+      return {
+        provider: els.provider.value,
+        model,
+        api_key: els.apiKey.value.trim(),
+        base_url: els.baseUrl.value.trim(),
+        timeout: Number(els.modelTimeout.value || 900),
+      };
+    }
+
+    async function syncRuntimeModelConfig(options = {}) {
+      const payload = currentRuntimeModelPayload();
+      const hasAnyValue = Boolean(payload.provider || payload.model || payload.api_key || payload.base_url || payload.timeout);
+      if (!hasAnyValue) return null;
+      if (options.requireComplete && (!payload.model || !payload.api_key)) {
+        throw new Error('请先在系统配置填写模型名和 API Key');
+      }
+      return apiWithTimeout('/api/runtime-model-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, options.timeoutMs || 8000);
+    }
+
+    function queueRuntimeModelConfigSync() {
+      const payload = currentRuntimeModelPayload();
+      if (!payload.model || !payload.api_key) return;
+      syncRuntimeModelConfig({ timeoutMs: 8000 }).then((result) => {
+        if (result?.model && els.env) {
+          els.env.textContent = `已缓存运行时模型：${result.provider || 'auto'} / ${result.model}`;
+        }
+      }).catch((err) => {
+        console.warn('runtime model config sync failed', err);
+      });
+    }
+
     function setStartupProgressMeta(text) {
       if (els.progressMeta) els.progressMeta.textContent = text;
     }
@@ -5100,6 +5137,7 @@ INDEX_HTML = r"""<!doctype html>
         else delete settings[key];
       });
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      queueRuntimeModelConfigSync();
     }
 
     function restoreSettings() {
@@ -10039,6 +10077,7 @@ INDEX_HTML = r"""<!doctype html>
       showView('output');
       try {
         await ensureLocalModelReady(model);
+        await syncRuntimeModelConfig({ requireComplete: true });
         const result = await api('/api/rerun-step', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -10087,6 +10126,7 @@ INDEX_HTML = r"""<!doctype html>
       els.resumeTaskBtn.disabled = true;
       try {
         await ensureLocalModelReady(model);
+        await syncRuntimeModelConfig({ requireComplete: true });
         const { productionConfig } = await collectProductionConfig();
         const result = await api('/api/resume-task', {
           method: 'POST',
@@ -10847,6 +10887,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         setStartupProgressMeta('\u68c0\u67e5\u6a21\u578b/API\u914d\u7f6e');
         await ensureLocalModelReady(model);
+        await syncRuntimeModelConfig({ requireComplete: true });
         setStartupProgressMeta('\u5904\u7406\u53c2\u8003\u7d20\u6750');
         const referenceImages = await uploadReferenceImages();
         setStartupProgressMeta('\u8bfb\u53d6\u751f\u4ea7\u914d\u7f6e');
@@ -11664,7 +11705,6 @@ INDEX_HTML = r"""<!doctype html>
     (async function init() {
       try {
         await loadConfig();
-        restoreSettings();
         await loadAssetLibrary();
         await loadProductionEntities();
         await loadComfyDebugWorkflows();
@@ -11814,6 +11854,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/test-model":
                 self._send_json(self._test_model(payload))
+                return
+
+            if parsed.path == "/api/runtime-model-config":
+                self._send_json(self._save_runtime_model_config(payload))
                 return
 
             if parsed.path == "/api/test-comfy-mcp":
@@ -12063,6 +12107,35 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if model and api_key:
             return
         raise ValueError("请先在系统配置填写模型/API Key，并点击测试模型或保存后再继续任务；当前不会自动回落到本地模型。")
+
+    def _save_runtime_model_config(self, payload: dict) -> dict:
+        runtime_model = self._resolve_runtime_model_request(payload)
+        model = str(runtime_model.get("model") or "").strip()
+        api_key = str(runtime_model.get("api_key") or "").strip()
+        provider = str(runtime_model.get("provider") or "auto").strip() or "auto"
+        base_url = str(runtime_model.get("base_url") or "").strip()
+        timeout = int(runtime_model.get("timeout") or 900)
+        if not model:
+            raise ValueError("model is required")
+        if not api_key:
+            raise ValueError("API Key is required")
+        self._write_runtime_model_config(
+            {
+                "provider": provider,
+                "model": model,
+                "api_key": api_key,
+                "base_url": base_url,
+                "timeout": timeout,
+            }
+        )
+        return {
+            "ok": True,
+            "provider": provider,
+            "model": model,
+            "base_url": base_url,
+            "timeout": timeout,
+            "has_api_key": True,
+        }
 
     def _system_health(self) -> dict:
         ollama_models = self._ollama_model_names()
