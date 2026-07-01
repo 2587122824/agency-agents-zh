@@ -53,7 +53,7 @@ def build_visual_provider_profile(compose_config: dict[str, Any] | None) -> dict
         "endpoint": endpoint,
         "comfy_mcp_url": mcp_url,
         "compose_tool": str(config.get("tool") or "").strip(),
-        "discovery_only": provider == "comfy_mcp",
+        "discovery_only": False,
         "source": str(config.get("visual_provider") or config.get("provider") or "auto").strip() or "auto",
     }
 

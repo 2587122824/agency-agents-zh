@@ -21,6 +21,7 @@ from uuid import uuid4
 from PIL import Image
 
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
+from my_codex_core.comfy_mcp_adapter import ComfyMCPAdapter
 from my_codex_core.production_entities import load_production_entities, write_production_entities
 from my_codex_core.production_pipeline import retry_production_job
 from my_codex_core.production_plan_compiler import compile_production_plan
@@ -2808,7 +2809,7 @@ INDEX_HTML = r"""<!doctype html>
               <label>视觉后端
                 <select id="visualProvider">
                   <option value="runninghub" selected>RunningHub / 云端 ComfyUI</option>
-                  <option value="comfy_mcp">Comfy MCP（模板发现优先）</option>
+                  <option value="comfy_mcp">Comfy MCP（自动发现/执行）</option>
                   <option value="local_comfyui">本地 ComfyUI</option>
                 </select>
               </label>
@@ -11423,6 +11424,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._test_model(payload))
                 return
 
+            if parsed.path == "/api/test-comfy-mcp":
+                self._send_json(self._test_comfy_mcp(payload))
+                return
+
             if parsed.path == "/api/save-staff":
                 self._send_json(self._save_staff(payload))
                 return
@@ -16044,6 +16049,32 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
         data = json.loads(raw)
         return {"ok": True, "model": model, "id": data.get("id", "")}
+
+    def _test_comfy_mcp(self, payload: dict) -> dict:
+        mcp_url = str(payload.get("mcp_url") or payload.get("comfy_mcp_url") or "").strip()
+        api_key = str(payload.get("api_key") or "").strip()
+        if not mcp_url:
+            raise ValueError("Comfy MCP URL is required")
+        discovery = ComfyMCPAdapter(mcp_url=mcp_url, api_key=api_key).discover()
+        tools = discovery.get("tools") if isinstance(discovery.get("tools"), list) else []
+        return {
+            "ok": bool(tools or discovery.get("health")),
+            "provider": "comfy_mcp",
+            "status": discovery.get("status") or "unknown",
+            "mcp_url": mcp_url,
+            "tool_count": len(tools),
+            "tools": [
+                {
+                    "name": str(item.get("name") or item.get("id") or ""),
+                    "description": str(item.get("description") or "")[:500],
+                }
+                for item in tools[:50]
+                if isinstance(item, dict)
+            ],
+            "health": discovery.get("health") or {},
+            "errors": [*(discovery.get("health_errors") or []), *(discovery.get("tool_errors") or [])][:8],
+            "capabilities": discovery.get("capabilities") or {},
+        }
 
     @staticmethod
     def _append_reference_images(user_input: str, reference_images: list[dict]) -> str:
