@@ -2754,6 +2754,7 @@ INDEX_HTML = r"""<!doctype html>
             </div>
             <div class="row">
               <button id="localOfflineBtn" type="button">一键本地离线模式</button>
+              <button id="syncRuntimeModelBtn" type="button">保存运行模型配置</button>
               <span class="muted small">自动使用 Ollama + qwen3:8b-q4_K_M + 项目内 runtime/models</span>
             </div>
             <div class="provider-grid">
@@ -3611,6 +3612,7 @@ INDEX_HTML = r"""<!doctype html>
       localModelPreset: document.getElementById('localModelPreset'),
       localModelName: document.getElementById('localModelName'),
       localOfflineBtn: document.getElementById('localOfflineBtn'),
+      syncRuntimeModelBtn: document.getElementById('syncRuntimeModelBtn'),
       testModelBtn: document.getElementById('testModelBtn'),
       userInput: document.getElementById('userInput'),
       useMemory: document.getElementById('useMemory'),
@@ -4210,6 +4212,7 @@ INDEX_HTML = r"""<!doctype html>
       document.body.dataset.view = viewName;
       if (viewName === 'config') {
         moveConfigSections();
+        queueRuntimeModelConfigSync({ remoteOnly: true });
       }
       for (const view of views) {
         view.hidden = view.dataset.view !== viewName;
@@ -4804,7 +4807,9 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function currentRuntimeModelPayload() {
-      const model = els.model.value === 'custom' ? els.customModel.value.trim() : els.model.value;
+      const selectedModel = String(els.model.value || '').trim();
+      const customModel = String(els.customModel.value || '').trim();
+      const model = selectedModel === 'custom' || (!selectedModel && customModel) ? customModel : selectedModel;
       return {
         provider: els.provider.value,
         model,
@@ -4849,6 +4854,38 @@ INDEX_HTML = r"""<!doctype html>
       }).catch((err) => {
         console.warn('runtime model config sync failed', err);
       });
+    }
+
+    async function saveRuntimeModelConfigFromVisibleForm(options = {}) {
+      saveSettings();
+      const payload = currentRuntimeModelPayload();
+      if (!payload.model || !payload.api_key) {
+        throw new Error('请先在系统配置填写模型名和 API Key');
+      }
+      const result = await syncRuntimeModelConfig({ requireComplete: true, timeoutMs: options.timeoutMs || 12000 });
+      if (result?.model && els.env) {
+        els.env.textContent = `已缓存运行时模型：${result.provider || 'auto'} / ${result.model}`;
+      }
+      return result;
+    }
+
+    async function handleRuntimeModelConfigSave() {
+      if (!els.syncRuntimeModelBtn) return;
+      const originalText = els.syncRuntimeModelBtn.textContent;
+      els.syncRuntimeModelBtn.disabled = true;
+      els.syncRuntimeModelBtn.textContent = '正在保存...';
+      try {
+        const result = await saveRuntimeModelConfigFromVisibleForm();
+        setStatus(`运行模型配置已保存：${result.provider || 'auto'} / ${result.model}`);
+        showToast('运行模型配置已保存');
+        if (selectedTask) await refreshSelectedTaskDetail({ preserveFile: true });
+      } catch (err) {
+        setStatus(err.message || '运行模型配置保存失败', true);
+        showToast(err.message || '运行模型配置保存失败', true);
+      } finally {
+        els.syncRuntimeModelBtn.disabled = false;
+        els.syncRuntimeModelBtn.textContent = originalText;
+      }
     }
 
     function setStartupProgressMeta(text) {
@@ -7709,6 +7746,29 @@ INDEX_HTML = r"""<!doctype html>
         card.appendChild(label);
         card.appendChild(value);
         if (detail.textContent) card.appendChild(detail);
+        if (action.action === 'sync_runtime_model') {
+          const actionRow = document.createElement('div');
+          actionRow.className = 'inline-actions';
+          const syncButton = document.createElement('button');
+          syncButton.type = 'button';
+          syncButton.textContent = '同步当前模型配置';
+          syncButton.onclick = async () => {
+            syncButton.disabled = true;
+            syncButton.textContent = '正在同步...';
+            try {
+              await saveRuntimeModelConfigFromVisibleForm();
+              await refreshSelectedTaskDetail({ preserveFile: true });
+            } catch (err) {
+              setStatus(err.message || '模型配置同步失败', true);
+              showToast(err.message || '模型配置同步失败', true);
+            } finally {
+              syncButton.disabled = false;
+              syncButton.textContent = '同步当前模型配置';
+            }
+          };
+          actionRow.appendChild(syncButton);
+          card.appendChild(actionRow);
+        }
         els.outputSummaryGrid.appendChild(card);
       }
       for (const item of blockerList) {
@@ -10089,7 +10149,7 @@ INDEX_HTML = r"""<!doctype html>
       showView('output');
       try {
         await ensureLocalModelReady(model);
-        await syncRuntimeModelConfig({ requireComplete: true });
+        await saveRuntimeModelConfigFromVisibleForm();
         const result = await api('/api/rerun-step', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -10138,7 +10198,7 @@ INDEX_HTML = r"""<!doctype html>
       els.resumeTaskBtn.disabled = true;
       try {
         await ensureLocalModelReady(model);
-        await syncRuntimeModelConfig({ requireComplete: true });
+        await saveRuntimeModelConfigFromVisibleForm();
         const { productionConfig } = await collectProductionConfig();
         const result = await api('/api/resume-task', {
           method: 'POST',
@@ -10899,7 +10959,7 @@ INDEX_HTML = r"""<!doctype html>
       try {
         setStartupProgressMeta('\u68c0\u67e5\u6a21\u578b/API\u914d\u7f6e');
         await ensureLocalModelReady(model);
-        await syncRuntimeModelConfig({ requireComplete: true });
+        await saveRuntimeModelConfigFromVisibleForm();
         setStartupProgressMeta('\u5904\u7406\u53c2\u8003\u7d20\u6750');
         const referenceImages = await uploadReferenceImages();
         setStartupProgressMeta('\u8bfb\u53d6\u751f\u4ea7\u914d\u7f6e');
@@ -11406,6 +11466,7 @@ INDEX_HTML = r"""<!doctype html>
     };
     els.comfyApiWorkflowFile.onchange = analyzeComfyApiWorkflowFile;
     els.localOfflineBtn.onclick = applyLocalOfflineMode;
+    if (els.syncRuntimeModelBtn) els.syncRuntimeModelBtn.onclick = handleRuntimeModelConfigSave;
     els.testModelBtn.onclick = testModelConnection;
     if (els.testComfyMcpBtn) els.testComfyMcpBtn.onclick = testComfyMcpConnection;
     if (els.syncComfyMcpWorkflowsBtn) els.syncComfyMcpWorkflowsBtn.onclick = syncComfyMcpWorkflows;
