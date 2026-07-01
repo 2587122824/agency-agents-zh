@@ -13130,6 +13130,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         comfy_debug = state_center.get("comfy_debug") if isinstance(state_center.get("comfy_debug"), dict) else {}
         task_state = str(state_center.get("state") or self._task_state(summary, files, comfy_debug))
         allowed_actions = state_center.get("allowed_actions") if isinstance(state_center.get("allowed_actions"), list) else self._allowed_task_actions(task_state, summary, files)
+        self._annotate_runtime_model_sync_state(state_center, active_job)
         task_status = state_center
         return {
             "name": name,
@@ -13144,6 +13145,36 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "task_status": task_status,
             "state_center": state_center,
         }
+
+    def _annotate_runtime_model_sync_state(self, state_center: dict, active_job: dict | None) -> None:
+        if not isinstance(state_center, dict):
+            return
+        if active_job:
+            return
+        allowed_actions = state_center.get("allowed_actions") if isinstance(state_center.get("allowed_actions"), list) else []
+        if "resume" not in allowed_actions:
+            return
+        runtime_model = self._read_runtime_model_config()
+        if runtime_model.get("model") and runtime_model.get("api_key"):
+            return
+        diagnostic = {
+            "level": "warn",
+            "code": "runtime_model_not_synced",
+            "message": "模型/API Key 尚未同步到后端运行时缓存；请在系统配置刷新后点击保存/测试模型，或直接用当前配置点击继续任务。",
+        }
+        diagnostics = state_center.setdefault("diagnostics", [])
+        if isinstance(diagnostics, list) and not any(item.get("code") == diagnostic["code"] for item in diagnostics if isinstance(item, dict)):
+            diagnostics.insert(0, diagnostic)
+        blockers = state_center.setdefault("blockers", [])
+        if isinstance(blockers, list) and not any(item.get("code") == diagnostic["code"] for item in blockers if isinstance(item, dict)):
+            blockers.insert(0, {"source": "runtime_model", "code": diagnostic["code"], "message": diagnostic["message"]})
+        state_center["blocking_reasons"] = [item.get("message", "") for item in blockers if isinstance(item, dict)]
+        state_center["next_action"] = {
+            "action": "sync_runtime_model",
+            "label": "同步模型配置后继续任务",
+            "reason": "runtime_model_not_synced",
+        }
+        state_center["recommended_next_operation"] = "同步模型配置后继续任务"
 
     @staticmethod
     def _production_jobs(task_dir: Path) -> list[dict]:
