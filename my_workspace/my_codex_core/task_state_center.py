@@ -224,6 +224,7 @@ class TaskStateCenter:
             "status": status,
             "manifest_file": str(manifest_path) if manifest_path.is_file() else "",
             "manifest_error": manifest_error,
+            "composition": manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {},
             "jobs": jobs,
             "history": history[-10:],
             "dag": dag,
@@ -323,6 +324,21 @@ class TaskStateCenter:
         production_status = str(production.get("status") or "").lower()
         if self._is_failed_status(production_status):
             diagnostics.append({"level": "error", "code": "production_failed", "message": f"自动生产失败：{production.get('status')}"})
+        composition = production.get("composition") if isinstance(production.get("composition"), dict) else {}
+        missing_slots = composition.get("missing_workflow_slots") if isinstance(composition.get("missing_workflow_slots"), list) else []
+        if missing_slots:
+            labels = [
+                str(item.get("label") or f"{item.get('workflow_id') or ''}{' / ' + str(item.get('mode')) if item.get('mode') else ''}").strip()
+                for item in missing_slots
+                if isinstance(item, dict)
+            ]
+            diagnostics.append(
+                {
+                    "level": "warn",
+                    "code": "missing_comfy_workflow_slots",
+                    "message": "ComfyUI 调试台缺少生产槽位配置：" + "、".join(label for label in labels if label),
+                }
+            )
         for blocker in blockers:
             diagnostics.append({"level": "warn", "code": blocker.get("code", "blocked"), "message": blocker.get("message", "")})
         if state == "completed" and not any(file in {"long_video_final.mp4", "final_video.mp4"} for file in self.files):

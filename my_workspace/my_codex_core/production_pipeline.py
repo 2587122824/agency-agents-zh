@@ -126,6 +126,9 @@ def run_auto_production(
     _write_text(comfyui_payload_path, json.dumps(comfyui_payload, ensure_ascii=False, indent=2) + "\n")
     packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config)
     plan_visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
+    required_workflow_slots = _required_workflow_slots(plan_visual_jobs)
+    configured_workflow_slots = _configured_workflow_slots(compose_config.get("workflow_library"))
+    missing_workflow_slots = _missing_workflow_slots(required_workflow_slots, configured_workflow_slots)
     write_graph_json(production_graph_path, build_production_graph(task_dir.name, plan_visual_jobs, global_context, packaging_jobs))
     compose_config.update(
         {
@@ -225,6 +228,9 @@ def run_auto_production(
             "workflow_preset_name": str(compose_config.get("workflow_preset_name") or ""),
             "workflow_preset_purpose": str(compose_config.get("workflow_preset_purpose") or ""),
             "workflow_library": compose_config.get("workflow_library") if isinstance(compose_config.get("workflow_library"), list) else [],
+            "required_workflow_slots": required_workflow_slots,
+            "configured_workflow_slots": configured_workflow_slots,
+            "missing_workflow_slots": missing_workflow_slots,
             "adapter_status": "pending" if mode in {"api_ready", "comfy_full"} or str(compose_config.get("tool") or "").strip().lower() == "ffmpeg" else "not_configured",
             "quality_gate_enabled": _as_bool(quality_config.get("enabled"), default=True),
             "quality_min_score": _safe_int(quality_config.get("min_score"), default=70, minimum=0, maximum=100),
@@ -378,6 +384,8 @@ def run_auto_production(
             manifest["composition"]["comfyui_downloaded_files"] = comfyui_adapter_result.get("downloaded_files", [])
             manifest["composition"]["visual_provider_status"] = comfyui_adapter_result["status"]
             manifest["composition"]["visual_provider_reason"] = comfyui_adapter_result.get("reason", "")
+            if comfyui_adapter_result.get("missing_workflow_slots"):
+                manifest["composition"]["missing_workflow_slots"] = comfyui_adapter_result.get("missing_workflow_slots", [])
             if comfyui_adapter_result.get("provider"):
                 manifest["composition"]["visual_provider"] = comfyui_adapter_result.get("provider", manifest["composition"].get("visual_provider", ""))
             manifest["composition"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
@@ -1078,7 +1086,10 @@ def _run_comfyui_adapter(
     api_key = str(compose_config.get("api_key") or "").strip()
     base_url = str(compose_config.get("base_url") or "").strip()
     endpoint = str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()
-    has_workflow_library_config = _workflow_library_has_configured_slots(compose_config.get("workflow_library"))
+    required_workflow_slots = _required_workflow_slots(compose_config.get("production_plan_visual_jobs"))
+    configured_workflow_slots = _configured_workflow_slots(compose_config.get("workflow_library"))
+    missing_workflow_slots = _missing_workflow_slots(required_workflow_slots, configured_workflow_slots)
+    has_workflow_library_config = bool(configured_workflow_slots)
     if provider == "comfy_mcp":
         return ComfyMCPAdapter(
             mcp_url=str(compose_config.get("comfy_mcp_url") or compose_config.get("mcp_url") or ""),
@@ -1097,6 +1108,7 @@ def _run_comfyui_adapter(
         return {
             "status": "skipped",
             "reason": "ComfyUI/RunningHub 未配置：请先在 ComfyUI 调试台为对应子模式保存 endpoint 和 nodeInfoList",
+            "missing_workflow_slots": missing_workflow_slots,
         }
 
     try:
@@ -1623,6 +1635,81 @@ def _workflow_library_has_configured_slots(library: Any) -> bool:
             if endpoint and node_info and node_info != "[]":
                 return True
     return False
+
+
+def _required_workflow_slots(jobs: Any) -> list[dict[str, str]]:
+    if not isinstance(jobs, list):
+        return []
+    slots: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        workflow_id = str(job.get("workflow_id") or job.get("capability") or "").strip()
+        mode = str(job.get("workflow_mode") or job.get("mode") or "").strip()
+        material_type = str(job.get("type") or job.get("material_type") or "").strip()
+        if not workflow_id:
+            continue
+        key = (workflow_id, mode, material_type)
+        if key in seen:
+            continue
+        seen.add(key)
+        slots.append(
+            {
+                "workflow_id": workflow_id,
+                "mode": mode,
+                "material_type": material_type,
+                "label": f"{workflow_id}{' / ' + mode if mode else ''}",
+            }
+        )
+    return slots
+
+
+def _configured_workflow_slots(library: Any) -> list[dict[str, str]]:
+    if not isinstance(library, list):
+        return []
+    slots: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in library:
+        if not isinstance(item, dict):
+            continue
+        workflow_id = str(item.get("id") or item.get("workflow_id") or "").strip()
+        endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
+        node_info = str(item.get("node_info_list_json") or item.get("nodeInfoList") or "").strip()
+        if workflow_id and endpoint and node_info and node_info != "[]":
+            key = (workflow_id, "")
+            if key not in seen:
+                seen.add(key)
+                slots.append({"workflow_id": workflow_id, "mode": "", "label": workflow_id})
+        mode_configs = item.get("mode_configs") or item.get("modeConfigs")
+        if not isinstance(mode_configs, dict):
+            continue
+        for mode, config in mode_configs.items():
+            if not isinstance(config, dict):
+                continue
+            endpoint = str(config.get("endpoint") or config.get("workflow_endpoint") or "").strip()
+            node_info = str(config.get("node_info_list_json") or config.get("nodeInfoList") or "").strip()
+            if workflow_id and str(mode).strip() and endpoint and node_info and node_info != "[]":
+                key = (workflow_id, str(mode).strip())
+                if key not in seen:
+                    seen.add(key)
+                    slots.append({"workflow_id": workflow_id, "mode": str(mode).strip(), "label": f"{workflow_id} / {str(mode).strip()}"})
+    return slots
+
+
+def _missing_workflow_slots(required: list[dict[str, str]], configured: list[dict[str, str]]) -> list[dict[str, str]]:
+    configured_pairs = {(str(item.get("workflow_id") or ""), str(item.get("mode") or "")) for item in configured if isinstance(item, dict)}
+    configured_ids = {workflow_id for workflow_id, mode in configured_pairs if workflow_id and not mode}
+    missing: list[dict[str, str]] = []
+    for slot in required:
+        workflow_id = str(slot.get("workflow_id") or "")
+        mode = str(slot.get("mode") or "")
+        if (workflow_id, mode) in configured_pairs:
+            continue
+        if workflow_id in configured_ids and not mode:
+            continue
+        missing.append(slot)
+    return missing
 
 
 def _ensure_library_item_runninghub_endpoint(item: dict[str, Any]) -> None:
