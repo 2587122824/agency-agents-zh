@@ -69,6 +69,8 @@ ASSET_LIBRARY_TAG_FOLDERS = {
 COMFY_DEBUG_TASK = "__comfy_debug__"
 COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
+RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
+RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
 IMAGE_EXTENSIONS = {
@@ -4797,13 +4799,19 @@ INDEX_HTML = r"""<!doctype html>
       const data = await api('/api/config');
       localModelPresets = data.local_model_presets || [];
       staffOptions = (data.staff || []).filter(isActiveLongVideoStaff);
-      els.env.textContent = data.openai_configured ? 'OpenAI 已配置' : 'OpenAI 未配置，默认离线模式';
+      if (data.runtime_model_saved && data.runtime_model_config?.model) {
+        const providerLabel = data.runtime_model_config.provider || 'auto';
+        els.env.textContent = `已缓存运行时模型：${providerLabel} / ${data.runtime_model_config.model}`;
+      } else {
+        els.env.textContent = data.openai_configured ? 'OpenAI 已配置' : 'OpenAI 未配置，默认离线模式';
+      }
       const activeWorkflows = (data.workflows || []).filter(isActiveLongVideoWorkflow);
       els.workflow.innerHTML = activeWorkflows.map(w => `<option value="${w.stem}">${w.name}</option>`).join('');
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       renderLocalModelPresets();
       restoreSettings();
+      applyRuntimeModelConfig(data.runtime_model_config || {});
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
     }
@@ -4814,6 +4822,27 @@ INDEX_HTML = r"""<!doctype html>
       } catch {
         return {};
       }
+    }
+
+    function applyRuntimeModelConfig(config) {
+      if (!config || typeof config !== 'object') return;
+      const settings = readSettings();
+      const hasLocalModelSettings = Boolean(settings.provider || settings.model || settings.customModel || settings.apiKey || settings.baseUrl);
+      if (hasLocalModelSettings) return;
+      if (config.provider) setIfExists(els.provider, config.provider);
+      if (config.model) {
+        const knownOptions = Array.from(els.model.options || []).map(option => option.value);
+        if (knownOptions.includes(config.model)) {
+          setIfExists(els.model, config.model);
+          els.customModel.value = '';
+        } else {
+          setIfExists(els.model, 'custom');
+          els.customModel.value = config.model;
+        }
+      }
+      if (config.api_key) els.apiKey.value = config.api_key;
+      if (config.base_url) els.baseUrl.value = config.base_url;
+      if (config.timeout) els.modelTimeout.value = String(config.timeout);
     }
 
     function serializeComfyDebugState() {
@@ -11881,11 +11910,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             reference_images = payload.get("reference_images") or []
             if reference_images:
                 user_input = self._append_reference_images(user_input, reference_images)
-            provider = str(payload.get("provider") or "auto").strip()
-            model = str(payload.get("model") or "").strip() or None
-            api_key = str(payload.get("api_key") or "").strip() or None
-            base_url = str(payload.get("base_url") or "").strip() or None
-            timeout = int(payload.get("timeout") or 0) or None
+            runtime_model = self._resolve_runtime_model_request(payload)
+            provider = runtime_model["provider"]
+            model = runtime_model["model"]
+            api_key = runtime_model["api_key"]
+            base_url = runtime_model["base_url"]
+            timeout = runtime_model["timeout"]
 
             if not workflow:
                 raise ValueError("workflow is required")
@@ -11928,6 +11958,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
         workflows = self._workflow_list()
         staff = [path.name for path in sorted(STAFF_ROOT.iterdir()) if path.is_dir()]
+        runtime_model_config = self._read_runtime_model_config()
         return {
             "workflows": workflows,
             "staff": staff,
@@ -11936,6 +11967,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "base_url_configured": bool(os.getenv("OPENAI_BASE_URL")),
             "default_model": os.getenv("OPENAI_MODEL") or "gpt-5.5",
             "default_base_url": os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
+            "runtime_model_config": runtime_model_config,
+            "runtime_model_saved": bool(runtime_model_config.get("api_key") and runtime_model_config.get("model")),
         }
 
     @staticmethod
@@ -11945,6 +11978,68 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         data = json.loads(LOCAL_MODEL_PRESETS.read_text(encoding="utf-8"))
         presets = data.get("presets") if isinstance(data, dict) else data
         return presets if isinstance(presets, list) else []
+
+    @staticmethod
+    def _read_runtime_model_config() -> dict:
+        try:
+            data = json.loads(RUNTIME_MODEL_CONFIG_PATH.read_text(encoding="utf-8-sig")) if RUNTIME_MODEL_CONFIG_PATH.is_file() else {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        return {
+            "provider": str(data.get("provider") or "").strip(),
+            "model": str(data.get("model") or "").strip(),
+            "api_key": str(data.get("api_key") or "").strip(),
+            "base_url": str(data.get("base_url") or "").strip(),
+            "timeout": int(data.get("timeout") or 0) or 900,
+            "updated_at": float(data.get("updated_at") or 0),
+        }
+
+    @staticmethod
+    def _write_runtime_model_config(config: dict) -> None:
+        RUNTIME_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+        current = WorkflowWebHandler._read_runtime_model_config()
+        current.update(
+            {
+                "provider": str(config.get("provider") or current.get("provider") or "").strip(),
+                "model": str(config.get("model") or current.get("model") or "").strip(),
+                "api_key": str(config.get("api_key") or current.get("api_key") or "").strip(),
+                "base_url": str(config.get("base_url") or current.get("base_url") or "").strip(),
+                "timeout": int(config.get("timeout") or current.get("timeout") or 900),
+                "updated_at": time.time(),
+            }
+        )
+        RUNTIME_MODEL_CONFIG_PATH.write_text(json.dumps(current, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    @classmethod
+    def _resolve_runtime_model_request(cls, payload: dict) -> dict:
+        saved = cls._read_runtime_model_config()
+        provider = str(payload.get("provider") or "").strip() or str(saved.get("provider") or "auto").strip() or "auto"
+        model = str(payload.get("model") or "").strip() or str(saved.get("model") or "").strip() or None
+        api_key = str(payload.get("api_key") or "").strip() or str(saved.get("api_key") or "").strip() or None
+        base_url = str(payload.get("base_url") or "").strip() or str(saved.get("base_url") or "").strip() or None
+        timeout = int(payload.get("timeout") or 0) or int(saved.get("timeout") or 0) or None
+        if any(
+            str(payload.get(key) or "").strip()
+            for key in ("provider", "model", "api_key", "base_url", "timeout")
+        ):
+            cls._write_runtime_model_config(
+                {
+                    "provider": provider,
+                    "model": model or "",
+                    "api_key": api_key or "",
+                    "base_url": base_url or "",
+                    "timeout": timeout or 900,
+                }
+            )
+        return {
+            "provider": provider,
+            "model": model,
+            "api_key": api_key,
+            "base_url": base_url,
+            "timeout": timeout,
+        }
 
     def _system_health(self) -> dict:
         ollama_models = self._ollama_model_names()
@@ -15800,6 +15895,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         step = int(payload.get("step") or 0)
         if step <= 0:
             raise ValueError("step is required")
+        runtime_model = self._resolve_runtime_model_request(payload)
         task_dir = self._safe_task_dir(task)
         summary = {}
         summary_path = task_dir / "run_summary.json"
@@ -15847,11 +15943,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 run_id,
                 task_dir,
                 step,
-                str(payload.get("provider") or "auto").strip(),
-                str(payload.get("model") or "").strip() or None,
-                str(payload.get("api_key") or "").strip() or None,
-                str(payload.get("base_url") or "").strip() or None,
-                int(payload.get("timeout") or 0) or None,
+                runtime_model["provider"],
+                runtime_model["model"],
+                runtime_model["api_key"],
+                runtime_model["base_url"],
+                runtime_model["timeout"],
             ),
             daemon=True,
         )
@@ -15860,6 +15956,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     def _resume_task(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
+        runtime_model = self._resolve_runtime_model_request(payload)
         task_dir = self._safe_task_dir(task)
         production_config = payload.get("production_config") or {}
         if isinstance(production_config, dict):
@@ -15913,11 +16010,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 run_id,
                 task_dir,
                 production_config if isinstance(production_config, dict) else {},
-                str(payload.get("provider") or "auto").strip(),
-                str(payload.get("model") or "").strip() or None,
-                str(payload.get("api_key") or "").strip() or None,
-                str(payload.get("base_url") or "").strip() or None,
-                int(payload.get("timeout") or 0) or None,
+                runtime_model["provider"],
+                runtime_model["model"],
+                runtime_model["api_key"],
+                runtime_model["base_url"],
+                runtime_model["timeout"],
             ),
             daemon=True,
         )
@@ -16391,9 +16488,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return {"ok": True, "name": target.name, "size_bytes": len(content_bytes)}
 
     def _test_model(self, payload: dict) -> dict:
-        api_key = str(payload.get("api_key") or "").strip()
-        base_url = str(payload.get("base_url") or "https://api.openai.com/v1").strip().rstrip("/")
-        model = str(payload.get("model") or "").strip()
+        runtime_model = self._resolve_runtime_model_request(payload)
+        api_key = str(runtime_model.get("api_key") or "").strip()
+        base_url = str(runtime_model.get("base_url") or "https://api.openai.com/v1").strip().rstrip("/")
+        model = str(runtime_model.get("model") or "").strip()
+        provider = str(runtime_model.get("provider") or payload.get("provider") or "openai").strip() or "openai"
         if not api_key:
             raise ValueError("API Key is required for model test")
         if not base_url:
@@ -16427,6 +16526,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError(f"连接失败：{exc.reason}") from exc
 
         data = json.loads(raw)
+        self._write_runtime_model_config(
+            {
+                "provider": provider,
+                "model": model,
+                "api_key": api_key,
+                "base_url": base_url,
+                "timeout": runtime_model.get("timeout") or 900,
+            }
+        )
         return {"ok": True, "model": model, "id": data.get("id", "")}
 
     def _test_comfy_mcp(self, payload: dict) -> dict:
