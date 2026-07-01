@@ -334,12 +334,29 @@ class TaskStateCenter:
             job_id = str(first.get("job_id") or "")
             retry_action = f"retry:{job_id}" if job_id else "inspect_blockers"
             return {"action": retry_action, "label": f"处理生产节点：{job_id or '未知节点'}", "reason": str(first.get("blocked_reason") or first.get("error") or ""), "job_id": job_id}
+        composition = production.get("composition") if isinstance(production.get("composition"), dict) else {}
+        raw_missing_slots = composition.get("missing_workflow_slots") if isinstance(composition.get("missing_workflow_slots"), list) else []
+        missing_slots = [item for item in raw_missing_slots if isinstance(item, dict) and not self._is_optional_missing_workflow_slot(item)]
+        has_final_media = any(file in {"long_video_final.mp4", "final_video.mp4"} for file in self.files)
+        if missing_slots and not has_final_media:
+            return {
+                "action": "configure_comfy_workflows",
+                "label": "配置 ComfyUI 工作流槽位后重试素材",
+                "reason": "missing_comfy_workflow_slots",
+            }
+        visual_provider = str(composition.get("visual_provider") or composition.get("visual_provider_details", {}).get("provider") or "").strip().lower()
+        if visual_provider == "runninghub" and not self._as_bool(composition.get("api_key_provided"), default=False) and not has_final_media:
+            return {
+                "action": "configure_runninghub_api_key",
+                "label": "配置 RunningHub API Key 后重试素材",
+                "reason": "missing_runninghub_api_key",
+            }
         if state in {"partial", "blocked", "failed", "cancelled", "paused"} and "resume" in allowed_actions:
             return {"action": "resume", "label": "继续任务", "reason": state}
         if blockers:
             return {"action": "inspect_blockers", "label": "查看阻塞原因", "reason": blockers[0].get("message", "")}
         if state == "completed":
-            if any(file in {"long_video_final.mp4", "final_video.mp4"} for file in self.files):
+            if has_final_media:
                 return {"action": "review_output", "label": "查看最终输出", "reason": "completed"}
             return {"action": "review_or_export", "label": "检查输出或导出任务", "reason": "completed_without_final_media"}
         return {"action": "none", "label": "暂无推荐操作", "reason": state}
@@ -368,6 +385,16 @@ class TaskStateCenter:
                     "message": "ComfyUI 调试台缺少生产槽位配置：" + "、".join(labels),
                     "details": details,
                     "suggestion": "请到 ComfyUI 调试台展开对应分类，为这些子模式保存 endpoint 和 nodeInfoList；配置后回到任务输出点击“重试素材”。",
+                }
+            )
+        visual_provider = str(composition.get("visual_provider") or composition.get("visual_provider_details", {}).get("provider") or "").strip().lower()
+        if visual_provider == "runninghub" and not self._as_bool(composition.get("api_key_provided"), default=False):
+            diagnostics.append(
+                {
+                    "level": "warn",
+                    "code": "missing_runninghub_api_key",
+                    "message": "RunningHub API Key 未配置：请到系统配置或 ComfyUI 调试台运行参数区保存 API Key；配置后回到任务输出点击“重试素材”。",
+                    "suggestion": "不要使用未知默认接口地址；生产执行只读取你在调试台/系统配置里保存过的 RunningHub 配置。",
                 }
             )
         for blocker in blockers:
