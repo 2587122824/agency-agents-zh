@@ -7685,7 +7685,8 @@ INDEX_HTML = r"""<!doctype html>
       if (['completed', 'complete', 'success', 'succeeded', 'done', 'approved', 'cached', 'downloaded'].includes(text)) return 'done';
       if (['running', 'queued', 'pending', 'submitted', 'processing'].includes(text)) return 'running';
       if (['failed', 'error', 'timeout', 'blocked', 'cancelled', 'canceled'].includes(text)) return 'failed';
-      if (['skipped', 'off', 'disabled'].includes(text)) return 'waiting';
+      if (['skipped', 'skip'].includes(text)) return 'skipped';
+      if (['not_configured', 'off', 'disabled'].includes(text)) return 'waiting';
       return text || 'waiting';
     }
 
@@ -7694,6 +7695,7 @@ INDEX_HTML = r"""<!doctype html>
       if (normalized === 'done') return '已完成';
       if (normalized === 'running') return '进行中';
       if (normalized === 'failed') return '异常/阻塞';
+      if (normalized === 'skipped') return '已跳过';
       return '等待中';
     }
 
@@ -7736,6 +7738,7 @@ INDEX_HTML = r"""<!doctype html>
       if (states.some(state => state === 'failed')) return 'failed';
       if (states.some(state => state === 'running')) return 'running';
       if (states.every(state => state === 'done')) return 'done';
+      if (states.every(state => state === 'skipped')) return 'skipped';
       return 'waiting';
     }
 
@@ -7752,12 +7755,31 @@ INDEX_HTML = r"""<!doctype html>
       const imageAssetCount = Number(status?.assets?.images?.length || data?.assets?.images?.length || 0);
       const videoAssetCount = Number(status?.assets?.videos?.length || data?.assets?.videos?.length || 0);
       const jobsText = job => JSON.stringify(job || {}).toLowerCase();
-      const visualStatus = jobListStatus(jobs, job => /material|comfy|runninghub|image|video|visual/.test(jobsText(job)));
-      const imageStatus = imageAssetCount > 0 ? 'done' : jobListStatus(jobs, job => /image|keyframe|base_asset|visual/.test(jobsText(job)));
-      const videoStatus = videoAssetCount > 0 ? 'done' : jobListStatus(jobs, job => /video|i2v|clip|visual/.test(jobsText(job)));
+      const providerStatus = normalizeStageStatus(
+        status?.production?.composition?.visual_provider_status
+        || status?.production?.composition?.comfyui_adapter_status
+        || status?.production?.composition?.adapter_status
+        || status?.production?.status
+      );
+      const visualSkipped = providerStatus === 'skipped';
+      const visualStatus = visualSkipped
+        ? 'skipped'
+        : jobListStatus(jobs, job => /material|comfy|runninghub|image|video|visual/.test(jobsText(job)));
+      const imageStatus = imageAssetCount > 0
+        ? 'done'
+        : visualSkipped
+          ? 'skipped'
+          : jobListStatus(jobs, job => /image|keyframe|base_asset|visual/.test(jobsText(job)));
+      const videoStatus = videoAssetCount > 0
+        ? 'done'
+        : visualSkipped
+          ? 'skipped'
+          : jobListStatus(jobs, job => /video|i2v|clip|visual/.test(jobsText(job)));
       const ttsStatus = objectStageStatus(status?.tts || status?.production?.tts);
       const ffmpegStatus = objectStageStatus(status?.ffmpeg || status?.production?.ffmpeg);
-      const finalReady = currentState === 'done' || Boolean(data?.summary?.final_output) || Boolean((data?.files || []).some(file => /(?:final|long_video).*\.mp4$/i.test(file)));
+      const finalReady = videoAssetCount > 0
+        || Boolean((status?.assets?.videos || []).some(file => /(?:final|long_video).*\.mp4$/i.test(String(file?.path || file?.file || file))))
+        || Boolean((data?.files || []).some(file => /(?:final|long_video).*\.mp4$/i.test(file)));
 
       const stages = [
         {
@@ -7834,6 +7856,7 @@ INDEX_HTML = r"""<!doctype html>
       value.className = 'value';
       const active = list.find(item => normalizeStageStatus(item.status) === 'running')
         || list.find(item => normalizeStageStatus(item.status) === 'failed')
+        || list.find(item => normalizeStageStatus(item.status) === 'skipped')
         || list.find(item => normalizeStageStatus(item.status) === 'waiting');
       value.textContent = active ? `${active.name} · ${stageStateLabel(active.status)}` : '阶段状态';
       const stageList = document.createElement('div');
