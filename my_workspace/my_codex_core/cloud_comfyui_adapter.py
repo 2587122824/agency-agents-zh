@@ -1167,6 +1167,12 @@ class CloudComfyUIAdapter:
         workflow_key = str(workflow_id or "").strip()
         mode_key = str(workflow_mode or "").strip()
         stale_node_ids = {str(row.get("nodeId") or "") for row in rows if isinstance(row, dict)}
+        is_three_frame_ltx = (
+            endpoint_text.endswith("/2071735603636563970")
+            or workflow_key in {"06_i2v_first_middle_last_frame_ltx_2_3", "06_i2v_first_middle_last_frame"}
+            or "first_middle_last" in mode_key.lower()
+            or "three_frame" in mode_key.lower()
+        )
 
         # The current z_image_turbo RunningHub workflow uses node 63 for the
         # text prompt and node 64 for latent size. Some migrated scene modes
@@ -1204,6 +1210,33 @@ class CloudComfyUIAdapter:
                 row = dict(row)
                 row["fieldValue"] = "{{prompt}}"
                 changed = True
+            if is_three_frame_ltx and isinstance(row, dict):
+                node_id = str(row.get("nodeId") or "")
+                field_name = str(row.get("fieldName") or "")
+                if node_id == "448" and field_name == "image" and str(row.get("fieldValue") or "") == "{{reference_image}}":
+                    row = dict(row)
+                    row["fieldValue"] = "{{input_middle_frame}}"
+                    changed = True
+                elif node_id == "449" and field_name == "image" and str(row.get("fieldValue") or "") == "{{reference_image}}":
+                    row = dict(row)
+                    row["fieldValue"] = "{{input_last_frame}}"
+                    changed = True
+                elif node_id == "422" and field_name == "value" and "{{prompt}}" not in str(row.get("fieldValue") or ""):
+                    row = dict(row)
+                    row["fieldValue"] = "{{prompt}}"
+                    changed = True
+                elif node_id == "426" and field_name == "preset_prompt":
+                    row = dict(row)
+                    row["fieldValue"] = "Describe this image in detail."
+                    changed = True
+                elif node_id == "412" and field_name == "value" and str(row.get("fieldValue") or "") != "{{fps}}":
+                    row = dict(row)
+                    row["fieldValue"] = "{{fps}}"
+                    changed = True
+                elif node_id == "413" and field_name == "frame_rate" and str(row.get("fieldValue") or "") != "{{fps}}":
+                    row = dict(row)
+                    row["fieldValue"] = "{{fps}}"
+                    changed = True
             repaired.append(row)
         if changed and (
             endpoint_text.endswith("/2069402773254397953")
@@ -1214,6 +1247,7 @@ class CloudComfyUIAdapter:
             or mode_key in {"style_reference", "cover_key_visual", "keyframe"}
             or "i2v" in mode_key.lower()
             or "ltx" in workflow_key.lower()
+            or is_three_frame_ltx
         ):
             return json.dumps(repaired, ensure_ascii=False, indent=2)
         return text
