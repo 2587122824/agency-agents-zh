@@ -31,6 +31,8 @@
     "reference_images"
   ],
   "quality_gate": [
+    "原始需求或上游分镜明确要求首中尾帧/三帧生视频/first_middle_last_frame时，必须为对应镜头输出generate_three_frame_shot，不能只输出generate_keyframe",
+    "generate_three_frame_shot必须包含start/middle/end三个frame_set角色，竖屏工作尺寸必须为480x848",
     "必须输出production_intents.image",
     "production_intents.image与image_prompts必须位于同一个可解析JSON对象中",
     "每条图片意图必须包含intent和intent_id",

@@ -141,3 +141,13 @@ version: 2026-06-30
 - 是否区分普通视频、B-roll、口播、后处理。
 - 是否没有把最终 DAG 文件流转写死到员工输出里。
 - 是否引用正式实体 ID，并避免重复描述同一角色/风格/产品/场景。
+
+## 首中尾帧引用决策硬规则
+
+- 先盘点 06_分镜生图设计师的 `production_intents.image`：只有当上游真实存在 `intent: generate_three_frame_shot` 的 `intent_id` 时，才允许输出 `generate_three_frame_i2v_clip`。
+- 如果上游只有 `generate_keyframe` 或单张 `asset_tag`，必须输出 `generate_i2v_clip` 或 `generate_broll_clip`；兼容 `video_prompts` 使用普通首帧/单图 I2V 模式，不得写 `first_middle_last`、`06C`、`three_frame`。
+- `generate_three_frame_i2v_clip.source_intent_ids` 必须引用上游三帧图片意图 ID，例如 `shot_003_three_frame`，不能引用普通 `keyframe_shot003`。
+- 首中尾帧兼容层必须显式绑定三帧：`reference_image = <three_frame_id>_start_frame`、`middle_frame_image = <three_frame_id>_middle_frame`、`last_frame_image = <three_frame_id>_end_frame`。
+- 如果需要首中尾帧但 06 没有提供三帧图片意图，不能提交不可执行的视频任务；应改为普通首帧 I2V，或输出 `repair_video` / 阻塞说明要求退回 06 补齐三帧。
+- 不允许在同一个可执行 `generate_three_frame_i2v_clip` 里同时写 `entity_missing` 来承认缺三帧；缺三帧时就不要输出该可执行 clip。
+- 竖屏任务的兼容 `video_prompts.width/height` 必须是 `480/848`，不要沿用横屏 `848/480`。

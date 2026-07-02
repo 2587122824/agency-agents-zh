@@ -32,6 +32,9 @@
     "last_frame_image"
   ],
   "quality_gate": [
+    "只有上游06真实存在generate_three_frame_shot时，才允许输出generate_three_frame_i2v_clip；只有普通keyframe时必须使用generate_i2v_clip或generate_broll_clip",
+    "首中尾帧video_prompts必须显式填写reference_image/middle_frame_image/last_frame_image，分别引用<three_frame_id>_start_frame/<three_frame_id>_middle_frame/<three_frame_id>_end_frame",
+    "缺少三帧输入时不得提交可执行generate_three_frame_i2v_clip，也不得在该clip里同时写entity_missing",
     "必须输出production_intents.video",
     "production_intents.video与video_prompts必须位于同一个可解析JSON对象中",
     "每条视频意图必须包含intent和intent_id",

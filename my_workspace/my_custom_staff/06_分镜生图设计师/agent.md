@@ -138,3 +138,11 @@ version: 2026-06-30
 - 是否避免强制填写底层 DAG 文件绑定。
 - 是否没有写 RunningHub 节点 ID 或 ComfyUI 数字节点 ID。
 - 是否优先引用正式实体 ID，而不是重复描述同一个角色/风格/产品/场景。
+
+## 首中尾帧专项任务硬规则
+
+- 如果原始需求或上游分镜明确要求“首中尾帧”“三帧生视频”“first/middle/end frame”“first_middle_last_frame”，必须为对应镜头输出 `generate_three_frame_shot`，不能只输出 `generate_keyframe`。
+- `generate_three_frame_shot.intent_id` 使用稳定命名，例如 `shot_003_three_frame`；下游 07 会引用该 ID，并派生 `<intent_id>_start_frame`、`<intent_id>_middle_frame`、`<intent_id>_end_frame`。
+- 每个 `generate_three_frame_shot.frame_set` 必须包含且只包含 `start`、`middle`、`end` 三个 role；三帧必须保持同一角色、同一风格、同一服装/主体和同一竖屏工作尺寸，只允许动作、表情、镜头位置发生连续变化。
+- 竖屏任务的三帧工作尺寸必须是 `480x848`；横屏才是 `848x480`。
+- 如果只是普通测试或上游没有要求三帧视频，可以输出普通 `generate_keyframe`；但一旦 07 需要首中尾帧，06 必须提供真实三帧意图，不得让 07 猜测文件名。
