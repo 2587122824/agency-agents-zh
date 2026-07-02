@@ -793,8 +793,9 @@ def retry_production_job(
         for item in (manifest.get("production_nodes") or [])
         if isinstance(item, dict)
     }
+    standard_packaging_job_ids = {"local_tts", "bgm_select", "ffmpeg_compose", "format_export", "subtitle_build"}
     if retry_job not in {"material", "tts", "ffmpeg"}:
-        if requested_job_id not in known_node_ids:
+        if requested_job_id not in known_node_ids and requested_job_id not in standard_packaging_job_ids:
             raise ValueError(f"unknown production job_id: {requested_job_id}")
         if requested_job_id == "local_tts":
             retry_job = "tts"
@@ -877,7 +878,7 @@ def retry_production_job(
         history_item["status"] = str(result_for_history.get("status") or "unknown")
         history_item["outputs"] = [str(item) for item in (result_for_history.get("downloaded_files") or []) if item]
         history_item["ended_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        if requested_job_id in known_node_ids:
+        if requested_job_id in known_node_ids or requested_job_id in standard_packaging_job_ids:
             existing_node = next(
                 (
                     item
