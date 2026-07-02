@@ -662,6 +662,14 @@ def _completed_visual_result_for_reuse(
         if isinstance(node, dict) and str(node.get("stage") or "") == "visual"
     ]
     nodes_by_id = {str(node.get("job_id") or ""): node for node in previous_nodes}
+    artifact_outputs: dict[str, list[str]] = {}
+    for artifact in previous_manifest.get("artifacts") or []:
+        if not isinstance(artifact, dict):
+            continue
+        producer_job_id = str(artifact.get("producer_job_id") or "").strip()
+        path = str(artifact.get("path") or "").strip()
+        if producer_job_id and path:
+            artifact_outputs.setdefault(producer_job_id, []).append(path)
     allowed_statuses = {"success", "cached", "downloaded"}
     reusable_jobs: list[dict[str, Any]] = []
     downloaded_files: list[str] = []
@@ -682,13 +690,24 @@ def _completed_visual_result_for_reuse(
             continue
         if status not in allowed_statuses:
             return None
-        outputs = [str(path) for path in (previous_node.get("outputs") or []) if str(path).strip()]
+        outputs = [
+            str(path)
+            for path in (
+                previous_node.get("outputs")
+                or previous_node.get("downloaded_files")
+                or artifact_outputs.get(job_id)
+                or []
+            )
+            if str(path).strip()
+        ]
         if not outputs or any(not Path(path).is_file() for path in outputs):
             return None
         downloaded_files.extend(outputs)
         cached_node = dict(previous_node)
         cached_node["status"] = "cached"
         cached_node["cache_hit"] = True
+        cached_node["outputs"] = outputs
+        cached_node["downloaded_files"] = outputs
         reusable_jobs.append(cached_node)
 
     deduped_files = list(dict.fromkeys(downloaded_files))
