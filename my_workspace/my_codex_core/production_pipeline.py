@@ -1471,6 +1471,7 @@ def _run_comfyui_adapter_with_quality_gate(
     progress_callback=None,
 ) -> dict[str, Any] | None:
     output_dir.mkdir(parents=True, exist_ok=True)
+    _restore_legacy_comfyui_job_state(output_dir)
     preflight = _preflight_visual_jobs(compose_config.get("production_plan_visual_jobs"))
     preflight_path = output_dir / "visual_preflight_report.json"
     preflight_path.write_text(json.dumps(preflight, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1563,6 +1564,49 @@ def _run_comfyui_adapter_with_quality_gate(
     if best_result.get("status") in {"success", "partial_success"} and best_result["quality_score"] < min_score:
         best_result["status"] = "quality_failed"
     return best_result
+
+
+def _restore_legacy_comfyui_job_state(output_dir: Path) -> Path | None:
+    """Promote the best pre-stable-state quality attempt into the shared cache.
+
+    Older runs stored ``production_job_state.json`` below every ``attempt_XX``
+    directory.  New runs intentionally keep one root state file so completed
+    jobs and RunningHub task IDs survive retries.  Select the legacy attempt
+    with the most reusable outputs instead of regenerating the entire batch.
+    """
+    state_path = output_dir / "production_job_state.json"
+    if state_path.is_file():
+        return state_path
+
+    candidates: list[tuple[int, int, float, Path, dict[str, Any]]] = []
+    reusable_statuses = {"success", "cached", "downloaded", "submitted"}
+    for candidate in output_dir.glob("attempt_*/production_job_state.json"):
+        data = _read_json_object(candidate)
+        jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}
+        reusable = 0
+        valid_files = 0
+        for item in jobs.values():
+            if not isinstance(item, dict) or str(item.get("status") or "").lower() not in reusable_statuses:
+                continue
+            files = [Path(str(value)) for value in (item.get("downloaded_files") or []) if str(value).strip()]
+            if files and all(path.is_file() for path in files):
+                reusable += 1
+                valid_files += len(files)
+        if reusable:
+            candidates.append((reusable, valid_files, candidate.stat().st_mtime, candidate, data))
+    if not candidates:
+        return None
+
+    reusable, valid_files, _, source_path, best = max(candidates, key=lambda row: row[:3])
+    best = dict(best)
+    best["legacy_state_migration"] = {
+        "source": str(source_path),
+        "reusable_jobs": reusable,
+        "valid_files": valid_files,
+        "migrated_at": time.time(),
+    }
+    state_path.write_text(json.dumps(best, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return state_path
 
 
 def _payload_for_attempt(payload: dict[str, Any], attempt: int) -> dict[str, Any]:

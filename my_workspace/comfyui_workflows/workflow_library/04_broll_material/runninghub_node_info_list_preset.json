@@ -1,56 +1,56 @@
 [
   {
-    "nodeId": "2483",
+    "nodeId": "73",
     "fieldName": "text",
     "fieldValue": "{{prompt}}"
   },
   {
-    "nodeId": "2612",
+    "nodeId": "25",
     "fieldName": "text",
     "fieldValue": "{{negative_prompt}}"
   },
   {
-    "nodeId": "2004",
-    "fieldName": "image",
-    "fieldValue": "{{reference_image}}"
-  },
-  {
-    "nodeId": "4977",
+    "nodeId": "43",
     "fieldName": "value",
-    "fieldValue": false
-  },
-  {
-    "nodeId": "3159",
-    "fieldName": "strength",
-    "fieldValue": 0.9
-  },
-  {
-    "nodeId": "4979",
-    "fieldName": "value",
-    "fieldValue": 121
-  },
-  {
-    "nodeId": "3059",
-    "fieldName": "width",
     "fieldValue": "{{width}}"
   },
   {
-    "nodeId": "3059",
-    "fieldName": "height",
+    "nodeId": "44",
+    "fieldName": "value",
     "fieldValue": "{{height}}"
   },
   {
-    "nodeId": "3059",
-    "fieldName": "length",
-    "fieldValue": "{{frame_count}}"
+    "nodeId": "74",
+    "fieldName": "value",
+    "fieldValue": "{{duration}}"
   },
   {
-    "nodeId": "4823",
-    "fieldName": "filename_prefix",
-    "fieldValue": "broll_material_ltx_video"
+    "nodeId": "20",
+    "fieldName": "value",
+    "fieldValue": "{{fps}}"
   },
   {
-    "nodeId": "4852",
+    "nodeId": "21",
+    "fieldName": "value",
+    "fieldValue": "{{fps}}"
+  },
+  {
+    "nodeId": "28",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}"
+  },
+  {
+    "nodeId": "46",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}"
+  },
+  {
+    "nodeId": "40",
+    "fieldName": "frame_rate",
+    "fieldValue": "{{fps}}"
+  },
+  {
+    "nodeId": "40",
     "fieldName": "filename_prefix",
     "fieldValue": "broll_material_ltx_video"
   }
