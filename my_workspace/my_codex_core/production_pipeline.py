@@ -29,6 +29,7 @@ def run_auto_production(
     production_config: dict[str, Any] | None = None,
     progress_callback=None,
     stop_after_comfyui: bool = False,
+    prepare_only: bool = False,
 ) -> dict[str, Any] | None:
     config = production_config or {}
     mode = str(config.get("mode") or "off").strip()
@@ -472,6 +473,20 @@ def run_auto_production(
                 status=tts_adapter_result.get("status") or "",
             )
 
+    if prepare_only:
+        manifest["status"] = "production_plan_ready"
+        manifest["composition"]["adapter_status"] = "not_started"
+        manifest["composition"]["comfyui_adapter_status"] = "not_started"
+        manifest["composition"]["local_ffmpeg_status"] = "not_started"
+        manifest["audio"]["adapter_status"] = "not_started" if _voice_config_tts_enabled(voice_config) else "not_configured"
+        return _finalize_production_manifest(
+            task_dir,
+            manifest,
+            production_note_path,
+            emit,
+            "production package compiled without executing adapters",
+        )
+
     if stop_after_comfyui:
         if manual_comfy_debug:
             return _finalize_production_manifest(
@@ -772,12 +787,16 @@ def retry_production_job(
         config = dict(config)
         if str(config.get("mode") or "").strip() in {"", "off", "package_only"}:
             config["mode"] = "comfy_full"
-        bootstrap_config = json.loads(json.dumps(config, ensure_ascii=False))
-        bootstrap_config["mode"] = "package_only"
         step_outputs = _load_task_step_outputs(task_dir)
         if not step_outputs:
             raise ValueError("cannot bootstrap production manifest: employee outputs are missing")
-        run_auto_production(task_dir, step_outputs, bootstrap_config, progress_callback=progress_callback)
+        run_auto_production(
+            task_dir,
+            step_outputs,
+            config,
+            progress_callback=progress_callback,
+            prepare_only=True,
+        )
     if not manifest_path.is_file():
         raise FileNotFoundError("production_manifest.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
@@ -1487,6 +1506,7 @@ def _run_comfyui_adapter_with_quality_gate(
     attempts: list[dict[str, Any]] = []
     best_result: dict[str, Any] | None = None
     best_score: dict[str, Any] = {"score": -1}
+    retry_job_ids: list[str] = []
     for attempt in range(1, max_attempts + 1):
         if progress_callback:
             progress_callback(
@@ -1500,13 +1520,24 @@ def _run_comfyui_adapter_with_quality_gate(
             )
         attempt_dir = output_dir / f"attempt_{attempt:02d}"
         attempt_payload_path = attempt_dir / "comfyui_payload.json"
-        attempt_payload = _payload_for_attempt(base_payload, attempt)
+        attempt_payload = (
+            _payload_for_targeted_attempt(base_payload, attempt, retry_job_ids)
+            if retry_job_ids
+            else _payload_for_attempt(base_payload, attempt)
+        )
         attempt_dir.mkdir(parents=True, exist_ok=True)
         attempt_payload_path.write_text(json.dumps(attempt_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        result = _run_comfyui_adapter(attempt_payload_path, compose_config, attempt_dir, progress_callback=progress_callback)
+        attempt_compose_config = dict(compose_config)
+        if retry_job_ids:
+            attempt_compose_config["force_retry_job_ids"] = retry_job_ids
+            attempt_compose_config["quality_retry_attempt"] = attempt
+        # Keep one stable adapter directory so completed jobs and remote task IDs
+        # survive quality attempts. Only failed job IDs are force-resubmitted.
+        result = _run_comfyui_adapter(attempt_payload_path, attempt_compose_config, output_dir, progress_callback=progress_callback)
         score = _score_material_result(result or {}, min_file_size_kb, attempt_dir, compose_config)
         score["attempt"] = attempt
         score["payload_file"] = str(attempt_payload_path)
+        score["retried_job_ids"] = list(retry_job_ids)
         attempts.append(score)
         if score["score"] > int(best_score.get("score", -1)):
             best_score = score
@@ -1515,6 +1546,7 @@ def _run_comfyui_adapter_with_quality_gate(
             break
         if result and result.get("status") == "success" and score["score"] >= min_score:
             break
+        retry_job_ids = _quality_retry_job_ids(score, compose_config.get("production_plan_visual_jobs"), result or {})
 
     report_path = _write_quality_report(output_dir, attempts, best_score, min_score, enabled=True)
     if not best_result:
@@ -1543,6 +1575,64 @@ def _payload_for_attempt(payload: dict[str, Any], attempt: int) -> dict[str, Any
             data["seed"] = str(int(time.time()) + attempt)
         data["attempt_index"] = attempt
     return data
+
+
+def _payload_for_targeted_attempt(payload: dict[str, Any], attempt: int, job_ids: list[str]) -> dict[str, Any]:
+    data = json.loads(json.dumps(payload, ensure_ascii=False))
+    targets = {str(value) for value in job_ids if str(value)}
+    for key in ("image_prompts", "video_prompts"):
+        values = data.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            job_id = str(item.get("job_id") or item.get("id") or "")
+            if job_id not in targets:
+                continue
+            seed = str(item.get("seed") or "").strip()
+            item["seed"] = str(int(seed) + attempt - 1) if seed.isdigit() else str(int(time.time()) + attempt)
+            item["quality_retry_attempt"] = attempt
+    return data
+
+
+def _quality_retry_job_ids(score: dict[str, Any], raw_jobs: Any, result: dict[str, Any] | None = None) -> list[str]:
+    visual_qc = score.get("visual_qc") if isinstance(score.get("visual_qc"), dict) else {}
+    selected: list[str] = []
+    for issue in visual_qc.get("errors") or []:
+        if not isinstance(issue, dict):
+            continue
+        job_id = str(issue.get("job_id") or "").strip()
+        if job_id:
+            selected.append(job_id)
+        duplicates = [str(value) for value in (issue.get("jobs") or []) if str(value)]
+        if duplicates:
+            # Keep the first good anchor and regenerate only later duplicates.
+            selected.extend(duplicates[1:])
+    for job in (result or {}).get("jobs") or []:
+        if not isinstance(job, dict):
+            continue
+        if str(job.get("status") or "").lower() in {"failed", "blocked", "timeout", "quality_failed"}:
+            job_id = str(job.get("job_id") or "").strip()
+            if job_id:
+                selected.append(job_id)
+    if not selected:
+        return []
+    jobs = [item for item in (raw_jobs or []) if isinstance(item, dict)]
+    dependents: dict[str, list[str]] = {}
+    for job in jobs:
+        job_id = str(job.get("job_id") or "")
+        for dependency in job.get("depends_on") or []:
+            dependents.setdefault(str(dependency), []).append(job_id)
+    queue = list(dict.fromkeys(selected))
+    expanded = list(queue)
+    while queue:
+        current = queue.pop(0)
+        for dependent in dependents.get(current, []):
+            if dependent and dependent not in expanded:
+                expanded.append(dependent)
+                queue.append(dependent)
+    return expanded
 
 
 def _load_comfyui_payload_with_fallback(path: Path) -> dict[str, Any]:

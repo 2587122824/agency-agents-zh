@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import re
 import time
@@ -155,6 +156,7 @@ class CloudComfyUIAdapter:
                 )
                 continue
             job, resolved_inputs, missing_inputs = self._apply_explicit_input_bindings(job, job_state)
+            runninghub_resume_key = stable_job_hash(job, job_config, resolved_inputs)
             failed_dependencies = [
                 dependency
                 for dependency in self._string_list(job.get("depends_on"))
@@ -257,9 +259,19 @@ class CloudComfyUIAdapter:
             job_payload = self._payload_for_material_job(job["base_payload"], job, index)
             self._write_json(job_dir / "comfyui_payload.json", job_payload)
             input_hash = stable_job_hash(job_payload, job_config, resolved_inputs)
+            job_config = dict(job_config)
+            job_config["runninghub_resume_key"] = runninghub_resume_key
             cached_state = (job_state.get("jobs") or {}).get(job_id, {})
             cached_files = [str(path) for path in cached_state.get("downloaded_files", []) if Path(str(path)).is_file()]
-            force_retry = str(compose_config.get("force_retry_job_id") or "") == job_id
+            force_retry_ids = {
+                str(value)
+                for value in (compose_config.get("force_retry_job_ids") or [])
+                if str(value)
+            }
+            force_retry = (
+                str(compose_config.get("force_retry_job_id") or "") == job_id
+                or job_id in force_retry_ids
+            )
             current_endpoint = str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint)
             current_preset_id = str(job_config.get("workflow_preset_id") or "")
             cached_endpoint = str(cached_state.get("endpoint") or "")
@@ -494,18 +506,65 @@ class CloudComfyUIAdapter:
         comfyui_payload = self._prepare_runninghub_payload(comfyui_payload)
         payload = self._build_runninghub_payload(comfyui_payload, compose_config)
         endpoint = self._effective_endpoint(compose_config)
-        self._emit(f"提交 RunningHub 请求：{endpoint}", endpoint=endpoint)
         request_path = output_dir / "runninghub_comfyui_request_payload.json"
         self._write_json(request_path, self._redact_response(payload))
-        submit_response = self._post_json(self._endpoint_url(endpoint), payload)
+        remote_state_path = output_dir / "runninghub_task_state.json"
+        resume_key = str(compose_config.get("runninghub_resume_key") or "").strip()
+        request_hash = hashlib.sha256(
+            json.dumps(
+                {"endpoint": endpoint, "resume_key": resume_key, "payload": ({} if resume_key else payload)},
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        remote_state = read_json(remote_state_path)
+        saved_status = str(remote_state.get("status") or "").upper()
+        saved_task_id = str(remote_state.get("task_id") or remote_state.get("taskId") or "").strip()
+        resume_remote = bool(
+            saved_task_id
+            and remote_state.get("request_hash") == request_hash
+            and saved_status not in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED"}
+        )
+        if resume_remote:
+            submit_response = read_json(output_dir / "runninghub_comfyui_submit_response.json")
+        else:
+            self._emit(f"提交 RunningHub 请求：{endpoint}", endpoint=endpoint)
+            submit_response = self._post_json(self._endpoint_url(endpoint), payload)
+        if resume_remote and not submit_response:
+            submit_response = {"taskId": saved_task_id, "status": saved_status or "RUNNING"}
         submit_path = output_dir / "runninghub_comfyui_submit_response.json"
-        self._write_json(submit_path, self._redact_response(submit_response))
+        if not resume_remote:
+            self._write_json(submit_path, self._redact_response(submit_response))
 
         task_id = self._first_value(submit_response, ("taskId", "task_id"))
         if not task_id:
             message = self._runninghub_error_message(submit_response) or "RunningHub ComfyUI workflow did not return taskId"
             raise ValueError(message)
         self._emit(f"RunningHub 已返回任务 ID：{task_id}", endpoint=endpoint, task_id=task_id, remote_status=self._status(submit_response))
+
+        remote_state.update(
+            {
+                "schema_version": 1,
+                "provider": "runninghub",
+                "task_id": task_id,
+                "endpoint": endpoint,
+                "request_hash": request_hash,
+                "status": saved_status if resume_remote else (self._status(submit_response) or "SUBMITTED"),
+                "resumed": resume_remote,
+                "submitted_at": remote_state.get("submitted_at") or time.time(),
+                "updated_at": time.time(),
+            }
+        )
+        self._write_json(remote_state_path, remote_state)
+        if resume_remote:
+            self._emit(
+                "Resuming persisted RunningHub task",
+                endpoint=endpoint,
+                task_id=task_id,
+                remote_status=saved_status or "RUNNING",
+                resumed=True,
+            )
 
         query_url = urljoin(f"{self.base_url}/", "query")
         poll_interval = self._safe_int(compose_config.get("poll_interval_seconds"), default=10, minimum=2, maximum=60)
@@ -534,6 +593,8 @@ class CloudComfyUIAdapter:
                 time.sleep(poll_interval)
                 continue
             status = self._status(query_response)
+            remote_state.update({"status": status or "UNKNOWN", "updated_at": time.time()})
+            self._write_json(remote_state_path, remote_state)
             self._emit(f"RunningHub 任务 {task_id} 状态：{status or 'UNKNOWN'}", endpoint=endpoint, task_id=task_id, remote_status=status)
             if status == "SUCCESS":
                 break
@@ -603,6 +664,8 @@ class CloudComfyUIAdapter:
             "request_payload_file": str(request_path),
             "submit_response_file": str(submit_path),
             "query_response_file": str(query_path),
+            "remote_task_state_file": str(remote_state_path),
+            "resumed_remote_task": resume_remote,
             "result_count": len(result_items),
             "downloaded_files": [str(path) for path in downloaded],
             "results": result_items,
@@ -610,6 +673,15 @@ class CloudComfyUIAdapter:
         }
         manifest_path = output_dir / "cloud_comfyui_manifest.json"
         self._write_json(manifest_path, manifest)
+        remote_state.update(
+            {
+                "status": status or manifest["status"].upper(),
+                "updated_at": time.time(),
+                "downloaded_files": [str(path) for path in downloaded],
+                "manifest_file": str(manifest_path),
+            }
+        )
+        self._write_json(remote_state_path, remote_state)
         if manifest["status"] != "success":
             message = self._runninghub_error_message(query_response) or status
             raise ValueError(f"RunningHub ComfyUI workflow failed: {message}")
