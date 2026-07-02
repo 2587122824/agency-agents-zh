@@ -383,7 +383,7 @@ class LocalFFmpegAdapter:
         return candidate if candidate.is_file() and candidate.suffix.lower() in AUDIO_EXTENSIONS else None
 
     @staticmethod
-    def _prepare_burn_subtitles(subtitles_file: Path, task_dir: Path, max_chars: int = 18) -> Path:
+    def _prepare_burn_subtitles(subtitles_file: Path, task_dir: Path, max_chars: int = 11) -> Path:
         """Create a burn-only SRT with deliberate CJK line breaks.
 
         libass wraps long Chinese rows by glyph width and may leave punctuation
@@ -392,17 +392,52 @@ class LocalFFmpegAdapter:
         """
         output = task_dir / "subtitles_burn.srt"
         text = subtitles_file.read_text(encoding="utf-8-sig", errors="replace")
-        blocks: list[str] = []
+        entries: list[tuple[int, int, list[str]]] = []
         for raw_block in re.split(r"\r?\n\s*\r?\n", text.strip()):
             lines = raw_block.splitlines()
             if len(lines) < 3:
-                blocks.append(raw_block.strip())
+                continue
+            timing = re.match(r"\s*(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})", lines[1])
+            if not timing:
                 continue
             caption = "".join(line.strip() for line in lines[2:] if line.strip())
-            wrapped = LocalFFmpegAdapter._wrap_cjk_caption(caption, max_chars=max_chars)
-            blocks.append("\n".join([lines[0].strip(), lines[1].strip(), *wrapped]))
+            rows = LocalFFmpegAdapter._wrap_cjk_caption(caption, max_chars=max_chars)
+            screens = [rows[index : index + 2] for index in range(0, len(rows), 2)]
+            start_ms = LocalFFmpegAdapter._parse_srt_time(timing.group(1))
+            end_ms = LocalFFmpegAdapter._parse_srt_time(timing.group(2))
+            weights = [max(1, len("".join(screen))) for screen in screens]
+            total_weight = sum(weights)
+            cursor = start_ms
+            for index, screen in enumerate(screens):
+                next_cursor = end_ms if index == len(screens) - 1 else start_ms + round((end_ms - start_ms) * sum(weights[: index + 1]) / total_weight)
+                entries.append((cursor, max(cursor + 1, next_cursor), screen))
+                cursor = next_cursor
+        blocks = [
+            "\n".join(
+                [
+                    str(index),
+                    f"{LocalFFmpegAdapter._format_srt_time(start_ms)} --> {LocalFFmpegAdapter._format_srt_time(end_ms)}",
+                    *rows,
+                ]
+            )
+            for index, (start_ms, end_ms, rows) in enumerate(entries, start=1)
+        ]
         output.write_text("\n\n".join(blocks).strip() + "\n", encoding="utf-8")
         return output
+
+    @staticmethod
+    def _parse_srt_time(value: str) -> int:
+        hours, minutes, rest = value.split(":")
+        seconds, milliseconds = rest.split(",")
+        return ((int(hours) * 60 + int(minutes)) * 60 + int(seconds)) * 1000 + int(milliseconds)
+
+    @staticmethod
+    def _format_srt_time(milliseconds: int) -> str:
+        value = max(0, int(milliseconds))
+        hours, remainder = divmod(value, 3_600_000)
+        minutes, remainder = divmod(remainder, 60_000)
+        seconds, millis = divmod(remainder, 1000)
+        return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
     @staticmethod
     def _wrap_cjk_caption(text: str, max_chars: int = 18) -> list[str]:
@@ -419,8 +454,10 @@ class LocalFFmpegAdapter:
             if current:
                 rows.append(current)
                 current = ""
+            part_count = max(1, (len(clause) + max_chars - 1) // max_chars)
+            balanced_width = max(1, (len(clause) + part_count - 1) // part_count)
             while len(clause) > max_chars:
-                cut = max_chars
+                cut = min(balanced_width, max_chars)
                 while cut < len(clause) and clause[cut] in "，。！？；、：,.!?;:":
                     cut += 1
                 rows.append(clause[:cut])
