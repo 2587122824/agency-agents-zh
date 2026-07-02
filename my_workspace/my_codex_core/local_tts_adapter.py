@@ -31,7 +31,7 @@ class LocalTTSAdapter:
         voice_preset = str(voice_config.get("voice_preset") or "warm_female").strip()
         voice_preset_name = str(voice_config.get("voice_preset_name") or voice_preset).strip()
         reference_audio = str(voice_config.get("reference_audio") or "").strip()
-        needs_reference_audio = mode in {"voxcpm2", "clone", "voice_clone"}
+        needs_reference_audio = mode in {"clone", "voice_clone"} or bool(reference_audio)
         if needs_reference_audio and not reference_audio:
             return {"status": "skipped", "reason": "VoxCPM2 reference audio is missing"}
         if reference_audio:
