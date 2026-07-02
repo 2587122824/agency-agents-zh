@@ -27,6 +27,14 @@ def normalize_global_context(payload: dict[str, Any], video_config: dict[str, An
     render = source.get("render") if isinstance(source.get("render"), dict) else {}
     width = _positive_int(render.get("working_width") or payload.get("width") or video.get("width"), 848)
     height = _positive_int(render.get("working_height") or payload.get("height") or video.get("height"), 480)
+    aspect_ratio = str(render.get("aspect_ratio") or video.get("aspect_ratio") or "16:9")
+    aspect_text = aspect_ratio.strip().lower()
+    if any(token in aspect_text for token in ("9:16", "portrait", "vertical", "绔栧睆")):
+        default_delivery_width, default_delivery_height = 1080, 1920
+    elif any(token in aspect_text for token in ("1:1", "square", "鏂瑰睆")):
+        default_delivery_width, default_delivery_height = 1080, 1080
+    else:
+        default_delivery_width, default_delivery_height = 1920, 1080
     context = {
         "characters": source.get("characters") if isinstance(source.get("characters"), list) else [],
         "products": source.get("products") if isinstance(source.get("products"), list) else [],
@@ -37,10 +45,10 @@ def normalize_global_context(payload: dict[str, Any], video_config: dict[str, An
         "render": {
             "working_width": width,
             "working_height": height,
-            "delivery_width": _positive_int(render.get("delivery_width"), 1920),
-            "delivery_height": _positive_int(render.get("delivery_height"), 1080),
+            "delivery_width": _positive_int(render.get("delivery_width"), default_delivery_width),
+            "delivery_height": _positive_int(render.get("delivery_height"), default_delivery_height),
             "frame_rate": _positive_int(render.get("frame_rate") or payload.get("fps") or video.get("fps"), 24),
-            "aspect_ratio": str(render.get("aspect_ratio") or video.get("aspect_ratio") or "16:9"),
+            "aspect_ratio": aspect_ratio,
         },
     }
     style = context["style"]
