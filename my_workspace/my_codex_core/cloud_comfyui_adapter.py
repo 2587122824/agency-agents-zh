@@ -13,6 +13,10 @@ from urllib.parse import urljoin, urlparse
 from .production_graph import artifact_record, build_production_graph, read_json, stable_job_hash, write_json
 from .production_parameter_policy import apply_locked_parameters_to_payload
 
+WORKFLOW_ID_ALIASES = {
+    "10_broll_transition": "10_broll_transition_video",
+}
+
 
 class CloudComfyUIAdapter:
     """Call a cloud ComfyUI final-production workflow and persist returned assets."""
@@ -1059,14 +1063,14 @@ class CloudComfyUIAdapter:
             and self._uses_workflow_library(compose_config)
             and not self._has_exact_workflow_library_config_for_job(job, compose_config)
         ):
-            workflow_id = str(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "").strip()
+            workflow_id = self._canonical_workflow_id(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "")
             workflow_mode = str(job.get("mode") or (job.get("prompt_data") or {}).get("workflow_mode") or "").strip()
             target = " / ".join(part for part in [workflow_id, workflow_mode] if part) or str(job.get("name") or job.get("job_id") or "当前可选节点")
             raise ValueError(f"可选 ComfyUI 后处理未配置，已跳过：{target}")
         preset = self._workflow_library_preset_for_job(job, compose_config)
         if not preset:
             if self._uses_workflow_library(compose_config):
-                workflow_id = str(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "").strip()
+                workflow_id = self._canonical_workflow_id(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "")
                 workflow_mode = str(job.get("mode") or (job.get("prompt_data") or {}).get("workflow_mode") or "").strip()
                 target = " / ".join(part for part in [workflow_id, workflow_mode] if part) or str(job.get("name") or job.get("job_id") or "当前生产节点")
                 raise ValueError(f"ComfyUI 调试台未配置：找不到生产节点对应槽位 {target}，请先在调试台保存 endpoint 和 nodeInfoList")
@@ -1101,10 +1105,10 @@ class CloudComfyUIAdapter:
         library = compose_config.get("workflow_library")
         if not isinstance(library, list):
             return None
-        workflow_id = str(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "").strip()
+        workflow_id = cls._canonical_workflow_id(job.get("workflow_id") or (job.get("prompt_data") or {}).get("workflow_id") or "")
         workflow_mode = str(job.get("mode") or (job.get("prompt_data") or {}).get("workflow_mode") or "").strip()
         if workflow_id:
-            exact = next((item for item in library if isinstance(item, dict) and str(item.get("id") or "").strip() == workflow_id), None)
+            exact = next((item for item in library if isinstance(item, dict) and cls._canonical_workflow_id(item.get("id") or "") == workflow_id), None)
             if exact:
                 return cls._library_item_with_mode_config(exact, workflow_mode)
         configured = [item for item in library if cls._is_configured_library_item(item)]
@@ -1121,6 +1125,11 @@ class CloudComfyUIAdapter:
         if job_type == "video":
             return cls._first_matching_preset(configured, ("all_in_one_video", "全能视频", "universal_video", "image_to_video", "ltx", "video", "broll", "视频", "图生视频", "生视频"))
         return cls._first_matching_preset(configured, ("all_in_one_image", "全能图片", "universal_image", "txt_img", "z_image", "image", "keyframe", "文生图", "生图", "关键帧", "配图"))
+
+    @staticmethod
+    def _canonical_workflow_id(workflow_id: Any) -> str:
+        value = str(workflow_id or "").strip()
+        return WORKFLOW_ID_ALIASES.get(value, value)
 
     @staticmethod
     def _library_item_with_mode_config(item: dict[str, Any], mode: str) -> dict[str, Any]:

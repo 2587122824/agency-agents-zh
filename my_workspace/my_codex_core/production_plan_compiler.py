@@ -47,6 +47,9 @@ VIDEO_INTENT_ROUTES = {
     "enhance_video": ("11_video_enhance", "video_upscale"),
     "repair_video": ("12_video_inpaint_fix", "video_inpaint_fix"),
 }
+WORKFLOW_ID_ALIASES = {
+    "10_broll_transition": "10_broll_transition_video",
+}
 
 
 def compile_production_plan(
@@ -652,7 +655,7 @@ def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
                     "type": job_type,
                     "capability": str(item.get("capability") or ("video_generate" if job_type == "video" else "image_generate")),
                     "mode": str(item.get("workflow_mode") or item.get("mode") or ""),
-                    "workflow_id": str(item.get("workflow_id") or ""),
+                    "workflow_id": _canonical_workflow_id(str(item.get("workflow_id") or "")),
                     "depends_on": _string_list(item.get("depends_on")),
                     "input_bindings": item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {},
                     "character_id": str(item.get("character_id") or ""),
@@ -700,6 +703,11 @@ def _skip_material_prompt_item(item: dict[str, Any]) -> bool:
             "workflow_id none",
         )
     )
+
+
+def _canonical_workflow_id(workflow_id: str) -> str:
+    value = str(workflow_id or "").strip()
+    return WORKFLOW_ID_ALIASES.get(value, value)
 
 
 def _json_object_from_text(text: str) -> dict[str, Any]:

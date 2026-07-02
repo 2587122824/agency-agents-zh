@@ -1919,6 +1919,16 @@ def _workflow_library_has_configured_slots(library: Any) -> bool:
     return False
 
 
+WORKFLOW_ID_ALIASES = {
+    "10_broll_transition": "10_broll_transition_video",
+}
+
+
+def _canonical_workflow_id(workflow_id: Any) -> str:
+    value = str(workflow_id or "").strip()
+    return WORKFLOW_ID_ALIASES.get(value, value)
+
+
 def _required_workflow_slots(jobs: Any) -> list[dict[str, str]]:
     if not isinstance(jobs, list):
         return []
@@ -1927,7 +1937,7 @@ def _required_workflow_slots(jobs: Any) -> list[dict[str, str]]:
     for job in jobs:
         if not isinstance(job, dict):
             continue
-        workflow_id = str(job.get("workflow_id") or job.get("capability") or "").strip()
+        workflow_id = _canonical_workflow_id(job.get("workflow_id") or job.get("capability") or "")
         mode = str(job.get("workflow_mode") or job.get("mode") or "").strip()
         material_type = str(job.get("type") or job.get("material_type") or "").strip()
         if _optional_workflow_slot(job, workflow_id, mode):
@@ -1957,7 +1967,7 @@ def _configured_workflow_slots(library: Any) -> list[dict[str, str]]:
     for item in library:
         if not isinstance(item, dict):
             continue
-        workflow_id = str(item.get("id") or item.get("workflow_id") or "").strip()
+        workflow_id = _canonical_workflow_id(item.get("id") or item.get("workflow_id") or "")
         endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
         node_info = str(item.get("node_info_list_json") or item.get("nodeInfoList") or "").strip()
         if workflow_id and endpoint and node_info and node_info != "[]":
@@ -1982,11 +1992,11 @@ def _configured_workflow_slots(library: Any) -> list[dict[str, str]]:
 
 
 def _missing_workflow_slots(required: list[dict[str, str]], configured: list[dict[str, str]]) -> list[dict[str, str]]:
-    configured_pairs = {(str(item.get("workflow_id") or ""), str(item.get("mode") or "")) for item in configured if isinstance(item, dict)}
+    configured_pairs = {(_canonical_workflow_id(item.get("workflow_id") or ""), str(item.get("mode") or "")) for item in configured if isinstance(item, dict)}
     configured_ids = {workflow_id for workflow_id, mode in configured_pairs if workflow_id and not mode}
     missing: list[dict[str, str]] = []
     for slot in required:
-        workflow_id = str(slot.get("workflow_id") or "")
+        workflow_id = _canonical_workflow_id(slot.get("workflow_id") or "")
         mode = str(slot.get("mode") or "")
         if (workflow_id, mode) in configured_pairs:
             continue
