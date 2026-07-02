@@ -492,15 +492,19 @@ def _compile_video_intents(
         elif intent_name in {"generate_i2v_clip", "enhance_video", "repair_video"}:
             _bind_first_source_image(item, image_job_ids)
             if intent_name == "generate_i2v_clip" and not _has_bound_first_frame(item):
-                workflow_id, workflow_mode = VIDEO_INTENT_ROUTES["generate_broll_clip"]
-                item["workflow_id"] = workflow_id
-                item["workflow_mode"] = workflow_mode
-                item["video_task_mode"] = workflow_mode
-                item["mode"] = workflow_mode
-                item["capability"] = "video_generate"
-                notes.append(
-                    f"video intent {intent_id} downgraded to text-to-video because no source image/frame was bound"
-                )
+                inferred = _bind_matching_keyframe_by_id(item, image_job_ids)
+                if inferred:
+                    notes.append(f"video intent {intent_id} inferred first frame from {inferred}")
+                else:
+                    workflow_id, workflow_mode = VIDEO_INTENT_ROUTES["generate_broll_clip"]
+                    item["workflow_id"] = workflow_id
+                    item["workflow_mode"] = workflow_mode
+                    item["video_task_mode"] = workflow_mode
+                    item["mode"] = workflow_mode
+                    item["capability"] = "video_generate"
+                    notes.append(
+                        f"video intent {intent_id} downgraded to text-to-video because no source image/frame was available"
+                    )
         elif intent_name == "generate_talking_image":
             item.setdefault("depends_on", [])
             if "local_tts" not in item["depends_on"]:
@@ -649,6 +653,39 @@ def _bind_first_source_image(item: dict[str, Any], image_job_ids: set[str]) -> N
             if job_id not in depends_on:
                 depends_on.append(job_id)
             return
+
+
+def _bind_matching_keyframe_by_id(item: dict[str, Any], image_job_ids: set[str]) -> str:
+    number = _trailing_number(item.get("job_id") or item.get("id") or "")
+    if not number:
+        return ""
+    candidates = [
+        f"kf_shot_{number}",
+        f"keyframe_shot_{number}",
+        f"shot_{number}_keyframe",
+        f"shot_{number}_first_frame",
+        f"clip_{number}_keyframe",
+    ]
+    bindings = item.setdefault("input_bindings", {})
+    depends_on = item.setdefault("depends_on", [])
+    for job_id in candidates:
+        if job_id not in image_job_ids:
+            continue
+        bindings.setdefault("input_base_image", {"from_job": job_id, "output": "output_final_image"})
+        if job_id not in depends_on:
+            depends_on.append(job_id)
+        item.setdefault("source_intent_ids", [])
+        if isinstance(item["source_intent_ids"], list) and job_id not in item["source_intent_ids"]:
+            item["source_intent_ids"].append(job_id)
+        return job_id
+    return ""
+
+
+def _trailing_number(value: Any) -> str:
+    match = re.search(r"(\d+)$", str(value or "").strip())
+    if not match:
+        return ""
+    return match.group(1).zfill(3)
 
 
 def _has_bound_first_frame(item: dict[str, Any]) -> bool:
