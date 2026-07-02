@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-03] Requirement alignment now recognizes the bilingual semantic family for an English AI-city-efficiency-quiet theme. A Chinese employee output passes when it still covers the AI, city/urban, efficiency, and quiet/silent concepts, instead of being rejected merely for not copying the complete English topic sentence verbatim.
+
 - [2026-07-03] Burned Chinese subtitles now use a separate `subtitles_burn.srt` with punctuation-aware line breaks. Long source entries are split into timed burn-only screens of at most two 11-character rows, with timing allocated by character count. The original sidecar SRT remains unchanged, while FFmpeg avoids both punctuation hanging at line starts and large multi-line blocks covering the picture.
 
 - [2026-07-03] Local FFmpeg no longer truncates a visual timeline when VoxCPM2 narration is shorter than the requested video. Voice-only composition applies `apad` before `-shortest`; voice+BGM composition pads the voice before side-chain ducking and mixes to the longest audio input. The video timeline therefore remains authoritative, with silence/BGM filling the narration tail instead of cutting the final shots.
