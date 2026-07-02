@@ -452,7 +452,12 @@ class CloudComfyUIAdapter:
                 prompt_data.get("capability"),
             )
         ).lower()
-        return "enhance_video" in text or "video_enhance" in text
+        return (
+            "enhance_video" in text
+            or "video_enhance" in text
+            or "cover_key_visual" in text
+            or "generate_cover_key_visual" in text
+        )
 
     def _run_runninghub(self, comfyui_payload: dict[str, Any], compose_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         comfyui_payload = self._prepare_runninghub_payload(comfyui_payload)

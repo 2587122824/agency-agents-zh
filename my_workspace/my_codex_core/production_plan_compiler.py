@@ -542,6 +542,11 @@ def _image_prompt_item(
     if entity_context:
         item["entity_context"] = entity_context
         _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
+    if _bool_or_default(
+        intent.get("optional_when_unconfigured"),
+        default=_bool_or_default(contract.get("optional_when_unconfigured"), default=intent_name == "generate_cover_key_visual"),
+    ):
+        item["optional_when_unconfigured"] = True
     return item
 
 

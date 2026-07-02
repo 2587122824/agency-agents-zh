@@ -1881,7 +1881,12 @@ def _optional_workflow_slot(job: dict[str, Any], workflow_id: str = "", mode: st
             job.get("capability"),
         )
     ).lower()
-    return "enhance_video" in text or "video_enhance" in text
+    return (
+        "enhance_video" in text
+        or "video_enhance" in text
+        or "cover_key_visual" in text
+        or "generate_cover_key_visual" in text
+    )
 
 
 def _ensure_library_item_runninghub_endpoint(item: dict[str, Any]) -> None:
