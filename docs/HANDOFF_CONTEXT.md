@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-03] Group-level production retries now map aliases such as `tts`, `bgm`, and `ffmpeg` back to their canonical packaging nodes (`local_tts`, `bgm_select`, `ffmpeg_compose`). A successful TTS retry therefore replaces a stale `local_tts=quality_failed` node and clears its old error instead of leaving FFmpeg permanently dependency-blocked. TTS retry also refreshes manifest voice-text length and target duration metadata.
+
 - [2026-07-03] Human-confirmation detection now accepts quoted JSON keys and values as well as Markdown-style assignments. An explicit `"human_confirmation_required": false` takes precedence over a nearby heading containing words such as “人工确认（阻塞）”, preventing non-blocking packaging output from pausing the workflow.
 
 - [2026-07-03] The production-plan compiler now preserves the semantic subtype of `generate_broll_clip`: an explicit `broll_scene_video` or `empty_transition_video` hint selects the matching mode under `10_broll_transition_video`. Previously every B-roll intent was flattened to `broll_scene_video`, even when staff output correctly requested an empty transition shot.

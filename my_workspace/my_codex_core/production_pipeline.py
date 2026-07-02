@@ -773,6 +773,11 @@ def retry_production_job(
     if not requested_job_id:
         raise ValueError("job or job_id is required")
     retry_job = requested_job_id.lower()
+    retry_node_id = {
+        "tts": "local_tts",
+        "bgm": "bgm_select",
+        "ffmpeg": "ffmpeg_compose",
+    }.get(retry_job, requested_job_id)
 
     manifest_path = task_dir / "production_manifest.json"
     saved_config = _read_json_object(task_dir / "production_config_snapshot.json")
@@ -918,20 +923,20 @@ def retry_production_job(
         history_item["status"] = str(result_for_history.get("status") or "unknown")
         history_item["outputs"] = [str(item) for item in (result_for_history.get("downloaded_files") or []) if item]
         history_item["ended_at"] = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-        if requested_job_id in known_node_ids or requested_job_id in standard_packaging_job_ids:
+        if retry_node_id in known_node_ids or retry_node_id in standard_packaging_job_ids:
             existing_node = next(
                 (
                     item
                     for item in (manifest.get("production_nodes") or [])
-                    if isinstance(item, dict) and str(item.get("job_id") or "") == requested_job_id
+                    if isinstance(item, dict) and str(item.get("job_id") or "") == retry_node_id
                 ),
                 {},
             )
             _upsert_production_node(
                 manifest,
-                requested_job_id,
-                stage="08_audio_visual_packaging" if requested_job_id in {"local_tts", "subtitle_build", "bgm_select", "ffmpeg_compose", "format_export"} else "visual",
-                mode=requested_job_id,
+                retry_node_id,
+                stage="08_audio_visual_packaging" if retry_node_id in {"local_tts", "subtitle_build", "bgm_select", "ffmpeg_compose", "format_export"} else "visual",
+                mode=retry_node_id,
                 status=history_item["status"],
                 depends_on=result_for_history.get("depends_on") or existing_node.get("depends_on") or [],
                 outputs=history_item["outputs"],
@@ -1041,6 +1046,8 @@ def _retry_tts_job(
     emit("retrying local TTS", stage="tts")
     result = _run_local_tts_adapter(voice_text, voice_config, paths["audio"]) or {"status": "skipped"}
     audio = manifest.setdefault("audio", {})
+    audio["voice_text_chars"] = len(re.sub(r"\s+", "", voice_text))
+    audio["target_duration_seconds"] = float(voice_config.get("target_duration_seconds") or 0)
     audio["adapter_status"] = result.get("status") or "failed"
     audio["adapter_manifest"] = str(paths["audio"] / "local_tts_manifest.json")
     files = result.get("downloaded_files") or []
