@@ -272,7 +272,7 @@ def declares_human_confirmation(content: str) -> bool:
     explicit_values = [
         match.group(1).strip().lower()
         for match in re.finditer(
-            r"human_confirmation_required\s*[:：]\s*`?\s*(true|false)\s*`?",
+            r"[\"'`]?human_confirmation_required[\"'`]?\s*[:：]\s*[\"'`]?\s*(true|false)\s*[\"'`]?",
             text,
             flags=re.IGNORECASE,
         )
@@ -281,7 +281,11 @@ def declares_human_confirmation(content: str) -> bool:
         return True
     if any(value == "false" for value in explicit_values):
         return False
-    if re.search(r"human_confirmation_required\s*[:：]\s*true", text, flags=re.IGNORECASE):
+    if re.search(
+        r"[\"'`]?human_confirmation_required[\"'`]?\s*[:：]\s*[\"'`]?\s*true",
+        text,
+        flags=re.IGNORECASE,
+    ):
         return True
     heading_match = re.search(r"^##\s*人工确认[（(]?阻塞[）)]?.*$", text, flags=re.MULTILINE)
     if not heading_match:
