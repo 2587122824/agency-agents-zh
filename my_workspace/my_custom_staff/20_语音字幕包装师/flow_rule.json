@@ -23,6 +23,7 @@
     "audio_mix_guidance"
   ],
   "quality_gate": [
+    "60秒成片的generate_voiceover.target_duration_seconds必须小于等于58秒，建议55-58秒，并使用本地TTS/VoxCPM2/预设音色配置生成旁白",
     "必须输出production_intents.audio",
     "需要旁白时必须输出generate_voiceover",
     "需要字幕时必须输出build_subtitles",
