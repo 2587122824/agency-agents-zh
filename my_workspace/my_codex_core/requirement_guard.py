@@ -265,10 +265,19 @@ def declares_human_confirmation(content: str) -> bool:
         return True
     if any(value == "false" for value in explicit_values):
         return False
-    return bool(
-        re.search(r"human_confirmation_required\s*[:：]\s*true", text, flags=re.IGNORECASE)
-        or re.search(r"^##\s*人工确认[（(]?阻塞[）)]?", text, flags=re.MULTILINE)
-    )
+    if re.search(r"human_confirmation_required\s*[:：]\s*true", text, flags=re.IGNORECASE):
+        return True
+    heading_match = re.search(r"^##\s*人工确认[（(]?阻塞[）)]?.*$", text, flags=re.MULTILINE)
+    if not heading_match:
+        return False
+    next_heading = re.search(r"^##\s+", text[heading_match.end() :], flags=re.MULTILINE)
+    section = text[heading_match.end() : heading_match.end() + next_heading.start()] if next_heading else text[heading_match.end() :]
+    normalized_section = section.strip().lower()
+    normalized_section = re.sub(r"^[。．.、\s]+", "", normalized_section)
+    non_blocking_prefixes = ("无", "暂无", "没有", "无需", "不需要", "否", "none", "no", "false", "n/a", "not required")
+    if normalized_section.startswith(non_blocking_prefixes):
+        return False
+    return bool(normalized_section)
 
 
 def _mentions_duration(content: str, duration_seconds: int) -> bool:
