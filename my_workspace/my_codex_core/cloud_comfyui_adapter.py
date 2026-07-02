@@ -260,7 +260,24 @@ class CloudComfyUIAdapter:
             cached_state = (job_state.get("jobs") or {}).get(job_id, {})
             cached_files = [str(path) for path in cached_state.get("downloaded_files", []) if Path(str(path)).is_file()]
             force_retry = str(compose_config.get("force_retry_job_id") or "") == job_id
-            if not force_retry and cached_state.get("status") in {"success", "cached", "downloaded", "submitted"} and cached_state.get("input_hash") == input_hash and cached_files:
+            current_endpoint = str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint)
+            current_preset_id = str(job_config.get("workflow_preset_id") or "")
+            cached_endpoint = str(cached_state.get("endpoint") or "")
+            cached_preset_id = str(cached_state.get("workflow_preset_id") or "")
+            cache_matches_route = (
+                str(cached_state.get("type") or "") == job_type
+                and bool(cached_preset_id)
+                and cached_preset_id == current_preset_id
+                and bool(cached_endpoint)
+                and cached_endpoint == current_endpoint
+            )
+            if (
+                not force_retry
+                and cached_state.get("status") in {"success", "cached", "downloaded", "submitted"}
+                and cached_state.get("input_hash") == input_hash
+                and cache_matches_route
+                and cached_files
+            ):
                 success_count += 1
                 downloaded_files.extend(cached_files)
                 if job_type == "image":
