@@ -3992,6 +3992,7 @@ INDEX_HTML = r"""<!doctype html>
     const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled', 'canceled', 'paused']);
     let outputSelectionVersion = 0;
     let lastTaskDetailRefreshAt = 0;
+    let stepOutputSignature = "";
     let assetPreviewItems = [];
     let assetPreviewTaskName = "";
     let assetPreviewIndex = 0;
@@ -7750,6 +7751,7 @@ INDEX_HTML = r"""<!doctype html>
         renderProductionPlanPreview(null);
         renderTaskComfyDebugPanel({});
         els.stepOutputMeta.textContent = '0 个步骤';
+        stepOutputSignature = "";
         els.stepOutputList.innerHTML = '<div class="muted small">选择任务后显示每个员工的输出。</div>';
         els.assetOutputMeta.textContent = '未生成';
         els.assetOutputList.classList.remove('asset-gallery');
@@ -7786,21 +7788,7 @@ INDEX_HTML = r"""<!doctype html>
       renderTaskComfyDebugPanel(status.comfy_debug || {});
       renderVideoPreview(data.name, files, finalVideoHint);
 
-      els.stepOutputMeta.textContent = `${visibleStepFiles.length} 个步骤`;
-      els.stepOutputList.innerHTML = '';
-      if (!visibleStepFiles.length) {
-        els.stepOutputList.innerHTML = '<div class="muted small">暂无步骤输出。先运行工作流，或检查 task_output 目录。</div>';
-      } else {
-        const confirmStep = awaitingConfirmationStep(summary);
-        for (const file of visibleStepFiles) {
-          const stepNo = stepNumberFromFile(file);
-          const statusStep = statusSteps.find(step => Number(step.step) === stepNo);
-          const subtitle = statusStep?.needs_confirmation || (confirmStep && stepNo === confirmStep)
-            ? '当前需要确认'
-            : (productionStatusLabel(statusStep?.status || '') || '查看本步骤结果');
-          els.stepOutputList.appendChild(outputFileButton(file, stepFileLabel(file), subtitle));
-        }
-      }
+      renderStepOutputList(visibleStepFiles, statusSteps, summary);
       renderStepConfirmBar();
 
       els.assetOutputMeta.textContent = assetItems.length ? `${assetItems.length} 个图片/视频` : '未生成';
@@ -7833,6 +7821,38 @@ INDEX_HTML = r"""<!doctype html>
           els.packageOutputList.appendChild(outputFileButton(file, file.replace('export_package/', ''), file));
         }
       }
+    }
+
+    function renderStepOutputList(visibleStepFiles, statusSteps, summary) {
+      const confirmStep = awaitingConfirmationStep(summary);
+      const rows = (visibleStepFiles || []).map(file => {
+        const stepNo = stepNumberFromFile(file);
+        const statusStep = (statusSteps || []).find(step => Number(step.step) === stepNo);
+        const subtitle = statusStep?.needs_confirmation || (confirmStep && stepNo === confirmStep)
+          ? '当前需要确认'
+          : (productionStatusLabel(statusStep?.status || '') || '查看本步骤结果');
+        return {
+          file,
+          title: stepFileLabel(file),
+          subtitle,
+        };
+      });
+      const signature = JSON.stringify(rows);
+      els.stepOutputMeta.textContent = `${rows.length} 个步骤`;
+      if (stepOutputSignature === signature) {
+        return;
+      }
+      const previousScrollTop = els.stepOutputList.scrollTop;
+      stepOutputSignature = signature;
+      els.stepOutputList.innerHTML = '';
+      if (!rows.length) {
+        els.stepOutputList.innerHTML = '<div class="muted small">暂无步骤输出。先运行工作流，或检查 task_output 目录。</div>';
+      } else {
+        for (const row of rows) {
+          els.stepOutputList.appendChild(outputFileButton(row.file, row.title, row.subtitle));
+        }
+      }
+      els.stepOutputList.scrollTop = previousScrollTop;
     }
 
     function normalizeStageStatus(value) {
