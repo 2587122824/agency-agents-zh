@@ -425,7 +425,7 @@ def _compile_video_intents(
         intent_id = _safe_id(intent.get("intent_id") or intent.get("id") or f"video_intent_{index:03d}")
         contract = contracts.get(intent_name) if isinstance(contracts.get(intent_name), dict) else {}
         compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
-        workflow_id, workflow_mode = _video_workflow_route(intent_name, contract, compatibility)
+        workflow_id, workflow_mode = _video_workflow_route(intent_name, intent, contract, compatibility)
         locked_intent, overrides = apply_locked_parameters_to_intent(
             intent,
             global_context=global_context,
@@ -608,11 +608,22 @@ def _image_workflow_route(
 
 def _video_workflow_route(
     intent_name: str,
+    intent: dict[str, Any],
     contract: dict[str, Any],
     compatibility: dict[str, Any],
 ) -> tuple[str, str]:
     """Resolve semantic video intent to the active debug-console workflow slot."""
 
+    if intent_name == "generate_broll_clip":
+        requested_mode = str(
+            intent.get("workflow_mode")
+            or intent.get("broll_mode")
+            or intent.get("video_task_mode")
+            or compatibility.get("recommended_workflow_mode")
+            or ""
+        ).strip()
+        if requested_mode in {"broll_scene_video", "empty_transition_video"}:
+            return "10_broll_transition_video", requested_mode
     if intent_name in VIDEO_INTENT_ROUTES:
         return VIDEO_INTENT_ROUTES[intent_name]
     return (

@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-03] The production-plan compiler now preserves the semantic subtype of `generate_broll_clip`: an explicit `broll_scene_video` or `empty_transition_video` hint selects the matching mode under `10_broll_transition_video`. Previously every B-roll intent was flattened to `broll_scene_video`, even when staff output correctly requested an empty transition shot.
+
 - [2026-07-03] Requirement alignment now recognizes the bilingual semantic family for an English AI-city-efficiency-quiet theme. A Chinese employee output passes when it still covers the AI, city/urban, efficiency, and quiet/silent concepts, instead of being rejected merely for not copying the complete English topic sentence verbatim.
 
 - [2026-07-03] Burned Chinese subtitles now use a separate `subtitles_burn.srt` with punctuation-aware line breaks. Long source entries are split into timed burn-only screens of at most two 11-character rows, with timing allocated by character count. The original sidecar SRT remains unchanged, while FFmpeg avoids both punctuation hanging at line starts and large multi-line blocks covering the picture.
