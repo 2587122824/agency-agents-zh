@@ -138,7 +138,11 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
                 invalid_times.append(raw or "空")
             elif key == "end_time":
                 max_end = max(max_end, parsed)
-    srt = str(payload.get("audio_package", {}).get("subtitle_srt_draft") or "") if isinstance(payload.get("audio_package"), dict) else ""
+    audio_package = payload.get("audio_package") if isinstance(payload.get("audio_package"), dict) else {}
+    if not audio_package:
+        package_payload = _payload_with(payloads, "audio_package")
+        audio_package = package_payload.get("audio_package") if isinstance(package_payload.get("audio_package"), dict) else {}
+    srt = str(audio_package.get("subtitle_srt_draft") or "")
     srt = srt.replace("\\n", "\n").replace("\\r", "\r")
     if not subtitle_segments and not srt.strip():
         issues.append("build_subtitles.segments 为空，且 audio_package.subtitle_srt_draft 未提供")

@@ -1684,6 +1684,31 @@ def _json_object_from_first_block(content: str) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _json_objects_from_blocks(content: str) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    for block in re.findall(r"```json\s*(.*?)```", str(content or ""), re.DOTALL | re.IGNORECASE):
+        try:
+            value = json.loads(block)
+        except Exception:
+            value = _salvage_comfyui_payload(block)
+        if isinstance(value, dict):
+            values.append(value)
+    return values
+
+
+def _json_payload_with(content: str, key: str, group: str = "") -> dict[str, Any]:
+    for payload in _json_objects_from_blocks(content):
+        if key not in payload:
+            continue
+        if key == "production_intents" and group:
+            intents = payload.get(key)
+            if isinstance(intents, dict) and isinstance(intents.get(group), list):
+                return payload
+        else:
+            return payload
+    return {}
+
+
 def _salvage_prompt_items(section: str, default_model: str, include_duration: bool) -> list[dict[str, Any]]:
     if not section:
         return []
@@ -2383,11 +2408,12 @@ def _extract_srt(content: str) -> str:
     match = re.search(r"```srt\s*(.*?)```", content, re.DOTALL | re.IGNORECASE)
     if match:
         return match.group(1).strip() + "\n"
-    payload = _json_object_from_first_block(content)
-    audio_package = payload.get("audio_package") if isinstance(payload.get("audio_package"), dict) else {}
+    package_payload = _json_payload_with(content, "audio_package")
+    audio_package = package_payload.get("audio_package") if isinstance(package_payload.get("audio_package"), dict) else {}
     draft = str(audio_package.get("subtitle_srt_draft") or "").strip()
     if draft:
         return draft + "\n"
+    payload = _json_payload_with(content, "production_intents", "audio")
     production_intents = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
     audio_intents = production_intents.get("audio") if isinstance(production_intents.get("audio"), list) else []
     for intent in audio_intents:
@@ -2411,11 +2437,12 @@ def _extract_srt(content: str) -> str:
 
 
 def _extract_voice_text(content: str) -> str:
-    payload = _json_object_from_first_block(content)
-    audio_package = payload.get("audio_package") if isinstance(payload.get("audio_package"), dict) else {}
+    package_payload = _json_payload_with(content, "audio_package")
+    audio_package = package_payload.get("audio_package") if isinstance(package_payload.get("audio_package"), dict) else {}
     packaged_voice_text = str(audio_package.get("voiceover_text") or "").strip()
     if packaged_voice_text:
         return _clean_voice_text(packaged_voice_text)
+    payload = _json_payload_with(content, "production_intents", "audio")
     production_intents = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
     audio_intents = production_intents.get("audio") if isinstance(production_intents.get("audio"), list) else []
     for intent in audio_intents:
