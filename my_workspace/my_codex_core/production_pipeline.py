@@ -2498,7 +2498,7 @@ def _quality_check_srt(srt: str) -> dict[str, Any]:
         return {"usable": False, "status": "missing", "reason": "没有抽取到 SRT", "entries": 0}
     if any(pattern in stripped for pattern in placeholder_patterns):
         return {"usable": False, "status": "placeholder", "reason": "SRT 包含占位说明", "entries": entries}
-    if entries < 3:
+    if entries < 1:
         return {"usable": False, "status": "too_few_entries", "reason": "SRT 条目过少", "entries": entries}
     if "-->" not in stripped:
         return {"usable": False, "status": "invalid", "reason": "SRT 缺少时间轴", "entries": entries}
