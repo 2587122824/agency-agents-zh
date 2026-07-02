@@ -13445,6 +13445,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 production_config=production_config,
                 progress_callback=self._progress_callback_for_run(run_id),
             )
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job and job.get("status") == "running":
+                    job["status"] = "completed"
+                    job["completed_steps"] = job.get("total_steps") or job.get("completed_steps") or 0
+                    job["current_message"] = job.get("current_message") or "任务完成"
+                    job["updated_at"] = time.time()
         except WorkflowCheckpointPause as exc:
             with RUN_JOBS_LOCK:
                 job = RUN_JOBS.get(run_id)
@@ -13542,6 +13549,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 production_config=production_config,
                 progress_callback=self._progress_callback_for_run(run_id),
             )
+            with RUN_JOBS_LOCK:
+                job = RUN_JOBS.get(run_id)
+                if job and job.get("status") == "running":
+                    job["status"] = "completed"
+                    job["completed_steps"] = job.get("total_steps") or job.get("completed_steps") or 0
+                    job["current_message"] = job.get("current_message") or "任务完成"
+                    job["updated_at"] = time.time()
         except WorkflowCheckpointPause as exc:
             with RUN_JOBS_LOCK:
                 job = RUN_JOBS.get(run_id)

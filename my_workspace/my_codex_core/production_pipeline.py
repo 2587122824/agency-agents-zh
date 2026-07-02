@@ -2486,8 +2486,6 @@ def _quality_check_voice_text(text: str) -> dict[str, Any]:
         return {"usable": False, "status": "placeholder", "reason": "配音稿包含占位说明"}
     if any(stripped.startswith(pattern) for pattern in placeholder_patterns):
         return {"usable": False, "status": "placeholder", "reason": "配音稿包含占位说明"}
-    if len(stripped) < 80:
-        return {"usable": False, "status": "too_short", "reason": "配音稿过短"}
     return {"usable": True, "status": "ok", "reason": ""}
 
 
