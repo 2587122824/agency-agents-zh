@@ -822,8 +822,8 @@ class CloudComfyUIAdapter:
         text = re.sub(r"(?i)\brobotic robotic calibration arm\b", "robotic calibration arm", text)
         text = re.sub(r"\s+", " ", text).strip(" ,")
         safety_prefix = (
-            "platform-safe non-graphic anime sci-fi video, fully clothed subjects, "
-            "clean synthetic surfaces, family-safe action tone, "
+            "platform-safe non-graphic video, fully clothed subjects, "
+            "family-safe action tone, "
         )
         if not text.lower().startswith("platform-safe non-graphic"):
             text = safety_prefix + text
