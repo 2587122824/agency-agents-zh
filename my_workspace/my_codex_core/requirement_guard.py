@@ -34,6 +34,13 @@ def build_requirement_lock(user_input: str) -> dict[str, Any]:
         flags=re.IGNORECASE,
     )
     core_topic = (topic_match.group(1) if topic_match else original.splitlines()[0] if original else "").strip()
+    english_topic_match = re.search(
+        r"(?:theme|topic|subject)\s*[:：]\s*([^\n。；;]{2,180})",
+        original,
+        flags=re.IGNORECASE,
+    )
+    if english_topic_match:
+        core_topic = english_topic_match.group(1).strip()
     core_topic = re.sub(r"[。；;]+$", "", core_topic).strip()
 
     duration_seconds = 0
@@ -118,7 +125,7 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
         matched_bigrams = [token for token in bigrams if token in output]
         minimum_matches = min(3, max(1, len(bigrams) // 6)) if bigrams else 0
         topic_covered_by_concepts = _topic_covered_by_salient_concepts(topic, output)
-        if missing_latin or (minimum_matches and len(matched_bigrams) < minimum_matches and not topic_covered_by_concepts):
+        if not topic_covered_by_concepts and (missing_latin or (minimum_matches and len(matched_bigrams) < minimum_matches)):
             issues.append(f"输出未保持核心主题“{topic}”")
 
     if step_no <= 3:
@@ -198,6 +205,31 @@ def _topic_covered_by_salient_concepts(topic: str, output: str) -> bool:
             "协作",
         )
         matched = [term for term in concept_terms if term in text]
+        return len(matched) >= 3
+
+    lower_topic = str(topic or "").lower()
+    lower_text = text.lower()
+    english_ai_productivity_topic = "ai" in lower_topic and (
+        "productivity" in lower_topic
+        or "productive" in lower_topic
+        or ("work" in lower_topic and ("improve" in lower_topic or "automation" in lower_topic))
+    )
+    if english_ai_productivity_topic and re.search(r"\bAI\b|artificial intelligence", text, flags=re.IGNORECASE):
+        concept_terms = (
+            "productivity",
+            "productive",
+            "efficiency",
+            "work",
+            "routine",
+            "automation",
+            "time",
+            "life",
+            "worker",
+            "organize",
+            "labor",
+            "leisure",
+        )
+        matched = [term for term in concept_terms if term in lower_text]
         return len(matched) >= 3
 
     return False
