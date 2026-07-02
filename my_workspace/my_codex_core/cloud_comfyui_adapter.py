@@ -1786,6 +1786,8 @@ class CloudComfyUIAdapter:
         if job_type == "video":
             prompt = self._runninghub_safe_video_prompt(prompt)
             negative = self._runninghub_safe_video_negative(negative)
+        elif str(job.get("mode") or "").strip().lower() == "style_reference":
+            prompt = self._safe_style_reference_prompt(prompt)
         payload["prompt"] = prompt
         payload["negative_prompt"] = negative
         if job_type == "video":
@@ -1876,6 +1878,29 @@ class CloudComfyUIAdapter:
         payload["global_style_weight"] = payload.get("global_style_weight") or style.get("weight") or ""
         apply_locked_parameters_to_payload(payload, job_type=job_type, mode=str(job.get("mode") or ""))
         return payload
+
+    @staticmethod
+    def _safe_style_reference_prompt(prompt: str) -> str:
+        """Keep style boards focused on environment instead of human appearance.
+
+        Style-reference images do not need people. Removing incidental skin/beauty
+        clauses both makes the reference cleaner and avoids false content-audit hits.
+        """
+        clauses = [item.strip() for item in re.split(r"(?<=[。！？!?])", str(prompt or "")) if item.strip()]
+        person_markers = ("人物", "人像", "面部", "磨皮", "美颜", "portrait", "face", "body")
+        kept = []
+        for clause in clauses:
+            lowered = clause.lower()
+            if any(marker in lowered for marker in person_markers):
+                continue
+            cleaned_clause = re.sub(r"(?:自然)?肤色|皮肤(?:质感|纹理)?|natural skin(?: tone)?|skin tone", "", clause, flags=re.IGNORECASE)
+            cleaned_clause = re.sub(r"[，,]{2,}", "，", cleaned_clause).strip("，, ")
+            cleaned_clause = re.sub(r"[，,]+([。！？!?])", r"\1", cleaned_clause)
+            if cleaned_clause:
+                kept.append(cleaned_clause)
+        cleaned = "".join(kept).strip()
+        suffix = "空景室内，无人物、无人像、无文字、无UI、无数字。"
+        return f"{cleaned}{suffix}" if cleaned else suffix
 
     def _reference_media_value(self, value: str) -> str:
         text = str(value or "").strip()
