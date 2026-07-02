@@ -47,7 +47,7 @@
 
 ## Recent Fixes
 
-- [2026-07-03] Group-level production retries now map aliases such as `tts`, `bgm`, and `ffmpeg` back to their canonical packaging nodes (`local_tts`, `bgm_select`, `ffmpeg_compose`). A successful TTS retry therefore replaces a stale `local_tts=quality_failed` node and clears its old error instead of leaving FFmpeg permanently dependency-blocked. TTS retry also refreshes manifest voice-text length and target duration metadata.
+- [2026-07-03] Group-level production retries now map aliases such as `tts`, `bgm`, and `ffmpeg` back to their canonical packaging nodes (`local_tts`, `bgm_select`, `ffmpeg_compose`). A successful TTS retry therefore replaces a stale `local_tts=quality_failed` node and clears its old error instead of leaving FFmpeg permanently dependency-blocked. TTS retry also refreshes manifest voice-text length and target duration metadata. Before FFmpeg dependency checks, old tasks additionally self-heal a stale `local_tts` node from a durable successful `local_tts_manifest.json` plus its existing WAV, avoiding unnecessary resynthesis after a restart.
 
 - [2026-07-03] Human-confirmation detection now accepts quoted JSON keys and values as well as Markdown-style assignments. An explicit `"human_confirmation_required": false` takes precedence over a nearby heading containing words such as “人工确认（阻塞）”, preventing non-blocking packaging output from pausing the workflow.
 

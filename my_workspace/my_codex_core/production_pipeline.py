@@ -1071,6 +1071,7 @@ def _retry_ffmpeg_job(
     emit,
 ) -> dict[str, Any]:
     emit("retrying local FFmpeg composition", stage="ffmpeg")
+    _reconcile_successful_tts_node(paths, manifest)
     nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
     tts_enabled = _manifest_requires_tts_for_packaging(manifest)
     if not tts_enabled:
@@ -1177,6 +1178,45 @@ def _retry_ffmpeg_job(
     )
     emit("FFmpeg composition retry finished", stage="ffmpeg", status=result.get("status") or "")
     return result
+
+
+def _reconcile_successful_tts_node(paths: dict[str, Path], manifest: dict[str, Any]) -> None:
+    """Recover a stale packaging node from a durable successful TTS manifest."""
+    tts_manifest = _read_json_object(paths["audio"] / "local_tts_manifest.json")
+    audio = manifest.get("audio") if isinstance(manifest.get("audio"), dict) else {}
+    if str(tts_manifest.get("status") or "").lower() != "success":
+        return
+    if str(audio.get("adapter_status") or "").lower() != "success":
+        return
+    outputs = [
+        str(value)
+        for value in (tts_manifest.get("downloaded_files") or [audio.get("voiceover_audio_file")])
+        if str(value or "").strip() and Path(str(value)).is_file()
+    ]
+    if not outputs:
+        return
+    existing = next(
+        (
+            item
+            for item in (manifest.get("production_nodes") or [])
+            if isinstance(item, dict) and str(item.get("job_id") or "") == "local_tts"
+        ),
+        {},
+    )
+    if str(existing.get("status") or "").lower() == "success" and not existing.get("error"):
+        return
+    _upsert_production_node(
+        manifest,
+        "local_tts",
+        stage="08_audio_visual_packaging",
+        mode="local_tts",
+        status="success",
+        depends_on=existing.get("depends_on") or [],
+        outputs=outputs,
+        attempts=int(existing.get("attempts") or 1),
+        error="",
+        optional_when_unconfigured=_as_bool(existing.get("optional_when_unconfigured"), default=False),
+    )
 
 
 def _finalize_retry_manifest(task_dir: Path, manifest: dict[str, Any], production_note_path: Path, emit, message: str) -> dict[str, Any]:
