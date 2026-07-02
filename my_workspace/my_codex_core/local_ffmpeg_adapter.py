@@ -103,6 +103,11 @@ class LocalFFmpegAdapter:
             and _bool_or_default(compose_config.get("burn_subtitles"), True)
             and self._subtitles_are_burnable(subtitles_file, manifest)
         )
+        burn_subtitles_file = (
+            self._prepare_burn_subtitles(subtitles_file, task_dir)
+            if burn_subtitles
+            else None
+        )
         subtitle_style = str(compose_config.get("subtitle_style") or DEFAULT_SUBTITLE_STYLE).strip()
         render = manifest.get("global_context", {}).get("render", {}) if isinstance(manifest.get("global_context"), dict) else {}
         delivery = render.get("delivery_resolution", {}) if isinstance(render.get("delivery_resolution"), dict) else {}
@@ -141,7 +146,7 @@ class LocalFFmpegAdapter:
                 video_files=video_files,
                 audio_file=audio_file,
                 bgm_file=bgm_file,
-                subtitles_file=subtitles_file if burn_subtitles else None,
+                subtitles_file=burn_subtitles_file,
                 subtitle_style=subtitle_style,
                 output_width=output_width,
                 output_height=output_height,
@@ -156,7 +161,7 @@ class LocalFFmpegAdapter:
                 image_files=image_files,
                 audio_file=audio_file,
                 bgm_file=bgm_file,
-                subtitles_file=subtitles_file if burn_subtitles else None,
+                subtitles_file=burn_subtitles_file,
                 subtitle_style=subtitle_style,
                 output_width=output_width,
                 output_height=output_height,
@@ -169,7 +174,7 @@ class LocalFFmpegAdapter:
                 ffmpeg_path=ffmpeg_path,
                 audio_file=audio_file,
                 bgm_file=bgm_file,
-                subtitles_file=subtitles_file if burn_subtitles else None,
+                subtitles_file=burn_subtitles_file,
                 subtitle_style=subtitle_style,
                 output_width=output_width,
                 output_height=output_height,
@@ -211,6 +216,7 @@ class LocalFFmpegAdapter:
                 "audio_file": str(audio_file) if audio_file else "",
                 "bgm_file": str(bgm_file) if bgm_file else "",
                 "subtitles_file": str(subtitles_file) if subtitles_file.is_file() else "",
+                "burn_subtitles_file": str(burn_subtitles_file) if burn_subtitles_file else "",
                 "subtitle_mode": "burned_in" if burn_subtitles else "sidecar_only",
                 "subtitle_burn_skipped_reason": "" if burn_subtitles else self._subtitle_skip_reason(subtitles_file, manifest),
                 "subtitle_style": subtitle_style if burn_subtitles else "",
@@ -375,6 +381,54 @@ class LocalFFmpegAdapter:
         candidate = Path(configured)
         candidate = candidate.resolve() if candidate.is_absolute() else (self.workspace_root / candidate).resolve()
         return candidate if candidate.is_file() and candidate.suffix.lower() in AUDIO_EXTENSIONS else None
+
+    @staticmethod
+    def _prepare_burn_subtitles(subtitles_file: Path, task_dir: Path, max_chars: int = 18) -> Path:
+        """Create a burn-only SRT with deliberate CJK line breaks.
+
+        libass wraps long Chinese rows by glyph width and may leave punctuation
+        at the beginning of a line.  Keep the original sidecar untouched while
+        producing a readable burn copy that prefers sentence punctuation.
+        """
+        output = task_dir / "subtitles_burn.srt"
+        text = subtitles_file.read_text(encoding="utf-8-sig", errors="replace")
+        blocks: list[str] = []
+        for raw_block in re.split(r"\r?\n\s*\r?\n", text.strip()):
+            lines = raw_block.splitlines()
+            if len(lines) < 3:
+                blocks.append(raw_block.strip())
+                continue
+            caption = "".join(line.strip() for line in lines[2:] if line.strip())
+            wrapped = LocalFFmpegAdapter._wrap_cjk_caption(caption, max_chars=max_chars)
+            blocks.append("\n".join([lines[0].strip(), lines[1].strip(), *wrapped]))
+        output.write_text("\n\n".join(blocks).strip() + "\n", encoding="utf-8")
+        return output
+
+    @staticmethod
+    def _wrap_cjk_caption(text: str, max_chars: int = 18) -> list[str]:
+        value = re.sub(r"\s+", "", str(text or "").strip())
+        if not value:
+            return [""]
+        clauses = [part for part in re.findall(r".*?[，。！？；、：]|.+$", value) if part]
+        rows: list[str] = []
+        current = ""
+        for clause in clauses:
+            if current and len(current) + len(clause) <= max_chars:
+                current += clause
+                continue
+            if current:
+                rows.append(current)
+                current = ""
+            while len(clause) > max_chars:
+                cut = max_chars
+                while cut < len(clause) and clause[cut] in "，。！？；、：,.!?;:":
+                    cut += 1
+                rows.append(clause[:cut])
+                clause = clause[cut:]
+            current = clause
+        if current:
+            rows.append(current)
+        return rows or [value]
 
     def _build_video_concat_command(
         self,

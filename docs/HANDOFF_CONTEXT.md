@@ -47,6 +47,8 @@
 
 ## Recent Fixes
 
+- [2026-07-03] Burned Chinese subtitles now use a separate `subtitles_burn.srt` with punctuation-aware line breaks (18 characters by default). The original sidecar SRT remains unchanged, while FFmpeg avoids libass auto-wrap artifacts such as commas or periods hanging at the start of a new line.
+
 - [2026-07-03] Local FFmpeg no longer truncates a visual timeline when VoxCPM2 narration is shorter than the requested video. Voice-only composition applies `apad` before `-shortest`; voice+BGM composition pads the voice before side-chain ducking and mixes to the longest audio input. The video timeline therefore remains authoritative, with silence/BGM filling the narration tail instead of cutting the final shots.
 
 - [2026-07-03] RunningHub LTX2.3 text-to-video routing now uses the node IDs from the user's current `LTX2.3文生视频【优化版】_api.json`: prompt `73.text`, negative prompt `25.text`, dimensions `43/44.value`, duration `74.value`, FPS `20/21.value` plus `40.frame_rate`, and seeds `28/46.noise_seed`. Both `10_broll_transition_video` modes share this mapping, eliminating the stale `2483/2612/3059` `NODE_INFO_MISMATCH`. Material retry also promotes the best legacy `attempt_XX/production_job_state.json` into the stable root cache when needed, so completed files are reused and only failed jobs are submitted again.
