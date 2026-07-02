@@ -31,16 +31,20 @@ def normalize_parameter_policy_context(
     )
     working_width, working_height = _working_dimensions_for_aspect(aspect_ratio)
     delivery_width, delivery_height = _delivery_dimensions_for_aspect(aspect_ratio)
+    configured_delivery_width = _positive_int(render.get("delivery_width"), delivery_width)
+    configured_delivery_height = _positive_int(render.get("delivery_height"), delivery_height)
+    if not _delivery_dimensions_match_aspect(
+        configured_delivery_width,
+        configured_delivery_height,
+        aspect_ratio,
+    ):
+        configured_delivery_width, configured_delivery_height = delivery_width, delivery_height
     render.update(
         {
             "working_width": working_width,
             "working_height": working_height,
-            "delivery_width": _positive_int(render.get("delivery_width"), delivery_width)
-            if str(render.get("delivery_width") or "").strip()
-            else delivery_width,
-            "delivery_height": _positive_int(render.get("delivery_height"), delivery_height)
-            if str(render.get("delivery_height") or "").strip()
-            else delivery_height,
+            "delivery_width": configured_delivery_width,
+            "delivery_height": configured_delivery_height,
             "frame_rate": 24,
             "aspect_ratio": aspect_ratio,
             "locked": True,
@@ -263,6 +267,14 @@ def _delivery_dimensions_for_aspect(aspect_ratio: str) -> tuple[int, int]:
     if aspect_ratio == "1:1":
         return 1080, 1080
     return 1920, 1080
+
+
+def _delivery_dimensions_match_aspect(width: int, height: int, aspect_ratio: str) -> bool:
+    if aspect_ratio == "9:16":
+        return height > width
+    if aspect_ratio == "1:1":
+        return width == height
+    return width > height
 
 
 def _positive_int(value: Any, default: int) -> int:
