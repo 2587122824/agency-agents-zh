@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -33,6 +34,8 @@ def run_auto_production(
     mode = str(config.get("mode") or "off").strip()
     if mode == "off":
         return None
+    previous_manifest = _read_json_object(task_dir / "production_manifest.json")
+    previous_production_plan = _read_json_object(task_dir / "production_plan.json")
 
     def emit(message: str, stage: str = "production", **extra: Any) -> None:
         if not progress_callback:
@@ -126,6 +129,13 @@ def run_auto_production(
     _write_text(comfyui_payload_path, json.dumps(comfyui_payload, ensure_ascii=False, indent=2) + "\n")
     packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config, voice_text_quality.get("usable"))
     plan_visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
+    reusable_visual_result = None
+    if mode == "comfy_full" and not stop_after_comfyui:
+        reusable_visual_result = _completed_visual_result_for_reuse(
+            previous_manifest,
+            previous_production_plan,
+            plan_visual_jobs,
+        )
     required_workflow_slots = _required_workflow_slots(plan_visual_jobs)
     configured_workflow_slots = _configured_workflow_slots(compose_config.get("workflow_library"))
     missing_workflow_slots = _missing_workflow_slots(required_workflow_slots, configured_workflow_slots)
@@ -319,6 +329,13 @@ def run_auto_production(
             emit("开始图片素材生成/匹配", stage="image")
             return "image", _run_image_adapter(image_content, image_config, paths["generated_images"])
         if mode == "comfy_full":
+            if reusable_visual_result:
+                emit(
+                    f"复用素材闸门已完成的 ComfyUI 素材，共 {len(reusable_visual_result.get('downloaded_files') or [])} 个文件",
+                    stage="comfyui",
+                    status="cached",
+                )
+                return "comfyui", reusable_visual_result
             if manual_comfy_debug:
                 state_path = paths["comfyui"] / "manual_debug_state.json"
                 state = _read_json_object(state_path)
@@ -618,6 +635,84 @@ def run_auto_production(
         )
 
     return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "自动生成阶段完成")
+
+
+def _completed_visual_result_for_reuse(
+    previous_manifest: dict[str, Any],
+    previous_production_plan: dict[str, Any],
+    current_visual_jobs: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if not previous_manifest or not previous_production_plan or not current_visual_jobs:
+        return None
+    previous_visual_jobs = previous_production_plan.get("visual_jobs")
+    if not isinstance(previous_visual_jobs, list):
+        return None
+    if _visual_jobs_fingerprint(previous_visual_jobs) != _visual_jobs_fingerprint(current_visual_jobs):
+        return None
+
+    composition = previous_manifest.get("composition")
+    if not isinstance(composition, dict):
+        return None
+    if str(composition.get("comfyui_adapter_status") or "").strip().lower() != "success":
+        return None
+
+    previous_nodes = [
+        node
+        for node in (previous_manifest.get("production_nodes") or [])
+        if isinstance(node, dict) and str(node.get("stage") or "") == "visual"
+    ]
+    nodes_by_id = {str(node.get("job_id") or ""): node for node in previous_nodes}
+    allowed_statuses = {"success", "cached", "downloaded"}
+    reusable_jobs: list[dict[str, Any]] = []
+    downloaded_files: list[str] = []
+
+    for job in current_visual_jobs:
+        if not isinstance(job, dict):
+            continue
+        job_id = str(job.get("job_id") or job.get("intent_id") or "").strip()
+        if not job_id:
+            return None
+        previous_node = nodes_by_id.get(job_id)
+        if not previous_node:
+            return None
+        status = str(previous_node.get("status") or "").strip().lower()
+        optional = _as_bool(job.get("optional_when_unconfigured"), default=False)
+        if status == "skipped" and optional:
+            reusable_jobs.append(dict(previous_node))
+            continue
+        if status not in allowed_statuses:
+            return None
+        outputs = [str(path) for path in (previous_node.get("outputs") or []) if str(path).strip()]
+        if not outputs or any(not Path(path).is_file() for path in outputs):
+            return None
+        downloaded_files.extend(outputs)
+        cached_node = dict(previous_node)
+        cached_node["status"] = "cached"
+        cached_node["cache_hit"] = True
+        reusable_jobs.append(cached_node)
+
+    deduped_files = list(dict.fromkeys(downloaded_files))
+    if not deduped_files:
+        return None
+    return {
+        "status": "success",
+        "provider": composition.get("visual_provider") or "runninghub",
+        "reason": "reused completed material-gate outputs",
+        "manifest_file": composition.get("comfyui_adapter_manifest") or composition.get("adapter_manifest") or "",
+        "downloaded_files": deduped_files,
+        "quality_report": composition.get("quality_report") or "",
+        "quality_score": composition.get("quality_score") or 100,
+        "attempts": composition.get("quality_attempts") or 1,
+        "job_state_file": composition.get("production_job_state") or "",
+        "jobs": reusable_jobs,
+        "artifacts": previous_manifest.get("artifacts") if isinstance(previous_manifest.get("artifacts"), list) else [],
+        "cache_hit": True,
+    }
+
+
+def _visual_jobs_fingerprint(jobs: list[dict[str, Any]]) -> str:
+    normalized = json.dumps(jobs, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
 def _finalize_production_manifest(task_dir: Path, manifest: dict[str, Any], production_note_path: Path, emit, message: str) -> dict[str, Any]:
