@@ -271,11 +271,21 @@ class CloudComfyUIAdapter:
                 and bool(cached_endpoint)
                 and cached_endpoint == current_endpoint
             )
+            reuse_existing_image_material = (
+                self._as_bool(compose_config.get("reuse_existing_image_materials"), default=False)
+                and job_type == "image"
+                and str(cached_state.get("type") or "") == "image"
+            )
             if (
                 not force_retry
                 and cached_state.get("status") in {"success", "cached", "downloaded", "submitted"}
-                and cached_state.get("input_hash") == input_hash
-                and cache_matches_route
+                and (
+                    (
+                        cached_state.get("input_hash") == input_hash
+                        and cache_matches_route
+                    )
+                    or reuse_existing_image_material
+                )
                 and cached_files
             ):
                 success_count += 1

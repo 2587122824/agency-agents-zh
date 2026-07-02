@@ -808,6 +808,7 @@ def retry_production_job(
             compose_config["force_retry_job_id"] = requested_job_id
     if retry_job == "material":
         mode = _retry_mode(manifest, config, "material")
+        compose_config.setdefault("reuse_existing_image_materials", True)
 
     def emit(message: str, stage: str = "production", **extra: Any) -> None:
         if not progress_callback:
