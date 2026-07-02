@@ -118,7 +118,7 @@ class LocalFFmpegAdapter:
             height_value,
             1080,
         )
-        output_fps = _int_or_default(fps_value, 24)
+        output_fps = _fps_or_default(fps_value, 24)
 
         if video_files:
             command, input_files = self._build_video_concat_command(
@@ -665,3 +665,11 @@ def _int_or_default(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(30, min(parsed, 14400))
+
+
+def _fps_or_default(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(parsed, 120))
