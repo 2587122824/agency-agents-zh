@@ -3983,6 +3983,7 @@ INDEX_HTML = r"""<!doctype html>
     let referencePreviewUrls = new Map();
     let comfyParameterCandidates = [];
     let progressTimer = null;
+    let progressRenderSignature = "";
     let currentRunId = "";
     let currentRunStatus = "";
     let autoFocusOutputDuringRun = false;
@@ -4350,6 +4351,7 @@ INDEX_HTML = r"""<!doctype html>
         progressTimer = null;
       }
       currentRunId = "";
+      progressRenderSignature = "";
       progressStepOpenState.clear();
       progressUserToggledSteps.clear();
       syncRunControlButtons();
@@ -4367,6 +4369,7 @@ INDEX_HTML = r"""<!doctype html>
         progressUserToggledSteps.clear();
       }
       currentRunId = "";
+      progressRenderSignature = "";
       activeRunTaskName = "";
       currentRunStatus = "";
       syncRunControlButtons();
@@ -4524,6 +4527,21 @@ INDEX_HTML = r"""<!doctype html>
 
     function renderProgress(job) {
       currentRunStatus = String(job?.status || currentRunStatus || "");
+      const signature = JSON.stringify({
+        status: job?.status || '',
+        total_steps: job?.total_steps || 0,
+        completed_steps: job?.completed_steps || 0,
+        current_step: job?.current_step || 0,
+        current_message: job?.current_message || '',
+        production_message: job?.production_message || '',
+        rerun_step: job?.rerun_step || 0,
+        steps: (job?.steps || []).map(step => [step.step, step.status, step.message, step.elapsed_seconds]),
+        details: (job?.detail_events || []).slice(-3),
+        production: (job?.production_events || []).slice(-3),
+      });
+      if (signature === progressRenderSignature) return false;
+      progressRenderSignature = signature;
+      const previousScrollTop = els.progressList.scrollTop;
       els.progressBox.hidden = false;
       const total = job.total_steps || 0;
       const completed = job.completed_steps || 0;
@@ -4658,20 +4676,40 @@ INDEX_HTML = r"""<!doctype html>
           els.progressList.appendChild(item);
         }
       }
+      els.progressList.scrollTop = previousScrollTop;
+      return true;
+    }
+
+    function nextRunPollDelay(job) {
+      const events = (job?.production_events || []).slice(-8);
+      const hasVideoContext = events.some(event => {
+        const type = String(event.job_type || event.material_type || '').toLowerCase();
+        return type === 'video';
+      });
+      const remoteStillRunning = events.some(event => {
+        const status = String(event.job_status || event.remote_status || event.status || '').toLowerCase();
+        return ['running', 'submitted', 'queued', 'pending'].includes(status);
+      });
+      const waitingForVideo = hasVideoContext && remoteStillRunning;
+      if (waitingForVideo) return 10 * 60 * 1000;
+      const productionRetry = String(job?.production_retry_job || '').toLowerCase();
+      if (productionRetry === 'tts') return 15000;
+      if (productionRetry === 'material') return 5000;
+      return 3000;
     }
 
     async function pollRunStatus(runId) {
       const job = await api(`/api/run-status?id=${encodeURIComponent(runId)}`);
       if (currentRunId && currentRunId !== runId) return;
       if (!currentRunId && !autoFocusOutputDuringRun) return;
-      renderProgress(job);
+      const progressChanged = renderProgress(job);
       const terminalRunStatus = TERMINAL_RUN_STATUSES.has(String(job.status || '').toLowerCase());
       if (terminalRunStatus) {
         finishRunInteraction({
           delayedProgressReset: job.status === 'completed' || job.status === 'paused',
         });
       }
-      if (job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
+      if (progressChanged && job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
         if (maybeShowOutput()) {
           await selectActiveRunTask(job);
           await refreshActiveRunTaskDetail(job);
@@ -4769,7 +4807,7 @@ INDEX_HTML = r"""<!doctype html>
           setStatus(err.message, true);
           finishRunInteraction();
         });
-      }, 1000);
+      }, nextRunPollDelay(job));
     }
 
     async function restoreActiveRun() {
@@ -14030,7 +14068,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 reverse=True,
             )
             for job in jobs:
-                if job.get("status") not in {"queued", "running", "paused", "failed", "cancelled", "canceled"}:
+                # Terminal jobs are already persisted into run_summary.json. Letting a
+                # historical failed job override a newer successful resume leaves the
+                # task card permanently failed even though every output exists.
+                if job.get("status") not in {"queued", "running", "paused"}:
                     continue
                 if str(job.get("task_name") or "") == task_name or str(job.get("task_dir") or "") == str(task_dir):
                     return json.loads(json.dumps(job, ensure_ascii=False))

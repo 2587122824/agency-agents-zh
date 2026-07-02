@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import base64
+import re
 import subprocess
 import textwrap
+import wave
 from pathlib import Path
 from typing import Any
 
@@ -71,6 +73,8 @@ class LocalTTSAdapter:
         )
         requested_timeout = _int_or_default(voice_config.get("timeout_seconds"), 1800)
         timeout, timeout_note = self._effective_timeout(mode, requested_timeout, text, command)
+        target_duration = _float_or_default(voice_config.get("target_duration_seconds"), 0.0)
+        estimated_duration = self._estimate_speech_duration(text, voice_config)
 
         manifest: dict[str, Any] = {
             "status": "running",
@@ -86,9 +90,24 @@ class LocalTTSAdapter:
             "command_template": command_template,
             "timeout_seconds": timeout,
             "requested_timeout_seconds": requested_timeout,
+            "target_duration_seconds": target_duration,
+            "estimated_duration_seconds": estimated_duration,
         }
         if timeout_note:
             manifest["timeout_note"] = timeout_note
+        if target_duration and estimated_duration > target_duration * 1.12:
+            manifest.update(
+                {
+                    "status": "quality_failed",
+                    "error": (
+                        f"Estimated voiceover duration {estimated_duration:.1f}s exceeds the "
+                        f"{target_duration:.1f}s target; shorten the script before VoxCPM2 synthesis."
+                    ),
+                    "duration_overrun_seconds": round(estimated_duration - target_duration, 3),
+                }
+            )
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return manifest
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
         result, timed_out, timeout_stdout, timeout_stderr = self._run_shell_command(command, timeout)
@@ -130,6 +149,7 @@ class LocalTTSAdapter:
                 }
             )
         else:
+            actual_duration = self._wav_duration(output_path)
             manifest.update(
                 {
                     "status": "success",
@@ -137,8 +157,20 @@ class LocalTTSAdapter:
                     "stderr_file": str(stderr_path),
                     "downloaded_files": [str(output_path)],
                     "output_size_bytes": output_path.stat().st_size,
+                    "actual_duration_seconds": actual_duration,
                 }
             )
+            if target_duration and actual_duration and actual_duration > target_duration + 1.5:
+                manifest.update(
+                    {
+                        "status": "quality_failed",
+                        "error": (
+                            f"Synthesized voiceover is {actual_duration:.1f}s, longer than the "
+                            f"{target_duration:.1f}s target. Shorten the voiceover text or adjust speech rate."
+                        ),
+                        "duration_overrun_seconds": round(actual_duration - target_duration, 3),
+                    }
+                )
 
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
@@ -159,6 +191,27 @@ class LocalTTSAdapter:
                     f"raised from {requested_timeout} to {timeout} seconds based on {len(text)} characters."
                 )
         return timeout, note
+
+    @staticmethod
+    def _estimate_speech_duration(text: str, voice_config: dict[str, Any]) -> float:
+        cjk_rate = _float_or_default(voice_config.get("estimated_cjk_chars_per_second"), 5.2)
+        cjk_rate = min(8.0, max(3.0, cjk_rate))
+        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+        latin_words = len(re.findall(r"[A-Za-z0-9]+", text))
+        sentence_pauses = len(re.findall(r"[。！？!?]", text)) * 0.28
+        short_pauses = len(re.findall(r"[，、；;,:：]", text)) * 0.12
+        line_pauses = max(0, len([line for line in text.splitlines() if line.strip()]) - 1) * 0.15
+        duration = cjk_count / cjk_rate + latin_words / 2.8 + sentence_pauses + short_pauses + line_pauses
+        return round(duration, 3)
+
+    @staticmethod
+    def _wav_duration(path: Path) -> float:
+        try:
+            with wave.open(str(path), "rb") as stream:
+                frame_rate = stream.getframerate()
+                return round(stream.getnframes() / frame_rate, 3) if frame_rate else 0.0
+        except (wave.Error, OSError):
+            return 0.0
 
     def _run_shell_command(self, command: str, timeout: int) -> tuple[subprocess.CompletedProcess[str] | None, bool, str, str]:
         process = subprocess.Popen(
@@ -338,3 +391,10 @@ def _int_or_default(value: Any, default: int, minimum: int = 30, maximum: int = 
     except (TypeError, ValueError):
         return default
     return max(minimum, min(parsed, maximum))
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default

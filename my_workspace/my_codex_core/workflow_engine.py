@@ -81,6 +81,7 @@ class WorkflowEngine:
         self.storage.write_json(task_dir / "workflow.json", workflow)
         self.storage.write_text(task_dir / "input.md", user_input)
         self.storage.write_json(task_dir / "task_brief.json", build_requirement_lock(user_input))
+        production_config = self._restore_production_config(task_dir, production_config)
         if progress_callback:
             progress_callback(
                 {
@@ -457,6 +458,7 @@ class WorkflowEngine:
             raise FileNotFoundError("input.md")
 
         workflow = self._load_workflow(workflow_path)
+        production_config = self._restore_production_config(task_dir, production_config)
         workflow_name = workflow.get("name") or task_dir.name
         task_title = self._summary_value(task_dir, "task_title")
         user_input = input_path.read_text(encoding="utf-8", errors="replace")
@@ -1656,6 +1658,31 @@ class WorkflowEngine:
         )
         summary["provider"] = provider
         summary["final_output"] = final_path
+        workflow_path = task_dir / "workflow.json"
+        total_steps = 0
+        if workflow_path.is_file():
+            try:
+                workflow = json.loads(workflow_path.read_text(encoding="utf-8-sig"))
+                total_steps = len(workflow.get("steps") or []) if isinstance(workflow, dict) else 0
+            except (json.JSONDecodeError, OSError):
+                total_steps = 0
+        completed_steps = len(list(task_dir.glob("step_*_*/output.md")))
+        fully_completed = bool(total_steps and completed_steps >= total_steps)
+        summary["status"] = "completed" if fully_completed else "partial"
+        summary["employee_workflow_status"] = "completed" if fully_completed else "partial"
+        summary["step_count"] = min(completed_steps, total_steps) if total_steps else completed_steps
+        summary["total_steps"] = total_steps or int(summary.get("total_steps") or 0)
+        summary["current_step"] = step_no
+        summary["awaiting_confirmation"] = False
+        for key in (
+            "error",
+            "traceback",
+            "failed_at",
+            "blocked_step",
+            "blocked_reason",
+            "awaiting_confirmation_step",
+        ):
+            summary.pop(key, None)
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
     @staticmethod
@@ -1689,8 +1716,21 @@ class WorkflowEngine:
                 "final_output": final_path,
                 "production_manifest": production_manifest,
                 "production_status": production_status,
+                "total_steps": step_count,
+                "current_step": step_count,
+                "awaiting_confirmation": False,
             }
         )
+        for key in (
+            "error",
+            "traceback",
+            "failed_at",
+            "blocked_step",
+            "blocked_reason",
+            "awaiting_confirmation_step",
+            "confirmation_kind",
+        ):
+            summary.pop(key, None)
         history = summary.setdefault("resume_history", [])
         history.append(
             {
@@ -1701,3 +1741,46 @@ class WorkflowEngine:
             }
         )
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _restore_production_config(self, task_dir: Path, incoming: dict | None) -> dict:
+        """Persist non-secret task production settings and reuse them on resume.
+
+        Browser state is transient; task mode, dimensions, TTS provider and workflow
+        routing must survive a refresh or a step rerun. Runtime credentials are never
+        written to the task directory and always come from the current request/cache.
+        """
+        snapshot_path = task_dir / "production_config_snapshot.json"
+        saved: dict = {}
+        if snapshot_path.is_file():
+            try:
+                loaded = json.loads(snapshot_path.read_text(encoding="utf-8-sig"))
+                saved = loaded if isinstance(loaded, dict) else {}
+            except (json.JSONDecodeError, OSError):
+                saved = {}
+        merged = self._deep_merge_dicts(saved, incoming if isinstance(incoming, dict) else {})
+        sanitized = self._sanitize_production_config(merged)
+        self.storage.write_json(snapshot_path, sanitized)
+        return merged
+
+    @classmethod
+    def _sanitize_production_config(cls, value):
+        secret_keys = {"api_key", "access_token", "token", "password", "secret", "authorization"}
+        if isinstance(value, dict):
+            return {
+                str(key): cls._sanitize_production_config(item)
+                for key, item in value.items()
+                if str(key).strip().lower() not in secret_keys
+            }
+        if isinstance(value, list):
+            return [cls._sanitize_production_config(item) for item in value]
+        return value
+
+    @classmethod
+    def _deep_merge_dicts(cls, base: dict, override: dict) -> dict:
+        merged = dict(base)
+        for key, value in override.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = cls._deep_merge_dicts(merged[key], value)
+            elif value not in (None, ""):
+                merged[key] = value
+        return merged

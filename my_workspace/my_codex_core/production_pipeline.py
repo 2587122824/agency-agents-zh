@@ -47,7 +47,10 @@ def run_auto_production(
     image_config = config.get("image_config") or {}
     video_config = config.get("video_config") or {}
     compose_config = dict(config.get("compose_config") or {})
-    voice_config = config.get("voice_config") or {}
+    voice_config = dict(config.get("voice_config") or {})
+    target_duration = _task_target_duration(task_dir)
+    if target_duration and not voice_config.get("target_duration_seconds"):
+        voice_config["target_duration_seconds"] = target_duration
     quality_config = config.get("quality_config") or {}
     comfy_debug_gate = config.get("comfy_debug_gate") if isinstance(config.get("comfy_debug_gate"), dict) else {}
     manual_comfy_debug = mode == "comfy_full" and _as_bool(comfy_debug_gate.get("enabled"), default=False)
@@ -255,6 +258,7 @@ def run_auto_production(
             "voice_text_status": voice_text_quality["status"],
             "voice_text_reason": voice_text_quality["reason"],
             "voice_text_chars": len(voice_text.strip()),
+            "target_duration_seconds": target_duration,
             "subtitle_status": subtitle_srt_quality["status"],
             "subtitle_reason": subtitle_srt_quality["reason"],
             "subtitle_entries": subtitle_srt_quality["entries"],
@@ -756,13 +760,29 @@ def retry_production_job(
     retry_job = requested_job_id.lower()
 
     manifest_path = task_dir / "production_manifest.json"
+    saved_config = _read_json_object(task_dir / "production_config_snapshot.json")
+    config = _deep_merge_config(saved_config, production_config if isinstance(production_config, dict) else {})
+    _write_production_config_snapshot(task_dir, config)
+    if not manifest_path.is_file():
+        if retry_job != "material":
+            raise FileNotFoundError("production_manifest.json")
+        # A task may have completed employee planning while auto production was
+        # temporarily off. Material retry should compile a package from those
+        # persisted outputs instead of requiring a nonexistent manifest.
+        config = dict(config)
+        if str(config.get("mode") or "").strip() in {"", "off", "package_only"}:
+            config["mode"] = "comfy_full"
+        bootstrap_config = json.loads(json.dumps(config, ensure_ascii=False))
+        bootstrap_config["mode"] = "package_only"
+        step_outputs = _load_task_step_outputs(task_dir)
+        if not step_outputs:
+            raise ValueError("cannot bootstrap production manifest: employee outputs are missing")
+        run_auto_production(task_dir, step_outputs, bootstrap_config, progress_callback=progress_callback)
     if not manifest_path.is_file():
         raise FileNotFoundError("production_manifest.json")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
     if not isinstance(manifest, dict):
         raise ValueError("production_manifest.json must contain a JSON object")
-
-    config = production_config if isinstance(production_config, dict) else {}
     mode = _retry_mode(manifest, config, requested_job_id)
     image_config = _retry_section_config(manifest, config, "image_config", "image_generation")
     video_config = _retry_section_config(manifest, config, "video_config", "video_generation")
@@ -1431,6 +1451,22 @@ def _run_comfyui_adapter_with_quality_gate(
     output_dir: Path,
     progress_callback=None,
 ) -> dict[str, Any] | None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    preflight = _preflight_visual_jobs(compose_config.get("production_plan_visual_jobs"))
+    preflight_path = output_dir / "visual_preflight_report.json"
+    preflight_path.write_text(json.dumps(preflight, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    if not preflight["passed"]:
+        return {
+            "status": "quality_failed",
+            "reason": "visual job preflight failed; no ComfyUI/RunningHub jobs were submitted",
+            "quality_score": 0,
+            "quality_report": str(preflight_path),
+            "preflight_report": str(preflight_path),
+            "preflight_errors": preflight["errors"],
+            "downloaded_files": [],
+            "jobs": [],
+            "attempts": 0,
+        }
     enabled = _as_bool(quality_config.get("enabled"), default=True)
     max_attempts = _safe_int(quality_config.get("max_attempts"), default=2, minimum=1, maximum=6)
     min_score = _safe_int(quality_config.get("min_score"), default=70, minimum=0, maximum=100)
@@ -1438,7 +1474,7 @@ def _run_comfyui_adapter_with_quality_gate(
     if not enabled:
         result = _run_comfyui_adapter(comfyui_payload_path, compose_config, output_dir, progress_callback=progress_callback)
         if result:
-            score = _score_material_result(result, min_file_size_kb)
+            score = _score_material_result(result, min_file_size_kb, output_dir, compose_config)
             result["quality_score"] = score["score"]
             result["quality_report"] = str(_write_quality_report(output_dir, [score], score, min_score, enabled=False))
             result["attempts"] = 1
@@ -1468,7 +1504,7 @@ def _run_comfyui_adapter_with_quality_gate(
         attempt_dir.mkdir(parents=True, exist_ok=True)
         attempt_payload_path.write_text(json.dumps(attempt_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         result = _run_comfyui_adapter(attempt_payload_path, compose_config, attempt_dir, progress_callback=progress_callback)
-        score = _score_material_result(result or {}, min_file_size_kb)
+        score = _score_material_result(result or {}, min_file_size_kb, attempt_dir, compose_config)
         score["attempt"] = attempt
         score["payload_file"] = str(attempt_payload_path)
         attempts.append(score)
@@ -1529,6 +1565,15 @@ def _read_json_object(path: Path) -> dict[str, Any]:
     except Exception:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _task_target_duration(task_dir: Path) -> float:
+    brief = _read_json_object(task_dir / "task_brief.json")
+    try:
+        value = float(brief.get("duration_seconds") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if value > 0 else 0.0
 
 
 def _manual_comfy_debug_approval(payload: dict[str, Any], state: dict[str, Any], stage: str = "all", task_dir: Path | None = None) -> dict[str, Any]:
@@ -1780,10 +1825,241 @@ def _salvage_json_number_field(body: str, key: str) -> int | float | None:
     return float(value) if "." in value else int(value)
 
 
-def _score_material_result(result: dict[str, Any], min_file_size_kb: int) -> dict[str, Any]:
+def _deep_merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base or {})
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _deep_merge_config(merged[key], value)
+        elif value not in (None, ""):
+            merged[key] = value
+    return merged
+
+
+def _write_production_config_snapshot(task_dir: Path, config: dict[str, Any]) -> None:
+    secret_keys = {"api_key", "access_token", "token", "password", "secret", "authorization"}
+
+    def sanitize(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(key): sanitize(item)
+                for key, item in value.items()
+                if str(key).strip().lower() not in secret_keys
+            }
+        if isinstance(value, list):
+            return [sanitize(item) for item in value]
+        return value
+
+    path = task_dir / "production_config_snapshot.json"
+    path.write_text(json.dumps(sanitize(config), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def _preflight_visual_jobs(raw_jobs: Any) -> dict[str, Any]:
+    jobs = [dict(item) for item in (raw_jobs or []) if isinstance(item, dict)]
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    image_ids = {str(job.get("job_id") or "") for job in jobs if str(job.get("type") or "").lower() == "image"}
+    primary_sources: dict[str, list[str]] = {}
+    checked_video_jobs = 0
+
+    def binding_source(job: dict[str, Any], key: str) -> str:
+        bindings = job.get("input_bindings") if isinstance(job.get("input_bindings"), dict) else {}
+        binding = bindings.get(key)
+        if isinstance(binding, dict):
+            return str(binding.get("from_job") or "").strip()
+        return str(binding or "").strip()
+
+    for job in jobs:
+        if str(job.get("type") or "").lower() != "video":
+            continue
+        checked_video_jobs += 1
+        job_id = str(job.get("job_id") or job.get("id") or f"video_{checked_video_jobs}")
+        mode = str(job.get("mode") or job.get("workflow_mode") or "").lower()
+        prompt = str(job.get("prompt") or "")
+        positive_clauses = [
+            clause
+            for clause in re.split(r"[。；;.!！?？]", prompt)
+            if not re.search(r"禁止|不要|避免|无(?:任何)?|不得|排除", clause)
+        ]
+        positive_text = " ".join(positive_clauses).lower()
+        forbidden = [
+            marker
+            for marker in ("anime", "cartoon", "动漫", "卡通", "倒计时", "countdown", "巨大文字", "大字覆盖", "ui界面")
+            if marker in positive_text
+        ]
+        if forbidden:
+            errors.append({"code": "forbidden_visual_prompt", "job_id": job_id, "markers": forbidden})
+
+        if "i2v" not in mode:
+            continue
+        is_three_frame = "middle_last" in mode or "first_middle_last" in mode
+        required_keys = (
+            ["input_base_image", "input_middle_frame", "input_last_frame"]
+            if is_three_frame
+            else ["input_base_image"]
+        )
+        sources = [binding_source(job, key) for key in required_keys]
+        missing_keys = [key for key, source in zip(required_keys, sources) if not source]
+        if missing_keys:
+            errors.append({"code": "missing_i2v_frame_binding", "job_id": job_id, "fields": missing_keys})
+            continue
+        unknown_sources = [source for source in sources if source not in image_ids]
+        if unknown_sources:
+            errors.append({"code": "unknown_i2v_frame_source", "job_id": job_id, "sources": unknown_sources})
+        if len(set(sources)) != len(sources):
+            errors.append({"code": "duplicate_three_frame_binding", "job_id": job_id, "sources": sources})
+        primary_sources.setdefault(sources[0], []).append(job_id)
+
+    for source, job_ids in primary_sources.items():
+        if len(job_ids) > 1:
+            errors.append({"code": "shared_i2v_first_frame", "source_job": source, "video_jobs": job_ids})
+    if not jobs:
+        warnings.append({"code": "visual_jobs_unavailable", "message": "No compiler-owned visual jobs were available for preflight."})
+    return {
+        "schema_version": 1,
+        "passed": not errors,
+        "job_count": len(jobs),
+        "video_job_count": checked_video_jobs,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def _inspect_visual_outputs(
+    result: dict[str, Any],
+    output_dir: Path | None,
+    compose_config: dict[str, Any],
+) -> dict[str, Any]:
+    errors: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    records: list[dict[str, Any]] = []
+    first_video_hashes: dict[str, tuple[int, str]] = {}
+    keyframe_hashes: dict[str, tuple[int, str]] = {}
+    render = (
+        ((compose_config.get("global_context") or {}).get("parameter_policy") or {}).get("locks") or {}
+    ).get("render") or {}
+    expected_width = int(render.get("working_width") or 0)
+    expected_height = int(render.get("working_height") or 0)
+    expected_vertical = bool(expected_width and expected_height and expected_height > expected_width)
+
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception:
+        cv2 = None
+        np = None
+        warnings.append({"code": "content_qc_backend_unavailable", "message": "OpenCV is unavailable."})
+
+    def dhash(frame) -> int:
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+        small = cv2.resize(gray, (9, 8), interpolation=cv2.INTER_AREA)
+        bits = small[:, 1:] > small[:, :-1]
+        value = 0
+        for bit in bits.flatten():
+            value = (value << 1) | int(bool(bit))
+        return value
+
+    def distance(left: int, right: int) -> int:
+        return (left ^ right).bit_count()
+
+    jobs = [item for item in (result.get("jobs") or []) if isinstance(item, dict)]
+    for index, job in enumerate(jobs, 1):
+        job_id = str(job.get("job_id") or job.get("name") or f"material_{index}")
+        job_type = str(job.get("type") or "").lower()
+        preset = str(job.get("workflow_preset_id") or "")
+        for raw_file in job.get("downloaded_files") or []:
+            path = Path(str(raw_file))
+            if not path.is_file() or cv2 is None:
+                continue
+            suffix = path.suffix.lower()
+            if job_type == "image" or suffix in {".png", ".jpg", ".jpeg", ".webp"}:
+                data = np.fromfile(str(path), dtype=np.uint8)
+                frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
+                if frame is None:
+                    errors.append({"code": "unreadable_image", "job_id": job_id, "file": str(path)})
+                    continue
+                height, width = frame.shape[:2]
+                image_hash = dhash(frame)
+                records.append({"job_id": job_id, "type": "image", "file": str(path), "width": width, "height": height, "dhash": f"{image_hash:016x}"})
+                if expected_vertical and width >= height:
+                    errors.append({"code": "wrong_image_orientation", "job_id": job_id, "width": width, "height": height})
+                if preset == "04_keyframe" or job_id.startswith(("kf_", "shot_")) or "frame" in job_id:
+                    keyframe_hashes[job_id] = (image_hash, str(path))
+                continue
+            if job_type != "video" and suffix not in {".mp4", ".mov", ".mkv", ".webm"}:
+                continue
+            cap = cv2.VideoCapture(str(path))
+            if not cap.isOpened():
+                errors.append({"code": "unreadable_video", "job_id": job_id, "file": str(path)})
+                continue
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 0)
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+            sample_hashes: list[int] = []
+            for ratio in (0.02, 0.5, 0.96):
+                frame_index = max(0, min(frame_count - 1, int(frame_count * ratio))) if frame_count else 0
+                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                ok, frame = cap.read()
+                if ok and frame is not None:
+                    sample_hashes.append(dhash(frame))
+            cap.release()
+            duration = round(frame_count / fps, 3) if fps > 0 else 0
+            records.append({
+                "job_id": job_id,
+                "type": "video",
+                "file": str(path),
+                "width": width,
+                "height": height,
+                "fps": round(fps, 3),
+                "duration_seconds": duration,
+                "sample_hashes": [f"{value:016x}" for value in sample_hashes],
+            })
+            if len(sample_hashes) < 2:
+                errors.append({"code": "insufficient_video_frames", "job_id": job_id, "file": str(path)})
+            else:
+                first_video_hashes[job_id] = (sample_hashes[0], str(path))
+                motion_distance = max(distance(sample_hashes[0], value) for value in sample_hashes[1:])
+                if motion_distance <= 2:
+                    warnings.append({"code": "nearly_static_video", "job_id": job_id, "hash_distance": motion_distance})
+            if expected_vertical and width >= height:
+                errors.append({"code": "wrong_video_orientation", "job_id": job_id, "width": width, "height": height})
+
+    def duplicate_groups(values: dict[str, tuple[int, str]], code: str, threshold: int) -> None:
+        ids = list(values)
+        for left_index, left_id in enumerate(ids):
+            for right_id in ids[left_index + 1 :]:
+                delta = distance(values[left_id][0], values[right_id][0])
+                if delta <= threshold:
+                    errors.append({"code": code, "jobs": [left_id, right_id], "hash_distance": delta})
+
+    duplicate_groups(first_video_hashes, "duplicate_video_first_frame", 2)
+    duplicate_groups(keyframe_hashes, "duplicate_keyframe_image", 2)
+    report = {
+        "schema_version": 1,
+        "passed": not errors,
+        "errors": errors,
+        "warnings": warnings,
+        "records": records,
+        "manual_review_required": ["realistic_vs_anime_style", "large_text_or_ui_overlay", "shot_semantic_match", "human_anatomy"],
+    }
+    if output_dir:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        report_path = output_dir / "visual_content_qc.json"
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        report["report_file"] = str(report_path)
+    return report
+
+
+def _score_material_result(
+    result: dict[str, Any],
+    min_file_size_kb: int,
+    output_dir: Path | None = None,
+    compose_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     files = [Path(path) for path in result.get("downloaded_files", []) if path]
     existing = [path for path in files if path.exists()]
     total_size = sum(path.stat().st_size for path in existing)
+    visual_qc = _inspect_visual_outputs(result, output_dir, compose_config or {})
     score = 0
     reasons = []
     if result.get("status") == "success":
@@ -1804,13 +2080,19 @@ def _score_material_result(result: dict[str, Any], min_file_size_kb: int) -> dic
         reasons.append(f"素材总大小 {total_size} bytes 达到阈值")
     else:
         reasons.append(f"素材总大小 {total_size} bytes 低于阈值")
+    visual_penalty = min(70, len(visual_qc["errors"]) * 40) + min(20, len(visual_qc["warnings"]) * 4)
+    if visual_qc["errors"]:
+        reasons.append(f"视觉质检发现 {len(visual_qc['errors'])} 个阻断问题")
+    if visual_qc["warnings"]:
+        reasons.append(f"视觉质检发现 {len(visual_qc['warnings'])} 个提醒")
     return {
-        "score": min(score, 100),
+        "score": max(0, min(score - visual_penalty, 100)),
         "status": result.get("status") or "unknown",
         "downloaded_files": [str(path) for path in existing],
         "total_size_bytes": total_size,
         "reasons": reasons,
         "manifest_file": result.get("manifest_file", ""),
+        "visual_qc": visual_qc,
     }
 
 
