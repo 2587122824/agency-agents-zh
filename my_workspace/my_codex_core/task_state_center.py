@@ -352,7 +352,7 @@ class TaskStateCenter:
         composition = production.get("composition") if isinstance(production.get("composition"), dict) else {}
         raw_missing_slots = composition.get("missing_workflow_slots") if isinstance(composition.get("missing_workflow_slots"), list) else []
         missing_slots = [item for item in raw_missing_slots if isinstance(item, dict) and not self._is_optional_missing_workflow_slot(item)]
-        has_final_media = any(file in {"long_video_final.mp4", "final_video.mp4"} for file in self.files)
+        has_final_media = self._has_final_media(production)
         if missing_slots and not has_final_media:
             return {
                 "action": "configure_comfy_workflows",
@@ -414,12 +414,27 @@ class TaskStateCenter:
             )
         for blocker in blockers:
             diagnostics.append({"level": "warn", "code": blocker.get("code", "blocked"), "message": blocker.get("message", "")})
-        if state == "completed" and not any(file in {"long_video_final.mp4", "final_video.mp4"} for file in self.files):
+        if state == "completed" and not self._has_final_media(production):
             diagnostics.append({"level": "info", "code": "no_final_media", "message": "任务已有文本结果，但尚未发现最终视频文件。"})
         missing_outputs = [str(step["step"]) for step in steps if step.get("status") in {"completed", "awaiting_confirmation"} and not step.get("has_output")]
         if missing_outputs:
             diagnostics.append({"level": "warn", "code": "missing_step_outputs", "message": f"步骤状态已完成但缺少 output.md：{', '.join(missing_outputs)}"})
         return diagnostics
+
+    def _has_final_media(self, production: dict[str, Any]) -> bool:
+        composition = production.get("composition") if isinstance(production.get("composition"), dict) else {}
+        for value in (self.summary.get("final_video"), composition.get("final_video_file")):
+            path_text = str(value or "").strip()
+            if not path_text or Path(path_text).suffix.lower() != ".mp4":
+                continue
+            path = Path(path_text)
+            if path.is_file() or (not path.is_absolute() and (self.task_dir / path).is_file()):
+                return True
+        return any(
+            Path(file).suffix.lower() == ".mp4"
+            and ("/" not in str(file).replace("\\", "/") or str(file).replace("\\", "/").startswith("export_package/"))
+            for file in self.files
+        )
 
     def _has_runninghub_api_key(self, composition: dict[str, Any]) -> bool:
         if self._as_bool(composition.get("api_key_provided"), default=False):
@@ -556,7 +571,12 @@ class TaskStateCenter:
             return {"status": "not_configured", "jobs": []}
         statuses = [str(job.get("status") or "pending") for job in matched]
         if all(status in {"success", "skipped", "not_configured"} for status in statuses):
-            status = "success" if any(status == "success" for status in statuses) else statuses[0]
+            if any(status == "success" for status in statuses):
+                status = "success"
+            elif any(status == "skipped" for status in statuses):
+                status = "skipped"
+            else:
+                status = "not_configured"
         elif any(status == "blocked" for status in statuses):
             status = "blocked"
         elif any(TaskStateCenter._is_failed_status(status) for status in statuses):

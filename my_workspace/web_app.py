@@ -7775,13 +7775,14 @@ INDEX_HTML = r"""<!doctype html>
       const packageFiles = files.filter(file => file.startsWith('export_package/') && !file.endsWith('/'));
       const assetItems = structuredAssetItems({ ...data, assets: status.assets });
       const packageReady = packageFiles.length ? `${packageFiles.length} 个文件` : '未生成';
-      const videoFile = preferredVideoFile(files);
+      const finalVideoHint = status?.production?.composition?.final_video_file || summary?.final_video || '';
+      const videoFile = preferredVideoFile(files, finalVideoHint);
       const productionJobs = status.production?.jobs || data.production_jobs || [];
       const executionStages = productionExecutionStages(status, data, productionJobs);
       renderProductionJobs(productionJobs, status.diagnostics || [], status.next_action || null, status.blockers || [], executionStages);
       renderProductionPlanPreview(data.production_plan_preview || null);
       renderTaskComfyDebugPanel(status.comfy_debug || {});
-      renderVideoPreview(data.name, files);
+      renderVideoPreview(data.name, files, finalVideoHint);
 
       els.stepOutputMeta.textContent = `${visibleStepFiles.length} 个步骤`;
       els.stepOutputList.innerHTML = '';
@@ -7897,7 +7898,9 @@ INDEX_HTML = r"""<!doctype html>
 
     function objectStageStatus(item) {
       if (!item || typeof item !== 'object') return 'waiting';
-      return normalizeStageStatus(item.status || item.adapter_status || item.local_ffmpeg_status || item.comfyui_adapter_status || item.state);
+      const raw = String(item.status || item.adapter_status || item.local_ffmpeg_status || item.comfyui_adapter_status || item.state || '').toLowerCase();
+      if (['not_configured', 'off', 'disabled'].includes(raw)) return 'skipped';
+      return normalizeStageStatus(raw);
     }
 
     function productionExecutionStages(status, data, jobs = []) {
@@ -7934,9 +7937,8 @@ INDEX_HTML = r"""<!doctype html>
           : jobListStatus(jobs, job => /video|i2v|clip|visual/.test(jobsText(job)));
       const ttsStatus = objectStageStatus(status?.tts || status?.production?.tts);
       const ffmpegStatus = objectStageStatus(status?.ffmpeg || status?.production?.ffmpeg);
-      const finalReady = videoAssetCount > 0
-        || Boolean((status?.assets?.videos || []).some(file => /(?:final|long_video).*\.mp4$/i.test(String(file?.path || file?.file || file))))
-        || Boolean((data?.files || []).some(file => /(?:final|long_video).*\.mp4$/i.test(file)));
+      const finalVideoHint = status?.production?.composition?.final_video_file || data?.summary?.final_video || '';
+      const finalReady = Boolean(preferredVideoFile(data?.files || [], finalVideoHint));
 
       const stages = [
         {
@@ -10377,8 +10379,8 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function renderVideoPreview(taskName, files) {
-      const videoFile = preferredVideoFile(files || []);
+    function renderVideoPreview(taskName, files, finalVideoHint = '') {
+      const videoFile = preferredVideoFile(files || [], finalVideoHint);
       if (!videoFile) {
         clearVideoPreview();
         return;
@@ -10395,9 +10397,21 @@ INDEX_HTML = r"""<!doctype html>
       els.videoPreviewBox.hidden = true;
     }
 
-    function preferredVideoFile(files) {
+    function preferredVideoFile(files, finalVideoHint = '') {
       const list = Array.isArray(files) ? files : [];
-      return list.find(file => /(^|\/)(long_video_final|final_video)\.mp4$/i.test(String(file || ''))) || '';
+      const normalizedHint = String(finalVideoHint || '').replace(/\\/g, '/');
+      const hintedName = normalizedHint.split('/').pop();
+      if (hintedName) {
+        const hinted = list.find(file => {
+          const normalized = String(file || '').replace(/\\/g, '/');
+          return normalized === normalizedHint || normalized.endsWith(`/${hintedName}`) || normalized === hintedName;
+        });
+        if (hinted) return hinted;
+      }
+      return list.find(file => /(^|\/)(long_video_final|final_video)\.mp4$/i.test(String(file || '')))
+        || list.find(file => /^[^/\\]+\.mp4$/i.test(String(file || '')))
+        || list.find(file => /^export_package\/[^/]+\.mp4$/i.test(String(file || '')))
+        || '';
     }
 
     function visibleTaskFiles(files) {
@@ -14102,7 +14116,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             diagnostics.append({"level": "error", "code": "production_failed", "message": f"自动生产失败：{production.get('status')}"})
         if summary.get("blocked_reason"):
             diagnostics.append({"level": "warn", "code": "task_blocked", "message": str(summary.get("blocked_reason"))})
-        if task_state == "completed" and not any(file in {"long_video_final.mp4", "final_video.mp4"} for file in files):
+        composition = production.get("composition") if isinstance(production.get("composition"), dict) else {}
+        final_video_hint = str(summary.get("final_video") or composition.get("final_video_file") or "").strip()
+        has_final_media = bool(final_video_hint and Path(final_video_hint).is_file()) or any(
+            Path(file).suffix.lower() == ".mp4"
+            and ("/" not in str(file).replace("\\", "/") or str(file).replace("\\", "/").startswith("export_package/"))
+            for file in files
+        )
+        if task_state == "completed" and not has_final_media:
             diagnostics.append({"level": "info", "code": "no_final_media", "message": "任务已有文本结果，但尚未发现最终视频文件。"})
         missing_outputs = [step["step"] for step in steps if step.get("status") in {"completed", "awaiting_confirmation"} and not step.get("has_output")]
         if missing_outputs:
