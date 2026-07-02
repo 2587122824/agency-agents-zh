@@ -548,7 +548,7 @@ class LocalFFmpegAdapter:
         if audio_file and bgm_file:
             return [
                 "-filter_complex",
-                "[2:a]volume=0.35[bgm];[bgm][1:a]sidechaincompress=threshold=0.015:ratio=8:attack=20:release=500[ducked];[1:a][ducked]amix=inputs=2:duration=first:normalize=0[aout]",
+                "[1:a]apad[voice];[2:a]volume=0.35[bgm];[bgm][voice]sidechaincompress=threshold=0.015:ratio=8:attack=20:release=500[ducked];[voice][ducked]amix=inputs=2:duration=longest:normalize=0[aout]",
                 "-map",
                 "0:v:0",
                 "-map",
@@ -556,7 +556,15 @@ class LocalFFmpegAdapter:
                 "-shortest",
             ]
         if audio_file:
-            return ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+            return [
+                "-filter_complex",
+                "[1:a]apad[aout]",
+                "-map",
+                "0:v:0",
+                "-map",
+                "[aout]",
+                "-shortest",
+            ]
         if bgm_file:
             return ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
         return []
