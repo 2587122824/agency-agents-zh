@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -12,6 +13,11 @@ VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg"}
 DEFAULT_SUBTITLE_STYLE = "FontName=Microsoft YaHei,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=1,Alignment=2,MarginV=72"
+DEFAULT_VIDEO_CRF = 26
+DEFAULT_VIDEO_PRESET = "medium"
+DEFAULT_VIDEO_MAX_RATE = "3M"
+DEFAULT_VIDEO_BUFFER_SIZE = "6M"
+DEFAULT_AUDIO_BITRATE = "128k"
 
 
 class LocalFFmpegAdapter:
@@ -119,6 +125,8 @@ class LocalFFmpegAdapter:
             1080,
         )
         output_fps = _fps_or_default(fps_value, 24)
+        encoding = self._encoding_settings(compose_config)
+        encoding_args = self._encoding_args(encoding)
 
         if video_files:
             command, input_files = self._build_video_concat_command(
@@ -132,6 +140,7 @@ class LocalFFmpegAdapter:
                 output_width=output_width,
                 output_height=output_height,
                 output_fps=output_fps,
+                encoding_args=encoding_args,
                 output_file=output_file,
             )
         elif image_files:
@@ -146,6 +155,7 @@ class LocalFFmpegAdapter:
                 output_width=output_width,
                 output_height=output_height,
                 output_fps=output_fps,
+                encoding_args=encoding_args,
                 output_file=output_file,
             )
         elif audio_file:
@@ -158,6 +168,7 @@ class LocalFFmpegAdapter:
                 output_width=output_width,
                 output_height=output_height,
                 output_fps=output_fps,
+                encoding_args=encoding_args,
                 output_file=output_file,
             )
         else:
@@ -198,6 +209,7 @@ class LocalFFmpegAdapter:
                 "subtitle_burn_skipped_reason": "" if burn_subtitles else self._subtitle_skip_reason(subtitles_file, manifest),
                 "subtitle_style": subtitle_style if burn_subtitles else "",
                 "render": {"width": output_width, "height": output_height, "fps": output_fps},
+                "encoding": encoding,
                 "note": "Local FFmpeg creates an editable preview/final draft from available clips/images/audio. When subtitles.srt exists, subtitles are burned in by default.",
             }
         )
@@ -339,6 +351,7 @@ class LocalFFmpegAdapter:
         output_width: int,
         output_height: int,
         output_fps: int,
+        encoding_args: list[str],
         output_file: Path,
     ) -> tuple[list[str], list[Path]]:
         concat_path = task_dir / "local_ffmpeg_video_inputs.txt"
@@ -364,7 +377,7 @@ class LocalFFmpegAdapter:
             command.extend(["-stream_loop", "-1", "-i", str(bgm_file)])
             input_files.append(bgm_file)
         command.extend(self._audio_mix_args(audio_file, bgm_file))
-        command.extend(["-vf", self._video_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps), "-c:v", "libx264", "-c:a", "aac", str(output_file)])
+        command.extend(["-vf", self._video_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps), *encoding_args, str(output_file)])
         return command, input_files
 
     def _build_image_slideshow_command(
@@ -379,6 +392,7 @@ class LocalFFmpegAdapter:
         output_width: int,
         output_height: int,
         output_fps: int,
+        encoding_args: list[str],
         output_file: Path,
     ) -> tuple[list[str], list[Path]]:
         concat_path = task_dir / "local_ffmpeg_image_inputs.txt"
@@ -411,10 +425,7 @@ class LocalFFmpegAdapter:
             [
                 "-vf",
                 self._image_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps),
-                "-c:v",
-                "libx264",
-                "-c:a",
-                "aac",
+                *encoding_args,
                 str(output_file),
             ]
         )
@@ -430,6 +441,7 @@ class LocalFFmpegAdapter:
         output_width: int,
         output_height: int,
         output_fps: int,
+        encoding_args: list[str],
         output_file: Path,
     ) -> tuple[list[str], list[Path]]:
         command = [
@@ -451,14 +463,48 @@ class LocalFFmpegAdapter:
             [
                 "-vf",
                 LocalFFmpegAdapter._audio_card_filter(subtitles_file, subtitle_style),
-                "-c:v",
-                "libx264",
-                "-c:a",
-                "aac",
+                *encoding_args,
                 str(output_file),
             ]
         )
         return command, files
+
+    @staticmethod
+    def _encoding_settings(compose_config: dict[str, Any]) -> dict[str, Any]:
+        preset = str(compose_config.get("video_preset") or DEFAULT_VIDEO_PRESET).strip().lower()
+        if preset not in {"ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"}:
+            preset = DEFAULT_VIDEO_PRESET
+        return {
+            "video_codec": "libx264",
+            "video_crf": _crf_or_default(compose_config.get("video_crf"), DEFAULT_VIDEO_CRF),
+            "video_preset": preset,
+            "video_max_rate": _bitrate_or_default(compose_config.get("video_max_rate"), DEFAULT_VIDEO_MAX_RATE),
+            "video_buffer_size": _bitrate_or_default(compose_config.get("video_buffer_size"), DEFAULT_VIDEO_BUFFER_SIZE),
+            "audio_codec": "aac",
+            "audio_bitrate": _bitrate_or_default(compose_config.get("audio_bitrate"), DEFAULT_AUDIO_BITRATE),
+            "fast_start": True,
+        }
+
+    @staticmethod
+    def _encoding_args(settings: dict[str, Any]) -> list[str]:
+        return [
+            "-c:v",
+            str(settings["video_codec"]),
+            "-preset",
+            str(settings["video_preset"]),
+            "-crf",
+            str(settings["video_crf"]),
+            "-maxrate",
+            str(settings["video_max_rate"]),
+            "-bufsize",
+            str(settings["video_buffer_size"]),
+            "-c:a",
+            str(settings["audio_codec"]),
+            "-b:a",
+            str(settings["audio_bitrate"]),
+            "-movflags",
+            "+faststart",
+        ]
 
     @staticmethod
     def _audio_mix_args(audio_file: Path | None, bgm_file: Path | None) -> list[str]:
@@ -673,3 +719,16 @@ def _fps_or_default(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(1, min(parsed, 120))
+
+
+def _crf_or_default(value: Any, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(18, min(parsed, 35))
+
+
+def _bitrate_or_default(value: Any, default: str) -> str:
+    text = str(value or "").strip()
+    return text if re.fullmatch(r"[1-9]\d*(?:[kKmM])?", text) else default
