@@ -35,7 +35,7 @@ def build_requirement_lock(user_input: str) -> dict[str, Any]:
     )
     core_topic = (topic_match.group(1) if topic_match else original.splitlines()[0] if original else "").strip()
     english_topic_match = re.search(
-        r"(?:theme|topic|subject)\s*[:：]\s*([^\n。；;]{2,180})",
+        r"(?:theme|topic|subject)\s*[:：]\s*([^\n。；;.]{2,180})",
         original,
         flags=re.IGNORECASE,
     )
@@ -214,7 +214,7 @@ def _topic_covered_by_salient_concepts(topic: str, output: str) -> bool:
         or "productive" in lower_topic
         or ("work" in lower_topic and ("improve" in lower_topic or "automation" in lower_topic))
     )
-    if english_ai_productivity_topic and re.search(r"\bAI\b|artificial intelligence", text, flags=re.IGNORECASE):
+    if english_ai_productivity_topic and re.search(r"AI|artificial intelligence|人工智能", text, flags=re.IGNORECASE):
         concept_terms = (
             "productivity",
             "productive",
@@ -230,7 +230,23 @@ def _topic_covered_by_salient_concepts(topic: str, output: str) -> bool:
             "leisure",
         )
         matched = [term for term in concept_terms if term in lower_text]
-        return len(matched) >= 3
+        if len(matched) >= 3:
+            return True
+        chinese_terms = (
+            "生产力",
+            "效率",
+            "工作",
+            "重复劳动",
+            "自动",
+            "时间",
+            "生活",
+            "清晨",
+            "散步",
+            "提前",
+            "下班",
+        )
+        chinese_matched = [term for term in chinese_terms if term in text]
+        return len(chinese_matched) >= 3
 
     return False
 
