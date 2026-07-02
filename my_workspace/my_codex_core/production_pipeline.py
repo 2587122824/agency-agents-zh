@@ -1356,6 +1356,22 @@ def _run_comfyui_adapter(
     configured_workflow_slots = _configured_workflow_slots(compose_config.get("workflow_library"))
     missing_workflow_slots = _missing_workflow_slots(required_workflow_slots, configured_workflow_slots)
     has_workflow_library_config = bool(configured_workflow_slots)
+    if missing_workflow_slots and has_workflow_library_config:
+        missing_labels = ", ".join(
+            str(slot.get("label") or slot.get("workflow_id") or "").strip()
+            for slot in missing_workflow_slots
+            if isinstance(slot, dict)
+        )
+        return {
+            "status": "skipped",
+            "reason": f"ComfyUI/RunningHub required workflow slots are not configured: {missing_labels}",
+            "missing_workflow_slots": missing_workflow_slots,
+            "downloaded_files": [],
+            "jobs": [],
+            "success_count": 0,
+            "failed_count": len(missing_workflow_slots),
+            "job_count": len(required_workflow_slots),
+        }
     if provider == "comfy_mcp":
         return ComfyMCPAdapter(
             mcp_url=str(compose_config.get("comfy_mcp_url") or compose_config.get("mcp_url") or ""),
