@@ -13523,6 +13523,49 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         summary.pop("blocked_reason", None)
         summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    @staticmethod
+    def _write_success_run_summary(job: dict) -> None:
+        task_dir_text = str(job.get("task_dir") or "").strip()
+        if not task_dir_text:
+            return
+        task_dir = Path(task_dir_text)
+        if not task_dir.is_dir():
+            return
+        summary_path = task_dir / "run_summary.json"
+        summary = {}
+        if summary_path.is_file():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+            except json.JSONDecodeError:
+                summary = {}
+        summary.update(
+            {
+                "status": "completed",
+                "workflow": str(job.get("workflow_name") or job.get("workflow") or summary.get("workflow") or ""),
+                "task_title": str(job.get("task_title") or summary.get("task_title") or ""),
+                "task_dir": str(task_dir),
+                "provider": str(job.get("provider") or summary.get("provider") or ""),
+                "step_count": int(job.get("completed_steps") or summary.get("step_count") or 0),
+                "total_steps": int(job.get("total_steps") or summary.get("total_steps") or 0),
+                "current_step": int(job.get("current_step") or summary.get("current_step") or 0),
+                "awaiting_confirmation": False,
+            }
+        )
+        for key in (
+            "awaiting_confirmation_step",
+            "confirmation_kind",
+            "blocked_step",
+            "blocked_reason",
+            "error",
+            "traceback",
+            "failed_at",
+            "paused_at",
+            "resume_step",
+            "resume_from_step",
+        ):
+            summary.pop(key, None)
+        summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
+
     def _run_resume_job(
         self,
         run_id: str,
@@ -13556,6 +13599,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     job["completed_steps"] = job.get("total_steps") or job.get("completed_steps") or 0
                     job["current_message"] = job.get("current_message") or "任务完成"
                     job["updated_at"] = time.time()
+                    self._write_success_run_summary(job)
         except WorkflowCheckpointPause as exc:
             with RUN_JOBS_LOCK:
                 job = RUN_JOBS.get(run_id)
