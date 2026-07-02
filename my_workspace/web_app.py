@@ -3995,6 +3995,7 @@ INDEX_HTML = r"""<!doctype html>
     let assetPreviewItems = [];
     let assetPreviewTaskName = "";
     let assetPreviewIndex = 0;
+    let assetGallerySignature = "";
     let assetLibraryItems = [];
     let assetLibrarySection = 'all';
     let selectedAssetLibraryId = '';
@@ -7754,6 +7755,7 @@ INDEX_HTML = r"""<!doctype html>
         els.assetOutputList.classList.remove('asset-gallery');
         assetPreviewItems = [];
         assetPreviewTaskName = "";
+        assetGallerySignature = "";
         closeAssetLightbox();
         els.assetOutputList.innerHTML = '<div class="muted small">运行后只显示图片和视频素材。</div>';
         els.packageOutputMeta.textContent = '未生成';
@@ -7802,10 +7804,10 @@ INDEX_HTML = r"""<!doctype html>
       renderStepConfirmBar();
 
       els.assetOutputMeta.textContent = assetItems.length ? `${assetItems.length} 个图片/视频` : '未生成';
-      els.assetOutputList.innerHTML = '';
       if (!assetItems.length) {
         assetPreviewItems = [];
         assetPreviewTaskName = "";
+        assetGallerySignature = "";
         els.assetOutputList.classList.remove('asset-gallery');
         closeAssetLightbox();
         els.assetOutputList.innerHTML = '<div class="muted small">还没有可显示的图片/视频素材。若使用 prompt_only 模式，通常只会生成提示词和生产清单。</div>';
@@ -8612,6 +8614,19 @@ INDEX_HTML = r"""<!doctype html>
           kind: isImageFile(file) ? 'image' : 'video',
         };
       }).filter(item => item.file && (isImageFile(item.file) || isVideoFile(item.file)));
+      const signature = JSON.stringify(galleryItems.map(item => [
+        item.file,
+        item.label || '',
+        item.kind || '',
+        Boolean(item.library || isAssetFavorited(taskName, item)),
+        ...(normalizeAssetTags(item.tags) || []),
+      ]));
+      if (assetPreviewTaskName === (taskName || "") && assetGallerySignature === signature) {
+        return;
+      }
+      assetPreviewTaskName = taskName || "";
+      assetPreviewItems = galleryItems;
+      assetGallerySignature = signature;
       els.assetOutputList.classList.add('asset-gallery');
       els.assetOutputList.innerHTML = '';
       galleryItems.forEach((item, index) => {
