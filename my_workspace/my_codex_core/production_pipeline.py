@@ -2335,10 +2335,49 @@ def _load_task_step_outputs(task_dir: Path) -> list[dict[str, str]]:
 
 def _extract_srt(content: str) -> str:
     match = re.search(r"```srt\s*(.*?)```", content, re.DOTALL | re.IGNORECASE)
-    return match.group(1).strip() + "\n" if match else ""
+    if match:
+        return match.group(1).strip() + "\n"
+    payload = _json_object_from_first_block(content)
+    audio_package = payload.get("audio_package") if isinstance(payload.get("audio_package"), dict) else {}
+    draft = str(audio_package.get("subtitle_srt_draft") or "").strip()
+    if draft:
+        return draft + "\n"
+    production_intents = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+    audio_intents = production_intents.get("audio") if isinstance(production_intents.get("audio"), list) else []
+    for intent in audio_intents:
+        if not isinstance(intent, dict) or str(intent.get("intent") or "") != "build_subtitles":
+            continue
+        segments = intent.get("subtitle_segments")
+        if not isinstance(segments, list):
+            continue
+        blocks: list[str] = []
+        for index, segment in enumerate(segments, 1):
+            if not isinstance(segment, dict):
+                continue
+            start = str(segment.get("start") or "").strip()
+            end = str(segment.get("end") or "").strip()
+            text = str(segment.get("text") or "").strip()
+            if start and end and text:
+                blocks.append(f"{segment.get('index') or index}\n{start} --> {end}\n{text}")
+        if blocks:
+            return "\n\n".join(blocks) + "\n"
+    return ""
 
 
 def _extract_voice_text(content: str) -> str:
+    payload = _json_object_from_first_block(content)
+    audio_package = payload.get("audio_package") if isinstance(payload.get("audio_package"), dict) else {}
+    packaged_voice_text = str(audio_package.get("voiceover_text") or "").strip()
+    if packaged_voice_text:
+        return _clean_voice_text(packaged_voice_text)
+    production_intents = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+    audio_intents = production_intents.get("audio") if isinstance(production_intents.get("audio"), list) else []
+    for intent in audio_intents:
+        if not isinstance(intent, dict) or str(intent.get("intent") or "") != "generate_voiceover":
+            continue
+        voice_text = str(intent.get("voice_text") or "").strip()
+        if voice_text:
+            return _clean_voice_text(voice_text)
     for heading in ("完整配音稿", "TTS 配音稿", "配音稿", "口播配音稿", "旁白稿"):
         text_block = _extract_fenced_block_after_heading(content, heading)
         if text_block:
