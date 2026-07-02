@@ -1420,10 +1420,11 @@ class WorkflowEngine:
         image_step_no = cls._step_number_for_agent_prefix(workflow, "06_")
         video_step_no = cls._step_number_for_agent_prefix(workflow, "07_")
         if material_step_no:
-            if cls._task_uses_comfy_full(task_dir) and cls._material_step_needs_gate_resume(task_dir, material_step_no):
+            material_gate_passed = cls._task_material_gate_passed(task_dir)
+            if not material_gate_passed and cls._task_uses_comfy_full(task_dir) and cls._material_step_needs_gate_resume(task_dir, material_step_no):
                 return material_step_no
             summary_path = task_dir / "run_summary.json"
-            if summary_path.exists():
+            if not material_gate_passed and summary_path.exists():
                 try:
                     summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
                 except json.JSONDecodeError:
@@ -1440,19 +1441,20 @@ class WorkflowEngine:
                     return material_step_no
                 if blocked_step >= material_step_no and "comfyui" in blocked_reason_lower and ("素材" in blocked_reason or "material" in blocked_reason_lower):
                     return material_step_no
-            for later_step in workflow.get("steps", []):
-                later_step_no = int(later_step.get("step") or 0)
-                if later_step_no <= material_step_no:
-                    continue
-                for error_path in sorted(task_dir.glob(f"step_{later_step_no:02d}_*/error.json")):
-                    try:
-                        error_data = json.loads(error_path.read_text(encoding="utf-8-sig"))
-                    except json.JSONDecodeError:
-                        error_data = {}
-                    error_text = json.dumps(error_data, ensure_ascii=False)
-                    error_text_lower = error_text.lower()
-                    if "comfyui" in error_text_lower and ("素材" in error_text or "material" in error_text_lower):
-                        return material_step_no
+            if not material_gate_passed:
+                for later_step in workflow.get("steps", []):
+                    later_step_no = int(later_step.get("step") or 0)
+                    if later_step_no <= material_step_no:
+                        continue
+                    for error_path in sorted(task_dir.glob(f"step_{later_step_no:02d}_*/error.json")):
+                        try:
+                            error_data = json.loads(error_path.read_text(encoding="utf-8-sig"))
+                        except json.JSONDecodeError:
+                            error_data = {}
+                        error_text = json.dumps(error_data, ensure_ascii=False)
+                        error_text_lower = error_text.lower()
+                        if "comfyui" in error_text_lower and ("素材" in error_text or "material" in error_text_lower):
+                            return material_step_no
         for step in workflow.get("steps", []):
             step_no = int(step.get("step") or 0)
             if step_no <= 0:
@@ -1469,6 +1471,17 @@ class WorkflowEngine:
             if not output_path.read_text(encoding="utf-8", errors="replace").strip():
                 return step_no
         return None
+
+    @classmethod
+    def _task_material_gate_passed(cls, task_dir: Path) -> bool:
+        manifest_path = task_dir / "production_manifest.json"
+        if not manifest_path.exists():
+            return False
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        return cls._material_gate_passed(manifest if isinstance(manifest, dict) else {})
 
     @staticmethod
     def _task_uses_comfy_full(task_dir: Path) -> bool:

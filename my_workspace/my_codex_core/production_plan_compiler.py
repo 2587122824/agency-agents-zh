@@ -491,6 +491,16 @@ def _compile_video_intents(
             _bind_three_frames(item, image_job_ids)
         elif intent_name in {"generate_i2v_clip", "enhance_video", "repair_video"}:
             _bind_first_source_image(item, image_job_ids)
+            if intent_name == "generate_i2v_clip" and not _has_bound_first_frame(item):
+                workflow_id, workflow_mode = VIDEO_INTENT_ROUTES["generate_broll_clip"]
+                item["workflow_id"] = workflow_id
+                item["workflow_mode"] = workflow_mode
+                item["video_task_mode"] = workflow_mode
+                item["mode"] = workflow_mode
+                item["capability"] = "video_generate"
+                notes.append(
+                    f"video intent {intent_id} downgraded to text-to-video because no source image/frame was bound"
+                )
         elif intent_name == "generate_talking_image":
             item.setdefault("depends_on", [])
             if "local_tts" not in item["depends_on"]:
@@ -639,6 +649,16 @@ def _bind_first_source_image(item: dict[str, Any], image_job_ids: set[str]) -> N
             if job_id not in depends_on:
                 depends_on.append(job_id)
             return
+
+
+def _has_bound_first_frame(item: dict[str, Any]) -> bool:
+    bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
+    if any(key in bindings for key in ("input_base_image", "first_frame", "start_frame")):
+        return True
+    for key in ("reference_image", "first_frame_image", "image", "image_ref"):
+        if str(item.get(key) or "").strip():
+            return True
+    return False
 
 
 def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
