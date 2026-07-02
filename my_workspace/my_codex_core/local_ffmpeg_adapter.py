@@ -94,15 +94,31 @@ class LocalFFmpegAdapter:
         subtitle_style = str(compose_config.get("subtitle_style") or DEFAULT_SUBTITLE_STYLE).strip()
         render = manifest.get("global_context", {}).get("render", {}) if isinstance(manifest.get("global_context"), dict) else {}
         delivery = render.get("delivery_resolution", {}) if isinstance(render.get("delivery_resolution"), dict) else {}
+        render_locked = _bool_or_default(render.get("locked"), False)
+        width_value = (
+            render.get("delivery_width") or delivery.get("width") or compose_config.get("delivery_width")
+            if render_locked
+            else compose_config.get("delivery_width") or render.get("delivery_width") or delivery.get("width")
+        )
+        height_value = (
+            render.get("delivery_height") or delivery.get("height") or compose_config.get("delivery_height")
+            if render_locked
+            else compose_config.get("delivery_height") or render.get("delivery_height") or delivery.get("height")
+        )
+        fps_value = (
+            render.get("frame_rate") or render.get("fps") or compose_config.get("fps")
+            if render_locked
+            else compose_config.get("fps") or render.get("frame_rate") or render.get("fps")
+        )
         output_width = _int_or_default(
-            compose_config.get("delivery_width") or render.get("delivery_width") or delivery.get("width"),
+            width_value,
             1920,
         )
         output_height = _int_or_default(
-            compose_config.get("delivery_height") or render.get("delivery_height") or delivery.get("height"),
+            height_value,
             1080,
         )
-        output_fps = _int_or_default(compose_config.get("fps") or render.get("frame_rate") or render.get("fps"), 24)
+        output_fps = _int_or_default(fps_value, 24)
 
         if video_files:
             command, input_files = self._build_video_concat_command(
