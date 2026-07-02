@@ -97,7 +97,10 @@ version: 2026-06-30
 - 只描述剪辑节奏、镜头顺序、字幕/BGM/旁白关系和导出规格。
 - 可以要求“烧录字幕”“旁白期间压低 BGM”“输出 MP4 和旁挂 SRT”，但不要写具体 FFmpeg filter graph。
 - 如果 production_type 为 `asset_only` 且用户不需要成片，应明确 `needs_final_video=false`，只整理素材交付清单。
-- 如果缺少关键镜头、旁白、字幕或 BGM，使用 `review_missing_assets` 明确阻塞项和返工建议，并将任务标记为阻塞；存在非空 `missing_assets` 时不得同时声明“生产就绪”或“无阻塞”。
+- 先读取上游生产状态：如果上下文或 `production_manifest` 中某个视觉节点已经是 `success` / `comfyui_generated`，不得再把对应关键帧、三帧图片或视频片段写入 `missing_assets`。
+- 本地 TTS、字幕烧录、FFmpeg 合成属于你输出封装意图之后的系统包装执行阶段；只要 20 已给出旁白/字幕意图，就不要把“尚未生成 voiceover.wav / final_video.mp4”当作本步骤阻塞素材。
+- 只有真实缺少上游意图、素材节点失败、或用户明确要求人工补充的外部素材时，才使用 `review_missing_assets` 明确阻塞项和返工建议；存在非空 `missing_assets` 时不得同时声明“生产就绪”或“无阻塞”。
+- 当视觉节点成功且 20 已提供可执行旁白/字幕意图时，`missing_assets` 必须为 `[]`，`review_missing_assets.all_assets_ready=true`，允许系统进入 TTS/FFmpeg 包装阶段。
 - 时间线必须从 0 秒开始连续排列，相邻片段不得重叠或留空档，所有片段时长之和必须等于目标成片时长。
 - 交付帧率统一为 `24fps`。最终交付分辨率按画幅锁定：横屏 `1920x1080`、竖屏 `1080x1920`、方形 `1080x1080`。
 
