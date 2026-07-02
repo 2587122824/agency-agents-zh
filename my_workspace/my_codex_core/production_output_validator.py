@@ -61,12 +61,29 @@ def validate_production_output(
 def _validate_script(content: str, duration: int, issues: list[str]) -> None:
     if not duration:
         return
-    text_blocks = re.findall(r"```text\s*(.*?)```", content, flags=re.IGNORECASE | re.DOTALL)
-    voice_text = max(text_blocks, key=len).strip() if text_blocks else _section_after(content, "TTS纯文本")
+    voice_text = _extract_script_tts_text(content)
     cjk_count = len(re.findall(r"[\u4e00-\u9fff]", voice_text))
     max_cjk = int(duration * 5.0)
     if cjk_count > max_cjk:
         issues.append(f"TTS口播约 {cjk_count} 个汉字，无法在 {duration} 秒内自然读完；上限约 {max_cjk} 字")
+
+
+def _extract_script_tts_text(content: str) -> str:
+    """Return the final narration text intended for TTS from a 03 script output.
+
+    Staff 03 commonly includes both a full timestamped script and a compact
+    TTS plain-text section.  The duration gate must count the final TTS section,
+    not the longest fenced block in the whole document, otherwise duplicated
+    script text can be rejected even when the actual TTS payload fits.
+    """
+    tts_section = _section_after_heading_regex(content, r"TTS")
+    if tts_section:
+        text_blocks = re.findall(r"```(?:text|txt)?\s*(.*?)```", tts_section, flags=re.IGNORECASE | re.DOTALL)
+        if text_blocks:
+            return max(text_blocks, key=len).strip()
+        return _strip_markdown_noise(tts_section).strip()
+    text_blocks = re.findall(r"```text\s*(.*?)```", content, flags=re.IGNORECASE | re.DOTALL)
+    return max(text_blocks, key=len).strip() if text_blocks else ""
 
 
 def _validate_images(payloads: list[dict[str, Any]], expected: tuple[int, int], issues: list[str]) -> None:
@@ -521,3 +538,24 @@ def _section_after(content: str, heading: str) -> str:
     following = content[match.end() :]
     next_heading = re.search(r"^#+\s+", following, flags=re.MULTILINE)
     return following[: next_heading.start()] if next_heading else following
+
+
+def _section_after_heading_regex(content: str, heading_pattern: str) -> str:
+    match = re.search(rf"^#+\s*.*(?:{heading_pattern}).*$", content, flags=re.IGNORECASE | re.MULTILINE)
+    if not match:
+        return ""
+    following = content[match.end() :]
+    next_heading = re.search(r"^#+\s+", following, flags=re.MULTILINE)
+    return following[: next_heading.start()] if next_heading else following
+
+
+def _strip_markdown_noise(text: str) -> str:
+    lines: list[str] = []
+    for raw in str(text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith(("**字数统计", "**字數統計", "- ", "* ")):
+            continue
+        lines.append(re.sub(r"^[>#*\-\s]+", "", line).strip())
+    return "\n".join(line for line in lines if line)
