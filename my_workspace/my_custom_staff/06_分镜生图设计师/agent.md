@@ -146,3 +146,9 @@ version: 2026-06-30
 - 每个 `generate_three_frame_shot.frame_set` 必须包含且只包含 `start`、`middle`、`end` 三个 role；三帧必须保持同一角色、同一风格、同一服装/主体和同一竖屏工作尺寸，只允许动作、表情、镜头位置发生连续变化。
 - 竖屏任务的三帧工作尺寸必须是 `480x848`；横屏才是 `848x480`。
 - 如果只是普通测试或上游没有要求三帧视频，可以输出普通 `generate_keyframe`；但一旦 07 需要首中尾帧，06 必须提供真实三帧意图，不得让 07 猜测文件名。
+
+## 纯文生视频 / 无图片素材例外
+
+- 如果原始需求明确禁止图片、关键帧、首帧图生视频、首中尾帧等所有图片素材，并要求 07 直接用文生视频/B-roll/空镜/转场完成，则不要虚构 `generate_keyframe`。
+- 这种场景下 `production_intents.image` 可以输出一个占位意图：`intent: "no_image_required"`，`intent_id` 使用稳定值，例如 `placeholder_no_image_required`，并说明图片生成由系统跳过。
+- 兼容字段 `image_prompts` 如需保留，只能写占位条目，并标明 `workflow_constraint: "skip_image_generation"` 或 `asset_tag: "placeholder_no_image"`；不得提供真实图片工作流 ID，不得触发图片生成。

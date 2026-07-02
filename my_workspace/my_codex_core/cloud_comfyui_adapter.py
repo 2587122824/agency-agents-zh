@@ -1400,6 +1400,8 @@ class CloudComfyUIAdapter:
                 continue
             if not isinstance(group, dict):
                 continue
+            if self._skip_material_prompt_group(group):
+                continue
             prompts = group.get("prompts")
             if isinstance(prompts, dict):
                 for name, item in prompts.items():
@@ -1437,6 +1439,31 @@ class CloudComfyUIAdapter:
                     )
                     jobs.append(self._job_from_prompt_item(payload, group, group, name, job_type, group_key))
         return jobs
+
+    @staticmethod
+    def _skip_material_prompt_group(group: dict[str, Any]) -> bool:
+        text = " ".join(
+            str(group.get(key) or "").strip().lower()
+            for key in (
+                "intent",
+                "workflow_id",
+                "workflow_mode",
+                "mode",
+                "image_task_mode",
+                "asset_tag",
+                "workflow_constraint",
+                "control_mode",
+            )
+        )
+        return any(
+            marker in text
+            for marker in (
+                "no_image_required",
+                "placeholder_no_image",
+                "skip_image_generation",
+                "placeholder",
+            )
+        )
 
     @classmethod
     def _job_from_prompt_item(

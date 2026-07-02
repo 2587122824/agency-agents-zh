@@ -12,6 +12,7 @@ IMAGE_INTENTS = {
     "generate_three_frame_shot",
     "generate_cover_key_visual",
     "repair_or_cutout_image",
+    "no_image_required",
 }
 VIDEO_INTENTS = {
     "generate_i2v_clip",

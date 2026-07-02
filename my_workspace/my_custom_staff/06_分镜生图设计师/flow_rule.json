@@ -18,7 +18,8 @@
     "generate_keyframe",
     "generate_three_frame_shot",
     "generate_cover_key_visual",
-    "repair_or_cutout_image"
+    "repair_or_cutout_image",
+    "no_image_required"
   ],
   "compatibility_fields": [
     "workflow_id",
@@ -36,6 +37,7 @@
     "必须输出production_intents.image",
     "production_intents.image与image_prompts必须位于同一个可解析JSON对象中",
     "每条图片意图必须包含intent和intent_id",
+    "原始需求明确禁止图片/关键帧/首帧/首中尾帧且要求纯文生视频时，允许输出no_image_required占位意图，系统会跳过图片素材生成",
     "intent必须来自allowed_intents，除非明确标记custom并说明原因",
     "必须保留image_prompts兼容旧生产链",
     "跨镜头复用对象必须优先填写character_id/style_id/product_id/scene_id",

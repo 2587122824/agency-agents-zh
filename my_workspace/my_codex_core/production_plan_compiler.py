@@ -325,6 +325,9 @@ def _compile_image_intents(
     for index, intent in enumerate(intents, 1):
         intent_name = str(intent.get("intent") or "").strip()
         intent_id = _safe_id(intent.get("intent_id") or intent.get("id") or f"image_intent_{index:03d}")
+        if intent_name == "no_image_required":
+            notes.append(f"image intent {intent_id} declares no image generation is required; skipped image material jobs")
+            continue
         contract = contracts.get(intent_name) if isinstance(contracts.get(intent_name), dict) else {}
         compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
         locked_intent, overrides = apply_locked_parameters_to_intent(
@@ -641,6 +644,8 @@ def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
     jobs: list[dict[str, Any]] = []
     for index, item in enumerate(values, 1):
         if isinstance(item, dict):
+            if _skip_material_prompt_item(item):
+                continue
             jobs.append(
                 {
                     "job_id": str(item.get("job_id") or item.get("id") or f"{job_type}_{index:03d}"),
@@ -669,6 +674,32 @@ def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
                 }
             )
     return jobs
+
+
+def _skip_material_prompt_item(item: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(item.get(key) or "").strip().lower()
+        for key in (
+            "intent",
+            "workflow_id",
+            "workflow_mode",
+            "mode",
+            "image_task_mode",
+            "asset_tag",
+            "workflow_constraint",
+            "control_mode",
+        )
+    )
+    return any(
+        marker in text
+        for marker in (
+            "no_image_required",
+            "placeholder_no_image",
+            "skip_image_generation",
+            "placeholder",
+            "workflow_id none",
+        )
+    )
 
 
 def _json_object_from_text(text: str) -> dict[str, Any]:
