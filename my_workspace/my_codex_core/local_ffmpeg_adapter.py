@@ -75,18 +75,24 @@ class LocalFFmpegAdapter:
             self._write_json(manifest_path, result_manifest)
             return result_manifest
 
-        video_files = self._dedupe_paths(
-            [
-                *self._collect_files(paths.get("video_clips"), VIDEO_EXTENSIONS, recursive=True),
-                *self._collect_files(paths.get("comfyui"), VIDEO_EXTENSIONS, recursive=True),
-            ]
-        )
-        image_files = self._dedupe_paths(
-            [
-                *self._collect_files(paths.get("generated_images"), IMAGE_EXTENSIONS, recursive=True),
-                *self._collect_files(paths.get("comfyui"), IMAGE_EXTENSIONS, recursive=True),
-            ]
-        )
+        manifest_video_files = self._collect_manifest_visual_files(manifest, task_dir, VIDEO_EXTENSIONS)
+        manifest_image_files = self._collect_manifest_visual_files(manifest, task_dir, IMAGE_EXTENSIONS)
+        video_files = self._dedupe_paths(manifest_video_files)
+        if not video_files:
+            video_files = self._dedupe_paths(
+                [
+                    *self._collect_files(paths.get("video_clips"), VIDEO_EXTENSIONS, recursive=True),
+                    *self._collect_files(paths.get("comfyui"), VIDEO_EXTENSIONS, recursive=True),
+                ]
+            )
+        image_files = self._dedupe_paths(manifest_image_files)
+        if not image_files:
+            image_files = self._dedupe_paths(
+                [
+                    *self._collect_files(paths.get("generated_images"), IMAGE_EXTENSIONS, recursive=True),
+                    *self._collect_files(paths.get("comfyui"), IMAGE_EXTENSIONS, recursive=True),
+                ]
+            )
         audio_file = self._find_audio_file(paths.get("audio"), manifest)
         bgm_file = self._find_bgm_file(manifest)
         subtitles_file = Path(str(manifest.get("files", {}).get("subtitles") or ""))
@@ -313,6 +319,37 @@ class LocalFFmpegAdapter:
                 result.append(path.resolve())
                 seen.add(key)
         return result
+
+    @staticmethod
+    def _collect_manifest_visual_files(manifest: dict[str, Any], task_dir: Path, extensions: set[str]) -> list[Path]:
+        if not isinstance(manifest, dict):
+            return []
+        result: list[Path] = []
+        for node in manifest.get("production_nodes") or []:
+            if not isinstance(node, dict):
+                continue
+            if str(node.get("stage") or "").strip() != "visual":
+                continue
+            if str(node.get("status") or "").strip().lower() not in {"success", "cached"}:
+                continue
+            for raw_path in [*(node.get("outputs") or []), *(node.get("downloaded_files") or [])]:
+                candidate = LocalFFmpegAdapter._resolve_task_media_path(raw_path, task_dir)
+                if candidate and candidate.suffix.lower() in extensions and candidate.is_file():
+                    result.append(candidate)
+        return result
+
+    @staticmethod
+    def _resolve_task_media_path(raw_path: Any, task_dir: Path) -> Path | None:
+        text = str(raw_path or "").strip()
+        if not text:
+            return None
+        candidate = Path(text)
+        if not candidate.is_absolute():
+            candidate = task_dir / candidate
+        try:
+            return candidate.resolve()
+        except OSError:
+            return None
 
     def _find_audio_file(self, audio_dir: Path | None, manifest: dict[str, Any]) -> Path | None:
         configured = str(manifest.get("audio", {}).get("voiceover_audio_file") or "").strip()
