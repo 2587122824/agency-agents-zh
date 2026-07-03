@@ -239,11 +239,15 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(Path(manifest["turnaround_sheet"]["file"]), sheet)
             layout = manifest["turnaround_sheet"]["layout"]
             self.assertEqual(layout["strategy"], "portrait_priority_quadrants")
+            self.assertEqual(layout["background"], (88, 24, 88, 255))
             self.assertEqual(layout["slots"][0]["role"], "main_front")
-            self.assertEqual(layout["slots"][3]["role"], "detail_or_material")
+            self.assertEqual([slot["role"] for slot in layout["slots"][1:]], ["back_view", "left_side_view", "right_side_or_detail"])
+            self.assertEqual({slot["w"] for slot in layout["slots"][1:]}, {layout["slots"][1]["w"]})
+            self.assertEqual({slot["h"] for slot in layout["slots"][1:]}, {layout["slots"][1]["h"]})
             self.assertGreater(layout["slots"][0]["w"] * layout["slots"][0]["h"], layout["slots"][3]["w"] * layout["slots"][3]["h"])
             with Image.open(sheet) as image:
                 self.assertGreater(image.height, image.width)
+                self.assertEqual(image.getpixel((0, 0)), (88, 24, 88))
 
     def test_turnaround_outputs_are_stitched_for_landscape_keyframe_input(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -259,16 +263,42 @@ class SemanticInputContractTests(unittest.TestCase):
             sheet = Path(manifest["downloaded_files"][0])
             layout = manifest["turnaround_sheet"]["layout"]
             self.assertEqual(layout["strategy"], "landscape_left_main_right_stack")
+            self.assertEqual(layout["background"], (88, 24, 88, 255))
             self.assertEqual(layout["slots"][0]["role"], "main_front")
             self.assertEqual([slot["role"] for slot in layout["slots"][1:]], ["back_view", "left_side_view", "right_side_view"])
+            self.assertEqual({slot["w"] for slot in layout["slots"][1:]}, {layout["slots"][1]["w"]})
+            self.assertEqual({slot["h"] for slot in layout["slots"][1:]}, {layout["slots"][1]["h"]})
             self.assertGreater(layout["slots"][0]["h"], layout["slots"][1]["h"])
             with Image.open(sheet) as image:
                 self.assertGreater(image.width, image.height)
+                self.assertEqual(image.getpixel((0, 0)), (88, 24, 88))
+
+    def test_turnaround_sheet_background_follows_source_edges(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            warm_files = self._make_turnaround_images(root / "warm", size=(40, 80), colors=[(240, 232, 210), (230, 225, 215), (238, 230, 220), (232, 226, 218)])
+            dark_files = self._make_turnaround_images(root / "dark", size=(40, 80), colors=[(35, 38, 42), (40, 42, 45), (32, 35, 40), (44, 42, 38)])
+            adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+            warm_manifest = adapter._maybe_append_turnaround_sheet(
+                {"task_type": "character_turnaround", "width": 480, "height": 848},
+                {},
+                root / "warm",
+                {"status": "success", "downloaded_files": [str(path) for path in warm_files]},
+            )
+            dark_manifest = adapter._maybe_append_turnaround_sheet(
+                {"task_type": "character_turnaround", "width": 480, "height": 848},
+                {},
+                root / "dark",
+                {"status": "success", "downloaded_files": [str(path) for path in dark_files]},
+            )
+            self.assertGreater(warm_manifest["turnaround_sheet"]["layout"]["background"][0], 220)
+            self.assertLess(dark_manifest["turnaround_sheet"]["layout"]["background"][0], 60)
 
     @staticmethod
-    def _make_turnaround_images(root: Path, size: tuple[int, int]) -> list[Path]:
+    def _make_turnaround_images(root: Path, size: tuple[int, int], colors: list[str | tuple[int, int, int]] | None = None) -> list[Path]:
+        root.mkdir(parents=True, exist_ok=True)
         files = []
-        colors = ["red", "green", "blue", "purple"]
+        colors = colors or ["red", "green", "blue", "purple"]
         for index, color in enumerate(colors, start=1):
             path = root / f"view_{index}.png"
             Image.new("RGB", size, color).save(path)

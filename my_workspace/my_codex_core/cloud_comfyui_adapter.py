@@ -1229,7 +1229,8 @@ class CloudComfyUIAdapter:
             sheet_width = int(layout["width"])
             sheet_height = int(layout["height"])
             slots = layout["slots"]
-            sheet = Image.new("RGBA", (sheet_width, sheet_height), (250, 250, 247, 255))
+            background = tuple(layout["background"])
+            sheet = Image.new("RGBA", (sheet_width, sheet_height), background)
             for index, image in enumerate(opened):
                 if index >= len(slots):
                     break
@@ -1241,16 +1242,15 @@ class CloudComfyUIAdapter:
                     max(1, int(slot["h"] * sheet_height)),
                 )
                 fitted = ImageOps.contain(image, (box[2], box[3]), method=Image.Resampling.LANCZOS)
-                tile = Image.new("RGBA", (box[2], box[3]), (255, 255, 255, 255))
-                offset = ((box[2] - fitted.width) // 2, (box[3] - fitted.height) // 2)
-                tile.alpha_composite(fitted, offset)
-                sheet.alpha_composite(tile, (box[0], box[1]))
+                offset = (box[0] + (box[2] - fitted.width) // 2, box[1] + (box[3] - fitted.height) // 2)
+                sheet.alpha_composite(fitted, offset)
             output_path.parent.mkdir(parents=True, exist_ok=True)
             sheet.convert("RGB").save(output_path, "PNG", optimize=True)
             return {
                 "strategy": str(layout["strategy"]),
                 "width": sheet_width,
                 "height": sheet_height,
+                "background": background,
                 "slots": slots,
             }
         finally:
@@ -1266,30 +1266,36 @@ class CloudComfyUIAdapter:
         portrait = ratio < 1.0
         max_long_side = 4096
         source_long = max(max(image.width, image.height) for image in images[:count])
+        background = cls._turnaround_background_color(images[:count])
         if portrait:
             sheet_height = min(max_long_side, max(848, source_long * 2))
             sheet_width = max(1, int(sheet_height * ratio))
             strategy = "portrait_priority_quadrants"
+            aux_w = 0.335
+            aux_h = 0.305
             slots = [
-                {"x": 0.025, "y": 0.025, "w": 0.560, "h": 0.470, "role": "main_front"},
-                {"x": 0.615, "y": 0.025, "w": 0.360, "h": 0.355, "role": "back_view"},
-                {"x": 0.025, "y": 0.525, "w": 0.560, "h": 0.450, "role": "side_view"},
-                {"x": 0.615, "y": 0.525, "w": 0.360, "h": 0.285, "role": "detail_or_material"},
+                {"x": 0.035, "y": 0.035, "w": 0.565, "h": 0.475, "role": "main_front"},
+                {"x": 0.630, "y": 0.035, "w": aux_w, "h": aux_h, "role": "back_view"},
+                {"x": 0.035, "y": 0.640, "w": aux_w, "h": aux_h, "role": "left_side_view"},
+                {"x": 0.630, "y": 0.640, "w": aux_w, "h": aux_h, "role": "right_side_or_detail"},
             ]
         else:
             sheet_width = min(max_long_side, max(1280, source_long * 3))
             sheet_height = max(1, int(sheet_width / ratio))
             strategy = "landscape_left_main_right_stack"
+            aux_w = 0.510
+            aux_h = 0.295
             slots = [
                 {"x": 0.025, "y": 0.025, "w": 0.405, "h": 0.950, "role": "main_front"},
-                {"x": 0.465, "y": 0.025, "w": 0.510, "h": 0.295, "role": "back_view"},
-                {"x": 0.465, "y": 0.352, "w": 0.510, "h": 0.295, "role": "left_side_view"},
-                {"x": 0.465, "y": 0.680, "w": 0.510, "h": 0.295, "role": "right_side_view"},
+                {"x": 0.465, "y": 0.025, "w": aux_w, "h": aux_h, "role": "back_view"},
+                {"x": 0.465, "y": 0.352, "w": aux_w, "h": aux_h, "role": "left_side_view"},
+                {"x": 0.465, "y": 0.680, "w": aux_w, "h": aux_h, "role": "right_side_view"},
             ]
         return {
             "strategy": strategy,
             "width": sheet_width,
             "height": sheet_height,
+            "background": background,
             "slots": slots[:count],
         }
 
@@ -1303,6 +1309,39 @@ class CloudComfyUIAdapter:
         if target_width > 0 and target_height > 0:
             return max(0.2, min(5.0, target_width / target_height))
         return sum((image.width / max(1, image.height)) for image in images) / max(1, len(images))
+
+    @classmethod
+    def _turnaround_background_color(cls, images: list[Image.Image]) -> tuple[int, int, int, int]:
+        samples: list[tuple[int, int, int]] = []
+        for image in images:
+            samples.extend(cls._edge_color_samples(image))
+        if not samples:
+            return (242, 242, 238, 255)
+        channels = []
+        for channel_index in range(3):
+            values = sorted(pixel[channel_index] for pixel in samples)
+            trim = max(0, len(values) // 10)
+            kept = values[trim : len(values) - trim] if trim and len(values) > trim * 2 else values
+            channels.append(int(round(sum(kept) / max(1, len(kept)))))
+        return (channels[0], channels[1], channels[2], 255)
+
+    @staticmethod
+    def _edge_color_samples(image: Image.Image) -> list[tuple[int, int, int]]:
+        source = ImageOps.exif_transpose(image).convert("RGBA")
+        source.thumbnail((96, 96), Image.Resampling.LANCZOS)
+        width, height = source.size
+        band = max(1, min(width, height) // 10)
+        pixels = source.load()
+        samples: list[tuple[int, int, int]] = []
+        for y in range(height):
+            for x in range(width):
+                if x >= band and x < width - band and y >= band and y < height - band:
+                    continue
+                red, green, blue, alpha = pixels[x, y]
+                if alpha < 16:
+                    continue
+                samples.append((red, green, blue))
+        return samples
 
     def _load_cached_artifacts(self, state: dict[str, Any], images: list[str], generated_map: dict[str, str]) -> None:
         jobs = state.get("jobs") if isinstance(state.get("jobs"), dict) else {}
