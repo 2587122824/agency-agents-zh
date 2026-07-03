@@ -56,6 +56,32 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("{{input_identity_image}}", json.dumps(pose_rows, ensure_ascii=False))
         self.assertIn("{{input_pose_image}}", json.dumps(pose_rows, ensure_ascii=False))
 
+        for canvas_path in (identity_canvas, pose_canvas):
+            canvas = json.loads(canvas_path.read_text(encoding="utf-8"))
+            node_ids = {node["id"] for node in canvas["nodes"]}
+            dangling_links = [
+                link for link in canvas.get("links", []) if link[1] not in node_ids or link[3] not in node_ids
+            ]
+            self.assertEqual(dangling_links, [])
+            widget_placeholders = [
+                node["id"]
+                for node in canvas["nodes"]
+                if any("{{" in str(value) for value in (node.get("widgets_values") or []))
+            ]
+            self.assertEqual(widget_placeholders, [])
+            set_names = {
+                str((node.get("widgets_values") or [""])[0])
+                for node in canvas["nodes"]
+                if node.get("type") == "SetNode"
+            }
+            missing_set_nodes = [
+                str((node.get("widgets_values") or [""])[0])
+                for node in canvas["nodes"]
+                if node.get("type") == "GetNode"
+                and str((node.get("widgets_values") or [""])[0]) not in set_names
+            ]
+            self.assertEqual(missing_set_nodes, [])
+
         workflows = {item["id"]: item for item in web_app.WorkflowWebHandler._comfy_debug_workflows()}
         modes = {item["value"]: item for item in workflows["04_keyframe"]["modes"]}
         self.assertIn("{{input_identity_image}}", modes["identity_keyframe"]["default_node_info"])

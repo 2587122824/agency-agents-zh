@@ -2918,6 +2918,128 @@
       "color": "#223",
       "bgcolor": "#335",
       "title": "INPUT IDENTITY IMAGE / 角色身份参考图：本地画布请选择示例图，RunningHub运行时由nodeInfoList替换"
+    },
+    {
+      "id": 471,
+      "type": "String Literal",
+      "pos": [
+        -1130,
+        -262.1167297363281
+      ],
+      "size": [
+        288.4223327636719,
+        88
+      ],
+      "flags": {},
+      "order": 33,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "label": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "slot_index": 0,
+          "links": [
+            931
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "String Literal",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "NameYourCharacterHere"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 472,
+      "type": "SetNode",
+      "pos": [
+        -970,
+        -132.11672973632812
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 78,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "STRING",
+          "name": "STRING",
+          "type": "STRING",
+          "link": 931
+        }
+      ],
+      "outputs": [
+        {
+          "label": "*",
+          "name": "*",
+          "type": "*"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SetNode",
+        "aux_id": "kijai/ComfyUI-KJNodes",
+        "previousName": "Name",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "Name"
+      ],
+      "color": "#432",
+      "bgcolor": "#653"
+    },
+    {
+      "id": 746,
+      "type": "SetNode",
+      "pos": [
+        1165,
+        748
+      ],
+      "size": [
+        210,
+        58
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 82,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "INT",
+          "name": "INT",
+          "type": "INT",
+          "link": 1921
+        }
+      ],
+      "outputs": [
+        {
+          "label": "*",
+          "name": "*",
+          "type": "*"
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "SetNode",
+        "aux_id": "kijai/ComfyUI-KJNodes",
+        "previousName": "Steps",
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [
+        "Steps"
+      ],
+      "color": "#1b4669",
+      "bgcolor": "#29699c"
     }
   ],
   "links": [
@@ -4160,6 +4282,22 @@
       763,
       5,
       "UPSCALE_MODEL"
+    ],
+    [
+      931,
+      471,
+      0,
+      472,
+      0,
+      "*"
+    ],
+    [
+      1921,
+      743,
+      0,
+      746,
+      0,
+      "*"
     ]
   ],
   "groups": [
