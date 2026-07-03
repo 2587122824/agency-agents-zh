@@ -71,3 +71,15 @@ The user-provided `角色一致性 & CONSISTENT CHARACTERS from an INPUT IMAGE` 
   - requires `{{input_identity_image}}` and `{{input_pose_image}}`
 
 After exposing each canvas as a RunningHub workflow, paste the returned endpoint into the matching debug-console mode. The mode-specific default nodeInfoList is loaded automatically by the system and can be adjusted after importing the actual RunningHub API JSON.
+## Clean consistent character canvases
+
+The consistent-character canvases are intentionally reduced to the main identity keyframe chain only. Background generation, emotion batches, pose-saving batches, extra SaveImage/PreviewImage outputs, and older experimental JSON templates were removed to avoid unrelated node validation errors.
+
+Current files:
+
+- `consistent_character_identity_keyframe_canvas.json`
+- `consistent_character_identity_keyframe_nodeinfo.json`
+- `consistent_character_pose_identity_keyframe_canvas.json`
+- `consistent_character_pose_identity_keyframe_nodeinfo.json`
+
+Canvas files keep literal default widget values so ComfyUI can open and validate them locally. Runtime placeholders such as `{{input_identity_image}}`, `{{input_pose_image}}`, `{{prompt}}`, `{{width}}`, `{{height}}`, and `{{seed}}` live only in the paired RunningHub nodeInfoList files.
