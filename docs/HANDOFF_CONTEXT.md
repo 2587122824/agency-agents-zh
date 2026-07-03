@@ -48,6 +48,7 @@
 ## Recent Fixes
 
 - [2026-07-03] Turnaround/three-view ComfyUI results are now auto-stitched as soon as files are downloaded. When a `turnaround` image job returns multiple images, `CloudComfyUIAdapter` creates a `*_turnaround_sheet.png`, keeps the original images, places the stitched sheet first in `downloaded_files`, and records `turnaround_sheet` metadata in the manifest. Layout selection follows the target render orientation: portrait requests prefer a portrait-friendly sheet, landscape requests prefer a wide sheet, and cached four-image results are repaired on reuse. This lets identity/pose keyframe generation consume one combined multi-view reference instead of only the first returned view.
+  - The stitched sheet now uses an asymmetric keyframe-reference layout instead of an even grid. Portrait sheets place source image 1 as the large upper-left front view, image 2 as upper-right back view, image 3 as lower-left side view, and image 4 as a smaller lower-right detail/material view. Landscape sheets use a left 40% primary front view with the remaining three views stacked on the right.
 
 - [2026-07-03] 角色素材库、三视图与关键帧语义输入已打通。生产实体编辑器为角色提供独立 `turnaround_images` 字段；ComfyUI 调试台在 `identity_keyframe` / `pose_identity_keyframe` 下显示“角色实体 → 身份母版/三视图 → 独立姿态素材”联动选择。母版或三视图只进入 `input_identity_image`，姿态图只进入 `input_pose_image`，避免把三视图误作姿态控制。生产计划编译器会把实体中保存的素材 ID 解析为 `my_asset_library` 实际路径，也会按素材的 `character_id` 和 `character_base` / `character_turnaround` 标签补全实体参考；该解析只作用于编译副本，不会改写用户实体库。
 

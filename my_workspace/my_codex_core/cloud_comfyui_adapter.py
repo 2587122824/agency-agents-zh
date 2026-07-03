@@ -1225,67 +1225,84 @@ class CloudComfyUIAdapter:
                     opened.append(ImageOps.exif_transpose(image).convert("RGBA"))
             if len(opened) < 2:
                 return {}
-            columns, rows = cls._turnaround_sheet_layout(opened, payload)
-            tile_width = max(image.width for image in opened)
-            tile_height = max(image.height for image in opened)
-            gutter = 16
-            max_long_side = 4096
-            raw_width = columns * tile_width + gutter * (columns + 1)
-            raw_height = rows * tile_height + gutter * (rows + 1)
-            scale = min(1.0, max_long_side / max(raw_width, raw_height))
-            if scale < 1.0:
-                tile_width = max(1, int(tile_width * scale))
-                tile_height = max(1, int(tile_height * scale))
-                gutter = max(6, int(gutter * scale))
-            sheet_width = columns * tile_width + gutter * (columns + 1)
-            sheet_height = rows * tile_height + gutter * (rows + 1)
-            sheet = Image.new("RGBA", (sheet_width, sheet_height), (246, 246, 242, 255))
+            layout = cls._turnaround_sheet_layout(opened, payload)
+            sheet_width = int(layout["width"])
+            sheet_height = int(layout["height"])
+            slots = layout["slots"]
+            sheet = Image.new("RGBA", (sheet_width, sheet_height), (250, 250, 247, 255))
             for index, image in enumerate(opened):
-                row = index // columns
-                column = index % columns
-                fitted = ImageOps.contain(image, (tile_width, tile_height), method=Image.Resampling.LANCZOS)
-                tile = Image.new("RGBA", (tile_width, tile_height), (255, 255, 255, 255))
-                offset = ((tile_width - fitted.width) // 2, (tile_height - fitted.height) // 2)
+                if index >= len(slots):
+                    break
+                slot = slots[index]
+                box = (
+                    int(slot["x"] * sheet_width),
+                    int(slot["y"] * sheet_height),
+                    max(1, int(slot["w"] * sheet_width)),
+                    max(1, int(slot["h"] * sheet_height)),
+                )
+                fitted = ImageOps.contain(image, (box[2], box[3]), method=Image.Resampling.LANCZOS)
+                tile = Image.new("RGBA", (box[2], box[3]), (255, 255, 255, 255))
+                offset = ((box[2] - fitted.width) // 2, (box[3] - fitted.height) // 2)
                 tile.alpha_composite(fitted, offset)
-                x = gutter + column * (tile_width + gutter)
-                y = gutter + row * (tile_height + gutter)
-                sheet.alpha_composite(tile, (x, y))
+                sheet.alpha_composite(tile, (box[0], box[1]))
             output_path.parent.mkdir(parents=True, exist_ok=True)
             sheet.convert("RGB").save(output_path, "PNG", optimize=True)
             return {
-                "columns": columns,
-                "rows": rows,
+                "strategy": str(layout["strategy"]),
                 "width": sheet_width,
                 "height": sheet_height,
+                "slots": slots,
             }
         finally:
             for image in opened:
                 image.close()
 
-    @staticmethod
-    def _turnaround_sheet_layout(images: list[Image.Image], payload: dict[str, Any]) -> tuple[int, int]:
+    @classmethod
+    def _turnaround_sheet_layout(cls, images: list[Image.Image], payload: dict[str, Any]) -> dict[str, Any]:
         count = min(4, len(images))
         if count <= 1:
-            return 1, 1
-        candidates = {
-            2: [(2, 1), (1, 2)],
-            3: [(3, 1), (1, 3)],
-            4: [(4, 1), (2, 2), (1, 4)],
-        }.get(count, [(count, 1)])
+            return {"strategy": "single", "width": images[0].width, "height": images[0].height, "slots": [{"x": 0, "y": 0, "w": 1, "h": 1, "role": "main_front"}]}
+        ratio = cls._turnaround_target_ratio(payload, images)
+        portrait = ratio < 1.0
+        max_long_side = 4096
+        source_long = max(max(image.width, image.height) for image in images[:count])
+        if portrait:
+            sheet_height = min(max_long_side, max(848, source_long * 2))
+            sheet_width = max(1, int(sheet_height * ratio))
+            strategy = "portrait_priority_quadrants"
+            slots = [
+                {"x": 0.025, "y": 0.025, "w": 0.560, "h": 0.470, "role": "main_front"},
+                {"x": 0.615, "y": 0.025, "w": 0.360, "h": 0.355, "role": "back_view"},
+                {"x": 0.025, "y": 0.525, "w": 0.560, "h": 0.450, "role": "side_view"},
+                {"x": 0.615, "y": 0.525, "w": 0.360, "h": 0.285, "role": "detail_or_material"},
+            ]
+        else:
+            sheet_width = min(max_long_side, max(1280, source_long * 3))
+            sheet_height = max(1, int(sheet_width / ratio))
+            strategy = "landscape_left_main_right_stack"
+            slots = [
+                {"x": 0.025, "y": 0.025, "w": 0.405, "h": 0.950, "role": "main_front"},
+                {"x": 0.465, "y": 0.025, "w": 0.510, "h": 0.295, "role": "back_view"},
+                {"x": 0.465, "y": 0.352, "w": 0.510, "h": 0.295, "role": "left_side_view"},
+                {"x": 0.465, "y": 0.680, "w": 0.510, "h": 0.295, "role": "right_side_view"},
+            ]
+        return {
+            "strategy": strategy,
+            "width": sheet_width,
+            "height": sheet_height,
+            "slots": slots[:count],
+        }
+
+    @staticmethod
+    def _turnaround_target_ratio(payload: dict[str, Any], images: list[Image.Image]) -> float:
         try:
             target_width = float(payload.get("width") or payload.get("delivery_width") or 0)
             target_height = float(payload.get("height") or payload.get("delivery_height") or 0)
         except (TypeError, ValueError):
             target_width = target_height = 0
-        panel_ratio = sum((image.width / max(1, image.height)) for image in images[:count]) / count
-        target_ratio = (target_width / target_height) if target_width > 0 and target_height > 0 else panel_ratio
-
-        def score(layout: tuple[int, int]) -> float:
-            columns, rows = layout
-            sheet_ratio = (columns * panel_ratio) / max(1, rows)
-            return abs(sheet_ratio - target_ratio)
-
-        return min(candidates, key=score)
+        if target_width > 0 and target_height > 0:
+            return max(0.2, min(5.0, target_width / target_height))
+        return sum((image.width / max(1, image.height)) for image in images) / max(1, len(images))
 
     def _load_cached_artifacts(self, state: dict[str, Any], images: list[str], generated_map: dict[str, str]) -> None:
         jobs = state.get("jobs") if isinstance(state.get("jobs"), dict) else {}

@@ -237,7 +237,11 @@ class SemanticInputContractTests(unittest.TestCase):
             sheet = Path(manifest["downloaded_files"][0])
             self.assertTrue(sheet.name.endswith("_turnaround_sheet.png"))
             self.assertEqual(Path(manifest["turnaround_sheet"]["file"]), sheet)
-            self.assertEqual(manifest["turnaround_sheet"]["layout"]["columns"], 2)
+            layout = manifest["turnaround_sheet"]["layout"]
+            self.assertEqual(layout["strategy"], "portrait_priority_quadrants")
+            self.assertEqual(layout["slots"][0]["role"], "main_front")
+            self.assertEqual(layout["slots"][3]["role"], "detail_or_material")
+            self.assertGreater(layout["slots"][0]["w"] * layout["slots"][0]["h"], layout["slots"][3]["w"] * layout["slots"][3]["h"])
             with Image.open(sheet) as image:
                 self.assertGreater(image.height, image.width)
 
@@ -253,7 +257,11 @@ class SemanticInputContractTests(unittest.TestCase):
                 {"status": "success", "downloaded_files": [str(path) for path in files]},
             )
             sheet = Path(manifest["downloaded_files"][0])
-            self.assertEqual(manifest["turnaround_sheet"]["layout"]["columns"], 4)
+            layout = manifest["turnaround_sheet"]["layout"]
+            self.assertEqual(layout["strategy"], "landscape_left_main_right_stack")
+            self.assertEqual(layout["slots"][0]["role"], "main_front")
+            self.assertEqual([slot["role"] for slot in layout["slots"][1:]], ["back_view", "left_side_view", "right_side_view"])
+            self.assertGreater(layout["slots"][0]["h"], layout["slots"][1]["h"])
             with Image.open(sheet) as image:
                 self.assertGreater(image.width, image.height)
 
