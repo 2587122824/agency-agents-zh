@@ -11,6 +11,8 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 from urllib.parse import urljoin, urlparse
 
+from PIL import Image, ImageOps
+
 from .production_graph import artifact_record, build_production_graph, read_json, stable_job_hash, write_json
 from .production_parameter_policy import apply_locked_parameters_to_payload
 
@@ -57,8 +59,10 @@ class CloudComfyUIAdapter:
         if len(material_jobs) > 1 and self._as_bool(compose_config.get("loop_material_prompts"), default=True):
             return self._run_material_jobs(material_jobs, provider, compose_config, output_dir)
         if provider == "runninghub":
-            return self._run_runninghub(comfyui_payload, compose_config, output_dir)
-        return self._run_generic(comfyui_payload, compose_config, output_dir)
+            result = self._run_runninghub(comfyui_payload, compose_config, output_dir)
+        else:
+            result = self._run_generic(comfyui_payload, compose_config, output_dir)
+        return self._maybe_append_turnaround_sheet(comfyui_payload, compose_config, output_dir, result)
 
     def _provider(self, compose_config: dict[str, Any]) -> str:
         provider = str(compose_config.get("visual_provider") or compose_config.get("provider") or "").strip().lower()
@@ -300,6 +304,13 @@ class CloudComfyUIAdapter:
                 )
                 and cached_files
             ):
+                cached_manifest = self._maybe_append_turnaround_sheet(
+                    job_payload,
+                    job_config,
+                    job_dir,
+                    {"status": "cached", "downloaded_files": cached_files},
+                )
+                cached_files = [str(path) for path in cached_manifest.get("downloaded_files", []) if Path(str(path)).is_file()]
                 success_count += 1
                 downloaded_files.extend(cached_files)
                 if job_type == "image":
@@ -1081,6 +1092,7 @@ class CloudComfyUIAdapter:
         for attempt in range(1, 4):
             try:
                 result = self._run_runninghub(payload, config, output_dir) if provider == "runninghub" else self._run_generic(payload, config, output_dir)
+                result = self._maybe_append_turnaround_sheet(payload, config, output_dir, result)
                 if not result.get("downloaded_files") and result.get("status") not in {"submitted"}:
                     raise ValueError("ComfyUI download failed: no output files returned")
                 return result, attempt
@@ -1140,6 +1152,140 @@ class CloudComfyUIAdapter:
         if video:
             result["output_final_video"] = video
         return result
+
+    def _maybe_append_turnaround_sheet(
+        self,
+        payload: dict[str, Any],
+        compose_config: dict[str, Any],
+        output_dir: Path,
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        if not self._is_turnaround_request(payload, compose_config):
+            return manifest
+        images = [
+            Path(str(path))
+            for path in (manifest.get("downloaded_files") or [])
+            if Path(str(path)).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} and Path(str(path)).is_file()
+        ]
+        if len(images) < 2:
+            return manifest
+        stem_source = (
+            payload.get("job_id")
+            or payload.get("asset_tag")
+            or payload.get("workflow_mode")
+            or payload.get("task_type")
+            or "turnaround"
+        )
+        sheet_path = output_dir / f"{self._safe_name(str(stem_source))}_turnaround_sheet.png"
+        created = self._create_turnaround_sheet(images[:4], sheet_path, payload)
+        if not created:
+            return manifest
+        downloaded = [str(sheet_path), *[str(path) for path in (manifest.get("downloaded_files") or []) if str(path) != str(sheet_path)]]
+        updated = dict(manifest)
+        updated["downloaded_files"] = downloaded
+        updated["turnaround_sheet"] = {
+            "file": str(sheet_path),
+            "source_files": [str(path) for path in images[:4]],
+            "layout": created,
+            "note": "Auto-stitched multi-view turnaround sheet for identity/keyframe reference input.",
+        }
+        manifest_path = output_dir / "cloud_comfyui_manifest.json"
+        if manifest_path.is_file():
+            existing = read_json(manifest_path)
+            if existing:
+                existing.update(updated)
+                self._write_json(manifest_path, existing)
+        return updated
+
+    @classmethod
+    def _is_turnaround_request(cls, payload: dict[str, Any], compose_config: dict[str, Any]) -> bool:
+        values = []
+        for source in (payload, compose_config):
+            for key in (
+                "workflow_id",
+                "workflow_mode",
+                "image_task_mode",
+                "task_type",
+                "image_task_type",
+                "asset_tag",
+                "control_mode",
+                "workflow_preset_id",
+                "workflow_preset_name",
+            ):
+                values.append(str(source.get(key) or ""))
+        text = " ".join(values).lower()
+        return any(marker in text for marker in ("turnaround", "three_view", "three-views", "multi_view", "三视", "四视"))
+
+    @classmethod
+    def _create_turnaround_sheet(cls, image_paths: list[Path], output_path: Path, payload: dict[str, Any]) -> dict[str, Any]:
+        opened: list[Image.Image] = []
+        try:
+            for path in image_paths:
+                with Image.open(path) as image:
+                    opened.append(ImageOps.exif_transpose(image).convert("RGBA"))
+            if len(opened) < 2:
+                return {}
+            columns, rows = cls._turnaround_sheet_layout(opened, payload)
+            tile_width = max(image.width for image in opened)
+            tile_height = max(image.height for image in opened)
+            gutter = 16
+            max_long_side = 4096
+            raw_width = columns * tile_width + gutter * (columns + 1)
+            raw_height = rows * tile_height + gutter * (rows + 1)
+            scale = min(1.0, max_long_side / max(raw_width, raw_height))
+            if scale < 1.0:
+                tile_width = max(1, int(tile_width * scale))
+                tile_height = max(1, int(tile_height * scale))
+                gutter = max(6, int(gutter * scale))
+            sheet_width = columns * tile_width + gutter * (columns + 1)
+            sheet_height = rows * tile_height + gutter * (rows + 1)
+            sheet = Image.new("RGBA", (sheet_width, sheet_height), (246, 246, 242, 255))
+            for index, image in enumerate(opened):
+                row = index // columns
+                column = index % columns
+                fitted = ImageOps.contain(image, (tile_width, tile_height), method=Image.Resampling.LANCZOS)
+                tile = Image.new("RGBA", (tile_width, tile_height), (255, 255, 255, 255))
+                offset = ((tile_width - fitted.width) // 2, (tile_height - fitted.height) // 2)
+                tile.alpha_composite(fitted, offset)
+                x = gutter + column * (tile_width + gutter)
+                y = gutter + row * (tile_height + gutter)
+                sheet.alpha_composite(tile, (x, y))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            sheet.convert("RGB").save(output_path, "PNG", optimize=True)
+            return {
+                "columns": columns,
+                "rows": rows,
+                "width": sheet_width,
+                "height": sheet_height,
+            }
+        finally:
+            for image in opened:
+                image.close()
+
+    @staticmethod
+    def _turnaround_sheet_layout(images: list[Image.Image], payload: dict[str, Any]) -> tuple[int, int]:
+        count = min(4, len(images))
+        if count <= 1:
+            return 1, 1
+        candidates = {
+            2: [(2, 1), (1, 2)],
+            3: [(3, 1), (1, 3)],
+            4: [(4, 1), (2, 2), (1, 4)],
+        }.get(count, [(count, 1)])
+        try:
+            target_width = float(payload.get("width") or payload.get("delivery_width") or 0)
+            target_height = float(payload.get("height") or payload.get("delivery_height") or 0)
+        except (TypeError, ValueError):
+            target_width = target_height = 0
+        panel_ratio = sum((image.width / max(1, image.height)) for image in images[:count]) / count
+        target_ratio = (target_width / target_height) if target_width > 0 and target_height > 0 else panel_ratio
+
+        def score(layout: tuple[int, int]) -> float:
+            columns, rows = layout
+            sheet_ratio = (columns * panel_ratio) / max(1, rows)
+            return abs(sheet_ratio - target_ratio)
+
+        return min(candidates, key=score)
 
     def _load_cached_artifacts(self, state: dict[str, Any], images: list[str], generated_map: dict[str, str]) -> None:
         jobs = state.get("jobs") if isinstance(state.get("jobs"), dict) else {}

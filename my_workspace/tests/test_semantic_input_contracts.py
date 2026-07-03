@@ -6,6 +6,8 @@ import unittest
 import json
 from pathlib import Path
 
+from PIL import Image
+
 
 WORKSPACE = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(WORKSPACE / "my_workspace"))
@@ -15,6 +17,7 @@ from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter  # noqa: E40
 from my_codex_core.production_plan_compiler import (  # noqa: E402
     _bind_first_source_video,
     _image_prompt_item,
+    compile_production_plan,
 )
 
 
@@ -39,6 +42,10 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("'keyframe'", group_line)
         self.assertIn("'identity_keyframe'", group_line)
         self.assertIn("'pose_identity_keyframe'", group_line)
+        self.assertIn("comfyDebugCharacterEntity", source)
+        self.assertIn("comfyDebugIdentityAssetReference", source)
+        self.assertIn("comfyDebugPoseAssetReference", source)
+        self.assertIn("productionEntityTurnaround", source)
 
     def test_consistent_character_keyframe_presets_are_mode_specific(self) -> None:
         library = WORKSPACE / "my_workspace" / "comfyui_workflows" / "workflow_library" / "04_keyframe_image"
@@ -115,6 +122,85 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(item["workflow_mode"], "identity_keyframe")
         self.assertEqual(item["input_identity_image"], "character.png")
 
+    def test_character_asset_id_and_turnaround_link_to_keyframe_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            entity_path = root / "entities.json"
+            library_path = root / "library.json"
+            entity_path.write_text(
+                json.dumps(
+                    {
+                        "characters": {
+                            "hero": {
+                                "character_id": "hero",
+                                "name": "Hero",
+                                "master_image": "asset_master",
+                                "turnaround_images": ["asset_turnaround"],
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            library_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "asset_master",
+                            "asset_id": "asset_master",
+                            "file": "01_character_base/hero.png",
+                            "kind": "image",
+                            "tags": ["character_base"],
+                            "character_id": "hero",
+                            "approved": True,
+                        },
+                        {
+                            "id": "asset_turnaround",
+                            "asset_id": "asset_turnaround",
+                            "file": "04_character_turnaround/hero_views.png",
+                            "kind": "image",
+                            "tags": ["character_turnaround"],
+                            "character_id": "hero",
+                            "approved": True,
+                        },
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            image_content = json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_keyframe",
+                                "intent_id": "hero_shot_001",
+                                "character_id": "hero",
+                                "prompt": "Hero walks through a realistic office",
+                            }
+                        ]
+                    }
+                }
+            )
+            plan = compile_production_plan(
+                task_id="entity_link_test",
+                route_content='{"production_type":"custom"}',
+                image_content=image_content,
+                entity_path=entity_path,
+                asset_library_path=library_path,
+            )
+            item = plan["compiled_payload"]["image_prompts"][0]
+            self.assertEqual(item["workflow_mode"], "identity_keyframe")
+            self.assertEqual(
+                item["input_identity_image"],
+                "my_workspace/my_asset_library/01_character_base/hero.png",
+            )
+            self.assertIn(
+                "my_workspace/my_asset_library/04_character_turnaround/hero_views.png",
+                item["reference_images"],
+            )
+
     def test_video_source_binding_uses_video_output(self) -> None:
         item = {"source_intent_ids": ["clip_001"], "input_bindings": {}, "depends_on": []}
         _bind_first_source_video(item, {"clip_001"})
@@ -136,6 +222,50 @@ class SemanticInputContractTests(unittest.TestCase):
         built = adapter._build_runninghub_payload(payload, config)
         values = [item["fieldValue"] for item in built["nodeInfoList"]]
         self.assertEqual(values, ["identity.png", "source.mp4"])
+
+    def test_turnaround_outputs_are_stitched_for_portrait_keyframe_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            files = self._make_turnaround_images(root, size=(40, 80))
+            adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+            manifest = adapter._maybe_append_turnaround_sheet(
+                {"task_type": "character_turnaround", "width": 480, "height": 848},
+                {},
+                root,
+                {"status": "success", "downloaded_files": [str(path) for path in files]},
+            )
+            sheet = Path(manifest["downloaded_files"][0])
+            self.assertTrue(sheet.name.endswith("_turnaround_sheet.png"))
+            self.assertEqual(Path(manifest["turnaround_sheet"]["file"]), sheet)
+            self.assertEqual(manifest["turnaround_sheet"]["layout"]["columns"], 2)
+            with Image.open(sheet) as image:
+                self.assertGreater(image.height, image.width)
+
+    def test_turnaround_outputs_are_stitched_for_landscape_keyframe_input(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            files = self._make_turnaround_images(root, size=(40, 80))
+            adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+            manifest = adapter._maybe_append_turnaround_sheet(
+                {"workflow_mode": "product_turnaround", "width": 848, "height": 480},
+                {},
+                root,
+                {"status": "success", "downloaded_files": [str(path) for path in files]},
+            )
+            sheet = Path(manifest["downloaded_files"][0])
+            self.assertEqual(manifest["turnaround_sheet"]["layout"]["columns"], 4)
+            with Image.open(sheet) as image:
+                self.assertGreater(image.width, image.height)
+
+    @staticmethod
+    def _make_turnaround_images(root: Path, size: tuple[int, int]) -> list[Path]:
+        files = []
+        colors = ["red", "green", "blue", "purple"]
+        for index, color in enumerate(colors, start=1):
+            path = root / f"view_{index}.png"
+            Image.new("RGB", size, color).save(path)
+            files.append(path)
+        return files
 
 
 if __name__ == "__main__":

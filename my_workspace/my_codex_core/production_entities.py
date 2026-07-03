@@ -6,6 +6,7 @@ from typing import Any
 
 
 DEFAULT_ENTITY_PATH = Path("my_workspace/my_production_entities/production_entities.json")
+DEFAULT_ASSET_LIBRARY_PATH = Path("my_workspace/my_asset_library/library.json")
 ENTITY_GROUPS = {
     "characters": "character_id",
     "styles": "style_id",
@@ -28,6 +29,96 @@ def write_production_entities(path: Path, registry: dict[str, Any]) -> dict[str,
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(normalized, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return normalized
+
+
+def load_asset_library(path: Path | None = None) -> list[dict[str, Any]]:
+    target = path or DEFAULT_ASSET_LIBRARY_PATH
+    try:
+        data = json.loads(target.read_text(encoding="utf-8-sig"))
+    except Exception:
+        data = []
+    return [dict(item) for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+
+
+def link_production_entities_to_assets(
+    registry: dict[str, Any],
+    asset_library: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Resolve entity asset IDs and infer entity references from library relations.
+
+    The persisted entity registry may intentionally contain stable asset IDs.
+    RunningHub needs real workspace paths, so the compiler uses this linked copy
+    without rewriting the user's registry. Character turnarounds are identity
+    references; they never become pose-control inputs implicitly.
+    """
+
+    linked = normalize_production_entities(registry)
+    assets = [dict(item) for item in (asset_library or []) if isinstance(item, dict)]
+    assets.sort(
+        key=lambda item: (
+            bool(item.get("approved")),
+            float(item.get("updated_at") or item.get("created_at") or 0),
+        ),
+        reverse=True,
+    )
+    by_id: dict[str, dict[str, Any]] = {}
+    for item in assets:
+        for key in (item.get("asset_id"), item.get("id")):
+            asset_id = str(key or "").strip()
+            if asset_id:
+                by_id[asset_id] = item
+
+    def resolve(value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        item = by_id.get(text)
+        if item:
+            return _asset_workspace_path(item)
+        return text.replace("\\", "/")
+
+    for group, id_key in ENTITY_GROUPS.items():
+        values = linked.get(group) if isinstance(linked.get(group), dict) else {}
+        for entity_id, entity in values.items():
+            if not isinstance(entity, dict):
+                continue
+            for key in ("master_image", "style_reference", "product_master_image", "scene_reference", "expression_sheet"):
+                if key in entity:
+                    entity[key] = resolve(entity.get(key))
+            for key in ("turnaround_images", "reference_assets", "approved_asset_ids"):
+                raw = entity.get(key)
+                if isinstance(raw, list):
+                    entity[key] = list(dict.fromkeys(filter(None, (resolve(item) for item in raw))))
+
+            matched = [item for item in assets if str(item.get(id_key) or "").strip() == str(entity_id)]
+            matched_paths = [path for path in (_asset_workspace_path(item) for item in matched) if path]
+            if matched_paths:
+                current = entity.get("reference_assets") if isinstance(entity.get("reference_assets"), list) else []
+                entity["reference_assets"] = list(dict.fromkeys([*current, *matched_paths]))
+
+            if group == "characters":
+                turnarounds = [
+                    _asset_workspace_path(item)
+                    for item in matched
+                    if _asset_has_tag(item, {"character_turnaround", "turnaround", "three_view", "three_views"})
+                ]
+                current_turnarounds = entity.get("turnaround_images") if isinstance(entity.get("turnaround_images"), list) else []
+                entity["turnaround_images"] = list(dict.fromkeys(filter(None, [*current_turnarounds, *turnarounds])))
+                if not str(entity.get("master_image") or "").strip():
+                    masters = [
+                        _asset_workspace_path(item)
+                        for item in matched
+                        if _asset_has_tag(item, {"character_base", "character_master", "identity_reference"})
+                    ]
+                    candidates = [*masters, *entity["turnaround_images"], *matched_paths]
+                    entity["master_image"] = next((value for value in candidates if value), "")
+            elif group == "styles" and not str(entity.get("style_reference") or "").strip():
+                entity["style_reference"] = next(iter(matched_paths), "")
+            elif group == "products" and not str(entity.get("product_master_image") or "").strip():
+                entity["product_master_image"] = next(iter(matched_paths), "")
+            elif group == "scenes" and not str(entity.get("scene_reference") or "").strip():
+                entity["scene_reference"] = next(iter(matched_paths), "")
+    return linked
 
 
 def normalize_production_entities(data: Any) -> dict[str, Any]:
@@ -296,6 +387,21 @@ def _entity_constraints(entity: dict[str, Any]) -> list[str]:
         elif isinstance(raw, str) and raw.strip():
             constraints.append(raw.strip())
     return list(dict.fromkeys(constraints))
+
+
+def _asset_workspace_path(item: dict[str, Any]) -> str:
+    value = str(item.get("file") or item.get("path") or "").strip().replace("\\", "/")
+    if not value:
+        return ""
+    if value.startswith("my_workspace/") or ":/" in value or value.startswith("/"):
+        return value
+    return f"my_workspace/my_asset_library/{value.lstrip('/')}"
+
+
+def _asset_has_tag(item: dict[str, Any], expected: set[str]) -> bool:
+    raw = item.get("tags")
+    tags = {str(value).strip().lower() for value in raw if str(value).strip()} if isinstance(raw, list) else set()
+    return bool(tags & expected)
 
 
 def _first_by_id(values: Any, key: str, entity_id: str) -> dict[str, Any]:

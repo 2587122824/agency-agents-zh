@@ -10,6 +10,8 @@ from .production_entities import (
     collect_entity_references,
     enrich_global_context_with_entities,
     entity_context_for_ids,
+    link_production_entities_to_assets,
+    load_asset_library,
     load_production_entities,
 )
 from .production_parameter_policy import (
@@ -22,6 +24,7 @@ from .production_parameter_policy import (
 PLAN_SCHEMA_VERSION = 1
 DEFAULT_TEMPLATE_PATH = Path("my_workspace/my_production_templates/production_templates.json")
 DEFAULT_ENTITY_PATH = Path("my_workspace/my_production_entities/production_entities.json")
+DEFAULT_ASSET_LIBRARY_PATH = Path("my_workspace/my_asset_library/library.json")
 PRODUCTION_TYPES = {"drama_story", "product_promo", "talking_avatar", "asset_only", "custom"}
 FRAME_ROLE_SUFFIX = {
     "start": "start_frame",
@@ -67,6 +70,7 @@ def compile_production_plan(
     voice_config: dict[str, Any] | None = None,
     template_path: Path | None = None,
     entity_path: Path | None = None,
+    asset_library_path: Path | None = None,
 ) -> dict[str, Any]:
     """Compile digital-staff production intents into a conservative production plan.
 
@@ -101,7 +105,10 @@ def compile_production_plan(
         "audio": _intent_list(audio_payload, "audio"),
         "package": _intent_list(package_payload, "package"),
     }
-    entity_registry = load_production_entities(entity_path or DEFAULT_ENTITY_PATH)
+    entity_registry = link_production_entities_to_assets(
+        load_production_entities(entity_path or DEFAULT_ENTITY_PATH),
+        load_asset_library(asset_library_path or DEFAULT_ASSET_LIBRARY_PATH),
+    )
     entity_references = collect_entity_references(
         production_intents,
         [route_payload, image_payload, video_payload, audio_payload, package_payload, existing_payload or {}],

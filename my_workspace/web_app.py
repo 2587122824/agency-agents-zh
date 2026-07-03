@@ -3167,6 +3167,9 @@ INDEX_HTML = r"""<!doctype html>
                   <label>参考资产 / 母版图
                     <input id="productionEntityReference" autocomplete="off" spellcheck="false" placeholder="my_workspace/my_asset_library/xxx.png 或资产ID" />
                   </label>
+                  <label id="productionEntityTurnaroundField">角色三视图资产（每行一个路径或资产 ID）
+                    <textarea id="productionEntityTurnaround" spellcheck="false" placeholder="character_turnaround_asset_id&#10;my_workspace/my_asset_library/04_character_turnaround/xxx.png"></textarea>
+                  </label>
                   <label>推荐权重
                     <input id="productionEntityWeight" autocomplete="off" spellcheck="false" placeholder="例如 0.75，可留空" />
                   </label>
@@ -3305,6 +3308,21 @@ INDEX_HTML = r"""<!doctype html>
                 </label>
                 <label id="comfyDebugPoseImageField" hidden>姿态参考图路径
                   <input id="comfyDebugPoseImage" autocomplete="off" spellcheck="false" placeholder="input_pose_image：姿态/构图控制图" />
+                </label>
+                <label id="comfyDebugCharacterEntityField" hidden>角色实体
+                  <select id="comfyDebugCharacterEntity">
+                    <option value="">不使用角色实体自动联动</option>
+                  </select>
+                </label>
+                <label id="comfyDebugIdentityAssetField" hidden>身份母版 / 三视图
+                  <select id="comfyDebugIdentityAssetReference">
+                    <option value="">请选择角色母版或三视图</option>
+                  </select>
+                </label>
+                <label id="comfyDebugPoseAssetField" hidden>独立姿态素材
+                  <select id="comfyDebugPoseAssetReference">
+                    <option value="">请选择姿态图（不要用三视图代替）</option>
+                  </select>
                 </label>
               </div>
               <input id="comfyDebugMiddleFrameReference" type="hidden" />
@@ -3817,6 +3835,8 @@ INDEX_HTML = r"""<!doctype html>
       productionEntityId: document.getElementById('productionEntityId'),
       productionEntityName: document.getElementById('productionEntityName'),
       productionEntityReference: document.getElementById('productionEntityReference'),
+      productionEntityTurnaroundField: document.getElementById('productionEntityTurnaroundField'),
+      productionEntityTurnaround: document.getElementById('productionEntityTurnaround'),
       productionEntityWeight: document.getElementById('productionEntityWeight'),
       productionEntityConstraints: document.getElementById('productionEntityConstraints'),
       productionEntityExtraJson: document.getElementById('productionEntityExtraJson'),
@@ -3846,6 +3866,12 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugSourceVideo: document.getElementById('comfyDebugSourceVideo'),
       comfyDebugPoseImageField: document.getElementById('comfyDebugPoseImageField'),
       comfyDebugPoseImage: document.getElementById('comfyDebugPoseImage'),
+      comfyDebugCharacterEntityField: document.getElementById('comfyDebugCharacterEntityField'),
+      comfyDebugCharacterEntity: document.getElementById('comfyDebugCharacterEntity'),
+      comfyDebugIdentityAssetField: document.getElementById('comfyDebugIdentityAssetField'),
+      comfyDebugIdentityAssetReference: document.getElementById('comfyDebugIdentityAssetReference'),
+      comfyDebugPoseAssetField: document.getElementById('comfyDebugPoseAssetField'),
+      comfyDebugPoseAssetReference: document.getElementById('comfyDebugPoseAssetReference'),
       comfyDebugReferencePreview: document.getElementById('comfyDebugReferencePreview'),
       comfyDebugReferencePreviewMeta: document.getElementById('comfyDebugReferencePreviewMeta'),
       comfyDebugMiddleFrameCard: document.getElementById('comfyDebugMiddleFrameCard'),
@@ -5933,6 +5959,9 @@ INDEX_HTML = r"""<!doctype html>
         audioFile: els.comfyDebugAudioFile?.value || '',
         sourceVideo: els.comfyDebugSourceVideo?.value || '',
         poseImage: els.comfyDebugPoseImage?.value || '',
+        characterEntity: els.comfyDebugCharacterEntity?.value || '',
+        identityAssetReference: els.comfyDebugIdentityAssetReference?.value || '',
+        poseAssetReference: els.comfyDebugPoseAssetReference?.value || '',
         seed: els.comfyDebugSeed?.value || '',
         width: els.comfyDebugWidth?.value || '',
         height: els.comfyDebugHeight?.value || '',
@@ -5974,6 +6003,9 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugAudioFile) els.comfyDebugAudioFile.value = state.audioFile || '';
       if (els.comfyDebugSourceVideo) els.comfyDebugSourceVideo.value = state.sourceVideo || '';
       if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = state.poseImage || '';
+      if (els.comfyDebugCharacterEntity) els.comfyDebugCharacterEntity.value = state.characterEntity || '';
+      if (els.comfyDebugIdentityAssetReference) els.comfyDebugIdentityAssetReference.value = state.identityAssetReference || '';
+      if (els.comfyDebugPoseAssetReference) els.comfyDebugPoseAssetReference.value = state.poseAssetReference || '';
       if (els.comfyDebugSeed) els.comfyDebugSeed.value = state.seed || '';
       if (els.comfyDebugWidth) els.comfyDebugWidth.value = state.width || '';
       if (els.comfyDebugHeight) els.comfyDebugHeight.value = state.height || '';
@@ -5998,6 +6030,7 @@ INDEX_HTML = r"""<!doctype html>
         els.comfyDebugLastFrameReferenceHint.textContent = state.lastFrameReferenceHint || '首尾帧视频需要第二张尾帧图。';
       }
       updateComfyImageTaskHint();
+      renderComfyDebugEntityReferenceOptions(state);
       updateComfyDebugReferencePreviews();
       updateComfyDebugMediaFields();
       comfyDebugFormHydrated = true;
@@ -9180,6 +9213,7 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugAudioFileField) els.comfyDebugAudioFileField.hidden = !acceptedInputs.includes('input_audio_file');
       if (els.comfyDebugSourceVideoField) els.comfyDebugSourceVideoField.hidden = !acceptedInputs.includes('input_source_video');
       if (els.comfyDebugPoseImageField) els.comfyDebugPoseImageField.hidden = !acceptedInputs.includes('input_pose_image');
+      renderComfyDebugEntityReferenceOptions();
       updateComfyDebugFrameCountHint();
       updateComfyDebugReferencePreviews();
     }
@@ -9222,6 +9256,7 @@ INDEX_HTML = r"""<!doctype html>
         renderAssetTagFilters();
         renderAssetLibrary();
         renderComfyDebugAssetReferenceOptions();
+        renderComfyDebugEntityReferenceOptions();
         setStatus('素材信息已保存', false);
       } catch (err) {
         setStatus(err.message || '素材信息保存失败', true);
@@ -9316,6 +9351,7 @@ INDEX_HTML = r"""<!doctype html>
           ? data.entities
           : { characters: {}, styles: {}, products: {}, scenes: {} };
         renderProductionEntityList();
+        renderComfyDebugEntityReferenceOptions();
         if (els.productionEntityStatus) {
           const total = productionEntityGroups().reduce((sum, group) => sum + Object.keys(productionEntities[group] || {}).length, 0);
           els.productionEntityStatus.textContent = `已加载 ${total} 个生产实体`;
@@ -9404,6 +9440,11 @@ INDEX_HTML = r"""<!doctype html>
       if (els.productionEntityId) els.productionEntityId.value = item[idKey] || item.id || '';
       if (els.productionEntityName) els.productionEntityName.value = item.name || '';
       if (els.productionEntityReference) els.productionEntityReference.value = item[refKey] || '';
+      if (els.productionEntityTurnaroundField) els.productionEntityTurnaroundField.hidden = group !== 'characters';
+      if (els.productionEntityTurnaround) {
+        const turnarounds = group === 'characters' && Array.isArray(item.turnaround_images) ? item.turnaround_images : [];
+        els.productionEntityTurnaround.value = turnarounds.join('\n');
+      }
       if (els.productionEntityWeight) els.productionEntityWeight.value = item.recommended_weight || '';
       const constraints = Array.isArray(item[constraintKey]) ? item[constraintKey] : [];
       if (els.productionEntityConstraints) els.productionEntityConstraints.value = constraints.join('\n');
@@ -9412,6 +9453,7 @@ INDEX_HTML = r"""<!doctype html>
       delete extra.id;
       delete extra.name;
       delete extra[refKey];
+      delete extra.turnaround_images;
       delete extra.recommended_weight;
       delete extra[constraintKey];
       if (els.productionEntityExtraJson) els.productionEntityExtraJson.value = JSON.stringify(extra, null, 2);
@@ -9457,6 +9499,12 @@ INDEX_HTML = r"""<!doctype html>
         recommended_weight: String(els.productionEntityWeight?.value || '').trim(),
         [constraintKey]: constraints,
       };
+      if (group === 'characters') {
+        item.turnaround_images = String(els.productionEntityTurnaround?.value || '')
+          .split(/\r?\n/)
+          .map(value => value.trim())
+          .filter(Boolean);
+      }
       const next = JSON.parse(JSON.stringify(productionEntities || {}));
       next[group] = next[group] && typeof next[group] === 'object' ? next[group] : {};
       if (selectedProductionEntityId && selectedProductionEntityId !== id) {
@@ -9474,6 +9522,129 @@ INDEX_HTML = r"""<!doctype html>
       fillProductionEntityEditor((productionEntities[group] || {})[id] || item);
       if (els.productionEntityStatus) els.productionEntityStatus.textContent = `已保存实体：${id}`;
       setStatus(`已保存生产实体：${id}`, false);
+      renderComfyDebugEntityReferenceOptions();
+    }
+
+    function comfyAssetPath(item) {
+      const file = String(item?.file || '').replace(/\\/g, '/').trim();
+      if (!file) return '';
+      return file.startsWith('my_workspace/') || /^[A-Za-z]:\//.test(file)
+        ? file
+        : `my_workspace/my_asset_library/${file.replace(/^\/+/, '')}`;
+    }
+
+    function resolveComfyEntityAsset(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const item = assetLibraryItems.find(asset => String(asset.asset_id || asset.id || '') === raw);
+      return item ? comfyAssetPath(item) : raw.replace(/\\/g, '/');
+    }
+
+    function characterEntityReferenceCandidates(entityId = '') {
+      const entity = productionEntities?.characters?.[entityId] || {};
+      const values = [
+        entity.master_image,
+        ...(Array.isArray(entity.turnaround_images) ? entity.turnaround_images : []),
+        ...(Array.isArray(entity.reference_assets) ? entity.reference_assets : []),
+        ...(Array.isArray(entity.approved_asset_ids) ? entity.approved_asset_ids : []),
+      ];
+      assetLibraryItems.forEach(item => {
+        if (entityId && String(item.character_id || '') === entityId) values.push(item.asset_id || item.id || item.file);
+      });
+      return [...new Set(values.map(resolveComfyEntityAsset).filter(Boolean))];
+    }
+
+    function appendComfyAssetOption(select, value, label) {
+      if (!select || !value || [...select.options].some(option => option.value === value)) return;
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label || value.split('/').pop() || value;
+      select.appendChild(option);
+    }
+
+    function renderComfyDebugEntityReferenceOptions(preferred = {}) {
+      const acceptedInputs = modeAcceptedInputs(selectedWorkflowModeDefinition(activeComfyDebugWorkflow()));
+      const needsIdentity = acceptedInputs.includes('input_identity_image');
+      const needsPose = acceptedInputs.includes('input_pose_image');
+      if (els.comfyDebugCharacterEntityField) els.comfyDebugCharacterEntityField.hidden = !needsIdentity;
+      if (els.comfyDebugIdentityAssetField) els.comfyDebugIdentityAssetField.hidden = !needsIdentity;
+      if (els.comfyDebugPoseAssetField) els.comfyDebugPoseAssetField.hidden = !needsPose;
+      if (!needsIdentity && !needsPose) return;
+
+      const currentEntity = String(preferred.characterEntity ?? els.comfyDebugCharacterEntity?.value ?? '');
+      const currentIdentity = String(preferred.identityAssetReference ?? els.comfyDebugIdentityAssetReference?.value ?? '');
+      const currentPose = String(preferred.poseAssetReference ?? els.comfyDebugPoseAssetReference?.value ?? '');
+      if (els.comfyDebugCharacterEntity) {
+        els.comfyDebugCharacterEntity.innerHTML = '<option value="">不使用角色实体自动联动</option>';
+        Object.values(productionEntities?.characters || {}).forEach(entity => {
+          const id = String(entity?.character_id || entity?.id || '').trim();
+          if (!id) return;
+          const option = document.createElement('option');
+          option.value = id;
+          option.textContent = `${entity.name || id} · ${id}`;
+          els.comfyDebugCharacterEntity.appendChild(option);
+        });
+        if ([...els.comfyDebugCharacterEntity.options].some(option => option.value === currentEntity)) {
+          els.comfyDebugCharacterEntity.value = currentEntity;
+        }
+      }
+
+      if (els.comfyDebugIdentityAssetReference) {
+        els.comfyDebugIdentityAssetReference.innerHTML = '<option value="">请选择角色母版或三视图</option>';
+        const candidates = currentEntity
+          ? characterEntityReferenceCandidates(currentEntity)
+          : assetLibraryItems.filter(item => {
+              const tags = normalizeAssetTags(item.tags || []);
+              const isCharacterReference = Boolean(item.character_id) || tags.some(tag => [
+                'character_base', 'character_master', 'identity_reference',
+                'character_turnaround', 'turnaround', 'three_view', 'three_views',
+              ].includes(tag));
+              return isCharacterReference && (String(item.kind || '').toLowerCase() === 'image' || isImageFile(item.file || ''));
+            }).map(comfyAssetPath).filter(Boolean);
+        candidates.forEach(value => {
+          const item = assetLibraryItems.find(asset => comfyAssetPath(asset) === value);
+          const tags = normalizeAssetTags(item?.tags || []);
+          const kind = tags.some(tag => ['character_turnaround', 'turnaround', 'three_view', 'three_views'].includes(tag)) ? '三视图' : '身份参考';
+          appendComfyAssetOption(els.comfyDebugIdentityAssetReference, value, `${kind} · ${item?.name || value.split('/').pop()}`);
+        });
+        appendComfyAssetOption(els.comfyDebugIdentityAssetReference, currentIdentity, `当前 · ${currentIdentity.split('/').pop()}`);
+        els.comfyDebugIdentityAssetReference.value = currentIdentity;
+      }
+
+      if (els.comfyDebugPoseAssetReference) {
+        els.comfyDebugPoseAssetReference.innerHTML = '<option value="">请选择姿态图（不要用三视图代替）</option>';
+        assetLibraryItems.filter(item => {
+          const file = String(item.file || '');
+          const tags = normalizeAssetTags(item.tags || []);
+          const isIdentitySheet = tags.some(tag => [
+            'character_base', 'character_master', 'identity_reference',
+            'character_turnaround', 'turnaround', 'three_view', 'three_views',
+          ].includes(tag));
+          const sameCharacter = !currentEntity || !item.character_id || String(item.character_id) === currentEntity;
+          return sameCharacter && !isIdentitySheet && (String(item.kind || '').toLowerCase() === 'image' || isImageFile(file));
+        }).forEach(item => appendComfyAssetOption(
+          els.comfyDebugPoseAssetReference,
+          comfyAssetPath(item),
+          `姿态候选 · ${item.name || assetFileLabel(item.file)}`,
+        ));
+        appendComfyAssetOption(els.comfyDebugPoseAssetReference, currentPose, `当前 · ${currentPose.split('/').pop()}`);
+        els.comfyDebugPoseAssetReference.value = currentPose;
+      }
+    }
+
+    function applyComfyDebugCharacterEntity() {
+      const entityId = els.comfyDebugCharacterEntity?.value || '';
+      renderComfyDebugEntityReferenceOptions({ characterEntity: entityId });
+      if (!entityId) return;
+      const candidate = characterEntityReferenceCandidates(entityId)[0] || '';
+      if (!candidate) {
+        setStatus('该角色实体还没有母版图或三视图资产，请先在素材库/实体管理中关联。', true);
+        return;
+      }
+      if (els.comfyDebugIdentityAssetReference) els.comfyDebugIdentityAssetReference.value = candidate;
+      setComfyDebugReference(candidate, `已从角色实体 ${entityId} 联动身份参考：${candidate}`);
+      saveCurrentComfyDebugUiState();
+      saveSettings();
     }
 
     function setComfyDebugReference(value = '', hint = '') {
@@ -12142,6 +12313,32 @@ INDEX_HTML = r"""<!doctype html>
       saveSettings();
       autoSaveActiveComfyDebugWorkflowConfig();
     };
+    if (els.comfyDebugCharacterEntity) {
+      els.comfyDebugCharacterEntity.onchange = () => {
+        applyComfyDebugCharacterEntity();
+        autoSaveActiveComfyDebugWorkflowConfig();
+      };
+    }
+    if (els.comfyDebugIdentityAssetReference) {
+      els.comfyDebugIdentityAssetReference.onchange = () => {
+        const value = els.comfyDebugIdentityAssetReference.value || '';
+        if (value && els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+        if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = value;
+        setComfyDebugReference(value, value ? `已联动身份母版/三视图：${value}` : '');
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+      };
+    }
+    if (els.comfyDebugPoseAssetReference) {
+      els.comfyDebugPoseAssetReference.onchange = () => {
+        const value = els.comfyDebugPoseAssetReference.value || '';
+        if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = value;
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+      };
+    }
     if (els.comfyDebugMiddleFrameAssetReference) {
       els.comfyDebugMiddleFrameAssetReference.onchange = () => {
         const value = els.comfyDebugMiddleFrameAssetReference.value;
@@ -12178,6 +12375,7 @@ INDEX_HTML = r"""<!doctype html>
     if (els.comfyDebugWorkflowMode) {
       els.comfyDebugWorkflowMode.onchange = () => {
         updateComfyImageTaskHint();
+        updateComfyDebugMediaFields();
         updateComfyDebugReferencePreviews();
         saveCurrentComfyDebugUiState();
         saveSettings();
