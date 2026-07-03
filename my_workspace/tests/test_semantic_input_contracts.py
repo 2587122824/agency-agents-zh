@@ -30,6 +30,15 @@ class SemanticInputContractTests(unittest.TestCase):
             ["input_identity_image", "input_pose_image"],
         )
 
+    def test_keyframe_ui_group_lists_all_keyframe_modes(self) -> None:
+        source = (WORKSPACE / "my_workspace" / "web_app.py").read_text(encoding="utf-8")
+        group_line = next(
+            line for line in source.splitlines() if "id: 'storyboard_keyframe'" in line
+        )
+        self.assertIn("'keyframe'", group_line)
+        self.assertIn("'identity_keyframe'", group_line)
+        self.assertIn("'pose_identity_keyframe'", group_line)
+
     def test_video_post_modes_require_source_video(self) -> None:
         for workflow_id in ("11_video_enhance", "12_video_inpaint_fix"):
             for mode in self.workflows[workflow_id]["modes"]:

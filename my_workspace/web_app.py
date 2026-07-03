@@ -4101,7 +4101,7 @@ INDEX_HTML = r"""<!doctype html>
     const comfyDebugCollapsedCapabilityGroups = new Set();
     const COMFY_DEBUG_CAPABILITY_GROUPS = [
       { id: 'asset_image', label: '01 基础资产', modes: ['character_base', 'product_base', 'scene_base', 'style_reference', 'character_turnaround', 'product_turnaround', 'cover_key_visual'] },
-      { id: 'storyboard_keyframe', label: '02 分镜关键帧', modes: ['keyframe'] },
+      { id: 'storyboard_keyframe', label: '02 分镜关键帧', modes: ['keyframe', 'identity_keyframe', 'pose_identity_keyframe'] },
       { id: 'image_post', label: '03 图片处理', modes: ['image_inpaint_fix', 'background_remove'] },
       { id: 'video_creation', label: '04 视频生成', modes: ['i2v_first_frame', 'i2v_first_middle_last_frame', 'i2v_first_last_frame', 'broll_scene_video', 'empty_transition_video'] },
       { id: 'video_control', label: '05 视频控制', modes: ['live_to_anime', 'motion_transfer'] },
