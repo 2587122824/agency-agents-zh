@@ -5671,7 +5671,16 @@ INDEX_HTML = r"""<!doctype html>
       const selectedMode = String(mode || workflow.modes?.[0]?.value || item.defaultWorkflowMode || 'default');
       if (!item.modeConfigs || typeof item.modeConfigs !== 'object') item.modeConfigs = {};
       if (!item.modeConfigs[selectedMode] && create) {
-        item.modeConfigs[selectedMode] = normalizeComfyModeConfig({}, item);
+        const modeDef = workflowModesForWorkflow(workflow).find(entry => String(entry.value || '') === selectedMode) || {};
+        const modeFallback = {
+          ...item,
+          nodeInfoList: modeDef.default_node_info || modeDef.defaultNodeInfo || item.nodeInfoList,
+          defaultWidth: modeDef.default_width || modeDef.defaultWidth || item.defaultWidth,
+          defaultHeight: modeDef.default_height || modeDef.defaultHeight || item.defaultHeight,
+          defaultFps: modeDef.default_fps || modeDef.defaultFps || item.defaultFps,
+          defaultDuration: modeDef.default_duration || modeDef.defaultDuration || item.defaultDuration,
+        };
+        item.modeConfigs[selectedMode] = normalizeComfyModeConfig({}, modeFallback);
       }
       return item.modeConfigs[selectedMode] || null;
     }
@@ -15506,12 +15515,28 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             default_node_info = str(item.get("default_node_info") or "").strip()
             if not default_node_info or default_node_info == "[]":
                 item["default_node_info"] = cls._default_comfy_debug_node_info(item_id)
+            for mode in item.get("modes") or []:
+                if not isinstance(mode, dict):
+                    continue
+                mode_value = str(mode.get("value") or "").strip()
+                mode_node_info = str(mode.get("default_node_info") or "").strip()
+                if mode_value and (not mode_node_info or mode_node_info == "[]"):
+                    default_mode_node_info = cls._default_comfy_debug_node_info(item_id, mode_value)
+                    if default_mode_node_info and default_mode_node_info != "[]":
+                        mode["default_node_info"] = default_mode_node_info
             seen.add(item_id)
             unique.append(item)
         return unique
 
     @classmethod
-    def _default_comfy_debug_node_info(cls, workflow_id: str) -> str:
+    def _default_comfy_debug_node_info(cls, workflow_id: str, workflow_mode: str = "") -> str:
+        mode_preset_map = {
+            ("04_keyframe", "identity_keyframe"): "04_keyframe_image/consistent_character_identity_keyframe_nodeinfo.json",
+            ("04_keyframe", "pose_identity_keyframe"): "04_keyframe_image/consistent_character_pose_identity_keyframe_nodeinfo.json",
+        }
+        mode_preset = mode_preset_map.get((str(workflow_id or "").strip(), str(workflow_mode or "").strip()))
+        if mode_preset:
+            return cls._read_workflow_library_text(mode_preset)
         preset_map = {
             "01_character_base": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
             "02_product_base": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",

@@ -1,0 +1,92 @@
+[
+  {
+    "nodeId": "626",
+    "fieldName": "image",
+    "fieldValue": "{{input_identity_image}}",
+    "description": "identity reference image for PulidFlux"
+  },
+  {
+    "nodeId": "625",
+    "fieldName": "image",
+    "fieldValue": "{{input_pose_image}}",
+    "description": "pose reference image / pose sheet"
+  },
+  {
+    "nodeId": "594",
+    "fieldName": "string",
+    "fieldValue": "{{prompt}}",
+    "description": "shot prompt / character description"
+  },
+  {
+    "nodeId": "582",
+    "fieldName": "text",
+    "fieldValue": "{{negative_prompt}}",
+    "description": "negative prompt"
+  },
+  {
+    "nodeId": "621",
+    "fieldName": "value",
+    "fieldValue": "{{width}}",
+    "description": "main generation width"
+  },
+  {
+    "nodeId": "622",
+    "fieldName": "value",
+    "fieldValue": "{{height}}",
+    "description": "main generation height"
+  },
+  {
+    "nodeId": "663",
+    "fieldName": "value",
+    "fieldValue": "{{width}}",
+    "description": "background/keyframe width"
+  },
+  {
+    "nodeId": "664",
+    "fieldName": "value",
+    "fieldValue": "{{height}}",
+    "description": "background/keyframe height"
+  },
+  {
+    "nodeId": "588",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}",
+    "description": "main generation seed"
+  },
+  {
+    "nodeId": "499",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}",
+    "description": "background/keyframe seed"
+  },
+  {
+    "nodeId": "179",
+    "fieldName": "filename_prefix",
+    "fieldValue": "pose_identity_keyframe",
+    "description": "main output prefix"
+  },
+  {
+    "nodeId": "433",
+    "fieldName": "filename_prefix",
+    "fieldValue": "pose_identity_keyframe",
+    "description": "background output prefix"
+  },
+  {
+    "nodeId": "440",
+    "fieldName": "filename_prefix",
+    "fieldValue": "pose_identity_keyframe",
+    "description": "background output prefix"
+  },
+  {
+    "nodeId": "447",
+    "fieldName": "filename_prefix",
+    "fieldValue": "pose_identity_keyframe",
+    "description": "background output prefix"
+  },
+  {
+    "nodeId": "637",
+    "fieldName": "filename_prefix",
+    "fieldValue": "pose_identity_keyframe",
+    "description": "background output prefix"
+  }
+]

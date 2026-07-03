@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 
@@ -38,6 +39,27 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("'keyframe'", group_line)
         self.assertIn("'identity_keyframe'", group_line)
         self.assertIn("'pose_identity_keyframe'", group_line)
+
+    def test_consistent_character_keyframe_presets_are_mode_specific(self) -> None:
+        library = WORKSPACE / "my_workspace" / "comfyui_workflows" / "workflow_library" / "04_keyframe_image"
+        identity_canvas = library / "consistent_character_identity_keyframe_canvas.json"
+        pose_canvas = library / "consistent_character_pose_identity_keyframe_canvas.json"
+        identity_nodeinfo = library / "consistent_character_identity_keyframe_nodeinfo.json"
+        pose_nodeinfo = library / "consistent_character_pose_identity_keyframe_nodeinfo.json"
+        for path in (identity_canvas, pose_canvas, identity_nodeinfo, pose_nodeinfo):
+            self.assertTrue(path.is_file(), path)
+
+        identity_rows = json.loads(identity_nodeinfo.read_text(encoding="utf-8"))
+        pose_rows = json.loads(pose_nodeinfo.read_text(encoding="utf-8"))
+        self.assertIn("{{input_identity_image}}", json.dumps(identity_rows, ensure_ascii=False))
+        self.assertNotIn("{{input_pose_image}}", json.dumps(identity_rows, ensure_ascii=False))
+        self.assertIn("{{input_identity_image}}", json.dumps(pose_rows, ensure_ascii=False))
+        self.assertIn("{{input_pose_image}}", json.dumps(pose_rows, ensure_ascii=False))
+
+        workflows = {item["id"]: item for item in web_app.WorkflowWebHandler._comfy_debug_workflows()}
+        modes = {item["value"]: item for item in workflows["04_keyframe"]["modes"]}
+        self.assertIn("{{input_identity_image}}", modes["identity_keyframe"]["default_node_info"])
+        self.assertIn("{{input_pose_image}}", modes["pose_identity_keyframe"]["default_node_info"])
 
     def test_video_post_modes_require_source_video(self) -> None:
         for workflow_id in ("11_video_enhance", "12_video_inpaint_fix"):

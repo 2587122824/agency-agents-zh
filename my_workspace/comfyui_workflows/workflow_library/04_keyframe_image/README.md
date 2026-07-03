@@ -58,3 +58,16 @@
 ## ??
 
 `runninghub_node_info_list_preset.json` ?? `FACEID_A_LOAD_IMAGE_NODE` ?????????????ID??????????? API JSON ?????????????????ID?
+
+## Consistent character keyframe variants
+
+The user-provided `角色一致性 & CONSISTENT CHARACTERS from an INPUT IMAGE` canvas has been adapted into two system modes:
+
+- `consistent_character_identity_keyframe_canvas.json` + `consistent_character_identity_keyframe_nodeinfo.json`
+  - for `04_keyframe / identity_keyframe`
+  - requires `{{input_identity_image}}`
+- `consistent_character_pose_identity_keyframe_canvas.json` + `consistent_character_pose_identity_keyframe_nodeinfo.json`
+  - for `04_keyframe / pose_identity_keyframe`
+  - requires `{{input_identity_image}}` and `{{input_pose_image}}`
+
+After exposing each canvas as a RunningHub workflow, paste the returned endpoint into the matching debug-console mode. The mode-specific default nodeInfoList is loaded automatically by the system and can be adjusted after importing the actual RunningHub API JSON.
