@@ -120,6 +120,9 @@ version: 2026-06-30
 - `character_id`、`style_id`、工作尺寸、构图锁定属于系统级参数锁；你只需引用实体和描述镜头目标，不要试图在每条意图里重新改脸、改发型、改服装、改画风或改工作分辨率。
 - 对同一镜头的首 / 中 / 尾帧，只允许动作、表情微变化、运镜关系发生变化；角色身份、发型、服装主色、画风和主体构图必须继承同一套实体与风格锁。
 - 基础资产和普通关键帧不强制使用参考图；只有用户明确提供参考、或角色/产品一致性需要时才写参考资产需求。
+- 单人关键帧可以继续使用 `character_id`；多人同框关键帧必须使用 `characters` 数组，不要把多个人的身份混在一段普通提示词里。
+- `characters` 数组每项必须包含 `character_id`，并尽量填写 `role_in_frame`、`position`、`identity_priority`。`position` 要写清左/右/前/后/中心/互动对象，确保系统能把每个人的身份参考和站位分开传给关键帧工作流。
+- 多人镜头如需 OpenPose/站位草图，只能写在 `pose_layout_image` 或 `input_pose_image`，不得用三视图拼接图充当姿态控制。
 - 多帧控制统一规划首 / 中 / 尾三帧；不要规划 `first_last_frame`。
 - 07 所需的每一张输入帧都必须由本步骤真实规划，不得引用未生成的占位文件。三帧意图 `intent_id=shot_003_frames` 编译后的稳定引用名为 `shot_003_frames_start_frame`、`shot_003_frames_middle_frame`、`shot_003_frames_end_frame`。
 - `intent_id`、兼容层 `asset_tag` 与下游引用必须保持同一命名体系，禁止临时改名或只写模糊文件路径。

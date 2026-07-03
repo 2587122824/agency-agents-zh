@@ -377,6 +377,7 @@ def _compile_image_intents(
                     render=render,
                     asset_tag=f"{intent_id}_{role}",
                     resolved_entities=resolved_entities,
+                    notes=notes,
                 )
                 attach_parameter_lock_metadata(
                     item,
@@ -402,6 +403,7 @@ def _compile_image_intents(
             render=render,
             asset_tag=str(intent.get("asset_role") or intent.get("asset_tag") or intent_name or intent_id),
             resolved_entities=resolved_entities,
+            notes=notes,
         )
         attach_parameter_lock_metadata(
             item,
@@ -544,6 +546,7 @@ def _image_prompt_item(
     render: dict[str, Any],
     asset_tag: str,
     resolved_entities: dict[str, Any],
+    notes: list[str] | None = None,
 ) -> dict[str, Any]:
     intent_name = str(intent.get("intent") or "").strip()
     workflow_id, workflow_mode = _image_workflow_route(intent_name, intent, contract, compatibility)
@@ -581,17 +584,47 @@ def _image_prompt_item(
     if entity_context:
         item["entity_context"] = entity_context
         _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
+    character_references = _character_references_from_intent(intent, resolved_entities)
+    if character_references:
+        raw_characters = intent.get("characters") if isinstance(intent.get("characters"), list) else []
+        if len(raw_characters) > 4 and notes is not None:
+            notes.append(f"image intent {job_id} has {len(raw_characters)} character references; only the first 4 are passed to multi-character keyframe generation")
+        item["character_references"] = character_references
+        _merge_compat_list(item, "reference_images", [entry["identity_image"] for entry in character_references if entry.get("identity_image")])
+        if len(character_references) > 4:
+            item["character_references"] = character_references[:4]
     references = item.get("reference_images") if isinstance(item.get("reference_images"), list) else []
     first_reference = str(item.get("reference_image") or (references[0] if references and isinstance(references[0], str) else ""))
-    if workflow_id == "04_keyframe" and first_reference:
-        workflow_mode = "pose_identity_keyframe" if str(intent.get("pose_image") or intent.get("input_pose_image") or "").strip() else "identity_keyframe"
+    pose_reference = str(intent.get("pose_layout_image") or intent.get("composition_reference") or intent.get("input_pose_image") or intent.get("pose_image") or "").strip()
+    if workflow_id == "04_keyframe" and len(item.get("character_references") or []) > 1:
+        workflow_mode = "multi_pose_identity_keyframe" if pose_reference else "multi_identity_keyframe"
+        item["workflow_mode"] = workflow_mode
+        item["image_task_mode"] = workflow_mode
+        item["mode"] = workflow_mode
+        item["control_mode"] = "multi_identity_pose_reference" if pose_reference else "multi_identity_reference"
+        item["input_identity_image"] = item["character_references"][0].get("identity_image", "")
+        if pose_reference:
+            item["input_pose_image"] = pose_reference
+    elif workflow_id == "04_keyframe" and len(item.get("character_references") or []) == 1:
+        only_reference = item["character_references"][0].get("identity_image", "")
+        if only_reference:
+            workflow_mode = "pose_identity_keyframe" if pose_reference else "identity_keyframe"
+            item["workflow_mode"] = workflow_mode
+            item["image_task_mode"] = workflow_mode
+            item["mode"] = workflow_mode
+            item["control_mode"] = "identity_pose_reference" if pose_reference else "identity_reference"
+            item["input_identity_image"] = only_reference
+            if pose_reference:
+                item["input_pose_image"] = pose_reference
+    elif workflow_id == "04_keyframe" and first_reference:
+        workflow_mode = "pose_identity_keyframe" if pose_reference else "identity_keyframe"
         item["workflow_mode"] = workflow_mode
         item["image_task_mode"] = workflow_mode
         item["mode"] = workflow_mode
         item["control_mode"] = "identity_pose_reference" if workflow_mode == "pose_identity_keyframe" else "identity_reference"
         item["input_identity_image"] = first_reference
         if workflow_mode == "pose_identity_keyframe":
-            item["input_pose_image"] = str(intent.get("input_pose_image") or intent.get("pose_image") or "")
+            item["input_pose_image"] = pose_reference
     if workflow_id == "03_style_cover_image" and first_reference:
         item["input_reference_style"] = first_reference
     if _bool_or_default(
@@ -600,6 +633,59 @@ def _image_prompt_item(
     ):
         item["optional_when_unconfigured"] = True
     return item
+
+
+def _character_references_from_intent(intent: dict[str, Any], resolved_entities: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_characters = intent.get("characters")
+    characters: list[dict[str, Any]] = []
+    if isinstance(raw_characters, list):
+        characters = [dict(item) for item in raw_characters if isinstance(item, dict) and str(item.get("character_id") or "").strip()]
+    if not characters:
+        return []
+    result: list[dict[str, Any]] = []
+    for index, character in enumerate(characters[:4], 1):
+        character_id = str(character.get("character_id") or "").strip()
+        entity = _resolved_character(resolved_entities, character_id)
+        identity_image = str(
+            character.get("input_identity_image")
+            or character.get("identity_image")
+            or character.get("reference_image")
+            or _first_identity_reference(entity)
+            or ""
+        ).strip()
+        result.append(
+            {
+                "character_id": character_id,
+                "identity_image": identity_image,
+                "role_in_frame": str(character.get("role_in_frame") or character.get("role") or f"character_{index}").strip(),
+                "position": str(character.get("position") or character.get("frame_position") or "").strip(),
+                "identity_priority": str(character.get("identity_priority") or character.get("priority") or index).strip(),
+            }
+        )
+    return result
+
+
+def _resolved_character(resolved_entities: dict[str, Any], character_id: str) -> dict[str, Any]:
+    for item in resolved_entities.get("characters") or []:
+        if isinstance(item, dict) and str(item.get("character_id") or "") == character_id:
+            return item
+    return {}
+
+
+def _first_identity_reference(entity: dict[str, Any]) -> str:
+    if not isinstance(entity, dict):
+        return ""
+    for key in ("master_image", "expression_sheet"):
+        value = str(entity.get(key) or "").strip()
+        if value:
+            return value
+    for key in ("turnaround_images", "reference_assets"):
+        values = entity.get(key)
+        if isinstance(values, list):
+            first = next((str(value).strip() for value in values if str(value).strip()), "")
+            if first:
+                return first
+    return ""
 
 
 def _image_workflow_route(

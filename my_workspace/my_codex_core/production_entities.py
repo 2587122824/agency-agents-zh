@@ -155,6 +155,9 @@ def collect_entity_references(
             if not isinstance(item, dict):
                 continue
             _add_ref(refs["character_ids"], item.get("character_id"))
+            for character in item.get("characters") or []:
+                if isinstance(character, dict):
+                    _add_ref(refs["character_ids"], character.get("character_id"))
             _add_ref(refs["style_ids"], item.get("style_id"))
             _add_ref(refs["product_ids"], item.get("product_id"))
             _add_ref(refs["scene_ids"], item.get("scene_id"))

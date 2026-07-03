@@ -731,6 +731,7 @@ class CloudComfyUIAdapter:
         source_video = str(comfyui_payload.get("input_source_video") or comfyui_payload.get("source_video") or "")
         middle_frame = str(comfyui_payload.get("input_middle_frame") or self._middle_frame_image(comfyui_payload) or "")
         last_frame = str(comfyui_payload.get("input_last_frame") or self._last_frame_image(comfyui_payload) or "")
+        character_references = self._character_reference_values(comfyui_payload)
         replacements = {
             "{{payload}}": json.dumps(comfyui_payload, ensure_ascii=False),
             "{{negative_prompt}}": str(comfyui_payload.get("negative_prompt") or ""),
@@ -768,6 +769,7 @@ class CloudComfyUIAdapter:
             "{{product_id}}": str(comfyui_payload.get("product_id") or ""),
             "{{scene_id}}": str(comfyui_payload.get("scene_id") or ""),
             "{{entity_context}}": json.dumps(comfyui_payload.get("entity_context") if isinstance(comfyui_payload.get("entity_context"), dict) else {}, ensure_ascii=False),
+            "{{character_references}}": json.dumps(character_references, ensure_ascii=False),
             "{{global_style_weight}}": str(comfyui_payload.get("global_style_weight") or style_context.get("weight") or ""),
             "{{working_width}}": str(render_context.get("working_width") or comfyui_payload.get("width") or ""),
             "{{working_height}}": str(render_context.get("working_height") or comfyui_payload.get("height") or ""),
@@ -791,6 +793,12 @@ class CloudComfyUIAdapter:
             reference_value = reference_images[index - 1] if len(reference_images) >= index else ""
             replacements[f"{{{{reference_image_{index}}}}}"] = reference_value
             replacements[f"{{{{has_reference_image_{index}}}}}"] = bool(reference_value)
+            character_ref = character_references[index - 1] if len(character_references) >= index else {}
+            character_image = str(character_ref.get("identity_image") or "")
+            replacements[f"{{{{character_reference_{index}}}}}"] = character_image
+            replacements[f"{{{{has_character_reference_{index}}}}}"] = bool(character_image)
+            replacements[f"{{{{character_id_{index}}}}}"] = str(character_ref.get("character_id") or "")
+            replacements[f"{{{{character_position_{index}}}}}"] = str(character_ref.get("position") or "")
         if node_info:
             node_info = self._replace_placeholders(node_info, replacements)
             node_info = self._override_dimension_node_info(node_info, comfyui_payload)
@@ -1856,6 +1864,7 @@ class CloudComfyUIAdapter:
             "product_id": str(prompt_data.get("product_id") or group.get("product_id") or "").strip(),
             "scene_id": str(prompt_data.get("scene_id") or group.get("scene_id") or "").strip(),
             "entity_context": prompt_data.get("entity_context") if isinstance(prompt_data.get("entity_context"), dict) else group.get("entity_context") if isinstance(group.get("entity_context"), dict) else {},
+            "character_references": prompt_data.get("character_references") if isinstance(prompt_data.get("character_references"), list) else group.get("character_references") if isinstance(group.get("character_references"), list) else [],
             "prompt": prompt,
             "negative_prompt": negative,
             "reference_image": reference_image,
@@ -1979,6 +1988,8 @@ class CloudComfyUIAdapter:
         payload["scene_id"] = str(job.get("scene_id") or "")
         if isinstance(job.get("entity_context"), dict):
             payload["entity_context"] = job["entity_context"]
+        if isinstance(job.get("character_references"), list):
+            payload["character_references"] = job["character_references"]
         payload["workflow_item_name"] = str(job.get("name") or f"material_{index:02d}")
         payload["workflow_item_type"] = job_type
         payload["task_type"] = str(
@@ -2157,6 +2168,24 @@ class CloudComfyUIAdapter:
         }.get(suffix, "image/png")
         encoded = base64.b64encode(path.read_bytes()).decode("ascii")
         return f"data:{mime};base64,{encoded}"
+
+    def _character_reference_values(self, payload: dict[str, Any]) -> list[dict[str, str]]:
+        values = payload.get("character_references") if isinstance(payload.get("character_references"), list) else []
+        result: list[dict[str, str]] = []
+        for index, item in enumerate(values[:4], 1):
+            if not isinstance(item, dict):
+                continue
+            raw_image = str(item.get("identity_image") or item.get("input_identity_image") or item.get("reference_image") or "").strip()
+            result.append(
+                {
+                    "character_id": str(item.get("character_id") or "").strip(),
+                    "identity_image": self._reference_image_value(raw_image) if raw_image else "",
+                    "position": str(item.get("position") or "").strip(),
+                    "role_in_frame": str(item.get("role_in_frame") or item.get("role") or f"character_{index}").strip(),
+                    "identity_priority": str(item.get("identity_priority") or item.get("priority") or index).strip(),
+                }
+            )
+        return result
 
     def _upload_runninghub_media(self, path: Path) -> str:
         boundary = f"----agencyAgentsZh{int(time.time() * 1000)}"
@@ -2603,7 +2632,7 @@ class CloudComfyUIAdapter:
                 if isinstance(item, str):
                     candidate = item.strip()
                 elif isinstance(item, dict):
-                    for key in ("url", "path", "file", "image", "reference_image"):
+                    for key in ("url", "path", "file", "image", "reference_image", "identity_image", "input_identity_image"):
                         raw_value = item.get(key)
                         if isinstance(raw_value, str) and raw_value.strip():
                             candidate = raw_value.strip()

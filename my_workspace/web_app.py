@@ -157,6 +157,8 @@ _KEYFRAME_WORKFLOW["modes"] = [
     {"value": "keyframe", "label": "关键帧（纯文本）", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "none", "requires_reference": False},
     {"value": "identity_keyframe", "label": "身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_reference", "requires_reference": True},
     {"value": "pose_identity_keyframe", "label": "身份+姿态关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_pose_reference", "requires_reference": True},
+    {"value": "multi_identity_keyframe", "label": "多人身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "multi_identity_reference", "requires_reference": True},
+    {"value": "multi_pose_identity_keyframe", "label": "多人身份+站位姿态关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "multi_identity_pose_reference", "requires_reference": True},
 ]
 
 COMFY_MODE_INPUT_CONTRACTS = {
@@ -164,6 +166,8 @@ COMFY_MODE_INPUT_CONTRACTS = {
     ("04_keyframe", "keyframe"): {},
     ("04_keyframe", "identity_keyframe"): {"required": ["input_identity_image"], "primary": "input_identity_image"},
     ("04_keyframe", "pose_identity_keyframe"): {"required": ["input_identity_image", "input_pose_image"], "primary": "input_identity_image"},
+    ("04_keyframe", "multi_identity_keyframe"): {"required": ["character_references"], "optional": ["input_identity_image"], "primary": "character_references"},
+    ("04_keyframe", "multi_pose_identity_keyframe"): {"required": ["character_references", "input_pose_image"], "optional": ["input_identity_image"], "primary": "character_references"},
     ("07_live_to_anime", "live_to_anime"): {"required": ["input_source_video"], "optional": ["input_reference_style", "input_identity_image"], "primary": "input_reference_style"},
     ("08_motion_transfer", "motion_transfer"): {"required": ["input_identity_image", "input_source_video"], "optional": ["input_pose_image"], "primary": "input_identity_image"},
     ("11_video_enhance", "video_upscale"): {"required": ["input_source_video"]},
@@ -200,7 +204,7 @@ for _workflow in COMFY_DEBUG_WORKFLOWS:
         _mode["required_inputs"] = list(dict.fromkeys(_required_inputs))
         _mode["optional_inputs"] = list(dict.fromkeys(_optional_inputs))
         _mode["primary_input"] = str(_contract.get("primary") or ("input_base_image" if "input_base_image" in _required_inputs else ""))
-        _mode["requires_reference"] = any(slot in _mode["required_inputs"] for slot in ("input_base_image", "input_identity_image", "input_reference_style"))
+        _mode["requires_reference"] = any(slot in _mode["required_inputs"] for slot in ("input_base_image", "input_identity_image", "input_reference_style", "character_references"))
         if _workflow.get("id") == "06_i2v_first_middle_last_frame":
             _mode["asset_tag"] = "i2v_first_middle_last_frame"
         _mode["outputs"] = ["output_final_video" if _workflow.get("type") == "video" else "output_final_image"]
@@ -4127,7 +4131,7 @@ INDEX_HTML = r"""<!doctype html>
     const comfyDebugCollapsedCapabilityGroups = new Set();
     const COMFY_DEBUG_CAPABILITY_GROUPS = [
       { id: 'asset_image', label: '01 基础资产', modes: ['character_base', 'product_base', 'scene_base', 'style_reference', 'character_turnaround', 'product_turnaround', 'cover_key_visual'] },
-      { id: 'storyboard_keyframe', label: '02 分镜关键帧', modes: ['keyframe', 'identity_keyframe', 'pose_identity_keyframe'] },
+      { id: 'storyboard_keyframe', label: '02 分镜关键帧', modes: ['keyframe', 'identity_keyframe', 'pose_identity_keyframe', 'multi_identity_keyframe', 'multi_pose_identity_keyframe'] },
       { id: 'image_post', label: '03 图片处理', modes: ['image_inpaint_fix', 'background_remove'] },
       { id: 'video_creation', label: '04 视频生成', modes: ['i2v_first_frame', 'i2v_first_middle_last_frame', 'i2v_first_last_frame', 'broll_scene_video', 'empty_transition_video'] },
       { id: 'video_control', label: '05 视频控制', modes: ['live_to_anime', 'motion_transfer'] },
@@ -6595,7 +6599,7 @@ INDEX_HTML = r"""<!doctype html>
       const panel = document.createElement('div');
       panel.className = 'comfy-parameter-panel';
       panel.appendChild(head);
-      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{payload}}'];
+      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{character_references}}', '{{character_reference_1}}', '{{character_reference_2}}', '{{character_reference_3}}', '{{character_reference_4}}', '{{character_id_1}}', '{{character_id_2}}', '{{character_id_3}}', '{{character_id_4}}', '{{character_position_1}}', '{{character_position_2}}', '{{character_position_3}}', '{{character_position_4}}', '{{payload}}'];
       comfyParameterCandidates.forEach((candidate, index) => {
         const item = document.createElement('div');
         item.className = 'comfy-parameter-row';
@@ -16413,6 +16417,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     semantic_values = {
                         "input_base_image": reference_image,
                         "input_identity_image": identity_image or reference_image,
+                        "character_references": reference_images_input,
                         "input_reference_style": reference_style or reference_image,
                         "input_pose_image": pose_image,
                         "input_source_video": source_video,
@@ -16454,6 +16459,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "input_mask_image": mask_image,
                 "input_audio_file": audio_file,
                 "reference_images": reference_images_input,
+                "character_references": payload.get("character_references") if isinstance(payload.get("character_references"), list) else [
+                    {"character_id": f"manual_character_{index}", "identity_image": value, "position": "", "role_in_frame": f"character_{index}", "identity_priority": index}
+                    for index, value in enumerate(reference_images_input[:4], start=1)
+                    if isinstance(value, str) and value.strip()
+                ],
                 "seed": seed,
                 "width": width or item.get("default_width") or "",
                 "height": height or item.get("default_height") or "",

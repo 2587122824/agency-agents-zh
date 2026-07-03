@@ -29,7 +29,9 @@
     "depends_on",
     "input_bindings",
     "reference_image",
-    "reference_images"
+    "reference_images",
+    "characters",
+    "pose_layout_image"
   ],
   "quality_gate": [
     "原始需求或上游分镜明确要求首中尾帧/三帧生视频/first_middle_last_frame时，必须为对应镜头输出generate_three_frame_shot，不能只输出generate_keyframe",
@@ -41,6 +43,8 @@
     "intent必须来自allowed_intents，除非明确标记custom并说明原因",
     "必须保留image_prompts兼容旧生产链",
     "跨镜头复用对象必须优先填写character_id/style_id/product_id/scene_id",
+    "多人同框generate_keyframe必须填写characters数组，并为每个角色标明character_id、position和role_in_frame，不能把多人身份混写成普通提示词",
+    "多人关键帧的pose_layout_image或input_pose_image只能作为站位/姿态构图参考，不能替代每个角色独立身份参考",
     "如果缺少正式实体但需要长期复用，必须标记entity_missing并建议新建实体",
     "workflow_id/workflow_mode/asset_tag只能作为兼容字段，不作为主语义",
     "不要强制员工填写input_bindings或底层DAG文件流转",

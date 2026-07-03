@@ -33,6 +33,11 @@ class SemanticInputContractTests(unittest.TestCase):
             modes["pose_identity_keyframe"]["required_inputs"],
             ["input_identity_image", "input_pose_image"],
         )
+        self.assertEqual(modes["multi_identity_keyframe"]["required_inputs"], ["character_references"])
+        self.assertEqual(
+            modes["multi_pose_identity_keyframe"]["required_inputs"],
+            ["character_references", "input_pose_image"],
+        )
 
     def test_keyframe_ui_group_lists_all_keyframe_modes(self) -> None:
         source = (WORKSPACE / "my_workspace" / "web_app.py").read_text(encoding="utf-8")
@@ -42,6 +47,8 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("'keyframe'", group_line)
         self.assertIn("'identity_keyframe'", group_line)
         self.assertIn("'pose_identity_keyframe'", group_line)
+        self.assertIn("'multi_identity_keyframe'", group_line)
+        self.assertIn("'multi_pose_identity_keyframe'", group_line)
         self.assertIn("comfyDebugCharacterEntity", source)
         self.assertIn("comfyDebugIdentityAssetReference", source)
         self.assertIn("comfyDebugPoseAssetReference", source)
@@ -201,6 +208,74 @@ class SemanticInputContractTests(unittest.TestCase):
                 item["reference_images"],
             )
 
+    def test_multi_character_keyframe_compiles_character_references(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            entity_path, library_path = self._write_two_character_fixture(root)
+            image_content = json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_keyframe",
+                                "intent_id": "duo_shot_001",
+                                "prompt": "Hero and mentor speak across a console",
+                                "characters": [
+                                    {"character_id": "hero", "role_in_frame": "lead", "position": "left", "identity_priority": 1},
+                                    {"character_id": "mentor", "role_in_frame": "mentor", "position": "right", "identity_priority": 2},
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+            plan = compile_production_plan(
+                task_id="multi_character_test",
+                route_content='{"production_type":"custom"}',
+                image_content=image_content,
+                entity_path=entity_path,
+                asset_library_path=library_path,
+            )
+            item = plan["compiled_payload"]["image_prompts"][0]
+            self.assertEqual(item["workflow_mode"], "multi_identity_keyframe")
+            self.assertEqual(item["control_mode"], "multi_identity_reference")
+            self.assertEqual([entry["character_id"] for entry in item["character_references"]], ["hero", "mentor"])
+            self.assertEqual(item["character_references"][0]["identity_image"], "my_workspace/my_asset_library/01_character_base/hero.png")
+            self.assertEqual(item["character_references"][1]["position"], "right")
+
+    def test_multi_character_pose_keyframe_uses_pose_layout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            entity_path, library_path = self._write_two_character_fixture(root)
+            image_content = json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_keyframe",
+                                "intent_id": "duo_pose_shot_001",
+                                "prompt": "Hero and mentor stand back to back",
+                                "pose_layout_image": "poses/duo_openpose.png",
+                                "characters": [
+                                    {"character_id": "hero", "position": "left"},
+                                    {"character_id": "mentor", "position": "right"},
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+            plan = compile_production_plan(
+                task_id="multi_pose_test",
+                route_content='{"production_type":"custom"}',
+                image_content=image_content,
+                entity_path=entity_path,
+                asset_library_path=library_path,
+            )
+            item = plan["compiled_payload"]["image_prompts"][0]
+            self.assertEqual(item["workflow_mode"], "multi_pose_identity_keyframe")
+            self.assertEqual(item["input_pose_image"], "poses/duo_openpose.png")
+
     def test_video_source_binding_uses_video_output(self) -> None:
         item = {"source_intent_ids": ["clip_001"], "input_bindings": {}, "depends_on": []}
         _bind_first_source_video(item, {"clip_001"})
@@ -222,6 +297,26 @@ class SemanticInputContractTests(unittest.TestCase):
         built = adapter._build_runninghub_payload(payload, config)
         values = [item["fieldValue"] for item in built["nodeInfoList"]]
         self.assertEqual(values, ["identity.png", "source.mp4"])
+
+    def test_adapter_replaces_multi_character_placeholders(self) -> None:
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        config = {
+            "node_info_list_json": (
+                '[{"nodeId":"1","fieldName":"image","fieldValue":"{{character_reference_1}}"},'
+                '{"nodeId":"2","fieldName":"image","fieldValue":"{{character_reference_2}}"},'
+                '{"nodeId":"3","fieldName":"image","fieldValue":"{{character_reference_3}}"},'
+                '{"nodeId":"4","fieldName":"text","fieldValue":"{{character_id_1}} {{character_position_2}}"}]'
+            )
+        }
+        payload = {
+            "character_references": [
+                {"character_id": "hero", "identity_image": "hero.png", "position": "left"},
+                {"character_id": "mentor", "identity_image": "mentor.png", "position": "right"},
+            ]
+        }
+        built = adapter._build_runninghub_payload(payload, config)
+        values = [(item["nodeId"], item["fieldValue"]) for item in built["nodeInfoList"]]
+        self.assertEqual(values, [("1", "hero.png"), ("2", "mentor.png"), ("4", "hero right")])
 
     def test_turnaround_outputs_are_stitched_for_portrait_keyframe_input(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -304,6 +399,34 @@ class SemanticInputContractTests(unittest.TestCase):
             Image.new("RGB", size, color).save(path)
             files.append(path)
         return files
+
+    @staticmethod
+    def _write_two_character_fixture(root: Path) -> tuple[Path, Path]:
+        entity_path = root / "entities.json"
+        library_path = root / "library.json"
+        entity_path.write_text(
+            json.dumps(
+                {
+                    "characters": {
+                        "hero": {"character_id": "hero", "name": "Hero", "master_image": "asset_hero"},
+                        "mentor": {"character_id": "mentor", "name": "Mentor", "master_image": "asset_mentor"},
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        library_path.write_text(
+            json.dumps(
+                [
+                    {"id": "asset_hero", "asset_id": "asset_hero", "file": "01_character_base/hero.png", "kind": "image", "tags": ["character_base"], "character_id": "hero", "approved": True},
+                    {"id": "asset_mentor", "asset_id": "asset_mentor", "file": "01_character_base/mentor.png", "kind": "image", "tags": ["character_base"], "character_id": "mentor", "approved": True},
+                ],
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return entity_path, library_path
 
 
 if __name__ == "__main__":
