@@ -543,7 +543,8 @@
         {
           "label": "vae",
           "name": "vae",
-          "type": "VAE"
+          "type": "VAE",
+          "link": 1976
         }
       ],
       "outputs": [
@@ -586,7 +587,8 @@
         {
           "label": "clip",
           "name": "clip",
-          "type": "CLIP"
+          "type": "CLIP",
+          "link": 1974
         },
         {
           "label": "text",
@@ -643,7 +645,8 @@
         {
           "label": "clip",
           "name": "clip",
-          "type": "CLIP"
+          "type": "CLIP",
+          "link": 1975
         }
       ],
       "outputs": [
@@ -693,7 +696,8 @@
           "type": "EVA_CLIP",
           "slot_index": 0,
           "links": [
-            1206
+            1206,
+            1981
           ]
         }
       ],
@@ -864,7 +868,8 @@
           "type": "FACEANALYSIS",
           "slot_index": 0,
           "links": [
-            1205
+            1205,
+            1982
           ]
         }
       ],
@@ -1205,7 +1210,8 @@
         {
           "label": "model",
           "name": "model",
-          "type": "MODEL"
+          "type": "MODEL",
+          "link": 1977
         },
         {
           "label": "steps",
@@ -1263,7 +1269,8 @@
         {
           "label": "model",
           "name": "model",
-          "type": "MODEL"
+          "type": "MODEL",
+          "link": 1978
         },
         {
           "label": "conditioning",
@@ -1349,17 +1356,20 @@
         {
           "label": "model",
           "name": "model",
-          "type": "MODEL"
+          "type": "MODEL",
+          "link": 1970
         },
         {
           "label": "clip",
           "name": "clip",
-          "type": "CLIP"
+          "type": "CLIP",
+          "link": 1971
         },
         {
           "label": "vae",
           "name": "vae",
-          "type": "VAE"
+          "type": "VAE",
+          "link": 1972
         },
         {
           "label": "positive",
@@ -1428,7 +1438,9 @@
           "name": "model",
           "type": "MODEL",
           "slot_index": 1,
-          "links": []
+          "links": [
+            1973
+          ]
         },
         {
           "label": "clip",
@@ -1711,7 +1723,10 @@
           "type": "CLIP",
           "slot_index": 1,
           "links": [
-            1775
+            1775,
+            1971,
+            1974,
+            1975
           ]
         }
       ],
@@ -1827,7 +1842,9 @@
           "slot_index": 0,
           "links": [
             1190,
-            1216
+            1216,
+            1972,
+            1976
           ]
         }
       ],
@@ -1863,7 +1880,8 @@
           "type": "PULIDFLUX",
           "slot_index": 0,
           "links": [
-            1276
+            1276,
+            1980
           ]
         }
       ],
@@ -2114,7 +2132,8 @@
         {
           "label": "model",
           "name": "model",
-          "type": "MODEL"
+          "type": "MODEL",
+          "link": 1973
         },
         {
           "label": "clip",
@@ -2542,17 +2561,20 @@
         {
           "label": "pulid_flux",
           "name": "pulid_flux",
-          "type": "PULIDFLUX"
+          "type": "PULIDFLUX",
+          "link": 1980
         },
         {
           "label": "eva_clip",
           "name": "eva_clip",
-          "type": "EVA_CLIP"
+          "type": "EVA_CLIP",
+          "link": 1981
         },
         {
           "label": "face_analysis",
           "name": "face_analysis",
-          "type": "FACEANALYSIS"
+          "type": "FACEANALYSIS",
+          "link": 1982
         },
         {
           "label": "image",
@@ -2581,7 +2603,11 @@
           "slot_index": 0,
           "links": [
             1224,
-            1298
+            1298,
+            1970,
+            1977,
+            1978,
+            1979
           ]
         }
       ],
@@ -2761,7 +2787,8 @@
         {
           "label": "model",
           "name": "model",
-          "type": "MODEL"
+          "type": "MODEL",
+          "link": 1979
         },
         {
           "label": "positive",
@@ -4562,6 +4589,110 @@
       614,
       0,
       "PULIDFLUX"
+    ],
+    [
+      1970,
+      628,
+      0,
+      95,
+      0,
+      "MODEL"
+    ],
+    [
+      1971,
+      724,
+      1,
+      95,
+      1,
+      "CLIP"
+    ],
+    [
+      1972,
+      615,
+      0,
+      95,
+      2,
+      "VAE"
+    ],
+    [
+      1973,
+      97,
+      1,
+      185,
+      0,
+      "MODEL"
+    ],
+    [
+      1974,
+      724,
+      1,
+      581,
+      0,
+      "CLIP"
+    ],
+    [
+      1975,
+      724,
+      1,
+      582,
+      0,
+      "CLIP"
+    ],
+    [
+      1976,
+      615,
+      0,
+      583,
+      1,
+      "VAE"
+    ],
+    [
+      1977,
+      628,
+      0,
+      587,
+      0,
+      "MODEL"
+    ],
+    [
+      1978,
+      628,
+      0,
+      618,
+      0,
+      "MODEL"
+    ],
+    [
+      1979,
+      628,
+      0,
+      763,
+      1,
+      "MODEL"
+    ],
+    [
+      1980,
+      627,
+      0,
+      628,
+      1,
+      "PULIDFLUX"
+    ],
+    [
+      1981,
+      630,
+      0,
+      628,
+      2,
+      "EVA_CLIP"
+    ],
+    [
+      1982,
+      629,
+      0,
+      628,
+      3,
+      "FACEANALYSIS"
     ]
   ],
   "groups": [
