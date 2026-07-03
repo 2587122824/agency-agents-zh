@@ -715,6 +715,9 @@ class CloudComfyUIAdapter:
         render_context = global_context.get("render") if isinstance(global_context.get("render"), dict) else {}
         style_context = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
         base_image = str(comfyui_payload.get("input_base_image") or self._first_reference_image(comfyui_payload) or "")
+        identity_image = str(comfyui_payload.get("input_identity_image") or comfyui_payload.get("identity_image") or self._first_reference_image(comfyui_payload) or "")
+        pose_image = str(comfyui_payload.get("input_pose_image") or comfyui_payload.get("pose_image") or "")
+        source_video = str(comfyui_payload.get("input_source_video") or comfyui_payload.get("source_video") or "")
         middle_frame = str(comfyui_payload.get("input_middle_frame") or self._middle_frame_image(comfyui_payload) or "")
         last_frame = str(comfyui_payload.get("input_last_frame") or self._last_frame_image(comfyui_payload) or "")
         replacements = {
@@ -724,6 +727,12 @@ class CloudComfyUIAdapter:
             "{{video_prompt}}": self._first_list_or_value(comfyui_payload, "video_prompts", "video_prompt"),
             "{{reference_image}}": self._first_reference_image(comfyui_payload),
             "{{input_base_image}}": base_image,
+            "{{input_identity_image}}": identity_image,
+            "{{identity_image}}": identity_image,
+            "{{input_pose_image}}": pose_image,
+            "{{pose_image}}": pose_image,
+            "{{input_source_video}}": source_video,
+            "{{source_video}}": source_video,
             "{{has_reference_image}}": bool(self._first_reference_image(comfyui_payload)),
             "{{middle_frame_image}}": self._middle_frame_image(comfyui_payload),
             "{{input_middle_frame}}": middle_frame,
@@ -1029,6 +1038,9 @@ class CloudComfyUIAdapter:
         missing: list[str] = []
         field_map = {
             "input_base_image": "reference_image",
+            "input_identity_image": "identity_image",
+            "input_pose_image": "pose_image",
+            "input_source_video": "source_video",
             "input_middle_frame": "middle_frame_image",
             "input_last_frame": "last_frame_image",
             "input_mask_image": "mask_image",
@@ -1848,15 +1860,18 @@ class CloudComfyUIAdapter:
         payload["has_last_frame_image"] = bool(payload.get("last_frame_image"))
         for semantic_key, job_key in (
             ("input_base_image", "reference_image"),
+            ("input_identity_image", "identity_image"),
+            ("input_pose_image", "pose_image"),
+            ("input_source_video", "source_video"),
             ("input_middle_frame", "middle_frame_image"),
             ("input_last_frame", "last_frame_image"),
             ("input_mask_image", "mask_image"),
             ("input_reference_style", "reference_style"),
             ("input_audio_file", "audio_file"),
         ):
-            value = str(job.get(job_key) or payload.get(semantic_key) or "").strip()
+            value = str(job.get(semantic_key) or job.get(job_key) or payload.get(semantic_key) or "").strip()
             if value:
-                payload[semantic_key] = self._reference_media_value(value) if semantic_key == "input_audio_file" else value
+                payload[semantic_key] = self._reference_media_value(value) if semantic_key in {"input_audio_file", "input_source_video"} else value
         for key in ("seed", "width", "height", "duration", "fps", "frame_count", "frames", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "camera_motion", "camera_path", "pose_video", "image_task_mode"):
             value = (
                 prompt_data.get(key)

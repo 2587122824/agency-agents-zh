@@ -12,6 +12,9 @@ from .production_parameter_policy import normalize_parameter_policy_context
 GRAPH_SCHEMA_VERSION = 1
 SEMANTIC_INPUT_ALIASES = {
     "input_base_image": ("input_base_image", "reference_image"),
+    "input_identity_image": ("input_identity_image", "identity_image", "reference_image"),
+    "input_pose_image": ("input_pose_image", "pose_image"),
+    "input_source_video": ("input_source_video", "source_video", "reference_video"),
     "input_middle_frame": ("input_middle_frame", "middle_frame_image"),
     "input_last_frame": ("input_last_frame", "last_frame_image"),
     "input_mask_image": ("input_mask_image", "mask_image"),

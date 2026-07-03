@@ -46,6 +46,8 @@ VIDEO_INTENT_ROUTES = {
     "generate_talking_image": ("09_talking_image", "talking_image"),
     "enhance_video": ("11_video_enhance", "video_upscale"),
     "repair_video": ("12_video_inpaint_fix", "video_inpaint_fix"),
+    "stylize_live_video": ("07_live_to_anime", "live_to_anime"),
+    "transfer_motion": ("08_motion_transfer", "motion_transfer"),
 }
 WORKFLOW_ID_ALIASES = {
     "10_broll_transition": "10_broll_transition_video",
@@ -420,6 +422,7 @@ def _compile_video_intents(
     contracts = ((templates.get("workflow_contracts") or {}).get("video") or {}) if isinstance(templates.get("workflow_contracts"), dict) else {}
     render = global_context.get("render") if isinstance(global_context.get("render"), dict) else {}
     image_job_ids = {str(job.get("job_id")) for job in image_jobs if job.get("job_id")}
+    video_job_ids: set[str] = set()
     for index, intent in enumerate(intents, 1):
         intent_name = str(intent.get("intent") or "").strip()
         intent_id = _safe_id(intent.get("intent_id") or intent.get("id") or f"video_intent_{index:03d}")
@@ -471,6 +474,9 @@ def _compile_video_intents(
             "source_intent_ids": _string_list(intent.get("source_intent_ids")),
             "depends_on": _string_list(intent.get("depends_on")),
             "input_bindings": intent.get("input_bindings") if isinstance(intent.get("input_bindings"), dict) else {},
+            "source_video": str(intent.get("input_source_video") or intent.get("source_video") or intent.get("reference_video") or ""),
+            "identity_image": str(intent.get("input_identity_image") or intent.get("identity_image") or ""),
+            "pose_image": str(intent.get("input_pose_image") or intent.get("pose_image") or ""),
         }
         if _bool_or_default(
             intent.get("optional_when_unconfigured"),
@@ -489,9 +495,9 @@ def _compile_video_intents(
         )
         if intent_name == "generate_three_frame_i2v_clip":
             _bind_three_frames(item, image_job_ids)
-        elif intent_name in {"generate_i2v_clip", "enhance_video", "repair_video"}:
+        elif intent_name == "generate_i2v_clip":
             _bind_first_source_image(item, image_job_ids)
-            if intent_name == "generate_i2v_clip" and not _has_bound_first_frame(item):
+            if not _has_bound_first_frame(item):
                 inferred = _bind_matching_keyframe_by_id(item, image_job_ids)
                 if inferred:
                     notes.append(f"video intent {intent_id} inferred first frame from {inferred}")
@@ -505,6 +511,11 @@ def _compile_video_intents(
                     notes.append(
                         f"video intent {intent_id} downgraded to text-to-video because no source image/frame was available"
                     )
+        elif intent_name in {"enhance_video", "repair_video", "stylize_live_video"}:
+            _bind_first_source_video(item, video_job_ids)
+        elif intent_name == "transfer_motion":
+            _bind_first_source_video(item, video_job_ids)
+            _bind_first_source_image(item, image_job_ids, slot="input_identity_image")
         elif intent_name == "generate_talking_image":
             item.setdefault("depends_on", [])
             if "local_tts" not in item["depends_on"]:
@@ -512,6 +523,7 @@ def _compile_video_intents(
             item["requires_audio"] = True
         prompts.append(item)
         jobs.append(dict(item))
+        video_job_ids.add(intent_id)
     return prompts, jobs
 
 
@@ -562,6 +574,19 @@ def _image_prompt_item(
     if entity_context:
         item["entity_context"] = entity_context
         _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
+    references = item.get("reference_images") if isinstance(item.get("reference_images"), list) else []
+    first_reference = str(item.get("reference_image") or (references[0] if references and isinstance(references[0], str) else ""))
+    if workflow_id == "04_keyframe" and first_reference:
+        workflow_mode = "pose_identity_keyframe" if str(intent.get("pose_image") or intent.get("input_pose_image") or "").strip() else "identity_keyframe"
+        item["workflow_mode"] = workflow_mode
+        item["image_task_mode"] = workflow_mode
+        item["mode"] = workflow_mode
+        item["control_mode"] = "identity_pose_reference" if workflow_mode == "pose_identity_keyframe" else "identity_reference"
+        item["input_identity_image"] = first_reference
+        if workflow_mode == "pose_identity_keyframe":
+            item["input_pose_image"] = str(intent.get("input_pose_image") or intent.get("pose_image") or "")
+    if workflow_id == "03_style_cover_image" and first_reference:
+        item["input_reference_style"] = first_reference
     if _bool_or_default(
         intent.get("optional_when_unconfigured"),
         default=_bool_or_default(contract.get("optional_when_unconfigured"), default=intent_name == "generate_cover_key_visual"),
@@ -651,7 +676,7 @@ def _bind_three_frames(item: dict[str, Any], image_job_ids: set[str]) -> None:
                 depends_on.append(job_id)
 
 
-def _bind_first_source_image(item: dict[str, Any], image_job_ids: set[str]) -> None:
+def _bind_first_source_image(item: dict[str, Any], image_job_ids: set[str], *, slot: str = "input_base_image") -> None:
     source_ids = _string_list(item.get("source_intent_ids"))
     bindings = item.setdefault("input_bindings", {})
     depends_on = item.setdefault("depends_on", [])
@@ -660,10 +685,26 @@ def _bind_first_source_image(item: dict[str, Any], image_job_ids: set[str]) -> N
         fallback = f"{candidate}_start_frame"
         job_id = candidate if candidate in image_job_ids else fallback if fallback in image_job_ids else ""
         if job_id:
-            bindings.setdefault("input_base_image", {"from_job": job_id, "output": "output_final_image"})
+            bindings.setdefault(slot, {"from_job": job_id, "output": "output_final_image"})
             if job_id not in depends_on:
                 depends_on.append(job_id)
             return
+
+
+def _bind_first_source_video(item: dict[str, Any], video_job_ids: set[str]) -> None:
+    bindings = item.setdefault("input_bindings", {})
+    depends_on = item.setdefault("depends_on", [])
+    if str(item.get("source_video") or "").strip():
+        bindings.setdefault("input_source_video", str(item["source_video"]))
+        return
+    for source_id in _string_list(item.get("source_intent_ids")):
+        job_id = _safe_id(source_id)
+        if job_id not in video_job_ids:
+            continue
+        bindings.setdefault("input_source_video", {"from_job": job_id, "output": "output_final_video"})
+        if job_id not in depends_on:
+            depends_on.append(job_id)
+        return
 
 
 def _bind_matching_keyframe_by_id(item: dict[str, Any], image_job_ids: set[str]) -> str:

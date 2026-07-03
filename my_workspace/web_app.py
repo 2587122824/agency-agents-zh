@@ -149,18 +149,45 @@ COMFY_DEBUG_WORKFLOWS = [
     {"id": "12_video_inpaint_fix", "name": "12 视频局部修复", "type": "video", "stage": "video_repair", "purpose": "视频局部区域修复、遮罩重绘或瑕疵处理。", "asset_tag": "video_inpaint_fix", "recommended": False, "default_task_type": "video_inpaint_fix", "default_control_mode": "video_mask_inpaint", "default_width": 1920, "default_height": 1080, "default_endpoint": "", "default_node_info": "[]", "modes": [{"value": "video_inpaint_fix", "label": "视频局部修复", "asset_tag": "video_inpaint_fix", "task_type": "video_inpaint_fix", "control_mode": "video_mask_inpaint", "requires_reference": True}]},
 ]
 
+# A workflow endpoint is only executable when its media roles are explicit.
+# Keep the legacy ``requires_reference`` flag for UI compatibility, but derive
+# it from this typed contract instead of treating every input as a base image.
+_KEYFRAME_WORKFLOW = next(item for item in COMFY_DEBUG_WORKFLOWS if item.get("id") == "04_keyframe")
+_KEYFRAME_WORKFLOW["modes"] = [
+    {"value": "keyframe", "label": "关键帧（纯文本）", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "none", "requires_reference": False},
+    {"value": "identity_keyframe", "label": "身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_reference", "requires_reference": True},
+    {"value": "pose_identity_keyframe", "label": "身份+姿态关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_pose_reference", "requires_reference": True},
+]
+
+COMFY_MODE_INPUT_CONTRACTS = {
+    ("03_style_cover_image", "cover_key_visual"): {"optional": ["input_reference_style"], "primary": "input_reference_style"},
+    ("04_keyframe", "keyframe"): {},
+    ("04_keyframe", "identity_keyframe"): {"required": ["input_identity_image"], "primary": "input_identity_image"},
+    ("04_keyframe", "pose_identity_keyframe"): {"required": ["input_identity_image", "input_pose_image"], "primary": "input_identity_image"},
+    ("07_live_to_anime", "live_to_anime"): {"required": ["input_source_video"], "optional": ["input_reference_style", "input_identity_image"], "primary": "input_reference_style"},
+    ("08_motion_transfer", "motion_transfer"): {"required": ["input_identity_image", "input_source_video"], "optional": ["input_pose_image"], "primary": "input_identity_image"},
+    ("11_video_enhance", "video_upscale"): {"required": ["input_source_video"]},
+    ("11_video_enhance", "frame_interpolation"): {"required": ["input_source_video"]},
+    ("11_video_enhance", "video_deflicker_stabilize"): {"required": ["input_source_video"]},
+    ("12_video_inpaint_fix", "video_inpaint_fix"): {"required": ["input_source_video", "input_mask_image"]},
+}
+
 # Generation and pre-production use a low-cost 480p working canvas. Final
 # delivery resolution is handled by the enhancement/editing stages (11/22).
 for _workflow in COMFY_DEBUG_WORKFLOWS:
     if str(_workflow.get("id") or "").split("_", 1)[0] in {f"{index:02d}" for index in range(1, 11)}:
         _workflow["default_width"] = 848
         _workflow["default_height"] = 480
-    if _workflow.get("id") == "06_i2v_first_middle_last_frame":
+    if _workflow.get("id") in {"06_i2v_first_last_frame", "06_i2v_first_middle_last_frame"}:
         _workflow["default_fps"] = 24
+    if _workflow.get("id") == "06_i2v_first_middle_last_frame":
+        _workflow["asset_tag"] = "i2v_first_middle_last_frame"
     for _mode in _workflow.get("modes") or []:
         _mode_value = str(_mode.get("value") or "")
-        _required_inputs = []
-        if _mode.get("requires_reference"):
+        _contract = COMFY_MODE_INPUT_CONTRACTS.get((_workflow.get("id"), _mode_value), {})
+        _required_inputs = list(_contract.get("required") or [])
+        _optional_inputs = list(_contract.get("optional") or [])
+        if not _contract and _mode.get("requires_reference"):
             _required_inputs.append("input_base_image")
         if _mode_value == "i2v_first_middle_last_frame":
             _required_inputs.extend(["input_middle_frame", "input_last_frame"])
@@ -171,6 +198,11 @@ for _workflow in COMFY_DEBUG_WORKFLOWS:
         if _mode_value == "talking_image":
             _required_inputs.append("input_audio_file")
         _mode["required_inputs"] = list(dict.fromkeys(_required_inputs))
+        _mode["optional_inputs"] = list(dict.fromkeys(_optional_inputs))
+        _mode["primary_input"] = str(_contract.get("primary") or ("input_base_image" if "input_base_image" in _required_inputs else ""))
+        _mode["requires_reference"] = any(slot in _mode["required_inputs"] for slot in ("input_base_image", "input_identity_image", "input_reference_style"))
+        if _workflow.get("id") == "06_i2v_first_middle_last_frame":
+            _mode["asset_tag"] = "i2v_first_middle_last_frame"
         _mode["outputs"] = ["output_final_video" if _workflow.get("type") == "video" else "output_final_image"]
         if _mode_value == "background_remove":
             _mode["outputs"].append("output_mask_alpha")
@@ -3268,6 +3300,12 @@ INDEX_HTML = r"""<!doctype html>
                 <label id="comfyDebugAudioFileField" hidden>口型音频路径
                   <input id="comfyDebugAudioFile" autocomplete="off" spellcheck="false" placeholder="input_audio_file：本地 TTS 生成的最终 WAV" />
                 </label>
+                <label id="comfyDebugSourceVideoField" hidden>源视频路径
+                  <input id="comfyDebugSourceVideo" autocomplete="off" spellcheck="false" placeholder="input_source_video：待处理、增强或动作参考的视频" />
+                </label>
+                <label id="comfyDebugPoseImageField" hidden>姿态参考图路径
+                  <input id="comfyDebugPoseImage" autocomplete="off" spellcheck="false" placeholder="input_pose_image：姿态/构图控制图" />
+                </label>
               </div>
               <input id="comfyDebugMiddleFrameReference" type="hidden" />
               <input id="comfyDebugLastFrameReference" type="hidden" />
@@ -3804,6 +3842,10 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugMaskImage: document.getElementById('comfyDebugMaskImage'),
       comfyDebugAudioFileField: document.getElementById('comfyDebugAudioFileField'),
       comfyDebugAudioFile: document.getElementById('comfyDebugAudioFile'),
+      comfyDebugSourceVideoField: document.getElementById('comfyDebugSourceVideoField'),
+      comfyDebugSourceVideo: document.getElementById('comfyDebugSourceVideo'),
+      comfyDebugPoseImageField: document.getElementById('comfyDebugPoseImageField'),
+      comfyDebugPoseImage: document.getElementById('comfyDebugPoseImage'),
       comfyDebugReferencePreview: document.getElementById('comfyDebugReferencePreview'),
       comfyDebugReferencePreviewMeta: document.getElementById('comfyDebugReferencePreviewMeta'),
       comfyDebugMiddleFrameCard: document.getElementById('comfyDebugMiddleFrameCard'),
@@ -5594,6 +5636,8 @@ INDEX_HTML = r"""<!doctype html>
         defaultWidth: String(item.defaultWidth ?? item.default_width ?? fallback.defaultWidth ?? ''),
         defaultHeight: String(item.defaultHeight ?? item.default_height ?? fallback.defaultHeight ?? ''),
         defaultReference: String(item.defaultReference ?? item.default_reference ?? fallback.defaultReference ?? ''),
+        defaultSourceVideo: String(item.defaultSourceVideo ?? item.default_source_video ?? fallback.defaultSourceVideo ?? ''),
+        defaultPoseImage: String(item.defaultPoseImage ?? item.default_pose_image ?? fallback.defaultPoseImage ?? ''),
         defaultMiddleFrameReference: String(item.defaultMiddleFrameReference ?? item.default_middle_frame_reference ?? fallback.defaultMiddleFrameReference ?? ''),
         defaultLastFrameReference: String(item.defaultLastFrameReference ?? item.default_last_frame_reference ?? fallback.defaultLastFrameReference ?? ''),
         defaultSeed: String(item.defaultSeed ?? item.default_seed ?? fallback.defaultSeed ?? ''),
@@ -5878,6 +5922,8 @@ INDEX_HTML = r"""<!doctype html>
         lastFrameReference: els.comfyDebugLastFrameReference?.value || '',
         maskImage: els.comfyDebugMaskImage?.value || '',
         audioFile: els.comfyDebugAudioFile?.value || '',
+        sourceVideo: els.comfyDebugSourceVideo?.value || '',
+        poseImage: els.comfyDebugPoseImage?.value || '',
         seed: els.comfyDebugSeed?.value || '',
         width: els.comfyDebugWidth?.value || '',
         height: els.comfyDebugHeight?.value || '',
@@ -5917,6 +5963,8 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugLastFrameReference) els.comfyDebugLastFrameReference.value = state.lastFrameReference || '';
       if (els.comfyDebugMaskImage) els.comfyDebugMaskImage.value = state.maskImage || '';
       if (els.comfyDebugAudioFile) els.comfyDebugAudioFile.value = state.audioFile || '';
+      if (els.comfyDebugSourceVideo) els.comfyDebugSourceVideo.value = state.sourceVideo || '';
+      if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = state.poseImage || '';
       if (els.comfyDebugSeed) els.comfyDebugSeed.value = state.seed || '';
       if (els.comfyDebugWidth) els.comfyDebugWidth.value = state.width || '';
       if (els.comfyDebugHeight) els.comfyDebugHeight.value = state.height || '';
@@ -5959,6 +6007,8 @@ INDEX_HTML = r"""<!doctype html>
         lastFrameReference: modeConfig.defaultLastFrameReference || '',
         maskImage: '',
         audioFile: '',
+        sourceVideo: modeConfig.defaultSourceVideo || '',
+        poseImage: modeConfig.defaultPoseImage || '',
         seed: modeConfig.defaultSeed || '',
         width: String(modeConfig.defaultWidth || workflow?.default_width || ''),
         height: String(modeConfig.defaultHeight || workflow?.default_height || ''),
@@ -6166,6 +6216,8 @@ INDEX_HTML = r"""<!doctype html>
           default_width: item.defaultWidth || '',
           default_height: item.defaultHeight || '',
           default_reference: item.defaultReference || '',
+          default_source_video: item.defaultSourceVideo || '',
+          default_pose_image: item.defaultPoseImage || '',
           default_seed: item.defaultSeed || '',
           default_duration: item.defaultDuration || '',
           default_fps: item.defaultFps || '',
@@ -6188,6 +6240,8 @@ INDEX_HTML = r"""<!doctype html>
             default_width: config.defaultWidth || '',
             default_height: config.defaultHeight || '',
             default_reference: config.defaultReference || '',
+            default_source_video: config.defaultSourceVideo || '',
+            default_pose_image: config.defaultPoseImage || '',
             default_middle_frame_reference: config.defaultMiddleFrameReference || '',
             default_last_frame_reference: config.defaultLastFrameReference || '',
             default_seed: config.defaultSeed || '',
@@ -6380,6 +6434,9 @@ INDEX_HTML = r"""<!doctype html>
         '{{video_prompt}}': '视频提示词',
         '{{reference_image}}': '参考图文件名/URL',
         '{{input_base_image}}': '语义槽位：主底图',
+        '{{input_identity_image}}': '语义槽位：身份参考图',
+        '{{input_pose_image}}': '语义槽位：姿态参考图',
+        '{{input_source_video}}': '语义槽位：源视频',
         '{{input_middle_frame}}': '语义槽位：中帧',
         '{{input_last_frame}}': '语义槽位：尾帧',
         '{{input_mask_image}}': '语义槽位：修复蒙版',
@@ -6496,7 +6553,7 @@ INDEX_HTML = r"""<!doctype html>
       const panel = document.createElement('div');
       panel.className = 'comfy-parameter-panel';
       panel.appendChild(head);
-      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{input_base_image}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{payload}}'];
+      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{payload}}'];
       comfyParameterCandidates.forEach((candidate, index) => {
         const item = document.createElement('div');
         item.className = 'comfy-parameter-row';
@@ -8950,22 +9007,6 @@ INDEX_HTML = r"""<!doctype html>
 
     function normalizeComfyDebugWorkflowDefinition(workflow) {
       const item = { ...(workflow || {}) };
-      if (item.id === '04_keyframe') {
-        item.default_task_type = 'keyframe';
-        item.default_control_mode = 'none';
-        item.default_image_task_type = 'keyframe';
-        item.asset_tag = 'keyframe';
-        item.modes = [{
-          value: 'keyframe',
-          label: '关键帧',
-          asset_tag: 'keyframe',
-          task_type: 'keyframe',
-          control_mode: 'none',
-          requires_reference: false,
-          required_inputs: [],
-          outputs: ['output_final_image'],
-        }];
-      }
       return item;
     }
 
@@ -9002,8 +9043,15 @@ INDEX_HTML = r"""<!doctype html>
 
     function comfyDebugModeDisablesReference(workflow = activeComfyDebugWorkflow()) {
       const mode = selectedWorkflowModeDefinition(workflow);
-      if (!mode || Boolean(mode.requires_reference)) return false;
-      return ['none', 'broll', 'transition'].includes(String(mode.control_mode || '').trim().toLowerCase());
+      if (!mode) return false;
+      return !modeAcceptedInputs(mode).some(slot => ['input_base_image', 'input_identity_image', 'input_reference_style'].includes(slot));
+    }
+
+    function modeAcceptedInputs(mode = selectedWorkflowModeDefinition()) {
+      return [...new Set([
+        ...(Array.isArray(mode?.required_inputs) ? mode.required_inputs : []),
+        ...(Array.isArray(mode?.optional_inputs) ? mode.optional_inputs : []),
+      ])];
     }
 
     function normalizeComfyDebugWorkflowSavedConfig(item, workflow) {
@@ -9016,15 +9064,7 @@ INDEX_HTML = r"""<!doctype html>
         item.defaultAssetReference = '';
         item.defaultReferenceHint = '';
       }
-      if (workflow.id === '04_keyframe') {
-        item.defaultWorkflowMode = 'keyframe';
-        item.defaultImageTaskType = 'keyframe';
-        item.defaultReference = '';
-        item.defaultAssetReference = '';
-        if (String(item.defaultReferenceHint || '').includes('需要参考')) {
-          item.defaultReferenceHint = '';
-        }
-      } else if (!item.defaultWorkflowMode && Array.isArray(workflow.modes) && workflow.modes.length === 1) {
+      if (!item.defaultWorkflowMode && Array.isArray(workflow.modes) && workflow.modes.length === 1) {
         item.defaultWorkflowMode = workflow.modes[0].value || '';
       }
       if (!item.defaultImageTaskType) {
@@ -9036,7 +9076,7 @@ INDEX_HTML = r"""<!doctype html>
         const size = normalizedComfyDebug480pSize(config.defaultWidth, config.defaultHeight, workflow);
         config.defaultWidth = size.width;
         config.defaultHeight = size.height;
-        if (!mode.requires_reference) {
+        if (!modeAcceptedInputs(mode).some(slot => ['input_base_image', 'input_identity_image', 'input_reference_style'].includes(slot))) {
           config.defaultReference = '';
           config.defaultMiddleFrameReference = '';
           config.defaultLastFrameReference = '';
@@ -9055,14 +9095,6 @@ INDEX_HTML = r"""<!doctype html>
         next.reference = '';
         next.assetReference = '';
         next.referenceHint = '';
-      }
-      if (workflow?.id === '04_keyframe') {
-        next.workflowMode = 'keyframe';
-        next.reference = '';
-        next.assetReference = '';
-        if (String(next.referenceHint || '').includes('需要参考')) {
-          next.referenceHint = '';
-        }
       }
       return next;
     }
@@ -9134,9 +9166,11 @@ INDEX_HTML = r"""<!doctype html>
         if (els.comfyDebugFps) els.comfyDebugFps.value = '';
       }
       const mode = selectedWorkflowModeDefinition(selected);
-      const requiredInputs = Array.isArray(mode?.required_inputs) ? mode.required_inputs : [];
-      if (els.comfyDebugMaskImageField) els.comfyDebugMaskImageField.hidden = !requiredInputs.includes('input_mask_image');
-      if (els.comfyDebugAudioFileField) els.comfyDebugAudioFileField.hidden = !requiredInputs.includes('input_audio_file');
+      const acceptedInputs = modeAcceptedInputs(mode);
+      if (els.comfyDebugMaskImageField) els.comfyDebugMaskImageField.hidden = !acceptedInputs.includes('input_mask_image');
+      if (els.comfyDebugAudioFileField) els.comfyDebugAudioFileField.hidden = !acceptedInputs.includes('input_audio_file');
+      if (els.comfyDebugSourceVideoField) els.comfyDebugSourceVideoField.hidden = !acceptedInputs.includes('input_source_video');
+      if (els.comfyDebugPoseImageField) els.comfyDebugPoseImageField.hidden = !acceptedInputs.includes('input_pose_image');
       updateComfyDebugFrameCountHint();
       updateComfyDebugReferencePreviews();
     }
@@ -9475,10 +9509,12 @@ INDEX_HTML = r"""<!doctype html>
       if (comfyDebugModeDisablesReference()) {
         return { hasReference: false, hasMiddleFrame: false, hasLastFrame: false };
       }
+      const acceptedInputs = modeAcceptedInputs();
       const text = comfyDebugNodeInfoText();
-      const hasReference = /\{\{\s*(reference_image|reference_image_[1-4]|has_reference_image|has_reference_image_[1-4])\s*\}\}/i.test(text);
-      const hasMiddleFrame = /\{\{\s*(middle_frame_image|mid_frame_image|has_middle_frame_image)\s*\}\}/i.test(text);
-      const hasLastFrame = /\{\{\s*(last_frame_image|end_frame_image|has_last_frame_image)\s*\}\}/i.test(text);
+      const hasReference = acceptedInputs.some(slot => ['input_base_image', 'input_identity_image', 'input_reference_style'].includes(slot))
+        || /\{\{\s*(reference_image|reference_image_[1-4]|input_identity_image|input_reference_style|has_reference_image|has_reference_image_[1-4])\s*\}\}/i.test(text);
+      const hasMiddleFrame = acceptedInputs.includes('input_middle_frame') || /\{\{\s*(middle_frame_image|mid_frame_image|has_middle_frame_image)\s*\}\}/i.test(text);
+      const hasLastFrame = acceptedInputs.includes('input_last_frame') || /\{\{\s*(last_frame_image|end_frame_image|has_last_frame_image)\s*\}\}/i.test(text);
       return { hasReference, hasMiddleFrame, hasLastFrame };
     }
 
@@ -11161,6 +11197,8 @@ INDEX_HTML = r"""<!doctype html>
       modeConfig.defaultWidth = els.comfyDebugWidth.value.trim();
       modeConfig.defaultHeight = els.comfyDebugHeight.value.trim();
       modeConfig.defaultReference = els.comfyDebugReference.value.trim();
+      modeConfig.defaultSourceVideo = els.comfyDebugSourceVideo?.value.trim() || '';
+      modeConfig.defaultPoseImage = els.comfyDebugPoseImage?.value.trim() || '';
       modeConfig.defaultMiddleFrameReference = els.comfyDebugMiddleFrameReference?.value.trim() || '';
       modeConfig.defaultLastFrameReference = els.comfyDebugLastFrameReference?.value.trim() || '';
       modeConfig.defaultSeed = els.comfyDebugSeed.value.trim();
@@ -11695,8 +11733,16 @@ INDEX_HTML = r"""<!doctype html>
         throw new Error('首尾帧模式必须同时提供首帧和尾帧');
       }
       const requiredInputs = Array.isArray(workflowModeDef?.required_inputs) ? workflowModeDef.required_inputs : [];
+      const acceptedInputs = modeAcceptedInputs(workflowModeDef);
+      const primaryInput = String(workflowModeDef?.primary_input || '');
+      const sourceVideoValue = String(overrides.input_source_video ?? (els.comfyDebugSourceVideo?.value || '')).trim();
+      const poseImageValue = String(overrides.input_pose_image ?? (els.comfyDebugPoseImage?.value || '')).trim();
       const semanticValues = {
-        input_base_image: submitReferenceValue,
+        input_base_image: acceptedInputs.includes('input_base_image') ? submitReferenceValue : '',
+        input_identity_image: acceptedInputs.includes('input_identity_image') ? submitReferenceValue : '',
+        input_reference_style: acceptedInputs.includes('input_reference_style') ? submitReferenceValue : '',
+        input_pose_image: poseImageValue,
+        input_source_video: sourceVideoValue,
         input_middle_frame: submitMiddleFrameValue,
         input_last_frame: submitLastFrameValue,
         input_mask_image: els.comfyDebugMaskImage?.value.trim() || '',
@@ -11723,11 +11769,16 @@ INDEX_HTML = r"""<!doctype html>
         reference_image: submitReferenceValue,
         middle_frame_image: submitMiddleFrameValue,
         last_frame_image: submitLastFrameValue,
-        input_base_image: submitReferenceValue,
+        input_base_image: semanticValues.input_base_image,
+        input_identity_image: semanticValues.input_identity_image,
+        input_reference_style: semanticValues.input_reference_style,
+        input_pose_image: poseImageValue,
+        input_source_video: sourceVideoValue,
         input_middle_frame: submitMiddleFrameValue,
         input_last_frame: submitLastFrameValue,
         input_mask_image: els.comfyDebugMaskImage?.value.trim() || '',
         input_audio_file: els.comfyDebugAudioFile?.value.trim() || '',
+        primary_input: primaryInput,
         task_type: imageTaskDef.taskType || '',
         control_mode: imageTaskDef.controlMode || '',
         image_task_mode: selected.type === 'image' ? imageTaskDef.value : '',
@@ -11749,6 +11800,9 @@ INDEX_HTML = r"""<!doctype html>
       if (!text || text === '[]') throw new Error('RunningHub 子模式尚未配置 nodeInfoList');
       const aliases = {
         input_base_image: ['{{input_base_image}}', '{{reference_image}}'],
+        input_identity_image: ['{{input_identity_image}}', '{{identity_image}}', '{{reference_image_1}}'],
+        input_pose_image: ['{{input_pose_image}}', '{{pose_image}}'],
+        input_source_video: ['{{input_source_video}}', '{{source_video}}', '{{reference_video}}'],
         input_middle_frame: ['{{input_middle_frame}}', '{{middle_frame_image}}'],
         input_last_frame: ['{{input_last_frame}}', '{{last_frame_image}}'],
         input_mask_image: ['{{input_mask_image}}', '{{mask_image}}'],
@@ -12038,6 +12092,8 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyDebugReference,
       els.comfyDebugMaskImage,
       els.comfyDebugAudioFile,
+      els.comfyDebugSourceVideo,
+      els.comfyDebugPoseImage,
       els.comfyDebugWorkflowMode,
       els.comfyDebugSeed,
       els.comfyDebugWidth,
@@ -16000,8 +16056,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         last_frame_image = str(payload.get("last_frame_image") or "").strip()
         mask_image = str(payload.get("input_mask_image") or payload.get("mask_image") or "").strip()
         audio_file = str(payload.get("input_audio_file") or payload.get("audio_file") or "").strip()
+        identity_image = str(payload.get("input_identity_image") or payload.get("identity_image") or "").strip()
+        pose_image = str(payload.get("input_pose_image") or payload.get("pose_image") or "").strip()
+        source_video = str(payload.get("input_source_video") or payload.get("source_video") or "").strip()
+        reference_style = str(payload.get("input_reference_style") or payload.get("reference_style") or "").strip()
         reference_images_input = payload.get("reference_images") if isinstance(payload.get("reference_images"), list) else []
-        has_any_reference = bool(reference_image or middle_frame_image or last_frame_image or reference_images_input)
+        has_any_reference = bool(reference_image or identity_image or reference_style or middle_frame_image or last_frame_image or reference_images_input)
         seed = str(payload.get("seed") or "").strip()
         width = str(payload.get("width") or "").strip()
         height = str(payload.get("height") or "").strip()
@@ -16089,6 +16149,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "character_turnaround": ("character_turnaround", "character_reference", True),
             "product_turnaround": ("product_turnaround", "product_reference", True),
             "keyframe": ("keyframe", "none", False),
+            "identity_keyframe": ("keyframe", "identity_reference", True),
+            "pose_identity_keyframe": ("keyframe", "identity_pose_reference", True),
             "cover_key_visual": ("cover_key_visual", "style_reference", False),
             "style_reference": ("style_reference", "none", False),
             "inpaint_fix": ("inpaint_fix", "mask_inpaint", True),
@@ -16124,13 +16186,21 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if mode_item:
                     task_type = str(mode_item.get("task_type") or task_type)
                     control_mode = str(mode_item.get("control_mode") or control_mode)
-                    if mode_item.get("requires_reference") and not has_any_reference:
-                        raise ValueError(f"{mode} requires reference_image")
                     required_inputs = mode_item.get("required_inputs") if isinstance(mode_item.get("required_inputs"), list) else []
-                    if "input_mask_image" in required_inputs and not mask_image:
-                        raise ValueError(f"{mode} requires input_mask_image")
-                    if "input_audio_file" in required_inputs and not audio_file:
-                        raise ValueError(f"{mode} requires input_audio_file")
+                    semantic_values = {
+                        "input_base_image": reference_image,
+                        "input_identity_image": identity_image or reference_image,
+                        "input_reference_style": reference_style or reference_image,
+                        "input_pose_image": pose_image,
+                        "input_source_video": source_video,
+                        "input_middle_frame": middle_frame_image,
+                        "input_last_frame": last_frame_image,
+                        "input_mask_image": mask_image,
+                        "input_audio_file": audio_file,
+                    }
+                    missing_inputs = [slot for slot in required_inputs if not semantic_values.get(str(slot))]
+                    if missing_inputs:
+                        raise ValueError(f"{mode} requires semantic inputs: {', '.join(missing_inputs)}")
             if job_type == "image" and mode in image_task_modes:
                 task_type, control_mode, requires_reference = image_task_modes[mode]
                 if requires_reference and not has_any_reference:
@@ -16145,11 +16215,6 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 task_type = task_type_override
             if control_mode_override:
                 control_mode = control_mode_override
-            if workflow_id == "04_keyframe" or mode == "keyframe":
-                reference_image = ""
-                middle_frame_image = ""
-                last_frame_image = ""
-                reference_images_input = []
             request_payload = {
                 "prompt": prompt,
                 "negative_prompt": negative_prompt,
@@ -16157,6 +16222,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "middle_frame_image": middle_frame_image,
                 "last_frame_image": last_frame_image,
                 "input_base_image": reference_image,
+                "input_identity_image": identity_image or (reference_image if mode in {"identity_keyframe", "pose_identity_keyframe", "motion_transfer"} else ""),
+                "input_reference_style": reference_style or (reference_image if mode in {"cover_key_visual", "live_to_anime"} else ""),
+                "input_pose_image": pose_image,
+                "input_source_video": source_video,
                 "input_middle_frame": middle_frame_image,
                 "input_last_frame": last_frame_image,
                 "input_mask_image": mask_image,
@@ -16221,10 +16290,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if audio_file:
                     safe_audio_file = self._ensure_comfy_safe_reference_file(audio_file)
                     request_payload["input_audio_file"] = adapter._reference_media_value(safe_audio_file)  # type: ignore[attr-defined]
+                if source_video:
+                    safe_source_video = self._ensure_comfy_safe_reference_file(source_video)
+                    request_payload["input_source_video"] = adapter._reference_media_value(safe_source_video)  # type: ignore[attr-defined]
+                if pose_image:
+                    safe_pose_image = self._ensure_comfy_safe_reference_file(pose_image)
+                    request_payload["input_pose_image"] = adapter._reference_image_value(safe_pose_image)  # type: ignore[attr-defined]
                 if uploaded_reference_images:
                     uploaded_reference = uploaded_reference_images[0]
                     request_payload["reference_image"] = uploaded_reference
                     request_payload["reference_images"] = uploaded_reference_images
+                    if request_payload.get("input_identity_image"):
+                        request_payload["input_identity_image"] = uploaded_reference
+                    if request_payload.get("input_reference_style"):
+                        request_payload["input_reference_style"] = uploaded_reference
                     if middle_frame_image and len(uploaded_reference_images) > 1:
                         request_payload["middle_frame_image"] = uploaded_reference_images[1]
                     if last_frame_image and len(uploaded_reference_images) > 1:
