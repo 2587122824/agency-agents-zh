@@ -108,6 +108,19 @@ class LocalFFmpegAdapter:
             if burn_subtitles
             else None
         )
+        original_audio_file = audio_file
+        audio_alignment: dict[str, Any] = {"status": "skipped", "reason": "not requested or unavailable"}
+        if (
+            audio_file
+            and subtitles_file.is_file()
+            and _bool_or_default(compose_config.get("align_voiceover_to_subtitles"), True)
+        ):
+            audio_file, audio_alignment = self._align_voiceover_to_subtitles(
+                ffmpeg_path=ffmpeg_path,
+                audio_file=audio_file,
+                subtitles_file=subtitles_file,
+                task_dir=task_dir,
+            )
         subtitle_style = str(compose_config.get("subtitle_style") or DEFAULT_SUBTITLE_STYLE).strip()
         render = manifest.get("global_context", {}).get("render", {}) if isinstance(manifest.get("global_context"), dict) else {}
         delivery = render.get("delivery_resolution", {}) if isinstance(render.get("delivery_resolution"), dict) else {}
@@ -214,6 +227,8 @@ class LocalFFmpegAdapter:
                 "video_files": [str(path) for path in video_files],
                 "image_files": [str(path) for path in image_files],
                 "audio_file": str(audio_file) if audio_file else "",
+                "original_audio_file": str(original_audio_file) if original_audio_file else "",
+                "audio_alignment": audio_alignment,
                 "bgm_file": str(bgm_file) if bgm_file else "",
                 "subtitles_file": str(subtitles_file) if subtitles_file.is_file() else "",
                 "burn_subtitles_file": str(burn_subtitles_file) if burn_subtitles_file else "",
@@ -381,6 +396,165 @@ class LocalFFmpegAdapter:
         candidate = Path(configured)
         candidate = candidate.resolve() if candidate.is_absolute() else (self.workspace_root / candidate).resolve()
         return candidate if candidate.is_file() and candidate.suffix.lower() in AUDIO_EXTENSIONS else None
+
+    @classmethod
+    def _align_voiceover_to_subtitles(
+        cls,
+        *,
+        ffmpeg_path: str,
+        audio_file: Path,
+        subtitles_file: Path,
+        task_dir: Path,
+    ) -> tuple[Path, dict[str, Any]]:
+        entries = cls._read_srt_entries(subtitles_file)
+        duration = cls._probe_media_duration(ffmpeg_path, audio_file)
+        subtitle_end = entries[-1][1] / 1000.0 if entries else 0.0
+        if len(entries) < 2 or duration <= 0 or subtitle_end <= 0:
+            return audio_file, {"status": "skipped", "reason": "insufficient subtitle/audio timing data"}
+        drift = subtitle_end - duration
+        if abs(drift) <= 1.0:
+            return audio_file, {
+                "status": "skipped",
+                "reason": "audio already matches subtitle timeline",
+                "audio_duration_seconds": round(duration, 3),
+                "subtitle_end_seconds": round(subtitle_end, 3),
+            }
+
+        silences = cls._detect_silence_midpoints(ffmpeg_path, audio_file)
+        weights = [max(1, len(re.sub(r"\s+", "", text))) for _, _, text in entries]
+        total_weight = sum(weights)
+        expected = [duration * sum(weights[:index]) / total_weight for index in range(1, len(entries))]
+        boundaries = [0.0]
+        remaining = list(silences)
+        for target in expected:
+            candidates = [value for value in remaining if value > boundaries[-1] + 0.08]
+            chosen = min(candidates, key=lambda value: abs(value - target)) if candidates else target
+            if abs(chosen - target) > max(2.5, duration * 0.06):
+                chosen = target
+            chosen = min(max(chosen, boundaries[-1] + 0.08), duration - 0.08)
+            boundaries.append(chosen)
+            remaining = [value for value in remaining if value > chosen + 0.08]
+        boundaries.append(duration)
+
+        filters: list[str] = []
+        labels: list[str] = []
+        segments: list[dict[str, Any]] = []
+        for index, ((start_ms, end_ms, _), source_start, source_end) in enumerate(zip(entries, boundaries, boundaries[1:])):
+            target_duration = max(0.05, (end_ms - start_ms) / 1000.0)
+            source_duration = max(0.05, source_end - source_start)
+            chain = f"[0:a]atrim=start={source_start:.6f}:end={source_end:.6f},asetpts=PTS-STARTPTS"
+            tempo = source_duration / target_duration
+            if tempo > 1.01:
+                chain += "," + cls._atempo_chain(tempo)
+            chain += f",apad,atrim=duration={target_duration:.6f}[s{index}]"
+            filters.append(chain)
+            labels.append(f"[s{index}]")
+            segments.append(
+                {
+                    "index": index + 1,
+                    "source_start": round(source_start, 3),
+                    "source_end": round(source_end, 3),
+                    "source_duration": round(source_duration, 3),
+                    "target_start": round(start_ms / 1000.0, 3),
+                    "target_end": round(end_ms / 1000.0, 3),
+                    "target_duration": round(target_duration, 3),
+                    "tempo": round(max(1.0, tempo), 4),
+                }
+            )
+        filters.append("".join(labels) + f"concat=n={len(labels)}:v=0:a=1[aout]")
+        aligned = task_dir / "audio" / "voiceover_aligned.wav"
+        aligned.parent.mkdir(parents=True, exist_ok=True)
+        command = [
+            ffmpeg_path,
+            "-y",
+            "-i",
+            str(audio_file),
+            "-filter_complex",
+            ";".join(filters),
+            "-map",
+            "[aout]",
+            "-ar",
+            "48000",
+            "-ac",
+            "1",
+            str(aligned),
+        ]
+        completed = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if completed.returncode != 0 or not aligned.is_file():
+            return audio_file, {
+                "status": "failed",
+                "reason": f"voiceover alignment ffmpeg exited with code {completed.returncode}",
+                "stderr": (completed.stderr or "")[-1200:],
+            }
+        return aligned, {
+            "status": "success",
+            "source_file": str(audio_file),
+            "aligned_file": str(aligned),
+            "audio_duration_seconds": round(duration, 3),
+            "subtitle_end_seconds": round(subtitle_end, 3),
+            "drift_seconds": round(drift, 3),
+            "silence_midpoints": [round(value, 3) for value in silences],
+            "segments": segments,
+        }
+
+    @staticmethod
+    def _read_srt_entries(path: Path) -> list[tuple[int, int, str]]:
+        entries: list[tuple[int, int, str]] = []
+        text = path.read_text(encoding="utf-8-sig", errors="replace")
+        for block in re.split(r"\r?\n\s*\r?\n", text.strip()):
+            lines = block.splitlines()
+            if len(lines) < 3:
+                continue
+            timing = re.match(r"\s*(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})", lines[1])
+            if timing:
+                entries.append(
+                    (
+                        LocalFFmpegAdapter._parse_srt_time(timing.group(1)),
+                        LocalFFmpegAdapter._parse_srt_time(timing.group(2)),
+                        "".join(line.strip() for line in lines[2:] if line.strip()),
+                    )
+                )
+        return entries
+
+    @staticmethod
+    def _probe_media_duration(ffmpeg_path: str, path: Path) -> float:
+        ffprobe = Path(ffmpeg_path).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
+        if not ffprobe.is_file():
+            return 0.0
+        completed = subprocess.run(
+            [str(ffprobe), "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        try:
+            return float((completed.stdout or "").strip()) if completed.returncode == 0 else 0.0
+        except ValueError:
+            return 0.0
+
+    @staticmethod
+    def _detect_silence_midpoints(ffmpeg_path: str, audio_file: Path) -> list[float]:
+        completed = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-i", str(audio_file), "-af", "silencedetect=noise=-35dB:d=0.12", "-f", "null", os.devnull],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        starts = [float(value) for value in re.findall(r"silence_start:\s*([0-9.]+)", completed.stderr or "")]
+        ends = [float(value) for value in re.findall(r"silence_end:\s*([0-9.]+)", completed.stderr or "")]
+        return [(start + end) / 2.0 for start, end in zip(starts, ends) if end > start]
+
+    @staticmethod
+    def _atempo_chain(tempo: float) -> str:
+        value = max(1.0, float(tempo))
+        factors: list[float] = []
+        while value > 2.0:
+            factors.append(2.0)
+            value /= 2.0
+        factors.append(value)
+        return ",".join(f"atempo={factor:.6f}" for factor in factors)
 
     @staticmethod
     def _prepare_burn_subtitles(subtitles_file: Path, task_dir: Path, max_chars: int = 11) -> Path:
