@@ -81,6 +81,13 @@ class SemanticInputContractTests(unittest.TestCase):
                 and str((node.get("widgets_values") or [""])[0]) not in set_names
             ]
             self.assertEqual(missing_set_nodes, [])
+            anything_everywhere_inputs = {
+                (node.get("inputs") or [{}])[0].get("name")
+                for node in canvas["nodes"]
+                if node.get("type") == "Anything Everywhere" and node.get("inputs")
+            }
+            self.assertTrue({"MODEL", "CLIP", "VAE"}.issubset(anything_everywhere_inputs))
+            self.assertTrue({"PULIDFLUX", "FACEANALYSIS", "EVA_CLIP"}.issubset(anything_everywhere_inputs))
 
         workflows = {item["id"]: item for item in web_app.WorkflowWebHandler._comfy_debug_workflows()}
         modes = {item["value"]: item for item in workflows["04_keyframe"]["modes"]}

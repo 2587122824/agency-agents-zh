@@ -3040,6 +3040,222 @@
       ],
       "color": "#1b4669",
       "bgcolor": "#29699c"
+    },
+    {
+      "id": 595,
+      "type": "Anything Everywhere",
+      "pos": [
+        -790,
+        1046
+      ],
+      "size": [
+        239.40000915527344,
+        46
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 113,
+      "mode": 0,
+      "inputs": [
+        {
+          "color_on": "#FFD500",
+          "label": "CLIP",
+          "name": "CLIP",
+          "shape": 7,
+          "type": "*",
+          "link": 1775
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Anything Everywhere",
+        "group_restricted": 0,
+        "color_restricted": 0,
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 596,
+      "type": "Anything Everywhere",
+      "pos": [
+        -785,
+        520
+      ],
+      "size": [
+        239.40000915527344,
+        46
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 83,
+      "mode": 0,
+      "inputs": [
+        {
+          "color_on": "#FF6E6E",
+          "label": "VAE",
+          "name": "VAE",
+          "shape": 7,
+          "type": "*",
+          "link": 1190
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Anything Everywhere",
+        "group_restricted": 0,
+        "color_restricted": 0,
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 603,
+      "type": "Anything Everywhere",
+      "pos": [
+        -373,
+        749
+      ],
+      "size": [
+        239.40000915527344,
+        46
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 138,
+      "mode": 0,
+      "inputs": [
+        {
+          "color_on": "#B39DDB",
+          "label": "MODEL",
+          "name": "MODEL",
+          "shape": 7,
+          "type": "*",
+          "link": 1298
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Anything Everywhere",
+        "group_restricted": 0,
+        "color_restricted": 0,
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 612,
+      "type": "Anything Everywhere",
+      "pos": [
+        -520,
+        77.8832778930664
+      ],
+      "size": [
+        239.40000915527344,
+        46
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 66,
+      "mode": 0,
+      "inputs": [
+        {
+          "color_on": "",
+          "label": "FACEANALYSIS",
+          "name": "FACEANALYSIS",
+          "shape": 7,
+          "type": "*",
+          "link": 1205
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Anything Everywhere",
+        "group_restricted": 0,
+        "color_restricted": 0,
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 613,
+      "type": "Anything Everywhere",
+      "pos": [
+        -520,
+        177.88327026367188
+      ],
+      "size": [
+        239.40000915527344,
+        46
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 57,
+      "mode": 0,
+      "inputs": [
+        {
+          "color_on": "",
+          "label": "EVA_CLIP",
+          "name": "EVA_CLIP",
+          "shape": 7,
+          "type": "*",
+          "link": 1206
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Anything Everywhere",
+        "group_restricted": 0,
+        "color_restricted": 0,
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [],
+      "color": "#223",
+      "bgcolor": "#335"
+    },
+    {
+      "id": 614,
+      "type": "Anything Everywhere",
+      "pos": [
+        -517,
+        316
+      ],
+      "size": [
+        172.18905639648438,
+        46
+      ],
+      "flags": {
+        "collapsed": true
+      },
+      "order": 84,
+      "mode": 0,
+      "inputs": [
+        {
+          "color_on": "",
+          "label": "PULIDFLUX",
+          "name": "PULIDFLUX",
+          "shape": 7,
+          "type": "*",
+          "link": 1276
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Anything Everywhere",
+        "group_restricted": 0,
+        "color_restricted": 0,
+        "widget_ue_connectable": {}
+      },
+      "widgets_values": [],
+      "color": "#223",
+      "bgcolor": "#335"
     }
   ],
   "links": [
@@ -4298,6 +4514,54 @@
       746,
       0,
       "*"
+    ],
+    [
+      1775,
+      724,
+      1,
+      595,
+      0,
+      "CLIP"
+    ],
+    [
+      1190,
+      615,
+      0,
+      596,
+      0,
+      "VAE"
+    ],
+    [
+      1298,
+      628,
+      0,
+      603,
+      0,
+      "MODEL"
+    ],
+    [
+      1205,
+      629,
+      0,
+      612,
+      0,
+      "FACEANALYSIS"
+    ],
+    [
+      1206,
+      630,
+      0,
+      613,
+      0,
+      "EVA_CLIP"
+    ],
+    [
+      1276,
+      627,
+      0,
+      614,
+      0,
+      "PULIDFLUX"
     ]
   ],
   "groups": [
