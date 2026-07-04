@@ -1,62 +1,56 @@
 [
   {
-    "nodeId": "39",
-    "fieldName": "text",
+    "nodeId": "34",
+    "fieldName": "value",
     "fieldValue": "{{prompt}}",
-    "description": "positive Flux/Kontext img2img keyframe prompt"
+    "description": "current shot prompt used by the next-scene prompt builder"
   },
   {
-    "nodeId": "40",
-    "fieldName": "text",
+    "nodeId": "3",
+    "fieldName": "prompt",
     "fieldValue": "{{negative_prompt}}",
-    "description": "negative prompt"
+    "description": "negative conditioning prompt"
   },
   {
-    "nodeId": "81",
+    "nodeId": "2",
     "fieldName": "image",
     "fieldValue": "{{input_base_image}}",
-    "description": "source image used for Flux/Kontext img2img latent"
+    "description": "source/reference image for img2img keyframe generation"
   },
   {
-    "nodeId": "90",
+    "nodeId": "8",
     "fieldName": "value",
-    "fieldValue": "{{width}}",
-    "description": "resize/output width"
+    "fieldValue": "{{short_side}}",
+    "description": "img2img resize shortest side derived from the debug form width/height"
   },
   {
-    "nodeId": "89",
-    "fieldName": "value",
-    "fieldValue": "{{height}}",
-    "description": "resize/output height"
-  },
-  {
-    "nodeId": "86",
+    "nodeId": "27",
     "fieldName": "seed",
     "fieldValue": "{{seed}}",
-    "description": "random seed"
+    "description": "shared seed for prompt generation and sampling"
   },
   {
-    "nodeId": "86",
+    "nodeId": "24",
     "fieldName": "steps",
-    "fieldValue": 20,
-    "description": "KSampler Inspire steps"
-  },
-  {
-    "nodeId": "86",
-    "fieldName": "cfg",
     "fieldValue": 8,
-    "description": "KSampler Inspire cfg"
+    "description": "KSampler steps"
   },
   {
-    "nodeId": "86",
+    "nodeId": "24",
+    "fieldName": "cfg",
+    "fieldValue": 1,
+    "description": "KSampler cfg"
+  },
+  {
+    "nodeId": "24",
     "fieldName": "denoise",
     "fieldValue": "{{denoise}}",
-    "description": "Flux/Kontext img2img denoise strength; recommended 0.25-0.45 for identity preservation"
+    "description": "img2img denoise strength; lower values preserve more of the source image"
   },
   {
-    "nodeId": "50",
+    "nodeId": "48",
     "fieldName": "filename_prefix",
     "fieldValue": "img2img_style_keyframe",
-    "description": "output filename prefix"
+    "description": "final grid output filename prefix"
   }
 ]

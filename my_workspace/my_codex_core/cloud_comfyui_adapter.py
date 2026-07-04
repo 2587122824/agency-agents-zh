@@ -759,6 +759,7 @@ class CloudComfyUIAdapter:
             "{{job_id}}": str(comfyui_payload.get("job_id") or comfyui_payload.get("id") or comfyui_payload.get("name") or ""),
             "{{width}}": str(comfyui_payload.get("width") or ""),
             "{{height}}": str(comfyui_payload.get("height") or ""),
+            "{{short_side}}": self._short_side(comfyui_payload),
             "{{task_type}}": str(comfyui_payload.get("task_type") or ""),
             "{{image_task_mode}}": str(comfyui_payload.get("image_task_mode") or ""),
             "{{control_mode}}": str(comfyui_payload.get("control_mode") or ""),
@@ -2085,7 +2086,7 @@ class CloudComfyUIAdapter:
             value = str(job.get(semantic_key) or job.get(job_key) or payload.get(semantic_key) or "").strip()
             if value:
                 payload[semantic_key] = self._reference_media_value(value) if semantic_key in {"input_audio_file", "input_source_video"} else value
-        for key in ("seed", "width", "height", "duration", "fps", "frame_count", "frames", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "camera_motion", "camera_path", "pose_video", "image_task_mode"):
+        for key in ("seed", "width", "height", "short_side", "duration", "fps", "frame_count", "frames", "denoise", "ipadapter_weight", "reference_strength", "motion_strength", "camera_motion", "camera_path", "pose_video", "image_task_mode"):
             value = (
                 prompt_data.get(key)
                 if key in prompt_data
@@ -2556,6 +2557,20 @@ class CloudComfyUIAdapter:
         if duration <= 0 or fps <= 0:
             return ""
         return str(max(1, int(round(duration * fps)) + 1))
+
+    @staticmethod
+    def _short_side(payload: dict[str, Any]) -> str:
+        explicit = payload.get("short_side")
+        if explicit not in (None, ""):
+            return str(explicit)
+        try:
+            width = int(float(payload.get("width") or 0))
+            height = int(float(payload.get("height") or 0))
+        except (TypeError, ValueError):
+            return ""
+        if width <= 0 or height <= 0:
+            return ""
+        return str(max(1, min(width, height)))
 
     @staticmethod
     def _ltx_guide_frame_count(payload: dict[str, Any]) -> str:

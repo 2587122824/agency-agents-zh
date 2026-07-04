@@ -98,6 +98,6 @@ This mode is kept as an explicit debug-console submode while the production flow
 ## Img2img style keyframe variant
 
 `img2img_style_keyframe_canvas.json` is exposed as `04_keyframe / img2img_style_keyframe`.
-The active `img2img_style_keyframe_nodeinfo.json` is calibrated for the user-provided Flux/Kontext img2img workflow `风格参考图生图.json`: `LoadImage(81) -> ImageResizeKJv2 -> VAEEncode -> KSampler //Inspire(86) -> VAEDecode -> SaveImage(50)`. It requires `{{input_base_image}}` and maps `{{prompt}}`, `{{negative_prompt}}`, `{{width}}`, `{{height}}`, `{{seed}}`, and `{{denoise}}`.
+The active `img2img_style_keyframe_nodeinfo.json` is calibrated for the user-provided Qwen Image Edit 2511 img2img workflow `图生图风格关键帧.json`: `LoadImage(2) -> PrimitiveStringMultiline(34) -> shortest-side Int(8) -> TextEncodeQwenImageEditPlus(3) -> KSampler(24) -> SaveImage(48)`. It requires `{{input_base_image}}` and maps `{{prompt}}`, `{{negative_prompt}}`, `{{short_side}}`, `{{seed}}`, and `{{denoise}}`.
 
 Use this mode when the reference image should remain recognizable as the basis of the keyframe. Recommended denoise is `0.25-0.45`; lower denoise preserves more of the source frame, higher denoise allows stronger shot changes.

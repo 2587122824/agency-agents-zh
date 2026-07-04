@@ -3453,7 +3453,7 @@ INDEX_HTML = r"""<!doctype html>
                 <textarea id="comfyDebugNegative" spellcheck="false" placeholder="例如：文字、水印、畸形手、脸部变形、闪烁、低清晰度"></textarea>
               </label>
               <label>nodeInfoList JSON（覆盖槽位）
-                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；视频长度节点请优先用 {{frame_count}}，可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{last_frame_image}}、{{seed}}、{{width}}、{{height}}、{{duration}}、{{fps}}、{{frame_count}}、{{task_type}}、{{image_task_mode}}、{{control_mode}}"></textarea>
+                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；视频长度节点请优先用 {{frame_count}}，可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{last_frame_image}}、{{seed}}、{{width}}、{{height}}、{{short_side}}、{{duration}}、{{fps}}、{{frame_count}}、{{task_type}}、{{image_task_mode}}、{{control_mode}}"></textarea>
               </label>
               <label>导入 API JSON 自动识别（仅本次调试）
                 <input id="comfyDebugApiWorkflowFile" type="file" accept=".json,application/json" />
@@ -6157,13 +6157,12 @@ INDEX_HTML = r"""<!doctype html>
           if (!item || typeof item !== 'object') return item;
           const nodeId = String(item.nodeId ?? '');
           const fieldName = String(item.fieldName ?? '');
-          if (nodeId === '39' && fieldName === 'text') return { ...item, fieldValue: '{{prompt}}' };
-          if (nodeId === '40' && fieldName === 'text') return { ...item, fieldValue: '{{negative_prompt}}' };
-          if (nodeId === '81' && fieldName === 'image') return { ...item, fieldValue: '{{input_base_image}}' };
-          if (nodeId === '90' && fieldName === 'value') return { ...item, fieldValue: '{{width}}' };
-          if (nodeId === '89' && fieldName === 'value') return { ...item, fieldValue: '{{height}}' };
-          if (nodeId === '86' && fieldName === 'seed') return { ...item, fieldValue: '{{seed}}' };
-          if (nodeId === '86' && fieldName === 'denoise') return { ...item, fieldValue: '{{denoise}}' };
+          if (nodeId === '34' && fieldName === 'value') return { ...item, fieldValue: '{{prompt}}' };
+          if (nodeId === '3' && fieldName === 'prompt') return { ...item, fieldValue: '{{negative_prompt}}' };
+          if (nodeId === '2' && fieldName === 'image') return { ...item, fieldValue: '{{input_base_image}}' };
+          if (nodeId === '8' && fieldName === 'value') return { ...item, fieldValue: '{{short_side}}' };
+          if (nodeId === '27' && fieldName === 'seed') return { ...item, fieldValue: '{{seed}}' };
+          if (nodeId === '24' && fieldName === 'denoise') return { ...item, fieldValue: '{{denoise}}' };
           return item;
         });
         return JSON.stringify(normalized, null, 2);
@@ -6501,6 +6500,7 @@ INDEX_HTML = r"""<!doctype html>
       if (type.includes('loadimage') && field === 'image') return '{{reference_image}}';
       if (field === 'width' || (field === 'value' && nodeId === '90')) return '{{width}}';
       if (field === 'height' || (field === 'value' && nodeId === '89')) return '{{height}}';
+      if (field === 'value' && nodeId === '8') return '{{short_side}}';
       if (['seed', 'noise_seed'].includes(field)) return '{{seed}}';
       if (field === 'denoise') return '{{denoise}}';
       if (field === 'fps' || field === 'frame_rate') return '{{fps}}';
@@ -6645,7 +6645,7 @@ INDEX_HTML = r"""<!doctype html>
       const panel = document.createElement('div');
       panel.className = 'comfy-parameter-panel';
       panel.appendChild(head);
-      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{width}}', '{{height}}', '{{seed}}', '{{denoise}}', '{{duration}}', '{{fps}}', '{{frame_count}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{character_references}}', '{{character_reference_1}}', '{{character_reference_2}}', '{{character_reference_3}}', '{{character_reference_4}}', '{{character_id_1}}', '{{character_id_2}}', '{{character_id_3}}', '{{character_id_4}}', '{{character_position_1}}', '{{character_position_2}}', '{{character_position_3}}', '{{character_position_4}}', '{{payload}}'];
+      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{width}}', '{{height}}', '{{short_side}}', '{{seed}}', '{{denoise}}', '{{duration}}', '{{fps}}', '{{frame_count}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{character_references}}', '{{character_reference_1}}', '{{character_reference_2}}', '{{character_reference_3}}', '{{character_reference_4}}', '{{character_id_1}}', '{{character_id_2}}', '{{character_id_3}}', '{{character_id_4}}', '{{character_position_1}}', '{{character_position_2}}', '{{character_position_3}}', '{{character_position_4}}', '{{payload}}'];
       comfyParameterCandidates.forEach((candidate, index) => {
         const item = document.createElement('div');
         item.className = 'comfy-parameter-row';
@@ -9275,6 +9275,13 @@ INDEX_HTML = r"""<!doctype html>
       return String(Math.max(1, Math.round(duration * fps)));
     }
 
+    function computedComfyDebugShortSide() {
+      const width = Number(String(els.comfyDebugWidth?.value || '').trim());
+      const height = Number(String(els.comfyDebugHeight?.value || '').trim());
+      if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return '';
+      return String(Math.max(1, Math.round(Math.min(width, height))));
+    }
+
     function updateComfyDebugFrameCountHint() {
       if (!els.comfyDebugFrameCountHint) return;
       const selected = activeComfyDebugWorkflow();
@@ -11538,6 +11545,7 @@ INDEX_HTML = r"""<!doctype html>
             seed: els.comfyDebugSeed.value.trim(),
             width: els.comfyDebugWidth.value.trim(),
             height: els.comfyDebugHeight.value.trim(),
+            short_side: computedComfyDebugShortSide(),
             duration: selected.type === 'video' ? els.comfyDebugDuration.value.trim() : '',
             fps: selected.type === 'video' ? els.comfyDebugFps.value.trim() : '',
             frame_count: selected.type === 'video' ? computedComfyDebugFrameCount() : '',
@@ -12022,6 +12030,7 @@ INDEX_HTML = r"""<!doctype html>
         seed: String(overrides.seed ?? els.comfyDebugSeed.value).trim(),
         width: els.comfyDebugWidth.value.trim(),
         height: els.comfyDebugHeight.value.trim(),
+        short_side: computedComfyDebugShortSide(),
         duration: selected.type === 'video' ? els.comfyDebugDuration.value.trim() : '',
         fps: selected.type === 'video' ? els.comfyDebugFps.value.trim() : '',
         frame_count: selected.type === 'video' ? computedComfyDebugFrameCount() : '',
@@ -16497,6 +16506,14 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 task_type = task_type_override
             if control_mode_override:
                 control_mode = control_mode_override
+            width_value = width or item.get("default_width") or ""
+            height_value = height or item.get("default_height") or ""
+            short_side = str(payload.get("short_side") or "").strip()
+            if not short_side:
+                try:
+                    short_side = str(max(1, min(int(float(width_value)), int(float(height_value)))))
+                except Exception:
+                    short_side = ""
             request_payload = {
                 "prompt": prompt,
                 "negative_prompt": negative_prompt,
@@ -16519,8 +16536,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     if isinstance(value, str) and value.strip()
                 ],
                 "seed": seed,
-                "width": width or item.get("default_width") or "",
-                "height": height or item.get("default_height") or "",
+                "width": width_value,
+                "height": height_value,
+                "short_side": short_side,
                 "task_type": task_type,
                 "control_mode": control_mode,
                 "image_task_mode": mode,
