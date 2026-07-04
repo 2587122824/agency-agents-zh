@@ -2092,7 +2092,7 @@ def _preflight_visual_jobs(raw_jobs: Any) -> dict[str, Any]:
 
     for source, job_ids in primary_sources.items():
         if len(job_ids) > 1:
-            errors.append({"code": "shared_i2v_first_frame", "source_job": source, "video_jobs": job_ids})
+            warnings.append({"code": "shared_i2v_first_frame", "source_job": source, "video_jobs": job_ids})
     if not jobs:
         warnings.append({"code": "visual_jobs_unavailable", "message": "No compiler-owned visual jobs were available for preflight."})
     return {
