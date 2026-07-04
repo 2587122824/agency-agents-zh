@@ -81,5 +81,14 @@ Current files:
 - `consistent_character_identity_keyframe_nodeinfo.json`
 - `consistent_character_pose_identity_keyframe_canvas.json`
 - `consistent_character_pose_identity_keyframe_nodeinfo.json`
+- `style_reference_keyframe_canvas.json`
+- `style_reference_keyframe_nodeinfo.json`
 
 Canvas files keep literal default widget values so ComfyUI can open and validate them locally. Runtime placeholders such as `{{input_identity_image}}`, `{{input_pose_image}}`, `{{prompt}}`, `{{width}}`, `{{height}}`, and `{{seed}}` live only in the paired RunningHub nodeInfoList files.
+
+## Style-reference keyframe variant
+
+`style_reference_keyframe_canvas.json` is exposed as `04_keyframe / style_reference_keyframe`.
+It is an SDXL IPAdapter Style Transfer image workflow for generating a current-shot keyframe from a style/reference image plus the shot prompt. It requires `{{input_reference_style}}` and maps `{{ipadapter_weight}}`, `{{prompt}}`, `{{negative_prompt}}`, `{{width}}`, `{{height}}`, and `{{seed}}` through `style_reference_keyframe_nodeinfo.json`.
+
+This mode is kept as an explicit debug-console submode while the production flow is still being stabilized. A later architecture pass can collapse it into a generic `04_keyframe/keyframe + controls.style_reference` preset without changing the canvas itself.

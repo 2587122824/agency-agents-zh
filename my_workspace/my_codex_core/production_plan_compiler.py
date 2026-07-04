@@ -596,7 +596,29 @@ def _image_prompt_item(
     references = item.get("reference_images") if isinstance(item.get("reference_images"), list) else []
     first_reference = str(item.get("reference_image") or (references[0] if references and isinstance(references[0], str) else ""))
     pose_reference = str(intent.get("pose_layout_image") or intent.get("composition_reference") or intent.get("input_pose_image") or intent.get("pose_image") or "").strip()
-    if workflow_id == "04_keyframe" and len(item.get("character_references") or []) > 1:
+    style_reference = str(
+        intent.get("input_reference_style")
+        or intent.get("reference_style")
+        or intent.get("style_reference")
+        or ""
+    ).strip()
+    style_reference_requested = (
+        workflow_id == "04_keyframe"
+        and bool(style_reference or first_reference)
+        and str(intent.get("control_mode") or intent.get("controlMode") or "").strip().lower() in {"style_reference", "style_ipadapter", "ipadapter_style"}
+    ) or (
+        workflow_id == "04_keyframe"
+        and bool(style_reference or first_reference)
+        and str(intent.get("asset_role") or intent.get("reference_role") or "").strip().lower() in {"style", "style_reference"}
+    )
+    if style_reference_requested:
+        workflow_mode = "style_reference_keyframe"
+        item["workflow_mode"] = workflow_mode
+        item["image_task_mode"] = workflow_mode
+        item["mode"] = workflow_mode
+        item["control_mode"] = "style_reference"
+        item["input_reference_style"] = style_reference or first_reference
+    elif workflow_id == "04_keyframe" and len(item.get("character_references") or []) > 1:
         workflow_mode = "multi_pose_identity_keyframe" if pose_reference else "multi_identity_keyframe"
         item["workflow_mode"] = workflow_mode
         item["image_task_mode"] = workflow_mode
