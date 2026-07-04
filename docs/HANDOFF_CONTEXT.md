@@ -167,6 +167,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
   - image/video intents parse as one JSON object
   - 480p working dimensions match aspect ratio
   - video references resolve to real 06 intent IDs
+  - first/middle/last video compatibility rows may rely on authoritative `production_intents.video.source_intent_ids`; they do not need to duplicate all three frame references in legacy `video_prompts`.
   - first/middle/last clips stay 4 seconds / 24fps
   - subtitle timestamps and coverage are sane
   - final edit timeline and missing-assets state are internally consistent

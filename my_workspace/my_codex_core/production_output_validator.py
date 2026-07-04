@@ -260,9 +260,12 @@ def _validate_videos(
             refs = _reference_ids(item)
             if len(set(refs)) < 3:
                 refs = _resolve_video_prompt_refs(item, index - 1, intents)
+            source_ids = []
             if len(set(refs)) < 3:
+                source_ids = _resolve_video_prompt_source_ids(item, index - 1, intents)
+            if len(set(refs)) < 3 and not source_ids:
                 issues.append(f"{label} 缺少 start/middle/end 三帧引用")
-            for ref in refs:
+            for ref in [*refs, *source_ids]:
                 if upstream_ids and ref not in upstream_ids:
                     issues.append(f"{label} 引用了不存在的上游图片：{ref}")
 
@@ -403,6 +406,24 @@ def _reference_ids(item: dict[str, Any]) -> list[str]:
 
 
 def _resolve_video_prompt_refs(prompt_item: dict[str, Any], prompt_index: int, intents: list[dict[str, Any]]) -> list[str]:
+    candidates = _matching_video_intents(prompt_item, prompt_index, intents)
+    for candidate in candidates:
+        refs = _reference_ids(candidate)
+        if len(set(refs)) >= 3:
+            return refs
+    return []
+
+
+def _resolve_video_prompt_source_ids(prompt_item: dict[str, Any], prompt_index: int, intents: list[dict[str, Any]]) -> list[str]:
+    candidates = _matching_video_intents(prompt_item, prompt_index, intents)
+    for candidate in candidates:
+        source_ids = _string_list(candidate.get("source_intent_ids"))
+        if source_ids:
+            return source_ids
+    return []
+
+
+def _matching_video_intents(prompt_item: dict[str, Any], prompt_index: int, intents: list[dict[str, Any]]) -> list[dict[str, Any]]:
     prompt_keys = {
         str(prompt_item.get("job_id") or "").strip(),
         str(prompt_item.get("id") or "").strip(),
@@ -427,11 +448,7 @@ def _resolve_video_prompt_refs(prompt_item: dict[str, Any], prompt_index: int, i
         indexed_intent = intents[prompt_index]
         if indexed_intent not in candidates:
             candidates.append(indexed_intent)
-    for candidate in candidates:
-        refs = _reference_ids(candidate)
-        if len(set(refs)) >= 3:
-            return refs
-    return []
+    return candidates
 
 
 def _string_list(value: Any) -> list[str]:

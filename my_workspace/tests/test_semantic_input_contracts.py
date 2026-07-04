@@ -561,6 +561,65 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertTrue(result["passed"], result["issues"])
         self.assertEqual(result["expected_work_resolution"], "848x480")
 
+    def test_validator_accepts_three_frame_source_intent_binding(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "video": [
+                        {
+                            "intent": "generate_three_frame_i2v_clip",
+                            "intent_id": "clip_shot_005_wakeup",
+                            "source_intent_ids": ["shot_005_three_frame"],
+                            "duration_seconds": 4,
+                            "fps": 24,
+                            "motion_plan": "闭眼到惊醒的首中尾三帧动作",
+                        }
+                    ]
+                },
+                "video_prompts": [
+                    {
+                        "task_type": "video",
+                        "video_task_mode": "first_middle_last_frame",
+                        "workflow_mode": "first_middle_last_frame",
+                        "asset_tag": "clip_shot_005_wakeup",
+                        "prompt": "闭眼到惊醒的首中尾三帧动作",
+                        "duration": 4,
+                        "fps": 24,
+                        "width": 480,
+                        "height": 848,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        previous = [
+            {
+                "agent": "06_分镜生图设计师",
+                "content": json.dumps(
+                    {
+                        "production_intents": {
+                            "image": [
+                                {
+                                    "intent": "generate_three_frame_shot",
+                                    "intent_id": "shot_005_three_frame",
+                                    "prompt": "主角醒来",
+                                }
+                            ]
+                        },
+                        "image_prompts": [],
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ]
+        result = validate_production_output(
+            {"agent": "07_视频生成执行员"},
+            f"```json\n{content}\n```",
+            {"original_requirement": "30秒短视频，真人画风", "duration_seconds": 30},
+            previous_outputs=previous,
+        )
+        self.assertTrue(result["passed"], result["issues"])
+
     def test_unconfigured_talking_image_slot_is_optional(self) -> None:
         slots = _required_workflow_slots(
             [
