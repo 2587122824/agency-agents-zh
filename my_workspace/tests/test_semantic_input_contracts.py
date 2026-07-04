@@ -288,6 +288,46 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertLessEqual(expression["denoise"], 0.38)
         self.assertIn("不变成人型", expression["prompt"])
 
+    def test_human_expression_sheet_uses_previous_reference_img2img(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_main_base",
+                            "asset_role": "character",
+                            "character_id": "character_main",
+                            "prompt": "30-40岁中国男性角色母版图，土黄色旧夹克，深蓝工装裤",
+                        },
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_expression_determined",
+                            "asset_role": "character",
+                            "character_id": "character_main",
+                            "prompt": "角色表情图：坚定、自信、笃定，下巴微扬，目光平视前方",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="human_expression_sheet_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+        )
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        expression = items["asset_character_expression_determined"]
+        self.assertEqual(expression["workflow_id"], "04_keyframe")
+        self.assertEqual(expression["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(
+            expression["input_bindings"]["input_base_image"],
+            {"from_job": "asset_character_main_base", "output": "output_final_image"},
+        )
+        self.assertIn("不换脸", expression["prompt"])
+        self.assertIn("不换衣服", expression["prompt"])
+
     def test_multi_character_keyframe_compiles_character_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

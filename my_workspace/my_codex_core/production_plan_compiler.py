@@ -405,7 +405,7 @@ def _compile_image_intents(
             resolved_entities=resolved_entities,
             notes=notes,
         )
-        _apply_animal_character_base_policy(item, intent, prompts, notes)
+        _apply_character_base_policy(item, intent, prompts, notes)
         attach_parameter_lock_metadata(
             item,
             global_context=global_context,
@@ -418,7 +418,7 @@ def _compile_image_intents(
     return prompts, jobs
 
 
-def _apply_animal_character_base_policy(
+def _apply_character_base_policy(
     item: dict[str, Any],
     intent: dict[str, Any],
     existing_items: list[dict[str, Any]],
@@ -439,8 +439,6 @@ def _apply_animal_character_base_policy(
         )
     ).lower()
     is_animal = _looks_like_animal_character(character_text)
-    if not is_animal:
-        return
     if is_animal and _looks_like_turnaround_sheet(character_text):
         item["animal_character_reference_sheet"] = True
         item["prompt"] = _append_prompt_once(
@@ -476,7 +474,11 @@ def _apply_animal_character_base_policy(
     item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
     item["prompt"] = _append_prompt_once(
         str(item.get("prompt") or ""),
-        "参考上一张角色设定图，必须保持同一只动物的毛色分布、耳朵形状、眼睛、鼻口、体型比例和尾巴一致；只改变表情和轻微动作，不改变物种，不变成人型。",
+        (
+            "参考上一张角色设定图，必须保持同一只动物的毛色分布、耳朵形状、眼睛、鼻口、体型比例和尾巴一致；只改变表情和轻微动作，不改变物种，不变成人型。"
+            if is_animal
+            else "参考上一张角色设定图，必须保持同一个人的脸型、年龄感、五官比例、发型、肤色、身材比例和服装一致；只改变表情和轻微动作，不换脸，不年轻化，不磨皮，不换衣服。"
+        ),
     )
     if notes is not None:
         notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe using {reference_job_id} for character consistency")
