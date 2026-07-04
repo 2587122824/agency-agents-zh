@@ -25,6 +25,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _payload_has_required_mode,
     _required_workflow_slots,
 )
+from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
 
 
 class SemanticInputContractTests(unittest.TestCase):
@@ -497,6 +498,68 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertNotIn("柯基国王", item["prompt"])
             self.assertIn("不出现主角", item["prompt"])
             self.assertNotIn("character", item.get("entity_context", {}))
+
+    def test_validator_treats_short_video_as_portrait_by_default(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_001_keyframe",
+                            "prompt": "2008年街边早餐摊，真人实拍质感",
+                        }
+                    ]
+                },
+                "image_prompts": [
+                    {
+                        "task_type": "image",
+                        "prompt": "2008年街边早餐摊，真人实拍质感",
+                        "width": 480,
+                        "height": 848,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        result = validate_production_output(
+            {"agent": "06_分镜生图设计师"},
+            f"```json\n{content}\n```",
+            {"original_requirement": "30秒短视频，真人画风", "duration_seconds": 30},
+        )
+        self.assertTrue(result["passed"], result["issues"])
+        self.assertEqual(result["expected_work_resolution"], "480x848")
+
+    def test_validator_respects_explicit_landscape_short_video(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_001_keyframe",
+                            "prompt": "2008年街边早餐摊，真人实拍质感",
+                        }
+                    ]
+                },
+                "image_prompts": [
+                    {
+                        "task_type": "image",
+                        "prompt": "2008年街边早餐摊，真人实拍质感",
+                        "width": 848,
+                        "height": 480,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        result = validate_production_output(
+            {"agent": "06_分镜生图设计师"},
+            f"```json\n{content}\n```",
+            {"original_requirement": "16:9横屏短视频，真人画风", "duration_seconds": 30},
+        )
+        self.assertTrue(result["passed"], result["issues"])
+        self.assertEqual(result["expected_work_resolution"], "848x480")
 
     def test_unconfigured_talking_image_slot_is_optional(self) -> None:
         slots = _required_workflow_slots(

@@ -65,6 +65,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
   - 16:9 -> `848x480`
   - 9:16 -> `480x848`
   - 1:1 -> `480x480`
+- Production-output validation treats short-video platforms/requirements (`短视频`, `抖音`, `快手`, `小红书`) as portrait `9:16` by default unless the user explicitly says `16:9`, landscape, or horizontal.
 - Delivery dimensions are normalized separately:
   - 16:9 -> `1920x1080`
   - 9:16 -> `1080x1920`

@@ -454,10 +454,17 @@ def _validate_work_resolution(item: dict[str, Any], expected: tuple[int, int], l
 def _expected_resolution(lock: dict[str, Any], delivery: bool) -> tuple[int, int]:
     constraints = " ".join(str(item) for item in lock.get("explicit_constraints") or [])
     original = str(lock.get("original_requirement") or "")
-    text = f"{original} {constraints}"
-    if "竖屏" in text or "9:16" in text:
+    aspect = str(lock.get("aspect_ratio") or lock.get("target_aspect_ratio") or "").strip()
+    platform = str(lock.get("target_platform") or lock.get("platform") or "").strip()
+    text = f"{original} {constraints} {aspect} {platform}"
+    lowered = text.lower()
+    if "16:9" in lowered or "横屏" in text or "landscape" in lowered:
+        return (1920, 1080) if delivery else (848, 480)
+    if "竖屏" in text or "9:16" in lowered or "portrait" in lowered:
         return (1080, 1920) if delivery else (480, 848)
-    if "1:1" in text or "方形" in text:
+    if any(token in text for token in ("短视频", "抖音", "快手", "小红书")):
+        return (1080, 1920) if delivery else (480, 848)
+    if "1:1" in lowered or "方形" in text or "square" in lowered:
         return (1080, 1080) if delivery else (480, 480)
     return (1920, 1080) if delivery else (848, 480)
 
