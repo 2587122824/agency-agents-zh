@@ -9881,10 +9881,12 @@ INDEX_HTML = r"""<!doctype html>
       const showReference = support.hasReference;
       const showMiddleFrame = support.hasMiddleFrame;
       const showLastFrame = support.hasLastFrame;
+      const showAnyReferenceInput = showReference || showMiddleFrame || showLastFrame;
       if (els.comfyDebugReferencePathField) els.comfyDebugReferencePathField.hidden = !showReference;
       if (els.comfyDebugAssetTagFilterField) els.comfyDebugAssetTagFilterField.hidden = !showReference;
       if (els.comfyDebugStartFrameCard) els.comfyDebugStartFrameCard.hidden = !showReference;
-      if (els.comfyDebugReferenceGrid) els.comfyDebugReferenceGrid.hidden = !(showReference || showMiddleFrame || showLastFrame);
+      if (els.comfyDebugReferenceGrid) els.comfyDebugReferenceGrid.hidden = !showAnyReferenceInput;
+      if (els.clearComfyDebugReferenceBtn?.parentElement) els.clearComfyDebugReferenceBtn.parentElement.hidden = !showAnyReferenceInput;
       if (els.comfyDebugMiddleFrameCard) els.comfyDebugMiddleFrameCard.hidden = !showMiddleFrame;
       if (els.comfyDebugLastFrameCard) els.comfyDebugLastFrameCard.hidden = !showLastFrame;
       renderComfyReferencePreview(els.comfyDebugReferencePreview, referenceValue, '首帧参考图');
