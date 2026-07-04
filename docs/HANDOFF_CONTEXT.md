@@ -129,6 +129,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - FFmpeg aligns continuous narration to multi-entry subtitle/shot timing with silence midpoint detection and per-segment tempo adjustment.
 - Burned Chinese subtitles use `subtitles_burn.srt` with punctuation-aware line breaks. Source sidecar SRT remains unchanged.
 - FFmpeg pads short narration instead of truncating the visual timeline. BGM/voice mixes use longest-authoritative audio where appropriate.
+- For video-clip concat, local FFmpeg reads the target duration from manifest/compose config and pads a short visual timeline by cloning the final frame with `tpad`, so a 60-second vertical task is not delivered as a materially shorter draft when clips total less than the requested duration.
 - Final MP4 defaults use delivery-oriented H.264: x264 `medium`, CRF 26, max rate 3 Mbps, buffer 6 Mbps, AAC 128 kbps, fast-start. These can be overridden through `compose_config`.
 
 ## Recovery / Retry Rules

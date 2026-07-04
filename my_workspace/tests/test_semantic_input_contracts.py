@@ -365,6 +365,10 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(result["status"], "skipped")
             self.assertNotIn("compose tool is not ffmpeg", result["reason"])
 
+    def test_video_filter_can_pad_to_target_duration(self) -> None:
+        filter_text = LocalFFmpegAdapter._video_filter(None, "", 1080, 1920, 24, pad_end_seconds=8.5)
+        self.assertIn("tpad=stop_mode=clone:stop_duration=8.500", filter_text)
+
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {

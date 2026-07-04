@@ -152,6 +152,12 @@ class LocalFFmpegAdapter:
         output_fps = _fps_or_default(fps_value, 24)
         encoding = self._encoding_settings(compose_config)
         encoding_args = self._encoding_args(encoding)
+        target_duration = _float_or_default(
+            compose_config.get("target_duration_seconds")
+            or compose_config.get("final_duration_seconds")
+            or (manifest.get("audio") or {}).get("target_duration_seconds"),
+            0.0,
+        )
 
         if video_files:
             command, input_files = self._build_video_concat_command(
@@ -167,6 +173,7 @@ class LocalFFmpegAdapter:
                 output_fps=output_fps,
                 encoding_args=encoding_args,
                 output_file=output_file,
+                target_duration_seconds=target_duration,
             )
         elif image_files:
             command, input_files = self._build_image_slideshow_command(
@@ -520,18 +527,31 @@ class LocalFFmpegAdapter:
     @staticmethod
     def _probe_media_duration(ffmpeg_path: str, path: Path) -> float:
         ffprobe = Path(ffmpeg_path).with_name("ffprobe.exe" if os.name == "nt" else "ffprobe")
-        if not ffprobe.is_file():
-            return 0.0
-        completed = subprocess.run(
-            [str(ffprobe), "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
+        if ffprobe.is_file():
+            completed = subprocess.run(
+                [str(ffprobe), "-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", str(path)],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+            )
+            try:
+                value = float((completed.stdout or "").strip()) if completed.returncode == 0 else 0.0
+                if value > 0:
+                    return value
+            except ValueError:
+                pass
         try:
-            return float((completed.stdout or "").strip()) if completed.returncode == 0 else 0.0
-        except ValueError:
+            import cv2  # type: ignore
+
+            cap = cv2.VideoCapture(str(path))
+            if not cap.isOpened():
+                return 0.0
+            frames = float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            fps = float(cap.get(cv2.CAP_PROP_FPS) or 0)
+            cap.release()
+            return frames / fps if frames > 0 and fps > 0 else 0.0
+        except Exception:
             return 0.0
 
     @staticmethod
@@ -656,12 +676,17 @@ class LocalFFmpegAdapter:
         output_fps: int,
         encoding_args: list[str],
         output_file: Path,
+        target_duration_seconds: float = 0.0,
     ) -> tuple[list[str], list[Path]]:
         concat_path = task_dir / "local_ffmpeg_video_inputs.txt"
         concat_path.write_text(
             "".join(f"file '{_ffconcat_path(path)}'\n" for path in video_files),
             encoding="utf-8",
         )
+        source_duration = sum(self._probe_media_duration(ffmpeg_path, path) for path in video_files)
+        pad_end_seconds = max(0.0, target_duration_seconds - source_duration) if source_duration > 0 else 0.0
+        if pad_end_seconds < 0.5:
+            pad_end_seconds = 0.0
         command = [
             ffmpeg_path,
             "-y",
@@ -680,7 +705,7 @@ class LocalFFmpegAdapter:
             command.extend(["-stream_loop", "-1", "-i", str(bgm_file)])
             input_files.append(bgm_file)
         command.extend(self._audio_mix_args(audio_file, bgm_file))
-        command.extend(["-vf", self._video_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps), *encoding_args, str(output_file)])
+        command.extend(["-vf", self._video_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps, pad_end_seconds), *encoding_args, str(output_file)])
         return command, input_files
 
     def _build_image_slideshow_command(
@@ -842,12 +867,15 @@ class LocalFFmpegAdapter:
         output_width: int,
         output_height: int,
         output_fps: int,
+        pad_end_seconds: float = 0.0,
     ) -> str:
         filters = [
             f"scale={output_width}:{output_height}:force_original_aspect_ratio=decrease",
             f"pad={output_width}:{output_height}:(ow-iw)/2:(oh-ih)/2",
             f"fps={output_fps}",
         ]
+        if pad_end_seconds > 0:
+            filters.append(f"tpad=stop_mode=clone:stop_duration={pad_end_seconds:.3f}")
         if subtitles_file:
             filters.append(_subtitle_filter(subtitles_file, subtitle_style))
         filters.append("format=yuv420p")
@@ -1022,6 +1050,14 @@ def _int_or_default(value: Any, default: int) -> int:
     except (TypeError, ValueError):
         return default
     return max(30, min(parsed, 14400))
+
+
+def _float_or_default(value: Any, default: float) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
 
 
 def _fps_or_default(value: Any, default: int) -> int:
