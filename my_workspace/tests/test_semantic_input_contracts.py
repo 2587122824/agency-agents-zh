@@ -329,6 +329,55 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("不换脸", expression["prompt"])
         self.assertIn("不换衣服", expression["prompt"])
 
+    def test_same_character_variant_and_unlabeled_protagonist_keyframe_bind_master(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_protagonist_2008",
+                            "asset_role": "character",
+                            "character_id": "character_protagonist",
+                            "prompt": "主角2008年版本，疲惫，穿旧格子衬衫和旧拖鞋",
+                        },
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_protagonist_present",
+                            "asset_role": "character",
+                            "character_id": "character_protagonist",
+                            "prompt": "主角逆袭后版本，同一张脸，穿深色商务休闲夹克",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_005_three_frame_end_frame",
+                            "prompt": "特写：主角双眼完全睁开，瞳孔放大，表情震惊，旧数码相机质感",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="same_character_generated_reference_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+        )
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        variant = items["asset_character_protagonist_present"]
+        self.assertEqual(variant["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(
+            variant["input_bindings"]["input_base_image"],
+            {"from_job": "asset_character_protagonist_2008", "output": "output_final_image"},
+        )
+        keyframe = items["shot_005_three_frame_end_frame"]
+        self.assertEqual(keyframe["character_id"], "character_protagonist")
+        self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
+        self.assertEqual(
+            keyframe["input_bindings"]["input_identity_image"],
+            {"from_job": "asset_character_protagonist_2008", "output": "output_final_image"},
+        )
+
     def test_multi_character_keyframe_compiles_character_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

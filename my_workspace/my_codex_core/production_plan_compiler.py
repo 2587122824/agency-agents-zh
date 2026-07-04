@@ -387,6 +387,7 @@ def _compile_image_intents(
                     overrides=overrides,
                 )
                 item["frame_role"] = role
+                _apply_generated_character_reference_policy(item, intent, prompts, notes)
                 prompts.append(item)
                 jobs.append({"job_id": job_id, "intent_id": intent_id, "frame_role": role, **item})
             continue
@@ -406,6 +407,7 @@ def _compile_image_intents(
             notes=notes,
         )
         _apply_character_base_policy(item, intent, prompts, notes)
+        _apply_generated_character_reference_policy(item, intent, prompts, notes)
         attach_parameter_lock_metadata(
             item,
             global_context=global_context,
@@ -541,6 +543,125 @@ def _previous_character_reference_job(items: list[dict[str, Any]], character_id:
         if _looks_like_expression_sheet(job_id):
             continue
         if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"} or str(item.get("asset_tag") or "").strip().lower() in {"character", "character_base"}:
+            return item
+    return None
+
+
+def _apply_generated_character_reference_policy(
+    item: dict[str, Any],
+    intent: dict[str, Any],
+    existing_items: list[dict[str, Any]],
+    notes: list[str] | None = None,
+) -> None:
+    prompt_text = " ".join(
+        str(value or "")
+        for value in (
+            item.get("job_id"),
+            item.get("prompt"),
+            intent.get("prompt"),
+            intent.get("description"),
+            intent.get("visual_description"),
+        )
+    )
+    character_id = str(item.get("character_id") or intent.get("character_id") or "").strip()
+    if not character_id and _looks_like_main_character_prompt(prompt_text):
+        character_id = _single_previous_character_id(existing_items)
+        if character_id:
+            item["character_id"] = character_id
+    if not character_id:
+        return
+
+    intent_name = str(intent.get("intent") or "").strip()
+    reference_job = (
+        _previous_character_reference_job(existing_items, character_id)
+        if intent_name == "generate_base_asset"
+        else _character_master_reference_job(existing_items, character_id)
+    )
+    if not reference_job:
+        return
+    reference_job_id = str(reference_job.get("job_id") or reference_job.get("id") or "").strip()
+    if not reference_job_id:
+        return
+
+    workflow_id = str(item.get("workflow_id") or "").strip()
+    workflow_mode = str(item.get("workflow_mode") or item.get("mode") or "").strip()
+    asset_role = str(intent.get("asset_role") or item.get("asset_tag") or "").strip().lower()
+
+    if (
+        intent_name == "generate_base_asset"
+        and asset_role == "character"
+        and workflow_mode == "character_base"
+        and not item.get("input_bindings")
+    ):
+        item["workflow_id"] = "04_keyframe"
+        item["workflow_mode"] = "img2img_style_keyframe"
+        item["image_task_mode"] = "img2img_style_keyframe"
+        item["mode"] = "img2img_style_keyframe"
+        item["control_mode"] = "img2img_style"
+        item["input_bindings"] = {
+            **(item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}),
+            "input_base_image": {"from_job": reference_job_id, "output": "output_final_image"},
+        }
+        item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
+        item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
+        item["denoise"] = intent.get("denoise") or 0.42
+        item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
+        item["prompt"] = _append_prompt_once(
+            str(item.get("prompt") or ""),
+            "参考上一张角色母版，必须保持同一个人的脸型、五官比例、年龄感、发型、肤色和身材比例一致；可以根据剧情阶段改变服装、精神状态和环境，但不换脸，不年轻化，不磨皮，不生成另一个人。",
+        )
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} bound to previous character reference {reference_job_id}")
+        return
+
+    if workflow_id == "04_keyframe" and workflow_mode == "keyframe" and not item.get("input_identity_image"):
+        item["workflow_mode"] = "identity_keyframe"
+        item["image_task_mode"] = "identity_keyframe"
+        item["mode"] = "identity_keyframe"
+        item["control_mode"] = "identity_reference"
+        item["input_bindings"] = {
+            **(item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}),
+            "input_identity_image": {"from_job": reference_job_id, "output": "output_final_image"},
+        }
+        item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
+        item["prompt"] = _append_prompt_once(
+            str(item.get("prompt") or ""),
+            "主角必须参考角色母版，保持同一张脸、同一年龄感、同一发型和身材比例；只改变场景、动作、表情和服装阶段，不随机换人。",
+        )
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} inferred identity reference from {reference_job_id}")
+
+
+def _looks_like_main_character_prompt(text: str) -> bool:
+    value = str(text or "").lower()
+    return any(token in value for token in ("主角", "主人公", "同一主角", "protagonist", "main character", "same protagonist"))
+
+
+def _single_previous_character_id(items: list[dict[str, Any]]) -> str:
+    ids: list[str] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        character_id = str(item.get("character_id") or "").strip()
+        if not character_id:
+            continue
+        mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
+        if mode not in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"}:
+            continue
+        if character_id not in ids:
+            ids.append(character_id)
+    return ids[0] if len(ids) == 1 else ""
+
+
+def _character_master_reference_job(items: list[dict[str, Any]], character_id: str) -> dict[str, Any] | None:
+    target = str(character_id or "").strip()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if target and str(item.get("character_id") or "").strip() != target:
+            continue
+        mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
+        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"}:
             return item
     return None
 
