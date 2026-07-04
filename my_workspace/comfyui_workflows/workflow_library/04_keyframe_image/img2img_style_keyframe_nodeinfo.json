@@ -1,72 +1,60 @@
 [
   {
-    "nodeId": "96",
-    "fieldName": "prompt",
-    "fieldValue": "{{prompt}}",
-    "description": "RunningHub translator/source prompt"
-  },
-  {
-    "nodeId": "81",
+    "nodeId": "39",
     "fieldName": "text",
     "fieldValue": "{{prompt}}",
-    "description": "positive keyframe prompt"
+    "description": "positive Flux/Kontext img2img keyframe prompt"
   },
   {
-    "nodeId": "3",
+    "nodeId": "40",
     "fieldName": "text",
     "fieldValue": "{{negative_prompt}}",
     "description": "negative prompt"
   },
   {
-    "nodeId": "93",
+    "nodeId": "81",
     "fieldName": "image",
     "fieldValue": "{{input_base_image}}",
-    "description": "source image used for img2img latent and IPAdapter style"
+    "description": "source image used for Flux/Kontext img2img latent"
   },
   {
-    "nodeId": "91",
-    "fieldName": "weight",
-    "fieldValue": "{{ipadapter_weight}}",
-    "description": "IPAdapter style-transfer weight"
-  },
-  {
-    "nodeId": "100",
-    "fieldName": "width_override",
+    "nodeId": "90",
+    "fieldName": "value",
     "fieldValue": "{{width}}",
-    "description": "output width"
+    "description": "resize/output width"
   },
   {
-    "nodeId": "100",
-    "fieldName": "height_override",
+    "nodeId": "89",
+    "fieldName": "value",
     "fieldValue": "{{height}}",
-    "description": "output height"
+    "description": "resize/output height"
   },
   {
-    "nodeId": "51",
+    "nodeId": "86",
     "fieldName": "seed",
     "fieldValue": "{{seed}}",
     "description": "random seed"
   },
   {
-    "nodeId": "51",
+    "nodeId": "86",
     "fieldName": "steps",
-    "fieldValue": 12,
-    "description": "sampler steps"
+    "fieldValue": 20,
+    "description": "KSampler Inspire steps"
   },
   {
-    "nodeId": "51",
+    "nodeId": "86",
     "fieldName": "cfg",
-    "fieldValue": 3,
-    "description": "sampler cfg"
+    "fieldValue": 8,
+    "description": "KSampler Inspire cfg"
   },
   {
-    "nodeId": "51",
+    "nodeId": "86",
     "fieldName": "denoise",
     "fieldValue": "{{denoise}}",
-    "description": "img2img denoise strength; recommended 0.35-0.55"
+    "description": "Flux/Kontext img2img denoise strength; recommended 0.25-0.45 for identity preservation"
   },
   {
-    "nodeId": "95",
+    "nodeId": "50",
     "fieldName": "filename_prefix",
     "fieldValue": "img2img_style_keyframe",
     "description": "output filename prefix"
