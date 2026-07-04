@@ -87,6 +87,14 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 
 - Subtemplates use typed semantic input contracts instead of one ambiguous `requires_reference` boolean.
 - Adapter input roles include `input_identity_image`, `input_pose_image`, `input_source_video`, and mask/source-video roles where relevant.
+- The ComfyUI debug console groups submodes by input/output shape plus post-processing intent, not by production stage:
+  - `01 文生图`: text-only image generation, including base assets, style/cover images, and text-only keyframes.
+  - `02 图生图`: reference-image-driven image generation, including turnaround sheets and identity/style/pose keyframes.
+  - `03 图片处理`: image repair, inpaint, cutout, matting, and other non-generative image post-processing.
+  - `04 文生视频`: prompt-only video generation such as B-roll, empty shots, and transitions.
+  - `05 图生视频`: image-driven video generation such as first-frame, first/last-frame, first/middle/last-frame, and talking-image clips.
+  - `06 视频生视频 / 视频处理`: video-driven stylization, motion transfer, enhancement, interpolation, stabilization, and repair.
+- The debug-console grouping is display-only. It must not rename workflow IDs, mode values, nodeInfo mappings, input contracts, or production compiler routes. Once production quality stabilizes, these display groups can support a later architecture consolidation pass.
 - Keyframe modes:
   - text-only keyframe
   - style-reference keyframe
