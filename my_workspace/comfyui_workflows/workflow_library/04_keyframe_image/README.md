@@ -83,6 +83,8 @@ Current files:
 - `consistent_character_pose_identity_keyframe_nodeinfo.json`
 - `style_reference_keyframe_canvas.json`
 - `style_reference_keyframe_nodeinfo.json`
+- `img2img_style_keyframe_canvas.json`
+- `img2img_style_keyframe_nodeinfo.json`
 
 Canvas files keep literal default widget values so ComfyUI can open and validate them locally. Runtime placeholders such as `{{input_identity_image}}`, `{{input_pose_image}}`, `{{prompt}}`, `{{width}}`, `{{height}}`, and `{{seed}}` live only in the paired RunningHub nodeInfoList files.
 
@@ -92,3 +94,10 @@ Canvas files keep literal default widget values so ComfyUI can open and validate
 It is an SDXL IPAdapter Style Transfer image workflow for generating a current-shot keyframe from a style/reference image plus the shot prompt. It requires `{{input_reference_style}}` and maps `{{ipadapter_weight}}`, `{{prompt}}`, `{{negative_prompt}}`, `{{width}}`, `{{height}}`, and `{{seed}}` through `style_reference_keyframe_nodeinfo.json`.
 
 This mode is kept as an explicit debug-console submode while the production flow is still being stabilized. A later architecture pass can collapse it into a generic `04_keyframe/keyframe + controls.style_reference` preset without changing the canvas itself.
+
+## Img2img style keyframe variant
+
+`img2img_style_keyframe_canvas.json` is exposed as `04_keyframe / img2img_style_keyframe`.
+It uses the same source image for two controls: `LoadImage -> VAEEncode -> KSampler.latent_image` preserves the source subject/composition, while the IPAdapter branch adds style/material guidance. It requires `{{input_base_image}}` and maps `{{denoise}}` plus `{{ipadapter_weight}}` through `img2img_style_keyframe_nodeinfo.json`.
+
+Use this mode when the reference image should remain recognizable as the basis of the keyframe. Recommended defaults are `denoise=0.45` and `ipadapter_weight=0.65`; lower denoise preserves more of the source frame, higher denoise allows stronger shot changes.

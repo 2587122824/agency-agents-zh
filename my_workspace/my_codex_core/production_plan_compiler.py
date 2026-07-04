@@ -611,7 +611,22 @@ def _image_prompt_item(
         and bool(style_reference or first_reference)
         and str(intent.get("asset_role") or intent.get("reference_role") or "").strip().lower() in {"style", "style_reference"}
     )
-    if style_reference_requested:
+    img2img_style_requested = (
+        workflow_id == "04_keyframe"
+        and bool(first_reference)
+        and str(intent.get("control_mode") or intent.get("controlMode") or "").strip().lower() in {"img2img_style", "img2img_style_reference", "reference_image_style"}
+    )
+    if img2img_style_requested:
+        workflow_mode = "img2img_style_keyframe"
+        item["workflow_mode"] = workflow_mode
+        item["image_task_mode"] = workflow_mode
+        item["mode"] = workflow_mode
+        item["control_mode"] = "img2img_style"
+        item["input_base_image"] = first_reference
+        item["input_reference_style"] = style_reference or first_reference
+        item["denoise"] = intent.get("denoise") or 0.45
+        item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.65
+    elif style_reference_requested:
         workflow_mode = "style_reference_keyframe"
         item["workflow_mode"] = workflow_mode
         item["image_task_mode"] = workflow_mode

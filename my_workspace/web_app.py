@@ -156,6 +156,7 @@ _KEYFRAME_WORKFLOW = next(item for item in COMFY_DEBUG_WORKFLOWS if item.get("id
 _KEYFRAME_WORKFLOW["modes"] = [
     {"value": "keyframe", "label": "关键帧（纯文本）", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "none", "requires_reference": False},
     {"value": "style_reference_keyframe", "label": "风格参考关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "style_reference", "requires_reference": True},
+    {"value": "img2img_style_keyframe", "label": "图生图风格关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "img2img_style", "requires_reference": True},
     {"value": "identity_keyframe", "label": "身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_reference", "requires_reference": True},
     {"value": "pose_identity_keyframe", "label": "身份+姿态关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_pose_reference", "requires_reference": True},
     {"value": "multi_identity_keyframe", "label": "多人身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "multi_identity_reference", "requires_reference": True},
@@ -166,6 +167,7 @@ COMFY_MODE_INPUT_CONTRACTS = {
     ("03_style_cover_image", "cover_key_visual"): {"optional": ["input_reference_style"], "primary": "input_reference_style"},
     ("04_keyframe", "keyframe"): {},
     ("04_keyframe", "style_reference_keyframe"): {"required": ["input_reference_style"], "primary": "input_reference_style"},
+    ("04_keyframe", "img2img_style_keyframe"): {"required": ["input_base_image"], "optional": ["input_reference_style"], "primary": "input_base_image"},
     ("04_keyframe", "identity_keyframe"): {"required": ["input_identity_image"], "primary": "input_identity_image"},
     ("04_keyframe", "pose_identity_keyframe"): {"required": ["input_identity_image", "input_pose_image"], "primary": "input_identity_image"},
     ("04_keyframe", "multi_identity_keyframe"): {"required": ["character_references"], "optional": ["input_identity_image"], "primary": "character_references"},
@@ -4122,6 +4124,7 @@ INDEX_HTML = r"""<!doctype html>
       { value: 'product_turnaround', label: '产品三视图', taskType: 'product_turnaround', controlMode: 'product_reference', requiresReference: true, prompt: '基于参考图生成产品三视图：同一产品正面、侧面、背面，材质颜色一致，结构准确，干净背景，无文字水印。' },
       { value: 'keyframe', label: '关键帧', taskType: 'keyframe', controlMode: 'none', requiresReference: false, prompt: '根据分镜文本生成视频关键帧：单张画面，构图适合后续图生视频，写实商业风格，无文字水印。' },
       { value: 'style_reference_keyframe', label: '风格参考关键帧', taskType: 'keyframe', controlMode: 'style_reference', requiresReference: true, prompt: '基于风格参考图生成当前分镜关键帧：保持参考图的色彩、光线、材质和画面气质，构图适合后续图生视频，无文字水印。' },
+      { value: 'img2img_style_keyframe', label: '图生图风格关键帧', taskType: 'keyframe', controlMode: 'img2img_style', requiresReference: true, prompt: '基于原图生成当前分镜关键帧：保留原图主体、构图和空间关系，允许轻微调整动作与镜头，继承原图风格质感，适合后续图生视频，无文字水印。' },
       { value: 'cover_key_visual', label: '封面关键视觉', taskType: 'cover_key_visual', controlMode: 'style_reference', requiresReference: false, prompt: '生成封面关键视觉：主体明确，构图有冲击力，适合横屏视频封面，预留标题安全区，写实商业科技风格，无文字水印。' },
       { value: 'style_reference', label: '风格参考图', taskType: 'style_reference', controlMode: 'none', requiresReference: false, prompt: '生成统一风格参考图：色彩、光线、材质和画面气质明确，可作为后续整条视频的视觉风格基准，无文字水印。' },
       { value: 'inpaint_fix', label: '局部修复/重绘', taskType: 'inpaint_fix', controlMode: 'mask_inpaint', requiresReference: true, prompt: '基于参考图进行局部修复或重绘：修正脸部、手部、文字、水印或局部瑕疵，保持原图主体和风格一致。' },
@@ -4134,7 +4137,7 @@ INDEX_HTML = r"""<!doctype html>
     const comfyDebugCollapsedCapabilityGroups = new Set();
     const COMFY_DEBUG_CAPABILITY_GROUPS = [
       { id: 'asset_image', label: '01 基础资产', modes: ['character_base', 'product_base', 'scene_base', 'style_reference', 'character_turnaround', 'product_turnaround', 'cover_key_visual'] },
-      { id: 'storyboard_keyframe', label: '02 分镜关键帧', modes: ['keyframe', 'style_reference_keyframe', 'identity_keyframe', 'pose_identity_keyframe', 'multi_identity_keyframe', 'multi_pose_identity_keyframe'] },
+      { id: 'storyboard_keyframe', label: '02 分镜关键帧', modes: ['keyframe', 'style_reference_keyframe', 'img2img_style_keyframe', 'identity_keyframe', 'pose_identity_keyframe', 'multi_identity_keyframe', 'multi_pose_identity_keyframe'] },
       { id: 'image_post', label: '03 图片处理', modes: ['image_inpaint_fix', 'background_remove'] },
       { id: 'video_creation', label: '04 视频生成', modes: ['i2v_first_frame', 'i2v_first_middle_last_frame', 'i2v_first_last_frame', 'broll_scene_video', 'empty_transition_video'] },
       { id: 'video_control', label: '05 视频控制', modes: ['live_to_anime', 'motion_transfer'] },
@@ -15737,6 +15740,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _default_comfy_debug_node_info(cls, workflow_id: str, workflow_mode: str = "") -> str:
         mode_preset_map = {
             ("04_keyframe", "style_reference_keyframe"): "04_keyframe_image/style_reference_keyframe_nodeinfo.json",
+            ("04_keyframe", "img2img_style_keyframe"): "04_keyframe_image/img2img_style_keyframe_nodeinfo.json",
             ("04_keyframe", "identity_keyframe"): "04_keyframe_image/consistent_character_identity_keyframe_nodeinfo.json",
             ("04_keyframe", "pose_identity_keyframe"): "04_keyframe_image/consistent_character_pose_identity_keyframe_nodeinfo.json",
         }
@@ -16381,6 +16385,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "product_turnaround": ("product_turnaround", "product_reference", True),
             "keyframe": ("keyframe", "none", False),
             "style_reference_keyframe": ("keyframe", "style_reference", True),
+            "img2img_style_keyframe": ("keyframe", "img2img_style", True),
             "identity_keyframe": ("keyframe", "identity_reference", True),
             "pose_identity_keyframe": ("keyframe", "identity_pose_reference", True),
             "cover_key_visual": ("cover_key_visual", "style_reference", False),
@@ -16456,7 +16461,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "last_frame_image": last_frame_image,
                 "input_base_image": reference_image,
                 "input_identity_image": identity_image or (reference_image if mode in {"identity_keyframe", "pose_identity_keyframe", "motion_transfer"} else ""),
-                "input_reference_style": reference_style or (reference_image if mode in {"cover_key_visual", "live_to_anime", "style_reference_keyframe"} else ""),
+                "input_reference_style": reference_style or (reference_image if mode in {"cover_key_visual", "live_to_anime", "style_reference_keyframe", "img2img_style_keyframe"} else ""),
                 "input_pose_image": pose_image,
                 "input_source_video": source_video,
                 "input_middle_frame": middle_frame_image,
@@ -16481,6 +16486,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "image_task_type": task_type if job_type == "image" else "",
                 "video_task_type": task_type if job_type == "video" else "",
             }
+            if mode == "img2img_style_keyframe":
+                request_payload["denoise"] = str(payload.get("denoise") or "").strip() or "0.45"
+                request_payload["ipadapter_weight"] = str(payload.get("ipadapter_weight") or "").strip() or "0.65"
             if job_type == "video":
                 request_payload["video_prompt"] = prompt
                 request_payload["duration"] = duration or item.get("default_duration") or ""

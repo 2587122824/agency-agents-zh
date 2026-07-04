@@ -26,6 +26,7 @@ COMFY_WORKFLOW_SLOT_LABELS: dict[tuple[str, str], str] = {
     ("03_style_cover_image", "cover_key_visual"): "01 基础资产 / 封面关键视觉",
     ("04_keyframe", "keyframe"): "02 分镜关键帧 / 关键帧",
     ("04_keyframe", "style_reference_keyframe"): "02 分镜关键帧 / 风格参考关键帧",
+    ("04_keyframe", "img2img_style_keyframe"): "02 分镜关键帧 / 图生图风格关键帧",
     ("05_image_repair_cutout", "image_inpaint_fix"): "03 图片处理 / 局部修复",
     ("05_image_repair_cutout", "background_remove"): "03 图片处理 / 抠图去背景",
     ("06_i2v_first_frame", "i2v_first_frame"): "04 视频生成 / 首帧图生视频",

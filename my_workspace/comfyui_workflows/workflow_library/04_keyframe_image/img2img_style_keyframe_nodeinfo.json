@@ -1,0 +1,74 @@
+[
+  {
+    "nodeId": "96",
+    "fieldName": "prompt",
+    "fieldValue": "{{prompt}}",
+    "description": "RunningHub translator/source prompt"
+  },
+  {
+    "nodeId": "81",
+    "fieldName": "text",
+    "fieldValue": "{{prompt}}",
+    "description": "positive keyframe prompt"
+  },
+  {
+    "nodeId": "3",
+    "fieldName": "text",
+    "fieldValue": "{{negative_prompt}}",
+    "description": "negative prompt"
+  },
+  {
+    "nodeId": "93",
+    "fieldName": "image",
+    "fieldValue": "{{input_base_image}}",
+    "description": "source image used for img2img latent and IPAdapter style"
+  },
+  {
+    "nodeId": "91",
+    "fieldName": "weight",
+    "fieldValue": "{{ipadapter_weight}}",
+    "description": "IPAdapter style-transfer weight"
+  },
+  {
+    "nodeId": "100",
+    "fieldName": "width_override",
+    "fieldValue": "{{width}}",
+    "description": "output width"
+  },
+  {
+    "nodeId": "100",
+    "fieldName": "height_override",
+    "fieldValue": "{{height}}",
+    "description": "output height"
+  },
+  {
+    "nodeId": "51",
+    "fieldName": "seed",
+    "fieldValue": "{{seed}}",
+    "description": "random seed"
+  },
+  {
+    "nodeId": "51",
+    "fieldName": "steps",
+    "fieldValue": 12,
+    "description": "sampler steps"
+  },
+  {
+    "nodeId": "51",
+    "fieldName": "cfg",
+    "fieldValue": 3,
+    "description": "sampler cfg"
+  },
+  {
+    "nodeId": "51",
+    "fieldName": "denoise",
+    "fieldValue": "{{denoise}}",
+    "description": "img2img denoise strength; recommended 0.35-0.55"
+  },
+  {
+    "nodeId": "95",
+    "fieldName": "filename_prefix",
+    "fieldValue": "img2img_style_keyframe",
+    "description": "output filename prefix"
+  }
+]

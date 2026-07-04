@@ -90,11 +90,13 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Keyframe modes:
   - text-only keyframe
   - style-reference keyframe
+  - img2img style keyframe
   - identity-reference keyframe
   - identity+pose keyframe
   - multi-character identity keyframe
   - multi-character identity+pose keyframe
 - `04_keyframe/style_reference_keyframe` is intentionally exposed as a concrete debug-console submode for the current stabilization phase. It uses an SDXL IPAdapter Style Transfer img2img canvas from `04_keyframe_image/style_reference_keyframe_canvas.json`, with nodeInfo in `style_reference_keyframe_nodeinfo.json`. Later architecture work can collapse it into `04_keyframe/keyframe + controls.style_reference`.
+- `04_keyframe/img2img_style_keyframe` is a separate stabilization-phase submode for reference-image-based keyframes that should preserve source subject/composition. Its canvas adds `LoadImage -> VAEEncode -> KSampler.latent_image` and keeps IPAdapter as style guidance. Default runtime values are `denoise=0.45` and `ipadapter_weight=0.65`.
 - Staff 06 may output `characters[]` for multi-person `generate_keyframe` intents. The compiler resolves each character to independent identity assets and routes 2-4 person shots to the multi-character keyframe modes.
 - RunningHub nodeInfo placeholders include `{{character_references}}`, `{{character_reference_1}}` through `{{character_reference_4}}`, `{{character_id_1}}` through `{{character_id_4}}`, and matching position placeholders.
 - Turnaround/three-view results are auto-stitched into `*_turnaround_sheet.png`. The stitched sheet is first in `downloaded_files` and recorded in manifest metadata.
