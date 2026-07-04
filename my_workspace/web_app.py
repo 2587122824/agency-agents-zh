@@ -6144,6 +6144,34 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    function normalizeComfyNodeInfoForDebugMode(raw, workflowId = activeComfyDebugWorkflowId, mode = activeComfyDebugWorkflowMode) {
+      const text = sanitizeComfyVisualNodeInfoList(raw);
+      if (text === '[]') return text;
+      const workflowKey = String(workflowId || '').trim();
+      const modeKey = String(mode || '').trim();
+      if (workflowKey !== '04_keyframe' || modeKey !== 'img2img_style_keyframe') return text;
+      try {
+        const parsed = JSON.parse(text);
+        if (!Array.isArray(parsed)) return text;
+        const normalized = parsed.map(item => {
+          if (!item || typeof item !== 'object') return item;
+          const nodeId = String(item.nodeId ?? '');
+          const fieldName = String(item.fieldName ?? '');
+          if (nodeId === '39' && fieldName === 'text') return { ...item, fieldValue: '{{prompt}}' };
+          if (nodeId === '40' && fieldName === 'text') return { ...item, fieldValue: '{{negative_prompt}}' };
+          if (nodeId === '81' && fieldName === 'image') return { ...item, fieldValue: '{{input_base_image}}' };
+          if (nodeId === '90' && fieldName === 'value') return { ...item, fieldValue: '{{width}}' };
+          if (nodeId === '89' && fieldName === 'value') return { ...item, fieldValue: '{{height}}' };
+          if (nodeId === '86' && fieldName === 'seed') return { ...item, fieldValue: '{{seed}}' };
+          if (nodeId === '86' && fieldName === 'denoise') return { ...item, fieldValue: '{{denoise}}' };
+          return item;
+        });
+        return JSON.stringify(normalized, null, 2);
+      } catch {
+        return text;
+      }
+    }
+
     function getSelectedComfyWorkflowPreset() {
       const selectedId = els.comfyWorkflowPreset.value || DEFAULT_COMFY_WORKFLOW_PRESET_ID;
       return comfyWorkflowLibrary.find(item => item.id === selectedId) || comfyWorkflowLibrary[0] || null;
@@ -6471,6 +6499,12 @@ INDEX_HTML = r"""<!doctype html>
         return looksNegative || textIndex > 0 ? '{{negative_prompt}}' : '{{prompt}}';
       }
       if (type.includes('loadimage') && field === 'image') return '{{reference_image}}';
+      if (field === 'width' || (field === 'value' && nodeId === '90')) return '{{width}}';
+      if (field === 'height' || (field === 'value' && nodeId === '89')) return '{{height}}';
+      if (['seed', 'noise_seed'].includes(field)) return '{{seed}}';
+      if (field === 'denoise') return '{{denoise}}';
+      if (field === 'fps' || field === 'frame_rate') return '{{fps}}';
+      if (['length', 'frames', 'frame_count', 'num_frames'].includes(field)) return '{{frame_count}}';
       if (field.includes('prompt') && field.includes('negative')) return '{{negative_prompt}}';
       if (field.includes('prompt')) return '{{prompt}}';
       return 'fixed';
@@ -6483,6 +6517,13 @@ INDEX_HTML = r"""<!doctype html>
         '{{negative_prompt}}': '负向提示词',
         '{{image_prompt}}': '生图提示词',
         '{{video_prompt}}': '视频提示词',
+        '{{width}}': '表单宽度',
+        '{{height}}': '表单高度',
+        '{{seed}}': '表单随机种子',
+        '{{denoise}}': '表单重绘幅度',
+        '{{duration}}': '表单时长',
+        '{{fps}}': '表单帧率',
+        '{{frame_count}}': '表单总帧数',
         '{{reference_image}}': '参考图文件名/URL',
         '{{input_base_image}}': '语义槽位：主底图',
         '{{input_identity_image}}': '语义槽位：身份参考图',
@@ -6604,7 +6645,7 @@ INDEX_HTML = r"""<!doctype html>
       const panel = document.createElement('div');
       panel.className = 'comfy-parameter-panel';
       panel.appendChild(head);
-      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{character_references}}', '{{character_reference_1}}', '{{character_reference_2}}', '{{character_reference_3}}', '{{character_reference_4}}', '{{character_id_1}}', '{{character_id_2}}', '{{character_id_3}}', '{{character_id_4}}', '{{character_position_1}}', '{{character_position_2}}', '{{character_position_3}}', '{{character_position_4}}', '{{payload}}'];
+      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{width}}', '{{height}}', '{{seed}}', '{{denoise}}', '{{duration}}', '{{fps}}', '{{frame_count}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{character_references}}', '{{character_reference_1}}', '{{character_reference_2}}', '{{character_reference_3}}', '{{character_reference_4}}', '{{character_id_1}}', '{{character_id_2}}', '{{character_id_3}}', '{{character_id_4}}', '{{character_position_1}}', '{{character_position_2}}', '{{character_position_3}}', '{{character_position_4}}', '{{payload}}'];
       comfyParameterCandidates.forEach((candidate, index) => {
         const item = document.createElement('div');
         item.className = 'comfy-parameter-row';
@@ -6730,7 +6771,7 @@ INDEX_HTML = r"""<!doctype html>
         const text = await file.text();
         const data = JSON.parse(text);
         const nodeInfo = nodeInfoFromImportedJson(data);
-        els.comfyDebugNodeInfoList.value = JSON.stringify(nodeInfo, null, 2);
+        els.comfyDebugNodeInfoList.value = normalizeComfyNodeInfoForDebugMode(JSON.stringify(nodeInfo, null, 2), activeComfyDebugWorkflowId, activeComfyDebugWorkflowMode);
         const endpoint = findEndpointInImportedJson(data);
         if (endpoint && els.comfyDebugEndpoint) {
           els.comfyDebugEndpoint.value = endpoint;
@@ -11321,7 +11362,7 @@ INDEX_HTML = r"""<!doctype html>
       const savedConfig = getComfyWorkflowLibraryItemById(item.id);
       const modeConfig = getComfyWorkflowModeConfig(item, activeComfyDebugWorkflowMode, true) || savedConfig || {};
       const endpoint = fallbackComfyDebugEndpoint(item, modeConfig);
-      const nodeInfo = modeConfig.nodeInfoList || item.default_node_info || '[]';
+      const nodeInfo = normalizeComfyNodeInfoForDebugMode(modeConfig.nodeInfoList || item.default_node_info || '[]', item.id, activeComfyDebugWorkflowMode);
       const width = modeConfig.defaultWidth || item.default_width || '';
       const height = modeConfig.defaultHeight || item.default_height || '';
       const duration = modeConfig.defaultDuration || item.default_duration || '';
@@ -11381,7 +11422,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!item.modeConfigs || typeof item.modeConfigs !== 'object') item.modeConfigs = {};
       const modeConfig = item.modeConfigs[mode] || normalizeComfyModeConfig({}, item);
       modeConfig.endpoint = els.comfyDebugEndpoint.value.trim();
-      modeConfig.nodeInfoList = sanitizeComfyVisualNodeInfoList(els.comfyDebugNodeInfoList.value.trim() || '[]');
+      modeConfig.nodeInfoList = normalizeComfyNodeInfoForDebugMode(els.comfyDebugNodeInfoList.value.trim() || '[]', workflow.id, mode);
       modeConfig.pollTimeout = els.comfyDebugPollTimeout.value || '3600';
       modeConfig.defaultWidth = els.comfyDebugWidth.value.trim();
       modeConfig.defaultHeight = els.comfyDebugHeight.value.trim();
@@ -11471,6 +11512,8 @@ INDEX_HTML = r"""<!doctype html>
       renderComfyDebugRunning(selected);
       setStatus(`ComfyUI 调试已开始：${selected.name || selected.id}`, false);
       try {
+        const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(els.comfyDebugNodeInfoList.value.trim(), selected.id, workflowModeDef?.value || '');
+        els.comfyDebugNodeInfoList.value = normalizedNodeInfo;
         const data = await api('/api/comfy-debug-run', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -11479,7 +11522,7 @@ INDEX_HTML = r"""<!doctype html>
             api_key: els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim(),
             base_url: els.comfyDebugBaseUrl.value.trim() || els.comfyBaseUrl.value.trim(),
             endpoint: els.comfyDebugEndpoint.value.trim(),
-            node_info_list_json: els.comfyDebugNodeInfoList.value.trim(),
+            node_info_list_json: normalizedNodeInfo,
             workflow_library: getComfyWorkflowLibraryPayload(),
             poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
             prompt,
@@ -11944,13 +11987,15 @@ INDEX_HTML = r"""<!doctype html>
       const baseUrl = fallbackComfyDebugBaseUrl(endpoint);
       const apiKey = String(els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim()).trim();
       validateComfyDebugProviderConfig(endpoint, baseUrl, apiKey);
-      validateComfyDebugSemanticContract(requiredInputs, endpoint, els.comfyDebugNodeInfoList.value.trim());
+      const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(els.comfyDebugNodeInfoList.value.trim(), selected.id, workflowModeDef?.value || '');
+      els.comfyDebugNodeInfoList.value = normalizedNodeInfo;
+      validateComfyDebugSemanticContract(requiredInputs, endpoint, normalizedNodeInfo);
       return {
         workflows: [selected.id],
         api_key: apiKey,
         base_url: baseUrl,
         endpoint,
-        node_info_list_json: els.comfyDebugNodeInfoList.value.trim(),
+        node_info_list_json: normalizedNodeInfo,
         workflow_library: getComfyWorkflowLibraryPayload(),
         poll_timeout_seconds: Number(els.comfyDebugPollTimeout.value || 3600),
         prompt,
