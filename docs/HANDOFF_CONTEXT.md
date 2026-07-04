@@ -119,6 +119,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
   - FPS `20/21.value` plus `40.frame_rate`
   - seeds `28/46.noise_seed`
 - `10_broll_transition_video` preserves explicit subtype: `broll_scene_video` vs `empty_transition_video`.
+- The adapter repairs legacy `10_broll_transition_video / broll_scene_video` nodeInfo rows that still point at old `2483/2612/3059` nodes, replacing them with the current LTX2.3 text-to-video nodeInfo so saved runtime configs do not break B-roll generation.
 
 ## Audio / Subtitle / FFmpeg State
 

@@ -333,6 +333,24 @@ class SemanticInputContractTests(unittest.TestCase):
         values = [item["fieldValue"] for item in built["nodeInfoList"]]
         self.assertEqual(values, ["identity.png", "source.mp4"])
 
+    def test_adapter_repairs_legacy_broll_ltx_node_info(self) -> None:
+        repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
+            json.dumps(
+                [
+                    {"nodeId": "2483", "fieldName": "text", "fieldValue": "{{prompt}}"},
+                    {"nodeId": "2612", "fieldName": "text", "fieldValue": "{{negative_prompt}}"},
+                    {"nodeId": "3059", "fieldName": "width", "fieldValue": "{{width}}"},
+                ]
+            ),
+            endpoint="/run/workflow/2071227330307125249",
+            workflow_id="10_broll_transition_video",
+            workflow_mode="broll_scene_video",
+        )
+        rows = json.loads(repaired)
+        self.assertNotIn("2483", {row["nodeId"] for row in rows})
+        self.assertIn({"nodeId": "73", "fieldName": "text", "fieldValue": "{{prompt}}"}, rows)
+        self.assertIn({"nodeId": "43", "fieldName": "value", "fieldValue": "{{width}}"}, rows)
+
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {

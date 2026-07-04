@@ -1508,6 +1508,13 @@ class CloudComfyUIAdapter:
             or "first_middle_last" in mode_key.lower()
             or "three_frame" in mode_key.lower()
         )
+        is_broll_ltx = (
+            endpoint_text.endswith("/2071227330307125249")
+            or workflow_key == "10_broll_transition_video"
+            or mode_key == "broll_scene_video"
+        )
+        if is_broll_ltx and {"2483", "2612", "3059"}.intersection(stale_node_ids):
+            return json.dumps(cls._ltx_text_to_video_node_info(), ensure_ascii=False, indent=2)
 
         # The current z_image_turbo RunningHub workflow uses node 63 for the
         # text prompt and node 64 for latent size. Some migrated scene modes
@@ -1608,6 +1615,21 @@ class CloudComfyUIAdapter:
             {"nodeId": "65", "fieldName": "shift", "fieldValue": 3},
             {"nodeId": "66", "fieldName": "sampler_name", "fieldValue": "res_multistep"},
             {"nodeId": "66", "fieldName": "scheduler", "fieldValue": "simple"},
+        ]
+
+    @staticmethod
+    def _ltx_text_to_video_node_info() -> list[dict[str, Any]]:
+        return [
+            {"nodeId": "73", "fieldName": "text", "fieldValue": "{{prompt}}"},
+            {"nodeId": "25", "fieldName": "text", "fieldValue": "{{negative_prompt}}"},
+            {"nodeId": "43", "fieldName": "value", "fieldValue": "{{width}}"},
+            {"nodeId": "44", "fieldName": "value", "fieldValue": "{{height}}"},
+            {"nodeId": "74", "fieldName": "value", "fieldValue": "{{duration}}"},
+            {"nodeId": "20", "fieldName": "value", "fieldValue": "{{fps}}"},
+            {"nodeId": "21", "fieldName": "value", "fieldValue": "{{fps}}"},
+            {"nodeId": "40", "fieldName": "frame_rate", "fieldValue": "{{fps}}"},
+            {"nodeId": "28", "fieldName": "noise_seed", "fieldValue": "{{seed}}"},
+            {"nodeId": "46", "fieldName": "noise_seed", "fieldValue": "{{seed}}"},
         ]
 
     @classmethod
