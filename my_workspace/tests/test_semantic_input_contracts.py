@@ -19,6 +19,7 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
     _image_prompt_item,
     compile_production_plan,
 )
+from my_codex_core.production_pipeline import _required_workflow_slots  # noqa: E402
 
 
 class SemanticInputContractTests(unittest.TestCase):
@@ -41,14 +42,17 @@ class SemanticInputContractTests(unittest.TestCase):
 
     def test_keyframe_ui_group_lists_all_keyframe_modes(self) -> None:
         source = (WORKSPACE / "my_workspace" / "web_app.py").read_text(encoding="utf-8")
-        group_line = next(
-            line for line in source.splitlines() if "id: 'storyboard_keyframe'" in line
+        image_to_image_group = next(
+            line for line in source.splitlines() if "id: 'image_to_image'" in line
         )
-        self.assertIn("'keyframe'", group_line)
-        self.assertIn("'identity_keyframe'", group_line)
-        self.assertIn("'pose_identity_keyframe'", group_line)
-        self.assertIn("'multi_identity_keyframe'", group_line)
-        self.assertIn("'multi_pose_identity_keyframe'", group_line)
+        text_to_image_group = next(
+            line for line in source.splitlines() if "id: 'text_to_image'" in line
+        )
+        self.assertIn("'keyframe'", text_to_image_group)
+        self.assertIn("'identity_keyframe'", image_to_image_group)
+        self.assertIn("'pose_identity_keyframe'", image_to_image_group)
+        self.assertIn("'multi_identity_keyframe'", image_to_image_group)
+        self.assertIn("'multi_pose_identity_keyframe'", image_to_image_group)
         self.assertIn("comfyDebugCharacterEntity", source)
         self.assertIn("comfyDebugIdentityAssetReference", source)
         self.assertIn("comfyDebugPoseAssetReference", source)
@@ -243,6 +247,28 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(item["character_references"][0]["identity_image"], "my_workspace/my_asset_library/01_character_base/hero.png")
             self.assertEqual(item["character_references"][1]["position"], "right")
 
+    def test_multi_character_keyframe_without_identity_images_falls_back_to_text_keyframe(self) -> None:
+        item = _image_prompt_item(
+            job_id="duo_shot_missing_refs",
+            prompt="Hero and mentor speak across a console",
+            intent={
+                "intent": "generate_keyframe",
+                "characters": [
+                    {"character_id": "hero", "position": "left"},
+                    {"character_id": "mentor", "position": "right"},
+                ],
+            },
+            contract={},
+            compatibility={},
+            render={"working_width": 480, "working_height": 848},
+            asset_tag="keyframe",
+            resolved_entities={},
+            notes=[],
+        )
+        self.assertEqual(item["workflow_id"], "04_keyframe")
+        self.assertEqual(item["workflow_mode"], "keyframe")
+        self.assertEqual(item["character_references"], [])
+
     def test_multi_character_pose_keyframe_uses_pose_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -284,6 +310,15 @@ class SemanticInputContractTests(unittest.TestCase):
             {"from_job": "clip_001", "output": "output_final_video"},
         )
         self.assertIn("clip_001", item["depends_on"])
+
+    def test_unconfigured_talking_image_slot_is_optional(self) -> None:
+        slots = _required_workflow_slots(
+            [
+                {"workflow_id": "09_talking_image", "mode": "talking_image", "type": "video"},
+                {"workflow_id": "04_keyframe", "mode": "keyframe", "type": "image"},
+            ]
+        )
+        self.assertEqual(slots, [{"workflow_id": "04_keyframe", "mode": "keyframe", "material_type": "image", "label": "04_keyframe / keyframe"}])
 
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

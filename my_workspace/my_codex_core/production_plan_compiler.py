@@ -489,7 +489,10 @@ def _compile_video_intents(
         }
         if _bool_or_default(
             intent.get("optional_when_unconfigured"),
-            default=_bool_or_default(contract.get("optional_when_unconfigured"), default=intent_name == "enhance_video"),
+            default=_bool_or_default(
+                contract.get("optional_when_unconfigured"),
+                default=intent_name in {"enhance_video", "generate_talking_image"},
+            ),
         ):
             item["optional_when_unconfigured"] = True
         if entity_context:
@@ -633,7 +636,15 @@ def _image_prompt_item(
         item["mode"] = workflow_mode
         item["control_mode"] = "style_reference"
         item["input_reference_style"] = style_reference or first_reference
-    elif workflow_id == "04_keyframe" and len(item.get("character_references") or []) > 1:
+    usable_character_references = _references_with_identity_images(item.get("character_references"))
+    if (img2img_style_requested or style_reference_requested):
+        pass
+    elif item.get("character_references") and not usable_character_references and workflow_id == "04_keyframe":
+        item["character_references"] = []
+        if notes is not None:
+            notes.append(f"image intent {job_id} downgraded to text keyframe because character references had no identity images")
+    elif workflow_id == "04_keyframe" and len(usable_character_references) > 1:
+        item["character_references"] = usable_character_references
         workflow_mode = "multi_pose_identity_keyframe" if pose_reference else "multi_identity_keyframe"
         item["workflow_mode"] = workflow_mode
         item["image_task_mode"] = workflow_mode
@@ -642,7 +653,8 @@ def _image_prompt_item(
         item["input_identity_image"] = item["character_references"][0].get("identity_image", "")
         if pose_reference:
             item["input_pose_image"] = pose_reference
-    elif workflow_id == "04_keyframe" and len(item.get("character_references") or []) == 1:
+    elif workflow_id == "04_keyframe" and len(usable_character_references) == 1:
+        item["character_references"] = usable_character_references
         only_reference = item["character_references"][0].get("identity_image", "")
         if only_reference:
             workflow_mode = "pose_identity_keyframe" if pose_reference else "identity_keyframe"
@@ -670,6 +682,16 @@ def _image_prompt_item(
     ):
         item["optional_when_unconfigured"] = True
     return item
+
+
+def _references_with_identity_images(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [
+        dict(entry)
+        for entry in value
+        if isinstance(entry, dict) and str(entry.get("identity_image") or "").strip()
+    ]
 
 
 def _character_references_from_intent(intent: dict[str, Any], resolved_entities: dict[str, Any]) -> list[dict[str, Any]]:
@@ -909,6 +931,7 @@ def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
                     "optional_when_unconfigured": _bool_or_default(
                         item.get("optional_when_unconfigured"),
                         default=str(item.get("workflow_mode") or item.get("mode") or "").strip() == "enhance_video"
+                        or str(item.get("workflow_mode") or item.get("mode") or "").strip() == "talking_image"
                         or str(item.get("capability") or "").strip() == "video_enhance",
                     ),
                     "parameter_locks": item.get("parameter_locks") if isinstance(item.get("parameter_locks"), dict) else {},

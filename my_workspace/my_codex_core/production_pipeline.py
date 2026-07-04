@@ -2516,6 +2516,8 @@ def _optional_workflow_slot(job: dict[str, Any], workflow_id: str = "", mode: st
         or "video_enhance" in text
         or "cover_key_visual" in text
         or "generate_cover_key_visual" in text
+        or "talking_image" in text
+        or "generate_talking_image" in text
     )
 
 
