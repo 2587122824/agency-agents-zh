@@ -2115,6 +2115,7 @@ def _inspect_visual_outputs(
     records: list[dict[str, Any]] = []
     first_video_hashes: dict[str, tuple[int, str]] = {}
     keyframe_hashes: dict[str, tuple[int, str]] = {}
+    video_sources: dict[str, set[str]] = {}
     render = (
         ((compose_config.get("global_context") or {}).get("parameter_policy") or {}).get("locks") or {}
     ).get("render") or {}
@@ -2147,6 +2148,12 @@ def _inspect_visual_outputs(
         job_id = str(job.get("job_id") or job.get("name") or f"material_{index}")
         job_type = str(job.get("type") or "").lower()
         preset = str(job.get("workflow_preset_id") or "")
+        if job_type == "video":
+            video_sources[job_id] = {
+                str(value).strip()
+                for value in (job.get("depends_on") or [])
+                if str(value).strip() and str(value).strip() != "local_tts"
+            }
         for raw_file in job.get("downloaded_files") or []:
             path = Path(str(raw_file))
             if not path.is_file() or cv2 is None:
@@ -2213,7 +2220,27 @@ def _inspect_visual_outputs(
                 if delta <= threshold:
                     errors.append({"code": code, "jobs": [left_id, right_id], "hash_distance": delta})
 
-    duplicate_groups(first_video_hashes, "duplicate_video_first_frame", 2)
+    def duplicate_video_first_frames(values: dict[str, tuple[int, str]], threshold: int) -> None:
+        ids = list(values)
+        for left_index, left_id in enumerate(ids):
+            for right_id in ids[left_index + 1 :]:
+                delta = distance(values[left_id][0], values[right_id][0])
+                if delta > threshold:
+                    continue
+                shared_sources = sorted(video_sources.get(left_id, set()).intersection(video_sources.get(right_id, set())))
+                if shared_sources:
+                    warnings.append(
+                        {
+                            "code": "shared_source_duplicate_video_first_frame",
+                            "jobs": [left_id, right_id],
+                            "source_jobs": shared_sources,
+                            "hash_distance": delta,
+                        }
+                    )
+                else:
+                    errors.append({"code": "duplicate_video_first_frame", "jobs": [left_id, right_id], "hash_distance": delta})
+
+    duplicate_video_first_frames(first_video_hashes, 2)
     duplicate_groups(keyframe_hashes, "duplicate_keyframe_image", 2)
     report = {
         "schema_version": 1,

@@ -135,6 +135,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - `run_auto_production(..., prepare_only=True)` compiles package/manifest without invoking RunningHub, TTS, BGM, or FFmpeg.
 - Visual quality retry should reuse completed outputs, isolate failing/duplicate jobs, expand to dependent downstream jobs, and change seeds only for retried jobs.
 - Visual preflight treats repeated use of the same i2v first frame as a warning, not a blocker. Story sequences may legitimately generate multiple motion clips from one keyframe; downstream quality checks should catch actual duplicate/bad outputs.
+- Visual content QC also downgrades duplicate video first frames to warnings when the clips share the same upstream keyframe dependency. Reusing one first frame for multiple i2v motions is valid for story continuity; unrelated duplicate first frames remain blocking errors.
 - Each RunningHub job writes `runninghub_task_state.json` with request fingerprint and taskId so retries/service restarts can query/download existing results instead of submitting duplicates.
 - Material retry promotes the best legacy `attempt_XX/production_job_state.json` into the stable root cache when needed.
 - Existing-task material retry must preserve non-empty ComfyUI/RunningHub credentials and base URLs already stored in task production config when the retry payload sends blank overrides.
