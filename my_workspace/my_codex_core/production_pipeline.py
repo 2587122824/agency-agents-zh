@@ -505,7 +505,7 @@ def run_auto_production(
 
     material_enabled = mode in {"api_ready", "comfy_full"}
     tts_enabled = _voice_config_tts_enabled(voice_config) and bool(voice_text_quality.get("usable"))
-    talking_image_requires_audio = _payload_has_mode(comfyui_payload, "talking_image")
+    talking_image_requires_audio = _payload_has_required_mode(comfyui_payload, "talking_image")
     if material_enabled and tts_enabled and talking_image_requires_audio:
         emit("检测到数字人口播：先生成最终 WAV，再执行口型工作流", stage="production")
         tts_kind, tts_result = run_tts_branch()
@@ -2820,6 +2820,28 @@ def _payload_has_mode(payload: dict[str, Any], mode: str) -> bool:
                 for prompt in prompts.values()
             ):
                 return True
+    return False
+
+
+def _payload_has_required_mode(payload: dict[str, Any], mode: str) -> bool:
+    target = str(mode or "").strip()
+    for key in ("image_prompts", "video_prompts"):
+        values = payload.get(key) if isinstance(payload.get(key), list) else []
+        for item in values:
+            if not isinstance(item, dict):
+                continue
+            workflow_id = _canonical_workflow_id(item.get("workflow_id") or item.get("capability") or "")
+            item_mode = str(item.get("mode") or item.get("workflow_mode") or item.get("video_task_mode") or "").strip()
+            if item_mode == target and not _optional_workflow_slot(item, workflow_id, item_mode):
+                return True
+            prompts = item.get("prompts") if isinstance(item.get("prompts"), dict) else {}
+            for prompt in prompts.values():
+                if not isinstance(prompt, dict):
+                    continue
+                prompt_workflow_id = _canonical_workflow_id(prompt.get("workflow_id") or prompt.get("capability") or workflow_id)
+                prompt_mode = str(prompt.get("mode") or prompt.get("workflow_mode") or prompt.get("video_task_mode") or "").strip()
+                if prompt_mode == target and not _optional_workflow_slot(prompt, prompt_workflow_id, prompt_mode):
+                    return True
     return False
 
 

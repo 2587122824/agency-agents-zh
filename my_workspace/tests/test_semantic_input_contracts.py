@@ -19,7 +19,7 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
     _image_prompt_item,
     compile_production_plan,
 )
-from my_codex_core.production_pipeline import _required_workflow_slots  # noqa: E402
+from my_codex_core.production_pipeline import _payload_has_required_mode, _required_workflow_slots  # noqa: E402
 
 
 class SemanticInputContractTests(unittest.TestCase):
@@ -319,6 +319,22 @@ class SemanticInputContractTests(unittest.TestCase):
             ]
         )
         self.assertEqual(slots, [{"workflow_id": "04_keyframe", "mode": "keyframe", "material_type": "image", "label": "04_keyframe / keyframe"}])
+
+    def test_optional_talking_image_does_not_require_audio_gate(self) -> None:
+        self.assertFalse(
+            _payload_has_required_mode(
+                {
+                    "video_prompts": [
+                        {
+                            "workflow_id": "09_talking_image",
+                            "mode": "talking_image",
+                            "optional_when_unconfigured": True,
+                        }
+                    ]
+                },
+                "talking_image",
+            )
+        )
 
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

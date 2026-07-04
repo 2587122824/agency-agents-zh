@@ -140,6 +140,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Existing-task material retry must preserve non-empty ComfyUI/RunningHub credentials and base URLs already stored in task production config when the retry payload sends blank overrides.
 - Optional video enhancement slots should be skipped rather than blocking final composition when unconfigured.
 - `09_talking_image / talking_image` is currently treated as optional when unconfigured. It can enhance lip-sync/口播 shots after calibration, but the long-video pipeline should still complete with ordinary visual clips plus local narration/subtitles when that slot is empty.
+- Optional `talking_image` jobs must not force the early TTS/WAV injection gate. Only non-optional talking-image jobs should block material generation while waiting for `input_audio_file`.
 - Multi-character keyframe routing must require concrete identity images. If staff outputs `characters[]` but no identity assets can be resolved, compile the shot back to the configured text-only `04_keyframe / keyframe` route instead of blocking on unconfigured multi-identity modes.
 
 ## Validation / Guardrails
