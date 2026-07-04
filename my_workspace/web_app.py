@@ -11988,14 +11988,14 @@ INDEX_HTML = r"""<!doctype html>
       const text = String(nodeInfoText || '').trim();
       if (!text || text === '[]') throw new Error('RunningHub 子模式尚未配置 nodeInfoList');
       const aliases = {
-        input_base_image: ['{{input_base_image}}', '{{reference_image}}'],
+        input_base_image: ['{{input_base_image}}', '{{reference_image}}', '{{input_reference_style}}', '{{reference_style}}'],
         input_identity_image: ['{{input_identity_image}}', '{{identity_image}}', '{{reference_image_1}}'],
         input_pose_image: ['{{input_pose_image}}', '{{pose_image}}'],
         input_source_video: ['{{input_source_video}}', '{{source_video}}', '{{reference_video}}'],
         input_middle_frame: ['{{input_middle_frame}}', '{{middle_frame_image}}'],
         input_last_frame: ['{{input_last_frame}}', '{{last_frame_image}}'],
         input_mask_image: ['{{input_mask_image}}', '{{mask_image}}'],
-        input_reference_style: ['{{input_reference_style}}', '{{reference_style}}'],
+        input_reference_style: ['{{input_reference_style}}', '{{reference_style}}', '{{input_base_image}}', '{{reference_image}}'],
         input_audio_file: ['{{input_audio_file}}', '{{audio_file}}'],
       };
       const missingMappings = requiredInputs.filter(slot => !(aliases[slot] || [`{{${slot}}}`]).some(token => text.includes(token)));
