@@ -19,7 +19,11 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
     _image_prompt_item,
     compile_production_plan,
 )
-from my_codex_core.production_pipeline import _payload_has_required_mode, _required_workflow_slots  # noqa: E402
+from my_codex_core.production_pipeline import (  # noqa: E402
+    _packaging_dependency_blockers,
+    _payload_has_required_mode,
+    _required_workflow_slots,
+)
 
 
 class SemanticInputContractTests(unittest.TestCase):
@@ -335,6 +339,17 @@ class SemanticInputContractTests(unittest.TestCase):
                 "talking_image",
             )
         )
+
+    def test_optional_talking_image_blocker_does_not_block_packaging(self) -> None:
+        manifest = {
+            "production_nodes": [
+                {"job_id": "talking_image", "stage": "visual", "mode": "talking_image", "status": "blocked", "error": "missing wav"},
+                {"job_id": "clip_001", "stage": "visual", "mode": "i2v_first_frame", "status": "success"},
+            ]
+        }
+        self.assertEqual(_packaging_dependency_blockers(manifest, tts_enabled=False, material_enabled=True), [])
+        talking_node = next(node for node in manifest["production_nodes"] if node["job_id"] == "talking_image")
+        self.assertEqual(talking_node["status"], "skipped")
 
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

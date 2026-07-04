@@ -2773,8 +2773,14 @@ def _packaging_dependency_blockers(manifest: dict[str, Any], tts_enabled: bool, 
     visual_nodes = [node for node in nodes if str(node.get("stage") or "") == "visual"]
     for node in visual_nodes:
         status = str(node.get("status") or "").strip()
+        job_id = str(node.get("job_id") or "visual")
+        mode = str(node.get("mode") or node.get("workflow_mode") or "")
+        if status == "blocked" and _optional_workflow_slot(node, str(node.get("workflow_id") or ""), mode or job_id):
+            node["status"] = "skipped"
+            node["blocked_reason"] = ""
+            node.setdefault("error", "")
+            continue
         if status not in ok_statuses:
-            job_id = str(node.get("job_id") or "visual")
             reason = str(node.get("blocked_reason") or node.get("error") or status or "not completed")
             blockers.append(f"{job_id}: {reason}")
 
