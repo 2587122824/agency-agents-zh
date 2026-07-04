@@ -35,7 +35,8 @@ class LocalFFmpegAdapter:
         manifest: dict[str, Any],
     ) -> dict[str, Any]:
         tool = str(compose_config.get("tool") or "").strip().lower()
-        if tool not in {"", "ffmpeg"}:
+        execution_mode = str(compose_config.get("execution_mode") or "").strip().lower()
+        if tool not in {"", "ffmpeg"} and not (tool == "runninghub" and execution_mode == "comfy_full"):
             return {"status": "skipped", "reason": f"compose tool is not ffmpeg: {tool}"}
 
         output_file = Path(manifest.get("composition", {}).get("target_file") or task_dir / "final_video.mp4")

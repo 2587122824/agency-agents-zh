@@ -14,6 +14,7 @@ sys.path.insert(0, str(WORKSPACE / "my_workspace"))
 
 import web_app  # noqa: E402
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter  # noqa: E402
+from my_codex_core.local_ffmpeg_adapter import LocalFFmpegAdapter  # noqa: E402
 from my_codex_core.production_plan_compiler import (  # noqa: E402
     _bind_first_source_video,
     _image_prompt_item,
@@ -350,6 +351,19 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(_packaging_dependency_blockers(manifest, tts_enabled=False, material_enabled=True), [])
         talking_node = next(node for node in manifest["production_nodes"] if node["job_id"] == "talking_image")
         self.assertEqual(talking_node["status"], "skipped")
+
+    def test_runninghub_comfy_full_allows_local_ffmpeg_composition(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            adapter = LocalFFmpegAdapter(WORKSPACE / "my_workspace")
+            result = adapter.run(
+                root,
+                {"comfyui": root / "missing_comfyui", "video_clips": root / "missing_video"},
+                {"tool": "runninghub", "execution_mode": "comfy_full", "ffmpeg_path": str(root / "missing_ffmpeg.exe")},
+                {"composition": {"target_file": str(root / "final.mp4")}, "files": {}},
+            )
+            self.assertEqual(result["status"], "skipped")
+            self.assertNotIn("compose tool is not ffmpeg", result["reason"])
 
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

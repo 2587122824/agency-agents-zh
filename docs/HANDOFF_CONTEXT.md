@@ -37,6 +37,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 
 - Long-video workflow ends with local editing/composition as the final authority.
 - ComfyUI/RunningHub is for visual material generation or preview clips, not final subtitle/audio burning by default.
+- `compose_config.tool == "runninghub"` in `comfy_full` means RunningHub is the visual material provider; it must still allow local FFmpeg final composition.
 - Audio/subtitle ownership:
   - `20_语音字幕包装师`
   - `22_剪辑成片执行师`

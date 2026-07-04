@@ -1409,7 +1409,8 @@ def _run_local_ffmpeg_adapter(
     manifest: dict[str, Any],
 ) -> dict[str, Any] | None:
     tool = str(compose_config.get("tool") or "").strip().lower()
-    if tool not in {"", "ffmpeg"}:
+    execution_mode = str(compose_config.get("execution_mode") or "").strip().lower()
+    if tool not in {"", "ffmpeg"} and not (tool == "runninghub" and execution_mode == "comfy_full"):
         return None
     try:
         workspace_root = Path(__file__).resolve().parents[1]
