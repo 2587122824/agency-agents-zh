@@ -5664,9 +5664,11 @@ INDEX_HTML = r"""<!doctype html>
 
     function normalizeComfyModeConfig(raw = {}, fallback = {}) {
       const item = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+      const rawNodeInfo = String(item.nodeInfoList ?? item.node_info_list_json ?? '').trim();
+      const fallbackNodeInfo = String(fallback.nodeInfoList ?? fallback.node_info_list_json ?? '[]').trim();
       return {
-        endpoint: String(item.endpoint ?? fallback.endpoint ?? ''),
-        nodeInfoList: sanitizeComfyVisualNodeInfoList(String(item.nodeInfoList ?? item.node_info_list_json ?? fallback.nodeInfoList ?? '[]')),
+        endpoint: String(item.endpoint || fallback.endpoint || ''),
+        nodeInfoList: sanitizeComfyVisualNodeInfoList(rawNodeInfo && rawNodeInfo !== '[]' ? rawNodeInfo : fallbackNodeInfo || '[]'),
         pollTimeout: String(item.pollTimeout ?? item.poll_timeout_seconds ?? fallback.pollTimeout ?? '3600'),
         defaultWidth: String(item.defaultWidth ?? item.default_width ?? fallback.defaultWidth ?? ''),
         defaultHeight: String(item.defaultHeight ?? item.default_height ?? fallback.defaultHeight ?? ''),
@@ -5705,17 +5707,20 @@ INDEX_HTML = r"""<!doctype html>
       if (!item) return null;
       const selectedMode = String(mode || workflow.modes?.[0]?.value || item.defaultWorkflowMode || 'default');
       if (!item.modeConfigs || typeof item.modeConfigs !== 'object') item.modeConfigs = {};
+      const modeDef = workflowModesForWorkflow(workflow).find(entry => String(entry.value || '') === selectedMode) || {};
+      const modeFallback = {
+        ...item,
+        endpoint: modeDef.default_endpoint || modeDef.endpoint || item.endpoint,
+        nodeInfoList: modeDef.default_node_info || modeDef.defaultNodeInfo || item.nodeInfoList,
+        defaultWidth: modeDef.default_width || modeDef.defaultWidth || item.defaultWidth,
+        defaultHeight: modeDef.default_height || modeDef.defaultHeight || item.defaultHeight,
+        defaultFps: modeDef.default_fps || modeDef.defaultFps || item.defaultFps,
+        defaultDuration: modeDef.default_duration || modeDef.defaultDuration || item.defaultDuration,
+      };
       if (!item.modeConfigs[selectedMode] && create) {
-        const modeDef = workflowModesForWorkflow(workflow).find(entry => String(entry.value || '') === selectedMode) || {};
-        const modeFallback = {
-          ...item,
-          nodeInfoList: modeDef.default_node_info || modeDef.defaultNodeInfo || item.nodeInfoList,
-          defaultWidth: modeDef.default_width || modeDef.defaultWidth || item.defaultWidth,
-          defaultHeight: modeDef.default_height || modeDef.defaultHeight || item.defaultHeight,
-          defaultFps: modeDef.default_fps || modeDef.defaultFps || item.defaultFps,
-          defaultDuration: modeDef.default_duration || modeDef.defaultDuration || item.defaultDuration,
-        };
         item.modeConfigs[selectedMode] = normalizeComfyModeConfig({}, modeFallback);
+      } else if (item.modeConfigs[selectedMode]) {
+        item.modeConfigs[selectedMode] = normalizeComfyModeConfig(item.modeConfigs[selectedMode], modeFallback);
       }
       return item.modeConfigs[selectedMode] || null;
     }
@@ -5856,7 +5861,17 @@ INDEX_HTML = r"""<!doctype html>
           if (!existing.modeConfigs || typeof existing.modeConfigs !== 'object') existing.modeConfigs = {};
           modes.forEach(mode => {
             const value = String(mode?.value || '');
-            if (value && !existing.modeConfigs[value]) existing.modeConfigs[value] = normalizeComfyModeConfig({}, existing);
+            if (!value) return;
+            const modeFallback = {
+              ...existing,
+              endpoint: mode.default_endpoint || mode.endpoint || existing.endpoint,
+              nodeInfoList: mode.default_node_info || mode.defaultNodeInfo || existing.nodeInfoList,
+              defaultWidth: mode.default_width || mode.defaultWidth || existing.defaultWidth,
+              defaultHeight: mode.default_height || mode.defaultHeight || existing.defaultHeight,
+              defaultFps: mode.default_fps || mode.defaultFps || existing.defaultFps,
+              defaultDuration: mode.default_duration || mode.defaultDuration || existing.defaultDuration,
+            };
+            existing.modeConfigs[value] = normalizeComfyModeConfig(existing.modeConfigs[value] || {}, modeFallback);
           });
           return;
         }
@@ -5889,7 +5904,17 @@ INDEX_HTML = r"""<!doctype html>
           debugWorkflow: true,
         };
         (Array.isArray(workflow.modes) ? workflow.modes : []).forEach(mode => {
-          if (mode?.value) item.modeConfigs[mode.value] = normalizeComfyModeConfig({}, item);
+          if (mode?.value) {
+            item.modeConfigs[mode.value] = normalizeComfyModeConfig({}, {
+              ...item,
+              endpoint: mode.default_endpoint || mode.endpoint || item.endpoint,
+              nodeInfoList: mode.default_node_info || mode.defaultNodeInfo || item.nodeInfoList,
+              defaultWidth: mode.default_width || mode.defaultWidth || item.defaultWidth,
+              defaultHeight: mode.default_height || mode.defaultHeight || item.defaultHeight,
+              defaultFps: mode.default_fps || mode.defaultFps || item.defaultFps,
+              defaultDuration: mode.default_duration || mode.defaultDuration || item.defaultDuration,
+            });
+          }
         });
         comfyWorkflowLibrary.push(item);
         byId.set(id, item);
