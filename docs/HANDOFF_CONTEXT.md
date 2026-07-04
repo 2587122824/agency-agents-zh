@@ -125,6 +125,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
   - FPS `20/21.value` plus `40.frame_rate`
   - seeds `28/46.noise_seed`
 - `10_broll_transition_video` preserves explicit subtype: `broll_scene_video` vs `empty_transition_video`.
+- B-roll clips are environment-only. If a `generate_broll_clip` intent includes a locked character ID, character name, or alias, the compiler clears `character_id`, removes known character terms from the prompt, and appends a no-visible-character/no-new-character constraint. Any shot where the protagonist must appear should be produced as keyframe + image-to-video instead of text-to-video B-roll.
 - The adapter repairs legacy `10_broll_transition_video / broll_scene_video` nodeInfo rows that still point at old `2483/2612/3059` nodes, replacing them with the current LTX2.3 text-to-video nodeInfo so saved runtime configs do not break B-roll generation.
 
 ## Audio / Subtitle / FFmpeg State

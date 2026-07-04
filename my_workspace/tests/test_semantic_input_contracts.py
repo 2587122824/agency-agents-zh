@@ -387,6 +387,77 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertIn("clip_001", item["depends_on"])
 
+    def test_broll_sanitizes_character_names_to_environment_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            entity_path = root / "entities.json"
+            library_path = root / "library.json"
+            entity_path.write_text(
+                json.dumps(
+                    {
+                        "characters": {
+                            "corgi_king": {
+                                "character_id": "corgi_king",
+                                "name": "Corgi King",
+                                "aliases": ["柯基国王"],
+                                "master_image": "asset_corgi",
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            library_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "asset_corgi",
+                            "asset_id": "asset_corgi",
+                            "file": "01_character_base/corgi.png",
+                            "kind": "image",
+                            "tags": ["character_base"],
+                            "character_id": "corgi_king",
+                            "approved": True,
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            video_content = json.dumps(
+                {
+                    "production_intents": {
+                        "video": [
+                            {
+                                "intent": "generate_broll_clip",
+                                "intent_id": "broll_palace",
+                                "character_id": "corgi_king",
+                                "prompt": "Corgi King 柯基国王走进外星宫殿，镜头扫过王座和发光星云",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            )
+            plan = compile_production_plan(
+                task_id="broll_character_sanitize_test",
+                route_content='{"production_type":"custom"}',
+                video_content=video_content,
+                entity_path=entity_path,
+                asset_library_path=library_path,
+            )
+            item = plan["compiled_payload"]["video_prompts"][0]
+            self.assertEqual(item["workflow_id"], "10_broll_transition_video")
+            self.assertEqual(item["workflow_mode"], "broll_scene_video")
+            self.assertEqual(item["character_id"], "")
+            self.assertTrue(item["no_visible_characters"])
+            self.assertEqual(item["broll_policy"], "environment_only")
+            self.assertNotIn("Corgi King", item["prompt"])
+            self.assertNotIn("柯基国王", item["prompt"])
+            self.assertIn("不出现主角", item["prompt"])
+            self.assertNotIn("character", item.get("entity_context", {}))
+
     def test_unconfigured_talking_image_slot_is_optional(self) -> None:
         slots = _required_workflow_slots(
             [

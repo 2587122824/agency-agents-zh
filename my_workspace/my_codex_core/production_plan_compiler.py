@@ -574,6 +574,14 @@ def _compile_video_intents(
         intent = locked_intent
         parameter_overrides.extend(_tag_overrides(overrides, intent_id, "video"))
         prompt = str(intent.get("prompt") or intent.get("motion_plan") or intent.get("description") or intent.get("edit_note") or "").strip()
+        broll_removed_character_terms: list[str] = []
+        if intent_name == "generate_broll_clip":
+            prompt, broll_removed_character_terms = _sanitize_broll_character_prompt(
+                prompt,
+                intent=intent,
+                global_context=global_context,
+                resolved_entities=resolved_entities,
+            )
         if not prompt and intent_name == "enhance_video":
             prompt = "对上游视频进行补帧、放大、稳定和画质增强。"
         if not prompt:
@@ -581,7 +589,7 @@ def _compile_video_intents(
             continue
         entity_context = entity_context_for_ids(
             resolved_entities,
-            character_id=str(intent.get("character_id") or ""),
+            character_id="" if intent_name == "generate_broll_clip" else str(intent.get("character_id") or ""),
             style_id=str(intent.get("style_id") or ""),
             product_id=str(intent.get("product_id") or ""),
             scene_id=str(intent.get("scene_id") or intent.get("shot_id") or ""),
@@ -601,7 +609,7 @@ def _compile_video_intents(
             "fps": _positive_int(intent.get("fps") or contract.get("fps") or render.get("frame_rate"), 24),
             "width": _positive_int(intent.get("width") or render.get("working_width"), 848),
             "height": _positive_int(intent.get("height") or render.get("working_height"), 480),
-            "character_id": str(intent.get("character_id") or ""),
+            "character_id": "" if intent_name == "generate_broll_clip" else str(intent.get("character_id") or ""),
             "style_id": str(intent.get("style_id") or ""),
             "product_id": str(intent.get("product_id") or ""),
             "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
@@ -624,6 +632,8 @@ def _compile_video_intents(
         if entity_context:
             item["entity_context"] = entity_context
             _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
+        if intent_name == "generate_broll_clip":
+            _apply_broll_no_character_policy(item, broll_removed_character_terms, notes)
         attach_parameter_lock_metadata(
             item,
             global_context=global_context,
@@ -663,6 +673,81 @@ def _compile_video_intents(
         jobs.append(dict(item))
         video_job_ids.add(intent_id)
     return prompts, jobs
+
+
+def _sanitize_broll_character_prompt(
+    prompt: str,
+    *,
+    intent: dict[str, Any],
+    global_context: dict[str, Any],
+    resolved_entities: dict[str, Any],
+) -> tuple[str, list[str]]:
+    text = str(prompt or "").strip()
+    character_terms = _broll_character_terms(intent, global_context, resolved_entities)
+    removed: list[str] = []
+    for term in character_terms:
+        if not term or not re.search(re.escape(term), text, flags=re.IGNORECASE):
+            continue
+        text = re.sub(re.escape(term), "", text, flags=re.IGNORECASE)
+        removed.append(term)
+    text = re.sub(r"\s{2,}", " ", text).strip(" ，,。.;；、")
+    text = _append_prompt_once(
+        text,
+        "B-roll空镜要求：只拍摄环境、道具、光影、天气、建筑或氛围细节，不出现主角，不出现任何可识别角色，不生成新人物或新动物角色。",
+    )
+    return text, removed
+
+
+def _broll_character_terms(
+    intent: dict[str, Any],
+    global_context: dict[str, Any],
+    resolved_entities: dict[str, Any],
+) -> list[str]:
+    terms: list[str] = []
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        if len(text) >= 2 and text not in terms:
+            terms.append(text)
+
+    add(intent.get("character_id"))
+    for character in intent.get("characters") or []:
+        if isinstance(character, dict):
+            add(character.get("character_id"))
+            add(character.get("name"))
+            for alias in character.get("aliases") or []:
+                add(alias)
+
+    for source in (
+        global_context.get("characters") if isinstance(global_context.get("characters"), list) else [],
+        resolved_entities.get("characters") if isinstance(resolved_entities.get("characters"), list) else [],
+    ):
+        for character in source:
+            if not isinstance(character, dict):
+                continue
+            add(character.get("character_id"))
+            add(character.get("name"))
+            for alias in character.get("aliases") or []:
+                add(alias)
+
+    return sorted(terms, key=len, reverse=True)
+
+
+def _apply_broll_no_character_policy(
+    item: dict[str, Any],
+    removed_character_terms: list[str],
+    notes: list[str] | None = None,
+) -> None:
+    item["character_id"] = ""
+    item["no_visible_characters"] = True
+    item["broll_policy"] = "environment_only"
+    item.pop("identity_image", None)
+    if removed_character_terms:
+        item["removed_character_terms"] = removed_character_terms
+        if notes is not None:
+            notes.append(
+                f"video intent {item.get('job_id')} sanitized B-roll character terms: {', '.join(removed_character_terms)}"
+            )
 
 
 def _image_prompt_item(
