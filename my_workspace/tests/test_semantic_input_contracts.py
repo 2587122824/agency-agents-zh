@@ -217,6 +217,77 @@ class SemanticInputContractTests(unittest.TestCase):
                 item["reference_images"],
             )
 
+    def test_animal_reference_sheet_stays_on_character_base(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_corgi_turnaround",
+                            "asset_role": "character",
+                            "character_id": "corgi_king",
+                            "prompt": "柯基狗狗主角三视图，正面、侧面、背面，星球国王披风",
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="animal_reference_sheet_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+        )
+        item = plan["compiled_payload"]["image_prompts"][0]
+        self.assertEqual(item["workflow_id"], "01_base_asset_image")
+        self.assertEqual(item["workflow_mode"], "character_base")
+        self.assertTrue(item["animal_character_reference_sheet"])
+        self.assertIn("不要人型骨架", item["prompt"])
+        self.assertIn("四足动物", item["prompt"])
+
+    def test_animal_expression_sheet_uses_previous_reference_img2img(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_corgi_turnaround",
+                            "asset_role": "character",
+                            "character_id": "corgi_king",
+                            "prompt": "柯基狗狗主角三视图，正面、侧面、背面，星球国王披风",
+                        },
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_corgi_emotions",
+                            "asset_role": "character",
+                            "character_id": "corgi_king",
+                            "prompt": "柯基狗狗主角表情图，开心、惊讶、坚定、害怕",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="animal_expression_sheet_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+        )
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        expression = items["asset_character_corgi_emotions"]
+        self.assertEqual(expression["workflow_id"], "04_keyframe")
+        self.assertEqual(expression["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(expression["control_mode"], "img2img_style")
+        self.assertEqual(
+            expression["input_bindings"]["input_base_image"],
+            {"from_job": "asset_character_corgi_turnaround", "output": "output_final_image"},
+        )
+        self.assertIn("asset_character_corgi_turnaround", expression["depends_on"])
+        self.assertLessEqual(expression["denoise"], 0.38)
+        self.assertIn("不变成人型", expression["prompt"])
+
     def test_multi_character_keyframe_compiles_character_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)

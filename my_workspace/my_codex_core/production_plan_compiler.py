@@ -405,6 +405,7 @@ def _compile_image_intents(
             resolved_entities=resolved_entities,
             notes=notes,
         )
+        _apply_animal_character_base_policy(item, intent, prompts, notes)
         attach_parameter_lock_metadata(
             item,
             global_context=global_context,
@@ -415,6 +416,131 @@ def _compile_image_intents(
         prompts.append(item)
         jobs.append({"job_id": intent_id, "intent_id": intent_id, **item})
     return prompts, jobs
+
+
+def _apply_animal_character_base_policy(
+    item: dict[str, Any],
+    intent: dict[str, Any],
+    existing_items: list[dict[str, Any]],
+    notes: list[str] | None = None,
+) -> None:
+    if str(intent.get("intent") or "").strip() != "generate_base_asset":
+        return
+    if str(intent.get("asset_role") or "character").strip().lower() != "character":
+        return
+    character_text = " ".join(
+        str(value or "")
+        for value in (
+            intent.get("character_id"),
+            intent.get("asset_tag"),
+            intent.get("prompt"),
+            intent.get("description"),
+            item.get("prompt"),
+        )
+    ).lower()
+    is_animal = _looks_like_animal_character(character_text)
+    if not is_animal:
+        return
+    if is_animal and _looks_like_turnaround_sheet(character_text):
+        item["animal_character_reference_sheet"] = True
+        item["prompt"] = _append_prompt_once(
+            str(item.get("prompt") or ""),
+            "动物角色设定图要求：保持四足动物解剖结构，不要人型骨架，不要人类站姿，不要拟人化成人体；在同一张图中呈现同一只动物的正面、侧面、背面/背部视角，毛色、耳朵、眼睛、体型和尾巴完全一致，干净白底，无文字水印。",
+        )
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} kept on animal-safe character_base instead of humanoid turnaround")
+
+    if not _looks_like_expression_sheet(character_text):
+        return
+    reference_job = _previous_character_reference_job(existing_items, str(item.get("character_id") or ""))
+    if not reference_job:
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} has no previous character reference to bind for expression consistency")
+        return
+
+    reference_job_id = str(reference_job.get("job_id") or reference_job.get("id") or "").strip()
+    if not reference_job_id:
+        return
+    item["workflow_id"] = "04_keyframe"
+    item["workflow_mode"] = "img2img_style_keyframe"
+    item["image_task_mode"] = "img2img_style_keyframe"
+    item["mode"] = "img2img_style_keyframe"
+    item["control_mode"] = "img2img_style"
+    item["input_bindings"] = {
+        **(item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}),
+        "input_base_image": {"from_job": reference_job_id, "output": "output_final_image"},
+    }
+    item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
+    item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
+    item["denoise"] = intent.get("denoise") or 0.38
+    item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
+    item["prompt"] = _append_prompt_once(
+        str(item.get("prompt") or ""),
+        "参考上一张角色设定图，必须保持同一只动物的毛色分布、耳朵形状、眼睛、鼻口、体型比例和尾巴一致；只改变表情和轻微动作，不改变物种，不变成人型。",
+    )
+    if notes is not None:
+        notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe using {reference_job_id} for character consistency")
+
+
+def _looks_like_animal_character(text: str) -> bool:
+    return any(
+        token in text
+        for token in (
+            "dog",
+            "corgi",
+            "cat",
+            "rabbit",
+            "fox",
+            "bear",
+            "panda",
+            "puppy",
+            "kitten",
+            "animal",
+            "狗",
+            "柯基",
+            "猫",
+            "兔",
+            "狐狸",
+            "熊",
+            "熊猫",
+            "动物",
+            "宠物",
+            "尾巴",
+            "爪",
+        )
+    )
+
+
+def _looks_like_turnaround_sheet(text: str) -> bool:
+    return any(token in text for token in ("turnaround", "three view", "three-view", "三视图", "正面", "侧面", "背面"))
+
+
+def _looks_like_expression_sheet(text: str) -> bool:
+    return any(token in text for token in ("emotion", "expression", "emotions", "expressions", "表情", "情绪", "表情图"))
+
+
+def _append_prompt_once(prompt: str, addition: str) -> str:
+    base = str(prompt or "").strip()
+    extra = str(addition or "").strip()
+    if not extra or extra in base:
+        return base
+    return f"{base} {extra}".strip()
+
+
+def _previous_character_reference_job(items: list[dict[str, Any]], character_id: str) -> dict[str, Any] | None:
+    target = str(character_id or "").strip()
+    for item in reversed(items):
+        if not isinstance(item, dict):
+            continue
+        if target and str(item.get("character_id") or "").strip() != target:
+            continue
+        mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
+        job_id = str(item.get("job_id") or item.get("id") or "").strip().lower()
+        if _looks_like_expression_sheet(job_id):
+            continue
+        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"} or str(item.get("asset_tag") or "").strip().lower() in {"character", "character_base"}:
+            return item
+    return None
 
 
 def _compile_video_intents(

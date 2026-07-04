@@ -111,6 +111,11 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - RunningHub nodeInfo placeholders include `{{character_references}}`, `{{character_reference_1}}` through `{{character_reference_4}}`, `{{character_id_1}}` through `{{character_id_4}}`, and matching position placeholders.
 - Turnaround/three-view results are auto-stitched into `*_turnaround_sheet.png`. The stitched sheet is first in `downloaded_files` and recorded in manifest metadata.
 - The stitched sheet uses adaptive background sampling and asymmetric layout so identity/pose keyframe models can consume a coherent reference sheet.
+- Animal protagonist consistency policy:
+  - Do not route animal character reference sheets to the humanoid `02_turnaround / character_turnaround` workflow, because that slot is calibrated around human skeleton/standing-pose structure and can distort four-legged anatomy.
+  - Animal `generate_base_asset` prompts that look like three-view/model-sheet requests stay on `01_base_asset_image / character_base`; the compiler appends animal anatomy constraints such as four-legged structure, no humanoid skeleton, no human standing pose, and same animal front/side/back views in one image.
+  - Animal expression/emotion sheets after a same-character reference sheet are routed to `04_keyframe / img2img_style_keyframe` with `input_base_image` bound to the previous character reference job, conservative `denoise`, and prompt constraints that preserve fur pattern, ears, eyes, body ratio, tail, and species.
+  - This is a production-routing stability rule, not a debug-console taxonomy change. It can be folded into a cleaner animal-character module after output quality stabilizes.
 - RunningHub style-reference prompts are environment-only: strip incidental human-appearance clauses and append an empty-scene/no-person constraint.
 - LTX2.3 text-to-video routing uses the user's current node IDs:
   - prompt `73.text`
