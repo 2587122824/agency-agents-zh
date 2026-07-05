@@ -26,6 +26,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _required_workflow_slots,
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
+from my_codex_core.requirement_guard import validate_requirement_alignment  # noqa: E402
 
 
 class SemanticInputContractTests(unittest.TestCase):
@@ -735,6 +736,18 @@ class SemanticInputContractTests(unittest.TestCase):
             {"agent": "06_分镜生图设计师"},
             content,
             {"original_requirement": "30秒短视频，真人画风", "duration_seconds": 30},
+        )
+        self.assertTrue(result["passed"], result["issues"])
+
+    def test_requirement_guard_accepts_2008_rebirth_paraphrase(self) -> None:
+        result = validate_requirement_alignment(
+            {
+                "core_topic": "上辈子我勤恳打工一辈子，省吃俭用依旧平庸碌碌，眼睁睁错过所有暴富风口，遗憾终身",
+                "duration_seconds": 30,
+                "original_requirement": "30秒短视频，真人画风",
+            },
+            "本次任务的核心是：为一段30秒、9:16竖屏、关于打工人穿越回2008年逆袭的短视频，规划图片资产。画面覆盖房价、互联网、商机和时代机会。",
+            4,
         )
         self.assertTrue(result["passed"], result["issues"])
 

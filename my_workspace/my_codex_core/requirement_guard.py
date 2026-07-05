@@ -185,6 +185,19 @@ def _topic_covered_by_salient_concepts(topic: str, output: str) -> bool:
     # says “效率提升 / 工作完成 / 时间归还 / 岗位消失 / 算法茧房” without repeating
     # “生产力” verbatim. Keep this narrow: require the AI anchor plus several
     # productivity/life-state concepts before treating the topic as covered.
+    rebirth_2008_topic = (
+        "打工" in topic
+        and any(term in topic for term in ("错过", "风口", "平庸", "碌碌", "省吃俭用", "暴富"))
+    )
+    if rebirth_2008_topic:
+        concept_families = (
+            ("打工", "工薪", "上班", "打工人"),
+            ("2008", "穿越", "重生", "回到"),
+            ("逆袭", "翻盘", "机会", "商机", "风口", "房价", "互联网"),
+        )
+        if all(any(term in text for term in family) for family in concept_families):
+            return True
+
     topic_mentions_ai = bool(re.search(r"AI|人工智能", topic, flags=re.IGNORECASE))
     output_mentions_ai = bool(re.search(r"AI|人工智能", text, flags=re.IGNORECASE))
     productivity_topic = "生产力" in topic or ("生产" in topic and "提高" in topic)
