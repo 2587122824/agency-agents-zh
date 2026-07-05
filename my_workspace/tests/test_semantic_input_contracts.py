@@ -166,6 +166,10 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(modes["keyframe"]["required_inputs"], [])
         self.assertEqual(modes["identity_keyframe"]["required_inputs"], ["input_identity_image"])
         self.assertEqual(
+            modes["identity_scene_keyframe"]["required_inputs"],
+            ["input_identity_image", "input_scene_image"],
+        )
+        self.assertEqual(
             modes["pose_identity_keyframe"]["required_inputs"],
             ["input_identity_image", "input_pose_image"],
         )
@@ -185,6 +189,7 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertIn("'keyframe'", text_to_image_group)
         self.assertIn("'identity_keyframe'", image_to_image_group)
+        self.assertIn("'identity_scene_keyframe'", image_to_image_group)
         self.assertIn("'pose_identity_keyframe'", image_to_image_group)
         self.assertIn("'multi_identity_keyframe'", image_to_image_group)
         self.assertIn("'multi_pose_identity_keyframe'", image_to_image_group)
@@ -203,14 +208,18 @@ class SemanticInputContractTests(unittest.TestCase):
         identity_canvas = library / "consistent_character_identity_keyframe_canvas.json"
         pose_canvas = library / "consistent_character_pose_identity_keyframe_canvas.json"
         identity_nodeinfo = library / "consistent_character_identity_keyframe_nodeinfo.json"
+        identity_scene_nodeinfo = library / "consistent_character_scene_keyframe_nodeinfo.json"
         pose_nodeinfo = library / "consistent_character_pose_identity_keyframe_nodeinfo.json"
-        for path in (identity_canvas, pose_canvas, identity_nodeinfo, pose_nodeinfo):
+        for path in (identity_canvas, pose_canvas, identity_nodeinfo, identity_scene_nodeinfo, pose_nodeinfo):
             self.assertTrue(path.is_file(), path)
 
         identity_rows = json.loads(identity_nodeinfo.read_text(encoding="utf-8"))
+        identity_scene_rows = json.loads(identity_scene_nodeinfo.read_text(encoding="utf-8"))
         pose_rows = json.loads(pose_nodeinfo.read_text(encoding="utf-8"))
         self.assertIn("{{input_identity_image}}", json.dumps(identity_rows, ensure_ascii=False))
         self.assertNotIn("{{input_pose_image}}", json.dumps(identity_rows, ensure_ascii=False))
+        self.assertIn("{{input_identity_image}}", json.dumps(identity_scene_rows, ensure_ascii=False))
+        self.assertIn("{{input_scene_image}}", json.dumps(identity_scene_rows, ensure_ascii=False))
         self.assertIn("{{input_identity_image}}", json.dumps(pose_rows, ensure_ascii=False))
         self.assertIn("{{input_pose_image}}", json.dumps(pose_rows, ensure_ascii=False))
 
@@ -250,6 +259,7 @@ class SemanticInputContractTests(unittest.TestCase):
         workflows = {item["id"]: item for item in web_app.WorkflowWebHandler._comfy_debug_workflows()}
         modes = {item["value"]: item for item in workflows["04_keyframe"]["modes"]}
         self.assertIn("{{input_identity_image}}", modes["identity_keyframe"]["default_node_info"])
+        self.assertIn("{{input_scene_image}}", modes["identity_scene_keyframe"]["default_node_info"])
         self.assertIn("{{input_pose_image}}", modes["pose_identity_keyframe"]["default_node_info"])
 
     def test_video_post_modes_require_source_video(self) -> None:
@@ -460,8 +470,8 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(len(items), 3)
         for item in items:
             self.assertEqual(item["workflow_id"], "04_keyframe")
-            self.assertEqual(item["workflow_mode"], "identity_keyframe")
-            self.assertEqual(item["control_mode"], "identity_reference")
+            self.assertEqual(item["workflow_mode"], "identity_scene_keyframe")
+            self.assertEqual(item["control_mode"], "identity_scene_reference")
             self.assertEqual(
                 item["input_identity_image"],
                 "my_workspace/my_asset_library/characters/hero.png",
@@ -525,7 +535,7 @@ class SemanticInputContractTests(unittest.TestCase):
         items = plan["compiled_payload"]["image_prompts"]
         self.assertEqual(len(items), 3)
         for item in items:
-            self.assertEqual(item["workflow_mode"], "identity_keyframe")
+            self.assertEqual(item["workflow_mode"], "identity_scene_keyframe")
             self.assertEqual(
                 item["input_identity_image"],
                 "my_workspace/my_asset_library/characters/hero.png",
@@ -706,10 +716,11 @@ class SemanticInputContractTests(unittest.TestCase):
             source_content=source_content,
         )
         item = plan["compiled_payload"]["image_prompts"][0]
-        self.assertEqual(item["workflow_mode"], "identity_keyframe")
-        self.assertEqual(item["control_mode"], "identity_reference")
+        self.assertEqual(item["workflow_mode"], "identity_scene_keyframe")
+        self.assertEqual(item["control_mode"], "identity_scene_reference")
         self.assertEqual(item["input_identity_image"], "my_workspace/my_asset_library/characters/xiaomei.png")
         self.assertEqual(item["input_base_image"], "my_workspace/my_asset_library/characters/xiaomei.png")
+        self.assertEqual(item["input_scene_image"], "my_workspace/my_asset_library/scenes/dining.png")
         self.assertTrue(item["prompt"].startswith("\u8ba9\u56fe\u4e2d\u4eba\u7269"))
         self.assertIn("\u9910\u684c", item["prompt"])
         self.assertIn("\u70ed\u996d", item["prompt"])

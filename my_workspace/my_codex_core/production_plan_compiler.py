@@ -596,6 +596,10 @@ def _apply_linked_character_reference_policy(
     item["input_reference_style"] = master_reference
     scene_reference = _linked_scene_reference_from_intent_or_item(intent, item)
     if scene_reference:
+        item["workflow_mode"] = "identity_scene_keyframe"
+        item["image_task_mode"] = "identity_scene_keyframe"
+        item["mode"] = "identity_scene_keyframe"
+        item["control_mode"] = "identity_scene_reference"
         item["input_scene_image"] = scene_reference
         item["scene_reference_image"] = scene_reference
         _merge_compat_list(item, "reference_images", [scene_reference])
@@ -606,7 +610,8 @@ def _apply_linked_character_reference_policy(
         "参考关联角色母版图，必须保持同一张脸、同一年龄感、同一发型、肤色、五官比例、身材比例和服装主特征；只改变当前镜头要求的表情、动作和轻微状态，不随机换人。",
     )
     if notes is not None:
-        notes.append(f"image intent {item.get('job_id')} bound to linked character master image as identity_keyframe")
+        routed_mode = item.get("workflow_mode") or "identity_keyframe"
+        notes.append(f"image intent {item.get('job_id')} bound to linked character master image as {routed_mode}")
 
 
 def _linked_character_reference_from_intent_or_item(intent: dict[str, Any], item: dict[str, Any]) -> str:
@@ -729,7 +734,7 @@ def _apply_img2img_style_edit_prompt_policy(
     notes: list[str] | None = None,
 ) -> None:
     mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
-    if mode not in {"img2img_style_keyframe", "identity_keyframe"}:
+    if mode not in {"img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"}:
         return
     intent_name = str((intent or {}).get("intent") or "").strip()
     if intent_name == "generate_base_asset":
@@ -875,7 +880,7 @@ def _previous_character_reference_job(items: list[dict[str, Any]], character_id:
         job_id = str(item.get("job_id") or item.get("id") or "").strip().lower()
         if _looks_like_expression_sheet(job_id):
             continue
-        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"} or str(item.get("asset_tag") or "").strip().lower() in {"character", "character_base"}:
+        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"} or str(item.get("asset_tag") or "").strip().lower() in {"character", "character_base"}:
             return item
     return None
 
@@ -985,7 +990,7 @@ def _single_previous_character_id(items: list[dict[str, Any]]) -> str:
         if not character_id:
             continue
         mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
-        if mode not in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"}:
+        if mode not in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"}:
             continue
         if character_id not in ids:
             ids.append(character_id)
@@ -1004,7 +1009,7 @@ def _character_master_reference_job(items: list[dict[str, Any]], character_id: s
         if target and str(item.get("character_id") or "").strip() != target:
             continue
         mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
-        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"}:
+        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"}:
             return item
     return None
 
@@ -1018,7 +1023,7 @@ def _referenced_previous_character_job_from_prompt(items: list[dict[str, Any]], 
         if not character_id or character_id not in text:
             continue
         mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
-        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"}:
+        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"}:
             return item
     return None
 
@@ -1417,6 +1422,11 @@ def _image_prompt_item(
         or intent.get("style_reference")
         or ""
     ).strip()
+    scene_reference = _linked_scene_reference_from_intent_or_item(intent, item)
+    if scene_reference:
+        item["input_scene_image"] = scene_reference
+        item["scene_reference_image"] = scene_reference
+        _merge_compat_list(item, "reference_images", [scene_reference])
     style_reference_requested = (
         workflow_id == "04_keyframe"
         and bool(style_reference or first_reference)
@@ -1470,19 +1480,23 @@ def _image_prompt_item(
         only_reference = item["character_references"][0].get("identity_image", "")
         if only_reference:
             workflow_mode = "pose_identity_keyframe" if pose_reference else "identity_keyframe"
+            if scene_reference and not pose_reference:
+                workflow_mode = "identity_scene_keyframe"
             item["workflow_mode"] = workflow_mode
             item["image_task_mode"] = workflow_mode
             item["mode"] = workflow_mode
-            item["control_mode"] = "identity_pose_reference" if pose_reference else "identity_reference"
+            item["control_mode"] = "identity_scene_reference" if workflow_mode == "identity_scene_keyframe" else ("identity_pose_reference" if pose_reference else "identity_reference")
             item["input_identity_image"] = only_reference
             if pose_reference:
                 item["input_pose_image"] = pose_reference
     elif workflow_id == "04_keyframe" and first_reference:
         workflow_mode = "pose_identity_keyframe" if pose_reference else "identity_keyframe"
+        if scene_reference and not pose_reference:
+            workflow_mode = "identity_scene_keyframe"
         item["workflow_mode"] = workflow_mode
         item["image_task_mode"] = workflow_mode
         item["mode"] = workflow_mode
-        item["control_mode"] = "identity_pose_reference" if workflow_mode == "pose_identity_keyframe" else "identity_reference"
+        item["control_mode"] = "identity_scene_reference" if workflow_mode == "identity_scene_keyframe" else ("identity_pose_reference" if workflow_mode == "pose_identity_keyframe" else "identity_reference")
         item["input_identity_image"] = first_reference
         if workflow_mode == "pose_identity_keyframe":
             item["input_pose_image"] = pose_reference
