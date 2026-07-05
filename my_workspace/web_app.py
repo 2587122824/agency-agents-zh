@@ -499,6 +499,138 @@ INDEX_HTML = r"""<!doctype html>
       padding-top: 10px;
       flex-wrap: wrap;
     }
+    .run-asset-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+      border-top: 1px solid var(--line);
+      padding-top: 10px;
+    }
+    .run-asset-summary {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-height: 32px;
+    }
+    .run-asset-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 240px;
+      padding: 5px 9px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #f8fafc;
+      font-size: 12px;
+    }
+    .run-asset-chip span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .run-asset-chip button {
+      border: 0;
+      background: transparent;
+      min-height: 0;
+      padding: 0;
+      color: var(--muted);
+    }
+    .run-asset-picker-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 80;
+      display: grid;
+      place-items: center;
+      padding: 28px;
+      background: rgba(15, 23, 42, .55);
+    }
+    .run-asset-picker-modal[hidden] {
+      display: none;
+    }
+    .run-asset-picker-card {
+      width: min(960px, calc(100vw - 40px));
+      height: min(720px, calc(100vh - 40px));
+      display: grid;
+      grid-template-rows: auto auto 1fr auto;
+      overflow: hidden;
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: var(--shadow-lg);
+    }
+    .run-asset-picker-head,
+    .run-asset-picker-actions {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 22px;
+    }
+    .run-asset-picker-tabs {
+      display: flex;
+      gap: 6px;
+      padding: 0 22px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .run-asset-picker-tabs button.active {
+      border-color: #99f6e4;
+      background: #ecfeff;
+      color: #0f766e;
+    }
+    .run-asset-picker-grid {
+      padding: 20px 22px;
+      overflow: auto;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+      align-content: start;
+    }
+    .run-asset-choice {
+      display: grid;
+      grid-template-rows: 116px auto;
+      min-height: 170px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      cursor: pointer;
+    }
+    .run-asset-choice.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(20, 184, 166, .14);
+    }
+    .run-asset-choice-media {
+      position: relative;
+      overflow: hidden;
+      background: #f1f5f9;
+    }
+    .run-asset-choice-media img,
+    .run-asset-choice-media video {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+    }
+    .run-asset-choice-check {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      width: 18px;
+      height: 18px;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      background: rgba(255,255,255,.92);
+    }
+    .run-asset-choice.selected .run-asset-choice-check {
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+    .run-asset-choice-body {
+      padding: 10px;
+      min-width: 0;
+    }
     #cancelRunBtn:disabled {
       display: none;
     }
@@ -2757,6 +2889,12 @@ INDEX_HTML = r"""<!doctype html>
         </div>
         <div class="run-composer">
           <textarea id="userInput" aria-label="长视频需求" placeholder="输入你要制作的长视频需求。比如：主题、平台、目标观众、风格、可用素材、交付目标。"></textarea>
+          <div class="run-asset-toolbar">
+            <button id="openRunAssetPickerBtn" type="button">+ 关联资产</button>
+            <div class="run-asset-summary" id="runAssetSummary">
+              <span class="muted small">未关联资产</span>
+            </div>
+          </div>
           <div class="composer-actions">
             <span id="status" class="status">准备就绪</span>
             <div class="row">
@@ -2770,6 +2908,28 @@ INDEX_HTML = r"""<!doctype html>
           <button id="longVideoSampleBtn" hidden>长视频示例</button>
           <button id="gameSampleBtn" hidden>游戏示例</button>
           <button id="clearSettingsBtn">清除已保存配置</button>
+        </div>
+      </div>
+
+      <div class="run-asset-picker-modal" id="runAssetPickerModal" hidden>
+        <div class="run-asset-picker-card">
+          <div class="run-asset-picker-head">
+            <strong>从资产库选择</strong>
+            <button id="runAssetPickerCloseBtn" type="button" aria-label="关闭">×</button>
+          </div>
+          <div class="run-asset-picker-tabs" id="runAssetPickerTabs">
+            <button class="active" data-run-asset-tab="assets" type="button">素材库</button>
+            <button data-run-asset-tab="characters" type="button">角色库</button>
+            <button data-run-asset-tab="scenes" type="button">场景库</button>
+          </div>
+          <div class="run-asset-picker-grid" id="runAssetPickerGrid"></div>
+          <div class="run-asset-picker-actions">
+            <span class="muted small" id="runAssetPickerMeta">未选择资产</span>
+            <div class="row">
+              <button id="runAssetPickerClearBtn" type="button">清空选择</button>
+              <button class="primary" id="runAssetPickerApplyBtn" type="button">应用</button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3783,6 +3943,15 @@ INDEX_HTML = r"""<!doctype html>
       referenceRole: document.getElementById('referenceRole'),
       referenceNote: document.getElementById('referenceNote'),
       referenceList: document.getElementById('referenceList'),
+      openRunAssetPickerBtn: document.getElementById('openRunAssetPickerBtn'),
+      runAssetSummary: document.getElementById('runAssetSummary'),
+      runAssetPickerModal: document.getElementById('runAssetPickerModal'),
+      runAssetPickerCloseBtn: document.getElementById('runAssetPickerCloseBtn'),
+      runAssetPickerTabs: document.getElementById('runAssetPickerTabs'),
+      runAssetPickerGrid: document.getElementById('runAssetPickerGrid'),
+      runAssetPickerMeta: document.getElementById('runAssetPickerMeta'),
+      runAssetPickerClearBtn: document.getElementById('runAssetPickerClearBtn'),
+      runAssetPickerApplyBtn: document.getElementById('runAssetPickerApplyBtn'),
       runBtn: document.getElementById('runBtn'),
       cancelRunBtn: document.getElementById('cancelRunBtn'),
       sampleBtn: document.getElementById('sampleBtn'),
@@ -4099,6 +4268,12 @@ INDEX_HTML = r"""<!doctype html>
     let assetLibrarySection = 'all';
     let selectedAssetLibraryId = '';
     let assetLibraryDetailDirty = false;
+    let runAssetPickerTab = 'assets';
+    const runAssetSelections = {
+      assets: new Set(),
+      characters: new Set(),
+      scenes: new Set(),
+    };
     const ASSET_LIBRARY_SECTIONS = [
       { value: 'all', label: '全部', addLabel: '新增资产', tags: [] },
       { value: 'material', label: '素材', addLabel: '新增素材', tags: ['scene', 'broll', 'bgm', 'music', 'cover', 'scene_base', 'cover_key_visual', 'image_inpaint_fix', 'background_remove', 'broll_scene_video', 'empty_transition_video', 'video_upscale', 'frame_interpolation', 'video_deflicker_stabilize', 'video_inpaint_fix'] },
@@ -9499,6 +9674,8 @@ INDEX_HTML = r"""<!doctype html>
         renderAssetTagFilters();
         renderAssetLibrary();
         renderComfyDebugAssetReferenceOptions();
+        renderRunAssetSummary();
+        if (!els.runAssetPickerModal?.hidden) renderRunAssetPicker();
         if (els.assetLibraryStatus) {
           els.assetLibraryStatus.textContent = assetLibraryItems.length ? `${assetLibraryItems.length} 个可复用素材` : '素材库为空';
           els.assetLibraryStatus.classList.remove('error');
@@ -9519,6 +9696,8 @@ INDEX_HTML = r"""<!doctype html>
           : { characters: {}, styles: {}, products: {}, scenes: {} };
         renderProductionEntityList();
         renderComfyDebugEntityReferenceOptions();
+        renderRunAssetSummary();
+        if (!els.runAssetPickerModal?.hidden) renderRunAssetPicker();
         if (els.productionEntityStatus) {
           const total = productionEntityGroups().reduce((sum, group) => sum + Object.keys(productionEntities[group] || {}).length, 0);
           els.productionEntityStatus.textContent = `已加载 ${total} 个生产实体`;
@@ -9530,6 +9709,196 @@ INDEX_HTML = r"""<!doctype html>
           els.productionEntityStatus.classList.add('error');
         }
       }
+    }
+
+    function runAssetKey(type, id) {
+      return `${type}:${String(id || '').trim()}`;
+    }
+
+    function runAssetSelectionCount() {
+      return Object.values(runAssetSelections).reduce((sum, values) => sum + values.size, 0);
+    }
+
+    function runAssetEntityValues(group) {
+      const values = productionEntities?.[group] && typeof productionEntities[group] === 'object' ? productionEntities[group] : {};
+      return Object.values(values).filter(item => item && typeof item === 'object');
+    }
+
+    function runAssetChoiceId(type, item) {
+      if (type === 'assets') return String(item.asset_id || item.id || '').trim();
+      if (type === 'characters') return String(item.character_id || item.id || '').trim();
+      if (type === 'scenes') return String(item.scene_id || item.id || '').trim();
+      return String(item.id || '').trim();
+    }
+
+    function runAssetChoiceLabel(type, item) {
+      const id = runAssetChoiceId(type, item);
+      return String(item.name || item.label || item.title || item.file || id || '').trim();
+    }
+
+    function runAssetSelected(type, id) {
+      return runAssetSelections[type]?.has(String(id || '').trim());
+    }
+
+    function toggleRunAssetSelection(type, id) {
+      const target = runAssetSelections[type];
+      if (!target || !id) return;
+      if (target.has(id)) target.delete(id);
+      else target.add(id);
+      renderRunAssetPicker();
+      renderRunAssetSummary();
+    }
+
+    function removeRunAssetSelection(type, id) {
+      runAssetSelections[type]?.delete(String(id || '').trim());
+      renderRunAssetSummary();
+      renderRunAssetPicker();
+    }
+
+    async function openRunAssetPicker() {
+      await Promise.all([loadAssetLibrary(), loadProductionEntities()]);
+      runAssetPickerTab = runAssetPickerTab || 'assets';
+      if (els.runAssetPickerModal) els.runAssetPickerModal.hidden = false;
+      renderRunAssetPicker();
+    }
+
+    function closeRunAssetPicker() {
+      if (els.runAssetPickerModal) els.runAssetPickerModal.hidden = true;
+    }
+
+    function clearRunAssetSelections() {
+      Object.values(runAssetSelections).forEach(values => values.clear());
+      renderRunAssetSummary();
+      renderRunAssetPicker();
+    }
+
+    function renderRunAssetPicker() {
+      const tabs = Array.from(els.runAssetPickerTabs?.querySelectorAll('[data-run-asset-tab]') || []);
+      tabs.forEach(button => button.classList.toggle('active', button.dataset.runAssetTab === runAssetPickerTab));
+      if (els.runAssetPickerMeta) {
+        const count = runAssetSelectionCount();
+        els.runAssetPickerMeta.textContent = count ? `已选择 ${count} 个关联项` : '未选择资产';
+      }
+      if (!els.runAssetPickerGrid) return;
+      els.runAssetPickerGrid.innerHTML = '';
+      const type = runAssetPickerTab;
+      const items = type === 'assets'
+        ? assetLibraryItems
+        : runAssetEntityValues(type);
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'muted small';
+        empty.textContent = type === 'assets' ? '素材库暂无可选资产' : '当前实体库暂无可选项';
+        els.runAssetPickerGrid.appendChild(empty);
+        return;
+      }
+      items.forEach(item => {
+        const id = runAssetChoiceId(type, item);
+        if (!id) return;
+        const selected = runAssetSelected(type, id);
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'run-asset-choice';
+        card.classList.toggle('selected', selected);
+        card.onclick = () => toggleRunAssetSelection(type, id);
+
+        const media = document.createElement('div');
+        media.className = 'run-asset-choice-media';
+        const check = document.createElement('span');
+        check.className = 'run-asset-choice-check';
+        media.appendChild(check);
+        if (type === 'assets') {
+          const url = assetLibraryMediaUrl(id);
+          if (assetLibraryKindLabel(item) === '图片') {
+            const img = document.createElement('img');
+            img.loading = 'lazy';
+            img.alt = runAssetChoiceLabel(type, item);
+            img.src = url;
+            media.appendChild(img);
+          } else if (assetLibraryKindLabel(item) === '视频') {
+            const video = document.createElement('video');
+            video.muted = true;
+            video.playsInline = true;
+            video.preload = 'metadata';
+            video.src = url;
+            media.appendChild(video);
+          }
+        }
+        if (media.children.length === 1) {
+          const fallback = document.createElement('div');
+          fallback.className = 'muted small';
+          fallback.style.padding = '42px 12px';
+          fallback.textContent = type === 'characters' ? '角色实体' : type === 'scenes' ? '场景实体' : '资产';
+          media.appendChild(fallback);
+        }
+
+        const body = document.createElement('div');
+        body.className = 'run-asset-choice-body';
+        body.innerHTML = `<strong>${escapeHtml(runAssetChoiceLabel(type, item))}</strong><div class="muted small">${escapeHtml(id)}</div>`;
+        card.appendChild(media);
+        card.appendChild(body);
+        els.runAssetPickerGrid.appendChild(card);
+      });
+    }
+
+    function renderRunAssetSummary() {
+      if (!els.runAssetSummary) return;
+      els.runAssetSummary.innerHTML = '';
+      const chips = [];
+      for (const id of runAssetSelections.assets) {
+        const item = assetLibraryItems.find(asset => runAssetChoiceId('assets', asset) === id) || { id };
+        chips.push({ type: 'assets', id, label: `素材：${runAssetChoiceLabel('assets', item)}` });
+      }
+      for (const id of runAssetSelections.characters) {
+        const item = productionEntities?.characters?.[id] || { id };
+        chips.push({ type: 'characters', id, label: `角色：${runAssetChoiceLabel('characters', item)}` });
+      }
+      for (const id of runAssetSelections.scenes) {
+        const item = productionEntities?.scenes?.[id] || { id };
+        chips.push({ type: 'scenes', id, label: `场景：${runAssetChoiceLabel('scenes', item)}` });
+      }
+      if (!chips.length) {
+        const empty = document.createElement('span');
+        empty.className = 'muted small';
+        empty.textContent = '未关联资产';
+        els.runAssetSummary.appendChild(empty);
+        return;
+      }
+      chips.forEach(chip => {
+        const el = document.createElement('span');
+        el.className = 'run-asset-chip';
+        el.innerHTML = `<span>${escapeHtml(chip.label)}</span>`;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.textContent = '×';
+        remove.onclick = () => removeRunAssetSelection(chip.type, chip.id);
+        el.appendChild(remove);
+        els.runAssetSummary.appendChild(el);
+      });
+    }
+
+    function selectedRunAssetPayload() {
+      const assets = Array.from(runAssetSelections.assets)
+        .map(id => assetLibraryItems.find(item => runAssetChoiceId('assets', item) === id))
+        .filter(Boolean)
+        .map(item => ({
+          asset_id: String(item.asset_id || item.id || '').trim(),
+          name: String(item.name || item.label || assetFileLabel(item.file) || '').trim(),
+          file: comfyAssetPath(item),
+          kind: String(item.kind || (isImageFile(item.file) ? 'image' : isVideoFile(item.file) ? 'video' : isAudioFile(item.file) ? 'audio' : '')).trim(),
+          tags: Array.isArray(item.tags) ? item.tags : [],
+          note: String(item.note || '').trim(),
+          character_id: String(item.character_id || '').trim(),
+          scene_id: String(item.scene_id || '').trim(),
+          product_id: String(item.product_id || '').trim(),
+        }));
+      const characters = Array.from(runAssetSelections.characters)
+        .map(id => productionEntities?.characters?.[id])
+        .filter(Boolean);
+      const scenes = Array.from(runAssetSelections.scenes)
+        .map(id => productionEntities?.scenes?.[id])
+        .filter(Boolean);
+      return { assets, characters, scenes };
     }
 
     function productionEntityGroups() {
@@ -11913,6 +12282,7 @@ INDEX_HTML = r"""<!doctype html>
         const referenceImages = await uploadReferenceImages();
         setStartupProgressMeta('\u8bfb\u53d6\u751f\u4ea7\u914d\u7f6e');
         const { imageConfig, videoConfig, productionConfig } = await collectProductionConfig();
+        const linkedAssets = selectedRunAssetPayload();
         setStartupProgressMeta('\u521b\u5efa\u65b0\u4efb\u52a1');
         const result = await apiWithTimeout('/api/run', {
           method: 'POST',
@@ -11934,6 +12304,7 @@ INDEX_HTML = r"""<!doctype html>
             image_config: imageConfig,
             video_config: videoConfig,
             reference_images: referenceImages,
+            linked_assets: linkedAssets,
             image_api_key: '',
             image_base_url: '',
             video_api_key: '',
@@ -12449,6 +12820,23 @@ INDEX_HTML = r"""<!doctype html>
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
     els.refreshHealthBtn.onclick = loadSystemHealth;
     els.productTemplate.onchange = () => applyProductTemplate(false);
+    if (els.openRunAssetPickerBtn) els.openRunAssetPickerBtn.onclick = openRunAssetPicker;
+    if (els.runAssetPickerCloseBtn) els.runAssetPickerCloseBtn.onclick = closeRunAssetPicker;
+    if (els.runAssetPickerApplyBtn) els.runAssetPickerApplyBtn.onclick = closeRunAssetPicker;
+    if (els.runAssetPickerClearBtn) els.runAssetPickerClearBtn.onclick = clearRunAssetSelections;
+    if (els.runAssetPickerModal) {
+      els.runAssetPickerModal.onclick = event => {
+        if (event.target === els.runAssetPickerModal) closeRunAssetPicker();
+      };
+    }
+    if (els.runAssetPickerTabs) {
+      els.runAssetPickerTabs.onclick = event => {
+        const button = event.target?.closest?.('[data-run-asset-tab]');
+        if (!button) return;
+        runAssetPickerTab = button.dataset.runAssetTab || 'assets';
+        renderRunAssetPicker();
+      };
+    }
     els.refreshAssetLibraryBtn.onclick = async () => {
       await loadAssetLibrary();
       await loadProductionEntities();
@@ -13027,6 +13415,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 user_input = self._append_knowledge_base(user_input)
             if inherit_task:
                 user_input = self._append_inherited_task(user_input, inherit_task, inherit_mode)
+            user_input = self._append_linked_assets(user_input, payload.get("linked_assets"))
             production_config = payload.get("production_config") or {}
             if memory_scope == "video_output" and isinstance(production_config, dict):
                 production_config["video_memory_context"] = self._long_term_memory_context()
@@ -18372,6 +18761,52 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "errors": saved["errors"],
             "registry_file": registry_path.relative_to(WORKSPACE_ROOT).as_posix(),
         }
+
+    @staticmethod
+    def _append_linked_assets(user_input: str, linked_assets: object) -> str:
+        if not isinstance(linked_assets, dict):
+            return user_input
+        assets = [item for item in linked_assets.get("assets") or [] if isinstance(item, dict)]
+        characters = [item for item in linked_assets.get("characters") or [] if isinstance(item, dict)]
+        scenes = [item for item in linked_assets.get("scenes") or [] if isinstance(item, dict)]
+        if not (assets or characters or scenes):
+            return user_input
+        payload = {
+            "linked_assets": {
+                "assets": assets,
+                "characters": characters,
+                "scenes": scenes,
+            }
+        }
+        lines = [
+            "## 关联资产上下文",
+            "以下资产由用户在新建任务时主动选择。数字员工应优先引用这些资产 ID 和实体 ID，不要重新发明角色、场景或素材来源。",
+        ]
+        if assets:
+            lines.append("### 可用素材")
+            for item in assets:
+                label = str(item.get("name") or item.get("asset_id") or item.get("file") or "").strip()
+                lines.append(f"- asset_id: {item.get('asset_id', '')} | name: {label} | file: {item.get('file', '')} | tags: {', '.join(str(tag) for tag in item.get('tags', []) if str(tag))}")
+        if characters:
+            lines.append("### 角色实体")
+            for item in characters:
+                lines.append(f"- character_id: {item.get('character_id') or item.get('id') or ''} | name: {item.get('name', '')} | master_image: {item.get('master_image', '')}")
+        if scenes:
+            lines.append("### 场景实体")
+            for item in scenes:
+                lines.append(f"- scene_id: {item.get('scene_id') or item.get('id') or ''} | name: {item.get('name', '')} | scene_master_image: {item.get('scene_master_image') or item.get('scene_reference') or ''}")
+                if item.get("scene_description"):
+                    lines.append(f"  - scene_description: {item.get('scene_description')}")
+        lines.extend(
+            [
+                "### 结构化数据",
+                "```json",
+                json.dumps(payload, ensure_ascii=False, indent=2),
+                "```",
+                "执行要求：涉及同一角色时使用 character_id；涉及同一地点时使用 scene_id，并继承 scene_master_image、fixed_layout、lighting、camera_allowed_changes、forbidden_changes。",
+            ]
+        )
+        return f"{user_input}\n\n" + "\n".join(lines) + "\n"
 
     @staticmethod
     def _append_reference_images(user_input: str, reference_images: list[dict]) -> str:

@@ -125,6 +125,28 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("允许远景和中景切换", context["constraints"])
         self.assertIn("不要改变舞台结构", context["constraints"])
 
+    def test_run_linked_assets_context_is_structured(self) -> None:
+        text = web_app.WorkflowWebHandler._append_linked_assets(
+            "做一个竞技场剧情短片",
+            {
+                "assets": [
+                    {
+                        "asset_id": "asset_scene_001",
+                        "name": "竞技场母版",
+                        "file": "my_workspace/my_asset_library/03_scene_base/arena.png",
+                        "tags": ["scene_base"],
+                    }
+                ],
+                "characters": [{"character_id": "hero", "name": "主角", "master_image": "hero.png"}],
+                "scenes": [{"scene_id": "arena", "name": "竞技场", "scene_master_image": "arena.png"}],
+            },
+        )
+        self.assertIn("## 关联资产上下文", text)
+        self.assertIn('"linked_assets"', text)
+        self.assertIn('"asset_id": "asset_scene_001"', text)
+        self.assertIn('"character_id": "hero"', text)
+        self.assertIn('"scene_id": "arena"', text)
+
     def test_task_state_does_not_offer_debug_queue_when_gate_is_off(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task_dir = Path(tmp)
