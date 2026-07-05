@@ -707,6 +707,20 @@ class SemanticInputContractTests(unittest.TestCase):
                 "comfyui/manual_debug/master.png",
             )
 
+    def test_task_comfy_debug_payload_includes_denoise(self) -> None:
+        payload = web_app.WorkflowWebHandler._debug_dimension_payload(
+            {
+                "width": 480,
+                "height": 848,
+                "duration": 4,
+                "fps": 24,
+                "denoise": 0.68,
+                "seed": 123,
+            }
+        )
+        self.assertEqual(payload["denoise"], "0.68")
+        self.assertEqual(payload["seed"], "123")
+
     def test_validator_treats_short_video_as_portrait_by_default(self) -> None:
         content = json.dumps(
             {

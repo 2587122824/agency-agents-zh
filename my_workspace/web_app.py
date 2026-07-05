@@ -15766,7 +15766,17 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not isinstance(item, dict):
             return {}
         result = {}
-        for key in ("width", "height", "duration", "fps"):
+        for key in (
+            "width",
+            "height",
+            "duration",
+            "fps",
+            "seed",
+            "denoise",
+            "ipadapter_weight",
+            "reference_strength",
+            "motion_strength",
+        ):
             value = cls._debug_material_value(item, key)
             if value:
                 result[key] = value
