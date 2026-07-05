@@ -156,7 +156,7 @@ _KEYFRAME_WORKFLOW = next(item for item in COMFY_DEBUG_WORKFLOWS if item.get("id
 _KEYFRAME_WORKFLOW["modes"] = [
     {"value": "keyframe", "label": "关键帧（纯文本）", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "none", "requires_reference": False},
     {"value": "style_reference_keyframe", "label": "风格参考关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "style_reference", "requires_reference": True},
-    {"value": "img2img_style_keyframe", "label": "图生图风格关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "img2img_style", "requires_reference": True},
+    {"value": "img2img_style_keyframe", "label": "图生图风格关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "img2img_style", "requires_reference": True, "default_denoise": "1"},
     {"value": "identity_keyframe", "label": "身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_reference", "requires_reference": True},
     {"value": "pose_identity_keyframe", "label": "身份+姿态关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_pose_reference", "requires_reference": True},
     {"value": "multi_identity_keyframe", "label": "多人身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "multi_identity_reference", "requires_reference": True},
@@ -4124,7 +4124,7 @@ INDEX_HTML = r"""<!doctype html>
       { value: 'product_turnaround', label: '产品三视图', taskType: 'product_turnaround', controlMode: 'product_reference', requiresReference: true, prompt: '基于参考图生成产品三视图：同一产品正面、侧面、背面，材质颜色一致，结构准确，干净背景，无文字水印。' },
       { value: 'keyframe', label: '关键帧', taskType: 'keyframe', controlMode: 'none', requiresReference: false, prompt: '根据分镜文本生成视频关键帧：单张画面，构图适合后续图生视频，写实商业风格，无文字水印。' },
       { value: 'style_reference_keyframe', label: '风格参考关键帧', taskType: 'keyframe', controlMode: 'style_reference', requiresReference: true, prompt: '基于风格参考图生成当前分镜关键帧：保持参考图的色彩、光线、材质和画面气质，构图适合后续图生视频，无文字水印。' },
-      { value: 'img2img_style_keyframe', label: '图生图风格关键帧', taskType: 'keyframe', controlMode: 'img2img_style', requiresReference: true, prompt: '基于原图生成当前分镜关键帧：保留原图主体、构图和空间关系，允许轻微调整动作与镜头，继承原图风格质感，适合后续图生视频，无文字水印。' },
+      { value: 'img2img_style_keyframe', label: '图生图风格关键帧', taskType: 'keyframe', controlMode: 'img2img_style', requiresReference: true, defaultDenoise: '1', prompt: '基于原图生成当前分镜关键帧：保留原图主体、构图和空间关系，允许轻微调整动作与镜头，继承原图风格质感，适合后续图生视频，无文字水印。' },
       { value: 'cover_key_visual', label: '封面关键视觉', taskType: 'cover_key_visual', controlMode: 'style_reference', requiresReference: false, prompt: '生成封面关键视觉：主体明确，构图有冲击力，适合横屏视频封面，预留标题安全区，写实商业科技风格，无文字水印。' },
       { value: 'style_reference', label: '风格参考图', taskType: 'style_reference', controlMode: 'none', requiresReference: false, prompt: '生成统一风格参考图：色彩、光线、材质和画面气质明确，可作为后续整条视频的视觉风格基准，无文字水印。' },
       { value: 'inpaint_fix', label: '局部修复/重绘', taskType: 'inpaint_fix', controlMode: 'mask_inpaint', requiresReference: true, prompt: '基于参考图进行局部修复或重绘：修正脸部、手部、文字、水印或局部瑕疵，保持原图主体和风格一致。' },
@@ -5678,6 +5678,7 @@ INDEX_HTML = r"""<!doctype html>
         defaultMiddleFrameReference: String(item.defaultMiddleFrameReference ?? item.default_middle_frame_reference ?? fallback.defaultMiddleFrameReference ?? ''),
         defaultLastFrameReference: String(item.defaultLastFrameReference ?? item.default_last_frame_reference ?? fallback.defaultLastFrameReference ?? ''),
         defaultSeed: String(item.defaultSeed ?? item.default_seed ?? fallback.defaultSeed ?? ''),
+        defaultDenoise: String(item.defaultDenoise ?? item.default_denoise ?? fallback.defaultDenoise ?? ''),
         defaultDuration: String(item.defaultDuration ?? item.default_duration ?? fallback.defaultDuration ?? ''),
         defaultFps: String(item.defaultFps ?? item.default_fps ?? fallback.defaultFps ?? ''),
         defaultPrompt: String(item.defaultPrompt ?? item.default_prompt ?? fallback.defaultPrompt ?? ''),
@@ -5716,6 +5717,7 @@ INDEX_HTML = r"""<!doctype html>
         defaultHeight: modeDef.default_height || modeDef.defaultHeight || item.defaultHeight,
         defaultFps: modeDef.default_fps || modeDef.defaultFps || item.defaultFps,
         defaultDuration: modeDef.default_duration || modeDef.defaultDuration || item.defaultDuration,
+        defaultDenoise: modeDef.default_denoise || modeDef.defaultDenoise || item.defaultDenoise,
       };
       if (!item.modeConfigs[selectedMode] && create) {
         item.modeConfigs[selectedMode] = normalizeComfyModeConfig({}, modeFallback);
@@ -5797,6 +5799,7 @@ INDEX_HTML = r"""<!doctype html>
           defaultMiddleFrameReference: String(item.defaultMiddleFrameReference || item.default_middle_frame_reference || item.middleFrameReference || item.middle_frame_image || ''),
           defaultLastFrameReference: String(item.defaultLastFrameReference || item.default_last_frame_reference || item.lastFrameReference || item.last_frame_image || ''),
           defaultSeed: String(item.defaultSeed || item.default_seed || item.seed || ''),
+          defaultDenoise: String(item.defaultDenoise || item.default_denoise || item.denoise || ''),
           defaultDuration: String(item.defaultDuration || item.default_duration || item.duration || ''),
           defaultPrompt: String(item.defaultPrompt || item.default_prompt || item.prompt || ''),
           defaultNegative: String(item.defaultNegative || item.default_negative || item.negative || item.negative_prompt || ''),
@@ -5829,6 +5832,7 @@ INDEX_HTML = r"""<!doctype html>
           defaultMiddleFrameReference: String(item.defaultMiddleFrameReference || item.default_middle_frame_reference || item.middleFrameReference || item.middle_frame_image || ''),
           defaultLastFrameReference: String(item.defaultLastFrameReference || item.default_last_frame_reference || item.lastFrameReference || item.last_frame_image || ''),
           defaultSeed: String(item.defaultSeed || item.default_seed || item.seed || ''),
+          defaultDenoise: String(item.defaultDenoise || item.default_denoise || item.denoise || ''),
           defaultDuration: String(item.defaultDuration || item.default_duration || item.duration || ''),
           defaultPrompt: String(item.defaultPrompt || item.default_prompt || item.prompt || ''),
           defaultNegative: String(item.defaultNegative || item.default_negative || item.negative || item.negative_prompt || ''),
@@ -5870,6 +5874,7 @@ INDEX_HTML = r"""<!doctype html>
               defaultHeight: mode.default_height || mode.defaultHeight || existing.defaultHeight,
               defaultFps: mode.default_fps || mode.defaultFps || existing.defaultFps,
               defaultDuration: mode.default_duration || mode.defaultDuration || existing.defaultDuration,
+              defaultDenoise: mode.default_denoise || mode.defaultDenoise || existing.defaultDenoise,
             };
             existing.modeConfigs[value] = normalizeComfyModeConfig(existing.modeConfigs[value] || {}, modeFallback);
           });
@@ -5889,6 +5894,7 @@ INDEX_HTML = r"""<!doctype html>
           defaultMiddleFrameReference: '',
           defaultLastFrameReference: '',
           defaultSeed: '',
+          defaultDenoise: '',
           defaultDuration: '',
           defaultWorkflowMode: Array.isArray(workflow.modes) && workflow.modes.length === 1 ? workflow.modes[0].value || '' : '',
           defaultImageTaskType: workflow.default_image_task_type || workflow.default_task_type || '',
@@ -5913,6 +5919,7 @@ INDEX_HTML = r"""<!doctype html>
               defaultHeight: mode.default_height || mode.defaultHeight || item.defaultHeight,
               defaultFps: mode.default_fps || mode.defaultFps || item.defaultFps,
               defaultDuration: mode.default_duration || mode.defaultDuration || item.defaultDuration,
+              defaultDenoise: mode.default_denoise || mode.defaultDenoise || item.defaultDenoise,
             });
           }
         });
@@ -6322,6 +6329,7 @@ INDEX_HTML = r"""<!doctype html>
           default_source_video: item.defaultSourceVideo || '',
           default_pose_image: item.defaultPoseImage || '',
           default_seed: item.defaultSeed || '',
+          default_denoise: item.defaultDenoise || '',
           default_duration: item.defaultDuration || '',
           default_fps: item.defaultFps || '',
           default_middle_frame_reference: item.defaultMiddleFrameReference || '',
@@ -6348,6 +6356,7 @@ INDEX_HTML = r"""<!doctype html>
             default_middle_frame_reference: config.defaultMiddleFrameReference || '',
             default_last_frame_reference: config.defaultLastFrameReference || '',
             default_seed: config.defaultSeed || '',
+            default_denoise: config.defaultDenoise || '',
             default_duration: config.defaultDuration || '',
             default_fps: config.defaultFps || '',
             default_prompt: config.defaultPrompt || '',
@@ -6545,7 +6554,7 @@ INDEX_HTML = r"""<!doctype html>
         '{{width}}': '表单宽度',
         '{{height}}': '表单高度',
         '{{seed}}': '表单随机种子',
-        '{{denoise}}': '表单重绘幅度',
+        '{{denoise}}': '运行重绘幅度',
         '{{duration}}': '表单时长',
         '{{fps}}': '表单帧率',
         '{{frame_count}}': '表单总帧数',
@@ -12063,6 +12072,7 @@ INDEX_HTML = r"""<!doctype html>
         workflow_mode: workflowModeDef?.value || '',
         asset_tag: imageTaskDef.assetTag || selected.asset_tag || selected.id,
         seed: String(overrides.seed ?? els.comfyDebugSeed.value).trim(),
+        denoise: String(overrides.denoise ?? '').trim(),
         width: els.comfyDebugWidth.value.trim(),
         height: els.comfyDebugHeight.value.trim(),
         short_side: computedComfyDebugShortSide(),
@@ -16675,7 +16685,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "video_task_type": task_type if job_type == "video" else "",
             }
             if mode == "img2img_style_keyframe":
-                request_payload["denoise"] = str(payload.get("denoise") or "").strip() or "0.45"
+                request_payload["denoise"] = str(payload.get("denoise") or "").strip() or "1"
                 request_payload["ipadapter_weight"] = str(payload.get("ipadapter_weight") or "").strip() or "0.65"
             if job_type == "video":
                 request_payload["video_prompt"] = prompt

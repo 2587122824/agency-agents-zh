@@ -63,6 +63,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("comfyDebugCharacterEntity", source)
         self.assertIn("comfyDebugIdentityAssetReference", source)
         self.assertIn("comfyDebugPoseAssetReference", source)
+        self.assertNotIn("comfyDebugDenoise", source)
         self.assertIn("productionEntityTurnaround", source)
 
     def test_consistent_character_keyframe_presets_are_mode_specific(self) -> None:
@@ -287,7 +288,7 @@ class SemanticInputContractTests(unittest.TestCase):
             {"from_job": "asset_character_corgi_turnaround", "output": "output_final_image"},
         )
         self.assertIn("asset_character_corgi_turnaround", expression["depends_on"])
-        self.assertLessEqual(expression["denoise"], 0.38)
+        self.assertEqual(expression["denoise"], 1)
         self.assertIn("不变成人型", expression["prompt"])
 
     def test_human_expression_sheet_uses_previous_reference_img2img(self) -> None:
@@ -307,6 +308,7 @@ class SemanticInputContractTests(unittest.TestCase):
                             "intent_id": "asset_character_expression_determined",
                             "asset_role": "character",
                             "character_id": "character_main",
+                            "denoise": 0.6,
                             "prompt": "角色表情图：坚定、自信、笃定，下巴微扬，目光平视前方",
                         },
                     ]
@@ -327,6 +329,7 @@ class SemanticInputContractTests(unittest.TestCase):
             expression["input_bindings"]["input_base_image"],
             {"from_job": "asset_character_main_base", "output": "output_final_image"},
         )
+        self.assertEqual(expression["denoise"], 0.6)
         self.assertIn("不换脸", expression["prompt"])
         self.assertIn("不换衣服", expression["prompt"])
 

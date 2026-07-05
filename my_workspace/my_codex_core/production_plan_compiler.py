@@ -475,7 +475,7 @@ def _apply_character_base_policy(
     }
     item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
     item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
-    item["denoise"] = intent.get("denoise") or 0.38
+    item["denoise"] = intent.get("denoise") or 1
     item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
     item["prompt"] = _append_prompt_once(
         str(item.get("prompt") or ""),
@@ -667,7 +667,7 @@ def _apply_generated_character_reference_policy(
         }
         item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
         item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
-        item["denoise"] = intent.get("denoise") or 0.42
+        item["denoise"] = intent.get("denoise") or 1
         item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
         item["prompt"] = _append_prompt_once(
             str(item.get("prompt") or ""),
@@ -688,7 +688,7 @@ def _apply_generated_character_reference_policy(
         }
         item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
         item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
-        item["denoise"] = intent.get("denoise") or 0.42
+        item["denoise"] = intent.get("denoise") or 1
         item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
         item["prompt"] = _append_prompt_once(
             str(item.get("prompt") or ""),
@@ -1165,7 +1165,7 @@ def _image_prompt_item(
         item["control_mode"] = "img2img_style"
         item["input_base_image"] = first_reference
         item["input_reference_style"] = style_reference or first_reference
-        item["denoise"] = intent.get("denoise") or 0.45
+        item["denoise"] = intent.get("denoise") or 1
         item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.65
     elif style_reference_requested:
         workflow_mode = "style_reference_keyframe"
