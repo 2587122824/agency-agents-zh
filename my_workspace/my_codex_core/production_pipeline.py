@@ -1056,10 +1056,10 @@ def _retry_tts_job(
         audio["voice_text_reason"] = reason
         audio["voiceover_audio_file"] = ""
         manifest["status"] = "local_tts_skipped"
-        _upsert_job(
+        _upsert_production_node(
             manifest,
             "local_tts",
-            "本地配音",
+            stage="08_audio_visual_packaging",
             mode="local_tts",
             status="skipped",
             outputs=[],
