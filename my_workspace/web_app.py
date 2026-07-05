@@ -13136,7 +13136,62 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "workflow_library": data.get("workflow_library") if isinstance(data.get("workflow_library"), list) else [],
             "updated_at": float(data.get("updated_at") or 0),
         }
+        WorkflowWebHandler._repair_runtime_comfy_node_info(result)
         return result
+
+    @staticmethod
+    def _repair_runtime_comfy_node_info(config: dict) -> None:
+        if not isinstance(config, dict):
+            return
+
+        def repair_node_info(raw: object, *, endpoint: str = "", workflow_id: str = "", workflow_mode: str = "") -> str:
+            return CloudComfyUIAdapter._repair_known_runninghub_node_info(
+                str(raw or "").strip(),
+                endpoint=endpoint,
+                workflow_id=workflow_id,
+                workflow_mode=workflow_mode,
+            )
+
+        if config.get("node_info_list_json"):
+            config["node_info_list_json"] = repair_node_info(
+                config.get("node_info_list_json"),
+                endpoint=str(config.get("workflow_endpoint") or ""),
+                workflow_id=str(config.get("workflow_preset_id") or ""),
+            )
+
+        workflow_library = config.get("workflow_library")
+        if not isinstance(workflow_library, list):
+            return
+        for item in workflow_library:
+            if not isinstance(item, dict):
+                continue
+            workflow_id = str(item.get("id") or item.get("workflow_id") or "").strip()
+            endpoint = str(item.get("endpoint") or item.get("workflow_endpoint") or "").strip()
+            if item.get("node_info_list_json") or item.get("nodeInfoList"):
+                repaired = repair_node_info(
+                    item.get("node_info_list_json") or item.get("nodeInfoList"),
+                    endpoint=endpoint,
+                    workflow_id=workflow_id,
+                )
+                item["node_info_list_json"] = repaired
+                item["nodeInfoList"] = repaired
+            mode_configs = item.get("mode_configs")
+            if not isinstance(mode_configs, dict):
+                continue
+            for mode_value, mode_config in mode_configs.items():
+                if not isinstance(mode_config, dict):
+                    continue
+                mode_endpoint = str(mode_config.get("endpoint") or mode_config.get("workflow_endpoint") or endpoint).strip()
+                if not (mode_config.get("node_info_list_json") or mode_config.get("nodeInfoList")):
+                    continue
+                repaired = repair_node_info(
+                    mode_config.get("node_info_list_json") or mode_config.get("nodeInfoList"),
+                    endpoint=mode_endpoint,
+                    workflow_id=workflow_id,
+                    workflow_mode=str(mode_value or ""),
+                )
+                mode_config["node_info_list_json"] = repaired
+                mode_config["nodeInfoList"] = repaired
 
     @staticmethod
     def _write_runtime_comfy_config(config: dict) -> None:

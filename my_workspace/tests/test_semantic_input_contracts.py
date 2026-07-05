@@ -1326,6 +1326,36 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn(("177", "text", "{{prompt}}"), row_keys)
         self.assertIn(("193", "image", "{{reference_image}}"), row_keys)
 
+    def test_runtime_config_repairs_three_frame_saved_node_info(self) -> None:
+        config = {
+            "workflow_library": [
+                {
+                    "id": "06_i2v_first_middle_last_frame",
+                    "mode_configs": {
+                        "i2v_first_middle_last_frame": {
+                            "endpoint": "/run/workflow/2072296894507872257",
+                            "node_info_list_json": json.dumps(
+                                [
+                                    {"nodeId": "447", "fieldName": "image", "fieldValue": "{{reference_image}}"},
+                                    {"nodeId": "448", "fieldName": "image", "fieldValue": "{{reference_image}}"},
+                                    {"nodeId": "449", "fieldName": "image", "fieldValue": "{{reference_image}}"},
+                                ]
+                            ),
+                        }
+                    },
+                }
+            ]
+        }
+
+        web_app.WorkflowWebHandler._repair_runtime_comfy_node_info(config)
+
+        mode_config = config["workflow_library"][0]["mode_configs"]["i2v_first_middle_last_frame"]
+        rows = json.loads(mode_config["node_info_list_json"])
+        row_keys = {(row["nodeId"], row["fieldName"], row["fieldValue"]) for row in rows}
+        self.assertIn(("447", "image", "{{reference_image}}"), row_keys)
+        self.assertIn(("448", "image", "{{input_middle_frame}}"), row_keys)
+        self.assertIn(("449", "image", "{{input_last_frame}}"), row_keys)
+
     def test_adapter_replaces_long_side_placeholder(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         payload = {
