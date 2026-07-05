@@ -9724,8 +9724,49 @@ INDEX_HTML = r"""<!doctype html>
       return Object.values(values).filter(item => item && typeof item === 'object');
     }
 
+    function runAssetCharacterAssetValues() {
+      const characterTags = new Set(['person', 'character', 'character_base', 'character_turnaround', 'character_generation', 'identity_reference']);
+      return assetLibraryItems
+        .filter(item => {
+          const tags = Array.isArray(item.tags) ? item.tags.map(tag => String(tag || '').trim()) : [];
+          const kind = String(item.kind || '').toLowerCase();
+          return tags.some(tag => characterTags.has(tag)) || kind === 'character';
+        })
+        .map(item => ({ ...item, _runAssetSource: 'asset_character' }));
+    }
+
+    function runAssetSceneAssetValues() {
+      const sceneTags = new Set(['scene', 'scene_base', 'broll_scene_video']);
+      return assetLibraryItems
+        .filter(item => {
+          const tags = Array.isArray(item.tags) ? item.tags.map(tag => String(tag || '').trim()) : [];
+          const kind = String(item.kind || '').toLowerCase();
+          return tags.some(tag => sceneTags.has(tag)) || kind === 'scene';
+        })
+        .map(item => ({ ...item, _runAssetSource: 'asset_scene' }));
+    }
+
+    function runAssetPickerItems(type) {
+      if (type === 'assets') return assetLibraryItems;
+      if (type === 'characters') {
+        return [
+          ...runAssetEntityValues('characters').map(item => ({ ...item, _runAssetSource: 'entity_character' })),
+          ...runAssetCharacterAssetValues(),
+        ];
+      }
+      if (type === 'scenes') {
+        return [
+          ...runAssetEntityValues('scenes').map(item => ({ ...item, _runAssetSource: 'entity_scene' })),
+          ...runAssetSceneAssetValues(),
+        ];
+      }
+      return [];
+    }
+
     function runAssetChoiceId(type, item) {
       if (type === 'assets') return String(item.asset_id || item.id || '').trim();
+      if (type === 'characters' && item?._runAssetSource === 'asset_character') return `asset:${String(item.asset_id || item.id || '').trim()}`;
+      if (type === 'scenes' && item?._runAssetSource === 'asset_scene') return `asset:${String(item.asset_id || item.id || '').trim()}`;
       if (type === 'characters') return String(item.character_id || item.id || '').trim();
       if (type === 'scenes') return String(item.scene_id || item.id || '').trim();
       return String(item.id || '').trim();
@@ -9782,9 +9823,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!els.runAssetPickerGrid) return;
       els.runAssetPickerGrid.innerHTML = '';
       const type = runAssetPickerTab;
-      const items = type === 'assets'
-        ? assetLibraryItems
-        : runAssetEntityValues(type);
+      const items = runAssetPickerItems(type);
       if (!items.length) {
         const empty = document.createElement('div');
         empty.className = 'muted small';
@@ -9807,8 +9846,9 @@ INDEX_HTML = r"""<!doctype html>
         const check = document.createElement('span');
         check.className = 'run-asset-choice-check';
         media.appendChild(check);
-        if (type === 'assets') {
-          const url = assetLibraryMediaUrl(id);
+        if (type === 'assets' || item._runAssetSource === 'asset_character' || item._runAssetSource === 'asset_scene') {
+          const assetId = String(item.asset_id || item.id || '').trim();
+          const url = assetLibraryMediaUrl(assetId);
           if (assetLibraryKindLabel(item) === '图片') {
             const img = document.createElement('img');
             img.loading = 'lazy';
@@ -9850,11 +9890,11 @@ INDEX_HTML = r"""<!doctype html>
         chips.push({ type: 'assets', id, label: `素材：${runAssetChoiceLabel('assets', item)}` });
       }
       for (const id of runAssetSelections.characters) {
-        const item = productionEntities?.characters?.[id] || { id };
+        const item = runAssetPickerItems('characters').find(candidate => runAssetChoiceId('characters', candidate) === id) || productionEntities?.characters?.[id] || { id };
         chips.push({ type: 'characters', id, label: `角色：${runAssetChoiceLabel('characters', item)}` });
       }
       for (const id of runAssetSelections.scenes) {
-        const item = productionEntities?.scenes?.[id] || { id };
+        const item = runAssetPickerItems('scenes').find(candidate => runAssetChoiceId('scenes', candidate) === id) || productionEntities?.scenes?.[id] || { id };
         chips.push({ type: 'scenes', id, label: `场景：${runAssetChoiceLabel('scenes', item)}` });
       }
       if (!chips.length) {
@@ -9877,11 +9917,8 @@ INDEX_HTML = r"""<!doctype html>
       });
     }
 
-    function selectedRunAssetPayload() {
-      const assets = Array.from(runAssetSelections.assets)
-        .map(id => assetLibraryItems.find(item => runAssetChoiceId('assets', item) === id))
-        .filter(Boolean)
-        .map(item => ({
+    function runAssetPayloadFromAsset(item) {
+      return {
           asset_id: String(item.asset_id || item.id || '').trim(),
           name: String(item.name || item.label || assetFileLabel(item.file) || '').trim(),
           file: comfyAssetPath(item),
@@ -9891,14 +9928,55 @@ INDEX_HTML = r"""<!doctype html>
           character_id: String(item.character_id || '').trim(),
           scene_id: String(item.scene_id || '').trim(),
           product_id: String(item.product_id || '').trim(),
-        }));
-      const characters = Array.from(runAssetSelections.characters)
-        .map(id => productionEntities?.characters?.[id])
-        .filter(Boolean);
-      const scenes = Array.from(runAssetSelections.scenes)
-        .map(id => productionEntities?.scenes?.[id])
-        .filter(Boolean);
-      return { assets, characters, scenes };
+        };
+    }
+
+    function selectedRunAssetPayload() {
+      const assets = Array.from(runAssetSelections.assets)
+        .map(id => assetLibraryItems.find(item => runAssetChoiceId('assets', item) === id))
+        .filter(Boolean)
+        .map(runAssetPayloadFromAsset);
+      const characters = [];
+      Array.from(runAssetSelections.characters).forEach(id => {
+        const item = runAssetPickerItems('characters').find(candidate => runAssetChoiceId('characters', candidate) === id);
+        if (!item) return;
+        if (item._runAssetSource === 'asset_character') {
+          const assetPayload = runAssetPayloadFromAsset(item);
+          assets.push(assetPayload);
+          characters.push({
+            character_id: assetPayload.character_id || assetPayload.asset_id,
+            id: assetPayload.character_id || assetPayload.asset_id,
+            name: assetPayload.name || assetPayload.asset_id,
+            master_image: assetPayload.file,
+            reference_assets: [assetPayload.file].filter(Boolean),
+            source_asset_id: assetPayload.asset_id,
+          });
+        } else {
+          characters.push(item);
+        }
+      });
+      const scenes = [];
+      Array.from(runAssetSelections.scenes).forEach(id => {
+        const item = runAssetPickerItems('scenes').find(candidate => runAssetChoiceId('scenes', candidate) === id);
+        if (!item) return;
+        if (item._runAssetSource === 'asset_scene') {
+          const assetPayload = runAssetPayloadFromAsset(item);
+          assets.push(assetPayload);
+          scenes.push({
+            scene_id: assetPayload.scene_id || assetPayload.asset_id,
+            id: assetPayload.scene_id || assetPayload.asset_id,
+            name: assetPayload.name || assetPayload.asset_id,
+            scene_master_image: assetPayload.file,
+            scene_reference: assetPayload.file,
+            reference_assets: [assetPayload.file].filter(Boolean),
+            source_asset_id: assetPayload.asset_id,
+          });
+        } else {
+          scenes.push(item);
+        }
+      });
+      const uniqueAssets = Array.from(new Map(assets.map(item => [item.asset_id || item.file, item])).values());
+      return { assets: uniqueAssets, characters, scenes };
     }
 
     function productionEntityGroups() {
