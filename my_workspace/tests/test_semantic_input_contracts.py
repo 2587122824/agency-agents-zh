@@ -644,6 +644,71 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("不换脸", expression["prompt"])
         self.assertIn("不换衣服", expression["prompt"])
 
+    def test_linked_character_img2img_uses_concise_edit_prompt(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_01_hesitate_keyframe",
+                            "character_id": "char_xiaomei",
+                            "scene_id": "scene_dining",
+                            "negative_prompt": "nudity, sexual content, gore, unsafe content, distorted body, distorted face, flicker, low quality",
+                            "prompt": (
+                                "platform-safe non-graphic video, fully clothed subjects, family-safe action tone, "
+                                "\u5c0f\u7f8e\uff08character_id: char_xiaomei\uff09\u7ad9\u5728\u5173\u8054\u573a\u666f\uff08scene_id: scene_dining\uff09\u7684\u9910\u684c\u5de6\u4fa7\u3002"
+                                "\u684c\u4e0a\u653e\u6709\u4e00\u7897\u70ed\u996d\uff0c\u84b8\u6c7d\u8885\u8885\u3002"
+                                "\u5c0f\u7f8e\u76ee\u5149\u843d\u5728\u996d\u7897\u4e0a\uff0c\u8868\u60c5\u8fdf\u7591\u3002"
+                                "\u670d\u88c5\u3001\u53d1\u578b\u3001\u4e94\u5b98\u4e0e\u89d2\u8272\u6bcd\u7248\u56fe\u5b8c\u5168\u4e00\u81f4\u3002"
+                                "\u80cc\u666f\u4e3a\u5173\u8054\u573a\u666f\u56fa\u5b9a\u89c6\u89d2\u3002"
+                                "\u7ad6\u5c4f9:16\uff0c\u5de5\u4f5c\u5c3a\u5bf8480x848\u3002 "
+                                "\u53c2\u8003\u5173\u8054\u89d2\u8272\u6bcd\u7248\u56fe\uff0c\u5fc5\u987b\u4fdd\u6301\u540c\u4e00\u5f20\u8138\u3001\u540c\u4e00\u5e74\u9f84\u611f\u3001\u540c\u4e00\u53d1\u578b\u3001\u80a4\u8272\u3001\u4e94\u5b98\u6bd4\u4f8b\u3001\u8eab\u6750\u6bd4\u4f8b\u548c\u670d\u88c5\u4e3b\u7279\u5f81\uff1b"
+                                "\u53ea\u6539\u53d8\u5f53\u524d\u955c\u5934\u8981\u6c42\u7684\u8868\u60c5\u3001\u52a8\u4f5c\u548c\u8f7b\u5fae\u72b6\u6001\uff0c\u4e0d\u968f\u673a\u6362\u4eba\u3002"
+                            ),
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        source_content = json.dumps(
+            {
+                "linked_assets": {
+                    "characters": [
+                        {
+                            "character_id": "char_xiaomei",
+                            "master_image": "my_workspace/my_asset_library/characters/xiaomei.png",
+                        }
+                    ],
+                    "scenes": [
+                        {
+                            "scene_id": "scene_dining",
+                            "scene_master_image": "my_workspace/my_asset_library/scenes/dining.png",
+                        }
+                    ],
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="linked_character_concise_edit_prompt_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+            source_content=source_content,
+        )
+        item = plan["compiled_payload"]["image_prompts"][0]
+        self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(item["input_base_image"], "my_workspace/my_asset_library/characters/xiaomei.png")
+        self.assertIn("\u9910\u684c", item["prompt"])
+        self.assertIn("\u70ed\u996d", item["prompt"])
+        self.assertNotIn("character_id", item["prompt"])
+        self.assertNotIn("scene_id", item["prompt"])
+        self.assertNotIn("\u5de5\u4f5c\u5c3a\u5bf8", item["prompt"])
+        self.assertNotIn("\u53c2\u8003\u5173\u8054\u89d2\u8272\u6bcd\u7248\u56fe", item["prompt"])
+        self.assertEqual(item["negative_prompt"], "")
+        self.assertIn("production_prompt_before_img2img_edit", item)
+
     def test_same_character_variant_and_unlabeled_protagonist_keyframe_bind_master(self) -> None:
         image_content = json.dumps(
             {

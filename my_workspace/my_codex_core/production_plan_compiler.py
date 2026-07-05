@@ -394,6 +394,7 @@ def _compile_image_intents(
                 _apply_linked_character_reference_policy(item, intent, notes)
                 _apply_generated_character_reference_policy(item, intent, prompts, notes)
                 _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
+                _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
                 prompts.append(item)
                 jobs.append({"job_id": job_id, "intent_id": intent_id, "frame_role": role, **item})
             continue
@@ -423,6 +424,7 @@ def _compile_image_intents(
             overrides=overrides,
         )
         _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
+        _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
         prompts.append(item)
         jobs.append({"job_id": intent_id, "intent_id": intent_id, **item})
     return prompts, jobs
@@ -542,7 +544,7 @@ def _merge_linked_asset_entities(registry: dict[str, Any], payload: dict[str, An
             "name": str(raw.get("name") or current.get("name") or character_id).strip(),
             "master_image": master_image or str(current.get("master_image") or "").strip(),
             "reference_assets": list(dict.fromkeys(reference_assets)),
-            "source_asset_id": str(raw.get("source_asset_id") or current.get("source_asset_id") or "").strip(),
+            "source_asset_id": str(raw.get("source_asset_id") or current.get("source_asset_id") or ("linked_task_asset" if master_image else "")).strip(),
         }
     for raw in linked_assets.get("scenes") or []:
         if not isinstance(raw, dict):
@@ -717,6 +719,70 @@ def _append_prompt_once(prompt: str, addition: str) -> str:
     if not extra or extra in base:
         return base
     return f"{base} {extra}".strip()
+
+
+def _apply_img2img_style_edit_prompt_policy(
+    item: dict[str, Any],
+    *,
+    intent: dict[str, Any] | None = None,
+    notes: list[str] | None = None,
+) -> None:
+    mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
+    if mode != "img2img_style_keyframe":
+        return
+    intent_name = str((intent or {}).get("intent") or "").strip()
+    if intent_name == "generate_base_asset":
+        return
+    original = str(item.get("prompt") or "").strip()
+    if not original:
+        return
+    edited = _concise_img2img_style_edit_prompt(original)
+    if edited and edited != original:
+        item["production_prompt_before_img2img_edit"] = original
+        item["prompt"] = edited
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} uses concise img2img edit prompt for Qwen Image Edit")
+    negative = str(item.get("negative_prompt") or "").strip()
+    if negative and _looks_like_generic_safety_negative(negative):
+        item["production_negative_before_img2img_edit"] = negative
+        item["negative_prompt"] = ""
+
+
+def _concise_img2img_style_edit_prompt(prompt: str) -> str:
+    text = str(prompt or "").strip()
+    text = re.sub(r"(?i)\bplatform-safe\s+non-graphic\s+video,\s*fully\s+clothed\s+subjects,\s*family-safe\s+action\s+tone,\s*", "", text)
+    text = re.sub(r"\uff08\s*(?:character_id|scene_id)\s*:[^)]*\uff09", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\(\s*(?:character_id|scene_id)\s*:[^)]*\)", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"(?:\u7ad6\u5c4f\s*)?9:16[^\u3002\uff1b;,.]*", "", text)
+    text = re.sub(r"\u5de5\u4f5c\u5c3a\u5bf8\s*\d+\s*x\s*\d+[^\u3002\uff1b;,.]*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\u53c2\u8003(?:\u5173\u8054|\u4e0a\u4e00\u5f20)?\u89d2\u8272[\s\S]*?(?:\u4e0d\u968f\u673a\u6362\u4eba|\u4e0d\u751f\u6210\u53e6\u4e00\u4e2a\u4eba|\u4e0d\u6362\u8863\u670d|\u4e0d\u53d8\u6210\u4eba\u578b)\u3002?", "", text)
+    text = re.sub(r"\u670d\u88c5\u3001\u53d1\u578b\u3001\u4e94\u5b98[^\u3002\uff1b;,.]*[\u3002\uff1b;,.]?", "", text)
+    text = re.sub(r"\u80cc\u666f\u4e3a\u5173\u8054\u573a\u666f\u56fa\u5b9a\u89c6\u89d2[\u3002\uff1b;,.]?", "", text)
+    text = re.sub(r"\s+", " ", text).strip(" ,.;\u3002\uff0c\uff1b")
+    if not text:
+        return str(prompt or "").strip()
+    if not re.search(r"^\s*(?:\u56fe\u4e2d|\u8ba9|\u5c06|\u628a|\u57fa\u4e8e)", text):
+        text = "\u56fe\u4e2d\u4eba\u7269" + text
+    return text
+
+
+def _looks_like_generic_safety_negative(negative: str) -> bool:
+    value = str(negative or "").lower()
+    safety_tokens = (
+        "nudity",
+        "sexual content",
+        "erotic",
+        "gore",
+        "unsafe content",
+        "graphic violence",
+    )
+    quality_tokens = (
+        "distorted body",
+        "distorted face",
+        "low quality",
+        "flicker",
+    )
+    return any(token in value for token in safety_tokens) and any(token in value for token in quality_tokens)
 
 
 def _apply_live_action_quality_policy(
@@ -1196,6 +1262,7 @@ def _ensure_video_keyframe_dependency(
     )
     _apply_generated_character_reference_policy(keyframe_item, keyframe_intent, image_prompts, notes)
     _apply_live_action_quality_policy(keyframe_item, global_context=global_context, intent=keyframe_intent)
+    _apply_img2img_style_edit_prompt_policy(keyframe_item, intent=keyframe_intent, notes=notes)
     image_prompts.append(keyframe_item)
     image_jobs.append({"job_id": keyframe_id, "intent_id": keyframe_id, **keyframe_item})
     image_job_ids.add(keyframe_id)
