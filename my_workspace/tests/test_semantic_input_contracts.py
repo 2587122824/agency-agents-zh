@@ -378,6 +378,43 @@ class SemanticInputContractTests(unittest.TestCase):
             {"from_job": "asset_character_protagonist_2008", "output": "output_final_image"},
         )
 
+    def test_cross_id_same_face_character_variant_binds_referenced_master(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_char_loser_front",
+                            "asset_role": "character",
+                            "character_id": "char_main_loser",
+                            "prompt": "30岁男性，面容疲惫，穿洗旧格子衬衫",
+                        },
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_char_winner_front",
+                            "asset_role": "character",
+                            "character_id": "char_main_winner",
+                            "prompt": "30岁男性，与char_main_loser同一面容，但气质不同，穿修身皮夹克",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="cross_id_same_face_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+        )
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        winner = items["asset_char_winner_front"]
+        self.assertEqual(winner["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(
+            winner["input_bindings"]["input_base_image"],
+            {"from_job": "asset_char_loser_front", "output": "output_final_image"},
+        )
+
     def test_multi_character_keyframe_compiles_character_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -666,6 +703,38 @@ class SemanticInputContractTests(unittest.TestCase):
             f"```json\n{content}\n```",
             {"original_requirement": "30秒短视频，真人画风", "duration_seconds": 30},
             previous_outputs=previous,
+        )
+        self.assertTrue(result["passed"], result["issues"])
+
+    def test_validator_accepts_standalone_json_line_comments(self) -> None:
+        content = """
+```json
+{
+  "production_intents": {
+    "image": [
+      // asset section
+      {
+        "intent": "generate_keyframe",
+        "intent_id": "shot_001_keyframe",
+        "prompt": "2008年街边早餐摊，真人实拍质感"
+      }
+    ]
+  },
+  "image_prompts": [
+    {
+      "task_type": "image",
+      "prompt": "2008年街边早餐摊，真人实拍质感",
+      "width": 480,
+      "height": 848
+    }
+  ]
+}
+```
+"""
+        result = validate_production_output(
+            {"agent": "06_分镜生图设计师"},
+            content,
+            {"original_requirement": "30秒短视频，真人画风", "duration_seconds": 30},
         )
         self.assertTrue(result["passed"], result["issues"])
 

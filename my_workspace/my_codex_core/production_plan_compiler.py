@@ -578,6 +578,8 @@ def _apply_generated_character_reference_policy(
         else _character_master_reference_job(existing_items, character_id)
     )
     if not reference_job:
+        reference_job = _referenced_previous_character_job_from_prompt(existing_items, prompt_text)
+    if not reference_job:
         return
     reference_job_id = str(reference_job.get("job_id") or reference_job.get("id") or "").strip()
     if not reference_job_id:
@@ -650,7 +652,11 @@ def _single_previous_character_id(items: list[dict[str, Any]]) -> str:
             continue
         if character_id not in ids:
             ids.append(character_id)
-    return ids[0] if len(ids) == 1 else ""
+    if len(ids) == 1:
+        return ids[0]
+    if ids and all(_looks_like_main_character_id(value) for value in ids):
+        return ids[0]
+    return ""
 
 
 def _character_master_reference_job(items: list[dict[str, Any]], character_id: str) -> dict[str, Any] | None:
@@ -664,6 +670,25 @@ def _character_master_reference_job(items: list[dict[str, Any]], character_id: s
         if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"}:
             return item
     return None
+
+
+def _referenced_previous_character_job_from_prompt(items: list[dict[str, Any]], prompt: str) -> dict[str, Any] | None:
+    text = str(prompt or "")
+    for item in reversed(items):
+        if not isinstance(item, dict):
+            continue
+        character_id = str(item.get("character_id") or "").strip()
+        if not character_id or character_id not in text:
+            continue
+        mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
+        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe"}:
+            return item
+    return None
+
+
+def _looks_like_main_character_id(value: str) -> bool:
+    text = str(value or "").strip().lower()
+    return bool(text) and any(token in text for token in ("main", "protagonist", "hero", "主角", "主人公", "char_main"))
 
 
 def _compile_video_intents(
@@ -1316,12 +1341,17 @@ def _json_object_from_text(text: str) -> dict[str, Any]:
         candidates.append(raw[start : end + 1])
     for candidate in candidates:
         try:
-            value = json.loads(candidate)
+            value = json.loads(_strip_json_comments(candidate))
         except Exception:
             continue
         if isinstance(value, dict):
             return value
     return {}
+
+
+def _strip_json_comments(value: str) -> str:
+    text = re.sub(r"(?m)^\s*//.*$", "", str(value or ""))
+    return re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
 
 
 def _merge_compat_list(target: dict[str, Any], key: str, values: Any) -> None:

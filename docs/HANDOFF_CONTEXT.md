@@ -119,6 +119,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
   - This is a production-routing stability rule, not a debug-console taxonomy change. It can be folded into a cleaner animal-character module after output quality stabilizes.
 - Human character expression/emotion sheets also route to `04_keyframe / img2img_style_keyframe` when a previous same-character reference job exists. This prevents expression assets from becoming unrelated modern portrait photos; face shape, age, hair, skin tone, body ratio, and outfit should stay locked while only expression/micro-action changes.
 - When staff emits multiple base assets for the same `character_id`, only the first one is treated as the master identity. Later same-character variants are compiled as reference-driven `img2img_style_keyframe` jobs against the master. If a keyframe prompt says `主角`/`主人公`/`protagonist` but omits `character_id`, the compiler binds the unique previous character master as an `identity_keyframe` reference.
+- If staff splits one protagonist into state IDs such as `char_main_loser` and `char_main_winner`, prompts like `与char_main_loser同一面容` bind the later state to the earlier character master. Multiple `char_main*`/`protagonist*` IDs are treated as one protagonist family for unlabeled protagonist keyframes.
 - RunningHub style-reference prompts are environment-only: strip incidental human-appearance clauses and append an empty-scene/no-person constraint.
 - LTX2.3 text-to-video routing uses the user's current node IDs:
   - prompt `73.text`
@@ -165,7 +166,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Employee production-output validation is active for 03/06/20/07/22. Failed validation gets one automatic correction retry, then fails visibly.
 - Validation checks include:
   - voice text fits target duration
-  - image/video intents parse as one JSON object
+  - image/video intents parse as one JSON object; standalone `//` or `/* */` comments inside fenced JSON blocks are stripped before parsing because staff occasionally emits commented JSON.
   - 480p working dimensions match aspect ratio
   - video references resolve to real 06 intent IDs
   - first/middle/last video compatibility rows may rely on authoritative `production_intents.video.source_intent_ids`; they do not need to duplicate all three frame references in legacy `video_prompts`.

@@ -330,12 +330,17 @@ def _json_objects(content: str) -> list[dict[str, Any]]:
     values: list[dict[str, Any]] = []
     for block in re.findall(r"```json\s*(.*?)```", str(content or ""), flags=re.IGNORECASE | re.DOTALL):
         try:
-            value = json.loads(block)
+            value = json.loads(_strip_json_comments(block))
         except Exception:
             continue
         if isinstance(value, dict):
             values.append(value)
     return values
+
+
+def _strip_json_comments(value: str) -> str:
+    text = re.sub(r"(?m)^\s*//.*$", "", str(value or ""))
+    return re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
 
 
 def _payload_with(payloads: list[dict[str, Any]], key: str, group: str = "") -> dict[str, Any]:
