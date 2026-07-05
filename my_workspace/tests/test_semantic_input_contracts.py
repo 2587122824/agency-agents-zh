@@ -460,8 +460,12 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(len(items), 3)
         for item in items:
             self.assertEqual(item["workflow_id"], "04_keyframe")
-            self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
-            self.assertEqual(item["control_mode"], "img2img_style")
+            self.assertEqual(item["workflow_mode"], "identity_keyframe")
+            self.assertEqual(item["control_mode"], "identity_reference")
+            self.assertEqual(
+                item["input_identity_image"],
+                "my_workspace/my_asset_library/characters/hero.png",
+            )
             self.assertEqual(
                 item["input_base_image"],
                 "my_workspace/my_asset_library/characters/hero.png",
@@ -521,7 +525,11 @@ class SemanticInputContractTests(unittest.TestCase):
         items = plan["compiled_payload"]["image_prompts"]
         self.assertEqual(len(items), 3)
         for item in items:
-            self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
+            self.assertEqual(item["workflow_mode"], "identity_keyframe")
+            self.assertEqual(
+                item["input_identity_image"],
+                "my_workspace/my_asset_library/characters/hero.png",
+            )
             self.assertEqual(
                 item["input_base_image"],
                 "my_workspace/my_asset_library/characters/hero.png",
@@ -698,7 +706,9 @@ class SemanticInputContractTests(unittest.TestCase):
             source_content=source_content,
         )
         item = plan["compiled_payload"]["image_prompts"][0]
-        self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(item["workflow_mode"], "identity_keyframe")
+        self.assertEqual(item["control_mode"], "identity_reference")
+        self.assertEqual(item["input_identity_image"], "my_workspace/my_asset_library/characters/xiaomei.png")
         self.assertEqual(item["input_base_image"], "my_workspace/my_asset_library/characters/xiaomei.png")
         self.assertTrue(item["prompt"].startswith("\u8ba9\u56fe\u4e2d\u4eba\u7269"))
         self.assertIn("\u9910\u684c", item["prompt"])
@@ -753,7 +763,11 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         keyframe = items["shot_005_three_frame_end_frame"]
         self.assertEqual(keyframe["character_id"], "character_protagonist")
-        self.assertEqual(keyframe["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
+        self.assertEqual(
+            keyframe["input_bindings"]["input_identity_image"],
+            {"from_job": "asset_character_protagonist_2008", "output": "output_final_image"},
+        )
         self.assertEqual(
             keyframe["input_bindings"]["input_base_image"],
             {"from_job": "asset_character_protagonist_2008", "output": "output_final_image"},

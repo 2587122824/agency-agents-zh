@@ -586,10 +586,11 @@ def _apply_linked_character_reference_policy(
     master_reference = _linked_character_reference_from_intent_or_item(intent, item)
     if not master_reference:
         return
-    item["workflow_mode"] = "img2img_style_keyframe"
-    item["image_task_mode"] = "img2img_style_keyframe"
-    item["mode"] = "img2img_style_keyframe"
-    item["control_mode"] = "img2img_style"
+    item["workflow_mode"] = "identity_keyframe"
+    item["image_task_mode"] = "identity_keyframe"
+    item["mode"] = "identity_keyframe"
+    item["control_mode"] = "identity_reference"
+    item["input_identity_image"] = master_reference
     item["input_base_image"] = master_reference
     item["reference_image"] = master_reference
     item["input_reference_style"] = master_reference
@@ -605,7 +606,7 @@ def _apply_linked_character_reference_policy(
         "参考关联角色母版图，必须保持同一张脸、同一年龄感、同一发型、肤色、五官比例、身材比例和服装主特征；只改变当前镜头要求的表情、动作和轻微状态，不随机换人。",
     )
     if notes is not None:
-        notes.append(f"image intent {item.get('job_id')} bound to linked character master image")
+        notes.append(f"image intent {item.get('job_id')} bound to linked character master image as identity_keyframe")
 
 
 def _linked_character_reference_from_intent_or_item(intent: dict[str, Any], item: dict[str, Any]) -> str:
@@ -728,7 +729,7 @@ def _apply_img2img_style_edit_prompt_policy(
     notes: list[str] | None = None,
 ) -> None:
     mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
-    if mode != "img2img_style_keyframe":
+    if mode not in {"img2img_style_keyframe", "identity_keyframe"}:
         return
     intent_name = str((intent or {}).get("intent") or "").strip()
     if intent_name == "generate_base_asset":
@@ -949,12 +950,13 @@ def _apply_generated_character_reference_policy(
         return
 
     if workflow_id == "04_keyframe" and workflow_mode == "keyframe" and not item.get("input_identity_image"):
-        item["workflow_mode"] = "img2img_style_keyframe"
-        item["image_task_mode"] = "img2img_style_keyframe"
-        item["mode"] = "img2img_style_keyframe"
-        item["control_mode"] = "img2img_style"
+        item["workflow_mode"] = "identity_keyframe"
+        item["image_task_mode"] = "identity_keyframe"
+        item["mode"] = "identity_keyframe"
+        item["control_mode"] = "identity_reference"
         item["input_bindings"] = {
             **(item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}),
+            "input_identity_image": {"from_job": reference_job_id, "output": "output_final_image"},
             "input_base_image": {"from_job": reference_job_id, "output": "output_final_image"},
         }
         item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
