@@ -3471,14 +3471,10 @@ INDEX_HTML = r"""<!doctype html>
                 <label>接口地址
                   <input id="comfyDebugEndpoint" autocomplete="off" spellcheck="false" placeholder="/run/workflow/xxx 或 /run/ai-app/xxx；留空用槽位配置" />
                 </label>
-                <label id="comfyDebugReferencePathField">参考图/视频路径
-                  <input id="comfyDebugReference" autocomplete="off" spellcheck="false" placeholder="可填 my_workspace/my_asset_library/xxx.png 或任务输出里的相对路径" />
-                </label>
-                <label id="comfyDebugAssetTagFilterField">素材标签筛选
-                  <select id="comfyDebugAssetTagFilter">
-                    <option value="">全部素材</option>
-                  </select>
-                </label>
+                <input id="comfyDebugReference" type="hidden" />
+                <select id="comfyDebugAssetTagFilter" hidden>
+                  <option value="">全部素材</option>
+                </select>
                 <label id="comfyDebugMaskImageField" hidden>蒙版路径
                   <input id="comfyDebugMaskImage" autocomplete="off" spellcheck="false" placeholder="input_mask_image：局部修复使用的黑白蒙版" />
                 </label>
@@ -3488,47 +3484,33 @@ INDEX_HTML = r"""<!doctype html>
                 <label id="comfyDebugSourceVideoField" hidden>源视频路径
                   <input id="comfyDebugSourceVideo" autocomplete="off" spellcheck="false" placeholder="input_source_video：待处理、增强或动作参考的视频" />
                 </label>
-                <label id="comfyDebugPoseImageField" hidden>姿态参考图路径
-                  <input id="comfyDebugPoseImage" autocomplete="off" spellcheck="false" placeholder="input_pose_image：姿态/构图控制图" />
-                </label>
-                <label id="comfyDebugSceneImageField" hidden>场景参考图路径
-                  <input id="comfyDebugSceneImage" autocomplete="off" spellcheck="false" placeholder="input_scene_image：场景母版/空间布局参考图" />
-                </label>
-                <label id="comfyDebugSceneAssetField" hidden>场景母版
-                  <select id="comfyDebugSceneAssetReference">
-                    <option value="">请选择场景母版或场景素材</option>
-                  </select>
-                </label>
-                <label id="comfyDebugCharacterEntityField" hidden>角色实体
-                  <select id="comfyDebugCharacterEntity">
-                    <option value="">不使用角色实体自动联动</option>
-                  </select>
-                </label>
-                <label id="comfyDebugIdentityAssetField" hidden>身份母版 / 三视图
-                  <select id="comfyDebugIdentityAssetReference">
-                    <option value="">请选择角色母版或三视图</option>
-                  </select>
-                </label>
-                <label id="comfyDebugPoseAssetField" hidden>独立姿态素材
-                  <select id="comfyDebugPoseAssetReference">
-                    <option value="">请选择姿态图（不要用三视图代替）</option>
-                  </select>
-                </label>
+                <input id="comfyDebugPoseImage" type="hidden" />
+                <input id="comfyDebugSceneImage" type="hidden" />
               </div>
               <input id="comfyDebugMiddleFrameReference" type="hidden" />
               <input id="comfyDebugLastFrameReference" type="hidden" />
               <div class="comfy-reference-grid" id="comfyDebugReferenceGrid">
                 <div class="comfy-reference-card" id="comfyDebugStartFrameCard">
                   <div class="comfy-reference-card-head">
-                    <strong>首帧 / 主参考</strong>
-                    <span class="muted small">reference_image</span>
+                    <strong id="comfyDebugReferenceCardTitle">首帧 / 主参考</strong>
+                    <span class="muted small" id="comfyDebugReferenceCardSlot">reference_image</span>
                   </div>
                   <div class="comfy-reference-body">
                     <div class="comfy-reference-preview" id="comfyDebugReferencePreview">
                       <span class="empty">未选择参考素材</span>
                     </div>
                     <div class="comfy-reference-controls">
-                      <label>从素材库选择
+                      <label id="comfyDebugCharacterEntityField" hidden>角色实体
+                        <select id="comfyDebugCharacterEntity">
+                          <option value="">不使用角色实体自动联动</option>
+                        </select>
+                      </label>
+                      <label id="comfyDebugIdentityAssetField" hidden>身份母版 / 三视图
+                        <select id="comfyDebugIdentityAssetReference">
+                          <option value="">请选择角色母版或三视图</option>
+                        </select>
+                      </label>
+                      <label id="comfyDebugAssetReferenceField">从素材库选择
                         <select id="comfyDebugAssetReference">
                           <option value="">不使用素材库参考</option>
                         </select>
@@ -3545,6 +3527,44 @@ INDEX_HTML = r"""<!doctype html>
                     </div>
                   </div>
                   <span class="muted small comfy-reference-meta" id="comfyDebugReferencePreviewMeta">未选择</span>
+                </div>
+                <div class="comfy-reference-card" id="comfyDebugSceneFrameCard" hidden>
+                  <div class="comfy-reference-card-head">
+                    <strong>场景参考</strong>
+                    <span class="muted small">input_scene_image</span>
+                  </div>
+                  <div class="comfy-reference-body">
+                    <div class="comfy-reference-preview" id="comfyDebugSceneImagePreview">
+                      <span class="empty">未选择场景素材</span>
+                    </div>
+                    <div class="comfy-reference-controls">
+                      <label id="comfyDebugSceneAssetField">场景母版
+                        <select id="comfyDebugSceneAssetReference">
+                          <option value="">请选择场景母版或场景素材</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  <span class="muted small comfy-reference-meta" id="comfyDebugSceneImageMeta">未选择场景参考</span>
+                </div>
+                <div class="comfy-reference-card" id="comfyDebugPoseFrameCard" hidden>
+                  <div class="comfy-reference-card-head">
+                    <strong>姿态参考</strong>
+                    <span class="muted small">input_pose_image</span>
+                  </div>
+                  <div class="comfy-reference-body">
+                    <div class="comfy-reference-preview" id="comfyDebugPoseImagePreview">
+                      <span class="empty">未选择姿态素材</span>
+                    </div>
+                    <div class="comfy-reference-controls">
+                      <label id="comfyDebugPoseAssetField">独立姿态素材
+                        <select id="comfyDebugPoseAssetReference">
+                          <option value="">请选择姿态图（不要用三视图代替）</option>
+                        </select>
+                      </label>
+                    </div>
+                  </div>
+                  <span class="muted small comfy-reference-meta" id="comfyDebugPoseImageMeta">未选择姿态参考</span>
                 </div>
                 <div class="comfy-reference-card" id="comfyDebugMiddleFrameCard" hidden>
                   <div class="comfy-reference-card-head">
@@ -4062,6 +4082,8 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugAssetTagFilterField: document.getElementById('comfyDebugAssetTagFilterField'),
       comfyDebugReferenceGrid: document.getElementById('comfyDebugReferenceGrid'),
       comfyDebugStartFrameCard: document.getElementById('comfyDebugStartFrameCard'),
+      comfyDebugReferenceCardTitle: document.getElementById('comfyDebugReferenceCardTitle'),
+      comfyDebugReferenceCardSlot: document.getElementById('comfyDebugReferenceCardSlot'),
       comfyDebugReference: document.getElementById('comfyDebugReference'),
       comfyDebugMiddleFrameReference: document.getElementById('comfyDebugMiddleFrameReference'),
       comfyDebugLastFrameReference: document.getElementById('comfyDebugLastFrameReference'),
@@ -4085,6 +4107,13 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugPoseAssetReference: document.getElementById('comfyDebugPoseAssetReference'),
       comfyDebugReferencePreview: document.getElementById('comfyDebugReferencePreview'),
       comfyDebugReferencePreviewMeta: document.getElementById('comfyDebugReferencePreviewMeta'),
+      comfyDebugAssetReferenceField: document.getElementById('comfyDebugAssetReferenceField'),
+      comfyDebugSceneFrameCard: document.getElementById('comfyDebugSceneFrameCard'),
+      comfyDebugSceneImagePreview: document.getElementById('comfyDebugSceneImagePreview'),
+      comfyDebugSceneImageMeta: document.getElementById('comfyDebugSceneImageMeta'),
+      comfyDebugPoseFrameCard: document.getElementById('comfyDebugPoseFrameCard'),
+      comfyDebugPoseImagePreview: document.getElementById('comfyDebugPoseImagePreview'),
+      comfyDebugPoseImageMeta: document.getElementById('comfyDebugPoseImageMeta'),
       comfyDebugMiddleFrameCard: document.getElementById('comfyDebugMiddleFrameCard'),
       comfyDebugMiddleFramePreview: document.getElementById('comfyDebugMiddleFramePreview'),
       comfyDebugLastFrameCard: document.getElementById('comfyDebugLastFrameCard'),
@@ -9583,9 +9612,9 @@ INDEX_HTML = r"""<!doctype html>
     function selectedWorkflowModeDefinition(workflow = activeComfyDebugWorkflow()) {
       const modes = workflowModesForWorkflow(workflow);
       if (!modes.length) return null;
-      const selected = (workflow?.id === activeComfyDebugWorkflowId && activeComfyDebugWorkflowMode)
-        ? activeComfyDebugWorkflowMode
-        : (els.comfyDebugWorkflowMode?.value || modes[0].value);
+      const selected = els.comfyDebugWorkflowMode?.value
+        || ((workflow?.id === activeComfyDebugWorkflowId && activeComfyDebugWorkflowMode) ? activeComfyDebugWorkflowMode : '')
+        || modes[0].value;
       return modes.find(item => item.value === selected) || modes[0];
     }
 
@@ -10332,6 +10361,7 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugIdentityAssetField) els.comfyDebugIdentityAssetField.hidden = !needsIdentity;
       if (els.comfyDebugPoseAssetField) els.comfyDebugPoseAssetField.hidden = !needsPose;
       if (els.comfyDebugSceneAssetField) els.comfyDebugSceneAssetField.hidden = !needsScene;
+      if (els.comfyDebugAssetReferenceField) els.comfyDebugAssetReferenceField.hidden = needsIdentity;
       if (!needsIdentity && !needsPose && !needsScene) return;
 
       const currentEntity = String(preferred.characterEntity ?? els.comfyDebugCharacterEntity?.value ?? '');
@@ -10588,21 +10618,33 @@ INDEX_HTML = r"""<!doctype html>
 
     function updateComfyDebugReferencePreviews() {
       const referenceValue = els.comfyDebugReference?.value || '';
+      const sceneImageValue = els.comfyDebugSceneImage?.value || '';
+      const poseImageValue = els.comfyDebugPoseImage?.value || '';
       const middleFrameValue = els.comfyDebugMiddleFrameReference?.value || '';
       const lastFrameValue = els.comfyDebugLastFrameReference?.value || '';
       const support = comfyDebugReferenceSupport();
+      const acceptedInputs = modeAcceptedInputs();
       const showReference = support.hasReference;
+      const showSceneReference = acceptedInputs.includes('input_scene_image');
+      const showPoseReference = acceptedInputs.includes('input_pose_image');
       const showMiddleFrame = support.hasMiddleFrame;
       const showLastFrame = support.hasLastFrame;
-      const showAnyReferenceInput = showReference || showMiddleFrame || showLastFrame;
-      if (els.comfyDebugReferencePathField) els.comfyDebugReferencePathField.hidden = !showReference;
-      if (els.comfyDebugAssetTagFilterField) els.comfyDebugAssetTagFilterField.hidden = !showReference;
+      const showAnyReferenceInput = showReference || showSceneReference || showPoseReference || showMiddleFrame || showLastFrame;
+      if (els.comfyDebugReferencePathField) els.comfyDebugReferencePathField.hidden = true;
+      if (els.comfyDebugAssetTagFilterField) els.comfyDebugAssetTagFilterField.hidden = true;
       if (els.comfyDebugStartFrameCard) els.comfyDebugStartFrameCard.hidden = !showReference;
+      if (els.comfyDebugSceneFrameCard) els.comfyDebugSceneFrameCard.hidden = !showSceneReference;
+      if (els.comfyDebugPoseFrameCard) els.comfyDebugPoseFrameCard.hidden = !showPoseReference;
       if (els.comfyDebugReferenceGrid) els.comfyDebugReferenceGrid.hidden = !showAnyReferenceInput;
       if (els.clearComfyDebugReferenceBtn?.parentElement) els.clearComfyDebugReferenceBtn.parentElement.hidden = !showAnyReferenceInput;
       if (els.comfyDebugMiddleFrameCard) els.comfyDebugMiddleFrameCard.hidden = !showMiddleFrame;
       if (els.comfyDebugLastFrameCard) els.comfyDebugLastFrameCard.hidden = !showLastFrame;
-      renderComfyReferencePreview(els.comfyDebugReferencePreview, referenceValue, '首帧参考图', comfyDebugLocalReferencePreviews.reference);
+      const primaryLabel = primaryComfyReferenceLabel(acceptedInputs);
+      if (els.comfyDebugReferenceCardTitle) els.comfyDebugReferenceCardTitle.textContent = primaryLabel.title;
+      if (els.comfyDebugReferenceCardSlot) els.comfyDebugReferenceCardSlot.textContent = primaryLabel.slot;
+      renderComfyReferencePreview(els.comfyDebugReferencePreview, referenceValue, primaryLabel.empty, comfyDebugLocalReferencePreviews.reference);
+      renderComfyReferencePreview(els.comfyDebugSceneImagePreview, sceneImageValue, '场景参考图');
+      renderComfyReferencePreview(els.comfyDebugPoseImagePreview, poseImageValue, '姿态参考图');
       renderComfyReferencePreview(els.comfyDebugMiddleFramePreview, middleFrameValue, '中帧参考图', comfyDebugLocalReferencePreviews.middle);
       renderComfyReferencePreview(els.comfyDebugLastFramePreview, lastFrameValue, '尾帧参考图', comfyDebugLocalReferencePreviews.last);
       if (els.comfyDebugReferencePreviewMeta) {
@@ -10610,10 +10652,24 @@ INDEX_HTML = r"""<!doctype html>
           ? (referenceValue.split('/').pop() || '已选择参考')
           : (comfyDebugLocalReferencePreviews.reference?.name || '未选择参考');
       }
+      if (els.comfyDebugSceneImageMeta) {
+        els.comfyDebugSceneImageMeta.textContent = sceneImageValue ? (sceneImageValue.split('/').pop() || '已选择场景') : '未选择场景参考';
+      }
+      if (els.comfyDebugPoseImageMeta) {
+        els.comfyDebugPoseImageMeta.textContent = poseImageValue ? (poseImageValue.split('/').pop() || '已选择姿态') : '未选择姿态参考';
+      }
       if (!showReference && referenceValue && els.comfyDebugReference) {
         els.comfyDebugReference.value = '';
         if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
         clearComfyDebugLocalReferencePreview('reference');
+      }
+      if (!showSceneReference && sceneImageValue && els.comfyDebugSceneImage) {
+        els.comfyDebugSceneImage.value = '';
+        if (els.comfyDebugSceneAssetReference) els.comfyDebugSceneAssetReference.value = '';
+      }
+      if (!showPoseReference && poseImageValue && els.comfyDebugPoseImage) {
+        els.comfyDebugPoseImage.value = '';
+        if (els.comfyDebugPoseAssetReference) els.comfyDebugPoseAssetReference.value = '';
       }
       if (!showMiddleFrame && middleFrameValue && els.comfyDebugMiddleFrameReference) {
         els.comfyDebugMiddleFrameReference.value = '';
@@ -10624,6 +10680,19 @@ INDEX_HTML = r"""<!doctype html>
         clearComfyDebugLocalReferencePreview('last');
       }
       updateComfyDebugUploadStates();
+    }
+
+    function primaryComfyReferenceLabel(acceptedInputs = modeAcceptedInputs()) {
+      if (acceptedInputs.includes('input_identity_image')) {
+        return { title: '人物参考', slot: 'input_identity_image', empty: '未选择人物参考' };
+      }
+      if (acceptedInputs.includes('input_reference_style')) {
+        return { title: '风格参考', slot: 'input_reference_style', empty: '未选择风格参考' };
+      }
+      if (acceptedInputs.includes('input_base_image')) {
+        return { title: '底图 / 主参考', slot: 'input_base_image', empty: '未选择底图参考' };
+      }
+      return { title: '首帧 / 主参考', slot: 'reference_image', empty: '未选择参考素材' };
     }
 
     function renderComfyDebugAssetReferenceOptions() {
@@ -13181,6 +13250,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyDebugPoseAssetReference.onchange = () => {
         const value = els.comfyDebugPoseAssetReference.value || '';
         if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = value;
+        updateComfyDebugReferencePreviews();
         saveCurrentComfyDebugUiState();
         saveSettings();
         autoSaveActiveComfyDebugWorkflowConfig();
@@ -13190,6 +13260,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyDebugSceneAssetReference.onchange = () => {
         const value = els.comfyDebugSceneAssetReference.value || '';
         if (els.comfyDebugSceneImage) els.comfyDebugSceneImage.value = value;
+        updateComfyDebugReferencePreviews();
         saveCurrentComfyDebugUiState();
         saveSettings();
         autoSaveActiveComfyDebugWorkflowConfig();
@@ -13233,6 +13304,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     if (els.comfyDebugWorkflowMode) {
       els.comfyDebugWorkflowMode.onchange = () => {
+        activeComfyDebugWorkflowMode = els.comfyDebugWorkflowMode.value || activeComfyDebugWorkflowMode;
         updateComfyImageTaskHint();
         updateComfyDebugMediaFields();
         updateComfyDebugReferencePreviews();
@@ -13274,6 +13346,10 @@ INDEX_HTML = r"""<!doctype html>
     }
     els.clearComfyDebugReferenceBtn.onclick = () => {
       if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+      if (els.comfyDebugCharacterEntity) els.comfyDebugCharacterEntity.value = '';
+      if (els.comfyDebugIdentityAssetReference) els.comfyDebugIdentityAssetReference.value = '';
+      if (els.comfyDebugPoseAssetReference) els.comfyDebugPoseAssetReference.value = '';
+      if (els.comfyDebugSceneAssetReference) els.comfyDebugSceneAssetReference.value = '';
       if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
       if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
       if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
@@ -13281,8 +13357,11 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
       clearComfyDebugLocalReferencePreviews();
       setComfyDebugReference('', '');
+      if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = '';
+      if (els.comfyDebugSceneImage) els.comfyDebugSceneImage.value = '';
       setComfyDebugMiddleFrameReference('', '');
       setComfyDebugLastFrameReference('', '');
+      updateComfyDebugReferencePreviews();
       saveCurrentComfyDebugUiState();
       saveSettings();
       autoSaveActiveComfyDebugWorkflowConfig();
