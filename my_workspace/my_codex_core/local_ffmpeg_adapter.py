@@ -705,7 +705,15 @@ class LocalFFmpegAdapter:
             command.extend(["-stream_loop", "-1", "-i", str(bgm_file)])
             input_files.append(bgm_file)
         command.extend(self._audio_mix_args(audio_file, bgm_file))
-        command.extend(["-vf", self._video_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps, pad_end_seconds), *encoding_args, str(output_file)])
+        command.extend(
+            [
+                "-vf",
+                self._video_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps, pad_end_seconds),
+                *self._target_duration_args(target_duration_seconds),
+                *encoding_args,
+                str(output_file),
+            ]
+        )
         return command, input_files
 
     def _build_image_slideshow_command(
@@ -859,6 +867,12 @@ class LocalFFmpegAdapter:
         if bgm_file:
             return ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
         return []
+
+    @staticmethod
+    def _target_duration_args(target_duration_seconds: float) -> list[str]:
+        if target_duration_seconds <= 0:
+            return []
+        return ["-t", f"{target_duration_seconds:.3f}"]
 
     @staticmethod
     def _video_filter(

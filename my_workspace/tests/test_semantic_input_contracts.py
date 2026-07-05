@@ -946,6 +946,33 @@ class SemanticInputContractTests(unittest.TestCase):
         filter_text = LocalFFmpegAdapter._video_filter(None, "", 1080, 1920, 24, pad_end_seconds=8.5)
         self.assertIn("tpad=stop_mode=clone:stop_duration=8.500", filter_text)
 
+    def test_video_concat_command_caps_to_target_duration(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_file = root / "clip.mp4"
+            video_file.write_bytes(b"fake")
+            output_file = root / "final.mp4"
+            adapter = LocalFFmpegAdapter(WORKSPACE / "my_workspace")
+            adapter._probe_media_duration = lambda _ffmpeg, _path: 37.6  # type: ignore[method-assign]
+            command, _ = adapter._build_video_concat_command(
+                ffmpeg_path="ffmpeg",
+                task_dir=root,
+                video_files=[video_file],
+                audio_file=None,
+                bgm_file=None,
+                subtitles_file=None,
+                subtitle_style="",
+                output_width=1080,
+                output_height=1920,
+                output_fps=24,
+                encoding_args=["-c:v", "libx264"],
+                output_file=output_file,
+                target_duration_seconds=30.0,
+            )
+            self.assertIn("-t", command)
+            self.assertEqual(command[command.index("-t") + 1], "30.000")
+            self.assertNotIn("tpad=stop_mode=clone", " ".join(command))
+
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {
