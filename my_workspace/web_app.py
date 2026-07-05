@@ -3353,7 +3353,7 @@ INDEX_HTML = r"""<!doctype html>
                       </label>
                       <div class="comfy-upload-control">
                         <label id="comfyDebugReferenceFileLabel">上传参考文件
-                          <input id="comfyDebugReferenceFile" type="file" accept="image/*" />
+                          <input id="comfyDebugReferenceFile" type="file" accept="image/*,.jpg,.jpeg,.jpe,.jfif,.pjpeg,.pjp,.png,.webp,.bmp,.gif,.tif,.tiff,.avif,.heic,.heif" />
                         </label>
                         <div id="comfyDebugReferenceUploadState" class="comfy-upload-state" hidden>
                           <span id="comfyDebugReferenceUploadName"></span>
@@ -3381,7 +3381,7 @@ INDEX_HTML = r"""<!doctype html>
                       </label>
                       <div class="comfy-upload-control">
                         <label id="comfyDebugMiddleFrameReferenceFileLabel">上传中帧文件
-                          <input id="comfyDebugMiddleFrameReferenceFile" type="file" accept="image/*" />
+                          <input id="comfyDebugMiddleFrameReferenceFile" type="file" accept="image/*,.jpg,.jpeg,.jpe,.jfif,.pjpeg,.pjp,.png,.webp,.bmp,.gif,.tif,.tiff,.avif,.heic,.heif" />
                         </label>
                         <div id="comfyDebugMiddleFrameUploadState" class="comfy-upload-state" hidden>
                           <span id="comfyDebugMiddleFrameUploadName"></span>
@@ -3409,7 +3409,7 @@ INDEX_HTML = r"""<!doctype html>
                       </label>
                       <div class="comfy-upload-control">
                         <label id="comfyDebugLastFrameReferenceFileLabel">上传尾帧文件
-                          <input id="comfyDebugLastFrameReferenceFile" type="file" accept="image/*" />
+                          <input id="comfyDebugLastFrameReferenceFile" type="file" accept="image/*,.jpg,.jpeg,.jpe,.jfif,.pjpeg,.pjp,.png,.webp,.bmp,.gif,.tif,.tiff,.avif,.heic,.heif" />
                         </label>
                         <div id="comfyDebugLastFrameUploadState" class="comfy-upload-state" hidden>
                           <span id="comfyDebugLastFrameUploadName"></span>
@@ -4057,6 +4057,7 @@ INDEX_HTML = r"""<!doctype html>
     let staffOptions = [];
     let selectedReferenceFiles = [];
     let referencePreviewUrls = new Map();
+    let comfyDebugLocalReferencePreviews = {};
     let comfyParameterCandidates = [];
     let progressTimer = null;
     let progressRenderSignature = "";
@@ -9829,6 +9830,25 @@ INDEX_HTML = r"""<!doctype html>
       return '';
     }
 
+    function setComfyDebugLocalReferencePreview(slot, file) {
+      clearComfyDebugLocalReferencePreview(slot);
+      if (!file) return;
+      comfyDebugLocalReferencePreviews[slot] = {
+        name: file.name || 'reference',
+        url: URL.createObjectURL(file),
+      };
+    }
+
+    function clearComfyDebugLocalReferencePreview(slot) {
+      const preview = comfyDebugLocalReferencePreviews[slot];
+      if (preview?.url) URL.revokeObjectURL(preview.url);
+      delete comfyDebugLocalReferencePreviews[slot];
+    }
+
+    function clearComfyDebugLocalReferencePreviews() {
+      Object.keys(comfyDebugLocalReferencePreviews).forEach(clearComfyDebugLocalReferencePreview);
+    }
+
     function compactReferenceName(value) {
       const text = String(value || '').replace(/\\/g, '/').trim();
       return text.split('/').filter(Boolean).pop() || text || '已选择文件';
@@ -9865,19 +9885,21 @@ INDEX_HTML = r"""<!doctype html>
       );
     }
 
-    function renderComfyReferencePreview(target, value, emptyText) {
+    function renderComfyReferencePreview(target, value, emptyText, localPreview = null) {
       if (!target) return;
       const raw = String(value || '').trim();
-      const url = referencePreviewUrl(raw);
-      const kind = raw && url && isVideoFile(raw) ? 'video' : raw && url ? 'image' : 'empty';
-      if (target.dataset.previewRaw === raw && target.dataset.previewUrl === url && target.dataset.previewKind === kind) {
+      const localName = localPreview?.name || '';
+      const url = referencePreviewUrl(raw) || (localPreview?.url || '');
+      const kind = url && (isVideoFile(raw) || isVideoFile(localName)) ? 'video' : url ? 'image' : 'empty';
+      const previewRaw = raw || localName;
+      if (target.dataset.previewRaw === previewRaw && target.dataset.previewUrl === url && target.dataset.previewKind === kind) {
         return;
       }
-      target.dataset.previewRaw = raw;
+      target.dataset.previewRaw = previewRaw;
       target.dataset.previewUrl = url;
       target.dataset.previewKind = kind;
       target.innerHTML = '';
-      if (!raw || !url) {
+      if (!url) {
         const empty = document.createElement('span');
         empty.className = 'empty';
         empty.textContent = raw ? '已选择，暂无缩略图预览' : emptyText;
@@ -9895,7 +9917,7 @@ INDEX_HTML = r"""<!doctype html>
       } else {
         const img = document.createElement('img');
         img.src = url;
-        img.alt = raw.split('/').pop() || 'reference';
+        img.alt = (raw || localName).split('/').pop() || 'reference';
         img.loading = 'lazy';
         img.decoding = 'async';
         target.appendChild(img);
@@ -9918,21 +9940,26 @@ INDEX_HTML = r"""<!doctype html>
       if (els.clearComfyDebugReferenceBtn?.parentElement) els.clearComfyDebugReferenceBtn.parentElement.hidden = !showAnyReferenceInput;
       if (els.comfyDebugMiddleFrameCard) els.comfyDebugMiddleFrameCard.hidden = !showMiddleFrame;
       if (els.comfyDebugLastFrameCard) els.comfyDebugLastFrameCard.hidden = !showLastFrame;
-      renderComfyReferencePreview(els.comfyDebugReferencePreview, referenceValue, '首帧参考图');
-      renderComfyReferencePreview(els.comfyDebugMiddleFramePreview, middleFrameValue, '中帧参考图');
-      renderComfyReferencePreview(els.comfyDebugLastFramePreview, lastFrameValue, '尾帧参考图');
+      renderComfyReferencePreview(els.comfyDebugReferencePreview, referenceValue, '首帧参考图', comfyDebugLocalReferencePreviews.reference);
+      renderComfyReferencePreview(els.comfyDebugMiddleFramePreview, middleFrameValue, '中帧参考图', comfyDebugLocalReferencePreviews.middle);
+      renderComfyReferencePreview(els.comfyDebugLastFramePreview, lastFrameValue, '尾帧参考图', comfyDebugLocalReferencePreviews.last);
       if (els.comfyDebugReferencePreviewMeta) {
-        els.comfyDebugReferencePreviewMeta.textContent = referenceValue ? (referenceValue.split('/').pop() || '已选择参考') : '未选择参考';
+        els.comfyDebugReferencePreviewMeta.textContent = referenceValue
+          ? (referenceValue.split('/').pop() || '已选择参考')
+          : (comfyDebugLocalReferencePreviews.reference?.name || '未选择参考');
       }
       if (!showReference && referenceValue && els.comfyDebugReference) {
         els.comfyDebugReference.value = '';
         if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+        clearComfyDebugLocalReferencePreview('reference');
       }
       if (!showMiddleFrame && middleFrameValue && els.comfyDebugMiddleFrameReference) {
         els.comfyDebugMiddleFrameReference.value = '';
+        clearComfyDebugLocalReferencePreview('middle');
       }
       if (!showLastFrame && lastFrameValue && els.comfyDebugLastFrameReference) {
         els.comfyDebugLastFrameReference.value = '';
+        clearComfyDebugLocalReferencePreview('last');
       }
       updateComfyDebugUploadStates();
     }
@@ -10014,6 +10041,8 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       try {
+        setComfyDebugLocalReferencePreview('reference', file);
+        updateComfyDebugReferencePreviews();
         if (els.comfyDebugReferenceHint) els.comfyDebugReferenceHint.textContent = `正在上传：${file.name}`;
         const contentBase64 = await fileToBase64(file);
         const result = await api('/api/upload-comfy-debug-reference', {
@@ -10025,6 +10054,7 @@ INDEX_HTML = r"""<!doctype html>
           }),
         });
         if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+        clearComfyDebugLocalReferencePreview('reference');
         setComfyDebugReference(result.stored_path || '', `已上传：${file.name}`);
         saveCurrentComfyDebugUiState();
         saveSettings();
@@ -10044,6 +10074,8 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       try {
+        setComfyDebugLocalReferencePreview('middle', file);
+        updateComfyDebugReferencePreviews();
         if (els.comfyDebugMiddleFrameReferenceHint) els.comfyDebugMiddleFrameReferenceHint.textContent = `正在上传中帧：${file.name}`;
         const contentBase64 = await fileToBase64(file);
         const result = await api('/api/upload-comfy-debug-reference', {
@@ -10055,6 +10087,7 @@ INDEX_HTML = r"""<!doctype html>
           }),
         });
         if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
+        clearComfyDebugLocalReferencePreview('middle');
         setComfyDebugMiddleFrameReference(result.stored_path || '', `已上传中帧：${file.name}`);
         saveCurrentComfyDebugUiState();
         saveSettings();
@@ -10074,6 +10107,8 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       try {
+        setComfyDebugLocalReferencePreview('last', file);
+        updateComfyDebugReferencePreviews();
         if (els.comfyDebugLastFrameReferenceHint) els.comfyDebugLastFrameReferenceHint.textContent = `正在上传：${file.name}`;
         const contentBase64 = await fileToBase64(file);
         const result = await api('/api/upload-comfy-debug-reference', {
@@ -10085,7 +10120,8 @@ INDEX_HTML = r"""<!doctype html>
           }),
         });
         if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
-      if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
+        if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
+        clearComfyDebugLocalReferencePreview('last');
         setComfyDebugLastFrameReference(result.stored_path || '', `已上传尾帧：${file.name}`);
         saveCurrentComfyDebugUiState();
         saveSettings();
@@ -11871,6 +11907,7 @@ INDEX_HTML = r"""<!doctype html>
       if (media) fitAssetLightboxMedia(media);
     });
     window.addEventListener('pagehide', pauseCurrentRunOnExit);
+    window.addEventListener('pagehide', clearComfyDebugLocalReferencePreviews);
     window.addEventListener('beforeunload', pauseCurrentRunOnExit);
     els.comfyWorkflowPreset.onchange = () => {
       loadSelectedComfyWorkflowPreset(true);
@@ -12428,6 +12465,7 @@ INDEX_HTML = r"""<!doctype html>
     els.comfyDebugAssetReference.onchange = () => {
       const value = els.comfyDebugAssetReference.value;
       if (value && els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+      clearComfyDebugLocalReferencePreview('reference');
       setComfyDebugReference(value, value ? `已选择素材库参考：${value}` : '');
       saveCurrentComfyDebugUiState();
       saveSettings();
@@ -12444,6 +12482,7 @@ INDEX_HTML = r"""<!doctype html>
         const value = els.comfyDebugIdentityAssetReference.value || '';
         if (value && els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
         if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = value;
+        clearComfyDebugLocalReferencePreview('reference');
         setComfyDebugReference(value, value ? `已联动身份母版/三视图：${value}` : '');
         saveCurrentComfyDebugUiState();
         saveSettings();
@@ -12463,6 +12502,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyDebugMiddleFrameAssetReference.onchange = () => {
         const value = els.comfyDebugMiddleFrameAssetReference.value;
         if (value && els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
+        clearComfyDebugLocalReferencePreview('middle');
         setComfyDebugMiddleFrameReference(value, value ? `素材库中帧：${value.split('/').pop()}` : '');
         saveCurrentComfyDebugUiState();
         saveSettings();
@@ -12473,6 +12513,7 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyDebugLastFrameAssetReference.onchange = () => {
         const value = els.comfyDebugLastFrameAssetReference.value;
         if (value && els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
+        clearComfyDebugLocalReferencePreview('last');
         setComfyDebugLastFrameReference(value, value ? `已选择尾帧素材：${value.split('/').pop()}` : '');
         saveCurrentComfyDebugUiState();
         saveSettings();
@@ -12489,6 +12530,7 @@ INDEX_HTML = r"""<!doctype html>
         if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
         if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
         if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
+        clearComfyDebugLocalReferencePreviews();
         renderComfyDebugAssetReferenceOptions();
       };
     }
@@ -12535,9 +12577,12 @@ INDEX_HTML = r"""<!doctype html>
     }
     els.clearComfyDebugReferenceBtn.onclick = () => {
       if (els.comfyDebugAssetReference) els.comfyDebugAssetReference.value = '';
+      if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
       if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
       if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+      if (els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
       if (els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
+      clearComfyDebugLocalReferencePreviews();
       setComfyDebugReference('', '');
       setComfyDebugMiddleFrameReference('', '');
       setComfyDebugLastFrameReference('', '');
