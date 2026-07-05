@@ -21,8 +21,11 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
     compile_production_plan,
 )
 from my_codex_core.production_pipeline import (  # noqa: E402
+    _clean_voice_text,
     _packaging_dependency_blockers,
     _payload_has_required_mode,
+    _extract_voice_text,
+    _quality_check_voice_text,
     _quality_check_srt,
     _required_workflow_slots,
     _srt_from_voice_text,
@@ -66,6 +69,17 @@ class SemanticInputContractTests(unittest.TestCase):
             )
             status = web_app.WorkflowWebHandler._task_comfy_debug_status(task_dir)
             self.assertTrue(status["enabled"])
+
+    def test_no_voiceover_marker_is_not_tts_text(self) -> None:
+        self.assertEqual(_clean_voice_text("（无旁白）\n"), "")
+        extracted = _extract_voice_text('```json\n{"production_intents":{"audio":[{"intent":"generate_voiceover","voice_text":"（无旁白）"}]}}\n```')
+        self.assertEqual(extracted.strip(), "（无旁白）")
+        voice_quality = _quality_check_voice_text("（无旁白）\n")
+        self.assertFalse(voice_quality["usable"])
+        self.assertEqual(voice_quality["status"], "disabled")
+        srt_quality = _quality_check_srt("1\n00:00:00,000 --> 00:00:02,000\n（无旁白）\n")
+        self.assertFalse(srt_quality["usable"])
+        self.assertEqual(srt_quality["status"], "disabled")
 
     def test_task_state_does_not_offer_debug_queue_when_gate_is_off(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

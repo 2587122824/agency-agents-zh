@@ -94,12 +94,17 @@ def run_auto_production(
     _write_text(audio_package_path, audio_content or "# 语音字幕制作包\n\n未找到 20_语音字幕包装师输出。\n")
     voice_text = _extract_voice_text(audio_content)
     voice_text_quality = _quality_check_voice_text(voice_text)
-    if not voice_text_quality["usable"]:
+    if not voice_text_quality["usable"] and voice_text_quality.get("status") == "disabled":
+        voice_text = ""
+    elif not voice_text_quality["usable"]:
         voice_text = "待从 20_语音字幕包装师输出中整理配音稿。\n"
     subtitle_srt = _extract_srt(audio_content)
     subtitle_srt_quality = _quality_check_srt(subtitle_srt)
+    if _is_no_voiceover_marker(subtitle_srt):
+        subtitle_srt = ""
+        subtitle_srt_quality = {"usable": False, "status": "disabled", "reason": "voiceover/subtitle disabled", "entries": 0}
     if not subtitle_srt_quality["usable"]:
-        subtitle_srt = _srt_from_voice_text(voice_text) if voice_text_quality["usable"] else _default_srt()
+        subtitle_srt = _srt_from_voice_text(voice_text) if voice_text_quality["usable"] else ("" if voice_text_quality.get("status") == "disabled" else _default_srt())
         subtitle_srt_quality = _quality_check_srt(subtitle_srt)
     _write_text(voiceover_path, voice_text)
     _write_text(subtitles_path, subtitle_srt)
@@ -1040,8 +1045,28 @@ def _retry_tts_job(
         voice_text = _extract_voice_text(audio_package_path.read_text(encoding="utf-8", errors="replace"))
     else:
         raise FileNotFoundError("audio/voiceover.txt")
-    if not voice_text.strip():
-        raise ValueError("voiceover text is empty")
+    voice_text_quality = _quality_check_voice_text(voice_text)
+    if not voice_text_quality.get("usable"):
+        audio = manifest.setdefault("audio", {})
+        reason = str(voice_text_quality.get("reason") or "voiceover text is empty")
+        audio["voice_text_chars"] = 0
+        audio["target_duration_seconds"] = float(voice_config.get("target_duration_seconds") or 0)
+        audio["adapter_status"] = "skipped"
+        audio["voice_text_status"] = str(voice_text_quality.get("status") or "missing")
+        audio["voice_text_reason"] = reason
+        audio["voiceover_audio_file"] = ""
+        manifest["status"] = "local_tts_skipped"
+        _upsert_job(
+            manifest,
+            "local_tts",
+            "本地配音",
+            mode="local_tts",
+            status="skipped",
+            outputs=[],
+            error=reason,
+        )
+        emit("local TTS skipped: no usable voiceover text", stage="tts", status="skipped")
+        return {"status": "skipped", "reason": reason, "downloaded_files": []}
 
     emit("retrying local TTS", stage="tts")
     result = _run_local_tts_adapter(voice_text, voice_config, paths["audio"]) or {"status": "skipped"}
@@ -2963,7 +2988,7 @@ def _extract_voice_text(content: str) -> str:
     audio_package = package_payload.get("audio_package") if isinstance(package_payload.get("audio_package"), dict) else {}
     packaged_voice_text = str(audio_package.get("voiceover_text") or "").strip()
     if packaged_voice_text:
-        return _clean_voice_text(packaged_voice_text)
+        return _clean_extracted_voice_text(packaged_voice_text)
     payload = _json_payload_with(content, "production_intents", "audio")
     production_intents = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
     audio_intents = production_intents.get("audio") if isinstance(production_intents.get("audio"), list) else []
@@ -2972,27 +2997,27 @@ def _extract_voice_text(content: str) -> str:
             continue
         voice_text = str(intent.get("voice_text") or "").strip()
         if voice_text:
-            return _clean_voice_text(voice_text)
+            return _clean_extracted_voice_text(voice_text)
     for heading in ("完整配音稿", "TTS 配音稿", "配音稿", "口播配音稿", "旁白稿"):
         text_block = _extract_fenced_block_after_heading(content, heading)
         if text_block:
-            return _clean_voice_text(text_block)
+            return _clean_extracted_voice_text(text_block)
     for heading in ("TTS 配音稿", "配音稿", "口播配音稿", "旁白稿"):
         section = _extract_section(content, heading)
         if section:
-            return _clean_voice_text(section)
+            return _clean_extracted_voice_text(section)
     for match in re.finditer(r"```(?:text)?\s*(.*?)```", content, re.DOTALL | re.IGNORECASE):
         block = match.group(1).strip()
         if len(block) > 200 and any(marker in block for marker in ("口播配音稿", "0s -", "我跟你说", "开头痛点")):
-            return _clean_voice_text(block)
+            return _clean_extracted_voice_text(block)
     for heading in ("完整配音稿", "TTS 配音稿", "配音稿", "口播稿", "旁白稿"):
         text_block = _extract_fenced_block_after_heading(content, heading)
         if text_block:
-            return _clean_voice_text(text_block)
+            return _clean_extracted_voice_text(text_block)
     for heading in ("TTS 配音稿", "配音稿", "口播稿", "旁白稿"):
         section = _extract_section(content, heading)
         if section:
-            return _clean_voice_text(section)
+            return _clean_extracted_voice_text(section)
     return ""
 
 
@@ -3024,12 +3049,55 @@ def _clean_voice_text(text: str) -> str:
             continue
         lines.append(line)
     cleaned = "\n".join(lines).strip()
+    if _is_no_voiceover_marker(cleaned):
+        return ""
     return cleaned + "\n" if cleaned else ""
+
+
+def _clean_extracted_voice_text(text: str) -> str:
+    stripped = str(text or "").strip()
+    if _is_no_voiceover_marker(stripped):
+        return stripped + "\n"
+    return _clean_voice_text(stripped)
+
+
+def _is_no_voiceover_marker(text: str) -> bool:
+    stripped = re.sub(r"\s+", "", str(text or "")).strip()
+    if not stripped:
+        return False
+    compact = re.sub(r"[()（）【】\[\]{}《》<>:：,，.。!！?？;；'\"“”‘’、/\\|_-]", "", stripped).lower()
+    if not compact:
+        return False
+    explicit_markers = {
+        "无旁白",
+        "無旁白",
+        "无配音",
+        "無配音",
+        "无口播",
+        "無口播",
+        "无字幕",
+        "無字幕",
+        "静音",
+        "無聲",
+        "无声",
+        "silent",
+        "novoiceover",
+        "nonarration",
+        "nosubtitle",
+        "nosubtitles",
+    }
+    if compact in explicit_markers:
+        return True
+    if len(compact) <= 18 and any(marker in compact for marker in explicit_markers):
+        return True
+    return bool(re.fullmatch(r"(旁白|配音|口播|字幕)(无|無|none|no)", compact))
 
 
 def _quality_check_voice_text(text: str) -> dict[str, Any]:
     stripped = (text or "").strip()
     placeholder_patterns = ["待从", "后续", "自行完成", "按上述", "....", "..."]
+    if _is_no_voiceover_marker(stripped):
+        return {"usable": False, "status": "disabled", "reason": "voiceover disabled"}
     if not stripped:
         return {"usable": False, "status": "missing", "reason": "没有抽取到配音稿"}
     if len(stripped) < 200 and any(pattern in stripped for pattern in placeholder_patterns):
@@ -3043,6 +3111,8 @@ def _quality_check_srt(srt: str) -> dict[str, Any]:
     stripped = (srt or "").strip()
     entries = len(re.findall(r"(?m)^\d+\s*$", stripped))
     placeholder_patterns = ["后续", "自行完成", "按上述", "....", "..."]
+    if _is_no_voiceover_marker(stripped) or _srt_body_is_no_voiceover_marker(stripped):
+        return {"usable": False, "status": "disabled", "reason": "subtitle disabled", "entries": 0}
     if not stripped:
         return {"usable": False, "status": "missing", "reason": "没有抽取到 SRT", "entries": 0}
     if any(pattern in stripped for pattern in placeholder_patterns):
@@ -3062,6 +3132,16 @@ def _quality_check_srt(srt: str) -> dict[str, Any]:
             "overloaded_entries": overloaded,
         }
     return {"usable": True, "status": "ok", "reason": "", "entries": entries}
+
+
+def _srt_body_is_no_voiceover_marker(srt: str) -> bool:
+    text_lines: list[str] = []
+    for raw_line in str(srt or "").splitlines():
+        line = raw_line.strip()
+        if not line or re.fullmatch(r"\d+", line) or "-->" in line:
+            continue
+        text_lines.append(line)
+    return bool(text_lines) and _is_no_voiceover_marker("".join(text_lines))
 
 
 def _srt_from_voice_text(voice_text: str) -> str:
