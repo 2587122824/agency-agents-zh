@@ -426,6 +426,51 @@ class SemanticInputContractTests(unittest.TestCase):
             )
             self.assertNotEqual(item["workflow_mode"], "character_base")
 
+    def test_three_frame_shot_uses_linked_character_master_image(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_three_frame_shot",
+                            "intent_id": "shot_meal_three_frame",
+                            "character_id": "hero",
+                            "scene_id": "dining_room",
+                            "frame_set": [
+                                {"role": "start", "prompt": "Hero hesitates beside the table."},
+                                {"role": "middle", "prompt": "Hero leans closer to smell the food."},
+                                {"role": "end", "prompt": "Hero smiles and starts eating."},
+                            ],
+                            "entity_usage": {
+                                "character_reference_image": "my_workspace/my_asset_library/characters/hero.png",
+                                "scene_reference_image": "my_workspace/my_asset_library/scenes/dining_room.png",
+                            },
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="three_frame_linked_character_reference_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+        )
+        items = plan["compiled_payload"]["image_prompts"]
+        self.assertEqual(len(items), 3)
+        for item in items:
+            self.assertEqual(item["workflow_id"], "04_keyframe")
+            self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
+            self.assertEqual(item["control_mode"], "img2img_style")
+            self.assertEqual(
+                item["input_base_image"],
+                "my_workspace/my_asset_library/characters/hero.png",
+            )
+            self.assertEqual(
+                item["input_scene_image"],
+                "my_workspace/my_asset_library/scenes/dining_room.png",
+            )
+
     def test_animal_reference_sheet_stays_on_character_base(self) -> None:
         image_content = json.dumps(
             {

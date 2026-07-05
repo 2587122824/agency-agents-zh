@@ -388,6 +388,7 @@ def _compile_image_intents(
                     overrides=overrides,
                 )
                 item["frame_role"] = role
+                _apply_linked_character_reference_policy(item, intent, notes)
                 _apply_generated_character_reference_policy(item, intent, prompts, notes)
                 _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
                 prompts.append(item)
@@ -409,6 +410,7 @@ def _compile_image_intents(
             notes=notes,
         )
         _apply_character_base_policy(item, intent, prompts, notes)
+        _apply_linked_character_reference_policy(item, intent, notes)
         _apply_generated_character_reference_policy(item, intent, prompts, notes)
         attach_parameter_lock_metadata(
             item,
@@ -504,6 +506,81 @@ def _character_master_reference_from_item(item: dict[str, Any]) -> str:
     entity_context = item.get("entity_context") if isinstance(item.get("entity_context"), dict) else {}
     character = entity_context.get("character") if isinstance(entity_context.get("character"), dict) else {}
     return _first_identity_reference(character)
+
+
+def _apply_linked_character_reference_policy(
+    item: dict[str, Any],
+    intent: dict[str, Any],
+    notes: list[str] | None = None,
+) -> None:
+    if str(item.get("workflow_id") or "").strip() != "04_keyframe":
+        return
+    if not str(item.get("character_id") or intent.get("character_id") or "").strip():
+        return
+    bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
+    if item.get("input_base_image") or bindings.get("input_base_image"):
+        return
+    master_reference = _linked_character_reference_from_intent_or_item(intent, item)
+    if not master_reference:
+        return
+    item["workflow_mode"] = "img2img_style_keyframe"
+    item["image_task_mode"] = "img2img_style_keyframe"
+    item["mode"] = "img2img_style_keyframe"
+    item["control_mode"] = "img2img_style"
+    item["input_base_image"] = master_reference
+    item["reference_image"] = master_reference
+    item["input_reference_style"] = master_reference
+    scene_reference = _linked_scene_reference_from_intent_or_item(intent, item)
+    if scene_reference:
+        item["input_scene_image"] = scene_reference
+        item["scene_reference_image"] = scene_reference
+        _merge_compat_list(item, "reference_images", [scene_reference])
+    item["denoise"] = intent.get("denoise") or item.get("denoise") or 1
+    item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or item.get("ipadapter_weight") or 0.72
+    item["prompt"] = _append_prompt_once(
+        str(item.get("prompt") or ""),
+        "参考关联角色母版图，必须保持同一张脸、同一年龄感、同一发型、肤色、五官比例、身材比例和服装主特征；只改变当前镜头要求的表情、动作和轻微状态，不随机换人。",
+    )
+    if notes is not None:
+        notes.append(f"image intent {item.get('job_id')} bound to linked character master image")
+
+
+def _linked_character_reference_from_intent_or_item(intent: dict[str, Any], item: dict[str, Any]) -> str:
+    entity_usage = intent.get("entity_usage") if isinstance(intent.get("entity_usage"), dict) else {}
+    for key in (
+        "character_reference_image",
+        "character_master_image",
+        "input_identity_image",
+        "identity_image",
+        "master_image",
+    ):
+        value = str(entity_usage.get(key) or intent.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _linked_scene_reference_from_intent_or_item(intent: dict[str, Any], item: dict[str, Any]) -> str:
+    entity_usage = intent.get("entity_usage") if isinstance(intent.get("entity_usage"), dict) else {}
+    for key in (
+        "scene_reference_image",
+        "scene_master_image",
+        "scene_reference",
+        "input_scene_image",
+    ):
+        value = str(entity_usage.get(key) or intent.get(key) or "").strip()
+        if value:
+            return value
+    entity_context = item.get("entity_context") if isinstance(item.get("entity_context"), dict) else {}
+    scene = entity_context.get("scene") if isinstance(entity_context.get("scene"), dict) else {}
+    for key in ("scene_master_image", "scene_reference", "reference_asset"):
+        value = str(scene.get(key) or "").strip()
+        if value:
+            return value
+    references = scene.get("reference_assets")
+    if isinstance(references, list):
+        return next((str(value).strip() for value in references if str(value).strip()), "")
+    return ""
 
 
 def _route_character_base_item_to_master_img2img(
