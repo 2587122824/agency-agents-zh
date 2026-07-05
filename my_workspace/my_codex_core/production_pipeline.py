@@ -123,7 +123,7 @@ def run_auto_production(
         video_content=video_content,
         audio_content=audio_content,
         package_content=edit_content,
-        source_content=_read_text(task_dir / "input.md"),
+        source_content=_read_text_file(task_dir / "input.md"),
         existing_payload=comfyui_payload,
         video_config=video_config,
         voice_config=voice_config,
@@ -1353,7 +1353,7 @@ def _refresh_visual_plan_for_retry(
         video_content=video_content,
         audio_content=audio_content,
         package_content=edit_content,
-        source_content=_read_text(task_dir / "input.md"),
+        source_content=_read_text_file(task_dir / "input.md"),
         existing_payload=existing_payload,
         video_config=video_config,
         voice_config=voice_config,
@@ -3507,6 +3507,13 @@ def _build_production_note(manifest: dict[str, Any]) -> str:
 def _write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content.rstrip() + "\n", encoding="utf-8")
+
+
+def _read_text_file(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8-sig", errors="replace") if path.is_file() else ""
+    except OSError:
+        return ""
 
 
 def _safe_file_name(name: str) -> str:
