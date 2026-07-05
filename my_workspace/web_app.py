@@ -6377,6 +6377,32 @@ INDEX_HTML = r"""<!doctype html>
       if (text === '[]') return text;
       const workflowKey = String(workflowId || '').trim();
       const modeKey = String(mode || '').trim();
+      if (workflowKey === '06_i2v_first_middle_last_frame' || modeKey === 'i2v_first_middle_last_frame') {
+        try {
+          const parsed = JSON.parse(text);
+          if (!Array.isArray(parsed)) return text;
+          const normalized = parsed.map(item => {
+            if (!item || typeof item !== 'object') return item;
+            const nodeId = String(item.nodeId ?? '');
+            const fieldName = String(item.fieldName ?? '');
+            if (nodeId === '447' && fieldName === 'image') return { ...item, fieldValue: '{{input_base_image}}' };
+            if (nodeId === '448' && fieldName === 'image') return { ...item, fieldValue: '{{input_middle_frame}}' };
+            if (nodeId === '449' && fieldName === 'image') return { ...item, fieldValue: '{{input_last_frame}}' };
+            return item;
+          });
+          const hasRow = (nodeId, fieldName) => normalized.some(item => (
+            item && typeof item === 'object'
+            && String(item.nodeId ?? '') === nodeId
+            && String(item.fieldName ?? '') === fieldName
+          ));
+          if (!hasRow('447', 'image')) normalized.unshift({ nodeId: '447', fieldName: 'image', fieldValue: '{{input_base_image}}' });
+          if (!hasRow('448', 'image')) normalized.unshift({ nodeId: '448', fieldName: 'image', fieldValue: '{{input_middle_frame}}' });
+          if (!hasRow('449', 'image')) normalized.unshift({ nodeId: '449', fieldName: 'image', fieldValue: '{{input_last_frame}}' });
+          return JSON.stringify(normalized, null, 2);
+        } catch {
+          return text;
+        }
+      }
       if (['02_ltx_video_2_3', '06_i2v_first_frame'].includes(workflowKey) || modeKey === 'i2v_first_frame') {
         try {
           const parsed = JSON.parse(text);
