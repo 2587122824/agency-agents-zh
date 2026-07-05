@@ -6446,6 +6446,21 @@ INDEX_HTML = r"""<!doctype html>
           return text;
         }
       }
+      if (workflowKey === '04_keyframe' && modeKey === 'identity_scene_keyframe') {
+        try {
+          const parsed = JSON.parse(text);
+          if (!Array.isArray(parsed)) return text;
+          const nodeIds = new Set(parsed.filter(item => item && typeof item === 'object').map(item => String(item.nodeId ?? '')));
+          const hasOldIdentitySceneMapping = nodeIds.has('626') || nodeIds.has('625') || nodeIds.has('594');
+          const missingRoleSceneCore = !nodeIds.has('35') || !nodeIds.has('22') || !nodeIds.has('21') || !nodeIds.has('33');
+          if (hasOldIdentitySceneMapping || missingRoleSceneCore) {
+            return JSON.stringify(qwenRoleSceneBlendNodeInfoList(), null, 2);
+          }
+          return text;
+        } catch {
+          return text;
+        }
+      }
       if (workflowKey !== '04_keyframe' || modeKey !== 'img2img_style_keyframe') return text;
       try {
         const parsed = JSON.parse(text);
@@ -6466,6 +6481,30 @@ INDEX_HTML = r"""<!doctype html>
       } catch {
         return text;
       }
+    }
+
+    function qwenRoleSceneBlendNodeInfoList() {
+      return [
+        { nodeId: '35', fieldName: 'image', fieldValue: '{{input_identity_image}}' },
+        { nodeId: '22', fieldName: 'image', fieldValue: '{{input_scene_image}}' },
+        { nodeId: '21', fieldName: 'prompt', fieldValue: '{{prompt}}' },
+        { nodeId: '1', fieldName: 'scale_to_length', fieldValue: '{{long_side}}' },
+        { nodeId: '8', fieldName: 'scale_to_length', fieldValue: '{{long_side}}' },
+        { nodeId: '16', fieldName: 'ref_longest_edge', fieldValue: '{{long_side}}' },
+        { nodeId: '24', fieldName: 'ref_longest_edge', fieldValue: '{{long_side}}' },
+        { nodeId: '10', fieldName: 'width', fieldValue: '{{short_side}}' },
+        { nodeId: '10', fieldName: 'height', fieldValue: '{{short_side}}' },
+        { nodeId: '12', fieldName: 'seed', fieldValue: '{{seed}}' },
+        { nodeId: '12', fieldName: 'steps', fieldValue: 8 },
+        { nodeId: '12', fieldName: 'cfg', fieldValue: 1 },
+        { nodeId: '12', fieldName: 'denoise', fieldValue: '{{denoise}}' },
+        { nodeId: '23', fieldName: 'seed', fieldValue: '{{seed}}' },
+        { nodeId: '23', fieldName: 'steps', fieldValue: 8 },
+        { nodeId: '23', fieldName: 'cfg', fieldValue: 1 },
+        { nodeId: '23', fieldName: 'denoise', fieldValue: 0.2 },
+        { nodeId: '25', fieldName: 'filename_prefix', fieldValue: 'identity_scene_keyframe_compare' },
+        { nodeId: '33', fieldName: 'filename_prefix', fieldValue: 'identity_scene_keyframe' },
+      ];
     }
 
     function ltxFirstFrameI2VNodeInfoList() {

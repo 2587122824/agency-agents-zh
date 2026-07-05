@@ -1,92 +1,116 @@
 [
   {
-    "nodeId": "626",
+    "nodeId": "35",
     "fieldName": "image",
     "fieldValue": "{{input_identity_image}}",
-    "description": "identity reference image for the character"
+    "description": "role/source character image, used as image 1 in the RoleScene Blend workflow"
   },
   {
-    "nodeId": "625",
+    "nodeId": "22",
     "fieldName": "image",
     "fieldValue": "{{input_scene_image}}",
-    "description": "scene/layout reference image for character-in-scene keyframe control"
+    "description": "target scene image, used as image 2 in the RoleScene Blend workflow"
   },
   {
-    "nodeId": "594",
-    "fieldName": "string",
+    "nodeId": "21",
+    "fieldName": "prompt",
     "fieldValue": "{{prompt}}",
-    "description": "shot prompt / character and scene action description"
+    "description": "Qwen edit instruction: place the referenced role into the referenced scene with the desired action/shot"
   },
   {
-    "nodeId": "582",
-    "fieldName": "text",
-    "fieldValue": "{{negative_prompt}}",
-    "description": "negative prompt"
+    "nodeId": "1",
+    "fieldName": "scale_to_length",
+    "fieldValue": "{{long_side}}",
+    "description": "character image longest-edge resize derived from the debug/production width and height"
   },
   {
-    "nodeId": "621",
-    "fieldName": "value",
-    "fieldValue": "{{width}}",
-    "description": "main generation width"
+    "nodeId": "8",
+    "fieldName": "scale_to_length",
+    "fieldValue": "{{long_side}}",
+    "description": "scene image longest-edge resize derived from the debug/production width and height"
   },
   {
-    "nodeId": "622",
-    "fieldName": "value",
-    "fieldValue": "{{height}}",
-    "description": "main generation height"
+    "nodeId": "16",
+    "fieldName": "ref_longest_edge",
+    "fieldValue": "{{long_side}}",
+    "description": "character reference longest edge for QwenEditConfigPreparer"
   },
   {
-    "nodeId": "663",
-    "fieldName": "value",
-    "fieldValue": "{{width}}",
-    "description": "background/keyframe width"
+    "nodeId": "24",
+    "fieldName": "ref_longest_edge",
+    "fieldValue": "{{long_side}}",
+    "description": "blended scene reference longest edge for QwenEditConfigPreparer"
   },
   {
-    "nodeId": "664",
-    "fieldName": "value",
-    "fieldValue": "{{height}}",
-    "description": "background/keyframe height"
+    "nodeId": "10",
+    "fieldName": "width",
+    "fieldValue": "{{short_side}}",
+    "description": "pose/control resize width derived from the shorter form side"
   },
   {
-    "nodeId": "588",
-    "fieldName": "noise_seed",
+    "nodeId": "10",
+    "fieldName": "height",
+    "fieldValue": "{{short_side}}",
+    "description": "pose/control resize height derived from the shorter form side"
+  },
+  {
+    "nodeId": "12",
+    "fieldName": "seed",
     "fieldValue": "{{seed}}",
-    "description": "main generation seed"
+    "description": "main generation KSampler seed"
   },
   {
-    "nodeId": "499",
-    "fieldName": "noise_seed",
+    "nodeId": "12",
+    "fieldName": "steps",
+    "fieldValue": 8,
+    "description": "main generation KSampler steps for Qwen Image Edit 2509 lightning"
+  },
+  {
+    "nodeId": "12",
+    "fieldName": "cfg",
+    "fieldValue": 1,
+    "description": "main generation KSampler cfg"
+  },
+  {
+    "nodeId": "12",
+    "fieldName": "denoise",
+    "fieldValue": "{{denoise}}",
+    "description": "main generation denoise strength; production defaults to 1 for full role-scene transfer"
+  },
+  {
+    "nodeId": "23",
+    "fieldName": "seed",
     "fieldValue": "{{seed}}",
-    "description": "background/keyframe seed"
+    "description": "refinement KSampler seed"
   },
   {
-    "nodeId": "179",
-    "fieldName": "filename_prefix",
-    "fieldValue": "identity_scene_keyframe",
-    "description": "main output prefix"
+    "nodeId": "23",
+    "fieldName": "steps",
+    "fieldValue": 8,
+    "description": "refinement KSampler steps"
   },
   {
-    "nodeId": "433",
-    "fieldName": "filename_prefix",
-    "fieldValue": "identity_scene_keyframe",
-    "description": "background output prefix"
+    "nodeId": "23",
+    "fieldName": "cfg",
+    "fieldValue": 1,
+    "description": "refinement KSampler cfg"
   },
   {
-    "nodeId": "440",
-    "fieldName": "filename_prefix",
-    "fieldValue": "identity_scene_keyframe",
-    "description": "background output prefix"
+    "nodeId": "23",
+    "fieldName": "denoise",
+    "fieldValue": 0.2,
+    "description": "low-denoise refinement pass from the calibrated workflow"
   },
   {
-    "nodeId": "447",
+    "nodeId": "25",
     "fieldName": "filename_prefix",
-    "fieldValue": "identity_scene_keyframe",
-    "description": "background output prefix"
+    "fieldValue": "identity_scene_keyframe_compare",
+    "description": "comparison/contact-sheet output prefix"
   },
   {
-    "nodeId": "637",
+    "nodeId": "33",
     "fieldName": "filename_prefix",
     "fieldValue": "identity_scene_keyframe",
-    "description": "background output prefix"
+    "description": "final single-image output prefix"
   }
 ]

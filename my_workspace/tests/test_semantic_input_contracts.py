@@ -220,6 +220,17 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("{{input_pose_image}}", json.dumps(identity_rows, ensure_ascii=False))
         self.assertIn("{{input_identity_image}}", json.dumps(identity_scene_rows, ensure_ascii=False))
         self.assertIn("{{input_scene_image}}", json.dumps(identity_scene_rows, ensure_ascii=False))
+        identity_scene_by_node = {
+            (str(row.get("nodeId")), str(row.get("fieldName"))): row.get("fieldValue")
+            for row in identity_scene_rows
+            if isinstance(row, dict)
+        }
+        self.assertEqual(identity_scene_by_node[("35", "image")], "{{input_identity_image}}")
+        self.assertEqual(identity_scene_by_node[("22", "image")], "{{input_scene_image}}")
+        self.assertEqual(identity_scene_by_node[("21", "prompt")], "{{prompt}}")
+        self.assertEqual(identity_scene_by_node[("12", "denoise")], "{{denoise}}")
+        self.assertEqual(identity_scene_by_node[("23", "denoise")], 0.2)
+        self.assertEqual(identity_scene_by_node[("33", "filename_prefix")], "identity_scene_keyframe")
         self.assertIn("{{input_identity_image}}", json.dumps(pose_rows, ensure_ascii=False))
         self.assertIn("{{input_pose_image}}", json.dumps(pose_rows, ensure_ascii=False))
 
