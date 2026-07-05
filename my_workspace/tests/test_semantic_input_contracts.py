@@ -1152,6 +1152,39 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("真人纪实质感", video_item["prompt"])
         self.assertIn("studio fashion shoot", video_item["negative_prompt"])
 
+    def test_plain_live_action_prompts_do_not_get_retro_guardrails(self) -> None:
+        plan = compile_production_plan(
+            task_id="plain_live_action",
+            route_content=json.dumps(
+                {
+                    "production_type": "commercial_story",
+                    "aspect_ratio": "9:16",
+                    "style_id": "modern_live_action",
+                },
+                ensure_ascii=False,
+            ),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_keyframe",
+                                "intent_id": "shot_001_keyframe",
+                                "prompt": "现代真人商业短视频，主角在城市咖啡店里看手机。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_content=json.dumps({"production_intents": {"video": []}}, ensure_ascii=False),
+            video_config={"aspect_ratio": "9:16"},
+        )
+        image_item = plan["compiled_payload"]["image_prompts"][0]
+        self.assertNotIn("2008年前后中国城市生活细节", image_item["prompt"])
+        self.assertNotIn("旧式招牌", image_item["prompt"])
+        self.assertNotIn("真人纪实质感", image_item["prompt"])
+
     def test_voice_requirement_enables_voxcpm2_fallback(self) -> None:
         config = {"voice_config": {"mode": "off"}}
         updated = web_app.WorkflowWebHandler._ensure_voice_config_for_requirement(

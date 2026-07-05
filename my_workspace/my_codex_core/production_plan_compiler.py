@@ -552,7 +552,7 @@ def _apply_live_action_quality_policy(
             (global_context.get("style") or {}).get("description") if isinstance(global_context.get("style"), dict) else "",
         )
     ).lower()
-    if not _looks_like_live_action_context(text):
+    if not _looks_like_live_action_context(text) or not _looks_like_retro_period_context(text):
         return
     item["prompt"] = _append_prompt_once(
         str(item.get("prompt") or ""),
@@ -588,6 +588,26 @@ def _looks_like_live_action_context(text: str) -> bool:
             "2008",
             "街拍",
             "纪实",
+        )
+    )
+
+
+def _looks_like_retro_period_context(text: str) -> bool:
+    value = str(text or "").lower()
+    return any(
+        token in value
+        for token in (
+            "2008",
+            "复古",
+            "年代",
+            "怀旧",
+            "老式",
+            "旧式",
+            "旧时代",
+            "千禧",
+            "vintage",
+            "retro",
+            "period",
         )
     )
 

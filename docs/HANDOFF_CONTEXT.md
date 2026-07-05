@@ -166,6 +166,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Steps 1-3 receive only the compact original requirement, not raw asset-library or ComfyUI config noise.
 - Model outputs are checked for topic retention, duration/structure coverage, ungrounded drift, and inappropriate confirmation blockers.
 - Topic-retention checks allow a narrow paraphrase pattern for the 2008 rebirth/business-opportunity story: if the locked topic is about a lifetime of work, missed wealth waves, and regret, outputs mentioning a worker/protagonist returning to or reborn in 2008 plus reversal/opportunity/business concepts count as on-topic even without repeating the full original sentence.
+- 2008/retro/live-action visual guardrails are not global live-action constraints. Only add the 2008-era street-detail / old-signage / retro-period prompt additions when the requirement or style explicitly mentions 2008, retro, vintage, period, nostalgic, or similar era cues. Plain modern live-action prompts must not inherit those test-task constraints.
 - Only decisions affecting theme, platform specs, brand/product, budget, identity, copyright/compliance, or final delivery may require human confirmation.
 - Employee production-output validation is active for 03/06/20/07/22. Failed validation gets one automatic correction retry, then fails visibly.
 - Validation checks include:
