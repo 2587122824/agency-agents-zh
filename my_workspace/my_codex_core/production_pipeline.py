@@ -154,6 +154,7 @@ def run_auto_production(
         {
             "production_graph_path": str(production_graph_path),
             "production_task_id": task_dir.name,
+            "execution_mode": mode,
             "global_context": global_context,
             "packaging_jobs": packaging_jobs,
             "production_plan_visual_jobs": plan_visual_jobs,
