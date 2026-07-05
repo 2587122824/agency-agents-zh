@@ -698,6 +698,14 @@ class SemanticInputContractTests(unittest.TestCase):
             keyframe_group = next(item for item in status["items"] if item["id"] == "group:04_keyframe:img2img_style_keyframe")
             child = keyframe_group["children"][0]
             self.assertEqual(child["reference_image"], "asset_char_main_front")
+            self.assertEqual(
+                web_app.WorkflowWebHandler._resolve_task_comfy_debug_reference(
+                    task_dir,
+                    status,
+                    child["reference_image"],
+                ),
+                "comfyui/manual_debug/master.png",
+            )
 
     def test_validator_treats_short_video_as_portrait_by_default(self) -> None:
         content = json.dumps(

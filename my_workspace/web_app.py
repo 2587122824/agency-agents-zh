@@ -15935,7 +15935,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("task and item_id are required")
         task_dir = self._safe_task_dir(task_name)
         status = self._task_comfy_debug_status(task_dir)
-        items = status.get("items") if isinstance(status.get("items"), list) else []
+        items = WorkflowWebHandler._flatten_task_comfy_debug_items(
+            status.get("items") if isinstance(status.get("items"), list) else []
+        )
         current_id = str(status.get("current_item_id") or "")
         item = next((entry for entry in items if isinstance(entry, dict) and entry.get("id") == item_id), None)
         if not item:
@@ -16145,7 +16147,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("task and item_id are required")
         task_dir = self._safe_task_dir(task_name)
         status = self._task_comfy_debug_status(task_dir)
-        items = status.get("items") if isinstance(status.get("items"), list) else []
+        items = WorkflowWebHandler._flatten_task_comfy_debug_items(
+            status.get("items") if isinstance(status.get("items"), list) else []
+        )
         current_id = str(status.get("current_item_id") or "")
         if item_id != current_id:
             raise ValueError("请按 ComfyUI 调试队列顺序确认当前项")
@@ -16223,7 +16227,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         parts = [part.strip() for part in re.split(r"[,，;；\n]+", text_value) if part.strip()]
         if not parts:
             return text_value
-        items = status.get("items") if isinstance(status.get("items"), list) else []
+        items = WorkflowWebHandler._flatten_task_comfy_debug_items(status.get("items") if isinstance(status.get("items"), list) else [])
         resolved: list[str] = []
         for part in parts:
             match = next(
@@ -16248,6 +16252,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 alias = WorkflowWebHandler._task_relative_reference_alias(task_dir, part)
                 resolved.append(alias or part)
         return ", ".join(resolved)
+
+    @staticmethod
+    def _flatten_task_comfy_debug_items(items: list[dict]) -> list[dict]:
+        flattened: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            flattened.append(item)
+            for child in item.get("children") or []:
+                if isinstance(child, dict):
+                    flattened.append(child)
+        return flattened
 
     @staticmethod
     def _task_relative_reference_alias(task_dir: Path, value: str) -> str:
