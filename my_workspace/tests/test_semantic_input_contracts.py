@@ -1026,6 +1026,46 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIsNone(web_app.WorkflowWebHandler._parse_range_header("bytes=1000-", 1000))
         self.assertIsNone(web_app.WorkflowWebHandler._parse_range_header("items=0-99", 1000))
 
+    def test_asset_source_key_normalizes_paths(self) -> None:
+        self.assertEqual(
+            web_app.WorkflowWebHandler._asset_source_key(r"task_a\\", r"\\comfyui\\job\\out.png"),
+            "task_a::comfyui/job/out.png",
+        )
+
+    def test_task_assets_include_favorite_state(self) -> None:
+        original_index = web_app.ASSET_LIBRARY_INDEX
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            task_dir = root / "task_a"
+            media = task_dir / "comfyui" / "job" / "out.png"
+            media.parent.mkdir(parents=True)
+            media.write_bytes(b"fake")
+            library_index = root / "library.json"
+            library_index.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "asset_1",
+                            "file": "07_keyframe/asset_1_out.png",
+                            "source_task": "task_a",
+                            "source_file": r"comfyui\\job\\out.png",
+                            "tags": ["image", "keyframe"],
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            try:
+                web_app.ASSET_LIBRARY_INDEX = library_index
+                assets = web_app.WorkflowWebHandler._task_assets(task_dir, ["comfyui/job/out.png"], task_name="task_a")
+            finally:
+                web_app.ASSET_LIBRARY_INDEX = original_index
+            item = assets["images"][0]
+            self.assertTrue(item["favorited"])
+            self.assertEqual(item["library_asset_id"], "asset_1")
+            self.assertEqual(item["source_file"], "comfyui/job/out.png")
+
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {

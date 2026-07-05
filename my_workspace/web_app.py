@@ -8867,7 +8867,7 @@ INDEX_HTML = r"""<!doctype html>
         item.file,
         item.label || '',
         item.kind || '',
-        Boolean(item.library || isAssetFavorited(taskName, item)),
+        Boolean(isAssetItemFavorited(taskName, item)),
         ...(normalizeAssetTags(item.tags) || []),
       ]));
       if (assetPreviewTaskName === (taskName || "") && assetGallerySignature === signature) {
@@ -8889,7 +8889,7 @@ INDEX_HTML = r"""<!doctype html>
       card.role = 'button';
       card.className = 'asset-card';
       card.dataset.file = item.file;
-      const favorited = item.library || isAssetFavorited(taskName, item);
+      const favorited = isAssetItemFavorited(taskName, item);
       if (favorited) card.classList.add('is-favorited');
       const media = document.createElement('div');
       media.className = 'asset-card-media';
@@ -8948,9 +8948,17 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function assetSourceKey(taskName, item) {
-      const sourceTask = item?.source_task || taskName || '';
-      const sourceFile = item?.source_file || item?.file || '';
+      const sourceTask = normalizeAssetSourcePart(item?.source_task_id || item?.source_task || taskName || '');
+      const sourceFile = normalizeAssetSourcePart(item?.source_file || item?.file || '');
       return `${sourceTask}::${sourceFile}`;
+    }
+
+    function normalizeAssetSourcePart(value) {
+      return String(value || '').replace(/\\/g, '/').replace(/\/+/g, '/').replace(/^\/+|\/+$/g, '').trim();
+    }
+
+    function isAssetItemFavorited(taskName, item) {
+      return Boolean(item?.library || item?.favorited || isAssetFavorited(taskName, item));
     }
 
     function isAssetFavorited(taskName, item) {
@@ -8962,6 +8970,10 @@ INDEX_HTML = r"""<!doctype html>
     function findFavoritedAsset(taskName, item) {
       if (!Array.isArray(assetLibraryItems) || !item?.file) return null;
       if (item.library && item.id) return item;
+      if (item.library_asset_id) {
+        const byId = assetLibraryItems.find(existing => String(existing.id || '') === String(item.library_asset_id || ''));
+        if (byId) return byId;
+      }
       const key = assetSourceKey(taskName, item);
       return assetLibraryItems.find(existing => assetSourceKey('', existing) === key) || null;
     }
@@ -14288,7 +14300,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             except json.JSONDecodeError:
                 summary = {}
         production_jobs = self._production_jobs(task_dir)
-        assets = self._task_assets(task_dir, files)
+        assets = self._task_assets(task_dir, files, task_name=name)
         production_plan_preview = self._production_plan_preview_for_task(name)
         active_job = self._active_job_for_task(name, task_dir)
         state_center = TaskStateCenter(
@@ -14725,10 +14737,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return sorted(actions)
 
     @staticmethod
-    def _task_assets(task_dir: Path, files: list[str]) -> dict:
+    def _task_assets(task_dir: Path, files: list[str], task_name: str = "") -> dict:
         images = []
         videos = []
         is_comfy_debug = task_dir.name == COMFY_DEBUG_TASK
+        favorite_map = WorkflowWebHandler._asset_library_source_map()
         for file in files:
             path = task_dir / file
             if not path.is_file():
@@ -14737,11 +14750,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 continue
             item = {
                 "file": file,
+                "source_task": task_name,
+                "source_task_id": task_name,
+                "source_file": file,
                 "name": Path(file).name,
                 "label": WorkflowWebHandler._asset_label(file),
                 "size": path.stat().st_size,
                 "mtime": path.stat().st_mtime,
             }
+            favorite = favorite_map.get(WorkflowWebHandler._asset_source_key(task_name, file))
+            if favorite:
+                item["favorited"] = True
+                item["library_asset_id"] = str(favorite.get("id") or "")
+                item["library_file"] = str(favorite.get("file") or "")
+                item["tags"] = favorite.get("tags") if isinstance(favorite.get("tags"), list) else []
             suffix = path.suffix.lower()
             if suffix in IMAGE_EXTENSIONS:
                 images.append(item)
@@ -14754,6 +14776,31 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "videos": videos,
             "counts": {"images": len(images), "videos": len(videos), "total": len(images) + len(videos)},
         }
+
+    @staticmethod
+    def _asset_library_source_map() -> dict[str, dict]:
+        if not ASSET_LIBRARY_INDEX.is_file():
+            return {}
+        try:
+            data = json.loads(ASSET_LIBRARY_INDEX.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return {}
+        items = data if isinstance(data, list) else []
+        result: dict[str, dict] = {}
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            task = str(item.get("source_task_id") or item.get("source_task") or "").strip()
+            source_file = str(item.get("source_file") or "").strip()
+            if task and source_file:
+                result[WorkflowWebHandler._asset_source_key(task, source_file)] = item
+        return result
+
+    @staticmethod
+    def _asset_source_key(task: str, file_name: str) -> str:
+        clean_task = re.sub(r"/+", "/", str(task or "").replace("\\", "/")).strip().strip("/")
+        clean_file = re.sub(r"/+", "/", str(file_name or "").replace("\\", "/")).strip().strip("/")
+        return f"{clean_task}::{clean_file}"
 
     @staticmethod
     def _is_visible_media_asset(file: str, include_nested: bool = False) -> bool:
@@ -16834,8 +16881,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("Invalid asset library folder")
         target_dir.mkdir(parents=True, exist_ok=True)
         items = [existing for existing in self._read_asset_library_index() if isinstance(existing, dict)]
+        target_source_key = self._asset_source_key(task, file_name)
         for existing in items:
-            if str(existing.get("source_task_id") or existing.get("source_task") or "") == task and str(existing.get("source_file") or "") == file_name:
+            existing_key = self._asset_source_key(
+                str(existing.get("source_task_id") or existing.get("source_task") or ""),
+                str(existing.get("source_file") or ""),
+            )
+            if existing_key == target_source_key:
                 return {"ok": True, "asset": existing, "duplicate": True}
         asset_id = uuid4().hex
         safe_stem = self._safe_asset_stem(Path(file_name).stem or "asset")
@@ -17188,7 +17240,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         kept: list[dict] = []
         for item in items:
             matches_id = asset_id and str(item.get("id") or "") == asset_id
-            matches_source = task and file_name and str(item.get("source_task_id") or item.get("source_task") or "") == task and str(item.get("source_file") or "") == file_name
+            matches_source = (
+                task
+                and file_name
+                and self._asset_source_key(
+                    str(item.get("source_task_id") or item.get("source_task") or ""),
+                    str(item.get("source_file") or ""),
+                )
+                == self._asset_source_key(task, file_name)
+            )
             if matches_id or matches_source:
                 removed.append(item)
             else:
