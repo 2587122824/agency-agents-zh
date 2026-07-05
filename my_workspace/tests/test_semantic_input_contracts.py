@@ -352,6 +352,80 @@ class SemanticInputContractTests(unittest.TestCase):
                 item["reference_images"],
             )
 
+    def test_linked_character_master_routes_base_variant_to_img2img(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            entity_path = root / "entities.json"
+            library_path = root / "library.json"
+            entity_path.write_text(
+                json.dumps(
+                    {
+                        "characters": {
+                            "hero": {
+                                "character_id": "hero",
+                                "name": "Hero",
+                                "master_image": "asset_master",
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            library_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "asset_master",
+                            "asset_id": "asset_master",
+                            "file": "01_character_base/hero.png",
+                            "kind": "image",
+                            "tags": ["character_base"],
+                            "character_id": "hero",
+                            "approved": True,
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            image_content = json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "hero_expression_frowning",
+                                "asset_role": "character",
+                                "character_id": "hero",
+                                "prompt": "Hero frowning expression reference, same face and hair",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            )
+            plan = compile_production_plan(
+                task_id="linked_character_master_img2img_test",
+                route_content='{"production_type":"custom"}',
+                image_content=image_content,
+                entity_path=entity_path,
+                asset_library_path=library_path,
+            )
+            item = plan["compiled_payload"]["image_prompts"][0]
+            self.assertEqual(item["workflow_id"], "04_keyframe")
+            self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
+            self.assertEqual(item["control_mode"], "img2img_style")
+            self.assertEqual(
+                item["input_base_image"],
+                "my_workspace/my_asset_library/01_character_base/hero.png",
+            )
+            self.assertEqual(
+                item["reference_image"],
+                "my_workspace/my_asset_library/01_character_base/hero.png",
+            )
+            self.assertNotEqual(item["workflow_mode"], "character_base")
+
     def test_animal_reference_sheet_stays_on_character_base(self) -> None:
         image_content = json.dumps(
             {

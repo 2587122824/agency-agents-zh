@@ -433,6 +433,7 @@ def _apply_character_base_policy(
         return
     if str(intent.get("asset_role") or "character").strip().lower() != "character":
         return
+    master_reference = _character_master_reference_from_item(item)
     character_text = " ".join(
         str(value or "")
         for value in (
@@ -452,6 +453,16 @@ def _apply_character_base_policy(
         )
         if notes is not None:
             notes.append(f"image intent {item.get('job_id')} kept on animal-safe character_base instead of humanoid turnaround")
+
+    if master_reference and not _looks_like_turnaround_sheet(character_text):
+        _route_character_base_item_to_master_img2img(
+            item,
+            intent,
+            master_reference,
+            notes,
+            reason="linked character master image",
+        )
+        return
 
     if not _looks_like_expression_sheet(character_text):
         return
@@ -487,6 +498,38 @@ def _apply_character_base_policy(
     )
     if notes is not None:
         notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe using {reference_job_id} for character consistency")
+
+
+def _character_master_reference_from_item(item: dict[str, Any]) -> str:
+    entity_context = item.get("entity_context") if isinstance(item.get("entity_context"), dict) else {}
+    character = entity_context.get("character") if isinstance(entity_context.get("character"), dict) else {}
+    return _first_identity_reference(character)
+
+
+def _route_character_base_item_to_master_img2img(
+    item: dict[str, Any],
+    intent: dict[str, Any],
+    master_reference: str,
+    notes: list[str] | None = None,
+    *,
+    reason: str,
+) -> None:
+    item["workflow_id"] = "04_keyframe"
+    item["workflow_mode"] = "img2img_style_keyframe"
+    item["image_task_mode"] = "img2img_style_keyframe"
+    item["mode"] = "img2img_style_keyframe"
+    item["control_mode"] = "img2img_style"
+    item["input_base_image"] = master_reference
+    item["reference_image"] = master_reference
+    item["input_reference_style"] = master_reference
+    item["denoise"] = intent.get("denoise") or 1
+    item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
+    item["prompt"] = _append_prompt_once(
+        str(item.get("prompt") or ""),
+        "参考关联角色母版图，必须保持同一张脸、同一年龄感、同一发型、肤色、五官比例、身材比例和服装主特征；只改变当前任务要求的表情、动作或轻微状态，不随机换人。",
+    )
+    if notes is not None:
+        notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe from {reason}")
 
 
 def _looks_like_animal_character(text: str) -> bool:
