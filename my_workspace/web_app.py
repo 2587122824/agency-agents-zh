@@ -16126,6 +16126,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                         "prompt_version": 2,
                     },
                 )
+            status = self._task_comfy_debug_status(task_dir)
         final_error = "；".join(errors[:5])
         self._update_job(
             run_id,
