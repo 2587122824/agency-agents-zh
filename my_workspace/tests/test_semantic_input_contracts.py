@@ -1409,6 +1409,37 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(result["status"], "skipped")
             self.assertNotIn("compose tool is not ffmpeg", result["reason"])
 
+    def test_local_ffmpeg_project_relative_output_path_not_nested(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            task_dir = Path(temp_dir) / "task_demo"
+            adapter = LocalFFmpegAdapter(WORKSPACE / "my_workspace")
+            output = adapter._resolve_output_path("my_workspace/my_task_output/task_demo/final.mp4", task_dir)
+            self.assertEqual(output, (WORKSPACE / "my_workspace/my_task_output/task_demo/final.mp4").resolve())
+
+    def test_local_ffmpeg_concat_list_uses_absolute_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            video_file = root / "clip.mp4"
+            video_file.write_bytes(b"fake")
+            adapter = LocalFFmpegAdapter(WORKSPACE / "my_workspace")
+            adapter._probe_media_duration = lambda _ffmpeg, _path: 4.0  # type: ignore[method-assign]
+            command, _ = adapter._build_video_concat_command(
+                ffmpeg_path="ffmpeg",
+                task_dir=root,
+                video_files=[video_file],
+                audio_file=None,
+                bgm_file=None,
+                subtitles_file=None,
+                subtitle_style="",
+                output_width=1080,
+                output_height=1920,
+                output_fps=24,
+                encoding_args=[],
+                output_file=root / "final.mp4",
+                target_duration_seconds=4,
+            )
+            self.assertEqual(command[command.index("-i") + 1], str((root / "local_ffmpeg_video_inputs.txt").resolve()))
+
     def test_video_filter_can_pad_to_target_duration(self) -> None:
         filter_text = LocalFFmpegAdapter._video_filter(None, "", 1080, 1920, 24, pad_end_seconds=8.5)
         self.assertIn("tpad=stop_mode=clone:stop_duration=8.500", filter_text)

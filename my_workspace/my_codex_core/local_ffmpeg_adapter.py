@@ -40,11 +40,10 @@ class LocalFFmpegAdapter:
         if tool not in {"", "ffmpeg"} and not (tool == "runninghub" and execution_mode == "comfy_full"):
             return {"status": "skipped", "reason": f"compose tool is not ffmpeg: {tool}"}
 
-        output_file = Path(manifest.get("composition", {}).get("target_file") or task_dir / "final_video.mp4")
-        if not output_file.is_absolute():
-            output_file = (task_dir / output_file).resolve()
-        else:
-            output_file = output_file.resolve()
+        output_file = self._resolve_output_path(
+            manifest.get("composition", {}).get("target_file") or "final_video.mp4",
+            task_dir,
+        )
         output_file.parent.mkdir(parents=True, exist_ok=True)
 
         manifest_path = task_dir / "local_ffmpeg_manifest.json"
@@ -368,16 +367,45 @@ class LocalFFmpegAdapter:
                     result.append(candidate)
         return result
 
+    def _resolve_output_path(self, raw_path: Any, task_dir: Path) -> Path:
+        text = str(raw_path or "").strip()
+        if not text:
+            return (task_dir / "final_video.mp4").resolve()
+        candidate = Path(text)
+        if candidate.is_absolute():
+            return candidate.resolve()
+        parts = candidate.parts
+        if parts and parts[0] == self.workspace_root.name:
+            return (self.project_root / candidate).resolve()
+        return (task_dir / candidate).resolve()
+
     @staticmethod
     def _resolve_task_media_path(raw_path: Any, task_dir: Path) -> Path | None:
         text = str(raw_path or "").strip()
         if not text:
             return None
         candidate = Path(text)
-        if not candidate.is_absolute():
-            candidate = task_dir / candidate
+        if candidate.is_absolute():
+            try:
+                return candidate.resolve()
+            except OSError:
+                return None
+        project_root = Path(__file__).resolve().parents[2]
+        workspace_root = project_root / "my_workspace"
+        candidates: list[Path] = []
+        parts = candidate.parts
+        if parts and parts[0] == workspace_root.name:
+            candidates.append(project_root / candidate)
+        candidates.extend([task_dir / candidate, workspace_root / candidate])
+        for value in candidates:
+            try:
+                resolved = value.resolve()
+            except OSError:
+                continue
+            if resolved.is_file():
+                return resolved
         try:
-            return candidate.resolve()
+            return candidates[0].resolve() if candidates else candidate.resolve()
         except OSError:
             return None
 
@@ -713,7 +741,7 @@ class LocalFFmpegAdapter:
             "-safe",
             "0",
             "-i",
-            str(concat_path),
+                str(concat_path.resolve()),
         ]
         input_files: list[Path] = [*video_files]
         if audio_file:
@@ -765,7 +793,7 @@ class LocalFFmpegAdapter:
             "-safe",
             "0",
             "-i",
-            str(concat_path),
+                str(concat_path.resolve()),
         ]
         input_files: list[Path] = [*image_files]
         if audio_file:
