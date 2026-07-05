@@ -617,15 +617,18 @@ def _apply_generated_character_reference_policy(
         return
 
     if workflow_id == "04_keyframe" and workflow_mode == "keyframe" and not item.get("input_identity_image"):
-        item["workflow_mode"] = "identity_keyframe"
-        item["image_task_mode"] = "identity_keyframe"
-        item["mode"] = "identity_keyframe"
-        item["control_mode"] = "identity_reference"
+        item["workflow_mode"] = "img2img_style_keyframe"
+        item["image_task_mode"] = "img2img_style_keyframe"
+        item["mode"] = "img2img_style_keyframe"
+        item["control_mode"] = "img2img_style"
         item["input_bindings"] = {
             **(item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}),
-            "input_identity_image": {"from_job": reference_job_id, "output": "output_final_image"},
+            "input_base_image": {"from_job": reference_job_id, "output": "output_final_image"},
         }
         item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
+        item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
+        item["denoise"] = intent.get("denoise") or 0.42
+        item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
         item["prompt"] = _append_prompt_once(
             str(item.get("prompt") or ""),
             "主角必须参考角色母版，保持同一张脸、同一年龄感、同一发型和身材比例；只改变场景、动作、表情和服装阶段，不随机换人。",

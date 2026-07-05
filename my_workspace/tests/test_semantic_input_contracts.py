@@ -373,9 +373,9 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         keyframe = items["shot_005_three_frame_end_frame"]
         self.assertEqual(keyframe["character_id"], "character_protagonist")
-        self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
+        self.assertEqual(keyframe["workflow_mode"], "img2img_style_keyframe")
         self.assertEqual(
-            keyframe["input_bindings"]["input_identity_image"],
+            keyframe["input_bindings"]["input_base_image"],
             {"from_job": "asset_character_protagonist_2008", "output": "output_final_image"},
         )
 
