@@ -1599,6 +1599,28 @@ class SemanticInputContractTests(unittest.TestCase):
             built = adapter._build_runninghub_payload({"input_base_image": str(image_path)}, config)
             self.assertEqual(built["nodeInfoList"][0]["fieldValue"], "uploaded/base.png")
 
+    def test_material_image_job_does_not_inherit_video_prompt_fields(self) -> None:
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        payload = adapter._payload_for_material_job(
+            {
+                "video_prompts": [{"prompts": {"clip": {"positive": "video prompt"}}}],
+                "video_prompt": "video prompt",
+                "video_task_mode": "i2v_first_frame",
+            },
+            {
+                "type": "image",
+                "job_id": "shot_001",
+                "mode": "img2img_style_keyframe",
+                "prompt": "让图中人物坐在操场上吃饭",
+            },
+            1,
+        )
+        self.assertEqual(payload["prompt"], "让图中人物坐在操场上吃饭")
+        self.assertNotIn("video_prompts", payload)
+        self.assertNotIn("video_prompt", payload)
+        prepared = adapter._prepare_runninghub_payload(payload)
+        self.assertEqual(prepared["prompt"], "让图中人物坐在操场上吃饭")
+
     def test_live_action_retro_prompts_get_quality_guardrails(self) -> None:
         plan = compile_production_plan(
             task_id="live_action_quality",

@@ -2086,10 +2086,20 @@ class CloudComfyUIAdapter:
             or ("first_frame" if job_type == "video" and reference_image else "reference_image" if reference_image else "none")
         )
         if job_type == "video":
+            payload.pop("image_prompt", None)
+            payload.pop("image_prompts", None)
+            payload.pop("image_task_mode", None)
             prompt = self._runninghub_safe_video_prompt(prompt)
             negative = self._runninghub_safe_video_negative(negative)
         elif str(job.get("mode") or "").strip().lower() == "style_reference":
+            payload.pop("video_prompt", None)
+            payload.pop("video_prompts", None)
+            payload.pop("video_task_mode", None)
             prompt = self._safe_style_reference_prompt(prompt)
+        else:
+            payload.pop("video_prompt", None)
+            payload.pop("video_prompts", None)
+            payload.pop("video_task_mode", None)
         payload["prompt"] = prompt
         payload["negative_prompt"] = negative
         if job_type == "video":
