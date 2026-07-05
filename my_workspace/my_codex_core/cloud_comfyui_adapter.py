@@ -1520,8 +1520,14 @@ class CloudComfyUIAdapter:
             or workflow_key == "10_broll_transition_video"
             or mode_key == "broll_scene_video"
         )
+        is_first_frame_i2v_ltx = (
+            workflow_key in {"02_ltx_video_2_3", "06_i2v_first_frame"}
+            or mode_key == "i2v_first_frame"
+        )
         if is_broll_ltx and {"2483", "2612", "3059"}.intersection(stale_node_ids):
             return json.dumps(cls._ltx_text_to_video_node_info(), ensure_ascii=False, indent=2)
+        if is_first_frame_i2v_ltx and {"177", "220", "180", "181", "231", "155", "156"}.intersection(stale_node_ids):
+            return json.dumps(cls._ltx_image_to_video_node_info(), ensure_ascii=False, indent=2)
 
         # The current z_image_turbo RunningHub workflow uses node 63 for the
         # text prompt and node 64 for latent size. Some migrated scene modes
@@ -1637,6 +1643,32 @@ class CloudComfyUIAdapter:
             {"nodeId": "40", "fieldName": "frame_rate", "fieldValue": "{{fps}}"},
             {"nodeId": "28", "fieldName": "noise_seed", "fieldValue": "{{seed}}"},
             {"nodeId": "46", "fieldName": "noise_seed", "fieldValue": "{{seed}}"},
+        ]
+
+    @staticmethod
+    def _ltx_image_to_video_node_info() -> list[dict[str, Any]]:
+        return [
+            {"nodeId": "4923", "fieldName": "prompt", "fieldValue": "{{prompt}}"},
+            {"nodeId": "2483", "fieldName": "text", "fieldValue": "{{prompt}}"},
+            {"nodeId": "4961", "fieldName": "prompt", "fieldValue": "{{negative_prompt}}"},
+            {"nodeId": "2612", "fieldName": "text", "fieldValue": "{{negative_prompt}}"},
+            {"nodeId": "2004", "fieldName": "image", "fieldValue": "{{reference_image}}"},
+            {"nodeId": "3059", "fieldName": "width", "fieldValue": "{{width}}"},
+            {"nodeId": "3059", "fieldName": "height", "fieldValue": "{{height}}"},
+            {"nodeId": "3059", "fieldName": "length", "fieldValue": "{{frame_count}}"},
+            {"nodeId": "4979", "fieldName": "value", "fieldValue": "{{frame_count}}"},
+            {"nodeId": "3980", "fieldName": "frames_number", "fieldValue": "{{frame_count}}"},
+            {"nodeId": "4978", "fieldName": "value", "fieldValue": "{{fps}}"},
+            {"nodeId": "3980", "fieldName": "frame_rate", "fieldValue": "{{fps}}"},
+            {"nodeId": "1241", "fieldName": "frame_rate", "fieldValue": "{{fps}}"},
+            {"nodeId": "4849", "fieldName": "fps", "fieldValue": "{{fps}}"},
+            {"nodeId": "4819", "fieldName": "fps", "fieldValue": "{{fps}}"},
+            {"nodeId": "4967", "fieldName": "seed", "fieldValue": "{{seed}}"},
+            {"nodeId": "3159", "fieldName": "strength", "fieldValue": 1},
+            {"nodeId": "3159", "fieldName": "bypass", "fieldValue": False},
+            {"nodeId": "4977", "fieldName": "value", "fieldValue": False},
+            {"nodeId": "4852", "fieldName": "filename_prefix", "fieldValue": "video/ltx2.3-i2v-first-frame"},
+            {"nodeId": "4823", "fieldName": "filename_prefix", "fieldValue": "video/ltx2.3-i2v-first-frame"},
         ]
 
     @classmethod

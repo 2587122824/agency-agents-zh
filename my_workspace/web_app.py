@@ -6182,6 +6182,19 @@ INDEX_HTML = r"""<!doctype html>
       if (text === '[]') return text;
       const workflowKey = String(workflowId || '').trim();
       const modeKey = String(mode || '').trim();
+      if (['02_ltx_video_2_3', '06_i2v_first_frame'].includes(workflowKey) || modeKey === 'i2v_first_frame') {
+        try {
+          const parsed = JSON.parse(text);
+          if (Array.isArray(parsed)) {
+            const staleIds = new Set(parsed.filter(item => item && typeof item === 'object').map(item => String(item.nodeId ?? '')));
+            if (['177', '220', '180', '181', '231', '155', '156'].some(id => staleIds.has(id))) {
+              return JSON.stringify(ltxFirstFrameI2VNodeInfoList(), null, 2);
+            }
+          }
+        } catch {
+          return text;
+        }
+      }
       if (workflowKey !== '04_keyframe' || modeKey !== 'img2img_style_keyframe') return text;
       try {
         const parsed = JSON.parse(text);
@@ -6202,6 +6215,32 @@ INDEX_HTML = r"""<!doctype html>
       } catch {
         return text;
       }
+    }
+
+    function ltxFirstFrameI2VNodeInfoList() {
+      return [
+        { nodeId: '4923', fieldName: 'prompt', fieldValue: '{{prompt}}' },
+        { nodeId: '2483', fieldName: 'text', fieldValue: '{{prompt}}' },
+        { nodeId: '4961', fieldName: 'prompt', fieldValue: '{{negative_prompt}}' },
+        { nodeId: '2612', fieldName: 'text', fieldValue: '{{negative_prompt}}' },
+        { nodeId: '2004', fieldName: 'image', fieldValue: '{{reference_image}}' },
+        { nodeId: '3059', fieldName: 'width', fieldValue: '{{width}}' },
+        { nodeId: '3059', fieldName: 'height', fieldValue: '{{height}}' },
+        { nodeId: '3059', fieldName: 'length', fieldValue: '{{frame_count}}' },
+        { nodeId: '4979', fieldName: 'value', fieldValue: '{{frame_count}}' },
+        { nodeId: '3980', fieldName: 'frames_number', fieldValue: '{{frame_count}}' },
+        { nodeId: '4978', fieldName: 'value', fieldValue: '{{fps}}' },
+        { nodeId: '3980', fieldName: 'frame_rate', fieldValue: '{{fps}}' },
+        { nodeId: '1241', fieldName: 'frame_rate', fieldValue: '{{fps}}' },
+        { nodeId: '4849', fieldName: 'fps', fieldValue: '{{fps}}' },
+        { nodeId: '4819', fieldName: 'fps', fieldValue: '{{fps}}' },
+        { nodeId: '4967', fieldName: 'seed', fieldValue: '{{seed}}' },
+        { nodeId: '3159', fieldName: 'strength', fieldValue: 1 },
+        { nodeId: '3159', fieldName: 'bypass', fieldValue: false },
+        { nodeId: '4977', fieldName: 'value', fieldValue: false },
+        { nodeId: '4852', fieldName: 'filename_prefix', fieldValue: 'video/ltx2.3-i2v-first-frame' },
+        { nodeId: '4823', fieldName: 'filename_prefix', fieldValue: 'video/ltx2.3-i2v-first-frame' },
+      ];
     }
 
     function getSelectedComfyWorkflowPreset() {

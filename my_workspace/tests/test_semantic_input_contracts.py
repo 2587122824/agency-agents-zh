@@ -1179,6 +1179,31 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn({"nodeId": "73", "fieldName": "text", "fieldValue": "{{prompt}}"}, rows)
         self.assertIn({"nodeId": "43", "fieldName": "value", "fieldValue": "{{width}}"}, rows)
 
+    def test_adapter_repairs_legacy_first_frame_i2v_ltx_node_info(self) -> None:
+        repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
+            json.dumps(
+                [
+                    {"nodeId": "177", "fieldName": "text", "fieldValue": "{{prompt}}"},
+                    {"nodeId": "180", "fieldName": "width", "fieldValue": "{{width}}"},
+                    {"nodeId": "180", "fieldName": "height", "fieldValue": "{{height}}"},
+                    {"nodeId": "231", "fieldName": "fps", "fieldValue": "{{fps}}"},
+                ]
+            ),
+            workflow_id="06_i2v_first_frame",
+            workflow_mode="i2v_first_frame",
+        )
+        rows = json.loads(repaired)
+        row_keys = {(row["nodeId"], row["fieldName"], row["fieldValue"]) for row in rows}
+        self.assertNotIn("177", {row["nodeId"] for row in rows})
+        self.assertIn(("4923", "prompt", "{{prompt}}"), row_keys)
+        self.assertIn(("2004", "image", "{{reference_image}}"), row_keys)
+        self.assertIn(("3059", "width", "{{width}}"), row_keys)
+        self.assertIn(("3059", "height", "{{height}}"), row_keys)
+        self.assertIn(("3059", "length", "{{frame_count}}"), row_keys)
+        self.assertIn(("4978", "value", "{{fps}}"), row_keys)
+        self.assertIn(("4967", "seed", "{{seed}}"), row_keys)
+        self.assertIn(("4977", "value", False), row_keys)
+
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {

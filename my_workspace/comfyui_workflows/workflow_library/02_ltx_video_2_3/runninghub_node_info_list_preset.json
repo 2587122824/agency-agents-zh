@@ -1,97 +1,126 @@
 [
   {
-    "nodeId": "177",
-    "fieldName": "text",
+    "nodeId": "4923",
+    "fieldName": "prompt",
     "fieldValue": "{{prompt}}",
-    "description": "primary prompt text used by the prompt switch"
+    "description": "Gemma API positive prompt from the debug/production form"
   },
   {
-    "nodeId": "220",
+    "nodeId": "2483",
     "fieldName": "text",
     "fieldValue": "{{prompt}}",
-    "description": "visible prompt passthrough feeding CLIPTextEncode"
+    "description": "CLIP positive prompt branch used by LTXVConditioning"
   },
   {
-    "nodeId": "182",
+    "nodeId": "4961",
+    "fieldName": "prompt",
+    "fieldValue": "{{negative_prompt}}",
+    "description": "Gemma API negative prompt"
+  },
+  {
+    "nodeId": "2612",
     "fieldName": "text",
     "fieldValue": "{{negative_prompt}}",
-    "description": "negative prompt"
+    "description": "CLIP negative prompt branch used by LTXVConditioning"
   },
   {
-    "nodeId": "193",
+    "nodeId": "2004",
     "fieldName": "image",
-    "fieldValue": "{{input_base_image}}",
-    "description": "first frame / base image"
+    "fieldValue": "{{reference_image}}",
+    "description": "uploaded first-frame image"
   },
   {
-    "nodeId": "186",
-    "fieldName": "value",
-    "fieldValue": "{{width}}",
-    "description": "reference resize long side"
-  },
-  {
-    "nodeId": "192",
-    "fieldName": "value",
-    "fieldValue": "{{duration}}",
-    "description": "clip duration in seconds"
-  },
-  {
-    "nodeId": "154",
-    "fieldName": "value",
-    "fieldValue": "{{fps}}",
-    "description": "frame rate"
-  },
-  {
-    "nodeId": "180",
+    "nodeId": "3059",
     "fieldName": "width",
     "fieldValue": "{{width}}",
-    "description": "latent width"
+    "description": "latent video width"
   },
   {
-    "nodeId": "180",
+    "nodeId": "3059",
     "fieldName": "height",
     "fieldValue": "{{height}}",
-    "description": "latent height"
+    "description": "latent video height"
   },
   {
-    "nodeId": "180",
+    "nodeId": "3059",
     "fieldName": "length",
     "fieldValue": "{{frame_count}}",
-    "description": "latent frame count"
+    "description": "latent frame count computed from duration and fps"
   },
   {
-    "nodeId": "181",
+    "nodeId": "4979",
+    "fieldName": "value",
+    "fieldValue": "{{frame_count}}",
+    "description": "shared number-of-frames primitive"
+  },
+  {
+    "nodeId": "3980",
     "fieldName": "frames_number",
     "fieldValue": "{{frame_count}}",
     "description": "audio latent frame count"
   },
   {
-    "nodeId": "181",
+    "nodeId": "4978",
+    "fieldName": "value",
+    "fieldValue": "{{fps}}",
+    "description": "shared fps primitive"
+  },
+  {
+    "nodeId": "3980",
     "fieldName": "frame_rate",
     "fieldValue": "{{fps}}",
     "description": "audio latent frame rate"
   },
   {
-    "nodeId": "231",
+    "nodeId": "1241",
+    "fieldName": "frame_rate",
+    "fieldValue": "{{fps}}",
+    "description": "LTX conditioning frame rate"
+  },
+  {
+    "nodeId": "4849",
     "fieldName": "fps",
     "fieldValue": "{{fps}}",
-    "description": "video container fps"
+    "description": "primary CreateVideo fps"
   },
   {
-    "nodeId": "155",
-    "fieldName": "noise_seed",
+    "nodeId": "4819",
+    "fieldName": "fps",
+    "fieldValue": "{{fps}}",
+    "description": "secondary CreateVideo fps"
+  },
+  {
+    "nodeId": "4967",
+    "fieldName": "seed",
     "fieldValue": "{{seed}}",
-    "description": "first pass noise seed"
+    "description": "Clown sampler seed"
   },
   {
-    "nodeId": "156",
-    "fieldName": "noise_seed",
-    "fieldValue": "{{seed}}",
-    "description": "upscale/refine pass noise seed"
+    "nodeId": "3159",
+    "fieldName": "strength",
+    "fieldValue": 1,
+    "description": "keep first-frame image conditioning enabled"
   },
   {
-    "nodeId": "232",
+    "nodeId": "3159",
+    "fieldName": "bypass",
+    "fieldValue": false,
+    "description": "do not bypass i2v first-frame conditioning"
+  },
+  {
+    "nodeId": "4977",
+    "fieldName": "value",
+    "fieldValue": false,
+    "description": "shared bypass_i2v primitive must stay disabled"
+  },
+  {
+    "nodeId": "4852",
     "fieldName": "filename_prefix",
-    "fieldValue": "video/ltx2.3-i2v"
+    "fieldValue": "video/ltx2.3-i2v-first-frame"
+  },
+  {
+    "nodeId": "4823",
+    "fieldName": "filename_prefix",
+    "fieldValue": "video/ltx2.3-i2v-first-frame"
   }
 ]
