@@ -73,6 +73,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Global frame rate is 24fps unless the locked render context says otherwise.
 - First/middle/last video clips are locked to 4 seconds / 24fps.
 - Staff should reference entities and intents, not override locked face/hair/outfit/style/resolution/FPS values.
+- Scene consistency is managed through the production entity scene library. Scene entities should use `scene_id`, `scene_master_image`, `scene_description`, `fixed_layout`, `lighting`, `camera_allowed_changes`, and `forbidden_changes`; `scene_reference` remains a backward-compatible alias for the master scene image. Staff should reference `scene_id` instead of restating or reinventing the location every shot.
 
 ## Visual Provider State
 

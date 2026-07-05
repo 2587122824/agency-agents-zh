@@ -3175,6 +3175,18 @@ INDEX_HTML = r"""<!doctype html>
                   <label>参考资产 / 母版图
                     <input id="productionEntityReference" autocomplete="off" spellcheck="false" placeholder="my_workspace/my_asset_library/xxx.png 或资产ID" />
                   </label>
+                  <label id="productionSceneDescriptionField" hidden>场景描述
+                    <textarea id="productionSceneDescription" spellcheck="false" placeholder="空间类型、时代、材质、氛围、可复用用途"></textarea>
+                  </label>
+                  <label id="productionSceneLayoutField" hidden>固定布局（每行一条）
+                    <textarea id="productionSceneLayout" spellcheck="false" placeholder="舞台在画面中央&#10;观众席围绕舞台&#10;远处保留城市天际线"></textarea>
+                  </label>
+                  <label id="productionSceneLightingField" hidden>灯光规则（每行一条）
+                    <textarea id="productionSceneLighting" spellcheck="false" placeholder="傍晚暖色主光&#10;舞台顶部灯架保持不变&#10;霓虹招牌只作为背景光"></textarea>
+                  </label>
+                  <label id="productionSceneCameraChangesField" hidden>允许镜头变化（每行一条）
+                    <textarea id="productionSceneCameraChanges" spellcheck="false" placeholder="允许远景/中景切换&#10;允许轻微推拉摇移&#10;允许人物在舞台左右移动"></textarea>
+                  </label>
                   <label id="productionEntityTurnaroundField">角色三视图资产（每行一个路径或资产 ID）
                     <textarea id="productionEntityTurnaround" spellcheck="false" placeholder="character_turnaround_asset_id&#10;my_workspace/my_asset_library/04_character_turnaround/xxx.png"></textarea>
                   </label>
@@ -3843,6 +3855,14 @@ INDEX_HTML = r"""<!doctype html>
       productionEntityId: document.getElementById('productionEntityId'),
       productionEntityName: document.getElementById('productionEntityName'),
       productionEntityReference: document.getElementById('productionEntityReference'),
+      productionSceneDescriptionField: document.getElementById('productionSceneDescriptionField'),
+      productionSceneDescription: document.getElementById('productionSceneDescription'),
+      productionSceneLayoutField: document.getElementById('productionSceneLayoutField'),
+      productionSceneLayout: document.getElementById('productionSceneLayout'),
+      productionSceneLightingField: document.getElementById('productionSceneLightingField'),
+      productionSceneLighting: document.getElementById('productionSceneLighting'),
+      productionSceneCameraChangesField: document.getElementById('productionSceneCameraChangesField'),
+      productionSceneCameraChanges: document.getElementById('productionSceneCameraChanges'),
       productionEntityTurnaroundField: document.getElementById('productionEntityTurnaroundField'),
       productionEntityTurnaround: document.getElementById('productionEntityTurnaround'),
       productionEntityWeight: document.getElementById('productionEntityWeight'),
@@ -9534,7 +9554,7 @@ INDEX_HTML = r"""<!doctype html>
         characters: 'master_image',
         styles: 'style_reference',
         products: 'product_master_image',
-        scenes: 'scene_reference',
+        scenes: 'scene_master_image',
       }[group] || 'reference_asset';
     }
 
@@ -9543,8 +9563,20 @@ INDEX_HTML = r"""<!doctype html>
         characters: 'forbidden_changes',
         styles: 'negative_constraints',
         products: 'forbidden_regions',
-        scenes: 'background_constraints',
+        scenes: 'forbidden_changes',
       }[group] || 'negative_constraints';
+    }
+
+    function productionEntityLines(value) {
+      return String(value || '')
+        .split(/\r?\n/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+
+    function productionEntityListValue(item, key) {
+      const value = item?.[key];
+      return Array.isArray(value) ? value.join('\n') : String(value || '');
     }
 
     function renderProductionEntityList() {
@@ -9586,7 +9618,20 @@ INDEX_HTML = r"""<!doctype html>
       const constraintKey = productionEntityConstraintKey(group);
       if (els.productionEntityId) els.productionEntityId.value = item[idKey] || item.id || '';
       if (els.productionEntityName) els.productionEntityName.value = item.name || '';
-      if (els.productionEntityReference) els.productionEntityReference.value = item[refKey] || '';
+      if (els.productionEntityReference) els.productionEntityReference.value = item[refKey] || (group === 'scenes' ? item.scene_reference : '') || '';
+      const isScene = group === 'scenes';
+      for (const field of [
+        els.productionSceneDescriptionField,
+        els.productionSceneLayoutField,
+        els.productionSceneLightingField,
+        els.productionSceneCameraChangesField,
+      ]) {
+        if (field) field.hidden = !isScene;
+      }
+      if (els.productionSceneDescription) els.productionSceneDescription.value = isScene ? (item.scene_description || '') : '';
+      if (els.productionSceneLayout) els.productionSceneLayout.value = isScene ? productionEntityListValue(item, 'fixed_layout') : '';
+      if (els.productionSceneLighting) els.productionSceneLighting.value = isScene ? productionEntityListValue(item, 'lighting') : '';
+      if (els.productionSceneCameraChanges) els.productionSceneCameraChanges.value = isScene ? productionEntityListValue(item, 'camera_allowed_changes') : '';
       if (els.productionEntityTurnaroundField) els.productionEntityTurnaroundField.hidden = group !== 'characters';
       if (els.productionEntityTurnaround) {
         const turnarounds = group === 'characters' && Array.isArray(item.turnaround_images) ? item.turnaround_images : [];
@@ -9600,6 +9645,12 @@ INDEX_HTML = r"""<!doctype html>
       delete extra.id;
       delete extra.name;
       delete extra[refKey];
+      delete extra.scene_reference;
+      delete extra.scene_master_image;
+      delete extra.scene_description;
+      delete extra.fixed_layout;
+      delete extra.lighting;
+      delete extra.camera_allowed_changes;
       delete extra.turnaround_images;
       delete extra.recommended_weight;
       delete extra[constraintKey];
@@ -9633,10 +9684,7 @@ INDEX_HTML = r"""<!doctype html>
           return;
         }
       }
-      const constraints = String(els.productionEntityConstraints?.value || '')
-        .split(/\r?\n/)
-        .map(item => item.trim())
-        .filter(Boolean);
+      const constraints = productionEntityLines(els.productionEntityConstraints?.value || '');
       const item = {
         ...(extra && typeof extra === 'object' ? extra : {}),
         [idKey]: id,
@@ -9646,11 +9694,18 @@ INDEX_HTML = r"""<!doctype html>
         recommended_weight: String(els.productionEntityWeight?.value || '').trim(),
         [constraintKey]: constraints,
       };
+      if (group === 'scenes') {
+        item.scene_reference = String(els.productionEntityReference?.value || '').trim();
+        item.scene_master_image = item.scene_reference;
+        item.scene_description = String(els.productionSceneDescription?.value || '').trim();
+        item.fixed_layout = productionEntityLines(els.productionSceneLayout?.value || '');
+        item.lighting = productionEntityLines(els.productionSceneLighting?.value || '');
+        item.camera_allowed_changes = productionEntityLines(els.productionSceneCameraChanges?.value || '');
+        item.forbidden_changes = constraints;
+        item.background_constraints = constraints;
+      }
       if (group === 'characters') {
-        item.turnaround_images = String(els.productionEntityTurnaround?.value || '')
-          .split(/\r?\n/)
-          .map(value => value.trim())
-          .filter(Boolean);
+        item.turnaround_images = productionEntityLines(els.productionEntityTurnaround?.value || '');
       }
       const next = JSON.parse(JSON.stringify(productionEntities || {}));
       next[group] = next[group] && typeof next[group] === 'object' ? next[group] : {};

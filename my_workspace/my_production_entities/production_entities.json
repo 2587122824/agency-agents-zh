@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "description": "生产实体库：角色、风格、产品、场景是一等对象。数字员工只引用 *_id，系统编译器从这里补齐母版图、规则、禁改项、推荐权重和适用工作流。",
+  "schema_version": 2,
+  "description": "生产实体库：角色、风格、产品、场景是一等对象。数字员工只引用 *_id，系统编译器从这里继承母版资产、固定规则、禁改项、推荐权重和适用工作流。场景库字段包括 scene_id、scene_master_image、scene_description、fixed_layout、lighting、camera_allowed_changes、forbidden_changes。",
   "characters": {},
   "styles": {},
   "products": {},

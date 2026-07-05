@@ -20,6 +20,7 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
     _image_prompt_item,
     compile_production_plan,
 )
+from my_codex_core.production_entities import entity_context_for_ids, normalize_production_entities  # noqa: E402
 from my_codex_core.production_pipeline import (  # noqa: E402
     _clean_voice_text,
     _packaging_dependency_blockers,
@@ -93,6 +94,36 @@ class SemanticInputContractTests(unittest.TestCase):
                 {"audio": {"adapter_status": "skipped", "voice_text_status": "disabled", "voiceover_audio_file": ""}},
             )
             self.assertIsNone(found)
+
+    def test_scene_library_fields_are_normalized_for_context(self) -> None:
+        registry = normalize_production_entities(
+            {
+                "scenes": {
+                    "scene_arena": {
+                        "name": "露天竞技场",
+                        "scene_master_image": "my_workspace/my_asset_library/03_scene_base/arena.png",
+                        "scene_description": "线下露天竞技场舞台，观众席环绕。",
+                        "fixed_layout": ["舞台在中央", "观众席围绕舞台"],
+                        "lighting": ["傍晚暖色主光"],
+                        "camera_allowed_changes": ["允许远景和中景切换"],
+                        "forbidden_changes": ["不要改变舞台结构"],
+                    }
+                }
+            }
+        )
+
+        scene = registry["scenes"]["scene_arena"]
+        self.assertEqual(scene["scene_id"], "scene_arena")
+        self.assertEqual(scene["scene_reference"], scene["scene_master_image"])
+        context = entity_context_for_ids(
+            {"characters": [], "styles": [], "products": [], "scenes": [scene]},
+            scene_id="scene_arena",
+        )
+        self.assertEqual(context["scene"]["scene_master_image"], "my_workspace/my_asset_library/03_scene_base/arena.png")
+        self.assertIn("舞台在中央", context["constraints"])
+        self.assertIn("傍晚暖色主光", context["constraints"])
+        self.assertIn("允许远景和中景切换", context["constraints"])
+        self.assertIn("不要改变舞台结构", context["constraints"])
 
     def test_task_state_does_not_offer_debug_queue_when_gate_is_off(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

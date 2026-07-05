@@ -82,7 +82,14 @@ def link_production_entities_to_assets(
         for entity_id, entity in values.items():
             if not isinstance(entity, dict):
                 continue
-            for key in ("master_image", "style_reference", "product_master_image", "scene_reference", "expression_sheet"):
+            for key in (
+                "master_image",
+                "style_reference",
+                "product_master_image",
+                "scene_reference",
+                "scene_master_image",
+                "expression_sheet",
+            ):
                 if key in entity:
                     entity[key] = resolve(entity.get(key))
             for key in ("turnaround_images", "reference_assets", "approved_asset_ids"):
@@ -118,6 +125,8 @@ def link_production_entities_to_assets(
                 entity["product_master_image"] = next(iter(matched_paths), "")
             elif group == "scenes" and not str(entity.get("scene_reference") or "").strip():
                 entity["scene_reference"] = next(iter(matched_paths), "")
+            if group == "scenes" and not str(entity.get("scene_master_image") or "").strip():
+                entity["scene_master_image"] = str(entity.get("scene_reference") or next(iter(matched_paths), ""))
     return linked
 
 
@@ -294,8 +303,26 @@ def _normalize_entity_group(value: Any, id_key: str) -> dict[str, dict[str, Any]
         item.setdefault("reference_assets", [])
         item.setdefault("recommended_weight", "")
         item.setdefault("negative_constraints", [])
+        if id_key == "scene_id":
+            _normalize_scene_entity(item)
         result[entity_id] = item
     return result
+
+
+def _normalize_scene_entity(item: dict[str, Any]) -> None:
+    scene_reference = str(item.get("scene_reference") or item.get("scene_master_image") or "").strip()
+    scene_master_image = str(item.get("scene_master_image") or scene_reference).strip()
+    item["scene_reference"] = scene_reference or scene_master_image
+    item["scene_master_image"] = scene_master_image or scene_reference
+    item.setdefault("scene_description", "")
+    for key in ("fixed_layout", "lighting", "camera_allowed_changes", "forbidden_changes", "background_constraints"):
+        value = item.get(key)
+        if isinstance(value, str):
+            item[key] = [line.strip() for line in value.splitlines() if line.strip()]
+        elif isinstance(value, list):
+            item[key] = [str(line).strip() for line in value if str(line).strip()]
+        else:
+            item[key] = []
 
 
 def _add_ref(target: set[str], value: Any) -> None:
@@ -356,6 +383,7 @@ def _entity_reference_assets(entity: dict[str, Any]) -> list[str]:
         "style_reference",
         "product_master_image",
         "scene_reference",
+        "scene_master_image",
         "expression_sheet",
     ):
         value = str(entity.get(key) or "").strip()
@@ -382,6 +410,9 @@ def _entity_constraints(entity: dict[str, Any]) -> list[str]:
         "forbidden_regions",
         "display_angles",
         "lighting_rules",
+        "lighting",
+        "fixed_layout",
+        "camera_allowed_changes",
         "background_constraints",
     ):
         raw = entity.get(key)
