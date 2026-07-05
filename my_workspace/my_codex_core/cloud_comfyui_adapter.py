@@ -1492,7 +1492,7 @@ class CloudComfyUIAdapter:
         if not text or text == "[]":
             return text or "[]"
         try:
-            rows = json.loads(text)
+            rows = cls._loads_node_info_json(text)
         except Exception:
             return text
         if not isinstance(rows, list):
@@ -2467,17 +2467,32 @@ class CloudComfyUIAdapter:
         return number if number >= minimum else None
 
     @staticmethod
-    def _parse_node_info_list(compose_config: dict[str, Any]) -> list[Any]:
+    def _loads_node_info_json(text: str) -> list[Any]:
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # Some debug-console exports store dynamic placeholders as bare
+            # values, e.g. "fieldValue": {{width}}. Normalize only that narrow
+            # nodeInfo pattern, then keep the downstream request as real JSON.
+            fixed = re.sub(
+                r'(:\s*)({{\s*[A-Za-z0-9_]+\s*}})(\s*[,}\]])',
+                r'\1"\2"\3',
+                text,
+            )
+            data = json.loads(fixed)
+        if not isinstance(data, list):
+            raise ValueError("ComfyUI nodeInfoList must be a JSON array")
+        return data
+
+    @classmethod
+    def _parse_node_info_list(cls, compose_config: dict[str, Any]) -> list[Any]:
         raw = compose_config.get("node_info_list")
         if isinstance(raw, list):
             return raw
         text = str(raw or compose_config.get("node_info_list_json") or "").strip()
         if not text:
             return []
-        data = json.loads(text)
-        if not isinstance(data, list):
-            raise ValueError("ComfyUI nodeInfoList must be a JSON array")
-        return data
+        return cls._loads_node_info_json(text)
 
     @classmethod
     def _find_download_urls(cls, data: Any) -> list[str]:

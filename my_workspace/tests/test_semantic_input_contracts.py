@@ -817,6 +817,18 @@ class SemanticInputContractTests(unittest.TestCase):
         values = [item["fieldValue"] for item in built["nodeInfoList"]]
         self.assertEqual(values, ["identity.png", "source.mp4"])
 
+    def test_adapter_accepts_bare_nodeinfo_placeholders(self) -> None:
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        config = {
+            "node_info_list_json": (
+                '[{"nodeId":"88","fieldName":"width","fieldValue": {{width}}},'
+                '{"nodeId":"88","fieldName":"height","fieldValue": {{height}}}]'
+            )
+        }
+        built = adapter._build_runninghub_payload({"width": 480, "height": 848}, config)
+        values = [(item["fieldName"], item["fieldValue"]) for item in built["nodeInfoList"]]
+        self.assertEqual(values, [("width", 480), ("height", 848)])
+
     def test_adapter_repairs_legacy_broll_ltx_node_info(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
             json.dumps(
