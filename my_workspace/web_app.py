@@ -12891,6 +12891,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     if comfy_base_url:
                         production_compose_config["base_url"] = comfy_base_url
                 production_config = self._apply_runtime_comfy_config(production_config, payload)
+                production_config = self._ensure_voice_config_for_requirement(production_config, user_input)
             image_config = payload.get("image_config") or {}
             if isinstance(image_config, dict) and str(image_config.get("positive_prompt") or "").strip():
                 user_input = self._append_image_config(user_input, image_config)
@@ -13099,6 +13100,52 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not compose_config.get("workflow_library") and isinstance(saved.get("workflow_library"), list):
             compose_config["workflow_library"] = saved["workflow_library"]
         return production_config
+
+    @classmethod
+    def _ensure_voice_config_for_requirement(cls, production_config: dict, user_input: str) -> dict:
+        if not isinstance(production_config, dict):
+            production_config = {}
+        if not cls._requirement_requests_voice(user_input):
+            return production_config
+        voice_config = production_config.setdefault("voice_config", {})
+        if not isinstance(voice_config, dict):
+            voice_config = {}
+            production_config["voice_config"] = voice_config
+        mode = str(voice_config.get("mode") or "").strip().lower()
+        if mode not in {"", "off"}:
+            return production_config
+        voice_config.update(
+            {
+                "mode": "voxcpm2",
+                "provider": "voxcpm2",
+                "voice_preset": voice_config.get("voice_preset") or "warm_female",
+                "voice_preset_name": voice_config.get("voice_preset_name") or "VoxCPM2 本地仿声",
+                "auto_enabled_reason": "requirement_requested_voice",
+            }
+        )
+        return production_config
+
+    @staticmethod
+    def _requirement_requests_voice(user_input: str) -> bool:
+        text = str(user_input or "").strip().lower()
+        if not text:
+            return False
+        return any(
+            token in text
+            for token in (
+                "配音",
+                "旁白",
+                "口播",
+                "解说",
+                "声音",
+                "语音",
+                "voiceover",
+                "voice over",
+                "narration",
+                "narrator",
+                "tts",
+            )
+        )
 
     @classmethod
     def _resolve_runtime_model_request(cls, payload: dict) -> dict:

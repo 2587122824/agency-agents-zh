@@ -878,6 +878,15 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("真人纪实质感", video_item["prompt"])
         self.assertIn("studio fashion shoot", video_item["negative_prompt"])
 
+    def test_voice_requirement_enables_voxcpm2_fallback(self) -> None:
+        config = {"voice_config": {"mode": "off"}}
+        updated = web_app.WorkflowWebHandler._ensure_voice_config_for_requirement(
+            config,
+            "30秒真人短视频，必须有中文旁白配音和字幕。",
+        )
+        self.assertEqual(updated["voice_config"]["mode"], "voxcpm2")
+        self.assertEqual(updated["voice_config"]["provider"], "voxcpm2")
+
     def test_adapter_repairs_legacy_broll_ltx_node_info(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
             json.dumps(
