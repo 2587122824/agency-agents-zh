@@ -3453,7 +3453,7 @@ INDEX_HTML = r"""<!doctype html>
                 <textarea id="comfyDebugNegative" spellcheck="false" placeholder="例如：文字、水印、畸形手、脸部变形、闪烁、低清晰度"></textarea>
               </label>
               <label>nodeInfoList JSON（覆盖槽位）
-                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；视频长度节点请优先用 {{frame_count}}，可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{last_frame_image}}、{{seed}}、{{width}}、{{height}}、{{short_side}}、{{duration}}、{{fps}}、{{frame_count}}、{{task_type}}、{{image_task_mode}}、{{control_mode}}"></textarea>
+                <textarea id="comfyDebugNodeInfoList" spellcheck="false" placeholder="留空使用所选工作流槽位的 nodeInfoList；视频长度节点请优先用 {{frame_count}}，可用 {{prompt}}、{{negative_prompt}}、{{reference_image}}、{{last_frame_image}}、{{seed}}、{{width}}、{{height}}、{{short_side}}、{{long_side}}、{{duration}}、{{fps}}、{{frame_count}}、{{task_type}}、{{image_task_mode}}、{{control_mode}}"></textarea>
               </label>
               <label>导入 API JSON 自动识别（仅本次调试）
                 <input id="comfyDebugApiWorkflowFile" type="file" accept=".json,application/json" />
@@ -6187,7 +6187,7 @@ INDEX_HTML = r"""<!doctype html>
           const parsed = JSON.parse(text);
           if (Array.isArray(parsed)) {
             const staleIds = new Set(parsed.filter(item => item && typeof item === 'object').map(item => String(item.nodeId ?? '')));
-            if (['177', '220', '180', '181', '231', '155', '156'].some(id => staleIds.has(id))) {
+            if (['4923', '2483', '4961', '2612', '2004', '3059', '4979', '4978', '4967', '3159', '4977'].some(id => staleIds.has(id))) {
               return JSON.stringify(ltxFirstFrameI2VNodeInfoList(), null, 2);
             }
           }
@@ -6219,27 +6219,23 @@ INDEX_HTML = r"""<!doctype html>
 
     function ltxFirstFrameI2VNodeInfoList() {
       return [
-        { nodeId: '4923', fieldName: 'prompt', fieldValue: '{{prompt}}' },
-        { nodeId: '2483', fieldName: 'text', fieldValue: '{{prompt}}' },
-        { nodeId: '4961', fieldName: 'prompt', fieldValue: '{{negative_prompt}}' },
-        { nodeId: '2612', fieldName: 'text', fieldValue: '{{negative_prompt}}' },
-        { nodeId: '2004', fieldName: 'image', fieldValue: '{{reference_image}}' },
-        { nodeId: '3059', fieldName: 'width', fieldValue: '{{width}}' },
-        { nodeId: '3059', fieldName: 'height', fieldValue: '{{height}}' },
-        { nodeId: '3059', fieldName: 'length', fieldValue: '{{frame_count}}' },
-        { nodeId: '4979', fieldName: 'value', fieldValue: '{{frame_count}}' },
-        { nodeId: '3980', fieldName: 'frames_number', fieldValue: '{{frame_count}}' },
-        { nodeId: '4978', fieldName: 'value', fieldValue: '{{fps}}' },
-        { nodeId: '3980', fieldName: 'frame_rate', fieldValue: '{{fps}}' },
-        { nodeId: '1241', fieldName: 'frame_rate', fieldValue: '{{fps}}' },
-        { nodeId: '4849', fieldName: 'fps', fieldValue: '{{fps}}' },
-        { nodeId: '4819', fieldName: 'fps', fieldValue: '{{fps}}' },
-        { nodeId: '4967', fieldName: 'seed', fieldValue: '{{seed}}' },
-        { nodeId: '3159', fieldName: 'strength', fieldValue: 1 },
-        { nodeId: '3159', fieldName: 'bypass', fieldValue: false },
-        { nodeId: '4977', fieldName: 'value', fieldValue: false },
-        { nodeId: '4852', fieldName: 'filename_prefix', fieldValue: 'video/ltx2.3-i2v-first-frame' },
-        { nodeId: '4823', fieldName: 'filename_prefix', fieldValue: 'video/ltx2.3-i2v-first-frame' },
+        { nodeId: '177', fieldName: 'text', fieldValue: '{{prompt}}' },
+        { nodeId: '178', fieldName: 'prompt', fieldValue: '{{prompt}}' },
+        { nodeId: '182', fieldName: 'text', fieldValue: '{{negative_prompt}}' },
+        { nodeId: '193', fieldName: 'image', fieldValue: '{{reference_image}}' },
+        { nodeId: '186', fieldName: 'value', fieldValue: '{{long_side}}' },
+        { nodeId: '192', fieldName: 'value', fieldValue: '{{duration}}' },
+        { nodeId: '154', fieldName: 'value', fieldValue: '{{fps}}' },
+        { nodeId: '155', fieldName: 'noise_seed', fieldValue: '{{seed}}' },
+        { nodeId: '156', fieldName: 'noise_seed', fieldValue: '{{seed}}' },
+        { nodeId: '158', fieldName: 'value', fieldValue: false },
+        { nodeId: '216', fieldName: 'value', fieldValue: false },
+        { nodeId: '195', fieldName: 'strength', fieldValue: 0.7 },
+        { nodeId: '195', fieldName: 'bypass', fieldValue: false },
+        { nodeId: '197', fieldName: 'strength', fieldValue: 1 },
+        { nodeId: '197', fieldName: 'bypass', fieldValue: false },
+        { nodeId: '231', fieldName: 'fps', fieldValue: '{{fps}}' },
+        { nodeId: '232', fieldName: 'filename_prefix', fieldValue: 'video/ltx2.3-i2v-first-frame' },
       ];
     }
 
@@ -6719,7 +6715,7 @@ INDEX_HTML = r"""<!doctype html>
       const panel = document.createElement('div');
       panel.className = 'comfy-parameter-panel';
       panel.appendChild(head);
-      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{width}}', '{{height}}', '{{short_side}}', '{{seed}}', '{{denoise}}', '{{duration}}', '{{fps}}', '{{frame_count}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{character_references}}', '{{character_reference_1}}', '{{character_reference_2}}', '{{character_reference_3}}', '{{character_reference_4}}', '{{character_id_1}}', '{{character_id_2}}', '{{character_id_3}}', '{{character_id_4}}', '{{character_position_1}}', '{{character_position_2}}', '{{character_position_3}}', '{{character_position_4}}', '{{payload}}'];
+      const sourceOptions = ['fixed', '{{prompt}}', '{{negative_prompt}}', '{{image_prompt}}', '{{video_prompt}}', '{{width}}', '{{height}}', '{{short_side}}', '{{long_side}}', '{{seed}}', '{{denoise}}', '{{duration}}', '{{fps}}', '{{frame_count}}', '{{input_base_image}}', '{{input_identity_image}}', '{{input_pose_image}}', '{{input_source_video}}', '{{input_middle_frame}}', '{{input_last_frame}}', '{{input_mask_image}}', '{{input_reference_style}}', '{{input_audio_file}}', '{{reference_image}}', '{{character_references}}', '{{character_reference_1}}', '{{character_reference_2}}', '{{character_reference_3}}', '{{character_reference_4}}', '{{character_id_1}}', '{{character_id_2}}', '{{character_id_3}}', '{{character_id_4}}', '{{character_position_1}}', '{{character_position_2}}', '{{character_position_3}}', '{{character_position_4}}', '{{payload}}'];
       comfyParameterCandidates.forEach((candidate, index) => {
         const item = document.createElement('div');
         item.className = 'comfy-parameter-row';

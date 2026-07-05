@@ -769,6 +769,7 @@ class CloudComfyUIAdapter:
             "{{width}}": str(comfyui_payload.get("width") or ""),
             "{{height}}": str(comfyui_payload.get("height") or ""),
             "{{short_side}}": self._short_side(comfyui_payload),
+            "{{long_side}}": self._long_side(comfyui_payload),
             "{{task_type}}": str(comfyui_payload.get("task_type") or ""),
             "{{image_task_mode}}": str(comfyui_payload.get("image_task_mode") or ""),
             "{{control_mode}}": str(comfyui_payload.get("control_mode") or ""),
@@ -1526,7 +1527,7 @@ class CloudComfyUIAdapter:
         )
         if is_broll_ltx and {"2483", "2612", "3059"}.intersection(stale_node_ids):
             return json.dumps(cls._ltx_text_to_video_node_info(), ensure_ascii=False, indent=2)
-        if is_first_frame_i2v_ltx and {"177", "220", "180", "181", "231", "155", "156"}.intersection(stale_node_ids):
+        if is_first_frame_i2v_ltx and {"4923", "2483", "4961", "2612", "2004", "3059", "4979", "4978", "4967", "3159", "4977"}.intersection(stale_node_ids):
             return json.dumps(cls._ltx_image_to_video_node_info(), ensure_ascii=False, indent=2)
 
         # The current z_image_turbo RunningHub workflow uses node 63 for the
@@ -1648,27 +1649,23 @@ class CloudComfyUIAdapter:
     @staticmethod
     def _ltx_image_to_video_node_info() -> list[dict[str, Any]]:
         return [
-            {"nodeId": "4923", "fieldName": "prompt", "fieldValue": "{{prompt}}"},
-            {"nodeId": "2483", "fieldName": "text", "fieldValue": "{{prompt}}"},
-            {"nodeId": "4961", "fieldName": "prompt", "fieldValue": "{{negative_prompt}}"},
-            {"nodeId": "2612", "fieldName": "text", "fieldValue": "{{negative_prompt}}"},
-            {"nodeId": "2004", "fieldName": "image", "fieldValue": "{{reference_image}}"},
-            {"nodeId": "3059", "fieldName": "width", "fieldValue": "{{width}}"},
-            {"nodeId": "3059", "fieldName": "height", "fieldValue": "{{height}}"},
-            {"nodeId": "3059", "fieldName": "length", "fieldValue": "{{frame_count}}"},
-            {"nodeId": "4979", "fieldName": "value", "fieldValue": "{{frame_count}}"},
-            {"nodeId": "3980", "fieldName": "frames_number", "fieldValue": "{{frame_count}}"},
-            {"nodeId": "4978", "fieldName": "value", "fieldValue": "{{fps}}"},
-            {"nodeId": "3980", "fieldName": "frame_rate", "fieldValue": "{{fps}}"},
-            {"nodeId": "1241", "fieldName": "frame_rate", "fieldValue": "{{fps}}"},
-            {"nodeId": "4849", "fieldName": "fps", "fieldValue": "{{fps}}"},
-            {"nodeId": "4819", "fieldName": "fps", "fieldValue": "{{fps}}"},
-            {"nodeId": "4967", "fieldName": "seed", "fieldValue": "{{seed}}"},
-            {"nodeId": "3159", "fieldName": "strength", "fieldValue": 1},
-            {"nodeId": "3159", "fieldName": "bypass", "fieldValue": False},
-            {"nodeId": "4977", "fieldName": "value", "fieldValue": False},
-            {"nodeId": "4852", "fieldName": "filename_prefix", "fieldValue": "video/ltx2.3-i2v-first-frame"},
-            {"nodeId": "4823", "fieldName": "filename_prefix", "fieldValue": "video/ltx2.3-i2v-first-frame"},
+            {"nodeId": "177", "fieldName": "text", "fieldValue": "{{prompt}}"},
+            {"nodeId": "178", "fieldName": "prompt", "fieldValue": "{{prompt}}"},
+            {"nodeId": "182", "fieldName": "text", "fieldValue": "{{negative_prompt}}"},
+            {"nodeId": "193", "fieldName": "image", "fieldValue": "{{reference_image}}"},
+            {"nodeId": "186", "fieldName": "value", "fieldValue": "{{long_side}}"},
+            {"nodeId": "192", "fieldName": "value", "fieldValue": "{{duration}}"},
+            {"nodeId": "154", "fieldName": "value", "fieldValue": "{{fps}}"},
+            {"nodeId": "155", "fieldName": "noise_seed", "fieldValue": "{{seed}}"},
+            {"nodeId": "156", "fieldName": "noise_seed", "fieldValue": "{{seed}}"},
+            {"nodeId": "158", "fieldName": "value", "fieldValue": False},
+            {"nodeId": "216", "fieldName": "value", "fieldValue": False},
+            {"nodeId": "195", "fieldName": "strength", "fieldValue": 0.7},
+            {"nodeId": "195", "fieldName": "bypass", "fieldValue": False},
+            {"nodeId": "197", "fieldName": "strength", "fieldValue": 1},
+            {"nodeId": "197", "fieldName": "bypass", "fieldValue": False},
+            {"nodeId": "231", "fieldName": "fps", "fieldValue": "{{fps}}"},
+            {"nodeId": "232", "fieldName": "filename_prefix", "fieldValue": "video/ltx2.3-i2v-first-frame"},
         ]
 
     @classmethod
@@ -2649,6 +2646,20 @@ class CloudComfyUIAdapter:
         if width <= 0 or height <= 0:
             return ""
         return str(max(1, min(width, height)))
+
+    @staticmethod
+    def _long_side(payload: dict[str, Any]) -> str:
+        explicit = payload.get("long_side")
+        if explicit not in (None, ""):
+            return str(explicit)
+        try:
+            width = int(float(payload.get("width") or 0))
+            height = int(float(payload.get("height") or 0))
+        except (TypeError, ValueError):
+            return ""
+        if width <= 0 or height <= 0:
+            return ""
+        return str(max(width, height))
 
     @staticmethod
     def _ltx_guide_frame_count(payload: dict[str, Any]) -> str:

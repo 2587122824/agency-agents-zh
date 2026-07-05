@@ -1262,10 +1262,10 @@ class SemanticInputContractTests(unittest.TestCase):
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
             json.dumps(
                 [
-                    {"nodeId": "177", "fieldName": "text", "fieldValue": "{{prompt}}"},
-                    {"nodeId": "180", "fieldName": "width", "fieldValue": "{{width}}"},
-                    {"nodeId": "180", "fieldName": "height", "fieldValue": "{{height}}"},
-                    {"nodeId": "231", "fieldName": "fps", "fieldValue": "{{fps}}"},
+                    {"nodeId": "4923", "fieldName": "prompt", "fieldValue": "{{prompt}}"},
+                    {"nodeId": "3059", "fieldName": "width", "fieldValue": "{{width}}"},
+                    {"nodeId": "3059", "fieldName": "height", "fieldValue": "{{height}}"},
+                    {"nodeId": "4978", "fieldName": "value", "fieldValue": "{{fps}}"},
                 ]
             ),
             workflow_id="06_i2v_first_frame",
@@ -1273,15 +1273,40 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         rows = json.loads(repaired)
         row_keys = {(row["nodeId"], row["fieldName"], row["fieldValue"]) for row in rows}
-        self.assertNotIn("177", {row["nodeId"] for row in rows})
-        self.assertIn(("4923", "prompt", "{{prompt}}"), row_keys)
-        self.assertIn(("2004", "image", "{{reference_image}}"), row_keys)
-        self.assertIn(("3059", "width", "{{width}}"), row_keys)
-        self.assertIn(("3059", "height", "{{height}}"), row_keys)
-        self.assertIn(("3059", "length", "{{frame_count}}"), row_keys)
-        self.assertIn(("4978", "value", "{{fps}}"), row_keys)
-        self.assertIn(("4967", "seed", "{{seed}}"), row_keys)
-        self.assertIn(("4977", "value", False), row_keys)
+        self.assertNotIn("4923", {row["nodeId"] for row in rows})
+        self.assertIn(("177", "text", "{{prompt}}"), row_keys)
+        self.assertIn(("178", "prompt", "{{prompt}}"), row_keys)
+        self.assertIn(("182", "text", "{{negative_prompt}}"), row_keys)
+        self.assertIn(("193", "image", "{{reference_image}}"), row_keys)
+        self.assertIn(("186", "value", "{{long_side}}"), row_keys)
+        self.assertIn(("192", "value", "{{duration}}"), row_keys)
+        self.assertIn(("154", "value", "{{fps}}"), row_keys)
+        self.assertIn(("155", "noise_seed", "{{seed}}"), row_keys)
+        self.assertIn(("158", "value", False), row_keys)
+        self.assertIn(("216", "value", False), row_keys)
+        self.assertIn(("232", "filename_prefix", "video/ltx2.3-i2v-first-frame"), row_keys)
+
+    def test_adapter_replaces_long_side_placeholder(self) -> None:
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        payload = {
+            "prompt": "slow push in",
+            "reference_image": "first.png",
+            "width": 480,
+            "height": 848,
+            "duration": 4,
+            "fps": 24,
+            "seed": 123,
+        }
+        config = {
+            "node_info_list_json": (
+                '[{"nodeId":"186","fieldName":"value","fieldValue":"{{long_side}}"},'
+                '{"nodeId":"177","fieldName":"text","fieldValue":"{{prompt}}"}]'
+            )
+        }
+        request = adapter._build_runninghub_payload(payload, config)
+        rows = request["nodeInfoList"]
+        self.assertIn({"nodeId": "186", "fieldName": "value", "fieldValue": 848}, rows)
+        self.assertIn({"nodeId": "177", "fieldName": "text", "fieldValue": "slow push in"}, rows)
 
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
