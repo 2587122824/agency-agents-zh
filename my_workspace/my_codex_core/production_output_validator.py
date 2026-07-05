@@ -33,9 +33,10 @@ def validate_production_output(
     agent = str(step.get("agent") or "")
     issues: list[str] = []
     payloads = _json_objects(content)
-    duration = int(requirement_lock.get("duration_seconds") or 0)
-    expected_work = _expected_resolution(requirement_lock, delivery=False)
-    expected_delivery = _expected_resolution(requirement_lock, delivery=True)
+    effective_lock = _effective_requirement_lock(requirement_lock, payloads, previous_outputs or [])
+    duration = int(effective_lock.get("duration_seconds") or 0)
+    expected_work = _expected_resolution(effective_lock, delivery=False)
+    expected_delivery = _expected_resolution(effective_lock, delivery=True)
 
     if agent.startswith("03_"):
         _validate_script(content, duration, issues)
@@ -336,6 +337,34 @@ def _json_objects(content: str) -> list[dict[str, Any]]:
         if isinstance(value, dict):
             values.append(value)
     return values
+
+
+def _effective_requirement_lock(
+    requirement_lock: dict[str, Any],
+    payloads: list[dict[str, Any]],
+    previous_outputs: list[dict[str, str]],
+) -> dict[str, Any]:
+    lock = dict(requirement_lock if isinstance(requirement_lock, dict) else {})
+    route_sources: list[dict[str, Any]] = []
+    for output in previous_outputs:
+        if isinstance(output, dict):
+            route_sources.extend(_json_objects(str(output.get("content") or "")))
+    route_sources.extend(payloads)
+    for payload in route_sources:
+        if not isinstance(payload, dict):
+            continue
+        for source_key, target_key in (
+            ("aspect_ratio", "aspect_ratio"),
+            ("target_aspect_ratio", "aspect_ratio"),
+            ("target_platform", "target_platform"),
+            ("platform", "target_platform"),
+            ("duration_seconds", "duration_seconds"),
+            ("target_duration_seconds", "duration_seconds"),
+        ):
+            value = payload.get(source_key)
+            if value not in (None, "") and not lock.get(target_key):
+                lock[target_key] = value
+    return lock
 
 
 def _strip_json_comments(value: str) -> str:

@@ -918,6 +918,53 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertTrue(result["passed"], result["issues"])
         self.assertEqual(result["expected_work_resolution"], "848x480")
 
+    def test_validator_inherits_route_aspect_from_previous_outputs(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_001_keyframe",
+                            "prompt": "小美坐在餐桌前准备吃饭",
+                        }
+                    ]
+                },
+                "image_prompts": [
+                    {
+                        "task_type": "image",
+                        "prompt": "小美坐在餐桌前准备吃饭",
+                        "width": 480,
+                        "height": 848,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        previous = [
+            {
+                "agent": "01_需求拆解专员",
+                "content": "```json\n"
+                + json.dumps(
+                    {
+                        "production_type": "drama_story",
+                        "target_platform": "抖音",
+                        "aspect_ratio": "9:16",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n```",
+            }
+        ]
+        result = validate_production_output(
+            {"agent": "06_分镜生图设计师"},
+            f"```json\n{content}\n```",
+            {"original_requirement": "人必须吃饭", "duration_seconds": 0},
+            previous_outputs=previous,
+        )
+        self.assertTrue(result["passed"], result["issues"])
+        self.assertEqual(result["expected_work_resolution"], "480x848")
+
     def test_validator_accepts_three_frame_source_intent_binding(self) -> None:
         content = json.dumps(
             {
