@@ -1049,12 +1049,28 @@ def _retry_tts_job(
     if not voice_text_quality.get("usable"):
         audio = manifest.setdefault("audio", {})
         reason = str(voice_text_quality.get("reason") or "voiceover text is empty")
+        tts_manifest_path = paths["audio"] / "local_tts_manifest.json"
+        tts_manifest_path.write_text(
+            json.dumps(
+                {
+                    "status": "skipped",
+                    "reason": reason,
+                    "downloaded_files": [],
+                    "voice_text_status": str(voice_text_quality.get("status") or "missing"),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         audio["voice_text_chars"] = 0
         audio["target_duration_seconds"] = float(voice_config.get("target_duration_seconds") or 0)
         audio["adapter_status"] = "skipped"
         audio["voice_text_status"] = str(voice_text_quality.get("status") or "missing")
         audio["voice_text_reason"] = reason
         audio["voiceover_audio_file"] = ""
+        audio["adapter_manifest"] = str(tts_manifest_path)
         manifest["status"] = "local_tts_skipped"
         _upsert_production_node(
             manifest,
