@@ -109,9 +109,9 @@
   },
   {
     "nodeId": "426",
-    "fieldName": "seed",
-    "fieldValue": "{{seed}}",
-    "description": "QwenVL prompt generation seed"
+    "fieldName": "preset_prompt",
+    "fieldValue": "Describe this image in detail.",
+    "description": "QwenVL preset prompt enum value"
   },
   {
     "nodeId": "362",

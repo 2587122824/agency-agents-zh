@@ -1583,8 +1583,9 @@ class CloudComfyUIAdapter:
                     row = dict(row)
                     row["fieldValue"] = "{{prompt}}"
                     changed = True
-                elif node_id == "426" and field_name == "preset_prompt":
+                elif node_id == "426" and field_name in {"seed", "preset_prompt"}:
                     row = dict(row)
+                    row["fieldName"] = "preset_prompt"
                     row["fieldValue"] = "Describe this image in detail."
                     changed = True
                 elif node_id == "412" and field_name == "value" and str(row.get("fieldValue") or "") != "{{fps}}":

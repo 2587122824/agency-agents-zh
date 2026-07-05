@@ -1385,6 +1385,27 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn(("447", "image", "{{input_base_image}}"), row_keys)
         self.assertIn(("448", "image", "{{input_middle_frame}}"), row_keys)
         self.assertIn(("449", "image", "{{input_last_frame}}"), row_keys)
+        self.assertNotIn(("426", "seed", "{{seed}}"), row_keys)
+        self.assertIn(("426", "preset_prompt", "Describe this image in detail."), row_keys)
+
+    def test_adapter_repairs_three_frame_qwenvl_preset_prompt(self) -> None:
+        repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
+            json.dumps(
+                [
+                    {"nodeId": "447", "fieldName": "image", "fieldValue": "{{input_base_image}}"},
+                    {"nodeId": "448", "fieldName": "image", "fieldValue": "{{input_middle_frame}}"},
+                    {"nodeId": "449", "fieldName": "image", "fieldValue": "{{input_last_frame}}"},
+                    {"nodeId": "426", "fieldName": "seed", "fieldValue": "{{seed}}"},
+                ]
+            ),
+            endpoint="/run/workflow/2072296894507872257",
+            workflow_id="06_i2v_first_middle_last_frame",
+            workflow_mode="i2v_first_middle_last_frame",
+        )
+        rows = json.loads(repaired)
+        row_keys = {(row["nodeId"], row["fieldName"], row["fieldValue"]) for row in rows}
+        self.assertNotIn(("426", "seed", "{{seed}}"), row_keys)
+        self.assertIn(("426", "preset_prompt", "Describe this image in detail."), row_keys)
 
     def test_adapter_treats_207173_as_first_frame_endpoint(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
