@@ -727,12 +727,19 @@ class CloudComfyUIAdapter:
         global_context = comfyui_payload.get("global_context") if isinstance(comfyui_payload.get("global_context"), dict) else {}
         render_context = global_context.get("render") if isinstance(global_context.get("render"), dict) else {}
         style_context = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
-        base_image = str(comfyui_payload.get("input_base_image") or self._first_reference_image(comfyui_payload) or "")
-        identity_image = str(comfyui_payload.get("input_identity_image") or comfyui_payload.get("identity_image") or self._first_reference_image(comfyui_payload) or "")
-        pose_image = str(comfyui_payload.get("input_pose_image") or comfyui_payload.get("pose_image") or "")
+        raw_base_image = str(comfyui_payload.get("input_base_image") or self._first_reference_image(comfyui_payload) or "")
+        raw_identity_image = str(comfyui_payload.get("input_identity_image") or comfyui_payload.get("identity_image") or self._first_reference_image(comfyui_payload) or "")
+        raw_pose_image = str(comfyui_payload.get("input_pose_image") or comfyui_payload.get("pose_image") or "")
+        base_image = self._reference_image_value(raw_base_image) if raw_base_image else ""
+        identity_image = self._reference_image_value(raw_identity_image) if raw_identity_image else ""
+        pose_image = self._reference_image_value(raw_pose_image) if raw_pose_image else ""
         source_video = str(comfyui_payload.get("input_source_video") or comfyui_payload.get("source_video") or "")
-        middle_frame = str(comfyui_payload.get("input_middle_frame") or self._middle_frame_image(comfyui_payload) or "")
-        last_frame = str(comfyui_payload.get("input_last_frame") or self._last_frame_image(comfyui_payload) or "")
+        raw_middle_frame = str(comfyui_payload.get("input_middle_frame") or self._middle_frame_image(comfyui_payload) or "")
+        raw_last_frame = str(comfyui_payload.get("input_last_frame") or self._last_frame_image(comfyui_payload) or "")
+        middle_frame = self._reference_image_value(raw_middle_frame) if raw_middle_frame else ""
+        last_frame = self._reference_image_value(raw_last_frame) if raw_last_frame else ""
+        raw_reference_style = str(comfyui_payload.get("input_reference_style") or comfyui_payload.get("reference_style") or style_context.get("reference_asset") or "")
+        reference_style = self._reference_image_value(raw_reference_style) if raw_reference_style else ""
         character_references = self._character_reference_values(comfyui_payload)
         replacements = {
             "{{payload}}": json.dumps(comfyui_payload, ensure_ascii=False),
@@ -754,7 +761,7 @@ class CloudComfyUIAdapter:
             "{{last_frame_image}}": self._last_frame_image(comfyui_payload),
             "{{input_last_frame}}": last_frame,
             "{{input_mask_image}}": str(comfyui_payload.get("input_mask_image") or comfyui_payload.get("mask_image") or ""),
-            "{{input_reference_style}}": str(comfyui_payload.get("input_reference_style") or comfyui_payload.get("reference_style") or style_context.get("reference_asset") or ""),
+            "{{input_reference_style}}": reference_style,
             "{{input_audio_file}}": str(comfyui_payload.get("input_audio_file") or comfyui_payload.get("audio_file") or ""),
             "{{has_last_frame_image}}": bool(self._last_frame_image(comfyui_payload)),
             "{{seed}}": seed_value,

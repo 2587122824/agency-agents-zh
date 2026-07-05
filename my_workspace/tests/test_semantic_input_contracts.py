@@ -950,6 +950,18 @@ class SemanticInputContractTests(unittest.TestCase):
         values = [(item["fieldName"], item["fieldValue"]) for item in built["nodeInfoList"]]
         self.assertEqual(values, [("width", 480), ("height", 848)])
 
+    def test_runninghub_uploads_semantic_input_base_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "base.png"
+            Image.new("RGB", (8, 8), "red").save(image_path)
+            adapter = CloudComfyUIAdapter("https://www.runninghub.cn/openapi/v2", "key", "/run/workflow/test")
+            adapter._upload_runninghub_media = lambda path: f"uploaded/{Path(path).name}"  # type: ignore[method-assign]
+            config = {
+                "node_info_list_json": '[{"nodeId":"2","fieldName":"image","fieldValue":"{{input_base_image}}"}]'
+            }
+            built = adapter._build_runninghub_payload({"input_base_image": str(image_path)}, config)
+            self.assertEqual(built["nodeInfoList"][0]["fieldValue"], "uploaded/base.png")
+
     def test_live_action_retro_prompts_get_quality_guardrails(self) -> None:
         plan = compile_production_plan(
             task_id="live_action_quality",
