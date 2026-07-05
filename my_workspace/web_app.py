@@ -6796,18 +6796,26 @@ INDEX_HTML = r"""<!doctype html>
         const text = await file.text();
         const data = JSON.parse(text);
         const nodeInfo = nodeInfoFromImportedJson(data);
-        els.comfyDebugNodeInfoList.value = normalizeComfyNodeInfoForDebugMode(JSON.stringify(nodeInfo, null, 2), activeComfyDebugWorkflowId, activeComfyDebugWorkflowMode);
+        const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(JSON.stringify(nodeInfo, null, 2), activeComfyDebugWorkflowId, activeComfyDebugWorkflowMode);
+        els.comfyDebugNodeInfoList.value = normalizedNodeInfo;
         const endpoint = findEndpointInImportedJson(data);
         if (endpoint && els.comfyDebugEndpoint) {
           els.comfyDebugEndpoint.value = endpoint;
         }
+        updateComfyDebugReferencePreviews();
         saveCurrentComfyDebugUiState();
+        saveActiveComfyDebugWorkflowConfig(false);
+        renderComfyDebugWorkflows({ refreshForm: false });
+        renderComfyWorkflowLibrary();
+        syncComfyDebugRunButton();
         saveSettings();
+        if (els.comfyDebugApiWorkflowFile) els.comfyDebugApiWorkflowFile.value = '';
         setStatus(endpoint
           ? `已导入调试 API JSON：${file.name}，识别 ${nodeInfo.length} 个可传参字段，并识别 Endpoint`
           : `已导入调试 API JSON：${file.name}，识别 ${nodeInfo.length} 个可传参字段；未识别 Endpoint，可手动填写或留空使用槽位配置`,
           false);
       } catch (err) {
+        if (els.comfyDebugApiWorkflowFile) els.comfyDebugApiWorkflowFile.value = '';
         setStatus(err.message || '调试 API JSON 识别失败', true);
       }
     }
