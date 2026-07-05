@@ -132,6 +132,7 @@ def compile_production_plan(
         templates,
         global_context,
         resolved_entities,
+        image_prompts,
         image_jobs,
         compile_notes,
         parameter_overrides,
@@ -759,6 +760,7 @@ def _compile_video_intents(
     templates: dict[str, Any],
     global_context: dict[str, Any],
     resolved_entities: dict[str, Any],
+    image_prompts: list[dict[str, Any]],
     image_jobs: list[dict[str, Any]],
     notes: list[str],
     parameter_overrides: list[dict[str, Any]],
@@ -785,8 +787,9 @@ def _compile_video_intents(
         intent = locked_intent
         parameter_overrides.extend(_tag_overrides(overrides, intent_id, "video"))
         prompt = str(intent.get("prompt") or intent.get("motion_plan") or intent.get("description") or intent.get("edit_note") or "").strip()
+        broll_promoted_to_i2v = intent_name == "generate_broll_clip" and _video_intent_has_visible_character(intent, prompt)
         broll_removed_character_terms: list[str] = []
-        if intent_name == "generate_broll_clip":
+        if intent_name == "generate_broll_clip" and not broll_promoted_to_i2v:
             prompt, broll_removed_character_terms = _sanitize_broll_character_prompt(
                 prompt,
                 intent=intent,
@@ -798,9 +801,15 @@ def _compile_video_intents(
         if not prompt:
             notes.append(f"video intent {intent_id} skipped because prompt is empty")
             continue
+        effective_intent_name = "generate_i2v_clip" if broll_promoted_to_i2v else intent_name
+        if broll_promoted_to_i2v:
+            workflow_id, workflow_mode = VIDEO_INTENT_ROUTES["generate_i2v_clip"]
+            notes.append(
+                f"video intent {intent_id} promoted from B-roll to image-to-video because it contains a visible character action"
+            )
         entity_context = entity_context_for_ids(
             resolved_entities,
-            character_id="" if intent_name == "generate_broll_clip" else str(intent.get("character_id") or ""),
+            character_id="" if effective_intent_name == "generate_broll_clip" else str(intent.get("character_id") or ""),
             style_id=str(intent.get("style_id") or ""),
             product_id=str(intent.get("product_id") or ""),
             scene_id=str(intent.get("scene_id") or intent.get("shot_id") or ""),
@@ -820,7 +829,7 @@ def _compile_video_intents(
             "fps": _positive_int(intent.get("fps") or contract.get("fps") or render.get("frame_rate"), 24),
             "width": _positive_int(intent.get("width") or render.get("working_width"), 848),
             "height": _positive_int(intent.get("height") or render.get("working_height"), 480),
-            "character_id": "" if intent_name == "generate_broll_clip" else str(intent.get("character_id") or ""),
+            "character_id": "" if effective_intent_name == "generate_broll_clip" else str(intent.get("character_id") or ""),
             "style_id": str(intent.get("style_id") or ""),
             "product_id": str(intent.get("product_id") or ""),
             "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
@@ -843,32 +852,38 @@ def _compile_video_intents(
         if entity_context:
             item["entity_context"] = entity_context
             _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
-        if intent_name == "generate_broll_clip":
+        if effective_intent_name == "generate_broll_clip":
             _apply_broll_no_character_policy(item, broll_removed_character_terms, notes)
         attach_parameter_lock_metadata(
             item,
             global_context=global_context,
             intent_kind="video",
-            intent_name=intent_name,
+            intent_name=effective_intent_name,
             overrides=overrides,
         )
         if intent_name == "generate_three_frame_i2v_clip":
             _bind_three_frames(item, image_job_ids)
-        elif intent_name == "generate_i2v_clip":
+        elif effective_intent_name == "generate_i2v_clip":
             _bind_first_source_image(item, image_job_ids)
             if not _has_bound_first_frame(item):
                 inferred = _bind_matching_keyframe_by_id(item, image_job_ids)
                 if inferred:
                     notes.append(f"video intent {intent_id} inferred first frame from {inferred}")
                 else:
-                    workflow_id, workflow_mode = VIDEO_INTENT_ROUTES["generate_broll_clip"]
-                    item["workflow_id"] = workflow_id
-                    item["workflow_mode"] = workflow_mode
-                    item["video_task_mode"] = workflow_mode
-                    item["mode"] = workflow_mode
-                    item["capability"] = "video_generate"
+                    generated = _ensure_video_keyframe_dependency(
+                        item,
+                        intent,
+                        templates=templates,
+                        global_context=global_context,
+                        resolved_entities=resolved_entities,
+                        image_prompts=image_prompts,
+                        image_jobs=image_jobs,
+                        image_job_ids=image_job_ids,
+                        notes=notes,
+                        promoted_from_broll=broll_promoted_to_i2v,
+                    )
                     notes.append(
-                        f"video intent {intent_id} downgraded to text-to-video because no source image/frame was available"
+                        f"video intent {intent_id} generated first-frame keyframe dependency {generated} instead of using text-to-video"
                     )
         elif intent_name in {"enhance_video", "repair_video", "stylize_live_video"}:
             _bind_first_source_video(item, video_job_ids)
@@ -885,6 +900,106 @@ def _compile_video_intents(
         jobs.append(dict(item))
         video_job_ids.add(intent_id)
     return prompts, jobs
+
+
+def _video_intent_has_visible_character(intent: dict[str, Any], prompt: str) -> bool:
+    if str(intent.get("character_id") or "").strip():
+        return True
+    constraints = intent.get("constraints") if isinstance(intent.get("constraints"), dict) else {}
+    if _bool_or_default(constraints.get("identity_lock"), default=False):
+        return True
+    text = " ".join(
+        str(value or "")
+        for value in (
+            prompt,
+            intent.get("motion_plan"),
+            intent.get("description"),
+            intent.get("shot_description"),
+        )
+    )
+    if _looks_like_main_character_prompt(text):
+        return True
+    value = text.lower()
+    return any(
+        token in value
+        for token in (
+            "主角",
+            "主人公",
+            "同一张脸",
+            "同一个人",
+            "出镜",
+            "露面",
+            "protagonist",
+            "main character",
+            "same face",
+            "same person",
+        )
+    )
+
+
+def _ensure_video_keyframe_dependency(
+    item: dict[str, Any],
+    intent: dict[str, Any],
+    *,
+    templates: dict[str, Any],
+    global_context: dict[str, Any],
+    resolved_entities: dict[str, Any],
+    image_prompts: list[dict[str, Any]],
+    image_jobs: list[dict[str, Any]],
+    image_job_ids: set[str],
+    notes: list[str],
+    promoted_from_broll: bool = False,
+) -> str:
+    video_id = _safe_id(item.get("job_id") or item.get("id") or "")
+    keyframe_id = _safe_id(intent.get("keyframe_intent_id") or intent.get("first_frame_intent_id") or f"{video_id}_keyframe")
+    if not keyframe_id:
+        keyframe_id = f"video_keyframe_{len(image_jobs) + 1:03d}"
+    bindings = item.setdefault("input_bindings", {})
+    depends_on = item.setdefault("depends_on", [])
+    if keyframe_id in image_job_ids:
+        bindings.setdefault("input_base_image", {"from_job": keyframe_id, "output": "output_final_image"})
+        if keyframe_id not in depends_on:
+            depends_on.append(keyframe_id)
+        return keyframe_id
+
+    image_contracts = ((templates.get("workflow_contracts") or {}).get("image") or {}) if isinstance(templates.get("workflow_contracts"), dict) else {}
+    contract = image_contracts.get("generate_keyframe") if isinstance(image_contracts.get("generate_keyframe"), dict) else {}
+    render = global_context.get("render") if isinstance(global_context.get("render"), dict) else {}
+    keyframe_intent = {
+        "intent": "generate_keyframe",
+        "intent_id": keyframe_id,
+        "prompt": str(item.get("prompt") or intent.get("prompt") or intent.get("motion_plan") or "").strip(),
+        "negative_prompt": str(item.get("negative_prompt") or intent.get("negative_prompt") or ""),
+        "character_id": str(item.get("character_id") or intent.get("character_id") or ""),
+        "style_id": str(item.get("style_id") or intent.get("style_id") or ""),
+        "product_id": str(item.get("product_id") or intent.get("product_id") or ""),
+        "scene_id": str(item.get("scene_id") or intent.get("scene_id") or intent.get("shot_id") or ""),
+        "asset_tag": f"{video_id}_first_frame",
+    }
+    if promoted_from_broll:
+        keyframe_intent["source_note"] = "promoted_from_character_broll"
+    keyframe_item = _image_prompt_item(
+        job_id=keyframe_id,
+        prompt=str(keyframe_intent["prompt"]),
+        intent=keyframe_intent,
+        contract=contract,
+        compatibility={},
+        render=render,
+        asset_tag=str(keyframe_intent["asset_tag"]),
+        resolved_entities=resolved_entities,
+        notes=notes,
+    )
+    _apply_generated_character_reference_policy(keyframe_item, keyframe_intent, image_prompts, notes)
+    _apply_live_action_quality_policy(keyframe_item, global_context=global_context, intent=keyframe_intent)
+    image_prompts.append(keyframe_item)
+    image_jobs.append({"job_id": keyframe_id, "intent_id": keyframe_id, **keyframe_item})
+    image_job_ids.add(keyframe_id)
+    bindings.setdefault("input_base_image", {"from_job": keyframe_id, "output": "output_final_image"})
+    if keyframe_id not in depends_on:
+        depends_on.append(keyframe_id)
+    if keyframe_id not in item.setdefault("source_intent_ids", []):
+        item["source_intent_ids"].append(keyframe_id)
+    return keyframe_id
 
 
 def _sanitize_broll_character_prompt(

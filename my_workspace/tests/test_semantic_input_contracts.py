@@ -515,7 +515,7 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertIn("clip_001", item["depends_on"])
 
-    def test_broll_sanitizes_character_names_to_environment_only(self) -> None:
+    def test_broll_with_visible_character_is_promoted_to_i2v(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             entity_path = root / "entities.json"
@@ -576,15 +576,63 @@ class SemanticInputContractTests(unittest.TestCase):
                 asset_library_path=library_path,
             )
             item = plan["compiled_payload"]["video_prompts"][0]
-            self.assertEqual(item["workflow_id"], "10_broll_transition_video")
-            self.assertEqual(item["workflow_mode"], "broll_scene_video")
-            self.assertEqual(item["character_id"], "")
-            self.assertTrue(item["no_visible_characters"])
-            self.assertEqual(item["broll_policy"], "environment_only")
-            self.assertNotIn("Corgi King", item["prompt"])
-            self.assertNotIn("柯基国王", item["prompt"])
-            self.assertIn("不出现主角", item["prompt"])
-            self.assertNotIn("character", item.get("entity_context", {}))
+            self.assertEqual(item["workflow_id"], "06_i2v_first_frame")
+            self.assertEqual(item["workflow_mode"], "i2v_first_frame")
+            self.assertEqual(item["character_id"], "corgi_king")
+            self.assertFalse(item.get("no_visible_characters", False))
+            self.assertEqual(item["input_bindings"]["input_base_image"]["from_job"], "broll_palace_keyframe")
+            self.assertIn("broll_palace_keyframe", {row["job_id"] for row in plan["compiled_payload"]["image_prompts"]})
+
+    def test_i2v_missing_source_generates_keyframe_instead_of_broll(self) -> None:
+        plan = compile_production_plan(
+            task_id="i2v_missing_source_keyframe",
+            route_content=json.dumps(
+                {
+                    "production_type": "drama_story",
+                    "aspect_ratio": "9:16",
+                    "global_context": {"characters": [{"character_id": "protagonist", "name": "主角"}]},
+                },
+                ensure_ascii=False,
+            ),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "hero_master",
+                                "asset_role": "character",
+                                "character_id": "protagonist",
+                                "prompt": "2008年普通打工人主角，真人纪实感，同一张脸。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_content=json.dumps(
+                {
+                    "production_intents": {
+                        "video": [
+                            {
+                                "intent": "generate_i2v_clip",
+                                "intent_id": "clip_001",
+                                "character_id": "protagonist",
+                                "prompt": "主角从出租屋醒来，看着2008年的旧手机，真人复古纪实画面。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        )
+        payload = plan["compiled_payload"]
+        video_item = payload["video_prompts"][0]
+        self.assertEqual(video_item["workflow_id"], "06_i2v_first_frame")
+        self.assertEqual(video_item["workflow_mode"], "i2v_first_frame")
+        self.assertIn("input_base_image", video_item["input_bindings"])
+        self.assertEqual(video_item["input_bindings"]["input_base_image"]["from_job"], "clip_001_keyframe")
+        self.assertIn("clip_001_keyframe", {row["job_id"] for row in payload["image_prompts"]})
 
     def test_validator_treats_short_video_as_portrait_by_default(self) -> None:
         content = json.dumps(
