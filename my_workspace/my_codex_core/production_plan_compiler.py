@@ -761,8 +761,8 @@ def _concise_img2img_style_edit_prompt(prompt: str) -> str:
     text = re.sub(r"\s+", " ", text).strip(" ,.;\u3002\uff0c\uff1b")
     if not text:
         return str(prompt or "").strip()
-    if not re.search(r"^\s*(?:\u56fe\u4e2d|\u8ba9|\u5c06|\u628a|\u57fa\u4e8e)", text):
-        text = "\u56fe\u4e2d\u4eba\u7269" + text
+    if not re.search(r"^\s*(?:\u8ba9|\u5c06|\u628a|\u57fa\u4e8e)", text):
+        text = "\u8ba9\u56fe\u4e2d\u4eba\u7269" + re.sub(r"^\s*\u56fe\u4e2d\u4eba\u7269", "", text).strip()
     return text
 
 

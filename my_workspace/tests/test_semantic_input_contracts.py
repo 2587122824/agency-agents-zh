@@ -700,6 +700,7 @@ class SemanticInputContractTests(unittest.TestCase):
         item = plan["compiled_payload"]["image_prompts"][0]
         self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
         self.assertEqual(item["input_base_image"], "my_workspace/my_asset_library/characters/xiaomei.png")
+        self.assertTrue(item["prompt"].startswith("\u8ba9\u56fe\u4e2d\u4eba\u7269"))
         self.assertIn("\u9910\u684c", item["prompt"])
         self.assertIn("\u70ed\u996d", item["prompt"])
         self.assertNotIn("character_id", item["prompt"])
