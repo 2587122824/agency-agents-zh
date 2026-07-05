@@ -65,6 +65,7 @@ def compile_production_plan(
     video_content: str = "",
     audio_content: str = "",
     package_content: str = "",
+    source_content: str = "",
     existing_payload: dict[str, Any] | None = None,
     video_config: dict[str, Any] | None = None,
     voice_config: dict[str, Any] | None = None,
@@ -86,6 +87,7 @@ def compile_production_plan(
     video_payload = _json_object_from_text(video_content)
     audio_payload = _json_object_from_text(audio_content)
     package_payload = _json_object_from_text(package_content)
+    source_payload = _json_object_from_text(source_content)
 
     route = _route_from_payload(route_payload, route_content, video_config or {})
     production_type = str(route.get("production_type") or "custom").strip()
@@ -109,9 +111,10 @@ def compile_production_plan(
         load_production_entities(entity_path or DEFAULT_ENTITY_PATH),
         load_asset_library(asset_library_path or DEFAULT_ASSET_LIBRARY_PATH),
     )
+    _merge_linked_asset_entities(entity_registry, source_payload)
     entity_references = collect_entity_references(
         production_intents,
-        [route_payload, image_payload, video_payload, audio_payload, package_payload, existing_payload or {}],
+        [route_payload, image_payload, video_payload, audio_payload, package_payload, source_payload, existing_payload or {}],
     )
     global_context, resolved_entities, entity_notes = enrich_global_context_with_entities(global_context, entity_registry, entity_references)
     global_context = normalize_parameter_policy_context(global_context, route=route, video_config=video_config or {})
@@ -508,6 +511,64 @@ def _character_master_reference_from_item(item: dict[str, Any]) -> str:
     return _first_identity_reference(character)
 
 
+def _merge_linked_asset_entities(registry: dict[str, Any], payload: dict[str, Any]) -> None:
+    linked_assets = payload.get("linked_assets") if isinstance(payload.get("linked_assets"), dict) else {}
+    if not linked_assets:
+        return
+    characters = registry.setdefault("characters", {})
+    if not isinstance(characters, dict):
+        characters = {}
+        registry["characters"] = characters
+    scenes = registry.setdefault("scenes", {})
+    if not isinstance(scenes, dict):
+        scenes = {}
+        registry["scenes"] = scenes
+    for raw in linked_assets.get("characters") or []:
+        if not isinstance(raw, dict):
+            continue
+        character_id = str(raw.get("character_id") or raw.get("id") or "").strip()
+        if not character_id:
+            continue
+        current = characters.get(character_id) if isinstance(characters.get(character_id), dict) else {}
+        reference_assets = list(current.get("reference_assets") or []) if isinstance(current.get("reference_assets"), list) else []
+        reference_assets.extend(str(value).strip() for value in raw.get("reference_assets") or [] if str(value).strip())
+        master_image = str(raw.get("master_image") or raw.get("reference_image") or "").strip()
+        if master_image:
+            reference_assets.insert(0, master_image)
+        characters[character_id] = {
+            **current,
+            "character_id": character_id,
+            "id": character_id,
+            "name": str(raw.get("name") or current.get("name") or character_id).strip(),
+            "master_image": master_image or str(current.get("master_image") or "").strip(),
+            "reference_assets": list(dict.fromkeys(reference_assets)),
+            "source_asset_id": str(raw.get("source_asset_id") or current.get("source_asset_id") or "").strip(),
+        }
+    for raw in linked_assets.get("scenes") or []:
+        if not isinstance(raw, dict):
+            continue
+        scene_id = str(raw.get("scene_id") or raw.get("id") or "").strip()
+        if not scene_id:
+            continue
+        current = scenes.get(scene_id) if isinstance(scenes.get(scene_id), dict) else {}
+        reference_assets = list(current.get("reference_assets") or []) if isinstance(current.get("reference_assets"), list) else []
+        reference_assets.extend(str(value).strip() for value in raw.get("reference_assets") or [] if str(value).strip())
+        scene_master = str(raw.get("scene_master_image") or raw.get("scene_reference") or raw.get("reference_image") or "").strip()
+        if scene_master:
+            reference_assets.insert(0, scene_master)
+        scenes[scene_id] = {
+            **current,
+            "scene_id": scene_id,
+            "id": scene_id,
+            "name": str(raw.get("name") or current.get("name") or scene_id).strip(),
+            "scene_master_image": scene_master or str(current.get("scene_master_image") or "").strip(),
+            "scene_reference": scene_master or str(current.get("scene_reference") or "").strip(),
+            "scene_description": str(raw.get("scene_description") or current.get("scene_description") or "").strip(),
+            "reference_assets": list(dict.fromkeys(reference_assets)),
+            "source_asset_id": str(raw.get("source_asset_id") or current.get("source_asset_id") or "").strip(),
+        }
+
+
 def _apply_linked_character_reference_policy(
     item: dict[str, Any],
     intent: dict[str, Any],
@@ -557,6 +618,10 @@ def _linked_character_reference_from_intent_or_item(intent: dict[str, Any], item
         value = str(entity_usage.get(key) or intent.get(key) or "").strip()
         if value:
             return value
+    entity_context = item.get("entity_context") if isinstance(item.get("entity_context"), dict) else {}
+    character = entity_context.get("character") if isinstance(entity_context.get("character"), dict) else {}
+    if str(character.get("source_asset_id") or "").strip():
+        return _first_identity_reference(character)
     return ""
 
 

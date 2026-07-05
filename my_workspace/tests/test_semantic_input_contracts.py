@@ -471,6 +471,66 @@ class SemanticInputContractTests(unittest.TestCase):
                 "my_workspace/my_asset_library/scenes/dining_room.png",
             )
 
+    def test_three_frame_shot_uses_source_linked_assets_when_staff_omits_paths(self) -> None:
+        linked_assets = {
+            "linked_assets": {
+                "characters": [
+                    {
+                        "character_id": "hero",
+                        "name": "Hero",
+                        "master_image": "my_workspace/my_asset_library/characters/hero.png",
+                        "source_asset_id": "asset_hero",
+                    }
+                ],
+                "scenes": [
+                    {
+                        "scene_id": "dining_room",
+                        "name": "Dining room",
+                        "scene_master_image": "my_workspace/my_asset_library/scenes/dining_room.png",
+                        "source_asset_id": "asset_scene",
+                    }
+                ],
+            }
+        }
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_three_frame_shot",
+                            "intent_id": "shot_meal_three_frame",
+                            "character_id": "hero",
+                            "scene_id": "dining_room",
+                            "frame_set": [
+                                {"role": "start", "prompt": "Hero hesitates beside the table."},
+                                {"role": "middle", "prompt": "Hero leans closer to smell the food."},
+                                {"role": "end", "prompt": "Hero smiles and starts eating."},
+                            ],
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="three_frame_source_linked_assets_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+        items = plan["compiled_payload"]["image_prompts"]
+        self.assertEqual(len(items), 3)
+        for item in items:
+            self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
+            self.assertEqual(
+                item["input_base_image"],
+                "my_workspace/my_asset_library/characters/hero.png",
+            )
+            self.assertEqual(
+                item["input_scene_image"],
+                "my_workspace/my_asset_library/scenes/dining_room.png",
+            )
+
     def test_animal_reference_sheet_stays_on_character_base(self) -> None:
         image_content = json.dumps(
             {
