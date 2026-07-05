@@ -1286,6 +1286,26 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn(("216", "value", False), row_keys)
         self.assertIn(("232", "filename_prefix", "video/ltx2.3-i2v-first-frame"), row_keys)
 
+    def test_adapter_does_not_apply_first_frame_mapping_to_three_frame_endpoint(self) -> None:
+        repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
+            json.dumps(
+                [
+                    {"nodeId": "177", "fieldName": "text", "fieldValue": "{{prompt}}"},
+                    {"nodeId": "178", "fieldName": "prompt", "fieldValue": "{{prompt}}"},
+                    {"nodeId": "193", "fieldName": "image", "fieldValue": "{{reference_image}}"},
+                ]
+            ),
+            endpoint="/run/workflow/2071735603636563970",
+            workflow_id="06_i2v_first_frame",
+            workflow_mode="i2v_first_frame",
+        )
+        rows = json.loads(repaired)
+        row_keys = {(row["nodeId"], row["fieldName"], row["fieldValue"]) for row in rows}
+        self.assertNotIn("178", {row["nodeId"] for row in rows})
+        self.assertIn(("447", "image", "{{input_base_image}}"), row_keys)
+        self.assertIn(("448", "image", "{{input_middle_frame}}"), row_keys)
+        self.assertIn(("449", "image", "{{input_last_frame}}"), row_keys)
+
     def test_adapter_replaces_long_side_placeholder(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         payload = {

@@ -1527,7 +1527,9 @@ class CloudComfyUIAdapter:
         )
         if is_broll_ltx and {"2483", "2612", "3059"}.intersection(stale_node_ids):
             return json.dumps(cls._ltx_text_to_video_node_info(), ensure_ascii=False, indent=2)
-        if is_first_frame_i2v_ltx and {"4923", "2483", "4961", "2612", "2004", "3059", "4979", "4978", "4967", "3159", "4977"}.intersection(stale_node_ids):
+        if is_three_frame_ltx and {"177", "178", "193", "195", "197", "4923", "2483", "4961", "2612", "2004", "3059", "4979", "4978", "4967", "3159", "4977"}.intersection(stale_node_ids):
+            return json.dumps(cls._ltx_three_frame_node_info(), ensure_ascii=False, indent=2)
+        if is_first_frame_i2v_ltx and not is_three_frame_ltx and {"4923", "2483", "4961", "2612", "2004", "3059", "4979", "4978", "4967", "3159", "4977"}.intersection(stale_node_ids):
             return json.dumps(cls._ltx_image_to_video_node_info(), ensure_ascii=False, indent=2)
 
         # The current z_image_turbo RunningHub workflow uses node 63 for the
@@ -1667,6 +1669,21 @@ class CloudComfyUIAdapter:
             {"nodeId": "231", "fieldName": "fps", "fieldValue": "{{fps}}"},
             {"nodeId": "232", "fieldName": "filename_prefix", "fieldValue": "video/ltx2.3-i2v-first-frame"},
         ]
+
+    @staticmethod
+    def _ltx_three_frame_node_info() -> list[dict[str, Any]]:
+        preset = (
+            Path(__file__).resolve().parents[1]
+            / "comfyui_workflows"
+            / "workflow_library"
+            / "06_i2v_first_middle_last_frame_ltx_2_3"
+            / "runninghub_node_info_list_preset.json"
+        )
+        try:
+            loaded = json.loads(preset.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return []
+        return loaded if isinstance(loaded, list) else []
 
     @classmethod
     def _library_item_supports_material_type(cls, item: dict[str, Any], material_type: str) -> bool:
