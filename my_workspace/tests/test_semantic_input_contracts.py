@@ -634,6 +634,71 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(video_item["input_bindings"]["input_base_image"]["from_job"], "clip_001_keyframe")
         self.assertIn("clip_001_keyframe", {row["job_id"] for row in payload["image_prompts"]})
 
+    def test_task_comfy_debug_resolves_input_binding_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            task_dir = Path(temp_dir)
+            comfy_dir = task_dir / "comfyui"
+            comfy_dir.mkdir(parents=True)
+            (comfy_dir / "comfyui_payload.json").write_text(
+                json.dumps(
+                    {
+                        "image_prompts": [
+                            {
+                                "id": "asset_char_main_front",
+                                "job_id": "asset_char_main_front",
+                                "workflow_id": "01_base_asset_image",
+                                "workflow_mode": "character_base",
+                                "prompt": "主角母版",
+                            },
+                            {
+                                "id": "shot_001_keyframe",
+                                "job_id": "shot_001_keyframe",
+                                "workflow_id": "04_keyframe",
+                                "workflow_mode": "img2img_style_keyframe",
+                                "prompt": "主角进入2008年街头",
+                                "input_bindings": {
+                                    "input_base_image": {
+                                        "from_job": "asset_char_main_front",
+                                        "output": "output_final_image",
+                                    }
+                                },
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (task_dir / "production_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "status": "awaiting_comfyui_image_debug",
+                        "composition": {"manual_debug_stage": "image"},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (comfy_dir / "manual_debug_state.json").write_text(
+                json.dumps(
+                    {
+                        "items": {
+                            "01_base_asset_image:character_base:asset_char_main_front": {
+                                "status": "approved",
+                                "files": ["comfyui/manual_debug/master.png"],
+                                "prompt_version": 2,
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            status = web_app.WorkflowWebHandler._task_comfy_debug_status(task_dir)
+            keyframe_group = next(item for item in status["items"] if item["id"] == "group:04_keyframe:img2img_style_keyframe")
+            child = keyframe_group["children"][0]
+            self.assertEqual(child["reference_image"], "asset_char_main_front")
+
     def test_validator_treats_short_video_as_portrait_by_default(self) -> None:
         content = json.dumps(
             {

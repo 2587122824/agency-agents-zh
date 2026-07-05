@@ -15253,6 +15253,23 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return ""
 
     @staticmethod
+    def _binding_source_from_material_item(entry: dict, *slots: str) -> str:
+        if not isinstance(entry, dict):
+            return ""
+        bindings = entry.get("input_bindings") if isinstance(entry.get("input_bindings"), dict) else {}
+        for slot in slots:
+            spec = bindings.get(slot)
+            if isinstance(spec, str) and spec.strip():
+                return spec.strip()
+            if not isinstance(spec, dict):
+                continue
+            for key in ("path", "file", "asset_id", "from_job"):
+                value = str(spec.get(key) or "").strip()
+                if value:
+                    return value
+        return ""
+
+    @staticmethod
     def _file_match_candidates(value: object) -> set[str]:
         text = str(value or "").replace("\\", "/").strip()
         if not text:
@@ -15761,7 +15778,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             value = str(entry.get(key) or "").strip()
             if value:
                 return value
-        return ""
+        return WorkflowWebHandler._binding_source_from_material_item(entry, "input_base_image", "input_identity_image")
 
     @staticmethod
     def _last_frame_from_material_item(entry: dict) -> str:
@@ -15769,7 +15786,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             value = str(entry.get(key) or "").strip()
             if value:
                 return value
-        return ""
+        return WorkflowWebHandler._binding_source_from_material_item(entry, "input_last_frame")
 
     @staticmethod
     def _middle_frame_from_material_item(entry: dict) -> str:
@@ -15777,7 +15794,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             value = str(entry.get(key) or "").strip()
             if value:
                 return value
-        return ""
+        return WorkflowWebHandler._binding_source_from_material_item(entry, "input_middle_frame")
 
     @staticmethod
     def _reference_images_from_material_item(entry: dict) -> list[dict | str]:
