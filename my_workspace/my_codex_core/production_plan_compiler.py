@@ -388,6 +388,7 @@ def _compile_image_intents(
                 )
                 item["frame_role"] = role
                 _apply_generated_character_reference_policy(item, intent, prompts, notes)
+                _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
                 prompts.append(item)
                 jobs.append({"job_id": job_id, "intent_id": intent_id, "frame_role": role, **item})
             continue
@@ -415,6 +416,7 @@ def _compile_image_intents(
             intent_name=intent_name,
             overrides=overrides,
         )
+        _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
         prompts.append(item)
         jobs.append({"job_id": intent_id, "intent_id": intent_id, **item})
     return prompts, jobs
@@ -529,6 +531,64 @@ def _append_prompt_once(prompt: str, addition: str) -> str:
     if not extra or extra in base:
         return base
     return f"{base} {extra}".strip()
+
+
+def _apply_live_action_quality_policy(
+    item: dict[str, Any],
+    *,
+    global_context: dict[str, Any],
+    intent: dict[str, Any] | None = None,
+) -> None:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            item.get("prompt"),
+            item.get("style_id"),
+            item.get("asset_tag"),
+            (intent or {}).get("prompt") if isinstance(intent, dict) else "",
+            (intent or {}).get("description") if isinstance(intent, dict) else "",
+            (global_context.get("style") or {}).get("style_id") if isinstance(global_context.get("style"), dict) else "",
+            (global_context.get("style") or {}).get("description") if isinstance(global_context.get("style"), dict) else "",
+        )
+    ).lower()
+    if not _looks_like_live_action_context(text):
+        return
+    item["prompt"] = _append_prompt_once(
+        str(item.get("prompt") or ""),
+        (
+            "真人纪实质感：自然皮肤纹理、普通市井人物、真实街拍/手持摄影光线、2008年前后中国城市生活细节；"
+            "避免棚拍海报感、网红精修脸、夸张皮衣硬照、时尚大片姿势和过度锐化塑料质感。"
+            "画面中如需招牌/报纸/广告，只用模糊不可读背景文字，不生成可读乱码。"
+        ),
+    )
+    item["negative_prompt"] = _append_prompt_once(
+        str(item.get("negative_prompt") or ""),
+        (
+            "AI generated look, glossy poster, studio fashion shoot, celebrity portrait, beauty retouching, plastic skin, "
+            "random different face, inconsistent age, inconsistent protagonist, gibberish text, malformed Chinese text, readable fake signs"
+        ),
+    )
+
+
+def _looks_like_live_action_context(text: str) -> bool:
+    value = str(text or "").lower()
+    return any(
+        token in value
+        for token in (
+            "真人",
+            "live action",
+            "live-action",
+            "realistic",
+            "photoreal",
+            "电影级",
+            "复古",
+            "年代",
+            "市井",
+            "2008",
+            "街拍",
+            "纪实",
+        )
+    )
 
 
 def _previous_character_reference_job(items: list[dict[str, Any]], character_id: str) -> dict[str, Any] | None:
@@ -820,6 +880,7 @@ def _compile_video_intents(
             if "local_tts" not in item["depends_on"]:
                 item["depends_on"].append("local_tts")
             item["requires_audio"] = True
+        _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
         prompts.append(item)
         jobs.append(dict(item))
         video_job_ids.add(intent_id)

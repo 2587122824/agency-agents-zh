@@ -829,6 +829,55 @@ class SemanticInputContractTests(unittest.TestCase):
         values = [(item["fieldName"], item["fieldValue"]) for item in built["nodeInfoList"]]
         self.assertEqual(values, [("width", 480), ("height", 848)])
 
+    def test_live_action_retro_prompts_get_quality_guardrails(self) -> None:
+        plan = compile_production_plan(
+            task_id="live_action_quality",
+            route_content=json.dumps(
+                {
+                    "production_type": "drama_story",
+                    "aspect_ratio": "9:16",
+                    "style_id": "style_vintage_2008_live_action",
+                },
+                ensure_ascii=False,
+            ),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_keyframe",
+                                "intent_id": "shot_001_keyframe",
+                                "prompt": "2008年市井街头，真人电影级复古画质，主角站在房产中介门口。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_content=json.dumps(
+                {
+                    "production_intents": {
+                        "video": [
+                            {
+                                "intent": "generate_broll_clip",
+                                "intent_id": "clip_001_street",
+                                "prompt": "2008年街边小卖部和公交站牌，复古市井烟火。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_config={"aspect_ratio": "9:16"},
+        )
+        image_item = plan["compiled_payload"]["image_prompts"][0]
+        video_item = plan["compiled_payload"]["video_prompts"][0]
+        self.assertIn("真人纪实质感", image_item["prompt"])
+        self.assertIn("模糊不可读背景文字", image_item["prompt"])
+        self.assertIn("gibberish text", image_item["negative_prompt"])
+        self.assertIn("真人纪实质感", video_item["prompt"])
+        self.assertIn("studio fashion shoot", video_item["negative_prompt"])
+
     def test_adapter_repairs_legacy_broll_ltx_node_info(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
             json.dumps(
