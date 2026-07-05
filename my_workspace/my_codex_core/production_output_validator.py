@@ -507,6 +507,12 @@ def _expected_resolution(lock: dict[str, Any], delivery: bool) -> tuple[int, int
     original = str(lock.get("original_requirement") or "")
     aspect = str(lock.get("aspect_ratio") or lock.get("target_aspect_ratio") or "").strip()
     platform = str(lock.get("target_platform") or lock.get("platform") or "").strip()
+    explicit_text = f"{original} {constraints}"
+    explicit_lowered = explicit_text.lower()
+    if "绔栧睆" in explicit_text or "9:16" in explicit_lowered or "portrait" in explicit_lowered:
+        return (1080, 1920) if delivery else (480, 848)
+    if "16:9" in explicit_lowered or "妯睆" in explicit_text or "landscape" in explicit_lowered:
+        return (1920, 1080) if delivery else (848, 480)
     text = f"{original} {constraints} {aspect} {platform}"
     lowered = text.lower()
     if "16:9" in lowered or "横屏" in text or "landscape" in lowered:

@@ -66,6 +66,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
   - 9:16 -> `480x848`
   - 1:1 -> `480x480`
 - Production-output validation treats short-video platforms/requirements (`短视频`, `抖音`, `快手`, `小红书`) as portrait `9:16` by default unless the user explicitly says `16:9`, landscape, or horizontal.
+- When the original locked requirement explicitly says `9:16`, vertical, or portrait, validation uses portrait working size `480x848` even if an upstream route JSON later mislabels `aspect_ratio` as `16:9`. The user's original delivery constraint wins over a staff routing typo.
 - Delivery dimensions are normalized separately:
   - 16:9 -> `1920x1080`
   - 9:16 -> `1080x1920`

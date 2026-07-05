@@ -1144,6 +1144,53 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertTrue(result["passed"], result["issues"])
         self.assertEqual(result["expected_work_resolution"], "480x848")
 
+    def test_validator_original_portrait_requirement_overrides_wrong_route_aspect(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_001_keyframe",
+                            "prompt": "Hero in a warm dining room.",
+                        }
+                    ]
+                },
+                "image_prompts": [
+                    {
+                        "task_type": "image",
+                        "prompt": "Hero in a warm dining room.",
+                        "width": 480,
+                        "height": 848,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+        previous = [
+            {
+                "agent": "01_route",
+                "content": "```json\n"
+                + json.dumps(
+                    {
+                        "production_type": "drama_story",
+                        "target_platform": "douyin",
+                        "aspect_ratio": "16:9",
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n```",
+            }
+        ]
+        result = validate_production_output(
+            {"agent": "06_image"},
+            f"```json\n{content}\n```",
+            {"original_requirement": "10秒，9:16 vertical video", "duration_seconds": 10},
+            previous_outputs=previous,
+        )
+        self.assertTrue(result["passed"], result["issues"])
+        self.assertEqual(result["expected_work_resolution"], "480x848")
+
     def test_validator_accepts_three_frame_source_intent_binding(self) -> None:
         content = json.dumps(
             {
