@@ -5499,7 +5499,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.useKnowledge, settings.useKnowledge);
       setIfExists(els.workflowAdvanceMode, settings.workflowAdvanceMode || 'auto');
       setIfExists(els.autoProductionMode, settings.autoProductionMode);
-      setIfExists(els.comfyDebugGate, settings.comfyDebugGate || 'on');
+      setIfExists(els.comfyDebugGate, settings.comfyDebugGate || 'off');
       setIfExists(els.composeTool, settings.composeTool);
       els.finalVideoName.value = settings.finalVideoName || '';
       setIfExists(els.visualProvider, settings.visualProvider || 'runninghub');
@@ -15579,10 +15579,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 stage = "all"
         leaf_items = cls._task_comfy_debug_items(payload, state, stage=stage)
         items = cls._task_comfy_debug_groups(leaf_items)
-        enabled = bool(items) and (
+        manual_debug_enabled = bool(composition.get("manual_debug_enabled"))
+        enabled = bool(items) and manual_debug_enabled and (
             production_status.startswith("awaiting_comfyui_")
             or production_status in {"comfyui_manual_approved", "comfyui_image_manual_approved", "comfyui_video_manual_approved"}
-            or bool(composition.get("manual_debug_enabled"))
+            or manual_debug_enabled
         )
         approved = len([item for item in items if item.get("status") == "approved"])
         current = next((item for item in items if item.get("status") != "approved"), None)

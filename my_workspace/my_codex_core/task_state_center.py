@@ -136,7 +136,7 @@ class TaskStateCenter:
         if str(self.summary.get("blocked_reason") or "").strip():
             return "blocked"
         production_status = str(self.summary.get("production_status") or "").strip().lower()
-        if production_status.startswith("awaiting_comfyui_"):
+        if production_status.startswith("awaiting_comfyui_") and comfy_debug.get("enabled"):
             return "partial" if comfy_debug.get("enabled") and comfy_debug.get("complete") else "blocked"
         if production_status and self._is_failed_status(production_status):
             return "failed"

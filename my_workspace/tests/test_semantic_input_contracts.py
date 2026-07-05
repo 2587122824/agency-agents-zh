@@ -29,11 +29,57 @@ from my_codex_core.production_pipeline import (  # noqa: E402
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
 from my_codex_core.requirement_guard import declares_human_confirmation, validate_requirement_alignment  # noqa: E402
+from my_codex_core.task_state_center import TaskStateCenter  # noqa: E402
 
 
 class SemanticInputContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.workflows = {item["id"]: item for item in web_app.COMFY_DEBUG_WORKFLOWS}
+
+    def test_comfy_debug_queue_requires_explicit_manual_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            comfy_dir = task_dir / "comfyui"
+            comfy_dir.mkdir()
+            (comfy_dir / "comfyui_payload.json").write_text(
+                json.dumps({"image_prompts": [{"id": "shot_001", "prompt": "test frame"}]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (task_dir / "production_manifest.json").write_text(
+                json.dumps({"status": "awaiting_comfyui_debug", "composition": {}}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            status = web_app.WorkflowWebHandler._task_comfy_debug_status(task_dir)
+            self.assertFalse(status["enabled"])
+            self.assertGreater(status["total"], 0)
+
+            (task_dir / "production_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "status": "awaiting_comfyui_debug",
+                        "composition": {"manual_debug_enabled": True},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            status = web_app.WorkflowWebHandler._task_comfy_debug_status(task_dir)
+            self.assertTrue(status["enabled"])
+
+    def test_task_state_does_not_offer_debug_queue_when_gate_is_off(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            center = TaskStateCenter(
+                task_dir=task_dir,
+                task_name="task_test",
+                summary={"production_status": "awaiting_comfyui_debug"},
+                files=[],
+                comfy_debug_loader=lambda _task_dir: {"enabled": False, "complete": False},
+            )
+            state = center.build()
+            self.assertNotIn("run_comfy_debug", state["allowed_actions"])
+            self.assertNotEqual(state["next_action"].get("action"), "run_comfy_debug")
 
     def test_keyframe_modes_are_explicit_and_typed(self) -> None:
         modes = {item["value"]: item for item in self.workflows["04_keyframe"]["modes"]}
