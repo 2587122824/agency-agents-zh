@@ -1019,6 +1019,13 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(result["status"], "skipped")
             self.assertIn("tempo above", result["reason"])
 
+    def test_media_range_header_parsing(self) -> None:
+        self.assertEqual(web_app.WorkflowWebHandler._parse_range_header("bytes=0-99", 1000), (0, 99))
+        self.assertEqual(web_app.WorkflowWebHandler._parse_range_header("bytes=900-", 1000), (900, 999))
+        self.assertEqual(web_app.WorkflowWebHandler._parse_range_header("bytes=-100", 1000), (900, 999))
+        self.assertIsNone(web_app.WorkflowWebHandler._parse_range_header("bytes=1000-", 1000))
+        self.assertIsNone(web_app.WorkflowWebHandler._parse_range_header("items=0-99", 1000))
+
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {

@@ -14823,14 +14823,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         }
         if suffix not in allowed:
             raise ValueError(f"Unsupported media file type: {suffix}")
-        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        data = target.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
+        self._send_file_response(target)
 
     def _asset_library(self) -> list[dict]:
         ASSET_LIBRARY_ROOT.mkdir(parents=True, exist_ok=True)
@@ -17227,14 +17220,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         suffix = target.suffix.lower()
         if suffix not in MEDIA_EXTENSIONS:
             raise ValueError(f"Unsupported media file type: {suffix}")
-        content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        data = target.read_bytes()
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        self.wfile.write(data)
+        self._send_file_response(target)
 
     def _send_reference_media(self, file_name: str) -> None:
         name = str(file_name or "").replace("\\", "/").strip().lstrip("/")
@@ -17248,14 +17234,64 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         suffix = target.suffix.lower()
         if suffix not in MEDIA_EXTENSIONS:
             raise ValueError(f"Unsupported reference media file type: {suffix}")
+        self._send_file_response(target)
+
+    def _send_file_response(self, target: Path) -> None:
+        file_size = target.stat().st_size
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-        data = target.read_bytes()
-        self.send_response(200)
+        range_header = str(self.headers.get("Range") or "").strip()
+        byte_range = self._parse_range_header(range_header, file_size) if range_header else None
+        if range_header and byte_range is None:
+            self.send_response(416)
+            self.send_header("Content-Range", f"bytes */{file_size}")
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            return
+        if byte_range:
+            start, end = byte_range
+            length = end - start + 1
+            self.send_response(206)
+            self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
+        else:
+            start, end = 0, max(0, file_size - 1)
+            length = file_size
+            self.send_response(200)
         self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(length))
+        self.send_header("Accept-Ranges", "bytes")
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
-        self.wfile.write(data)
+        with target.open("rb") as handle:
+            handle.seek(start)
+            remaining = length
+            while remaining > 0:
+                chunk = handle.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
+
+    @staticmethod
+    def _parse_range_header(range_header: str, file_size: int) -> tuple[int, int] | None:
+        match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+        if not match or file_size < 0:
+            return None
+        start_text, end_text = match.groups()
+        if not start_text and not end_text:
+            return None
+        if start_text:
+            start = int(start_text)
+            end = int(end_text) if end_text else file_size - 1
+        else:
+            suffix_length = int(end_text)
+            if suffix_length <= 0:
+                return None
+            start = max(0, file_size - suffix_length)
+            end = file_size - 1
+        if start >= file_size or end < start:
+            return None
+        return start, min(end, file_size - 1)
 
     @staticmethod
     def _read_asset_library_index() -> list[dict]:

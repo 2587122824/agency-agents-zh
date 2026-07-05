@@ -181,6 +181,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 ## Task Output / UI State
 
 - Task Output prefers `task_status.steps`, `task_status.production.jobs`, `task_status.assets`, `task_status.allowed_actions`, and `task_status.diagnostics`.
+- Task Output and asset-library media endpoints support HTTP byte-range requests so browser video/audio previews can seek instead of downloading the whole file as a single 200 response.
 - Diagnostics render above production jobs and should include real blockers before export/review suggestions.
 - Missing ComfyUI slot diagnostics include the raw `workflow_id / mode` and user-facing debug-console path.
 - Missing slot rows expose a `去配置` action that jumps to the exact ComfyUI debug submode.
