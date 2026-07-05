@@ -3494,6 +3494,11 @@ INDEX_HTML = r"""<!doctype html>
                 <label id="comfyDebugSceneImageField" hidden>场景参考图路径
                   <input id="comfyDebugSceneImage" autocomplete="off" spellcheck="false" placeholder="input_scene_image：场景母版/空间布局参考图" />
                 </label>
+                <label id="comfyDebugSceneAssetField" hidden>场景母版
+                  <select id="comfyDebugSceneAssetReference">
+                    <option value="">请选择场景母版或场景素材</option>
+                  </select>
+                </label>
                 <label id="comfyDebugCharacterEntityField" hidden>角色实体
                   <select id="comfyDebugCharacterEntity">
                     <option value="">不使用角色实体自动联动</option>
@@ -4070,6 +4075,8 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugPoseImage: document.getElementById('comfyDebugPoseImage'),
       comfyDebugSceneImageField: document.getElementById('comfyDebugSceneImageField'),
       comfyDebugSceneImage: document.getElementById('comfyDebugSceneImage'),
+      comfyDebugSceneAssetField: document.getElementById('comfyDebugSceneAssetField'),
+      comfyDebugSceneAssetReference: document.getElementById('comfyDebugSceneAssetReference'),
       comfyDebugCharacterEntityField: document.getElementById('comfyDebugCharacterEntityField'),
       comfyDebugCharacterEntity: document.getElementById('comfyDebugCharacterEntity'),
       comfyDebugIdentityAssetField: document.getElementById('comfyDebugIdentityAssetField'),
@@ -5880,6 +5887,7 @@ INDEX_HTML = r"""<!doctype html>
         defaultSourceVideo: String(item.defaultSourceVideo ?? item.default_source_video ?? fallback.defaultSourceVideo ?? ''),
         defaultPoseImage: String(item.defaultPoseImage ?? item.default_pose_image ?? fallback.defaultPoseImage ?? ''),
         defaultSceneImage: String(item.defaultSceneImage ?? item.default_scene_image ?? fallback.defaultSceneImage ?? ''),
+        defaultSceneAssetReference: String(item.defaultSceneAssetReference ?? item.default_scene_asset_reference ?? fallback.defaultSceneAssetReference ?? ''),
         defaultMiddleFrameReference: String(item.defaultMiddleFrameReference ?? item.default_middle_frame_reference ?? fallback.defaultMiddleFrameReference ?? ''),
         defaultLastFrameReference: String(item.defaultLastFrameReference ?? item.default_last_frame_reference ?? fallback.defaultLastFrameReference ?? ''),
         defaultSeed: String(item.defaultSeed ?? item.default_seed ?? fallback.defaultSeed ?? ''),
@@ -6002,6 +6010,7 @@ INDEX_HTML = r"""<!doctype html>
           defaultHeight: String(item.defaultHeight || item.default_height || ''),
           defaultReference: String(item.defaultReference || item.default_reference || item.reference || ''),
           defaultSceneImage: String(item.defaultSceneImage || item.default_scene_image || item.sceneImage || item.scene_image || ''),
+          defaultSceneAssetReference: String(item.defaultSceneAssetReference || item.default_scene_asset_reference || item.sceneAssetReference || ''),
           defaultMiddleFrameReference: String(item.defaultMiddleFrameReference || item.default_middle_frame_reference || item.middleFrameReference || item.middle_frame_image || ''),
           defaultLastFrameReference: String(item.defaultLastFrameReference || item.default_last_frame_reference || item.lastFrameReference || item.last_frame_image || ''),
           defaultSeed: String(item.defaultSeed || item.default_seed || item.seed || ''),
@@ -6036,6 +6045,7 @@ INDEX_HTML = r"""<!doctype html>
           defaultHeight: String(item.defaultHeight || item.default_height || ''),
           defaultReference: String(item.defaultReference || item.default_reference || item.reference || ''),
           defaultSceneImage: String(item.defaultSceneImage || item.default_scene_image || item.sceneImage || item.scene_image || ''),
+          defaultSceneAssetReference: String(item.defaultSceneAssetReference || item.default_scene_asset_reference || item.sceneAssetReference || ''),
           defaultMiddleFrameReference: String(item.defaultMiddleFrameReference || item.default_middle_frame_reference || item.middleFrameReference || item.middle_frame_image || ''),
           defaultLastFrameReference: String(item.defaultLastFrameReference || item.default_last_frame_reference || item.lastFrameReference || item.last_frame_image || ''),
           defaultSeed: String(item.defaultSeed || item.default_seed || item.seed || ''),
@@ -6208,6 +6218,7 @@ INDEX_HTML = r"""<!doctype html>
         sourceVideo: els.comfyDebugSourceVideo?.value || '',
         poseImage: els.comfyDebugPoseImage?.value || '',
         sceneImage: els.comfyDebugSceneImage?.value || '',
+        sceneAssetReference: els.comfyDebugSceneAssetReference?.value || '',
         characterEntity: els.comfyDebugCharacterEntity?.value || '',
         identityAssetReference: els.comfyDebugIdentityAssetReference?.value || '',
         poseAssetReference: els.comfyDebugPoseAssetReference?.value || '',
@@ -6253,6 +6264,7 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugSourceVideo) els.comfyDebugSourceVideo.value = state.sourceVideo || '';
       if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = state.poseImage || '';
       if (els.comfyDebugSceneImage) els.comfyDebugSceneImage.value = state.sceneImage || '';
+      if (els.comfyDebugSceneAssetReference) els.comfyDebugSceneAssetReference.value = state.sceneAssetReference || '';
       if (els.comfyDebugCharacterEntity) els.comfyDebugCharacterEntity.value = state.characterEntity || '';
       if (els.comfyDebugIdentityAssetReference) els.comfyDebugIdentityAssetReference.value = state.identityAssetReference || '';
       if (els.comfyDebugPoseAssetReference) els.comfyDebugPoseAssetReference.value = state.poseAssetReference || '';
@@ -6302,6 +6314,7 @@ INDEX_HTML = r"""<!doctype html>
         sourceVideo: modeConfig.defaultSourceVideo || '',
         poseImage: modeConfig.defaultPoseImage || '',
         sceneImage: modeConfig.defaultSceneImage || '',
+        sceneAssetReference: modeConfig.defaultSceneAssetReference || '',
         seed: modeConfig.defaultSeed || '',
         width: String(modeConfig.defaultWidth || workflow?.default_width || ''),
         height: String(modeConfig.defaultHeight || workflow?.default_height || ''),
@@ -6603,6 +6616,7 @@ INDEX_HTML = r"""<!doctype html>
           default_source_video: item.defaultSourceVideo || '',
           default_pose_image: item.defaultPoseImage || '',
           default_scene_image: item.defaultSceneImage || '',
+          default_scene_asset_reference: item.defaultSceneAssetReference || '',
           default_seed: item.defaultSeed || '',
           default_denoise: item.defaultDenoise || '',
           default_duration: item.defaultDuration || '',
@@ -6629,6 +6643,7 @@ INDEX_HTML = r"""<!doctype html>
             default_source_video: config.defaultSourceVideo || '',
             default_pose_image: config.defaultPoseImage || '',
             default_scene_image: config.defaultSceneImage || '',
+            default_scene_asset_reference: config.defaultSceneAssetReference || '',
             default_middle_frame_reference: config.defaultMiddleFrameReference || '',
             default_last_frame_reference: config.defaultLastFrameReference || '',
             default_seed: config.defaultSeed || '',
@@ -10250,6 +10265,17 @@ INDEX_HTML = r"""<!doctype html>
       return [...new Set(values.map(resolveComfyEntityAsset).filter(Boolean))];
     }
 
+    function sceneReferenceCandidates() {
+      const values = [];
+      Object.values(productionEntities?.scenes || {}).forEach(entity => {
+        if (!entity || typeof entity !== 'object') return;
+        values.push(entity.scene_master_image, entity.scene_reference, entity.reference_asset);
+        if (Array.isArray(entity.reference_assets)) values.push(...entity.reference_assets);
+      });
+      runAssetSceneAssetValues().forEach(item => values.push(item.asset_id || item.id || item.file));
+      return [...new Set(values.map(resolveComfyEntityAsset).filter(Boolean))];
+    }
+
     function appendComfyAssetOption(select, value, label) {
       if (!select || !value || [...select.options].some(option => option.value === value)) return;
       const option = document.createElement('option');
@@ -10262,14 +10288,17 @@ INDEX_HTML = r"""<!doctype html>
       const acceptedInputs = modeAcceptedInputs(selectedWorkflowModeDefinition(activeComfyDebugWorkflow()));
       const needsIdentity = acceptedInputs.includes('input_identity_image');
       const needsPose = acceptedInputs.includes('input_pose_image');
+      const needsScene = acceptedInputs.includes('input_scene_image');
       if (els.comfyDebugCharacterEntityField) els.comfyDebugCharacterEntityField.hidden = !needsIdentity;
       if (els.comfyDebugIdentityAssetField) els.comfyDebugIdentityAssetField.hidden = !needsIdentity;
       if (els.comfyDebugPoseAssetField) els.comfyDebugPoseAssetField.hidden = !needsPose;
-      if (!needsIdentity && !needsPose) return;
+      if (els.comfyDebugSceneAssetField) els.comfyDebugSceneAssetField.hidden = !needsScene;
+      if (!needsIdentity && !needsPose && !needsScene) return;
 
       const currentEntity = String(preferred.characterEntity ?? els.comfyDebugCharacterEntity?.value ?? '');
       const currentIdentity = String(preferred.identityAssetReference ?? els.comfyDebugIdentityAssetReference?.value ?? '');
       const currentPose = String(preferred.poseAssetReference ?? els.comfyDebugPoseAssetReference?.value ?? '');
+      const currentScene = String(preferred.sceneAssetReference ?? els.comfyDebugSceneAssetReference?.value ?? els.comfyDebugSceneImage?.value ?? '');
       if (els.comfyDebugCharacterEntity) {
         els.comfyDebugCharacterEntity.innerHTML = '<option value="">不使用角色实体自动联动</option>';
         Object.values(productionEntities?.characters || {}).forEach(entity => {
@@ -10325,6 +10354,16 @@ INDEX_HTML = r"""<!doctype html>
         ));
         appendComfyAssetOption(els.comfyDebugPoseAssetReference, currentPose, `当前 · ${currentPose.split('/').pop()}`);
         els.comfyDebugPoseAssetReference.value = currentPose;
+      }
+
+      if (els.comfyDebugSceneAssetReference) {
+        els.comfyDebugSceneAssetReference.innerHTML = '<option value="">请选择场景母版或场景素材</option>';
+        sceneReferenceCandidates().forEach(value => {
+          const item = assetLibraryItems.find(asset => comfyAssetPath(asset) === value);
+          appendComfyAssetOption(els.comfyDebugSceneAssetReference, value, `场景参考 · ${item?.name || value.split('/').pop()}`);
+        });
+        appendComfyAssetOption(els.comfyDebugSceneAssetReference, currentScene, `当前 · ${currentScene.split('/').pop()}`);
+        els.comfyDebugSceneAssetReference.value = currentScene;
       }
     }
 
@@ -12113,6 +12152,7 @@ INDEX_HTML = r"""<!doctype html>
       modeConfig.defaultSourceVideo = els.comfyDebugSourceVideo?.value.trim() || '';
       modeConfig.defaultPoseImage = els.comfyDebugPoseImage?.value.trim() || '';
       modeConfig.defaultSceneImage = els.comfyDebugSceneImage?.value.trim() || '';
+      modeConfig.defaultSceneAssetReference = els.comfyDebugSceneAssetReference?.value || '';
       modeConfig.defaultMiddleFrameReference = els.comfyDebugMiddleFrameReference?.value.trim() || '';
       modeConfig.defaultLastFrameReference = els.comfyDebugLastFrameReference?.value.trim() || '';
       modeConfig.defaultSeed = els.comfyDebugSeed.value.trim();
@@ -13102,6 +13142,15 @@ INDEX_HTML = r"""<!doctype html>
       els.comfyDebugPoseAssetReference.onchange = () => {
         const value = els.comfyDebugPoseAssetReference.value || '';
         if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = value;
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+      };
+    }
+    if (els.comfyDebugSceneAssetReference) {
+      els.comfyDebugSceneAssetReference.onchange = () => {
+        const value = els.comfyDebugSceneAssetReference.value || '';
+        if (els.comfyDebugSceneImage) els.comfyDebugSceneImage.value = value;
         saveCurrentComfyDebugUiState();
         saveSettings();
         autoSaveActiveComfyDebugWorkflowConfig();
