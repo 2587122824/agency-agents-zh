@@ -23,7 +23,9 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
 from my_codex_core.production_pipeline import (  # noqa: E402
     _packaging_dependency_blockers,
     _payload_has_required_mode,
+    _quality_check_srt,
     _required_workflow_slots,
+    _srt_from_voice_text,
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
 from my_codex_core.requirement_guard import declares_human_confirmation, validate_requirement_alignment  # noqa: E402
@@ -972,6 +974,50 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertIn("-t", command)
             self.assertEqual(command[command.index("-t") + 1], "30.000")
             self.assertNotIn("tpad=stop_mode=clone", " ".join(command))
+
+    def test_srt_quality_rejects_overloaded_subtitle_entry(self) -> None:
+        srt = (
+            "1\n00:00:00,000 --> 00:00:02,300\n"
+            "买房囤铺，入局新兴行业，短短几年从一无所有逆袭成亿万富豪。这辈子的翻盘，现在开始。\n"
+        )
+        result = _quality_check_srt(srt)
+        self.assertFalse(result["usable"])
+        self.assertEqual(result["status"], "overloaded")
+
+    def test_voice_text_fallback_srt_splits_chinese_punctuation(self) -> None:
+        srt = _srt_from_voice_text("上辈子，我勤恳打工一辈子。省吃俭用，依旧平庸碌碌。短短几年逆袭成亿万富豪。")
+        self.assertGreaterEqual(srt.count("-->"), 3)
+        self.assertIn("上辈子", srt)
+        self.assertIn("短短几年", srt)
+
+    def test_voiceover_alignment_skips_excessive_tempo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            audio = root / "voiceover.wav"
+            audio.write_bytes(b"fake")
+            subtitles = root / "subtitles.srt"
+            subtitles.write_text(
+                "1\n00:00:00,000 --> 00:00:01,000\n一句话\n\n"
+                "2\n00:00:01,000 --> 00:00:02,000\n很长的收尾旁白\n",
+                encoding="utf-8",
+            )
+            original_detect = LocalFFmpegAdapter._detect_silence_midpoints
+            original_probe = LocalFFmpegAdapter._probe_media_duration
+            try:
+                LocalFFmpegAdapter._detect_silence_midpoints = staticmethod(lambda _ffmpeg, _audio: [1.0])  # type: ignore[method-assign]
+                LocalFFmpegAdapter._probe_media_duration = staticmethod(lambda _ffmpeg, _path: 5.0)  # type: ignore[method-assign]
+                aligned, result = LocalFFmpegAdapter._align_voiceover_to_subtitles(
+                    ffmpeg_path="ffmpeg",
+                    audio_file=audio,
+                    subtitles_file=subtitles,
+                    task_dir=root,
+                )
+            finally:
+                LocalFFmpegAdapter._detect_silence_midpoints = original_detect  # type: ignore[method-assign]
+                LocalFFmpegAdapter._probe_media_duration = original_probe  # type: ignore[method-assign]
+            self.assertEqual(aligned, audio)
+            self.assertEqual(result["status"], "skipped")
+            self.assertIn("tempo above", result["reason"])
 
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

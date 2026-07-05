@@ -3051,6 +3051,16 @@ def _quality_check_srt(srt: str) -> dict[str, Any]:
         return {"usable": False, "status": "too_few_entries", "reason": "SRT 条目过少", "entries": entries}
     if "-->" not in stripped:
         return {"usable": False, "status": "invalid", "reason": "SRT 缺少时间轴", "entries": entries}
+    overloaded = _overloaded_srt_entries(stripped)
+    if overloaded:
+        worst = overloaded[0]
+        return {
+            "usable": False,
+            "status": "overloaded",
+            "reason": f"SRT entry {worst['index']} is too dense: {worst['chars_per_second']:.1f} chars/s",
+            "entries": entries,
+            "overloaded_entries": overloaded,
+        }
     return {"usable": True, "status": "ok", "reason": "", "entries": entries}
 
 
@@ -3092,6 +3102,42 @@ def _chunk_voice_text_for_srt(text: str, max_chars: int = 32) -> list[str]:
         if sentence:
             chunks.append(sentence)
     return chunks
+
+
+def _overloaded_srt_entries(srt: str, max_chars_per_second: float = 10.0) -> list[dict[str, Any]]:
+    overloaded: list[dict[str, Any]] = []
+    for block in re.split(r"\r?\n\s*\r?\n", srt.strip()):
+        lines = [line.strip() for line in block.splitlines() if line.strip()]
+        if len(lines) < 3:
+            continue
+        try:
+            index = int(lines[0])
+        except ValueError:
+            index = len(overloaded) + 1
+        timing = re.match(r"(\d{2}:\d{2}:\d{2},\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2},\d{3})", lines[1])
+        if not timing:
+            continue
+        start = _parse_srt_time_ms(timing.group(1))
+        end = _parse_srt_time_ms(timing.group(2))
+        duration = max(0.001, (end - start) / 1000.0)
+        text = "".join(lines[2:])
+        char_count = len(re.findall(r"[\u4e00-\u9fffA-Za-z0-9]", text))
+        chars_per_second = char_count / duration
+        if chars_per_second > max_chars_per_second:
+            overloaded.append(
+                {
+                    "index": index,
+                    "chars": char_count,
+                    "duration_seconds": round(duration, 3),
+                    "chars_per_second": round(chars_per_second, 3),
+                }
+            )
+    return sorted(overloaded, key=lambda item: item["chars_per_second"], reverse=True)
+
+
+def _parse_srt_time_ms(value: str) -> int:
+    hour, minute, second, millisecond = [int(part) for part in re.split(r"[:,]", value)]
+    return ((hour * 60 + minute) * 60 + second) * 1000 + millisecond
 
 
 def _format_srt_time(milliseconds: int) -> str:

@@ -18,6 +18,7 @@ DEFAULT_VIDEO_PRESET = "medium"
 DEFAULT_VIDEO_MAX_RATE = "3M"
 DEFAULT_VIDEO_BUFFER_SIZE = "6M"
 DEFAULT_AUDIO_BITRATE = "128k"
+MAX_ALIGNMENT_TEMPO = 1.35
 
 
 class LocalFFmpegAdapter:
@@ -469,6 +470,18 @@ class LocalFFmpegAdapter:
                     "tempo": round(max(1.0, tempo), 4),
                 }
             )
+        excessive_segments = [segment for segment in segments if segment["tempo"] > MAX_ALIGNMENT_TEMPO]
+        if excessive_segments:
+            return audio_file, {
+                "status": "skipped",
+                "reason": f"voiceover alignment would require tempo above {MAX_ALIGNMENT_TEMPO:.2f}; keeping natural TTS timing",
+                "audio_duration_seconds": round(duration, 3),
+                "subtitle_end_seconds": round(subtitle_end, 3),
+                "drift_seconds": round(drift, 3),
+                "silence_midpoints": [round(value, 3) for value in silences],
+                "segments": segments,
+                "excessive_segments": excessive_segments,
+            }
         filters.append("".join(labels) + f"concat=n={len(labels)}:v=0:a=1[aout]")
         aligned = task_dir / "audio" / "voiceover_aligned.wav"
         aligned.parent.mkdir(parents=True, exist_ok=True)
