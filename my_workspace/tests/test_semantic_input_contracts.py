@@ -81,6 +81,19 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertFalse(srt_quality["usable"])
         self.assertEqual(srt_quality["status"], "disabled")
 
+    def test_ffmpeg_ignores_stale_audio_when_tts_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            audio_dir = Path(tmp) / "audio"
+            audio_dir.mkdir()
+            stale_audio = audio_dir / "voiceover.wav"
+            stale_audio.write_bytes(b"stale")
+            adapter = LocalFFmpegAdapter(Path(tmp))
+            found = adapter._find_audio_file(
+                audio_dir,
+                {"audio": {"adapter_status": "skipped", "voice_text_status": "disabled", "voiceover_audio_file": ""}},
+            )
+            self.assertIsNone(found)
+
     def test_task_state_does_not_offer_debug_queue_when_gate_is_off(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task_dir = Path(tmp)

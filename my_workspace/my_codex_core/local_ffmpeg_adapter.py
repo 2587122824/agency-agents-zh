@@ -382,7 +382,12 @@ class LocalFFmpegAdapter:
             return None
 
     def _find_audio_file(self, audio_dir: Path | None, manifest: dict[str, Any]) -> Path | None:
-        configured = str(manifest.get("audio", {}).get("voiceover_audio_file") or "").strip()
+        audio_manifest = manifest.get("audio") if isinstance(manifest.get("audio"), dict) else {}
+        configured = str(audio_manifest.get("voiceover_audio_file") or "").strip()
+        audio_status = str(audio_manifest.get("adapter_status") or "").strip().lower()
+        voice_text_status = str(audio_manifest.get("voice_text_status") or "").strip().lower()
+        if not configured and (audio_status == "skipped" or voice_text_status == "disabled"):
+            return None
         candidates = []
         if configured:
             candidates.append(Path(configured))
