@@ -26,7 +26,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _required_workflow_slots,
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
-from my_codex_core.requirement_guard import validate_requirement_alignment  # noqa: E402
+from my_codex_core.requirement_guard import declares_human_confirmation, validate_requirement_alignment  # noqa: E402
 
 
 class SemanticInputContractTests(unittest.TestCase):
@@ -65,6 +65,10 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("comfyDebugPoseAssetReference", source)
         self.assertNotIn("comfyDebugDenoise", source)
         self.assertIn("productionEntityTurnaround", source)
+
+    def test_non_blocking_human_confirmation_bullet_is_not_declared(self) -> None:
+        content = "## 人工确认（阻塞）\n- 无需人工确认，所有决策均在合理推断范围内。"
+        self.assertFalse(declares_human_confirmation(content))
 
     def test_consistent_character_keyframe_presets_are_mode_specific(self) -> None:
         library = WORKSPACE / "my_workspace" / "comfyui_workflows" / "workflow_library" / "04_keyframe_image"

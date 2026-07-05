@@ -306,7 +306,7 @@ def declares_human_confirmation(content: str) -> bool:
     next_heading = re.search(r"^##\s+", text[heading_match.end() :], flags=re.MULTILINE)
     section = text[heading_match.end() : heading_match.end() + next_heading.start()] if next_heading else text[heading_match.end() :]
     normalized_section = section.strip().lower()
-    normalized_section = re.sub(r"^[。．.、\s]+", "", normalized_section)
+    normalized_section = re.sub(r"^[。．.、\s>*\-•·]+", "", normalized_section)
     non_blocking_prefixes = ("无", "暂无", "没有", "无需", "不需要", "否", "none", "no", "false", "n/a", "not required")
     if normalized_section.startswith(non_blocking_prefixes):
         return False
