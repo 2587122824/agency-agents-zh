@@ -1723,7 +1723,6 @@ class CloudComfyUIAdapter:
     def _ltx_image_to_video_node_info() -> list[dict[str, Any]]:
         return [
             {"nodeId": "177", "fieldName": "text", "fieldValue": "{{prompt}}"},
-            {"nodeId": "178", "fieldName": "prompt", "fieldValue": "{{prompt}}"},
             {"nodeId": "182", "fieldName": "text", "fieldValue": "{{negative_prompt}}"},
             {"nodeId": "193", "fieldName": "image", "fieldValue": "{{reference_image}}"},
             {"nodeId": "186", "fieldName": "value", "fieldValue": "{{long_side}}"},

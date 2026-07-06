@@ -1965,8 +1965,8 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn(("154", "value", "{{fps}}"), row_keys)
         self.assertIn(("155", "noise_seed", "{{seed}}"), row_keys)
         self.assertIn(("158", "value", False), row_keys)
-        self.assertIn(("178", "prompt", "{{prompt}}"), row_keys)
         self.assertIn(("216", "value", False), row_keys)
+        self.assertNotIn("178", {row["nodeId"] for row in rows})
         self.assertIn(("232", "filename_prefix", "video/ltx2.3-i2v-first-frame"), row_keys)
 
     def test_adapter_repairs_current_first_frame_i2v_mapping_missing_llm_bypass(self) -> None:
@@ -1987,8 +1987,8 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         rows = json.loads(repaired)
         row_keys = {(row["nodeId"], row["fieldName"], row["fieldValue"]) for row in rows}
-        self.assertIn(("178", "prompt", "{{prompt}}"), row_keys)
         self.assertIn(("216", "value", False), row_keys)
+        self.assertNotIn("178", {row["nodeId"] for row in rows})
         self.assertIn(("195", "bypass", False), row_keys)
         self.assertIn(("197", "bypass", False), row_keys)
 
@@ -2051,7 +2051,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("447", {row["nodeId"] for row in rows})
         self.assertIn(("216", "value", False), row_keys)
         self.assertIn(("177", "text", "{{prompt}}"), row_keys)
-        self.assertIn(("178", "prompt", "{{prompt}}"), row_keys)
+        self.assertNotIn("178", {row["nodeId"] for row in rows})
         self.assertIn(("193", "image", "{{reference_image}}"), row_keys)
 
     def test_runtime_config_repairs_three_frame_saved_node_info(self) -> None:
