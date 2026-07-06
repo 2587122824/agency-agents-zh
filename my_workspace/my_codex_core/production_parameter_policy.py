@@ -101,10 +101,18 @@ def apply_locked_parameters_to_intent(
     if intent_kind == "video":
         force("fps", 24, "frame_rate_lock")
         mode_text = f"{intent_name} {locked.get('workflow_mode') or ''} {locked.get('mode') or ''}".lower()
-        if "three_frame" in mode_text or "first_middle_last" in mode_text or intent_name == "generate_three_frame_i2v_clip":
+        is_locked_i2v_clip = (
+            "three_frame" in mode_text
+            or "first_middle_last" in mode_text
+            or "i2v_first_frame" in mode_text
+            or "first_frame" in mode_text
+            or intent_name in {"generate_three_frame_i2v_clip", "generate_i2v_clip"}
+        )
+        if is_locked_i2v_clip:
             force("duration_seconds", 4, "first_middle_last_duration_lock")
             force("fps", 24, "first_middle_last_fps_lock")
-            locked["control_mode"] = "first_middle_last_frame"
+            if "three_frame" in mode_text or "first_middle_last" in mode_text or intent_name == "generate_three_frame_i2v_clip":
+                locked["control_mode"] = "first_middle_last_frame"
 
     if overrides:
         existing = locked.get("parameter_overrides") if isinstance(locked.get("parameter_overrides"), list) else []
@@ -156,10 +164,12 @@ def apply_locked_parameters_to_payload(payload: dict[str, Any], *, job_type: str
     if str(job_type or payload.get("workflow_item_type") or "").lower() == "video":
         payload["fps"] = _positive_int(render.get("frame_rate"), 24)
     mode_text = f"{mode} {payload.get('workflow_mode') or ''} {payload.get('control_mode') or ''}".lower()
-    if "first_middle_last" in mode_text or "three_frame" in mode_text:
+    is_locked_i2v_clip = "first_middle_last" in mode_text or "three_frame" in mode_text or "i2v_first_frame" in mode_text or "first_frame" in mode_text
+    if is_locked_i2v_clip:
         payload["duration"] = 4
         payload["fps"] = 24
-        payload["control_mode"] = "first_middle_last_frame"
+        if "first_middle_last" in mode_text or "three_frame" in mode_text:
+            payload["control_mode"] = "first_middle_last_frame"
     style = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
     if style.get("style_id"):
         payload["style_id"] = str(style.get("style_id") or "")
@@ -224,6 +234,8 @@ def _locked_fields_for_item(intent_kind: str, intent_name: str) -> list[str]:
     if intent_kind == "video":
         fields.append("fps")
     if intent_name == "generate_three_frame_i2v_clip":
+        fields.extend(["duration", "duration_seconds"])
+    elif intent_name == "generate_i2v_clip":
         fields.extend(["duration", "duration_seconds"])
     return fields
 

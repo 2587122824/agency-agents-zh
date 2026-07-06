@@ -1206,6 +1206,7 @@ class SemanticInputContractTests(unittest.TestCase):
                                 "intent": "generate_i2v_clip",
                                 "intent_id": "clip_001",
                                 "character_id": "protagonist",
+                                "duration_seconds": 2,
                                 "prompt": "主角从出租屋醒来，看着2008年的旧手机，真人复古纪实画面。",
                             }
                         ]
@@ -1218,6 +1219,8 @@ class SemanticInputContractTests(unittest.TestCase):
         video_item = payload["video_prompts"][0]
         self.assertEqual(video_item["workflow_id"], "06_i2v_first_frame")
         self.assertEqual(video_item["workflow_mode"], "i2v_first_frame")
+        self.assertEqual(video_item["duration"], 4)
+        self.assertEqual(video_item["fps"], 24)
         self.assertIn("input_base_image", video_item["input_bindings"])
         self.assertEqual(video_item["input_bindings"]["input_base_image"]["from_job"], "clip_001_keyframe")
         self.assertIn("clip_001_keyframe", {row["job_id"] for row in payload["image_prompts"]})
@@ -1962,9 +1965,32 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn(("154", "value", "{{fps}}"), row_keys)
         self.assertIn(("155", "noise_seed", "{{seed}}"), row_keys)
         self.assertIn(("158", "value", False), row_keys)
-        self.assertNotIn("178", {row["nodeId"] for row in rows})
-        self.assertNotIn("216", {row["nodeId"] for row in rows})
+        self.assertIn(("178", "prompt", "{{prompt}}"), row_keys)
+        self.assertIn(("216", "value", False), row_keys)
         self.assertIn(("232", "filename_prefix", "video/ltx2.3-i2v-first-frame"), row_keys)
+
+    def test_adapter_repairs_current_first_frame_i2v_mapping_missing_llm_bypass(self) -> None:
+        repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
+            json.dumps(
+                [
+                    {"nodeId": "177", "fieldName": "text", "fieldValue": "{{prompt}}"},
+                    {"nodeId": "182", "fieldName": "text", "fieldValue": "{{negative_prompt}}"},
+                    {"nodeId": "193", "fieldName": "image", "fieldValue": "{{reference_image}}"},
+                    {"nodeId": "186", "fieldName": "value", "fieldValue": "{{long_side}}"},
+                    {"nodeId": "192", "fieldName": "value", "fieldValue": "{{duration}}"},
+                    {"nodeId": "154", "fieldName": "value", "fieldValue": "{{fps}}"},
+                ]
+            ),
+            endpoint="/run/workflow/2071735603636563970",
+            workflow_id="06_i2v_first_frame",
+            workflow_mode="i2v_first_frame",
+        )
+        rows = json.loads(repaired)
+        row_keys = {(row["nodeId"], row["fieldName"], row["fieldValue"]) for row in rows}
+        self.assertIn(("178", "prompt", "{{prompt}}"), row_keys)
+        self.assertIn(("216", "value", False), row_keys)
+        self.assertIn(("195", "bypass", False), row_keys)
+        self.assertIn(("197", "bypass", False), row_keys)
 
     def test_adapter_does_not_apply_first_frame_mapping_to_three_frame_endpoint(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
@@ -2023,8 +2049,9 @@ class SemanticInputContractTests(unittest.TestCase):
         rows = json.loads(repaired)
         row_keys = {(row["nodeId"], row["fieldName"], row["fieldValue"]) for row in rows}
         self.assertNotIn("447", {row["nodeId"] for row in rows})
-        self.assertNotIn("216", {row["nodeId"] for row in rows})
+        self.assertIn(("216", "value", False), row_keys)
         self.assertIn(("177", "text", "{{prompt}}"), row_keys)
+        self.assertIn(("178", "prompt", "{{prompt}}"), row_keys)
         self.assertIn(("193", "image", "{{reference_image}}"), row_keys)
 
     def test_runtime_config_repairs_three_frame_saved_node_info(self) -> None:
