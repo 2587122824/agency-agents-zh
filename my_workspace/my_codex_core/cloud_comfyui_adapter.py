@@ -2544,6 +2544,8 @@ class CloudComfyUIAdapter:
                 number = cls._clean_float_value(updated.get("fieldValue"), minimum=0)
                 if number is None:
                     number = cls._clean_float_value(default_denoise, minimum=0)
+                if number is None:
+                    number = 1.0
                 if number is not None:
                     updated["fieldValue"] = number
             return updated

@@ -1960,6 +1960,14 @@ class SemanticInputContractTests(unittest.TestCase):
         values = {(item["nodeId"], item["fieldName"]): item["fieldValue"] for item in built["nodeInfoList"]}
         self.assertEqual(values[("24", "denoise")], 1.0)
 
+    def test_adapter_never_sends_blank_denoise_node_info(self) -> None:
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        config = {"node_info_list_json": '[{"nodeId":"24","fieldName":"denoise","fieldValue":""}]'}
+
+        built = adapter._build_runninghub_payload({"seed": 123}, config)
+
+        self.assertEqual(built["nodeInfoList"][0]["fieldValue"], 1.0)
+
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {
