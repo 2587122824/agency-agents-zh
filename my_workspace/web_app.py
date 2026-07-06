@@ -12434,6 +12434,7 @@ INDEX_HTML = r"""<!doctype html>
         controlMode: workflowModeDef.control_mode,
         requiresReference: Boolean(workflowModeDef.requires_reference),
         assetTag: workflowModeDef.asset_tag || selected.asset_tag || selected.id,
+        defaultDenoise: workflowModeDef.default_denoise || workflowModeDef.defaultDenoise || '',
       } : imageTaskDefinitionForWorkflow(selected);
       const referenceValue = els.comfyDebugReference.value.trim();
       const lastFrameValue = els.comfyDebugLastFrameReference?.value.trim() || '';
@@ -12898,6 +12899,7 @@ INDEX_HTML = r"""<!doctype html>
         controlMode: workflowModeDef.control_mode,
         requiresReference: Boolean(workflowModeDef.requires_reference),
         assetTag: workflowModeDef.asset_tag || selected.asset_tag || selected.id,
+        defaultDenoise: workflowModeDef.default_denoise || workflowModeDef.defaultDenoise || '',
       } : imageTaskDefinitionForWorkflow(selected);
       const referenceSupport = comfyDebugReferenceSupport();
       const referenceValue = String(overrides.reference_image ?? els.comfyDebugReference.value).trim();

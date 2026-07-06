@@ -834,7 +834,7 @@ class CloudComfyUIAdapter:
         if node_info:
             node_info = self._replace_placeholders(node_info, replacements)
             node_info = self._override_dimension_node_info(node_info, comfyui_payload)
-            node_info = self._normalize_numeric_node_info(node_info, seed_value)
+            node_info = self._normalize_numeric_node_info(node_info, seed_value, denoise_value)
             node_info = self._drop_empty_image_node_info(node_info)
         payload: dict[str, Any] = {
             "apiKey": self.api_key,
@@ -2505,7 +2505,7 @@ class CloudComfyUIAdapter:
         return [replace_item(item) for item in node_info]
 
     @classmethod
-    def _normalize_numeric_node_info(cls, node_info: list[Any], seed_value: int) -> list[Any]:
+    def _normalize_numeric_node_info(cls, node_info: list[Any], seed_value: int, default_denoise: Any = None) -> list[Any]:
         integer_fields = {
             "seed",
             "noise_seed",
@@ -2542,6 +2542,8 @@ class CloudComfyUIAdapter:
                     updated["fieldValue"] = number
             elif field_name == "denoise":
                 number = cls._clean_float_value(updated.get("fieldValue"), minimum=0)
+                if number is None:
+                    number = cls._clean_float_value(default_denoise, minimum=0)
                 if number is not None:
                     updated["fieldValue"] = number
             return updated

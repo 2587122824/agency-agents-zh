@@ -1943,6 +1943,22 @@ class SemanticInputContractTests(unittest.TestCase):
     def test_debug_payload_uses_mode_default_denoise(self) -> None:
         marker = "denoise: String(overrides.denoise ?? imageTaskDef.defaultDenoise ?? workflowModeDef?.default_denoise ?? workflowModeDef?.defaultDenoise ?? '').trim()"
         self.assertIn(marker, web_app.INDEX_HTML)
+        self.assertIn("defaultDenoise: workflowModeDef.default_denoise || workflowModeDef.defaultDenoise || ''", web_app.INDEX_HTML)
+
+    def test_adapter_defaults_blank_img2img_denoise_node_info(self) -> None:
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        config = {
+            "node_info_list_json": (
+                '[{"nodeId":"24","fieldName":"denoise","fieldValue":""},'
+                '{"nodeId":"24","fieldName":"steps","fieldValue":8}]'
+            )
+        }
+        payload = {"workflow_mode": "img2img_style_keyframe", "seed": 123}
+
+        built = adapter._build_runninghub_payload(payload, config)
+
+        values = {(item["nodeId"], item["fieldName"]): item["fieldValue"] for item in built["nodeInfoList"]}
+        self.assertEqual(values[("24", "denoise")], 1.0)
 
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
