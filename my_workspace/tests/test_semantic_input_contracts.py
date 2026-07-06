@@ -1913,6 +1913,7 @@ class SemanticInputContractTests(unittest.TestCase):
             "node_info_list_json": (
                 '[{"nodeId":"35","fieldName":"image","fieldValue":"{{input_identity_image}}"},'
                 '{"nodeId":"22","fieldName":"image","fieldValue":"{{input_scene_image}}"},'
+                '{"nodeId":"12","fieldName":"denoise","fieldValue":"{{denoise}}"},'
                 '{"nodeId":"21","fieldName":"prompt","fieldValue":"{{prompt}}"}]'
             )
         }
@@ -1920,6 +1921,7 @@ class SemanticInputContractTests(unittest.TestCase):
             "prompt": "put Xiaomei into the school playground",
             "input_identity_image": "characters/xiaomei.png",
             "input_scene_image": "scenes/playground.png",
+            "workflow_mode": "identity_scene_keyframe",
             "seed": 123,
         }
 
@@ -1928,8 +1930,10 @@ class SemanticInputContractTests(unittest.TestCase):
         values = {(item["nodeId"], item["fieldName"]): item["fieldValue"] for item in built["nodeInfoList"]}
         self.assertEqual(values[("35", "image")], "characters/xiaomei.png")
         self.assertEqual(values[("22", "image")], "scenes/playground.png")
+        self.assertEqual(values[("12", "denoise")], 1.0)
         self.assertEqual(values[("21", "prompt")], "put Xiaomei into the school playground")
         self.assertNotIn("{{input_scene_image}}", json.dumps(built["nodeInfoList"], ensure_ascii=False))
+        self.assertNotIn("{{denoise}}", json.dumps(built["nodeInfoList"], ensure_ascii=False))
 
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

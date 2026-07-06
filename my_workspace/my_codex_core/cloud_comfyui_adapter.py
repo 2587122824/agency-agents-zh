@@ -743,6 +743,7 @@ class CloudComfyUIAdapter:
         raw_reference_style = str(comfyui_payload.get("input_reference_style") or comfyui_payload.get("reference_style") or style_context.get("reference_asset") or "")
         reference_style = self._reference_image_value(raw_reference_style) if raw_reference_style else ""
         character_references = self._character_reference_values(comfyui_payload)
+        denoise_value = self._denoise_value(comfyui_payload)
         replacements = {
             "{{payload}}": json.dumps(comfyui_payload, ensure_ascii=False),
             "{{negative_prompt}}": str(comfyui_payload.get("negative_prompt") or ""),
@@ -798,7 +799,7 @@ class CloudComfyUIAdapter:
             "{{middle_frame_index}}": self._middle_frame_index(comfyui_payload),
             "{{last_frame_index}}": self._last_frame_index(comfyui_payload),
             "{{ltx_guide_frame_count}}": self._ltx_guide_frame_count(comfyui_payload),
-            "{{denoise}}": str(comfyui_payload.get("denoise") or ""),
+            "{{denoise}}": denoise_value,
             "{{ipadapter_weight}}": str(comfyui_payload.get("ipadapter_weight") or ""),
             "{{reference_strength}}": str(comfyui_payload.get("reference_strength") or ""),
             "{{motion_strength}}": str(comfyui_payload.get("motion_strength") or ""),
@@ -842,6 +843,21 @@ class CloudComfyUIAdapter:
         if seed is not None:
             return seed
         return int(time.time() * 1000) % 2_147_483_647
+
+    @staticmethod
+    def _denoise_value(payload: dict[str, Any]) -> str:
+        raw = str(payload.get("denoise") or "").strip()
+        if raw:
+            return raw
+        mode_values = {
+            str(payload.get("workflow_mode") or "").strip(),
+            str(payload.get("image_task_mode") or "").strip(),
+            str(payload.get("mode") or "").strip(),
+            str(payload.get("control_mode") or "").strip(),
+        }
+        if mode_values & {"img2img_style_keyframe", "identity_scene_keyframe", "img2img_style", "identity_scene_reference"}:
+            return "1"
+        return ""
 
     def _prepare_runninghub_payload(self, comfyui_payload: dict[str, Any]) -> dict[str, Any]:
         payload = json.loads(json.dumps(comfyui_payload, ensure_ascii=False))
@@ -2510,6 +2526,10 @@ class CloudComfyUIAdapter:
                 number = cls._clean_int_value(updated.get("fieldValue"), minimum=1)
                 if number is not None:
                     updated["fieldValue"] = number
+            elif field_name == "denoise":
+                number = cls._clean_float_value(updated.get("fieldValue"), minimum=0)
+                if number is not None:
+                    updated["fieldValue"] = number
             return updated
 
         return [replace_item(item) for item in node_info]
@@ -2532,6 +2552,17 @@ class CloudComfyUIAdapter:
             return None
         try:
             number = int(float(text))
+        except ValueError:
+            return None
+        return number if number >= minimum else None
+
+    @staticmethod
+    def _clean_float_value(value: Any, minimum: float = 0) -> float | None:
+        text = str(value or "").strip()
+        if not text or text in {"\\", "/", "None", "null", "undefined"}:
+            return None
+        try:
+            number = float(text)
         except ValueError:
             return None
         return number if number >= minimum else None

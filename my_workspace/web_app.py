@@ -158,7 +158,7 @@ _KEYFRAME_WORKFLOW["modes"] = [
     {"value": "style_reference_keyframe", "label": "风格参考关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "style_reference", "requires_reference": True},
     {"value": "img2img_style_keyframe", "label": "图生图风格关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "img2img_style", "requires_reference": True, "default_denoise": "1"},
     {"value": "identity_keyframe", "label": "身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_reference", "requires_reference": True},
-    {"value": "identity_scene_keyframe", "label": "人物+场景一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_scene_reference", "requires_reference": True},
+    {"value": "identity_scene_keyframe", "label": "人物+场景一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_scene_reference", "requires_reference": True, "default_denoise": "1"},
     {"value": "pose_identity_keyframe", "label": "身份+姿态关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "identity_pose_reference", "requires_reference": True},
     {"value": "multi_identity_keyframe", "label": "多人身份一致关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "multi_identity_reference", "requires_reference": True},
     {"value": "multi_pose_identity_keyframe", "label": "多人身份+站位姿态关键帧", "asset_tag": "keyframe", "task_type": "keyframe", "control_mode": "multi_identity_pose_reference", "requires_reference": True},
@@ -4392,7 +4392,7 @@ INDEX_HTML = r"""<!doctype html>
       { value: 'keyframe', label: '关键帧', taskType: 'keyframe', controlMode: 'none', requiresReference: false, prompt: '根据分镜文本生成视频关键帧：单张画面，构图适合后续图生视频，写实商业风格，无文字水印。' },
       { value: 'style_reference_keyframe', label: '风格参考关键帧', taskType: 'keyframe', controlMode: 'style_reference', requiresReference: true, prompt: '基于风格参考图生成当前分镜关键帧：保持参考图的色彩、光线、材质和画面气质，构图适合后续图生视频，无文字水印。' },
       { value: 'img2img_style_keyframe', label: '图生图风格关键帧', taskType: 'keyframe', controlMode: 'img2img_style', requiresReference: true, defaultDenoise: '1', prompt: '基于原图生成当前分镜关键帧：保留原图主体、构图和空间关系，允许轻微调整动作与镜头，继承原图风格质感，适合后续图生视频，无文字水印。' },
-      { value: 'identity_scene_keyframe', label: '人物+场景一致关键帧', taskType: 'keyframe', controlMode: 'identity_scene_reference', requiresReference: true, prompt: '基于人物身份图和场景母版图生成当前分镜关键帧：人物身份保持一致，场景空间布局和氛围保持一致，只调整当前镜头动作、表情和机位，无文字水印。' },
+      { value: 'identity_scene_keyframe', label: '人物+场景一致关键帧', taskType: 'keyframe', controlMode: 'identity_scene_reference', requiresReference: true, defaultDenoise: '1', prompt: '基于人物身份图和场景母版图生成当前分镜关键帧：人物身份保持一致，场景空间布局和氛围保持一致，只调整当前镜头动作、表情和机位，无文字水印。' },
       { value: 'cover_key_visual', label: '封面关键视觉', taskType: 'cover_key_visual', controlMode: 'style_reference', requiresReference: false, prompt: '生成封面关键视觉：主体明确，构图有冲击力，适合横屏视频封面，预留标题安全区，写实商业科技风格，无文字水印。' },
       { value: 'style_reference', label: '风格参考图', taskType: 'style_reference', controlMode: 'none', requiresReference: false, prompt: '生成统一风格参考图：色彩、光线、材质和画面气质明确，可作为后续整条视频的视觉风格基准，无文字水印。' },
       { value: 'inpaint_fix', label: '局部修复/重绘', taskType: 'inpaint_fix', controlMode: 'mask_inpaint', requiresReference: true, prompt: '基于参考图进行局部修复或重绘：修正脸部、手部、文字、水印或局部瑕疵，保持原图主体和风格一致。' },
@@ -17750,8 +17750,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 "image_task_type": task_type if job_type == "image" else "",
                 "video_task_type": task_type if job_type == "video" else "",
             }
-            if mode == "img2img_style_keyframe":
+            if mode in {"img2img_style_keyframe", "identity_scene_keyframe"}:
                 request_payload["denoise"] = str(payload.get("denoise") or "").strip() or "1"
+            if mode == "img2img_style_keyframe":
                 request_payload["ipadapter_weight"] = str(payload.get("ipadapter_weight") or "").strip() or "0.65"
             if job_type == "video":
                 request_payload["video_prompt"] = prompt
