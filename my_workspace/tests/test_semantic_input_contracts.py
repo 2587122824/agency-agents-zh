@@ -868,6 +868,177 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(item["character_references"][0]["identity_image"], "my_workspace/my_asset_library/01_character_base/hero.png")
             self.assertEqual(item["character_references"][1]["position"], "right")
 
+    def test_generated_character_masters_feed_multi_character_keyframe(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_hero_front",
+                            "asset_role": "character",
+                            "character_id": "hero",
+                            "prompt": "Hero full body reference",
+                        },
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_mentor_front",
+                            "asset_role": "character",
+                            "character_id": "mentor",
+                            "prompt": "Mentor full body reference",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "duo_shot_generated_refs",
+                            "prompt": "Hero and mentor face each other",
+                            "characters": [
+                                {"character_id": "hero", "position": "left"},
+                                {"character_id": "mentor", "position": "right"},
+                            ],
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="generated_multi_character_refs_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+        )
+        context = plan["global_context"]
+        self.assertTrue(context["parameter_policy"]["locks"]["character_identity"]["enabled"])
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        item = items["duo_shot_generated_refs"]
+        self.assertEqual(item["workflow_mode"], "multi_identity_keyframe")
+        self.assertEqual(item["control_mode"], "multi_identity_reference")
+        self.assertEqual(item["depends_on"], ["asset_hero_front", "asset_mentor_front"])
+        self.assertEqual(
+            item["character_references"][0]["identity_binding"],
+            {"from_job": "asset_hero_front", "output": "output_final_image"},
+        )
+        self.assertEqual(
+            item["character_references"][1]["identity_binding"],
+            {"from_job": "asset_mentor_front", "output": "output_final_image"},
+        )
+
+    def test_generated_character_master_feeds_single_identity_keyframe(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_hero_front",
+                            "asset_role": "character",
+                            "character_id": "hero",
+                            "prompt": "Hero full body reference",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "hero_closeup",
+                            "character_id": "hero",
+                            "prompt": "Hero close-up in the same outfit",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="generated_single_character_ref_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+        )
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        keyframe = items["hero_closeup"]
+        self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
+        self.assertEqual(
+            keyframe["input_bindings"]["input_identity_image"],
+            {"from_job": "asset_hero_front", "output": "output_final_image"},
+        )
+        self.assertEqual(
+            keyframe["input_bindings"]["input_base_image"],
+            {"from_job": "asset_hero_front", "output": "output_final_image"},
+        )
+
+    def test_linked_character_master_wins_over_generated_master(self) -> None:
+        linked_assets = {
+            "linked_assets": {
+                "characters": [
+                    {
+                        "character_id": "hero",
+                        "name": "Hero",
+                        "master_image": "my_workspace/my_asset_library/characters/hero.png",
+                    }
+                ]
+            }
+        }
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_hero_front",
+                            "asset_role": "character",
+                            "character_id": "hero",
+                            "prompt": "Hero alternate expression",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "hero_keyframe",
+                            "character_id": "hero",
+                            "prompt": "Hero walks through the room",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="linked_master_priority_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        keyframe = items["hero_keyframe"]
+        self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
+        self.assertEqual(keyframe["input_identity_image"], "my_workspace/my_asset_library/characters/hero.png")
+        self.assertNotIn("input_identity_image", keyframe.get("input_bindings", {}))
+
+    def test_character_reference_identity_binding_resolves_from_job_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            image_path = Path(temp_dir) / "hero.png"
+            Image.new("RGB", (8, 8), "red").save(image_path)
+            adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+            job = {
+                "job_id": "duo",
+                "character_references": [
+                    {
+                        "character_id": "hero",
+                        "identity_binding": {"from_job": "asset_hero_front", "output": "output_final_image"},
+                    }
+                ],
+            }
+            state = {
+                "jobs": {
+                    "asset_hero_front": {
+                        "artifacts": [
+                            {
+                                "output_name": "output_final_image",
+                                "path": str(image_path),
+                            }
+                        ]
+                    }
+                }
+            }
+            resolved_job, resolved_inputs, missing = adapter._apply_explicit_input_bindings(job, state)
+            self.assertEqual(missing, [])
+            self.assertEqual(resolved_job["character_references"][0]["identity_image"], str(image_path))
+            self.assertEqual(resolved_inputs["character_references[1].identity_image"], str(image_path))
+
     def test_multi_character_keyframe_without_identity_images_falls_back_to_text_keyframe(self) -> None:
         item = _image_prompt_item(
             job_id="duo_shot_missing_refs",

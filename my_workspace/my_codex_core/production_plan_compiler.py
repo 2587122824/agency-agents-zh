@@ -117,9 +117,14 @@ def compile_production_plan(
         [route_payload, image_payload, video_payload, audio_payload, package_payload, source_payload, existing_payload or {}],
     )
     global_context, resolved_entities, entity_notes = enrich_global_context_with_entities(global_context, entity_registry, entity_references)
+    transient_notes = _merge_generated_character_master_entities(
+        global_context,
+        resolved_entities,
+        production_intents["image"],
+    )
     global_context = normalize_parameter_policy_context(global_context, route=route, video_config=video_config or {})
     compat_payload = json.loads(json.dumps(existing_payload or {}, ensure_ascii=False))
-    compile_notes: list[str] = [*entity_notes]
+    compile_notes: list[str] = [*entity_notes, *transient_notes]
     parameter_overrides: list[dict[str, Any]] = []
 
     image_prompts, image_jobs = _compile_image_intents(
@@ -569,6 +574,67 @@ def _merge_linked_asset_entities(registry: dict[str, Any], payload: dict[str, An
             "reference_assets": list(dict.fromkeys(reference_assets)),
             "source_asset_id": str(raw.get("source_asset_id") or current.get("source_asset_id") or "").strip(),
         }
+
+
+def _merge_generated_character_master_entities(
+    global_context: dict[str, Any],
+    resolved_entities: dict[str, Any],
+    image_intents: list[dict[str, Any]],
+) -> list[str]:
+    """Expose first generated character base assets as task-local identity anchors."""
+
+    notes: list[str] = []
+    generated_masters: dict[str, dict[str, Any]] = {}
+    for index, intent in enumerate(image_intents, 1):
+        if not isinstance(intent, dict):
+            continue
+        if str(intent.get("intent") or "").strip() != "generate_base_asset":
+            continue
+        if str(intent.get("asset_role") or "character").strip().lower() != "character":
+            continue
+        character_id = str(intent.get("character_id") or "").strip()
+        if not character_id or character_id in generated_masters:
+            continue
+        job_id = _safe_id(intent.get("intent_id") or intent.get("id") or f"image_intent_{index:03d}")
+        generated_masters[character_id] = {
+            "character_id": character_id,
+            "id": character_id,
+            "name": str(intent.get("name") or intent.get("character_name") or character_id).strip(),
+            "generated_master_job_id": job_id,
+            "master_image_binding": {"from_job": job_id, "output": "output_final_image"},
+            "reference_assets": [],
+            "source_asset_id": "generated_task_master",
+        }
+    if not generated_masters:
+        return notes
+
+    characters = resolved_entities.setdefault("characters", [])
+    if not isinstance(characters, list):
+        characters = []
+        resolved_entities["characters"] = characters
+    for character_id, generated in generated_masters.items():
+        existing = next(
+            (
+                entry
+                for entry in characters
+                if isinstance(entry, dict) and str(entry.get("character_id") or "") == character_id
+            ),
+            None,
+        )
+        if existing and _first_identity_reference(existing):
+            _upsert_character(global_context, existing)
+            continue
+        if existing:
+            existing.update({key: value for key, value in generated.items() if value not in (None, "", [])})
+            entity = existing
+        else:
+            entity = dict(generated)
+            characters.append(entity)
+        _upsert_character(global_context, entity)
+        notes.append(
+            f"角色实体 {character_id} 使用本任务生成的 {generated['generated_master_job_id']} 作为临时master identity"
+        )
+    return notes
 
 
 def _apply_linked_character_reference_policy(
@@ -1458,7 +1524,7 @@ def _image_prompt_item(
         item["mode"] = workflow_mode
         item["control_mode"] = "style_reference"
         item["input_reference_style"] = style_reference or first_reference
-    usable_character_references = _references_with_identity_images(item.get("character_references"))
+    usable_character_references = _references_with_identity_sources(item.get("character_references"))
     if (img2img_style_requested or style_reference_requested):
         pass
     elif item.get("character_references") and not usable_character_references and workflow_id == "04_keyframe":
@@ -1473,12 +1539,14 @@ def _image_prompt_item(
         item["mode"] = workflow_mode
         item["control_mode"] = "multi_identity_pose_reference" if pose_reference else "multi_identity_reference"
         item["input_identity_image"] = item["character_references"][0].get("identity_image", "")
+        _apply_character_reference_dependency_bindings(item)
         if pose_reference:
             item["input_pose_image"] = pose_reference
     elif workflow_id == "04_keyframe" and len(usable_character_references) == 1:
         item["character_references"] = usable_character_references
         only_reference = item["character_references"][0].get("identity_image", "")
-        if only_reference:
+        only_binding = item["character_references"][0].get("identity_binding") if isinstance(item["character_references"][0].get("identity_binding"), dict) else {}
+        if only_reference or only_binding:
             workflow_mode = "pose_identity_keyframe" if pose_reference else "identity_keyframe"
             if scene_reference and not pose_reference:
                 workflow_mode = "identity_scene_keyframe"
@@ -1486,7 +1554,13 @@ def _image_prompt_item(
             item["image_task_mode"] = workflow_mode
             item["mode"] = workflow_mode
             item["control_mode"] = "identity_scene_reference" if workflow_mode == "identity_scene_keyframe" else ("identity_pose_reference" if pose_reference else "identity_reference")
-            item["input_identity_image"] = only_reference
+            if only_reference:
+                item["input_identity_image"] = only_reference
+            elif only_binding:
+                bindings = item.setdefault("input_bindings", {})
+                bindings.setdefault("input_identity_image", dict(only_binding))
+                bindings.setdefault("input_base_image", dict(only_binding))
+            _apply_character_reference_dependency_bindings(item)
             if pose_reference:
                 item["input_pose_image"] = pose_reference
     elif workflow_id == "04_keyframe" and first_reference:
@@ -1510,14 +1584,35 @@ def _image_prompt_item(
     return item
 
 
-def _references_with_identity_images(value: Any) -> list[dict[str, Any]]:
+def _references_with_identity_sources(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [
         dict(entry)
         for entry in value
-        if isinstance(entry, dict) and str(entry.get("identity_image") or "").strip()
+        if isinstance(entry, dict)
+        and (
+            str(entry.get("identity_image") or "").strip()
+            or isinstance(entry.get("identity_binding"), dict)
+        )
     ]
+
+
+def _apply_character_reference_dependency_bindings(item: dict[str, Any]) -> None:
+    references = item.get("character_references") if isinstance(item.get("character_references"), list) else []
+    if not references:
+        return
+    depends_on = item.setdefault("depends_on", [])
+    if not isinstance(depends_on, list):
+        depends_on = _string_list(depends_on)
+        item["depends_on"] = depends_on
+    for reference in references:
+        if not isinstance(reference, dict):
+            continue
+        binding = reference.get("identity_binding") if isinstance(reference.get("identity_binding"), dict) else {}
+        upstream = str(binding.get("from_job") or "").strip()
+        if upstream and upstream not in depends_on:
+            depends_on.append(upstream)
 
 
 def _character_references_from_intent(intent: dict[str, Any], resolved_entities: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1538,14 +1633,18 @@ def _character_references_from_intent(intent: dict[str, Any], resolved_entities:
             or _first_identity_reference(entity)
             or ""
         ).strip()
+        identity_binding = entity.get("master_image_binding") if isinstance(entity.get("master_image_binding"), dict) else {}
+        reference = {
+            "character_id": character_id,
+            "identity_image": identity_image,
+            "role_in_frame": str(character.get("role_in_frame") or character.get("role") or f"character_{index}").strip(),
+            "position": str(character.get("position") or character.get("frame_position") or "").strip(),
+            "identity_priority": str(character.get("identity_priority") or character.get("priority") or index).strip(),
+        }
+        if not identity_image and identity_binding:
+            reference["identity_binding"] = dict(identity_binding)
         result.append(
-            {
-                "character_id": character_id,
-                "identity_image": identity_image,
-                "role_in_frame": str(character.get("role_in_frame") or character.get("role") or f"character_{index}").strip(),
-                "position": str(character.get("position") or character.get("frame_position") or "").strip(),
-                "identity_priority": str(character.get("identity_priority") or character.get("priority") or index).strip(),
-            }
+            reference
         )
     return result
 

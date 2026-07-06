@@ -1116,16 +1116,7 @@ class CloudComfyUIAdapter:
         }
         state_jobs = state.get("jobs") if isinstance(state.get("jobs"), dict) else {}
         for slot, spec in bindings.items():
-            value = ""
-            if isinstance(spec, str):
-                value = spec
-            elif isinstance(spec, dict):
-                upstream = str(spec.get("from_job") or "")
-                output_name = str(spec.get("output") or "")
-                upstream_state = state_jobs.get(upstream) if isinstance(state_jobs.get(upstream), dict) else {}
-                artifacts = upstream_state.get("artifacts") if isinstance(upstream_state.get("artifacts"), list) else []
-                match = next((item for item in artifacts if isinstance(item, dict) and (not output_name or item.get("output_name") == output_name)), None)
-                value = str((match or {}).get("path") or "")
+            value = self._resolve_input_binding_value(spec, state_jobs)
             if value and Path(value).is_file():
                 resolved[str(slot)] = value
                 target = field_map.get(str(slot), str(slot))
@@ -1134,7 +1125,43 @@ class CloudComfyUIAdapter:
                     job["reference_images"] = [value]
             elif isinstance(spec, dict) and spec.get("required", True):
                 missing.append(str(slot))
+        character_references = job.get("character_references") if isinstance(job.get("character_references"), list) else []
+        for index, reference in enumerate(character_references, 1):
+            if not isinstance(reference, dict):
+                continue
+            if str(reference.get("identity_image") or reference.get("input_identity_image") or reference.get("reference_image") or "").strip():
+                continue
+            spec = reference.get("identity_binding") if isinstance(reference.get("identity_binding"), dict) else {}
+            if not spec:
+                continue
+            value = self._resolve_input_binding_value(spec, state_jobs)
+            key = f"character_references[{index}].identity_image"
+            if value and Path(value).is_file():
+                reference["identity_image"] = value
+                resolved[key] = value
+            elif spec.get("required", True):
+                missing.append(key)
         return job, resolved, missing
+
+    @staticmethod
+    def _resolve_input_binding_value(spec: Any, state_jobs: dict[str, Any]) -> str:
+        if isinstance(spec, str):
+            return spec
+        if not isinstance(spec, dict):
+            return ""
+        upstream = str(spec.get("from_job") or "")
+        output_name = str(spec.get("output") or "")
+        upstream_state = state_jobs.get(upstream) if isinstance(state_jobs.get(upstream), dict) else {}
+        artifacts = upstream_state.get("artifacts") if isinstance(upstream_state.get("artifacts"), list) else []
+        match = next(
+            (
+                item
+                for item in artifacts
+                if isinstance(item, dict) and (not output_name or item.get("output_name") == output_name)
+            ),
+            None,
+        )
+        return str((match or {}).get("path") or "")
 
     def _run_job_with_retries(
         self,
