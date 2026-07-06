@@ -1940,6 +1940,10 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn(marker, web_app.INDEX_HTML)
         self.assertNotIn("throw new Error(`nodeInfoList 缺少语义槽位映射", web_app.INDEX_HTML)
 
+    def test_debug_payload_uses_mode_default_denoise(self) -> None:
+        marker = "denoise: String(overrides.denoise ?? imageTaskDef.defaultDenoise ?? workflowModeDef?.default_denoise ?? workflowModeDef?.defaultDenoise ?? '').trim()"
+        self.assertIn(marker, web_app.INDEX_HTML)
+
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {

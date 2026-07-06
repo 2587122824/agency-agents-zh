@@ -669,9 +669,21 @@ class CloudComfyUIAdapter:
                     )
             result_items.append(item)
 
+        media_missing_error = ""
+        if status == "SUCCESS" and not downloaded:
+            result_types = [str(item.get("outputType") or "").strip().lower() for item in result_items]
+            if result_items and all(item_type in {"txt", "text", "json"} for item_type in result_types if item_type):
+                media_missing_error = (
+                    "RunningHub workflow completed but returned only text outputs. "
+                    "Publish/select an image or video output node in RunningHub, e.g. SaveImage node 48 for img2img_style_keyframe."
+                )
+            elif not result_items:
+                media_missing_error = "RunningHub workflow completed but returned no downloadable image or video outputs."
+
+        manifest_status = "success" if status == "SUCCESS" and not media_missing_error else "failed" if status != "TIMEOUT" else "timeout"
         manifest = {
             "provider": "runninghub",
-            "status": "success" if status == "SUCCESS" else "failed" if status != "TIMEOUT" else "timeout",
+            "status": manifest_status,
             "taskId": task_id,
             "endpoint": endpoint,
             "request_payload_file": str(request_path),
@@ -684,6 +696,8 @@ class CloudComfyUIAdapter:
             "results": result_items,
             "note": "Result URLs may expire; downloaded files above are durable local copies.",
         }
+        if media_missing_error:
+            manifest["error"] = media_missing_error
         manifest_path = output_dir / "cloud_comfyui_manifest.json"
         self._write_json(manifest_path, manifest)
         remote_state.update(
@@ -696,7 +710,7 @@ class CloudComfyUIAdapter:
         )
         self._write_json(remote_state_path, remote_state)
         if manifest["status"] != "success":
-            message = self._runninghub_error_message(query_response) or status
+            message = media_missing_error or self._runninghub_error_message(query_response) or status
             raise ValueError(f"RunningHub ComfyUI workflow failed: {message}")
         return manifest
 

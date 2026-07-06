@@ -12974,7 +12974,7 @@ INDEX_HTML = r"""<!doctype html>
         workflow_mode: workflowModeDef?.value || '',
         asset_tag: imageTaskDef.assetTag || selected.asset_tag || selected.id,
         seed: String(overrides.seed ?? els.comfyDebugSeed.value).trim(),
-        denoise: String(overrides.denoise ?? '').trim(),
+        denoise: String(overrides.denoise ?? imageTaskDef.defaultDenoise ?? workflowModeDef?.default_denoise ?? workflowModeDef?.defaultDenoise ?? '').trim(),
         width: els.comfyDebugWidth.value.trim(),
         height: els.comfyDebugHeight.value.trim(),
         short_side: computedComfyDebugShortSide(),
