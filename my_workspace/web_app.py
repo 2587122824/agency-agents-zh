@@ -3543,6 +3543,15 @@ INDEX_HTML = r"""<!doctype html>
                           <option value="">请选择场景母版或场景素材</option>
                         </select>
                       </label>
+                      <div class="comfy-upload-control">
+                        <label id="comfyDebugSceneImageFileLabel">上传场景文件
+                          <input id="comfyDebugSceneImageFile" type="file" accept="image/*,.jpg,.jpeg,.jpe,.jfif,.pjpeg,.pjp,.png,.webp,.bmp,.gif,.tif,.tiff,.avif,.heic,.heif" />
+                        </label>
+                        <div id="comfyDebugSceneImageUploadState" class="comfy-upload-state" hidden>
+                          <span id="comfyDebugSceneImageUploadName"></span>
+                          <button id="comfyDebugSceneImageReuploadBtn" type="button">重新上传</button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <span class="muted small comfy-reference-meta" id="comfyDebugSceneImageMeta">未选择场景参考</span>
@@ -3562,6 +3571,15 @@ INDEX_HTML = r"""<!doctype html>
                           <option value="">请选择姿态图（不要用三视图代替）</option>
                         </select>
                       </label>
+                      <div class="comfy-upload-control">
+                        <label id="comfyDebugPoseImageFileLabel">上传姿态文件
+                          <input id="comfyDebugPoseImageFile" type="file" accept="image/*,.jpg,.jpeg,.jpe,.jfif,.pjpeg,.pjp,.png,.webp,.bmp,.gif,.tif,.tiff,.avif,.heic,.heif" />
+                        </label>
+                        <div id="comfyDebugPoseImageUploadState" class="comfy-upload-state" hidden>
+                          <span id="comfyDebugPoseImageUploadName"></span>
+                          <button id="comfyDebugPoseImageReuploadBtn" type="button">重新上传</button>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <span class="muted small comfy-reference-meta" id="comfyDebugPoseImageMeta">未选择姿态参考</span>
@@ -4111,9 +4129,19 @@ INDEX_HTML = r"""<!doctype html>
       comfyDebugSceneFrameCard: document.getElementById('comfyDebugSceneFrameCard'),
       comfyDebugSceneImagePreview: document.getElementById('comfyDebugSceneImagePreview'),
       comfyDebugSceneImageMeta: document.getElementById('comfyDebugSceneImageMeta'),
+      comfyDebugSceneImageFile: document.getElementById('comfyDebugSceneImageFile'),
+      comfyDebugSceneImageFileLabel: document.getElementById('comfyDebugSceneImageFileLabel'),
+      comfyDebugSceneImageUploadState: document.getElementById('comfyDebugSceneImageUploadState'),
+      comfyDebugSceneImageUploadName: document.getElementById('comfyDebugSceneImageUploadName'),
+      comfyDebugSceneImageReuploadBtn: document.getElementById('comfyDebugSceneImageReuploadBtn'),
       comfyDebugPoseFrameCard: document.getElementById('comfyDebugPoseFrameCard'),
       comfyDebugPoseImagePreview: document.getElementById('comfyDebugPoseImagePreview'),
       comfyDebugPoseImageMeta: document.getElementById('comfyDebugPoseImageMeta'),
+      comfyDebugPoseImageFile: document.getElementById('comfyDebugPoseImageFile'),
+      comfyDebugPoseImageFileLabel: document.getElementById('comfyDebugPoseImageFileLabel'),
+      comfyDebugPoseImageUploadState: document.getElementById('comfyDebugPoseImageUploadState'),
+      comfyDebugPoseImageUploadName: document.getElementById('comfyDebugPoseImageUploadName'),
+      comfyDebugPoseImageReuploadBtn: document.getElementById('comfyDebugPoseImageReuploadBtn'),
       comfyDebugMiddleFrameCard: document.getElementById('comfyDebugMiddleFrameCard'),
       comfyDebugMiddleFramePreview: document.getElementById('comfyDebugMiddleFramePreview'),
       comfyDebugLastFrameCard: document.getElementById('comfyDebugLastFrameCard'),
@@ -6311,7 +6339,8 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = state.middleFrameAssetReference || '';
       if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = state.lastFrameAssetReference || '';
       if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
-      if (els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
+      if (els.comfyDebugSceneImageFile) els.comfyDebugSceneImageFile.value = '';
+      if (els.comfyDebugPoseImageFile) els.comfyDebugPoseImageFile.value = '';
       if (els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
       if (els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
       if (els.comfyDebugReferenceHint) {
@@ -10569,6 +10598,20 @@ INDEX_HTML = r"""<!doctype html>
         '已选择中帧'
       );
       setComfyUploadState(
+        els.comfyDebugSceneImageFileLabel,
+        els.comfyDebugSceneImageUploadState,
+        els.comfyDebugSceneImageUploadName,
+        els.comfyDebugSceneImage?.value || '',
+        '已选择场景'
+      );
+      setComfyUploadState(
+        els.comfyDebugPoseImageFileLabel,
+        els.comfyDebugPoseImageUploadState,
+        els.comfyDebugPoseImageUploadName,
+        els.comfyDebugPoseImage?.value || '',
+        '已选择姿态'
+      );
+      setComfyUploadState(
         els.comfyDebugLastFrameReferenceFileLabel,
         els.comfyDebugLastFrameUploadState,
         els.comfyDebugLastFrameUploadName,
@@ -10647,6 +10690,8 @@ INDEX_HTML = r"""<!doctype html>
       renderComfyReferencePreview(els.comfyDebugPoseImagePreview, poseImageValue, '姿态参考图');
       renderComfyReferencePreview(els.comfyDebugMiddleFramePreview, middleFrameValue, '中帧参考图', comfyDebugLocalReferencePreviews.middle);
       renderComfyReferencePreview(els.comfyDebugLastFramePreview, lastFrameValue, '尾帧参考图', comfyDebugLocalReferencePreviews.last);
+      renderComfyReferencePreview(els.comfyDebugSceneImagePreview, sceneImageValue, '场景参考图', comfyDebugLocalReferencePreviews.scene);
+      renderComfyReferencePreview(els.comfyDebugPoseImagePreview, poseImageValue, '姿态参考图', comfyDebugLocalReferencePreviews.pose);
       if (els.comfyDebugReferencePreviewMeta) {
         els.comfyDebugReferencePreviewMeta.textContent = referenceValue
           ? (referenceValue.split('/').pop() || '已选择参考')
@@ -10666,10 +10711,12 @@ INDEX_HTML = r"""<!doctype html>
       if (!showSceneReference && sceneImageValue && els.comfyDebugSceneImage) {
         els.comfyDebugSceneImage.value = '';
         if (els.comfyDebugSceneAssetReference) els.comfyDebugSceneAssetReference.value = '';
+        clearComfyDebugLocalReferencePreview('scene');
       }
       if (!showPoseReference && poseImageValue && els.comfyDebugPoseImage) {
         els.comfyDebugPoseImage.value = '';
         if (els.comfyDebugPoseAssetReference) els.comfyDebugPoseAssetReference.value = '';
+        clearComfyDebugLocalReferencePreview('pose');
       }
       if (!showMiddleFrame && middleFrameValue && els.comfyDebugMiddleFrameReference) {
         els.comfyDebugMiddleFrameReference.value = '';
@@ -10860,6 +10907,74 @@ INDEX_HTML = r"""<!doctype html>
       } catch (err) {
         setComfyDebugLastFrameReference(els.comfyDebugLastFrameReference?.value || '', err.message || '尾帧文件上传失败');
         setStatus(err.message || '尾帧文件上传失败', true);
+      }
+    }
+
+    async function uploadComfyDebugSceneImageFile() {
+      const file = els.comfyDebugSceneImageFile?.files && els.comfyDebugSceneImageFile.files[0];
+      if (!file) return;
+      if (!isImageFile(file.name || '') && !String(file.type || '').startsWith('image/')) {
+        if (els.comfyDebugSceneImageFile) els.comfyDebugSceneImageFile.value = '';
+        setStatus('场景参考只能上传图片文件', true);
+        return;
+      }
+      try {
+        setComfyDebugLocalReferencePreview('scene', file);
+        updateComfyDebugReferencePreviews();
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/upload-comfy-debug-reference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+          }),
+        });
+        if (els.comfyDebugSceneAssetReference) els.comfyDebugSceneAssetReference.value = '';
+        if (els.comfyDebugSceneImage) els.comfyDebugSceneImage.value = result.stored_path || '';
+        clearComfyDebugLocalReferencePreview('scene');
+        updateComfyDebugReferencePreviews();
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+        setStatus(`场景参考已上传：${result.stored_path}`, false);
+      } catch (err) {
+        updateComfyDebugReferencePreviews();
+        setStatus(err.message || '场景参考上传失败', true);
+      }
+    }
+
+    async function uploadComfyDebugPoseImageFile() {
+      const file = els.comfyDebugPoseImageFile?.files && els.comfyDebugPoseImageFile.files[0];
+      if (!file) return;
+      if (!isImageFile(file.name || '') && !String(file.type || '').startsWith('image/')) {
+        if (els.comfyDebugPoseImageFile) els.comfyDebugPoseImageFile.value = '';
+        setStatus('姿态参考只能上传图片文件', true);
+        return;
+      }
+      try {
+        setComfyDebugLocalReferencePreview('pose', file);
+        updateComfyDebugReferencePreviews();
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/upload-comfy-debug-reference', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+          }),
+        });
+        if (els.comfyDebugPoseAssetReference) els.comfyDebugPoseAssetReference.value = '';
+        if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = result.stored_path || '';
+        clearComfyDebugLocalReferencePreview('pose');
+        updateComfyDebugReferencePreviews();
+        saveCurrentComfyDebugUiState();
+        saveSettings();
+        autoSaveActiveComfyDebugWorkflowConfig();
+        setStatus(`姿态参考已上传：${result.stored_path}`, false);
+      } catch (err) {
+        updateComfyDebugReferencePreviews();
+        setStatus(err.message || '姿态参考上传失败', true);
       }
     }
 
@@ -13249,6 +13364,8 @@ INDEX_HTML = r"""<!doctype html>
     if (els.comfyDebugPoseAssetReference) {
       els.comfyDebugPoseAssetReference.onchange = () => {
         const value = els.comfyDebugPoseAssetReference.value || '';
+        if (value && els.comfyDebugPoseImageFile) els.comfyDebugPoseImageFile.value = '';
+        clearComfyDebugLocalReferencePreview('pose');
         if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = value;
         updateComfyDebugReferencePreviews();
         saveCurrentComfyDebugUiState();
@@ -13259,6 +13376,8 @@ INDEX_HTML = r"""<!doctype html>
     if (els.comfyDebugSceneAssetReference) {
       els.comfyDebugSceneAssetReference.onchange = () => {
         const value = els.comfyDebugSceneAssetReference.value || '';
+        if (value && els.comfyDebugSceneImageFile) els.comfyDebugSceneImageFile.value = '';
+        clearComfyDebugLocalReferencePreview('scene');
         if (els.comfyDebugSceneImage) els.comfyDebugSceneImage.value = value;
         updateComfyDebugReferencePreviews();
         saveCurrentComfyDebugUiState();
@@ -13317,6 +13436,12 @@ INDEX_HTML = r"""<!doctype html>
     if (els.comfyDebugMiddleFrameReferenceFile) {
       els.comfyDebugMiddleFrameReferenceFile.onchange = uploadComfyDebugMiddleFrameReferenceFile;
     }
+    if (els.comfyDebugSceneImageFile) {
+      els.comfyDebugSceneImageFile.onchange = uploadComfyDebugSceneImageFile;
+    }
+    if (els.comfyDebugPoseImageFile) {
+      els.comfyDebugPoseImageFile.onchange = uploadComfyDebugPoseImageFile;
+    }
     if (els.comfyDebugLastFrameReferenceFile) {
       els.comfyDebugLastFrameReferenceFile.onchange = uploadComfyDebugLastFrameReferenceFile;
     }
@@ -13333,6 +13458,22 @@ INDEX_HTML = r"""<!doctype html>
         if (els.comfyDebugMiddleFrameReferenceFile) {
           els.comfyDebugMiddleFrameReferenceFile.value = '';
           els.comfyDebugMiddleFrameReferenceFile.click();
+        }
+      };
+    }
+    if (els.comfyDebugSceneImageReuploadBtn) {
+      els.comfyDebugSceneImageReuploadBtn.onclick = () => {
+        if (els.comfyDebugSceneImageFile) {
+          els.comfyDebugSceneImageFile.value = '';
+          els.comfyDebugSceneImageFile.click();
+        }
+      };
+    }
+    if (els.comfyDebugPoseImageReuploadBtn) {
+      els.comfyDebugPoseImageReuploadBtn.onclick = () => {
+        if (els.comfyDebugPoseImageFile) {
+          els.comfyDebugPoseImageFile.value = '';
+          els.comfyDebugPoseImageFile.click();
         }
       };
     }
@@ -13353,6 +13494,8 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugMiddleFrameAssetReference) els.comfyDebugMiddleFrameAssetReference.value = '';
       if (els.comfyDebugLastFrameAssetReference) els.comfyDebugLastFrameAssetReference.value = '';
       if (els.comfyDebugReferenceFile) els.comfyDebugReferenceFile.value = '';
+      if (els.comfyDebugSceneImageFile) els.comfyDebugSceneImageFile.value = '';
+      if (els.comfyDebugPoseImageFile) els.comfyDebugPoseImageFile.value = '';
       if (els.comfyDebugMiddleFrameReferenceFile) els.comfyDebugMiddleFrameReferenceFile.value = '';
       if (els.comfyDebugLastFrameReferenceFile) els.comfyDebugLastFrameReferenceFile.value = '';
       clearComfyDebugLocalReferencePreviews();
