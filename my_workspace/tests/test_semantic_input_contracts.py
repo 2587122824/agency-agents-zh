@@ -1907,6 +1907,30 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn({"nodeId": "186", "fieldName": "value", "fieldValue": 848}, rows)
         self.assertIn({"nodeId": "177", "fieldName": "text", "fieldValue": "slow push in"}, rows)
 
+    def test_adapter_replaces_identity_scene_image_placeholders(self) -> None:
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        config = {
+            "node_info_list_json": (
+                '[{"nodeId":"35","fieldName":"image","fieldValue":"{{input_identity_image}}"},'
+                '{"nodeId":"22","fieldName":"image","fieldValue":"{{input_scene_image}}"},'
+                '{"nodeId":"21","fieldName":"prompt","fieldValue":"{{prompt}}"}]'
+            )
+        }
+        payload = {
+            "prompt": "put Xiaomei into the school playground",
+            "input_identity_image": "characters/xiaomei.png",
+            "input_scene_image": "scenes/playground.png",
+            "seed": 123,
+        }
+
+        built = adapter._build_runninghub_payload(payload, config)
+
+        values = {(item["nodeId"], item["fieldName"]): item["fieldValue"] for item in built["nodeInfoList"]}
+        self.assertEqual(values[("35", "image")], "characters/xiaomei.png")
+        self.assertEqual(values[("22", "image")], "scenes/playground.png")
+        self.assertEqual(values[("21", "prompt")], "put Xiaomei into the school playground")
+        self.assertNotIn("{{input_scene_image}}", json.dumps(built["nodeInfoList"], ensure_ascii=False))
+
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {

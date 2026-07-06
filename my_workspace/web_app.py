@@ -17803,6 +17803,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if source_video:
                     safe_source_video = self._ensure_comfy_safe_reference_file(source_video)
                     request_payload["input_source_video"] = adapter._reference_media_value(safe_source_video)  # type: ignore[attr-defined]
+                if scene_image:
+                    safe_scene_image = self._ensure_comfy_safe_reference_file(scene_image)
+                    request_payload["input_scene_image"] = adapter._reference_image_value(safe_scene_image)  # type: ignore[attr-defined]
                 if pose_image:
                     safe_pose_image = self._ensure_comfy_safe_reference_file(pose_image)
                     request_payload["input_pose_image"] = adapter._reference_image_value(safe_pose_image)  # type: ignore[attr-defined]

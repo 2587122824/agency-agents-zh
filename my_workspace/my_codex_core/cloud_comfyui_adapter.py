@@ -729,9 +729,11 @@ class CloudComfyUIAdapter:
         style_context = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
         raw_base_image = str(comfyui_payload.get("input_base_image") or self._first_reference_image(comfyui_payload) or "")
         raw_identity_image = str(comfyui_payload.get("input_identity_image") or comfyui_payload.get("identity_image") or self._first_reference_image(comfyui_payload) or "")
+        raw_scene_image = str(comfyui_payload.get("input_scene_image") or comfyui_payload.get("scene_reference_image") or comfyui_payload.get("scene_image") or "")
         raw_pose_image = str(comfyui_payload.get("input_pose_image") or comfyui_payload.get("pose_image") or "")
         base_image = self._reference_image_value(raw_base_image) if raw_base_image else ""
         identity_image = self._reference_image_value(raw_identity_image) if raw_identity_image else ""
+        scene_image = self._reference_image_value(raw_scene_image) if raw_scene_image else ""
         pose_image = self._reference_image_value(raw_pose_image) if raw_pose_image else ""
         source_video = str(comfyui_payload.get("input_source_video") or comfyui_payload.get("source_video") or "")
         raw_middle_frame = str(comfyui_payload.get("input_middle_frame") or self._middle_frame_image(comfyui_payload) or "")
@@ -750,6 +752,10 @@ class CloudComfyUIAdapter:
             "{{input_base_image}}": base_image,
             "{{input_identity_image}}": identity_image,
             "{{identity_image}}": identity_image,
+            "{{input_scene_image}}": scene_image,
+            "{{scene_reference_image}}": scene_image,
+            "{{scene_reference}}": scene_image,
+            "{{scene_image}}": scene_image,
             "{{input_pose_image}}": pose_image,
             "{{pose_image}}": pose_image,
             "{{input_source_video}}": source_video,
@@ -1069,6 +1075,7 @@ class CloudComfyUIAdapter:
         field_map = {
             "input_base_image": "reference_image",
             "input_identity_image": "identity_image",
+            "input_scene_image": "scene_image",
             "input_pose_image": "pose_image",
             "input_source_video": "source_video",
             "input_middle_frame": "middle_frame_image",
@@ -2161,6 +2168,7 @@ class CloudComfyUIAdapter:
         for semantic_key, job_key in (
             ("input_base_image", "reference_image"),
             ("input_identity_image", "identity_image"),
+            ("input_scene_image", "scene_image"),
             ("input_pose_image", "pose_image"),
             ("input_source_video", "source_video"),
             ("input_middle_frame", "middle_frame_image"),
