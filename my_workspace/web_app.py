@@ -14356,6 +14356,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         labels = {"ok": "正常", "warn": "提醒", "error": "异常"}
         return {"name": name, "status": status, "label": labels.get(status, status), "detail": detail}
 
+    @staticmethod
+    def _ensure_comfy_debug_dirs() -> None:
+        OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
+        COMFY_DEBUG_ROOT.mkdir(parents=True, exist_ok=True)
+        (REFERENCE_ROOT / "comfy_debug").mkdir(parents=True, exist_ok=True)
+
     def _path_check(self, name: str, path: Path, must_be_writable: bool) -> dict:
         try:
             path.mkdir(parents=True, exist_ok=True)
@@ -15283,6 +15289,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     job["updated_at"] = time.time()
 
     def _tasks(self) -> list[dict]:
+        self._ensure_comfy_debug_dirs()
         if not OUTPUT_ROOT.exists():
             return []
 
@@ -15312,7 +15319,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     def _task_detail(self, name: str) -> dict:
         if name == COMFY_DEBUG_TASK:
-            raise FileNotFoundError("Standalone ComfyUI debug output is not a production task")
+            return self._comfy_debug_task_detail()
         task_dir = self._safe_task_dir(name)
         files = []
         for path in sorted(task_dir.rglob("*")):
@@ -15357,6 +15364,53 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "comfy_debug": comfy_debug,
             "task_status": task_status,
             "state_center": state_center,
+        }
+
+    def _comfy_debug_task_detail(self) -> dict:
+        self._ensure_comfy_debug_dirs()
+        task_dir = COMFY_DEBUG_ROOT
+        files = []
+        for path in sorted(task_dir.rglob("*")):
+            if path.is_file():
+                files.append(path.relative_to(task_dir).as_posix())
+        active_job = self._active_job_for_task(COMFY_DEBUG_TASK, task_dir)
+        comfy_debug = self._task_comfy_debug_status(task_dir)
+        task_state = str((active_job or {}).get("status") or ("completed" if files else "idle"))
+        summary = {
+            "task_title": "ComfyUI Debug",
+            "workflow": "standalone_comfy_debug",
+            "status": task_state,
+            "state": task_state,
+        }
+        assets = self._task_assets(task_dir, files, task_name=COMFY_DEBUG_TASK)
+        task_status = {
+            "schema_version": 1,
+            "state": task_state,
+            "workflow": {
+                "status": task_state,
+                "state": task_state,
+                "current_step": int((active_job or {}).get("current_step") or 0),
+                "completed_steps": int((active_job or {}).get("completed_steps") or 0),
+            },
+            "steps": [],
+            "production": {"jobs": []},
+            "comfy_debug": comfy_debug,
+            "assets": assets,
+            "allowed_actions": [],
+            "diagnostics": [],
+        }
+        return {
+            "name": COMFY_DEBUG_TASK,
+            "summary": summary,
+            "files": files,
+            "task_state": task_state,
+            "allowed_actions": [],
+            "assets": assets,
+            "production_jobs": [],
+            "production_plan_preview": {},
+            "comfy_debug": comfy_debug,
+            "task_status": task_status,
+            "state_center": task_status,
         }
 
     def _annotate_runtime_model_sync_state(self, state_center: dict, active_job: dict | None) -> None:
@@ -15943,7 +15997,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
     def _production_plan_preview_for_task(self, task_name: str) -> dict:
         if task_name == COMFY_DEBUG_TASK:
-            raise FileNotFoundError("Standalone ComfyUI debug output has no production plan preview")
+            return {}
         task_dir = self._safe_task_dir(task_name)
         plan = self._read_json_file(task_dir / "production_plan.json")
         graph = self._read_json_file(task_dir / "production_graph.json")
