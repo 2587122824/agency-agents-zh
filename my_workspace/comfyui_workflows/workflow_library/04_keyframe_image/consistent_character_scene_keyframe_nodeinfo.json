@@ -102,12 +102,6 @@
     "description": "low-denoise refinement pass from the calibrated workflow"
   },
   {
-    "nodeId": "25",
-    "fieldName": "filename_prefix",
-    "fieldValue": "identity_scene_keyframe_compare",
-    "description": "comparison/contact-sheet output prefix"
-  },
-  {
     "nodeId": "33",
     "fieldName": "filename_prefix",
     "fieldValue": "identity_scene_keyframe",

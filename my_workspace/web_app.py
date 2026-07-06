@@ -6510,8 +6510,9 @@ INDEX_HTML = r"""<!doctype html>
           if (!Array.isArray(parsed)) return text;
           const nodeIds = new Set(parsed.filter(item => item && typeof item === 'object').map(item => String(item.nodeId ?? '')));
           const hasOldIdentitySceneMapping = nodeIds.has('626') || nodeIds.has('625') || nodeIds.has('594');
+          const hasRemovedCompareOutput = nodeIds.has('25');
           const missingRoleSceneCore = !nodeIds.has('35') || !nodeIds.has('22') || !nodeIds.has('21') || !nodeIds.has('33');
-          if (hasOldIdentitySceneMapping || missingRoleSceneCore) {
+          if (hasOldIdentitySceneMapping || hasRemovedCompareOutput || missingRoleSceneCore) {
             return JSON.stringify(qwenRoleSceneBlendNodeInfoList(), null, 2);
           }
           return text;
@@ -6560,7 +6561,6 @@ INDEX_HTML = r"""<!doctype html>
         { nodeId: '23', fieldName: 'steps', fieldValue: 8 },
         { nodeId: '23', fieldName: 'cfg', fieldValue: 1 },
         { nodeId: '23', fieldName: 'denoise', fieldValue: 0.2 },
-        { nodeId: '25', fieldName: 'filename_prefix', fieldValue: 'identity_scene_keyframe_compare' },
         { nodeId: '33', fieldName: 'filename_prefix', fieldValue: 'identity_scene_keyframe' },
       ];
     }
