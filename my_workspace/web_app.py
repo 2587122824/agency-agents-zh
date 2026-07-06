@@ -13001,7 +13001,9 @@ INDEX_HTML = r"""<!doctype html>
         input_audio_file: ['{{input_audio_file}}', '{{audio_file}}'],
       };
       const missingMappings = requiredInputs.filter(slot => !(aliases[slot] || [`{{${slot}}}`]).some(token => text.includes(token)));
-      if (missingMappings.length) throw new Error(`nodeInfoList 缺少语义槽位映射：${missingMappings.join(', ')}`);
+      if (missingMappings.length) {
+        console.warn(`nodeInfoList 未检测到语义槽位映射，将按现有节点配置继续运行：${missingMappings.join(', ')}`);
+      }
     }
 
     function startComfyDebugWorkflowRunState(selected, statusText) {

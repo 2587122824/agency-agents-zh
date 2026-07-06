@@ -1938,6 +1938,7 @@ class SemanticInputContractTests(unittest.TestCase):
     def test_debug_identity_validation_accepts_legacy_reference_image_slot(self) -> None:
         marker = "input_identity_image: ['{{input_identity_image}}', '{{identity_image}}', '{{reference_image}}', '{{reference_image_1}}']"
         self.assertIn(marker, web_app.INDEX_HTML)
+        self.assertNotIn("throw new Error(`nodeInfoList 缺少语义槽位映射", web_app.INDEX_HTML)
 
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
