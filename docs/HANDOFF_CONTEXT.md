@@ -181,6 +181,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Validation checks include:
   - voice text fits target duration
   - image/video intents parse as one JSON object; standalone `//` or `/* */` comments inside fenced JSON blocks are stripped before parsing because staff occasionally emits commented JSON.
+  - `20_语音字幕包装师` is constrained to return one parseable JSON object only, with no prose/self-check/action block outside the JSON. This avoids malformed `production_intents.audio` outputs that block automatic resume before material generation.
   - 480p working dimensions match aspect ratio
   - video references resolve to real 06 intent IDs
   - first/middle/last video compatibility rows may rely on authoritative `production_intents.video.source_intent_ids`; they do not need to duplicate all three frame references in legacy `video_prompts`.

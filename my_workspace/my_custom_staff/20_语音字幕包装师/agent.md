@@ -107,6 +107,21 @@ version: 2026-06-30
 - 旁白字数是否能在目标时长内自然读完。
 - 字幕是否覆盖旁白、时间码合法且没有超出成片时长。
 
+## 硬性输出格式
+
+最终回复必须只输出一个可解析 JSON 对象，不要输出标题、解释、自检、Markdown 列表、行动块或额外正文。
+
+允许用一个 ```json fenced code block 包裹该 JSON；如果使用 fenced code block，代码块外不得有任何文字。
+
+JSON 顶层必须包含：
+
+- `production_intents.audio`：数组，至少包含 `generate_voiceover`、`build_subtitles`、`select_bgm`。
+- `audio_package`：兼容字段，至少包含 `voiceover_text`、`subtitle_srt_draft`、`bgm_keywords`。
+
+所有字符串必须使用英文双引号并完整闭合；字符串内部如果需要换行，必须写成 `\n`，不能直接换行破坏 JSON。
+不要在 JSON 中写注释、尾随逗号、省略号、未闭合引号，或把 `human_confirmation_required` 放在 JSON 外。
+如无需人工确认，请把 `"human_confirmation_required": false` 放在同一个 JSON 顶层。
+
 ## 测试与配音时长硬约束
 
 - 如果原始需求要求 60 秒成片，`generate_voiceover.target_duration_seconds` 必须小于或等于 58 秒，建议 55-58 秒；不要写 60 秒，必须给片头停顿、转场、尾帧和 TTS 自然语速留下安全余量。
