@@ -1935,6 +1935,10 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("{{input_scene_image}}", json.dumps(built["nodeInfoList"], ensure_ascii=False))
         self.assertNotIn("{{denoise}}", json.dumps(built["nodeInfoList"], ensure_ascii=False))
 
+    def test_debug_identity_validation_accepts_legacy_reference_image_slot(self) -> None:
+        marker = "input_identity_image: ['{{input_identity_image}}', '{{identity_image}}', '{{reference_image}}', '{{reference_image_1}}']"
+        self.assertIn(marker, web_app.INDEX_HTML)
+
     def test_adapter_replaces_multi_character_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {
