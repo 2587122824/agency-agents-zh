@@ -6320,7 +6320,7 @@ INDEX_HTML = r"""<!doctype html>
       if (els.comfyDebugAudioFile) els.comfyDebugAudioFile.value = state.audioFile || '';
       if (els.comfyDebugSourceVideo) els.comfyDebugSourceVideo.value = state.sourceVideo || '';
       if (els.comfyDebugPoseImage) els.comfyDebugPoseImage.value = state.poseImage || '';
-      if (els.comfyDebugSceneImage) els.comfyDebugSceneImage.value = state.sceneImage || '';
+      if (els.comfyDebugSceneImage) els.comfyDebugSceneImage.value = state.sceneImage || state.sceneAssetReference || '';
       if (els.comfyDebugSceneAssetReference) els.comfyDebugSceneAssetReference.value = state.sceneAssetReference || '';
       if (els.comfyDebugCharacterEntity) els.comfyDebugCharacterEntity.value = state.characterEntity || '';
       if (els.comfyDebugIdentityAssetReference) els.comfyDebugIdentityAssetReference.value = state.identityAssetReference || '';
@@ -10462,6 +10462,9 @@ INDEX_HTML = r"""<!doctype html>
         });
         appendComfyAssetOption(els.comfyDebugSceneAssetReference, currentScene, `当前 · ${currentScene.split('/').pop()}`);
         els.comfyDebugSceneAssetReference.value = currentScene;
+        if (currentScene && els.comfyDebugSceneImage && !els.comfyDebugSceneImage.value) {
+          els.comfyDebugSceneImage.value = currentScene;
+        }
       }
     }
 
@@ -10661,7 +10664,7 @@ INDEX_HTML = r"""<!doctype html>
 
     function updateComfyDebugReferencePreviews() {
       const referenceValue = els.comfyDebugReference?.value || '';
-      const sceneImageValue = els.comfyDebugSceneImage?.value || '';
+      const sceneImageValue = els.comfyDebugSceneImage?.value || els.comfyDebugSceneAssetReference?.value || '';
       const poseImageValue = els.comfyDebugPoseImage?.value || '';
       const middleFrameValue = els.comfyDebugMiddleFrameReference?.value || '';
       const lastFrameValue = els.comfyDebugLastFrameReference?.value || '';
@@ -12922,7 +12925,7 @@ INDEX_HTML = r"""<!doctype html>
       const primaryInput = String(workflowModeDef?.primary_input || '');
       const sourceVideoValue = String(overrides.input_source_video ?? (els.comfyDebugSourceVideo?.value || '')).trim();
       const poseImageValue = String(overrides.input_pose_image ?? (els.comfyDebugPoseImage?.value || '')).trim();
-      const sceneImageValue = String(overrides.input_scene_image ?? (els.comfyDebugSceneImage?.value || '')).trim();
+      const sceneImageValue = String(overrides.input_scene_image ?? (els.comfyDebugSceneImage?.value || els.comfyDebugSceneAssetReference?.value || '')).trim();
       const semanticValues = {
         input_base_image: acceptedInputs.includes('input_base_image') ? submitReferenceValue : '',
         input_identity_image: acceptedInputs.includes('input_identity_image') ? submitReferenceValue : '',
