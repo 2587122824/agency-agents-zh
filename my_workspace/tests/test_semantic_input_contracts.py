@@ -1748,6 +1748,7 @@ class SemanticInputContractTests(unittest.TestCase):
                 ffmpeg_path="ffmpeg",
                 task_dir=root,
                 video_files=[video_file],
+                image_files=[],
                 audio_file=None,
                 bgm_file=None,
                 subtitles_file=None,
@@ -1777,6 +1778,7 @@ class SemanticInputContractTests(unittest.TestCase):
                 ffmpeg_path="ffmpeg",
                 task_dir=root,
                 video_files=[video_file],
+                image_files=[],
                 audio_file=None,
                 bgm_file=None,
                 subtitles_file=None,
@@ -2129,8 +2131,13 @@ class SemanticInputContractTests(unittest.TestCase):
             adapter._run_windows_sapi = fake_sapi  # type: ignore[method-assign]
 
             result = adapter.run(
-                "猪猪侠今天也要上班。" * 120,
-                {"mode": "voxcpm2", "provider": "voxcpm2", "preemptive_fallback_min_seconds": 1},
+                "猪猪侠今天也要上班。" * 40,
+                {
+                    "mode": "voxcpm2",
+                    "provider": "voxcpm2",
+                    "preemptive_fallback_min_seconds": 1,
+                    "target_duration_seconds": 120,
+                },
                 output_dir,
             )
 
@@ -2138,6 +2145,49 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(result["fallback_from_provider"], "voxcpm2")
             self.assertIn("skipped", result["fallback_reason"])
+
+    def test_video_concat_uses_image_tail_before_padding_last_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            video = task_dir / "clip.mp4"
+            image = task_dir / "keyframe.png"
+            video.write_bytes(b"video")
+            image.write_bytes(b"image")
+            adapter = LocalFFmpegAdapter(workspace_root=WORKSPACE / "my_workspace")
+
+            def fake_probe(ffmpeg_path: str, path: Path) -> float:
+                return 20.0 if path == video else 0.0
+
+            def fake_tail(**kwargs):
+                tail = task_dir / "local_ffmpeg_slideshow_tail.mp4"
+                tail.write_bytes(b"tail")
+                return tail, 10.0
+
+            adapter._probe_media_duration = fake_probe  # type: ignore[method-assign]
+            adapter._render_image_tail_video = fake_tail  # type: ignore[method-assign]
+
+            command, input_files = adapter._build_video_concat_command(
+                ffmpeg_path="ffmpeg",
+                task_dir=task_dir,
+                video_files=[video],
+                image_files=[image],
+                audio_file=None,
+                bgm_file=None,
+                subtitles_file=None,
+                subtitle_style="",
+                output_width=1080,
+                output_height=1920,
+                output_fps=24,
+                encoding_args=["-c:v", "libx264"],
+                output_file=task_dir / "final.mp4",
+                target_duration_seconds=30.0,
+            )
+
+            concat_text = (task_dir / "local_ffmpeg_video_inputs.txt").read_text(encoding="utf-8")
+            self.assertIn("clip.mp4", concat_text)
+            self.assertIn("local_ffmpeg_slideshow_tail.mp4", concat_text)
+            self.assertIn(image, input_files)
+            self.assertFalse(any("tpad=stop_mode=clone" in part for part in command))
 
     def test_adapter_repairs_legacy_broll_ltx_node_info(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(

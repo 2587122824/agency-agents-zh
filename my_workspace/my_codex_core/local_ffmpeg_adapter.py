@@ -164,6 +164,7 @@ class LocalFFmpegAdapter:
                 ffmpeg_path=ffmpeg_path,
                 task_dir=task_dir,
                 video_files=video_files,
+                image_files=image_files,
                 audio_file=audio_file,
                 bgm_file=bgm_file,
                 subtitles_file=burn_subtitles_file,
@@ -713,6 +714,7 @@ class LocalFFmpegAdapter:
         ffmpeg_path: str,
         task_dir: Path,
         video_files: list[Path],
+        image_files: list[Path],
         audio_file: Path | None,
         bgm_file: Path | None,
         subtitles_file: Path | None,
@@ -725,11 +727,32 @@ class LocalFFmpegAdapter:
         target_duration_seconds: float = 0.0,
     ) -> tuple[list[str], list[Path]]:
         concat_path = task_dir / "local_ffmpeg_video_inputs.txt"
+        concat_video_files = list(video_files)
+        input_files: list[Path] = [*video_files]
         concat_path.write_text(
-            "".join(f"file '{_ffconcat_path(path)}'\n" for path in video_files),
+            "".join(f"file '{_ffconcat_path(path)}'\n" for path in concat_video_files),
             encoding="utf-8",
         )
-        source_duration = sum(self._probe_media_duration(ffmpeg_path, path) for path in video_files)
+        source_duration = sum(self._probe_media_duration(ffmpeg_path, path) for path in concat_video_files)
+        missing_duration = max(0.0, target_duration_seconds - source_duration) if source_duration > 0 else 0.0
+        if missing_duration >= 0.5 and image_files:
+            tail_video, tail_duration = self._render_image_tail_video(
+                ffmpeg_path=ffmpeg_path,
+                task_dir=task_dir,
+                image_files=image_files,
+                needed_duration_seconds=missing_duration,
+                output_width=output_width,
+                output_height=output_height,
+                output_fps=output_fps,
+            )
+            if tail_video and tail_duration > 0:
+                concat_video_files.append(tail_video)
+                input_files.extend([tail_video, *image_files])
+                source_duration += tail_duration
+                concat_path.write_text(
+                    "".join(f"file '{_ffconcat_path(path)}'\n" for path in concat_video_files),
+                    encoding="utf-8",
+                )
         pad_end_seconds = max(0.0, target_duration_seconds - source_duration) if source_duration > 0 else 0.0
         if pad_end_seconds < 0.5:
             pad_end_seconds = 0.0
@@ -743,7 +766,6 @@ class LocalFFmpegAdapter:
             "-i",
                 str(concat_path.resolve()),
         ]
-        input_files: list[Path] = [*video_files]
         if audio_file:
             command.extend(["-i", str(audio_file)])
             input_files.append(audio_file)
@@ -761,6 +783,80 @@ class LocalFFmpegAdapter:
             ]
         )
         return command, input_files
+
+    def _render_image_tail_video(
+        self,
+        ffmpeg_path: str,
+        task_dir: Path,
+        image_files: list[Path],
+        needed_duration_seconds: float,
+        output_width: int,
+        output_height: int,
+        output_fps: int,
+    ) -> tuple[Path | None, float]:
+        if needed_duration_seconds <= 0 or not image_files:
+            return None, 0.0
+        max_still_seconds = 3.0
+        selected_count = min(len(image_files), max(1, int((needed_duration_seconds + max_still_seconds - 0.001) // max_still_seconds)))
+        selected_images = image_files[:selected_count]
+        still_duration = min(max_still_seconds, max(0.5, needed_duration_seconds / max(1, selected_count)))
+        tail_duration = min(needed_duration_seconds, still_duration * selected_count)
+        if tail_duration <= 0:
+            return None, 0.0
+
+        concat_path = task_dir / "local_ffmpeg_slideshow_tail_inputs.txt"
+        output_path = task_dir / "local_ffmpeg_slideshow_tail.mp4"
+        command_path = task_dir / "local_ffmpeg_slideshow_tail_command.txt"
+        stdout_path = task_dir / "local_ffmpeg_slideshow_tail_stdout.txt"
+        stderr_path = task_dir / "local_ffmpeg_slideshow_tail_stderr.txt"
+        lines: list[str] = []
+        for image in selected_images:
+            lines.append(f"file '{_ffconcat_path(image)}'\n")
+            lines.append(f"duration {still_duration:.6f}\n")
+        lines.append(f"file '{_ffconcat_path(selected_images[-1])}'\n")
+        concat_path.write_text("".join(lines), encoding="utf-8")
+        command = [
+            ffmpeg_path,
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_path.resolve()),
+            "-vf",
+            self._image_filter(None, "", output_width, output_height, output_fps),
+            "-t",
+            f"{tail_duration:.3f}",
+            "-an",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "veryfast",
+            "-crf",
+            "26",
+            "-pix_fmt",
+            "yuv420p",
+            str(output_path.resolve()),
+        ]
+        command_path.write_text(self._format_command(command) + "\n", encoding="utf-8")
+        try:
+            result = subprocess.run(
+                command,
+                cwd=str(task_dir),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=max(120, int(tail_duration * 8)),
+            )
+            stdout_path.write_text(result.stdout or "", encoding="utf-8")
+            stderr_path.write_text(result.stderr or "", encoding="utf-8")
+            if result.returncode == 0 and output_path.is_file():
+                return output_path.resolve(), tail_duration
+        except Exception as exc:
+            stderr_path.write_text(str(exc), encoding="utf-8")
+        return None, 0.0
 
     def _build_image_slideshow_command(
         self,

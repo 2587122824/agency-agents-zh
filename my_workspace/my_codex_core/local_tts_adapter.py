@@ -220,6 +220,8 @@ class LocalTTSAdapter:
         fallback_config["mode"] = "windows_sapi"
         fallback_config["provider"] = "windows_sapi"
         fallback_config["timeout_seconds"] = voice_config.get("fallback_timeout_seconds") or 900
+        if "sapi_rate" not in fallback_config:
+            fallback_config["sapi_rate"] = self._recommended_sapi_rate(voice_text, voice_config)
         result = self._run_windows_sapi(voice_text, fallback_config, output_dir)
         result.update(
             {
@@ -276,6 +278,23 @@ class LocalTTSAdapter:
         is_cpu = "--device cpu" in command_lower or " device=cpu" in command_lower
         threshold = _float_or_default(voice_config.get("preemptive_fallback_min_seconds"), 45.0)
         return is_voxcpm_mode and is_cpu and estimated_duration >= threshold
+
+    @staticmethod
+    def _recommended_sapi_rate(text: str, voice_config: dict[str, Any]) -> int:
+        explicit = voice_config.get("fallback_sapi_rate")
+        if explicit is not None:
+            return _int_or_default(explicit, 3, minimum=-10, maximum=10)
+        target_duration = _float_or_default(voice_config.get("target_duration_seconds"), 0.0)
+        if target_duration <= 0:
+            return 0
+        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", str(text or "")))
+        latin_words = len(re.findall(r"[A-Za-z0-9]+", str(text or "")))
+        density = cjk_count + latin_words * 2
+        if target_duration <= 150 and density >= 350:
+            return 3
+        if target_duration <= 90 and density >= 220:
+            return 4
+        return 0
 
     @staticmethod
     def _estimate_speech_duration(text: str, voice_config: dict[str, Any]) -> float:
@@ -441,6 +460,7 @@ class LocalTTSAdapter:
                 }
             )
         else:
+            actual_duration = self._wav_duration(output_path)
             manifest.update(
                 {
                     "status": "success",
@@ -448,6 +468,7 @@ class LocalTTSAdapter:
                     "stderr_file": str(stderr_path),
                     "downloaded_files": [str(output_path)],
                     "output_size_bytes": output_path.stat().st_size,
+                    "actual_duration_seconds": actual_duration,
                 }
             )
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
