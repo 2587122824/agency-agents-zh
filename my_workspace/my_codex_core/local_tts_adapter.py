@@ -108,6 +108,19 @@ class LocalTTSAdapter:
             )
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return manifest
+        if self._should_preempt_voxcpm2_cpu(mode, command, estimated_duration, needs_reference_audio, voice_config):
+            manifest.update(
+                {
+                    "status": "failed",
+                    "error": (
+                        "VoxCPM2 CPU synthesis was skipped for a long voiceover; "
+                        "using Windows SAPI fallback to keep final composition unblocked."
+                    ),
+                    "fallback_status": "preemptive",
+                }
+            )
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return self._fallback_after_voxcpm2_failure(voice_text, voice_config, output_dir, manifest)
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
         result, timed_out, timeout_stdout, timeout_stderr = self._run_shell_command(command, timeout)
@@ -238,6 +251,31 @@ class LocalTTSAdapter:
                     f"raised from {requested_timeout} to {timeout} seconds based on {len(text)} characters."
                 )
         return timeout, note
+
+    @staticmethod
+    def _should_preempt_voxcpm2_cpu(
+        mode: str,
+        command: str,
+        estimated_duration: float,
+        needs_reference_audio: bool,
+        voice_config: dict[str, Any],
+    ) -> bool:
+        if needs_reference_audio:
+            return False
+        if str(voice_config.get("preemptive_fallback") or "").strip().lower() in {"0", "false", "off", "disabled"}:
+            return False
+        fallback_provider = str(
+            voice_config.get("fallback_provider")
+            or voice_config.get("fallback_tts_provider")
+            or "windows_sapi"
+        ).strip().lower()
+        if fallback_provider in {"", "off", "none", "disabled"}:
+            return False
+        command_lower = command.lower()
+        is_voxcpm_mode = mode in {"preset", "voxcpm2", "clone", "voice_clone"}
+        is_cpu = "--device cpu" in command_lower or " device=cpu" in command_lower
+        threshold = _float_or_default(voice_config.get("preemptive_fallback_min_seconds"), 45.0)
+        return is_voxcpm_mode and is_cpu and estimated_duration >= threshold
 
     @staticmethod
     def _estimate_speech_duration(text: str, voice_config: dict[str, Any]) -> float:
