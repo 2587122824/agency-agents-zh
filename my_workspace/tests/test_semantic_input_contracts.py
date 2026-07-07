@@ -674,6 +674,59 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn("不换脸", expression["prompt"])
         self.assertIn("不换衣服", expression["prompt"])
 
+    def test_generated_expression_assets_bind_first_character_master(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_piggy_worker_front",
+                            "asset_role": "character",
+                            "character_id": "piggy_worker",
+                            "prompt": "Piggy worker front master, white shirt, red tie, blue pants.",
+                        },
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_piggy_worker_expression_tired",
+                            "asset_role": "expression",
+                            "character_id": "piggy_worker",
+                            "prompt": "Piggy worker tired expression, same outfit as master.",
+                        },
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_piggy_worker_expression_happy",
+                            "asset_role": "expression",
+                            "character_id": "piggy_worker",
+                            "prompt": "Piggy worker happy expression, same outfit as master.",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="generated_expression_master_binding_test",
+            route_content='{"production_type":"custom"}',
+            image_content=image_content,
+        )
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        tired = items["asset_piggy_worker_expression_tired"]
+        happy = items["asset_piggy_worker_expression_happy"]
+        for expression in (tired, happy):
+            self.assertEqual(expression["workflow_id"], "04_keyframe")
+            self.assertEqual(expression["workflow_mode"], "img2img_style_keyframe")
+            self.assertEqual(
+                expression["input_bindings"]["input_base_image"],
+                {"from_job": "asset_piggy_worker_front", "output": "output_final_image"},
+            )
+            self.assertIn("asset_piggy_worker_front", expression["depends_on"])
+        self.assertNotIn("asset_piggy_worker_expression_tired", happy["depends_on"])
+        self.assertNotEqual(
+            happy["input_bindings"]["input_base_image"]["from_job"],
+            "asset_piggy_worker_expression_tired",
+        )
+
     def test_linked_character_img2img_uses_concise_edit_prompt(self) -> None:
         image_content = json.dumps(
             {
@@ -2105,6 +2158,29 @@ class SemanticInputContractTests(unittest.TestCase):
         rows = request["nodeInfoList"]
         self.assertIn({"nodeId": "186", "fieldName": "value", "fieldValue": 848}, rows)
         self.assertIn({"nodeId": "177", "fieldName": "text", "fieldValue": "slow push in"}, rows)
+
+    def test_adapter_resolves_generated_character_master_reference(self) -> None:
+        global_context = {
+            "characters": [
+                {
+                    "character_id": "piggy_worker",
+                    "generated_master_job_id": "asset_piggy_worker_front",
+                    "master_image_binding": {"from_job": "asset_piggy_worker_front", "output": "output_final_image"},
+                }
+            ]
+        }
+        generated_map = {"asset_piggy_worker_front": "I:/tmp/master.png"}
+        job = {"job_id": "asset_piggy_worker_expression_happy", "character_id": "piggy_worker"}
+        self.assertEqual(
+            CloudComfyUIAdapter._generated_master_reference_for_job(job, global_context, generated_map),
+            "I:/tmp/master.png",
+        )
+        self.assertTrue(CloudComfyUIAdapter._job_has_generated_character_master(job, global_context))
+        master_job = {"job_id": "asset_piggy_worker_front", "character_id": "piggy_worker"}
+        self.assertEqual(
+            CloudComfyUIAdapter._generated_master_reference_for_job(master_job, global_context, generated_map),
+            "",
+        )
 
     def test_adapter_replaces_identity_scene_image_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

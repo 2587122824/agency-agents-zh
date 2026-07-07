@@ -5036,7 +5036,7 @@ INDEX_HTML = r"""<!doctype html>
         return ['running', 'submitted', 'queued', 'pending'].includes(status);
       });
       const waitingForVideo = hasVideoContext && remoteStillRunning;
-      if (waitingForVideo) return 10 * 60 * 1000;
+      if (waitingForVideo) return 3000;
       const productionRetry = String(job?.production_retry_job || '').toLowerCase();
       if (productionRetry === 'tts') return 15000;
       if (productionRetry === 'material') return 5000;
@@ -5054,7 +5054,7 @@ INDEX_HTML = r"""<!doctype html>
           delayedProgressReset: job.status === 'completed' || job.status === 'paused',
         });
       }
-      if (progressChanged && job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
+      if (job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
         if (maybeShowOutput()) {
           await selectActiveRunTask(job);
           await refreshActiveRunTaskDetail(job);
@@ -9084,7 +9084,10 @@ INDEX_HTML = r"""<!doctype html>
         runBtn.className = 'secondary small';
         const itemStatus = String(item.status || '').toLowerCase();
         const canRunOutOfTurn = ['failed', 'completed', 'success', 'approved'].includes(itemStatus);
-        const debugButtonLocked = Boolean(currentRunId && ['queued', 'running'].includes(currentRunStatus));
+        const debugButtonLocked = Boolean(
+          selectedTaskHasActiveExecution()
+          || (currentRunId && ['queued', 'running'].includes(currentRunStatus))
+        );
         runBtn.textContent = itemStatus === 'running' ? '运行中' : (canRunOutOfTurn ? '重新运行本组' : '运行当前组');
         runBtn.disabled = taskStopped || debugButtonLocked || itemStatus === 'running' || (item.id !== currentId && !canRunOutOfTurn);
         runBtn.onclick = () => runTaskComfyDebugItem(item.id);
@@ -9104,6 +9107,10 @@ INDEX_HTML = r"""<!doctype html>
 
     async function runTaskComfyDebugItem(itemId) {
       if (!selectedTask || !itemId) return;
+      if (selectedTaskHasActiveExecution()) {
+        setStatus('主任务正在运行，ComfyUI 调试队列已锁定，请等待当前生产步骤结束后再手动调试。', true);
+        return;
+      }
       if (selectedTaskIsStopped()) {
         setStatus('任务已终止或完成，请先点击继续任务后再操作 ComfyUI 调试队列。', true);
         return;
@@ -9144,6 +9151,10 @@ INDEX_HTML = r"""<!doctype html>
 
     async function approveTaskComfyDebugItem(itemId) {
       if (!selectedTask || !itemId) return;
+      if (selectedTaskHasActiveExecution()) {
+        setStatus('主任务正在运行，ComfyUI 调试队列已锁定，请等待当前生产步骤结束后再确认调试项。', true);
+        return;
+      }
       if (selectedTaskIsStopped()) {
         setStatus('任务已终止或完成，请先点击继续任务后再确认 ComfyUI 调试队列。', true);
         return;
@@ -9195,7 +9206,14 @@ INDEX_HTML = r"""<!doctype html>
       const images = Array.isArray(assets.images) ? assets.images.map(item => ({ ...item, kind: 'image' })) : [];
       const videos = Array.isArray(assets.videos) ? assets.videos.map(item => ({ ...item, kind: 'video' })) : [];
       const structured = images.concat(videos).filter(item => item && item.file);
-      if (structured.length) return structured;
+      if (structured.length) {
+        return structured.sort((a, b) => {
+          const at = Number(a.mtime || a.created_at || a.updated_at || 0);
+          const bt = Number(b.mtime || b.created_at || b.updated_at || 0);
+          if (at || bt) return at - bt;
+          return assetSortKey(a.file).localeCompare(assetSortKey(b.file), undefined, { numeric: true });
+        });
+      }
       return generatedAssetFiles(data?.files || []).map(file => ({
         file,
         label: assetFileLabel(file),
@@ -17077,6 +17095,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not task_name or not item_id:
             raise ValueError("task and item_id are required")
         task_dir = self._safe_task_dir(task_name)
+        active_job = self._active_job_for_task(task_name, task_dir)
+        if str((active_job or {}).get("status") or "").lower() in {"queued", "running"}:
+            raise ValueError("Main task is still running; ComfyUI debug queue is locked until the current production step finishes.")
         status = self._task_comfy_debug_status(task_dir)
         items = WorkflowWebHandler._flatten_task_comfy_debug_items(
             status.get("items") if isinstance(status.get("items"), list) else []
@@ -17290,6 +17311,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not task_name or not item_id:
             raise ValueError("task and item_id are required")
         task_dir = self._safe_task_dir(task_name)
+        active_job = self._active_job_for_task(task_name, task_dir)
+        if str((active_job or {}).get("status") or "").lower() in {"queued", "running"}:
+            raise ValueError("Main task is still running; ComfyUI debug queue is locked until the current production step finishes.")
         status = self._task_comfy_debug_status(task_dir)
         items = WorkflowWebHandler._flatten_task_comfy_debug_items(
             status.get("items") if isinstance(status.get("items"), list) else []

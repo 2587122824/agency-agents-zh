@@ -478,28 +478,24 @@ def _apply_character_base_policy(
 
     if not _looks_like_expression_sheet(character_text):
         return
-    reference_job = _previous_character_reference_job(existing_items, str(item.get("character_id") or ""))
+    reference_job = _character_master_reference_job(existing_items, str(item.get("character_id") or ""))
     if not reference_job:
         if notes is not None:
-            notes.append(f"image intent {item.get('job_id')} has no previous character reference to bind for expression consistency")
+            notes.append(f"image intent {item.get('job_id')} has no character master reference to bind for expression consistency")
         return
 
-    reference_job_id = str(reference_job.get("job_id") or reference_job.get("id") or "").strip()
+    reference_job_id = _route_character_asset_item_to_reference_job(
+        item,
+        intent,
+        reference_job,
+        prompt_suffix=(
+            "鍙傝€冧笂涓€寮犺鑹茶瀹氬浘锛屽繀椤讳繚鎸佸悓涓€鍙姩鐗╃殑姣涜壊鍒嗗竷銆佽€虫湹褰㈢姸銆佺溂鐫涖€侀蓟鍙ｃ€佷綋鍨嬫瘮渚嬪拰灏惧反涓€鑷达紱鍙敼鍙樿〃鎯呭拰杞诲井鍔ㄤ綔锛屼笉鏀瑰彉鐗╃锛屼笉鍙樻垚浜哄瀷銆?"
+            if is_animal
+            else "鍙傝€冧笂涓€寮犺鑹茶瀹氬浘锛屽繀椤讳繚鎸佸悓涓€涓汉鐨勮劯鍨嬨€佸勾榫勬劅銆佷簲瀹樻瘮渚嬨€佸彂鍨嬨€佽偆鑹层€佽韩鏉愭瘮渚嬪拰鏈嶈涓€鑷达紱鍙敼鍙樿〃鎯呭拰杞诲井鍔ㄤ綔锛屼笉鎹㈣劯锛屼笉骞磋交鍖栵紝涓嶇（鐨紝涓嶆崲琛ｆ湇銆?"
+        ),
+    )
     if not reference_job_id:
         return
-    item["workflow_id"] = "04_keyframe"
-    item["workflow_mode"] = "img2img_style_keyframe"
-    item["image_task_mode"] = "img2img_style_keyframe"
-    item["mode"] = "img2img_style_keyframe"
-    item["control_mode"] = "img2img_style"
-    item["input_bindings"] = {
-        **(item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}),
-        "input_base_image": {"from_job": reference_job_id, "output": "output_final_image"},
-    }
-    item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
-    item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
-    item["denoise"] = intent.get("denoise") or 1
-    item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
     item["prompt"] = _append_prompt_once(
         str(item.get("prompt") or ""),
         (
@@ -509,7 +505,7 @@ def _apply_character_base_policy(
         ),
     )
     if notes is not None:
-        notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe using {reference_job_id} for character consistency")
+        notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe using character master {reference_job_id}")
 
 
 def _character_master_reference_from_item(item: dict[str, Any]) -> str:
@@ -748,6 +744,32 @@ def _route_character_base_item_to_master_img2img(
         notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe from {reason}")
 
 
+def _route_character_asset_item_to_reference_job(
+    item: dict[str, Any],
+    intent: dict[str, Any],
+    reference_job: dict[str, Any],
+    *,
+    prompt_suffix: str,
+) -> str:
+    reference_job_id = str(reference_job.get("job_id") or reference_job.get("id") or "").strip()
+    if not reference_job_id:
+        return ""
+    item["workflow_id"] = "04_keyframe"
+    item["workflow_mode"] = "img2img_style_keyframe"
+    item["image_task_mode"] = "img2img_style_keyframe"
+    item["mode"] = "img2img_style_keyframe"
+    item["control_mode"] = "img2img_style"
+    item["input_bindings"] = {
+        **(item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}),
+        "input_base_image": {"from_job": reference_job_id, "output": "output_final_image"},
+    }
+    item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
+    item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
+    item["denoise"] = intent.get("denoise") or 1
+    item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
+    return reference_job_id
+
+
 def _looks_like_animal_character(text: str) -> bool:
     return any(
         token in text
@@ -951,6 +973,26 @@ def _previous_character_reference_job(items: list[dict[str, Any]], character_id:
     return None
 
 
+def _is_character_asset_variant_role(asset_role: str) -> bool:
+    role = str(asset_role or "").strip().lower()
+    if not role:
+        return True
+    if role in {
+        "character",
+        "character_base",
+        "character_variant",
+        "variant",
+        "expression",
+        "expression_sheet",
+        "emotion",
+        "emotion_sheet",
+        "state",
+        "pose",
+    }:
+        return True
+    return role.startswith(("character_", "expression_", "emotion_", "state_"))
+
+
 def _apply_generated_character_reference_policy(
     item: dict[str, Any],
     intent: dict[str, Any],
@@ -976,11 +1018,7 @@ def _apply_generated_character_reference_policy(
         return
 
     intent_name = str(intent.get("intent") or "").strip()
-    reference_job = (
-        _previous_character_reference_job(existing_items, character_id)
-        if intent_name == "generate_base_asset"
-        else _character_master_reference_job(existing_items, character_id)
-    )
+    reference_job = _character_master_reference_job(existing_items, character_id)
     if not reference_job:
         reference_job = _referenced_previous_character_job_from_prompt(existing_items, prompt_text)
     if not reference_job:
@@ -995,7 +1033,7 @@ def _apply_generated_character_reference_policy(
 
     if (
         intent_name == "generate_base_asset"
-        and asset_role == "character"
+        and _is_character_asset_variant_role(asset_role)
         and workflow_mode == "character_base"
         and not item.get("input_bindings")
     ):
@@ -1017,7 +1055,7 @@ def _apply_generated_character_reference_policy(
             "参考上一张角色母版，必须保持同一个人的脸型、五官比例、年龄感、发型、肤色和身材比例一致；可以根据剧情阶段改变服装、精神状态和环境，但不换脸，不年轻化，不磨皮，不生成另一个人。",
         )
         if notes is not None:
-            notes.append(f"image intent {item.get('job_id')} bound to previous character reference {reference_job_id}")
+            notes.append(f"image intent {item.get('job_id')} bound to character master reference {reference_job_id}")
         return
 
     if workflow_id == "04_keyframe" and workflow_mode == "keyframe" and not item.get("input_identity_image"):

@@ -228,7 +228,31 @@ class CloudComfyUIAdapter:
                         material_type=job_type,
                         job_type=job_type,
                     )
-                elif not explicit_graph_inputs and job_type == "image" and generated_reference_images:
+                elif (
+                    not explicit_graph_inputs
+                    and job_type == "image"
+                    and self._generated_master_reference_for_job(job, global_context, generated_reference_map)
+                ):
+                    master_reference = self._generated_master_reference_for_job(job, global_context, generated_reference_map)
+                    job["reference_image"] = self._reference_image_value(master_reference)
+                    job["reference_images"] = [job["reference_image"]]
+                    self._emit(
+                        f"已把角色母版作为生图素材 {index}/{len(selected_jobs)} 的参考图",
+                        total_jobs=len(selected_jobs),
+                        completed_jobs=index - 1,
+                        current_job=index,
+                        job_index=index,
+                        job_count=len(selected_jobs),
+                        material_name=job_name,
+                        material_type=job_type,
+                        job_type=job_type,
+                    )
+                elif (
+                    not explicit_graph_inputs
+                    and job_type == "image"
+                    and generated_reference_images
+                    and not self._job_has_generated_character_master(job, global_context)
+                ):
                     previous_index = len(generated_reference_images) - 1
                     job["reference_image"] = self._reference_image_value(generated_reference_images[previous_index])
                     job["reference_images"] = [job["reference_image"]]
@@ -1074,6 +1098,41 @@ class CloudComfyUIAdapter:
         enriched["characters"] = list(by_id.values())
         enriched["style"] = style
         return enriched
+
+    @classmethod
+    def _generated_master_reference_for_job(
+        cls,
+        job: dict[str, Any],
+        global_context: dict[str, Any],
+        generated_reference_map: dict[str, str],
+    ) -> str:
+        master_job_id = cls._generated_master_job_id_for_job(job, global_context)
+        if not master_job_id or master_job_id == str(job.get("job_id") or "").strip():
+            return ""
+        for key in cls._reference_lookup_keys(master_job_id):
+            if key in generated_reference_map:
+                return generated_reference_map[key]
+        return ""
+
+    @classmethod
+    def _job_has_generated_character_master(cls, job: dict[str, Any], global_context: dict[str, Any]) -> bool:
+        return bool(cls._generated_master_job_id_for_job(job, global_context))
+
+    @staticmethod
+    def _generated_master_job_id_for_job(job: dict[str, Any], global_context: dict[str, Any]) -> str:
+        character_id = str(job.get("character_id") or "").strip()
+        if not character_id:
+            return ""
+        characters = global_context.get("characters") if isinstance(global_context.get("characters"), list) else []
+        for character in characters:
+            if not isinstance(character, dict):
+                continue
+            if str(character.get("character_id") or character.get("id") or "").strip() != character_id:
+                continue
+            master_job_id = str(character.get("generated_master_job_id") or "").strip()
+            binding = character.get("master_image_binding") if isinstance(character.get("master_image_binding"), dict) else {}
+            return master_job_id or str(binding.get("from_job") or "").strip()
+        return ""
 
     def _topological_material_jobs(self, jobs: list[dict[str, Any]]) -> list[dict[str, Any]]:
         by_id = {str(job.get("job_id")): job for job in jobs}
