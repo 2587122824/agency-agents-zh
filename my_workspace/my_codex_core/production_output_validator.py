@@ -59,6 +59,72 @@ def validate_production_output(
     }
 
 
+def normalize_production_output_content(
+    step: dict[str, Any],
+    content: str,
+    requirement_lock: dict[str, Any],
+    previous_outputs: list[dict[str, str]] | None = None,
+) -> dict[str, Any]:
+    """Apply locked production dimensions to staff JSON before validation.
+
+    Staff sometimes emits delivery or model-native resolutions in compatibility
+    prompt fields. The production compiler will use locked working dimensions,
+    so normalize the textual handoff as well instead of failing the workflow on
+    a recoverable width/height typo.
+    """
+
+    agent = str(step.get("agent") or "")
+    if not (agent.startswith("06_") or agent.startswith("07_")):
+        return {"content": content, "changed": False, "normalizations": []}
+    payloads = _json_objects(content)
+    effective_lock = _effective_requirement_lock(requirement_lock, payloads, previous_outputs or [])
+    expected = _expected_resolution(effective_lock, delivery=False)
+    text = str(content or "")
+    updated = _normalize_work_dimension_keys(text, expected)
+    normalizations: list[dict[str, Any]] = []
+    if updated != text:
+        normalizations.append(
+            {
+                "type": "locked_work_resolution",
+                "agent": agent,
+                "width": expected[0],
+                "height": expected[1],
+            }
+        )
+    return {"content": updated, "changed": updated != text, "normalizations": normalizations}
+
+
+def _normalize_work_dimension_keys(content: str, expected: tuple[int, int]) -> str:
+    width, height = expected
+    text = str(content or "")
+    width_keys = ("width", "work_width", "working_width")
+    height_keys = ("height", "work_height", "working_height")
+    resolution_keys = ("resolution", "work_resolution", "working_resolution")
+
+    for key in width_keys:
+        text = re.sub(
+            rf'("{re.escape(key)}"\s*:\s*)"?\d+(?:\.\d+)?"?',
+            rf'\g<1>{width}',
+            text,
+            flags=re.IGNORECASE,
+        )
+    for key in height_keys:
+        text = re.sub(
+            rf'("{re.escape(key)}"\s*:\s*)"?\d+(?:\.\d+)?"?',
+            rf'\g<1>{height}',
+            text,
+            flags=re.IGNORECASE,
+        )
+    for key in resolution_keys:
+        text = re.sub(
+            rf'("{re.escape(key)}"\s*:\s*)"[^"]*\d+\s*[xX*×]\s*\d+[^"]*"',
+            rf'\g<1>"{width}x{height}"',
+            text,
+            flags=re.IGNORECASE,
+        )
+    return text
+
+
 def _validate_script(content: str, duration: int, issues: list[str]) -> None:
     if not duration:
         return

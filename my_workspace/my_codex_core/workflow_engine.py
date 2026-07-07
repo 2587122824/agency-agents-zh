@@ -10,7 +10,7 @@ from typing import Callable
 from .codex_api import CodexAPI, LLMResult
 from .action_executor import ActionExecutor
 from .production_pipeline import run_auto_production
-from .production_output_validator import validate_production_output
+from .production_output_validator import normalize_production_output_content, validate_production_output
 from .requirement_guard import (
     build_requirement_lock,
     correction_prompt,
@@ -1006,8 +1006,11 @@ class WorkflowEngine:
         result = self.api.run(system_prompt, prompt)
         if result.provider == "offline":
             return result
+        result, initial_normalizations = self._normalize_production_result(result, step, lock, previous_outputs or [])
 
         validation = self._combined_output_validation(lock, result.content, step, previous_outputs or [])
+        if initial_normalizations:
+            validation["auto_normalizations"] = initial_normalizations
         attempts.append(validation)
         if validation.get("passed"):
             self.storage.write_json(step_dir / "requirement_validation.json", {"passed": True, "attempts": attempts})
@@ -1019,7 +1022,10 @@ class WorkflowEngine:
         retry_prompt = correction_prompt(prompt, lock, result.content, validation.get("issues") or [])
         self.storage.write_text(step_dir / "prompt_retry_requirement.md", retry_prompt)
         retry_result = self.api.run(system_prompt, retry_prompt)
+        retry_result, retry_normalizations = self._normalize_production_result(retry_result, step, lock, previous_outputs or [])
         retry_validation = self._combined_output_validation(lock, retry_result.content, step, previous_outputs or [])
+        if retry_normalizations:
+            retry_validation["auto_normalizations"] = retry_normalizations
         attempts.append(retry_validation)
         self.storage.write_json(
             step_dir / "requirement_validation.json",
@@ -1067,9 +1073,13 @@ class WorkflowEngine:
             content = candidate.read_text(encoding="utf-8", errors="replace")
             if not content.strip():
                 continue
+            normalization = normalize_production_output_content(step, content, lock, previous_outputs)
+            content = str(normalization.get("content") or content)
             validation = self._combined_output_validation(lock, content, step, previous_outputs)
             if not validation.get("passed"):
                 continue
+            if normalization.get("normalizations"):
+                validation["auto_normalizations"] = normalization.get("normalizations")
 
             self.storage.write_text(step_dir / "output.md", content)
             self.storage.write_json(
@@ -1096,6 +1106,27 @@ class WorkflowEngine:
             self._update_summary_after_candidate_recovery(step_dir.parent, step, candidate.name)
             return LLMResult(provider="recovered", model="validated-candidate", content=content)
         return None
+
+    @staticmethod
+    def _normalize_production_result(
+        result: LLMResult,
+        step: dict,
+        lock: dict,
+        previous_outputs: list[dict[str, str]],
+    ) -> tuple[LLMResult, list[dict]]:
+        normalization = normalize_production_output_content(step, result.content, lock, previous_outputs)
+        normalizations = normalization.get("normalizations") if isinstance(normalization.get("normalizations"), list) else []
+        if not normalization.get("changed"):
+            return result, normalizations
+        return (
+            LLMResult(
+                provider=result.provider,
+                model=result.model,
+                content=str(normalization.get("content") or result.content),
+                raw=result.raw,
+            ),
+            normalizations,
+        )
 
     def _update_summary_after_candidate_recovery(self, task_dir: Path, step: dict, source_name: str) -> None:
         summary = self._read_summary(task_dir)

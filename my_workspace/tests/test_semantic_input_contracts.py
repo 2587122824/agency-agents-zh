@@ -32,6 +32,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _srt_from_voice_text,
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
+from my_codex_core.production_output_validator import normalize_production_output_content  # noqa: E402
 from my_codex_core.requirement_guard import declares_human_confirmation, validate_requirement_alignment  # noqa: E402
 from my_codex_core.task_state_center import TaskStateCenter  # noqa: E402
 
@@ -1520,6 +1521,61 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertTrue(result["passed"], result["issues"])
         self.assertEqual(result["expected_work_resolution"], "480x848")
+
+    def test_normalizes_staff_prompt_dimensions_to_locked_work_size(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_001_keyframe",
+                            "prompt": "Original pig worker on subway.",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_002_keyframe",
+                            "prompt": "Original pig worker in office.",
+                        },
+                    ]
+                },
+                "image_prompts": [
+                    {
+                        "task_type": "image",
+                        "prompt": "Original pig worker on subway.",
+                        "width": 1440,
+                        "height": 848,
+                        "resolution": "1440x848",
+                    },
+                    {
+                        "task_type": "image",
+                        "prompt": "Original pig worker in office.",
+                        "width": 960,
+                        "height": 1440,
+                        "working_resolution": "960x1440",
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        )
+        normalized = normalize_production_output_content(
+            {"agent": "06_image"},
+            f"```json\n{content}\n```",
+            {"original_requirement": "猪猪侠打工人的一天，竖屏9:16，2分钟", "duration_seconds": 120},
+        )
+        self.assertTrue(normalized["changed"])
+        normalized_content = normalized["content"]
+        self.assertIn('"width": 480', normalized_content)
+        self.assertIn('"height": 848', normalized_content)
+        self.assertIn('"resolution": "480x848"', normalized_content)
+        self.assertIn('"working_resolution": "480x848"', normalized_content)
+
+        result = validate_production_output(
+            {"agent": "06_image"},
+            normalized_content,
+            {"original_requirement": "猪猪侠打工人的一天，竖屏9:16，2分钟", "duration_seconds": 120},
+        )
+        self.assertTrue(result["passed"], result["issues"])
 
     def test_validator_accepts_three_frame_source_intent_binding(self) -> None:
         content = json.dumps(
