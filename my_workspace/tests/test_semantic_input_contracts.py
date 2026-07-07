@@ -1885,6 +1885,41 @@ class SemanticInputContractTests(unittest.TestCase):
         prepared = adapter._prepare_runninghub_payload(payload)
         self.assertEqual(prepared["prompt"], "让图中人物坐在操场上吃饭")
 
+    def test_reference_image_job_sends_single_image_edit_prompt(self) -> None:
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        source_prompt = (
+            "\u732a\u732a\u6253\u5de5\u4eba7\u79cd\u57fa\u7840\u8868\u60c5\u72b6\u6001\u56fe\uff0c"
+            "\u534a\u8eab\u6784\u56fe\uff0c\u7eaf\u8272\u80cc\u666f\uff0c"
+            "\u5206\u522b\u4e3a\uff1a\u5f00\u5fc3\u3001\u56f0\u3001\u5d29\u6e83\u3001\u5f97\u610f\u3001\u60ca\u8bb6\u3001\u65e0\u5948\u3001\u75b2\u60eb\u3002"
+            "\u4fdd\u6301\u540c\u4e00\u8138\u578b\u3001\u670d\u88c5\u548c\u4f53\u578b\u3002"
+            "\u53c2\u8003\u4e0a\u4e00\u5f20\u89d2\u8272\u8bbe\u5b9a\u56fe\uff0c\u5fc5\u987b\u4fdd\u6301\u540c\u4e00\u4e2a\u4eba\u8138\u578b\u3001"
+            "\u5e74\u9f84\u611f\u3001\u4e94\u5b98\u6bd4\u4f8b\u3001\u53d1\u578b\u3001\u80a4\u8272\u3001\u8eab\u6750\u6bd4\u4f8b\u548c\u670d\u88c5\u4e00\u81f4\uff1b"
+            "\u53ea\u6539\u53d8\u8868\u60c5\u548c\u8f7b\u5fae\u52a8\u4f5c\uff0c\u4e0d\u6362\u8138\uff0c\u4e0d\u5e74\u8f7b\u5316\uff0c\u4e0d\u78e8\u76ae\uff0c\u4e0d\u6362\u8863\u670d\u3002"
+        )
+        payload = adapter._payload_for_material_job(
+            {},
+            {
+                "type": "image",
+                "job_id": "piggy_worker_expression_happy",
+                "mode": "img2img_style_keyframe",
+                "prompt": source_prompt,
+                "reference_image": "character.png",
+            },
+            1,
+        )
+        self.assertNotIn("7\u79cd", payload["prompt"])
+        self.assertNotIn("\u5206\u522b\u4e3a", payload["prompt"])
+        self.assertIn("\u53ea\u8f93\u51fa\u4e00\u5f20\u5b8c\u6574\u5355\u56fe", payload["prompt"])
+
+        built = adapter._build_runninghub_payload(
+            payload,
+            {"node_info_list_json": '[{"nodeId":"34","fieldName":"value","fieldValue":"{{prompt}}"}]'},
+        )
+        prompt_value = built["nodeInfoList"][0]["fieldValue"]
+        self.assertEqual(prompt_value, payload["prompt"])
+        self.assertNotIn("\u5206\u522b\u4e3a", prompt_value)
+        self.assertNotIn("7\u79cd", prompt_value)
+
     def test_live_action_retro_prompts_get_quality_guardrails(self) -> None:
         plan = compile_production_plan(
             task_id="live_action_quality",

@@ -842,7 +842,7 @@ class CloudComfyUIAdapter:
             "{{reference_strength}}": str(comfyui_payload.get("reference_strength") or ""),
             "{{motion_strength}}": str(comfyui_payload.get("motion_strength") or ""),
             "{{pose_video}}": str(comfyui_payload.get("pose_video") or ""),
-            "{{prompt}}": self._first_prompt(comfyui_payload),
+            "{{prompt}}": self._runninghub_prompt_value(comfyui_payload),
         }
         reference_images = self._reference_image_list_values(comfyui_payload)
         for index in range(1, 5):
@@ -2230,6 +2230,7 @@ class CloudComfyUIAdapter:
             payload.pop("video_prompt", None)
             payload.pop("video_prompts", None)
             payload.pop("video_task_mode", None)
+            prompt = self._single_reference_image_prompt(prompt, {**payload, **job, **prompt_data, **group})
         payload["prompt"] = prompt
         payload["negative_prompt"] = negative
         if job_type == "video":
@@ -2324,6 +2325,138 @@ class CloudComfyUIAdapter:
         payload["global_style_weight"] = payload.get("global_style_weight") or style.get("weight") or ""
         apply_locked_parameters_to_payload(payload, job_type=job_type, mode=str(job.get("mode") or ""))
         return payload
+
+    @classmethod
+    def _runninghub_prompt_value(cls, payload: dict[str, Any]) -> str:
+        prompt = cls._first_prompt(payload)
+        if cls._is_reference_driven_image_payload(payload):
+            return cls._single_reference_image_prompt(prompt, payload)
+        return prompt
+
+    @staticmethod
+    def _is_reference_driven_image_payload(payload: dict[str, Any]) -> bool:
+        job_type = str(payload.get("workflow_item_type") or payload.get("type") or "").strip().lower()
+        if job_type == "video" or payload.get("video_prompt") or payload.get("video_prompts"):
+            return False
+        mode_values = {
+            str(payload.get("workflow_mode") or "").strip().lower(),
+            str(payload.get("image_task_mode") or "").strip().lower(),
+            str(payload.get("mode") or "").strip().lower(),
+            str(payload.get("control_mode") or "").strip().lower(),
+        }
+        reference_modes = {
+            "img2img_style_keyframe",
+            "identity_keyframe",
+            "identity_scene_keyframe",
+            "pose_identity_keyframe",
+            "multi_identity_keyframe",
+            "multi_pose_identity_keyframe",
+            "img2img_style",
+            "identity_reference",
+            "identity_scene_reference",
+            "identity_pose_reference",
+            "multi_identity_reference",
+            "multi_identity_pose_reference",
+        }
+        if mode_values & reference_modes:
+            return True
+        workflow_id = str(payload.get("workflow_id") or payload.get("capability") or "").strip()
+        if workflow_id == "04_keyframe" and any(
+            str(payload.get(key) or "").strip()
+            for key in ("input_base_image", "input_identity_image", "reference_image", "input_scene_image")
+        ):
+            return True
+        return False
+
+    @classmethod
+    def _single_reference_image_prompt(cls, prompt: str, context: dict[str, Any] | None = None) -> str:
+        text = str(prompt or "").strip()
+        if not text:
+            return text
+        original = text
+        had_sheet_instruction = cls._looks_like_multi_image_prompt(text)
+        text = re.sub(
+            r"(?i)\bplatform-safe\s+non-graphic\s+video,\s*fully\s+clothed\s+subjects,\s*family-safe\s+action\s+tone,\s*",
+            "",
+            text,
+        )
+        text = re.sub(r"\uff08\s*(?:character_id|scene_id)\s*:[^)]*\uff09", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\(\s*(?:character_id|scene_id)\s*:[^)]*\)", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"(?:\u7ad6\u5c4f\s*)?9:16[^\u3002\uff1b;,.]*", "", text)
+        text = re.sub(r"\u5de5\u4f5c\u5c3a\u5bf8\s*\d+\s*x\s*\d+[^\u3002\uff1b;,.]*", "", text, flags=re.IGNORECASE)
+        text = re.sub(r"\s*(?:[\uff0c,]\s*)?\u5206\u522b\u4e3a\s*[:\uff1a][^\u3002\uff1b;.!?\uff01\uff1f]*[\u3002\uff1b;.!?\uff01\uff1f]?", "\u3002", text)
+        text = re.sub(r"\d+\s*(?:\u79cd|\u4e2a)\s*[^\u3002\uff1b;,.!?\uff01\uff1f]*?(?:\u8868\u60c5|\u60c5\u7eea|\u72b6\u6001)[^\u3002\uff1b;,.!?\uff01\uff1f]*", "\u5f53\u524d\u5355\u4e00\u8868\u60c5\u72b6\u6001", text)
+        text = re.sub(r"(?i)\b(?:expression|emotion|state)\s*(?:sheet|grid|set|board|contact sheet)\b[^.?!;,\u3002\uff1b]*[.?!;\u3002\uff1b]?", "single current expression ", text)
+        text = re.sub(r"(?i)\b(?:multiple|several|many)\s+(?:expressions|emotions|states|views)\b", "one current expression", text)
+        text = re.sub(r"\u53c2\u8003(?:\u5173\u8054|\u4e0a\u4e00\u5f20)?\u89d2\u8272[\s\S]*?(?:\u4e0d\u968f\u673a\u6362\u4eba|\u4e0d\u751f\u6210\u53e6\u4e00\u4e2a\u4eba|\u4e0d\u6362\u8863\u670d|\u4e0d\u53d8\u6210\u4eba\u578b)\u3002?", "", text)
+        text = re.sub(r"\u4fdd\u6301\u540c\u4e00[^\u3002\uff1b;.!?\uff01\uff1f]*(?:\u670d\u88c5|\u8863\u670d)[^\u3002\uff1b;.!?\uff01\uff1f]*[\u3002\uff1b;.!?\uff01\uff1f]?", "", text)
+        text = re.sub(r"[ \t]+", " ", text)
+        text = re.sub(r"\s*[\u3002\uff1b;,.]\s*[\u3002\uff1b;,.]+", "\u3002", text)
+        text = text.strip(" ,.;\u3002\uff0c\uff1b")
+        if not had_sheet_instruction and text == original.strip(" ,.;\u3002\uff0c\uff1b"):
+            return original
+        if not text:
+            text = cls._state_prompt_from_context(context or {}) or "\u4fdd\u6301\u53c2\u8003\u56fe\u4e3b\u4f53\u4e00\u81f4\uff0c\u751f\u6210\u5f53\u524d\u5355\u5f20\u72b6\u6001\u56fe"
+        if not re.search(r"^\s*(?:\u8ba9|\u5c06|\u628a|\u57fa\u4e8e|\u4fdd\u6301)", text):
+            text = "\u8ba9\u56fe\u4e2d\u4e3b\u4f53" + re.sub(r"^\s*\u56fe\u4e2d(?:\u4eba\u7269|\u4e3b\u4f53)", "", text).strip()
+        if had_sheet_instruction or cls._looks_like_multi_image_prompt(original):
+            no_sheet = "\u53ea\u8f93\u51fa\u4e00\u5f20\u5b8c\u6574\u5355\u56fe\uff0c\u4e0d\u8981\u62fc\u56fe\u3001\u4e5d\u5bab\u683c\u3001\u5206\u680f\u3001\u591a\u89c6\u56fe\u3001\u8868\u60c5\u8868\u6216\u6587\u5b57\u6807\u7b7e\u3002"
+            if no_sheet.rstrip("\u3002") not in text:
+                text = f"{text}\u3002{no_sheet}"
+        return text.strip() or original
+
+    @staticmethod
+    def _looks_like_multi_image_prompt(text: str) -> bool:
+        value = str(text or "").lower()
+        numbered_sheet = bool(re.search(r"\d+\s*(?:\u79cd|\u4e2a)\s*[^\u3002\uff1b;,.!?\uff01\uff1f]*?(?:\u8868\u60c5|\u60c5\u7eea|\u72b6\u6001)", value))
+        if (
+            "\u53ea\u8f93\u51fa\u4e00\u5f20\u5b8c\u6574\u5355\u56fe" in value
+            and "\u4e0d\u8981\u62fc\u56fe" in value
+            and not numbered_sheet
+            and not any(marker in value for marker in ("\u5206\u522b\u4e3a", "\u8868\u60c5\u72b6\u6001\u56fe", "expression sheet", "emotion sheet", "contact sheet"))
+        ):
+            return False
+        return any(
+            marker in value
+            for marker in (
+                "\u5206\u522b\u4e3a",
+                "\u8868\u60c5\u72b6\u6001\u56fe",
+                "\u8868\u60c5\u56fe",
+                "\u8868\u60c5\u8868",
+                "\u4e5d\u5bab\u683c",
+                "\u62fc\u56fe",
+                "\u591a\u89c6\u56fe",
+                "expression sheet",
+                "emotion sheet",
+                "contact sheet",
+                "grid",
+                "multiple expressions",
+                "multiple emotions",
+            )
+        ) or numbered_sheet
+
+    @staticmethod
+    def _state_prompt_from_context(context: dict[str, Any]) -> str:
+        text = " ".join(
+            str(context.get(key) or "")
+            for key in ("job_id", "name", "asset_tag", "workflow_item_name", "prompt_id", "id")
+        ).lower()
+        states = {
+            "happy": "\u5f00\u5fc3",
+            "smile": "\u5fae\u7b11",
+            "sad": "\u96be\u8fc7",
+            "tired": "\u75b2\u60eb",
+            "angry": "\u751f\u6c14",
+            "surprised": "\u60ca\u8bb6",
+            "shock": "\u60ca\u8bb6",
+            "confused": "\u56f0\u60d1",
+            "sleepy": "\u56f0\u5026",
+            "proud": "\u5f97\u610f",
+        }
+        for marker, label in states.items():
+            if marker in text or label in text:
+                return f"\u4fdd\u6301\u53c2\u8003\u56fe\u4e3b\u4f53\u4e00\u81f4\uff0c\u751f\u6210\u5355\u5f20{label}\u8868\u60c5\u72b6\u6001\u56fe"
+        return ""
 
     @staticmethod
     def _safe_style_reference_prompt(prompt: str) -> str:
