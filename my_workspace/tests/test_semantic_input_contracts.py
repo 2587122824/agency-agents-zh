@@ -1280,6 +1280,71 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(video_item["input_bindings"]["input_base_image"]["from_job"], "clip_001_keyframe")
         self.assertIn("clip_001_keyframe", {row["job_id"] for row in payload["image_prompts"]})
 
+    def test_legacy_i2v_binding_restores_missing_keyframe_after_image_recompile(self) -> None:
+        plan = compile_production_plan(
+            task_id="legacy_i2v_retry_keyframe_restore",
+            route_content=json.dumps(
+                {
+                    "production_type": "custom",
+                    "aspect_ratio": "9:16",
+                },
+                ensure_ascii=False,
+            ),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "asset_person_stand",
+                                "asset_role": "character",
+                                "character_id": "person_outline",
+                                "prompt": "简化人体轮廓站立母版。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_content=json.dumps(
+                {
+                    "video_prompts": [
+                        {
+                            "job_id": "clip_03_b_roll",
+                            "workflow_id": "06_i2v_first_frame",
+                            "workflow_mode": "i2v_first_frame",
+                            "character_id": "person_outline",
+                            "prompt": "人体轮廓做简单下落演示动画。",
+                            "input_bindings": {
+                                "input_base_image": {
+                                    "from_job": "clip_03_b_roll_keyframe",
+                                    "output": "output_final_image",
+                                }
+                            },
+                            "depends_on": ["clip_03_b_roll_keyframe"],
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+            existing_payload={
+                "image_prompts": [
+                    {
+                        "job_id": "stale_legacy_image",
+                        "workflow_id": "04_keyframe",
+                        "workflow_mode": "keyframe",
+                        "prompt": "stale legacy image should be replaced by compiled image intents",
+                    }
+                ]
+            },
+        )
+        payload = plan["compiled_payload"]
+        image_ids = {row["job_id"] for row in payload["image_prompts"]}
+        self.assertIn("asset_person_stand", image_ids)
+        self.assertIn("clip_03_b_roll_keyframe", image_ids)
+        self.assertNotIn("stale_legacy_image", image_ids)
+        self.assertIn("clip_03_b_roll_keyframe", {row["job_id"] for row in plan["visual_jobs"] if row["type"] == "image"})
+
     def test_task_comfy_debug_resolves_input_binding_reference(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             task_dir = Path(temp_dir)

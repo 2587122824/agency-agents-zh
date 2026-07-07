@@ -148,6 +148,13 @@ def compile_production_plan(
 
     _prefer_compiled_compat_list(compat_payload, "image_prompts", image_prompts, image_payload.get("image_prompts"))
     _prefer_compiled_compat_list(compat_payload, "video_prompts", video_prompts, video_payload.get("video_prompts"))
+    _repair_legacy_i2v_keyframe_dependencies(
+        compat_payload,
+        templates=templates,
+        global_context=global_context,
+        resolved_entities=resolved_entities,
+        notes=compile_notes,
+    )
     _merge_compat_list(compat_payload, "reference_images", image_payload.get("reference_images"))
     _merge_compat_list(compat_payload, "reference_images", video_payload.get("reference_images"))
     _merge_compat_list(compat_payload, "reference_images", route_payload.get("reference_images"))
@@ -1247,7 +1254,7 @@ def _compile_video_intents(
             _bind_three_frames(item, image_job_ids)
         elif effective_intent_name == "generate_i2v_clip":
             _bind_first_source_image(item, image_job_ids)
-            if not _has_bound_first_frame(item):
+            if not _has_bound_first_frame(item, image_job_ids):
                 inferred = _bind_matching_keyframe_by_id(item, image_job_ids)
                 if inferred:
                     notes.append(f"video intent {intent_id} inferred first frame from {inferred}")
@@ -1333,7 +1340,13 @@ def _ensure_video_keyframe_dependency(
     promoted_from_broll: bool = False,
 ) -> str:
     video_id = _safe_id(item.get("job_id") or item.get("id") or "")
-    keyframe_id = _safe_id(intent.get("keyframe_intent_id") or intent.get("first_frame_intent_id") or f"{video_id}_keyframe")
+    bound_source = _first_frame_binding_source(item)
+    keyframe_id = _safe_id(
+        intent.get("keyframe_intent_id")
+        or intent.get("first_frame_intent_id")
+        or (bound_source if bound_source and bound_source not in image_job_ids else "")
+        or f"{video_id}_keyframe"
+    )
     if not keyframe_id:
         keyframe_id = f"video_keyframe_{len(image_jobs) + 1:03d}"
     bindings = item.setdefault("input_bindings", {})
@@ -1855,14 +1868,89 @@ def _trailing_number(value: Any) -> str:
     return match.group(1).zfill(3)
 
 
-def _has_bound_first_frame(item: dict[str, Any]) -> bool:
+def _first_frame_binding_source(item: dict[str, Any]) -> str:
     bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
-    if any(key in bindings for key in ("input_base_image", "first_frame", "start_frame")):
-        return True
+    for key in ("input_base_image", "first_frame", "start_frame"):
+        binding = bindings.get(key)
+        if isinstance(binding, dict):
+            source = str(binding.get("from_job") or "").strip()
+            if source:
+                return source
+        elif str(binding or "").strip():
+            return str(binding).strip()
+    return ""
+
+
+def _has_bound_first_frame(item: dict[str, Any], image_job_ids: set[str] | None = None) -> bool:
+    source = _first_frame_binding_source(item)
+    if source:
+        if image_job_ids is None:
+            return True
+        return source in image_job_ids or Path(source).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}
     for key in ("reference_image", "first_frame_image", "image", "image_ref"):
         if str(item.get(key) or "").strip():
             return True
     return False
+
+
+def _repair_legacy_i2v_keyframe_dependencies(
+    payload: dict[str, Any],
+    *,
+    templates: dict[str, Any],
+    global_context: dict[str, Any],
+    resolved_entities: dict[str, Any],
+    notes: list[str],
+) -> None:
+    image_prompts = payload.get("image_prompts")
+    video_prompts = payload.get("video_prompts")
+    if not isinstance(image_prompts, list) or not isinstance(video_prompts, list):
+        return
+    image_job_ids = {
+        str(item.get("job_id") or item.get("id") or "").strip()
+        for item in image_prompts
+        if isinstance(item, dict) and str(item.get("job_id") or item.get("id") or "").strip()
+    }
+    image_contracts = ((templates.get("workflow_contracts") or {}).get("image") or {}) if isinstance(templates.get("workflow_contracts"), dict) else {}
+    contract = image_contracts.get("generate_keyframe") if isinstance(image_contracts.get("generate_keyframe"), dict) else {}
+    render = global_context.get("render") if isinstance(global_context.get("render"), dict) else {}
+
+    for item in video_prompts:
+        if not isinstance(item, dict):
+            continue
+        mode = str(item.get("workflow_mode") or item.get("mode") or item.get("video_task_mode") or "").lower()
+        if "i2v" not in mode:
+            continue
+        source = _safe_id(_first_frame_binding_source(item))
+        if not source or source in image_job_ids:
+            continue
+        intent = {
+            "intent": "generate_keyframe",
+            "intent_id": source,
+            "prompt": str(item.get("prompt") or item.get("motion_plan") or "").strip(),
+            "negative_prompt": str(item.get("negative_prompt") or ""),
+            "character_id": str(item.get("character_id") or ""),
+            "style_id": str(item.get("style_id") or ""),
+            "product_id": str(item.get("product_id") or ""),
+            "scene_id": str(item.get("scene_id") or ""),
+            "asset_tag": f"{str(item.get('job_id') or item.get('id') or source)}_first_frame",
+        }
+        keyframe_item = _image_prompt_item(
+            job_id=source,
+            prompt=str(intent["prompt"]),
+            intent=intent,
+            contract=contract,
+            compatibility={},
+            render=render,
+            asset_tag=str(intent["asset_tag"]),
+            resolved_entities=resolved_entities,
+            notes=notes,
+        )
+        _apply_generated_character_reference_policy(keyframe_item, intent, image_prompts, notes)
+        _apply_live_action_quality_policy(keyframe_item, global_context=global_context, intent=intent)
+        _apply_img2img_style_edit_prompt_policy(keyframe_item, intent=intent, notes=notes)
+        image_prompts.append(keyframe_item)
+        image_job_ids.add(source)
+        notes.append(f"legacy i2v video prompt {item.get('job_id') or item.get('id') or ''} restored missing first-frame keyframe {source}")
 
 
 def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
