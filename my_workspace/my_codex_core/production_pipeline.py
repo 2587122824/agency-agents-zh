@@ -52,6 +52,8 @@ def run_auto_production(
     target_duration = _task_target_duration(task_dir)
     if target_duration and not voice_config.get("target_duration_seconds"):
         voice_config["target_duration_seconds"] = target_duration
+    if target_duration and not compose_config.get("target_duration_seconds") and not compose_config.get("final_duration_seconds"):
+        compose_config["target_duration_seconds"] = target_duration
     quality_config = config.get("quality_config") or {}
     comfy_debug_gate = config.get("comfy_debug_gate") if isinstance(config.get("comfy_debug_gate"), dict) else {}
     manual_comfy_debug = mode == "comfy_full" and _as_bool(comfy_debug_gate.get("enabled"), default=False)
@@ -820,6 +822,11 @@ def retry_production_job(
     voice_config = _retry_section_config(manifest, config, "voice_config", "audio")
     compose_config = _retry_section_config(manifest, config, "compose_config", "composition")
     compose_config = dict(compose_config)
+    target_duration = _task_target_duration(task_dir)
+    if target_duration and not voice_config.get("target_duration_seconds"):
+        voice_config["target_duration_seconds"] = target_duration
+    if target_duration and not compose_config.get("target_duration_seconds") and not compose_config.get("final_duration_seconds"):
+        compose_config["target_duration_seconds"] = target_duration
     compose_config.update(
         {
             "production_graph_path": str(task_dir / "production_graph.json"),

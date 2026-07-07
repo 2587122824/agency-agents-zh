@@ -235,6 +235,7 @@ class LocalFFmpegAdapter:
                 "input_files": [str(path) for path in input_files],
                 "video_files": [str(path) for path in video_files],
                 "image_files": [str(path) for path in image_files],
+                "target_duration_seconds": target_duration,
                 "audio_file": str(audio_file) if audio_file else "",
                 "original_audio_file": str(original_audio_file) if original_audio_file else "",
                 "audio_alignment": audio_alignment,
@@ -772,7 +773,7 @@ class LocalFFmpegAdapter:
         if bgm_file:
             command.extend(["-stream_loop", "-1", "-i", str(bgm_file)])
             input_files.append(bgm_file)
-        command.extend(self._audio_mix_args(audio_file, bgm_file))
+        command.extend(self._audio_mix_args(audio_file, bgm_file, stop_at_shortest=target_duration_seconds <= 0))
         command.extend(
             [
                 "-vf",
@@ -985,7 +986,8 @@ class LocalFFmpegAdapter:
         ]
 
     @staticmethod
-    def _audio_mix_args(audio_file: Path | None, bgm_file: Path | None) -> list[str]:
+    def _audio_mix_args(audio_file: Path | None, bgm_file: Path | None, stop_at_shortest: bool = True) -> list[str]:
+        shortest_args = ["-shortest"] if stop_at_shortest else []
         if audio_file and bgm_file:
             return [
                 "-filter_complex",
@@ -994,7 +996,7 @@ class LocalFFmpegAdapter:
                 "0:v:0",
                 "-map",
                 "[aout]",
-                "-shortest",
+                *shortest_args,
             ]
         if audio_file:
             return [
@@ -1004,10 +1006,10 @@ class LocalFFmpegAdapter:
                 "0:v:0",
                 "-map",
                 "[aout]",
-                "-shortest",
+                *shortest_args,
             ]
         if bgm_file:
-            return ["-map", "0:v:0", "-map", "1:a:0", "-shortest"]
+            return ["-map", "0:v:0", "-map", "1:a:0", *shortest_args]
         return []
 
     @staticmethod

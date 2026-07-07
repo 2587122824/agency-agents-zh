@@ -2226,6 +2226,38 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertIn(image, input_files)
             self.assertFalse(any("tpad=stop_mode=clone" in part for part in command))
 
+    def test_video_concat_target_duration_does_not_stop_at_short_audio(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            video = task_dir / "clip.mp4"
+            audio = task_dir / "voiceover.wav"
+            video.write_bytes(b"video")
+            audio.write_bytes(b"audio")
+            adapter = LocalFFmpegAdapter(workspace_root=WORKSPACE / "my_workspace")
+            adapter._probe_media_duration = lambda ffmpeg_path, path: 120.0  # type: ignore[method-assign]
+
+            command, input_files = adapter._build_video_concat_command(
+                ffmpeg_path="ffmpeg",
+                task_dir=task_dir,
+                video_files=[video],
+                image_files=[],
+                audio_file=audio,
+                bgm_file=None,
+                subtitles_file=None,
+                subtitle_style="",
+                output_width=1080,
+                output_height=1920,
+                output_fps=24,
+                encoding_args=["-c:v", "libx264"],
+                output_file=task_dir / "final.mp4",
+                target_duration_seconds=120.0,
+            )
+
+            self.assertIn(audio, input_files)
+            self.assertIn("-t", command)
+            self.assertIn("120.000", command)
+            self.assertNotIn("-shortest", command)
+
     def test_adapter_repairs_legacy_broll_ltx_node_info(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
             json.dumps(
