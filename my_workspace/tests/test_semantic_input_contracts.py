@@ -2146,6 +2146,43 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(result["fallback_from_provider"], "voxcpm2")
             self.assertIn("skipped", result["fallback_reason"])
 
+    def test_recommended_sapi_rate_overrides_default_zero_for_dense_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
+            captured_rate = None
+
+            def fake_sapi(voice_text: str, voice_config: dict, fallback_output_dir: Path):
+                nonlocal captured_rate
+                captured_rate = voice_config.get("sapi_rate")
+                output_file = fallback_output_dir / "voiceover.wav"
+                output_file.write_bytes(b"fallback wav")
+                return {
+                    "status": "success",
+                    "provider": "windows_sapi",
+                    "mode": "windows_sapi",
+                    "downloaded_files": [str(output_file)],
+                    "output_file": str(output_file),
+                    "rate": captured_rate,
+                }
+
+            adapter._run_windows_sapi = fake_sapi  # type: ignore[method-assign]
+            result = adapter._fallback_after_voxcpm2_failure(
+                "猪猪侠今天也要上班。" * 45,
+                {
+                    "mode": "voxcpm2",
+                    "provider": "voxcpm2",
+                    "sapi_rate": 0,
+                    "target_duration_seconds": 120,
+                },
+                output_dir,
+                {"status": "failed", "error": "timeout"},
+            )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(captured_rate, 3)
+            self.assertEqual(result["rate"], 3)
+
     def test_video_concat_uses_image_tail_before_padding_last_frame(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task_dir = Path(tmp)

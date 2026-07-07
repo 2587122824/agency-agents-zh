@@ -220,8 +220,14 @@ class LocalTTSAdapter:
         fallback_config["mode"] = "windows_sapi"
         fallback_config["provider"] = "windows_sapi"
         fallback_config["timeout_seconds"] = voice_config.get("fallback_timeout_seconds") or 900
-        if "sapi_rate" not in fallback_config:
-            fallback_config["sapi_rate"] = self._recommended_sapi_rate(voice_text, voice_config)
+        if voice_config.get("fallback_sapi_rate") is not None:
+            fallback_config["sapi_rate"] = _int_or_default(voice_config.get("fallback_sapi_rate"), 3, minimum=-10, maximum=10)
+        else:
+            recommended_rate = self._recommended_sapi_rate(voice_text, voice_config)
+            if recommended_rate:
+                fallback_config["sapi_rate"] = recommended_rate
+            elif "sapi_rate" not in fallback_config:
+                fallback_config["sapi_rate"] = 0
         result = self._run_windows_sapi(voice_text, fallback_config, output_dir)
         result.update(
             {
