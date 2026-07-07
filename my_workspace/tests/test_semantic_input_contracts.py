@@ -2193,7 +2193,11 @@ class SemanticInputContractTests(unittest.TestCase):
             adapter = LocalFFmpegAdapter(workspace_root=WORKSPACE / "my_workspace")
 
             def fake_probe(ffmpeg_path: str, path: Path) -> float:
-                return 20.0 if path == video else 0.0
+                if path == video:
+                    return 20.0
+                if path == task_dir / "local_ffmpeg_slideshow_tail.mp4":
+                    return 10.0
+                return 0.0
 
             def fake_tail(**kwargs):
                 tail = task_dir / "local_ffmpeg_slideshow_tail.mp4"
@@ -2225,6 +2229,50 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertIn("local_ffmpeg_slideshow_tail.mp4", concat_text)
             self.assertIn(image, input_files)
             self.assertFalse(any("tpad=stop_mode=clone" in part for part in command))
+
+    def test_video_concat_pads_when_rendered_image_tail_is_shorter_than_needed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            video = task_dir / "clip.mp4"
+            image = task_dir / "keyframe.png"
+            tail = task_dir / "local_ffmpeg_slideshow_tail.mp4"
+            video.write_bytes(b"video")
+            image.write_bytes(b"image")
+            adapter = LocalFFmpegAdapter(workspace_root=WORKSPACE / "my_workspace")
+
+            def fake_probe(ffmpeg_path: str, path: Path) -> float:
+                if path == video:
+                    return 20.0
+                if path == tail:
+                    return 7.5
+                return 0.0
+
+            def fake_tail(**kwargs):
+                tail.write_bytes(b"tail")
+                return tail, fake_probe("", tail)
+
+            adapter._probe_media_duration = fake_probe  # type: ignore[method-assign]
+            adapter._render_image_tail_video = fake_tail  # type: ignore[method-assign]
+
+            command, _input_files = adapter._build_video_concat_command(
+                ffmpeg_path="ffmpeg",
+                task_dir=task_dir,
+                video_files=[video],
+                image_files=[image],
+                audio_file=None,
+                bgm_file=None,
+                subtitles_file=None,
+                subtitle_style="",
+                output_width=1080,
+                output_height=1920,
+                output_fps=24,
+                encoding_args=["-c:v", "libx264"],
+                output_file=task_dir / "final.mp4",
+                target_duration_seconds=30.0,
+            )
+
+            video_filter = command[command.index("-vf") + 1]
+            self.assertIn("tpad=stop_mode=clone:stop_duration=2.500", video_filter)
 
     def test_video_concat_target_duration_does_not_stop_at_short_audio(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

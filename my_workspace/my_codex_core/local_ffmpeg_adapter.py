@@ -854,7 +854,8 @@ class LocalFFmpegAdapter:
             stdout_path.write_text(result.stdout or "", encoding="utf-8")
             stderr_path.write_text(result.stderr or "", encoding="utf-8")
             if result.returncode == 0 and output_path.is_file():
-                return output_path.resolve(), tail_duration
+                actual_duration = self._probe_media_duration(ffmpeg_path, output_path.resolve())
+                return output_path.resolve(), actual_duration or tail_duration
         except Exception as exc:
             stderr_path.write_text(str(exc), encoding="utf-8")
         return None, 0.0
