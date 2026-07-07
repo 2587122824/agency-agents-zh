@@ -14,6 +14,7 @@ sys.path.insert(0, str(WORKSPACE / "my_workspace"))
 
 import web_app  # noqa: E402
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter  # noqa: E402
+from my_codex_core.local_tts_adapter import LocalTTSAdapter  # noqa: E402
 from my_codex_core.local_ffmpeg_adapter import LocalFFmpegAdapter  # noqa: E402
 from my_codex_core.production_plan_compiler import (  # noqa: E402
     _bind_first_source_video,
@@ -2066,6 +2067,41 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertEqual(updated["voice_config"]["mode"], "voxcpm2")
         self.assertEqual(updated["voice_config"]["provider"], "voxcpm2")
+
+    def test_voxcpm2_timeout_falls_back_to_windows_sapi(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
+
+            def fake_timeout(command: str, timeout: int):
+                return None, True, "partial stdout", "partial stderr"
+
+            def fake_sapi(voice_text: str, voice_config: dict, fallback_output_dir: Path):
+                output_file = fallback_output_dir / "voiceover.wav"
+                output_file.write_bytes(b"fallback wav")
+                return {
+                    "status": "success",
+                    "provider": "windows_sapi",
+                    "mode": "windows_sapi",
+                    "downloaded_files": [str(output_file)],
+                    "output_file": str(output_file),
+                }
+
+            adapter._run_shell_command = fake_timeout  # type: ignore[method-assign]
+            adapter._run_windows_sapi = fake_sapi  # type: ignore[method-assign]
+
+            result = adapter.run(
+                "猪猪侠今天也要上班。",
+                {"mode": "voxcpm2", "provider": "voxcpm2", "timeout_seconds": 30},
+                output_dir,
+            )
+
+            self.assertEqual(result["status"], "success")
+            self.assertEqual(result["provider"], "windows_sapi")
+            self.assertEqual(result["fallback_from_provider"], "voxcpm2")
+            self.assertIn("timed out", result["fallback_reason"])
+            manifest = json.loads((output_dir / "local_tts_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest["fallback_from_provider"], "voxcpm2")
 
     def test_adapter_repairs_legacy_broll_ltx_node_info(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(

@@ -124,7 +124,7 @@ class LocalTTSAdapter:
                 }
             )
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return manifest
+            return self._fallback_after_voxcpm2_failure(voice_text, voice_config, output_dir, manifest)
 
         stdout_path.write_text(result.stdout or "", encoding="utf-8")
         stderr_path.write_text(result.stderr or "", encoding="utf-8")
@@ -172,8 +172,55 @@ class LocalTTSAdapter:
                     }
                 )
 
+        if str(manifest.get("status") or "").lower() == "failed":
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return self._fallback_after_voxcpm2_failure(voice_text, voice_config, output_dir, manifest)
+
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
+
+    def _fallback_after_voxcpm2_failure(
+        self,
+        voice_text: str,
+        voice_config: dict[str, Any],
+        output_dir: Path,
+        primary_manifest: dict[str, Any],
+    ) -> dict[str, Any]:
+        fallback_provider = str(
+            voice_config.get("fallback_provider")
+            or voice_config.get("fallback_tts_provider")
+            or "windows_sapi"
+        ).strip().lower()
+        if fallback_provider in {"", "off", "none", "disabled"}:
+            primary_manifest["fallback_status"] = "disabled"
+            manifest_path = output_dir / "local_tts_manifest.json"
+            manifest_path.write_text(json.dumps(primary_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return primary_manifest
+        if fallback_provider not in {"windows_sapi", "sapi"}:
+            primary_manifest["fallback_status"] = "unsupported"
+            primary_manifest["fallback_provider"] = fallback_provider
+            manifest_path = output_dir / "local_tts_manifest.json"
+            manifest_path.write_text(json.dumps(primary_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return primary_manifest
+
+        fallback_config = dict(voice_config)
+        fallback_config["mode"] = "windows_sapi"
+        fallback_config["provider"] = "windows_sapi"
+        fallback_config["timeout_seconds"] = voice_config.get("fallback_timeout_seconds") or 900
+        result = self._run_windows_sapi(voice_text, fallback_config, output_dir)
+        result.update(
+            {
+                "fallback_from_provider": "voxcpm2",
+                "fallback_reason": str(primary_manifest.get("error") or "VoxCPM2 synthesis failed"),
+                "primary_status": primary_manifest.get("status"),
+                "primary_error": primary_manifest.get("error"),
+                "primary_stdout_file": primary_manifest.get("stdout_file"),
+                "primary_stderr_file": primary_manifest.get("stderr_file"),
+            }
+        )
+        manifest_path = output_dir / "local_tts_manifest.json"
+        manifest_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return result
 
     @staticmethod
     def _effective_timeout(mode: str, requested_timeout: int, text: str, command: str) -> tuple[int, str]:
