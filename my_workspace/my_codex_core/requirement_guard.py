@@ -111,7 +111,7 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
 
     if not output:
         issues.append("模型输出为空")
-    if topic and output and not _audio_packaging_is_explicitly_disabled(output, step_no):
+    if topic and output and not _audio_packaging_is_explicitly_disabled(output):
         latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
         missing_latin = [token for token in latin_tokens if token.lower() not in output.lower()]
         compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
@@ -157,9 +157,7 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
     }
 
 
-def _audio_packaging_is_explicitly_disabled(content: str, step_no: int) -> bool:
-    if int(step_no) != 20:
-        return False
+def _audio_packaging_is_explicitly_disabled(content: str) -> bool:
     for payload in _json_objects(content):
         production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
         audio_intents = production.get("audio") if isinstance(production.get("audio"), list) else []

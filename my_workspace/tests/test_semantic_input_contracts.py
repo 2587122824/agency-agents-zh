@@ -161,7 +161,7 @@ class SemanticInputContractTests(unittest.TestCase):
                 "duration_seconds": 12,
             },
             f"```json\n{content}\n```",
-            20,
+            5,
         )
 
         self.assertTrue(result["passed"], result["issues"])
