@@ -208,6 +208,46 @@ class SemanticInputContractTests(unittest.TestCase):
 
         self.assertTrue(result["passed"], result["issues"])
 
+    def test_normalizes_package_delivery_resolution_to_locked_delivery_size(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "package": [
+                        {
+                            "intent": "build_edit_timeline",
+                            "intent_id": "edit_timeline_preview",
+                            "timeline": [{"source_intent_id": "shot_001", "start_seconds": 0, "duration_seconds": 12}],
+                        },
+                        {
+                            "intent": "apply_delivery_spec",
+                            "intent_id": "delivery_spec_preview",
+                            "delivery_resolution": "480x848",
+                            "fps": 24,
+                        },
+                    ]
+                },
+                "delivery_spec": {
+                    "format": "mp4",
+                    "resolution": "480x848",
+                    "fps": 24,
+                },
+                "missing_assets": [],
+            },
+            ensure_ascii=False,
+        )
+
+        lock = {
+            "original_requirement": "竖屏12秒生产烟测，只验证图片素材和本地图片轮播预览",
+            "duration_seconds": 12,
+        }
+        normalized = normalize_production_output_content({"agent": "22_剪辑成片执行师"}, f"```json\n{content}\n```", lock)
+        self.assertTrue(normalized["changed"])
+        self.assertIn('"resolution": "1080x1920"', normalized["content"])
+        self.assertIn('"delivery_resolution": "1080x1920"', normalized["content"])
+
+        result = validate_production_output({"agent": "22_剪辑成片执行师"}, normalized["content"], lock)
+        self.assertTrue(result["passed"], result["issues"])
+
     def test_scene_library_fields_are_normalized_for_context(self) -> None:
         registry = normalize_production_entities(
             {

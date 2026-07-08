@@ -74,14 +74,28 @@ def normalize_production_output_content(
     """
 
     agent = str(step.get("agent") or "")
-    if not (agent.startswith("06_") or agent.startswith("07_")):
+    if not (agent.startswith("06_") or agent.startswith("07_") or agent.startswith("22_")):
         return {"content": content, "changed": False, "normalizations": []}
     payloads = _json_objects(content)
     effective_lock = _effective_requirement_lock(requirement_lock, payloads, previous_outputs or [])
-    expected = _expected_resolution(effective_lock, delivery=False)
     text = str(content or "")
-    updated = _normalize_work_dimension_keys(text, expected)
     normalizations: list[dict[str, Any]] = []
+    if agent.startswith("22_"):
+        expected = _expected_resolution(effective_lock, delivery=True)
+        updated = _normalize_delivery_dimension_keys(text, expected)
+        if updated != text:
+            normalizations.append(
+                {
+                    "type": "locked_delivery_resolution",
+                    "agent": agent,
+                    "width": expected[0],
+                    "height": expected[1],
+                }
+            )
+        return {"content": updated, "changed": updated != text, "normalizations": normalizations}
+
+    expected = _expected_resolution(effective_lock, delivery=False)
+    updated = _normalize_work_dimension_keys(text, expected)
     if updated != text:
         normalizations.append(
             {
@@ -118,6 +132,20 @@ def _normalize_work_dimension_keys(content: str, expected: tuple[int, int]) -> s
     for key in resolution_keys:
         text = re.sub(
             rf'("{re.escape(key)}"\s*:\s*)"[^"]*\d+\s*[xX*×]\s*\d+[^"]*"',
+            rf'\g<1>"{width}x{height}"',
+            text,
+            flags=re.IGNORECASE,
+        )
+    return text
+
+
+def _normalize_delivery_dimension_keys(content: str, expected: tuple[int, int]) -> str:
+    width, height = expected
+    text = str(content or "")
+    resolution_keys = ("delivery_resolution", "output_resolution", "final_resolution", "resolution")
+    for key in resolution_keys:
+        text = re.sub(
+            rf'("{re.escape(key)}"\s*:\s*)"[^"]*\d+\s*[xX*脳]\s*\d+[^"]*"',
             rf'\g<1>"{width}x{height}"',
             text,
             flags=re.IGNORECASE,
