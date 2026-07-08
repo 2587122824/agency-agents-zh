@@ -111,7 +111,7 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
 
     if not output:
         issues.append("模型输出为空")
-    if topic and output and not _audio_packaging_is_explicitly_disabled(output):
+    if topic and output and not _production_package_can_omit_topic(output, lock):
         latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
         missing_latin = [token for token in latin_tokens if token.lower() not in output.lower()]
         compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
@@ -157,7 +157,11 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
     }
 
 
-def _audio_packaging_is_explicitly_disabled(content: str) -> bool:
+def _production_package_can_omit_topic(content: str, lock: dict[str, Any]) -> bool:
+    return _audio_packaging_is_explicitly_disabled(content, lock) or _video_generation_is_explicitly_skipped(content, lock)
+
+
+def _audio_packaging_is_explicitly_disabled(content: str, lock: dict[str, Any]) -> bool:
     for payload in _json_objects(content):
         production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
         audio_intents = production.get("audio") if isinstance(production.get("audio"), list) else []
@@ -170,7 +174,25 @@ def _audio_packaging_is_explicitly_disabled(content: str) -> bool:
         }
         required_disabled = all(_intent_disabled(relevant.get(intent) or {}) for intent in ("generate_voiceover", "build_subtitles"))
         optional_bgm_ok = "select_bgm" not in relevant or _intent_disabled(relevant["select_bgm"])
-        if required_disabled and optional_bgm_ok:
+        if required_disabled and optional_bgm_ok and _requirement_disables_voiceover(lock):
+            return True
+    return False
+
+
+def _video_generation_is_explicitly_skipped(content: str, lock: dict[str, Any]) -> bool:
+    if not _requirement_disables_ai_video(lock):
+        return False
+    for payload in _json_objects(content):
+        production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+        if "video" not in production:
+            continue
+        video_intents = production.get("video")
+        video_prompts = payload.get("video_prompts")
+        if isinstance(video_intents, list) and not video_intents and isinstance(video_prompts, list) and not video_prompts:
+            return True
+        if isinstance(video_intents, list) and video_intents and all(
+            _video_intent_disabled(item) for item in video_intents if isinstance(item, dict)
+        ):
             return True
     return False
 
@@ -198,6 +220,57 @@ def _strip_json_comments(value: str) -> str:
 
 def _intent_disabled(intent: dict[str, Any]) -> bool:
     return intent.get("enabled") is False or str(intent.get("status") or "").strip().lower() in {"disabled", "skipped"}
+
+
+def _video_intent_disabled(intent: dict[str, Any]) -> bool:
+    compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
+    constraints = intent.get("constraints") if isinstance(intent.get("constraints"), dict) else {}
+    return (
+        _intent_disabled(intent)
+        or str(intent.get("intent") or "") == "no_video_required"
+        or compatibility.get("skip_execution") is True
+        or constraints.get("skip_execution") is True
+        or (_number(intent.get("duration"), intent.get("duration_seconds")) == 0 and "skip" in json.dumps(intent, ensure_ascii=False).lower())
+    )
+
+
+def _number(*values: Any) -> float:
+    for value in values:
+        try:
+            if value not in (None, ""):
+                return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _requirement_text(lock: dict[str, Any]) -> str:
+    return " ".join(
+        str(value or "")
+        for value in (
+            lock.get("original_requirement"),
+            lock.get("production_type"),
+            lock.get("quality_mode"),
+            " ".join(str(item) for item in lock.get("explicit_constraints") or []),
+        )
+    )
+
+
+def _requirement_disables_voiceover(lock: dict[str, Any]) -> bool:
+    text = _requirement_text(lock)
+    lowered = text.lower()
+    return any(token in text for token in ("不需要配音", "无需配音", "不生成配音", "无配音", "不需要旁白", "无需旁白", "无旁白")) or any(
+        token in lowered for token in ("no voice", "no voiceover", "no narration", "without voice", "without narration")
+    )
+
+
+def _requirement_disables_ai_video(lock: dict[str, Any]) -> bool:
+    text = _requirement_text(lock)
+    lowered = text.lower()
+    return any(
+        token in text
+        for token in ("不生成AI视频", "不生成 AI 视频", "不需要AI视频", "不需要 AI 视频", "无需AI视频", "无AI视频", "只验证图片素材", "本地图片轮播预览")
+    ) or any(token in lowered for token in ("asset_only", "only image", "image-only", "no ai video", "without ai video"))
 
 
 def correction_prompt(prompt: str, lock: dict[str, Any], rejected_content: str, issues: list[str]) -> str:

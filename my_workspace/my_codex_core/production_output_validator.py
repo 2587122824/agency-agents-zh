@@ -43,10 +43,10 @@ def validate_production_output(
     elif agent.startswith("06_"):
         _validate_images(payloads, expected_work, issues)
     elif agent.startswith("20_"):
-        _validate_audio(payloads, duration, issues)
+        _validate_audio(payloads, duration, issues, effective_lock)
     elif agent.startswith("07_"):
         upstream_ids = _upstream_image_ids(previous_outputs or [])
-        _validate_videos(payloads, expected_work, upstream_ids, issues)
+        _validate_videos(payloads, expected_work, upstream_ids, issues, effective_lock)
     elif agent.startswith("22_"):
         _validate_package(payloads, duration, expected_delivery, issues)
 
@@ -179,7 +179,7 @@ def _validate_images(payloads: list[dict[str, Any]], expected: tuple[int, int], 
         _validate_work_resolution(item, expected, f"image_prompts[{index}]", issues)
 
 
-def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[str]) -> None:
+def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[str], requirement_lock: dict[str, Any]) -> None:
     payload = _payload_with(payloads, "production_intents", "audio")
     intents = _intent_group(payload, "audio")
     if not intents:
@@ -189,7 +189,10 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
     subtitles = next((item for item in intents if item.get("intent") == "build_subtitles"), None)
     if not isinstance(voice, dict):
         issues.append("缺少 generate_voiceover 音频意图")
-    elif not _intent_disabled(voice):
+    elif _intent_disabled(voice):
+        if not _requirement_disables_voiceover(requirement_lock):
+            issues.append("generate_voiceover 已禁用，但原始需求未明确不需要配音/旁白")
+    else:
         voice_text = str(voice.get("voice_text") or "")
         cjk_count = len(re.findall(r"[\u4e00-\u9fff]", voice_text))
         if duration and cjk_count > int(duration * 5.0):
@@ -229,6 +232,8 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
     srt = str(audio_package.get("subtitle_srt_draft") or "")
     srt = srt.replace("\\n", "\n").replace("\\r", "\r")
     if _intent_disabled(subtitles):
+        if not (_requirement_disables_subtitles(requirement_lock) or _requirement_disables_voiceover(requirement_lock)):
+            issues.append("build_subtitles 已禁用，但原始需求未明确不需要字幕")
         return
     if not subtitle_segments and not srt.strip():
         issues.append("build_subtitles.segments 为空，且 audio_package.subtitle_srt_draft 未提供")
@@ -261,11 +266,14 @@ def _validate_videos(
     expected: tuple[int, int],
     upstream_ids: set[str],
     issues: list[str],
+    requirement_lock: dict[str, Any],
 ) -> None:
     intent_payload = _payload_with(payloads, "production_intents", "video")
     compat_payload = _payload_with(payloads, "video_prompts")
     intents = _intent_group(intent_payload, "video")
     prompts = compat_payload.get("video_prompts") if isinstance(compat_payload.get("video_prompts"), list) else []
+    if _video_generation_disabled(intent_payload, compat_payload) and _requirement_disables_ai_video(requirement_lock):
+        return
     if not intents:
         issues.append("缺少可解析的 production_intents.video JSON 数组")
     if not prompts:
@@ -428,6 +436,8 @@ def _effective_requirement_lock(
             ("platform", "target_platform"),
             ("duration_seconds", "duration_seconds"),
             ("target_duration_seconds", "duration_seconds"),
+            ("production_type", "production_type"),
+            ("quality_mode", "quality_mode"),
         ):
             value = payload.get(source_key)
             if value not in (None, "") and not lock.get(target_key):
@@ -461,6 +471,69 @@ def _intent_group(payload: dict[str, Any], group: str) -> list[dict[str, Any]]:
 
 def _intent_disabled(intent: dict[str, Any]) -> bool:
     return intent.get("enabled") is False or str(intent.get("status") or "").strip().lower() in {"disabled", "skipped"}
+
+
+def _video_generation_disabled(intent_payload: dict[str, Any], compat_payload: dict[str, Any]) -> bool:
+    production = intent_payload.get("production_intents") if isinstance(intent_payload.get("production_intents"), dict) else {}
+    if "video" not in production:
+        return False
+    video_intents = production.get("video")
+    video_prompts = compat_payload.get("video_prompts")
+    if isinstance(video_intents, list) and not video_intents and isinstance(video_prompts, list) and not video_prompts:
+        return True
+    if not isinstance(video_intents, list) or not video_intents:
+        return False
+    return all(_video_intent_disabled(item) for item in video_intents if isinstance(item, dict))
+
+
+def _video_intent_disabled(intent: dict[str, Any]) -> bool:
+    compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
+    constraints = intent.get("constraints") if isinstance(intent.get("constraints"), dict) else {}
+    return (
+        _intent_disabled(intent)
+        or str(intent.get("intent") or "") == "no_video_required"
+        or compatibility.get("skip_execution") is True
+        or constraints.get("skip_execution") is True
+        or (_number(intent.get("duration"), intent.get("duration_seconds")) == 0 and "skip" in json.dumps(intent, ensure_ascii=False).lower())
+    )
+
+
+def _requirement_text(requirement_lock: dict[str, Any]) -> str:
+    return " ".join(
+        str(value or "")
+        for value in (
+            requirement_lock.get("original_requirement"),
+            requirement_lock.get("production_type"),
+            requirement_lock.get("quality_mode"),
+            " ".join(str(item) for item in requirement_lock.get("explicit_constraints") or []),
+        )
+    )
+
+
+def _requirement_disables_voiceover(requirement_lock: dict[str, Any]) -> bool:
+    text = _requirement_text(requirement_lock)
+    lowered = text.lower()
+    return any(token in text for token in ("不需要配音", "无需配音", "不生成配音", "无配音", "不需要旁白", "无需旁白", "无旁白")) or any(
+        token in lowered for token in ("no voice", "no voiceover", "no narration", "without voice", "without narration")
+    )
+
+
+def _requirement_disables_subtitles(requirement_lock: dict[str, Any]) -> bool:
+    text = _requirement_text(requirement_lock)
+    lowered = text.lower()
+    return any(
+        token in text
+        for token in ("不需要字幕", "无需字幕", "不生成字幕", "无字幕", "文字标签后期叠加", "只验证图片素材", "本地图片轮播预览")
+    ) or any(token in lowered for token in ("no subtitle", "no subtitles", "without subtitle", "without subtitles", "image-only"))
+
+
+def _requirement_disables_ai_video(requirement_lock: dict[str, Any]) -> bool:
+    text = _requirement_text(requirement_lock)
+    lowered = text.lower()
+    return any(
+        token in text
+        for token in ("不生成AI视频", "不生成 AI 视频", "不需要AI视频", "不需要 AI 视频", "无需AI视频", "无AI视频", "只验证图片素材", "本地图片轮播预览")
+    ) or any(token in lowered for token in ("asset_only", "only image", "image-only", "no ai video", "without ai video"))
 
 
 def _upstream_image_ids(previous_outputs: list[dict[str, str]]) -> set[str]:

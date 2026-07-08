@@ -166,6 +166,48 @@ class SemanticInputContractTests(unittest.TestCase):
 
         self.assertTrue(result["passed"], result["issues"])
 
+    def test_video_validator_accepts_empty_video_intents_when_ai_video_disabled(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {"video": []},
+                "video_prompts": [],
+            },
+            ensure_ascii=False,
+        )
+
+        result = validate_production_output(
+            {"agent": "07_视频生成执行员"},
+            f"```json\n{content}\n```",
+            {
+                "core_topic": "不同高度跳下身体承重变化，竖屏12秒生产烟测",
+                "original_requirement": "只验证图片素材和本地图片轮播预览，不生成AI视频片段，不需要配音",
+                "duration_seconds": 12,
+            },
+        )
+
+        self.assertTrue(result["passed"], result["issues"])
+
+    def test_requirement_guard_accepts_skipped_video_package_without_topic_terms(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {"video": []},
+                "video_prompts": [],
+            },
+            ensure_ascii=False,
+        )
+
+        result = validate_requirement_alignment(
+            {
+                "core_topic": "不同高度跳下身体承重变化，竖屏12秒生产烟测",
+                "original_requirement": "只验证图片素材和本地图片轮播预览，不生成AI视频片段，不需要配音",
+                "duration_seconds": 12,
+            },
+            f"```json\n{content}\n```",
+            6,
+        )
+
+        self.assertTrue(result["passed"], result["issues"])
+
     def test_scene_library_fields_are_normalized_for_context(self) -> None:
         registry = normalize_production_entities(
             {
