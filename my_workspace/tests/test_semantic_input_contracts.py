@@ -170,6 +170,79 @@ class SemanticInputContractTests(unittest.TestCase):
 
         self.assertTrue(result["passed"], result["issues"])
 
+    def test_requirement_guard_accepts_on_topic_audio_package_without_verbatim_topic(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "audio": [
+                        {
+                            "intent": "generate_voiceover",
+                            "intent_id": "voiceover_main",
+                            "voice_text": (
+                                "又是被闹钟叫醒的一天。再睡五分钟……不行！要迟到了！冲啊！"
+                                "地铁还是那么挤。开电脑，回消息，开会。又是重复的一天。"
+                                "一杯咖啡续命。这十分钟，是我的。下班铃，我最爱的声音。"
+                                "回家，瘫进沙发。你的一天，也是这样吗？"
+                            ),
+                            "target_duration_seconds": 58,
+                        },
+                        {
+                            "intent": "build_subtitles",
+                            "intent_id": "subtitle_main",
+                            "subtitle_segments": [
+                                {"start_time": "00:00:00,000", "end_time": "00:00:08,000", "text": "又是被闹钟叫醒的一天。"},
+                                {"start_time": "00:00:50,000", "end_time": "00:00:59,800", "text": "下班回家，瘫进沙发。"},
+                            ],
+                        },
+                    ]
+                },
+                "audio_package": {
+                    "voiceover_text": "闹钟、地铁、开会、咖啡、下班回家，完整覆盖打工人日常。",
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        result = validate_requirement_alignment(
+            {
+                "core_topic": "主角小美打工人的一天vlog，竖屏1分钟",
+                "original_requirement": "主角小美打工人的一天vlog，竖屏1分钟",
+                "duration_seconds": 60,
+            },
+            f"```json\n{content}\n```",
+            5,
+        )
+
+        self.assertTrue(result["passed"], result["issues"])
+
+    def test_requirement_guard_rejects_unrelated_audio_package_even_with_duration(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "audio": [
+                        {
+                            "intent": "generate_voiceover",
+                            "voice_text": "今天我们来到一家网红火锅店，看看招牌牛油锅和新品甜品到底值不值得排队。",
+                            "target_duration_seconds": 60,
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+
+        result = validate_requirement_alignment(
+            {
+                "core_topic": "主角小美打工人的一天vlog，竖屏1分钟",
+                "original_requirement": "主角小美打工人的一天vlog，竖屏1分钟",
+                "duration_seconds": 60,
+            },
+            f"```json\n{content}\n```",
+            5,
+        )
+
+        self.assertFalse(result["passed"])
+
     def test_video_validator_accepts_empty_video_intents_when_ai_video_disabled(self) -> None:
         content = json.dumps(
             {

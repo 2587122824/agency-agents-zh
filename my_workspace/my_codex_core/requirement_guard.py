@@ -112,6 +112,7 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
     if not output:
         issues.append("模型输出为空")
     if topic and output and not _production_package_can_omit_topic(output, lock):
+        topic_covered_by_package = _production_package_preserves_topic(output, lock)
         latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
         missing_latin = [token for token in latin_tokens if token.lower() not in output.lower()]
         compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
@@ -126,7 +127,11 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
         matched_bigrams = [token for token in bigrams if token in output]
         minimum_matches = min(3, max(1, len(bigrams) // 6)) if bigrams else 0
         topic_covered_by_concepts = _topic_covered_by_salient_concepts(topic, output)
-        if not topic_covered_by_concepts and (missing_latin or (minimum_matches and len(matched_bigrams) < minimum_matches)):
+        if (
+            not topic_covered_by_package
+            and not topic_covered_by_concepts
+            and (missing_latin or (minimum_matches and len(matched_bigrams) < minimum_matches))
+        ):
             issues.append(f"输出未保持核心主题“{topic}”")
 
     if step_no <= 3:
@@ -159,6 +164,159 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
 
 def _production_package_can_omit_topic(content: str, lock: dict[str, Any]) -> bool:
     return _audio_packaging_is_explicitly_disabled(content, lock) or _video_generation_is_explicitly_skipped(content, lock)
+
+
+def _production_package_preserves_topic(content: str, lock: dict[str, Any]) -> bool:
+    """Accept structured packages that preserve the locked task without verbatim prose."""
+    topic = str(lock.get("core_topic") or "").strip()
+    if not topic:
+        return True
+    for payload in _json_objects(content):
+        anchor_text = _collect_text_for_keys(
+            payload,
+            {
+                "requirement_anchor",
+                "topic_anchor",
+                "task_anchor",
+                "core_topic",
+                "locked_topic",
+                "original_requirement",
+                "delivery_requirement",
+                "aspect_ratio",
+            },
+        )
+        if anchor_text and _topic_text_covers(topic, anchor_text):
+            return True
+
+        production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+        audio_intents = production.get("audio") if isinstance(production.get("audio"), list) else []
+        if audio_intents:
+            audio_text = _collect_audio_package_text(payload)
+            if audio_text and _audio_package_text_preserves_topic(topic, audio_text, payload, lock):
+                return True
+    return False
+
+
+def _collect_audio_package_text(payload: dict[str, Any]) -> str:
+    return " ".join(
+        part
+        for part in (
+            _collect_text_for_keys(
+                payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {},
+                {
+                    "voice_text",
+                    "subtitle_segments",
+                    "text",
+                    "description",
+                    "mood_tags",
+                    "mix_guidance",
+                    "segments",
+                    "sfx",
+                },
+            ),
+            _collect_text_for_keys(
+                payload.get("audio_package") if isinstance(payload.get("audio_package"), dict) else {},
+                {
+                    "voiceover_text",
+                    "subtitle_srt_draft",
+                    "bgm_keywords",
+                    "voice",
+                    "voice_style",
+                },
+            ),
+        )
+        if part
+    )
+
+
+def _collect_text_for_keys(value: Any, keys: set[str]) -> str:
+    parts: list[str] = []
+    normalized_keys = {key.lower() for key in keys}
+
+    def visit(item: Any, current_key: str = "") -> None:
+        key_matches = current_key.lower() in normalized_keys
+        if isinstance(item, dict):
+            for key, child in item.items():
+                visit(child, str(key))
+            return
+        if isinstance(item, list):
+            for child in item:
+                visit(child, current_key)
+            return
+        if key_matches and item not in (None, ""):
+            parts.append(str(item))
+
+    visit(value)
+    return " ".join(parts)
+
+
+def _audio_package_text_preserves_topic(topic: str, audio_text: str, payload: dict[str, Any], lock: dict[str, Any]) -> bool:
+    if _topic_text_covers(topic, audio_text):
+        return True
+    if not _package_duration_matches(payload, lock):
+        return False
+    return _topic_covered_by_salient_concepts(topic, audio_text)
+
+
+def _topic_text_covers(topic: str, text: str) -> bool:
+    if not topic or not text:
+        return False
+    if topic in text:
+        return True
+    latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
+    if any(token.lower() not in text.lower() for token in latin_tokens):
+        return False
+    compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
+    common = {"一个", "主题", "视频", "短片", "风格", "竖屏", "横屏"}
+    bigrams = [
+        compact_topic[index : index + 2]
+        for index in range(max(0, len(compact_topic) - 1))
+        if compact_topic[index : index + 2] not in common
+    ]
+    if not bigrams:
+        return bool(latin_tokens)
+    matched = [token for token in dict.fromkeys(bigrams) if token in text]
+    return len(matched) >= min(3, max(1, len(set(bigrams)) // 5))
+
+
+def _package_duration_matches(payload: dict[str, Any], lock: dict[str, Any]) -> bool:
+    duration = int(lock.get("duration_seconds") or 0)
+    if not duration:
+        return True
+    numeric_values = _collect_numeric_values_for_keys(
+        payload,
+        {
+            "duration",
+            "duration_seconds",
+            "target_duration_seconds",
+            "total_duration_seconds",
+        },
+    )
+    return any(abs(value - duration) <= max(2.0, duration * 0.08) for value in numeric_values)
+
+
+def _collect_numeric_values_for_keys(value: Any, keys: set[str]) -> list[float]:
+    values: list[float] = []
+    normalized_keys = {key.lower() for key in keys}
+
+    def visit(item: Any, current_key: str = "") -> None:
+        if isinstance(item, dict):
+            for key, child in item.items():
+                visit(child, str(key))
+            return
+        if isinstance(item, list):
+            for child in item:
+                visit(child, current_key)
+            return
+        if current_key.lower() not in normalized_keys:
+            return
+        try:
+            values.append(float(item))
+        except (TypeError, ValueError):
+            return
+
+    visit(value)
+    return values
 
 
 def _audio_packaging_is_explicitly_disabled(content: str, lock: dict[str, Any]) -> bool:
@@ -286,6 +444,8 @@ def correction_prompt(prompt: str, lock: dict[str, Any], rejected_content: str, 
 {str(rejected_content or '')[:4000]}
 </rejected_output>
 
+如果当前步骤输出 JSON 生产包，请在顶层加入 requirement_anchor 对象，至少包含 core_topic、duration_seconds、aspect_ratio 或 delivery_format；这只用于机器校验，不要求把完整需求硬塞进旁白或字幕正文。
+
 {requirement_lock_prompt(lock)}
 """
 
@@ -311,6 +471,19 @@ def _topic_covered_by_salient_concepts(topic: str, output: str) -> bool:
             ("打工", "工薪", "上班", "打工人"),
             ("2008", "穿越", "重生", "回到"),
             ("逆袭", "翻盘", "机会", "商机", "风口", "房价", "互联网"),
+        )
+        if all(any(term in text for term in family) for family in concept_families):
+            return True
+
+    day_in_life_topic = (
+        any(term in topic for term in ("一天", "一日", "日常", "vlog", "VLOG"))
+        and any(term in topic for term in ("打工", "上班", "职场", "工作", "工薪"))
+    )
+    if day_in_life_topic:
+        concept_families = (
+            ("打工", "上班", "工作", "开会", "电脑", "回消息", "地铁", "通勤"),
+            ("一天", "清晨", "闹钟", "下班", "回家", "日常", "重复"),
+            ("我", "主角", "她", "他", "小美", "主人公"),
         )
         if all(any(term in text for term in family) for family in concept_families):
             return True
