@@ -699,6 +699,34 @@ class SemanticInputContractTests(unittest.TestCase):
             (task_dir / "final_video.mp4").write_bytes(b"video")
             self.assertEqual(web_app.WorkflowWebHandler._production_resume_job_for_task(task_dir), "")
 
+    def test_cloud_adapter_skips_failed_unreferenced_auxiliary_material(self) -> None:
+        jobs = [
+            {"job_id": "asset_character_turnaround", "mode": "character_turnaround", "workflow_id": "02_turnaround"},
+            {"job_id": "shot_001_keyframe", "depends_on": ["asset_character_master"], "mode": "identity_keyframe"},
+        ]
+
+        self.assertTrue(
+            CloudComfyUIAdapter._can_skip_failed_auxiliary_job(
+                jobs[0],
+                jobs,
+                RuntimeError("RunningHub failed: torch.OutOfMemoryError"),
+            )
+        )
+
+    def test_cloud_adapter_keeps_referenced_auxiliary_failure_blocking(self) -> None:
+        jobs = [
+            {"job_id": "asset_character_turnaround", "mode": "character_turnaround", "workflow_id": "02_turnaround"},
+            {"job_id": "shot_001_keyframe", "depends_on": ["asset_character_turnaround"], "mode": "identity_keyframe"},
+        ]
+
+        self.assertFalse(
+            CloudComfyUIAdapter._can_skip_failed_auxiliary_job(
+                jobs[0],
+                jobs,
+                RuntimeError("RunningHub failed: torch.OutOfMemoryError"),
+            )
+        )
+
     def test_keyframe_modes_are_explicit_and_typed(self) -> None:
         modes = {item["value"]: item for item in self.workflows["04_keyframe"]["modes"]}
         self.assertEqual(modes["keyframe"]["required_inputs"], [])

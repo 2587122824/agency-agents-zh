@@ -423,6 +423,61 @@ class CloudComfyUIAdapter:
                     output_file=job_downloaded[0] if job_downloaded else "",
                 )
             except Exception as exc:
+                if self._can_skip_failed_auxiliary_job(job, selected_jobs, exc):
+                    skipped_count += 1
+                    skip_reason = f"Optional auxiliary material failed and was skipped: {exc}"
+                    skipped_item = {
+                        "index": index,
+                        "job_id": job_id,
+                        "name": job_name,
+                        "type": job_type,
+                        "status": "skipped",
+                        "depends_on": self._string_list(job.get("depends_on")),
+                        "cache_hit": False,
+                        "attempts": int((job_state.get("jobs") or {}).get(job_id, {}).get("attempts") or 1),
+                        "input_hash": input_hash,
+                        "prompt": str(job.get("prompt") or "")[:500],
+                        "workflow_preset_id": str(job_config.get("workflow_preset_id") or ""),
+                        "workflow_preset_name": str(job_config.get("workflow_preset_name") or ""),
+                        "endpoint": str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint),
+                        "manifest_file": str(job_dir / "cloud_comfyui_manifest.json"),
+                        "downloaded_files": [],
+                        "skip_reason": skip_reason,
+                        "error_category": self._error_category(exc),
+                        "optional_when_unconfigured": True,
+                    }
+                    self._write_json(
+                        job_dir / "cloud_comfyui_manifest.json",
+                        {
+                            "provider": provider,
+                            "status": "skipped",
+                            "name": job_name,
+                            "type": job_type,
+                            "prompt": str(job.get("prompt") or "")[:2000],
+                            "workflow_preset_id": str(job_config.get("workflow_preset_id") or ""),
+                            "workflow_preset_name": str(job_config.get("workflow_preset_name") or ""),
+                            "endpoint": str(job_config.get("workflow_endpoint") or job_config.get("endpoint") or self.endpoint),
+                            "skip_reason": skip_reason,
+                            "original_error": str(exc),
+                        },
+                    )
+                    job_results.append(skipped_item)
+                    job_state["jobs"][job_id] = {**skipped_item, "updated_at": time.time()}
+                    write_json(state_path, job_state)
+                    self._emit(
+                        f"跳过非关键辅助素材 {index}/{len(selected_jobs)}：{job_name}",
+                        total_jobs=len(selected_jobs),
+                        completed_jobs=index,
+                        current_job=index,
+                        job_index=index,
+                        job_count=len(selected_jobs),
+                        material_name=job_name,
+                        material_type=job_type,
+                        job_type=job_type,
+                        job_status="skipped",
+                        skip_reason=skip_reason,
+                    )
+                    continue
                 error_manifest = {
                     "provider": provider,
                     "status": "failed",
@@ -511,6 +566,50 @@ class CloudComfyUIAdapter:
             job_status=status,
         )
         return manifest
+
+    @classmethod
+    def _can_skip_failed_auxiliary_job(
+        cls,
+        job: dict[str, Any],
+        selected_jobs: list[dict[str, Any]],
+        exc: BaseException,
+    ) -> bool:
+        if cls._error_category(exc) not in {"resource_oom", "provider_busy", "timeout"}:
+            return False
+        job_id = str(job.get("job_id") or job.get("name") or "").strip()
+        if not job_id:
+            return False
+        for candidate in selected_jobs:
+            if not isinstance(candidate, dict):
+                continue
+            if job_id in cls._string_list(candidate.get("depends_on")):
+                return False
+        prompt_data = job.get("prompt_data") if isinstance(job.get("prompt_data"), dict) else {}
+        text = " ".join(
+            str(value or "").strip()
+            for value in (
+                job_id,
+                job.get("workflow_id"),
+                job.get("workflow_mode"),
+                job.get("mode"),
+                job.get("intent"),
+                job.get("asset_tag"),
+                job.get("capability"),
+                prompt_data.get("workflow_mode"),
+                prompt_data.get("capability"),
+            )
+        ).lower()
+        auxiliary_tokens = (
+            "turnaround",
+            "three_view",
+            "three-view",
+            "cover_key_visual",
+            "style_reference",
+            "enhance_video",
+            "video_enhance",
+            "talking_image",
+        )
+        return any(token in text for token in auxiliary_tokens)
 
     @staticmethod
     def _is_optional_when_unconfigured(job: dict[str, Any]) -> bool:
@@ -1255,7 +1354,7 @@ class CloudComfyUIAdapter:
     @staticmethod
     def _error_category(exc: BaseException) -> str:
         text = str(exc).lower()
-        if any(marker in text for marker in ("out of memory", "cuda oom", "显存")):
+        if any(marker in text for marker in ("out of memory", "outofmemory", "cuda oom", "显存")):
             return "resource_oom"
         if any(marker in text for marker in ("timeout", "timed out")):
             return "timeout"
