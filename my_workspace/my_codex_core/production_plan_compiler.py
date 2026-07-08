@@ -55,6 +55,27 @@ VIDEO_INTENT_ROUTES = {
 WORKFLOW_ID_ALIASES = {
     "10_broll_transition": "10_broll_transition_video",
 }
+VISUAL_STYLE_FAMILY_LABELS = {
+    "live_action": "真人纪实/实拍",
+    "3d_cartoon": "3D卡通动画",
+    "flat_cartoon": "2D扁平卡通",
+    "anime": "动画番剧",
+    "product_render": "产品商业渲染",
+    "infographic": "信息图/科普图解",
+    "custom": "任务指定视觉风格",
+}
+UNIVERSAL_VISUAL_STYLE_POSITIVE = (
+    "全片视觉一致性约束：所有角色、场景、道具、关键帧、封面和视频片段必须保持同一个美术风格、同一种媒介质感、"
+    "同一套光线方向、色彩饱和度、镜头语言和画面颗粒；只允许根据剧情改变动作、表情、构图和局部道具。"
+    "不要在同一任务内混用真人摄影、3D渲染、2D插画、扁平贴纸、漫画、产品棚拍等不同视觉体系。"
+    "画面内文字仅在明确要求时生成；标题、字幕和大段文字优先留给后期排版。"
+)
+UNIVERSAL_VISUAL_STYLE_NEGATIVE = (
+    "mixed visual styles, inconsistent art direction, inconsistent render medium, style drift, "
+    "photorealistic and cartoon mixed together, 2D and 3D mixed together, live-action background with illustrated subject, "
+    "different lighting style, different color palette, random material change, glossy wet skin unless requested, "
+    "flat sticker mixed with realistic render, malformed text, gibberish text, large readable title text unless requested"
+)
 
 
 def compile_production_plan(
@@ -272,6 +293,9 @@ def _route_from_payload(payload: dict[str, Any], text: str, video_config: dict[s
         "needs_voiceover": _bool_or_default(route.get("needs_voiceover"), default=True),
         "needs_final_video": _bool_or_default(route.get("needs_final_video"), default=production_type != "asset_only"),
         "quality_mode": str(route.get("quality_mode") or "standard"),
+        "style_id": str(route.get("style_id") or route.get("visual_style_id") or "").strip(),
+        "visual_style": str(route.get("visual_style") or route.get("style") or "").strip(),
+        "style_description": str(route.get("style_description") or route.get("visual_style_description") or "").strip(),
         "routing_reason": str(route.get("routing_reason") or "由production_plan_compiler根据01输出或关键词推断。"),
     }
 
@@ -307,7 +331,11 @@ def _global_context_from_sources(
     render_defaults = ((templates.get("global_defaults") or {}).get("render") or {}) if isinstance(templates.get("global_defaults"), dict) else {}
     context: dict[str, Any] = {
         "characters": [],
-        "style": {},
+        "style": {
+            "style_id": str(route.get("style_id") or "").strip(),
+            "visual_style": str(route.get("visual_style") or "").strip(),
+            "description": str(route.get("style_description") or "").strip(),
+        },
         "render": {
             "working_width": _positive_int(video_config.get("working_width") or video_config.get("width") or render_defaults.get("working_width"), 848),
             "working_height": _positive_int(video_config.get("working_height") or video_config.get("height") or render_defaults.get("working_height"), 480),
@@ -324,10 +352,136 @@ def _global_context_from_sources(
         style_id = str(payload.get("style_id") or "").strip()
         if style_id:
             context.setdefault("style", {}).setdefault("style_id", style_id)
+        visual_style = str(payload.get("visual_style") or payload.get("style") or "").strip()
+        if visual_style and isinstance(context.get("style"), dict):
+            context["style"].setdefault("visual_style", visual_style)
         character_id = str(payload.get("character_id") or "").strip()
         if character_id:
             _upsert_character(context, {"character_id": character_id})
+    _attach_visual_style_blueprint(context, route=route, payloads=payloads)
     return context
+
+
+def _attach_visual_style_blueprint(
+    context: dict[str, Any],
+    *,
+    route: dict[str, Any],
+    payloads: list[dict[str, Any]],
+) -> None:
+    style = context.setdefault("style", {})
+    if not isinstance(style, dict):
+        style = {}
+        context["style"] = style
+    explicit_positive = str(style.get("positive_prompt") or style.get("style_prompt") or "").strip()
+    explicit_negative = str(style.get("negative_prompt") or style.get("negative_constraints") or "").strip()
+    if explicit_positive or explicit_negative:
+        family = _infer_visual_style_family(route, payloads, style) or "custom"
+        blueprint = {
+            "style_family": family,
+            "style_label": VISUAL_STYLE_FAMILY_LABELS.get(family, VISUAL_STYLE_FAMILY_LABELS["custom"]),
+            "positive_prompt": explicit_positive or _build_universal_visual_style_positive(family),
+            "negative_prompt": explicit_negative or UNIVERSAL_VISUAL_STYLE_NEGATIVE,
+            "source": "explicit_global_context",
+        }
+        style["blueprint"] = blueprint
+        if not str(style.get("style_id") or "").strip():
+            style["style_id"] = "custom_locked_style"
+        return
+
+    family = _infer_visual_style_family(route, payloads, style) or "custom"
+    blueprint_id = f"consistent_{family}"
+    blueprint = {
+        "id": blueprint_id,
+        "style_family": family,
+        "style_label": VISUAL_STYLE_FAMILY_LABELS.get(family, VISUAL_STYLE_FAMILY_LABELS["custom"]),
+        "positive_prompt": _build_universal_visual_style_positive(family),
+        "negative_prompt": UNIVERSAL_VISUAL_STYLE_NEGATIVE,
+    }
+    blueprint["source"] = "production_plan_compiler_inference"
+    style["blueprint"] = blueprint
+    if not str(style.get("style_id") or "").strip():
+        style["style_id"] = blueprint_id
+    if not str(style.get("style_family") or "").strip():
+        style["style_family"] = family
+    if not str(style.get("positive_prompt") or "").strip():
+        style["positive_prompt"] = blueprint.get("positive_prompt") or ""
+    if not str(style.get("negative_prompt") or "").strip():
+        style["negative_prompt"] = blueprint.get("negative_prompt") or ""
+
+
+def _build_universal_visual_style_positive(family: str) -> str:
+    label = VISUAL_STYLE_FAMILY_LABELS.get(str(family or "").strip(), VISUAL_STYLE_FAMILY_LABELS["custom"])
+    return f"本任务统一视觉风格锚点：{label}。{UNIVERSAL_VISUAL_STYLE_POSITIVE}"
+
+
+def _infer_visual_style_family(
+    route: dict[str, Any],
+    payloads: list[dict[str, Any]],
+    style: dict[str, Any],
+) -> str:
+    style_id = str(style.get("style_id") or route.get("style_id") or "").strip().lower()
+    explicit_style = " ".join(
+        str(value or "")
+        for value in (
+            style_id,
+            style.get("visual_style"),
+            style.get("description"),
+            route.get("visual_style"),
+            route.get("style_description"),
+        )
+    ).lower()
+    text = f"{explicit_style} {_payload_style_text(payloads)}".lower()
+    if _looks_like_live_action_context(text):
+        return "live_action"
+    if any(token in text for token in ("产品渲染", "商品渲染", "product render", "packshot", "棚拍", "电商主图")):
+        return "product_render"
+    if any(token in text for token in ("信息图", "科普图", "图解", "infographic", "diagram", "chart")):
+        return "infographic"
+    if any(token in text for token in ("二次元", "番剧", "anime", "manga")):
+        return "anime"
+    if any(token in text for token in ("扁平", "flat cartoon", "flat illustration", "2d cartoon", "二维卡通")):
+        return "flat_cartoon"
+    if any(token in text for token in ("3d卡通", "3d 卡通", "3d cartoon", "玩具质感", "toy render", "q版", "q 版")):
+        return "3d_cartoon"
+    if any(token in text for token in ("卡通", "cartoon", "动画", "animation")):
+        return "3d_cartoon"
+    return "custom"
+
+
+def _payload_style_text(payloads: list[dict[str, Any]]) -> str:
+    chunks: list[str] = []
+
+    def visit(value: Any) -> None:
+        if len(chunks) > 200:
+            return
+        if isinstance(value, dict):
+            for key, item in value.items():
+                key_text = str(key or "").lower()
+                if key_text in {
+                    "prompt",
+                    "description",
+                    "visual_description",
+                    "style_id",
+                    "visual_style",
+                    "style_description",
+                    "asset_role",
+                    "asset_tag",
+                    "character_id",
+                    "scene_id",
+                    "routing_reason",
+                }:
+                    chunks.append(str(item or ""))
+                elif key_text in {"production_intents", "global_context", "style", "image", "video"}:
+                    visit(item)
+                elif isinstance(item, (dict, list)):
+                    visit(item)
+        elif isinstance(value, list):
+            for item in value[:80]:
+                visit(item)
+
+    for payload in payloads:
+        visit(payload)
+    return " ".join(chunks)
 
 
 def _intent_list(payload: dict[str, Any], group: str) -> list[dict[str, Any]]:
@@ -408,6 +562,7 @@ def _compile_image_intents(
                 _apply_generated_scene_reference_policy(item, intent, prompts, notes)
                 _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
                 _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
+                _apply_visual_style_policy(item, global_context=global_context)
                 prompts.append(item)
                 jobs.append({"job_id": job_id, "intent_id": intent_id, "frame_role": role, **item})
             continue
@@ -439,6 +594,7 @@ def _compile_image_intents(
         )
         _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
         _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
+        _apply_visual_style_policy(item, global_context=global_context)
         prompts.append(item)
         jobs.append({"job_id": intent_id, "intent_id": intent_id, **item})
     return prompts, jobs
@@ -923,6 +1079,38 @@ def _apply_live_action_quality_policy(
             "random different face, inconsistent age, inconsistent protagonist, gibberish text, malformed Chinese text, readable fake signs"
         ),
     )
+
+
+def _apply_visual_style_policy(item: dict[str, Any], *, global_context: dict[str, Any]) -> None:
+    style = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
+    blueprint = style.get("blueprint") if isinstance(style.get("blueprint"), dict) else {}
+    positive = str(
+        blueprint.get("positive_prompt")
+        or style.get("positive_prompt")
+        or style.get("style_prompt")
+        or ""
+    ).strip()
+    negative = str(
+        blueprint.get("negative_prompt")
+        or style.get("negative_prompt")
+        or style.get("negative_constraints")
+        or ""
+    ).strip()
+    if not positive and not negative:
+        return
+    if positive:
+        item["prompt"] = _append_prompt_once(str(item.get("prompt") or ""), positive)
+    mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
+    reference_edit_modes = {"img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe", "pose_identity_keyframe"}
+    if negative and mode not in reference_edit_modes:
+        item["negative_prompt"] = _append_prompt_once(str(item.get("negative_prompt") or ""), negative)
+    item["visual_style_blueprint"] = {
+        "id": str(blueprint.get("id") or style.get("style_id") or "").strip(),
+        "style_family": str(blueprint.get("style_family") or style.get("style_family") or "").strip(),
+        "source": str(blueprint.get("source") or "").strip(),
+        "positive_prompt": positive,
+        "negative_prompt": negative,
+    }
 
 
 def _looks_like_live_action_context(text: str) -> bool:
@@ -1463,6 +1651,7 @@ def _compile_video_intents(
                 item["depends_on"].append("local_tts")
             item["requires_audio"] = True
         _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
+        _apply_visual_style_policy(item, global_context=global_context)
         prompts.append(item)
         jobs.append(dict(item))
         video_job_ids.add(intent_id)
@@ -1565,6 +1754,7 @@ def _ensure_video_keyframe_dependency(
     _apply_generated_character_reference_policy(keyframe_item, keyframe_intent, image_prompts, notes)
     _apply_live_action_quality_policy(keyframe_item, global_context=global_context, intent=keyframe_intent)
     _apply_img2img_style_edit_prompt_policy(keyframe_item, intent=keyframe_intent, notes=notes)
+    _apply_visual_style_policy(keyframe_item, global_context=global_context)
     image_prompts.append(keyframe_item)
     image_jobs.append({"job_id": keyframe_id, "intent_id": keyframe_id, **keyframe_item})
     image_job_ids.add(keyframe_id)

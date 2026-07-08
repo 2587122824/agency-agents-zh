@@ -2450,6 +2450,61 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("旧式招牌", image_item["prompt"])
         self.assertNotIn("真人纪实质感", image_item["prompt"])
 
+    def test_visual_style_consistency_policy_is_generic(self) -> None:
+        plan = compile_production_plan(
+            task_id="generic_style_consistency",
+            route_content=json.dumps(
+                {
+                    "production_type": "product_promo",
+                    "aspect_ratio": "9:16",
+                    "visual_style": "产品商业渲染，干净棚拍质感",
+                },
+                ensure_ascii=False,
+            ),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "asset_product",
+                                "asset_role": "product",
+                                "prompt": "一只透明玻璃水杯放在白色台面上。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_content=json.dumps(
+                {
+                    "production_intents": {
+                        "video": [
+                            {
+                                "intent": "generate_broll_clip",
+                                "intent_id": "clip_product_spin",
+                                "prompt": "镜头缓慢环绕玻璃水杯，展示杯身高光。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_config={"aspect_ratio": "9:16"},
+        )
+
+        image_item = plan["compiled_payload"]["image_prompts"][0]
+        video_item = plan["compiled_payload"]["video_prompts"][0]
+        style_lock = plan["parameter_policy"]["locks"]["style"]
+        self.assertIn("全片视觉一致性约束", image_item["prompt"])
+        self.assertIn("全片视觉一致性约束", video_item["prompt"])
+        self.assertIn("mixed visual styles", image_item["negative_prompt"])
+        self.assertIn("mixed visual styles", video_item["negative_prompt"])
+        self.assertEqual(image_item["visual_style_blueprint"]["style_family"], "product_render")
+        self.assertEqual(video_item["visual_style_blueprint"]["style_family"], "product_render")
+        self.assertTrue(style_lock["enabled"])
+        self.assertIn("全片视觉一致性约束", style_lock["positive_prompt"])
+
     def test_generated_scene_assets_bind_to_character_keyframes(self) -> None:
         plan = compile_production_plan(
             task_id="scene_bound_keyframes",

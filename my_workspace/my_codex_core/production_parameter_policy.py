@@ -185,6 +185,7 @@ def _build_policy(context: dict[str, Any]) -> dict[str, Any]:
     render = context.get("render") if isinstance(context.get("render"), dict) else {}
     characters = context.get("characters") if isinstance(context.get("characters"), list) else []
     style = context.get("style") if isinstance(context.get("style"), dict) else {}
+    blueprint = style.get("blueprint") if isinstance(style.get("blueprint"), dict) else {}
     return {
         "schema_version": PARAMETER_POLICY_SCHEMA_VERSION,
         "inheritance_order": ["locked_global_context", "entity_defaults", "template_defaults", "node_intent_values"],
@@ -198,9 +199,12 @@ def _build_policy(context: dict[str, Any]) -> dict[str, Any]:
                 "source": "production_entities.characters",
             },
             "style": {
-                "enabled": bool(style.get("style_id") or style.get("reference_asset")),
+                "enabled": bool(style.get("style_id") or style.get("reference_asset") or blueprint.get("positive_prompt") or blueprint.get("negative_prompt")),
                 "scope": "task",
                 "style_id": str(style.get("style_id") or ""),
+                "style_family": str(style.get("style_family") or blueprint.get("style_family") or ""),
+                "positive_prompt": str(style.get("positive_prompt") or blueprint.get("positive_prompt") or ""),
+                "negative_prompt": str(style.get("negative_prompt") or blueprint.get("negative_prompt") or ""),
                 "locked_fields": ["style_id", "style_reference", "palette", "camera_language", "negative_constraints"],
                 "source": "production_entities.styles",
             },
