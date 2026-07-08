@@ -405,6 +405,7 @@ def _compile_image_intents(
                 item["frame_role"] = role
                 _apply_linked_character_reference_policy(item, intent, notes)
                 _apply_generated_character_reference_policy(item, intent, prompts, notes)
+                _apply_generated_scene_reference_policy(item, intent, prompts, notes)
                 _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
                 _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
                 prompts.append(item)
@@ -428,6 +429,7 @@ def _compile_image_intents(
         _apply_character_base_policy(item, intent, prompts, notes)
         _apply_linked_character_reference_policy(item, intent, notes)
         _apply_generated_character_reference_policy(item, intent, prompts, notes)
+        _apply_generated_scene_reference_policy(item, intent, prompts, notes)
         attach_parameter_lock_metadata(
             item,
             global_context=global_context,
@@ -1123,6 +1125,179 @@ def _character_master_reference_job(items: list[dict[str, Any]], character_id: s
         if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"}:
             return item
     return None
+
+
+def _apply_generated_scene_reference_policy(
+    item: dict[str, Any],
+    intent: dict[str, Any],
+    existing_items: list[dict[str, Any]],
+    notes: list[str] | None = None,
+) -> None:
+    if str(item.get("workflow_id") or "").strip() != "04_keyframe":
+        return
+    mode = str(item.get("workflow_mode") or item.get("mode") or "").strip()
+    if mode not in {"keyframe", "identity_keyframe", "identity_scene_keyframe"}:
+        return
+    if item.get("input_scene_image") or item.get("scene_reference_image"):
+        return
+    bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
+    if bindings.get("input_scene_image"):
+        return
+    scene_job = _generated_scene_reference_job(existing_items, item, intent)
+    if not scene_job:
+        return
+    scene_job_id = str(scene_job.get("job_id") or scene_job.get("id") or "").strip()
+    if not scene_job_id:
+        return
+    item["workflow_mode"] = "identity_scene_keyframe"
+    item["image_task_mode"] = "identity_scene_keyframe"
+    item["mode"] = "identity_scene_keyframe"
+    item["control_mode"] = "identity_scene_reference"
+    bindings = dict(bindings)
+    bindings.setdefault("input_scene_image", {"from_job": scene_job_id, "output": "output_final_image"})
+    item["input_bindings"] = bindings
+    item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), scene_job_id]))
+    item["scene_reference_binding"] = {"from_job": scene_job_id, "output": "output_final_image"}
+    item["prompt"] = _append_prompt_once(
+        str(item.get("prompt") or ""),
+        "Keep the linked scene/platform layout from the scene reference image; preserve the same room, platform height, floor, wall and camera-space continuity while changing only the character action.",
+    )
+    if notes is not None:
+        notes.append(f"image intent {item.get('job_id')} bound to generated scene reference {scene_job_id}")
+
+
+def _generated_scene_reference_job(
+    items: list[dict[str, Any]],
+    item: dict[str, Any],
+    intent: dict[str, Any],
+) -> dict[str, Any] | None:
+    scene_items = [candidate for candidate in items if _is_scene_reference_item(candidate)]
+    if not scene_items:
+        return None
+    item_scene_id = str(item.get("scene_id") or intent.get("scene_id") or intent.get("shot_id") or "").strip()
+    if item_scene_id:
+        exact = next(
+            (
+                candidate
+                for candidate in reversed(scene_items)
+                if str(candidate.get("scene_id") or "").strip() == item_scene_id
+            ),
+            None,
+        )
+        if exact:
+            return exact
+        normalized_scene = _normalized_scene_key(item_scene_id)
+        if normalized_scene:
+            fuzzy = next(
+                (
+                    candidate
+                    for candidate in reversed(scene_items)
+                    if normalized_scene and normalized_scene == _normalized_scene_key(candidate.get("scene_id"))
+                ),
+                None,
+            )
+            if fuzzy:
+                return fuzzy
+    if not _scene_token_fallback_allowed(item, intent):
+        return None
+    target_tokens = _scene_match_tokens(item, intent)
+    if target_tokens:
+        scored: list[tuple[int, int, dict[str, Any]]] = []
+        for index, candidate in enumerate(scene_items):
+            candidate_tokens = _scene_match_tokens(candidate, {})
+            score = len(target_tokens.intersection(candidate_tokens))
+            if score:
+                scored.append((score, index, candidate))
+        if scored:
+            scored.sort(key=lambda value: (value[0], value[1]), reverse=True)
+            return scored[0][2]
+    return None
+
+
+def _is_scene_reference_item(item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    workflow_mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
+    asset_tag = str(item.get("asset_tag") or item.get("asset_role") or "").strip().lower()
+    job_id = str(item.get("job_id") or item.get("id") or "").strip().lower()
+    return workflow_mode == "scene_base" or asset_tag in {"scene", "scene_base"} or job_id.startswith("asset_scene")
+
+
+def _normalized_scene_key(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    if not text:
+        return ""
+    replacements = {
+        "base": "low",
+        "low": "low",
+        "30": "low",
+        "30cm": "low",
+        "medium": "mid",
+        "middle": "mid",
+        "mid": "mid",
+        "60": "mid",
+        "60cm": "mid",
+        "high": "high",
+        "1m": "high",
+        "100": "high",
+        "100cm": "high",
+    }
+    for token, normalized in replacements.items():
+        if re.search(rf"(^|[_\-\s]){re.escape(token)}($|[_\-\s])", text) or token in text:
+            return normalized
+    return text
+
+
+def _scene_match_tokens(item: dict[str, Any], intent: dict[str, Any]) -> set[str]:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            item.get("job_id"),
+            item.get("id"),
+            item.get("scene_id"),
+            item.get("asset_tag"),
+            item.get("prompt"),
+            intent.get("scene_id"),
+            intent.get("shot_id"),
+            intent.get("prompt"),
+            intent.get("description"),
+        )
+    ).lower()
+    tokens: set[str] = set()
+    if any(token in text for token in ("30cm", "30 cm", "30厘米", "低高度", "low", "base", "platform_low")):
+        tokens.add("low")
+    if any(token in text for token in ("60cm", "60 cm", "60厘米", "中等高度", "medium", "middle", "mid", "platform_mid")):
+        tokens.add("mid")
+    if any(token in text for token in ("1m", "1 m", "100cm", "100 cm", "一米", "1米", "较高", "高高度", "high", "platform_high")):
+        tokens.add("high")
+    return tokens
+
+
+def _scene_token_fallback_allowed(item: dict[str, Any], intent: dict[str, Any]) -> bool:
+    text = " ".join(
+        str(value or "")
+        for value in (
+            item.get("job_id"),
+            item.get("id"),
+            item.get("asset_tag"),
+            item.get("prompt"),
+            intent.get("prompt"),
+            intent.get("description"),
+        )
+    ).lower()
+    return any(
+        token in text
+        for token in (
+            "platform",
+            "跳跃平台",
+            "平台上",
+            "平台",
+            "jump",
+            "landing",
+            "land",
+            "stands on",
+        )
+    )
 
 
 def _referenced_previous_character_job_from_prompt(items: list[dict[str, Any]], prompt: str) -> dict[str, Any] | None:

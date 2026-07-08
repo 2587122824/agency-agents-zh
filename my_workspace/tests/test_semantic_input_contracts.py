@@ -2126,6 +2126,98 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("旧式招牌", image_item["prompt"])
         self.assertNotIn("真人纪实质感", image_item["prompt"])
 
+    def test_generated_scene_assets_bind_to_character_keyframes(self) -> None:
+        plan = compile_production_plan(
+            task_id="scene_bound_keyframes",
+            route_content=json.dumps(
+                {"production_type": "custom", "aspect_ratio": "9:16"},
+                ensure_ascii=False,
+            ),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "asset_character_stand",
+                                "asset_role": "character",
+                                "character_id": "character_jumper",
+                                "prompt": "same character standing, gray shirt and navy pants",
+                            },
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "asset_scene_platform_low",
+                                "asset_role": "scene",
+                                "character_id": "character_jumper",
+                                "scene_id": "scene_platform_base",
+                                "prompt": "30cm low platform in a plain indoor room",
+                            },
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "asset_scene_platform_mid",
+                                "asset_role": "scene",
+                                "character_id": "character_jumper",
+                                "scene_id": "scene_platform_medium",
+                                "prompt": "60cm medium platform in the same plain indoor room",
+                            },
+                            {
+                                "intent": "generate_three_frame_shot",
+                                "intent_id": "shot_007_three_frame",
+                                "character_id": "character_jumper",
+                                "scene_id": "scene_platform_base",
+                                "frame_set": [
+                                    {"role": "start", "prompt": "character stands on the 30cm platform"},
+                                    {"role": "middle", "prompt": "character jumps from the 30cm platform"},
+                                    {"role": "end", "prompt": "character lands from the 30cm platform"},
+                                ],
+                            },
+                            {
+                                "intent": "generate_three_frame_shot",
+                                "intent_id": "shot_009_three_frame",
+                                "character_id": "character_jumper",
+                                "scene_id": "scene_platform_medium",
+                                "frame_set": [
+                                    {"role": "start", "prompt": "character stands on the 60cm platform"},
+                                    {"role": "middle", "prompt": "character jumps from the 60cm platform"},
+                                    {"role": "end", "prompt": "character lands from the 60cm platform"},
+                                ],
+                            },
+                            {
+                                "intent": "generate_keyframe",
+                                "intent_id": "keyframe_info_graph",
+                                "character_id": "character_jumper",
+                                "prompt": "infographic labels 30cm, 60cm and 1m with colored force bars",
+                            },
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_content=json.dumps({"production_intents": {"video": []}}, ensure_ascii=False),
+            video_config={"aspect_ratio": "9:16"},
+        )
+
+        image_items = {
+            item["job_id"]: item
+            for item in plan["compiled_payload"]["image_prompts"]
+            if isinstance(item, dict) and item.get("job_id")
+        }
+        low_start = image_items["shot_007_three_frame_start_frame"]
+        mid_start = image_items["shot_009_three_frame_start_frame"]
+
+        self.assertEqual(low_start["workflow_mode"], "identity_scene_keyframe")
+        self.assertEqual(low_start["control_mode"], "identity_scene_reference")
+        self.assertEqual(low_start["input_bindings"]["input_scene_image"]["from_job"], "asset_scene_platform_low")
+        self.assertIn("asset_scene_platform_low", low_start["depends_on"])
+
+        self.assertEqual(mid_start["workflow_mode"], "identity_scene_keyframe")
+        self.assertEqual(mid_start["input_bindings"]["input_scene_image"]["from_job"], "asset_scene_platform_mid")
+        self.assertIn("asset_scene_platform_mid", mid_start["depends_on"])
+
+        info_graph = image_items["keyframe_info_graph"]
+        self.assertEqual(info_graph["workflow_mode"], "identity_keyframe")
+        self.assertNotIn("input_scene_image", info_graph.get("input_bindings") or {})
+
     def test_voice_requirement_enables_voxcpm2_fallback(self) -> None:
         config = {"voice_config": {"mode": "off"}}
         updated = web_app.WorkflowWebHandler._ensure_voice_config_for_requirement(
