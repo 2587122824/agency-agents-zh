@@ -279,6 +279,11 @@ class SemanticInputContractTests(unittest.TestCase):
             )
         )
 
+    def test_local_ffmpeg_distributes_image_slideshow_to_target_duration(self) -> None:
+        images = [Path(f"frame_{index:02d}.png") for index in range(13)]
+        self.assertAlmostEqual(LocalFFmpegAdapter._image_still_duration(images, 12.0), 12.0 / 13.0, places=6)
+        self.assertEqual(LocalFFmpegAdapter._image_still_duration(images, 0.0), 3.0)
+
     def test_normalizes_package_delivery_resolution_to_locked_delivery_size(self) -> None:
         content = json.dumps(
             {

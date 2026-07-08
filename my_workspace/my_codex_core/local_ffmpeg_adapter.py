@@ -191,6 +191,7 @@ class LocalFFmpegAdapter:
                 output_fps=output_fps,
                 encoding_args=encoding_args,
                 output_file=output_file,
+                target_duration_seconds=target_duration,
             )
         elif audio_file:
             command, input_files = self._build_audio_card_command(
@@ -227,6 +228,7 @@ class LocalFFmpegAdapter:
             subtitles_file=subtitles_file if subtitles_file.is_file() else None,
             output_file=output_file,
             burn_subtitles=burn_subtitles,
+            target_duration_seconds=target_duration,
         )
         self._write_json(timeline_path, timeline)
         edit_plan_path.write_text(self._build_edit_plan(timeline, subtitle_style), encoding="utf-8")
@@ -885,13 +887,14 @@ class LocalFFmpegAdapter:
         output_fps: int,
         encoding_args: list[str],
         output_file: Path,
+        target_duration_seconds: float = 0.0,
     ) -> tuple[list[str], list[Path]]:
         concat_path = task_dir / "local_ffmpeg_image_inputs.txt"
-        duration = 3
+        duration = self._image_still_duration(image_files, target_duration_seconds)
         lines: list[str] = []
         for image in image_files:
             lines.append(f"file '{_ffconcat_path(image)}'\n")
-            lines.append(f"duration {duration}\n")
+            lines.append(f"duration {duration:.6f}\n")
         lines.append(f"file '{_ffconcat_path(image_files[-1])}'\n")
         concat_path.write_text("".join(lines), encoding="utf-8")
         command = [
@@ -916,11 +919,18 @@ class LocalFFmpegAdapter:
             [
                 "-vf",
                 self._image_filter(subtitles_file, subtitle_style, output_width, output_height, output_fps),
+                *self._target_duration_args(target_duration_seconds),
                 *encoding_args,
                 str(output_file),
             ]
         )
         return command, input_files
+
+    @staticmethod
+    def _image_still_duration(image_files: list[Path], target_duration_seconds: float = 0.0) -> float:
+        if target_duration_seconds > 0 and image_files:
+            return max(0.25, target_duration_seconds / max(1, len(image_files)))
+        return 3.0
 
     @staticmethod
     def _build_audio_card_command(
@@ -1086,12 +1096,14 @@ class LocalFFmpegAdapter:
         subtitles_file: Path | None,
         output_file: Path,
         burn_subtitles: bool,
+        target_duration_seconds: float = 0.0,
     ) -> dict[str, Any]:
         clips: list[dict[str, Any]] = []
         for index, path in enumerate(video_files, start=1):
             clips.append({"index": index, "type": "video", "file": str(path), "role": "primary_visual"})
+        image_duration = LocalFFmpegAdapter._image_still_duration(image_files, target_duration_seconds)
         for index, path in enumerate(image_files, start=len(clips) + 1):
-            clips.append({"index": index, "type": "image", "file": str(path), "role": "slideshow_visual", "duration_seconds": 3})
+            clips.append({"index": index, "type": "image", "file": str(path), "role": "slideshow_visual", "duration_seconds": round(image_duration, 3)})
         return {
             "schema_version": 1,
             "output_file": str(output_file),
