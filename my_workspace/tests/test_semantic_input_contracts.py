@@ -2248,6 +2248,34 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(captured_rate, 3)
             self.assertEqual(result["rate"], 3)
 
+    def test_wav_duration_uses_actual_payload_when_header_size_is_placeholder(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            wav_path = Path(tmp) / "placeholder_size.wav"
+            sample_rate = 24000
+            channels = 1
+            bits_per_sample = 16
+            bytes_per_sample = bits_per_sample // 8
+            frame_count = int(sample_rate * 1.5)
+            payload = b"\x00" * frame_count * channels * bytes_per_sample
+            header = (
+                b"RIFF"
+                + (0x7FFFFFBF).to_bytes(4, "little")
+                + b"WAVE"
+                + b"fmt "
+                + (16).to_bytes(4, "little")
+                + (1).to_bytes(2, "little")
+                + channels.to_bytes(2, "little")
+                + sample_rate.to_bytes(4, "little")
+                + (sample_rate * channels * bytes_per_sample).to_bytes(4, "little")
+                + (channels * bytes_per_sample).to_bytes(2, "little")
+                + bits_per_sample.to_bytes(2, "little")
+                + b"data"
+                + (0x7FFFFF9B).to_bytes(4, "little")
+            )
+            wav_path.write_bytes(header + payload)
+
+            self.assertEqual(LocalTTSAdapter._wav_duration(wav_path), 1.5)
+
     def test_video_concat_uses_image_tail_before_padding_last_frame(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task_dir = Path(tmp)

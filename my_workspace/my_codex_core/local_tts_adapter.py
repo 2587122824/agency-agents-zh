@@ -505,9 +505,47 @@ class LocalTTSAdapter:
         try:
             with wave.open(str(path), "rb") as stream:
                 frame_rate = stream.getframerate()
-                return round(stream.getnframes() / frame_rate, 3) if frame_rate else 0.0
+                if not frame_rate:
+                    return 0.0
+                channels = max(1, stream.getnchannels())
+                sample_width = max(1, stream.getsampwidth())
+                bytes_per_second = frame_rate * channels * sample_width
+                declared_audio_bytes = stream.getnframes() * channels * sample_width
+                actual_file_bytes = path.stat().st_size
+                if declared_audio_bytes > actual_file_bytes + 4096:
+                    payload_bytes = LocalTTSAdapter._wav_payload_bytes_from_file_size(path)
+                    if payload_bytes and bytes_per_second:
+                        return round(payload_bytes / bytes_per_second, 3)
+                return round(stream.getnframes() / frame_rate, 3)
         except (wave.Error, OSError):
             return 0.0
+
+    @staticmethod
+    def _wav_payload_bytes_from_file_size(path: Path) -> int:
+        try:
+            file_size = path.stat().st_size
+            with path.open("rb") as handle:
+                header = handle.read(12)
+                if len(header) < 12 or header[:4] not in {b"RIFF", b"RF64"} or header[8:12] != b"WAVE":
+                    return 0
+                offset = 12
+                while offset + 8 <= file_size:
+                    handle.seek(offset)
+                    chunk_header = handle.read(8)
+                    if len(chunk_header) < 8:
+                        return 0
+                    chunk_id = chunk_header[:4]
+                    chunk_size = int.from_bytes(chunk_header[4:8], "little", signed=False)
+                    payload_offset = offset + 8
+                    if chunk_id == b"data":
+                        return max(0, file_size - payload_offset)
+                    next_offset = payload_offset + chunk_size + (chunk_size % 2)
+                    if next_offset <= offset:
+                        return 0
+                    offset = next_offset
+        except OSError:
+            return 0
+        return 0
 
     def _media_duration(self, path: Path) -> float:
         if path.suffix.lower() == ".wav":
