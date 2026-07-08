@@ -15981,8 +15981,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             )
         return steps
 
-    @staticmethod
-    def _workflow_steps_for_task(task_dir: Path) -> list[dict]:
+    @classmethod
+    def _workflow_steps_for_task(cls, task_dir: Path) -> list[dict]:
         workflow_path = task_dir / "workflow.json"
         if not workflow_path.is_file():
             return []
@@ -18943,10 +18943,94 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         worker.start()
         return job
 
+    @classmethod
+    def _production_resume_job_for_task(cls, task_dir: Path) -> str:
+        if not cls._employee_outputs_complete(task_dir):
+            return ""
+        if cls._task_has_final_video_file(task_dir):
+            return ""
+        manifest_path = task_dir / "production_manifest.json"
+        if not manifest_path.is_file():
+            if (task_dir / "production_graph.json").is_file() or (task_dir / "production_plan.json").is_file():
+                return "material"
+            return ""
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+        except json.JSONDecodeError:
+            return "material"
+        if not isinstance(manifest, dict):
+            return "material"
+        status = str(manifest.get("status") or "").strip().lower()
+        composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
+        audio = manifest.get("audio") if isinstance(manifest.get("audio"), dict) else {}
+        material_status = str(
+            composition.get("comfyui_adapter_status")
+            or composition.get("adapter_status")
+            or composition.get("visual_provider_status")
+            or status
+        ).strip().lower()
+        audio_status = str(audio.get("adapter_status") or "").strip().lower()
+        ffmpeg_status = str(composition.get("local_ffmpeg_status") or "").strip().lower()
+        if material_status not in {"success", "cached", "downloaded", "skipped"}:
+            return "material"
+        if audio_status and audio_status not in {"success", "skipped", "not_configured"}:
+            return "tts"
+        if ffmpeg_status not in {"success", "skipped"}:
+            return "ffmpeg"
+        return ""
+
+    @classmethod
+    def _employee_outputs_complete(cls, task_dir: Path) -> bool:
+        if not (task_dir / "final_output.md").is_file():
+            return False
+        workflow_steps = cls._workflow_steps_for_task(task_dir)
+        total_steps = len(workflow_steps)
+        completed_outputs = len(list(task_dir.glob("step_*_*/output.md")))
+        summary_path = task_dir / "run_summary.json"
+        summary_steps = 0
+        if summary_path.is_file():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+                if isinstance(summary, dict):
+                    summary_steps = int(summary.get("step_count") or 0)
+                    total_steps = total_steps or int(summary.get("total_steps") or 0)
+            except (ValueError, json.JSONDecodeError):
+                pass
+        if total_steps:
+            return max(completed_outputs, summary_steps) >= total_steps
+        return completed_outputs > 0
+
+    @staticmethod
+    def _task_has_final_video_file(task_dir: Path) -> bool:
+        summary_path = task_dir / "run_summary.json"
+        hints: list[str] = []
+        if summary_path.is_file():
+            try:
+                summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+                if isinstance(summary, dict):
+                    hints.append(str(summary.get("final_video") or ""))
+            except json.JSONDecodeError:
+                pass
+        manifest_path = task_dir / "production_manifest.json"
+        if manifest_path.is_file():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+                composition = manifest.get("composition") if isinstance(manifest, dict) and isinstance(manifest.get("composition"), dict) else {}
+                files = manifest.get("files") if isinstance(manifest, dict) and isinstance(manifest.get("files"), dict) else {}
+                hints.extend([str(composition.get("final_video_file") or ""), str(files.get("final_video") or "")])
+            except json.JSONDecodeError:
+                pass
+        for hint in hints:
+            path_text = str(hint or "").strip()
+            if not path_text or Path(path_text).suffix.lower() != ".mp4":
+                continue
+            path = Path(path_text)
+            if path.is_file() or (not path.is_absolute() and (task_dir / path).is_file()):
+                return True
+        return any(path.is_file() for path in task_dir.glob("*.mp4"))
+
     def _resume_task(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
-        runtime_model = self._resolve_runtime_model_request(payload)
-        self._ensure_runtime_model_configured(runtime_model)
         task_dir = self._safe_task_dir(task)
         production_config = payload.get("production_config") or {}
         if isinstance(production_config, dict):
@@ -18987,6 +19071,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             total = int(debug_status.get("total") or 0)
             approved = int(debug_status.get("approved") or 0)
             raise ValueError(f"ComfyUI 调试队列尚未全部确认（{approved}/{total}）。请先运行并确认下方调试队列，再继续主流程。")
+        production_resume_job = self._production_resume_job_for_task(task_dir)
+        if production_resume_job:
+            retry_payload = dict(payload)
+            retry_payload["task"] = task
+            retry_payload["job"] = production_resume_job
+            retry_payload["production_config"] = production_config if isinstance(production_config, dict) else {}
+            return self._retry_production_job(retry_payload)
+        runtime_model = self._resolve_runtime_model_request(payload)
+        self._ensure_runtime_model_configured(runtime_model)
         run_id = uuid4().hex
         job = {
             "run_id": run_id,

@@ -652,6 +652,53 @@ class SemanticInputContractTests(unittest.TestCase):
             node = next(job for job in state["production"]["jobs"] if job["id"] == "asset_character_master")
             self.assertEqual(node["status"], "running")
 
+    def test_task_state_labels_running_in_chinese(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            job_dir = task_dir / "generated_images" / "job_asset_character_master"
+            job_dir.mkdir(parents=True)
+            (job_dir / "runninghub_task_state.json").write_text(
+                json.dumps({"status": "RUNNING", "task_id": "remote_123"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (task_dir / "production_graph.json").write_text(
+                json.dumps({"jobs": [{"job_id": "asset_character_master", "stage": "visual"}]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            center = TaskStateCenter(
+                task_dir=task_dir,
+                task_name="task_test",
+                summary={"status": "completed", "step_count": 1, "total_steps": 1, "final_output": str(task_dir / "final_output.md")},
+                files=["final_output.md", "production_graph.json"],
+            )
+
+            self.assertEqual(center.build()["status_label"], "运行中")
+
+    def test_resume_after_employee_completion_selects_material_retry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            (task_dir / "workflow.json").write_text(
+                json.dumps({"steps": [{"agent": "01_a", "task": "a", "output": "a"}]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            step_dir = task_dir / "step_01_01_a"
+            step_dir.mkdir()
+            (step_dir / "output.md").write_text("done\n", encoding="utf-8")
+            (task_dir / "final_output.md").write_text("final text\n", encoding="utf-8")
+            (task_dir / "run_summary.json").write_text(
+                json.dumps({"status": "paused", "step_count": 1, "total_steps": 1}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (task_dir / "production_graph.json").write_text(
+                json.dumps({"jobs": [{"job_id": "asset_character_master", "stage": "visual"}]}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            self.assertEqual(web_app.WorkflowWebHandler._production_resume_job_for_task(task_dir), "material")
+
+            (task_dir / "final_video.mp4").write_bytes(b"video")
+            self.assertEqual(web_app.WorkflowWebHandler._production_resume_job_for_task(task_dir), "")
+
     def test_keyframe_modes_are_explicit_and_typed(self) -> None:
         modes = {item["value"]: item for item in self.workflows["04_keyframe"]["modes"]}
         self.assertEqual(modes["keyframe"]["required_inputs"], [])

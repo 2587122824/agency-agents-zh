@@ -787,7 +787,10 @@ class TaskStateCenter:
     def _status_label(state: str) -> str:
         labels = {
             "empty": "未开始",
+            "queued": "排队中",
+            "running": "运行中",
             "partial": "进行中/部分完成",
+            "paused": "已暂停",
             "completed": "已完成",
             "failed": "失败",
             "blocked": "阻塞",
