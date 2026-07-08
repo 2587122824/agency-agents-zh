@@ -2279,6 +2279,8 @@ def _prefer_compiled_compat_list(target: dict[str, Any], key: str, compiled_valu
             target[f"legacy_{key}"] = legacy_list
         target[key] = compiled_list
         return
+    if key in {"image_prompts", "video_prompts"}:
+        target[key] = []
     _merge_compat_list(target, key, legacy_list)
 
 

@@ -245,6 +245,27 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertFalse([job for job in plan["visual_jobs"] if job.get("type") == "video"])
         self.assertTrue(any("skip_asset_only_video" in note for note in plan["compile_notes"]))
 
+    def test_compiler_clears_stale_existing_video_prompts_when_skip_filtered(self) -> None:
+        stale_payload = {
+            "video_prompts": [
+                {
+                    "job_id": "skip_asset_only_video",
+                    "workflow_mode": "i2v_first_frame",
+                    "prompt": "占位意图：不生成AI视频，此意图不应执行",
+                }
+            ]
+        }
+        plan = compile_production_plan(
+            task_id="stale_skip_video_placeholder_test",
+            route_content=json.dumps({"production_type": "asset_only", "aspect_ratio": "9:16"}, ensure_ascii=False),
+            image_content=json.dumps({"production_intents": {"image": []}}, ensure_ascii=False),
+            video_content=json.dumps({"production_intents": {"video": []}, "video_prompts": []}, ensure_ascii=False),
+            existing_payload=stale_payload,
+        )
+
+        self.assertEqual(plan["compiled_payload"].get("video_prompts"), [])
+        self.assertFalse([job for job in plan["visual_jobs"] if job.get("type") == "video"])
+
     def test_ffmpeg_manifest_filter_removes_skip_video_placeholders(self) -> None:
         manifest = {
             "production_nodes": [
