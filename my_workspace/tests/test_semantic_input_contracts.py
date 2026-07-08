@@ -1226,6 +1226,64 @@ class SemanticInputContractTests(unittest.TestCase):
                 "my_workspace/my_asset_library/scenes/dining_room.png",
             )
 
+    def test_linked_character_asset_without_entity_id_promotes_to_referenced_character(self) -> None:
+        linked_assets = {
+            "linked_assets": {
+                "assets": [
+                    {
+                        "asset_id": "asset_xiaomei",
+                        "name": "Xiaomei base image",
+                        "file": "my_workspace/my_asset_library/01_character_base/xiaomei.png",
+                        "kind": "image",
+                        "tags": ["image", "character_base"],
+                        "character_id": "",
+                    }
+                ],
+                "characters": [],
+                "scenes": [],
+            }
+        }
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_xiaomei_master",
+                            "asset_role": "character",
+                            "character_id": "character_xiaomei",
+                            "prompt": "Generate Xiaomei base asset.",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "shot_xiaomei_office",
+                            "character_id": "character_xiaomei",
+                            "prompt": "Xiaomei works at an office desk.",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="linked_character_asset_without_entity_id_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+        master_path = "my_workspace/my_asset_library/01_character_base/xiaomei.png"
+        character = plan["resolved_entities"]["characters"][0]
+        self.assertEqual(character["character_id"], "character_xiaomei")
+        self.assertEqual(character["master_image"], master_path)
+
+        base_item, keyframe = plan["compiled_payload"]["image_prompts"][:2]
+        self.assertEqual(base_item["workflow_id"], "04_keyframe")
+        self.assertEqual(base_item["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(base_item["input_base_image"], master_path)
+        self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
+        self.assertEqual(keyframe["input_identity_image"], master_path)
+        self.assertEqual(keyframe["input_base_image"], master_path)
+
     def test_animal_reference_sheet_stays_on_character_base(self) -> None:
         image_content = json.dumps(
             {

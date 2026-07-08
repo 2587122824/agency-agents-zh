@@ -133,15 +133,15 @@ def compile_production_plan(
         "audio": _intent_list(audio_payload, "audio"),
         "package": _intent_list(package_payload, "package"),
     }
-    entity_registry = link_production_entities_to_assets(
-        load_production_entities(entity_path or DEFAULT_ENTITY_PATH),
-        load_asset_library(asset_library_path or DEFAULT_ASSET_LIBRARY_PATH),
-    )
-    _merge_linked_asset_entities(entity_registry, source_payload)
     entity_references = collect_entity_references(
         production_intents,
         [route_payload, image_payload, video_payload, audio_payload, package_payload, source_payload, existing_payload or {}],
     )
+    entity_registry = link_production_entities_to_assets(
+        load_production_entities(entity_path or DEFAULT_ENTITY_PATH),
+        load_asset_library(asset_library_path or DEFAULT_ASSET_LIBRARY_PATH),
+    )
+    _merge_linked_asset_entities(entity_registry, source_payload, entity_references=entity_references)
     global_context, resolved_entities, entity_notes = enrich_global_context_with_entities(global_context, entity_registry, entity_references)
     transient_notes = _merge_generated_character_master_entities(
         global_context,
@@ -684,7 +684,12 @@ def _character_master_reference_from_item(item: dict[str, Any]) -> str:
     return _first_identity_reference(character)
 
 
-def _merge_linked_asset_entities(registry: dict[str, Any], payload: dict[str, Any]) -> None:
+def _merge_linked_asset_entities(
+    registry: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    entity_references: dict[str, set[str]] | None = None,
+) -> None:
     linked_assets = payload.get("linked_assets") if isinstance(payload.get("linked_assets"), dict) else {}
     if not linked_assets:
         return
@@ -696,27 +701,48 @@ def _merge_linked_asset_entities(registry: dict[str, Any], payload: dict[str, An
     if not isinstance(scenes, dict):
         scenes = {}
         registry["scenes"] = scenes
+    referenced_character_ids = [
+        str(value).strip()
+        for value in sorted((entity_references or {}).get("character_ids") or [])
+        if str(value).strip()
+    ]
     for raw in linked_assets.get("characters") or []:
         if not isinstance(raw, dict):
             continue
         character_id = str(raw.get("character_id") or raw.get("id") or "").strip()
         if not character_id:
             continue
-        current = characters.get(character_id) if isinstance(characters.get(character_id), dict) else {}
-        reference_assets = list(current.get("reference_assets") or []) if isinstance(current.get("reference_assets"), list) else []
-        reference_assets.extend(str(value).strip() for value in raw.get("reference_assets") or [] if str(value).strip())
-        master_image = str(raw.get("master_image") or raw.get("reference_image") or "").strip()
-        if master_image:
-            reference_assets.insert(0, master_image)
-        characters[character_id] = {
-            **current,
-            "character_id": character_id,
-            "id": character_id,
-            "name": str(raw.get("name") or current.get("name") or character_id).strip(),
-            "master_image": master_image or str(current.get("master_image") or "").strip(),
-            "reference_assets": list(dict.fromkeys(reference_assets)),
-            "source_asset_id": str(raw.get("source_asset_id") or current.get("source_asset_id") or ("linked_task_asset" if master_image else "")).strip(),
-        }
+        _upsert_linked_character_entity(characters, raw, character_id=character_id)
+        if entity_references is not None:
+            entity_references.setdefault("character_ids", set()).add(character_id)
+    for raw in linked_assets.get("assets") or []:
+        if not isinstance(raw, dict) or not _linked_asset_looks_like_character(raw):
+            continue
+        character_id = str(raw.get("character_id") or "").strip()
+        if not character_id and len(referenced_character_ids) == 1:
+            character_id = referenced_character_ids[0]
+        if not character_id:
+            character_id = str(raw.get("asset_id") or raw.get("id") or "").strip()
+        if not character_id:
+            continue
+        file_path = _linked_asset_file_path(raw)
+        if not file_path:
+            continue
+        aliases = [str(raw.get("asset_id") or raw.get("id") or "").strip()]
+        _upsert_linked_character_entity(
+            characters,
+            {
+                **raw,
+                "character_id": character_id,
+                "master_image": file_path,
+                "reference_assets": [file_path],
+                "source_asset_id": str(raw.get("asset_id") or raw.get("id") or "linked_task_asset").strip(),
+                "aliases": aliases,
+            },
+            character_id=character_id,
+        )
+        if entity_references is not None:
+            entity_references.setdefault("character_ids", set()).add(character_id)
     for raw in linked_assets.get("scenes") or []:
         if not isinstance(raw, dict):
             continue
@@ -740,6 +766,58 @@ def _merge_linked_asset_entities(registry: dict[str, Any], payload: dict[str, An
             "reference_assets": list(dict.fromkeys(reference_assets)),
             "source_asset_id": str(raw.get("source_asset_id") or current.get("source_asset_id") or "").strip(),
         }
+
+
+def _upsert_linked_character_entity(characters: dict[str, Any], raw: dict[str, Any], *, character_id: str) -> None:
+    current = characters.get(character_id) if isinstance(characters.get(character_id), dict) else {}
+    reference_assets = list(current.get("reference_assets") or []) if isinstance(current.get("reference_assets"), list) else []
+    reference_assets.extend(_linked_asset_file_path({"file": value}) for value in raw.get("reference_assets") or [] if str(value).strip())
+    master_image = _linked_asset_file_path(
+        {
+            "file": raw.get("master_image")
+            or raw.get("reference_image")
+            or raw.get("file")
+            or raw.get("source_file")
+            or ""
+        }
+    )
+    if master_image:
+        reference_assets.insert(0, master_image)
+    aliases = list(current.get("aliases") or []) if isinstance(current.get("aliases"), list) else []
+    aliases.extend(str(value).strip() for value in raw.get("aliases") or [] if str(value).strip())
+    for value in (raw.get("asset_id"), raw.get("id")):
+        text = str(value or "").strip()
+        if text and text != character_id:
+            aliases.append(text)
+    characters[character_id] = {
+        **current,
+        "character_id": character_id,
+        "id": character_id,
+        "name": str(raw.get("name") or current.get("name") or character_id).strip(),
+        "master_image": master_image or str(current.get("master_image") or "").strip(),
+        "reference_assets": list(dict.fromkeys(value for value in reference_assets if value)),
+        "aliases": list(dict.fromkeys(value for value in aliases if value)),
+        "source_asset_id": str(raw.get("source_asset_id") or current.get("source_asset_id") or ("linked_task_asset" if master_image else "")).strip(),
+    }
+
+
+def _linked_asset_looks_like_character(raw: dict[str, Any]) -> bool:
+    tags = {str(tag or "").strip().lower() for tag in raw.get("tags") or [] if str(tag).strip()}
+    if tags.intersection({"character", "character_base", "character_master", "character_turnaround", "identity_reference", "turnaround", "three_view", "three_views"}):
+        return True
+    file_path = str(raw.get("file") or raw.get("source_file") or "").replace("\\", "/").lower()
+    return any(part in file_path for part in ("/01_character_base/", "/04_character_turnaround/", "character_base", "character_turnaround"))
+
+
+def _linked_asset_file_path(raw: dict[str, Any]) -> str:
+    value = str(raw.get("file") or "").strip().replace("\\", "/")
+    if not value:
+        return ""
+    if value.startswith("my_workspace/") or re.match(r"^[A-Za-z]:/", value) or value.startswith("/"):
+        return value
+    if re.match(r"^\d{2}_[A-Za-z0-9_]+/", value):
+        return f"my_workspace/my_asset_library/{value}"
+    return value
 
 
 def _merge_generated_character_master_entities(
