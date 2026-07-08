@@ -86,6 +86,7 @@ class LocalFFmpegAdapter:
                     *self._collect_files(paths.get("comfyui"), VIDEO_EXTENSIONS, recursive=True),
                 ]
             )
+        video_files = [path for path in video_files if not self._is_skip_placeholder_media_path(path)]
         image_files = self._dedupe_paths(manifest_image_files)
         if not image_files:
             image_files = self._dedupe_paths(
@@ -350,6 +351,16 @@ class LocalFFmpegAdapter:
                 result.append(path.resolve())
                 seen.add(key)
         return result
+
+    @staticmethod
+    def _is_skip_placeholder_media_path(path: Path) -> bool:
+        text = str(path or "").replace("\\", "/").lower()
+        return (
+            "skip_asset_only_video" in text
+            or "skip_video_placeholder" in text
+            or "skip_execution" in text
+            or ("placeholder" in text and text.endswith((".mp4", ".mov", ".mkv", ".webm", ".avi")))
+        )
 
     @staticmethod
     def _collect_manifest_visual_files(manifest: dict[str, Any], task_dir: Path, extensions: set[str]) -> list[Path]:

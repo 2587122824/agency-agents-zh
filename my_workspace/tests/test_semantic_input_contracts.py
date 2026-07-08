@@ -267,6 +267,18 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(len(filtered["production_nodes"]), 1)
         self.assertEqual(filtered["production_nodes"][0]["job_id"], "shot_001_keyframe")
 
+    def test_local_ffmpeg_filters_skip_placeholder_video_paths(self) -> None:
+        self.assertTrue(
+            LocalFFmpegAdapter._is_skip_placeholder_media_path(
+                Path("comfyui/job_skip_asset_only_video/comfyui_result_01.mp4")
+            )
+        )
+        self.assertFalse(
+            LocalFFmpegAdapter._is_skip_placeholder_media_path(
+                Path("comfyui/job_real_clip/comfyui_result_01.mp4")
+            )
+        )
+
     def test_normalizes_package_delivery_resolution_to_locked_delivery_size(self) -> None:
         content = json.dumps(
             {
