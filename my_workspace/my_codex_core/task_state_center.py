@@ -267,10 +267,17 @@ class TaskStateCenter:
         manifest, manifest_error = self._json_file_with_error(manifest_path)
         history = manifest.get("production_job_history") if isinstance(manifest.get("production_job_history"), list) else []
         nodes = self._production_nodes(manifest)
-        graph_backed = False
-        if not nodes:
-            nodes = self._production_nodes_from_graph()
-            graph_backed = bool(nodes)
+        graph_nodes = self._production_nodes_from_graph()
+        graph_backed = bool(graph_nodes)
+        if graph_nodes:
+            if not nodes:
+                nodes = graph_nodes
+            else:
+                graph_by_id = {str(node.get("job_id") or ""): node for node in graph_nodes if node.get("job_id")}
+                merged_nodes = [graph_by_id.get(str(node.get("job_id") or ""), node) for node in nodes]
+                manifest_ids = {str(node.get("job_id") or "") for node in merged_nodes if node.get("job_id")}
+                merged_nodes.extend(node for node in graph_nodes if str(node.get("job_id") or "") not in manifest_ids)
+                nodes = merged_nodes
         jobs = self._legacy_jobs_from_manifest(manifest, nodes)
         dag = {
             "nodes": nodes,

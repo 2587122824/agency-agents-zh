@@ -652,6 +652,57 @@ class SemanticInputContractTests(unittest.TestCase):
             node = next(job for job in state["production"]["jobs"] if job["id"] == "asset_character_master")
             self.assertEqual(node["status"], "running")
 
+    def test_task_state_merges_graph_visual_jobs_when_manifest_has_packaging_nodes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            job_dir = task_dir / "generated_images" / "job_asset_character_master"
+            job_dir.mkdir(parents=True)
+            (job_dir / "runninghub_task_state.json").write_text(
+                json.dumps({"status": "SUCCESS", "task_id": "remote_123"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (job_dir / "frame.png").write_bytes(b"png")
+            (task_dir / "production_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "status": "production_plan_ready",
+                        "production_nodes": [
+                            {"job_id": "local_tts", "stage": "08_audio_visual_packaging", "status": "pending"}
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (task_dir / "production_graph.json").write_text(
+                json.dumps(
+                    {
+                        "jobs": [
+                            {
+                                "job_id": "asset_character_master",
+                                "stage": "visual",
+                                "mode": "character_base",
+                                "workflow_id": "01_base_asset_image",
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            state = TaskStateCenter(
+                task_dir=task_dir,
+                task_name="task_test",
+                summary={"status": "completed", "step_count": 1, "total_steps": 1, "final_output": str(task_dir / "final_output.md")},
+                files=["final_output.md", "production_graph.json", "production_manifest.json"],
+            ).build()
+
+            job_ids = {job["id"]: job for job in state["production"]["jobs"]}
+            self.assertIn("local_tts", job_ids)
+            self.assertIn("asset_character_master", job_ids)
+            self.assertEqual(job_ids["asset_character_master"]["status"], "success")
+
     def test_task_state_labels_running_in_chinese(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             task_dir = Path(tmp)
