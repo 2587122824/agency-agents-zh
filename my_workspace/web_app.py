@@ -3155,7 +3155,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="voxcpm2">VoxCPM2 本地仿声</option>
                 </select>
               </label>
-              <label>默认 AI 音色
+              <label id="voicePresetField">默认 AI 音色
                 <select id="voicePreset">
                   <option value="warm_female">暖心女声：自然亲和，适合口播种草</option>
                   <option value="clear_female">清爽女声：干净利落，适合教程解说</option>
@@ -3165,34 +3165,40 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="story_female">故事女声：温柔叙事，适合长视频讲述</option>
                 </select>
               </label>
-              <label>本人参考音频
+              <label id="voiceReferenceFileField">本人参考音频
                 <input id="voiceReferenceFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
               </label>
-              <label>已上传参考音频路径
+              <label id="voiceReferenceAudioPathField">已上传参考音频路径
                 <input id="voiceReferenceAudioPath" autocomplete="off" spellcheck="false" placeholder="上传后自动填入，也可手动填 my_voice_samples/xxx.wav" />
               </label>
             </div>
-            <div class="provider-grid config-card" data-title="阿里云 CosyVoice API" data-desc="HTTP API 配置；API Key 仅随任务请求传给后端，不写入任务输出文件">
+            <div id="aliyunTtsConfigCard" class="provider-grid config-card" data-title="阿里云 CosyVoice API" data-desc="HTTP API 配置；API Key 仅随任务请求传给后端，不写入任务输出文件" hidden>
               <label>阿里云 API Key
                 <input id="aliyunTtsApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="DashScope / Model Studio API Key" />
               </label>
-              <label>Workspace ID
+              <label hidden>Workspace ID
                 <input id="aliyunTtsWorkspaceId" autocomplete="off" spellcheck="false" placeholder="可选：专属工作空间 ID" />
               </label>
-              <label>接口地址
+              <label hidden>接口地址
                 <input id="aliyunTtsEndpoint" autocomplete="off" spellcheck="false" placeholder="留空默认 SpeechSynthesizer；也可填完整 Endpoint" />
               </label>
-              <label>模型
+              <label hidden>模型
                 <select id="aliyunTtsModel">
-                  <option value="cosyvoice-v3.5-plus">cosyvoice-v3.5-plus</option>
-                  <option value="cosyvoice-v3.5-flash">cosyvoice-v3.5-flash</option>
-                  <option value="cosyvoice-v3-plus">cosyvoice-v3-plus</option>
                   <option value="cosyvoice-v3-flash" selected>cosyvoice-v3-flash</option>
-                  <option value="cosyvoice-v2">cosyvoice-v2</option>
                 </select>
               </label>
               <label>音色
-                <input id="aliyunTtsVoice" autocomplete="off" spellcheck="false" placeholder="例如：longanyang" />
+                <select id="aliyunTtsVoice">
+                  <option value="longanyang" selected>龙安阳：自然男声</option>
+                  <option value="longxiaochun">龙小淳：自然女声</option>
+                  <option value="longxiaoxia">龙小夏：清亮女声</option>
+                  <option value="longxiaocheng">龙小诚：稳重男声</option>
+                  <option value="longxiaobai">龙小白：亲和女声</option>
+                  <option value="longlaotie">龙老铁：东北男声</option>
+                  <option value="longshu">龙书：沉稳叙述</option>
+                  <option value="longshuo">龙硕：专业解说</option>
+                  <option value="longtong">龙彤：温和女声</option>
+                </select>
               </label>
               <label>音频格式
                 <select id="aliyunTtsFormat">
@@ -3202,7 +3208,7 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="pcm">PCM</option>
                 </select>
               </label>
-              <label>采样率
+              <label hidden>采样率
                 <select id="aliyunTtsSampleRate">
                   <option value="8000">8000 Hz</option>
                   <option value="16000">16000 Hz</option>
@@ -3213,56 +3219,56 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid config-card" data-title="配音高级项" data-desc="仿声参考文本、VoxCPM2 命令模板和配音超时设置">
-              <label>CosyVoice 音量
+            <div id="voiceAdvancedCard" class="provider-grid config-card" data-title="配音高级项" data-desc="仿声参考文本、VoxCPM2 命令模板和配音超时设置">
+              <label hidden>CosyVoice 音量
                 <input id="aliyunTtsVolume" type="number" min="0" max="100" step="1" placeholder="默认 50；范围 0-100" />
               </label>
-              <label>CosyVoice 语速
+              <label hidden>CosyVoice 语速
                 <input id="aliyunTtsRate" type="number" min="0.5" max="2" step="0.05" placeholder="默认 1.0；如 1.15 更快" />
               </label>
-              <label>CosyVoice 音调
+              <label hidden>CosyVoice 音调
                 <input id="aliyunTtsPitch" type="number" min="0.5" max="2" step="0.05" placeholder="默认 1.0" />
               </label>
-              <label>OPUS 码率
+              <label hidden>OPUS 码率
                 <input id="aliyunTtsBitRate" type="number" min="16000" max="48000" step="1000" placeholder="仅 OPUS 常用；如 24000" />
               </label>
-              <label>CosyVoice Seed
+              <label hidden>CosyVoice Seed
                 <input id="aliyunTtsSeed" type="number" step="1" placeholder="可选：固定随机性" />
               </label>
-              <label>语言提示
+              <label hidden>语言提示
                 <input id="aliyunTtsLanguageHint" autocomplete="off" spellcheck="false" placeholder="可选：zh / en / 粤语等语言提示" />
               </label>
-              <label>风格指令
+              <label hidden>风格指令
                 <input id="aliyunTtsInstruction" autocomplete="off" spellcheck="false" placeholder="可选：例如 温和、清晰、科普解说感" />
               </label>
-              <label>SSML
+              <label hidden>SSML
                 <select id="aliyunTtsEnableSsml">
                   <option value="off" selected>关闭</option>
                   <option value="on">启用</option>
                 </select>
               </label>
-              <label>词级时间戳
+              <label hidden>词级时间戳
                 <select id="aliyunTtsWordTimestamp">
                   <option value="off" selected>关闭</option>
                   <option value="on">启用</option>
                 </select>
               </label>
-              <label>AIGC 标识
+              <label hidden>AIGC 标识
                 <select id="aliyunTtsEnableAigcTag">
                   <option value="off" selected>关闭</option>
                   <option value="on">启用</option>
                 </select>
               </label>
-              <label>Markdown 过滤
+              <label hidden>Markdown 过滤
                 <select id="aliyunTtsMarkdownFilter">
                   <option value="off" selected>关闭</option>
                   <option value="on">启用</option>
                 </select>
               </label>
-              <label>AIGC 传播者
+              <label hidden>AIGC 传播者
                 <input id="aliyunTtsAigcPropagator" autocomplete="off" spellcheck="false" placeholder="可选：aigc_propagator" />
               </label>
-              <label>AIGC 传播 ID
+              <label hidden>AIGC 传播 ID
                 <input id="aliyunTtsAigcPropagateId" autocomplete="off" spellcheck="false" placeholder="可选：aigc_propagate_id" />
               </label>
               <label>参考音频原文
@@ -4029,12 +4035,17 @@ INDEX_HTML = r"""<!doctype html>
       assetMaxAttempts: document.getElementById('assetMaxAttempts'),
       assetMinScore: document.getElementById('assetMinScore'),
       voiceMode: document.getElementById('voiceMode'),
+      voicePresetField: document.getElementById('voicePresetField'),
       voicePreset: document.getElementById('voicePreset'),
+      voiceReferenceFileField: document.getElementById('voiceReferenceFileField'),
       voiceReferenceFile: document.getElementById('voiceReferenceFile'),
+      voiceReferenceAudioPathField: document.getElementById('voiceReferenceAudioPathField'),
       voiceReferenceAudioPath: document.getElementById('voiceReferenceAudioPath'),
       voiceReferenceText: document.getElementById('voiceReferenceText'),
       voiceCommandTemplate: document.getElementById('voiceCommandTemplate'),
       voiceTimeout: document.getElementById('voiceTimeout'),
+      voiceAdvancedCard: document.getElementById('voiceAdvancedCard'),
+      aliyunTtsConfigCard: document.getElementById('aliyunTtsConfigCard'),
       aliyunTtsApiKey: document.getElementById('aliyunTtsApiKey'),
       aliyunTtsWorkspaceId: document.getElementById('aliyunTtsWorkspaceId'),
       aliyunTtsEndpoint: document.getElementById('aliyunTtsEndpoint'),
@@ -5960,25 +5971,25 @@ INDEX_HTML = r"""<!doctype html>
       els.voiceCommandTemplate.value = settings.voiceCommandTemplate || '';
       setIfExists(els.voiceTimeout, normalizeVoiceTimeout(settings.voiceTimeout));
       els.aliyunTtsApiKey.value = settings.aliyunTtsApiKey || '';
-      els.aliyunTtsWorkspaceId.value = settings.aliyunTtsWorkspaceId || '';
-      els.aliyunTtsEndpoint.value = settings.aliyunTtsEndpoint || '';
-      setIfExists(els.aliyunTtsModel, settings.aliyunTtsModel || 'cosyvoice-v3-flash');
-      els.aliyunTtsVoice.value = settings.aliyunTtsVoice || 'longanyang';
+      els.aliyunTtsWorkspaceId.value = '';
+      els.aliyunTtsEndpoint.value = '';
+      setIfExists(els.aliyunTtsModel, 'cosyvoice-v3-flash');
+      setIfExists(els.aliyunTtsVoice, settings.aliyunTtsVoice || 'longanyang');
       setIfExists(els.aliyunTtsFormat, settings.aliyunTtsFormat || 'wav');
-      setIfExists(els.aliyunTtsSampleRate, settings.aliyunTtsSampleRate || '24000');
-      els.aliyunTtsVolume.value = settings.aliyunTtsVolume || '';
-      els.aliyunTtsRate.value = settings.aliyunTtsRate || '';
-      els.aliyunTtsPitch.value = settings.aliyunTtsPitch || '';
-      els.aliyunTtsBitRate.value = settings.aliyunTtsBitRate || '';
-      els.aliyunTtsSeed.value = settings.aliyunTtsSeed || '';
-      els.aliyunTtsLanguageHint.value = settings.aliyunTtsLanguageHint || '';
-      els.aliyunTtsInstruction.value = settings.aliyunTtsInstruction || '';
-      setIfExists(els.aliyunTtsEnableSsml, settings.aliyunTtsEnableSsml || 'off');
-      setIfExists(els.aliyunTtsWordTimestamp, settings.aliyunTtsWordTimestamp || 'off');
-      setIfExists(els.aliyunTtsEnableAigcTag, settings.aliyunTtsEnableAigcTag || 'off');
-      setIfExists(els.aliyunTtsMarkdownFilter, settings.aliyunTtsMarkdownFilter || 'off');
-      els.aliyunTtsAigcPropagator.value = settings.aliyunTtsAigcPropagator || '';
-      els.aliyunTtsAigcPropagateId.value = settings.aliyunTtsAigcPropagateId || '';
+      setIfExists(els.aliyunTtsSampleRate, '24000');
+      els.aliyunTtsVolume.value = '';
+      els.aliyunTtsRate.value = '';
+      els.aliyunTtsPitch.value = '';
+      els.aliyunTtsBitRate.value = '';
+      els.aliyunTtsSeed.value = '';
+      els.aliyunTtsLanguageHint.value = '';
+      els.aliyunTtsInstruction.value = '';
+      setIfExists(els.aliyunTtsEnableSsml, 'off');
+      setIfExists(els.aliyunTtsWordTimestamp, 'off');
+      setIfExists(els.aliyunTtsEnableAigcTag, 'off');
+      setIfExists(els.aliyunTtsMarkdownFilter, 'off');
+      els.aliyunTtsAigcPropagator.value = '';
+      els.aliyunTtsAigcPropagateId.value = '';
       syncVoiceCommandTemplateForMode();
       setIfExists(els.imageTool, settings.imageTool);
       els.imagePositivePrompt.value = settings.imagePositivePrompt || '';
@@ -7817,7 +7828,18 @@ INDEX_HTML = r"""<!doctype html>
       if (knownDefaults.includes(current)) {
         els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
       }
+      syncVoiceModeVisibility();
       saveSettings();
+    }
+
+    function syncVoiceModeVisibility() {
+      const mode = els.voiceMode?.value || 'off';
+      const isAliyun = mode === 'aliyun_cosyvoice';
+      if (els.aliyunTtsConfigCard) els.aliyunTtsConfigCard.hidden = !isAliyun;
+      if (els.voicePresetField) els.voicePresetField.hidden = isAliyun;
+      if (els.voiceReferenceFileField) els.voiceReferenceFileField.hidden = isAliyun;
+      if (els.voiceReferenceAudioPathField) els.voiceReferenceAudioPathField.hidden = isAliyun;
+      if (els.voiceAdvancedCard) els.voiceAdvancedCard.hidden = isAliyun;
     }
 
     function selectedVoicePresetLabel() {
@@ -12327,25 +12349,25 @@ INDEX_HTML = r"""<!doctype html>
           command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
           timeout_seconds: Number(els.voiceTimeout.value || 3600),
           aliyun_api_key: els.aliyunTtsApiKey.value.trim(),
-          aliyun_workspace_id: els.aliyunTtsWorkspaceId.value.trim(),
-          aliyun_endpoint: els.aliyunTtsEndpoint.value.trim(),
-          aliyun_model: els.aliyunTtsModel.value,
-          aliyun_voice: els.aliyunTtsVoice.value.trim() || 'longanyang',
+          aliyun_workspace_id: '',
+          aliyun_endpoint: '',
+          aliyun_model: 'cosyvoice-v3-flash',
+          aliyun_voice: els.aliyunTtsVoice.value || 'longanyang',
           aliyun_format: els.aliyunTtsFormat.value,
-          aliyun_sample_rate: Number(els.aliyunTtsSampleRate.value || 24000),
-          aliyun_volume: els.aliyunTtsVolume.value.trim(),
-          aliyun_rate: els.aliyunTtsRate.value.trim(),
-          aliyun_pitch: els.aliyunTtsPitch.value.trim(),
-          aliyun_bit_rate: els.aliyunTtsBitRate.value.trim(),
-          aliyun_seed: els.aliyunTtsSeed.value.trim(),
-          aliyun_language_hint: els.aliyunTtsLanguageHint.value.trim(),
-          aliyun_instruction: els.aliyunTtsInstruction.value.trim(),
-          aliyun_enable_ssml: els.aliyunTtsEnableSsml.value === 'on',
-          aliyun_word_timestamp_enabled: els.aliyunTtsWordTimestamp.value === 'on',
-          aliyun_enable_aigc_tag: els.aliyunTtsEnableAigcTag.value === 'on',
-          aliyun_enable_markdown_filter: els.aliyunTtsMarkdownFilter.value === 'on',
-          aliyun_aigc_propagator: els.aliyunTtsAigcPropagator.value.trim(),
-          aliyun_aigc_propagate_id: els.aliyunTtsAigcPropagateId.value.trim(),
+          aliyun_sample_rate: 24000,
+          aliyun_volume: '',
+          aliyun_rate: '',
+          aliyun_pitch: '',
+          aliyun_bit_rate: '',
+          aliyun_seed: '',
+          aliyun_language_hint: '',
+          aliyun_instruction: '',
+          aliyun_enable_ssml: false,
+          aliyun_word_timestamp_enabled: false,
+          aliyun_enable_aigc_tag: false,
+          aliyun_enable_markdown_filter: false,
+          aliyun_aigc_propagator: '',
+          aliyun_aigc_propagate_id: '',
         },
         compose_config: {
           tool: els.composeTool.value,
@@ -13916,6 +13938,7 @@ INDEX_HTML = r"""<!doctype html>
       els.referenceNote.value = '';
       clearReferenceFiles();
       syncCustomModelState(false);
+      syncVoiceModeVisibility();
       setStatus('已清除本地保存配置');
     };
     els.referenceImages.onchange = () => {
