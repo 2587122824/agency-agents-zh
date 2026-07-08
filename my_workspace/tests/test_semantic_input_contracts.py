@@ -778,6 +778,54 @@ class SemanticInputContractTests(unittest.TestCase):
             )
         )
 
+    def test_visual_prompt_policy_avoids_text_generation_cues(self) -> None:
+        plan = compile_production_plan(
+            task_id="task_text_guard",
+            route_content=json.dumps({"production_type": "drama_story", "visual_style": "3D卡通动画"}, ensure_ascii=False),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "asset_scene_bedroom",
+                                "asset_role": "scene",
+                                "prompt": "温暖卧室，清晨光线，床头柜和闹钟。",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+        item = plan["compiled_payload"]["image_prompts"][0]
+        self.assertIn("不生成任何可读文字", item["prompt"])
+        self.assertNotIn("标题、字幕和大段文字", item["prompt"])
+        self.assertIn("visible text", item["negative_prompt"])
+
+    def test_runninghub_text_node_sanitizer_removes_file_tokens(self) -> None:
+        rows = CloudComfyUIAdapter._sanitize_text_node_info_values(
+            [
+                {
+                    "nodeId": "34",
+                    "fieldName": "value",
+                    "description": "当前镜头提示词",
+                    "fieldValue": "让角色看向 openapi/abc123.png，并参考 job_asset_scene_bedroom 的构图。",
+                },
+                {
+                    "nodeId": "2",
+                    "fieldName": "image",
+                    "description": "图生图参考图",
+                    "fieldValue": "openapi/abc123.png",
+                },
+            ]
+        )
+
+        self.assertNotIn("openapi/abc123.png", rows[0]["fieldValue"])
+        self.assertNotIn("job_asset_scene_bedroom", rows[0]["fieldValue"])
+        self.assertEqual(rows[1]["fieldValue"], "openapi/abc123.png")
+
     def test_keyframe_modes_are_explicit_and_typed(self) -> None:
         modes = {item["value"]: item for item in self.workflows["04_keyframe"]["modes"]}
         self.assertEqual(modes["keyframe"]["required_inputs"], [])

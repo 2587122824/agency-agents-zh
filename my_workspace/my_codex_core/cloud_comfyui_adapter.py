@@ -956,6 +956,7 @@ class CloudComfyUIAdapter:
             replacements[f"{{{{character_position_{index}}}}}"] = str(character_ref.get("position") or "")
         if node_info:
             node_info = self._replace_placeholders(node_info, replacements)
+            node_info = self._sanitize_text_node_info_values(node_info)
             node_info = self._override_dimension_node_info(node_info, comfyui_payload)
             node_info = self._normalize_numeric_node_info(node_info, seed_value, denoise_value)
             node_info = self._drop_empty_image_node_info(node_info)
@@ -2806,6 +2807,49 @@ class CloudComfyUIAdapter:
         if isinstance(value, dict):
             return {key: cls._replace_placeholders(item, replacements) for key, item in value.items()}
         return value
+
+    @classmethod
+    def _sanitize_text_node_info_values(cls, node_info: list[Any]) -> list[Any]:
+        sanitized: list[Any] = []
+        for item in node_info:
+            if not isinstance(item, dict):
+                sanitized.append(item)
+                continue
+            updated = dict(item)
+            value = updated.get("fieldValue")
+            if isinstance(value, str) and cls._is_text_prompt_node_info(updated):
+                updated["fieldValue"] = cls._strip_prompt_engineering_artifacts(value)
+            sanitized.append(updated)
+        return sanitized
+
+    @staticmethod
+    def _is_text_prompt_node_info(item: dict[str, Any]) -> bool:
+        field_name = str(item.get("fieldName") or "").strip().lower()
+        description = str(item.get("description") or "").strip().lower()
+        if field_name in {"prompt", "text", "positive", "negative_prompt", "caption"}:
+            return True
+        if any(token in description for token in ("提示词", "prompt", "文案", "caption")):
+            return True
+        value = str(item.get("fieldValue") or "").strip()
+        return field_name == "value" and len(value) > 40 and not re.fullmatch(r"[-+]?\d+(?:\.\d+)?", value)
+
+    @staticmethod
+    def _strip_prompt_engineering_artifacts(text: str) -> str:
+        value = str(text or "")
+        patterns = (
+            r"\bopenapi/[A-Za-z0-9._/\-]+\.(?:png|jpe?g|webp|mp4|mov|webm)\b",
+            r"\bcomfyui_result_\d+\.(?:png|jpe?g|webp|mp4|mov|webm)\b",
+            r"\b(?:generated_images|video_clips|image_prompts|video_prompts|my_workspace)[\\/][^\s，,。；;：:]+",
+            r"\b[A-Za-z]:[\\/][^\s，,。；;：:]+",
+            r"\bjob_[A-Za-z0-9_\-]+\b",
+            r"\b(?:asset|shot|vid_clip|kf_shot)_[A-Za-z0-9_\-]+\b",
+        )
+        for pattern in patterns:
+            value = re.sub(pattern, "", value, flags=re.IGNORECASE)
+        value = re.sub(r"\s{2,}", " ", value)
+        value = re.sub(r"\s*([，,。；;：:])\s*([，,。；;：:])+", r"\1", value)
+        value = re.sub(r"\s+([，,。；;：:])", r"\1", value)
+        return value.strip()
 
     @classmethod
     def _override_dimension_node_info(cls, node_info: list[Any], payload: dict[str, Any]) -> list[Any]:

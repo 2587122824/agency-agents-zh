@@ -68,13 +68,18 @@ UNIVERSAL_VISUAL_STYLE_POSITIVE = (
     "全片视觉一致性约束：所有角色、场景、道具、关键帧、封面和视频片段必须保持同一个美术风格、同一种媒介质感、"
     "同一套光线方向、色彩饱和度、镜头语言和画面颗粒；只允许根据剧情改变动作、表情、构图和局部道具。"
     "不要在同一任务内混用真人摄影、3D渲染、2D插画、扁平贴纸、漫画、产品棚拍等不同视觉体系。"
-    "画面内文字仅在明确要求时生成；标题、字幕和大段文字优先留给后期排版。"
 )
 UNIVERSAL_VISUAL_STYLE_NEGATIVE = (
     "mixed visual styles, inconsistent art direction, inconsistent render medium, style drift, "
     "photorealistic and cartoon mixed together, 2D and 3D mixed together, live-action background with illustrated subject, "
     "different lighting style, different color palette, random material change, glossy wet skin unless requested, "
-    "flat sticker mixed with realistic render, malformed text, gibberish text, large readable title text unless requested"
+    "flat sticker mixed with realistic render, any visible text, readable text, Chinese characters, subtitles, captions, "
+    "title text, logo, watermark, UI text, screen text, sign text, poster text, malformed text, gibberish text"
+)
+VISUAL_NO_TEXT_POSITIVE = "画面保持干净，不生成任何可读文字、标题、字幕、标签、UI、招牌字、水印或乱码；文字信息全部留给后期剪辑排版。"
+VISUAL_NO_TEXT_NEGATIVE = (
+    "visible text, readable text, Chinese text, English text, subtitles, captions, title, labels, logo, watermark, "
+    "UI, screen text, sign text, poster text, random letters, malformed characters, gibberish"
 )
 
 
@@ -1111,6 +1116,25 @@ def _apply_visual_style_policy(item: dict[str, Any], *, global_context: dict[str
         "positive_prompt": positive,
         "negative_prompt": negative,
     }
+    _apply_no_text_visual_policy(item)
+
+
+def _apply_no_text_visual_policy(item: dict[str, Any]) -> None:
+    item["prompt"] = _remove_text_generation_cues(str(item.get("prompt") or ""))
+    item["prompt"] = _append_prompt_once(str(item.get("prompt") or ""), VISUAL_NO_TEXT_POSITIVE)
+    mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
+    reference_edit_modes = {"img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe", "pose_identity_keyframe"}
+    if mode not in reference_edit_modes:
+        item["negative_prompt"] = _append_prompt_once(str(item.get("negative_prompt") or ""), VISUAL_NO_TEXT_NEGATIVE)
+
+
+def _remove_text_generation_cues(prompt: str) -> str:
+    text = str(prompt or "")
+    text = re.sub(r"画面内文字仅在明确要求时生成[；;，,。]?.*?(?:后期排版|排版)[。；;]?", "", text)
+    text = re.sub(r"(?:封面)?(?:主标题|副标题|标题|字幕|文字标签|文案)[:：][^。；;\\n]*[。；;]?", "", text)
+    text = re.sub(r"(?i)(?:title|subtitle|caption|text label)\\s*[:：][^.。；;\\n]*[.。；;]?", "", text)
+    text = re.sub(r"\\s{2,}", " ", text)
+    return text.strip(" ，,。；;")
 
 
 def _looks_like_live_action_context(text: str) -> bool:
