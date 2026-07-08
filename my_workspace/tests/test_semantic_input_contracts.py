@@ -24,6 +24,7 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
 from my_codex_core.production_entities import entity_context_for_ids, normalize_production_entities  # noqa: E402
 from my_codex_core.production_pipeline import (  # noqa: E402
     _clean_voice_text,
+    _filter_skip_execution_visual_nodes,
     _packaging_dependency_blockers,
     _payload_has_required_mode,
     _extract_voice_text,
@@ -243,6 +244,28 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertFalse(payload.get("video_prompts"))
         self.assertFalse([job for job in plan["visual_jobs"] if job.get("type") == "video"])
         self.assertTrue(any("skip_asset_only_video" in note for note in plan["compile_notes"]))
+
+    def test_ffmpeg_manifest_filter_removes_skip_video_placeholders(self) -> None:
+        manifest = {
+            "production_nodes": [
+                {
+                    "job_id": "skip_asset_only_video",
+                    "stage": "visual",
+                    "status": "success",
+                    "outputs": ["comfyui/job_skip_asset_only_video/comfyui_result_01.mp4"],
+                },
+                {
+                    "job_id": "shot_001_keyframe",
+                    "stage": "visual",
+                    "status": "success",
+                    "outputs": ["comfyui/job_shot_001_keyframe/comfyui_result_01.png"],
+                },
+            ]
+        }
+
+        filtered = _filter_skip_execution_visual_nodes(manifest)
+        self.assertEqual(len(filtered["production_nodes"]), 1)
+        self.assertEqual(filtered["production_nodes"][0]["job_id"], "shot_001_keyframe")
 
     def test_normalizes_package_delivery_resolution_to_locked_delivery_size(self) -> None:
         content = json.dumps(

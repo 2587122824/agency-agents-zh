@@ -1469,7 +1469,7 @@ def _run_local_ffmpeg_adapter(
             task_dir=task_dir,
             paths=paths,
             compose_config=compose_config,
-            manifest=manifest,
+            manifest=_filter_skip_execution_visual_nodes(manifest),
         )
     except Exception as exc:
         error_path = task_dir / "local_ffmpeg_error.json"
@@ -1478,6 +1478,40 @@ def _run_local_ffmpeg_adapter(
             encoding="utf-8",
         )
         return {"status": "failed", "error": str(exc), "manifest_file": str(error_path)}
+
+
+def _filter_skip_execution_visual_nodes(manifest: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(manifest, dict):
+        return manifest
+    filtered = json.loads(json.dumps(manifest, ensure_ascii=False))
+    nodes = filtered.get("production_nodes")
+    if not isinstance(nodes, list):
+        return filtered
+    filtered["production_nodes"] = [
+        node
+        for node in nodes
+        if not (isinstance(node, dict) and _is_skip_execution_visual_node(node))
+    ]
+    return filtered
+
+
+def _is_skip_execution_visual_node(node: dict[str, Any]) -> bool:
+    if str(node.get("stage") or "").strip() != "visual":
+        return False
+    raw_parts: list[str] = []
+    for key in ("job_id", "name", "mode", "workflow_id", "business_asset_id", "prompt", "error"):
+        raw_parts.append(str(node.get(key) or ""))
+    for key in ("outputs", "downloaded_files"):
+        value = node.get(key)
+        if isinstance(value, list):
+            raw_parts.extend(str(item or "") for item in value)
+    text = " ".join(raw_parts).lower()
+    return (
+        "skip_asset_only_video" in text
+        or "skip_video_placeholder" in text
+        or "skip_execution" in text
+        or ("placeholder" in text and (".mp4" in text or "video" in text))
+    )
 
 
 def _run_comfyui_adapter(
