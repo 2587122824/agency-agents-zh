@@ -15234,7 +15234,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _is_failed_production_status(status: str) -> bool:
         if not status or status == "off":
             return False
-        failed_keywords = ("failed", "partial", "quality_failed", "adapter_failed", "timeout")
+        failed_keywords = ("failed", "partial", "quality_failed", "adapter_failed", "adapter_skipped", "timeout")
         return any(keyword in status for keyword in failed_keywords)
 
     @staticmethod

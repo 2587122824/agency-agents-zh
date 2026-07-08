@@ -23,9 +23,11 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
 )
 from my_codex_core.production_entities import entity_context_for_ids, normalize_production_entities  # noqa: E402
 from my_codex_core.production_pipeline import (  # noqa: E402
+    _active_visual_jobs_for_mode,
     _clean_voice_text,
     _filter_skip_execution_visual_nodes,
     _packaging_dependency_blockers,
+    _payload_for_material_type,
     _payload_has_required_mode,
     _extract_voice_text,
     _quality_check_voice_text,
@@ -2042,6 +2044,31 @@ class SemanticInputContractTests(unittest.TestCase):
             )
             self.assertEqual(result["status"], "skipped")
             self.assertNotIn("compose tool is not ffmpeg", result["reason"])
+
+    def test_api_ready_visual_jobs_are_image_only(self) -> None:
+        jobs = [
+            {"job_id": "asset_1", "capability": "image_generate", "workflow_id": "04_keyframe"},
+            {"job_id": "clip_1", "capability": "video_generate", "workflow_id": "06_i2v_first_frame"},
+            {"job_id": "enhance_1", "capability": "video_enhance", "workflow_id": "11_video_enhance"},
+        ]
+        self.assertEqual([job["job_id"] for job in _active_visual_jobs_for_mode("api_ready", jobs)], ["asset_1"])
+        self.assertEqual([job["job_id"] for job in _active_visual_jobs_for_mode("comfy_full", jobs)], ["asset_1", "clip_1", "enhance_1"])
+
+    def test_api_ready_payload_removes_video_prompts(self) -> None:
+        payload = {
+            "image_prompts": [{"id": "image_1", "prompt": "frame"}],
+            "video_prompts": [{"id": "clip_1", "prompt": "motion"}],
+            "video_prompt": "motion",
+            "global_context": {"characters": []},
+        }
+        filtered = _payload_for_material_type(payload, "image")
+        self.assertIn("image_prompts", filtered)
+        self.assertNotIn("video_prompts", filtered)
+        self.assertNotIn("video_prompt", filtered)
+        self.assertEqual(filtered["global_context"], {"characters": []})
+
+    def test_api_adapter_skipped_is_failed_production_status(self) -> None:
+        self.assertTrue(web_app.WorkflowWebHandler._is_failed_production_status("api_adapter_skipped"))
 
     def test_local_ffmpeg_project_relative_output_path_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

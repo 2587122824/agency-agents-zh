@@ -148,10 +148,11 @@ def run_auto_production(
             previous_production_plan,
             plan_visual_jobs,
         )
-    required_workflow_slots = _required_workflow_slots(plan_visual_jobs)
+    active_visual_jobs = _active_visual_jobs_for_mode(mode, plan_visual_jobs)
+    required_workflow_slots = _required_workflow_slots(active_visual_jobs)
     configured_workflow_slots = _configured_workflow_slots(compose_config.get("workflow_library"))
     missing_workflow_slots = _missing_workflow_slots(required_workflow_slots, configured_workflow_slots)
-    write_graph_json(production_graph_path, build_production_graph(task_dir.name, plan_visual_jobs, global_context, packaging_jobs))
+    write_graph_json(production_graph_path, build_production_graph(task_dir.name, active_visual_jobs, global_context, packaging_jobs))
     compose_config.update(
         {
             "production_graph_path": str(production_graph_path),
@@ -159,7 +160,7 @@ def run_auto_production(
             "execution_mode": mode,
             "global_context": global_context,
             "packaging_jobs": packaging_jobs,
-            "production_plan_visual_jobs": plan_visual_jobs,
+            "production_plan_visual_jobs": active_visual_jobs,
         }
     )
     _write_text(checklist_path, _build_edit_checklist(image_step, video_step, audio_step, None, edit_step, image_config, video_config, compose_config))
@@ -340,6 +341,15 @@ def run_auto_production(
 
     def run_material_branch() -> tuple[str, dict[str, Any] | None]:
         if mode == "api_ready":
+            if _api_ready_uses_comfyui_image_slots(compose_config):
+                emit("开始调用 ComfyUI/RunningHub 图片素材槽位", stage="image")
+                return "comfyui_image", _run_api_ready_comfyui_image_adapter(
+                    comfyui_payload,
+                    compose_config,
+                    quality_config,
+                    paths["generated_images"],
+                    progress_callback=progress_callback,
+                )
             emit("开始图片素材生成/匹配", stage="image")
             return "image", _run_image_adapter(image_content, image_config, paths["generated_images"])
         if mode == "comfy_full":
@@ -401,6 +411,55 @@ def run_auto_production(
                 stage="image",
                 status=image_adapter_result.get("status") or "",
                 downloaded_count=len(image_adapter_result.get("downloaded_files") or []),
+            )
+        manifest["video_generation"]["adapter_status"] = "skipped"
+        manifest["video_generation"]["skip_reason"] = "api_ready mode is image-only; video generation is disabled."
+
+    def apply_comfyui_image_result(comfyui_adapter_result: dict[str, Any] | None) -> None:
+        if comfyui_adapter_result:
+            status = comfyui_adapter_result.get("status") or "failed"
+            manifest["image_generation"]["tool"] = "comfyui"
+            manifest["image_generation"]["adapter_status"] = status
+            manifest["image_generation"]["adapter_manifest"] = comfyui_adapter_result.get("manifest_file", "")
+            manifest["image_generation"]["downloaded_files"] = comfyui_adapter_result.get("downloaded_files", [])
+            manifest["image_generation"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
+            manifest["image_generation"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
+            manifest["image_generation"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
+            manifest["image_generation"]["production_job_state"] = comfyui_adapter_result.get("job_state_file", "")
+            if comfyui_adapter_result.get("reason"):
+                manifest["image_generation"]["reason"] = comfyui_adapter_result.get("reason", "")
+            manifest["artifacts"] = comfyui_adapter_result.get("artifacts", [])
+            for node in comfyui_adapter_result.get("jobs", []):
+                if not isinstance(node, dict):
+                    continue
+                _upsert_production_node(
+                    manifest,
+                    str(node.get("job_id") or node.get("name") or "image_material"),
+                    stage="visual",
+                    mode=str(node.get("mode") or ""),
+                    status=str(node.get("status") or "unknown"),
+                    depends_on=node.get("depends_on") or [],
+                    outputs=node.get("downloaded_files") or [],
+                    attempts=int(node.get("attempts") or 1),
+                    cache_hit=bool(node.get("cache_hit")),
+                    error=str(node.get("error") or node.get("reason") or ""),
+                    optional_when_unconfigured=_as_bool(node.get("optional_when_unconfigured"), default=False),
+                )
+            if status == "success":
+                manifest["status"] = "image_generated"
+            elif status == "partial_success":
+                manifest["status"] = "image_partial_failed"
+            elif status == "skipped":
+                manifest["status"] = "api_adapter_skipped"
+                manifest["image_generation"]["skip_reason"] = comfyui_adapter_result.get("reason", "")
+            else:
+                manifest["status"] = "image_adapter_failed"
+            emit(
+                f"图片素材阶段结束：{status}，下载 {len(comfyui_adapter_result.get('downloaded_files') or [])} 个素材",
+                stage="image",
+                status=status,
+                downloaded_count=len(comfyui_adapter_result.get("downloaded_files") or []),
+                quality_score=comfyui_adapter_result.get("quality_score", 0),
             )
         manifest["video_generation"]["adapter_status"] = "skipped"
         manifest["video_generation"]["skip_reason"] = "api_ready mode is image-only; video generation is disabled."
@@ -508,6 +567,8 @@ def run_auto_production(
         material_kind, material_result = run_material_branch()
         if material_kind == "image":
             apply_image_result(material_result)
+        elif material_kind == "comfyui_image":
+            apply_comfyui_image_result(material_result)
         elif material_kind == "comfyui":
             apply_comfyui_result(material_result)
         return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "ComfyUI 素材门禁完成")
@@ -526,6 +587,8 @@ def run_auto_production(
             material_kind, material_result = run_material_branch()
             if material_kind == "image":
                 apply_image_result(material_result)
+            elif material_kind == "comfyui_image":
+                apply_comfyui_image_result(material_result)
             elif material_kind == "comfyui":
                 apply_comfyui_result(material_result)
         else:
@@ -547,6 +610,8 @@ def run_auto_production(
             tts_kind, tts_result = tts_future.result()
         if material_kind == "image":
             apply_image_result(material_result)
+        elif material_kind == "comfyui_image":
+            apply_comfyui_image_result(material_result)
         elif material_kind == "comfyui":
             apply_comfyui_result(material_result)
         if tts_kind == "tts":
@@ -556,6 +621,8 @@ def run_auto_production(
             material_kind, material_result = run_material_branch()
             if material_kind == "image":
                 apply_image_result(material_result)
+            elif material_kind == "comfyui_image":
+                apply_comfyui_image_result(material_result)
             elif material_kind == "comfyui":
                 apply_comfyui_result(material_result)
         if tts_enabled:
@@ -979,14 +1046,29 @@ def _retry_material_job(
     progress_callback=None,
 ) -> dict[str, Any]:
     if mode == "api_ready":
-        prompt_path = paths["image_prompts"] / "storyboard_image_prompts.md"
-        image_content = prompt_path.read_text(encoding="utf-8", errors="replace") if prompt_path.is_file() else ""
         emit("retrying image material generation", stage="image")
-        result = _run_image_adapter(image_content, image_config, paths["generated_images"]) or {"status": "skipped"}
+        if _api_ready_uses_comfyui_image_slots(compose_config):
+            payload_path = paths["comfyui"] / "comfyui_payload.json"
+            payload = _load_comfyui_payload_with_fallback(payload_path) if payload_path.is_file() else {}
+            result = _run_api_ready_comfyui_image_adapter(
+                payload,
+                compose_config,
+                quality_config,
+                paths["generated_images"],
+                progress_callback=progress_callback,
+            ) or {"status": "skipped"}
+        else:
+            prompt_path = paths["image_prompts"] / "storyboard_image_prompts.md"
+            image_content = prompt_path.read_text(encoding="utf-8", errors="replace") if prompt_path.is_file() else ""
+            result = _run_image_adapter(image_content, image_config, paths["generated_images"]) or {"status": "skipped"}
         image_generation = manifest.setdefault("image_generation", {})
+        image_generation["tool"] = "comfyui" if _api_ready_uses_comfyui_image_slots(compose_config) else image_generation.get("tool", "")
         image_generation["adapter_status"] = result.get("status") or "failed"
         image_generation["adapter_manifest"] = result.get("manifest_file", "")
         image_generation["downloaded_files"] = result.get("downloaded_files", [])
+        image_generation["quality_report"] = result.get("quality_report", "")
+        image_generation["quality_score"] = result.get("quality_score", 0)
+        image_generation["production_job_state"] = result.get("job_state_file", "")
         video_generation = manifest.setdefault("video_generation", {})
         video_generation["adapter_status"] = "skipped"
         video_generation["skip_reason"] = "api_ready mode is image-only; video generation is disabled."
@@ -1378,20 +1460,21 @@ def _refresh_visual_plan_for_retry(
     write_production_plan(plan_path, production_plan)
     _write_text(payload_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
+    active_visual_jobs = _active_visual_jobs_for_mode(str(manifest.get("mode") or ""), visual_jobs)
     voice_text_quality = _quality_check_voice_text(_extract_voice_text(audio_content))
     packaging_jobs = _packaging_graph_jobs(payload, voice_config, voice_text_quality.get("usable"))
-    write_graph_json(graph_path, build_production_graph(task_dir.name, visual_jobs, global_context, packaging_jobs))
+    write_graph_json(graph_path, build_production_graph(task_dir.name, active_visual_jobs, global_context, packaging_jobs))
     compose_config.update(
         {
             "production_graph_path": str(graph_path),
             "production_task_id": task_dir.name,
             "global_context": global_context,
             "packaging_jobs": packaging_jobs,
-            "production_plan_visual_jobs": visual_jobs,
+            "production_plan_visual_jobs": active_visual_jobs,
         }
     )
 
-    required = _required_workflow_slots(visual_jobs)
+    required = _required_workflow_slots(active_visual_jobs)
     configured = _configured_workflow_slots(compose_config.get("workflow_library"))
     composition = manifest.setdefault("composition", {})
     composition["required_workflow_slots"] = required
@@ -1427,6 +1510,87 @@ def _retry_quality_config(manifest: dict[str, Any], config: dict[str, Any]) -> d
     }
     base.update({key: value for key, value in override.items() if value not in (None, "")})
     return base
+
+
+def _active_visual_jobs_for_mode(mode: str, plan_visual_jobs: Any) -> list[dict[str, Any]]:
+    if not isinstance(plan_visual_jobs, list):
+        return []
+    jobs = [job for job in plan_visual_jobs if isinstance(job, dict)]
+    if str(mode or "").strip() == "api_ready":
+        return [job for job in jobs if _visual_job_material_type(job) == "image"]
+    return jobs
+
+
+def _visual_job_material_type(job: dict[str, Any]) -> str:
+    for key in ("type", "material_type", "resource_class"):
+        value = str(job.get(key) or "").strip().lower()
+        if "image" in value:
+            return "image"
+        if "video" in value:
+            return "video"
+    capability = str(job.get("capability") or "").strip().lower()
+    if "image" in capability:
+        return "image"
+    if "video" in capability:
+        return "video"
+    workflow_id = str(job.get("workflow_id") or "").strip().lower()
+    if workflow_id.startswith(("01_", "02_", "03_", "04_", "05_")):
+        return "image"
+    if workflow_id.startswith(("06_", "07_", "08_", "09_", "10_", "11_", "12_")):
+        return "video"
+    return ""
+
+
+def _api_ready_uses_comfyui_image_slots(compose_config: dict[str, Any]) -> bool:
+    if not isinstance(compose_config, dict):
+        return False
+    provider_profile = build_visual_provider_profile(compose_config)
+    if not provider_profile.get("supported"):
+        return False
+    base_url = str(compose_config.get("base_url") or "").strip()
+    endpoint = str(compose_config.get("workflow_endpoint") or compose_config.get("endpoint") or "").strip()
+    node_info = str(compose_config.get("node_info_list_json") or "").strip()
+    has_selected_slot = bool(base_url and endpoint and node_info and node_info != "[]")
+    return bool(has_selected_slot or _configured_workflow_slots(compose_config.get("workflow_library")))
+
+
+def _run_api_ready_comfyui_image_adapter(
+    comfyui_payload: dict[str, Any],
+    compose_config: dict[str, Any],
+    quality_config: dict[str, Any],
+    output_dir: Path,
+    progress_callback=None,
+) -> dict[str, Any] | None:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    image_payload = _payload_for_material_type(comfyui_payload, "image")
+    image_compose_config = dict(compose_config)
+    image_compose_config["execution_mode"] = "api_ready"
+    image_compose_config["production_plan_visual_jobs"] = _active_visual_jobs_for_mode(
+        "api_ready",
+        compose_config.get("production_plan_visual_jobs"),
+    )
+    image_compose_config["packaging_jobs"] = []
+    payload_path = output_dir / "api_ready_image_payload.json"
+    payload_path.write_text(json.dumps(image_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return _run_comfyui_adapter_with_quality_gate(
+        payload_path,
+        image_compose_config,
+        quality_config,
+        output_dir,
+        progress_callback=progress_callback,
+    )
+
+
+def _payload_for_material_type(payload: dict[str, Any], material_type: str) -> dict[str, Any]:
+    filtered = json.loads(json.dumps(payload if isinstance(payload, dict) else {}, ensure_ascii=False))
+    target = str(material_type or "").strip().lower()
+    if target == "image":
+        for key in ("video_prompt", "video_prompts", "video_task_mode", "video_task_type"):
+            filtered.pop(key, None)
+    elif target == "video":
+        for key in ("image_prompt", "image_prompts", "image_task_mode", "image_task_type"):
+            filtered.pop(key, None)
+    return filtered
 
 
 def _run_local_tts_adapter(
