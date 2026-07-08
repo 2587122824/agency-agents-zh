@@ -130,9 +130,13 @@ class TaskStateCenter:
         if summary_status in {"failed", "error"}:
             return "failed"
         if summary_status == "paused":
+            production = self._production()
+            if self._production_has_active_work(production):
+                return "running"
             return "paused"
         if summary_status in {"completed", "success"}:
-            return "completed"
+            production = self._production()
+            return "completed" if self._has_final_media(production) else self._state_for_unfinished_production(production)
         if self.summary.get("awaiting_confirmation"):
             return "awaiting_confirmation"
         if str(self.summary.get("blocked_reason") or "").strip():
@@ -149,10 +153,32 @@ class TaskStateCenter:
         total_steps = int(self.summary.get("total_steps") or 0)
         completed_steps = int(self.summary.get("completed_steps") or self.summary.get("step_count") or 0)
         if (self.summary.get("final_output") or "final_output.md" in self.files) and self.summary and total_steps > 0 and completed_steps >= total_steps:
-            return "completed"
+            production = self._production()
+            return "completed" if self._has_final_media(production) else self._state_for_unfinished_production(production)
         if any(file.startswith("step_") for file in self.files):
             return "partial"
         return "empty"
+
+    def _state_for_unfinished_production(self, production: dict[str, Any]) -> str:
+        status = str(production.get("status") or "").strip().lower()
+        if self._is_failed_status(status):
+            return "failed"
+        jobs = production.get("jobs") if isinstance(production.get("jobs"), list) else []
+        job_statuses = [str(job.get("status") or "").strip().lower() for job in jobs if isinstance(job, dict)]
+        if any(item in {"running", "queued"} for item in job_statuses):
+            return "running"
+        if any(item in {"pending", "not_started"} for item in job_statuses):
+            return "partial"
+        if (self.task_dir / "production_graph.json").is_file() or (self.task_dir / "production_plan.json").is_file():
+            return "partial"
+        return "partial"
+
+    def _production_has_active_work(self, production: dict[str, Any]) -> bool:
+        status = str(production.get("status") or "").strip().lower()
+        if status in {"running", "queued"}:
+            return True
+        jobs = production.get("jobs") if isinstance(production.get("jobs"), list) else []
+        return any(str(job.get("status") or "").strip().lower() in {"running", "queued"} for job in jobs if isinstance(job, dict))
 
     def _steps(self) -> list[dict[str, Any]]:
         workflow_steps = self._workflow_steps()
@@ -241,6 +267,10 @@ class TaskStateCenter:
         manifest, manifest_error = self._json_file_with_error(manifest_path)
         history = manifest.get("production_job_history") if isinstance(manifest.get("production_job_history"), list) else []
         nodes = self._production_nodes(manifest)
+        graph_backed = False
+        if not nodes:
+            nodes = self._production_nodes_from_graph()
+            graph_backed = bool(nodes)
         jobs = self._legacy_jobs_from_manifest(manifest, nodes)
         dag = {
             "nodes": nodes,
@@ -255,7 +285,7 @@ class TaskStateCenter:
         tts = self._stage_status(manifest, jobs, stage_id="tts", node_ids={"local_tts"})
         ffmpeg = self._stage_status(manifest, jobs, stage_id="ffmpeg", node_ids={"ffmpeg_compose", "format_export"})
         manual = self._stage_status(manifest, jobs, stage_id="manual_debug", node_ids=set())
-        status = str(manifest.get("status") or self.summary.get("production_status") or "off")
+        status = str(manifest.get("status") or self.summary.get("production_status") or ("running" if graph_backed else "off"))
         composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
         composition = self._normalized_composition_status(composition)
         return {
@@ -271,6 +301,7 @@ class TaskStateCenter:
             "ffmpeg": ffmpeg,
             "manual_debug": manual,
             "allowed_retries": self._allowed_retries(jobs, nodes),
+            "graph_backed": graph_backed,
         }
 
     def _normalized_composition_status(self, composition: dict[str, Any]) -> dict[str, Any]:
@@ -418,6 +449,14 @@ class TaskStateCenter:
             )
         for blocker in blockers:
             diagnostics.append({"level": "warn", "code": blocker.get("code", "blocked"), "message": blocker.get("message", "")})
+        if state in {"running", "partial"} and production.get("graph_backed") and not production.get("manifest_file"):
+            diagnostics.append(
+                {
+                    "level": "info",
+                    "code": "production_materials_in_progress",
+                    "message": "员工步骤已完成，素材生产仍在进行中；production_manifest.json 会在素材/包装阶段返回后写入。",
+                }
+            )
         if state == "completed" and not self._has_final_media(production):
             diagnostics.append({"level": "info", "code": "no_final_media", "message": "任务已有文本结果，但尚未发现最终视频文件。"})
         missing_outputs = [str(step["step"]) for step in steps if step.get("status") in {"completed", "awaiting_confirmation"} and not step.get("has_output")]
@@ -514,6 +553,57 @@ class TaskStateCenter:
             )
         return nodes
 
+    def _production_nodes_from_graph(self) -> list[dict[str, Any]]:
+        graph, _ = self._json_file_with_error(self.task_dir / "production_graph.json")
+        jobs = graph.get("jobs") if isinstance(graph.get("jobs"), list) else []
+        nodes: list[dict[str, Any]] = []
+        for raw in jobs:
+            if not isinstance(raw, dict) or not raw.get("job_id"):
+                continue
+            job_id = str(raw.get("job_id") or "")
+            runtime = self._visual_job_runtime_state(job_id)
+            status = str(runtime.get("status") or "pending").strip().lower()
+            if status in {"success", "succeeded", "completed", "complete", "done"}:
+                status = "success"
+            elif status in {"running", "queued"}:
+                status = "running"
+            elif status in {"failed", "error", "timeout"}:
+                status = "failed"
+            else:
+                status = "pending"
+            nodes.append(
+                {
+                    "job_id": job_id,
+                    "stage": str(raw.get("stage") or "visual"),
+                    "mode": str(raw.get("mode") or ""),
+                    "status": status,
+                    "depends_on": [str(value) for value in (raw.get("depends_on") or []) if value],
+                    "outputs": [str(value) for value in (runtime.get("files") or []) if value],
+                    "attempts": int(runtime.get("attempts") or 1),
+                    "cache_hit": False,
+                    "optional_when_unconfigured": self._as_bool(raw.get("optional_when_unconfigured"), default=False),
+                    "blocked_reason": str(runtime.get("blocked_reason") or ""),
+                    "error": str(runtime.get("error") or ""),
+                }
+            )
+        return nodes
+
+    def _visual_job_runtime_state(self, job_id: str) -> dict[str, Any]:
+        job_dir = self.task_dir / "generated_images" / f"job_{job_id}"
+        state, _ = self._json_file_with_error(job_dir / "runninghub_task_state.json")
+        files = []
+        if job_dir.is_dir():
+            for path in sorted(job_dir.iterdir()):
+                if path.is_file() and path.suffix.lower() not in {".json", ".txt", ".md"}:
+                    files.append(str(path))
+        status = str(state.get("status") or "").strip().lower()
+        return {
+            "status": status or ("success" if files else "pending"),
+            "files": files,
+            "error": state.get("error") or state.get("message") or "",
+            "attempts": state.get("attempts") or 1,
+        }
+
     def _legacy_jobs_from_manifest(self, manifest: dict[str, Any], nodes: list[dict[str, Any]]) -> list[dict[str, Any]]:
         composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
         audio = manifest.get("audio") if isinstance(manifest.get("audio"), dict) else {}
@@ -524,6 +614,17 @@ class TaskStateCenter:
             material_status = str(composition.get("comfyui_adapter_status") or composition.get("adapter_status") or "not_configured")
         else:
             material_status = str(image_generation.get("adapter_status") or video_generation.get("adapter_status") or "not_configured")
+        if nodes and material_status in {"", "not_configured", "pending"}:
+            visual_statuses = [str(node.get("status") or "pending") for node in nodes if str(node.get("stage") or "") == "visual"]
+            if visual_statuses:
+                if any(status in {"running", "queued"} for status in visual_statuses):
+                    material_status = "running"
+                elif any(self._is_failed_status(status) for status in visual_statuses):
+                    material_status = "failed"
+                elif all(status in {"success", "skipped"} for status in visual_statuses):
+                    material_status = "success"
+                else:
+                    material_status = "pending"
         material_outputs = []
         for key in ("downloaded_files",):
             values = composition.get("comfyui_downloaded_files") or composition.get(key) or image_generation.get(key) or video_generation.get(key) or []

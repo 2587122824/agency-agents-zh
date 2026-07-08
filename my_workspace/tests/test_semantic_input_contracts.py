@@ -566,6 +566,92 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertNotIn("run_comfy_debug", state["allowed_actions"])
             self.assertNotEqual(state["next_action"].get("action"), "run_comfy_debug")
 
+    def test_task_state_does_not_complete_without_final_media_after_employee_steps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            (task_dir / "final_output.md").write_text("# final text only\n", encoding="utf-8")
+            (task_dir / "production_graph.json").write_text(
+                json.dumps(
+                    {
+                        "jobs": [
+                            {
+                                "job_id": "asset_character_master",
+                                "stage": "visual",
+                                "mode": "character_base",
+                                "workflow_id": "01_base_asset_image",
+                                "depends_on": [],
+                                "outputs": ["output_final_image"],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            center = TaskStateCenter(
+                task_dir=task_dir,
+                task_name="task_test",
+                summary={"status": "completed", "step_count": 9, "total_steps": 9, "final_output": str(task_dir / "final_output.md")},
+                files=["final_output.md", "production_graph.json"],
+            )
+
+            state = center.build()
+
+            self.assertNotEqual(state["state"], "completed")
+            self.assertEqual(state["state"], "partial")
+            self.assertTrue(any(item["code"] == "production_materials_in_progress" for item in state["diagnostics"]))
+
+    def test_task_state_exposes_graph_jobs_before_manifest_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            job_dir = task_dir / "generated_images" / "job_asset_character_master"
+            job_dir.mkdir(parents=True)
+            (job_dir / "runninghub_task_state.json").write_text(
+                json.dumps({"status": "RUNNING", "task_id": "remote_123"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            (task_dir / "production_graph.json").write_text(
+                json.dumps(
+                    {
+                        "jobs": [
+                            {
+                                "job_id": "asset_character_master",
+                                "stage": "visual",
+                                "mode": "character_base",
+                                "workflow_id": "01_base_asset_image",
+                                "depends_on": [],
+                                "outputs": ["output_final_image"],
+                            },
+                            {
+                                "job_id": "shot_001_keyframe",
+                                "stage": "visual",
+                                "mode": "identity_keyframe",
+                                "workflow_id": "04_keyframe",
+                                "depends_on": ["asset_character_master"],
+                                "outputs": ["output_final_image"],
+                            },
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            center = TaskStateCenter(
+                task_dir=task_dir,
+                task_name="task_test",
+                summary={"status": "completed", "step_count": 9, "total_steps": 9, "final_output": str(task_dir / "final_output.md")},
+                files=["final_output.md", "production_graph.json"],
+            )
+
+            state = center.build()
+
+            self.assertEqual(state["state"], "running")
+            self.assertTrue(state["production"]["graph_backed"])
+            material = next(job for job in state["production"]["jobs"] if job["id"] == "material")
+            self.assertEqual(material["status"], "running")
+            node = next(job for job in state["production"]["jobs"] if job["id"] == "asset_character_master")
+            self.assertEqual(node["status"], "running")
+
     def test_keyframe_modes_are_explicit_and_typed(self) -> None:
         modes = {item["value"]: item for item in self.workflows["04_keyframe"]["modes"]}
         self.assertEqual(modes["keyframe"]["required_inputs"], [])
