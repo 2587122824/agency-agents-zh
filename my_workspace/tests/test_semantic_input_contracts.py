@@ -421,6 +421,85 @@ class SemanticInputContractTests(unittest.TestCase):
         result = validate_production_output({"agent": "22_剪辑成片执行师"}, normalized["content"], lock)
         self.assertTrue(result["passed"], result["issues"])
 
+    def test_normalizes_package_timeline_small_duration_gap_to_locked_duration(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "package": [
+                        {
+                            "intent": "build_edit_timeline",
+                            "intent_id": "edit_timeline_xiaomei_vlog",
+                            "timeline": [
+                                {"source_intent_id": "clip_001", "start_seconds": 0, "duration_seconds": 30},
+                                {"source_intent_id": "clip_002", "start_seconds": 30, "duration_seconds": 28},
+                            ],
+                        },
+                        {
+                            "intent": "apply_delivery_spec",
+                            "intent_id": "delivery_spec_xiaomei_vlog",
+                            "delivery_resolution": "1080x1920",
+                            "fps": 24,
+                        },
+                    ]
+                },
+                "edit_timeline": [
+                    {"clip_id": "clip_001", "start_seconds": 0, "duration_seconds": 30},
+                    {"clip_id": "clip_002", "start_seconds": 30, "duration_seconds": 28},
+                ],
+                "delivery_spec": {"resolution": "1080x1920", "fps": 24},
+                "missing_assets": [],
+            },
+            ensure_ascii=False,
+        )
+        lock = {
+            "original_requirement": "主角小美打工人的一天vlog，竖屏1分钟",
+            "duration_seconds": 60,
+        }
+
+        normalized = normalize_production_output_content({"agent": "22_剪辑成片执行师"}, f"```json\n{content}\n```", lock)
+
+        self.assertTrue(normalized["changed"])
+        self.assertTrue(any(item["type"] == "locked_package_timeline_duration" for item in normalized["normalizations"]))
+        result = validate_production_output({"agent": "22_剪辑成片执行师"}, normalized["content"], lock)
+        self.assertTrue(result["passed"], result["issues"])
+
+    def test_does_not_normalize_package_timeline_large_duration_gap(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "package": [
+                        {
+                            "intent": "build_edit_timeline",
+                            "intent_id": "edit_timeline_short",
+                            "timeline": [
+                                {"source_intent_id": "clip_001", "start_seconds": 0, "duration_seconds": 20},
+                                {"source_intent_id": "clip_002", "start_seconds": 20, "duration_seconds": 20},
+                            ],
+                        },
+                        {
+                            "intent": "apply_delivery_spec",
+                            "intent_id": "delivery_spec_short",
+                            "delivery_resolution": "1080x1920",
+                            "fps": 24,
+                        },
+                    ]
+                },
+                "delivery_spec": {"resolution": "1080x1920", "fps": 24},
+                "missing_assets": [],
+            },
+            ensure_ascii=False,
+        )
+        lock = {
+            "original_requirement": "主角小美打工人的一天vlog，竖屏1分钟",
+            "duration_seconds": 60,
+        }
+
+        normalized = normalize_production_output_content({"agent": "22_剪辑成片执行师"}, f"```json\n{content}\n```", lock)
+        result = validate_production_output({"agent": "22_剪辑成片执行师"}, normalized["content"], lock)
+
+        self.assertFalse(any(item["type"] == "locked_package_timeline_duration" for item in normalized["normalizations"]))
+        self.assertFalse(result["passed"])
+
     def test_scene_library_fields_are_normalized_for_context(self) -> None:
         registry = normalize_production_entities(
             {

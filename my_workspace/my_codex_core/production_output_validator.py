@@ -92,7 +92,10 @@ def normalize_production_output_content(
                     "height": expected[1],
                 }
             )
-        return {"content": updated, "changed": updated != text, "normalizations": normalizations}
+        duration = int(effective_lock.get("duration_seconds") or 0)
+        timeline_updated, timeline_normalizations = _normalize_package_timeline_duration(updated, duration)
+        normalizations.extend(timeline_normalizations)
+        return {"content": timeline_updated, "changed": timeline_updated != text, "normalizations": normalizations}
 
     expected = _expected_resolution(effective_lock, delivery=False)
     updated = _normalize_work_dimension_keys(text, expected)
@@ -151,6 +154,96 @@ def _normalize_delivery_dimension_keys(content: str, expected: tuple[int, int]) 
             flags=re.IGNORECASE,
         )
     return text
+
+
+def _normalize_package_timeline_duration(content: str, duration: int) -> tuple[str, list[dict[str, Any]]]:
+    if not duration:
+        return content, []
+    text = str(content or "")
+    normalizations: list[dict[str, Any]] = []
+
+    def normalize_payload(payload: dict[str, Any]) -> bool:
+        changed = False
+        for label, timeline in _package_timeline_lists(payload):
+            adjustment = _normalize_timeline_list_to_duration(timeline, duration)
+            if adjustment:
+                normalizations.append({"type": "locked_package_timeline_duration", "timeline": label, **adjustment})
+                changed = True
+        return changed
+
+    def replace_block(match: re.Match[str]) -> str:
+        raw = match.group(1)
+        try:
+            payload = json.loads(_strip_json_comments(raw))
+        except Exception:
+            return match.group(0)
+        if not isinstance(payload, dict) or not normalize_payload(payload):
+            return match.group(0)
+        return "```json\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n```"
+
+    updated = re.sub(r"```json\s*(.*?)```", replace_block, text, flags=re.IGNORECASE | re.DOTALL)
+    if normalizations or updated != text:
+        return updated, normalizations
+
+    try:
+        payload = json.loads(_strip_json_comments(text))
+    except Exception:
+        return text, []
+    if not isinstance(payload, dict) or not normalize_payload(payload):
+        return text, []
+    return json.dumps(payload, ensure_ascii=False, indent=2), normalizations
+
+
+def _package_timeline_lists(payload: dict[str, Any]) -> list[tuple[str, list[Any]]]:
+    timelines: list[tuple[str, list[Any]]] = []
+    production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+    package_intents = production.get("package") if isinstance(production.get("package"), list) else []
+    for index, intent in enumerate(package_intents, 1):
+        if not isinstance(intent, dict) or intent.get("intent") != "build_edit_timeline":
+            continue
+        timeline = intent.get("timeline")
+        if isinstance(timeline, list):
+            timelines.append((f"production_intents.package[{index}].timeline", timeline))
+    top_timeline = payload.get("edit_timeline")
+    if isinstance(top_timeline, list):
+        timelines.append(("edit_timeline", top_timeline))
+    elif isinstance(top_timeline, dict) and isinstance(top_timeline.get("clips"), list):
+        timelines.append(("edit_timeline.clips", top_timeline["clips"]))
+    return timelines
+
+
+def _normalize_timeline_list_to_duration(timeline: list[Any], duration: int) -> dict[str, Any] | None:
+    clips = [item for item in timeline if isinstance(item, dict)]
+    if not clips:
+        return None
+    previous_end = 0.0
+    for index, clip in enumerate(clips, 1):
+        start = _number(clip.get("start_seconds"), clip.get("start"))
+        clip_duration = _number(clip.get("duration_seconds"), clip.get("duration"))
+        if clip_duration <= 0:
+            return None
+        if index == 1 and abs(start) > 0.25:
+            return None
+        if index > 1 and abs(start - previous_end) > 0.25:
+            return None
+        previous_end = max(previous_end, start + clip_duration)
+    delta = float(duration) - previous_end
+    if abs(delta) <= 0.5:
+        return None
+    if abs(delta) > max(4.0, float(duration) * 0.08):
+        return None
+    last = clips[-1]
+    duration_key = "duration_seconds" if "duration_seconds" in last else "duration"
+    original_duration = _number(last.get(duration_key))
+    adjusted_duration = round(max(0.5, original_duration + delta), 3)
+    if adjusted_duration <= 0:
+        return None
+    last[duration_key] = int(adjusted_duration) if adjusted_duration.is_integer() else adjusted_duration
+    return {
+        "target_duration_seconds": duration,
+        "previous_end_seconds": round(previous_end, 3),
+        "adjusted_last_clip_duration_seconds": last[duration_key],
+    }
 
 
 def _validate_script(content: str, duration: int, issues: list[str]) -> None:
