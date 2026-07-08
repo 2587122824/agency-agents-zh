@@ -2071,12 +2071,16 @@ def _deep_merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[s
 def _write_production_config_snapshot(task_dir: Path, config: dict[str, Any]) -> None:
     secret_keys = {"api_key", "access_token", "token", "password", "secret", "authorization"}
 
+    def is_secret_key(key: object) -> bool:
+        normalized = str(key).strip().lower()
+        return normalized in secret_keys or normalized.endswith("_api_key") or normalized.endswith("_token")
+
     def sanitize(value: Any) -> Any:
         if isinstance(value, dict):
             return {
                 str(key): sanitize(item)
                 for key, item in value.items()
-                if str(key).strip().lower() not in secret_keys
+                if not is_secret_key(key)
             }
         if isinstance(value, list):
             return [sanitize(item) for item in value]

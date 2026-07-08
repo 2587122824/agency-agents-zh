@@ -1796,11 +1796,15 @@ class WorkflowEngine:
     @classmethod
     def _sanitize_production_config(cls, value):
         secret_keys = {"api_key", "access_token", "token", "password", "secret", "authorization"}
+        def is_secret_key(key: object) -> bool:
+            normalized = str(key).strip().lower()
+            return normalized in secret_keys or normalized.endswith("_api_key") or normalized.endswith("_token")
+
         if isinstance(value, dict):
             return {
                 str(key): cls._sanitize_production_config(item)
                 for key, item in value.items()
-                if str(key).strip().lower() not in secret_keys
+                if not is_secret_key(key)
             }
         if isinstance(value, list):
             return [cls._sanitize_production_config(item) for item in value]

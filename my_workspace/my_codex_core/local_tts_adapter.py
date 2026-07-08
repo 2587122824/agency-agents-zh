@@ -8,6 +8,8 @@ import textwrap
 import wave
 from pathlib import Path
 from typing import Any
+from urllib import request as urllib_request
+from urllib.error import HTTPError, URLError
 
 
 class LocalTTSAdapter:
@@ -23,6 +25,8 @@ class LocalTTSAdapter:
             return {"status": "skipped", "reason": "local TTS is disabled"}
         if provider in {"windows_sapi", "sapi"} or mode in {"windows_sapi", "sapi"}:
             return self._run_windows_sapi(voice_text, voice_config, output_dir)
+        if provider in {"aliyun_cosyvoice", "cosyvoice"} or mode in {"aliyun_cosyvoice", "cosyvoice"}:
+            return self._run_aliyun_cosyvoice(voice_text, voice_config, output_dir)
         if provider != "voxcpm2":
             return {"status": "skipped", "reason": f"unsupported local TTS provider: {provider}"}
 
@@ -192,6 +196,188 @@ class LocalTTSAdapter:
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
 
+    def _run_aliyun_cosyvoice(self, voice_text: str, voice_config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
+        text = str(voice_text or "").strip()
+        if not text:
+            return {"status": "skipped", "reason": "voice text is empty"}
+
+        api_key = str(
+            voice_config.get("aliyun_api_key")
+            or voice_config.get("api_key")
+            or voice_config.get("dashscope_api_key")
+            or ""
+        ).strip()
+        if not api_key:
+            return {"status": "skipped", "reason": "Aliyun CosyVoice API Key is missing"}
+
+        endpoint = self._aliyun_cosyvoice_endpoint(voice_config)
+        model = str(voice_config.get("aliyun_model") or voice_config.get("model") or "cosyvoice-v3-flash").strip()
+        voice = str(voice_config.get("aliyun_voice") or voice_config.get("voice") or "longanyang").strip()
+        audio_format = str(voice_config.get("aliyun_format") or voice_config.get("format") or "wav").strip().lower()
+        if audio_format not in {"mp3", "wav", "pcm", "opus"}:
+            audio_format = "mp3"
+
+        output_dir = output_dir.resolve()
+        output_dir.mkdir(parents=True, exist_ok=True)
+        text_path = output_dir / "aliyun_cosyvoice_text.txt"
+        output_path = output_dir / f"voiceover.{audio_format}"
+        manifest_path = output_dir / "local_tts_manifest.json"
+        response_path = output_dir / "aliyun_cosyvoice_response.json"
+        self._remove_stale_file(output_path)
+        text_path.write_text(text + "\n", encoding="utf-8")
+
+        payload_input: dict[str, Any] = {
+            "text": text,
+            "voice": voice,
+            "format": audio_format,
+            "sample_rate": _int_or_default(voice_config.get("aliyun_sample_rate"), 24000, minimum=8000, maximum=48000),
+        }
+        optional_specs: tuple[tuple[str, str, str], ...] = (
+            ("aliyun_volume", "volume", "int"),
+            ("aliyun_rate", "rate", "float"),
+            ("aliyun_pitch", "pitch", "float"),
+            ("aliyun_bit_rate", "bit_rate", "int"),
+            ("aliyun_seed", "seed", "int"),
+            ("aliyun_instruction", "instruction", "str"),
+            ("aliyun_aigc_propagator", "aigc_propagator", "str"),
+            ("aliyun_aigc_propagate_id", "aigc_propagate_id", "str"),
+        )
+        for config_key, payload_key, value_type in optional_specs:
+            value = voice_config.get(config_key)
+            if value in (None, ""):
+                continue
+            try:
+                if value_type == "int":
+                    payload_input[payload_key] = int(value)
+                elif value_type == "float":
+                    payload_input[payload_key] = float(value)
+                else:
+                    payload_input[payload_key] = str(value)
+            except (TypeError, ValueError):
+                continue
+
+        language_hint = str(voice_config.get("aliyun_language_hint") or "").strip()
+        if language_hint:
+            payload_input["language_hints"] = [item.strip() for item in language_hint.replace("，", ",").split(",") if item.strip()]
+        for config_key, payload_key in (
+            ("aliyun_enable_ssml", "enable_ssml"),
+            ("aliyun_word_timestamp_enabled", "word_timestamp_enabled"),
+            ("aliyun_enable_aigc_tag", "enable_aigc_tag"),
+            ("aliyun_enable_markdown_filter", "enable_markdown_filter"),
+        ):
+            value = voice_config.get(config_key)
+            if value not in (None, ""):
+                payload_input[payload_key] = _bool_value(value)
+
+        payload = {"model": model, "input": payload_input}
+        timeout = _int_or_default(voice_config.get("timeout_seconds"), 600)
+        target_duration = _float_or_default(voice_config.get("target_duration_seconds"), 0.0)
+        estimated_duration = self._estimate_speech_duration(text, voice_config)
+        manifest: dict[str, Any] = {
+            "status": "running",
+            "provider": "aliyun_cosyvoice",
+            "mode": voice_config.get("mode") or "aliyun_cosyvoice",
+            "endpoint": endpoint,
+            "api_key_provided": True,
+            "model": model,
+            "voice": voice,
+            "format": audio_format,
+            "sample_rate": payload_input["sample_rate"],
+            "text_file": str(text_path),
+            "output_file": str(output_path),
+            "timeout_seconds": timeout,
+            "target_duration_seconds": target_duration,
+            "estimated_duration_seconds": estimated_duration,
+        }
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        request = urllib_request.Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=timeout) as response:
+                raw = response.read()
+        except HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            manifest.update({"status": "failed", "error": f"Aliyun CosyVoice HTTP {exc.code}: {error_body[:1000]}"})
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return manifest
+        except (URLError, TimeoutError, OSError) as exc:
+            manifest.update({"status": "failed", "error": f"Aliyun CosyVoice request failed: {exc}"})
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            return manifest
+
+        try:
+            data = json.loads(raw.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError:
+            data = {}
+        response_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        audio = ((data.get("output") or {}).get("audio") or {}) if isinstance(data, dict) else {}
+        audio_url = str(audio.get("url") or "").strip()
+        audio_data = str(audio.get("data") or "").strip()
+        try:
+            if audio_data:
+                output_path.write_bytes(base64.b64decode(audio_data))
+            elif audio_url:
+                download_request = urllib_request.Request(audio_url, method="GET")
+                with urllib_request.urlopen(download_request, timeout=timeout) as response:
+                    output_path.write_bytes(response.read())
+            else:
+                manifest.update({"status": "failed", "error": "Aliyun CosyVoice response did not include output.audio.url or output.audio.data"})
+        except (OSError, ValueError, URLError, TimeoutError) as exc:
+            self._remove_stale_file(output_path)
+            manifest.update({"status": "failed", "error": f"Aliyun CosyVoice audio download failed: {exc}"})
+
+        if output_path.is_file():
+            actual_duration = self._media_duration(output_path)
+            manifest.update(
+                {
+                    "status": "success",
+                    "request_id": data.get("request_id") if isinstance(data, dict) else "",
+                    "response_file": str(response_path),
+                    "audio_url_expires_at": audio.get("expires_at", ""),
+                    "downloaded_files": [str(output_path)],
+                    "output_size_bytes": output_path.stat().st_size,
+                    "actual_duration_seconds": actual_duration,
+                }
+            )
+            usage = data.get("usage") if isinstance(data, dict) else {}
+            if isinstance(usage, dict):
+                manifest["usage"] = usage
+            if target_duration and actual_duration and actual_duration > target_duration + 1.5:
+                manifest.update(
+                    {
+                        "status": "quality_failed",
+                        "error": (
+                            f"Synthesized voiceover is {actual_duration:.1f}s, longer than the "
+                            f"{target_duration:.1f}s target. Shorten the voiceover text or adjust speech rate."
+                        ),
+                        "duration_overrun_seconds": round(actual_duration - target_duration, 3),
+                    }
+                )
+
+        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return manifest
+
+    @staticmethod
+    def _aliyun_cosyvoice_endpoint(voice_config: dict[str, Any]) -> str:
+        endpoint = str(voice_config.get("aliyun_endpoint") or "").strip()
+        if endpoint:
+            return endpoint
+        base_url = str(voice_config.get("aliyun_base_url") or "").strip().rstrip("/")
+        workspace_id = str(voice_config.get("aliyun_workspace_id") or "").strip()
+        if base_url:
+            return base_url + "/api/v1/services/audio/tts/SpeechSynthesizer"
+        if workspace_id:
+            return f"https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+        return "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+
     def _fallback_after_voxcpm2_failure(
         self,
         voice_text: str,
@@ -322,6 +508,36 @@ class LocalTTSAdapter:
                 return round(stream.getnframes() / frame_rate, 3) if frame_rate else 0.0
         except (wave.Error, OSError):
             return 0.0
+
+    def _media_duration(self, path: Path) -> float:
+        if path.suffix.lower() == ".wav":
+            duration = self._wav_duration(path)
+            if duration:
+                return duration
+        ffprobe = self.workspace_root.parent / "runtime" / "ffmpeg" / "bin" / "ffprobe.exe"
+        if not ffprobe.is_file():
+            ffprobe = Path("ffprobe")
+        try:
+            result = subprocess.run(
+                [
+                    str(ffprobe),
+                    "-v",
+                    "error",
+                    "-show_entries",
+                    "format=duration",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    str(path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            if result.returncode == 0:
+                return round(float(str(result.stdout or "").strip()), 3)
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
+        return 0.0
 
     def _run_shell_command(self, command: str, timeout: int) -> tuple[subprocess.CompletedProcess[str] | None, bool, str, str]:
         process = subprocess.Popen(
@@ -510,3 +726,9 @@ def _float_or_default(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _bool_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on", "enable", "enabled"}

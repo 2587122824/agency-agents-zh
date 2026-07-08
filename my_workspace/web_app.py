@@ -3145,10 +3145,11 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="provider-grid config-card" data-title="本地配音" data-desc="选择 TTS 模式、默认音色和参考音频，供自动成片使用">
-              <label>本地配音
+            <div class="provider-grid config-card" data-title="语音合成" data-desc="选择 TTS 模式、默认音色和参考音频，供自动成片使用">
+              <label>语音合成
                 <select id="voiceMode">
                   <option value="off" selected>不生成配音音频</option>
+                  <option value="aliyun_cosyvoice">阿里云 CosyVoice API</option>
                   <option value="windows_sapi">Windows 本地语音（最快备用）</option>
                   <option value="preset">默认 AI 音色</option>
                   <option value="voxcpm2">VoxCPM2 本地仿声</option>
@@ -3171,7 +3172,99 @@ INDEX_HTML = r"""<!doctype html>
                 <input id="voiceReferenceAudioPath" autocomplete="off" spellcheck="false" placeholder="上传后自动填入，也可手动填 my_voice_samples/xxx.wav" />
               </label>
             </div>
+            <div class="provider-grid config-card" data-title="阿里云 CosyVoice API" data-desc="HTTP API 配置；API Key 仅随任务请求传给后端，不写入任务输出文件">
+              <label>阿里云 API Key
+                <input id="aliyunTtsApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="DashScope / Model Studio API Key" />
+              </label>
+              <label>Workspace ID
+                <input id="aliyunTtsWorkspaceId" autocomplete="off" spellcheck="false" placeholder="可选：专属工作空间 ID" />
+              </label>
+              <label>接口地址
+                <input id="aliyunTtsEndpoint" autocomplete="off" spellcheck="false" placeholder="留空默认 SpeechSynthesizer；也可填完整 Endpoint" />
+              </label>
+              <label>模型
+                <select id="aliyunTtsModel">
+                  <option value="cosyvoice-v3.5-plus">cosyvoice-v3.5-plus</option>
+                  <option value="cosyvoice-v3.5-flash">cosyvoice-v3.5-flash</option>
+                  <option value="cosyvoice-v3-plus">cosyvoice-v3-plus</option>
+                  <option value="cosyvoice-v3-flash" selected>cosyvoice-v3-flash</option>
+                  <option value="cosyvoice-v2">cosyvoice-v2</option>
+                </select>
+              </label>
+              <label>音色
+                <input id="aliyunTtsVoice" autocomplete="off" spellcheck="false" placeholder="例如：longanyang" />
+              </label>
+              <label>音频格式
+                <select id="aliyunTtsFormat">
+                  <option value="mp3">MP3</option>
+                  <option value="wav" selected>WAV</option>
+                  <option value="opus">OPUS</option>
+                  <option value="pcm">PCM</option>
+                </select>
+              </label>
+              <label>采样率
+                <select id="aliyunTtsSampleRate">
+                  <option value="8000">8000 Hz</option>
+                  <option value="16000">16000 Hz</option>
+                  <option value="22050">22050 Hz</option>
+                  <option value="24000" selected>24000 Hz</option>
+                  <option value="44100">44100 Hz</option>
+                  <option value="48000">48000 Hz</option>
+                </select>
+              </label>
+            </div>
             <div class="provider-grid config-card" data-title="配音高级项" data-desc="仿声参考文本、VoxCPM2 命令模板和配音超时设置">
+              <label>CosyVoice 音量
+                <input id="aliyunTtsVolume" type="number" min="0" max="100" step="1" placeholder="默认 50；范围 0-100" />
+              </label>
+              <label>CosyVoice 语速
+                <input id="aliyunTtsRate" type="number" min="0.5" max="2" step="0.05" placeholder="默认 1.0；如 1.15 更快" />
+              </label>
+              <label>CosyVoice 音调
+                <input id="aliyunTtsPitch" type="number" min="0.5" max="2" step="0.05" placeholder="默认 1.0" />
+              </label>
+              <label>OPUS 码率
+                <input id="aliyunTtsBitRate" type="number" min="16000" max="48000" step="1000" placeholder="仅 OPUS 常用；如 24000" />
+              </label>
+              <label>CosyVoice Seed
+                <input id="aliyunTtsSeed" type="number" step="1" placeholder="可选：固定随机性" />
+              </label>
+              <label>语言提示
+                <input id="aliyunTtsLanguageHint" autocomplete="off" spellcheck="false" placeholder="可选：zh / en / 粤语等语言提示" />
+              </label>
+              <label>风格指令
+                <input id="aliyunTtsInstruction" autocomplete="off" spellcheck="false" placeholder="可选：例如 温和、清晰、科普解说感" />
+              </label>
+              <label>SSML
+                <select id="aliyunTtsEnableSsml">
+                  <option value="off" selected>关闭</option>
+                  <option value="on">启用</option>
+                </select>
+              </label>
+              <label>词级时间戳
+                <select id="aliyunTtsWordTimestamp">
+                  <option value="off" selected>关闭</option>
+                  <option value="on">启用</option>
+                </select>
+              </label>
+              <label>AIGC 标识
+                <select id="aliyunTtsEnableAigcTag">
+                  <option value="off" selected>关闭</option>
+                  <option value="on">启用</option>
+                </select>
+              </label>
+              <label>Markdown 过滤
+                <select id="aliyunTtsMarkdownFilter">
+                  <option value="off" selected>关闭</option>
+                  <option value="on">启用</option>
+                </select>
+              </label>
+              <label>AIGC 传播者
+                <input id="aliyunTtsAigcPropagator" autocomplete="off" spellcheck="false" placeholder="可选：aigc_propagator" />
+              </label>
+              <label>AIGC 传播 ID
+                <input id="aliyunTtsAigcPropagateId" autocomplete="off" spellcheck="false" placeholder="可选：aigc_propagate_id" />
+              </label>
               <label>参考音频原文
                 <input id="voiceReferenceText" autocomplete="off" spellcheck="false" placeholder="可选：参考音频里本人说的话，能提高仿声稳定性" />
               </label>
@@ -3942,6 +4035,26 @@ INDEX_HTML = r"""<!doctype html>
       voiceReferenceText: document.getElementById('voiceReferenceText'),
       voiceCommandTemplate: document.getElementById('voiceCommandTemplate'),
       voiceTimeout: document.getElementById('voiceTimeout'),
+      aliyunTtsApiKey: document.getElementById('aliyunTtsApiKey'),
+      aliyunTtsWorkspaceId: document.getElementById('aliyunTtsWorkspaceId'),
+      aliyunTtsEndpoint: document.getElementById('aliyunTtsEndpoint'),
+      aliyunTtsModel: document.getElementById('aliyunTtsModel'),
+      aliyunTtsVoice: document.getElementById('aliyunTtsVoice'),
+      aliyunTtsFormat: document.getElementById('aliyunTtsFormat'),
+      aliyunTtsSampleRate: document.getElementById('aliyunTtsSampleRate'),
+      aliyunTtsVolume: document.getElementById('aliyunTtsVolume'),
+      aliyunTtsRate: document.getElementById('aliyunTtsRate'),
+      aliyunTtsPitch: document.getElementById('aliyunTtsPitch'),
+      aliyunTtsBitRate: document.getElementById('aliyunTtsBitRate'),
+      aliyunTtsSeed: document.getElementById('aliyunTtsSeed'),
+      aliyunTtsLanguageHint: document.getElementById('aliyunTtsLanguageHint'),
+      aliyunTtsInstruction: document.getElementById('aliyunTtsInstruction'),
+      aliyunTtsEnableSsml: document.getElementById('aliyunTtsEnableSsml'),
+      aliyunTtsWordTimestamp: document.getElementById('aliyunTtsWordTimestamp'),
+      aliyunTtsEnableAigcTag: document.getElementById('aliyunTtsEnableAigcTag'),
+      aliyunTtsMarkdownFilter: document.getElementById('aliyunTtsMarkdownFilter'),
+      aliyunTtsAigcPropagator: document.getElementById('aliyunTtsAigcPropagator'),
+      aliyunTtsAigcPropagateId: document.getElementById('aliyunTtsAigcPropagateId'),
       imageTool: document.getElementById('imageTool'),
       imagePositivePrompt: document.getElementById('imagePositivePrompt'),
       imageModel: document.getElementById('imageModel'),
@@ -4759,6 +4872,7 @@ INDEX_HTML = r"""<!doctype html>
     function progressProductionStep(event, steps) {
       const stage = String(event.stage || '').toLowerCase();
       const message = String(event.message || '').toLowerCase();
+      const activeStep = Number((steps || []).find(step => step.status === 'active')?.step || 0);
       const findStep = keywords => {
         const hit = (steps || []).find(step => {
           const name = `${step.agent_name || ''} ${step.agent_id || ''} ${step.task || ''}`.toLowerCase();
@@ -4766,6 +4880,16 @@ INDEX_HTML = r"""<!doctype html>
         });
         return hit ? Number(hit.step || 0) : 0;
       };
+      if (stage.includes('comfy') || stage.includes('runninghub') || stage.includes('material') || message.includes('runninghub') || message.includes('comfy')) {
+        return Number(event.step || 0) || findStep(['comfy', 'material']) || activeStep || 9;
+      }
+      if (stage.includes('tts') || stage.includes('voice') || stage.includes('audio')) {
+        return Number(event.step || 0) || findStep(['tts', 'audio']) || activeStep || 8;
+      }
+      if (stage.includes('ffmpeg') || stage.includes('compose') || stage.includes('production') || stage.includes('package')) {
+        return Number(event.step || 0) || findStep(['ffmpeg', 'compose']) || activeStep || (steps || []).length || 10;
+      }
+      return Number(event.step || 0) || activeStep || 1;
       if (stage.includes('comfy') || stage.includes('runninghub') || stage.includes('material') || message.includes('runninghub') || message.includes('comfy')) {
         return findStep(['comfy', '素材', 'material']) || 9;
       }
@@ -4850,6 +4974,18 @@ INDEX_HTML = r"""<!doctype html>
           updated_at: Date.now() / 1000,
         });
       }
+      const activeStep = (steps || []).find(step => step.status === 'active');
+      const fallbackStep = Number(job.current_step || activeStep?.step || 0);
+      const fallbackMessage = String(job.current_message || job.production_message || activeStep?.message || '').trim();
+      if (fallbackStep && fallbackMessage && !grouped.has(fallbackStep)) {
+        add(fallbackStep, {
+          kind: 'active',
+          title: 'Run detail',
+          message: fallbackMessage,
+          meta: '',
+          updated_at: Date.now() / 1000,
+        });
+      }
       for (const items of grouped.values()) {
         items.sort((a, b) => (a.updated_at || 0) - (b.updated_at || 0));
       }
@@ -4928,12 +5064,14 @@ INDEX_HTML = r"""<!doctype html>
         const detailItems = detailsByStep.get(stepNo) || [];
         const stepKey = progressStepKey(job, stepNo);
         const hasUserState = progressUserToggledSteps.has(stepKey);
-        const wrapper = document.createElement('details');
+        const wrapper = document.createElement(detailItems.length ? 'details' : 'div');
         wrapper.className = `progress-step-wrap ${detailItems.length ? 'has-details' : ''}`;
-        wrapper.open = hasUserState
-          ? Boolean(progressStepOpenState.get(stepKey))
-          : false;
-        const item = document.createElement('summary');
+        if (detailItems.length) {
+          wrapper.open = hasUserState
+            ? Boolean(progressStepOpenState.get(stepKey))
+            : false;
+        }
+        const item = document.createElement(detailItems.length ? 'summary' : 'div');
         item.className = `progress-step ${step.status || ''}`;
         const left = document.createElement('span');
         left.className = 'progress-step-main';
@@ -5057,7 +5195,11 @@ INDEX_HTML = r"""<!doctype html>
       if (job.task_name && ['queued', 'running', 'paused'].includes(job.status)) {
         if (maybeShowOutput()) {
           await selectActiveRunTask(job);
-          await refreshActiveRunTaskDetail(job);
+          if (job.status === 'running') {
+            await refreshActiveRunTaskLiveSections(job);
+          } else {
+            await refreshActiveRunTaskDetail(job);
+          }
         }
       }
       if (job.status === 'running') {
@@ -5637,6 +5779,26 @@ INDEX_HTML = r"""<!doctype html>
         voiceReferenceText: els.voiceReferenceText.value,
         voiceCommandTemplate: els.voiceCommandTemplate.value,
         voiceTimeout: els.voiceTimeout.value,
+        aliyunTtsApiKey: els.aliyunTtsApiKey.value,
+        aliyunTtsWorkspaceId: els.aliyunTtsWorkspaceId.value,
+        aliyunTtsEndpoint: els.aliyunTtsEndpoint.value,
+        aliyunTtsModel: els.aliyunTtsModel.value,
+        aliyunTtsVoice: els.aliyunTtsVoice.value,
+        aliyunTtsFormat: els.aliyunTtsFormat.value,
+        aliyunTtsSampleRate: els.aliyunTtsSampleRate.value,
+        aliyunTtsVolume: els.aliyunTtsVolume.value,
+        aliyunTtsRate: els.aliyunTtsRate.value,
+        aliyunTtsPitch: els.aliyunTtsPitch.value,
+        aliyunTtsBitRate: els.aliyunTtsBitRate.value,
+        aliyunTtsSeed: els.aliyunTtsSeed.value,
+        aliyunTtsLanguageHint: els.aliyunTtsLanguageHint.value,
+        aliyunTtsInstruction: els.aliyunTtsInstruction.value,
+        aliyunTtsEnableSsml: els.aliyunTtsEnableSsml.value,
+        aliyunTtsWordTimestamp: els.aliyunTtsWordTimestamp.value,
+        aliyunTtsEnableAigcTag: els.aliyunTtsEnableAigcTag.value,
+        aliyunTtsMarkdownFilter: els.aliyunTtsMarkdownFilter.value,
+        aliyunTtsAigcPropagator: els.aliyunTtsAigcPropagator.value,
+        aliyunTtsAigcPropagateId: els.aliyunTtsAigcPropagateId.value,
         imageTool: els.imageTool.value,
         imagePositivePrompt: els.imagePositivePrompt.value,
         imageModel: els.imageModel.value,
@@ -5797,6 +5959,26 @@ INDEX_HTML = r"""<!doctype html>
       els.voiceReferenceText.value = settings.voiceReferenceText || '';
       els.voiceCommandTemplate.value = settings.voiceCommandTemplate || '';
       setIfExists(els.voiceTimeout, normalizeVoiceTimeout(settings.voiceTimeout));
+      els.aliyunTtsApiKey.value = settings.aliyunTtsApiKey || '';
+      els.aliyunTtsWorkspaceId.value = settings.aliyunTtsWorkspaceId || '';
+      els.aliyunTtsEndpoint.value = settings.aliyunTtsEndpoint || '';
+      setIfExists(els.aliyunTtsModel, settings.aliyunTtsModel || 'cosyvoice-v3-flash');
+      els.aliyunTtsVoice.value = settings.aliyunTtsVoice || 'longanyang';
+      setIfExists(els.aliyunTtsFormat, settings.aliyunTtsFormat || 'wav');
+      setIfExists(els.aliyunTtsSampleRate, settings.aliyunTtsSampleRate || '24000');
+      els.aliyunTtsVolume.value = settings.aliyunTtsVolume || '';
+      els.aliyunTtsRate.value = settings.aliyunTtsRate || '';
+      els.aliyunTtsPitch.value = settings.aliyunTtsPitch || '';
+      els.aliyunTtsBitRate.value = settings.aliyunTtsBitRate || '';
+      els.aliyunTtsSeed.value = settings.aliyunTtsSeed || '';
+      els.aliyunTtsLanguageHint.value = settings.aliyunTtsLanguageHint || '';
+      els.aliyunTtsInstruction.value = settings.aliyunTtsInstruction || '';
+      setIfExists(els.aliyunTtsEnableSsml, settings.aliyunTtsEnableSsml || 'off');
+      setIfExists(els.aliyunTtsWordTimestamp, settings.aliyunTtsWordTimestamp || 'off');
+      setIfExists(els.aliyunTtsEnableAigcTag, settings.aliyunTtsEnableAigcTag || 'off');
+      setIfExists(els.aliyunTtsMarkdownFilter, settings.aliyunTtsMarkdownFilter || 'off');
+      els.aliyunTtsAigcPropagator.value = settings.aliyunTtsAigcPropagator || '';
+      els.aliyunTtsAigcPropagateId.value = settings.aliyunTtsAigcPropagateId || '';
       syncVoiceCommandTemplateForMode();
       setIfExists(els.imageTool, settings.imageTool);
       els.imagePositivePrompt.value = settings.imagePositivePrompt || '';
@@ -6800,6 +6982,26 @@ INDEX_HTML = r"""<!doctype html>
         els.voiceReferenceText,
         els.voiceCommandTemplate,
         els.voiceTimeout,
+        els.aliyunTtsApiKey,
+        els.aliyunTtsWorkspaceId,
+        els.aliyunTtsEndpoint,
+        els.aliyunTtsModel,
+        els.aliyunTtsVoice,
+        els.aliyunTtsFormat,
+        els.aliyunTtsSampleRate,
+        els.aliyunTtsVolume,
+        els.aliyunTtsRate,
+        els.aliyunTtsPitch,
+        els.aliyunTtsBitRate,
+        els.aliyunTtsSeed,
+        els.aliyunTtsLanguageHint,
+        els.aliyunTtsInstruction,
+        els.aliyunTtsEnableSsml,
+        els.aliyunTtsWordTimestamp,
+        els.aliyunTtsEnableAigcTag,
+        els.aliyunTtsMarkdownFilter,
+        els.aliyunTtsAigcPropagator,
+        els.aliyunTtsAigcPropagateId,
         els.imageTool,
         els.imagePositivePrompt,
         els.imageModel,
@@ -8176,6 +8378,49 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
+    async function refreshActiveRunTaskLiveSections(job) {
+      if (!job?.task_name || selectedTask !== job.task_name) return;
+      const now = Date.now();
+      if (now - lastTaskDetailRefreshAt < 2000) return;
+      lastTaskDetailRefreshAt = now;
+      try {
+        const data = await api(`/api/task?name=${encodeURIComponent(selectedTask)}`);
+        selectedTaskSummary = data.summary || {};
+        selectedTaskStatus = canonicalTaskStatus(data);
+        selectedTaskAllowedActions = Array.isArray(selectedTaskStatus?.allowed_actions)
+          ? selectedTaskStatus.allowed_actions
+          : Array.isArray(data.allowed_actions) ? data.allowed_actions : [];
+        els.viewerTitle.textContent = data.summary?.task_title || data.summary?.workflow || selectedTask;
+        els.viewerMeta.textContent = selectedTask;
+        currentTaskFiles = data.files || currentTaskFiles;
+
+        const status = selectedTaskStatus;
+        const productionJobs = status.production?.jobs || data.production_jobs || [];
+        const executionStages = productionExecutionStages(status, data, productionJobs);
+        renderProductionJobs(productionJobs, status.diagnostics || [], status.next_action || null, status.blockers || [], executionStages);
+        renderTaskComfyDebugPanel(status.comfy_debug || {});
+        renderVideoPreview(data.name, data.files || currentTaskFiles, status?.production?.composition?.final_video_file || data.summary?.final_video || '');
+
+        const assetItems = structuredAssetItems({ ...data, assets: status.assets });
+        if (assetItems.length || assetPreviewItems.length) {
+          els.assetOutputMeta.textContent = assetItems.length ? `${assetItems.length} images/videos` : 'not generated';
+          if (assetItems.length) {
+            renderAssetGallery(data.name, assetItems);
+          } else {
+            assetPreviewItems = [];
+            assetPreviewTaskName = "";
+            assetGallerySignature = "";
+            els.assetOutputList.classList.remove('asset-gallery');
+            closeAssetLightbox();
+            els.assetOutputList.innerHTML = '<div class="muted small">No generated image/video assets yet.</div>';
+          }
+        }
+        syncOutputButtons();
+      } catch (err) {
+        // The task directory or task status can lag behind the active run by a few seconds.
+      }
+    }
+
     function prepareOutputForPendingRun(title) {
       outputSelectionVersion += 1;
       selectedTask = null;
@@ -9115,7 +9360,7 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('任务已终止或完成，请先点击继续任务后再操作 ComfyUI 调试队列。', true);
         return;
       }
-      const { productionConfig } = collectProductionConfig();
+      const { productionConfig } = await collectProductionConfig();
       try {
         const job = await api('/api/task-comfy-debug-run', {
           method: 'POST',
@@ -11998,9 +12243,14 @@ INDEX_HTML = r"""<!doctype html>
 
     async function collectProductionConfig() {
       const voiceReferenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
+      if (els.voiceMode.value === 'aliyun_cosyvoice' && !els.aliyunTtsApiKey.value.trim()) {
+        throw new Error('请先在系统配置填写阿里云 CosyVoice API Key');
+      }
       const voiceProvider = els.voiceMode.value === 'windows_sapi'
         ? 'windows_sapi'
-        : (['voxcpm2', 'preset'].includes(els.voiceMode.value) ? 'voxcpm2' : '');
+        : (els.voiceMode.value === 'aliyun_cosyvoice'
+          ? 'aliyun_cosyvoice'
+          : (['voxcpm2', 'preset'].includes(els.voiceMode.value) ? 'voxcpm2' : ''));
       const imageConfig = {
         tool: 'prompt_only',
         positive_prompt: '',
@@ -12076,6 +12326,26 @@ INDEX_HTML = r"""<!doctype html>
           reference_text: els.voiceReferenceText.value.trim(),
           command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
           timeout_seconds: Number(els.voiceTimeout.value || 3600),
+          aliyun_api_key: els.aliyunTtsApiKey.value.trim(),
+          aliyun_workspace_id: els.aliyunTtsWorkspaceId.value.trim(),
+          aliyun_endpoint: els.aliyunTtsEndpoint.value.trim(),
+          aliyun_model: els.aliyunTtsModel.value,
+          aliyun_voice: els.aliyunTtsVoice.value.trim() || 'longanyang',
+          aliyun_format: els.aliyunTtsFormat.value,
+          aliyun_sample_rate: Number(els.aliyunTtsSampleRate.value || 24000),
+          aliyun_volume: els.aliyunTtsVolume.value.trim(),
+          aliyun_rate: els.aliyunTtsRate.value.trim(),
+          aliyun_pitch: els.aliyunTtsPitch.value.trim(),
+          aliyun_bit_rate: els.aliyunTtsBitRate.value.trim(),
+          aliyun_seed: els.aliyunTtsSeed.value.trim(),
+          aliyun_language_hint: els.aliyunTtsLanguageHint.value.trim(),
+          aliyun_instruction: els.aliyunTtsInstruction.value.trim(),
+          aliyun_enable_ssml: els.aliyunTtsEnableSsml.value === 'on',
+          aliyun_word_timestamp_enabled: els.aliyunTtsWordTimestamp.value === 'on',
+          aliyun_enable_aigc_tag: els.aliyunTtsEnableAigcTag.value === 'on',
+          aliyun_enable_markdown_filter: els.aliyunTtsMarkdownFilter.value === 'on',
+          aliyun_aigc_propagator: els.aliyunTtsAigcPropagator.value.trim(),
+          aliyun_aigc_propagate_id: els.aliyunTtsAigcPropagateId.value.trim(),
         },
         compose_config: {
           tool: els.composeTool.value,
@@ -13602,6 +13872,26 @@ INDEX_HTML = r"""<!doctype html>
       els.voiceReferenceText.value = '';
       els.voiceCommandTemplate.value = defaultVoxCPM2CommandTemplate();
       els.voiceTimeout.value = '3600';
+      els.aliyunTtsApiKey.value = '';
+      els.aliyunTtsWorkspaceId.value = '';
+      els.aliyunTtsEndpoint.value = '';
+      els.aliyunTtsModel.value = 'cosyvoice-v3-flash';
+      els.aliyunTtsVoice.value = 'longanyang';
+      els.aliyunTtsFormat.value = 'wav';
+      els.aliyunTtsSampleRate.value = '24000';
+      els.aliyunTtsVolume.value = '';
+      els.aliyunTtsRate.value = '';
+      els.aliyunTtsPitch.value = '';
+      els.aliyunTtsBitRate.value = '';
+      els.aliyunTtsSeed.value = '';
+      els.aliyunTtsLanguageHint.value = '';
+      els.aliyunTtsInstruction.value = '';
+      els.aliyunTtsEnableSsml.value = 'off';
+      els.aliyunTtsWordTimestamp.value = 'off';
+      els.aliyunTtsEnableAigcTag.value = 'off';
+      els.aliyunTtsMarkdownFilter.value = 'off';
+      els.aliyunTtsAigcPropagator.value = '';
+      els.aliyunTtsAigcPropagateId.value = '';
       els.imageTool.value = 'prompt_only';
       els.imagePositivePrompt.value = '';
       els.imageModel.value = '';
