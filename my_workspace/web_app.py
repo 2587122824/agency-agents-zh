@@ -9294,7 +9294,7 @@ INDEX_HTML = r"""<!doctype html>
     function renderTaskComfyDebugPanel(debugStatus) {
       const status = debugStatus && typeof debugStatus === 'object' ? debugStatus : {};
       const items = Array.isArray(status.items) ? status.items : [];
-      const enabled = Boolean(status.enabled || items.length);
+      const enabled = Boolean(status.enabled);
       const taskStopped = selectedTaskIsStopped();
       els.taskComfyDebugPanel.hidden = !enabled;
       els.taskComfyDebugList.innerHTML = '';
