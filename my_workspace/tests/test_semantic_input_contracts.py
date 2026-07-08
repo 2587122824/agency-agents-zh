@@ -97,6 +97,75 @@ class SemanticInputContractTests(unittest.TestCase):
             )
             self.assertIsNone(found)
 
+    def test_audio_validator_accepts_explicitly_disabled_voice_and_subtitles(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "audio": [
+                        {
+                            "intent": "generate_voiceover",
+                            "enabled": False,
+                            "voice_text": "",
+                            "target_duration_seconds": 12,
+                        },
+                        {
+                            "intent": "build_subtitles",
+                            "enabled": False,
+                            "segments": [],
+                        },
+                        {
+                            "intent": "select_bgm",
+                            "enabled": False,
+                        },
+                    ]
+                },
+                "audio_package": {
+                    "voiceover_text": "",
+                    "subtitle_srt_draft": "",
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        result = validate_production_output(
+            {"agent": "20_语音字幕包装师"},
+            f"```json\n{content}\n```",
+            {
+                "core_topic": "不同高度跳下身体承重变化，竖屏12秒生产烟测",
+                "original_requirement": "竖屏12秒生产烟测，只验证图片素材和本地图片轮播预览，不需要配音",
+                "duration_seconds": 12,
+            },
+        )
+
+        self.assertTrue(result["passed"], result["issues"])
+
+    def test_requirement_guard_accepts_disabled_audio_package_without_topic_terms(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "audio": [
+                        {"intent": "generate_voiceover", "enabled": False, "voice_text": ""},
+                        {"intent": "build_subtitles", "enabled": False, "segments": []},
+                        {"intent": "select_bgm", "enabled": False},
+                    ]
+                },
+                "audio_package": {"voiceover_text": "", "subtitle_srt_draft": ""},
+            },
+            ensure_ascii=False,
+        )
+
+        result = validate_requirement_alignment(
+            {
+                "core_topic": "不同高度跳下身体承重变化，竖屏12秒生产烟测",
+                "original_requirement": "不同高度跳下身体承重变化，竖屏12秒生产烟测，不需要配音",
+                "duration_seconds": 12,
+            },
+            f"```json\n{content}\n```",
+            20,
+        )
+
+        self.assertTrue(result["passed"], result["issues"])
+
     def test_scene_library_fields_are_normalized_for_context(self) -> None:
         registry = normalize_production_entities(
             {

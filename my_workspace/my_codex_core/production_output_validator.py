@@ -189,7 +189,7 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
     subtitles = next((item for item in intents if item.get("intent") == "build_subtitles"), None)
     if not isinstance(voice, dict):
         issues.append("缺少 generate_voiceover 音频意图")
-    else:
+    elif not _intent_disabled(voice):
         voice_text = str(voice.get("voice_text") or "")
         cjk_count = len(re.findall(r"[\u4e00-\u9fff]", voice_text))
         if duration and cjk_count > int(duration * 5.0):
@@ -228,6 +228,8 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
         audio_package = package_payload.get("audio_package") if isinstance(package_payload.get("audio_package"), dict) else {}
     srt = str(audio_package.get("subtitle_srt_draft") or "")
     srt = srt.replace("\\n", "\n").replace("\\r", "\r")
+    if _intent_disabled(subtitles):
+        return
     if not subtitle_segments and not srt.strip():
         issues.append("build_subtitles.segments 为空，且 audio_package.subtitle_srt_draft 未提供")
     for raw in re.findall(r"-->\s*([^\n\r]+)", srt):
@@ -455,6 +457,10 @@ def _intent_group(payload: dict[str, Any], group: str) -> list[dict[str, Any]]:
     production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
     values = production.get(group) if isinstance(production.get(group), list) else []
     return [item for item in values if isinstance(item, dict)]
+
+
+def _intent_disabled(intent: dict[str, Any]) -> bool:
+    return intent.get("enabled") is False or str(intent.get("status") or "").strip().lower() in {"disabled", "skipped"}
 
 
 def _upstream_image_ids(previous_outputs: list[dict[str, str]]) -> set[str]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -110,7 +111,7 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
 
     if not output:
         issues.append("模型输出为空")
-    if topic and output:
+    if topic and output and not _audio_packaging_is_explicitly_disabled(output, step_no):
         latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
         missing_latin = [token for token in latin_tokens if token.lower() not in output.lower()]
         compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
@@ -154,6 +155,51 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
         "issues": issues,
         "core_topic": topic,
     }
+
+
+def _audio_packaging_is_explicitly_disabled(content: str, step_no: int) -> bool:
+    if int(step_no) != 20:
+        return False
+    for payload in _json_objects(content):
+        production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+        audio_intents = production.get("audio") if isinstance(production.get("audio"), list) else []
+        if not audio_intents:
+            continue
+        relevant = {
+            str(item.get("intent") or ""): item
+            for item in audio_intents
+            if isinstance(item, dict) and item.get("intent") in {"generate_voiceover", "build_subtitles", "select_bgm"}
+        }
+        required_disabled = all(_intent_disabled(relevant.get(intent) or {}) for intent in ("generate_voiceover", "build_subtitles"))
+        optional_bgm_ok = "select_bgm" not in relevant or _intent_disabled(relevant["select_bgm"])
+        if required_disabled and optional_bgm_ok:
+            return True
+    return False
+
+
+def _json_objects(content: str) -> list[dict[str, Any]]:
+    text = str(content or "").strip()
+    candidates = re.findall(r"```json\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    if not candidates and text:
+        candidates = [text]
+    values: list[dict[str, Any]] = []
+    for candidate in candidates:
+        try:
+            value = json.loads(_strip_json_comments(candidate))
+        except Exception:
+            continue
+        if isinstance(value, dict):
+            values.append(value)
+    return values
+
+
+def _strip_json_comments(value: str) -> str:
+    text = re.sub(r"(?m)^\s*//.*$", "", str(value or ""))
+    return re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+
+
+def _intent_disabled(intent: dict[str, Any]) -> bool:
+    return intent.get("enabled") is False or str(intent.get("status") or "").strip().lower() in {"disabled", "skipped"}
 
 
 def correction_prompt(prompt: str, lock: dict[str, Any], rejected_content: str, issues: list[str]) -> str:
