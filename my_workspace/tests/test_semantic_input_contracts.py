@@ -208,6 +208,42 @@ class SemanticInputContractTests(unittest.TestCase):
 
         self.assertTrue(result["passed"], result["issues"])
 
+    def test_compiler_filters_skip_execution_video_placeholders(self) -> None:
+        plan = compile_production_plan(
+            task_id="skip_video_placeholder_test",
+            route_content=json.dumps({"production_type": "asset_only", "aspect_ratio": "9:16"}, ensure_ascii=False),
+            image_content=json.dumps({"production_intents": {"image": []}}, ensure_ascii=False),
+            video_content=json.dumps(
+                {
+                    "production_intents": {
+                        "video": [
+                            {
+                                "intent": "generate_i2v_clip",
+                                "intent_id": "skip_asset_only_video",
+                                "duration_seconds": 0,
+                                "motion_plan": "不生成AI视频，本意图不应执行",
+                                "compatibility": {"skip_execution": True},
+                            }
+                        ]
+                    },
+                    "video_prompts": [
+                        {
+                            "job_id": "skip_asset_only_video",
+                            "asset_tag": "skip_video_placeholder",
+                            "prompt": "占位提示：不应执行",
+                            "duration": 0,
+                        }
+                    ],
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+        payload = plan["compiled_payload"]
+        self.assertFalse(payload.get("video_prompts"))
+        self.assertFalse([job for job in plan["visual_jobs"] if job.get("type") == "video"])
+        self.assertTrue(any("skip_asset_only_video" in note for note in plan["compile_notes"]))
+
     def test_normalizes_package_delivery_resolution_to_locked_delivery_size(self) -> None:
         content = json.dumps(
             {

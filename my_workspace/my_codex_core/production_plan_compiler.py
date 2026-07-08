@@ -1338,6 +1338,9 @@ def _compile_video_intents(
     for index, intent in enumerate(intents, 1):
         intent_name = str(intent.get("intent") or "").strip()
         intent_id = _safe_id(intent.get("intent_id") or intent.get("id") or f"video_intent_{index:03d}")
+        if _skip_video_intent(intent):
+            notes.append(f"video intent {intent_id} skipped because it is explicitly disabled")
+            continue
         contract = contracts.get(intent_name) if isinstance(contracts.get(intent_name), dict) else {}
         compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
         workflow_id, workflow_mode = _video_workflow_route(intent_name, intent, contract, compatibility)
@@ -2168,6 +2171,10 @@ def _jobs_from_prompts(values: Any, job_type: str) -> list[dict[str, Any]]:
 
 
 def _skip_material_prompt_item(item: dict[str, Any]) -> bool:
+    compatibility = item.get("compatibility") if isinstance(item.get("compatibility"), dict) else {}
+    constraints = item.get("constraints") if isinstance(item.get("constraints"), dict) else {}
+    if item.get("enabled") is False or compatibility.get("skip_execution") is True or constraints.get("skip_execution") is True:
+        return True
     text = " ".join(
         str(item.get(key) or "").strip().lower()
         for key in (
@@ -2179,6 +2186,8 @@ def _skip_material_prompt_item(item: dict[str, Any]) -> bool:
             "asset_tag",
             "workflow_constraint",
             "control_mode",
+            "prompt",
+            "motion_plan",
         )
     )
     return any(
@@ -2187,9 +2196,30 @@ def _skip_material_prompt_item(item: dict[str, Any]) -> bool:
             "no_image_required",
             "placeholder_no_image",
             "skip_image_generation",
+            "skip_video_generation",
+            "skip_execution",
             "placeholder",
+            "不应执行",
+            "不生成ai视频",
             "workflow_id none",
         )
+    )
+
+
+def _skip_video_intent(intent: dict[str, Any]) -> bool:
+    compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
+    constraints = intent.get("constraints") if isinstance(intent.get("constraints"), dict) else {}
+    text = json.dumps(intent, ensure_ascii=False).lower()
+    return (
+        intent.get("enabled") is False
+        or str(intent.get("status") or "").strip().lower() in {"disabled", "skipped"}
+        or compatibility.get("skip_execution") is True
+        or constraints.get("skip_execution") is True
+        or str(intent.get("intent") or "") == "no_video_required"
+        or ("skip" in text and _positive_int(intent.get("duration") or intent.get("duration_seconds"), 0) == 0)
+        or "不生成ai视频" in text
+        or "不生成 ai 视频" in text
+        or "不应执行" in text
     )
 
 
@@ -2241,6 +2271,9 @@ def _merge_compat_list(target: dict[str, Any], key: str, values: Any) -> None:
 def _prefer_compiled_compat_list(target: dict[str, Any], key: str, compiled_values: Any, legacy_values: Any) -> None:
     compiled_list = [item for item in compiled_values if isinstance(item, dict)] if isinstance(compiled_values, list) else []
     legacy_list = [item for item in legacy_values if isinstance(item, dict)] if isinstance(legacy_values, list) else []
+    if key in {"image_prompts", "video_prompts"}:
+        compiled_list = [item for item in compiled_list if not _skip_material_prompt_item(item)]
+        legacy_list = [item for item in legacy_list if not _skip_material_prompt_item(item)]
     if compiled_list:
         if legacy_list:
             target[f"legacy_{key}"] = legacy_list
