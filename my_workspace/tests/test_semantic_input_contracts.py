@@ -25,6 +25,7 @@ from my_codex_core.production_entities import entity_context_for_ids, normalize_
 from my_codex_core.production_pipeline import (  # noqa: E402
     _active_visual_jobs_for_mode,
     _clean_voice_text,
+    _downgrade_unconfigured_visual_jobs_for_available_slots,
     _filter_skip_execution_visual_nodes,
     _packaging_dependency_blockers,
     _payload_for_material_type,
@@ -2069,6 +2070,54 @@ class SemanticInputContractTests(unittest.TestCase):
 
     def test_api_adapter_skipped_is_failed_production_status(self) -> None:
         self.assertTrue(web_app.WorkflowWebHandler._is_failed_production_status("api_adapter_skipped"))
+
+    def test_unconfigured_multi_identity_keyframe_downgrades_to_identity_keyframe(self) -> None:
+        visual_jobs = [
+            {
+                "job_id": "shot_duo",
+                "workflow_id": "04_keyframe",
+                "workflow_mode": "multi_identity_keyframe",
+                "mode": "multi_identity_keyframe",
+                "image_task_mode": "multi_identity_keyframe",
+                "control_mode": "multi_identity_reference",
+            }
+        ]
+        payload = {
+            "image_prompts": [
+                {
+                    "job_id": "shot_duo",
+                    "workflow_id": "04_keyframe",
+                    "workflow_mode": "multi_identity_keyframe",
+                    "mode": "multi_identity_keyframe",
+                    "image_task_mode": "multi_identity_keyframe",
+                    "control_mode": "multi_identity_reference",
+                }
+            ]
+        }
+        notes: list[str] = []
+        _downgrade_unconfigured_visual_jobs_for_available_slots(
+            visual_jobs,
+            payload,
+            {
+                "workflow_library": [
+                    {
+                        "id": "04_keyframe",
+                        "mode_configs": {
+                            "identity_keyframe": {
+                                "endpoint": "/run/workflow/identity",
+                                "node_info_list_json": "[{}]",
+                            }
+                        },
+                    }
+                ]
+            },
+            notes=notes,
+        )
+        self.assertEqual(visual_jobs[0]["workflow_mode"], "identity_keyframe")
+        self.assertEqual(visual_jobs[0]["control_mode"], "identity_reference")
+        self.assertEqual(payload["image_prompts"][0]["workflow_mode"], "identity_keyframe")
+        self.assertEqual(payload["image_prompts"][0]["control_mode"], "identity_reference")
+        self.assertIn("multi_identity_keyframe", notes[0])
 
     def test_local_ffmpeg_project_relative_output_path_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

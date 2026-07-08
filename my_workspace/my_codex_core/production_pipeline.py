@@ -137,10 +137,16 @@ def run_auto_production(
     comfyui_payload["global_context"] = global_context
     production_plan["global_context"] = global_context
     production_plan["compiled_payload"] = comfyui_payload
+    plan_visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
+    _downgrade_unconfigured_visual_jobs_for_available_slots(
+        plan_visual_jobs,
+        comfyui_payload,
+        compose_config,
+        notes=production_plan.setdefault("compile_notes", []),
+    )
     write_production_plan(production_plan_path, production_plan)
     _write_text(comfyui_payload_path, json.dumps(comfyui_payload, ensure_ascii=False, indent=2) + "\n")
     packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config, voice_text_quality.get("usable"))
-    plan_visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
     reusable_visual_result = None
     if mode == "comfy_full" and not stop_after_comfyui:
         reusable_visual_result = _completed_visual_result_for_reuse(
@@ -1454,12 +1460,18 @@ def _refresh_visual_plan_for_retry(
     payload["global_context"] = global_context
     production_plan["global_context"] = global_context
     production_plan["compiled_payload"] = payload
+    visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
+    _downgrade_unconfigured_visual_jobs_for_available_slots(
+        visual_jobs,
+        payload,
+        compose_config,
+        notes=production_plan.setdefault("compile_notes", []),
+    )
 
     plan_path = task_dir / "production_plan.json"
     graph_path = task_dir / "production_graph.json"
     write_production_plan(plan_path, production_plan)
     _write_text(payload_path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
-    visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
     active_visual_jobs = _active_visual_jobs_for_mode(str(manifest.get("mode") or ""), visual_jobs)
     voice_text_quality = _quality_check_voice_text(_extract_voice_text(audio_content))
     packaging_jobs = _packaging_graph_jobs(payload, voice_config, voice_text_quality.get("usable"))
@@ -1510,6 +1522,100 @@ def _retry_quality_config(manifest: dict[str, Any], config: dict[str, Any]) -> d
     }
     base.update({key: value for key, value in override.items() if value not in (None, "")})
     return base
+
+
+def _downgrade_unconfigured_visual_jobs_for_available_slots(
+    visual_jobs: list[dict[str, Any]],
+    payload: dict[str, Any],
+    compose_config: dict[str, Any],
+    *,
+    notes: list[Any] | None = None,
+) -> None:
+    configured = _configured_workflow_slots(compose_config.get("workflow_library"))
+    if not configured:
+        return
+    payload_items = _payload_image_items_by_job_id(payload)
+    for job in visual_jobs:
+        if not isinstance(job, dict):
+            continue
+        workflow_id = _canonical_workflow_id(job.get("workflow_id") or "")
+        mode = str(job.get("workflow_mode") or job.get("mode") or "").strip()
+        if workflow_id != "04_keyframe" or mode not in {"multi_identity_keyframe", "multi_pose_identity_keyframe"}:
+            continue
+        if _workflow_slot_configured(configured, workflow_id, mode):
+            continue
+        fallback_mode = _multi_character_keyframe_fallback_mode(job, configured)
+        if not fallback_mode:
+            continue
+        _set_visual_job_mode(job, fallback_mode)
+        _set_visual_job_mode(payload_items.get(str(job.get("job_id") or "")), fallback_mode)
+        job["workflow_fallback_from"] = mode
+        job["workflow_fallback_reason"] = "configured multi-character keyframe slot is unavailable"
+        if notes is not None:
+            notes.append(
+                f"image job {job.get('job_id') or job.get('id') or ''} downgraded from {mode} to {fallback_mode} because the multi-character keyframe slot is not configured"
+            )
+
+
+def _payload_image_items_by_job_id(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    items = payload.get("image_prompts") if isinstance(payload, dict) else None
+    if not isinstance(items, list):
+        return {}
+    mapped: dict[str, dict[str, Any]] = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        job_id = str(item.get("job_id") or item.get("id") or item.get("intent_id") or "").strip()
+        if job_id:
+            mapped[job_id] = item
+    return mapped
+
+
+def _multi_character_keyframe_fallback_mode(job: dict[str, Any], configured_slots: list[dict[str, str]]) -> str:
+    if _job_has_scene_reference(job) and _workflow_slot_configured(configured_slots, "04_keyframe", "identity_scene_keyframe"):
+        return "identity_scene_keyframe"
+    if _workflow_slot_configured(configured_slots, "04_keyframe", "identity_keyframe"):
+        return "identity_keyframe"
+    if _workflow_slot_configured(configured_slots, "04_keyframe", "keyframe"):
+        return "keyframe"
+    return ""
+
+
+def _job_has_scene_reference(job: dict[str, Any]) -> bool:
+    if str(job.get("input_scene_image") or job.get("scene_reference_image") or job.get("scene_master_image") or "").strip():
+        return True
+    bindings = job.get("input_bindings") if isinstance(job.get("input_bindings"), dict) else {}
+    for key in ("input_scene_image", "scene_reference_image", "scene_master_image"):
+        if isinstance(bindings.get(key), dict) or str(bindings.get(key) or "").strip():
+            return True
+    return False
+
+
+def _set_visual_job_mode(job: dict[str, Any] | None, mode: str) -> None:
+    if not isinstance(job, dict) or not mode:
+        return
+    job["workflow_mode"] = mode
+    job["image_task_mode"] = mode
+    job["mode"] = mode
+    if mode == "identity_scene_keyframe":
+        job["control_mode"] = "identity_scene_reference"
+    elif mode == "identity_keyframe":
+        job["control_mode"] = "identity_reference"
+    elif mode == "keyframe":
+        job["control_mode"] = "none"
+
+
+def _workflow_slot_configured(configured_slots: list[dict[str, str]], workflow_id: str, mode: str) -> bool:
+    canonical = _canonical_workflow_id(workflow_id)
+    target_mode = str(mode or "").strip()
+    for slot in configured_slots:
+        if not isinstance(slot, dict):
+            continue
+        slot_workflow_id = _canonical_workflow_id(slot.get("workflow_id") or "")
+        slot_mode = str(slot.get("mode") or "").strip()
+        if slot_workflow_id == canonical and slot_mode == target_mode:
+            return True
+    return False
 
 
 def _active_visual_jobs_for_mode(mode: str, plan_visual_jobs: Any) -> list[dict[str, Any]]:
