@@ -580,6 +580,7 @@ def _compile_image_intents(
                 _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
                 _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
                 _apply_visual_style_policy(item, global_context=global_context)
+                item["intent_id"] = intent_id
                 prompts.append(item)
                 jobs.append({"job_id": job_id, "intent_id": intent_id, "frame_role": role, **item})
             continue
@@ -612,8 +613,19 @@ def _compile_image_intents(
         _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
         _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
         _apply_visual_style_policy(item, global_context=global_context)
+        item["intent_id"] = intent_id
         prompts.append(item)
         jobs.append({"job_id": intent_id, "intent_id": intent_id, **item})
+    _apply_generated_scene_reference_postpass(prompts, notes)
+    jobs = [
+        {
+            "job_id": str(item.get("job_id") or item.get("id") or f"image_{index:03d}"),
+            "intent_id": str(item.get("intent_id") or item.get("job_id") or item.get("id") or f"image_{index:03d}"),
+            **item,
+        }
+        for index, item in enumerate(prompts, 1)
+        if isinstance(item, dict)
+    ]
     return prompts, jobs
 
 
@@ -1357,6 +1369,11 @@ def _apply_generated_character_reference_policy(
     existing_items: list[dict[str, Any]],
     notes: list[str] | None = None,
 ) -> None:
+    asset_role = str(intent.get("asset_role") or item.get("asset_tag") or "").strip().lower()
+    workflow_mode = str(item.get("workflow_mode") or item.get("mode") or "").strip()
+    if workflow_mode == "scene_base" or asset_role in SCENE_ASSET_ROLES:
+        item["character_id"] = ""
+        return
     prompt_text = " ".join(
         str(value or "")
         for value in (
@@ -1387,7 +1404,6 @@ def _apply_generated_character_reference_policy(
 
     workflow_id = str(item.get("workflow_id") or "").strip()
     workflow_mode = str(item.get("workflow_mode") or item.get("mode") or "").strip()
-    asset_role = str(intent.get("asset_role") or item.get("asset_tag") or "").strip().lower()
 
     if (
         intent_name == "generate_base_asset"
@@ -1491,6 +1507,8 @@ def _apply_generated_scene_reference_policy(
     bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
     if bindings.get("input_scene_image"):
         return
+    if not _item_has_identity_reference(item):
+        return
     scene_job = _generated_scene_reference_job(existing_items, item, intent)
     if not scene_job:
         return
@@ -1512,6 +1530,27 @@ def _apply_generated_scene_reference_policy(
     )
     if notes is not None:
         notes.append(f"image intent {item.get('job_id')} bound to generated scene reference {scene_job_id}")
+
+
+def _apply_generated_scene_reference_postpass(items: list[dict[str, Any]], notes: list[str] | None = None) -> None:
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        _apply_generated_scene_reference_policy(item, {}, items, notes)
+
+
+def _item_has_identity_reference(item: dict[str, Any]) -> bool:
+    for key in ("input_identity_image", "input_base_image"):
+        if str(item.get(key) or "").strip():
+            return True
+    bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
+    for key in ("input_identity_image", "input_base_image"):
+        value = bindings.get(key)
+        if isinstance(value, dict) and str(value.get("from_job") or value.get("path") or "").strip():
+            return True
+        if str(value or "").strip():
+            return True
+    return bool(_references_with_identity_sources(item.get("character_references")))
 
 
 def _generated_scene_reference_job(
