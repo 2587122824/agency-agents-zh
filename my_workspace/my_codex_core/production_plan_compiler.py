@@ -649,7 +649,7 @@ def _apply_character_base_policy(
             notes.append(f"image intent {item.get('job_id')} kept on animal-safe character_base instead of humanoid turnaround")
 
     if master_reference and not _looks_like_turnaround_sheet(character_text):
-        _route_character_base_item_to_master_img2img(
+        _route_character_base_item_to_master_identity_keyframe(
             item,
             intent,
             master_reference,
@@ -978,7 +978,7 @@ def _linked_scene_reference_from_intent_or_item(intent: dict[str, Any], item: di
     return ""
 
 
-def _route_character_base_item_to_master_img2img(
+def _route_character_base_item_to_master_identity_keyframe(
     item: dict[str, Any],
     intent: dict[str, Any],
     master_reference: str,
@@ -987,13 +987,13 @@ def _route_character_base_item_to_master_img2img(
     reason: str,
 ) -> None:
     item["workflow_id"] = "04_keyframe"
-    item["workflow_mode"] = "img2img_style_keyframe"
-    item["image_task_mode"] = "img2img_style_keyframe"
-    item["mode"] = "img2img_style_keyframe"
-    item["control_mode"] = "img2img_style"
+    item["workflow_mode"] = "identity_keyframe"
+    item["image_task_mode"] = "identity_keyframe"
+    item["mode"] = "identity_keyframe"
+    item["control_mode"] = "identity_reference"
+    item["input_identity_image"] = master_reference
     item["input_base_image"] = master_reference
     item["reference_image"] = master_reference
-    item["input_reference_style"] = master_reference
     item["denoise"] = intent.get("denoise") or LINKED_CHARACTER_VARIANT_DENOISE
     item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
     item["prompt"] = _append_prompt_once(
@@ -1001,7 +1001,7 @@ def _route_character_base_item_to_master_img2img(
         "参考关联角色母版图，必须保持同一张脸、同一年龄感、同一发型、肤色、五官比例、身材比例和服装主特征；只改变当前任务要求的表情、动作或轻微状态，不随机换人。",
     )
     if notes is not None:
-        notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe from {reason}")
+        notes.append(f"image intent {item.get('job_id')} routed to identity_keyframe from {reason}")
 
 
 def _route_character_asset_item_to_reference_job(
@@ -1427,7 +1427,6 @@ def _apply_generated_character_reference_policy(
             "input_base_image": {"from_job": reference_job_id, "output": "output_final_image"},
         }
         item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
-        item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
         item["denoise"] = intent.get("denoise") or 1
         item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
         item["prompt"] = _append_prompt_once(

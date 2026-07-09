@@ -1107,7 +1107,7 @@ class SemanticInputContractTests(unittest.TestCase):
                 item["reference_images"],
             )
 
-    def test_linked_character_master_routes_base_variant_to_img2img(self) -> None:
+    def test_linked_character_master_routes_base_variant_to_identity_keyframe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             entity_path = root / "entities.json"
@@ -1169,8 +1169,12 @@ class SemanticInputContractTests(unittest.TestCase):
             )
             item = plan["compiled_payload"]["image_prompts"][0]
             self.assertEqual(item["workflow_id"], "04_keyframe")
-            self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
-            self.assertEqual(item["control_mode"], "img2img_style")
+            self.assertEqual(item["workflow_mode"], "identity_keyframe")
+            self.assertEqual(item["control_mode"], "identity_reference")
+            self.assertEqual(
+                item["input_identity_image"],
+                "my_workspace/my_asset_library/01_character_base/hero.png",
+            )
             self.assertEqual(
                 item["input_base_image"],
                 "my_workspace/my_asset_library/01_character_base/hero.png",
@@ -1347,7 +1351,9 @@ class SemanticInputContractTests(unittest.TestCase):
 
         base_item, keyframe = plan["compiled_payload"]["image_prompts"][:2]
         self.assertEqual(base_item["workflow_id"], "04_keyframe")
-        self.assertEqual(base_item["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(base_item["workflow_mode"], "identity_keyframe")
+        self.assertEqual(base_item["control_mode"], "identity_reference")
+        self.assertEqual(base_item["input_identity_image"], master_path)
         self.assertEqual(base_item["input_base_image"], master_path)
         self.assertEqual(base_item["denoise"], 1)
         self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
@@ -1559,8 +1565,12 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         item = plan["compiled_payload"]["image_prompts"][0]
         self.assertEqual(item["workflow_id"], "04_keyframe")
-        self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
-        self.assertEqual(item["control_mode"], "img2img_style")
+        self.assertEqual(item["workflow_mode"], "identity_keyframe")
+        self.assertEqual(item["control_mode"], "identity_reference")
+        self.assertEqual(
+            item["input_identity_image"],
+            "my_workspace/my_asset_library/01_character_base/xiaomei.png",
+        )
         self.assertEqual(
             item["input_base_image"],
             "my_workspace/my_asset_library/01_character_base/xiaomei.png",
