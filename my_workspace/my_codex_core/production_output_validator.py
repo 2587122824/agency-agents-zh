@@ -480,11 +480,13 @@ def _validate_package(
         issues.append("缺少可解析的 production_intents.package JSON 数组")
         return
     timeline_intent = next((item for item in intents if item.get("intent") == "build_edit_timeline"), None)
+    detailed_timeline_valid = False
     if not isinstance(timeline_intent, dict):
         issues.append("缺少 build_edit_timeline 意图")
     else:
         timeline = timeline_intent.get("timeline") if isinstance(timeline_intent.get("timeline"), list) else []
         previous_end = 0.0
+        timeline_issue_count_before = len(issues)
         for index, clip in enumerate(timeline, 1):
             start = _number(clip.get("start_seconds"))
             clip_duration = _number(clip.get("duration_seconds"))
@@ -496,11 +498,12 @@ def _validate_package(
             previous_end = max(previous_end, start + clip_duration)
         if duration and abs(previous_end - duration) > 0.5:
             issues.append(f"详细剪辑时间轴结束于 {previous_end:g} 秒，不等于目标 {duration} 秒")
+        detailed_timeline_valid = bool(timeline) and len(issues) == timeline_issue_count_before
     compact = payload.get("edit_timeline") if isinstance(payload.get("edit_timeline"), dict) else {}
     clips = compact.get("clips") if isinstance(compact.get("clips"), list) else []
-    if clips and duration:
+    if clips and duration and not detailed_timeline_valid:
         total = sum(_number(item.get("duration_seconds")) for item in clips)
-        if abs(total - duration) > 0.5:
+        if abs(total - duration) > 0.5 and not _compact_timeline_reaches_duration(compact, duration):
             issues.append(f"兼容剪辑时间轴合计 {total:g} 秒，不等于目标 {duration} 秒")
     delivery = payload.get("delivery_spec") if isinstance(payload.get("delivery_spec"), dict) else {}
     if not delivery:
@@ -522,6 +525,28 @@ def _validate_package(
     missing = payload.get("missing_assets") if isinstance(payload.get("missing_assets"), list) else []
     if missing:
         issues.append(f"仍有 {len(missing)} 项缺失素材，不能声明生产就绪或无阻塞项")
+
+
+def _compact_timeline_reaches_duration(compact: dict[str, Any], duration: int) -> bool:
+    entries: list[Any] = []
+    for key in ("clips", "transitions", "overlays"):
+        values = compact.get(key)
+        if isinstance(values, list):
+            entries.extend(values)
+    max_end = 0.0
+    saw_timed_entry = False
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        start = _number(entry.get("start_seconds"), entry.get("start"))
+        entry_duration = _number(entry.get("duration_seconds"), entry.get("duration"))
+        end = _number(entry.get("end_seconds"), entry.get("end"))
+        if entry_duration > 0:
+            end = max(end, start + entry_duration)
+        if end > 0:
+            saw_timed_entry = True
+            max_end = max(max_end, end)
+    return saw_timed_entry and abs(max_end - duration) <= 0.5
 
 
 def _json_objects(content: str) -> list[dict[str, Any]]:

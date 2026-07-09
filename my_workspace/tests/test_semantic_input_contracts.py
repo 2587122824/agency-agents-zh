@@ -464,6 +464,48 @@ class SemanticInputContractTests(unittest.TestCase):
         result = validate_production_output({"agent": "22_剪辑成片执行师"}, normalized["content"], lock)
         self.assertTrue(result["passed"], result["issues"])
 
+    def test_valid_detailed_package_timeline_overrides_short_compat_clips(self) -> None:
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "package": [
+                        {
+                            "intent": "build_edit_timeline",
+                            "intent_id": "edit_timeline_xiaomei_vlog",
+                            "timeline": [
+                                {"source_intent_id": "clip_001", "start_seconds": 0, "duration_seconds": 20},
+                                {"source_intent_id": "clip_002", "start_seconds": 20, "duration_seconds": 22},
+                                {"source_intent_id": "transition_fadeout", "start_seconds": 42, "duration_seconds": 18},
+                            ],
+                        },
+                        {
+                            "intent": "apply_delivery_spec",
+                            "intent_id": "delivery_spec_xiaomei_vlog",
+                            "delivery_resolution": "1080x1920",
+                            "fps": 24,
+                        },
+                    ]
+                },
+                "edit_timeline": {
+                    "clips": [
+                        {"clip_id": "clip_001", "start_seconds": 0, "duration_seconds": 20},
+                        {"clip_id": "clip_002", "start_seconds": 20, "duration_seconds": 22},
+                    ]
+                },
+                "delivery_spec": {"resolution": "1080x1920", "fps": 24},
+                "missing_assets": [],
+            },
+            ensure_ascii=False,
+        )
+        lock = {
+            "original_requirement": "xiaomei food street vlog, 9:16 vertical, 60 seconds",
+            "duration_seconds": 60,
+        }
+
+        result = validate_production_output({"agent": "22_剪辑成片执行师"}, f"```json\n{content}\n```", lock)
+
+        self.assertTrue(result["passed"], result["issues"])
+
     def test_does_not_normalize_package_timeline_large_duration_gap(self) -> None:
         content = json.dumps(
             {
