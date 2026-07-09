@@ -15,6 +15,7 @@ from PIL import Image, ImageOps
 
 from .production_graph import artifact_record, build_production_graph, read_json, stable_job_hash, write_json
 from .production_parameter_policy import apply_locked_parameters_to_payload
+from .production_plan_compiler import sanitize_generation_prompt
 
 WORKFLOW_ID_ALIASES = {
     "10_broll_transition": "10_broll_transition_video",
@@ -1000,8 +1001,12 @@ class CloudComfyUIAdapter:
     def _prepare_runninghub_payload(self, comfyui_payload: dict[str, Any]) -> dict[str, Any]:
         payload = json.loads(json.dumps(comfyui_payload, ensure_ascii=False))
         if not self._looks_like_video_payload(payload):
+            if payload.get("prompt") is not None:
+                payload["prompt"] = sanitize_generation_prompt(payload.get("prompt") or "")
+            if payload.get("image_prompt") is not None:
+                payload["image_prompt"] = sanitize_generation_prompt(payload.get("image_prompt") or "")
             return payload
-        prompt = self._runninghub_safe_video_prompt(str(payload.get("prompt") or self._first_prompt(payload) or ""))
+        prompt = self._runninghub_safe_video_prompt(sanitize_generation_prompt(payload.get("prompt") or self._first_prompt(payload) or ""))
         negative = self._runninghub_safe_video_negative(str(payload.get("negative_prompt") or ""))
         payload["prompt"] = prompt
         payload["negative_prompt"] = negative
@@ -2452,10 +2457,10 @@ class CloudComfyUIAdapter:
 
     @classmethod
     def _runninghub_prompt_value(cls, payload: dict[str, Any]) -> str:
-        prompt = cls._first_prompt(payload)
+        prompt = sanitize_generation_prompt(cls._first_prompt(payload))
         if cls._is_reference_driven_image_payload(payload):
-            return cls._single_reference_image_prompt(prompt, payload)
-        return prompt
+            return sanitize_generation_prompt(cls._single_reference_image_prompt(prompt, payload))
+        return sanitize_generation_prompt(prompt)
 
     @staticmethod
     def _is_reference_driven_image_payload(payload: dict[str, Any]) -> bool:
@@ -2859,7 +2864,7 @@ class CloudComfyUIAdapter:
 
     @staticmethod
     def _strip_prompt_engineering_artifacts(text: str) -> str:
-        value = str(text or "")
+        value = sanitize_generation_prompt(str(text or ""))
         patterns = (
             r"\bopenapi/[A-Za-z0-9._/\-]+\.(?:png|jpe?g|webp|mp4|mov|webm)\b",
             r"\bcomfyui_result_\d+\.(?:png|jpe?g|webp|mp4|mov|webm)\b",

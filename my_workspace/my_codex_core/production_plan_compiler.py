@@ -93,6 +93,40 @@ SCENE_BASE_NO_CHARACTER_NEGATIVE = (
     "character reference leakage, identity leakage"
 )
 SCENE_ASSET_ROLES = {"scene", "scene_base", "background", "bg", "environment", "location", "set"}
+PROMPT_REFERENCE_ARTIFACT_PATTERNS = (
+    r"\bopenapi/[A-Za-z0-9._/\-]+\.(?:png|jpe?g|webp|mp4|mov|webm)\b",
+    r"\b(?:generated_images|video_clips|image_prompts|video_prompts|my_workspace)[\\/][^\s，。；;、]+",
+    r"\b[A-Za-z]:[\\/][^\s，。；;、]+",
+    r"\b(?:asset|source_asset|source_asset_id|library_asset|library_asset_id|job|shot|vid_clip|kf_shot)_[A-Za-z0-9_\-]+\b",
+    r"\b[a-f0-9]{24,64}(?:_[A-Za-z0-9_\-]+)?\b",
+)
+
+
+def sanitize_generation_prompt(text: str) -> str:
+    """Remove internal IDs, paths, and request-schema fragments from model prompts."""
+
+    value = str(text or "")
+    if not value:
+        return ""
+    value = re.sub(r"(?i)\"?\b(?:nodeId|fieldName|fieldValue|nodeInfoList|asset_id|source_asset_id|library_asset_id)\b\"?\s*[:：]\s*\"?[^,，。；;\n]+\"?", "", value)
+    value = re.sub(
+        r"参考已有(?:关键帧|素材|图片|图像|资产){0,3}\s*[\"'“”‘’]?\s*(?:asset_)?[A-Za-z0-9_\-]{12,64}\s*[\"'“”‘’]?\s*的(?:风格|画风|构图|视觉)",
+        "参考关联素材的视觉风格",
+        value,
+    )
+    value = re.sub(
+        r"参考(?:素材库|关联)?(?:关键帧|素材|图片|图像|资产){0,3}\s*[\"'“”‘’]?\s*(?:asset_)?[A-Za-z0-9_\-]{24,64}\s*[\"'“”‘’]?",
+        "参考关联素材",
+        value,
+    )
+    for pattern in PROMPT_REFERENCE_ARTIFACT_PATTERNS:
+        value = re.sub(pattern, "", value, flags=re.IGNORECASE)
+    value = re.sub(r"\s{2,}", " ", value)
+    value = re.sub(r"\s*([，。；;、,.])\s*([，。；;、,.])+", r"\1", value)
+    value = re.sub(r"\s+([，。；;、,.])", r"\1", value)
+    value = re.sub(r"([，,；;、])\s*([。.])", r"\2", value)
+    value = re.sub(r"参考已有(?:关键帧|素材|图片|图像|资产){0,3}\s*[\"'“”‘’\s]*的(?:风格|画风|构图|视觉)", "参考关联素材的视觉风格", value)
+    return value.strip(" \t\r\n，,；;、")
 
 
 def compile_production_plan(
@@ -550,7 +584,7 @@ def _compile_image_intents(
                 if not isinstance(frame, dict):
                     continue
                 role = _frame_role(frame.get("role"))
-                prompt = str(frame.get("prompt") or frame.get("description") or intent.get("prompt") or "").strip()
+                prompt = sanitize_generation_prompt(frame.get("prompt") or frame.get("description") or intent.get("prompt") or "")
                 if not prompt:
                     notes.append(f"image intent {intent_id}:{role} skipped because prompt is empty")
                     continue
@@ -580,10 +614,11 @@ def _compile_image_intents(
                 _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
                 _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
                 _apply_visual_style_policy(item, global_context=global_context)
+                item["prompt"] = sanitize_generation_prompt(item.get("prompt") or "")
                 prompts.append(item)
                 jobs.append({"job_id": job_id, "intent_id": intent_id, "frame_role": role, **item})
             continue
-        prompt = str(intent.get("prompt") or intent.get("description") or intent.get("visual_description") or "").strip()
+        prompt = sanitize_generation_prompt(intent.get("prompt") or intent.get("description") or intent.get("visual_description") or "")
         if not prompt:
             notes.append(f"image intent {intent_id} skipped because prompt is empty")
             continue
@@ -612,6 +647,7 @@ def _compile_image_intents(
         _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
         _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
         _apply_visual_style_policy(item, global_context=global_context)
+        item["prompt"] = sanitize_generation_prompt(item.get("prompt") or "")
         prompts.append(item)
         jobs.append({"job_id": intent_id, "intent_id": intent_id, **item})
     return prompts, jobs
@@ -1724,7 +1760,7 @@ def _compile_video_intents(
         )
         intent = locked_intent
         parameter_overrides.extend(_tag_overrides(overrides, intent_id, "video"))
-        prompt = str(intent.get("prompt") or intent.get("motion_plan") or intent.get("description") or intent.get("edit_note") or "").strip()
+        prompt = sanitize_generation_prompt(intent.get("prompt") or intent.get("motion_plan") or intent.get("description") or intent.get("edit_note") or "")
         broll_promoted_to_i2v = intent_name == "generate_broll_clip" and _video_intent_has_visible_character(intent, prompt)
         broll_removed_character_terms: list[str] = []
         if intent_name == "generate_broll_clip" and not broll_promoted_to_i2v:
@@ -1835,6 +1871,7 @@ def _compile_video_intents(
             item["requires_audio"] = True
         _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
         _apply_visual_style_policy(item, global_context=global_context)
+        item["prompt"] = sanitize_generation_prompt(item.get("prompt") or "")
         prompts.append(item)
         jobs.append(dict(item))
         video_job_ids.add(intent_id)

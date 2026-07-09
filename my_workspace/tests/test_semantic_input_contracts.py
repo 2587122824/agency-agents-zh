@@ -3037,6 +3037,99 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(item["library_asset_id"], "asset_1")
             self.assertEqual(item["source_file"], "comfyui/job/out.png")
 
+    def test_task_assets_include_sanitized_request_info(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            task_dir = root / "task_a"
+            media = task_dir / "generated_images" / "job_shot_001" / "out.png"
+            media.parent.mkdir(parents=True)
+            media.write_bytes(b"fake")
+            (task_dir / "production_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "production_nodes": [
+                            {
+                                "job_id": "shot_001",
+                                "outputs": ["generated_images/job_shot_001/out.png"],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            (task_dir / "production_plan.json").write_text(
+                json.dumps(
+                    {
+                        "compiled_payload": {
+                            "image_prompts": [
+                                {
+                                    "job_id": "shot_001",
+                                    "prompt": "年轻女性坐在咖啡店，参考已有关键帧素材 'a509cdff82fe430c87d1246907e2b80c' 的风格。",
+                                }
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            assets = web_app.WorkflowWebHandler._task_assets(
+                task_dir,
+                ["generated_images/job_shot_001/out.png"],
+                task_name="task_a",
+            )
+            item = assets["images"][0]
+            self.assertEqual(item["producer_job_id"], "shot_001")
+            self.assertIn("年轻女性坐在咖啡店", item["request_info"])
+            self.assertNotIn("a509cdff82fe430c87d1246907e2b80c", item["request_info"])
+            self.assertNotIn("nodeId", item["request_info"])
+
+    def test_compiler_strips_asset_ids_and_paths_from_generation_prompts(self) -> None:
+        leaked_asset_id = "a509cdff82fe430c87d1246907e2b80c"
+        plan = compile_production_plan(
+            task_id="sanitize_asset_id_prompt",
+            route_content=json.dumps({"production_type": "drama_story"}, ensure_ascii=False),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_keyframe",
+                                "intent_id": "shot_001",
+                                "prompt": (
+                                    f"年轻女性主角半身母版图，参考已有关键帧素材 '{leaked_asset_id}' 的风格。"
+                                    "文件 my_workspace/my_asset_library/07_keyframe/a509cdff82fe430c87d1246907e2b80c_comfyui_result_02.png。"
+                                ),
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_content=json.dumps(
+                {
+                    "production_intents": {
+                        "video": [
+                            {
+                                "intent": "generate_broll_clip",
+                                "intent_id": "clip_001",
+                                "prompt": f"咖啡店空镜，source_asset_id: {leaked_asset_id}",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        )
+        payload = plan["compiled_payload"]
+        image_prompt = payload["image_prompts"][0]["prompt"]
+        video_prompt = payload["video_prompts"][0]["prompt"]
+        self.assertNotIn(leaked_asset_id, image_prompt)
+        self.assertNotIn("my_workspace/my_asset_library", image_prompt)
+        self.assertNotIn(leaked_asset_id, video_prompt)
+        self.assertIn("参考关联素材的视觉风格", image_prompt)
+
     def test_adapter_replaces_typed_placeholders(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {
@@ -3203,6 +3296,24 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(prompt_value, payload["prompt"])
         self.assertNotIn("\u5206\u522b\u4e3a", prompt_value)
         self.assertNotIn("7\u79cd", prompt_value)
+
+    def test_runninghub_prompt_nodes_strip_asset_artifacts(self) -> None:
+        leaked_asset_id = "a509cdff82fe430c87d1246907e2b80c"
+        adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+        built = adapter._build_runninghub_payload(
+            {
+                "prompt": (
+                    f"年轻女性坐在咖啡店，参考已有关键帧素材 '{leaked_asset_id}' 的风格，"
+                    "my_workspace/my_asset_library/07_keyframe/a509cdff82fe430c87d1246907e2b80c.png"
+                )
+            },
+            {"node_info_list_json": '[{"nodeId":"63","fieldName":"text","fieldValue":"{{prompt}}"}]'},
+        )
+        prompt_value = built["nodeInfoList"][0]["fieldValue"]
+        self.assertIn("年轻女性坐在咖啡店", prompt_value)
+        self.assertNotIn(leaked_asset_id, prompt_value)
+        self.assertNotIn("my_workspace/my_asset_library", prompt_value)
+        self.assertNotIn("nodeId", prompt_value)
 
     def test_live_action_retro_prompts_get_quality_guardrails(self) -> None:
         plan = compile_production_plan(

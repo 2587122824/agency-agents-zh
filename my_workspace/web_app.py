@@ -25,7 +25,7 @@ from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
 from my_codex_core.comfy_mcp_adapter import ComfyMCPAdapter
 from my_codex_core.production_entities import load_production_entities, write_production_entities
 from my_codex_core.production_pipeline import retry_production_job
-from my_codex_core.production_plan_compiler import compile_production_plan
+from my_codex_core.production_plan_compiler import compile_production_plan, sanitize_generation_prompt
 from my_codex_core.task_state_center import TaskStateCenter
 from my_codex_core.workflow_engine import WorkflowCheckpointPause, WorkflowEngine
 
@@ -11727,6 +11727,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!els.assetLightbox) return;
       els.assetLightbox.hidden = true;
       if (els.assetLightboxStage) els.assetLightboxStage.innerHTML = '';
+      els.assetLightbox?.querySelector('.asset-lightbox-request-info')?.remove();
     }
 
     function handleAssetLightboxBackgroundClick(event) {
@@ -11798,6 +11799,7 @@ INDEX_HTML = r"""<!doctype html>
       els.assetLightboxTitle.textContent = item.label || assetFileLabel(item.file);
       els.assetLightboxMeta.textContent = item.file;
       els.assetLightboxCounter.textContent = `${assetPreviewIndex + 1} / ${assetPreviewItems.length}`;
+      renderAssetLightboxRequestInfo(item);
       els.assetLightboxPrevBtn.disabled = assetPreviewItems.length <= 1;
       els.assetLightboxNextBtn.disabled = assetPreviewItems.length <= 1;
       els.assetLightboxOpenBtn.onclick = () => window.open(url, '_blank', 'noopener');
@@ -11817,6 +11819,24 @@ INDEX_HTML = r"""<!doctype html>
           }
         };
       }
+    }
+
+    function renderAssetLightboxRequestInfo(item) {
+      const foot = els.assetLightbox?.querySelector('.asset-lightbox-foot');
+      if (!foot) return;
+      foot.querySelector('.asset-lightbox-request-info')?.remove();
+      const prompt = String(item?.request_info || item?.prompt || '').trim();
+      if (!prompt || /"?(nodeId|fieldName|fieldValue|nodeInfoList)"?\s*:/i.test(prompt)) return;
+      const details = document.createElement('details');
+      details.className = 'asset-lightbox-request-info';
+      const summary = document.createElement('summary');
+      summary.textContent = '请求信息';
+      const body = document.createElement('div');
+      body.className = 'details-body muted small';
+      body.textContent = prompt;
+      details.appendChild(summary);
+      details.appendChild(body);
+      foot.appendChild(details);
     }
 
     function fitAssetLightboxMedia(media) {
@@ -16154,6 +16174,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         videos = []
         is_comfy_debug = task_dir.name == COMFY_DEBUG_TASK
         favorite_map = WorkflowWebHandler._asset_library_source_map()
+        manifest = WorkflowWebHandler._read_json_file(task_dir / "production_manifest.json")
+        graph = WorkflowWebHandler._read_json_file(task_dir / "production_graph.json")
+        plan = WorkflowWebHandler._read_json_file(task_dir / "production_plan.json")
+        job_state = WorkflowWebHandler._read_json_file(task_dir / "production_job_state.json")
         for file in files:
             path = task_dir / file
             if not path.is_file():
@@ -16176,6 +16200,17 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 item["library_asset_id"] = str(favorite.get("id") or "")
                 item["library_file"] = str(favorite.get("file") or "")
                 item["tags"] = favorite.get("tags") if isinstance(favorite.get("tags"), list) else []
+            job_id = WorkflowWebHandler._producer_job_id_for_file(file, manifest)
+            if not job_id:
+                job_id = WorkflowWebHandler._producer_job_id_for_file(file, job_state)
+            if job_id:
+                job = WorkflowWebHandler._production_job_definition(job_id, graph, plan)
+                source_intent = WorkflowWebHandler._production_prompt_item_for_job(job_id, plan)
+                prompt = sanitize_generation_prompt(source_intent.get("prompt") or job.get("prompt") or "")
+                item["producer_job_id"] = job_id
+                if prompt:
+                    item["prompt"] = prompt
+                    item["request_info"] = prompt
             suffix = path.suffix.lower()
             if suffix in IMAGE_EXTENSIONS:
                 images.append(item)
