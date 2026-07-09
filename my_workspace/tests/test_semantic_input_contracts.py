@@ -1361,6 +1361,75 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("input_identity_image", item)
         self.assertIn("Background/location plate only", item["prompt"])
 
+    def test_background_assets_bind_keyframes_as_scene_references(self) -> None:
+        linked_assets = {
+            "linked_assets": {
+                "assets": [
+                    {
+                        "asset_id": "asset_xiaomei",
+                        "file": "my_workspace/my_asset_library/01_character_base/xiaomei.png",
+                        "kind": "image",
+                        "tags": ["image", "character_base"],
+                        "character_id": "",
+                    }
+                ],
+                "characters": [],
+                "scenes": [],
+            }
+        }
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "base_scene_morning",
+                            "asset_role": "background",
+                            "scene_id": "scene_morning_home",
+                            "prompt": "Messy bedroom background plate, morning light.",
+                        },
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "base_bg_corridor",
+                            "asset_role": "background",
+                            "scene_id": "scene_morning_home",
+                            "prompt": "Apartment corridor background plate.",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "keyframe_shot_001",
+                            "character_id": "character_xiaomei",
+                            "scene_id": "scene_morning_home",
+                            "prompt": "Xiaomei sits up on the messy bed, tired face, morning light.",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="background_scene_keyframe_binding_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+
+        scene, corridor, keyframe = plan["compiled_payload"]["image_prompts"]
+        self.assertEqual(scene["workflow_mode"], "scene_base")
+        self.assertEqual(corridor["workflow_mode"], "scene_base")
+        self.assertEqual(scene["character_id"], "")
+        self.assertEqual(keyframe["workflow_mode"], "identity_scene_keyframe")
+        self.assertEqual(keyframe["control_mode"], "identity_scene_reference")
+        self.assertEqual(
+            keyframe["input_identity_image"],
+            "my_workspace/my_asset_library/01_character_base/xiaomei.png",
+        )
+        self.assertEqual(
+            keyframe["input_bindings"]["input_scene_image"],
+            {"from_job": "base_scene_morning", "output": "output_final_image"},
+        )
+        self.assertIn("base_scene_morning", keyframe["depends_on"])
+
     def test_linked_character_front_expression_is_not_turnaround(self) -> None:
         linked_assets = {
             "linked_assets": {
@@ -2978,6 +3047,29 @@ class SemanticInputContractTests(unittest.TestCase):
             }
 
             self.assertFalse(WorkflowEngine._material_gate_passed(production_manifest))
+
+    def test_keyframe_identity_modes_do_not_fall_back_to_generic_slot(self) -> None:
+        preset = CloudComfyUIAdapter._workflow_library_preset_for_job(
+            {
+                "workflow_id": "04_keyframe",
+                "mode": "identity_scene_keyframe",
+                "type": "image",
+            },
+            {
+                "workflow_library": [
+                    {
+                        "id": "04_keyframe",
+                        "endpoint": "/run/workflow/generic-keyframe",
+                        "node_info_list_json": '[{"nodeId":"63","fieldName":"text","fieldValue":"{{prompt}}"}]',
+                    }
+                ]
+            },
+        )
+
+        self.assertIsNotNone(preset)
+        self.assertEqual(preset["_matched_mode"], "identity_scene_keyframe")
+        self.assertEqual(preset["endpoint"], "")
+        self.assertEqual(preset["node_info_list_json"], "[]")
 
     def test_reference_image_job_sends_single_image_edit_prompt(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

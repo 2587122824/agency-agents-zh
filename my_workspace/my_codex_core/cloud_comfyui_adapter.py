@@ -1704,7 +1704,25 @@ class CloudComfyUIAdapter:
             merged["node_info_list_json"] = config.get("node_info_list_json") or config.get("nodeInfoList") or "[]"
             merged["poll_timeout_seconds"] = config.get("poll_timeout_seconds") or config.get("pollTimeout") or merged.get("poll_timeout_seconds")
             merged["_matched_mode"] = mode
+        elif CloudComfyUIAdapter._mode_requires_exact_config(merged.get("id"), mode):
+            merged["endpoint"] = ""
+            merged["node_info_list_json"] = "[]"
+            merged["_matched_mode"] = mode
         return merged
+
+    @staticmethod
+    def _mode_requires_exact_config(workflow_id: Any, mode: Any) -> bool:
+        workflow_key = CloudComfyUIAdapter._canonical_workflow_id(workflow_id)
+        mode_key = str(mode or "").strip()
+        return workflow_key == "04_keyframe" and mode_key in {
+            "style_reference_keyframe",
+            "img2img_style_keyframe",
+            "identity_keyframe",
+            "identity_scene_keyframe",
+            "pose_identity_keyframe",
+            "multi_identity_keyframe",
+            "multi_pose_identity_keyframe",
+        }
 
     @classmethod
     def _repair_known_runninghub_node_info(

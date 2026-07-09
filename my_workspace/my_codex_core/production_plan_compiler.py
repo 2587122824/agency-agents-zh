@@ -92,6 +92,7 @@ SCENE_BASE_NO_CHARACTER_NEGATIVE = (
     "protagonist, main character, recognizable person, portrait, posed foreground person, cartoon office worker, "
     "character reference leakage, identity leakage"
 )
+SCENE_ASSET_ROLES = {"scene", "scene_base", "background", "bg", "environment", "location", "set"}
 
 
 def compile_production_plan(
@@ -1524,25 +1525,23 @@ def _generated_scene_reference_job(
         return None
     item_scene_id = str(item.get("scene_id") or intent.get("scene_id") or intent.get("shot_id") or "").strip()
     if item_scene_id:
-        exact = next(
-            (
+        exact = _preferred_scene_reference_candidate(
+            [
                 candidate
-                for candidate in reversed(scene_items)
+                for candidate in scene_items
                 if str(candidate.get("scene_id") or "").strip() == item_scene_id
-            ),
-            None,
+            ]
         )
         if exact:
             return exact
         normalized_scene = _normalized_scene_key(item_scene_id)
         if normalized_scene:
-            fuzzy = next(
-                (
+            fuzzy = _preferred_scene_reference_candidate(
+                [
                     candidate
-                    for candidate in reversed(scene_items)
+                    for candidate in scene_items
                     if normalized_scene and normalized_scene == _normalized_scene_key(candidate.get("scene_id"))
-                ),
-                None,
+                ]
             )
             if fuzzy:
                 return fuzzy
@@ -1555,11 +1554,32 @@ def _generated_scene_reference_job(
             candidate_tokens = _scene_match_tokens(candidate, {})
             score = len(target_tokens.intersection(candidate_tokens))
             if score:
-                scored.append((score, index, candidate))
+                scored.append((score, _scene_reference_priority(candidate), index, candidate))
         if scored:
-            scored.sort(key=lambda value: (value[0], value[1]), reverse=True)
-            return scored[0][2]
+            scored.sort(key=lambda value: (value[0], value[1], value[2]), reverse=True)
+            return scored[0][3]
     return None
+
+
+def _preferred_scene_reference_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
+    if not candidates:
+        return None
+    return max(enumerate(candidates), key=lambda value: (_scene_reference_priority(value[1]), -value[0]))[1]
+
+
+def _scene_reference_priority(item: dict[str, Any]) -> int:
+    workflow_mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
+    asset_tag = str(item.get("asset_tag") or item.get("asset_role") or "").strip().lower()
+    job_id = str(item.get("job_id") or item.get("id") or "").strip().lower()
+    if workflow_mode == "scene_base" and (asset_tag in {"scene", "scene_base"} or job_id.startswith(("base_scene", "asset_scene", "scene_"))):
+        return 40
+    if workflow_mode == "scene_base":
+        return 30
+    if asset_tag in {"scene", "scene_base"} or job_id.startswith(("base_scene", "asset_scene", "scene_")):
+        return 20
+    if asset_tag in {"background", "bg", "environment", "location"} or job_id.startswith("base_bg"):
+        return 10
+    return 0
 
 
 def _is_scene_reference_item(item: Any) -> bool:
@@ -1568,7 +1588,11 @@ def _is_scene_reference_item(item: Any) -> bool:
     workflow_mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
     asset_tag = str(item.get("asset_tag") or item.get("asset_role") or "").strip().lower()
     job_id = str(item.get("job_id") or item.get("id") or "").strip().lower()
-    return workflow_mode == "scene_base" or asset_tag in {"scene", "scene_base"} or job_id.startswith("asset_scene")
+    return (
+        workflow_mode == "scene_base"
+        or asset_tag in SCENE_ASSET_ROLES
+        or job_id.startswith(("asset_scene", "base_scene", "base_bg", "scene_"))
+    )
 
 
 def _normalized_scene_key(value: Any) -> str:
@@ -2032,7 +2056,7 @@ def _image_prompt_item(
 ) -> dict[str, Any]:
     intent_name = str(intent.get("intent") or "").strip()
     workflow_id, workflow_mode = _image_workflow_route(intent_name, intent, contract, compatibility)
-    scene_base_item = workflow_mode == "scene_base" or str(intent.get("asset_role") or "").strip().lower() in {"scene", "scene_base"}
+    scene_base_item = workflow_mode == "scene_base" or str(intent.get("asset_role") or "").strip().lower() in SCENE_ASSET_ROLES
     entity_context = entity_context_for_ids(
         resolved_entities,
         character_id="" if scene_base_item else str(intent.get("character_id") or ""),
@@ -2290,7 +2314,7 @@ def _image_workflow_route(
             return "03_style_cover_image", "style_reference"
         if role == "product":
             return "01_base_asset_image", "product_base"
-        if role == "scene":
+        if role in SCENE_ASSET_ROLES:
             return "01_base_asset_image", "scene_base"
         return "01_base_asset_image", "character_base"
     if intent_name == "generate_turnaround":
