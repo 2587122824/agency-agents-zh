@@ -93,7 +93,7 @@ def apply_locked_parameters_to_intent(
     if style_id:
         force("style_id", style_id, "style_lock")
     character_id = _locked_character_id(global_context)
-    if character_id:
+    if character_id and _should_apply_character_identity_lock(locked, intent_kind=intent_kind, intent_name=intent_name):
         force("character_id", character_id, "character_identity_lock")
     elif locked.get("character_id") and _character_ids(global_context) and str(locked.get("character_id")) not in _character_ids(global_context):
         notes.append(f"{intent_kind} intent {locked.get('intent_id') or locked.get('id') or intent_name} uses unknown character_id={locked.get('character_id')}; kept for compatibility but not treated as a locked entity.")
@@ -174,7 +174,7 @@ def apply_locked_parameters_to_payload(payload: dict[str, Any], *, job_type: str
     if style.get("style_id"):
         payload["style_id"] = str(style.get("style_id") or "")
     character_id = _locked_character_id(global_context)
-    if character_id:
+    if character_id and _should_apply_character_identity_lock(payload, intent_kind=str(job_type or payload.get("task_type") or ""), intent_name=mode):
         payload["character_id"] = character_id
     payload["global_style_weight"] = payload.get("global_style_weight") or style.get("weight") or ""
     payload["parameter_policy"] = policy
@@ -247,6 +247,95 @@ def _locked_fields_for_item(intent_kind: str, intent_name: str) -> list[str]:
 def _locked_character_id(context: dict[str, Any]) -> str:
     ids = _character_ids(context)
     return ids[0] if len(ids) == 1 else ""
+
+
+def _should_apply_character_identity_lock(payload: dict[str, Any], *, intent_kind: str, intent_name: str) -> bool:
+    current_character_id = str(payload.get("character_id") or "").strip()
+    if current_character_id:
+        return True
+    constraints = payload.get("constraints") if isinstance(payload.get("constraints"), dict) else {}
+    identity_lock = constraints.get("identity_lock")
+    if identity_lock is False:
+        return False
+    if identity_lock is True:
+        return True
+    if isinstance(payload.get("characters"), list) and payload.get("characters"):
+        return True
+
+    kind_text = str(intent_kind or payload.get("task_type") or "").strip().lower()
+    mode_text = " ".join(
+        str(value or "")
+        for value in (
+            intent_name,
+            payload.get("intent"),
+            payload.get("workflow_mode"),
+            payload.get("mode"),
+            payload.get("control_mode"),
+            payload.get("image_task_mode"),
+            payload.get("video_task_mode"),
+        )
+    ).lower()
+    role_text = " ".join(
+        str(payload.get(key) or "")
+        for key in ("asset_role", "asset_tag", "reference_role", "capability")
+    ).lower()
+    prompt_text = " ".join(
+        str(payload.get(key) or "")
+        for key in ("prompt", "description", "visual_description", "shot_description", "motion_plan")
+    ).lower()
+    combined = f"{mode_text} {role_text} {prompt_text}"
+
+    if "broll" in combined or "b-roll" in combined:
+        return False
+    if any(token in role_text for token in ("scene", "background", "environment", "location", "set", "product", "food")):
+        return False
+    if any(token in combined for token in (
+        "stall",
+        "food",
+        "snack",
+        "dish",
+        "restaurant",
+        "street",
+        "background",
+        "environment",
+        "location",
+        "empty scene",
+        "no protagonist",
+        "no visible character",
+        "摊",
+        "美食",
+        "食物",
+        "小吃",
+        "串串",
+        "鱿鱼",
+        "蛋糕",
+        "环境",
+        "场景",
+        "背景",
+        "空镜",
+    )):
+        return False
+    if any(token in combined for token in (
+        "identity",
+        "character",
+        "portrait",
+        "face",
+        "full body",
+        "protagonist",
+        "hero",
+        "host",
+        "avatar",
+        "主角",
+        "角色",
+        "人物",
+        "人像",
+        "脸",
+        "全身",
+        "小美",
+    )):
+        return True
+
+    return not kind_text.startswith("image")
 
 
 def _character_ids(context: dict[str, Any]) -> list[str]:

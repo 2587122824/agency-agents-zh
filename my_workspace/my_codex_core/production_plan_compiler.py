@@ -81,8 +81,8 @@ VISUAL_NO_TEXT_NEGATIVE = (
     "visible text, readable text, Chinese text, English text, subtitles, captions, title, labels, logo, watermark, "
     "UI, screen text, sign text, poster text, random letters, malformed characters, gibberish"
 )
-LINKED_CHARACTER_VARIANT_DENOISE = 0.58
-LINKED_CHARACTER_KEYFRAME_DENOISE = 0.65
+LINKED_CHARACTER_VARIANT_DENOISE = 1
+LINKED_CHARACTER_KEYFRAME_DENOISE = 1
 SCENE_BASE_NO_CHARACTER_PROMPT = (
     "Background/location plate only: no protagonist, no recognizable foreground person, no character portrait, "
     "no posed person at the main subject position. If the scene explicitly needs a crowd, keep people as distant "

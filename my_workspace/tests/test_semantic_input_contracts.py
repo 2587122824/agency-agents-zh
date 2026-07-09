@@ -1179,7 +1179,7 @@ class SemanticInputContractTests(unittest.TestCase):
                 item["reference_image"],
                 "my_workspace/my_asset_library/01_character_base/hero.png",
             )
-            self.assertEqual(item["denoise"], 0.58)
+            self.assertEqual(item["denoise"], 1)
             self.assertNotEqual(item["workflow_mode"], "character_base")
 
     def test_three_frame_shot_uses_linked_character_master_image(self) -> None:
@@ -1349,9 +1349,11 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(base_item["workflow_id"], "04_keyframe")
         self.assertEqual(base_item["workflow_mode"], "img2img_style_keyframe")
         self.assertEqual(base_item["input_base_image"], master_path)
+        self.assertEqual(base_item["denoise"], 1)
         self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
         self.assertEqual(keyframe["input_identity_image"], master_path)
         self.assertEqual(keyframe["input_base_image"], master_path)
+        self.assertEqual(keyframe["denoise"], 1)
 
     def test_scene_base_does_not_inherit_linked_character_reference(self) -> None:
         linked_assets = {
@@ -1402,6 +1404,50 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("input_base_image", item)
         self.assertNotIn("input_identity_image", item)
         self.assertIn("Background/location plate only", item["prompt"])
+
+    def test_environment_keyframe_with_identity_lock_false_does_not_inherit_single_character(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_xiaomei_master",
+                            "asset_role": "character",
+                            "character_id": "character_xiaomei",
+                            "prompt": "Xiaomei portrait reference.",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "keyframe_foodstall_skewers",
+                            "character_id": "",
+                            "scene_id": "scene_foodstreet",
+                            "prompt": "Hotpot skewer stall wide shot, red oil pot boiling, steam and neon lights.",
+                            "constraints": {"identity_lock": False, "style_lock": True},
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="environment_keyframe_identity_lock_false_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+        )
+
+        item = {row["job_id"]: row for row in plan["compiled_payload"]["image_prompts"]}["keyframe_foodstall_skewers"]
+        self.assertEqual(item["workflow_mode"], "keyframe")
+        self.assertEqual(item["character_id"], "")
+        self.assertNotIn("input_base_image", item)
+        self.assertNotIn("input_identity_image", item)
+        self.assertFalse(
+            any(
+                override["intent_id"] == "keyframe_foodstall_skewers"
+                and override["field"] == "character_id"
+                for override in plan["parameter_overrides"]
+            )
+        )
 
     def test_background_assets_bind_keyframes_as_scene_references(self) -> None:
         linked_assets = {
@@ -1519,7 +1565,7 @@ class SemanticInputContractTests(unittest.TestCase):
             item["input_base_image"],
             "my_workspace/my_asset_library/01_character_base/xiaomei.png",
         )
-        self.assertEqual(item["denoise"], 0.58)
+        self.assertEqual(item["denoise"], 1)
 
     def test_animal_reference_sheet_stays_on_character_base(self) -> None:
         image_content = json.dumps(
