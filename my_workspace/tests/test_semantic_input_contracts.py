@@ -804,6 +804,31 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("标题、字幕和大段文字", item["prompt"])
         self.assertIn("visible text", item["negative_prompt"])
 
+    def test_cover_title_layout_cue_becomes_clean_empty_space(self) -> None:
+        plan = compile_production_plan(
+            task_id="cover_title_guard",
+            route_content='{"production_type":"drama_story"}',
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_cover_key_visual",
+                                "intent_id": "cover_kv",
+                                "prompt": "\u4e3b\u89d2\u5728\u5915\u9633\u4e0b\u5fae\u7b11\u3002\u6784\u56fe\u65f6\u4e0a1/3\u7559\u767d\uff0c\u7528\u4e8e\u53e0\u52a0\u6807\u9898\u3002",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        )
+
+        item = plan["compiled_payload"]["image_prompts"][0]
+        self.assertIn("upper third clean empty space", item["prompt"])
+        self.assertNotIn("\u7528\u4e8e\u53e0\u52a0\u6807\u9898", item["prompt"])
+        self.assertNotIn("\u53e0\u52a0\u6807\u9898", item["prompt"])
+
     def test_runninghub_text_node_sanitizer_removes_file_tokens(self) -> None:
         rows = CloudComfyUIAdapter._sanitize_text_node_info_values(
             [
@@ -1111,6 +1136,7 @@ class SemanticInputContractTests(unittest.TestCase):
                 item["reference_image"],
                 "my_workspace/my_asset_library/01_character_base/hero.png",
             )
+            self.assertEqual(item["denoise"], 0.58)
             self.assertNotEqual(item["workflow_mode"], "character_base")
 
     def test_three_frame_shot_uses_linked_character_master_image(self) -> None:
@@ -1284,6 +1310,56 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(keyframe["input_identity_image"], master_path)
         self.assertEqual(keyframe["input_base_image"], master_path)
 
+    def test_scene_base_does_not_inherit_linked_character_reference(self) -> None:
+        linked_assets = {
+            "linked_assets": {
+                "assets": [
+                    {
+                        "asset_id": "asset_xiaomei",
+                        "name": "Xiaomei base image",
+                        "file": "my_workspace/my_asset_library/01_character_base/xiaomei.png",
+                        "kind": "image",
+                        "tags": ["image", "character_base"],
+                        "character_id": "",
+                    }
+                ],
+                "characters": [],
+                "scenes": [],
+            }
+        }
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "base_asset_scene_office",
+                            "asset_role": "scene",
+                            "character_id": "character_xiaomei",
+                            "scene_id": "scene_office",
+                            "prompt": "Bright office desk background with monitor, keyboard, white coffee cup and plant.",
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="scene_base_linked_character_isolation_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+
+        item = plan["compiled_payload"]["image_prompts"][0]
+        self.assertEqual(item["workflow_id"], "01_base_asset_image")
+        self.assertEqual(item["workflow_mode"], "scene_base")
+        self.assertEqual(item["character_id"], "")
+        self.assertEqual(item["reference_images"], [])
+        self.assertNotIn("input_base_image", item)
+        self.assertNotIn("input_identity_image", item)
+        self.assertIn("Background/location plate only", item["prompt"])
+
     def test_linked_character_front_expression_is_not_turnaround(self) -> None:
         linked_assets = {
             "linked_assets": {
@@ -1331,6 +1407,7 @@ class SemanticInputContractTests(unittest.TestCase):
             item["input_base_image"],
             "my_workspace/my_asset_library/01_character_base/xiaomei.png",
         )
+        self.assertEqual(item["denoise"], 0.58)
 
     def test_animal_reference_sheet_stays_on_character_base(self) -> None:
         image_content = json.dumps(

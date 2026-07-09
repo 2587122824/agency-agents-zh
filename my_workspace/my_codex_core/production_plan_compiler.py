@@ -81,6 +81,17 @@ VISUAL_NO_TEXT_NEGATIVE = (
     "visible text, readable text, Chinese text, English text, subtitles, captions, title, labels, logo, watermark, "
     "UI, screen text, sign text, poster text, random letters, malformed characters, gibberish"
 )
+LINKED_CHARACTER_VARIANT_DENOISE = 0.58
+LINKED_CHARACTER_KEYFRAME_DENOISE = 0.65
+SCENE_BASE_NO_CHARACTER_PROMPT = (
+    "Background/location plate only: no protagonist, no recognizable foreground person, no character portrait, "
+    "no posed person at the main subject position. If the scene explicitly needs a crowd, keep people as distant "
+    "blurred anonymous silhouettes and do not borrow identity or style from any character reference."
+)
+SCENE_BASE_NO_CHARACTER_NEGATIVE = (
+    "protagonist, main character, recognizable person, portrait, posed foreground person, cartoon office worker, "
+    "character reference leakage, identity leakage"
+)
 
 
 def compile_production_plan(
@@ -913,7 +924,7 @@ def _apply_linked_character_reference_policy(
         item["input_scene_image"] = scene_reference
         item["scene_reference_image"] = scene_reference
         _merge_compat_list(item, "reference_images", [scene_reference])
-    item["denoise"] = intent.get("denoise") or item.get("denoise") or 1
+    item["denoise"] = intent.get("denoise") or item.get("denoise") or LINKED_CHARACTER_KEYFRAME_DENOISE
     item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or item.get("ipadapter_weight") or 0.72
     item["prompt"] = _append_prompt_once(
         str(item.get("prompt") or ""),
@@ -982,7 +993,7 @@ def _route_character_base_item_to_master_img2img(
     item["input_base_image"] = master_reference
     item["reference_image"] = master_reference
     item["input_reference_style"] = master_reference
-    item["denoise"] = intent.get("denoise") or 1
+    item["denoise"] = intent.get("denoise") or LINKED_CHARACTER_VARIANT_DENOISE
     item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
     item["prompt"] = _append_prompt_once(
         str(item.get("prompt") or ""),
@@ -1226,8 +1237,35 @@ def _apply_no_text_visual_policy(item: dict[str, Any]) -> None:
         item["negative_prompt"] = _append_prompt_once(str(item.get("negative_prompt") or ""), VISUAL_NO_TEXT_NEGATIVE)
 
 
-def _remove_text_generation_cues(prompt: str) -> str:
+def _remove_title_layout_generation_cues(prompt: str) -> str:
     text = str(prompt or "")
+    text = re.sub(
+        r"(?i)(?:\u6784\u56fe\u65f6)?\s*(?:\u4e0a|\u4e0b|\u5de6|\u53f3)?\s*(?:\d+\s*/\s*\d+|\u4e09\u5206\u4e4b\u4e00|third)"
+        r"[^\u3002\uff1b;,.]*?(?:\u7528\u4e8e|\u65b9\u4fbf|\u53ef\u4f9b|\u9884\u7559|\u7559\u7ed9|for)"
+        r"[^\u3002\uff1b;,.]*?(?:\u6807\u9898|\u526f\u6807\u9898|\u5b57\u5e55|\u6587\u6848|\u6587\u5b57|title|subtitle|caption|copy|text)"
+        r"[^\u3002\uff1b;,.]*[\u3002\uff1b;,.]?",
+        " upper third clean empty space. ",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(?:\u6807\u9898|\u526f\u6807\u9898|\u5b57\u5e55|\u6587\u6848|\u6587\u5b57|title|subtitle|caption|copy|text)"
+        r"[^\u3002\uff1b;,.]{0,16}(?:\u7559\u767d|\u9884\u7559|\u533a\u57df|area|space)"
+        r"[^\u3002\uff1b;,.]*[\u3002\uff1b;,.]?",
+        " clean empty space. ",
+        text,
+    )
+    text = re.sub(
+        r"(?i)(?:\u7559\u767d|\u9884\u7559)[^\u3002\uff1b;,.]{0,24}"
+        r"(?:\u6807\u9898|\u526f\u6807\u9898|\u5b57\u5e55|\u6587\u6848|\u6587\u5b57|title|subtitle|caption|copy|text)"
+        r"[^\u3002\uff1b;,.]*[\u3002\uff1b;,.]?",
+        " clean empty space. ",
+        text,
+    )
+    return re.sub(r"\s{2,}", " ", text).strip()
+
+
+def _remove_text_generation_cues(prompt: str) -> str:
+    text = _remove_title_layout_generation_cues(str(prompt or ""))
     text = re.sub(r"画面内文字仅在明确要求时生成[；;，,。]?.*?(?:后期排版|排版)[。；;]?", "", text)
     text = re.sub(r"(?:封面)?(?:主标题|副标题|标题|字幕|文字标签|文案)[:：][^。；;\\n]*[。；;]?", "", text)
     text = re.sub(r"(?i)(?:title|subtitle|caption|text label)\\s*[:：][^.。；;\\n]*[.。；;]?", "", text)
@@ -1963,6 +2001,23 @@ def _apply_broll_no_character_policy(
             )
 
 
+def _apply_scene_base_no_character_policy(item: dict[str, Any], notes: list[str] | None = None) -> None:
+    item["character_id"] = ""
+    item["scene_base_policy"] = "background_plate_no_character_reference"
+    item["prompt"] = _append_prompt_once(str(item.get("prompt") or ""), SCENE_BASE_NO_CHARACTER_PROMPT)
+    item["negative_prompt"] = _append_prompt_once(str(item.get("negative_prompt") or ""), SCENE_BASE_NO_CHARACTER_NEGATIVE)
+    item["reference_images"] = []
+    for key in (
+        "input_identity_image",
+        "input_base_image",
+        "identity_image",
+        "character_references",
+    ):
+        item.pop(key, None)
+    if notes is not None:
+        notes.append(f"image intent {item.get('job_id')} isolated scene base from character references")
+
+
 def _image_prompt_item(
     *,
     job_id: str,
@@ -1977,9 +2032,10 @@ def _image_prompt_item(
 ) -> dict[str, Any]:
     intent_name = str(intent.get("intent") or "").strip()
     workflow_id, workflow_mode = _image_workflow_route(intent_name, intent, contract, compatibility)
+    scene_base_item = workflow_mode == "scene_base" or str(intent.get("asset_role") or "").strip().lower() in {"scene", "scene_base"}
     entity_context = entity_context_for_ids(
         resolved_entities,
-        character_id=str(intent.get("character_id") or ""),
+        character_id="" if scene_base_item else str(intent.get("character_id") or ""),
         style_id=str(intent.get("style_id") or ""),
         product_id=str(intent.get("product_id") or ""),
         scene_id=str(intent.get("scene_id") or intent.get("shot_id") or ""),
@@ -1998,7 +2054,7 @@ def _image_prompt_item(
         "negative_prompt": str(intent.get("negative_prompt") or ""),
         "width": _positive_int(intent.get("width") or render.get("working_width"), 848),
         "height": _positive_int(intent.get("height") or render.get("working_height"), 480),
-        "character_id": str(intent.get("character_id") or ""),
+        "character_id": "" if scene_base_item else str(intent.get("character_id") or ""),
         "style_id": str(intent.get("style_id") or ""),
         "product_id": str(intent.get("product_id") or ""),
         "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
@@ -2011,7 +2067,9 @@ def _image_prompt_item(
     if entity_context:
         item["entity_context"] = entity_context
         _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
-    character_references = _character_references_from_intent(intent, resolved_entities)
+    if scene_base_item:
+        _apply_scene_base_no_character_policy(item, notes)
+    character_references = [] if scene_base_item else _character_references_from_intent(intent, resolved_entities)
     if character_references:
         raw_characters = intent.get("characters") if isinstance(intent.get("characters"), list) else []
         if len(raw_characters) > 4 and notes is not None:
