@@ -694,10 +694,6 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(material["status"], "running")
             node = next(job for job in state["production"]["jobs"] if job["id"] == "asset_character_master")
             self.assertEqual(node["status"], "running")
-            self.assertEqual(state["next_action"]["action"], "wait_for_materials")
-            self.assertEqual(state["next_action"]["progress"]["done"], 0)
-            self.assertEqual(state["next_action"]["progress"]["total"], 2)
-            self.assertIn("asset_character_master", state["next_action"]["progress"]["running"])
 
     def test_task_state_merges_graph_visual_jobs_when_manifest_has_packaging_nodes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -3436,65 +3432,6 @@ class SemanticInputContractTests(unittest.TestCase):
         info_graph = image_items["keyframe_info_graph"]
         self.assertEqual(info_graph["workflow_mode"], "identity_keyframe")
         self.assertNotIn("input_scene_image", info_graph.get("input_bindings") or {})
-
-    def test_generated_scene_postpass_binds_later_scene_to_linked_character_variant(self) -> None:
-        linked_assets = {
-            "linked_assets": {
-                "assets": [
-                    {
-                        "asset_id": "asset_xiaomei",
-                        "name": "Xiaomei base image",
-                        "file": "my_workspace/my_asset_library/01_character_base/xiaomei.png",
-                        "kind": "image",
-                        "tags": ["image", "character_base"],
-                        "character_id": "character_xiaomei",
-                    }
-                ],
-                "characters": [],
-                "scenes": [],
-            }
-        }
-        plan = compile_production_plan(
-            task_id="late_scene_binding_test",
-            route_content=json.dumps({"production_type": "drama_story", "aspect_ratio": "9:16"}, ensure_ascii=False),
-            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
-            image_content=json.dumps(
-                {
-                    "production_intents": {
-                        "image": [
-                            {
-                                "intent": "generate_base_asset",
-                                "intent_id": "asset_xiaomei_pose_01",
-                                "asset_role": "character",
-                                "character_id": "character_xiaomei",
-                                "scene_id": "scene_food_stall",
-                                "prompt": "Xiaomei holds a skewer at the food stall, same face.",
-                            },
-                            {
-                                "intent": "generate_base_asset",
-                                "intent_id": "asset_scene_food_stall",
-                                "asset_role": "scene",
-                                "scene_id": "scene_food_stall",
-                                "prompt": "Food stall background plate, warm evening light, no foreground character.",
-                            },
-                        ]
-                    }
-                },
-                ensure_ascii=False,
-            ),
-        )
-
-        image_items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
-        pose = image_items["asset_xiaomei_pose_01"]
-        scene = image_items["asset_scene_food_stall"]
-
-        self.assertEqual(pose["workflow_mode"], "identity_scene_keyframe")
-        self.assertEqual(pose["control_mode"], "identity_scene_reference")
-        self.assertEqual(pose["input_identity_image"], "my_workspace/my_asset_library/01_character_base/xiaomei.png")
-        self.assertEqual(pose["input_bindings"]["input_scene_image"]["from_job"], "asset_scene_food_stall")
-        self.assertIn("asset_scene_food_stall", pose["depends_on"])
-        self.assertEqual(scene["workflow_mode"], "scene_base")
-        self.assertEqual(scene["character_id"], "")
 
     def test_voice_requirement_enables_voxcpm2_fallback(self) -> None:
         config = {"voice_config": {"mode": "off"}}

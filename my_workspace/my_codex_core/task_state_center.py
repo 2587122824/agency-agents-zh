@@ -408,23 +408,6 @@ class TaskStateCenter:
                 "label": "配置 RunningHub API Key 后重试素材",
                 "reason": "missing_runninghub_api_key",
             }
-        progress = self._production_progress_summary(production)
-        if progress and state == "running":
-            return {
-                "action": "wait_for_materials",
-                "label": progress["label"],
-                "reason": "production_in_progress",
-                "progress": progress,
-            }
-        if progress and state == "partial" and progress.get("remaining", 0) > 0:
-            action = "resume" if "resume" in allowed_actions else "wait_for_materials"
-            label = f"继续生成素材：{progress['done']}/{progress['total']}" if action == "resume" else progress["label"]
-            return {
-                "action": action,
-                "label": label,
-                "reason": "production_incomplete",
-                "progress": progress,
-            }
         if state in {"partial", "blocked", "failed", "cancelled", "paused"} and "resume" in allowed_actions:
             return {"action": "resume", "label": "继续任务", "reason": state}
         if blockers:
@@ -474,12 +457,10 @@ class TaskStateCenter:
         for blocker in blockers:
             diagnostics.append({"level": "warn", "code": blocker.get("code", "blocked"), "message": blocker.get("message", "")})
         if state in {"running", "partial"} and production.get("graph_backed") and not production.get("manifest_file"):
-            progress = self._production_progress_summary(production)
             diagnostics.append(
                 {
                     "level": "info",
                     "code": "production_materials_in_progress",
-                    "details": progress,
                     "message": "员工步骤已完成，素材生产仍在进行中；production_manifest.json 会在素材/包装阶段返回后写入。",
                 }
             )
@@ -511,52 +492,6 @@ class TaskStateCenter:
         if self._as_bool(self.runtime_comfy_config.get("has_api_key"), default=False):
             return True
         return bool(str(self.runtime_comfy_config.get("api_key") or "").strip())
-
-    def _production_progress_summary(self, production: dict[str, Any]) -> dict[str, Any]:
-        dag = production.get("dag") if isinstance(production.get("dag"), dict) else {}
-        nodes = dag.get("nodes") if isinstance(dag.get("nodes"), list) else []
-        if not nodes:
-            return {}
-        counts = dag.get("counts") if isinstance(dag.get("counts"), dict) else self._status_counts(nodes)
-        total = len(nodes)
-        done = int(counts.get("success") or 0) + int(counts.get("skipped") or 0)
-        running_nodes = [
-            node
-            for node in nodes
-            if str(node.get("status") or "").strip().lower() in {"running", "queued"}
-        ]
-        pending_nodes = [
-            node
-            for node in nodes
-            if str(node.get("status") or "").strip().lower() in {"pending", "not_started"}
-        ]
-        failed_nodes = dag.get("failed_nodes") if isinstance(dag.get("failed_nodes"), list) else []
-        blocked_nodes = dag.get("blocked_nodes") if isinstance(dag.get("blocked_nodes"), list) else []
-        running_ids = [str(node.get("job_id") or "") for node in running_nodes if str(node.get("job_id") or "").strip()]
-        pending_ids = [str(node.get("job_id") or "") for node in pending_nodes if str(node.get("job_id") or "").strip()]
-        failed_ids = [
-            str(node.get("job_id") or "")
-            for node in [*failed_nodes, *blocked_nodes]
-            if str(node.get("job_id") or "").strip()
-        ]
-        if running_ids:
-            focus = "当前运行：" + "、".join(running_ids[:3])
-        elif pending_ids:
-            focus = "等待处理：" + "、".join(pending_ids[:3])
-        else:
-            focus = "等待生产清单回写"
-        label = f"正在生成素材：{done}/{total}"
-        return {
-            "total": total,
-            "done": done,
-            "remaining": max(total - done, 0),
-            "counts": counts,
-            "running": running_ids,
-            "pending": pending_ids,
-            "failed_or_blocked": failed_ids,
-            "label": label,
-            "message": f"{label}；{focus}。production_manifest.json 会在素材/包装阶段完成后写入。",
-        }
 
     @staticmethod
     def _workflow_slot_detail(item: dict[str, Any]) -> dict[str, str]:
