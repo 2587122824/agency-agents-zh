@@ -16,6 +16,7 @@ import web_app  # noqa: E402
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter  # noqa: E402
 from my_codex_core.local_tts_adapter import LocalTTSAdapter  # noqa: E402
 from my_codex_core.local_ffmpeg_adapter import LocalFFmpegAdapter  # noqa: E402
+from my_codex_core.workflow_engine import WorkflowEngine  # noqa: E402
 from my_codex_core.production_plan_compiler import (  # noqa: E402
     _bind_first_source_video,
     _image_prompt_item,
@@ -2927,6 +2928,56 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("video_prompt", payload)
         prepared = adapter._prepare_runninghub_payload(payload)
         self.assertEqual(prepared["prompt"], "让图中人物坐在操场上吃饭")
+
+    def test_material_job_requires_durable_downloaded_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
+            adapter._run_generic = lambda payload, config, output_dir: {  # type: ignore[method-assign]
+                "status": "submitted",
+                "downloaded_files": [],
+            }
+            with self.assertRaisesRegex(ValueError, "durable local output files"):
+                adapter._run_job_with_retries(
+                    "generic",
+                    {"prompt": "test"},
+                    {},
+                    Path(temp_dir),
+                    "job_missing_download",
+                )
+
+    def test_material_gate_requires_each_job_downloaded_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            manifest_path = root / "cloud_comfyui_manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "status": "success",
+                        "job_count": 1,
+                        "success_count": 1,
+                        "failed_count": 0,
+                        "downloaded_files": [],
+                        "jobs": [
+                            {
+                                "job_id": "image_001",
+                                "status": "success",
+                                "downloaded_files": [],
+                            }
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            production_manifest = {
+                "composition": {
+                    "adapter_status": "success",
+                    "downloaded_files": ["missing.png"],
+                    "adapter_manifest": str(manifest_path),
+                }
+            }
+
+            self.assertFalse(WorkflowEngine._material_gate_passed(production_manifest))
 
     def test_reference_image_job_sends_single_image_edit_prompt(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")

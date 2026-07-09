@@ -164,7 +164,7 @@ class CloudComfyUIAdapter:
             failed_dependencies = [
                 dependency
                 for dependency in self._string_list(job.get("depends_on"))
-                if str((job_state.get("jobs") or {}).get(dependency, {}).get("status") or "") not in {"success", "cached", "downloaded", "submitted"}
+                if str((job_state.get("jobs") or {}).get(dependency, {}).get("status") or "") not in {"success", "cached", "downloaded"}
                 and dependency != "local_tts"
             ]
             if missing_inputs or failed_dependencies:
@@ -377,8 +377,8 @@ class CloudComfyUIAdapter:
             )
             try:
                 manifest, attempts = self._run_job_with_retries(provider, job_payload, job_config, job_dir, job_id)
-                job_downloaded = [str(path) for path in manifest.get("downloaded_files", [])]
-                if manifest.get("status") in {"success", "downloaded", "submitted"}:
+                job_downloaded = self._existing_downloaded_files(manifest.get("downloaded_files"))
+                if manifest.get("status") in {"success", "downloaded"} and job_downloaded:
                     success_count += 1
                 downloaded_files.extend(job_downloaded)
                 if job_type == "image":
@@ -1335,8 +1335,10 @@ class CloudComfyUIAdapter:
             try:
                 result = self._run_runninghub(payload, config, output_dir) if provider == "runninghub" else self._run_generic(payload, config, output_dir)
                 result = self._maybe_append_turnaround_sheet(payload, config, output_dir, result)
-                if not result.get("downloaded_files") and result.get("status") not in {"submitted"}:
-                    raise ValueError("ComfyUI download failed: no output files returned")
+                downloaded_files = self._existing_downloaded_files(result.get("downloaded_files"))
+                if not downloaded_files:
+                    raise ValueError("ComfyUI download failed: no durable local output files were downloaded")
+                result["downloaded_files"] = downloaded_files
                 return result, attempt
             except Exception as exc:
                 last_error = exc
@@ -1351,6 +1353,10 @@ class CloudComfyUIAdapter:
                 )
                 time.sleep(min(8, 2 ** (attempt - 1)))
         raise last_error or ValueError(f"production job failed: {job_id}")
+
+    @staticmethod
+    def _existing_downloaded_files(value: Any) -> list[str]:
+        return [str(path) for path in (value or []) if str(path).strip() and Path(str(path)).is_file()]
 
     @staticmethod
     def _error_category(exc: BaseException) -> str:

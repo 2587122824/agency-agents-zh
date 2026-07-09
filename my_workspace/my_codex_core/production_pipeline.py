@@ -1982,7 +1982,7 @@ def _restore_legacy_comfyui_job_state(output_dir: Path) -> Path | None:
         return state_path
 
     candidates: list[tuple[int, int, float, Path, dict[str, Any]]] = []
-    reusable_statuses = {"success", "cached", "downloaded", "submitted"}
+    reusable_statuses = {"success", "cached", "downloaded"}
     for candidate in output_dir.glob("attempt_*/production_job_state.json"):
         data = _read_json_object(candidate)
         jobs = data.get("jobs") if isinstance(data.get("jobs"), dict) else {}

@@ -604,6 +604,8 @@ class TaskStateCenter:
                 if path.is_file() and path.suffix.lower() not in {".json", ".txt", ".md"}:
                     files.append(str(path))
         status = str(state.get("status") or "").strip().lower()
+        if status in {"success", "succeeded", "completed", "complete", "done", "cached", "downloaded"} and not files:
+            status = "pending"
         return {
             "status": status or ("success" if files else "pending"),
             "files": files,

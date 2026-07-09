@@ -911,7 +911,39 @@ class WorkflowEngine:
         job_count = int(adapter_manifest.get("job_count") or 0)
         success_count = int(adapter_manifest.get("success_count") or 0)
         failed_count = int(adapter_manifest.get("failed_count") or 0)
-        return job_count > 0 and success_count == job_count and failed_count == 0
+        if not (job_count > 0 and success_count == job_count and failed_count == 0):
+            return False
+        return WorkflowEngine._adapter_manifest_downloads_complete(adapter_manifest, job_count)
+
+    @staticmethod
+    def _adapter_manifest_downloads_complete(adapter_manifest: dict, job_count: int) -> bool:
+        jobs = adapter_manifest.get("jobs") if isinstance(adapter_manifest.get("jobs"), list) else []
+        complete_statuses = {"success", "cached", "downloaded"}
+        if jobs:
+            required_jobs = [
+                job
+                for job in jobs
+                if isinstance(job, dict)
+                and str(job.get("status") or "").strip().lower() != "skipped"
+            ]
+            if len(required_jobs) < job_count:
+                return False
+            for job in required_jobs:
+                status = str(job.get("status") or "").strip().lower()
+                files = [
+                    Path(str(path))
+                    for path in (job.get("downloaded_files") or job.get("outputs") or [])
+                    if str(path).strip()
+                ]
+                if status not in complete_statuses or not files or any(not path.is_file() for path in files):
+                    return False
+            return True
+        downloaded_files = [
+            Path(str(path))
+            for path in (adapter_manifest.get("downloaded_files") or [])
+            if str(path).strip()
+        ]
+        return len(downloaded_files) >= job_count and all(path.is_file() for path in downloaded_files)
 
     @staticmethod
     def _manual_comfy_debug_waiting(production_manifest: dict | None, production_config: dict | None) -> bool:
