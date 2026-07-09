@@ -1284,6 +1284,54 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(keyframe["input_identity_image"], master_path)
         self.assertEqual(keyframe["input_base_image"], master_path)
 
+    def test_linked_character_front_expression_is_not_turnaround(self) -> None:
+        linked_assets = {
+            "linked_assets": {
+                "assets": [
+                    {
+                        "asset_id": "asset_xiaomei",
+                        "name": "Xiaomei base image",
+                        "file": "my_workspace/my_asset_library/01_character_base/xiaomei.png",
+                        "kind": "image",
+                        "tags": ["image", "character_base"],
+                        "character_id": "",
+                    }
+                ],
+                "characters": [],
+                "scenes": [],
+            }
+        }
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "base_asset_xiaomei_expression_warm_smile",
+                            "asset_role": "character",
+                            "character_id": "character_xiaomei",
+                            "prompt": "小美正面微笑表情，穿着浅蓝色衬衫，头发自然披肩，表情温暖亲切，背景淡出。",
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="linked_character_front_expression_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+        item = plan["compiled_payload"]["image_prompts"][0]
+        self.assertEqual(item["workflow_id"], "04_keyframe")
+        self.assertEqual(item["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(item["control_mode"], "img2img_style")
+        self.assertEqual(
+            item["input_base_image"],
+            "my_workspace/my_asset_library/01_character_base/xiaomei.png",
+        )
+
     def test_animal_reference_sheet_stays_on_character_base(self) -> None:
         image_content = json.dumps(
             {

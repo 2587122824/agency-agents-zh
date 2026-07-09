@@ -1048,7 +1048,27 @@ def _looks_like_animal_character(text: str) -> bool:
 
 
 def _looks_like_turnaround_sheet(text: str) -> bool:
-    return any(token in text for token in ("turnaround", "three view", "three-view", "三视图", "正面", "侧面", "背面"))
+    value = str(text or "").lower()
+    if any(
+        token in value
+        for token in (
+            "turnaround",
+            "three view",
+            "three-view",
+            "three views",
+            "model sheet",
+            "三视图",
+            "三面图",
+            "多视角",
+            "正侧背",
+            "涓夎",
+        )
+    ):
+        return True
+    front = any(token in value for token in ("正面", "姝ｉ潰", "front view", "front-facing"))
+    side = any(token in value for token in ("侧面", "側面", "渚ч潰", "side view", "profile view"))
+    back = any(token in value for token in ("背面", "背部", "鑳岄潰", "back view", "rear view"))
+    return front and side and back
 
 
 def _looks_like_expression_sheet(text: str) -> bool:
