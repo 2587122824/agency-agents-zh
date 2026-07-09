@@ -1361,6 +1361,77 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(keyframe["input_base_image"], master_path)
         self.assertEqual(keyframe["denoise"], 1)
 
+    def test_generic_linked_keyframe_asset_becomes_style_reference_not_identity(self) -> None:
+        reference_path = "my_workspace/my_asset_library/07_keyframe/ref_keyframe.png"
+        linked_assets = {
+            "linked_assets": {
+                "assets": [
+                    {
+                        "asset_id": "asset_keyframe_ref",
+                        "name": "Selected keyframe reference",
+                        "file": reference_path,
+                        "kind": "image",
+                        "tags": ["image", "keyframe"],
+                    }
+                ],
+                "characters": [],
+                "scenes": [],
+            }
+        }
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "base_character_hero",
+                            "asset_role": "character",
+                            "character_id": "hero",
+                            "prompt": "Generate the main character base image.",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "keyframe_empty_room",
+                            "character_id": "",
+                            "prompt": "Empty living room wide shot, afternoon window light.",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="generic_linked_keyframe_style_reference_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+
+        style_context = plan["global_context"]["style"]
+        self.assertEqual(style_context["reference_asset"], reference_path)
+        self.assertEqual(style_context["style_reference"], reference_path)
+        self.assertEqual(style_context["linked_reference_assets"][0]["file"], reference_path)
+
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        base_item = items["base_character_hero"]
+        self.assertEqual(base_item["workflow_id"], "04_keyframe")
+        self.assertEqual(base_item["workflow_mode"], "img2img_style_keyframe")
+        self.assertEqual(base_item["control_mode"], "img2img_style")
+        self.assertEqual(base_item["input_base_image"], reference_path)
+        self.assertEqual(base_item["input_reference_style"], reference_path)
+        self.assertNotIn("input_identity_image", base_item)
+
+        empty_room = items["keyframe_empty_room"]
+        self.assertEqual(empty_room["workflow_id"], "04_keyframe")
+        self.assertEqual(empty_room["workflow_mode"], "style_reference_keyframe")
+        self.assertEqual(empty_room["control_mode"], "style_reference")
+        self.assertEqual(empty_room["input_reference_style"], reference_path)
+        self.assertNotIn("input_identity_image", empty_room)
+
+        prompt_text = "\n".join(str(item.get("prompt") or "") for item in items.values())
+        self.assertNotIn("asset_keyframe_ref", prompt_text)
+        self.assertNotIn("ref_keyframe.png", prompt_text)
+
     def test_scene_base_does_not_inherit_linked_character_reference(self) -> None:
         linked_assets = {
             "linked_assets": {

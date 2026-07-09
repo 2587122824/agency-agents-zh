@@ -188,6 +188,7 @@ def compile_production_plan(
         load_asset_library(asset_library_path or DEFAULT_ASSET_LIBRARY_PATH),
     )
     _merge_linked_asset_entities(entity_registry, source_payload, entity_references=entity_references)
+    linked_style_notes = _merge_linked_style_reference_assets(global_context, source_payload)
     global_context, resolved_entities, entity_notes = enrich_global_context_with_entities(global_context, entity_registry, entity_references)
     transient_notes = _merge_generated_character_master_entities(
         global_context,
@@ -196,7 +197,7 @@ def compile_production_plan(
     )
     global_context = normalize_parameter_policy_context(global_context, route=route, video_config=video_config or {})
     compat_payload = json.loads(json.dumps(existing_payload or {}, ensure_ascii=False))
-    compile_notes: list[str] = [*entity_notes, *transient_notes]
+    compile_notes: list[str] = [*entity_notes, *transient_notes, *linked_style_notes]
     parameter_overrides: list[dict[str, Any]] = []
 
     image_prompts, image_jobs = _compile_image_intents(
@@ -611,6 +612,7 @@ def _compile_image_intents(
                 _apply_linked_character_reference_policy(item, intent, notes)
                 _apply_generated_character_reference_policy(item, intent, prompts, notes)
                 _apply_generated_scene_reference_policy(item, intent, prompts, notes)
+                _apply_linked_style_reference_policy(item, intent, global_context, notes)
                 _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
                 _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
                 _apply_visual_style_policy(item, global_context=global_context)
@@ -637,6 +639,7 @@ def _compile_image_intents(
         _apply_linked_character_reference_policy(item, intent, notes)
         _apply_generated_character_reference_policy(item, intent, prompts, notes)
         _apply_generated_scene_reference_policy(item, intent, prompts, notes)
+        _apply_linked_style_reference_policy(item, intent, global_context, notes)
         attach_parameter_lock_metadata(
             item,
             global_context=global_context,
@@ -816,6 +819,53 @@ def _merge_linked_asset_entities(
         }
 
 
+def _merge_linked_style_reference_assets(context: dict[str, Any], payload: dict[str, Any]) -> list[str]:
+    linked_assets = payload.get("linked_assets") if isinstance(payload.get("linked_assets"), dict) else {}
+    if not linked_assets:
+        return []
+    style = context.setdefault("style", {})
+    if not isinstance(style, dict):
+        style = {}
+        context["style"] = style
+    reference_assets = style.get("reference_assets") if isinstance(style.get("reference_assets"), list) else []
+    linked_references = style.get("linked_reference_assets") if isinstance(style.get("linked_reference_assets"), list) else []
+    notes: list[str] = []
+    seen = {
+        str(value.get("file") if isinstance(value, dict) else value or "").strip().replace("\\", "/")
+        for value in linked_references
+    }
+    seen.update(str(value or "").strip().replace("\\", "/") for value in reference_assets if str(value or "").strip())
+    for raw in linked_assets.get("assets") or []:
+        if not isinstance(raw, dict) or not _linked_asset_looks_like_style_reference(raw):
+            continue
+        file_path = _linked_asset_file_path(raw)
+        if not file_path or file_path in seen:
+            continue
+        seen.add(file_path)
+        reference_assets.insert(0, file_path)
+        linked_references.append(
+            {
+                "asset_id": str(raw.get("asset_id") or raw.get("id") or "").strip(),
+                "name": str(raw.get("name") or "").strip(),
+                "file": file_path,
+                "tags": [str(tag).strip() for tag in raw.get("tags") or [] if str(tag).strip()],
+                "source": "linked_assets.assets",
+            }
+        )
+        notes.append(f"linked reference asset {file_path} registered as input_reference_style")
+    if not linked_references:
+        return notes
+    style["reference_assets"] = list(dict.fromkeys(value for value in reference_assets if str(value or "").strip()))
+    style["linked_reference_assets"] = linked_references
+    first_reference = str(style["reference_assets"][0] or "").strip() if style["reference_assets"] else ""
+    if first_reference:
+        if not str(style.get("reference_asset") or "").strip():
+            style["reference_asset"] = first_reference
+        if not str(style.get("style_reference") or "").strip():
+            style["style_reference"] = first_reference
+    return notes
+
+
 def _upsert_linked_character_entity(characters: dict[str, Any], raw: dict[str, Any], *, character_id: str) -> None:
     current = characters.get(character_id) if isinstance(characters.get(character_id), dict) else {}
     reference_assets = list(current.get("reference_assets") or []) if isinstance(current.get("reference_assets"), list) else []
@@ -857,8 +907,42 @@ def _linked_asset_looks_like_character(raw: dict[str, Any]) -> bool:
     return any(part in file_path for part in ("/01_character_base/", "/04_character_turnaround/", "character_base", "character_turnaround"))
 
 
+def _linked_asset_looks_like_style_reference(raw: dict[str, Any]) -> bool:
+    if _linked_asset_looks_like_character(raw) or _linked_asset_looks_like_scene(raw):
+        return False
+    kind = str(raw.get("kind") or raw.get("type") or "").strip().lower()
+    if kind and kind not in {"image", "reference", "asset", "keyframe", "style"}:
+        return False
+    tags = {str(tag or "").strip().lower() for tag in raw.get("tags") or [] if str(tag).strip()}
+    if tags.intersection(
+        {
+            "style",
+            "style_reference",
+            "reference",
+            "keyframe",
+            "cover",
+            "cover_key_visual",
+            "i2v_first_frame",
+            "i2v_first_last_frame",
+            "i2v_first_middle_last_frame",
+            "image_reference",
+        }
+    ):
+        return True
+    file_path = str(raw.get("file") or raw.get("source_file") or raw.get("path") or "").replace("\\", "/").lower()
+    return any(part in file_path for part in ("/06_style_reference/", "/07_keyframe/", "/08_cover_key_visual/", "style_reference", "keyframe", "cover_key_visual"))
+
+
+def _linked_asset_looks_like_scene(raw: dict[str, Any]) -> bool:
+    tags = {str(tag or "").strip().lower() for tag in raw.get("tags") or [] if str(tag).strip()}
+    if tags.intersection({"scene", "scene_base", "scene_reference", "background", "environment", "location"}):
+        return True
+    file_path = str(raw.get("file") or raw.get("source_file") or raw.get("path") or "").replace("\\", "/").lower()
+    return any(part in file_path for part in ("/02_scene_base/", "/03_background/", "scene_base", "scene_reference", "background"))
+
+
 def _linked_asset_file_path(raw: dict[str, Any]) -> str:
-    value = str(raw.get("file") or "").strip().replace("\\", "/")
+    value = str(raw.get("file") or raw.get("source_file") or raw.get("path") or raw.get("source_path") or "").strip().replace("\\", "/")
     if not value:
         return ""
     if value.startswith("my_workspace/") or re.match(r"^[A-Za-z]:/", value) or value.startswith("/"):
@@ -1012,6 +1096,112 @@ def _linked_scene_reference_from_intent_or_item(intent: dict[str, Any], item: di
     if isinstance(references, list):
         return next((str(value).strip() for value in references if str(value).strip()), "")
     return ""
+
+
+def _apply_linked_style_reference_policy(
+    item: dict[str, Any],
+    intent: dict[str, Any],
+    global_context: dict[str, Any],
+    notes: list[str] | None = None,
+) -> None:
+    reference = _linked_style_reference_from_context(global_context)
+    if not reference:
+        return
+    if str(item.get("input_reference_style") or "").strip():
+        return
+    workflow_id = str(item.get("workflow_id") or "").strip()
+    workflow_mode = str(item.get("workflow_mode") or item.get("mode") or "").strip()
+    asset_role = str(intent.get("asset_role") or item.get("asset_tag") or "").strip().lower()
+    bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
+
+    if (
+        workflow_id == "01_base_asset_image"
+        and workflow_mode == "character_base"
+        and not _item_has_identity_reference(item)
+        and not bindings.get("input_base_image")
+    ):
+        item["workflow_id"] = "04_keyframe"
+        item["workflow_mode"] = "img2img_style_keyframe"
+        item["image_task_mode"] = "img2img_style_keyframe"
+        item["mode"] = "img2img_style_keyframe"
+        item["control_mode"] = "img2img_style"
+        item["input_base_image"] = reference
+        item["input_reference_style"] = reference
+        item["reference_image"] = reference
+        item["denoise"] = intent.get("denoise") or item.get("denoise") or 1
+        item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or item.get("ipadapter_weight") or 0.65
+        _merge_compat_list(item, "reference_images", [reference])
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} uses linked reference asset as img2img_style base")
+        return
+
+    if workflow_id == "03_style_cover_image" and workflow_mode == "cover_key_visual":
+        item["input_reference_style"] = reference
+        item["control_mode"] = "style_reference"
+        _merge_compat_list(item, "reference_images", [reference])
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} uses linked reference asset as cover style reference")
+        return
+
+    if workflow_id != "04_keyframe":
+        return
+
+    if workflow_mode == "keyframe" and not _item_has_identity_reference(item) and not item.get("input_scene_image"):
+        item["workflow_mode"] = "style_reference_keyframe"
+        item["image_task_mode"] = "style_reference_keyframe"
+        item["mode"] = "style_reference_keyframe"
+        item["control_mode"] = "style_reference"
+        item["input_reference_style"] = reference
+        _merge_compat_list(item, "reference_images", [reference])
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} routed to style_reference_keyframe from linked reference asset")
+        return
+
+    if workflow_mode in {"style_reference_keyframe", "img2img_style_keyframe"} or asset_role in {"style", "style_reference", "cover_key_visual"}:
+        item["input_reference_style"] = reference
+        _merge_compat_list(item, "reference_images", [reference])
+        if notes is not None:
+            notes.append(f"image intent {item.get('job_id')} uses linked reference asset as input_reference_style")
+
+
+def _linked_style_reference_from_context(global_context: dict[str, Any]) -> str:
+    style = global_context.get("style") if isinstance(global_context.get("style"), dict) else {}
+    linked = style.get("linked_reference_assets")
+    if isinstance(linked, list):
+        for entry in linked:
+            if isinstance(entry, dict):
+                value = str(entry.get("file") or entry.get("path") or "").strip()
+            else:
+                value = str(entry or "").strip()
+            if value:
+                return value
+    for key in ("input_reference_style", "style_reference", "reference_asset"):
+        value = str(style.get(key) or "").strip()
+        if value:
+            return value
+    references = style.get("reference_assets")
+    if isinstance(references, list):
+        return next((str(value).strip() for value in references if str(value).strip()), "")
+    return ""
+
+
+def _item_has_identity_reference(item: dict[str, Any]) -> bool:
+    if str(item.get("input_identity_image") or "").strip():
+        return True
+    bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
+    if bindings.get("input_identity_image") or bindings.get("input_base_image"):
+        return True
+    if _references_with_identity_sources(item.get("character_references")):
+        return True
+    control_mode = str(item.get("control_mode") or "").strip().lower()
+    mode = str(item.get("workflow_mode") or item.get("mode") or "").strip().lower()
+    return control_mode.startswith("identity") or mode in {
+        "identity_keyframe",
+        "identity_scene_keyframe",
+        "pose_identity_keyframe",
+        "multi_identity_keyframe",
+        "multi_pose_identity_keyframe",
+    }
 
 
 def _route_character_base_item_to_master_identity_keyframe(
@@ -1972,6 +2162,7 @@ def _ensure_video_keyframe_dependency(
         notes=notes,
     )
     _apply_generated_character_reference_policy(keyframe_item, keyframe_intent, image_prompts, notes)
+    _apply_linked_style_reference_policy(keyframe_item, keyframe_intent, global_context, notes)
     _apply_live_action_quality_policy(keyframe_item, global_context=global_context, intent=keyframe_intent)
     _apply_img2img_style_edit_prompt_policy(keyframe_item, intent=keyframe_intent, notes=notes)
     _apply_visual_style_policy(keyframe_item, global_context=global_context)
@@ -2554,6 +2745,7 @@ def _repair_legacy_i2v_keyframe_dependencies(
             notes=notes,
         )
         _apply_generated_character_reference_policy(keyframe_item, intent, image_prompts, notes)
+        _apply_linked_style_reference_policy(keyframe_item, intent, global_context, notes)
         _apply_live_action_quality_policy(keyframe_item, global_context=global_context, intent=intent)
         _apply_img2img_style_edit_prompt_policy(keyframe_item, intent=intent, notes=notes)
         image_prompts.append(keyframe_item)
