@@ -5632,7 +5632,9 @@ INDEX_HTML = r"""<!doctype html>
       };
       const serverIsRemote = looksLikeRemoteRuntimeModel(config);
       const localSettingsAreRemote = looksLikeRemoteRuntimeModel(localSettingsPayload);
-      if (hasLocalModelSettings && (!serverIsRemote || localSettingsAreRemote)) return;
+      // A saved remote system model is authoritative. Browser-local presets must
+      // never silently replace it on a normal task run.
+      if (hasLocalModelSettings && !serverIsRemote && localSettingsAreRemote) return;
       if (config.provider) setIfExists(els.provider, config.provider);
       if (config.model) {
         const knownOptions = Array.from(els.model.options || []).map(option => option.value);
@@ -5920,6 +5922,12 @@ INDEX_HTML = r"""<!doctype html>
       settingsRestoring = true;
       comfyDebugFormHydrated = false;
       const settings = readSettings();
+      // This was a historical editor-only RunningHub endpoint. It must not
+      // reappear as a default production value after the routing reset.
+      if (settings.comfyWorkflowEndpoint === '/run/workflow/2072296894507872257') {
+        settings.comfyWorkflowEndpoint = '';
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+      }
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       setIfExists(els.provider, settings.provider);
@@ -14344,12 +14352,16 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _write_runtime_model_config(config: dict) -> None:
         RUNTIME_STATE_ROOT.mkdir(parents=True, exist_ok=True)
         current = WorkflowWebHandler._read_runtime_model_config()
+
+        def configured_value(key: str) -> str:
+            return str((config.get(key) if key in config else current.get(key)) or "").strip()
+
         current.update(
             {
-                "provider": str(config.get("provider") or current.get("provider") or "").strip(),
-                "model": str(config.get("model") or current.get("model") or "").strip(),
-                "api_key": str(config.get("api_key") or current.get("api_key") or "").strip(),
-                "base_url": str(config.get("base_url") or current.get("base_url") or "").strip(),
+                "provider": configured_value("provider"),
+                "model": configured_value("model"),
+                "api_key": configured_value("api_key"),
+                "base_url": configured_value("base_url"),
                 "timeout": int(config.get("timeout") or current.get("timeout") or 900),
                 "updated_at": time.time(),
             }
@@ -14440,6 +14452,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _write_runtime_comfy_config(config: dict) -> None:
         RUNTIME_STATE_ROOT.mkdir(parents=True, exist_ok=True)
         current = WorkflowWebHandler._read_runtime_comfy_config(redact=False)
+
+        def configured_value(key: str) -> str:
+            return str((config.get(key) if key in config else current.get(key)) or "").strip()
+
         workflow_library = config.get("workflow_library")
         if not isinstance(workflow_library, list):
             workflow_library = current.get("workflow_library") if isinstance(current.get("workflow_library"), list) else []
@@ -14447,10 +14463,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             {
                 "visual_provider": str(config.get("visual_provider") or current.get("visual_provider") or "runninghub").strip() or "runninghub",
                 "api_key": str(config.get("api_key") or current.get("api_key") or "").strip(),
-                "base_url": str(config.get("base_url") or current.get("base_url") or "").strip(),
-                "comfy_mcp_url": str(config.get("comfy_mcp_url") or current.get("comfy_mcp_url") or "").strip(),
-                "workflow_endpoint": str(config.get("workflow_endpoint") or current.get("workflow_endpoint") or "").strip(),
-                "node_info_list_json": str(config.get("node_info_list_json") or current.get("node_info_list_json") or "").strip(),
+                "base_url": configured_value("base_url"),
+                "comfy_mcp_url": configured_value("comfy_mcp_url"),
+                "workflow_endpoint": configured_value("workflow_endpoint"),
+                "node_info_list_json": configured_value("node_info_list_json"),
                 "poll_timeout_seconds": int(config.get("poll_timeout_seconds") or current.get("poll_timeout_seconds") or 3600),
                 "workflow_preset_id": str(config.get("workflow_preset_id") or current.get("workflow_preset_id") or "").strip(),
                 "workflow_preset_name": str(config.get("workflow_preset_name") or current.get("workflow_preset_name") or "").strip(),
@@ -14551,11 +14567,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _resolve_runtime_model_request(cls, payload: dict) -> dict:
         saved = cls._read_runtime_model_config()
         request_payload = dict(payload)
-        if (
-            cls._is_remote_runtime_model_config(saved)
-            and cls._is_local_runtime_model_config(request_payload)
-            and not cls._truthy(request_payload.get("allow_local_override"))
-        ):
+        if cls._is_remote_runtime_model_config(saved) and not cls._truthy(request_payload.get("allow_local_override")):
             request_payload = {
                 **request_payload,
                 "provider": saved.get("provider") or "auto",
@@ -14569,7 +14581,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         api_key = str(request_payload.get("api_key") or "").strip() or str(saved.get("api_key") or "").strip() or None
         base_url = str(request_payload.get("base_url") or "").strip() or str(saved.get("base_url") or "").strip() or None
         timeout = int(request_payload.get("timeout") or 0) or int(saved.get("timeout") or 0) or None
-        if any(
+        if (
+            cls._is_remote_runtime_model_config(request_payload)
+            or cls._truthy(request_payload.get("allow_local_override"))
+        ) and any(
             str(request_payload.get(key) or "").strip()
             for key in ("provider", "model", "api_key", "base_url", "timeout")
         ):
