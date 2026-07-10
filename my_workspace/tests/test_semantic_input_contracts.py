@@ -1468,6 +1468,69 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("asset_keyframe_ref", prompt_text)
         self.assertNotIn("ref_keyframe.png", prompt_text)
 
+    def test_single_character_named_asset_overrides_mistagged_scene(self) -> None:
+        reference_path = "my_workspace/my_asset_library/uncategorized/xiaomei_reference.jpg"
+        linked_assets = {
+            "linked_assets": {
+                "assets": [
+                    {
+                        "asset_id": "asset_xiaomei_ref",
+                        "name": "小美",
+                        "file": reference_path,
+                        "kind": "image",
+                        "tags": ["image", "scene"],
+                        "character_id": "",
+                    }
+                ],
+                "characters": [],
+                "scenes": [],
+            }
+        }
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_character_xiaomei_front",
+                            "asset_role": "character",
+                            "character_id": "character_xiaomei",
+                            "prompt": "小美正面全身照，田径运动员，高马尾。",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "keyframe_shot_xiaomei",
+                            "character_id": "character_xiaomei",
+                            "prompt": "小美在田径场起跑。",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="single_character_mistagged_scene_identity_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+
+        assignment = plan["reference_assignments"][0]
+        self.assertEqual(assignment["role"], "identity_reference")
+        self.assertEqual(assignment["character_id"], "character_xiaomei")
+        self.assertEqual(assignment["confidence"], "low")
+
+        items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
+        base_item = items["asset_character_xiaomei_front"]
+        self.assertEqual(base_item["workflow_mode"], "identity_keyframe")
+        self.assertEqual(base_item["control_mode"], "identity_reference")
+        self.assertEqual(base_item["input_identity_image"], reference_path)
+        self.assertEqual(base_item["identity_anchor"]["source"], "external_identity_anchor")
+
+        keyframe = items["keyframe_shot_xiaomei"]
+        self.assertEqual(keyframe["workflow_mode"], "identity_keyframe")
+        self.assertEqual(keyframe["input_identity_image"], reference_path)
+
     def test_scene_base_does_not_inherit_linked_character_reference(self) -> None:
         linked_assets = {
             "linked_assets": {

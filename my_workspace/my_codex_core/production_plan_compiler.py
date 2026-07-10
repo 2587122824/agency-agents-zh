@@ -839,6 +839,10 @@ def _assign_linked_asset_roles(payload: dict[str, Any], entity_references: dict[
         if character_id or _linked_asset_looks_like_character(raw):
             role = "identity_reference"
             character_id = character_id or (character_ids[0] if len(character_ids) == 1 else asset_id)
+        elif _linked_asset_should_be_single_character_identity(raw, character_ids):
+            role = "identity_reference"
+            confidence = "low"
+            character_id = character_ids[0]
         elif _linked_asset_looks_like_scene(raw):
             role = "scene_reference"
         elif character_ids and not _linked_asset_looks_like_style_reference(raw):
@@ -968,6 +972,70 @@ def _linked_asset_looks_like_character(raw: dict[str, Any]) -> bool:
         return True
     file_path = str(raw.get("file") or raw.get("source_file") or "").replace("\\", "/").lower()
     return any(part in file_path for part in ("/01_character_base/", "/04_character_turnaround/", "character_base", "character_turnaround"))
+
+
+def _linked_asset_should_be_single_character_identity(raw: dict[str, Any], character_ids: list[str]) -> bool:
+    if len(character_ids) != 1:
+        return False
+    if str(raw.get("character_id") or "").strip():
+        return False
+    role = str(raw.get("reference_role") or "").strip().lower()
+    if role in {"scene_reference", "style_reference", "auxiliary_reference"}:
+        return False
+    kind = str(raw.get("kind") or raw.get("type") or "").strip().lower()
+    if kind and kind not in {"image", "reference", "asset", "keyframe"}:
+        return False
+    if str(raw.get("scene_id") or raw.get("product_id") or "").strip():
+        return False
+    tags = {str(tag or "").strip().lower() for tag in raw.get("tags") or [] if str(tag).strip()}
+    if tags.intersection({"style", "style_reference", "cover", "background", "environment", "location", "scene_base", "scene_reference"}):
+        return False
+    return _linked_asset_name_looks_like_person_reference(raw)
+
+
+def _linked_asset_name_looks_like_person_reference(raw: dict[str, Any]) -> bool:
+    name = str(raw.get("name") or raw.get("title") or raw.get("label") or "").strip()
+    if not name:
+        return False
+    normalized = re.sub(r"[\s_\-]+", "", name).lower()
+    if not normalized or re.fullmatch(r"[a-f0-9]{12,64}", normalized):
+        return False
+    scene_terms = (
+        "scene",
+        "background",
+        "environment",
+        "location",
+        "room",
+        "street",
+        "track",
+        "field",
+        "场景",
+        "背景",
+        "环境",
+        "地点",
+        "房间",
+        "卧室",
+        "客厅",
+        "办公室",
+        "街",
+        "跑道",
+        "操场",
+        "田径场",
+        "天空",
+        "夕阳",
+        "清晨",
+        "黄昏",
+    )
+    if any(term in normalized for term in scene_terms):
+        return False
+    if any(term in normalized for term in ("character", "人物", "角色", "主角", "形象", "头像", "人像", "portrait")):
+        return True
+    cjk_chars = re.findall(r"[\u4e00-\u9fff]", name)
+    if 1 < len(cjk_chars) <= 4:
+        return True
+    if re.fullmatch(r"[a-z][a-z0-9]{1,24}", normalized):
+        return True
+    return False
 
 
 def _linked_asset_looks_like_style_reference(raw: dict[str, Any]) -> bool:
