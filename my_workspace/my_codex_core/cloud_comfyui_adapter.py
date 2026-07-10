@@ -288,6 +288,12 @@ class CloudComfyUIAdapter:
             job_payload = self._payload_for_material_job(job["base_payload"], job, index)
             self._write_json(job_dir / "comfyui_payload.json", job_payload)
             input_hash = stable_job_hash(job_payload, job_config, resolved_inputs)
+            input_provenance = {
+                "workflow_id": str(job.get("workflow_id") or ""),
+                "workflow_mode": str(job.get("mode") or job.get("workflow_mode") or ""),
+                "identity_anchor": job.get("identity_anchor") if isinstance(job.get("identity_anchor"), dict) else {},
+                "resolved_inputs": dict(resolved_inputs),
+            }
             job_config = dict(job_config)
             job_config["runninghub_resume_key"] = runninghub_resume_key
             cached_state = (job_state.get("jobs") or {}).get(job_id, {})
@@ -350,6 +356,9 @@ class CloudComfyUIAdapter:
                     "cache_hit": True,
                     "attempts": int(cached_state.get("attempts") or 1),
                     "input_hash": input_hash,
+                    "input_provenance": input_provenance,
+                    "character_id": str(job.get("character_id") or ""),
+                    "workflow_mode": str(job.get("mode") or job.get("workflow_mode") or ""),
                     "downloaded_files": cached_files,
                 }
                 job_results.append(cached_result)
@@ -437,6 +446,9 @@ class CloudComfyUIAdapter:
                         "cache_hit": False,
                         "attempts": int((job_state.get("jobs") or {}).get(job_id, {}).get("attempts") or 1),
                         "input_hash": input_hash,
+                        "input_provenance": input_provenance,
+                        "character_id": str(job.get("character_id") or ""),
+                        "workflow_mode": str(job.get("mode") or job.get("workflow_mode") or ""),
                         "prompt": str(job.get("prompt") or "")[:500],
                         "workflow_preset_id": str(job_config.get("workflow_preset_id") or ""),
                         "workflow_preset_name": str(job_config.get("workflow_preset_name") or ""),

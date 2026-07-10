@@ -2410,6 +2410,15 @@ def _preflight_visual_jobs(raw_jobs: Any) -> dict[str, Any]:
         return str(binding or "").strip()
 
     for job in jobs:
+        job_id = str(job.get("job_id") or job.get("id") or "")
+        mode = str(job.get("mode") or job.get("workflow_mode") or "").lower()
+        character_id = str(job.get("character_id") or "").strip()
+        if mode in {"identity_keyframe", "identity_scene_keyframe", "pose_identity_keyframe"}:
+            if not binding_source(job, "input_identity_image"):
+                errors.append({"code": "missing_identity_binding", "job_id": job_id, "mode": mode})
+        if character_id and str(job.get("type") or "").lower() == "image" and mode.startswith("identity"):
+            if not binding_source(job, "input_identity_image"):
+                errors.append({"code": "character_without_identity_anchor", "job_id": job_id, "character_id": character_id})
         if str(job.get("type") or "").lower() != "video":
             continue
         checked_video_jobs += 1
@@ -2491,6 +2500,18 @@ def _inspect_visual_outputs(
         np = None
         warnings.append({"code": "content_qc_backend_unavailable", "message": "OpenCV is unavailable."})
 
+    ocr = None
+    try:
+        from rapidocr_onnxruntime import RapidOCR  # type: ignore
+        ocr = RapidOCR()
+    except Exception as exc:
+        warnings.append({"code": "text_qc_backend_unavailable", "message": str(exc)[:240]})
+    face_detector = None
+    if cv2 is not None:
+        cascade = Path(cv2.data.haarcascades) / "haarcascade_frontalface_default.xml"
+        if cascade.is_file():
+            face_detector = cv2.CascadeClassifier(str(cascade))
+
     def dhash(frame) -> int:
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
         small = cv2.resize(gray, (9, 8), interpolation=cv2.INTER_AREA)
@@ -2528,6 +2549,23 @@ def _inspect_visual_outputs(
                 height, width = frame.shape[:2]
                 image_hash = dhash(frame)
                 records.append({"job_id": job_id, "type": "image", "file": str(path), "width": width, "height": height, "dhash": f"{image_hash:016x}"})
+                mode = str(job.get("workflow_mode") or job.get("mode") or "").lower()
+                character_id = str(job.get("character_id") or "").strip()
+                if character_id and mode.startswith("identity") and face_detector is not None:
+                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                    faces = face_detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(24, 24))
+                    if len(faces) == 0:
+                        errors.append({"code": "identity_face_missing", "job_id": job_id, "character_id": character_id})
+                    elif any(x <= 2 or y <= 2 or x + w >= width - 2 or y + h >= height - 2 for x, y, w, h in faces):
+                        errors.append({"code": "identity_face_cropped", "job_id": job_id, "character_id": character_id})
+                if ocr is not None and not bool(job.get("allow_in_scene_text")):
+                    try:
+                        ocr_result, _ = ocr(frame)
+                        detected = [str(row[1]) for row in (ocr_result or []) if isinstance(row, (list, tuple)) and len(row) > 1 and str(row[1]).strip()]
+                        if detected:
+                            errors.append({"code": "unexpected_visual_text", "job_id": job_id, "text": detected[:8]})
+                    except Exception as exc:
+                        warnings.append({"code": "text_qc_failed", "job_id": job_id, "message": str(exc)[:160]})
                 if expected_vertical and width >= height:
                     errors.append({"code": "wrong_image_orientation", "job_id": job_id, "width": width, "height": height})
                 if preset == "04_keyframe" or job_id.startswith(("kf_", "shot_")) or "frame" in job_id:

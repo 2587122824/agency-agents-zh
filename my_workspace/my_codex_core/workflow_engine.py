@@ -19,6 +19,7 @@ from .requirement_guard import (
     requirement_lock_prompt,
     validate_requirement_alignment,
 )
+from .reference_snapshot import snapshot_linked_assets
 from .staff_loader import StaffLoader
 from .task_storage import TaskStorage
 
@@ -79,6 +80,7 @@ class WorkflowEngine:
         agents = self.staff_loader.load_all()
 
         self.storage.write_json(task_dir / "workflow.json", workflow)
+        user_input = snapshot_linked_assets(task_dir, user_input)
         self.storage.write_text(task_dir / "input.md", user_input)
         self.storage.write_json(task_dir / "task_brief.json", build_requirement_lock(user_input))
         production_config = self._restore_production_config(task_dir, production_config)

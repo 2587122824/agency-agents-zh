@@ -69,6 +69,31 @@ def build_production_graph(
 ) -> dict[str, Any]:
     graph_jobs = []
     seen: set[str] = set()
+    characters = global_context.get("characters") if isinstance(global_context.get("characters"), list) else []
+    for character in characters:
+        if not isinstance(character, dict):
+            continue
+        source_asset_id = str(character.get("source_asset_id") or "").strip()
+        master_image = str(character.get("master_image") or "").strip()
+        if not source_asset_id or not master_image:
+            continue
+        anchor_id = _unique_job_id(f"external_identity_anchor_{character.get('character_id') or source_asset_id}", seen)
+        seen.add(anchor_id)
+        graph_jobs.append(
+            {
+                "job_id": anchor_id,
+                "stage": "external_input",
+                "capability": "identity_anchor",
+                "mode": "external_identity_anchor",
+                "workflow_id": "",
+                "depends_on": [],
+                "inputs": {"input_identity_image": master_image},
+                "params": {"character_id": str(character.get("character_id") or ""), "source_asset_id": source_asset_id},
+                "outputs": ["output_identity_anchor"],
+                "resource_class": "external",
+                "retry": {"max_attempts": 0, "retry_on": []},
+            }
+        )
     for index, source in enumerate(jobs, 1):
         job_id = _unique_job_id(source.get("job_id") or source.get("name") or f"material_{index:03d}", seen)
         seen.add(job_id)

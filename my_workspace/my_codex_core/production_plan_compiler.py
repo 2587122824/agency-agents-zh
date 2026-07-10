@@ -187,6 +187,7 @@ def compile_production_plan(
         load_production_entities(entity_path or DEFAULT_ENTITY_PATH),
         load_asset_library(asset_library_path or DEFAULT_ASSET_LIBRARY_PATH),
     )
+    reference_assignments = _assign_linked_asset_roles(source_payload, entity_references)
     _merge_linked_asset_entities(entity_registry, source_payload, entity_references=entity_references)
     linked_style_notes = _merge_linked_style_reference_assets(global_context, source_payload)
     global_context, resolved_entities, entity_notes = enrich_global_context_with_entities(global_context, entity_registry, entity_references)
@@ -241,6 +242,7 @@ def compile_production_plan(
     compat_payload["production_type"] = production_type
     compat_payload["production_route"] = route
     compat_payload["production_intents"] = production_intents
+    compat_payload["reference_assignments"] = reference_assignments
     legacy_global_context = compat_payload.get("global_context") if isinstance(compat_payload.get("global_context"), dict) else {}
     compat_payload["global_context"] = _deep_merge_dict(legacy_global_context, global_context)
     render = compat_payload["global_context"].get("render") if isinstance(compat_payload["global_context"].get("render"), dict) else {}
@@ -296,6 +298,7 @@ def compile_production_plan(
         "global_context": global_context,
         "resolved_entities": resolved_entities,
         "production_intents": production_intents,
+        "reference_assignments": reference_assignments,
         "compiled_payload": compat_payload,
         "visual_jobs": visual_jobs,
         "audio_intents": production_intents["audio"],
@@ -819,6 +822,64 @@ def _merge_linked_asset_entities(
         }
 
 
+def _assign_linked_asset_roles(payload: dict[str, Any], entity_references: dict[str, set[str]]) -> list[dict[str, Any]]:
+    """Classify task-local references before style policy can consume a person as style."""
+
+    linked_assets = payload.get("linked_assets") if isinstance(payload.get("linked_assets"), dict) else {}
+    raw_assets = [item for item in linked_assets.get("assets") or [] if isinstance(item, dict)]
+    character_ids = [str(value).strip() for value in sorted(entity_references.get("character_ids") or []) if str(value).strip()]
+    assignments: list[dict[str, Any]] = []
+    next_character = 0
+    assigned_characters: set[str] = set()
+    for index, raw in enumerate(raw_assets, 1):
+        asset_id = str(raw.get("asset_id") or raw.get("id") or f"linked_asset_{index}").strip()
+        role = "style_reference"
+        confidence = "high"
+        character_id = str(raw.get("character_id") or "").strip()
+        if character_id or _linked_asset_looks_like_character(raw):
+            role = "identity_reference"
+            character_id = character_id or (character_ids[0] if len(character_ids) == 1 else asset_id)
+        elif _linked_asset_looks_like_scene(raw):
+            role = "scene_reference"
+        elif character_ids and not _linked_asset_looks_like_style_reference(raw):
+            role = "identity_reference"
+            confidence = "low"
+            if not character_id:
+                available = [value for value in character_ids if value not in assigned_characters]
+                character_id = available[0] if available else character_ids[min(next_character, len(character_ids) - 1)]
+                next_character += 1
+        elif len(character_ids) == 1 and _linked_asset_looks_like_style_reference(raw):
+            # A lone generic keyframe selected for a single protagonist is an identity
+            # source unless it is explicitly a style/scene asset.
+            tags = {str(value).strip().lower() for value in raw.get("tags") or [] if str(value).strip()}
+            if not tags.intersection({"style", "style_reference", "cover", "background", "scene", "environment"}):
+                role = "identity_reference"
+                confidence = "low"
+                character_id = character_ids[0]
+        if role == "identity_reference":
+            if character_id in assigned_characters:
+                role = "auxiliary_reference"
+            else:
+                assigned_characters.add(character_id)
+                raw["character_id"] = character_id
+                raw["reference_role"] = role
+                raw["identity_anchor"] = True
+        else:
+            raw["reference_role"] = role
+        assignments.append(
+            {
+                "asset_id": asset_id,
+                "selection_rank": int(raw.get("selection_rank") or index),
+                "role": role,
+                "confidence": confidence,
+                "character_id": character_id if role == "identity_reference" else "",
+                "file": _linked_asset_file_path(raw),
+                "sha256": str(raw.get("snapshot_sha256") or raw.get("source_sha256") or ""),
+            }
+        )
+    return assignments
+
+
 def _merge_linked_style_reference_assets(context: dict[str, Any], payload: dict[str, Any]) -> list[str]:
     linked_assets = payload.get("linked_assets") if isinstance(payload.get("linked_assets"), dict) else {}
     if not linked_assets:
@@ -900,6 +961,8 @@ def _upsert_linked_character_entity(characters: dict[str, Any], raw: dict[str, A
 
 
 def _linked_asset_looks_like_character(raw: dict[str, Any]) -> bool:
+    if str(raw.get("reference_role") or "").strip().lower() == "identity_reference":
+        return True
     tags = {str(tag or "").strip().lower() for tag in raw.get("tags") or [] if str(tag).strip()}
     if tags.intersection({"character", "character_base", "character_master", "character_turnaround", "identity_reference", "turnaround", "three_view", "three_views"}):
         return True
@@ -908,6 +971,8 @@ def _linked_asset_looks_like_character(raw: dict[str, Any]) -> bool:
 
 
 def _linked_asset_looks_like_style_reference(raw: dict[str, Any]) -> bool:
+    if str(raw.get("reference_role") or "").strip().lower() in {"identity_reference", "auxiliary_reference"}:
+        return False
     if _linked_asset_looks_like_character(raw) or _linked_asset_looks_like_scene(raw):
         return False
     kind = str(raw.get("kind") or raw.get("type") or "").strip().lower()
@@ -1018,15 +1083,29 @@ def _apply_linked_character_reference_policy(
     intent: dict[str, Any],
     notes: list[str] | None = None,
 ) -> None:
-    if str(item.get("workflow_id") or "").strip() != "04_keyframe":
-        return
     if not str(item.get("character_id") or intent.get("character_id") or "").strip():
         return
     bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
-    if item.get("input_base_image") or bindings.get("input_base_image"):
-        return
     master_reference = _linked_character_reference_from_intent_or_item(intent, item)
     if not master_reference:
+        return
+    if item.get("input_base_image") or bindings.get("input_base_image"):
+        if str(item.get("input_identity_image") or "").strip() == master_reference:
+            item["identity_anchor"] = {"source": "external_identity_anchor", "file": master_reference}
+        return
+    workflow_id = str(item.get("workflow_id") or "").strip()
+    workflow_mode = str(item.get("workflow_mode") or item.get("mode") or "").strip()
+    if workflow_id == "01_base_asset_image" and workflow_mode == "character_base":
+        _route_character_base_item_to_master_identity_keyframe(
+            item,
+            intent,
+            master_reference,
+            notes,
+            reason="linked external identity anchor",
+        )
+        item["identity_anchor"] = {"source": "external_identity_anchor", "file": master_reference}
+        return
+    if workflow_id != "04_keyframe":
         return
     item["workflow_mode"] = "identity_keyframe"
     item["image_task_mode"] = "identity_keyframe"
@@ -1035,7 +1114,7 @@ def _apply_linked_character_reference_policy(
     item["input_identity_image"] = master_reference
     item["input_base_image"] = master_reference
     item["reference_image"] = master_reference
-    item["input_reference_style"] = master_reference
+    item["identity_anchor"] = {"source": "external_identity_anchor", "file": master_reference}
     scene_reference = _linked_scene_reference_from_intent_or_item(intent, item)
     if scene_reference:
         item["workflow_mode"] = "identity_scene_keyframe"
