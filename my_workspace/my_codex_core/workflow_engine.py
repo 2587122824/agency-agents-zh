@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime
@@ -1076,8 +1077,104 @@ class WorkflowEngine:
 
         second_rejected_path = step_dir / f"output_rejected_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
         self.storage.write_text(second_rejected_path, retry_result.content)
+        recovered_content = self._recover_single_missing_shot(step, step_dir, retry_result.content, previous_outputs or [])
+        if recovered_content:
+            recovered_validation = self._combined_output_validation(lock, recovered_content, step, previous_outputs or [])
+            attempts.append(recovered_validation)
+            self.storage.write_json(
+                step_dir / "requirement_validation.json",
+                {"passed": bool(recovered_validation.get("passed")), "auto_material_recovery": True, "attempts": attempts},
+            )
+            self.storage.write_json(step_dir / "production_contract_validation.json", recovered_validation.get("production_contract") or {})
+            if recovered_validation.get("passed"):
+                return LLMResult(provider=retry_result.provider, model=retry_result.model, content=recovered_content, raw=retry_result.raw)
         issues = "；".join(str(item) for item in (retry_validation.get("issues") or []))
         raise RequirementAlignmentError(f"员工输出校验连续两次未通过：{issues}")
+
+    def _recover_single_missing_shot(
+        self,
+        step: dict,
+        step_dir: Path,
+        content: str,
+        previous_outputs: list[dict[str, str]],
+    ) -> str:
+        """Backfill one explicitly reported missing 06/07 shot before packaging fails."""
+        if not str(step.get("agent") or "").startswith("22_"):
+            return ""
+        package = self._first_json_payload(content)
+        missing = package.get("missing_assets") if isinstance(package, dict) else []
+        if not isinstance(missing, list) or len(missing) != 1 or not isinstance(missing[0], dict):
+            return ""
+        clip_id = str(missing[0].get("missing_clip_id") or "").strip().upper()
+        if not re.fullmatch(r"L\d{1,3}", clip_id):
+            return ""
+        image_record = next((item for item in previous_outputs if str(item.get("agent") or "").startswith("06_")), None)
+        video_record = next((item for item in previous_outputs if str(item.get("agent") or "").startswith("07_")), None)
+        image_path = Path(str((image_record or {}).get("output_path") or ""))
+        video_path = Path(str((video_record or {}).get("output_path") or ""))
+        if not image_path.is_file() or not video_path.is_file():
+            return ""
+        image_payload = self._first_json_payload(image_path.read_text(encoding="utf-8", errors="replace"))
+        video_payload = self._first_json_payload(video_path.read_text(encoding="utf-8", errors="replace"))
+        image_intents = ((image_payload.get("production_intents") or {}).get("image")) if isinstance(image_payload.get("production_intents"), dict) else None
+        video_intents = ((video_payload.get("production_intents") or {}).get("video")) if isinstance(video_payload.get("production_intents"), dict) else None
+        if not isinstance(image_intents, list) or not isinstance(video_intents, list):
+            return ""
+        image_id = f"keyframe_{clip_id}_auto_recovery"
+        video_id = f"clip_{clip_id}_auto_recovery"
+        if any(str(item.get("intent_id") or "") == image_id for item in image_intents if isinstance(item, dict)):
+            return ""
+        character_id = str(next((item.get("character_id") or "" for item in image_intents if isinstance(item, dict) and item.get("character_id")), ""))
+        role = str(missing[0].get("missing_role") or "missing story shot").strip()
+        image_intents.append({
+            "intent": "generate_keyframe", "intent_id": image_id, "character_id": character_id,
+            "prompt": f"{clip_id} {role}: keep the established protagonist identity and visual style, no readable text.",
+            "source_note": "auto_missing_material_recovery",
+        })
+        video_intents.append({
+            "intent": "generate_i2v_clip", "intent_id": video_id, "keyframe_intent_id": image_id,
+            "character_id": character_id, "duration": 5,
+            "prompt": f"{clip_id} {role}: natural continuous motion, keep the established protagonist identity and scene style.",
+            "source_note": "auto_missing_material_recovery",
+        })
+        self.storage.write_text(image_path, self._replace_first_json_payload(image_path.read_text(encoding="utf-8", errors="replace"), image_payload))
+        self.storage.write_text(video_path, self._replace_first_json_payload(video_path.read_text(encoding="utf-8", errors="replace"), video_payload))
+        package["missing_assets"] = []
+        for item in ((package.get("production_intents") or {}).get("package") or []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("intent") == "review_missing_assets":
+                item["missing_assets"] = []
+                item["all_assets_ready"] = True
+            if item.get("intent") == "build_edit_timeline":
+                for entry in item.get("timeline") or []:
+                    if isinstance(entry, dict) and not entry.get("source_intent_id") and clip_id in str(entry.get("edit_note") or ""):
+                        entry["source_intent_id"] = video_id
+        for entry in ((package.get("edit_timeline") or {}).get("clips") or []):
+            if isinstance(entry, dict) and entry.get("status") == "missing" and clip_id in str(entry.get("clip_id") or "").upper():
+                entry["clip_id"] = video_id
+                entry.pop("status", None)
+        self.storage.write_json(step_dir.parent / "auto_material_recovery.json", {
+            "status": "recovered", "missing_clip_id": clip_id, "image_intent_id": image_id,
+            "video_intent_id": video_id, "recovered_at": datetime.now().isoformat(timespec="seconds"),
+        })
+        return self._replace_first_json_payload(content, package)
+
+    @staticmethod
+    def _first_json_payload(content: str) -> dict:
+        match = re.search(r"```json\s*(\{.*?\})\s*```", str(content or ""), flags=re.IGNORECASE | re.DOTALL)
+        if not match:
+            return {}
+        try:
+            value = json.loads(match.group(1))
+        except Exception:
+            return {}
+        return value if isinstance(value, dict) else {}
+
+    @staticmethod
+    def _replace_first_json_payload(content: str, payload: dict) -> str:
+        replacement = "```json\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n```"
+        return re.sub(r"```json\s*\{.*?\}\s*```", replacement, str(content or ""), count=1, flags=re.IGNORECASE | re.DOTALL)
 
     def _recover_valid_candidate_output(
         self,
