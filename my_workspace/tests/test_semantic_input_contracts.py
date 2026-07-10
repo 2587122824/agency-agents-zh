@@ -4,7 +4,9 @@ import sys
 import tempfile
 import unittest
 import json
+import os
 from pathlib import Path
+from unittest.mock import patch
 
 from PIL import Image
 
@@ -40,6 +42,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
 from my_codex_core.production_output_validator import normalize_production_output_content  # noqa: E402
 from my_codex_core.requirement_guard import declares_human_confirmation, validate_requirement_alignment  # noqa: E402
+from my_codex_core.reference_snapshot import snapshot_linked_assets  # noqa: E402
 from my_codex_core.task_state_center import TaskStateCenter  # noqa: E402
 
 
@@ -77,6 +80,41 @@ class SemanticInputContractTests(unittest.TestCase):
             )
             status = web_app.WorkflowWebHandler._task_comfy_debug_status(task_dir)
             self.assertTrue(status["enabled"])
+
+    def test_linked_asset_snapshot_resolves_repository_relative_path_from_workspace_cwd(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            project_root = Path(tmp) / "project"
+            workspace_root = project_root / "my_workspace"
+            source = workspace_root / "my_asset_library" / "uncategorized" / "xiaomei.jpg"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"reference-image")
+            task_dir = workspace_root / "my_task_output" / "task"
+            task_dir.mkdir(parents=True)
+            payload = {
+                "linked_assets": {
+                    "assets": [
+                        {
+                            "asset_id": "xiaomei",
+                            "file": "my_workspace/my_asset_library/uncategorized/xiaomei.jpg",
+                        }
+                    ]
+                }
+            }
+            original_cwd = Path.cwd()
+            try:
+                os.chdir(workspace_root)
+                with patch("my_codex_core.reference_snapshot._PROJECT_ROOT", project_root), patch(
+                    "my_codex_core.reference_snapshot._WORKSPACE_ROOT", workspace_root
+                ):
+                    result = snapshot_linked_assets(task_dir, "```json\n" + json.dumps(payload) + "\n```")
+            finally:
+                os.chdir(original_cwd)
+
+            frozen = json.loads(result.removeprefix("```json\n").removesuffix("\n```"))
+            item = frozen["linked_assets"]["assets"][0]
+            self.assertNotIn("snapshot_error", item)
+            self.assertTrue(Path(item["snapshot_file"]).is_file())
+            self.assertEqual(Path(item["source_file"]), source.resolve())
 
     def test_no_voiceover_marker_is_not_tts_text(self) -> None:
         self.assertEqual(_clean_voice_text("（无旁白）\n"), "")

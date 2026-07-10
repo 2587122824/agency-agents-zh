@@ -9,6 +9,8 @@ from typing import Any
 
 
 _JSON_BLOCK = re.compile(r"```json\s*(\{.*?\})\s*```", re.IGNORECASE | re.DOTALL)
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+_WORKSPACE_ROOT = _PROJECT_ROOT / "my_workspace"
 
 
 def snapshot_linked_assets(task_dir: Path, user_input: str) -> str:
@@ -71,9 +73,18 @@ def _resolve_source_path(value: str) -> Path | None:
     text = value.strip().replace("\\", "/")
     if not text:
         return None
-    candidates = [Path(text)]
-    if not Path(text).is_absolute():
-        candidates.append(Path.cwd() / text)
+    raw_path = Path(text)
+    if raw_path.is_absolute():
+        candidates = [raw_path]
+    else:
+        # UI payloads are rooted at the repository (for example,
+        # ``my_workspace/my_asset_library/...``), while the management service
+        # may itself be launched from ``my_workspace``.
+        candidates = [
+            _PROJECT_ROOT / raw_path,
+            _WORKSPACE_ROOT / raw_path,
+            Path.cwd() / raw_path,
+        ]
     for candidate in candidates:
         if candidate.is_file():
             return candidate.resolve()
