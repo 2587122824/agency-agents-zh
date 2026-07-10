@@ -1631,6 +1631,44 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertIn("base_scene_morning", keyframe["depends_on"])
 
+    def test_scene_only_keyframe_does_not_route_to_identity_scene_mode(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_base_asset",
+                            "intent_id": "asset_scene_track_morning",
+                            "asset_role": "scene",
+                            "scene_id": "scene_track_field",
+                            "prompt": "Empty athletics track at dawn.",
+                        },
+                        {
+                            "intent": "generate_keyframe",
+                            "intent_id": "keyframe_sky_transition",
+                            "character_id": "",
+                            "scene_id": "scene_track_field",
+                            "prompt": "Empty track sky brightens through morning mist.",
+                        },
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        plan = compile_production_plan(
+            task_id="scene_only_keyframe_route_test",
+            route_content='{"production_type":"drama_story"}',
+            image_content=image_content,
+        )
+
+        item = {row["job_id"]: row for row in plan["compiled_payload"]["image_prompts"]}["keyframe_sky_transition"]
+        self.assertEqual(item["workflow_mode"], "keyframe")
+        self.assertNotEqual(item.get("control_mode"), "identity_scene_reference")
+        self.assertNotIn("input_identity_image", item)
+        self.assertNotIn("input_scene_image", item)
+        self.assertNotIn("input_identity_image", item.get("input_bindings") or {})
+        self.assertNotIn("input_scene_image", item.get("input_bindings") or {})
+
     def test_linked_character_front_expression_is_not_turnaround(self) -> None:
         linked_assets = {
             "linked_assets": {

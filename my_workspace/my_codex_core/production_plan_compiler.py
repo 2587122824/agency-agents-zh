@@ -1796,6 +1796,13 @@ def _apply_generated_scene_reference_policy(
     bindings = item.get("input_bindings") if isinstance(item.get("input_bindings"), dict) else {}
     if bindings.get("input_scene_image"):
         return
+    if not _item_has_identity_reference(item):
+        if notes is not None:
+            notes.append(
+                f"scene-only image intent {item.get('job_id')} keeps its keyframe route; "
+                "identity_scene_keyframe requires an identity binding"
+            )
+        return
     scene_job = _generated_scene_reference_job(existing_items, item, intent)
     if not scene_job:
         return
