@@ -9239,6 +9239,11 @@ INDEX_HTML = r"""<!doctype html>
         jobsTarget.appendChild(fixed);
       }
       const jobs = Array.isArray(preview.jobs) ? preview.jobs : [];
+      const visibleJobs = jobs.filter(job => {
+        const mode = String(job?.mode || job?.workflow_mode || '').toLowerCase();
+        const status = String(job?.status || 'pending').toLowerCase();
+        return !(mode.startsWith('identity_') && ['pending', 'waiting', 'queued', ''].includes(status));
+      });
       if (!jobs.length) {
         const empty = document.createElement('div');
         empty.className = 'muted small';
@@ -9246,7 +9251,7 @@ INDEX_HTML = r"""<!doctype html>
         jobsTarget.appendChild(empty);
         return;
       }
-      jobs.slice(0, 80).forEach(job => {
+      visibleJobs.slice(0, 80).forEach(job => {
         const row = document.createElement('div');
         row.className = 'production-job-row';
         const title = document.createElement('strong');
