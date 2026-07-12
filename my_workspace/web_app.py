@@ -76,6 +76,7 @@ RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
 RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
 RUNTIME_COMFY_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_comfy_config.json"
 PERSONAL_KNOWLEDGE_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_personal_knowledge_config.json"
+ALIYUN_VOICE_CLONES_PATH = RUNTIME_STATE_ROOT / "web_aliyun_voice_clones.json"
 DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = ""
 DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = ""
 RUN_JOBS: dict[str, dict] = {}
@@ -3398,6 +3399,71 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
         </div>
+        <div class="config-card audio-debug-card" data-title="阿里云 CosyVoice 声音复刻" data-desc="创建本人授权的复刻音色，保存 voice_id 后可直接用于上方文本转音频">
+          <div class="provider-grid">
+            <label>阿里云 API Key
+              <input id="aliyunCloneApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="DashScope / Model Studio API Key；仅保存在本机浏览器设置里" />
+            </label>
+            <label>Workspace ID
+              <input id="aliyunCloneWorkspaceId" autocomplete="off" spellcheck="false" placeholder="阿里云百炼工作空间 ID，例如 llm-xxxx" />
+            </label>
+            <label>地域
+              <select id="aliyunCloneRegion">
+                <option value="cn-beijing" selected>华北2（北京）</option>
+                <option value="cn-shanghai">华东2（上海）</option>
+              </select>
+            </label>
+            <label>复刻目标模型
+              <select id="aliyunCloneTargetModel">
+                <option value="cosyvoice-v3-flash" selected>cosyvoice-v3-flash</option>
+                <option value="cosyvoice-v2">cosyvoice-v2</option>
+              </select>
+            </label>
+            <label>音色前缀
+              <input id="aliyunClonePrefix" autocomplete="off" spellcheck="false" placeholder="例如 my_voice；最终 voice_id 由阿里云返回" />
+            </label>
+            <label>参考音频公网 URL
+              <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav；阿里云必须能访问" />
+            </label>
+            <label>样本语言
+              <select id="aliyunCloneLanguage">
+                <option value="中文" selected>中文</option>
+                <option value="英文">英文</option>
+              </select>
+            </label>
+            <label>最大样本时长
+              <select id="aliyunCloneMaxSeconds">
+                <option value="10">10 秒</option>
+                <option value="15" selected>15 秒</option>
+                <option value="20">20 秒</option>
+              </select>
+            </label>
+            <label>预处理
+              <select id="aliyunClonePreprocess">
+                <option value="true" selected>开启</option>
+                <option value="false">关闭</option>
+              </select>
+            </label>
+          </div>
+          <div class="row">
+            <button class="primary" id="createAliyunCloneBtn" type="button">创建复刻音色</button>
+            <span class="muted small" id="aliyunCloneStatus">未创建</span>
+          </div>
+          <div class="provider-grid">
+            <label>已保存复刻音色
+              <select id="aliyunCloneVoiceSelect">
+                <option value="">未保存复刻音色</option>
+              </select>
+            </label>
+            <label>当前合成使用的 voice
+              <input id="aliyunCustomVoiceId" autocomplete="off" spellcheck="false" placeholder="可手动填 voice_id，或从左侧选择" />
+            </label>
+            <label>操作
+              <button id="useAliyunCloneVoiceBtn" type="button">使用选中音色</button>
+            </label>
+          </div>
+          <span class="muted small">参考音频需要是本人或已授权声音，并且 URL 能被阿里云公网访问。本地上传文件不会直接传给阿里云复刻接口。</span>
+        </div>
       </div>
 
       <div class="panel form view" data-view="staff" hidden>
@@ -4253,6 +4319,20 @@ INDEX_HTML = r"""<!doctype html>
       runAudioDebugBtn: document.getElementById('runAudioDebugBtn'),
       audioDebugStatus: document.getElementById('audioDebugStatus'),
       audioDebugResult: document.getElementById('audioDebugResult'),
+      aliyunCloneApiKey: document.getElementById('aliyunCloneApiKey'),
+      aliyunCloneWorkspaceId: document.getElementById('aliyunCloneWorkspaceId'),
+      aliyunCloneRegion: document.getElementById('aliyunCloneRegion'),
+      aliyunCloneTargetModel: document.getElementById('aliyunCloneTargetModel'),
+      aliyunClonePrefix: document.getElementById('aliyunClonePrefix'),
+      aliyunCloneAudioUrl: document.getElementById('aliyunCloneAudioUrl'),
+      aliyunCloneLanguage: document.getElementById('aliyunCloneLanguage'),
+      aliyunCloneMaxSeconds: document.getElementById('aliyunCloneMaxSeconds'),
+      aliyunClonePreprocess: document.getElementById('aliyunClonePreprocess'),
+      createAliyunCloneBtn: document.getElementById('createAliyunCloneBtn'),
+      aliyunCloneStatus: document.getElementById('aliyunCloneStatus'),
+      aliyunCloneVoiceSelect: document.getElementById('aliyunCloneVoiceSelect'),
+      aliyunCustomVoiceId: document.getElementById('aliyunCustomVoiceId'),
+      useAliyunCloneVoiceBtn: document.getElementById('useAliyunCloneVoiceBtn'),
       imageTool: document.getElementById('imageTool'),
       imagePositivePrompt: document.getElementById('imagePositivePrompt'),
       imageModel: document.getElementById('imageModel'),
@@ -4626,6 +4706,7 @@ INDEX_HTML = r"""<!doctype html>
     let workflowEditorSteps = [];
     let workflowEditorBase = {};
     let staffOptions = [];
+    let aliyunVoiceClones = [];
     let personalKnowledgeItems = [];
     let selectedPersonalKnowledgePath = '';
     let personalKnowledgeDirty = false;
@@ -5772,6 +5853,7 @@ INDEX_HTML = r"""<!doctype html>
       const data = await api('/api/config');
       runtimeModelConfigFromServer = data.runtime_model_config || {};
       runtimeComfyConfigFromServer = data.runtime_comfy_config || {};
+      aliyunVoiceClones = Array.isArray(data.aliyun_voice_clones) ? data.aliyun_voice_clones : [];
       if (els.personalKnowledgeRootPath && data.personal_knowledge_config?.root_path) {
         els.personalKnowledgeRootPath.value = data.personal_knowledge_config.root_path;
       }
@@ -5791,6 +5873,7 @@ INDEX_HTML = r"""<!doctype html>
       restoreSettings();
       applyRuntimeModelConfig(data.runtime_model_config || {});
       applyRuntimeComfyConfig(data.runtime_comfy_config || {});
+      renderAliyunVoiceClones();
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       loadAudioDebugHistory().catch(() => {});
@@ -6027,6 +6110,16 @@ INDEX_HTML = r"""<!doctype html>
         aliyunTtsAigcPropagator: els.aliyunTtsAigcPropagator.value,
         aliyunTtsAigcPropagateId: els.aliyunTtsAigcPropagateId.value,
         audioDebugText: els.audioDebugText?.value || '',
+        aliyunCloneApiKey: els.aliyunCloneApiKey?.value || '',
+        aliyunCloneWorkspaceId: els.aliyunCloneWorkspaceId?.value || '',
+        aliyunCloneRegion: els.aliyunCloneRegion?.value || 'cn-beijing',
+        aliyunCloneTargetModel: els.aliyunCloneTargetModel?.value || 'cosyvoice-v3-flash',
+        aliyunClonePrefix: els.aliyunClonePrefix?.value || '',
+        aliyunCloneAudioUrl: els.aliyunCloneAudioUrl?.value || '',
+        aliyunCloneLanguage: els.aliyunCloneLanguage?.value || '中文',
+        aliyunCloneMaxSeconds: els.aliyunCloneMaxSeconds?.value || '15',
+        aliyunClonePreprocess: els.aliyunClonePreprocess?.value || 'true',
+        aliyunCustomVoiceId: els.aliyunCustomVoiceId?.value || '',
         imageTool: els.imageTool.value,
         imagePositivePrompt: els.imagePositivePrompt.value,
         imageModel: els.imageModel.value,
@@ -6214,6 +6307,16 @@ INDEX_HTML = r"""<!doctype html>
       els.aliyunTtsAigcPropagator.value = '';
       els.aliyunTtsAigcPropagateId.value = '';
       if (els.audioDebugText) els.audioDebugText.value = settings.audioDebugText || '';
+      if (els.aliyunCloneApiKey) els.aliyunCloneApiKey.value = settings.aliyunCloneApiKey || settings.aliyunTtsApiKey || '';
+      if (els.aliyunCloneWorkspaceId) els.aliyunCloneWorkspaceId.value = settings.aliyunCloneWorkspaceId || '';
+      setIfExists(els.aliyunCloneRegion, settings.aliyunCloneRegion || 'cn-beijing');
+      setIfExists(els.aliyunCloneTargetModel, settings.aliyunCloneTargetModel || 'cosyvoice-v3-flash');
+      if (els.aliyunClonePrefix) els.aliyunClonePrefix.value = settings.aliyunClonePrefix || '';
+      if (els.aliyunCloneAudioUrl) els.aliyunCloneAudioUrl.value = settings.aliyunCloneAudioUrl || '';
+      setIfExists(els.aliyunCloneLanguage, settings.aliyunCloneLanguage || '中文');
+      setIfExists(els.aliyunCloneMaxSeconds, settings.aliyunCloneMaxSeconds || '15');
+      setIfExists(els.aliyunClonePreprocess, settings.aliyunClonePreprocess || 'true');
+      if (els.aliyunCustomVoiceId) els.aliyunCustomVoiceId.value = settings.aliyunCustomVoiceId || '';
       syncVoiceCommandTemplateForMode();
       setIfExists(els.imageTool, settings.imageTool);
       els.imagePositivePrompt.value = settings.imagePositivePrompt || '';
@@ -7238,6 +7341,16 @@ INDEX_HTML = r"""<!doctype html>
         els.aliyunTtsAigcPropagator,
         els.aliyunTtsAigcPropagateId,
         els.audioDebugText,
+        els.aliyunCloneApiKey,
+        els.aliyunCloneWorkspaceId,
+        els.aliyunCloneRegion,
+        els.aliyunCloneTargetModel,
+        els.aliyunClonePrefix,
+        els.aliyunCloneAudioUrl,
+        els.aliyunCloneLanguage,
+        els.aliyunCloneMaxSeconds,
+        els.aliyunClonePreprocess,
+        els.aliyunCustomVoiceId,
         els.imageTool,
         els.imagePositivePrompt,
         els.imageModel,
@@ -7292,6 +7405,8 @@ INDEX_HTML = r"""<!doctype html>
       });
       els.voiceMode.addEventListener('change', syncVoiceCommandTemplateForMode);
       if (els.runAudioDebugBtn) els.runAudioDebugBtn.addEventListener('click', runAudioDebug);
+      if (els.createAliyunCloneBtn) els.createAliyunCloneBtn.addEventListener('click', createAliyunCosyVoiceClone);
+      if (els.useAliyunCloneVoiceBtn) els.useAliyunCloneVoiceBtn.addEventListener('click', useSelectedAliyunCloneVoice);
     }
 
     function applyImageProviderDefaults() {
@@ -8259,6 +8374,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function buildVoiceConfig(referenceAudio = '') {
+      const customAliyunVoice = String(els.aliyunCustomVoiceId?.value || '').trim();
+      const customAliyunModel = selectedAliyunClone()?.target_model || els.aliyunCloneTargetModel?.value || 'cosyvoice-v3-flash';
       return {
         mode: els.voiceMode.value,
         provider: currentVoiceProvider(),
@@ -8268,11 +8385,11 @@ INDEX_HTML = r"""<!doctype html>
         reference_text: els.voiceReferenceText.value.trim(),
         command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
         timeout_seconds: Number(els.voiceTimeout.value || 3600),
-        aliyun_api_key: els.aliyunTtsApiKey.value.trim(),
+        aliyun_api_key: (els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim() || ''),
         aliyun_workspace_id: '',
         aliyun_endpoint: '',
-        aliyun_model: 'cosyvoice-v3-flash',
-        aliyun_voice: els.aliyunTtsVoice.value || 'longanyang',
+        aliyun_model: customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice' ? customAliyunModel : 'cosyvoice-v3-flash',
+        aliyun_voice: customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice' ? customAliyunVoice : (els.aliyunTtsVoice.value || 'longanyang'),
         aliyun_format: els.aliyunTtsFormat.value,
         aliyun_sample_rate: 24000,
         aliyun_volume: '',
@@ -8326,6 +8443,110 @@ INDEX_HTML = r"""<!doctype html>
       });
     }
 
+    function selectedAliyunClone() {
+      const voiceId = String(els.aliyunCloneVoiceSelect?.value || '').trim();
+      return aliyunVoiceClones.find(item => String(item.voice_id || '') === voiceId) || null;
+    }
+
+    function renderAliyunVoiceClones() {
+      if (!els.aliyunCloneVoiceSelect) return;
+      const current = els.aliyunCloneVoiceSelect.value || els.aliyunCustomVoiceId?.value || '';
+      els.aliyunCloneVoiceSelect.innerHTML = '';
+      const empty = document.createElement('option');
+      empty.value = '';
+      empty.textContent = aliyunVoiceClones.length ? '选择已保存音色' : '未保存复刻音色';
+      els.aliyunCloneVoiceSelect.appendChild(empty);
+      aliyunVoiceClones.forEach(item => {
+        const voiceId = String(item.voice_id || '').trim();
+        if (!voiceId) return;
+        const option = document.createElement('option');
+        option.value = voiceId;
+        option.textContent = `${item.prefix || item.name || '复刻音色'} / ${voiceId}`;
+        els.aliyunCloneVoiceSelect.appendChild(option);
+      });
+      if (current && [...els.aliyunCloneVoiceSelect.options].some(option => option.value === current)) {
+        els.aliyunCloneVoiceSelect.value = current;
+      }
+    }
+
+    function useSelectedAliyunCloneVoice() {
+      const item = selectedAliyunClone();
+      if (!item) {
+        setStatus('请先选择一个已保存的复刻音色', true);
+        return;
+      }
+      if (els.aliyunCustomVoiceId) els.aliyunCustomVoiceId.value = item.voice_id || '';
+      if (els.voiceMode) setIfExists(els.voiceMode, 'aliyun_cosyvoice');
+      if (els.aliyunCloneTargetModel && item.target_model) setIfExists(els.aliyunCloneTargetModel, item.target_model);
+      syncVoiceModeVisibility();
+      saveSettings();
+      setStatus(`已使用复刻音色：${item.voice_id}`);
+    }
+
+    async function createAliyunCosyVoiceClone() {
+      const apiKey = String(els.aliyunCloneApiKey?.value || els.aliyunTtsApiKey?.value || '').trim();
+      const workspaceId = String(els.aliyunCloneWorkspaceId?.value || '').trim();
+      const audioUrl = String(els.aliyunCloneAudioUrl?.value || '').trim();
+      const prefix = String(els.aliyunClonePrefix?.value || '').trim();
+      if (!apiKey) {
+        setStatus('请先在系统配置或音频调试台填写阿里云 API Key', true);
+        return;
+      }
+      if (!workspaceId) {
+        setStatus('请填写阿里云 Workspace ID', true);
+        return;
+      }
+      if (!/^https?:\/\//i.test(audioUrl)) {
+        setStatus('请填写阿里云可访问的参考音频公网 URL', true);
+        return;
+      }
+      if (!prefix) {
+        setStatus('请填写音色前缀', true);
+        return;
+      }
+      const originalText = els.createAliyunCloneBtn?.textContent || '';
+      if (els.createAliyunCloneBtn) {
+        els.createAliyunCloneBtn.disabled = true;
+        els.createAliyunCloneBtn.textContent = '创建中...';
+      }
+      if (els.aliyunCloneStatus) els.aliyunCloneStatus.textContent = '正在创建复刻音色...';
+      try {
+        saveSettings();
+        if (els.aliyunTtsApiKey && apiKey && !els.aliyunTtsApiKey.value.trim()) els.aliyunTtsApiKey.value = apiKey;
+        const result = await apiWithTimeout('/api/aliyun-cosyvoice-clone', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: apiKey,
+            workspace_id: workspaceId,
+            region: els.aliyunCloneRegion?.value || 'cn-beijing',
+            target_model: els.aliyunCloneTargetModel?.value || 'cosyvoice-v3-flash',
+            prefix,
+            audio_url: audioUrl,
+            language: els.aliyunCloneLanguage?.value || '中文',
+            max_seconds: Number(els.aliyunCloneMaxSeconds?.value || 15),
+            enable_preprocess: String(els.aliyunClonePreprocess?.value || 'true') !== 'false',
+          }),
+        }, 120000);
+        aliyunVoiceClones = Array.isArray(result.voices) ? result.voices : aliyunVoiceClones;
+        renderAliyunVoiceClones();
+        const voiceId = result.voice?.voice_id || result.voice_id || '';
+        if (voiceId) {
+          els.aliyunCloneVoiceSelect.value = voiceId;
+          useSelectedAliyunCloneVoice();
+        }
+        if (els.aliyunCloneStatus) els.aliyunCloneStatus.textContent = voiceId ? `创建成功：${voiceId}` : '创建完成';
+      } catch (err) {
+        if (els.aliyunCloneStatus) els.aliyunCloneStatus.textContent = err.message || '创建失败';
+        setStatus(err.message || '阿里云声音复刻失败', true);
+      } finally {
+        if (els.createAliyunCloneBtn) {
+          els.createAliyunCloneBtn.disabled = false;
+          els.createAliyunCloneBtn.textContent = originalText || '创建复刻音色';
+        }
+      }
+    }
+
     async function runAudioDebug() {
       const text = String(els.audioDebugText?.value || '').trim();
       if (!text) {
@@ -8336,7 +8557,7 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请先在系统配置选择语音合成方式', true);
         return;
       }
-      if (els.voiceMode.value === 'aliyun_cosyvoice' && !els.aliyunTtsApiKey.value.trim()) {
+      if (els.voiceMode.value === 'aliyun_cosyvoice' && !(els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim())) {
         setStatus('请先填写阿里云 CosyVoice API Key', true);
         return;
       }
@@ -14632,6 +14853,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._audio_debug_run(payload))
                 return
 
+            if parsed.path == "/api/aliyun-cosyvoice-clone":
+                self._send_json(self._create_aliyun_cosyvoice_clone(payload))
+                return
+
             if parsed.path == "/api/upload-knowledge":
                 self._send_json(self._upload_knowledge(payload))
                 return
@@ -14869,6 +15094,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "runtime_comfy_config": runtime_comfy_config,
             "runtime_comfy_saved": bool(runtime_comfy_config.get("has_api_key") or runtime_comfy_config.get("workflow_library")),
             "personal_knowledge_config": self._read_personal_knowledge_config(),
+            "aliyun_voice_clones": self._read_aliyun_voice_clones(),
         }
 
     @staticmethod
@@ -20275,6 +20501,104 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if len(items) >= limit:
                 break
         return items
+
+    @staticmethod
+    def _read_aliyun_voice_clones() -> list[dict]:
+        try:
+            data = json.loads(ALIYUN_VOICE_CLONES_PATH.read_text(encoding="utf-8-sig")) if ALIYUN_VOICE_CLONES_PATH.is_file() else []
+        except Exception:
+            data = []
+        if isinstance(data, dict):
+            data = data.get("voices") if isinstance(data.get("voices"), list) else []
+        return [item for item in data if isinstance(item, dict)]
+
+    @staticmethod
+    def _write_aliyun_voice_clones(items: list[dict]) -> None:
+        ALIYUN_VOICE_CLONES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        ALIYUN_VOICE_CLONES_PATH.write_text(
+            json.dumps({"voices": items, "updated_at": time.time()}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _create_aliyun_cosyvoice_clone(self, payload: dict) -> dict:
+        api_key = str(payload.get("api_key") or "").strip()
+        workspace_id = str(payload.get("workspace_id") or "").strip()
+        region = str(payload.get("region") or "cn-beijing").strip() or "cn-beijing"
+        target_model = str(payload.get("target_model") or "cosyvoice-v3-flash").strip() or "cosyvoice-v3-flash"
+        prefix = str(payload.get("prefix") or "").strip()
+        audio_url = str(payload.get("audio_url") or "").strip()
+        language = str(payload.get("language") or "中文").strip() or "中文"
+        max_seconds = int(float(payload.get("max_seconds") or 15))
+        enable_preprocess = str(payload.get("enable_preprocess") if payload.get("enable_preprocess") is not None else "true").strip().lower() not in {"0", "false", "off", "no"}
+        if not api_key:
+            raise ValueError("Aliyun API Key is required")
+        if not workspace_id:
+            raise ValueError("Aliyun Workspace ID is required")
+        if not prefix:
+            raise ValueError("voice prefix is required")
+        if not re.match(r"^https?://", audio_url, flags=re.I):
+            raise ValueError("reference audio must be a public HTTP/HTTPS URL")
+        if max_seconds <= 0:
+            max_seconds = 15
+
+        endpoint = f"https://{workspace_id}.{region}.maas.aliyuncs.com/api/v1/services/audio/tts/customization"
+        request_payload = {
+            "model": "voice-enrollment",
+            "input": {
+                "action": "create_voice",
+                "target_model": target_model,
+                "prefix": prefix,
+                "url": audio_url,
+                "language": language,
+                "max_seconds": max_seconds,
+                "enable_preprocess": enable_preprocess,
+            },
+        }
+        request = urllib_request.Request(
+            endpoint,
+            data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=90) as response:
+                raw = response.read()
+        except urllib_error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            raise ValueError(f"Aliyun CosyVoice clone HTTP {exc.code}: {error_body[:1000]}") from exc
+        except (urllib_error.URLError, TimeoutError, OSError) as exc:
+            raise ValueError(f"Aliyun CosyVoice clone request failed: {exc}") from exc
+
+        try:
+            data = json.loads(raw.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError as exc:
+            raise ValueError("Aliyun CosyVoice clone response was not valid JSON") from exc
+        output = data.get("output") if isinstance(data, dict) else {}
+        if not isinstance(output, dict):
+            output = {}
+        voice_id = str(output.get("voice_id") or output.get("voice") or data.get("voice_id") if isinstance(data, dict) else "").strip()
+        if not voice_id:
+            raise ValueError(f"Aliyun CosyVoice clone response did not include voice_id: {json.dumps(data, ensure_ascii=False)[:1000]}")
+
+        voice = {
+            "voice_id": voice_id,
+            "prefix": prefix,
+            "target_model": target_model,
+            "workspace_id": workspace_id,
+            "region": region,
+            "language": language,
+            "audio_url": audio_url,
+            "request_id": data.get("request_id") if isinstance(data, dict) else "",
+            "created_at": time.time(),
+        }
+        voices = self._read_aliyun_voice_clones()
+        voices = [item for item in voices if str(item.get("voice_id") or "") != voice_id]
+        voices.insert(0, voice)
+        self._write_aliyun_voice_clones(voices[:50])
+        return {"ok": True, "voice_id": voice_id, "voice": voice, "voices": voices[:50], "raw": data}
 
     def _knowledge_files(self) -> list[dict]:
         knowledge_root = self._active_knowledge_root()
