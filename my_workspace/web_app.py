@@ -6498,25 +6498,25 @@ INDEX_HTML = r"""<!doctype html>
       els.voiceCommandTemplate.value = settings.voiceCommandTemplate || '';
       setIfExists(els.voiceTimeout, normalizeVoiceTimeout(settings.voiceTimeout));
       els.aliyunTtsApiKey.value = settings.aliyunTtsApiKey || '';
-      els.aliyunTtsWorkspaceId.value = '';
-      els.aliyunTtsEndpoint.value = '';
-      setIfExists(els.aliyunTtsModel, 'cosyvoice-v3-flash');
+      els.aliyunTtsWorkspaceId.value = settings.aliyunTtsWorkspaceId || settings.aliyunCloneWorkspaceId || '';
+      els.aliyunTtsEndpoint.value = settings.aliyunTtsEndpoint || '';
+      setIfExists(els.aliyunTtsModel, settings.aliyunTtsModel || settings.aliyunCloneTargetModel || 'cosyvoice-v3-flash');
       setIfExists(els.aliyunTtsVoice, settings.aliyunTtsVoice || 'longanyang');
       setIfExists(els.aliyunTtsFormat, settings.aliyunTtsFormat || 'wav');
-      setIfExists(els.aliyunTtsSampleRate, '24000');
-      els.aliyunTtsVolume.value = '';
-      els.aliyunTtsRate.value = '';
-      els.aliyunTtsPitch.value = '';
-      els.aliyunTtsBitRate.value = '';
-      els.aliyunTtsSeed.value = '';
-      els.aliyunTtsLanguageHint.value = '';
-      els.aliyunTtsInstruction.value = '';
-      setIfExists(els.aliyunTtsEnableSsml, 'off');
-      setIfExists(els.aliyunTtsWordTimestamp, 'off');
-      setIfExists(els.aliyunTtsEnableAigcTag, 'off');
-      setIfExists(els.aliyunTtsMarkdownFilter, 'off');
-      els.aliyunTtsAigcPropagator.value = '';
-      els.aliyunTtsAigcPropagateId.value = '';
+      setIfExists(els.aliyunTtsSampleRate, settings.aliyunTtsSampleRate || '24000');
+      els.aliyunTtsVolume.value = settings.aliyunTtsVolume || '';
+      els.aliyunTtsRate.value = settings.aliyunTtsRate || '';
+      els.aliyunTtsPitch.value = settings.aliyunTtsPitch || '';
+      els.aliyunTtsBitRate.value = settings.aliyunTtsBitRate || '';
+      els.aliyunTtsSeed.value = settings.aliyunTtsSeed || '';
+      els.aliyunTtsLanguageHint.value = settings.aliyunTtsLanguageHint || '';
+      els.aliyunTtsInstruction.value = settings.aliyunTtsInstruction || '';
+      setIfExists(els.aliyunTtsEnableSsml, settings.aliyunTtsEnableSsml || 'off');
+      setIfExists(els.aliyunTtsWordTimestamp, settings.aliyunTtsWordTimestamp || 'off');
+      setIfExists(els.aliyunTtsEnableAigcTag, settings.aliyunTtsEnableAigcTag || 'off');
+      setIfExists(els.aliyunTtsMarkdownFilter, settings.aliyunTtsMarkdownFilter || 'off');
+      els.aliyunTtsAigcPropagator.value = settings.aliyunTtsAigcPropagator || '';
+      els.aliyunTtsAigcPropagateId.value = settings.aliyunTtsAigcPropagateId || '';
       if (els.audioDebugText) els.audioDebugText.value = settings.audioDebugText || '';
       if (els.aliyunCloneApiKey) els.aliyunCloneApiKey.value = settings.aliyunCloneApiKey || settings.aliyunTtsApiKey || '';
       if (els.aliyunCloneWorkspaceId) els.aliyunCloneWorkspaceId.value = settings.aliyunCloneWorkspaceId || '';
@@ -8619,7 +8619,15 @@ INDEX_HTML = r"""<!doctype html>
 
     function buildVoiceConfig(referenceAudio = '') {
       const customAliyunVoice = String(els.aliyunCustomVoiceId?.value || '').trim();
-      const customAliyunModel = selectedAliyunClone()?.target_model || els.aliyunCloneTargetModel?.value || 'cosyvoice-v3-flash';
+      const selectedClone = selectedAliyunClone();
+      const customAliyunModel = selectedClone?.target_model || els.aliyunCloneTargetModel?.value || els.aliyunTtsModel?.value || 'cosyvoice-v3-flash';
+      const aliyunWorkspaceId = String(
+        selectedClone?.workspace_id
+        || els.aliyunTtsWorkspaceId?.value
+        || els.aliyunCloneWorkspaceId?.value
+        || ''
+      ).trim();
+      const aliyunRegion = String(selectedClone?.region || els.aliyunCloneRegion?.value || 'cn-beijing').trim() || 'cn-beijing';
       return {
         mode: els.voiceMode.value,
         provider: currentVoiceProvider(),
@@ -8630,25 +8638,26 @@ INDEX_HTML = r"""<!doctype html>
         command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
         timeout_seconds: Number(els.voiceTimeout.value || 3600),
         aliyun_api_key: (els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim() || ''),
-        aliyun_workspace_id: '',
-        aliyun_endpoint: '',
+        aliyun_workspace_id: aliyunWorkspaceId,
+        aliyun_region: aliyunRegion,
+        aliyun_endpoint: els.aliyunTtsEndpoint?.value?.trim() || '',
         aliyun_model: customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice' ? customAliyunModel : 'cosyvoice-v3-flash',
         aliyun_voice: customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice' ? customAliyunVoice : (els.aliyunTtsVoice.value || 'longanyang'),
         aliyun_format: els.aliyunTtsFormat.value,
-        aliyun_sample_rate: 24000,
-        aliyun_volume: '',
-        aliyun_rate: '',
-        aliyun_pitch: '',
-        aliyun_bit_rate: '',
-        aliyun_seed: '',
-        aliyun_language_hint: '',
-        aliyun_instruction: '',
-        aliyun_enable_ssml: false,
-        aliyun_word_timestamp_enabled: false,
-        aliyun_enable_aigc_tag: false,
-        aliyun_enable_markdown_filter: false,
-        aliyun_aigc_propagator: '',
-        aliyun_aigc_propagate_id: '',
+        aliyun_sample_rate: Number(els.aliyunTtsSampleRate?.value || 24000),
+        aliyun_volume: els.aliyunTtsVolume?.value || '',
+        aliyun_rate: els.aliyunTtsRate?.value || '',
+        aliyun_pitch: els.aliyunTtsPitch?.value || '',
+        aliyun_bit_rate: els.aliyunTtsBitRate?.value || '',
+        aliyun_seed: els.aliyunTtsSeed?.value || '',
+        aliyun_language_hint: els.aliyunTtsLanguageHint?.value || '',
+        aliyun_instruction: els.aliyunTtsInstruction?.value || '',
+        aliyun_enable_ssml: els.aliyunTtsEnableSsml?.value === 'on',
+        aliyun_word_timestamp_enabled: els.aliyunTtsWordTimestamp?.value === 'on',
+        aliyun_enable_aigc_tag: els.aliyunTtsEnableAigcTag?.value === 'on',
+        aliyun_enable_markdown_filter: els.aliyunTtsMarkdownFilter?.value === 'on',
+        aliyun_aigc_propagator: els.aliyunTtsAigcPropagator?.value || '',
+        aliyun_aigc_propagate_id: els.aliyunTtsAigcPropagateId?.value || '',
       };
     }
 
@@ -8738,6 +8747,10 @@ INDEX_HTML = r"""<!doctype html>
       if (els.aliyunCustomVoiceId) els.aliyunCustomVoiceId.value = item.voice_id || '';
       if (els.voiceMode) setIfExists(els.voiceMode, 'aliyun_cosyvoice');
       if (els.aliyunCloneTargetModel && item.target_model) setIfExists(els.aliyunCloneTargetModel, item.target_model);
+      if (els.aliyunTtsModel && item.target_model) setIfExists(els.aliyunTtsModel, item.target_model);
+      if (els.aliyunTtsWorkspaceId && item.workspace_id) els.aliyunTtsWorkspaceId.value = item.workspace_id || '';
+      if (els.aliyunCloneWorkspaceId && item.workspace_id) els.aliyunCloneWorkspaceId.value = item.workspace_id || '';
+      if (els.aliyunCloneRegion && item.region) setIfExists(els.aliyunCloneRegion, item.region);
       syncVoiceModeVisibility();
       saveSettings();
       setStatus(`已使用复刻音色：${item.voice_id}`);
@@ -8779,6 +8792,8 @@ INDEX_HTML = r"""<!doctype html>
         }
         saveSettings();
         if (els.aliyunTtsApiKey && apiKey && !els.aliyunTtsApiKey.value.trim()) els.aliyunTtsApiKey.value = apiKey;
+        if (els.aliyunTtsWorkspaceId && workspaceId) els.aliyunTtsWorkspaceId.value = workspaceId;
+        if (els.aliyunTtsModel) setIfExists(els.aliyunTtsModel, els.aliyunCloneTargetModel?.value || 'cosyvoice-v3-flash');
         const result = await apiWithTimeout('/api/aliyun-cosyvoice-clone', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -8814,6 +8829,11 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     async function runAudioDebug() {
+      const setAudioDebugStatus = (text, isError = false) => {
+        if (!els.audioDebugStatus) return;
+        els.audioDebugStatus.textContent = text;
+        els.audioDebugStatus.classList.toggle('error', isError);
+      };
       const text = String(els.audioDebugText?.value || '').trim();
       if (!text) {
         setStatus('请先输入调试文本', true);
@@ -8832,7 +8852,7 @@ INDEX_HTML = r"""<!doctype html>
         els.runAudioDebugBtn.disabled = true;
         els.runAudioDebugBtn.textContent = '生成中...';
       }
-      if (els.audioDebugStatus) els.audioDebugStatus.textContent = '正在生成音频...';
+      setAudioDebugStatus('正在生成音频...');
       try {
         saveSettings();
         const referenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
@@ -8845,17 +8865,18 @@ INDEX_HTML = r"""<!doctype html>
           }),
         }, Math.max(30000, Number(els.voiceTimeout.value || 600) * 1000 + 5000));
         const item = result.result || {};
-        if (els.audioDebugStatus) {
-          const duration = Number(item.actual_duration_seconds || 0);
-          els.audioDebugStatus.textContent = item.audio_file
+        const duration = Number(item.actual_duration_seconds || 0);
+        setAudioDebugStatus(
+          item.audio_file
             ? `已生成：${duration ? duration.toFixed(1) + 's / ' : ''}${item.audio_file}`
-            : (item.error || item.status || '生成完成但未找到音频文件');
-        }
+            : (item.error || item.status || '生成完成但未找到音频文件'),
+          !item.audio_file
+        );
         renderAudioDebugHistory(result.history || [item]);
         if (!item.audio_file && item.error) setStatus(item.error, true);
         else setStatus('音频调试生成完成');
       } catch (err) {
-        if (els.audioDebugStatus) els.audioDebugStatus.textContent = err.message || '生成失败';
+        setAudioDebugStatus(err.message || '生成失败', true);
         setStatus(err.message || '音频调试生成失败', true);
       } finally {
         if (els.runAudioDebugBtn) {
@@ -13314,7 +13335,7 @@ INDEX_HTML = r"""<!doctype html>
 
     async function collectProductionConfig() {
       const voiceReferenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
-      if (els.voiceMode.value === 'aliyun_cosyvoice' && !els.aliyunTtsApiKey.value.trim()) {
+      if (els.voiceMode.value === 'aliyun_cosyvoice' && !(els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim())) {
         throw new Error('请先在系统配置填写阿里云 CosyVoice API Key');
       }
       const imageConfig = {

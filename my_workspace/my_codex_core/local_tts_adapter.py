@@ -305,7 +305,7 @@ class LocalTTSAdapter:
                 raw = response.read()
         except HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
-            manifest.update({"status": "failed", "error": f"Aliyun CosyVoice HTTP {exc.code}: {error_body[:1000]}"})
+            manifest.update({"status": "failed", "error": self._friendly_aliyun_error(exc.code, error_body)})
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return manifest
         except (URLError, TimeoutError, OSError) as exc:
@@ -372,11 +372,30 @@ class LocalTTSAdapter:
             return endpoint
         base_url = str(voice_config.get("aliyun_base_url") or "").strip().rstrip("/")
         workspace_id = str(voice_config.get("aliyun_workspace_id") or "").strip()
+        region = str(voice_config.get("aliyun_region") or "cn-beijing").strip() or "cn-beijing"
         if base_url:
             return base_url + "/api/v1/services/audio/tts/SpeechSynthesizer"
         if workspace_id:
-            return f"https://{workspace_id}.cn-beijing.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+            return f"https://{workspace_id}.{region}.maas.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
         return "https://dashscope.aliyuncs.com/api/v1/services/audio/tts/SpeechSynthesizer"
+
+    @staticmethod
+    def _friendly_aliyun_error(status_code: int, error_body: str) -> str:
+        text = error_body[:1000]
+        try:
+            data = json.loads(error_body)
+        except Exception:
+            data = {}
+        message = str(data.get("message") or "") if isinstance(data, dict) else ""
+        code = str(data.get("code") or "") if isinstance(data, dict) else ""
+        if "error code: 418" in message or "error code: 418" in text:
+            return (
+                "阿里云 CosyVoice 合成失败：引擎拒绝了本次文本或音色请求。"
+                "请确认已选择正确的复刻 voice_id、Workspace ID 和地域；"
+                "也建议先用正常中文句子测试，避免随机字符、乱码或过短混杂文本。"
+                f" 原始错误：HTTP {status_code} {code}: {text}"
+            )
+        return f"Aliyun CosyVoice HTTP {status_code}: {text}"
 
     def _fallback_after_voxcpm2_failure(
         self,
