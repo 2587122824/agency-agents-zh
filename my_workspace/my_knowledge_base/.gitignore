@@ -12,6 +12,14 @@
 !decisions/README.md
 !conversation_logs/
 !conversation_logs/README.md
+!content_library/
+!content_library/README.md
+!reviews/
+!reviews/README.md
+!sop/
+!sop/README.md
+!external_methods/
+!external_methods/README.md
 !templates/
 !templates/*.md
 
@@ -26,4 +34,12 @@ decisions/*
 !decisions/README.md
 conversation_logs/*
 !conversation_logs/README.md
+content_library/*
+!content_library/README.md
+reviews/*
+!reviews/README.md
+sop/*
+!sop/README.md
+external_methods/*
+!external_methods/README.md
 INDEX.json

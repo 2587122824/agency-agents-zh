@@ -1,24 +1,33 @@
-# 个人产品库与知识库
+# Personal Knowledge Base
 
-这里用于沉淀你的产品想法、内容实验、系统规划、商业判断和关键决策。
+This project folder keeps templates and compatibility docs only.
 
-## 使用方式
+Your real private records should live in the global personal knowledge base:
 
-1. 新想法先放到 `idea_inbox/`，不急着分类。
-2. 已经值得长期跟踪的产品方向放到 `product_library/`。
-3. 阶段性规划、路线图和任务拆解放到 `planning/`。
-4. 做过的重要取舍放到 `decisions/`，方便以后回看为什么这么做。
-5. 新条目优先复制 `templates/` 里的模板，保持每条记录可复盘。
+`I:\Ai_WorkSpace\personal_knowledge_base`
 
-## 推荐命名
+## Second Brain Loop
 
-- 想法：`YYYY-MM-DD-idea-短标题.md`
-- 产品：`YYYY-MM-DD-product-短标题.md`
-- 规划：`YYYY-MM-DD-plan-短标题.md`
-- 决策：`YYYY-MM-DD-decision-短标题.md`
+Use the library as a loop, not a storage box:
 
-## 隐私边界
+```text
+capture -> organize -> connect -> execute -> review -> reuse
+```
 
-本目录默认只提交结构、说明和模板。真实想法、规划和私密索引默认被 `.gitignore` 忽略，避免误推到远端。
+## Core Areas
 
-如果某条内容确定可以公开，再手动调整忽略规则或复制到公开文档区。
+- `idea_inbox/`: raw thoughts and early ideas.
+- `product_library/`: product directions worth tracking.
+- `planning/`: plans, roadmaps, and next actions.
+- `decisions/`: important choices and why they were made.
+- `conversation_logs/`: useful conversations and extracted judgments.
+- `content_library/`: published or planned videos, posts, articles, and demos.
+- `reviews/`: reviews of content, tasks, experiments, and product work.
+- `sop/`: reusable standard operating procedures.
+- `external_methods/`: useful external courses, articles, cases, competitors, and platform rules.
+
+## Privacy
+
+The real records are local by default and should not be committed to GitHub.
+
+Commit templates and structure only.

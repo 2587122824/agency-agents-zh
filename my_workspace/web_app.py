@@ -3603,6 +3603,10 @@ INDEX_HTML = r"""<!doctype html>
                   <option value="planning">规划</option>
                   <option value="decisions">决策</option>
                   <option value="conversation_logs">聊天记录</option>
+                  <option value="content_library">作品库</option>
+                  <option value="reviews">复盘库</option>
+                  <option value="sop">SOP库</option>
+                  <option value="external_methods">外部方法库</option>
                 </select>
               </label>
               <label>搜索
@@ -4617,6 +4621,12 @@ INDEX_HTML = r"""<!doctype html>
       decisions: { label: '决策', prefix: 'decision', template: '# 决策标题\n\n- 日期：\n- 状态：accepted / reversed / superseded\n- 相关产品/计划：\n\n## 背景\n\n\n## 决策\n\n\n## 原因\n\n\n## 放弃的方案\n\n\n## 影响\n\n\n## 复盘时间\n' },
       conversation_logs: { label: '聊天', prefix: 'chat', template: '# 聊天记录标题\n\n- 日期：\n- 参与者：我 / Codex\n- 主题：\n- 状态：raw / summarized / extracted\n- 关联条目：\n\n## 背景\n\n\n## 对话摘要\n\n\n## 关键判断\n\n\n## 新想法\n\n\n## 决策\n\n\n## 待办\n\n\n## 可沉淀到其他库\n\n- 产品库：\n- 规划：\n- 决策：\n- 想法收件箱：\n\n## 原始摘录\n' },
     };
+    Object.assign(PERSONAL_KNOWLEDGE_CATEGORIES, {
+      content_library: { label: '作品', prefix: 'content', template: '# Content Title\n\n- Date:\n- Platform:\n- IP / Series:\n- Status: draft / published / archived\n- Link:\n- Cost:\n\n## One-Line Topic\n\n\n## Script / Outline\n\n\n## Assets Used\n\n\n## Publishing Metadata\n\n- Title:\n- Cover:\n- Tags:\n- Publish time:\n\n## Performance Data\n\n- Views:\n- Completion rate:\n- Likes:\n- Comments:\n- Saves:\n- Conversion:\n\n## Notes\n\n\n## Related\n\n- Product:\n- Plan:\n- Decision:\n- SOP:\n- Review:\n' },
+      reviews: { label: '复盘', prefix: 'review', template: '# Review Title\n\n- Date:\n- Object: content / task / experiment / product\n- Related item:\n- Result: win / neutral / loss\n\n## Goal\n\n\n## What Happened\n\n\n## What Worked\n\n\n## What Failed\n\n\n## Root Cause\n\n\n## Lessons\n\n\n## Next Change\n\n\n## Reusable Asset\n\n' },
+      sop: { label: 'SOP', prefix: 'sop', template: '# SOP Title\n\n- Date:\n- Status: draft / testing / stable / deprecated\n- Applies to:\n- Owner:\n\n## Purpose\n\n\n## Inputs\n\n\n## Steps\n\n1. \n2. \n3. \n\n## Quality Checklist\n\n- [ ] \n- [ ] \n\n## Failure Handling\n\n\n## Output\n\n\n## Related Records\n\n' },
+      external_methods: { label: '外部方法', prefix: 'method', template: '# External Method Title\n\n- Date:\n- Source:\n- Link:\n- Type: course / article / competitor / platform-rule / case-study\n- Trust level: high / medium / low\n\n## Summary\n\n\n## Useful Parts\n\n\n## Limits / Risks\n\n\n## How To Adapt Locally\n\n\n## Related SOP / Product\n\n' },
+    });
     const ASSET_CATEGORY_TAGS = [
       { value: 'person', label: '人物' },
       { value: 'product', label: '产品' },
@@ -14747,7 +14757,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     @staticmethod
     def _ensure_personal_knowledge_structure(root: Path) -> None:
         root.mkdir(parents=True, exist_ok=True)
-        for name in ["idea_inbox", "product_library", "planning", "decisions", "conversation_logs", "templates"]:
+        for name in [
+            "idea_inbox",
+            "product_library",
+            "planning",
+            "decisions",
+            "conversation_logs",
+            "content_library",
+            "reviews",
+            "sop",
+            "external_methods",
+            "templates",
+        ]:
             (root / name).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
@@ -20067,6 +20088,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "planning": "plan",
             "decisions": "decision",
             "conversation_logs": "chat",
+            "content_library": "content",
+            "reviews": "review",
+            "sop": "sop",
+            "external_methods": "method",
         }
 
     @staticmethod
