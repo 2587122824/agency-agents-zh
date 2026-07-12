@@ -572,9 +572,9 @@ INDEX_HTML = r"""<!doctype html>
     }
     .audio-debug-history-card {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 10px;
-      align-items: center;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 12px;
+      align-items: stretch;
       padding: 10px;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -585,12 +585,31 @@ INDEX_HTML = r"""<!doctype html>
       gap: 6px;
       min-width: 0;
     }
+    .audio-debug-history-player {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+      align-items: stretch;
+      min-width: 0;
+    }
     .audio-debug-history-card audio {
-      width: min(260px, 100%);
+      width: 100%;
+      min-width: 0;
     }
     .audio-debug-history-card button {
       min-width: 72px;
       padding-inline: 10px;
+      justify-self: start;
+    }
+    .audio-debug-history-error {
+      padding: 8px 10px;
+      border: 1px solid #fed7aa;
+      border-radius: 8px;
+      background: #fff7ed;
+      color: #9a3412;
+      font-size: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
     }
     .audio-debug-clone-shell {
       display: grid;
@@ -677,6 +696,13 @@ INDEX_HTML = r"""<!doctype html>
       }
       .audio-debug-actions button {
         width: 100%;
+      }
+      .audio-debug-history-player {
+        grid-template-columns: 1fr;
+      }
+      .audio-debug-history-card button {
+        width: 100%;
+        justify-self: stretch;
       }
     }
     .form {
@@ -8653,11 +8679,12 @@ INDEX_HTML = r"""<!doctype html>
         `;
         if (file) {
           const controls = document.createElement('div');
-          controls.className = 'audio-debug-history-main';
+          controls.className = 'audio-debug-history-player';
           const audio = document.createElement('audio');
           audio.controls = true;
           audio.preload = 'metadata';
           audio.src = mediaUrl('__audio_debug__', file);
+          audio.title = file;
           controls.appendChild(audio);
           const open = document.createElement('button');
           open.type = 'button';
@@ -8665,6 +8692,12 @@ INDEX_HTML = r"""<!doctype html>
           open.onclick = () => window.open(mediaUrl('__audio_debug__', file), '_blank', 'noopener');
           controls.appendChild(open);
           row.appendChild(controls);
+        } else {
+          const error = String(item.error || '').trim();
+          const note = document.createElement('div');
+          note.className = 'audio-debug-history-error';
+          note.textContent = error ? `未生成音频：${error}` : '未生成音频文件。';
+          row.appendChild(note);
         }
         els.audioDebugResult.appendChild(row);
       });
