@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import error as urllib_error
 from urllib import request as urllib_request
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 from uuid import uuid4
 
 from PIL import Image
@@ -3596,11 +3596,14 @@ INDEX_HTML = r"""<!doctype html>
                   <label>本地个人音频
                     <input id="aliyunCloneLocalAudioFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
                   </label>
+                  <label>公网基地址
+                    <input id="aliyunVoicePublicBaseUrl" autocomplete="off" spellcheck="false" placeholder="例如 https://你的域名 或 Cloudflare Tunnel 地址" />
+                  </label>
                   <label class="audio-debug-field-wide">参考音频公网 URL
                     <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
                   </label>
                 </div>
-                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机，可用于 VoxCPM2 本地仿声；阿里云声音复刻仍需要填写公网 URL。</div>
+                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机，可用于 VoxCPM2 本地仿声；如果设置了公网基地址，上传后会自动生成阿里云可读取的 URL。</div>
               </div>
               <div class="audio-debug-clone-section">
                 <div class="audio-debug-clone-section-title">
@@ -4534,6 +4537,7 @@ INDEX_HTML = r"""<!doctype html>
       aliyunCloneTargetModel: document.getElementById('aliyunCloneTargetModel'),
       aliyunClonePrefix: document.getElementById('aliyunClonePrefix'),
       aliyunCloneLocalAudioFile: document.getElementById('aliyunCloneLocalAudioFile'),
+      aliyunVoicePublicBaseUrl: document.getElementById('aliyunVoicePublicBaseUrl'),
       aliyunCloneLocalAudioHint: document.getElementById('aliyunCloneLocalAudioHint'),
       aliyunCloneAudioUrl: document.getElementById('aliyunCloneAudioUrl'),
       aliyunCloneLanguage: document.getElementById('aliyunCloneLanguage'),
@@ -6326,6 +6330,7 @@ INDEX_HTML = r"""<!doctype html>
         aliyunCloneRegion: els.aliyunCloneRegion?.value || 'cn-beijing',
         aliyunCloneTargetModel: els.aliyunCloneTargetModel?.value || 'cosyvoice-v3-flash',
         aliyunClonePrefix: els.aliyunClonePrefix?.value || '',
+        aliyunVoicePublicBaseUrl: els.aliyunVoicePublicBaseUrl?.value || '',
         aliyunCloneAudioUrl: els.aliyunCloneAudioUrl?.value || '',
         aliyunCloneLanguage: els.aliyunCloneLanguage?.value || '中文',
         aliyunCloneMaxSeconds: els.aliyunCloneMaxSeconds?.value || '15',
@@ -6523,6 +6528,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.aliyunCloneRegion, settings.aliyunCloneRegion || 'cn-beijing');
       setIfExists(els.aliyunCloneTargetModel, settings.aliyunCloneTargetModel || 'cosyvoice-v3-flash');
       if (els.aliyunClonePrefix) els.aliyunClonePrefix.value = settings.aliyunClonePrefix || '';
+      if (els.aliyunVoicePublicBaseUrl) els.aliyunVoicePublicBaseUrl.value = settings.aliyunVoicePublicBaseUrl || '';
       if (els.aliyunCloneAudioUrl) els.aliyunCloneAudioUrl.value = settings.aliyunCloneAudioUrl || '';
       setIfExists(els.aliyunCloneLanguage, settings.aliyunCloneLanguage || '中文');
       setIfExists(els.aliyunCloneMaxSeconds, settings.aliyunCloneMaxSeconds || '15');
@@ -7557,6 +7563,7 @@ INDEX_HTML = r"""<!doctype html>
         els.aliyunCloneRegion,
         els.aliyunCloneTargetModel,
         els.aliyunClonePrefix,
+        els.aliyunVoicePublicBaseUrl,
         els.aliyunCloneAudioUrl,
         els.aliyunCloneLanguage,
         els.aliyunCloneMaxSeconds,
@@ -8528,6 +8535,14 @@ INDEX_HTML = r"""<!doctype html>
       return els.voiceReferenceAudioPath.value.trim();
     }
 
+    function voiceSamplePublicUrl(result = {}) {
+      const baseUrl = String(els.aliyunVoicePublicBaseUrl?.value || '').trim().replace(/\/+$/, '');
+      const mediaPath = String(result.media_path || '').trim();
+      if (baseUrl && !/^https?:\/\//i.test(baseUrl)) return '';
+      if (!baseUrl || !mediaPath) return '';
+      return `${baseUrl}${mediaPath.startsWith('/') ? mediaPath : '/' + mediaPath}`;
+    }
+
     async function uploadAliyunCloneLocalAudio() {
       const file = els.aliyunCloneLocalAudioFile?.files && els.aliyunCloneLocalAudioFile.files[0];
       if (!file) return '';
@@ -8543,10 +8558,14 @@ INDEX_HTML = r"""<!doctype html>
           }),
         });
         const storedPath = result.stored_path || '';
+        const publicUrl = voiceSamplePublicUrl(result);
         if (els.voiceReferenceAudioPath) els.voiceReferenceAudioPath.value = storedPath;
+        if (publicUrl && els.aliyunCloneAudioUrl) els.aliyunCloneAudioUrl.value = publicUrl;
         if (els.aliyunCloneLocalAudioHint) {
-          els.aliyunCloneLocalAudioHint.textContent = storedPath
-            ? `已保存到本机：${storedPath}。可用于 VoxCPM2 本地仿声；阿里云复刻仍需公网 URL。`
+          els.aliyunCloneLocalAudioHint.textContent = publicUrl
+            ? `已保存到本机：${storedPath}。已生成公网 URL 并填入参考音频：${publicUrl}`
+            : storedPath
+            ? `已保存到本机：${storedPath}。请填写公网基地址后重新选择音频，或手动填参考音频公网 URL。`
             : '已上传，但没有返回保存路径。';
         }
         saveSettings();
@@ -15106,6 +15125,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/reference-media":
                 query = parse_qs(parsed.query)
                 self._send_reference_media(self._single(query, "file"))
+            elif parsed.path == "/api/voice-sample-media":
+                query = parse_qs(parsed.query)
+                self._send_voice_sample_media(self._single(query, "file"))
             elif parsed.path == "/api/run-status":
                 query = parse_qs(parsed.query)
                 self._send_json(self._run_status(self._single(query, "id")))
@@ -19895,6 +19917,22 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError(f"Unsupported reference media file type: {suffix}")
         self._send_file_response(target)
 
+    def _send_voice_sample_media(self, file_name: str) -> None:
+        name = str(file_name or "").replace("\\", "/").strip().lstrip("/")
+        if name.startswith("my_workspace/"):
+            name = name[len("my_workspace/") :]
+        if name.startswith("my_voice_samples/"):
+            name = name[len("my_voice_samples/") :]
+        if not name or ".." in Path(name).parts:
+            raise FileNotFoundError(file_name)
+        target = (VOICE_SAMPLE_ROOT / name).resolve()
+        if not target.is_file() or not self._is_relative_to(target, VOICE_SAMPLE_ROOT):
+            raise FileNotFoundError(file_name)
+        suffix = target.suffix.lower()
+        if suffix not in {".wav", ".mp3", ".m4a", ".flac", ".ogg"}:
+            raise ValueError(f"Unsupported voice sample file type: {suffix}")
+        self._send_file_response(target)
+
     def _send_file_response(self, target: Path) -> None:
         file_size = target.stat().st_size
         content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
@@ -20709,9 +20747,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         target.write_bytes(audio_bytes)
 
         relative_path = target.relative_to(WORKSPACE_ROOT).as_posix()
+        media_path = f"/api/voice-sample-media?file={quote(relative_path, safe='')}"
         return {
             "filename": filename,
             "stored_path": relative_path,
+            "media_path": media_path,
             "size_bytes": len(audio_bytes),
         }
 
