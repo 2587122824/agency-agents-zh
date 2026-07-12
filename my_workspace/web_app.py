@@ -591,38 +591,54 @@ INDEX_HTML = r"""<!doctype html>
       min-width: 72px;
       padding-inline: 10px;
     }
-    .audio-debug-clone-grid {
+    .audio-debug-clone-shell {
       display: grid;
-      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      grid-template-columns: minmax(0, 1fr) 360px;
+      gap: 18px;
+      align-items: start;
+    }
+    .audio-debug-clone-form {
+      display: grid;
+      gap: 16px;
+    }
+    .audio-debug-field-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
     }
-    .audio-debug-clone-wide {
-      grid-column: span 2;
+    .audio-debug-field-wide {
+      grid-column: 1 / -1;
     }
     .audio-debug-clone-actions {
       display: flex;
       align-items: center;
       gap: 10px;
       flex-wrap: wrap;
-      margin-top: 12px;
     }
     .audio-debug-saved-voice {
       display: grid;
-      grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+      grid-template-columns: 1fr;
       gap: 12px;
       align-items: end;
-      margin-top: 14px;
-      padding-top: 14px;
-      border-top: 1px solid var(--line);
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+    }
+    .audio-debug-note {
+      padding: 10px 12px;
+      border: 1px solid #d7ebe8;
+      border-radius: 8px;
+      background: #f3fbfa;
+      color: #134e4a;
+      font-size: 13px;
+      line-height: 1.5;
     }
     @media (max-width: 1100px) {
       .audio-debug-layout {
         grid-template-columns: 1fr;
       }
-      .audio-debug-clone-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-      .audio-debug-saved-voice {
+      .audio-debug-clone-shell {
         grid-template-columns: 1fr;
       }
     }
@@ -633,10 +649,10 @@ INDEX_HTML = r"""<!doctype html>
       .audio-debug-hero-actions {
         justify-content: flex-start;
       }
-      .audio-debug-clone-grid {
+      .audio-debug-field-grid {
         grid-template-columns: 1fr;
       }
-      .audio-debug-clone-wide {
+      .audio-debug-field-wide {
         grid-column: auto;
       }
       .audio-debug-actions button {
@@ -3525,66 +3541,75 @@ INDEX_HTML = r"""<!doctype html>
             </div>
           </div>
           <div class="config-card audio-debug-card" data-title="阿里云 CosyVoice 声音复刻" data-desc="创建本人授权的复刻音色，保存 voice_id 后可直接用于上方文本转音频">
-            <div class="audio-debug-clone-grid">
-              <label>阿里云 API Key
-                <input id="aliyunCloneApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="DashScope / Model Studio API Key" />
-              </label>
-              <label>Workspace ID
-                <input id="aliyunCloneWorkspaceId" autocomplete="off" spellcheck="false" placeholder="例如 llm-xxxx" />
-              </label>
-              <label>地域
-                <select id="aliyunCloneRegion">
-                  <option value="cn-beijing" selected>华北2（北京）</option>
-                  <option value="cn-shanghai">华东2（上海）</option>
-                </select>
-              </label>
-              <label>复刻目标模型
-                <select id="aliyunCloneTargetModel">
-                  <option value="cosyvoice-v3-flash" selected>cosyvoice-v3-flash</option>
-                  <option value="cosyvoice-v2">cosyvoice-v2</option>
-                </select>
-              </label>
-              <label>音色前缀
-                <input id="aliyunClonePrefix" autocomplete="off" spellcheck="false" placeholder="例如 my_voice" />
-              </label>
-              <label class="audio-debug-clone-wide">参考音频公网 URL
-                <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
-              </label>
-              <label>样本语言
-                <select id="aliyunCloneLanguage">
-                  <option value="中文" selected>中文</option>
-                  <option value="英文">英文</option>
-                </select>
-              </label>
-              <label>最大样本时长
-                <select id="aliyunCloneMaxSeconds">
-                  <option value="10">10 秒</option>
-                  <option value="15" selected>15 秒</option>
-                  <option value="20">20 秒</option>
-                </select>
-              </label>
-              <label>预处理
-                <select id="aliyunClonePreprocess">
-                  <option value="true" selected>开启</option>
-                  <option value="false">关闭</option>
-                </select>
-              </label>
-            </div>
-            <div class="audio-debug-clone-actions">
-              <button class="primary" id="createAliyunCloneBtn" type="button">创建复刻音色</button>
-              <span class="status" id="aliyunCloneStatus">未创建</span>
-              <span class="muted small">参考音频需要是本人或已授权声音，并且 URL 能被阿里云公网访问。</span>
-            </div>
-            <div class="audio-debug-saved-voice">
-              <label>已保存复刻音色
-                <select id="aliyunCloneVoiceSelect">
-                  <option value="">未保存复刻音色</option>
-                </select>
-              </label>
-              <label>当前合成使用的 voice
-                <input id="aliyunCustomVoiceId" autocomplete="off" spellcheck="false" placeholder="可手动填 voice_id，或从左侧选择" />
-              </label>
-              <button id="useAliyunCloneVoiceBtn" type="button">使用选中音色</button>
+            <div class="audio-debug-clone-shell">
+              <div class="audio-debug-clone-form">
+                <div class="audio-debug-field-grid">
+                  <label>阿里云 API Key
+                    <input id="aliyunCloneApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="DashScope / Model Studio API Key" />
+                  </label>
+                  <label>业务空间 ID
+                    <input id="aliyunCloneWorkspaceId" autocomplete="off" spellcheck="false" placeholder="例如 ws-xxxx 或 llm-xxxx" />
+                  </label>
+                  <label>地域
+                    <select id="aliyunCloneRegion">
+                      <option value="cn-beijing" selected>华北2（北京）</option>
+                      <option value="cn-shanghai">华东2（上海）</option>
+                    </select>
+                  </label>
+                  <label>复刻目标模型
+                    <select id="aliyunCloneTargetModel">
+                      <option value="cosyvoice-v3-flash" selected>cosyvoice-v3-flash</option>
+                      <option value="cosyvoice-v2">cosyvoice-v2</option>
+                    </select>
+                  </label>
+                  <label>音色前缀
+                    <input id="aliyunClonePrefix" autocomplete="off" spellcheck="false" placeholder="例如 my_voice" />
+                  </label>
+                  <label>本地个人音频
+                    <input id="aliyunCloneLocalAudioFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
+                  </label>
+                  <label class="audio-debug-field-wide">参考音频公网 URL
+                    <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
+                  </label>
+                  <label>样本语言
+                    <select id="aliyunCloneLanguage">
+                      <option value="中文" selected>中文</option>
+                      <option value="英文">英文</option>
+                    </select>
+                  </label>
+                  <label>最大样本时长
+                    <select id="aliyunCloneMaxSeconds">
+                      <option value="10">10 秒</option>
+                      <option value="15" selected>15 秒</option>
+                      <option value="20">20 秒</option>
+                    </select>
+                  </label>
+                  <label>预处理
+                    <select id="aliyunClonePreprocess">
+                      <option value="true" selected>开启</option>
+                      <option value="false">关闭</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机，可用于 VoxCPM2 本地仿声；阿里云声音复刻仍需要填写公网 URL。</div>
+                <div class="audio-debug-clone-actions">
+                  <button class="primary" id="createAliyunCloneBtn" type="button">创建复刻音色</button>
+                  <span class="status" id="aliyunCloneStatus">未创建</span>
+                </div>
+              </div>
+              <div class="audio-debug-saved-voice">
+                <strong>使用复刻音色</strong>
+                <label>已保存复刻音色
+                  <select id="aliyunCloneVoiceSelect">
+                    <option value="">未保存复刻音色</option>
+                  </select>
+                </label>
+                <label>当前合成使用的 voice
+                  <input id="aliyunCustomVoiceId" autocomplete="off" spellcheck="false" placeholder="可手动填 voice_id，或从左侧选择" />
+                </label>
+                <button id="useAliyunCloneVoiceBtn" type="button">使用选中音色</button>
+                <span class="muted small">选中后，上方“文本转音频”会使用这个 voice_id 合成。</span>
+              </div>
             </div>
           </div>
         </div>
@@ -4448,6 +4473,8 @@ INDEX_HTML = r"""<!doctype html>
       aliyunCloneRegion: document.getElementById('aliyunCloneRegion'),
       aliyunCloneTargetModel: document.getElementById('aliyunCloneTargetModel'),
       aliyunClonePrefix: document.getElementById('aliyunClonePrefix'),
+      aliyunCloneLocalAudioFile: document.getElementById('aliyunCloneLocalAudioFile'),
+      aliyunCloneLocalAudioHint: document.getElementById('aliyunCloneLocalAudioHint'),
       aliyunCloneAudioUrl: document.getElementById('aliyunCloneAudioUrl'),
       aliyunCloneLanguage: document.getElementById('aliyunCloneLanguage'),
       aliyunCloneMaxSeconds: document.getElementById('aliyunCloneMaxSeconds'),
@@ -7531,6 +7558,7 @@ INDEX_HTML = r"""<!doctype html>
       if (els.runAudioDebugBtn) els.runAudioDebugBtn.addEventListener('click', runAudioDebug);
       if (els.createAliyunCloneBtn) els.createAliyunCloneBtn.addEventListener('click', createAliyunCosyVoiceClone);
       if (els.useAliyunCloneVoiceBtn) els.useAliyunCloneVoiceBtn.addEventListener('click', useSelectedAliyunCloneVoice);
+      if (els.aliyunCloneLocalAudioFile) els.aliyunCloneLocalAudioFile.addEventListener('change', uploadAliyunCloneLocalAudio);
     }
 
     function applyImageProviderDefaults() {
@@ -8440,6 +8468,38 @@ INDEX_HTML = r"""<!doctype html>
       return els.voiceReferenceAudioPath.value.trim();
     }
 
+    async function uploadAliyunCloneLocalAudio() {
+      const file = els.aliyunCloneLocalAudioFile?.files && els.aliyunCloneLocalAudioFile.files[0];
+      if (!file) return '';
+      if (els.aliyunCloneLocalAudioHint) els.aliyunCloneLocalAudioHint.textContent = '正在上传本地个人音频...';
+      try {
+        const contentBase64 = await fileToBase64(file);
+        const result = await api('/api/upload-voice-sample', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            filename: file.name,
+            content_base64: contentBase64,
+          }),
+        });
+        const storedPath = result.stored_path || '';
+        if (els.voiceReferenceAudioPath) els.voiceReferenceAudioPath.value = storedPath;
+        if (els.aliyunCloneLocalAudioHint) {
+          els.aliyunCloneLocalAudioHint.textContent = storedPath
+            ? `已保存到本机：${storedPath}。可用于 VoxCPM2 本地仿声；阿里云复刻仍需公网 URL。`
+            : '已上传，但没有返回保存路径。';
+        }
+        saveSettings();
+        return storedPath;
+      } catch (err) {
+        if (els.aliyunCloneLocalAudioHint) els.aliyunCloneLocalAudioHint.textContent = err.message || '上传失败';
+        setStatus(err.message || '本地个人音频上传失败', true);
+        return '';
+      } finally {
+        if (els.aliyunCloneLocalAudioFile) els.aliyunCloneLocalAudioFile.value = '';
+      }
+    }
+
     function defaultVoxCPM2CommandTemplate() {
       return '';
     }
@@ -8629,8 +8689,8 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请填写阿里云 Workspace ID', true);
         return;
       }
-      if (!/^https?:\/\//i.test(audioUrl)) {
-        setStatus('请填写阿里云可访问的参考音频公网 URL', true);
+      if (!/^https?:\/\//i.test(audioUrl) && !els.aliyunCloneLocalAudioFile?.files?.[0]) {
+        setStatus('请填写阿里云可访问的参考音频公网 URL，或先选择本地个人音频保存到本机', true);
         return;
       }
       if (!prefix) {
@@ -8644,6 +8704,12 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (els.aliyunCloneStatus) els.aliyunCloneStatus.textContent = '正在创建复刻音色...';
       try {
+        if (els.aliyunCloneLocalAudioFile?.files?.[0] && !audioUrl) {
+          await uploadAliyunCloneLocalAudio();
+        }
+        if (!/^https?:\/\//i.test(String(els.aliyunCloneAudioUrl?.value || '').trim())) {
+          throw new Error('阿里云声音复刻需要公网 URL。本地个人音频已可用于 VoxCPM2，但阿里云无法读取本机文件。');
+        }
         saveSettings();
         if (els.aliyunTtsApiKey && apiKey && !els.aliyunTtsApiKey.value.trim()) els.aliyunTtsApiKey.value = apiKey;
         const result = await apiWithTimeout('/api/aliyun-cosyvoice-clone', {
@@ -8655,7 +8721,7 @@ INDEX_HTML = r"""<!doctype html>
             region: els.aliyunCloneRegion?.value || 'cn-beijing',
             target_model: els.aliyunCloneTargetModel?.value || 'cosyvoice-v3-flash',
             prefix,
-            audio_url: audioUrl,
+            audio_url: String(els.aliyunCloneAudioUrl?.value || '').trim(),
             language: els.aliyunCloneLanguage?.value || '中文',
             max_seconds: Number(els.aliyunCloneMaxSeconds?.value || 15),
             enable_preprocess: String(els.aliyunClonePreprocess?.value || 'true') !== 'false',
