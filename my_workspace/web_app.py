@@ -328,6 +328,7 @@ INDEX_HTML = r"""<!doctype html>
     body[data-view="workflow"] main,
     body[data-view="assets"] main,
     body[data-view="knowledgeBase"] main,
+    body[data-view="audioDebug"] main,
     body[data-view="comfyDebug"] main,
     body[data-view="system"] main {
       grid-template-columns: 1fr;
@@ -2890,6 +2891,7 @@ INDEX_HTML = r"""<!doctype html>
         <button class="nav-btn" data-view-target="staff" type="button">数字员工</button>
         <button class="nav-btn" data-view-target="workflow" type="button">工作流</button>
         <button class="nav-btn" data-view-target="assets" type="button">素材库</button>
+        <button class="nav-btn" data-view-target="audioDebug" type="button">音频调试</button>
         <button class="nav-btn" data-view-target="comfyDebug" type="button">ComfyUI调试</button>
         <button class="nav-btn" data-view-target="output" type="button">任务输出</button>
         <button class="nav-btn" data-view-target="system" type="button">系统状态</button>
@@ -3371,20 +3373,30 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
-            <div class="config-card audio-debug-card" data-title="音频调试台" data-desc="复用当前语音合成配置，输入文本后立即生成一段可试听的音频文件">
-              <div class="audio-debug-layout">
-                <label>调试文本
-                  <textarea id="audioDebugText" spellcheck="false" placeholder="输入要合成的旁白文本。使用 VoxCPM2 本地仿声时，会自动使用当前本人参考音频。"></textarea>
-                </label>
-                <div class="audio-debug-side">
-                  <button class="primary" id="runAudioDebugBtn" type="button">生成调试音频</button>
-                  <span class="muted small" id="audioDebugStatus">未生成</span>
-                  <div class="audio-debug-result" id="audioDebugResult"></div>
-                </div>
-              </div>
-            </div>
           </div>
         </details>
+        </div>
+      </div>
+
+      <div class="panel form view" data-view="audioDebug" hidden>
+        <div class="run-section">
+          <div class="run-section-head">
+            <strong>音频调试台</strong>
+            <span class="muted small">复用“系统配置”里的语音合成、音色、本人参考音频和命令模板；适合试音色、试克隆、快速生成短句音频。</span>
+          </div>
+        </div>
+        <div class="config-card audio-debug-card" data-title="文本转音频" data-desc="输入文本后立即生成可试听的音频文件，最近结果会保留在下方">
+          <div class="audio-debug-layout">
+            <label>调试文本
+              <textarea id="audioDebugText" spellcheck="false" placeholder="输入要合成的旁白文本。使用 VoxCPM2 本地仿声时，会自动使用当前本人参考音频。"></textarea>
+            </label>
+            <div class="audio-debug-side">
+              <button class="primary" id="runAudioDebugBtn" type="button">生成调试音频</button>
+              <span class="muted small" id="audioDebugStatus">未生成</span>
+              <button type="button" data-view-target="config">打开语音配置</button>
+              <div class="audio-debug-result" id="audioDebugResult"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -4912,6 +4924,9 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (viewName === 'assets') {
         loadAssetLibrary();
+      }
+      if (viewName === 'audioDebug') {
+        loadAudioDebugHistory().catch(() => {});
       }
       if (viewName === 'knowledgeBase') {
         loadPersonalKnowledgeList().catch(err => setPersonalKnowledgeStatus(err.message, true));
