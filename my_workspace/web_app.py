@@ -503,27 +503,144 @@ INDEX_HTML = r"""<!doctype html>
       background: #f8fafc;
       color: #98a2b3;
     }
+    .audio-debug-page {
+      width: min(1180px, 100%);
+      margin: 0 auto;
+      display: grid;
+      gap: 16px;
+    }
+    .audio-debug-hero {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      padding: 2px 0 10px;
+      border-bottom: 1px solid var(--line);
+    }
+    .audio-debug-hero strong {
+      display: block;
+      font-size: 18px;
+      margin-bottom: 6px;
+    }
+    .audio-debug-hero-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .audio-debug-card {
+      padding-top: 58px;
+    }
     .audio-debug-layout {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 320px;
-      gap: 14px;
+      grid-template-columns: minmax(420px, 1fr) 420px;
+      gap: 18px;
       align-items: start;
     }
-    .audio-debug-layout textarea {
-      min-height: 150px;
-    }
-    .audio-debug-side,
-    .audio-debug-result {
+    .audio-debug-compose {
       display: grid;
       gap: 10px;
+    }
+    .audio-debug-layout textarea {
+      min-height: 220px;
+      font-size: 15px;
+      background: #fcfcfd;
+    }
+    .audio-debug-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .audio-debug-actions button {
+      width: auto;
+      min-width: 150px;
+    }
+    .audio-debug-side {
+      display: grid;
+      gap: 12px;
       align-content: start;
     }
-    .audio-debug-result audio {
-      width: 100%;
+    .audio-debug-result {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      max-height: 420px;
+      overflow: auto;
+      padding-right: 2px;
     }
-    @media (max-width: 860px) {
+    .audio-debug-history-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+    }
+    .audio-debug-history-main {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .audio-debug-history-card audio {
+      width: min(260px, 100%);
+    }
+    .audio-debug-history-card button {
+      min-width: 72px;
+      padding-inline: 10px;
+    }
+    .audio-debug-clone-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(180px, 1fr));
+      gap: 12px;
+    }
+    .audio-debug-clone-wide {
+      grid-column: span 2;
+    }
+    .audio-debug-clone-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .audio-debug-saved-voice {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto;
+      gap: 12px;
+      align-items: end;
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+    @media (max-width: 1100px) {
       .audio-debug-layout {
         grid-template-columns: 1fr;
+      }
+      .audio-debug-clone-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      .audio-debug-saved-voice {
+        grid-template-columns: 1fr;
+      }
+    }
+    @media (max-width: 640px) {
+      .audio-debug-hero {
+        display: grid;
+      }
+      .audio-debug-hero-actions {
+        justify-content: flex-start;
+      }
+      .audio-debug-clone-grid {
+        grid-template-columns: 1fr;
+      }
+      .audio-debug-clone-wide {
+        grid-column: auto;
+      }
+      .audio-debug-actions button {
+        width: 100%;
       }
     }
     .form {
@@ -3380,89 +3497,96 @@ INDEX_HTML = r"""<!doctype html>
       </div>
 
       <div class="panel form view" data-view="audioDebug" hidden>
-        <div class="run-section">
-          <div class="run-section-head">
-            <strong>音频调试台</strong>
-            <span class="muted small">复用“系统配置”里的语音合成、音色、本人参考音频和命令模板；适合试音色、试克隆、快速生成短句音频。</span>
-          </div>
-        </div>
-        <div class="config-card audio-debug-card" data-title="文本转音频" data-desc="输入文本后立即生成可试听的音频文件，最近结果会保留在下方">
-          <div class="audio-debug-layout">
-            <label>调试文本
-              <textarea id="audioDebugText" spellcheck="false" placeholder="输入要合成的旁白文本。使用 VoxCPM2 本地仿声时，会自动使用当前本人参考音频。"></textarea>
-            </label>
-            <div class="audio-debug-side">
-              <button class="primary" id="runAudioDebugBtn" type="button">生成调试音频</button>
-              <span class="muted small" id="audioDebugStatus">未生成</span>
-              <button type="button" data-view-target="config">打开语音配置</button>
-              <div class="audio-debug-result" id="audioDebugResult"></div>
+        <div class="audio-debug-page">
+          <div class="audio-debug-hero">
+            <div>
+              <strong>音频调试台</strong>
+              <span class="muted small">复用系统配置里的语音合成、音色、本人参考音频和命令模板。适合试音色、试克隆、快速生成短句音频。</span>
+            </div>
+            <div class="audio-debug-hero-actions">
+              <button type="button" data-view-target="config">语音配置</button>
             </div>
           </div>
-        </div>
-        <div class="config-card audio-debug-card" data-title="阿里云 CosyVoice 声音复刻" data-desc="创建本人授权的复刻音色，保存 voice_id 后可直接用于上方文本转音频">
-          <div class="provider-grid">
-            <label>阿里云 API Key
-              <input id="aliyunCloneApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="DashScope / Model Studio API Key；仅保存在本机浏览器设置里" />
-            </label>
-            <label>Workspace ID
-              <input id="aliyunCloneWorkspaceId" autocomplete="off" spellcheck="false" placeholder="阿里云百炼工作空间 ID，例如 llm-xxxx" />
-            </label>
-            <label>地域
-              <select id="aliyunCloneRegion">
-                <option value="cn-beijing" selected>华北2（北京）</option>
-                <option value="cn-shanghai">华东2（上海）</option>
-              </select>
-            </label>
-            <label>复刻目标模型
-              <select id="aliyunCloneTargetModel">
-                <option value="cosyvoice-v3-flash" selected>cosyvoice-v3-flash</option>
-                <option value="cosyvoice-v2">cosyvoice-v2</option>
-              </select>
-            </label>
-            <label>音色前缀
-              <input id="aliyunClonePrefix" autocomplete="off" spellcheck="false" placeholder="例如 my_voice；最终 voice_id 由阿里云返回" />
-            </label>
-            <label>参考音频公网 URL
-              <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav；阿里云必须能访问" />
-            </label>
-            <label>样本语言
-              <select id="aliyunCloneLanguage">
-                <option value="中文" selected>中文</option>
-                <option value="英文">英文</option>
-              </select>
-            </label>
-            <label>最大样本时长
-              <select id="aliyunCloneMaxSeconds">
-                <option value="10">10 秒</option>
-                <option value="15" selected>15 秒</option>
-                <option value="20">20 秒</option>
-              </select>
-            </label>
-            <label>预处理
-              <select id="aliyunClonePreprocess">
-                <option value="true" selected>开启</option>
-                <option value="false">关闭</option>
-              </select>
-            </label>
+          <div class="config-card audio-debug-card" data-title="文本转音频" data-desc="输入文本后立即生成可试听的音频文件，最近结果会保留在右侧">
+            <div class="audio-debug-layout">
+              <div class="audio-debug-compose">
+                <label>调试文本
+                  <textarea id="audioDebugText" spellcheck="false" placeholder="输入要合成的旁白文本。使用 VoxCPM2 本地仿声时，会自动使用当前本人参考音频。"></textarea>
+                </label>
+                <div class="audio-debug-actions">
+                  <button class="primary" id="runAudioDebugBtn" type="button">生成调试音频</button>
+                  <span class="status" id="audioDebugStatus">未生成</span>
+                </div>
+              </div>
+              <div class="audio-debug-side">
+                <strong>最近调试音频</strong>
+                <div class="audio-debug-result" id="audioDebugResult"></div>
+              </div>
+            </div>
           </div>
-          <div class="row">
-            <button class="primary" id="createAliyunCloneBtn" type="button">创建复刻音色</button>
-            <span class="muted small" id="aliyunCloneStatus">未创建</span>
-          </div>
-          <div class="provider-grid">
-            <label>已保存复刻音色
-              <select id="aliyunCloneVoiceSelect">
-                <option value="">未保存复刻音色</option>
-              </select>
-            </label>
-            <label>当前合成使用的 voice
-              <input id="aliyunCustomVoiceId" autocomplete="off" spellcheck="false" placeholder="可手动填 voice_id，或从左侧选择" />
-            </label>
-            <label>操作
+          <div class="config-card audio-debug-card" data-title="阿里云 CosyVoice 声音复刻" data-desc="创建本人授权的复刻音色，保存 voice_id 后可直接用于上方文本转音频">
+            <div class="audio-debug-clone-grid">
+              <label>阿里云 API Key
+                <input id="aliyunCloneApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="DashScope / Model Studio API Key" />
+              </label>
+              <label>Workspace ID
+                <input id="aliyunCloneWorkspaceId" autocomplete="off" spellcheck="false" placeholder="例如 llm-xxxx" />
+              </label>
+              <label>地域
+                <select id="aliyunCloneRegion">
+                  <option value="cn-beijing" selected>华北2（北京）</option>
+                  <option value="cn-shanghai">华东2（上海）</option>
+                </select>
+              </label>
+              <label>复刻目标模型
+                <select id="aliyunCloneTargetModel">
+                  <option value="cosyvoice-v3-flash" selected>cosyvoice-v3-flash</option>
+                  <option value="cosyvoice-v2">cosyvoice-v2</option>
+                </select>
+              </label>
+              <label>音色前缀
+                <input id="aliyunClonePrefix" autocomplete="off" spellcheck="false" placeholder="例如 my_voice" />
+              </label>
+              <label class="audio-debug-clone-wide">参考音频公网 URL
+                <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
+              </label>
+              <label>样本语言
+                <select id="aliyunCloneLanguage">
+                  <option value="中文" selected>中文</option>
+                  <option value="英文">英文</option>
+                </select>
+              </label>
+              <label>最大样本时长
+                <select id="aliyunCloneMaxSeconds">
+                  <option value="10">10 秒</option>
+                  <option value="15" selected>15 秒</option>
+                  <option value="20">20 秒</option>
+                </select>
+              </label>
+              <label>预处理
+                <select id="aliyunClonePreprocess">
+                  <option value="true" selected>开启</option>
+                  <option value="false">关闭</option>
+                </select>
+              </label>
+            </div>
+            <div class="audio-debug-clone-actions">
+              <button class="primary" id="createAliyunCloneBtn" type="button">创建复刻音色</button>
+              <span class="status" id="aliyunCloneStatus">未创建</span>
+              <span class="muted small">参考音频需要是本人或已授权声音，并且 URL 能被阿里云公网访问。</span>
+            </div>
+            <div class="audio-debug-saved-voice">
+              <label>已保存复刻音色
+                <select id="aliyunCloneVoiceSelect">
+                  <option value="">未保存复刻音色</option>
+                </select>
+              </label>
+              <label>当前合成使用的 voice
+                <input id="aliyunCustomVoiceId" autocomplete="off" spellcheck="false" placeholder="可手动填 voice_id，或从左侧选择" />
+              </label>
               <button id="useAliyunCloneVoiceBtn" type="button">使用选中音色</button>
-            </label>
+            </div>
           </div>
-          <span class="muted small">参考音频需要是本人或已授权声音，并且 URL 能被阿里云公网访问。本地上传文件不会直接传给阿里云复刻接口。</span>
         </div>
       </div>
 
@@ -8412,32 +8536,41 @@ INDEX_HTML = r"""<!doctype html>
       if (!els.audioDebugResult) return;
       els.audioDebugResult.innerHTML = '';
       const list = Array.isArray(items) ? items.filter(Boolean) : [];
-      if (!list.length) return;
+      if (!list.length) {
+        const empty = document.createElement('div');
+        empty.className = 'audio-debug-history-card';
+        empty.innerHTML = '<div class="audio-debug-history-main"><div class="reference-name">暂无调试音频</div><div class="muted small">生成后会显示最近的音频、状态和试听控件。</div></div>';
+        els.audioDebugResult.appendChild(empty);
+        return;
+      }
       list.forEach((item, index) => {
         const row = document.createElement('div');
-        row.className = 'reference-item';
+        row.className = 'audio-debug-history-card';
         const file = String(item.audio_file || '').trim();
         const status = String(item.status || '').trim();
         const duration = Number(item.actual_duration_seconds || 0);
         const durationText = duration ? `${duration.toFixed(1)}s` : '';
         row.innerHTML = `
-          <div class="reference-info">
+          <div class="audio-debug-history-main">
             <div class="reference-name">${escapeHtml(index === 0 ? '最新调试音频' : item.run_id || '调试音频')}</div>
             <div class="muted small">${escapeHtml([status, item.provider || '', durationText].filter(Boolean).join(' / '))}</div>
             <div class="muted small">${escapeHtml(item.text_preview || '')}</div>
           </div>
         `;
         if (file) {
+          const controls = document.createElement('div');
+          controls.className = 'audio-debug-history-main';
           const audio = document.createElement('audio');
           audio.controls = true;
           audio.preload = 'metadata';
           audio.src = mediaUrl('__audio_debug__', file);
-          row.appendChild(audio);
+          controls.appendChild(audio);
           const open = document.createElement('button');
           open.type = 'button';
           open.textContent = '打开文件';
           open.onclick = () => window.open(mediaUrl('__audio_debug__', file), '_blank', 'noopener');
-          row.appendChild(open);
+          controls.appendChild(open);
+          row.appendChild(controls);
         }
         els.audioDebugResult.appendChild(row);
       });
