@@ -4564,6 +4564,7 @@ INDEX_HTML = r"""<!doctype html>
     let personalKnowledgeItems = [];
     let selectedPersonalKnowledgePath = '';
     let personalKnowledgeDirty = false;
+    let lastPersonalKnowledgeCategory = 'idea_inbox';
     let selectedReferenceFiles = [];
     let referencePreviewUrls = new Map();
     let comfyDebugLocalReferencePreviews = {};
@@ -7815,6 +7816,23 @@ INDEX_HTML = r"""<!doctype html>
       els.personalKnowledgeFilename.value = `${personalKnowledgeToday()}-${category.prefix}-${personalKnowledgeSlug(title)}.md`;
     }
 
+    function applyPersonalKnowledgeDraftTemplate(options = {}) {
+      const category = PERSONAL_KNOWLEDGE_CATEGORIES[personalKnowledgeCategory()] || PERSONAL_KNOWLEDGE_CATEGORIES.idea_inbox;
+      lastPersonalKnowledgeCategory = personalKnowledgeCategory();
+      selectedPersonalKnowledgePath = '';
+      personalKnowledgeDirty = false;
+      if (els.personalKnowledgeTitle) els.personalKnowledgeTitle.value = `${category.label}标题`;
+      if (els.personalKnowledgeContent) {
+        els.personalKnowledgeContent.value = category.template.replace(/\u65e5\u671f\uff1a\s*/g, `日期：${personalKnowledgeToday()}`);
+      }
+      if (els.personalKnowledgePath) els.personalKnowledgePath.value = '';
+      if (els.personalKnowledgeFilename) els.personalKnowledgeFilename.value = '';
+      updatePersonalKnowledgeFilenameSuggestion();
+      renderPersonalKnowledgeList();
+      setPersonalKnowledgeStatus('新记录草稿，保存后写入本地知识库');
+      if (options.focus) els.personalKnowledgeTitle?.focus();
+    }
+
     function renderPersonalKnowledgeList() {
       if (!els.personalKnowledgeList) return;
       const query = (els.personalKnowledgeSearch?.value || '').trim().toLowerCase();
@@ -7858,6 +7876,8 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function newPersonalKnowledgeRecord() {
+      applyPersonalKnowledgeDraftTemplate({ focus: true });
+      return;
       const category = PERSONAL_KNOWLEDGE_CATEGORIES[personalKnowledgeCategory()] || PERSONAL_KNOWLEDGE_CATEGORIES.idea_inbox;
       selectedPersonalKnowledgePath = '';
       personalKnowledgeDirty = false;
@@ -7880,6 +7900,7 @@ INDEX_HTML = r"""<!doctype html>
       selectedPersonalKnowledgePath = data.relative_path || relativePath;
       personalKnowledgeDirty = false;
       if (els.personalKnowledgeCategory && data.category) els.personalKnowledgeCategory.value = data.category;
+      lastPersonalKnowledgeCategory = data.category || personalKnowledgeCategory();
       if (els.personalKnowledgeTitle) els.personalKnowledgeTitle.value = data.title || '';
       if (els.personalKnowledgeFilename) els.personalKnowledgeFilename.value = data.name || '';
       if (els.personalKnowledgePath) els.personalKnowledgePath.value = selectedPersonalKnowledgePath;
@@ -13840,10 +13861,13 @@ INDEX_HTML = r"""<!doctype html>
     if (els.savePersonalKnowledgeBtnBottom) els.savePersonalKnowledgeBtnBottom.onclick = savePersonalKnowledge;
     if (els.personalKnowledgeCategory) {
       els.personalKnowledgeCategory.onchange = () => {
-        selectedPersonalKnowledgePath = '';
-        if (els.personalKnowledgePath) els.personalKnowledgePath.value = '';
-        renderPersonalKnowledgeList();
-        updatePersonalKnowledgeFilenameSuggestion();
+        const nextCategory = personalKnowledgeCategory();
+        if (personalKnowledgeDirty && !confirm('当前记录有未保存内容，切换类型会换成新模板。继续吗？')) {
+          els.personalKnowledgeCategory.value = lastPersonalKnowledgeCategory;
+          return;
+        }
+        lastPersonalKnowledgeCategory = nextCategory;
+        applyPersonalKnowledgeDraftTemplate();
       };
     }
     if (els.personalKnowledgeSearch) els.personalKnowledgeSearch.oninput = renderPersonalKnowledgeList;
