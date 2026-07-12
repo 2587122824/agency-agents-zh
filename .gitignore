@@ -12,6 +12,7 @@ __pycache__/
 tmp/
 my_workspace/my_task_output/
 my_workspace/my_voice_samples/
+my_workspace/web_app_*.log
 
 # Asset-library metadata is tracked, generated media is local-only
 my_workspace/my_asset_library/**/*.png
