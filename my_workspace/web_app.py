@@ -38,6 +38,7 @@ MEMORY_ROOT = WORKSPACE_ROOT / "my_memory"
 REFERENCE_ROOT = WORKSPACE_ROOT / "my_reference_images"
 VOICE_SAMPLE_ROOT = WORKSPACE_ROOT / "my_voice_samples"
 KNOWLEDGE_ROOT = WORKSPACE_ROOT / "my_knowledge_base"
+DEFAULT_PERSONAL_KNOWLEDGE_ROOT = WORKSPACE_ROOT.parent.parent / "personal_knowledge_base"
 ASSET_LIBRARY_ROOT = WORKSPACE_ROOT / "my_asset_library"
 ASSET_LIBRARY_INDEX = ASSET_LIBRARY_ROOT / "library.json"
 PRODUCTION_ENTITIES_PATH = WORKSPACE_ROOT / "my_production_entities" / "production_entities.json"
@@ -72,6 +73,7 @@ LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.
 RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
 RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
 RUNTIME_COMFY_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_comfy_config.json"
+PERSONAL_KNOWLEDGE_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_personal_knowledge_config.json"
 DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = ""
 DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = ""
 RUN_JOBS: dict[str, dict] = {}
@@ -3591,6 +3593,10 @@ INDEX_HTML = r"""<!doctype html>
           <aside class="knowledge-sidebar">
             <div class="knowledge-filter-grid">
               <label>类型
+                <input id="personalKnowledgeRootPath" autocomplete="off" spellcheck="false" placeholder="I:\\Ai_WorkSpace\\personal_knowledge_base" />
+              </label>
+              <button id="savePersonalKnowledgeRootBtn" type="button">保存全局路径</button>
+              <label>类型
                 <select id="personalKnowledgeCategory">
                   <option value="idea_inbox">想法收件箱</option>
                   <option value="product_library">个人产品库</option>
@@ -4119,6 +4125,8 @@ INDEX_HTML = r"""<!doctype html>
       uploadKnowledgeBtn: document.getElementById('uploadKnowledgeBtn'),
       knowledgeList: document.getElementById('knowledgeList'),
       personalKnowledgeStatus: document.getElementById('personalKnowledgeStatus'),
+      personalKnowledgeRootPath: document.getElementById('personalKnowledgeRootPath'),
+      savePersonalKnowledgeRootBtn: document.getElementById('savePersonalKnowledgeRootBtn'),
       refreshPersonalKnowledgeBtn: document.getElementById('refreshPersonalKnowledgeBtn'),
       newPersonalKnowledgeBtn: document.getElementById('newPersonalKnowledgeBtn'),
       savePersonalKnowledgeBtn: document.getElementById('savePersonalKnowledgeBtn'),
@@ -5698,6 +5706,9 @@ INDEX_HTML = r"""<!doctype html>
       const data = await api('/api/config');
       runtimeModelConfigFromServer = data.runtime_model_config || {};
       runtimeComfyConfigFromServer = data.runtime_comfy_config || {};
+      if (els.personalKnowledgeRootPath && data.personal_knowledge_config?.root_path) {
+        els.personalKnowledgeRootPath.value = data.personal_knowledge_config.root_path;
+      }
       localModelPresets = data.local_model_presets || [];
       staffOptions = (data.staff || []).filter(isActiveLongVideoStaff);
       if (data.runtime_model_saved && data.runtime_model_config?.model) {
@@ -7871,8 +7882,26 @@ INDEX_HTML = r"""<!doctype html>
       setPersonalKnowledgeStatus('正在加载知识库...');
       const data = await api('/api/personal-knowledge');
       personalKnowledgeItems = data.items || [];
+      if (els.personalKnowledgeRootPath && data.root_path) els.personalKnowledgeRootPath.value = data.root_path;
       renderPersonalKnowledgeList();
       setPersonalKnowledgeStatus(`已加载 ${personalKnowledgeItems.length} 条记录`);
+    }
+
+    async function savePersonalKnowledgeRoot() {
+      const rootPath = (els.personalKnowledgeRootPath?.value || '').trim();
+      if (!rootPath) {
+        setPersonalKnowledgeStatus('请填写全局个人库路径', true);
+        return;
+      }
+      setPersonalKnowledgeStatus('正在保存全局个人库路径...');
+      const data = await api('/api/personal-knowledge-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ root_path: rootPath }),
+      });
+      if (els.personalKnowledgeRootPath) els.personalKnowledgeRootPath.value = data.root_path || rootPath;
+      await loadPersonalKnowledgeList();
+      setPersonalKnowledgeStatus(`全局个人库路径已保存：${data.root_path || rootPath}`);
     }
 
     function newPersonalKnowledgeRecord() {
@@ -13855,6 +13884,7 @@ INDEX_HTML = r"""<!doctype html>
     if (els.testComfyMcpBtn) els.testComfyMcpBtn.onclick = testComfyMcpConnection;
     if (els.syncComfyMcpWorkflowsBtn) els.syncComfyMcpWorkflowsBtn.onclick = syncComfyMcpWorkflows;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
+    if (els.savePersonalKnowledgeRootBtn) els.savePersonalKnowledgeRootBtn.onclick = savePersonalKnowledgeRoot;
     if (els.refreshPersonalKnowledgeBtn) els.refreshPersonalKnowledgeBtn.onclick = loadPersonalKnowledgeList;
     if (els.newPersonalKnowledgeBtn) els.newPersonalKnowledgeBtn.onclick = newPersonalKnowledgeRecord;
     if (els.savePersonalKnowledgeBtn) els.savePersonalKnowledgeBtn.onclick = savePersonalKnowledge;
@@ -14354,7 +14384,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             elif parsed.path == "/api/knowledge":
                 self._send_json({"files": self._knowledge_files()})
             elif parsed.path == "/api/personal-knowledge":
-                self._send_json({"items": self._personal_knowledge_items()})
+                self._send_json({"items": self._personal_knowledge_items(), "root_path": str(self._active_knowledge_root())})
             elif parsed.path == "/api/personal-knowledge-file":
                 query = parse_qs(parsed.query)
                 self._send_json(self._personal_knowledge_file(self._single(query, "path")))
@@ -14430,6 +14460,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/personal-knowledge-file":
                 self._send_json(self._save_personal_knowledge_file(payload))
+                return
+
+            if parsed.path == "/api/personal-knowledge-config":
+                self._send_json(self._save_personal_knowledge_config(payload))
                 return
 
             if parsed.path == "/api/favorite-asset":
@@ -14656,6 +14690,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "runtime_model_saved": bool(runtime_model_config.get("api_key") and runtime_model_config.get("model")),
             "runtime_comfy_config": runtime_comfy_config,
             "runtime_comfy_saved": bool(runtime_comfy_config.get("has_api_key") or runtime_comfy_config.get("workflow_library")),
+            "personal_knowledge_config": self._read_personal_knowledge_config(),
         }
 
     @staticmethod
@@ -14665,6 +14700,55 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         data = json.loads(LOCAL_MODEL_PRESETS.read_text(encoding="utf-8"))
         presets = data.get("presets") if isinstance(data, dict) else data
         return presets if isinstance(presets, list) else []
+
+    @staticmethod
+    def _read_personal_knowledge_config() -> dict:
+        try:
+            data = json.loads(PERSONAL_KNOWLEDGE_CONFIG_PATH.read_text(encoding="utf-8-sig")) if PERSONAL_KNOWLEDGE_CONFIG_PATH.is_file() else {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        root_path = str(data.get("root_path") or DEFAULT_PERSONAL_KNOWLEDGE_ROOT).strip()
+        return {
+            "root_path": root_path,
+            "default_root_path": str(DEFAULT_PERSONAL_KNOWLEDGE_ROOT),
+            "project_fallback_path": str(KNOWLEDGE_ROOT),
+            "updated_at": float(data.get("updated_at") or 0),
+        }
+
+    @staticmethod
+    def _write_personal_knowledge_config(config: dict) -> None:
+        root_path = str(config.get("root_path") or DEFAULT_PERSONAL_KNOWLEDGE_ROOT).strip()
+        if not root_path:
+            root_path = str(DEFAULT_PERSONAL_KNOWLEDGE_ROOT)
+        PERSONAL_KNOWLEDGE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        PERSONAL_KNOWLEDGE_CONFIG_PATH.write_text(
+            json.dumps({"root_path": root_path, "updated_at": time.time()}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+
+    def _save_personal_knowledge_config(self, payload: dict) -> dict:
+        root_path = str(payload.get("root_path") or "").strip()
+        if not root_path:
+            raise ValueError("root_path is required")
+        root = Path(root_path).expanduser().resolve()
+        self._ensure_personal_knowledge_structure(root)
+        self._write_personal_knowledge_config({"root_path": str(root)})
+        return self._read_personal_knowledge_config()
+
+    @classmethod
+    def _active_knowledge_root(cls) -> Path:
+        root_path = str(cls._read_personal_knowledge_config().get("root_path") or "").strip()
+        root = Path(root_path).expanduser().resolve() if root_path else DEFAULT_PERSONAL_KNOWLEDGE_ROOT.resolve()
+        cls._ensure_personal_knowledge_structure(root)
+        return root
+
+    @staticmethod
+    def _ensure_personal_knowledge_structure(root: Path) -> None:
+        root.mkdir(parents=True, exist_ok=True)
+        for name in ["idea_inbox", "product_library", "planning", "decisions", "conversation_logs", "templates"]:
+            (root / name).mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _read_runtime_model_config() -> dict:
@@ -15003,7 +15087,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             self._health_check("Python 运行时", "ok", f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"),
             self._path_check("工作区目录", WORKSPACE_ROOT, must_be_writable=False),
             self._path_check("任务输出目录", OUTPUT_ROOT, must_be_writable=True),
-            self._path_check("知识库目录", KNOWLEDGE_ROOT, must_be_writable=True),
+            self._path_check("知识库目录", self._active_knowledge_root(), must_be_writable=True),
             self._path_check("动作工作区", WORKSPACE_ROOT / "my_action_workspace", must_be_writable=True),
         ]
 
@@ -19930,11 +20014,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         }
 
     def _knowledge_files(self) -> list[dict]:
-        if not KNOWLEDGE_ROOT.exists():
+        knowledge_root = self._active_knowledge_root()
+        if not knowledge_root.exists():
             return []
 
         files = []
-        for path in sorted(KNOWLEDGE_ROOT.iterdir()):
+        for path in sorted(knowledge_root.iterdir()):
             if not path.is_file() or path.name == ".gitignore":
                 continue
             if path.suffix.lower() not in {".md", ".txt", ".json", ".csv"}:
@@ -19965,11 +20050,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("Knowledge file is too large; max size is 5 MB")
         content_bytes.decode("utf-8")
 
-        KNOWLEDGE_ROOT.mkdir(parents=True, exist_ok=True)
+        knowledge_root = self._active_knowledge_root()
+        knowledge_root.mkdir(parents=True, exist_ok=True)
         safe_stem = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in Path(filename).stem)[:80]
-        target = KNOWLEDGE_ROOT / f"{safe_stem}{suffix}"
+        target = knowledge_root / f"{safe_stem}{suffix}"
         if target.exists():
-            target = KNOWLEDGE_ROOT / f"{safe_stem}_{uuid4().hex[:8]}{suffix}"
+            target = knowledge_root / f"{safe_stem}_{uuid4().hex[:8]}{suffix}"
         target.write_bytes(content_bytes)
         return {"ok": True, "name": target.name, "size_bytes": len(content_bytes)}
 
@@ -19995,10 +20081,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         text = str(relative_path or "").strip().replace("\\", "/")
         if not text:
             raise ValueError("path is required")
-        candidate = (KNOWLEDGE_ROOT / text).resolve()
-        if not self._is_relative_to(candidate, KNOWLEDGE_ROOT.resolve()):
+        knowledge_root = self._active_knowledge_root().resolve()
+        candidate = (knowledge_root / text).resolve()
+        if not self._is_relative_to(candidate, knowledge_root):
             raise ValueError("Invalid knowledge path")
-        category = candidate.relative_to(KNOWLEDGE_ROOT.resolve()).parts[0] if candidate != KNOWLEDGE_ROOT.resolve() else ""
+        category = candidate.relative_to(knowledge_root).parts[0] if candidate != knowledge_root else ""
         if category not in self._personal_knowledge_categories():
             raise ValueError("Invalid knowledge category")
         if candidate.suffix.lower() != ".md":
@@ -20015,12 +20102,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return fallback[:120]
 
     def _personal_knowledge_items(self) -> list[dict]:
-        if not KNOWLEDGE_ROOT.exists():
+        knowledge_root = self._active_knowledge_root()
+        if not knowledge_root.exists():
             return []
         items: list[dict] = []
         categories = self._personal_knowledge_categories()
         for category in categories:
-            root = KNOWLEDGE_ROOT / category
+            root = knowledge_root / category
             if not root.exists():
                 continue
             for path in sorted(root.glob("*.md")):
@@ -20036,7 +20124,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     {
                         "category": category,
                         "name": path.name,
-                        "relative_path": path.relative_to(KNOWLEDGE_ROOT).as_posix(),
+                        "relative_path": path.relative_to(knowledge_root).as_posix(),
                         "title": self._extract_markdown_title(content, path.stem),
                         "excerpt": excerpt,
                         "size": stat.st_size,
@@ -20054,11 +20142,12 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             content = path.read_text(encoding="utf-8-sig")
         except UnicodeDecodeError:
             content = path.read_text(encoding="utf-8", errors="replace")
-        category = path.relative_to(KNOWLEDGE_ROOT.resolve()).parts[0]
+        knowledge_root = self._active_knowledge_root().resolve()
+        category = path.relative_to(knowledge_root).parts[0]
         return {
             "category": category,
             "name": path.name,
-            "relative_path": path.relative_to(KNOWLEDGE_ROOT).as_posix(),
+            "relative_path": path.relative_to(knowledge_root).as_posix(),
             "title": self._extract_markdown_title(content, path.stem),
             "content": content,
         }
@@ -20078,15 +20167,17 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         existing_path = str(payload.get("relative_path") or "").strip()
         if existing_path:
             target = self._safe_personal_knowledge_path(existing_path)
-            category = target.relative_to(KNOWLEDGE_ROOT.resolve()).parts[0]
+            knowledge_root = self._active_knowledge_root().resolve()
+            category = target.relative_to(knowledge_root).parts[0]
         else:
+            knowledge_root = self._active_knowledge_root().resolve()
             filename = self._safe_markdown_filename(str(payload.get("filename") or "").strip())
             if filename == "untitled.md":
                 date_prefix = time.strftime("%Y-%m-%d")
                 prefix = categories[category]
                 filename = self._safe_markdown_filename(f"{date_prefix}-{prefix}-{title}")
-            target = (KNOWLEDGE_ROOT / category / filename).resolve()
-            if not self._is_relative_to(target, (KNOWLEDGE_ROOT / category).resolve()):
+            target = (knowledge_root / category / filename).resolve()
+            if not self._is_relative_to(target, (knowledge_root / category).resolve()):
                 raise ValueError("Invalid knowledge filename")
             if target.exists():
                 target = target.with_name(f"{target.stem}_{uuid4().hex[:8]}{target.suffix}")
@@ -20098,7 +20189,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "ok": True,
             "category": category,
             "name": target.name,
-            "relative_path": target.relative_to(KNOWLEDGE_ROOT).as_posix(),
+            "relative_path": target.relative_to(self._active_knowledge_root().resolve()).as_posix(),
             "title": self._extract_markdown_title(content, title),
             "size": stat.st_size,
             "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
@@ -20345,12 +20436,13 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return "\n\n".join(sections)
 
     def _append_knowledge_base(self, user_input: str) -> str:
-        if not KNOWLEDGE_ROOT.exists():
+        knowledge_root = self._active_knowledge_root()
+        if not knowledge_root.exists():
             return user_input
 
         sections = []
         remaining = 20000
-        for path in sorted(KNOWLEDGE_ROOT.iterdir()):
+        for path in sorted(knowledge_root.iterdir()):
             if not path.is_file() or path.name == ".gitignore":
                 continue
             if path.suffix.lower() not in {".md", ".txt", ".json", ".csv"}:
