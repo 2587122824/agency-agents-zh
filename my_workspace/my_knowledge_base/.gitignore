@@ -1,2 +1,25 @@
 *
 !.gitignore
+!README.md
+!INDEX.sample.json
+!idea_inbox/
+!idea_inbox/README.md
+!product_library/
+!product_library/README.md
+!planning/
+!planning/README.md
+!decisions/
+!decisions/README.md
+!templates/
+!templates/*.md
+
+# Personal notes, raw drafts, and real private indexes stay local by default.
+idea_inbox/*
+!idea_inbox/README.md
+product_library/*
+!product_library/README.md
+planning/*
+!planning/README.md
+decisions/*
+!decisions/README.md
+INDEX.json

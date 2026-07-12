@@ -1,0 +1,15 @@
+{
+  "description": "复制为 INDEX.json 后可作为本地私人索引使用。INDEX.json 默认不提交。",
+  "items": [
+    {
+      "id": "2026-07-12-example",
+      "type": "idea",
+      "title": "示例：数字人 IP 生产控制台",
+      "status": "exploring",
+      "tags": ["digital-human", "production-console"],
+      "file": "idea_inbox/2026-07-12-idea-digital-human-production-console.md",
+      "created_at": "2026-07-12",
+      "updated_at": "2026-07-12"
+    }
+  ]
+}
