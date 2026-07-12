@@ -212,9 +212,13 @@ class LocalTTSAdapter:
 
         workspace_id = str(voice_config.get("aliyun_workspace_id") or "").strip()
         endpoint = self._aliyun_cosyvoice_endpoint(voice_config)
-        model = str(voice_config.get("aliyun_model") or voice_config.get("model") or "cosyvoice-v3-flash").strip()
+        model_default = "cosyvoice-v3-flash" if workspace_id else "cosyvoice-v1"
+        model = str(voice_config.get("aliyun_model") or voice_config.get("model") or model_default).strip()
+        if not workspace_id and model == "cosyvoice-v3-flash":
+            model = "cosyvoice-v1"
         voice = self._normalize_aliyun_preset_voice(
             str(voice_config.get("aliyun_voice") or voice_config.get("voice") or "longanyang").strip(),
+            model=model,
             is_custom_clone=bool(workspace_id),
         )
         audio_format = str(voice_config.get("aliyun_format") or voice_config.get("format") or "wav").strip().lower()
@@ -371,17 +375,39 @@ class LocalTTSAdapter:
         return manifest
 
     @staticmethod
-    def _normalize_aliyun_preset_voice(voice: str, *, is_custom_clone: bool = False) -> str:
+    def _normalize_aliyun_preset_voice(voice: str, *, model: str = "cosyvoice-v1", is_custom_clone: bool = False) -> str:
         if is_custom_clone:
             return voice or "longanyang"
-        legacy_v3_aliases = {
-            "longxiaochun": "longxiaochun_v3",
-            "longxiaoxia": "longxiaoxia_v3",
-            "longshu": "longshu_v3",
+        v1_aliases = {
+            "longxiaochun_v3": "longxiaochun",
+            "longxiaoxia_v3": "longxiaoxia",
+            "longshu_v3": "longshu",
         }
-        allowed_presets = {"longanyang", "longxiaochun_v3", "longxiaoxia_v3", "longshu_v3"}
-        normalized = legacy_v3_aliases.get(voice, voice or "longanyang")
-        return normalized if normalized in allowed_presets else "longanyang"
+        allowed_v1_presets = {
+            "longxiaochun",
+            "longxiaoxia",
+            "longxiaocheng",
+            "longxiaobai",
+            "longlaotie",
+            "longshu",
+            "longshuo",
+            "longtong",
+            "longwan",
+            "longcheng",
+            "longhua",
+            "longjing",
+            "longmiao",
+            "longyue",
+            "longyuan",
+            "longfei",
+            "longxiang",
+            "loongstella",
+            "loongbella",
+        }
+        normalized = v1_aliases.get(voice, voice or "longxiaochun")
+        if model == "cosyvoice-v1":
+            return normalized if normalized in allowed_v1_presets else "longxiaochun"
+        return normalized or "longxiaochun"
 
     @staticmethod
     def _aliyun_cosyvoice_endpoint(voice_config: dict[str, Any]) -> str:

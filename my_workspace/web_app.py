@@ -3448,15 +3448,30 @@ INDEX_HTML = r"""<!doctype html>
               </label>
               <label hidden>模型
                 <select id="aliyunTtsModel">
-                  <option value="cosyvoice-v3-flash" selected>cosyvoice-v3-flash</option>
+                  <option value="cosyvoice-v1" selected>cosyvoice-v1</option>
                 </select>
               </label>
               <label>音色
                 <select id="aliyunTtsVoice">
-                  <option value="longanyang" selected>龙安阳：自然男声</option>
-                  <option value="longxiaochun_v3">龙小淳 V3：自然女声</option>
-                  <option value="longxiaoxia_v3">龙小夏 V3：清亮女声</option>
-                  <option value="longshu_v3">龙书 V3：沉稳叙述</option>
+                  <option value="longxiaochun" selected>龙小淳：自然女声</option>
+                  <option value="longxiaoxia">龙小夏：清亮女声</option>
+                  <option value="longxiaocheng">龙小诚：稳重男声</option>
+                  <option value="longxiaobai">龙小白：亲和女声</option>
+                  <option value="longlaotie">龙老铁：东北男声</option>
+                  <option value="longshu">龙书：沉稳叙述</option>
+                  <option value="longshuo">龙硕：专业解说</option>
+                  <option value="longtong">龙彤：温和女声</option>
+                  <option value="longwan">龙婉：温柔女声</option>
+                  <option value="longcheng">龙橙：自然男声</option>
+                  <option value="longhua">龙华：成熟男声</option>
+                  <option value="longjing">龙婧：清晰女声</option>
+                  <option value="longmiao">龙妙：亲切女声</option>
+                  <option value="longyue">龙悦：朗读女声</option>
+                  <option value="longyuan">龙媛：有声书女声</option>
+                  <option value="longfei">龙飞：播报男声</option>
+                  <option value="longxiang">龙祥：磁性男声</option>
+                  <option value="loongstella">Stella：中英双语女声</option>
+                  <option value="loongbella">Bella：中文女声</option>
                 </select>
               </label>
               <label>音频格式
@@ -6500,7 +6515,7 @@ INDEX_HTML = r"""<!doctype html>
       els.aliyunTtsApiKey.value = settings.aliyunTtsApiKey || '';
       els.aliyunTtsWorkspaceId.value = settings.aliyunTtsWorkspaceId || settings.aliyunCloneWorkspaceId || '';
       els.aliyunTtsEndpoint.value = settings.aliyunTtsEndpoint || '';
-      setIfExists(els.aliyunTtsModel, settings.aliyunTtsModel || settings.aliyunCloneTargetModel || 'cosyvoice-v3-flash');
+      setIfExists(els.aliyunTtsModel, settings.aliyunTtsModel || 'cosyvoice-v1');
       setIfExists(els.aliyunTtsVoice, normalizeAliyunTtsVoice(settings.aliyunTtsVoice));
       setIfExists(els.aliyunTtsFormat, settings.aliyunTtsFormat || 'wav');
       setIfExists(els.aliyunTtsSampleRate, settings.aliyunTtsSampleRate || '24000');
@@ -8618,17 +8633,25 @@ INDEX_HTML = r"""<!doctype html>
       if (els.voiceAdvancedCard) els.voiceAdvancedCard.hidden = isAliyun;
     }
 
-    const ALIYUN_COSYVOICE_V3_VOICE_ALIASES = {
-      longxiaochun: 'longxiaochun_v3',
-      longxiaoxia: 'longxiaoxia_v3',
-      longshu: 'longshu_v3',
+    const ALIYUN_COSYVOICE_V1_VOICE_ALIASES = {
+      longxiaochun_v3: 'longxiaochun',
+      longxiaoxia_v3: 'longxiaoxia',
+      longshu_v3: 'longshu',
     };
 
     function normalizeAliyunTtsVoice(value) {
       const raw = String(value || '').trim();
-      const mapped = ALIYUN_COSYVOICE_V3_VOICE_ALIASES[raw] || raw || 'longanyang';
+      const mapped = ALIYUN_COSYVOICE_V1_VOICE_ALIASES[raw] || raw || 'longxiaochun';
       const options = Array.from(els.aliyunTtsVoice?.options || []).map((option) => option.value);
-      return options.includes(mapped) ? mapped : 'longanyang';
+      return options.includes(mapped) ? mapped : 'longxiaochun';
+    }
+
+    function normalizeAliyunTtsModel(value) {
+      const raw = String(value || '').trim();
+      const options = Array.from(els.aliyunTtsModel?.options || [])
+        .map((option) => option.value)
+        .filter((model) => model !== 'cosyvoice-v3-flash');
+      return options.includes(raw) ? raw : 'cosyvoice-v1';
     }
 
     function selectedVoicePresetLabel() {
@@ -8649,6 +8672,8 @@ INDEX_HTML = r"""<!doctype html>
       const isCustomAliyunVoice = Boolean(customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice');
       const selectedClone = selectedAliyunClone();
       const customAliyunModel = selectedClone?.target_model || els.aliyunCloneTargetModel?.value || els.aliyunTtsModel?.value || 'cosyvoice-v3-flash';
+      const presetAliyunVoice = normalizeAliyunTtsVoice(els.aliyunTtsVoice.value);
+      const presetAliyunModel = normalizeAliyunTtsModel(els.aliyunTtsModel?.value || 'cosyvoice-v1');
       const aliyunWorkspaceId = String(
         isCustomAliyunVoice
           ? (selectedClone?.workspace_id || els.aliyunTtsWorkspaceId?.value || els.aliyunCloneWorkspaceId?.value || '')
@@ -8668,8 +8693,8 @@ INDEX_HTML = r"""<!doctype html>
         aliyun_workspace_id: aliyunWorkspaceId,
         aliyun_region: aliyunRegion,
         aliyun_endpoint: isCustomAliyunVoice ? (els.aliyunTtsEndpoint?.value?.trim() || '') : '',
-        aliyun_model: isCustomAliyunVoice ? customAliyunModel : 'cosyvoice-v3-flash',
-        aliyun_voice: isCustomAliyunVoice ? customAliyunVoice : normalizeAliyunTtsVoice(els.aliyunTtsVoice.value),
+        aliyun_model: isCustomAliyunVoice ? customAliyunModel : presetAliyunModel,
+        aliyun_voice: isCustomAliyunVoice ? customAliyunVoice : presetAliyunVoice,
         aliyun_format: els.aliyunTtsFormat.value,
         aliyun_sample_rate: Number(els.aliyunTtsSampleRate?.value || 24000),
         aliyun_volume: els.aliyunTtsVolume?.value || '',
@@ -14988,8 +15013,8 @@ INDEX_HTML = r"""<!doctype html>
       els.aliyunTtsApiKey.value = '';
       els.aliyunTtsWorkspaceId.value = '';
       els.aliyunTtsEndpoint.value = '';
-      els.aliyunTtsModel.value = 'cosyvoice-v3-flash';
-      els.aliyunTtsVoice.value = 'longanyang';
+      els.aliyunTtsModel.value = 'cosyvoice-v1';
+      els.aliyunTtsVoice.value = 'longxiaochun';
       els.aliyunTtsFormat.value = 'wav';
       els.aliyunTtsSampleRate.value = '24000';
       els.aliyunTtsVolume.value = '';
