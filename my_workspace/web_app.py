@@ -323,6 +323,7 @@ INDEX_HTML = r"""<!doctype html>
     body[data-view="staff"] main,
     body[data-view="workflow"] main,
     body[data-view="assets"] main,
+    body[data-view="knowledgeBase"] main,
     body[data-view="comfyDebug"] main,
     body[data-view="system"] main {
       grid-template-columns: 1fr;
@@ -348,6 +349,57 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       gap: 14px;
       align-content: start;
+    }
+    .knowledge-shell {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      min-height: calc(100vh - 130px);
+    }
+    .knowledge-sidebar {
+      border-right: 1px solid var(--line);
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+      background: #fbfcfd;
+    }
+    .knowledge-editor {
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+    .knowledge-filter-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .knowledge-list {
+      display: grid;
+      gap: 8px;
+      max-height: calc(100vh - 320px);
+      overflow: auto;
+    }
+    .knowledge-item {
+      text-align: left;
+      display: grid;
+      gap: 4px;
+      min-height: auto;
+    }
+    .knowledge-item.active {
+      border-color: var(--accent);
+      background: #ecfdf5;
+    }
+    .knowledge-meta-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .knowledge-editor textarea {
+      min-height: 54vh;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
     }
     #configSections {
       grid-auto-rows: max-content;
@@ -2791,6 +2843,8 @@ INDEX_HTML = r"""<!doctype html>
       .provider-grid { grid-template-columns: 1fr; }
       .video-grid { grid-template-columns: 1fr; }
       .staff-manager { grid-template-columns: 1fr; }
+      .knowledge-shell { grid-template-columns: 1fr; }
+      .knowledge-sidebar { border-right: 0; border-bottom: 1px solid var(--line); }
       .output-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .output-sections { grid-template-columns: 1fr; }
       .workflow-step-grid { grid-template-columns: 1fr; }
@@ -2812,6 +2866,7 @@ INDEX_HTML = r"""<!doctype html>
         <button class="nav-btn" data-view-target="comfyDebug" type="button">ComfyUI调试</button>
         <button class="nav-btn" data-view-target="output" type="button">任务输出</button>
         <button class="nav-btn" data-view-target="system" type="button">系统状态</button>
+        <button class="nav-btn" data-view-target="knowledgeBase" type="button">个人知识库</button>
       </nav>
     </div>
     <div class="muted small" id="env">加载中</div>
@@ -3520,6 +3575,61 @@ INDEX_HTML = r"""<!doctype html>
         </div>
       </div>
 
+      <div class="panel form view" data-view="knowledgeBase" hidden>
+        <div class="manager-toolbar">
+          <div class="manager-title">
+            <strong>个人产品库 / 知识库</strong>
+            <span id="personalKnowledgeStatus" class="status">记录想法、产品、规划、决策和聊天</span>
+          </div>
+          <div class="manager-actions">
+            <button id="refreshPersonalKnowledgeBtn" type="button">刷新</button>
+            <button id="newPersonalKnowledgeBtn" type="button">新建记录</button>
+            <button class="primary" id="savePersonalKnowledgeBtn" type="button">保存记录</button>
+          </div>
+        </div>
+        <div class="knowledge-shell">
+          <aside class="knowledge-sidebar">
+            <div class="knowledge-filter-grid">
+              <label>类型
+                <select id="personalKnowledgeCategory">
+                  <option value="idea_inbox">想法收件箱</option>
+                  <option value="product_library">个人产品库</option>
+                  <option value="planning">规划</option>
+                  <option value="decisions">决策</option>
+                  <option value="conversation_logs">聊天记录</option>
+                </select>
+              </label>
+              <label>搜索
+                <input id="personalKnowledgeSearch" autocomplete="off" spellcheck="false" placeholder="按标题、文件名或内容搜索" />
+              </label>
+            </div>
+            <div class="knowledge-list" id="personalKnowledgeList">
+              <div class="muted small">点击刷新加载记录</div>
+            </div>
+          </aside>
+          <div class="knowledge-editor">
+            <div class="provider-grid">
+              <label>标题
+                <input id="personalKnowledgeTitle" autocomplete="off" spellcheck="false" placeholder="例如：数字人IP生产控制台" />
+              </label>
+              <label>文件名
+                <input id="personalKnowledgeFilename" autocomplete="off" spellcheck="false" placeholder="留空则按日期和标题自动生成" />
+              </label>
+              <label>当前路径
+                <input id="personalKnowledgePath" readonly placeholder="保存后显示" />
+              </label>
+            </div>
+            <label>内容
+              <textarea id="personalKnowledgeContent" spellcheck="false" placeholder="选择左侧记录，或点击新建记录。"></textarea>
+            </label>
+            <div class="row">
+              <button class="primary" id="savePersonalKnowledgeBtnBottom" type="button">保存记录</button>
+              <span class="muted small">真实记录默认保存在 my_workspace/my_knowledge_base 下，并被 .gitignore 忽略，不会自动提交到 GitHub。</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="panel form view" data-view="comfyDebug" hidden>
         <div class="manager-toolbar">
           <div class="manager-title">
@@ -4008,6 +4118,18 @@ INDEX_HTML = r"""<!doctype html>
       knowledgeFile: document.getElementById('knowledgeFile'),
       uploadKnowledgeBtn: document.getElementById('uploadKnowledgeBtn'),
       knowledgeList: document.getElementById('knowledgeList'),
+      personalKnowledgeStatus: document.getElementById('personalKnowledgeStatus'),
+      refreshPersonalKnowledgeBtn: document.getElementById('refreshPersonalKnowledgeBtn'),
+      newPersonalKnowledgeBtn: document.getElementById('newPersonalKnowledgeBtn'),
+      savePersonalKnowledgeBtn: document.getElementById('savePersonalKnowledgeBtn'),
+      savePersonalKnowledgeBtnBottom: document.getElementById('savePersonalKnowledgeBtnBottom'),
+      personalKnowledgeCategory: document.getElementById('personalKnowledgeCategory'),
+      personalKnowledgeSearch: document.getElementById('personalKnowledgeSearch'),
+      personalKnowledgeList: document.getElementById('personalKnowledgeList'),
+      personalKnowledgeTitle: document.getElementById('personalKnowledgeTitle'),
+      personalKnowledgeFilename: document.getElementById('personalKnowledgeFilename'),
+      personalKnowledgePath: document.getElementById('personalKnowledgePath'),
+      personalKnowledgeContent: document.getElementById('personalKnowledgeContent'),
       workflowAdvanceMode: document.getElementById('workflowAdvanceMode'),
       autoProductionMode: document.getElementById('autoProductionMode'),
       comfyDebugGate: document.getElementById('comfyDebugGate'),
@@ -4439,6 +4561,9 @@ INDEX_HTML = r"""<!doctype html>
     let workflowEditorSteps = [];
     let workflowEditorBase = {};
     let staffOptions = [];
+    let personalKnowledgeItems = [];
+    let selectedPersonalKnowledgePath = '';
+    let personalKnowledgeDirty = false;
     let selectedReferenceFiles = [];
     let referencePreviewUrls = new Map();
     let comfyDebugLocalReferencePreviews = {};
@@ -4476,6 +4601,13 @@ INDEX_HTML = r"""<!doctype html>
       { value: 'product', label: '商品', addLabel: '新增商品', tags: ['product', 'product_base', 'product_turnaround', 'product_generation'] },
       { value: 'reference', label: '参考', addLabel: '新增参考', tags: ['style', 'style_reference', 'keyframe', 'reference', 'i2v_first_frame', 'i2v_first_last_frame', 'i2v_first_middle_last_frame', 'live_to_anime', 'motion_transfer', 'talking_image'] },
     ];
+    const PERSONAL_KNOWLEDGE_CATEGORIES = {
+      idea_inbox: { label: '想法', prefix: 'idea', template: '# 想法标题\n\n- 日期：\n- 状态：inbox / exploring / validated / paused / abandoned\n- 标签：\n\n## 一句话\n\n\n## 背景\n\n\n## 用户与场景\n\n\n## 价值假设\n\n\n## 最小验证\n\n\n## 风险与反证\n\n\n## 下一步\n' },
+      product_library: { label: '产品', prefix: 'product', template: '# 产品方向标题\n\n- 日期：\n- 状态：exploring / building / validating / operating / paused\n- 标签：\n\n## 定位\n\n\n## 目标用户\n\n\n## 核心问题\n\n\n## 解决方案\n\n\n## MVP\n\n\n## 工作流\n\n\n## 商业模式\n\n\n## 替代方案与竞品\n\n\n## 验证指标\n\n\n## 下一步\n' },
+      planning: { label: '规划', prefix: 'plan', template: '# 规划标题\n\n- 日期：\n- 周期：\n- 状态：draft / active / completed / paused\n\n## 目标\n\n\n## 成功标准\n\n\n## 不做什么\n\n\n## 阶段\n\n1. \n2. \n3. \n\n## 风险\n\n\n## 下一步动作\n' },
+      decisions: { label: '决策', prefix: 'decision', template: '# 决策标题\n\n- 日期：\n- 状态：accepted / reversed / superseded\n- 相关产品/计划：\n\n## 背景\n\n\n## 决策\n\n\n## 原因\n\n\n## 放弃的方案\n\n\n## 影响\n\n\n## 复盘时间\n' },
+      conversation_logs: { label: '聊天', prefix: 'chat', template: '# 聊天记录标题\n\n- 日期：\n- 参与者：我 / Codex\n- 主题：\n- 状态：raw / summarized / extracted\n- 关联条目：\n\n## 背景\n\n\n## 对话摘要\n\n\n## 关键判断\n\n\n## 新想法\n\n\n## 决策\n\n\n## 待办\n\n\n## 可沉淀到其他库\n\n- 产品库：\n- 规划：\n- 决策：\n- 想法收件箱：\n\n## 原始摘录\n' },
+    };
     const ASSET_CATEGORY_TAGS = [
       { value: 'person', label: '人物' },
       { value: 'product', label: '产品' },
@@ -4720,6 +4852,9 @@ INDEX_HTML = r"""<!doctype html>
       }
       if (viewName === 'assets') {
         loadAssetLibrary();
+      }
+      if (viewName === 'knowledgeBase') {
+        loadPersonalKnowledgeList().catch(err => setPersonalKnowledgeStatus(err.message, true));
       }
       if (viewName === 'comfyDebug') {
         loadAssetLibrary();
@@ -7642,6 +7777,144 @@ INDEX_HTML = r"""<!doctype html>
         item.appendChild(info);
         els.knowledgeList.appendChild(item);
       }
+    }
+
+    function setPersonalKnowledgeStatus(message, isError = false) {
+      if (els.personalKnowledgeStatus) {
+        els.personalKnowledgeStatus.textContent = message;
+        els.personalKnowledgeStatus.classList.toggle('error', Boolean(isError));
+      }
+    }
+
+    function personalKnowledgeCategory() {
+      return els.personalKnowledgeCategory?.value || 'idea_inbox';
+    }
+
+    function personalKnowledgeToday() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function personalKnowledgeSlug(text) {
+      const cleaned = String(text || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, '-')
+        .replace(/^-+|-+$/g, '');
+      return cleaned || 'untitled';
+    }
+
+    function personalKnowledgeTitleFromContent(content) {
+      const firstHeading = String(content || '').split(/\r?\n/).find(line => line.trim().startsWith('#'));
+      return firstHeading ? firstHeading.replace(/^#+\s*/, '').trim() : '';
+    }
+
+    function updatePersonalKnowledgeFilenameSuggestion() {
+      if (!els.personalKnowledgeFilename || selectedPersonalKnowledgePath) return;
+      const category = PERSONAL_KNOWLEDGE_CATEGORIES[personalKnowledgeCategory()] || PERSONAL_KNOWLEDGE_CATEGORIES.idea_inbox;
+      const title = els.personalKnowledgeTitle?.value || personalKnowledgeTitleFromContent(els.personalKnowledgeContent?.value || '');
+      els.personalKnowledgeFilename.value = `${personalKnowledgeToday()}-${category.prefix}-${personalKnowledgeSlug(title)}.md`;
+    }
+
+    function renderPersonalKnowledgeList() {
+      if (!els.personalKnowledgeList) return;
+      const query = (els.personalKnowledgeSearch?.value || '').trim().toLowerCase();
+      const category = personalKnowledgeCategory();
+      const items = personalKnowledgeItems.filter(item => {
+        if (item.category !== category) return false;
+        if (!query) return true;
+        return [item.title, item.name, item.relative_path, item.excerpt].some(value => String(value || '').toLowerCase().includes(query));
+      });
+      els.personalKnowledgeList.innerHTML = '';
+      if (!items.length) {
+        els.personalKnowledgeList.innerHTML = '<div class="muted small">当前分类暂无记录</div>';
+        return;
+      }
+      for (const item of items) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = `knowledge-item ${selectedPersonalKnowledgePath === item.relative_path ? 'active' : ''}`;
+        const title = document.createElement('strong');
+        title.textContent = item.title || item.name;
+        const meta = document.createElement('div');
+        meta.className = 'muted small';
+        meta.textContent = `${item.name} / ${item.mtime || ''}`;
+        const excerpt = document.createElement('div');
+        excerpt.className = 'muted small';
+        excerpt.textContent = item.excerpt || '';
+        btn.appendChild(title);
+        btn.appendChild(meta);
+        if (item.excerpt) btn.appendChild(excerpt);
+        btn.onclick = () => openPersonalKnowledge(item.relative_path);
+        els.personalKnowledgeList.appendChild(btn);
+      }
+    }
+
+    async function loadPersonalKnowledgeList() {
+      setPersonalKnowledgeStatus('正在加载知识库...');
+      const data = await api('/api/personal-knowledge');
+      personalKnowledgeItems = data.items || [];
+      renderPersonalKnowledgeList();
+      setPersonalKnowledgeStatus(`已加载 ${personalKnowledgeItems.length} 条记录`);
+    }
+
+    function newPersonalKnowledgeRecord() {
+      const category = PERSONAL_KNOWLEDGE_CATEGORIES[personalKnowledgeCategory()] || PERSONAL_KNOWLEDGE_CATEGORIES.idea_inbox;
+      selectedPersonalKnowledgePath = '';
+      personalKnowledgeDirty = false;
+      if (els.personalKnowledgeTitle) els.personalKnowledgeTitle.value = `${category.label}标题`;
+      if (els.personalKnowledgeContent) {
+        els.personalKnowledgeContent.value = category.template.replace(/日期：/g, `日期：${personalKnowledgeToday()}`);
+      }
+      if (els.personalKnowledgePath) els.personalKnowledgePath.value = '';
+      if (els.personalKnowledgeFilename) els.personalKnowledgeFilename.value = '';
+      updatePersonalKnowledgeFilenameSuggestion();
+      renderPersonalKnowledgeList();
+      setPersonalKnowledgeStatus('新记录草稿，保存后写入本地知识库');
+      els.personalKnowledgeTitle?.focus();
+    }
+
+    async function openPersonalKnowledge(relativePath) {
+      if (!relativePath) return;
+      setPersonalKnowledgeStatus('正在读取记录...');
+      const data = await api(`/api/personal-knowledge-file?path=${encodeURIComponent(relativePath)}`);
+      selectedPersonalKnowledgePath = data.relative_path || relativePath;
+      personalKnowledgeDirty = false;
+      if (els.personalKnowledgeCategory && data.category) els.personalKnowledgeCategory.value = data.category;
+      if (els.personalKnowledgeTitle) els.personalKnowledgeTitle.value = data.title || '';
+      if (els.personalKnowledgeFilename) els.personalKnowledgeFilename.value = data.name || '';
+      if (els.personalKnowledgePath) els.personalKnowledgePath.value = selectedPersonalKnowledgePath;
+      if (els.personalKnowledgeContent) els.personalKnowledgeContent.value = data.content || '';
+      renderPersonalKnowledgeList();
+      setPersonalKnowledgeStatus(`已打开：${selectedPersonalKnowledgePath}`);
+    }
+
+    async function savePersonalKnowledge() {
+      const category = personalKnowledgeCategory();
+      const title = (els.personalKnowledgeTitle?.value || '').trim() || personalKnowledgeTitleFromContent(els.personalKnowledgeContent?.value || '') || '未命名记录';
+      const content = els.personalKnowledgeContent?.value || '';
+      if (!content.trim()) {
+        setPersonalKnowledgeStatus('内容为空，未保存', true);
+        return;
+      }
+      updatePersonalKnowledgeFilenameSuggestion();
+      setPersonalKnowledgeStatus('正在保存记录...');
+      const result = await api('/api/personal-knowledge-file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category,
+          title,
+          filename: els.personalKnowledgeFilename?.value || '',
+          relative_path: selectedPersonalKnowledgePath,
+          content,
+        }),
+      });
+      selectedPersonalKnowledgePath = result.relative_path || '';
+      personalKnowledgeDirty = false;
+      if (els.personalKnowledgePath) els.personalKnowledgePath.value = selectedPersonalKnowledgePath;
+      if (els.personalKnowledgeFilename) els.personalKnowledgeFilename.value = result.name || els.personalKnowledgeFilename.value;
+      await loadPersonalKnowledgeList();
+      setPersonalKnowledgeStatus(`已保存：${selectedPersonalKnowledgePath}`);
     }
 
     async function loadSystemHealth() {
@@ -13561,6 +13834,30 @@ INDEX_HTML = r"""<!doctype html>
     if (els.testComfyMcpBtn) els.testComfyMcpBtn.onclick = testComfyMcpConnection;
     if (els.syncComfyMcpWorkflowsBtn) els.syncComfyMcpWorkflowsBtn.onclick = syncComfyMcpWorkflows;
     els.uploadKnowledgeBtn.onclick = uploadKnowledgeFile;
+    if (els.refreshPersonalKnowledgeBtn) els.refreshPersonalKnowledgeBtn.onclick = loadPersonalKnowledgeList;
+    if (els.newPersonalKnowledgeBtn) els.newPersonalKnowledgeBtn.onclick = newPersonalKnowledgeRecord;
+    if (els.savePersonalKnowledgeBtn) els.savePersonalKnowledgeBtn.onclick = savePersonalKnowledge;
+    if (els.savePersonalKnowledgeBtnBottom) els.savePersonalKnowledgeBtnBottom.onclick = savePersonalKnowledge;
+    if (els.personalKnowledgeCategory) {
+      els.personalKnowledgeCategory.onchange = () => {
+        selectedPersonalKnowledgePath = '';
+        if (els.personalKnowledgePath) els.personalKnowledgePath.value = '';
+        renderPersonalKnowledgeList();
+        updatePersonalKnowledgeFilenameSuggestion();
+      };
+    }
+    if (els.personalKnowledgeSearch) els.personalKnowledgeSearch.oninput = renderPersonalKnowledgeList;
+    [els.personalKnowledgeTitle, els.personalKnowledgeContent].filter(Boolean).forEach(control => {
+      control.addEventListener('input', () => {
+        personalKnowledgeDirty = true;
+        updatePersonalKnowledgeFilenameSuggestion();
+      });
+    });
+    if (els.personalKnowledgeFilename) {
+      els.personalKnowledgeFilename.addEventListener('input', () => {
+        personalKnowledgeDirty = true;
+      });
+    }
     els.refreshHealthBtn.onclick = loadSystemHealth;
     els.productTemplate.onchange = () => applyProductTemplate(false);
     if (els.openRunAssetPickerBtn) els.openRunAssetPickerBtn.onclick = openRunAssetPicker;
@@ -14032,6 +14329,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"workflows": self._comfy_debug_workflows()})
             elif parsed.path == "/api/knowledge":
                 self._send_json({"files": self._knowledge_files()})
+            elif parsed.path == "/api/personal-knowledge":
+                self._send_json({"items": self._personal_knowledge_items()})
+            elif parsed.path == "/api/personal-knowledge-file":
+                query = parse_qs(parsed.query)
+                self._send_json(self._personal_knowledge_file(self._single(query, "path")))
             elif parsed.path == "/api/staff":
                 self._send_json({"staff": self._staff_list()})
             elif parsed.path == "/api/staff-detail":
@@ -14100,6 +14402,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/upload-knowledge":
                 self._send_json(self._upload_knowledge(payload))
+                return
+
+            if parsed.path == "/api/personal-knowledge-file":
+                self._send_json(self._save_personal_knowledge_file(payload))
                 return
 
             if parsed.path == "/api/favorite-asset":
@@ -19642,6 +19948,137 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             target = KNOWLEDGE_ROOT / f"{safe_stem}_{uuid4().hex[:8]}{suffix}"
         target.write_bytes(content_bytes)
         return {"ok": True, "name": target.name, "size_bytes": len(content_bytes)}
+
+    @staticmethod
+    def _personal_knowledge_categories() -> dict[str, str]:
+        return {
+            "idea_inbox": "idea",
+            "product_library": "product",
+            "planning": "plan",
+            "decisions": "decision",
+            "conversation_logs": "chat",
+        }
+
+    @staticmethod
+    def _safe_markdown_filename(value: str, fallback: str = "untitled") -> str:
+        name = Path(str(value or "").strip()).name
+        stem = Path(name).stem if name else fallback
+        safe = "".join(ch if ch.isalnum() or ch in ("-", "_") else "-" for ch in stem).strip("-_")
+        safe = safe[:96] or fallback
+        return f"{safe}.md"
+
+    def _safe_personal_knowledge_path(self, relative_path: str) -> Path:
+        text = str(relative_path or "").strip().replace("\\", "/")
+        if not text:
+            raise ValueError("path is required")
+        candidate = (KNOWLEDGE_ROOT / text).resolve()
+        if not self._is_relative_to(candidate, KNOWLEDGE_ROOT.resolve()):
+            raise ValueError("Invalid knowledge path")
+        category = candidate.relative_to(KNOWLEDGE_ROOT.resolve()).parts[0] if candidate != KNOWLEDGE_ROOT.resolve() else ""
+        if category not in self._personal_knowledge_categories():
+            raise ValueError("Invalid knowledge category")
+        if candidate.suffix.lower() != ".md":
+            raise ValueError("Only markdown records are supported")
+        return candidate
+
+    def _extract_markdown_title(self, content: str, fallback: str) -> str:
+        for line in str(content or "").splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                title = stripped.lstrip("#").strip()
+                if title:
+                    return title[:120]
+        return fallback[:120]
+
+    def _personal_knowledge_items(self) -> list[dict]:
+        if not KNOWLEDGE_ROOT.exists():
+            return []
+        items: list[dict] = []
+        categories = self._personal_knowledge_categories()
+        for category in categories:
+            root = KNOWLEDGE_ROOT / category
+            if not root.exists():
+                continue
+            for path in sorted(root.glob("*.md")):
+                if path.name.upper() == "README.MD":
+                    continue
+                try:
+                    content = path.read_text(encoding="utf-8-sig")
+                except UnicodeDecodeError:
+                    content = path.read_text(encoding="utf-8", errors="replace")
+                stat = path.stat()
+                excerpt = " ".join(line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#"))[:180]
+                items.append(
+                    {
+                        "category": category,
+                        "name": path.name,
+                        "relative_path": path.relative_to(KNOWLEDGE_ROOT).as_posix(),
+                        "title": self._extract_markdown_title(content, path.stem),
+                        "excerpt": excerpt,
+                        "size": stat.st_size,
+                        "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+                    }
+                )
+        items.sort(key=lambda item: (item.get("mtime") or "", item.get("relative_path") or ""), reverse=True)
+        return items
+
+    def _personal_knowledge_file(self, relative_path: str) -> dict:
+        path = self._safe_personal_knowledge_path(relative_path)
+        if not path.is_file():
+            raise FileNotFoundError(relative_path)
+        try:
+            content = path.read_text(encoding="utf-8-sig")
+        except UnicodeDecodeError:
+            content = path.read_text(encoding="utf-8", errors="replace")
+        category = path.relative_to(KNOWLEDGE_ROOT.resolve()).parts[0]
+        return {
+            "category": category,
+            "name": path.name,
+            "relative_path": path.relative_to(KNOWLEDGE_ROOT).as_posix(),
+            "title": self._extract_markdown_title(content, path.stem),
+            "content": content,
+        }
+
+    def _save_personal_knowledge_file(self, payload: dict) -> dict:
+        categories = self._personal_knowledge_categories()
+        category = str(payload.get("category") or "idea_inbox").strip()
+        if category not in categories:
+            raise ValueError("Invalid knowledge category")
+        title = str(payload.get("title") or "").strip() or "未命名记录"
+        content = str(payload.get("content") or "")
+        if not content.strip():
+            raise ValueError("content is required")
+        if len(content.encode("utf-8")) > 2 * 1024 * 1024:
+            raise ValueError("Knowledge record is too large; max size is 2 MB")
+
+        existing_path = str(payload.get("relative_path") or "").strip()
+        if existing_path:
+            target = self._safe_personal_knowledge_path(existing_path)
+            category = target.relative_to(KNOWLEDGE_ROOT.resolve()).parts[0]
+        else:
+            filename = self._safe_markdown_filename(str(payload.get("filename") or "").strip())
+            if filename == "untitled.md":
+                date_prefix = time.strftime("%Y-%m-%d")
+                prefix = categories[category]
+                filename = self._safe_markdown_filename(f"{date_prefix}-{prefix}-{title}")
+            target = (KNOWLEDGE_ROOT / category / filename).resolve()
+            if not self._is_relative_to(target, (KNOWLEDGE_ROOT / category).resolve()):
+                raise ValueError("Invalid knowledge filename")
+            if target.exists():
+                target = target.with_name(f"{target.stem}_{uuid4().hex[:8]}{target.suffix}")
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(content, encoding="utf-8", newline="\n")
+        stat = target.stat()
+        return {
+            "ok": True,
+            "category": category,
+            "name": target.name,
+            "relative_path": target.relative_to(KNOWLEDGE_ROOT).as_posix(),
+            "title": self._extract_markdown_title(content, title),
+            "size": stat.st_size,
+            "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+        }
 
     def _test_model(self, payload: dict) -> dict:
         runtime_model = self._resolve_runtime_model_request(payload)
