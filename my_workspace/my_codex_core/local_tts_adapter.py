@@ -213,6 +213,7 @@ class LocalTTSAdapter:
         endpoint = self._aliyun_cosyvoice_endpoint(voice_config)
         model = str(voice_config.get("aliyun_model") or voice_config.get("model") or "cosyvoice-v3-flash").strip()
         voice = str(voice_config.get("aliyun_voice") or voice_config.get("voice") or "longanyang").strip()
+        workspace_id = str(voice_config.get("aliyun_workspace_id") or "").strip()
         audio_format = str(voice_config.get("aliyun_format") or voice_config.get("format") or "wav").strip().lower()
         if audio_format not in {"mp3", "wav", "pcm", "opus"}:
             audio_format = "mp3"
@@ -281,6 +282,7 @@ class LocalTTSAdapter:
             "api_key_provided": True,
             "model": model,
             "voice": voice,
+            "voice_kind": "custom_clone" if workspace_id else "preset",
             "format": audio_format,
             "sample_rate": payload_input["sample_rate"],
             "text_file": str(text_path),

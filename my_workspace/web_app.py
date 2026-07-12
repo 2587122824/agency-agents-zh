@@ -8638,15 +8638,15 @@ INDEX_HTML = r"""<!doctype html>
 
     function buildVoiceConfig(referenceAudio = '') {
       const customAliyunVoice = String(els.aliyunCustomVoiceId?.value || '').trim();
+      const isCustomAliyunVoice = Boolean(customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice');
       const selectedClone = selectedAliyunClone();
       const customAliyunModel = selectedClone?.target_model || els.aliyunCloneTargetModel?.value || els.aliyunTtsModel?.value || 'cosyvoice-v3-flash';
       const aliyunWorkspaceId = String(
-        selectedClone?.workspace_id
-        || els.aliyunTtsWorkspaceId?.value
-        || els.aliyunCloneWorkspaceId?.value
-        || ''
+        isCustomAliyunVoice
+          ? (selectedClone?.workspace_id || els.aliyunTtsWorkspaceId?.value || els.aliyunCloneWorkspaceId?.value || '')
+          : ''
       ).trim();
-      const aliyunRegion = String(selectedClone?.region || els.aliyunCloneRegion?.value || 'cn-beijing').trim() || 'cn-beijing';
+      const aliyunRegion = String(isCustomAliyunVoice ? (selectedClone?.region || els.aliyunCloneRegion?.value || 'cn-beijing') : 'cn-beijing').trim() || 'cn-beijing';
       return {
         mode: els.voiceMode.value,
         provider: currentVoiceProvider(),
@@ -8659,9 +8659,9 @@ INDEX_HTML = r"""<!doctype html>
         aliyun_api_key: (els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim() || ''),
         aliyun_workspace_id: aliyunWorkspaceId,
         aliyun_region: aliyunRegion,
-        aliyun_endpoint: els.aliyunTtsEndpoint?.value?.trim() || '',
-        aliyun_model: customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice' ? customAliyunModel : 'cosyvoice-v3-flash',
-        aliyun_voice: customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice' ? customAliyunVoice : (els.aliyunTtsVoice.value || 'longanyang'),
+        aliyun_endpoint: isCustomAliyunVoice ? (els.aliyunTtsEndpoint?.value?.trim() || '') : '',
+        aliyun_model: isCustomAliyunVoice ? customAliyunModel : 'cosyvoice-v3-flash',
+        aliyun_voice: isCustomAliyunVoice ? customAliyunVoice : (els.aliyunTtsVoice.value || 'longanyang'),
         aliyun_format: els.aliyunTtsFormat.value,
         aliyun_sample_rate: Number(els.aliyunTtsSampleRate?.value || 24000),
         aliyun_volume: els.aliyunTtsVolume?.value || '',
