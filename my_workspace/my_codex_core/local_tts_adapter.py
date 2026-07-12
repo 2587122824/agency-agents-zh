@@ -210,10 +210,13 @@ class LocalTTSAdapter:
         if not api_key:
             return {"status": "skipped", "reason": "Aliyun CosyVoice API Key is missing"}
 
+        workspace_id = str(voice_config.get("aliyun_workspace_id") or "").strip()
         endpoint = self._aliyun_cosyvoice_endpoint(voice_config)
         model = str(voice_config.get("aliyun_model") or voice_config.get("model") or "cosyvoice-v3-flash").strip()
-        voice = str(voice_config.get("aliyun_voice") or voice_config.get("voice") or "longanyang").strip()
-        workspace_id = str(voice_config.get("aliyun_workspace_id") or "").strip()
+        voice = self._normalize_aliyun_preset_voice(
+            str(voice_config.get("aliyun_voice") or voice_config.get("voice") or "longanyang").strip(),
+            is_custom_clone=bool(workspace_id),
+        )
         audio_format = str(voice_config.get("aliyun_format") or voice_config.get("format") or "wav").strip().lower()
         if audio_format not in {"mp3", "wav", "pcm", "opus"}:
             audio_format = "mp3"
@@ -366,6 +369,19 @@ class LocalTTSAdapter:
 
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
+
+    @staticmethod
+    def _normalize_aliyun_preset_voice(voice: str, *, is_custom_clone: bool = False) -> str:
+        if is_custom_clone:
+            return voice or "longanyang"
+        legacy_v3_aliases = {
+            "longxiaochun": "longxiaochun_v3",
+            "longxiaoxia": "longxiaoxia_v3",
+            "longshu": "longshu_v3",
+        }
+        allowed_presets = {"longanyang", "longxiaochun_v3", "longxiaoxia_v3", "longshu_v3"}
+        normalized = legacy_v3_aliases.get(voice, voice or "longanyang")
+        return normalized if normalized in allowed_presets else "longanyang"
 
     @staticmethod
     def _aliyun_cosyvoice_endpoint(voice_config: dict[str, Any]) -> str:

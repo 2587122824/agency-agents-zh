@@ -3454,14 +3454,9 @@ INDEX_HTML = r"""<!doctype html>
               <label>音色
                 <select id="aliyunTtsVoice">
                   <option value="longanyang" selected>龙安阳：自然男声</option>
-                  <option value="longxiaochun">龙小淳：自然女声</option>
-                  <option value="longxiaoxia">龙小夏：清亮女声</option>
-                  <option value="longxiaocheng">龙小诚：稳重男声</option>
-                  <option value="longxiaobai">龙小白：亲和女声</option>
-                  <option value="longlaotie">龙老铁：东北男声</option>
-                  <option value="longshu">龙书：沉稳叙述</option>
-                  <option value="longshuo">龙硕：专业解说</option>
-                  <option value="longtong">龙彤：温和女声</option>
+                  <option value="longxiaochun_v3">龙小淳 V3：自然女声</option>
+                  <option value="longxiaoxia_v3">龙小夏 V3：清亮女声</option>
+                  <option value="longshu_v3">龙书 V3：沉稳叙述</option>
                 </select>
               </label>
               <label>音频格式
@@ -6506,7 +6501,7 @@ INDEX_HTML = r"""<!doctype html>
       els.aliyunTtsWorkspaceId.value = settings.aliyunTtsWorkspaceId || settings.aliyunCloneWorkspaceId || '';
       els.aliyunTtsEndpoint.value = settings.aliyunTtsEndpoint || '';
       setIfExists(els.aliyunTtsModel, settings.aliyunTtsModel || settings.aliyunCloneTargetModel || 'cosyvoice-v3-flash');
-      setIfExists(els.aliyunTtsVoice, settings.aliyunTtsVoice || 'longanyang');
+      setIfExists(els.aliyunTtsVoice, normalizeAliyunTtsVoice(settings.aliyunTtsVoice));
       setIfExists(els.aliyunTtsFormat, settings.aliyunTtsFormat || 'wav');
       setIfExists(els.aliyunTtsSampleRate, settings.aliyunTtsSampleRate || '24000');
       els.aliyunTtsVolume.value = settings.aliyunTtsVolume || '';
@@ -8623,6 +8618,19 @@ INDEX_HTML = r"""<!doctype html>
       if (els.voiceAdvancedCard) els.voiceAdvancedCard.hidden = isAliyun;
     }
 
+    const ALIYUN_COSYVOICE_V3_VOICE_ALIASES = {
+      longxiaochun: 'longxiaochun_v3',
+      longxiaoxia: 'longxiaoxia_v3',
+      longshu: 'longshu_v3',
+    };
+
+    function normalizeAliyunTtsVoice(value) {
+      const raw = String(value || '').trim();
+      const mapped = ALIYUN_COSYVOICE_V3_VOICE_ALIASES[raw] || raw || 'longanyang';
+      const options = Array.from(els.aliyunTtsVoice?.options || []).map((option) => option.value);
+      return options.includes(mapped) ? mapped : 'longanyang';
+    }
+
     function selectedVoicePresetLabel() {
       const option = els.voicePreset?.selectedOptions?.[0];
       return option ? option.textContent.trim() : '';
@@ -8661,7 +8669,7 @@ INDEX_HTML = r"""<!doctype html>
         aliyun_region: aliyunRegion,
         aliyun_endpoint: isCustomAliyunVoice ? (els.aliyunTtsEndpoint?.value?.trim() || '') : '',
         aliyun_model: isCustomAliyunVoice ? customAliyunModel : 'cosyvoice-v3-flash',
-        aliyun_voice: isCustomAliyunVoice ? customAliyunVoice : (els.aliyunTtsVoice.value || 'longanyang'),
+        aliyun_voice: isCustomAliyunVoice ? customAliyunVoice : normalizeAliyunTtsVoice(els.aliyunTtsVoice.value),
         aliyun_format: els.aliyunTtsFormat.value,
         aliyun_sample_rate: Number(els.aliyunTtsSampleRate?.value || 24000),
         aliyun_volume: els.aliyunTtsVolume?.value || '',
