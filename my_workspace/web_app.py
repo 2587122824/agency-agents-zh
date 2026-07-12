@@ -23,6 +23,7 @@ from PIL import Image
 
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
 from my_codex_core.comfy_mcp_adapter import ComfyMCPAdapter
+from my_codex_core.local_tts_adapter import LocalTTSAdapter
 from my_codex_core.production_entities import load_production_entities, write_production_entities
 from my_codex_core.production_pipeline import retry_production_job
 from my_codex_core.production_plan_compiler import compile_production_plan, sanitize_generation_prompt
@@ -68,6 +69,7 @@ ASSET_LIBRARY_TAG_FOLDERS = {
     "bgm": "22_bgm",
 }
 COMFY_DEBUG_TASK = "__comfy_debug__"
+AUDIO_DEBUG_TASK = "__audio_debug__"
 COMFY_DEBUG_ROOT = OUTPUT_ROOT / COMFY_DEBUG_TASK
 LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.json"
 RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
@@ -498,6 +500,29 @@ INDEX_HTML = r"""<!doctype html>
       cursor: not-allowed;
       background: #f8fafc;
       color: #98a2b3;
+    }
+    .audio-debug-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 14px;
+      align-items: start;
+    }
+    .audio-debug-layout textarea {
+      min-height: 150px;
+    }
+    .audio-debug-side,
+    .audio-debug-result {
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .audio-debug-result audio {
+      width: 100%;
+    }
+    @media (max-width: 860px) {
+      .audio-debug-layout {
+        grid-template-columns: 1fr;
+      }
     }
     .form {
       padding: 16px;
@@ -3346,6 +3371,18 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
+            <div class="config-card audio-debug-card" data-title="音频调试台" data-desc="复用当前语音合成配置，输入文本后立即生成一段可试听的音频文件">
+              <div class="audio-debug-layout">
+                <label>调试文本
+                  <textarea id="audioDebugText" spellcheck="false" placeholder="输入要合成的旁白文本。使用 VoxCPM2 本地仿声时，会自动使用当前本人参考音频。"></textarea>
+                </label>
+                <div class="audio-debug-side">
+                  <button class="primary" id="runAudioDebugBtn" type="button">生成调试音频</button>
+                  <span class="muted small" id="audioDebugStatus">未生成</span>
+                  <div class="audio-debug-result" id="audioDebugResult"></div>
+                </div>
+              </div>
+            </div>
           </div>
         </details>
         </div>
@@ -4200,6 +4237,10 @@ INDEX_HTML = r"""<!doctype html>
       aliyunTtsMarkdownFilter: document.getElementById('aliyunTtsMarkdownFilter'),
       aliyunTtsAigcPropagator: document.getElementById('aliyunTtsAigcPropagator'),
       aliyunTtsAigcPropagateId: document.getElementById('aliyunTtsAigcPropagateId'),
+      audioDebugText: document.getElementById('audioDebugText'),
+      runAudioDebugBtn: document.getElementById('runAudioDebugBtn'),
+      audioDebugStatus: document.getElementById('audioDebugStatus'),
+      audioDebugResult: document.getElementById('audioDebugResult'),
       imageTool: document.getElementById('imageTool'),
       imagePositivePrompt: document.getElementById('imagePositivePrompt'),
       imageModel: document.getElementById('imageModel'),
@@ -5737,6 +5778,7 @@ INDEX_HTML = r"""<!doctype html>
       applyRuntimeComfyConfig(data.runtime_comfy_config || {});
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
+      loadAudioDebugHistory().catch(() => {});
       queueRuntimeModelConfigSync({ remoteOnly: true });
       queueRuntimeComfyConfigSync();
     }
@@ -5969,6 +6011,7 @@ INDEX_HTML = r"""<!doctype html>
         aliyunTtsMarkdownFilter: els.aliyunTtsMarkdownFilter.value,
         aliyunTtsAigcPropagator: els.aliyunTtsAigcPropagator.value,
         aliyunTtsAigcPropagateId: els.aliyunTtsAigcPropagateId.value,
+        audioDebugText: els.audioDebugText?.value || '',
         imageTool: els.imageTool.value,
         imagePositivePrompt: els.imagePositivePrompt.value,
         imageModel: els.imageModel.value,
@@ -6155,6 +6198,7 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.aliyunTtsMarkdownFilter, 'off');
       els.aliyunTtsAigcPropagator.value = '';
       els.aliyunTtsAigcPropagateId.value = '';
+      if (els.audioDebugText) els.audioDebugText.value = settings.audioDebugText || '';
       syncVoiceCommandTemplateForMode();
       setIfExists(els.imageTool, settings.imageTool);
       els.imagePositivePrompt.value = settings.imagePositivePrompt || '';
@@ -7178,6 +7222,7 @@ INDEX_HTML = r"""<!doctype html>
         els.aliyunTtsMarkdownFilter,
         els.aliyunTtsAigcPropagator,
         els.aliyunTtsAigcPropagateId,
+        els.audioDebugText,
         els.imageTool,
         els.imagePositivePrompt,
         els.imageModel,
@@ -7226,10 +7271,12 @@ INDEX_HTML = r"""<!doctype html>
         els.referenceRole,
         els.referenceNote,
       ].forEach(control => {
+        if (!control) return;
         control.addEventListener('change', saveSettings);
         control.addEventListener('input', saveSettings);
       });
       els.voiceMode.addEventListener('change', syncVoiceCommandTemplateForMode);
+      if (els.runAudioDebugBtn) els.runAudioDebugBtn.addEventListener('click', runAudioDebug);
     }
 
     function applyImageProviderDefaults() {
@@ -8186,6 +8233,140 @@ INDEX_HTML = r"""<!doctype html>
     function selectedVoicePresetLabel() {
       const option = els.voicePreset?.selectedOptions?.[0];
       return option ? option.textContent.trim() : '';
+    }
+
+    function currentVoiceProvider() {
+      const mode = els.voiceMode?.value || 'off';
+      if (mode === 'windows_sapi') return 'windows_sapi';
+      if (mode === 'aliyun_cosyvoice') return 'aliyun_cosyvoice';
+      if (['voxcpm2', 'preset'].includes(mode)) return 'voxcpm2';
+      return '';
+    }
+
+    function buildVoiceConfig(referenceAudio = '') {
+      return {
+        mode: els.voiceMode.value,
+        provider: currentVoiceProvider(),
+        voice_preset: els.voicePreset.value,
+        voice_preset_name: selectedVoicePresetLabel(),
+        reference_audio: referenceAudio,
+        reference_text: els.voiceReferenceText.value.trim(),
+        command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
+        timeout_seconds: Number(els.voiceTimeout.value || 3600),
+        aliyun_api_key: els.aliyunTtsApiKey.value.trim(),
+        aliyun_workspace_id: '',
+        aliyun_endpoint: '',
+        aliyun_model: 'cosyvoice-v3-flash',
+        aliyun_voice: els.aliyunTtsVoice.value || 'longanyang',
+        aliyun_format: els.aliyunTtsFormat.value,
+        aliyun_sample_rate: 24000,
+        aliyun_volume: '',
+        aliyun_rate: '',
+        aliyun_pitch: '',
+        aliyun_bit_rate: '',
+        aliyun_seed: '',
+        aliyun_language_hint: '',
+        aliyun_instruction: '',
+        aliyun_enable_ssml: false,
+        aliyun_word_timestamp_enabled: false,
+        aliyun_enable_aigc_tag: false,
+        aliyun_enable_markdown_filter: false,
+        aliyun_aigc_propagator: '',
+        aliyun_aigc_propagate_id: '',
+      };
+    }
+
+    function renderAudioDebugHistory(items = []) {
+      if (!els.audioDebugResult) return;
+      els.audioDebugResult.innerHTML = '';
+      const list = Array.isArray(items) ? items.filter(Boolean) : [];
+      if (!list.length) return;
+      list.forEach((item, index) => {
+        const row = document.createElement('div');
+        row.className = 'reference-item';
+        const file = String(item.audio_file || '').trim();
+        const status = String(item.status || '').trim();
+        const duration = Number(item.actual_duration_seconds || 0);
+        const durationText = duration ? `${duration.toFixed(1)}s` : '';
+        row.innerHTML = `
+          <div class="reference-info">
+            <div class="reference-name">${escapeHtml(index === 0 ? '最新调试音频' : item.run_id || '调试音频')}</div>
+            <div class="muted small">${escapeHtml([status, item.provider || '', durationText].filter(Boolean).join(' / '))}</div>
+            <div class="muted small">${escapeHtml(item.text_preview || '')}</div>
+          </div>
+        `;
+        if (file) {
+          const audio = document.createElement('audio');
+          audio.controls = true;
+          audio.preload = 'metadata';
+          audio.src = mediaUrl('__audio_debug__', file);
+          row.appendChild(audio);
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.textContent = '打开文件';
+          open.onclick = () => window.open(mediaUrl('__audio_debug__', file), '_blank', 'noopener');
+          row.appendChild(open);
+        }
+        els.audioDebugResult.appendChild(row);
+      });
+    }
+
+    async function runAudioDebug() {
+      const text = String(els.audioDebugText?.value || '').trim();
+      if (!text) {
+        setStatus('请先输入调试文本', true);
+        return;
+      }
+      if (els.voiceMode.value === 'off') {
+        setStatus('请先在系统配置选择语音合成方式', true);
+        return;
+      }
+      if (els.voiceMode.value === 'aliyun_cosyvoice' && !els.aliyunTtsApiKey.value.trim()) {
+        setStatus('请先填写阿里云 CosyVoice API Key', true);
+        return;
+      }
+      const originalText = els.runAudioDebugBtn?.textContent || '';
+      if (els.runAudioDebugBtn) {
+        els.runAudioDebugBtn.disabled = true;
+        els.runAudioDebugBtn.textContent = '生成中...';
+      }
+      if (els.audioDebugStatus) els.audioDebugStatus.textContent = '正在生成音频...';
+      try {
+        saveSettings();
+        const referenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
+        const result = await apiWithTimeout('/api/audio-debug-run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text,
+            voice_config: buildVoiceConfig(referenceAudio),
+          }),
+        }, Math.max(30000, Number(els.voiceTimeout.value || 600) * 1000 + 5000));
+        const item = result.result || {};
+        if (els.audioDebugStatus) {
+          const duration = Number(item.actual_duration_seconds || 0);
+          els.audioDebugStatus.textContent = item.audio_file
+            ? `已生成：${duration ? duration.toFixed(1) + 's / ' : ''}${item.audio_file}`
+            : (item.error || item.status || '生成完成但未找到音频文件');
+        }
+        renderAudioDebugHistory(result.history || [item]);
+        if (!item.audio_file && item.error) setStatus(item.error, true);
+        else setStatus('音频调试生成完成');
+      } catch (err) {
+        if (els.audioDebugStatus) els.audioDebugStatus.textContent = err.message || '生成失败';
+        setStatus(err.message || '音频调试生成失败', true);
+      } finally {
+        if (els.runAudioDebugBtn) {
+          els.runAudioDebugBtn.disabled = false;
+          els.runAudioDebugBtn.textContent = originalText || '生成调试音频';
+        }
+      }
+    }
+
+    async function loadAudioDebugHistory() {
+      if (!els.audioDebugResult) return;
+      const data = await api('/api/audio-debug-history');
+      renderAudioDebugHistory(data.history || []);
     }
 
     function syncCustomModelState(focusWhenCustom = true) {
@@ -12634,11 +12815,6 @@ INDEX_HTML = r"""<!doctype html>
       if (els.voiceMode.value === 'aliyun_cosyvoice' && !els.aliyunTtsApiKey.value.trim()) {
         throw new Error('请先在系统配置填写阿里云 CosyVoice API Key');
       }
-      const voiceProvider = els.voiceMode.value === 'windows_sapi'
-        ? 'windows_sapi'
-        : (els.voiceMode.value === 'aliyun_cosyvoice'
-          ? 'aliyun_cosyvoice'
-          : (['voxcpm2', 'preset'].includes(els.voiceMode.value) ? 'voxcpm2' : ''));
       const imageConfig = {
         tool: 'prompt_only',
         positive_prompt: '',
@@ -12705,36 +12881,7 @@ INDEX_HTML = r"""<!doctype html>
         },
         image_config: imageConfig,
         video_config: videoConfig,
-        voice_config: {
-          mode: els.voiceMode.value,
-          provider: voiceProvider,
-          voice_preset: els.voicePreset.value,
-          voice_preset_name: selectedVoicePresetLabel(),
-          reference_audio: voiceReferenceAudio,
-          reference_text: els.voiceReferenceText.value.trim(),
-          command_template: els.voiceCommandTemplate.value.trim() || defaultVoxCPM2CommandTemplate(),
-          timeout_seconds: Number(els.voiceTimeout.value || 3600),
-          aliyun_api_key: els.aliyunTtsApiKey.value.trim(),
-          aliyun_workspace_id: '',
-          aliyun_endpoint: '',
-          aliyun_model: 'cosyvoice-v3-flash',
-          aliyun_voice: els.aliyunTtsVoice.value || 'longanyang',
-          aliyun_format: els.aliyunTtsFormat.value,
-          aliyun_sample_rate: 24000,
-          aliyun_volume: '',
-          aliyun_rate: '',
-          aliyun_pitch: '',
-          aliyun_bit_rate: '',
-          aliyun_seed: '',
-          aliyun_language_hint: '',
-          aliyun_instruction: '',
-          aliyun_enable_ssml: false,
-          aliyun_word_timestamp_enabled: false,
-          aliyun_enable_aigc_tag: false,
-          aliyun_enable_markdown_filter: false,
-          aliyun_aigc_propagator: '',
-          aliyun_aigc_propagate_id: '',
-        },
+        voice_config: buildVoiceConfig(voiceReferenceAudio),
         compose_config: {
           tool: els.composeTool.value,
           execution_mode: els.autoProductionMode.value,
@@ -14391,6 +14538,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json({"entities": self._production_entities()})
             elif parsed.path == "/api/comfy-debug-workflows":
                 self._send_json({"workflows": self._comfy_debug_workflows()})
+            elif parsed.path == "/api/audio-debug-history":
+                self._send_json({"history": self._audio_debug_history()})
             elif parsed.path == "/api/knowledge":
                 self._send_json({"files": self._knowledge_files()})
             elif parsed.path == "/api/personal-knowledge":
@@ -14462,6 +14611,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/upload-voice-sample":
                 self._send_json(self._upload_voice_sample(payload))
+                return
+
+            if parsed.path == "/api/audio-debug-run":
+                self._send_json(self._audio_debug_run(payload))
                 return
 
             if parsed.path == "/api/upload-knowledge":
@@ -16103,7 +16256,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         for path in sorted(OUTPUT_ROOT.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
             if not path.is_dir():
                 continue
-            if path.name == COMFY_DEBUG_TASK:
+            if path.name in {COMFY_DEBUG_TASK, AUDIO_DEBUG_TASK}:
                 continue
             summary_path = path / "run_summary.json"
             summary = {}
@@ -20033,6 +20186,80 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "stored_path": relative_path,
             "size_bytes": len(audio_bytes),
         }
+
+    def _audio_debug_run(self, payload: dict) -> dict:
+        text = str(payload.get("text") or "").strip()
+        if not text:
+            raise ValueError("audio debug text is required")
+        if len(text) > 8000:
+            raise ValueError("audio debug text is too long; max 8000 characters")
+
+        voice_config = payload.get("voice_config") if isinstance(payload.get("voice_config"), dict) else {}
+        mode = str(voice_config.get("mode") or "").strip().lower()
+        provider = str(voice_config.get("provider") or "").strip().lower()
+        if mode in {"", "off"} or provider in {"", "none"}:
+            raise ValueError("请先在系统配置选择一个语音合成方式")
+
+        run_id = datetime.now().strftime("%Y%m%d_%H%M%S") + "_" + uuid4().hex[:8]
+        debug_root = OUTPUT_ROOT / AUDIO_DEBUG_TASK
+        output_dir = debug_root / "runs" / run_id / "audio"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        (output_dir.parent / "input.txt").write_text(text + "\n", encoding="utf-8")
+
+        result = LocalTTSAdapter(WORKSPACE_ROOT).run(text, voice_config, output_dir)
+        status = str(result.get("status") or "").strip().lower()
+        files = result.get("downloaded_files") if isinstance(result.get("downloaded_files"), list) else []
+        output_file = str(result.get("output_file") or (files[0] if files else "") or "").strip()
+        relative_file = ""
+        if output_file:
+            output_path = Path(output_file)
+            if not output_path.is_absolute():
+                output_path = (WORKSPACE_ROOT / output_path).resolve()
+            else:
+                output_path = output_path.resolve()
+            if output_path.is_file() and self._is_relative_to(output_path, debug_root.resolve()):
+                relative_file = output_path.relative_to(debug_root).as_posix()
+
+        manifest = {
+            "run_id": run_id,
+            "created_at": time.time(),
+            "text_preview": text[:120],
+            "provider": result.get("provider") or provider,
+            "mode": result.get("mode") or mode,
+            "status": result.get("status") or status,
+            "error": result.get("error") or result.get("reason") or "",
+            "audio_file": relative_file,
+            "actual_duration_seconds": result.get("actual_duration_seconds") or 0,
+            "output_size_bytes": result.get("output_size_bytes") or 0,
+            "local_tts_manifest": "runs/" + run_id + "/audio/local_tts_manifest.json",
+        }
+        (output_dir.parent / "audio_debug_manifest.json").write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return {"ok": status in {"success", "quality_failed"}, "result": manifest, "raw": result, "history": self._audio_debug_history()}
+
+    @staticmethod
+    def _audio_debug_history(limit: int = 8) -> list[dict]:
+        runs_root = OUTPUT_ROOT / AUDIO_DEBUG_TASK / "runs"
+        if not runs_root.is_dir():
+            return []
+        items: list[dict] = []
+        for path in sorted(runs_root.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+            if not path.is_dir():
+                continue
+            manifest_path = path / "audio_debug_manifest.json"
+            if not manifest_path.is_file():
+                continue
+            try:
+                data = json.loads(manifest_path.read_text(encoding="utf-8-sig"))
+            except Exception:
+                continue
+            if isinstance(data, dict):
+                items.append(data)
+            if len(items) >= limit:
+                break
+        return items
 
     def _knowledge_files(self) -> list[dict]:
         knowledge_root = self._active_knowledge_root()
