@@ -528,7 +528,8 @@ INDEX_HTML = r"""<!doctype html>
       flex-wrap: wrap;
       justify-content: flex-end;
     }
-    .audio-debug-card {
+    .config-card.audio-debug-card {
+      grid-template-columns: minmax(0, 1fr);
       padding-top: 58px;
     }
     .audio-debug-layout {
@@ -593,21 +594,49 @@ INDEX_HTML = r"""<!doctype html>
     }
     .audio-debug-clone-shell {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 360px;
-      gap: 18px;
-      align-items: start;
-    }
-    .audio-debug-clone-form {
-      display: grid;
       gap: 16px;
+      align-items: start;
+      min-width: 0;
+    }
+    .audio-debug-clone-section {
+      display: grid;
+      gap: 12px;
+      min-width: 0;
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfd;
+    }
+    .audio-debug-clone-section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+    .audio-debug-clone-section-title strong {
+      color: var(--text);
+      line-height: 1.3;
     }
     .audio-debug-field-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
       gap: 12px;
+      min-width: 0;
     }
     .audio-debug-field-wide {
       grid-column: 1 / -1;
+    }
+    .audio-debug-field-grid label,
+    .audio-debug-saved-voice label {
+      min-width: 0;
+    }
+    .audio-debug-field-grid input,
+    .audio-debug-field-grid select,
+    .audio-debug-saved-voice input,
+    .audio-debug-saved-voice select {
+      width: 100%;
+      min-width: 0;
     }
     .audio-debug-clone-actions {
       display: flex;
@@ -617,13 +646,7 @@ INDEX_HTML = r"""<!doctype html>
     }
     .audio-debug-saved-voice {
       display: grid;
-      grid-template-columns: 1fr;
       gap: 12px;
-      align-items: end;
-      padding: 14px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fbfcfd;
     }
     .audio-debug-note {
       padding: 10px 12px;
@@ -636,9 +659,6 @@ INDEX_HTML = r"""<!doctype html>
     }
     @media (max-width: 1100px) {
       .audio-debug-layout {
-        grid-template-columns: 1fr;
-      }
-      .audio-debug-clone-shell {
         grid-template-columns: 1fr;
       }
     }
@@ -3542,7 +3562,24 @@ INDEX_HTML = r"""<!doctype html>
           </div>
           <div class="config-card audio-debug-card" data-title="阿里云 CosyVoice 声音复刻" data-desc="创建本人授权的复刻音色，保存 voice_id 后可直接用于上方文本转音频">
             <div class="audio-debug-clone-shell">
-              <div class="audio-debug-clone-form">
+              <div class="audio-debug-clone-section">
+                <div class="audio-debug-clone-section-title">
+                  <strong>音频样本</strong>
+                </div>
+                <div class="audio-debug-field-grid">
+                  <label>本地个人音频
+                    <input id="aliyunCloneLocalAudioFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
+                  </label>
+                  <label class="audio-debug-field-wide">参考音频公网 URL
+                    <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
+                  </label>
+                </div>
+                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机，可用于 VoxCPM2 本地仿声；阿里云声音复刻仍需要填写公网 URL。</div>
+              </div>
+              <div class="audio-debug-clone-section">
+                <div class="audio-debug-clone-section-title">
+                  <strong>阿里云复刻配置</strong>
+                </div>
                 <div class="audio-debug-field-grid">
                   <label>阿里云 API Key
                     <input id="aliyunCloneApiKey" type="password" autocomplete="off" spellcheck="false" placeholder="DashScope / Model Studio API Key" />
@@ -3565,12 +3602,6 @@ INDEX_HTML = r"""<!doctype html>
                   <label>音色前缀
                     <input id="aliyunClonePrefix" autocomplete="off" spellcheck="false" placeholder="例如 my_voice" />
                   </label>
-                  <label>本地个人音频
-                    <input id="aliyunCloneLocalAudioFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
-                  </label>
-                  <label class="audio-debug-field-wide">参考音频公网 URL
-                    <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
-                  </label>
                   <label>样本语言
                     <select id="aliyunCloneLanguage">
                       <option value="中文" selected>中文</option>
@@ -3591,14 +3622,17 @@ INDEX_HTML = r"""<!doctype html>
                     </select>
                   </label>
                 </div>
-                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机，可用于 VoxCPM2 本地仿声；阿里云声音复刻仍需要填写公网 URL。</div>
+              </div>
+              <div class="audio-debug-clone-section">
                 <div class="audio-debug-clone-actions">
                   <button class="primary" id="createAliyunCloneBtn" type="button">创建复刻音色</button>
                   <span class="status" id="aliyunCloneStatus">未创建</span>
                 </div>
               </div>
-              <div class="audio-debug-saved-voice">
-                <strong>使用复刻音色</strong>
+              <div class="audio-debug-clone-section audio-debug-saved-voice">
+                <div class="audio-debug-clone-section-title">
+                  <strong>使用复刻音色</strong>
+                </div>
                 <label>已保存复刻音色
                   <select id="aliyunCloneVoiceSelect">
                     <option value="">未保存复刻音色</option>
