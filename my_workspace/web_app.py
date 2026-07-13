@@ -3654,7 +3654,7 @@ INDEX_HTML = r"""<!doctype html>
                     </select>
                   </label>
                   <label>音色前缀
-                    <input id="aliyunClonePrefix" autocomplete="off" spellcheck="false" placeholder="例如 my_voice" />
+                    <input id="aliyunClonePrefix" autocomplete="off" spellcheck="false" placeholder="例如 myvoice，仅英文字母和数字" />
                   </label>
                   <label>样本语言
                     <select id="aliyunCloneLanguage">
@@ -8829,11 +8829,18 @@ INDEX_HTML = r"""<!doctype html>
       setStatus(`已使用复刻音色：${item.voice_id}`);
     }
 
+    function normalizeAliyunClonePrefix(value) {
+      const normalized = String(value || '').replace(/[^A-Za-z0-9]/g, '');
+      return normalized || 'myvoice';
+    }
+
     async function createAliyunCosyVoiceClone() {
       const apiKey = String(els.aliyunCloneApiKey?.value || els.aliyunTtsApiKey?.value || '').trim();
       const workspaceId = String(els.aliyunCloneWorkspaceId?.value || '').trim();
       const audioUrl = String(els.aliyunCloneAudioUrl?.value || '').trim();
-      const prefix = String(els.aliyunClonePrefix?.value || '').trim();
+      const rawPrefix = String(els.aliyunClonePrefix?.value || '').trim();
+      const prefix = normalizeAliyunClonePrefix(rawPrefix);
+      if (els.aliyunClonePrefix && rawPrefix !== prefix) els.aliyunClonePrefix.value = prefix;
       if (!apiKey) {
         setStatus('请先在系统配置或音频调试台填写阿里云 API Key', true);
         return;
@@ -8847,7 +8854,7 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       if (!prefix) {
-        setStatus('请填写音色前缀', true);
+        setStatus('请填写音色前缀，仅支持英文字母和数字，例如 myvoice', true);
         return;
       }
       const originalText = els.createAliyunCloneBtn?.textContent || '';
@@ -21033,12 +21040,17 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             encoding="utf-8",
         )
 
+    @staticmethod
+    def _normalize_aliyun_clone_prefix(value: object) -> str:
+        normalized = re.sub(r"[^A-Za-z0-9]", "", str(value or ""))
+        return normalized or "myvoice"
+
     def _create_aliyun_cosyvoice_clone(self, payload: dict) -> dict:
         api_key = str(payload.get("api_key") or "").strip()
         workspace_id = str(payload.get("workspace_id") or "").strip()
         region = str(payload.get("region") or "cn-beijing").strip() or "cn-beijing"
         target_model = str(payload.get("target_model") or "cosyvoice-v3-flash").strip() or "cosyvoice-v3-flash"
-        prefix = str(payload.get("prefix") or "").strip()
+        prefix = self._normalize_aliyun_clone_prefix(payload.get("prefix"))
         audio_url = str(payload.get("audio_url") or "").strip()
         language = str(payload.get("language") or "中文").strip() or "中文"
         max_seconds = int(float(payload.get("max_seconds") or 15))
@@ -21048,7 +21060,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not workspace_id:
             raise ValueError("Aliyun Workspace ID is required")
         if not prefix:
-            raise ValueError("voice prefix is required")
+            raise ValueError("voice prefix is required; use English letters and numbers only")
         if not re.match(r"^https?://", audio_url, flags=re.I):
             raise ValueError("reference audio must be a public HTTP/HTTPS URL")
         if max_seconds <= 0:
