@@ -10,6 +10,7 @@ from typing import Callable
 
 from .codex_api import CodexAPI, LLMResult
 from .action_executor import ActionExecutor
+from .memory_context import load_long_term_memory_context
 from .production_pipeline import run_auto_production
 from .production_output_validator import validate_production_output
 from .requirement_guard import (
@@ -1755,6 +1756,10 @@ class WorkflowEngine:
             except (json.JSONDecodeError, OSError):
                 saved = {}
         merged = self._deep_merge_dicts(saved, incoming if isinstance(incoming, dict) else {})
+        if "video_memory_context" in saved or (
+            isinstance(incoming, dict) and "video_memory_context" in incoming
+        ):
+            merged["video_memory_context"] = load_long_term_memory_context(self.workspace_root / "my_memory")
         sanitized = self._sanitize_production_config(merged)
         self.storage.write_json(snapshot_path, sanitized)
         return merged

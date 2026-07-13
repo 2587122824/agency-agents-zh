@@ -27,6 +27,10 @@ from PIL import Image
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter
 from my_codex_core.comfy_mcp_adapter import ComfyMCPAdapter
 from my_codex_core.local_tts_adapter import LocalTTSAdapter
+from my_codex_core.memory_context import (
+    load_long_term_memory_context,
+    memory_document_has_user_values as _memory_document_has_user_values,
+)
 from my_codex_core.production_entities import load_production_entities, write_production_entities
 from my_codex_core.production_pipeline import retry_production_job
 from my_codex_core.production_plan_compiler import compile_production_plan, sanitize_generation_prompt
@@ -85,19 +89,6 @@ DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = ""
 DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = ""
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
-
-
-def _memory_document_has_user_values(content: str) -> bool:
-    for raw_line in str(content or "").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if re.fullmatch(r"[-*]\s*[^:：]+[:：]\s*", line):
-            continue
-        return True
-    return False
-
-
 IMAGE_EXTENSIONS = {
     ".png",
     ".jpg",
@@ -21876,18 +21867,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return f"{user_input}\n\n## 长期记忆\n{context}\n"
 
     def _long_term_memory_context(self) -> str:
-        if not MEMORY_ROOT.exists():
-            return ""
-
-        sections = []
-        for path in sorted(MEMORY_ROOT.glob("*.md")):
-            content = path.read_text(encoding="utf-8", errors="replace").strip()
-            if content and _memory_document_has_user_values(content):
-                sections.append(f"### {path.name}\n{content}")
-
-        if not sections:
-            return ""
-        return "\n\n".join(sections)
+        return load_long_term_memory_context(MEMORY_ROOT)
 
     def _append_knowledge_base(self, user_input: str) -> str:
         knowledge_root = self._active_knowledge_root()

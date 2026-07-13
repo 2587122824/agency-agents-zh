@@ -29,6 +29,8 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - `20_` must not invent TTS engines, voice names, clone IDs, speed, or pitch. Runtime generation uses the selected system audio configuration.
 - The active long-video workflow requires only the topic/product information. Platform, audience, duration, purpose, available assets, and restrictions are optional inputs and remain `未指定` when omitted.
 - Verification on 2026-07-13: `python -m compileall -q my_workspace`, 157 semantic-contract tests, JSON validation, and the rejected real task `task_20260713_215010_*` step 20 regression all passed.
+- Production-output parsing accepts either one strict raw JSON object or one/more fenced `json` blocks, matching the staff output contract. It does not extract or repair JSON embedded in mixed prose.
+- Resuming an older task refreshes `video_memory_context` from the current `my_memory` files when that scope was enabled. Stale template text saved in an old `production_config_snapshot.json` is not reused.
 
 ## Current UX Rules
 

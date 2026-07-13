@@ -413,8 +413,12 @@ def _compact_timeline_reaches_duration(compact: dict[str, Any], duration: int) -
 
 
 def _json_objects(content: str) -> list[dict[str, Any]]:
+    text = str(content or "").strip()
+    blocks = re.findall(r"```json\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
+    if not blocks and text:
+        blocks = [text]
     values: list[dict[str, Any]] = []
-    for block in re.findall(r"```json\s*(.*?)```", str(content or ""), flags=re.IGNORECASE | re.DOTALL):
+    for block in blocks:
         try:
             value = json.loads(_strip_json_comments(block))
         except Exception:

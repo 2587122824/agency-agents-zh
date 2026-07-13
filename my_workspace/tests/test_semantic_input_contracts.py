@@ -258,6 +258,25 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertTrue(web_app._memory_document_has_user_values("# 标题\n- 角色名称：小美\n"))
         self.assertEqual(web_app.WorkflowWebHandler._long_term_memory_context(None), "")
 
+    def test_resume_refreshes_stale_video_memory_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            task_dir = workspace / "my_task_output" / "task_resume"
+            memory_root = workspace / "my_memory"
+            task_dir.mkdir(parents=True)
+            memory_root.mkdir(parents=True)
+            (memory_root / "style_guide.md").write_text("# 风格\n- 画幅：\n", encoding="utf-8")
+            (task_dir / "production_config_snapshot.json").write_text(
+                json.dumps({"video_memory_context": "旧的默认画幅和负面提示词"}, ensure_ascii=False),
+                encoding="utf-8",
+            )
+
+            restored = WorkflowEngine(workspace)._restore_production_config(task_dir, {})
+
+            self.assertEqual(restored["video_memory_context"], "")
+            persisted = json.loads((task_dir / "production_config_snapshot.json").read_text(encoding="utf-8"))
+            self.assertEqual(persisted["video_memory_context"], "")
+
     def test_requirement_guard_accepts_storyboard_timestamp_reaching_target(self) -> None:
         lock = build_requirement_lock("小美的田径训练日记，竖屏1分钟")
         outputs = (
@@ -594,7 +613,7 @@ class SemanticInputContractTests(unittest.TestCase):
 
         accepted = WorkflowEngine._combined_output_validation(
             lock,
-            f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
+            json.dumps(payload, ensure_ascii=False),
             {"step": 5, "agent": "20_语音字幕包装师"},
             previous_outputs,
         )
