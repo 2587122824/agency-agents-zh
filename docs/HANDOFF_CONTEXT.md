@@ -35,6 +35,8 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - The production compiler no longer promotes character B-roll to I2V. It raises an explicit classification error if invalid B-roll reaches compilation, so the backend does not silently change the employee's route or create a replacement creative route.
 - `23_长视频策划编导` must classify visible body close-ups as character shots, and `06_分镜生图设计师` must produce an explicit character keyframe for every visible person/body-part shot. A negative clause such as `无人物出现` remains valid for environment/object B-roll.
 - `23_长视频策划编导` has an explicit delivery-constraints section and must repeat user-specified duration and aspect/orientation before writing the shot plan.
+- Talking-image `source_intent_ids` may contain both an upstream character image and an audio intent such as `voiceover_main`; employee validation checks the image dependency without misclassifying the audio dependency as an image.
+- Distant silhouettes, tiny people, and character-representing light dots still count as character shots. They require a character keyframe and may not be classified as environment B-roll.
 - I2V intents and legacy I2V prompts must reference an existing upstream image explicitly. The compiler no longer guesses a same-numbered keyframe or generates/restores a missing keyframe; missing or dangling image references fail compilation.
 
 ## Current UX Rules

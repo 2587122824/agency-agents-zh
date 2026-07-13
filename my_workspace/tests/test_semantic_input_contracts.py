@@ -540,6 +540,54 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertTrue(any("必须显式引用一张上游图片" in issue for issue in result["issues"]), result["issues"])
 
+    def test_talking_image_validator_allows_audio_and_image_source_ids(self) -> None:
+        previous_outputs = [
+            {
+                "agent": "06_分镜生图设计师",
+                "content": json.dumps(
+                    {
+                        "production_intents": {
+                            "image": [
+                                {
+                                    "intent": "generate_keyframe",
+                                    "intent_id": "shot_001_keyframe",
+                                    "character_id": "character_xiaomei",
+                                }
+                            ]
+                        },
+                        "image_prompts": [
+                            {"asset_tag": "shot_001_keyframe", "width": 480, "height": 848}
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ]
+        payload = {
+            "production_intents": {
+                "video": [
+                    {
+                        "intent": "generate_talking_image",
+                        "intent_id": "clip_001_talking",
+                        "source_intent_ids": ["shot_001_keyframe", "voiceover_main"],
+                        "character_id": "character_xiaomei",
+                    }
+                ]
+            },
+            "video_prompts": [
+                {"asset_tag": "clip_001_talking", "width": 480, "height": 848}
+            ],
+        }
+
+        result = validate_production_output(
+            {"agent": "07_视频生成执行员"},
+            json.dumps(payload, ensure_ascii=False),
+            build_requirement_lock("小美的田径训练日记，竖屏1分钟"),
+            previous_outputs,
+        )
+
+        self.assertTrue(result["passed"], result["issues"])
+
     def test_requirement_guard_accepts_skipped_video_package_without_topic_terms(self) -> None:
         content = json.dumps(
             {

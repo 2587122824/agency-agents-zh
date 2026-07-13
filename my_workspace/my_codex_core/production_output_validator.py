@@ -289,11 +289,20 @@ def _validate_videos(
             for ref in [*source_ids, *refs]:
                 if upstream_ids and ref not in upstream_ids:
                     issues.append(f"视频意图 {intent_id or index} 引用了不存在的上游图片：{ref}")
-        elif intent in {"generate_i2v_clip", "generate_talking_image"}:
+        elif intent == "generate_i2v_clip":
             refs = list(dict.fromkeys([*_string_list(item.get("source_intent_ids")), *_reference_ids(item)]))
             if not refs:
                 issues.append(f"图生视频意图 {intent_id or index} 必须显式引用一张上游图片")
             for ref in refs:
+                if upstream_ids and ref not in upstream_ids:
+                    issues.append(f"视频意图 {intent_id or index} 引用了不存在的上游图片：{ref}")
+        elif intent == "generate_talking_image":
+            explicit_refs = _reference_ids(item)
+            source_image_refs = [ref for ref in _string_list(item.get("source_intent_ids")) if ref in upstream_ids]
+            image_refs = list(dict.fromkeys([*explicit_refs, *source_image_refs]))
+            if not image_refs:
+                issues.append(f"口播视频意图 {intent_id or index} 必须显式引用一张上游人物图片")
+            for ref in explicit_refs:
                 if upstream_ids and ref not in upstream_ids:
                     issues.append(f"视频意图 {intent_id or index} 引用了不存在的上游图片：{ref}")
         if intent == "generate_broll_clip":

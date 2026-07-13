@@ -128,6 +128,7 @@ version: 2026-06-30
 - 多帧控制统一规划首 / 中 / 尾三帧；不要规划 `first_last_frame`。
 - 07 所需的每一张输入帧都必须由本步骤真实规划，不得引用未生成的占位文件。三帧意图 `intent_id=shot_003_frames` 编译后的稳定引用名为 `shot_003_frames_start_frame`、`shot_003_frames_middle_frame`、`shot_003_frames_end_frame`。
 - 逐镜头检查真实画面内容：只要出现角色姓名、人物、面部、手、手臂、脚、腿、背部或其他身体局部，就必须为该镜头输出带 `character_id` 的 `generate_keyframe` 或 `generate_three_frame_shot`。即使 23 的表格把身体特写写成 B-roll，也不能省略输入帧；应按画面事实把它作为角色图生视频的上游图片需求，且不得改变镜头内容。
+- 远景剪影、小人影或代表角色的“小光点”也必须带对应 `character_id`；不能因为人物占画面很小就把角色 ID 留空。
 - `intent_id`、兼容层 `asset_tag` 与下游引用必须保持同一命名体系，禁止临时改名或只写模糊文件路径。
 - 员工只描述“需要什么图、为什么需要、风格和角色如何保持”，不要写底层节点 ID。
 
