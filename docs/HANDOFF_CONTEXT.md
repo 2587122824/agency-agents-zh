@@ -10,7 +10,10 @@ Last compacted: 2026-07-13
 - Generated I2V files were verified as distinct H.264 MP4 files at 24fps and about 4.042 seconds each. The new workflow outputs `576x1024`; the two existing environment clips remain `448x832` and are normalized during final composition.
 - Visual review shows that the new I2V workflow follows its supplied first frame. Remaining character/clothing inconsistency comes from the previously generated upstream keyframes, not from prompt replacement or reuse of one output video.
 - Voice-provider fallback was removed. A narration requirement no longer silently enables VoxCPM2 when system audio is off, and VoxCPM2 failure/timeout no longer switches to Windows SAPI. The selected provider now returns its own visible failure and stops.
-- Verification: `python -m compileall -q my_workspace`, 161 semantic-contract tests, and focused no-TTS-fallback tests passed.
+- Visual-only FFmpeg composition is no longer allowed when usable employee voiceover text exists. A missing/disabled TTS provider remains a required `local_tts` dependency, returns a visible failure, and blocks FFmpeg instead of producing a silent final MP4. Visual-only composition remains valid only when there is no usable voiceover text.
+- Real-task regression on `task_20260713_215010_小美的田径训练日记_竖屏1分钟长视频`: TTS retry now returns `local_tts_failed / TTS provider is not configured`; FFmpeg retry returns `ffmpeg_dependency_blocked / local_tts: not_configured`; no final MP4 is produced.
+- The task contains 314 usable narration characters and the selected cloned voice record exists, but the task snapshot is `mode=off` and there is no DashScope/CosyVoice API Key in task config, runtime config, process/user/machine environment, or saved debug manifests. A real CosyVoice retry requires the user's DashScope API Key; do not substitute an old debug MP3 or another provider.
+- Verification: `python -m compileall -q my_workspace`, 167 semantic-contract tests, focused no-TTS-fallback tests, and the real-task TTS/FFmpeg regressions passed.
 
 ## Project Snapshot
 

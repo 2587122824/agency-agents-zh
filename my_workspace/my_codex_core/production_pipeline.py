@@ -584,7 +584,19 @@ def run_auto_production(
         return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "ComfyUI 素材门禁完成")
 
     material_enabled = mode in {"api_ready", "comfy_full"}
-    tts_enabled = _voice_config_tts_enabled(voice_config) and bool(voice_text_quality.get("usable"))
+    tts_required = bool(voice_text_quality.get("usable"))
+    tts_enabled = _voice_config_tts_enabled(voice_config) and tts_required
+    if tts_required and not tts_enabled:
+        manifest["audio"]["adapter_status"] = "not_configured"
+        _upsert_production_node(
+            manifest,
+            "local_tts",
+            stage="08_audio_visual_packaging",
+            mode="local_tts",
+            status="not_configured",
+            outputs=[],
+            error="Voiceover text exists, but no TTS provider is configured.",
+        )
     talking_image_requires_audio = _payload_has_required_mode(comfyui_payload, "talking_image")
     if material_enabled and tts_enabled and talking_image_requires_audio:
         emit("检测到数字人口播：先生成最终 WAV，再执行口型工作流", stage="production")
@@ -655,8 +667,8 @@ def run_auto_production(
     )
 
     emit("开始本地 FFmpeg 剪辑/预览合成", stage="ffmpeg")
-    ffmpeg_depends_on = _ffmpeg_dependency_ids(manifest, tts_enabled)
-    dependency_blockers = _packaging_dependency_blockers(manifest, tts_enabled, material_enabled)
+    ffmpeg_depends_on = _ffmpeg_dependency_ids(manifest, tts_required)
+    dependency_blockers = _packaging_dependency_blockers(manifest, tts_required, material_enabled)
     if dependency_blockers:
         blocked_reason = "; ".join(dependency_blockers)
         manifest["status"] = "ffmpeg_dependency_blocked"
@@ -909,7 +921,11 @@ def retry_production_job(
             "production_graph_path": str(task_dir / "production_graph.json"),
             "production_task_id": task_dir.name,
             "global_context": manifest.get("global_context") if isinstance(manifest.get("global_context"), dict) else {},
-            "packaging_jobs": _packaging_graph_jobs({}, voice_config),
+            "packaging_jobs": _packaging_graph_jobs(
+                {},
+                voice_config,
+                _manifest_requires_tts_for_packaging(manifest),
+            ),
         }
     )
     quality_config = _retry_quality_config(manifest, config)
@@ -1217,11 +1233,6 @@ def _retry_ffmpeg_job(
     nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
     tts_enabled = _manifest_requires_tts_for_packaging(manifest)
     if not tts_enabled:
-        _mark_optional_audio_packaging_skipped(
-            manifest,
-            "local_tts",
-            "No usable voiceover text or generated WAV; composing a visual-only video.",
-        )
         _mark_optional_audio_packaging_skipped(
             manifest,
             "bgm_select",
@@ -1715,9 +1726,6 @@ def _run_local_tts_adapter(
     voice_config: dict[str, Any],
     output_dir: Path,
 ) -> dict[str, Any] | None:
-    mode = str(voice_config.get("mode") or "off").strip().lower()
-    if mode in {"", "off"}:
-        return {"status": "skipped", "reason": "local TTS is disabled"}
     try:
         workspace_root = Path(__file__).resolve().parents[1]
         return LocalTTSAdapter(workspace_root=workspace_root).run(
@@ -3046,7 +3054,7 @@ def _packaging_graph_jobs(
     voice_config: dict[str, Any],
     voice_text_usable: bool | None = None,
 ) -> list[dict[str, Any]]:
-    tts_enabled = _voice_config_tts_enabled(voice_config) and voice_text_usable is not False
+    tts_enabled = voice_text_usable is True
     jobs: list[dict[str, Any]] = []
     if tts_enabled:
         jobs.append(
@@ -3163,6 +3171,8 @@ def _manifest_requires_tts_for_packaging(manifest: dict[str, Any]) -> bool:
 
     voice_text_status = str(audio.get("voice_text_status") or "").strip().lower()
     voice_text_usable = voice_text_status in {"ok", "usable", "success"}
+    if voice_text_usable:
+        return True
     adapter_status = str(audio.get("adapter_status") or "").strip().lower()
     nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
     tts_node = next((node for node in nodes if node.get("job_id") == "local_tts"), None)
@@ -3170,8 +3180,6 @@ def _manifest_requires_tts_for_packaging(manifest: dict[str, Any]) -> bool:
 
     if adapter_status == "success" or tts_node_status == "success":
         return True
-    if not voice_text_usable:
-        return False
     if tts_node and tts_node_status not in {"", "skipped", "not_configured"}:
         return True
     return adapter_status not in {"", "off", "not_configured", "skipped"}
@@ -3232,11 +3240,11 @@ def _packaging_dependency_blockers(manifest: dict[str, Any], tts_enabled: bool, 
     if tts_enabled:
         tts_node = next((node for node in nodes if node.get("job_id") == "local_tts"), None)
         tts_status = str((tts_node or {}).get("status") or (manifest.get("audio") or {}).get("adapter_status") or "")
-        if tts_status not in ok_statuses:
+        if tts_status not in {"success", "cached", "downloaded"}:
             reason = str((tts_node or {}).get("blocked_reason") or (tts_node or {}).get("error") or tts_status or "not completed")
             blockers.append(f"local_tts: {reason}")
-        elif not str((manifest.get("audio") or {}).get("voiceover_audio_file") or "").strip() and tts_status not in {"skipped", "not_configured"}:
-            blockers.append("local_tts: voiceover WAV is missing")
+        elif not str((manifest.get("audio") or {}).get("voiceover_audio_file") or "").strip():
+            blockers.append("local_tts: voiceover audio is missing")
 
     return blockers
 

@@ -31,6 +31,8 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _clean_voice_text,
     _downgrade_unconfigured_visual_jobs_for_available_slots,
     _filter_skip_execution_visual_nodes,
+    _manifest_requires_tts_for_packaging,
+    _packaging_graph_jobs,
     _packaging_dependency_blockers,
     _payload_for_material_type,
     _payload_has_required_mode,
@@ -38,6 +40,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _preflight_visual_jobs,
     _quality_check_voice_text,
     _quality_check_srt,
+    _run_local_tts_adapter,
     _run_comfyui_adapter_with_quality_gate,
     _required_workflow_slots,
     _srt_from_voice_text,
@@ -3491,6 +3494,56 @@ class SemanticInputContractTests(unittest.TestCase):
         talking_node = next(node for node in manifest["production_nodes"] if node["job_id"] == "talking_image")
         self.assertEqual(talking_node["status"], "skipped")
 
+    def test_usable_voice_text_requires_tts_even_when_provider_is_not_configured(self) -> None:
+        manifest = {
+            "audio": {
+                "voice_text_status": "ok",
+                "adapter_status": "not_configured",
+                "voiceover_audio_file": "",
+            },
+            "production_nodes": [],
+        }
+        self.assertTrue(_manifest_requires_tts_for_packaging(manifest))
+
+    def test_required_tts_blocks_ffmpeg_when_provider_is_not_configured(self) -> None:
+        manifest = {
+            "audio": {"adapter_status": "not_configured", "voiceover_audio_file": ""},
+            "production_nodes": [
+                {
+                    "job_id": "local_tts",
+                    "stage": "08_audio_visual_packaging",
+                    "status": "not_configured",
+                    "error": "Voiceover text exists, but no TTS provider is configured.",
+                }
+            ],
+        }
+        blockers = _packaging_dependency_blockers(manifest, tts_enabled=True, material_enabled=False)
+        self.assertEqual(
+            blockers,
+            ["local_tts: Voiceover text exists, but no TTS provider is configured."],
+        )
+
+    def test_packaging_graph_keeps_tts_dependency_for_usable_voice_text(self) -> None:
+        jobs = _packaging_graph_jobs({}, {"mode": "off", "provider": ""}, voice_text_usable=True)
+        jobs_by_id = {job["job_id"]: job for job in jobs}
+        self.assertIn("local_tts", jobs_by_id)
+        self.assertIn("local_tts", jobs_by_id["ffmpeg_compose"]["depends_on"])
+
+    def test_unconfigured_tts_returns_visible_failure(self) -> None:
+        adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
+        result = adapter.run("需要生成旁白。", {"mode": "off", "provider": ""}, Path.cwd())
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("not configured", result["error"])
+
+    def test_production_tts_wrapper_does_not_skip_unconfigured_provider(self) -> None:
+        result = _run_local_tts_adapter(
+            "需要生成旁白。",
+            {"mode": "off", "provider": ""},
+            Path.cwd(),
+        )
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("not configured", result["error"])
+
     def test_runninghub_comfy_full_allows_local_ffmpeg_composition(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -3528,6 +3581,9 @@ class SemanticInputContractTests(unittest.TestCase):
 
     def test_api_adapter_skipped_is_failed_production_status(self) -> None:
         self.assertTrue(web_app.WorkflowWebHandler._is_failed_production_status("api_adapter_skipped"))
+
+    def test_blocked_production_status_is_failed(self) -> None:
+        self.assertTrue(web_app.WorkflowWebHandler._is_failed_production_status("ffmpeg_dependency_blocked"))
 
     def test_unconfigured_multi_identity_keyframe_stays_strictly_required(self) -> None:
         visual_jobs = [

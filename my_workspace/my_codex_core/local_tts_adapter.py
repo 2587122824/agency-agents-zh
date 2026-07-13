@@ -22,13 +22,13 @@ class LocalTTSAdapter:
         mode = str(voice_config.get("mode") or "off").strip().lower()
         provider = str(voice_config.get("provider") or "").strip().lower()
         if mode in {"", "off"} or provider in {"", "none"}:
-            return {"status": "skipped", "reason": "local TTS is disabled"}
+            return {"status": "failed", "error": "TTS provider is not configured"}
         if provider in {"windows_sapi", "sapi"} or mode in {"windows_sapi", "sapi"}:
             return self._run_windows_sapi(voice_text, voice_config, output_dir)
         if provider in {"aliyun_cosyvoice", "cosyvoice"} or mode in {"aliyun_cosyvoice", "cosyvoice"}:
             return self._run_aliyun_cosyvoice(voice_text, voice_config, output_dir)
         if provider != "voxcpm2":
-            return {"status": "skipped", "reason": f"unsupported local TTS provider: {provider}"}
+            return {"status": "failed", "error": f"unsupported local TTS provider: {provider}"}
 
         text = str(voice_text or "").strip()
         if not text:
@@ -39,7 +39,7 @@ class LocalTTSAdapter:
         reference_audio = str(voice_config.get("reference_audio") or "").strip()
         needs_reference_audio = mode in {"clone", "voice_clone"} or bool(reference_audio)
         if needs_reference_audio and not reference_audio:
-            return {"status": "skipped", "reason": "VoxCPM2 reference audio is missing"}
+            return {"status": "failed", "error": "VoxCPM2 reference audio is missing"}
         if reference_audio:
             reference_audio_path = Path(reference_audio)
             if not reference_audio_path.is_absolute():
@@ -191,7 +191,7 @@ class LocalTTSAdapter:
             or ""
         ).strip()
         if not api_key:
-            return {"status": "skipped", "reason": "Aliyun CosyVoice API Key is missing"}
+            return {"status": "failed", "error": "Aliyun CosyVoice API Key is missing"}
 
         workspace_id = str(voice_config.get("aliyun_workspace_id") or "").strip()
         endpoint = self._aliyun_cosyvoice_endpoint(voice_config)
