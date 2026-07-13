@@ -1511,22 +1511,6 @@ def _looks_like_retro_period_context(text: str) -> bool:
     )
 
 
-def _previous_character_reference_job(items: list[dict[str, Any]], character_id: str) -> dict[str, Any] | None:
-    target = str(character_id or "").strip()
-    for item in reversed(items):
-        if not isinstance(item, dict):
-            continue
-        if target and str(item.get("character_id") or "").strip() != target:
-            continue
-        mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
-        job_id = str(item.get("job_id") or item.get("id") or "").strip().lower()
-        if _looks_like_expression_sheet(job_id):
-            continue
-        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"} or str(item.get("asset_tag") or "").strip().lower() in {"character", "character_base"}:
-            return item
-    return None
-
-
 def _is_character_asset_variant_role(asset_role: str) -> bool:
     role = str(asset_role or "").strip().lower()
     if not role:
@@ -1553,28 +1537,12 @@ def _apply_generated_character_reference_policy(
     existing_items: list[dict[str, Any]],
     notes: list[str] | None = None,
 ) -> None:
-    prompt_text = " ".join(
-        str(value or "")
-        for value in (
-            item.get("job_id"),
-            item.get("prompt"),
-            intent.get("prompt"),
-            intent.get("description"),
-            intent.get("visual_description"),
-        )
-    )
     character_id = str(item.get("character_id") or intent.get("character_id") or "").strip()
-    if not character_id and _looks_like_main_character_prompt(prompt_text):
-        character_id = _single_previous_character_id(existing_items)
-        if character_id:
-            item["character_id"] = character_id
     if not character_id:
         return
 
     intent_name = str(intent.get("intent") or "").strip()
     reference_job = _character_master_reference_job(existing_items, character_id)
-    if not reference_job:
-        reference_job = _referenced_previous_character_job_from_prompt(existing_items, prompt_text)
     if not reference_job:
         return
     reference_job_id = str(reference_job.get("job_id") or reference_job.get("id") or "").strip()
@@ -1628,26 +1596,6 @@ def _apply_generated_character_reference_policy(
 def _looks_like_main_character_prompt(text: str) -> bool:
     value = str(text or "").lower()
     return any(token in value for token in ("主角", "主人公", "同一主角", "protagonist", "main character", "same protagonist"))
-
-
-def _single_previous_character_id(items: list[dict[str, Any]]) -> str:
-    ids: list[str] = []
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        character_id = str(item.get("character_id") or "").strip()
-        if not character_id:
-            continue
-        mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
-        if mode not in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"}:
-            continue
-        if character_id not in ids:
-            ids.append(character_id)
-    if len(ids) == 1:
-        return ids[0]
-    if ids and all(_looks_like_main_character_id(value) for value in ids):
-        return ids[0]
-    return ""
 
 
 def _character_master_reference_job(items: list[dict[str, Any]], character_id: str) -> dict[str, Any] | None:
@@ -1714,62 +1662,16 @@ def _generated_scene_reference_job(
     if not scene_items:
         return None
     item_scene_id = str(item.get("scene_id") or intent.get("scene_id") or intent.get("shot_id") or "").strip()
-    if item_scene_id:
-        exact = _preferred_scene_reference_candidate(
-            [
-                candidate
-                for candidate in scene_items
-                if str(candidate.get("scene_id") or "").strip() == item_scene_id
-            ]
-        )
-        if exact:
-            return exact
-        normalized_scene = _normalized_scene_key(item_scene_id)
-        if normalized_scene:
-            fuzzy = _preferred_scene_reference_candidate(
-                [
-                    candidate
-                    for candidate in scene_items
-                    if normalized_scene and normalized_scene == _normalized_scene_key(candidate.get("scene_id"))
-                ]
-            )
-            if fuzzy:
-                return fuzzy
-    if not _scene_token_fallback_allowed(item, intent):
+    if not item_scene_id:
         return None
-    target_tokens = _scene_match_tokens(item, intent)
-    if target_tokens:
-        scored: list[tuple[int, int, dict[str, Any]]] = []
-        for index, candidate in enumerate(scene_items):
-            candidate_tokens = _scene_match_tokens(candidate, {})
-            score = len(target_tokens.intersection(candidate_tokens))
-            if score:
-                scored.append((score, _scene_reference_priority(candidate), index, candidate))
-        if scored:
-            scored.sort(key=lambda value: (value[0], value[1], value[2]), reverse=True)
-            return scored[0][3]
-    return None
-
-
-def _preferred_scene_reference_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any] | None:
-    if not candidates:
-        return None
-    return max(enumerate(candidates), key=lambda value: (_scene_reference_priority(value[1]), -value[0]))[1]
-
-
-def _scene_reference_priority(item: dict[str, Any]) -> int:
-    workflow_mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
-    asset_tag = str(item.get("asset_tag") or item.get("asset_role") or "").strip().lower()
-    job_id = str(item.get("job_id") or item.get("id") or "").strip().lower()
-    if workflow_mode == "scene_base" and (asset_tag in {"scene", "scene_base"} or job_id.startswith(("base_scene", "asset_scene", "scene_"))):
-        return 40
-    if workflow_mode == "scene_base":
-        return 30
-    if asset_tag in {"scene", "scene_base"} or job_id.startswith(("base_scene", "asset_scene", "scene_")):
-        return 20
-    if asset_tag in {"background", "bg", "environment", "location"} or job_id.startswith("base_bg"):
-        return 10
-    return 0
+    exact = [
+        candidate
+        for candidate in scene_items
+        if str(candidate.get("scene_id") or "").strip() == item_scene_id
+    ]
+    if len(exact) > 1:
+        raise ValueError(f"scene_id {item_scene_id} resolves to multiple generated scene references")
+    return exact[0] if exact else None
 
 
 def _is_scene_reference_item(item: Any) -> bool:
@@ -1777,108 +1679,10 @@ def _is_scene_reference_item(item: Any) -> bool:
         return False
     workflow_mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
     asset_tag = str(item.get("asset_tag") or item.get("asset_role") or "").strip().lower()
-    job_id = str(item.get("job_id") or item.get("id") or "").strip().lower()
     return (
         workflow_mode == "scene_base"
         or asset_tag in SCENE_ASSET_ROLES
-        or job_id.startswith(("asset_scene", "base_scene", "base_bg", "scene_"))
     )
-
-
-def _normalized_scene_key(value: Any) -> str:
-    text = str(value or "").strip().lower()
-    if not text:
-        return ""
-    replacements = {
-        "base": "low",
-        "low": "low",
-        "30": "low",
-        "30cm": "low",
-        "medium": "mid",
-        "middle": "mid",
-        "mid": "mid",
-        "60": "mid",
-        "60cm": "mid",
-        "high": "high",
-        "1m": "high",
-        "100": "high",
-        "100cm": "high",
-    }
-    for token, normalized in replacements.items():
-        if re.search(rf"(^|[_\-\s]){re.escape(token)}($|[_\-\s])", text) or token in text:
-            return normalized
-    return text
-
-
-def _scene_match_tokens(item: dict[str, Any], intent: dict[str, Any]) -> set[str]:
-    text = " ".join(
-        str(value or "")
-        for value in (
-            item.get("job_id"),
-            item.get("id"),
-            item.get("scene_id"),
-            item.get("asset_tag"),
-            item.get("prompt"),
-            intent.get("scene_id"),
-            intent.get("shot_id"),
-            intent.get("prompt"),
-            intent.get("description"),
-        )
-    ).lower()
-    tokens: set[str] = set()
-    if any(token in text for token in ("30cm", "30 cm", "30厘米", "低高度", "low", "base", "platform_low")):
-        tokens.add("low")
-    if any(token in text for token in ("60cm", "60 cm", "60厘米", "中等高度", "medium", "middle", "mid", "platform_mid")):
-        tokens.add("mid")
-    if any(token in text for token in ("1m", "1 m", "100cm", "100 cm", "一米", "1米", "较高", "高高度", "high", "platform_high")):
-        tokens.add("high")
-    return tokens
-
-
-def _scene_token_fallback_allowed(item: dict[str, Any], intent: dict[str, Any]) -> bool:
-    text = " ".join(
-        str(value or "")
-        for value in (
-            item.get("job_id"),
-            item.get("id"),
-            item.get("asset_tag"),
-            item.get("prompt"),
-            intent.get("prompt"),
-            intent.get("description"),
-        )
-    ).lower()
-    return any(
-        token in text
-        for token in (
-            "platform",
-            "跳跃平台",
-            "平台上",
-            "平台",
-            "jump",
-            "landing",
-            "land",
-            "stands on",
-        )
-    )
-
-
-def _referenced_previous_character_job_from_prompt(items: list[dict[str, Any]], prompt: str) -> dict[str, Any] | None:
-    text = str(prompt or "")
-    for item in reversed(items):
-        if not isinstance(item, dict):
-            continue
-        character_id = str(item.get("character_id") or "").strip()
-        if not character_id or character_id not in text:
-            continue
-        mode = str(item.get("mode") or item.get("workflow_mode") or "").strip()
-        if mode in {"character_base", "character_turnaround", "img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"}:
-            return item
-    return None
-
-
-def _looks_like_main_character_id(value: str) -> bool:
-    text = str(value or "").strip().lower()
-    return bool(text) and any(token in text for token in ("main", "protagonist", "hero", "主角", "主人公", "char_main"))
 
 
 def _compile_video_intents(
@@ -2489,12 +2293,10 @@ def _bind_first_source_image(item: dict[str, Any], image_job_ids: set[str], *, s
     depends_on = item.setdefault("depends_on", [])
     for source_id in source_ids:
         candidate = _safe_id(source_id)
-        fallback = f"{candidate}_start_frame"
-        job_id = candidate if candidate in image_job_ids else fallback if fallback in image_job_ids else ""
-        if job_id:
-            bindings.setdefault(slot, {"from_job": job_id, "output": "output_final_image"})
-            if job_id not in depends_on:
-                depends_on.append(job_id)
+        if candidate in image_job_ids:
+            bindings.setdefault(slot, {"from_job": candidate, "output": "output_final_image"})
+            if candidate not in depends_on:
+                depends_on.append(candidate)
             return
 
 

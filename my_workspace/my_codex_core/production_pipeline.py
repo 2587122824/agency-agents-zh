@@ -65,6 +65,11 @@ def run_auto_production(
     video_step = _find_step(step_outputs, "07_")
     audio_step = _find_step(step_outputs, "20_")
     edit_step = _find_step(step_outputs, "22_")
+    _require_production_step_output(route_step, "01_需求拆解专员")
+    _require_production_step_output(image_step, "06_分镜生图设计师")
+    _require_production_step_output(video_step, "07_视频生成执行员")
+    _require_production_step_output(audio_step, "20_语音字幕包装师")
+    _require_production_step_output(edit_step, "22_剪辑成片执行师")
     route_content = route_step.get("content", "") if route_step else ""
     image_content = image_step.get("content", "") if image_step else ""
     video_content = video_step.get("content", "") if video_step else ""
@@ -91,33 +96,32 @@ def run_auto_production(
     compose_config["visual_provider_profile"] = visual_provider_profile
     emit("正在整理制作包：提示词、配音文案、字幕、ComfyUI 参数和剪辑方案", stage="package")
 
-    _write_text(image_prompt_path, image_content or "# 分镜生图提示词\n\n未找到 06_分镜生图设计师输出。\n")
-    _write_text(video_prompt_path, video_content or "# 视频生成提示词\n\n未找到 07_视频生成执行员输出。\n")
-    _write_text(audio_package_path, audio_content or "# 语音字幕制作包\n\n未找到 20_语音字幕包装师输出。\n")
+    _write_text(image_prompt_path, image_content)
+    _write_text(video_prompt_path, video_content)
+    _write_text(audio_package_path, audio_content)
     voice_text = _extract_voice_text(audio_content)
     voice_text_quality = _quality_check_voice_text(voice_text)
-    if not voice_text_quality["usable"] and voice_text_quality.get("status") == "disabled":
+    voice_disabled = _audio_intent_disabled(audio_content, "generate_voiceover") or voice_text_quality.get("status") == "disabled"
+    if voice_disabled:
         voice_text = ""
+        voice_text_quality = {"usable": False, "status": "disabled", "reason": "voiceover disabled"}
     elif not voice_text_quality["usable"]:
-        voice_text = "待从 20_语音字幕包装师输出中整理配音稿。\n"
+        raise ValueError(f"20_语音字幕包装师配音稿无效：{voice_text_quality.get('reason') or voice_text_quality.get('status')}")
     subtitle_srt = _extract_srt(audio_content)
     subtitle_srt_quality = _quality_check_srt(subtitle_srt)
-    if _is_no_voiceover_marker(subtitle_srt):
+    subtitles_disabled = _audio_intent_disabled(audio_content, "build_subtitles") or _is_no_voiceover_marker(subtitle_srt)
+    if subtitles_disabled:
         subtitle_srt = ""
         subtitle_srt_quality = {"usable": False, "status": "disabled", "reason": "voiceover/subtitle disabled", "entries": 0}
-    if not subtitle_srt_quality["usable"]:
-        subtitle_srt = _srt_from_voice_text(voice_text) if voice_text_quality["usable"] else ("" if voice_text_quality.get("status") == "disabled" else _default_srt())
-        subtitle_srt_quality = _quality_check_srt(subtitle_srt)
+    elif not subtitle_srt_quality["usable"]:
+        raise ValueError(f"20_语音字幕包装师字幕无效：{subtitle_srt_quality.get('reason') or subtitle_srt_quality.get('status')}")
     _write_text(voiceover_path, voice_text)
     _write_text(subtitles_path, subtitle_srt)
     _write_text(comfyui_plan_path, compose_content)
-    _write_text(edit_plan_path, edit_content or "# 剪辑成片执行方案\n\n未找到 22_剪辑成片执行师输出。\n")
+    _write_text(edit_plan_path, edit_content)
     comfyui_payload_text = _combined_comfyui_payload_text(image_content, video_content, mode, final_video_name, video_config)
-    _write_text(
-        comfyui_payload_path,
-        _ensure_comfyui_payload_defaults(comfyui_payload_text, mode, final_video_name, video_config),
-    )
-    comfyui_payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+    _write_text(comfyui_payload_path, comfyui_payload_text)
+    comfyui_payload = _load_comfyui_payload_strict(comfyui_payload_path)
     production_plan = compile_production_plan(
         task_id=task_dir.name,
         route_content=route_content,
@@ -138,7 +142,7 @@ def run_auto_production(
     production_plan["global_context"] = global_context
     production_plan["compiled_payload"] = comfyui_payload
     plan_visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
-    _downgrade_unconfigured_visual_jobs_for_available_slots(
+    _record_unconfigured_multi_character_slots(
         plan_visual_jobs,
         comfyui_payload,
         compose_config,
@@ -318,7 +322,7 @@ def run_auto_production(
     def apply_manual_comfy_debug_gate() -> dict[str, Any]:
         state_path = paths["comfyui"] / "manual_debug_state.json"
         state = _read_json_object(state_path)
-        payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+        payload = _load_comfyui_payload_strict(comfyui_payload_path)
         approval = _manual_comfy_debug_approval(payload, state, manual_comfy_stage, task_dir)
         composition = manifest.setdefault("composition", {})
         composition["manual_debug_enabled"] = True
@@ -373,7 +377,7 @@ def run_auto_production(
             if manual_comfy_debug:
                 state_path = paths["comfyui"] / "manual_debug_state.json"
                 state = _read_json_object(state_path)
-                payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+                payload = _load_comfyui_payload_strict(comfyui_payload_path)
                 approval = _manual_comfy_debug_approval(payload, state, "all", task_dir)
                 if approval["complete"]:
                     emit("复用已确认的 ComfyUI 调试素材", stage="comfyui", status="success")
@@ -994,7 +998,7 @@ def retry_production_job(
             result = _retry_tts_job(task_dir, paths, manifest, voice_config, emit)
         elif retry_job == "bgm":
             payload_path = paths["comfyui"] / "comfyui_payload.json"
-            payload = _load_comfyui_payload_with_fallback(payload_path) if payload_path.is_file() else {}
+            payload = _load_comfyui_payload_strict(payload_path) if payload_path.is_file() else {}
             result = _select_bgm_from_asset_library(task_dir, voice_config, payload)
             manifest.setdefault("audio", {})["bgm_file"] = result.get("file", "")
             manifest["audio"]["bgm_asset_id"] = result.get("asset_id", "")
@@ -1075,7 +1079,7 @@ def _retry_material_job(
         emit("retrying image material generation", stage="image")
         if _api_ready_uses_comfyui_image_slots(compose_config):
             payload_path = paths["comfyui"] / "comfyui_payload.json"
-            payload = _load_comfyui_payload_with_fallback(payload_path) if payload_path.is_file() else {}
+            payload = _load_comfyui_payload_strict(payload_path) if payload_path.is_file() else {}
             result = _run_api_ready_comfyui_image_adapter(
                 payload,
                 compose_config,
@@ -1456,7 +1460,7 @@ def _refresh_visual_plan_for_retry(
         raise ValueError("cannot rebuild production plan: 06/07 employee outputs are missing")
 
     payload_path = paths["comfyui"] / "comfyui_payload.json"
-    existing_payload = _load_comfyui_payload_with_fallback(payload_path) if payload_path.is_file() else {}
+    existing_payload = _load_comfyui_payload_strict(payload_path) if payload_path.is_file() else {}
     production_plan = compile_production_plan(
         task_id=task_dir.name,
         route_content=route_content,
@@ -1476,7 +1480,7 @@ def _refresh_visual_plan_for_retry(
     production_plan["global_context"] = global_context
     production_plan["compiled_payload"] = payload
     visual_jobs = production_plan.get("visual_jobs") if isinstance(production_plan.get("visual_jobs"), list) else []
-    _downgrade_unconfigured_visual_jobs_for_available_slots(
+    _record_unconfigured_multi_character_slots(
         visual_jobs,
         payload,
         compose_config,
@@ -1539,7 +1543,7 @@ def _retry_quality_config(manifest: dict[str, Any], config: dict[str, Any]) -> d
     return base
 
 
-def _downgrade_unconfigured_visual_jobs_for_available_slots(
+def _record_unconfigured_multi_character_slots(
     visual_jobs: list[dict[str, Any]],
     payload: dict[str, Any],
     compose_config: dict[str, Any],
@@ -1562,54 +1566,6 @@ def _downgrade_unconfigured_visual_jobs_for_available_slots(
             notes.append(
                 f"image job {job.get('job_id') or job.get('id') or ''} requires {workflow_id} / {mode}; strict visual routing keeps the missing slot as a blocker"
             )
-
-
-def _payload_image_items_by_job_id(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    items = payload.get("image_prompts") if isinstance(payload, dict) else None
-    if not isinstance(items, list):
-        return {}
-    mapped: dict[str, dict[str, Any]] = {}
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        job_id = str(item.get("job_id") or item.get("id") or item.get("intent_id") or "").strip()
-        if job_id:
-            mapped[job_id] = item
-    return mapped
-
-
-def _multi_character_keyframe_fallback_mode(job: dict[str, Any], configured_slots: list[dict[str, str]]) -> str:
-    if _job_has_scene_reference(job) and _workflow_slot_configured(configured_slots, "04_keyframe", "identity_scene_keyframe"):
-        return "identity_scene_keyframe"
-    if _workflow_slot_configured(configured_slots, "04_keyframe", "identity_keyframe"):
-        return "identity_keyframe"
-    if _workflow_slot_configured(configured_slots, "04_keyframe", "keyframe"):
-        return "keyframe"
-    return ""
-
-
-def _job_has_scene_reference(job: dict[str, Any]) -> bool:
-    if str(job.get("input_scene_image") or job.get("scene_reference_image") or job.get("scene_master_image") or "").strip():
-        return True
-    bindings = job.get("input_bindings") if isinstance(job.get("input_bindings"), dict) else {}
-    for key in ("input_scene_image", "scene_reference_image", "scene_master_image"):
-        if isinstance(bindings.get(key), dict) or str(bindings.get(key) or "").strip():
-            return True
-    return False
-
-
-def _set_visual_job_mode(job: dict[str, Any] | None, mode: str) -> None:
-    if not isinstance(job, dict) or not mode:
-        return
-    job["workflow_mode"] = mode
-    job["image_task_mode"] = mode
-    job["mode"] = mode
-    if mode == "identity_scene_keyframe":
-        job["control_mode"] = "identity_scene_reference"
-    elif mode == "identity_keyframe":
-        job["control_mode"] = "identity_reference"
-    elif mode == "keyframe":
-        job["control_mode"] = "none"
 
 
 def _workflow_slot_configured(configured_slots: list[dict[str, str]], workflow_id: str, mode: str) -> bool:
@@ -1840,7 +1796,7 @@ def _run_comfyui_adapter(
             mcp_url=str(compose_config.get("comfy_mcp_url") or compose_config.get("mcp_url") or ""),
             api_key=api_key,
             progress_callback=progress_callback,
-        ).run(_load_comfyui_payload_with_fallback(comfyui_payload_path), compose_config, output_dir)
+        ).run(_load_comfyui_payload_strict(comfyui_payload_path), compose_config, output_dir)
     if provider == "local_comfyui":
         if not base_url:
             return {"status": "skipped", "reason": "local_comfyui provider requires a base URL"}
@@ -1857,7 +1813,7 @@ def _run_comfyui_adapter(
         }
 
     try:
-        comfyui_payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+        comfyui_payload = _load_comfyui_payload_strict(comfyui_payload_path)
         if not isinstance(comfyui_payload, dict) or not comfyui_payload:
             raise ValueError("comfyui_payload.json must contain a JSON object with image_prompts or video_prompts")
         manifest = CloudComfyUIAdapter(base_url=base_url, api_key=api_key, endpoint=endpoint, progress_callback=progress_callback).run(
@@ -1894,18 +1850,8 @@ def _run_comfyui_adapter_with_quality_gate(
 ) -> dict[str, Any] | None:
     output_dir.mkdir(parents=True, exist_ok=True)
     _restore_legacy_comfyui_job_state(output_dir)
-    preflight = _preflight_visual_jobs(compose_config.get("production_plan_visual_jobs"))
-    if not preflight["passed"]:
-        payload_jobs = _payload_visual_jobs(_load_comfyui_payload_with_fallback(comfyui_payload_path))
-        payload_preflight = _preflight_visual_jobs(payload_jobs)
-        if payload_preflight["passed"]:
-            payload_preflight.setdefault("warnings", []).append(
-                {
-                    "code": "preflight_recovered_from_payload",
-                    "message": "compose_config visual jobs were stale; refreshed preflight from current ComfyUI payload.",
-                }
-            )
-            preflight = payload_preflight
+    payload_jobs = _payload_visual_jobs(_load_comfyui_payload_strict(comfyui_payload_path))
+    preflight = _preflight_visual_jobs(payload_jobs)
     preflight_path = output_dir / "visual_preflight_report.json"
     preflight_path.write_text(json.dumps(preflight, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if not preflight["passed"]:
@@ -1933,7 +1879,7 @@ def _run_comfyui_adapter_with_quality_gate(
             result["attempts"] = 1
         return result
 
-    base_payload = _load_comfyui_payload_with_fallback(comfyui_payload_path)
+    base_payload = _load_comfyui_payload_strict(comfyui_payload_path)
     if not isinstance(base_payload, dict):
         base_payload = {}
 
@@ -2112,16 +2058,18 @@ def _quality_retry_job_ids(score: dict[str, Any], raw_jobs: Any, result: dict[st
     return expanded
 
 
-def _load_comfyui_payload_with_fallback(path: Path) -> dict[str, Any]:
+def _load_comfyui_payload_strict(path: Path) -> dict[str, Any]:
     try:
         text = path.read_text(encoding="utf-8")
-    except Exception:
-        return {}
+    except OSError as exc:
+        raise ValueError(f"无法读取 ComfyUI 参数包：{path}") from exc
     try:
         payload = json.loads(text)
-        return payload if isinstance(payload, dict) else {}
-    except Exception:
-        return _salvage_comfyui_payload(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"ComfyUI 参数包不是有效 JSON：{exc.msg}（第 {exc.lineno} 行第 {exc.colno} 列）") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("ComfyUI 参数包必须是 JSON 对象")
+    return payload
 
 
 def _read_json_object(path: Path) -> dict[str, Any]:
@@ -2210,45 +2158,14 @@ def _manual_comfy_debug_items(payload: dict[str, Any], stage: str = "all") -> li
     return items
 
 
-def _salvage_comfyui_payload(text: str) -> dict[str, Any]:
-    image_section = _between_markers(text, '"image_prompts"', '"video_prompts"')
-    video_section = _between_markers(text, '"video_prompts"', '"reference_images"')
-    image_prompts = _salvage_prompt_items(image_section, default_model="Z-Image Turbo", include_duration=False)
-    video_prompts = _salvage_prompt_items(video_section, default_model="LTX-Video 2.3", include_duration=True)
-    if not image_prompts and not video_prompts:
-        return {}
-    payload: dict[str, Any] = {
-        "execution_mode": "comfy_full",
-        "image_prompts": image_prompts,
-        "video_prompts": video_prompts,
-        "reference_images": [],
-        "output": {
-            "aspect_ratio": "16:9",
-            "output_directory": "output/comfyui_materials/",
-            "file_naming_convention": "{type}_{id}.mp4 or .png",
-        },
-        "payload_recovered": True,
-        "payload_recovery_note": "Original ComfyUI JSON was invalid; prompt items were recovered from text.",
-    }
-    return payload
-
-
-def _between_markers(text: str, start_marker: str, end_marker: str) -> str:
-    start = text.find(start_marker)
-    if start < 0:
-        return ""
-    end = text.find(end_marker, start + len(start_marker))
-    return text[start:end] if end > start else text[start:]
-
-
 def _combined_comfyui_plan(image_content: str, video_content: str) -> str:
     return (
         "# ComfyUI 素材生成编排方案\n\n"
         "本方案由 06_分镜生图设计师和 07_视频生成执行员输出整合生成；项目已不再单独运行 21_ComfyUI素材编排师。\n\n"
         "## 1. 生图参数来源（06）\n\n"
-        f"{image_content or '未找到 06_分镜生图设计师输出。'}\n\n"
+        f"{image_content}\n\n"
         "## 2. 生视频参数来源（07）\n\n"
-        f"{video_content or '未找到 07_视频生成执行员输出。'}\n"
+        f"{video_content}\n"
     )
 
 
@@ -2260,9 +2177,9 @@ def _combined_comfyui_payload_text(
     video_config: dict[str, Any],
 ) -> str:
     defaults = json.loads(_default_comfyui_payload(mode, final_video_name, video_config))
-    image_payload = _json_object_from_first_block(image_content)
-    video_payload = _json_object_from_first_block(video_content)
-    for source in (image_payload, video_payload):
+    image_payloads = _json_objects_from_blocks(image_content, source="06_分镜生图设计师")
+    video_payloads = _json_objects_from_blocks(video_content, source="07_视频生成执行员")
+    for source in (*image_payloads, *video_payloads):
         if not source:
             continue
         for key in ("image_prompts", "video_prompts", "reference_images", "missing_or_inferred_prompts"):
@@ -2287,26 +2204,34 @@ def _combined_comfyui_payload_text(
 
 
 def _json_object_from_first_block(content: str) -> dict[str, Any]:
-    block = _extract_json_block(content)
-    if not block:
-        return {}
-    try:
-        data = json.loads(block)
-    except Exception:
-        data = _salvage_comfyui_payload(block)
-    return data if isinstance(data, dict) else {}
+    values = _json_objects_from_blocks(content)
+    return values[0] if values else {}
 
 
-def _json_objects_from_blocks(content: str) -> list[dict[str, Any]]:
+def _json_objects_from_blocks(content: str, source: str = "员工输出") -> list[dict[str, Any]]:
+    text = str(content or "").strip()
+    blocks = re.findall(r"```json\s*(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    if not blocks and text:
+        blocks = [text]
+    if not blocks:
+        raise ValueError(f"{source}缺少 JSON 对象")
     values: list[dict[str, Any]] = []
-    for block in re.findall(r"```json\s*(.*?)```", str(content or ""), re.DOTALL | re.IGNORECASE):
+    for index, block in enumerate(blocks, 1):
         try:
-            value = json.loads(block)
-        except Exception:
-            value = _salvage_comfyui_payload(block)
-        if isinstance(value, dict):
-            values.append(value)
+            value = json.loads(_strip_json_comments(block))
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"{source}的第 {index} 个 JSON 无效：{exc.msg}（第 {exc.lineno} 行第 {exc.colno} 列）"
+            ) from exc
+        if not isinstance(value, dict):
+            raise ValueError(f"{source}的第 {index} 个 JSON 必须是对象")
+        values.append(value)
     return values
+
+
+def _strip_json_comments(value: str) -> str:
+    text = re.sub(r"(?m)^\s*//.*$", "", str(value or ""))
+    return re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
 
 
 def _json_payload_with(content: str, key: str, group: str = "") -> dict[str, Any]:
@@ -2320,76 +2245,6 @@ def _json_payload_with(content: str, key: str, group: str = "") -> dict[str, Any
         else:
             return payload
     return {}
-
-
-def _salvage_prompt_items(section: str, default_model: str, include_duration: bool) -> list[dict[str, Any]]:
-    if not section:
-        return []
-    items: list[dict[str, Any]] = []
-    pattern = re.compile(
-        r'"(?:id|prompt_id)"\s*:\s*"(?P<id>[^"]+)"(?P<body>.*?)(?=\n\s*\{\s*\n\s*"(?:id|prompt_id)"|\n\s*\]\s*,|\Z)',
-        re.DOTALL,
-    )
-    for match in pattern.finditer(section):
-        body = match.group("body")
-        prompt = _salvage_json_string_field(body, "prompt") or _salvage_json_string_field(body, "prompt_text")
-        if not prompt:
-            continue
-        negative_prompt = _salvage_json_string_field(body, "negative_prompt")
-        item: dict[str, Any] = {
-            "id": match.group("id"),
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
-            "aspect_ratio": _salvage_json_string_field(body, "aspect_ratio") or "16:9",
-            "model": _salvage_json_string_field(body, "model") or default_model,
-        }
-        item_type = _salvage_json_string_field(body, "type")
-        if item_type:
-            item["type"] = item_type
-        if include_duration:
-            duration = _salvage_json_number_field(body, "duration")
-            fps = _salvage_json_number_field(body, "fps")
-            if duration:
-                item["duration"] = duration
-            if fps:
-                item["fps"] = fps
-        seed = _salvage_json_number_field(body, "seed")
-        if seed:
-            item["seed"] = seed
-        items.append(item)
-    return items
-
-
-def _salvage_json_string_field(body: str, key: str) -> str:
-    marker = f'"{key}"'
-    start = body.find(marker)
-    if start < 0:
-        return ""
-    colon = body.find(":", start + len(marker))
-    if colon < 0:
-        return ""
-    first_quote = body.find('"', colon + 1)
-    if first_quote < 0:
-        return ""
-    next_key = re.search(r'\n\s*"[A-Za-z_][A-Za-z0-9_]*"\s*:', body[first_quote + 1 :])
-    if next_key:
-        end_region = first_quote + 1 + next_key.start()
-        comma = body.rfind(",", first_quote + 1, end_region)
-        last_quote = body.rfind('"', first_quote + 1, comma if comma > first_quote else end_region)
-    else:
-        last_quote = body.rfind('"')
-    if last_quote <= first_quote:
-        return ""
-    value = body[first_quote + 1 : last_quote]
-    return value.replace('\\"', '"').strip()
-
-
-def _salvage_json_number_field(body: str, key: str) -> int | float | None:
-    match = re.search(rf'"{re.escape(key)}"\s*:\s*(-?\d+(?:\.\d+)?)', body)
-    if not match:
-        return None
-    value = match.group(1)
-    return float(value) if "." in value else int(value)
 
 
 def _deep_merge_config(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
@@ -3325,7 +3180,7 @@ def _payload_has_required_mode(payload: dict[str, Any], mode: str) -> bool:
 
 
 def _inject_mode_audio_file(payload_path: Path, mode: str, audio_file: str) -> None:
-    payload = _load_comfyui_payload_with_fallback(payload_path)
+    payload = _load_comfyui_payload_strict(payload_path)
     for key in ("image_prompts", "video_prompts"):
         values = payload.get(key) if isinstance(payload.get(key), list) else []
         for item in values:
@@ -3352,6 +3207,11 @@ def _find_step(step_outputs: list[dict[str, str]], prefix: str) -> dict[str, str
     return None
 
 
+def _require_production_step_output(step: dict[str, str] | None, label: str) -> None:
+    if not isinstance(step, dict) or not str(step.get("content") or "").strip():
+        raise ValueError(f"缺少必需员工输出：{label}")
+
+
 def _load_task_step_outputs(task_dir: Path) -> list[dict[str, str]]:
     outputs: list[dict[str, str]] = []
     for step_dir in sorted(task_dir.glob("step_*")):
@@ -3372,9 +3232,6 @@ def _load_task_step_outputs(task_dir: Path) -> list[dict[str, str]]:
 
 
 def _extract_srt(content: str) -> str:
-    match = re.search(r"```srt\s*(.*?)```", content, re.DOTALL | re.IGNORECASE)
-    if match:
-        return match.group(1).strip() + "\n"
     package_payload = _json_payload_with(content, "audio_package")
     audio_package = package_payload.get("audio_package") if isinstance(package_payload.get("audio_package"), dict) else {}
     draft = str(audio_package.get("subtitle_srt_draft") or "").strip()
@@ -3386,7 +3243,9 @@ def _extract_srt(content: str) -> str:
     for intent in audio_intents:
         if not isinstance(intent, dict) or str(intent.get("intent") or "") != "build_subtitles":
             continue
-        segments = intent.get("subtitle_segments")
+        segments = intent.get("segments")
+        if not isinstance(segments, list):
+            segments = intent.get("subtitle_segments")
         if not isinstance(segments, list):
             continue
         blocks: list[str] = []
@@ -3418,42 +3277,25 @@ def _extract_voice_text(content: str) -> str:
         voice_text = str(intent.get("voice_text") or "").strip()
         if voice_text:
             return _clean_extracted_voice_text(voice_text)
-    for heading in ("完整配音稿", "TTS 配音稿", "配音稿", "口播配音稿", "旁白稿"):
-        text_block = _extract_fenced_block_after_heading(content, heading)
-        if text_block:
-            return _clean_extracted_voice_text(text_block)
-    for heading in ("TTS 配音稿", "配音稿", "口播配音稿", "旁白稿"):
-        section = _extract_section(content, heading)
-        if section:
-            return _clean_extracted_voice_text(section)
-    for match in re.finditer(r"```(?:text)?\s*(.*?)```", content, re.DOTALL | re.IGNORECASE):
-        block = match.group(1).strip()
-        if len(block) > 200 and any(marker in block for marker in ("口播配音稿", "0s -", "我跟你说", "开头痛点")):
-            return _clean_extracted_voice_text(block)
-    for heading in ("完整配音稿", "TTS 配音稿", "配音稿", "口播稿", "旁白稿"):
-        text_block = _extract_fenced_block_after_heading(content, heading)
-        if text_block:
-            return _clean_extracted_voice_text(text_block)
-    for heading in ("TTS 配音稿", "配音稿", "口播稿", "旁白稿"):
-        section = _extract_section(content, heading)
-        if section:
-            return _clean_extracted_voice_text(section)
     return ""
 
 
-def _extract_section(content: str, heading: str) -> str:
-    pattern = rf"#+\s*(?:\d+(?:\.\d+)*[\.、]?\s*)?{re.escape(heading)}\s*(.*?)(?:\n#+\s|\Z)"
-    match = re.search(pattern, content, re.DOTALL)
-    if not match:
-        return ""
-    text = re.sub(r"```(?:text)?\s*|\s*```", "", match.group(1)).strip()
-    return text + "\n" if text else ""
-
-
-def _extract_fenced_block_after_heading(content: str, heading: str) -> str:
-    pattern = rf"#+\s*(?:\d+(?:\.\d+)*[\.、]?\s*)?{re.escape(heading)}(?:[^\n]*)\n.*?```(?:text)?\s*(.*?)```"
-    match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
-    return match.group(1).strip() + "\n" if match else ""
+def _audio_intent_disabled(content: str, intent_name: str) -> bool:
+    payload = _json_payload_with(content, "production_intents", "audio")
+    production_intents = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+    audio_intents = production_intents.get("audio") if isinstance(production_intents.get("audio"), list) else []
+    intent = next(
+        (
+            item
+            for item in audio_intents
+            if isinstance(item, dict) and str(item.get("intent") or "").strip() == intent_name
+        ),
+        None,
+    )
+    return bool(
+        isinstance(intent, dict)
+        and (intent.get("enabled") is False or str(intent.get("status") or "").strip().lower() in {"disabled", "skipped"})
+    )
 
 
 def _clean_voice_text(text: str) -> str:
@@ -3564,46 +3406,6 @@ def _srt_body_is_no_voiceover_marker(srt: str) -> bool:
     return bool(text_lines) and _is_no_voiceover_marker("".join(text_lines))
 
 
-def _srt_from_voice_text(voice_text: str) -> str:
-    chunks = _chunk_voice_text_for_srt(voice_text)
-    if not chunks:
-        return _default_srt()
-    lines: list[str] = []
-    current_ms = 0
-    for index, chunk in enumerate(chunks, start=1):
-        duration_ms = max(2200, min(7000, int(len(chunk) / 5 * 1000)))
-        start = _format_srt_time(current_ms)
-        end = _format_srt_time(current_ms + duration_ms)
-        lines.extend([str(index), f"{start} --> {end}", chunk, ""])
-        current_ms += duration_ms + 120
-    return "\n".join(lines).strip() + "\n"
-
-
-def _chunk_voice_text_for_srt(text: str, max_chars: int = 32) -> list[str]:
-    source = re.sub(r"【.*?】", "", text)
-    source = re.sub(r"\s+", " ", source).strip()
-    if not source:
-        return []
-    parts = [part.strip() for part in re.split(r"([。！？!?；;])", source) if part.strip()]
-    sentences: list[str] = []
-    current = ""
-    for part in parts:
-        current += part
-        if re.fullmatch(r"[。！？!?；;]", part):
-            sentences.append(current.strip())
-            current = ""
-    if current.strip():
-        sentences.append(current.strip())
-    chunks: list[str] = []
-    for sentence in sentences:
-        while len(sentence) > max_chars:
-            chunks.append(sentence[:max_chars])
-            sentence = sentence[max_chars:]
-        if sentence:
-            chunks.append(sentence)
-    return chunks
-
-
 def _overloaded_srt_entries(srt: str, max_chars_per_second: float = 10.0) -> list[dict[str, Any]]:
     overloaded: list[dict[str, Any]] = []
     for block in re.split(r"\r?\n\s*\r?\n", srt.strip()):
@@ -3638,29 +3440,6 @@ def _overloaded_srt_entries(srt: str, max_chars_per_second: float = 10.0) -> lis
 def _parse_srt_time_ms(value: str) -> int:
     hour, minute, second, millisecond = [int(part) for part in re.split(r"[:,]", value)]
     return ((hour * 60 + minute) * 60 + second) * 1000 + millisecond
-
-
-def _format_srt_time(milliseconds: int) -> str:
-    seconds, ms = divmod(milliseconds, 1000)
-    minutes, sec = divmod(seconds, 60)
-    hours, minute = divmod(minutes, 60)
-    return f"{hours:02d}:{minute:02d}:{sec:02d},{ms:03d}"
-
-
-def _extract_json_block(content: str) -> str:
-    match = re.search(r"```json\s*(.*?)```", content, re.DOTALL | re.IGNORECASE)
-    if not match:
-        return ""
-    raw = match.group(1).strip()
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
-        return raw + "\n"
-    return json.dumps(parsed, ensure_ascii=False, indent=2) + "\n"
-
-
-def _default_srt() -> str:
-    return "1\n00:00:00,000 --> 00:00:03,000\n待从 20_语音字幕包装师输出中整理字幕。\n"
 
 
 def _normalize_comfyui_canvas(payload: dict[str, Any], video_config: dict[str, Any]) -> None:
@@ -3791,30 +3570,6 @@ def _default_comfyui_payload(
         "nodeInfoList": [],
         "notes": "待根据 06/07 输出的 ComfyUI 参数包和实际 ComfyUI 节点补全。",
     }
-    return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-
-
-def _ensure_comfyui_payload_defaults(
-    payload_text: str,
-    mode: str,
-    final_video_name: str,
-    video_config: dict[str, Any],
-) -> str:
-    defaults = json.loads(_default_comfyui_payload(mode, final_video_name, video_config))
-    try:
-        payload = json.loads(payload_text)
-    except json.JSONDecodeError:
-        payload = _salvage_comfyui_payload(payload_text)
-        if not payload:
-            payload = defaults
-    if not isinstance(payload, dict):
-        payload = defaults
-    for key in ("negative_prompt", "reference_image", "seed"):
-        if not str(payload.get(key) or "").strip():
-            payload[key] = defaults.get(key, "")
-    if not isinstance(payload.get("output"), dict):
-        payload["output"] = defaults.get("output", {})
-    _normalize_comfyui_canvas(payload, video_config)
     return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
 
 

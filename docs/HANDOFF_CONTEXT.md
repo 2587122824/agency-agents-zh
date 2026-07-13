@@ -2,6 +2,16 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 Strict Production Input Contracts
+
+- Production packaging now requires non-empty outputs from employees `01_`, `06_`, `07_`, `20_`, and `22_`. Missing outputs fail explicitly instead of creating placeholder prompt, voice, subtitle, or edit-plan files.
+- Employee `20_` voiceover and subtitle data are read only from the validated JSON contract. Invalid/missing voice text or SRT now fails explicitly; the backend no longer rebuilds SRT from voice text or writes default placeholder narration/subtitles. Explicit `enabled=false` / `status=disabled` remains the only supported no-voice/no-subtitle path.
+- ComfyUI employee JSON and persisted payload files are strict. Invalid JSON is never salvaged with regex extraction or replaced by a default payload. Raw JSON objects and one or more fenced `json` blocks remain supported, including standalone `//` and block comments as specified by the employee contract.
+- Removed semantic route guessing that matched generated scene references from prompt keywords/fuzzy scene IDs, bound cross-ID character variants from prompt prose, or tried an implicit `_start_frame` suffix for missing I2V sources. Scene references now require one exact `scene_id`; ambiguity fails. I2V requires an exact upstream image intent ID.
+- Visual preflight now reads the final compiled ComfyUI payload as its sole authority instead of failing against a stale config copy and then switching sources.
+- The real task `task_20260713_215010_小美的田径训练日记_竖屏1分钟长视频` remains valid under the strict parser: 314 narration characters, 11 valid SRT entries, one valid image JSON object, one valid video JSON object, and 42 compiled visual jobs.
+- Verification: 179 semantic-contract tests passed.
+
 ## 2026-07-14 CosyVoice Retry Diagnosis
 
 - The latest retry of `task_20260713_215010_小美的田径训练日记_竖屏1分钟长视频` failed at `local_tts`, not in the visual workflow. Its saved snapshot contained 314 usable narration characters but still had `voice_config.mode=off` and an empty provider, so the explicit error was `TTS provider is not configured`; FFmpeg remained blocked and did not create a silent final video.

@@ -28,9 +28,12 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
 from my_codex_core.production_entities import entity_context_for_ids, normalize_production_entities  # noqa: E402
 from my_codex_core.production_pipeline import (  # noqa: E402
     _active_visual_jobs_for_mode,
+    _audio_intent_disabled,
     _clean_voice_text,
-    _downgrade_unconfigured_visual_jobs_for_available_slots,
+    _extract_srt,
     _filter_skip_execution_visual_nodes,
+    _json_objects_from_blocks,
+    _load_comfyui_payload_strict,
     _manifest_requires_tts_for_packaging,
     _packaging_graph_jobs,
     _packaging_dependency_blockers,
@@ -40,10 +43,11 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _preflight_visual_jobs,
     _quality_check_voice_text,
     _quality_check_srt,
+    _record_unconfigured_multi_character_slots,
     _run_local_tts_adapter,
     _run_comfyui_adapter_with_quality_gate,
     _required_workflow_slots,
-    _srt_from_voice_text,
+    run_auto_production,
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
 from my_codex_core.requirement_guard import (  # noqa: E402
@@ -2104,7 +2108,7 @@ class SemanticInputContractTests(unittest.TestCase):
             )
         )
 
-    def test_background_assets_bind_keyframes_as_scene_references(self) -> None:
+    def test_ambiguous_scene_id_fails_instead_of_selecting_first_background(self) -> None:
         linked_assets = {
             "linked_assets": {
                 "assets": [
@@ -2150,28 +2154,13 @@ class SemanticInputContractTests(unittest.TestCase):
             },
             ensure_ascii=False,
         )
-        plan = compile_production_plan(
-            task_id="background_scene_keyframe_binding_test",
-            route_content='{"production_type":"drama_story"}',
-            image_content=image_content,
-            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
-        )
-
-        scene, corridor, keyframe = plan["compiled_payload"]["image_prompts"]
-        self.assertEqual(scene["workflow_mode"], "scene_base")
-        self.assertEqual(corridor["workflow_mode"], "scene_base")
-        self.assertEqual(scene["character_id"], "")
-        self.assertEqual(keyframe["workflow_mode"], "identity_scene_keyframe")
-        self.assertEqual(keyframe["control_mode"], "identity_scene_reference")
-        self.assertEqual(
-            keyframe["input_identity_image"],
-            "my_workspace/my_asset_library/01_character_base/xiaomei.png",
-        )
-        self.assertEqual(
-            keyframe["input_bindings"]["input_scene_image"],
-            {"from_job": "base_scene_morning", "output": "output_final_image"},
-        )
-        self.assertIn("base_scene_morning", keyframe["depends_on"])
+        with self.assertRaisesRegex(ValueError, "resolves to multiple generated scene references"):
+            compile_production_plan(
+                task_id="background_scene_keyframe_binding_test",
+                route_content='{"production_type":"drama_story"}',
+                image_content=image_content,
+                source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+            )
 
     def test_scene_only_keyframe_does_not_route_to_identity_scene_mode(self) -> None:
         image_content = json.dumps(
@@ -2553,7 +2542,7 @@ class SemanticInputContractTests(unittest.TestCase):
             {"from_job": "asset_character_protagonist_2008", "output": "output_final_image"},
         )
 
-    def test_cross_id_same_face_character_variant_binds_referenced_master(self) -> None:
+    def test_cross_id_character_variant_is_not_bound_from_prompt_text(self) -> None:
         image_content = json.dumps(
             {
                 "production_intents": {
@@ -2584,11 +2573,8 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         items = {item["job_id"]: item for item in plan["compiled_payload"]["image_prompts"]}
         winner = items["asset_char_winner_front"]
-        self.assertEqual(winner["workflow_mode"], "img2img_style_keyframe")
-        self.assertEqual(
-            winner["input_bindings"]["input_base_image"],
-            {"from_job": "asset_char_loser_front", "output": "output_final_image"},
-        )
+        self.assertEqual(winner["workflow_mode"], "character_base")
+        self.assertNotIn("input_base_image", winner.get("input_bindings") or {})
 
     def test_multi_character_keyframe_compiles_character_references(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3004,6 +2990,50 @@ class SemanticInputContractTests(unittest.TestCase):
                     },
                     ensure_ascii=False,
                 ),
+            )
+
+    def test_i2v_does_not_guess_three_frame_start_suffix(self) -> None:
+        image_content = json.dumps(
+            {
+                "production_intents": {
+                    "image": [
+                        {
+                            "intent": "generate_three_frame_shot",
+                            "intent_id": "shot_001_three_frame",
+                            "character_id": "character_main",
+                            "frame_set": [
+                                {"role": "start", "prompt": "起跑准备"},
+                                {"role": "middle", "prompt": "加速冲刺"},
+                                {"role": "end", "prompt": "冲过终点"},
+                            ],
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        video_content = json.dumps(
+            {
+                "production_intents": {
+                    "video": [
+                        {
+                            "intent": "generate_i2v_clip",
+                            "intent_id": "clip_001",
+                            "source_intent_ids": ["shot_001_three_frame"],
+                            "duration_seconds": 4,
+                            "prompt": "从起跑动作进入冲刺",
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        with self.assertRaisesRegex(ValueError, "has no explicit upstream image"):
+            compile_production_plan(
+                task_id="no_three_frame_suffix_guess",
+                route_content='{"production_type":"custom"}',
+                image_content=image_content,
+                video_content=video_content,
             )
 
     def test_legacy_i2v_binding_fails_when_keyframe_is_missing(self) -> None:
@@ -3609,7 +3639,7 @@ class SemanticInputContractTests(unittest.TestCase):
             ]
         }
         notes: list[str] = []
-        _downgrade_unconfigured_visual_jobs_for_available_slots(
+        _record_unconfigured_multi_character_slots(
             visual_jobs,
             payload,
             {
@@ -3759,11 +3789,67 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertFalse(result["usable"])
         self.assertEqual(result["status"], "overloaded")
 
-    def test_voice_text_fallback_srt_splits_chinese_punctuation(self) -> None:
-        srt = _srt_from_voice_text("上辈子，我勤恳打工一辈子。省吃俭用，依旧平庸碌碌。短短几年逆袭成亿万富豪。")
-        self.assertGreaterEqual(srt.count("-->"), 3)
-        self.assertIn("上辈子", srt)
-        self.assertIn("短短几年", srt)
+    def test_auto_production_rejects_missing_required_employee_output(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaisesRegex(ValueError, "缺少必需员工输出：01_需求拆解专员"):
+                run_auto_production(Path(temp_dir), [], {"mode": "package_only"})
+
+    def test_auto_production_does_not_rebuild_invalid_srt_from_voice_text(self) -> None:
+        audio_payload = {
+            "production_intents": {
+                "audio": [
+                    {"intent": "generate_voiceover", "voice_text": "这是员工明确输出的旁白正文，不能被拿来重造无效字幕。"},
+                    {"intent": "build_subtitles", "segments": []},
+                ]
+            },
+            "audio_package": {
+                "voiceover_text": "这是员工明确输出的旁白正文，不能被拿来重造无效字幕。",
+                "subtitle_srt_draft": "这不是有效的 SRT 时间轴",
+            },
+        }
+        step_outputs = [
+            {"agent": "01_需求拆解专员", "content": "{}"},
+            {"agent": "06_分镜生图设计师", "content": "{}"},
+            {"agent": "07_视频生成执行员", "content": "{}"},
+            {"agent": "20_语音字幕包装师", "content": json.dumps(audio_payload, ensure_ascii=False)},
+            {"agent": "22_剪辑成片执行师", "content": "{}"},
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            task_dir = Path(temp_dir)
+            with self.assertRaisesRegex(ValueError, "字幕无效"):
+                run_auto_production(task_dir, step_outputs, {"mode": "package_only"})
+            self.assertFalse((task_dir / "subtitles.srt").exists())
+
+    def test_invalid_staff_json_is_not_salvaged(self) -> None:
+        with self.assertRaisesRegex(ValueError, "JSON 无效"):
+            _json_objects_from_blocks('```json\n{"image_prompts": [{"id": "shot_1",}] }\n```', source="06_分镜生图设计师")
+
+    def test_invalid_comfyui_payload_file_is_not_salvaged(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            payload_path = Path(temp_dir) / "comfyui_payload.json"
+            payload_path.write_text('{"image_prompts": [}', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "不是有效 JSON"):
+                _load_comfyui_payload_strict(payload_path)
+
+    def test_valid_employee_audio_srt_is_preserved(self) -> None:
+        expected = "1\n00:00:00,000 --> 00:00:03,000\n清晨六点，小美准时来到田径场。\n"
+        content = json.dumps(
+            {
+                "production_intents": {
+                    "audio": [
+                        {"intent": "generate_voiceover", "voice_text": "清晨六点，小美准时来到田径场。"},
+                        {"intent": "build_subtitles", "segments": []},
+                    ]
+                },
+                "audio_package": {
+                    "voiceover_text": "清晨六点，小美准时来到田径场。",
+                    "subtitle_srt_draft": expected,
+                },
+            },
+            ensure_ascii=False,
+        )
+        self.assertEqual(_extract_srt(content), expected)
+        self.assertFalse(_audio_intent_disabled(content, "build_subtitles"))
 
     def test_voiceover_alignment_skips_excessive_tempo(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -4622,7 +4708,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("missing_identity_binding", {item["code"] for item in report["errors"]})
         self.assertNotIn("character_without_identity_anchor", {item["code"] for item in report["errors"]})
 
-    def test_comfyui_preflight_recovers_from_payload_when_config_jobs_are_stale(self) -> None:
+    def test_comfyui_preflight_uses_compiled_payload_as_authority(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
             payload_path = output_dir / "api_ready_image_payload.json"
@@ -4670,7 +4756,7 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertTrue(report["passed"])
             self.assertEqual(report["errors"], [])
-            self.assertIn("preflight_recovered_from_payload", {item["code"] for item in report["warnings"]})
+            self.assertEqual(report["warnings"], [])
 
     def test_comfyui_job_state_recovers_from_completed_job_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
