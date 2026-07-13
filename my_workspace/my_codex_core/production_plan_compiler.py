@@ -1365,13 +1365,18 @@ def _route_character_base_item_to_master_identity_keyframe(
     item["mode"] = "identity_keyframe"
     item["control_mode"] = "identity_reference"
     item["input_identity_image"] = master_reference
-    item["input_base_image"] = master_reference
-    item["reference_image"] = master_reference
+    item.pop("input_base_image", None)
+    item.pop("reference_image", None)
+    _merge_compat_list(item, "reference_images", [master_reference])
     item["denoise"] = intent.get("denoise") or LINKED_CHARACTER_VARIANT_DENOISE
-    item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
+    item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.58
     item["prompt"] = _append_prompt_once(
         str(item.get("prompt") or ""),
         "参考关联角色母版图，必须保持同一张脸、同一年龄感、同一发型、肤色、五官比例、身材比例和服装主特征；只改变当前任务要求的表情、动作或轻微状态，不随机换人。",
+    )
+    item["prompt"] = _append_prompt_once(
+        str(item.get("prompt") or ""),
+        "Use the linked character image only as an identity anchor. Recompose the requested pose, outfit, expression, framing, and background from the prompt; do not copy the reference image's original seated pose, school uniform, background, or crop.",
     )
     if notes is not None:
         notes.append(f"image intent {item.get('job_id')} routed to identity_keyframe from {reason}")

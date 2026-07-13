@@ -1215,14 +1215,13 @@ class SemanticInputContractTests(unittest.TestCase):
                 item["input_identity_image"],
                 "my_workspace/my_asset_library/01_character_base/hero.png",
             )
-            self.assertEqual(
-                item["input_base_image"],
+            self.assertNotIn("input_base_image", item)
+            self.assertNotIn("reference_image", item)
+            self.assertIn(
                 "my_workspace/my_asset_library/01_character_base/hero.png",
+                item["reference_images"],
             )
-            self.assertEqual(
-                item["reference_image"],
-                "my_workspace/my_asset_library/01_character_base/hero.png",
-            )
+            self.assertLess(item["ipadapter_weight"], 0.72)
             self.assertEqual(item["denoise"], 1)
             self.assertNotEqual(item["workflow_mode"], "character_base")
 
