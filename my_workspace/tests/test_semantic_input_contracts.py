@@ -4423,6 +4423,36 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(updated["voice_config"]["aliyun_model"], "cosyvoice-v1")
         self.assertEqual(updated["voice_config"]["aliyun_workspace_id"], "")
 
+    def test_runtime_voice_key_applies_only_to_explicit_aliyun_provider(self) -> None:
+        with patch.object(
+            web_app.WorkflowWebHandler,
+            "_read_runtime_voice_config",
+            return_value={"provider": "aliyun_cosyvoice", "api_key": "sk-test", "has_api_key": True},
+        ):
+            enabled = web_app.WorkflowWebHandler._apply_runtime_voice_config(
+                {"voice_config": {"mode": "aliyun_cosyvoice", "provider": "aliyun_cosyvoice"}}
+            )
+            disabled = web_app.WorkflowWebHandler._apply_runtime_voice_config(
+                {"voice_config": {"mode": "off", "provider": ""}}
+            )
+        self.assertEqual(enabled["voice_config"]["aliyun_api_key"], "sk-test")
+        self.assertNotIn("aliyun_api_key", disabled["voice_config"])
+        self.assertEqual(disabled["voice_config"]["mode"], "off")
+
+    def test_runtime_voice_config_redacts_saved_api_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "runtime_voice.json"
+            with patch.object(web_app, "RUNTIME_VOICE_CONFIG_PATH", config_path):
+                web_app.WorkflowWebHandler._write_runtime_voice_config(
+                    {"provider": "aliyun_cosyvoice", "api_key": "sk-test-secret"}
+                )
+                raw = web_app.WorkflowWebHandler._read_runtime_voice_config(redact=False)
+                redacted = web_app.WorkflowWebHandler._read_runtime_voice_config(redact=True)
+        self.assertEqual(raw["api_key"], "sk-test-secret")
+        self.assertTrue(raw["has_api_key"])
+        self.assertEqual(redacted["api_key"], "")
+        self.assertTrue(redacted["has_api_key"])
+
     def test_voxcpm2_timeout_does_not_switch_provider(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)

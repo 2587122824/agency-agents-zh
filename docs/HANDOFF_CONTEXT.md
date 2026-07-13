@@ -9,6 +9,14 @@ Last compacted: 2026-07-13
 - A real retry still requires the system configuration to be explicitly set to Aliyun CosyVoice and a valid DashScope API Key. The existing OSS `LTAI...` AccessKey is not a DashScope API Key and must not be substituted.
 - Verification: 169 semantic-contract tests, `python -m compileall -q my_workspace`, and `git diff --check` passed.
 
+## 2026-07-14 Runtime Voice Credential Persistence
+
+- DashScope/CosyVoice credentials now have a backend runtime cache at `tmp/web_runtime_voice_config.json`, matching the existing runtime model and RunningHub credential pattern. `/api/config` and `/api/runtime-voice-config` expose only `has_api_key`; they never return the saved key.
+- The saved key is injected only when the incoming voice configuration already explicitly selects `aliyun_cosyvoice`/`cosyvoice`. `mode=off`, another provider, or a missing voice configuration remains unchanged. This is credential reuse, not provider selection or fallback.
+- New tasks, resume, production retry, and audio debug all use the same explicit-only injection path. Successful voice cloning saves the valid key for later synthesis; clone deletion may reuse it.
+- Production config snapshots already remove `aliyun_api_key` and every key ending in `_api_key`, so runtime injection does not leak credentials into task output.
+- Verification: 171 semantic-contract tests, `python -m compileall -q my_workspace`, inline browser-script syntax validation, and `git diff --check` passed.
+
 ## 2026-07-14 LTX I2V Production Repair
 
 - The old first-frame I2V RunningHub workflow `2071735603636563970` failed at `LTX2_NAG(238)` because its GGUF model weights were dimension `4096` while the active connector expected `3840`.

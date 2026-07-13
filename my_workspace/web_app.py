@@ -82,6 +82,7 @@ LOCAL_MODEL_PRESETS = WORKSPACE_ROOT / "my_local_models" / "local_model_presets.
 RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
 RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
 RUNTIME_COMFY_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_comfy_config.json"
+RUNTIME_VOICE_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_voice_config.json"
 PERSONAL_KNOWLEDGE_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_personal_knowledge_config.json"
 ALIYUN_VOICE_CLONES_PATH = RUNTIME_STATE_ROOT / "web_aliyun_voice_clones.json"
 OSS_VOICE_UPLOAD_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_oss_voice_upload_config.json"
@@ -5156,6 +5157,7 @@ INDEX_HTML = r"""<!doctype html>
     let localModelPresets = [];
     let runtimeModelConfigFromServer = {};
     let runtimeComfyConfigFromServer = {};
+    let runtimeVoiceConfigFromServer = {};
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v2';
@@ -6150,6 +6152,44 @@ INDEX_HTML = r"""<!doctype html>
       return syncRuntimeComfyConfig({ timeoutMs: options.timeoutMs || 12000, requireRunningHub: Boolean(options.requireRunningHub) });
     }
 
+    function currentRuntimeVoicePayload() {
+      return {
+        provider: currentVoiceProvider(),
+        api_key: String(els.aliyunTtsApiKey?.value || els.aliyunCloneApiKey?.value || '').trim(),
+      };
+    }
+
+    function hasSavedRuntimeVoiceApiKey() {
+      return Boolean(runtimeVoiceConfigFromServer?.has_api_key);
+    }
+
+    async function syncRuntimeVoiceConfig(options = {}) {
+      const payload = currentRuntimeVoicePayload();
+      if (payload.provider !== 'aliyun_cosyvoice') return null;
+      if (!payload.api_key && !hasSavedRuntimeVoiceApiKey()) {
+        if (options.requireComplete) throw new Error('请先填写阿里云 CosyVoice API Key');
+        return null;
+      }
+      const result = await apiWithTimeout('/api/runtime-voice-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }, options.timeoutMs || 8000);
+      if (result && typeof result === 'object') {
+        runtimeVoiceConfigFromServer = result;
+        applyRuntimeVoiceConfig(result);
+      }
+      return result;
+    }
+
+    function queueRuntimeVoiceConfigSync() {
+      const payload = currentRuntimeVoicePayload();
+      if (payload.provider !== 'aliyun_cosyvoice' || !payload.api_key) return;
+      syncRuntimeVoiceConfig({ timeoutMs: 8000 }).catch((err) => {
+        console.warn('runtime voice config sync failed', err);
+      });
+    }
+
     async function handleRuntimeModelConfigSave() {
       if (!els.syncRuntimeModelBtn) return;
       const originalText = els.syncRuntimeModelBtn.textContent;
@@ -6177,6 +6217,7 @@ INDEX_HTML = r"""<!doctype html>
       const data = await api('/api/config');
       runtimeModelConfigFromServer = data.runtime_model_config || {};
       runtimeComfyConfigFromServer = data.runtime_comfy_config || {};
+      runtimeVoiceConfigFromServer = data.runtime_voice_config || {};
       aliyunVoiceClones = Array.isArray(data.aliyun_voice_clones) ? data.aliyun_voice_clones : [];
       if (els.personalKnowledgeRootPath && data.personal_knowledge_config?.root_path) {
         els.personalKnowledgeRootPath.value = data.personal_knowledge_config.root_path;
@@ -6197,12 +6238,21 @@ INDEX_HTML = r"""<!doctype html>
       restoreSettings();
       applyRuntimeModelConfig(data.runtime_model_config || {});
       applyRuntimeComfyConfig(data.runtime_comfy_config || {});
+      applyRuntimeVoiceConfig(data.runtime_voice_config || {});
       renderAliyunVoiceClones();
       setIfExists(els.productTemplate, 'long_video');
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       loadAudioDebugHistory().catch(() => {});
       queueRuntimeModelConfigSync({ remoteOnly: true });
       queueRuntimeComfyConfigSync();
+      queueRuntimeVoiceConfigSync();
+    }
+
+    function applyRuntimeVoiceConfig(config) {
+      if (!config || typeof config !== 'object' || !config.has_api_key) return;
+      const placeholder = '已保存 DashScope API Key；留空继续使用已保存密钥';
+      if (els.aliyunTtsApiKey) els.aliyunTtsApiKey.placeholder = placeholder;
+      if (els.aliyunCloneApiKey) els.aliyunCloneApiKey.placeholder = placeholder;
     }
 
     function applyRuntimeComfyConfig(config) {
@@ -6551,6 +6601,7 @@ INDEX_HTML = r"""<!doctype html>
       localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
       queueRuntimeModelConfigSync({ remoteOnly: true });
       queueRuntimeComfyConfigSync();
+      queueRuntimeVoiceConfigSync();
     }
 
     function restoreSettings() {
@@ -9033,7 +9084,7 @@ INDEX_HTML = r"""<!doctype html>
       if (!window.confirm(`确定删除这个复刻音色吗？\n${voiceId}\n\n删除后会从阿里云和本地音色列表移除。`)) return;
       const apiKey = String(els.aliyunCloneApiKey?.value || els.aliyunTtsApiKey?.value || '').trim();
       const workspaceId = String(item.workspace_id || els.aliyunCloneWorkspaceId?.value || els.aliyunTtsWorkspaceId?.value || '').trim();
-      if (!apiKey) {
+      if (!apiKey && !hasSavedRuntimeVoiceApiKey()) {
         setStatus('请先填写阿里云 API Key，再删除复刻音色', true);
         return;
       }
@@ -9087,7 +9138,7 @@ INDEX_HTML = r"""<!doctype html>
       const rawPrefix = String(els.aliyunClonePrefix?.value || '').trim();
       const prefix = normalizeAliyunClonePrefix(rawPrefix);
       if (els.aliyunClonePrefix && rawPrefix !== prefix) els.aliyunClonePrefix.value = prefix;
-      if (!apiKey) {
+      if (!apiKey && !hasSavedRuntimeVoiceApiKey()) {
         setStatus('请先在系统配置或音频调试台填写阿里云 API Key', true);
         return;
       }
@@ -9171,7 +9222,7 @@ INDEX_HTML = r"""<!doctype html>
         setStatus('请先在系统配置选择语音合成方式', true);
         return;
       }
-      if (els.voiceMode.value === 'aliyun_cosyvoice' && !(els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim())) {
+      if (els.voiceMode.value === 'aliyun_cosyvoice' && !(els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim() || hasSavedRuntimeVoiceApiKey())) {
         setStatus('请先填写阿里云 CosyVoice API Key', true);
         return;
       }
@@ -13663,7 +13714,7 @@ INDEX_HTML = r"""<!doctype html>
 
     async function collectProductionConfig() {
       const voiceReferenceAudio = els.voiceMode.value === 'voxcpm2' ? await uploadVoiceReferenceAudio() : '';
-      if (els.voiceMode.value === 'aliyun_cosyvoice' && !(els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim())) {
+      if (els.voiceMode.value === 'aliyun_cosyvoice' && !(els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim() || hasSavedRuntimeVoiceApiKey())) {
         throw new Error('请先在系统配置填写阿里云 CosyVoice API Key');
       }
       const imageConfig = {
@@ -15545,6 +15596,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._save_runtime_comfy_config(payload))
                 return
 
+            if parsed.path == "/api/runtime-voice-config":
+                self._send_json(self._save_runtime_voice_config(payload))
+                return
+
             if parsed.path == "/api/test-comfy-mcp":
                 self._send_json(self._test_comfy_mcp(payload))
                 return
@@ -15644,6 +15699,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     if comfy_base_url:
                         production_compose_config["base_url"] = comfy_base_url
                 production_config = self._apply_runtime_comfy_config(production_config, payload)
+                production_config = self._apply_runtime_voice_config(production_config)
                 production_config = self._hydrate_aliyun_clone_metadata(production_config)
                 production_config = self._ensure_voice_config_for_requirement(production_config, user_input)
             image_config = payload.get("image_config") or {}
@@ -15710,6 +15766,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         staff = [path.name for path in sorted(STAFF_ROOT.iterdir()) if path.is_dir()]
         runtime_model_config = self._read_runtime_model_config()
         runtime_comfy_config = self._read_runtime_comfy_config(redact=True)
+        runtime_voice_config = self._read_runtime_voice_config(redact=True)
         return {
             "workflows": workflows,
             "staff": staff,
@@ -15722,6 +15779,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "runtime_model_saved": bool(runtime_model_config.get("api_key") and runtime_model_config.get("model")),
             "runtime_comfy_config": runtime_comfy_config,
             "runtime_comfy_saved": bool(runtime_comfy_config.get("has_api_key") or runtime_comfy_config.get("workflow_library")),
+            "runtime_voice_config": runtime_voice_config,
+            "runtime_voice_saved": bool(runtime_voice_config.get("has_api_key")),
             "personal_knowledge_config": self._read_personal_knowledge_config(),
             "aliyun_voice_clones": self._read_aliyun_voice_clones(),
         }
@@ -15944,6 +16003,68 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("payload must be a JSON object")
         self._write_runtime_comfy_config(payload)
         return self._read_runtime_comfy_config(redact=True)
+
+    @staticmethod
+    def _read_runtime_voice_config(*, redact: bool = False) -> dict:
+        try:
+            data = json.loads(RUNTIME_VOICE_CONFIG_PATH.read_text(encoding="utf-8-sig")) if RUNTIME_VOICE_CONFIG_PATH.is_file() else {}
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        api_key = str(data.get("api_key") or "").strip()
+        return {
+            "provider": "aliyun_cosyvoice" if api_key else "",
+            "api_key": "" if redact else api_key,
+            "has_api_key": bool(api_key),
+            "updated_at": float(data.get("updated_at") or 0),
+        }
+
+    @staticmethod
+    def _write_runtime_voice_config(config: dict) -> None:
+        RUNTIME_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+        current = WorkflowWebHandler._read_runtime_voice_config(redact=False)
+        api_key = str(config.get("api_key") or current.get("api_key") or "").strip()
+        RUNTIME_VOICE_CONFIG_PATH.write_text(
+            json.dumps(
+                {
+                    "provider": "aliyun_cosyvoice" if api_key else "",
+                    "api_key": api_key,
+                    "updated_at": time.time(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def _save_runtime_voice_config(self, payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("payload must be a JSON object")
+        provider = str(payload.get("provider") or "").strip().lower()
+        if provider not in {"aliyun_cosyvoice", "cosyvoice"}:
+            raise ValueError("runtime voice credentials may only be saved for aliyun_cosyvoice")
+        self._write_runtime_voice_config(payload)
+        return self._read_runtime_voice_config(redact=True)
+
+    @classmethod
+    def _apply_runtime_voice_config(cls, production_config: dict) -> dict:
+        if not isinstance(production_config, dict):
+            return {}
+        voice_config = production_config.get("voice_config")
+        if not isinstance(voice_config, dict):
+            return production_config
+        mode = str(voice_config.get("mode") or "").strip().lower()
+        provider = str(voice_config.get("provider") or "").strip().lower()
+        if mode not in {"aliyun_cosyvoice", "cosyvoice"} and provider not in {"aliyun_cosyvoice", "cosyvoice"}:
+            return production_config
+        if str(voice_config.get("aliyun_api_key") or voice_config.get("api_key") or voice_config.get("dashscope_api_key") or "").strip():
+            return production_config
+        saved_api_key = str(cls._read_runtime_voice_config(redact=False).get("api_key") or "").strip()
+        if saved_api_key:
+            voice_config["aliyun_api_key"] = saved_api_key
+        return production_config
 
     @classmethod
     def _apply_runtime_comfy_config(cls, production_config: dict, payload: dict) -> dict:
@@ -20583,6 +20704,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if comfy_base_url:
                     production_compose_config["base_url"] = comfy_base_url
             production_config = self._apply_runtime_comfy_config(production_config, payload)
+            production_config = self._apply_runtime_voice_config(production_config)
             production_config = self._hydrate_aliyun_clone_metadata(production_config)
         summary = {}
         summary_path = task_dir / "run_summary.json"
@@ -20667,6 +20789,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if comfy_base_url:
                     production_compose_config["base_url"] = comfy_base_url
             production_config = self._apply_runtime_comfy_config(production_config, payload)
+            production_config = self._apply_runtime_voice_config(production_config)
             production_config = self._hydrate_aliyun_clone_metadata(production_config)
 
         summary = {}
@@ -21212,7 +21335,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("audio debug text is too long; max 8000 characters")
 
         voice_config = payload.get("voice_config") if isinstance(payload.get("voice_config"), dict) else {}
-        hydrated = self._hydrate_aliyun_clone_metadata({"voice_config": voice_config})
+        hydrated = self._apply_runtime_voice_config({"voice_config": voice_config})
+        hydrated = self._hydrate_aliyun_clone_metadata(hydrated)
         voice_config = hydrated.get("voice_config") if isinstance(hydrated.get("voice_config"), dict) else voice_config
         mode = str(voice_config.get("mode") or "").strip().lower()
         provider = str(voice_config.get("provider") or "").strip().lower()
@@ -21318,7 +21442,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         return normalized or "myvoice"
 
     def _create_aliyun_cosyvoice_clone(self, payload: dict) -> dict:
-        api_key = str(payload.get("api_key") or "").strip()
+        api_key = str(payload.get("api_key") or self._read_runtime_voice_config(redact=False).get("api_key") or "").strip()
         workspace_id = str(payload.get("workspace_id") or "").strip()
         region = str(payload.get("region") or "cn-beijing").strip() or "cn-beijing"
         target_model = str(payload.get("target_model") or "cosyvoice-v3-flash").strip() or "cosyvoice-v3-flash"
@@ -21395,10 +21519,11 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         voices = [item for item in voices if str(item.get("voice_id") or "") != voice_id]
         voices.insert(0, voice)
         self._write_aliyun_voice_clones(voices[:50])
+        self._write_runtime_voice_config({"provider": "aliyun_cosyvoice", "api_key": api_key})
         return {"ok": True, "voice_id": voice_id, "voice": voice, "voices": voices[:50], "raw": data}
 
     def _delete_aliyun_cosyvoice_clone(self, payload: dict) -> dict:
-        api_key = str(payload.get("api_key") or "").strip()
+        api_key = str(payload.get("api_key") or self._read_runtime_voice_config(redact=False).get("api_key") or "").strip()
         voice_id = str(payload.get("voice_id") or "").strip()
         if not api_key:
             raise ValueError("Aliyun API Key is required")
