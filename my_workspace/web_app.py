@@ -6285,7 +6285,7 @@ INDEX_HTML = r"""<!doctype html>
       if (config.poll_timeout_seconds && els.comfyPollTimeout && !String(els.comfyPollTimeout.value || '').trim()) {
         els.comfyPollTimeout.value = String(config.poll_timeout_seconds);
       }
-      if (Array.isArray(config.workflow_library) && config.workflow_library.length && !comfyWorkflowLibrary.length) {
+      if (Array.isArray(config.workflow_library) && config.workflow_library.length) {
         comfyWorkflowLibrary = normalizeComfyWorkflowLibrary(config.workflow_library);
         renderComfyWorkflowLibrary();
       }

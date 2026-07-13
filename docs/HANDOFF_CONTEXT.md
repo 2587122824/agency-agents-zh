@@ -10,6 +10,7 @@ Last compacted: 2026-07-13
 - `off`/`package_only` continue to control automatic production only. Explicit material retry and task-scoped ComfyUI debug may run with the current configured visual provider/workflow slot; they do not enable TTS or change the saved automatic mode. TTS retry checks only the current audio configuration and fails explicitly when audio is `off`.
 - Task-scoped ComfyUI debug requires the exact current workflow ID/mode slot, endpoint, and node mapping. It does not use request-body workflow overrides, task snapshots, or built-in endpoint substitutions when the current slot is missing.
 - Visual settings have one owner: `web_runtime_comfy_config.json`. The backend overlays its current provider, endpoint, node mapping, and workflow library onto the production config at execution time; the frontend also completes ComfyUI sync before constructing the production config, preventing stale blank/old workflow slots.
+- On page load, the backend runtime workflow library replaces stale browser-local workflow values. The validated first-frame slot is `06_i2v_first_frame / i2v_first_frame` using RunningHub workflow `2069607607387639810` and its matching `2483/2612/2004/4981/4979/4978/4814/4977/4823` node mapping.
 - The frontend waits for RunningHub/CosyVoice credential persistence, then saves the complete current production config before starting, resuming, or retrying work.
 - Verification: 187 semantic-contract tests, embedded frontend JavaScript syntax validation, `python -m compileall -q my_workspace`, and `git diff --check` passed.
 
