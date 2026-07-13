@@ -15,6 +15,7 @@ WORKSPACE = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(WORKSPACE / "my_workspace"))
 
 import web_app  # noqa: E402
+from my_codex_core.codex_api import LLMResult  # noqa: E402
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter  # noqa: E402
 from my_codex_core.local_tts_adapter import LocalTTSAdapter  # noqa: E402
 from my_codex_core.local_ffmpeg_adapter import LocalFFmpegAdapter  # noqa: E402
@@ -832,6 +833,43 @@ class SemanticInputContractTests(unittest.TestCase):
 
             (task_dir / "final_video.mp4").write_bytes(b"video")
             self.assertEqual(web_app.WorkflowWebHandler._production_resume_job_for_task(task_dir), "")
+
+    def test_employee_output_validation_failure_does_not_auto_retry(self) -> None:
+        class FakeAPI:
+            provider = "fake"
+            model = "fake-model"
+            timeout = 1
+
+            def __init__(self) -> None:
+                self.calls = 0
+
+            def run(self, system_prompt: str, prompt: str) -> LLMResult:
+                self.calls += 1
+                return LLMResult(provider="fake", model="fake-model", content="{}", raw={})
+
+        with tempfile.TemporaryDirectory() as tmp:
+            engine = WorkflowEngine(Path(tmp))
+            fake_api = FakeAPI()
+            engine.api = fake_api
+            step_dir = Path(tmp) / "step_06_image"
+
+            with self.assertRaisesRegex(Exception, "Employee output validation failed"):
+                engine._run_model_with_requirement_guard(
+                    "system",
+                    "prompt",
+                    "30 second vertical video",
+                    {"step": 6, "agent": "06_image", "task": "image", "output": "json"},
+                    step_dir,
+                    [],
+                )
+
+            self.assertEqual(fake_api.calls, 1)
+            self.assertFalse((step_dir / "prompt_retry_requirement.md").exists())
+            self.assertFalse(list(step_dir.glob("output_rejected_retry_*.md")))
+            validation = json.loads((step_dir / "requirement_validation.json").read_text(encoding="utf-8"))
+            self.assertFalse(validation["passed"])
+            self.assertEqual(validation["auto_retry_count"], 0)
+            self.assertTrue(validation["strict_employee_output"])
 
     def test_cloud_adapter_skips_failed_unreferenced_auxiliary_material(self) -> None:
         jobs = [

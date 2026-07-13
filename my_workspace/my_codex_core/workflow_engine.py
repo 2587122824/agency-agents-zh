@@ -11,10 +11,9 @@ from typing import Callable
 from .codex_api import CodexAPI, LLMResult
 from .action_executor import ActionExecutor
 from .production_pipeline import run_auto_production
-from .production_output_validator import normalize_production_output_content, validate_production_output
+from .production_output_validator import validate_production_output
 from .requirement_guard import (
     build_requirement_lock,
-    correction_prompt,
     declares_human_confirmation,
     extract_original_requirement,
     requirement_lock_prompt,
@@ -555,21 +554,7 @@ class WorkflowEngine:
             )
 
             try:
-                recovered_result = self._recover_valid_candidate_output(step, step_dir, user_input, previous_outputs)
-                if recovered_result and progress_callback:
-                    progress_callback(
-                        {
-                            "event": "step_update",
-                            "step": step_no,
-                            "agent_id": agent.agent_id,
-                            "agent_name": agent.name,
-                            "message": "已复用当前校验器确认通过的历史候选输出，跳过重复模型调用",
-                            "provider": recovered_result.provider,
-                            "model": recovered_result.model,
-                            "total_steps": len(steps),
-                        }
-                    )
-                if not recovered_result and progress_callback:
+                if progress_callback:
                     progress_callback(
                         {
                             "event": "step_update",
@@ -583,7 +568,7 @@ class WorkflowEngine:
                             "total_steps": len(steps),
                         }
                     )
-                result = recovered_result or self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir, previous_outputs)
+                result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir, previous_outputs)
             except Exception as exc:
                 error_text = (
                     "# 当前步骤执行失败\n\n"
@@ -1041,11 +1026,7 @@ class WorkflowEngine:
         result = self.api.run(system_prompt, prompt)
         if result.provider == "offline":
             return result
-        result, initial_normalizations = self._normalize_production_result(result, step, lock, previous_outputs or [])
-
         validation = self._combined_output_validation(lock, result.content, step, previous_outputs or [])
-        if initial_normalizations:
-            validation["auto_normalizations"] = initial_normalizations
         attempts.append(validation)
         if validation.get("passed"):
             self.storage.write_json(step_dir / "requirement_validation.json", {"passed": True, "attempts": attempts})
@@ -1054,235 +1035,19 @@ class WorkflowEngine:
 
         rejected_path = step_dir / f"output_rejected_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
         self.storage.write_text(rejected_path, result.content)
-        retry_prompt = correction_prompt(prompt, lock, result.content, validation.get("issues") or [])
-        self.storage.write_text(step_dir / "prompt_retry_requirement.md", retry_prompt)
-        retry_result = self.api.run(system_prompt, retry_prompt)
-        retry_result, retry_normalizations = self._normalize_production_result(retry_result, step, lock, previous_outputs or [])
-        retry_validation = self._combined_output_validation(lock, retry_result.content, step, previous_outputs or [])
-        if retry_normalizations:
-            retry_validation["auto_normalizations"] = retry_normalizations
-        attempts.append(retry_validation)
         self.storage.write_json(
             step_dir / "requirement_validation.json",
             {
-                "passed": bool(retry_validation.get("passed")),
-                "auto_retry_count": 1,
+                "passed": False,
+                "auto_retry_count": 0,
+                "strict_employee_output": True,
                 "rejected_output": rejected_path.name,
                 "attempts": attempts,
             },
         )
-        self.storage.write_json(step_dir / "production_contract_validation.json", retry_validation.get("production_contract") or {})
-        if retry_validation.get("passed"):
-            return retry_result
-
-        second_rejected_path = step_dir / f"output_rejected_retry_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
-        self.storage.write_text(second_rejected_path, retry_result.content)
-        recovered_content = self._recover_single_missing_shot(step, step_dir, retry_result.content, previous_outputs or [])
-        if recovered_content:
-            recovered_validation = self._combined_output_validation(lock, recovered_content, step, previous_outputs or [])
-            attempts.append(recovered_validation)
-            self.storage.write_json(
-                step_dir / "requirement_validation.json",
-                {"passed": bool(recovered_validation.get("passed")), "auto_material_recovery": True, "attempts": attempts},
-            )
-            self.storage.write_json(step_dir / "production_contract_validation.json", recovered_validation.get("production_contract") or {})
-            if recovered_validation.get("passed"):
-                return LLMResult(provider=retry_result.provider, model=retry_result.model, content=recovered_content, raw=retry_result.raw)
-        issues = "；".join(str(item) for item in (retry_validation.get("issues") or []))
-        raise RequirementAlignmentError(f"员工输出校验连续两次未通过：{issues}")
-
-    def _recover_single_missing_shot(
-        self,
-        step: dict,
-        step_dir: Path,
-        content: str,
-        previous_outputs: list[dict[str, str]],
-    ) -> str:
-        """Backfill one explicitly reported missing 06/07 shot before packaging fails."""
-        if not str(step.get("agent") or "").startswith("22_"):
-            return ""
-        package = self._first_json_payload(content)
-        missing = package.get("missing_assets") if isinstance(package, dict) else []
-        if not isinstance(missing, list) or len(missing) != 1 or not isinstance(missing[0], dict):
-            return ""
-        clip_id = str(missing[0].get("missing_clip_id") or "").strip().upper()
-        if not re.fullmatch(r"L\d{1,3}", clip_id):
-            return ""
-        image_record = next((item for item in previous_outputs if str(item.get("agent") or "").startswith("06_")), None)
-        video_record = next((item for item in previous_outputs if str(item.get("agent") or "").startswith("07_")), None)
-        image_path = Path(str((image_record or {}).get("output_path") or ""))
-        video_path = Path(str((video_record or {}).get("output_path") or ""))
-        if not image_path.is_file() or not video_path.is_file():
-            return ""
-        image_payload = self._first_json_payload(image_path.read_text(encoding="utf-8", errors="replace"))
-        video_payload = self._first_json_payload(video_path.read_text(encoding="utf-8", errors="replace"))
-        image_intents = ((image_payload.get("production_intents") or {}).get("image")) if isinstance(image_payload.get("production_intents"), dict) else None
-        video_intents = ((video_payload.get("production_intents") or {}).get("video")) if isinstance(video_payload.get("production_intents"), dict) else None
-        if not isinstance(image_intents, list) or not isinstance(video_intents, list):
-            return ""
-        image_id = f"keyframe_{clip_id}_auto_recovery"
-        video_id = f"clip_{clip_id}_auto_recovery"
-        if any(str(item.get("intent_id") or "") == image_id for item in image_intents if isinstance(item, dict)):
-            return ""
-        character_id = str(next((item.get("character_id") or "" for item in image_intents if isinstance(item, dict) and item.get("character_id")), ""))
-        role = str(missing[0].get("missing_role") or "missing story shot").strip()
-        image_intents.append({
-            "intent": "generate_keyframe", "intent_id": image_id, "character_id": character_id,
-            "prompt": f"{clip_id} {role}: keep the established protagonist identity and visual style, no readable text.",
-            "source_note": "auto_missing_material_recovery",
-        })
-        video_intents.append({
-            "intent": "generate_i2v_clip", "intent_id": video_id, "keyframe_intent_id": image_id,
-            "character_id": character_id, "duration": 5,
-            "prompt": f"{clip_id} {role}: natural continuous motion, keep the established protagonist identity and scene style.",
-            "source_note": "auto_missing_material_recovery",
-        })
-        self.storage.write_text(image_path, self._replace_first_json_payload(image_path.read_text(encoding="utf-8", errors="replace"), image_payload))
-        self.storage.write_text(video_path, self._replace_first_json_payload(video_path.read_text(encoding="utf-8", errors="replace"), video_payload))
-        package["missing_assets"] = []
-        for item in ((package.get("production_intents") or {}).get("package") or []):
-            if not isinstance(item, dict):
-                continue
-            if item.get("intent") == "review_missing_assets":
-                item["missing_assets"] = []
-                item["all_assets_ready"] = True
-            if item.get("intent") == "build_edit_timeline":
-                for entry in item.get("timeline") or []:
-                    if isinstance(entry, dict) and not entry.get("source_intent_id") and clip_id in str(entry.get("edit_note") or ""):
-                        entry["source_intent_id"] = video_id
-        for entry in ((package.get("edit_timeline") or {}).get("clips") or []):
-            if isinstance(entry, dict) and entry.get("status") == "missing" and clip_id in str(entry.get("clip_id") or "").upper():
-                entry["clip_id"] = video_id
-                entry.pop("status", None)
-        self.storage.write_json(step_dir.parent / "auto_material_recovery.json", {
-            "status": "recovered", "missing_clip_id": clip_id, "image_intent_id": image_id,
-            "video_intent_id": video_id, "recovered_at": datetime.now().isoformat(timespec="seconds"),
-        })
-        return self._replace_first_json_payload(content, package)
-
-    @staticmethod
-    def _first_json_payload(content: str) -> dict:
-        match = re.search(r"```json\s*(\{.*?\})\s*```", str(content or ""), flags=re.IGNORECASE | re.DOTALL)
-        if not match:
-            return {}
-        try:
-            value = json.loads(match.group(1))
-        except Exception:
-            return {}
-        return value if isinstance(value, dict) else {}
-
-    @staticmethod
-    def _replace_first_json_payload(content: str, payload: dict) -> str:
-        replacement = "```json\n" + json.dumps(payload, ensure_ascii=False, indent=2) + "\n```"
-        return re.sub(r"```json\s*\{.*?\}\s*```", replacement, str(content or ""), count=1, flags=re.IGNORECASE | re.DOTALL)
-
-    def _recover_valid_candidate_output(
-        self,
-        step: dict,
-        step_dir: Path,
-        user_input: str,
-        previous_outputs: list[dict[str, str]],
-    ) -> LLMResult | None:
-        """Promote a previously rejected candidate if current validators accept it.
-
-        This is intentionally limited to resume-time candidate files. It lets old
-        tasks benefit from validator/compiler fixes without spending another LLM
-        call, while still running the normal post-step production gate after the
-        recovered content is returned to the resume loop.
-        """
-
-        candidates = [
-            *step_dir.glob("output_rejected_retry_*.md"),
-            *step_dir.glob("output_rejected_*.md"),
-        ]
-        unique_candidates = sorted({path.resolve(): path for path in candidates}.values(), key=lambda path: path.stat().st_mtime, reverse=True)
-        if not unique_candidates:
-            return None
-
-        lock = build_requirement_lock(user_input)
-        for candidate in unique_candidates:
-            content = candidate.read_text(encoding="utf-8", errors="replace")
-            if not content.strip():
-                continue
-            normalization = normalize_production_output_content(step, content, lock, previous_outputs)
-            content = str(normalization.get("content") or content)
-            validation = self._combined_output_validation(lock, content, step, previous_outputs)
-            if not validation.get("passed"):
-                continue
-            if normalization.get("normalizations"):
-                validation["auto_normalizations"] = normalization.get("normalizations")
-
-            self.storage.write_text(step_dir / "output.md", content)
-            self.storage.write_json(
-                step_dir / "requirement_validation.json",
-                {
-                    "passed": True,
-                    "recovered_from": candidate.name,
-                    "recovered_at": datetime.now().isoformat(timespec="seconds"),
-                    "attempts": [validation],
-                },
-            )
-            self.storage.write_json(step_dir / "production_contract_validation.json", validation.get("production_contract") or {})
-            self.storage.write_json(
-                step_dir / "recovered_output.json",
-                {
-                    "source": candidate.name,
-                    "recovered_at": datetime.now().isoformat(timespec="seconds"),
-                    "reason": "previous rejected candidate passes current validators",
-                },
-            )
-            error_path = step_dir / "error.json"
-            if error_path.exists():
-                error_path.unlink()
-            self._update_summary_after_candidate_recovery(step_dir.parent, step, candidate.name)
-            return LLMResult(provider="recovered", model="validated-candidate", content=content)
-        return None
-
-    @staticmethod
-    def _normalize_production_result(
-        result: LLMResult,
-        step: dict,
-        lock: dict,
-        previous_outputs: list[dict[str, str]],
-    ) -> tuple[LLMResult, list[dict]]:
-        normalization = normalize_production_output_content(step, result.content, lock, previous_outputs)
-        normalizations = normalization.get("normalizations") if isinstance(normalization.get("normalizations"), list) else []
-        if not normalization.get("changed"):
-            return result, normalizations
-        return (
-            LLMResult(
-                provider=result.provider,
-                model=result.model,
-                content=str(normalization.get("content") or result.content),
-                raw=result.raw,
-            ),
-            normalizations,
-        )
-
-    def _update_summary_after_candidate_recovery(self, task_dir: Path, step: dict, source_name: str) -> None:
-        summary = self._read_summary(task_dir)
-        if not summary:
-            return
-        step_no = int(step.get("step") or 0)
-        summary.update(
-            {
-                "status": "paused",
-                "current_step": step_no,
-                "step_count": max(int(summary.get("step_count") or 0), step_no),
-                "resume_from_step": step_no,
-                "blocked_step": 0,
-                "blocked_reason": "",
-                "awaiting_confirmation": False,
-                "awaiting_confirmation_step": 0,
-                "error": "",
-                "traceback": "",
-                "recovered_step": step_no,
-                "recovered_output": source_name,
-                "recovered_at": datetime.now().isoformat(timespec="seconds"),
-                "updated_at": time.time(),
-            }
-        )
-        self._write_summary(task_dir, summary)
+        self.storage.write_json(step_dir / "production_contract_validation.json", validation.get("production_contract") or {})
+        issues = "; ".join(str(item) for item in (validation.get("issues") or []))
+        raise RequirementAlignmentError(f"Employee output validation failed: {issues}")
 
     @staticmethod
     def _combined_output_validation(
