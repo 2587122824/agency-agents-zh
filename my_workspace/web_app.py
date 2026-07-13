@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import json
 import mimetypes
+import os
 import re
 import shutil
 import sys
@@ -11,12 +13,13 @@ import threading
 import time
 import traceback
 from datetime import datetime
+from email.utils import formatdate
 from io import BytesIO
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib import error as urllib_error
 from urllib import request as urllib_request
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urlparse, urlunparse
 from uuid import uuid4
 
 from PIL import Image
@@ -77,6 +80,7 @@ RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
 RUNTIME_COMFY_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_comfy_config.json"
 PERSONAL_KNOWLEDGE_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_personal_knowledge_config.json"
 ALIYUN_VOICE_CLONES_PATH = RUNTIME_STATE_ROOT / "web_aliyun_voice_clones.json"
+OSS_VOICE_UPLOAD_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_oss_voice_upload_config.json"
 DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = ""
 DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = ""
 RUN_JOBS: dict[str, dict] = {}
@@ -3618,13 +3622,13 @@ INDEX_HTML = r"""<!doctype html>
                     <input id="aliyunCloneLocalAudioFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
                   </label>
                   <label>公网基地址
-                    <input id="aliyunVoicePublicBaseUrl" autocomplete="off" spellcheck="false" placeholder="可选：你的域名；留空则尝试 RunningHub 上传" />
+                    <input id="aliyunVoicePublicBaseUrl" autocomplete="off" spellcheck="false" placeholder="可选：你的域名；留空则使用后端 OSS 临时上传" />
                   </label>
                   <label class="audio-debug-field-wide">参考音频公网 URL
                     <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
                   </label>
                 </div>
-                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机；如果设置了公网基地址会拼出 URL，否则会尝试用 RunningHub 媒体上传获取云端 URL。</div>
+                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机；如果设置了公网基地址会拼出 URL，否则会使用后端 OSS 私有桶生成临时签名 URL。</div>
               </div>
               <div class="audio-debug-clone-section">
                 <div class="audio-debug-clone-section-title">
@@ -8570,36 +8574,29 @@ INDEX_HTML = r"""<!doctype html>
       if (els.aliyunCloneLocalAudioHint) els.aliyunCloneLocalAudioHint.textContent = '正在上传本地个人音频...';
       try {
         const contentBase64 = await fileToBase64(file);
-        const hasPublicBaseUrl = /^https?:\/\//i.test(String(els.aliyunVoicePublicBaseUrl?.value || '').trim());
         const result = await api('/api/upload-voice-sample', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             filename: file.name,
             content_base64: contentBase64,
-            upload_to_runninghub: !hasPublicBaseUrl,
-            runninghub_api_key: els.comfyApiKey?.value?.trim() || els.comfyDebugApiKey?.value?.trim() || '',
-            runninghub_base_url: els.comfyBaseUrl?.value?.trim() || els.comfyDebugBaseUrl?.value?.trim() || '',
           }),
         });
         const storedPath = result.stored_path || '';
         const publicUrl = voiceSamplePublicUrl(result);
-        const runninghubUpload = result.runninghub_upload || {};
-        const runninghubUrl = String(runninghubUpload.url || '').trim();
-        const runninghubValue = String(runninghubUpload.value || '').trim();
+        const ossUpload = result.oss_upload || {};
+        const ossUrl = String(ossUpload.url || '').trim();
         if (els.voiceReferenceAudioPath) els.voiceReferenceAudioPath.value = storedPath;
-        if ((publicUrl || runninghubUrl) && els.aliyunCloneAudioUrl) els.aliyunCloneAudioUrl.value = publicUrl || runninghubUrl;
+        if ((publicUrl || ossUrl) && els.aliyunCloneAudioUrl) els.aliyunCloneAudioUrl.value = publicUrl || ossUrl;
         if (els.aliyunCloneLocalAudioHint) {
           els.aliyunCloneLocalAudioHint.textContent = publicUrl
             ? `已保存到本机：${storedPath}。已生成公网 URL 并填入参考音频：${publicUrl}`
-            : runninghubUrl
-            ? `已保存到本机：${storedPath}。RunningHub 已返回公网 URL 并填入参考音频：${runninghubUrl}`
-            : runninghubUpload.ok && runninghubValue
-            ? `已保存到本机：${storedPath}。RunningHub 上传成功，但返回的是平台内部文件值（${runninghubValue}），不是阿里云可读取的公网 URL。`
-            : runninghubUpload.error
-            ? `已保存到本机：${storedPath}。RunningHub 上传未生成公网 URL：${runninghubUpload.error}`
+            : ossUrl
+            ? `已保存到本机：${storedPath}。已上传 OSS，并填入临时签名 URL（约 ${Math.round(Number(ossUpload.expires_seconds || 3600) / 60)} 分钟有效）：${ossUrl}`
+            : ossUpload.error
+            ? `已保存到本机：${storedPath}。OSS 临时上传失败：${ossUpload.error}`
             : storedPath
-            ? `已保存到本机：${storedPath}。请填写公网基地址后重新选择音频，或手动填参考音频公网 URL。`
+            ? `已保存到本机：${storedPath}。请填写公网基地址，或提供 OSS 配置后重新选择音频。`
             : '已上传，但没有返回保存路径。';
         }
         saveSettings();
@@ -20811,34 +20808,138 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "media_path": media_path,
             "size_bytes": len(audio_bytes),
         }
-        if self._truthy(payload.get("upload_to_runninghub")):
-            result["runninghub_upload"] = self._upload_voice_sample_to_runninghub(target, payload)
+        oss_config = self._read_oss_voice_upload_config(redact=False)
+        if oss_config:
+            result["oss_upload"] = self._upload_voice_sample_to_oss(target, oss_config)
         return result
 
-    def _upload_voice_sample_to_runninghub(self, path: Path, payload: dict) -> dict:
-        saved = self._read_runtime_comfy_config(redact=False)
-        api_key = str(payload.get("runninghub_api_key") or payload.get("comfy_api_key") or saved.get("api_key") or "").strip()
-        base_url = str(payload.get("runninghub_base_url") or payload.get("comfy_base_url") or saved.get("base_url") or "https://www.runninghub.cn/openapi/v2").strip()
-        base_url = base_url.rstrip("/") or "https://www.runninghub.cn/openapi/v2"
-        if not api_key:
-            return {
-                "ok": False,
-                "error": "未配置 RunningHub/ComfyUI API Key，无法上传到 RunningHub 获取云端文件地址。",
-            }
+    @staticmethod
+    def _read_oss_voice_upload_config(*, redact: bool = False) -> dict:
+        config: dict[str, object] = {}
         try:
-            adapter = CloudComfyUIAdapter(base_url, api_key, "", progress_callback=None)
-            value = adapter._upload_runninghub_media(path)  # RunningHub's media endpoint supports images and other binary media.
-        except Exception as exc:
-            return {"ok": False, "error": str(exc), "base_url": base_url}
-        is_http_url = bool(re.match(r"^https?://", value, flags=re.I))
-        return {
-            "ok": True,
-            "value": value,
-            "url": value if is_http_url else "",
-            "is_public_url": is_http_url,
-            "base_url": base_url,
-            "note": "" if is_http_url else "RunningHub 返回的是平台内部文件值，不是阿里云可直接读取的公网 HTTP URL。",
+            if OSS_VOICE_UPLOAD_CONFIG_PATH.is_file():
+                raw = json.loads(OSS_VOICE_UPLOAD_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+                if isinstance(raw, dict):
+                    config.update(raw)
+        except Exception:
+            config = {}
+        env_map = {
+            "access_key_id": "ALIYUN_OSS_ACCESS_KEY_ID",
+            "access_key_secret": "ALIYUN_OSS_ACCESS_KEY_SECRET",
+            "bucket": "ALIYUN_OSS_BUCKET",
+            "endpoint": "ALIYUN_OSS_ENDPOINT",
+            "prefix": "ALIYUN_OSS_TEMP_PREFIX",
+            "expires_seconds": "ALIYUN_OSS_SIGNED_URL_EXPIRES",
         }
+        for key, env_name in env_map.items():
+            value = os.environ.get(env_name)
+            if value:
+                config[key] = value
+        normalized = {
+            "access_key_id": str(config.get("access_key_id") or "").strip(),
+            "access_key_secret": str(config.get("access_key_secret") or "").strip(),
+            "bucket": str(config.get("bucket") or "").strip(),
+            "endpoint": str(config.get("endpoint") or "").strip(),
+            "prefix": str(config.get("prefix") or "voice-clone-temp").strip().strip("/") or "voice-clone-temp",
+            "expires_seconds": int(float(config.get("expires_seconds") or 3600)),
+        }
+        if not all(normalized[key] for key in ("access_key_id", "access_key_secret", "bucket", "endpoint")):
+            return {}
+        normalized["expires_seconds"] = max(60, min(int(normalized["expires_seconds"]), 86400))
+        if redact:
+            normalized["access_key_secret"] = "***"
+            normalized["access_key_id"] = normalized["access_key_id"][:4] + "***" if normalized["access_key_id"] else ""
+        return normalized
+
+    def _upload_voice_sample_to_oss(self, path: Path, config: dict) -> dict:
+        access_key_id = str(config.get("access_key_id") or "").strip()
+        access_key_secret = str(config.get("access_key_secret") or "").strip()
+        bucket = str(config.get("bucket") or "").strip()
+        endpoint = str(config.get("endpoint") or "").strip()
+        prefix = str(config.get("prefix") or "voice-clone-temp").strip().strip("/") or "voice-clone-temp"
+        expires_seconds = int(config.get("expires_seconds") or 3600)
+        if not all([access_key_id, access_key_secret, bucket, endpoint]):
+            return {"ok": False, "error": "OSS voice upload config is incomplete"}
+
+        endpoint_url = endpoint if endpoint.startswith(("http://", "https://")) else f"https://{endpoint}"
+        parsed_endpoint = urlparse(endpoint_url)
+        if parsed_endpoint.scheme not in {"http", "https"} or not parsed_endpoint.netloc:
+            return {"ok": False, "error": f"Invalid OSS endpoint: {endpoint}"}
+        object_key = f"{prefix}/{datetime.now().strftime('%Y%m%d')}/{uuid4().hex}{path.suffix.lower()}"
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        date_header = formatdate(usegmt=True)
+        canonical_resource = f"/{bucket}/{object_key}"
+        string_to_sign = f"PUT\n\n{content_type}\n{date_header}\n{canonical_resource}"
+        signature = self._oss_signature(access_key_secret, string_to_sign)
+        upload_url = urlunparse((parsed_endpoint.scheme, f"{bucket}.{parsed_endpoint.netloc}", f"/{quote(object_key)}", "", "", ""))
+        request = urllib_request.Request(
+            upload_url,
+            data=path.read_bytes(),
+            headers={
+                "Authorization": f"OSS {access_key_id}:{signature}",
+                "Date": date_header,
+                "Content-Type": content_type,
+            },
+            method="PUT",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=120) as response:
+                status_code = response.status
+        except urllib_error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:1200]
+            return {"ok": False, "error": f"OSS upload HTTP {exc.code}: {detail}"}
+        except (urllib_error.URLError, TimeoutError, OSError) as exc:
+            return {"ok": False, "error": f"OSS upload failed: {exc}"}
+
+        expires_at = int(time.time()) + expires_seconds
+        signed_url = self._oss_signed_get_url(
+            endpoint_url=endpoint_url,
+            bucket=bucket,
+            object_key=object_key,
+            access_key_id=access_key_id,
+            access_key_secret=access_key_secret,
+            expires_at=expires_at,
+        )
+        return {
+            "ok": 200 <= int(status_code) < 300,
+            "bucket": bucket,
+            "endpoint": endpoint,
+            "object_key": object_key,
+            "url": signed_url,
+            "expires_at": expires_at,
+            "expires_seconds": expires_seconds,
+        }
+
+    @staticmethod
+    def _oss_signature(access_key_secret: str, string_to_sign: str) -> str:
+        digest = hmac.new(
+            access_key_secret.encode("utf-8"),
+            string_to_sign.encode("utf-8"),
+            hashlib.sha1,
+        ).digest()
+        return base64.b64encode(digest).decode("ascii")
+
+    @classmethod
+    def _oss_signed_get_url(
+        cls,
+        *,
+        endpoint_url: str,
+        bucket: str,
+        object_key: str,
+        access_key_id: str,
+        access_key_secret: str,
+        expires_at: int,
+    ) -> str:
+        parsed_endpoint = urlparse(endpoint_url if endpoint_url.startswith(("http://", "https://")) else f"https://{endpoint_url}")
+        canonical_resource = f"/{bucket}/{object_key}"
+        string_to_sign = f"GET\n\n\n{expires_at}\n{canonical_resource}"
+        signature = cls._oss_signature(access_key_secret, string_to_sign)
+        query = (
+            f"OSSAccessKeyId={quote(access_key_id, safe='')}"
+            f"&Expires={expires_at}"
+            f"&Signature={quote(signature, safe='')}"
+        )
+        return urlunparse((parsed_endpoint.scheme, f"{bucket}.{parsed_endpoint.netloc}", f"/{quote(object_key)}", "", query, ""))
 
     def _audio_debug_run(self, payload: dict) -> dict:
         text = str(payload.get("text") or "").strip()
