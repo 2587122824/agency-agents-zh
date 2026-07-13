@@ -552,13 +552,14 @@ INDEX_HTML = r"""<!doctype html>
       grid-template-columns: minmax(420px, 1fr) 420px;
       gap: 18px;
       align-items: stretch;
-      min-height: 420px;
+      height: 420px;
     }
     .audio-debug-compose {
       display: grid;
       grid-template-rows: minmax(0, 1fr) auto;
       gap: 10px;
       min-height: 0;
+      overflow: hidden;
     }
     .audio-debug-compose label {
       grid-template-rows: auto minmax(0, 1fr);
@@ -585,6 +586,7 @@ INDEX_HTML = r"""<!doctype html>
       grid-template-rows: auto minmax(0, 1fr);
       gap: 12px;
       min-height: 0;
+      overflow: hidden;
     }
     .audio-debug-result {
       display: grid;
@@ -703,7 +705,7 @@ INDEX_HTML = r"""<!doctype html>
     @media (max-width: 1100px) {
       .audio-debug-layout {
         grid-template-columns: 1fr;
-        min-height: 0;
+        height: auto;
       }
       .audio-debug-layout textarea {
         min-height: 220px;
