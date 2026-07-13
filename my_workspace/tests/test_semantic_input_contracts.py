@@ -19,7 +19,7 @@ from my_codex_core.codex_api import LLMResult  # noqa: E402
 from my_codex_core.cloud_comfyui_adapter import CloudComfyUIAdapter  # noqa: E402
 from my_codex_core.local_tts_adapter import LocalTTSAdapter  # noqa: E402
 from my_codex_core.local_ffmpeg_adapter import LocalFFmpegAdapter  # noqa: E402
-from my_codex_core.workflow_engine import WorkflowEngine  # noqa: E402
+from my_codex_core.workflow_engine import RequirementAlignmentError, WorkflowEngine, _step_error_text  # noqa: E402
 from my_codex_core.production_plan_compiler import (  # noqa: E402
     _bind_first_source_video,
     _image_prompt_item,
@@ -43,8 +43,12 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _srt_from_voice_text,
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
-from my_codex_core.production_output_validator import normalize_production_output_content  # noqa: E402
-from my_codex_core.requirement_guard import declares_human_confirmation, validate_requirement_alignment  # noqa: E402
+from my_codex_core.requirement_guard import (  # noqa: E402
+    build_requirement_lock,
+    declares_human_confirmation,
+    extract_original_requirement,
+    validate_requirement_alignment,
+)
 from my_codex_core.reference_snapshot import snapshot_linked_assets  # noqa: E402
 from my_codex_core.task_state_center import TaskStateCenter  # noqa: E402
 
@@ -184,6 +188,68 @@ class SemanticInputContractTests(unittest.TestCase):
         )
 
         self.assertTrue(result["passed"], result["issues"])
+
+    def test_original_requirement_stops_before_linked_asset_context(self) -> None:
+        user_input = (
+            "小美的田径训练日记，竖屏1分钟\n\n"
+            "## 关联资产上下文\n"
+            "- asset_id: xiaomei\n"
+            "## ComfyUI 素材/预览配置\n"
+            "- provider: runninghub\n"
+        )
+
+        self.assertEqual(extract_original_requirement(user_input), "小美的田径训练日记，竖屏1分钟")
+        lock = build_requirement_lock(user_input)
+        self.assertEqual(lock["original_requirement"], "小美的田径训练日记，竖屏1分钟")
+        self.assertEqual(lock["duration_seconds"], 60)
+        self.assertEqual(lock["explicit_constraints"], ["竖屏"])
+
+    def test_early_step_prompt_contains_compact_requirement_without_asset_duplication(self) -> None:
+        user_input = (
+            "小美的田径训练日记，竖屏1分钟\n\n"
+            "## 关联资产上下文\n"
+            "- asset_id: xiaomei\n"
+        )
+        prompt = WorkflowEngine._build_step_prompt(
+            {"name": "通用视频生产主流程", "description": "测试"},
+            {"step": 1, "agent": "01_需求拆解专员", "task": "拆解", "output": "Brief"},
+            user_input,
+            [],
+        )
+
+        self.assertEqual(prompt.count("小美的田径训练日记，竖屏1分钟"), 1)
+        self.assertNotIn("asset_id: xiaomei", prompt)
+        self.assertNotIn("自动采用的默认值", prompt)
+        self.assertNotIn("禁止凭空", prompt)
+
+    def test_requirement_guard_accepts_storyboard_timestamp_reaching_target(self) -> None:
+        lock = build_requirement_lock("小美的田径训练日记，竖屏1分钟")
+        outputs = (
+            "# 小美的田径训练日记\n竖屏 9:16\n| 夕阳总结 | 00:42‑00:60 | 收尾 |",
+            "# 小美的田径训练日记\n竖屏 9:16\n| 夕阳总结 | 00:42-01:00 | 收尾 |",
+        )
+
+        for content in outputs:
+            with self.subTest(content=content):
+                result = validate_requirement_alignment(lock, content, 3)
+                self.assertTrue(result["passed"], result["issues"])
+
+    def test_validation_error_message_names_source_without_timeout_advice(self) -> None:
+        exc = RequirementAlignmentError(
+            [{"source": "用户明确要求", "code": "duration_missing", "message": "输出未体现锁定时长 60 秒"}]
+        )
+
+        text = _step_error_text(3, "23_长视频策划编导", exc)
+
+        self.assertIn("错误来源：员工输出校验", text)
+        self.assertIn("[用户明确要求]", text)
+        self.assertNotIn("调整 `模型超时`", text)
+
+    def test_timeout_error_message_only_for_actual_timeout(self) -> None:
+        text = _step_error_text(3, "23_长视频策划编导", TimeoutError("request timed out"))
+
+        self.assertIn("错误来源：模型/API 调用", text)
+        self.assertIn("调整 `模型超时`", text)
 
     def test_requirement_guard_accepts_disabled_audio_package_without_topic_terms(self) -> None:
         content = json.dumps(
@@ -423,7 +489,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertAlmostEqual(LocalFFmpegAdapter._image_still_duration(images, 12.0), 12.0 / 13.0, places=6)
         self.assertEqual(LocalFFmpegAdapter._image_still_duration(images, 0.0), 3.0)
 
-    def test_normalizes_package_delivery_resolution_to_locked_delivery_size(self) -> None:
+    def test_package_delivery_resolution_mismatch_is_reported_without_rewrite(self) -> None:
         content = json.dumps(
             {
                 "production_intents": {
@@ -455,15 +521,14 @@ class SemanticInputContractTests(unittest.TestCase):
             "original_requirement": "竖屏12秒生产烟测，只验证图片素材和本地图片轮播预览",
             "duration_seconds": 12,
         }
-        normalized = normalize_production_output_content({"agent": "22_剪辑成片执行师"}, f"```json\n{content}\n```", lock)
-        self.assertTrue(normalized["changed"])
-        self.assertIn('"resolution": "1080x1920"', normalized["content"])
-        self.assertIn('"delivery_resolution": "1080x1920"', normalized["content"])
+        wrapped = f"```json\n{content}\n```"
+        result = validate_production_output({"agent": "22_剪辑成片执行师"}, wrapped, lock)
 
-        result = validate_production_output({"agent": "22_剪辑成片执行师"}, normalized["content"], lock)
-        self.assertTrue(result["passed"], result["issues"])
+        self.assertFalse(result["passed"])
+        self.assertIn('"resolution": "480x848"', wrapped)
+        self.assertTrue(any("交付分辨率" in issue for issue in result["issues"]))
 
-    def test_normalizes_package_timeline_small_duration_gap_to_locked_duration(self) -> None:
+    def test_package_timeline_small_duration_gap_is_reported_without_rewrite(self) -> None:
         content = json.dumps(
             {
                 "production_intents": {
@@ -498,12 +563,12 @@ class SemanticInputContractTests(unittest.TestCase):
             "duration_seconds": 60,
         }
 
-        normalized = normalize_production_output_content({"agent": "22_剪辑成片执行师"}, f"```json\n{content}\n```", lock)
+        wrapped = f"```json\n{content}\n```"
+        result = validate_production_output({"agent": "22_剪辑成片执行师"}, wrapped, lock)
 
-        self.assertTrue(normalized["changed"])
-        self.assertTrue(any(item["type"] == "locked_package_timeline_duration" for item in normalized["normalizations"]))
-        result = validate_production_output({"agent": "22_剪辑成片执行师"}, normalized["content"], lock)
-        self.assertTrue(result["passed"], result["issues"])
+        self.assertFalse(result["passed"])
+        self.assertIn('"duration_seconds": 28', wrapped)
+        self.assertTrue(any("58 秒" in issue and "60 秒" in issue for issue in result["issues"]))
 
     def test_valid_detailed_package_timeline_overrides_short_compat_clips(self) -> None:
         content = json.dumps(
@@ -547,7 +612,7 @@ class SemanticInputContractTests(unittest.TestCase):
 
         self.assertTrue(result["passed"], result["issues"])
 
-    def test_does_not_normalize_package_timeline_large_duration_gap(self) -> None:
+    def test_package_timeline_large_duration_gap_is_reported(self) -> None:
         content = json.dumps(
             {
                 "production_intents": {
@@ -578,10 +643,7 @@ class SemanticInputContractTests(unittest.TestCase):
             "duration_seconds": 60,
         }
 
-        normalized = normalize_production_output_content({"agent": "22_剪辑成片执行师"}, f"```json\n{content}\n```", lock)
-        result = validate_production_output({"agent": "22_剪辑成片执行师"}, normalized["content"], lock)
-
-        self.assertFalse(any(item["type"] == "locked_package_timeline_duration" for item in normalized["normalizations"]))
+        result = validate_production_output({"agent": "22_剪辑成片执行师"}, f"```json\n{content}\n```", lock)
         self.assertFalse(result["passed"])
 
     def test_scene_library_fields_are_normalized_for_context(self) -> None:
@@ -2997,7 +3059,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertTrue(result["passed"], result["issues"])
         self.assertEqual(result["expected_work_resolution"], "480x848")
 
-    def test_normalizes_staff_prompt_dimensions_to_locked_work_size(self) -> None:
+    def test_staff_prompt_dimension_mismatch_is_reported_without_rewrite(self) -> None:
         content = json.dumps(
             {
                 "production_intents": {
@@ -3033,24 +3095,15 @@ class SemanticInputContractTests(unittest.TestCase):
             },
             ensure_ascii=False,
         )
-        normalized = normalize_production_output_content(
-            {"agent": "06_image"},
-            f"```json\n{content}\n```",
-            {"original_requirement": "猪猪侠打工人的一天，竖屏9:16，2分钟", "duration_seconds": 120},
-        )
-        self.assertTrue(normalized["changed"])
-        normalized_content = normalized["content"]
-        self.assertIn('"width": 480', normalized_content)
-        self.assertIn('"height": 848', normalized_content)
-        self.assertIn('"resolution": "480x848"', normalized_content)
-        self.assertIn('"working_resolution": "480x848"', normalized_content)
-
+        wrapped = f"```json\n{content}\n```"
         result = validate_production_output(
             {"agent": "06_image"},
-            normalized_content,
+            wrapped,
             {"original_requirement": "猪猪侠打工人的一天，竖屏9:16，2分钟", "duration_seconds": 120},
         )
-        self.assertTrue(result["passed"], result["issues"])
+        self.assertFalse(result["passed"])
+        self.assertIn('"width": 1440', wrapped)
+        self.assertTrue(any("工作尺寸" in issue for issue in result["issues"]))
 
     def test_validator_accepts_three_frame_source_intent_binding(self) -> None:
         content = json.dumps(

@@ -6,6 +6,7 @@ from typing import Any
 
 
 GENERATED_CONTEXT_MARKERS = (
+    "## 关联资产上下文",
     "## 可复用素材库",
     "## ComfyUI 素材/预览配置",
     "## 图片生成参数",
@@ -73,33 +74,20 @@ def build_requirement_lock(user_input: str) -> dict[str, Any]:
         "styles": styles,
         "explicit_constraints": list(dict.fromkeys(item for item in explicit_constraints if item)),
         "confirmation_policy": {
-            "auto_resolve": "可合理推断且不改变主题、主体、合规边界或最终交付的缺省项",
-            "human_required": "会改变主题、平台硬规格、品牌/产品、预算、人物身份、版权合规或最终交付的决定",
+            "auto_resolve": "仅允许不改变员工内容的技术解析；不得补写创意、默认值或生产方向",
+            "human_required": "缺少当前步骤必需信息，或决定会改变用户明确要求与最终交付",
         },
     }
 
 
 def requirement_lock_prompt(lock: dict[str, Any]) -> str:
     constraints = lock.get("explicit_constraints") or []
-    styles = lock.get("styles") or []
     duration = int(lock.get("duration_seconds") or 0)
-    lines = [
-        "## 锁定需求（最高优先级，不得被上游输出、示例或素材库覆盖）",
-        f"- 原始需求：{lock.get('original_requirement') or '未提供'}",
-        f"- 核心主题：{lock.get('core_topic') or '未提取'}",
-    ]
+    lines = ["## 用户明确约束（机器提取，只读）"]
     if duration:
-        lines.append(f"- 目标时长：{duration} 秒")
-    if styles:
-        lines.append(f"- 风格：{'、'.join(str(item) for item in styles)}")
+        lines.append(f"- target_duration_seconds: {duration}")
     if constraints:
-        lines.append(f"- 显式结构/画幅约束：{'；'.join(str(item) for item in constraints)}")
-    lines.extend(
-        [
-            "- 禁止凭空替换主题，禁止引入原始需求中不存在的具体品牌、商品、人物或项目。",
-            "- 如果上游员工输出与本锁定需求冲突，以本锁定需求为准并主动纠正。",
-        ]
-    )
+        lines.append(f"- delivery_constraints: {'；'.join(str(item) for item in constraints)}")
     return "\n".join(lines)
 
 
@@ -108,9 +96,14 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
     topic = str(lock.get("core_topic") or "").strip()
     original = str(lock.get("original_requirement") or "")
     issues: list[str] = []
+    issue_details: list[dict[str, str]] = []
+
+    def add_issue(message: str, source: str, code: str) -> None:
+        issues.append(message)
+        issue_details.append({"source": source, "code": code, "message": message})
 
     if not output:
-        issues.append("模型输出为空")
+        add_issue("模型输出为空", "员工岗位输出契约", "empty_output")
     if topic and output and not _production_package_can_omit_topic(output, lock):
         topic_covered_by_package = _production_package_preserves_topic(output, lock)
         latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
@@ -132,32 +125,36 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
             and not topic_covered_by_concepts
             and (missing_latin or (minimum_matches and len(matched_bigrams) < minimum_matches))
         ):
-            issues.append(f"输出未保持核心主题“{topic}”")
+            add_issue(f"输出未保持核心主题“{topic}”", "用户明确要求", "core_topic_missing")
 
     if step_no <= 3:
         duration = int(lock.get("duration_seconds") or 0)
         if duration and not _mentions_duration(output, duration):
-            issues.append(f"输出未体现锁定时长 {duration} 秒")
+            add_issue(f"输出未体现锁定时长 {duration} 秒", "用户明确要求", "duration_missing")
+        for constraint in lock.get("explicit_constraints") or []:
+            if _is_delivery_format_constraint(str(constraint)) and not _mentions_delivery_format(output, str(constraint)):
+                add_issue(
+                    f"输出遗漏用户明确画幅约束“{constraint}”",
+                    "用户明确要求",
+                    "delivery_format_missing",
+                )
         for polarity in ("正面", "负面"):
             if polarity in original and polarity not in output:
-                issues.append(f"输出遗漏原始结构约束“{polarity}”")
-
-    original_has_commerce = bool(re.search(r"产品|商品|品牌|带货|推广|广告|手表|手机|鞋|服装", original))
-    if not original_has_commerce and re.search(
-        r"X[-‐‑–—]?Watch|智能手表|立即购买|下单购买|购买链接|革命性.{0,8}(?:产品|商品)",
-        output,
-        flags=re.IGNORECASE,
-    ):
-        issues.append("输出凭空引入了原始需求中不存在的商品/品牌叙事")
+                add_issue(f"输出遗漏原始结构约束“{polarity}”", "用户明确要求", "structure_missing")
 
     pending_heading = re.search(r"^#{1,6}\s*待确认(?:信息|问题)?", output, flags=re.MULTILINE)
     if pending_heading and "暂无" not in output[pending_heading.start() : pending_heading.start() + 120] and not declares_human_confirmation(output):
-        issues.append("输出使用了泛化的待确认项；应自动采用非阻塞默认值，或明确声明阻塞型人工确认")
+        add_issue(
+            "输出使用了泛化的待确认项；需要明确声明是否阻塞执行",
+            "员工岗位输出契约",
+            "confirmation_state_ambiguous",
+        )
 
     return {
         "passed": not issues,
         "step": int(step_no),
         "issues": issues,
+        "issue_details": issue_details,
         "core_topic": topic,
     }
 
@@ -431,25 +428,6 @@ def _requirement_disables_ai_video(lock: dict[str, Any]) -> bool:
     ) or any(token in lowered for token in ("asset_only", "only image", "image-only", "no ai video", "without ai video"))
 
 
-def correction_prompt(prompt: str, lock: dict[str, Any], rejected_content: str, issues: list[str]) -> str:
-    issue_text = "\n".join(f"- {item}" for item in issues)
-    return f"""{prompt}
-
-## 需求一致性自动纠偏
-你上一次的输出已被系统拒绝，原因如下：
-{issue_text}
-
-请重新完成当前步骤。必须回到锁定需求，不得沿用下面这份跑题内容中的主题、品牌或商品：
-<rejected_output>
-{str(rejected_content or '')[:4000]}
-</rejected_output>
-
-如果当前步骤输出 JSON 生产包，请在顶层加入 requirement_anchor 对象，至少包含 core_topic、duration_seconds、aspect_ratio 或 delivery_format；这只用于机器校验，不要求把完整需求硬塞进旁白或字幕正文。
-
-{requirement_lock_prompt(lock)}
-"""
-
-
 def _topic_covered_by_salient_concepts(topic: str, output: str) -> bool:
     """Accept semantically faithful scripts that use paraphrases instead of exact topic bigrams."""
     compact_topic = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(topic or ""))
@@ -614,6 +592,9 @@ def _mentions_duration(content: str, duration_seconds: int) -> bool:
         minutes = duration_seconds // 60
         if re.search(rf"(?<!\d){re.escape(str(minutes))}\s*(?:min|mins|minute|minutes|分钟)(?![A-Za-z0-9])", text, flags=re.IGNORECASE):
             return True
+    for payload in _json_objects(text):
+        if _package_duration_matches(payload, {"duration_seconds": duration_seconds}):
+            return True
     if _timeline_reaches_duration(text, duration_seconds):
         return True
     if _segment_durations_sum_to_target(text, duration_seconds):
@@ -622,10 +603,16 @@ def _mentions_duration(content: str, duration_seconds: int) -> bool:
 
 
 def _timeline_reaches_duration(content: str, duration_seconds: int) -> bool:
-    """Accept storyboard timelines such as 0-10s or 7.5-10s as proof of duration."""
+    """Accept second ranges and MM:SS/HH:MM:SS storyboard timelines."""
     target = float(duration_seconds)
+    timestamp = r"(?:\d{1,3}:){1,2}\d{1,2}(?:[.,]\d{1,3})?"
+    range_separator = r"[-‐‑‒–—―~～至到]"
+    for match in re.finditer(rf"(?<!\d)({timestamp})\s*{range_separator}\s*({timestamp})(?!\d)", content):
+        end = _timestamp_seconds(match.group(2))
+        if end is not None and abs(end - target) <= 0.25:
+            return True
     for match in re.finditer(
-        r"(?<!\d)(\d+(?:\.\d+)?)\s*(?:-|–|—|~|～|至|到)\s*(\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds|秒)?",
+        rf"(?<!\d)(\d+(?:\.\d+)?)\s*{range_separator}\s*(\d+(?:\.\d+)?)\s*(?:s|sec|secs|second|seconds|秒)?",
         content,
         flags=re.IGNORECASE,
     ):
@@ -637,6 +624,39 @@ def _timeline_reaches_duration(content: str, duration_seconds: int) -> bool:
         if start <= target <= end + 0.25 or abs(end - target) <= 0.25:
             return True
     return False
+
+
+def _timestamp_seconds(value: str) -> float | None:
+    parts = re.split(r":", str(value or "").strip())
+    if len(parts) not in {2, 3}:
+        return None
+    try:
+        numbers = [float(part.replace(",", ".")) for part in parts]
+    except ValueError:
+        return None
+    if any(number < 0 for number in numbers):
+        return None
+    if len(numbers) == 2:
+        minutes, seconds = numbers
+        return minutes * 60 + seconds
+    hours, minutes, seconds = numbers
+    return hours * 3600 + minutes * 60 + seconds
+
+
+def _is_delivery_format_constraint(value: str) -> bool:
+    return str(value or "").strip().lower() in {"竖屏", "横屏", "16:9", "9:16", "1:1"}
+
+
+def _mentions_delivery_format(content: str, constraint: str) -> bool:
+    text = str(content or "").lower()
+    value = str(constraint or "").strip().lower()
+    if value in {"竖屏", "9:16"}:
+        return "竖屏" in text or "9:16" in text or "vertical" in text
+    if value in {"横屏", "16:9"}:
+        return "横屏" in text or "16:9" in text or "horizontal" in text or "landscape" in text
+    if value == "1:1":
+        return "1:1" in text or "方形" in text or "square" in text
+    return True
 
 
 def _segment_durations_sum_to_target(content: str, duration_seconds: int) -> bool:

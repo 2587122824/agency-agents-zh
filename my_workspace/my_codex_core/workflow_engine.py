@@ -40,7 +40,57 @@ class WorkflowCheckpointPause(RuntimeError):
 
 
 class RequirementAlignmentError(RuntimeError):
-    """Raised when a model output still violates the locked requirement after correction."""
+    """Raised when an employee output violates an explicit validation contract."""
+
+    def __init__(self, issue_details: list[dict] | None = None) -> None:
+        self.issue_details = [item for item in (issue_details or []) if isinstance(item, dict)]
+        lines = []
+        for item in self.issue_details:
+            source = str(item.get("source") or "未分类校验")
+            message = str(item.get("message") or "输出不符合校验要求")
+            lines.append(f"[{source}] {message}")
+        detail = "; ".join(lines) if lines else "[未分类校验] 输出不符合校验要求"
+        super().__init__(f"Employee output validation failed: {detail}")
+
+
+def _is_timeout_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        if isinstance(current, TimeoutError) or "timeout" in current.__class__.__name__.lower():
+            return True
+        message = str(current).lower()
+        if "timed out" in message or "timeout exceeded" in message or "read timeout" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+def _error_source(exc: BaseException) -> tuple[str, str]:
+    if isinstance(exc, RequirementAlignmentError):
+        return "employee_output_validation", "员工输出校验"
+    if _is_timeout_error(exc):
+        return "model_api_timeout", "模型/API 调用"
+    return "workflow_execution", "工作流执行"
+
+
+def _step_error_text(step_no: int, agent_id: str, exc: BaseException) -> str:
+    source_code, source = _error_source(exc)
+    if source_code == "employee_output_validation":
+        guidance = "员工原始输出已保留在当前步骤目录；系统没有自动改写或重试。请根据带来源的校验明细修正后继续任务。"
+    elif source_code == "model_api_timeout":
+        guidance = "检测到真实超时。可以检查模型服务状态，或在管理台调整 `模型超时` 后重试。"
+    else:
+        guidance = "请根据错误信息修正对应模型、接口或输入后继续任务。"
+    return (
+        "# 当前步骤执行失败\n\n"
+        f"- 步骤：{step_no}\n"
+        f"- 员工：{agent_id}\n"
+        f"- 错误来源：{source}\n"
+        f"- 错误：{exc}\n\n"
+        f"{guidance}\n"
+    )
 
 
 class WorkflowEngine:
@@ -155,14 +205,8 @@ class WorkflowEngine:
                     )
                 result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir, previous_outputs)
             except Exception as exc:
-                error_text = (
-                    "# 当前步骤执行失败\n\n"
-                    f"- 步骤：{step_no}\n"
-                    f"- 员工：{agent.agent_id}\n"
-                    f"- 错误：{exc}\n\n"
-                    "如果使用本地 Ollama 模型，通常是模型生成时间超过超时设置。"
-                    "可以在管理台把 `模型超时` 调到 900 秒或 1800 秒后重试。\n"
-                )
+                source_code, source_label = _error_source(exc)
+                error_text = _step_error_text(step_no, agent.agent_id, exc)
                 self.storage.write_text(step_dir / "output.md", error_text)
                 self.storage.write_json(
                     step_dir / "error.json",
@@ -171,6 +215,9 @@ class WorkflowEngine:
                         "agent_id": agent.agent_id,
                         "agent_name": agent.name,
                         "error": str(exc),
+                        "error_source": source_code,
+                        "error_source_label": source_label,
+                        "issue_details": getattr(exc, "issue_details", []),
                     },
                 )
                 raise
@@ -570,13 +617,8 @@ class WorkflowEngine:
                     )
                 result = self._run_model_with_requirement_guard(agent.prompt, prompt, user_input, step, step_dir, previous_outputs)
             except Exception as exc:
-                error_text = (
-                    "# 当前步骤执行失败\n\n"
-                    f"- 步骤：{step_no}\n"
-                    f"- 员工：{agent.agent_id}\n"
-                    f"- 错误：{exc}\n\n"
-                    "可以在管理台修正模型/API/上下文后点击“继续任务”，系统会从这个步骤继续执行。\n"
-                )
+                source_code, source_label = _error_source(exc)
+                error_text = _step_error_text(step_no, agent.agent_id, exc)
                 self.storage.write_text(step_dir / "output.md", error_text)
                 self.storage.write_json(
                     step_dir / "error.json",
@@ -585,6 +627,9 @@ class WorkflowEngine:
                         "agent_id": agent.agent_id,
                         "agent_name": agent.name,
                         "error": str(exc),
+                        "error_source": source_code,
+                        "error_source_label": source_label,
+                        "issue_details": getattr(exc, "issue_details", []),
                         "resume_at": datetime.now().isoformat(timespec="seconds"),
                     },
                 )
@@ -1046,8 +1091,7 @@ class WorkflowEngine:
             },
         )
         self.storage.write_json(step_dir / "production_contract_validation.json", validation.get("production_contract") or {})
-        issues = "; ".join(str(item) for item in (validation.get("issues") or []))
-        raise RequirementAlignmentError(f"Employee output validation failed: {issues}")
+        raise RequirementAlignmentError(validation.get("issue_details") or [])
 
     @staticmethod
     def _combined_output_validation(
@@ -1059,11 +1103,16 @@ class WorkflowEngine:
         requirement = validate_requirement_alignment(lock, content, int(step.get("step") or 0))
         contract = validate_production_output(step, content, lock, previous_outputs)
         issues = [*(requirement.get("issues") or []), *(contract.get("issues") or [])]
+        issue_details = [
+            *(requirement.get("issue_details") or []),
+            *(contract.get("issue_details") or []),
+        ]
         return {
             "passed": not issues,
             "step": int(step.get("step") or 0),
             "agent": str(step.get("agent") or ""),
             "issues": issues,
+            "issue_details": issue_details,
             "core_topic": requirement.get("core_topic") or lock.get("core_topic") or "",
             "requirement_alignment": requirement,
             "production_contract": contract,
@@ -1112,11 +1161,10 @@ class WorkflowEngine:
 ## 执行要求
 1. 只完成当前步骤，不要代替后续员工完成全部流程。
 2. 严格按你的 `agent.md` 中定义的职责和输出格式交付。
-3. 不要笼统输出“待确认信息”。能够合理推断且不改变主题、主体、合规边界或最终交付的缺省项，由你直接采用合理默认值，并列在“自动采用的默认值”中。
-4. 输出必须是中文 Markdown，可直接交给下一位员工继续处理。
-5. 只有会改变主题、平台硬规格、品牌/产品、预算、人物身份、版权合规或最终交付的决定才需要人工确认。此时必须输出 `human_confirmation_required: true` 和标题 `## 人工确认（阻塞）`；否则不要向用户提问。
-6. 输出前自检：核心主题、时长、风格和显式结构必须与“锁定需求”一致；上游若跑题必须纠正，不能继续继承。
-7. 如果需要执行受控动作，只能在输出末尾提供一个 JSON 代码块，格式为：
+3. 仅继承用户明确要求和已提供的结构化数据，不添加用户未要求的创意约束、默认风格、品牌、人物设定或生产方向。
+4. 缺少完成当前步骤所必需的信息时明确指出缺失项，不自行补写；输出必须是中文 Markdown，可直接交给下一位员工继续处理。
+5. 如当前步骤无法继续，输出 `human_confirmation_required: true` 和标题 `## 人工确认（阻塞）`，并说明具体缺失信息；否则不要添加待确认段落。
+6. 如果需要执行受控动作，只能在输出末尾提供一个 JSON 代码块，格式为：
 ```json
 {{"actions":[{{"action":"mkdir","params":{{"path":"demo"}}}},{{"action":"create_file","params":{{"path":"demo/readme.md","content":"内容","overwrite":false}}}},{{"action":"open_url","params":{{"url":"https://example.com"}}}},{{"action":"fetch_url","params":{{"url":"https://example.com","path":"web/example.txt","overwrite":true}}}}]}}
 ```

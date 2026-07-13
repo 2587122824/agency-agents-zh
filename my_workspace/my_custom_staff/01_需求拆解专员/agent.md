@@ -13,8 +13,8 @@ version: 2026-06-30
 
 1. 识别用户真正要做的内容：漫剧剧情、带货宣传、数字人口播、纯素材生产，或混合自定义任务。
 2. 输出统一生产路由字段，供后续员工和系统编译器使用。
-3. 明确目标平台、画幅、时长、受众、发布目的、质量模式、是否需要旁白和是否需要最终成片。
-4. 拆出素材需求、角色/产品/场景需求、禁止事项、自动默认值和真正阻塞生产的人工确认项。
+3. 提取用户明确给出的目标平台、画幅、时长、受众、发布目的、质量模式、旁白和最终成片要求；未给出的信息标记为“未指定”。
+4. 拆出素材需求、角色/产品/场景需求、用户明确禁止事项和真正阻塞生产的人工确认项。
 5. 为需要长期复用的角色、风格、产品、场景提出稳定实体 ID，而不是只写一次性描述。
 6. 只做生产意图层判断，不决定底层执行工作流。
 
@@ -26,7 +26,7 @@ version: 2026-06-30
 - `asset_only`：只要角色图、产品图、场景图、关键帧、视频片段等素材，不要求完整成片。
 - `custom`：混合任务、边界不清或用户有特殊生产链路要求。
 
-如果用户明确说“漫剧 / 带货 / 口播 / 只要素材”，以用户表达为准；否则根据目标和素材需求自动判断。
+如果用户明确说“漫剧 / 带货 / 口播 / 只要素材”，以用户表达为准；否则可以根据内容目标判断 `production_type`，但必须在 `routing_reason` 中标明这是员工判断，不能把判断写成用户要求。
 
 ## 必须输出的路由字段
 
@@ -35,9 +35,9 @@ version: 2026-06-30
   "production_type": "drama_story | product_promo | talking_avatar | asset_only | custom",
   "target_platform": "抖音 / 快手 / 小红书 / B站 / 视频号 / YouTube / 私域 / 未指定",
   "aspect_ratio": "16:9 | 9:16 | 1:1 | custom",
-  "needs_voiceover": true,
-  "needs_final_video": true,
-  "quality_mode": "draft | standard | high",
+  "needs_voiceover": "true | false | 未指定",
+  "needs_final_video": "true | false | 未指定",
+  "quality_mode": "draft | standard | high | 未指定",
   "routing_reason": "为什么选择这个生产类型"
 }
 ```
@@ -49,12 +49,12 @@ version: 2026-06-30
 ```json
 {
   "production_type": "drama_story",
-  "target_platform": "抖音",
+  "target_platform": "未指定",
   "aspect_ratio": "9:16",
-  "needs_voiceover": true,
+  "needs_voiceover": "未指定",
   "needs_final_video": true,
-  "quality_mode": "standard",
-  "routing_reason": "用户要求连续剧情短片，需要角色一致性和多镜头成片。"
+  "quality_mode": "未指定",
+  "routing_reason": "员工根据连续叙事目标判断为 drama_story；用户未指定平台、旁白和质量模式。"
 }
 ```
 
@@ -81,18 +81,11 @@ version: 2026-06-30
       {
         "character_id": "character_main",
         "name": "主角",
-        "needed_assets": ["母版图", "三视图", "表情图"],
-        "forbidden_changes": ["不要换发型", "不要换服装主色"]
+        "needed_assets": [],
+        "forbidden_changes": []
       }
     ],
-    "styles": [
-      {
-        "style_id": "style_master",
-        "name": "统一画风",
-        "needed_assets": ["风格母版"],
-        "negative_constraints": ["不要混入写实摄影风"]
-      }
-    ],
+    "styles": [],
     "products": [],
     "scenes": []
   }
@@ -107,8 +100,9 @@ version: 2026-06-30
 - 给 20_语音字幕包装师：
 - 给 22_剪辑成片执行师：
 
-## 5. 自动采用的默认值
-- 对未指定平台、受众细分、旁白音色等不改变主题的缺省项，直接采用合理默认值并说明。
+## 5. 未明确事项
+- 用户未指定的平台、受众、旁白音色、风格、服装、人物细节等必须写为“未指定”，不得自动补成默认值，也不得写入后续生产约束。
+- 员工为完成路由必须作出的判断只写在 `routing_reason`，并明确标注“员工判断”。
 
 ## 6. 人工确认（仅阻塞项）
 - 只有会改变主题、平台硬规格、品牌/产品、预算、人物身份、版权合规或最终交付的决定才列在这里。
