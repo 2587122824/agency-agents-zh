@@ -311,6 +311,28 @@ class CloudComfyUIAdapter:
             current_preset_id = str(job_config.get("workflow_preset_id") or "")
             cached_endpoint = str(cached_state.get("endpoint") or "")
             cached_preset_id = str(cached_state.get("workflow_preset_id") or "")
+            if not cached_files:
+                recovered_state = self._recover_job_state_from_manifest(
+                    job_dir / "cloud_comfyui_manifest.json",
+                    job=job,
+                    job_id=job_id,
+                    job_name=job_name,
+                    job_type=job_type,
+                    job_index=index,
+                    input_hash=input_hash,
+                    input_provenance=input_provenance,
+                    workflow_preset_id=current_preset_id,
+                    workflow_preset_name=str(job_config.get("workflow_preset_name") or ""),
+                    endpoint=current_endpoint,
+                )
+                recovered_files = self._existing_downloaded_files(recovered_state.get("downloaded_files"))
+                if recovered_files:
+                    cached_state = recovered_state
+                    cached_files = recovered_files
+                    job_state["jobs"][job_id] = {**recovered_state, "updated_at": time.time()}
+                    write_json(state_path, job_state)
+                    cached_endpoint = str(cached_state.get("endpoint") or "")
+                    cached_preset_id = str(cached_state.get("workflow_preset_id") or "")
             cache_matches_route = (
                 str(cached_state.get("type") or "") == job_type
                 and bool(cached_preset_id)
@@ -1374,6 +1396,53 @@ class CloudComfyUIAdapter:
     @staticmethod
     def _existing_downloaded_files(value: Any) -> list[str]:
         return [str(path) for path in (value or []) if str(path).strip() and Path(str(path)).is_file()]
+
+    @classmethod
+    def _recover_job_state_from_manifest(
+        cls,
+        manifest_path: Path,
+        *,
+        job: dict[str, Any],
+        job_id: str,
+        job_name: str,
+        job_type: str,
+        job_index: int,
+        input_hash: str,
+        input_provenance: dict[str, Any],
+        workflow_preset_id: str,
+        workflow_preset_name: str,
+        endpoint: str,
+    ) -> dict[str, Any]:
+        if not manifest_path.is_file():
+            return {}
+        manifest = read_json(manifest_path)
+        status = str(manifest.get("status") or "").lower()
+        if status not in {"success", "downloaded", "cached"}:
+            return {}
+        downloaded_files = cls._existing_downloaded_files(manifest.get("downloaded_files"))
+        if not downloaded_files:
+            return {}
+        return {
+            "index": job_index,
+            "job_id": job_id,
+            "name": job_name,
+            "type": job_type,
+            "status": "success" if status == "downloaded" else status,
+            "depends_on": cls._string_list(job.get("depends_on")),
+            "cache_hit": True,
+            "attempts": 1,
+            "input_hash": input_hash,
+            "input_provenance": input_provenance,
+            "character_id": str(job.get("character_id") or ""),
+            "workflow_mode": str(job.get("mode") or job.get("workflow_mode") or ""),
+            "prompt": str(job.get("prompt") or "")[:500],
+            "workflow_preset_id": workflow_preset_id,
+            "workflow_preset_name": workflow_preset_name,
+            "endpoint": endpoint,
+            "manifest_file": str(manifest_path),
+            "downloaded_files": downloaded_files,
+            "recovered_from_manifest": True,
+        }
 
     @staticmethod
     def _error_category(exc: BaseException) -> str:

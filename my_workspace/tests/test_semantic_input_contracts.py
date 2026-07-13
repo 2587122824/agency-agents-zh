@@ -3946,6 +3946,43 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(report["errors"], [])
             self.assertIn("preflight_recovered_from_payload", {item["code"] for item in report["warnings"]})
 
+    def test_comfyui_job_state_recovers_from_completed_job_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            job_dir = Path(tmp) / "job_asset_turnaround"
+            job_dir.mkdir()
+            image_path = job_dir / "asset_turnaround_sheet.png"
+            image_path.write_bytes(b"png")
+            manifest_path = job_dir / "cloud_comfyui_manifest.json"
+            manifest_path.write_text(
+                json.dumps(
+                    {
+                        "status": "success",
+                        "downloaded_files": [str(image_path)],
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+            state = CloudComfyUIAdapter._recover_job_state_from_manifest(
+                manifest_path,
+                job={"depends_on": [], "mode": "character_turnaround", "character_id": "character_mei"},
+                job_id="asset_turnaround_character_mei",
+                job_name="asset_turnaround_character_mei",
+                job_type="image",
+                job_index=2,
+                input_hash="hash",
+                input_provenance={"workflow_mode": "character_turnaround"},
+                workflow_preset_id="02_turnaround",
+                workflow_preset_name="02 turnaround",
+                endpoint="/run/workflow/turnaround",
+            )
+
+            self.assertEqual(state["status"], "success")
+            self.assertTrue(state["cache_hit"])
+            self.assertTrue(state["recovered_from_manifest"])
+            self.assertEqual(state["downloaded_files"], [str(image_path)])
+
     def test_aliyun_duration_retry_rate_uses_actual_overrun(self) -> None:
         retry_rate = LocalTTSAdapter._aliyun_duration_retry_rate(None, actual_duration=78.1, target_duration=60.0)
 
