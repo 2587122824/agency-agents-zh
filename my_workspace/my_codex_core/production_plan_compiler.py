@@ -2616,6 +2616,23 @@ def _image_prompt_item(
         item["input_identity_image"] = first_reference
         if workflow_mode == "pose_identity_keyframe":
             item["input_pose_image"] = pose_reference
+    if (
+        workflow_id == "03_style_cover_image"
+        and workflow_mode == "cover_key_visual"
+        and str(item.get("character_id") or "").strip()
+        and first_reference
+    ):
+        workflow_id = "04_keyframe"
+        workflow_mode = "identity_scene_keyframe" if scene_reference else "identity_keyframe"
+        item["workflow_id"] = workflow_id
+        item["workflow_mode"] = workflow_mode
+        item["image_task_mode"] = workflow_mode
+        item["mode"] = workflow_mode
+        item["control_mode"] = "identity_scene_reference" if scene_reference else "identity_reference"
+        item["input_identity_image"] = first_reference
+        item.pop("input_reference_style", None)
+        if notes is not None:
+            notes.append(f"image intent {job_id} routed cover key visual to {workflow_mode} to preserve character identity")
     if workflow_id == "03_style_cover_image" and first_reference:
         item["input_reference_style"] = first_reference
     if _bool_or_default(

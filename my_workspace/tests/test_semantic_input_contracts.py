@@ -912,6 +912,47 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("\u7528\u4e8e\u53e0\u52a0\u6807\u9898", item["prompt"])
         self.assertNotIn("\u53e0\u52a0\u6807\u9898", item["prompt"])
 
+    def test_character_cover_key_visual_routes_to_identity_keyframe(self) -> None:
+        linked_assets = {
+            "linked_assets": {
+                "characters": [
+                    {
+                        "character_id": "xiaomei",
+                        "name": "Xiaomei",
+                        "master_image": "my_workspace/my_asset_library/01_character_base/xiaomei.png",
+                    }
+                ],
+                "assets": [],
+                "scenes": [],
+            }
+        }
+        plan = compile_production_plan(
+            task_id="cover_identity_route",
+            route_content='{"production_type":"drama_story"}',
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_cover_key_visual",
+                                "intent_id": "cover_kv_shot05",
+                                "character_id": "xiaomei",
+                                "prompt": "Xiaomei crouches at the starting line, low angle cover visual.",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            source_content="```json\n" + json.dumps(linked_assets, ensure_ascii=False) + "\n```",
+        )
+
+        item = plan["compiled_payload"]["image_prompts"][0]
+        self.assertEqual(item["workflow_id"], "04_keyframe")
+        self.assertEqual(item["workflow_mode"], "identity_keyframe")
+        self.assertEqual(item["control_mode"], "identity_reference")
+        self.assertEqual(item["input_identity_image"], "my_workspace/my_asset_library/01_character_base/xiaomei.png")
+
     def test_runninghub_text_node_sanitizer_removes_file_tokens(self) -> None:
         rows = CloudComfyUIAdapter._sanitize_text_node_info_values(
             [
