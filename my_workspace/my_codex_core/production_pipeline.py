@@ -883,9 +883,6 @@ def retry_production_job(
 
     manifest_path = task_dir / "production_manifest.json"
     config = dict(production_config) if isinstance(production_config, dict) else {}
-    configured_mode = str(config.get("mode") or "").strip()
-    if configured_mode in {"", "off", "package_only"}:
-        raise ValueError(f"current system production mode '{configured_mode or 'off'}' does not allow production retries")
     _write_production_config_snapshot(task_dir, config)
     if not manifest_path.is_file():
         if retry_job != "material":
@@ -933,12 +930,15 @@ def retry_production_job(
     production_note_path = task_dir / "auto_production.md"
 
     manifest.setdefault("schema_version", 1)
-    manifest["mode"] = mode
+    manifest["mode"] = str(config.get("mode") or "off").strip() or "off"
+    manifest["manual_retry_execution_mode"] = mode
     manifest.setdefault("files", {})
     manifest.setdefault("image_generation", {})
     manifest.setdefault("video_generation", {})
     manifest.setdefault("composition", {})
     manifest.setdefault("audio", {})
+    if retry_job in {"tts", "local_tts"} and not _voice_config_tts_enabled(voice_config):
+        raise ValueError("current system audio configuration is off; TTS retry is not allowed")
     known_node_ids = {
         str(item.get("job_id") or "")
         for item in (manifest.get("production_nodes") or [])
@@ -1410,6 +1410,19 @@ def _update_run_summary_production_status(task_dir: Path, manifest: dict[str, An
 
 def _retry_mode(manifest: dict[str, Any], config: dict[str, Any], requested_job: str = "") -> str:
     configured = str(config.get("mode") or "").strip()
+    if configured in {"api_ready", "comfy_full"}:
+        return configured
+    requested = str(requested_job or "").strip().lower()
+    if requested in {"tts", "local_tts", "bgm", "bgm_select", "ffmpeg", "ffmpeg_compose", "format_export", "subtitle_build"}:
+        return configured or "off"
+    compose_config = config.get("compose_config") if isinstance(config.get("compose_config"), dict) else {}
+    workflow_library = compose_config.get("workflow_library")
+    visual_provider = str(compose_config.get("visual_provider") or "").strip().lower()
+    if visual_provider in {"runninghub", "comfyui", "comfy_mcp"} or (isinstance(workflow_library, list) and workflow_library):
+        return "comfy_full"
+    image_config = config.get("image_config") if isinstance(config.get("image_config"), dict) else {}
+    if str(image_config.get("tool") or "").strip().lower() not in {"", "off", "prompt_only"}:
+        return "api_ready"
     return configured or "off"
 
 

@@ -19091,9 +19091,6 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("task and item_id are required")
         task_dir = self._safe_task_dir(task_name)
         production_config = self._current_system_production_config()
-        production_mode = str(production_config.get("mode") or "off").strip()
-        if production_mode in {"", "off", "package_only"}:
-            raise ValueError(f"当前系统生产模式为 {production_mode or 'off'}，不会执行首帧视频或其他 ComfyUI 任务")
         compose_config = production_config.get("compose_config") if isinstance(production_config.get("compose_config"), dict) else {}
         runtime_payload = dict(payload)
         runtime_payload["api_key"] = str(compose_config.get("api_key") or "").strip()
@@ -19114,6 +19111,18 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         can_rerun = item_status in {"failed", "completed", "success", "approved"}
         if item_id != current_id and not can_rerun:
             raise ValueError("请按 ComfyUI 调试队列顺序运行当前项")
+        slot_items = [child for child in (item.get("children") or []) if isinstance(child, dict)] if item.get("group") else [item]
+        missing_slots = []
+        for slot_item in slot_items:
+            workflow_id = str(slot_item.get("workflow_id") or "").strip()
+            workflow_mode = str(slot_item.get("workflow_mode") or "").strip()
+            if not CloudComfyUIAdapter._has_exact_workflow_library_config_for_job(
+                {"workflow_id": workflow_id, "workflow_mode": workflow_mode},
+                compose_config,
+            ):
+                missing_slots.append(f"{workflow_id} / {workflow_mode}" if workflow_mode else workflow_id)
+        if missing_slots:
+            raise ValueError(f"当前系统配置缺少工作流槽位：{', '.join(missing_slots)}")
         if item.get("group"):
             return self._start_task_comfy_debug_group(task_dir, status, item, runtime_payload)
         debug_payload = {
@@ -20804,9 +20813,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("job or job_id is required")
         task_dir = self._safe_task_dir(task)
         production_config = self._current_system_production_config()
-        production_mode = str(production_config.get("mode") or "off").strip()
-        if production_mode in {"", "off", "package_only"}:
-            raise ValueError(f"当前系统生产模式为 {production_mode or 'off'}，不会执行音频、首帧视频或其他生产重试")
+        voice_config = production_config.get("voice_config") if isinstance(production_config.get("voice_config"), dict) else {}
+        if retry_job.lower() in {"tts", "local_tts"} and str(voice_config.get("mode") or "off").strip().lower() in {"", "off"}:
+            raise ValueError("当前系统音频配置为关闭，不能重试配音；请先在系统配置中明确选择音频提供方")
 
         summary = {}
         summary_path = task_dir / "run_summary.json"

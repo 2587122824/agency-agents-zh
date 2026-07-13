@@ -7,9 +7,10 @@ Last compacted: 2026-07-13
 - The backend now persists a secret-free current system production config at `tmp/web_runtime_production_config.json`. RunningHub and CosyVoice credentials remain in their dedicated runtime credential files and are injected only when the current config explicitly selects those providers.
 - New tasks, resume, production retry, and task-scoped ComfyUI debug now use the backend current system config. Execution requests can no longer replace voice mode, production mode, workflow slots, endpoints, or node mappings with request-body values.
 - Old task snapshots and manifests are audit records only. Resume/retry no longer merges their old voice/workflow values into the current configuration.
-- Removed the material-retry behavior that changed `off` or `package_only` into `comfy_full`. Production retry and task-scoped ComfyUI debug now fail explicitly in `off`/`package_only`, so disabled audio and disabled visual production stay disabled.
+- `off`/`package_only` continue to control automatic production only. Explicit material retry and task-scoped ComfyUI debug may run with the current configured visual provider/workflow slot; they do not enable TTS or change the saved automatic mode. TTS retry checks only the current audio configuration and fails explicitly when audio is `off`.
+- Task-scoped ComfyUI debug requires the exact current workflow ID/mode slot, endpoint, and node mapping. It does not use request-body workflow overrides, task snapshots, or built-in endpoint substitutions when the current slot is missing.
 - The frontend waits for RunningHub/CosyVoice credential persistence, then saves the complete current production config before starting, resuming, or retrying work.
-- Verification: 186 semantic-contract tests, embedded frontend JavaScript syntax validation, `python -m compileall -q my_workspace`, and `git diff --check` passed.
+- Verification: 187 semantic-contract tests, embedded frontend JavaScript syntax validation, `python -m compileall -q my_workspace`, and `git diff --check` passed.
 
 ## 2026-07-14 Strict Production Input Contracts
 

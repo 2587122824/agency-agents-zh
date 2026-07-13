@@ -45,10 +45,10 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _quality_check_voice_text,
     _quality_check_srt,
     _record_unconfigured_multi_character_slots,
+    _retry_mode,
     _run_local_tts_adapter,
     _run_comfyui_adapter_with_quality_gate,
     _required_workflow_slots,
-    retry_production_job,
     run_auto_production,
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
@@ -4630,21 +4630,33 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(restored["voice_config"]["mode"], "off")
         self.assertEqual(restored["compose_config"]["workflow_endpoint"], "/run/workflow/current-system")
 
-    def test_package_only_rejects_production_retry_instead_of_enabling_comfy_full(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            with self.assertRaisesRegex(ValueError, "package_only.*does not allow production retries"):
-                retry_production_job(
-                    Path(tmp),
-                    "material",
-                    {
-                        "mode": "package_only",
-                        "voice_config": {"mode": "off", "provider": ""},
-                        "compose_config": {"workflow_library": []},
-                    },
-                )
+    def test_package_only_manual_material_uses_configured_visual_provider_only(self) -> None:
+        config = {
+            "mode": "package_only",
+            "voice_config": {"mode": "off", "provider": ""},
+            "compose_config": {
+                "visual_provider": "runninghub",
+                "workflow_library": [
+                    {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/current-system"}
+                ],
+            },
+        }
+        self.assertEqual(_retry_mode({}, config, "material"), "comfy_full")
+        self.assertEqual(_retry_mode({}, config, "local_tts"), "package_only")
+        self.assertEqual(_retry_mode({}, config, "ffmpeg"), "package_only")
 
-    def test_retry_request_cannot_override_package_only_system_config(self) -> None:
+    def test_material_retry_uses_current_system_config_without_request_override(self) -> None:
         handler = web_app.WorkflowWebHandler.__new__(web_app.WorkflowWebHandler)
+        current_config = {
+            "mode": "package_only",
+            "voice_config": {"mode": "off", "provider": ""},
+            "compose_config": {
+                "visual_provider": "runninghub",
+                "workflow_library": [
+                    {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/current-system"}
+                ],
+            },
+        }
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             handler,
             "_safe_task_dir",
@@ -4652,29 +4664,55 @@ class SemanticInputContractTests(unittest.TestCase):
         ), patch.object(
             handler,
             "_current_system_production_config",
-            return_value={
-                "mode": "package_only",
-                "voice_config": {"mode": "off", "provider": ""},
-                "compose_config": {"workflow_library": []},
-            },
-        ):
-            with self.assertRaisesRegex(ValueError, "package_only"):
-                handler._retry_production_job(
-                    {
-                        "task": "task_test",
-                        "job": "local_tts",
-                        "production_config": {
-                            "mode": "comfy_full",
-                            "voice_config": {
-                                "mode": "aliyun_cosyvoice",
-                                "provider": "aliyun_cosyvoice",
-                            },
+            return_value=current_config,
+        ), patch.object(web_app.threading, "Thread") as thread_class:
+            result = handler._retry_production_job(
+                {
+                    "task": "task_test",
+                    "job": "material",
+                    "production_config": {
+                        "mode": "comfy_full",
+                        "compose_config": {
+                            "workflow_library": [
+                                {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/request-override"}
+                            ]
                         },
-                    }
-                )
+                    },
+                }
+            )
+        worker_args = thread_class.call_args.kwargs["args"]
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(worker_args[3], current_config)
+        self.assertEqual(
+            worker_args[3]["compose_config"]["workflow_library"][0]["endpoint"],
+            "/run/workflow/current-system",
+        )
 
-    def test_task_comfy_debug_cannot_bypass_package_only_system_config(self) -> None:
+    def test_tts_retry_is_rejected_only_when_current_audio_config_is_off(self) -> None:
         handler = web_app.WorkflowWebHandler.__new__(web_app.WorkflowWebHandler)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            handler, "_safe_task_dir", return_value=Path(tmp)
+        ), patch.object(
+            handler,
+            "_current_system_production_config",
+            return_value={"mode": "package_only", "voice_config": {"mode": "off", "provider": ""}},
+        ):
+            with self.assertRaisesRegex(ValueError, "音频配置为关闭"):
+                handler._retry_production_job({"task": "task_test", "job": "local_tts"})
+
+    def test_task_comfy_debug_uses_current_workflow_in_package_only_mode(self) -> None:
+        handler = web_app.WorkflowWebHandler.__new__(web_app.WorkflowWebHandler)
+        current_library = [
+            {
+                "id": "06_i2v_first_frame",
+                "mode_configs": {
+                    "i2v_first_frame": {
+                        "endpoint": "/run/workflow/current-system",
+                        "node_info_list_json": '[{"nodeId":"1","fieldName":"text","fieldValue":"{{prompt}}"}]',
+                    }
+                },
+            }
+        ]
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             handler,
             "_safe_task_dir",
@@ -4685,19 +4723,43 @@ class SemanticInputContractTests(unittest.TestCase):
             return_value={
                 "mode": "package_only",
                 "voice_config": {"mode": "off", "provider": ""},
-                "compose_config": {"workflow_library": []},
+                "compose_config": {
+                    "api_key": "runtime-key",
+                    "base_url": "https://www.runninghub.cn/openapi/v2",
+                    "workflow_library": current_library,
+                },
             },
-        ):
-            with self.assertRaisesRegex(ValueError, "package_only"):
-                handler._start_task_comfy_debug(
+        ), patch.object(handler, "_active_job_for_task", return_value=None), patch.object(
+            handler,
+            "_task_comfy_debug_status",
+            return_value={
+                "current_item_id": "clip_001",
+                "items": [
                     {
-                        "task": "task_test",
-                        "item_id": "clip_001",
-                        "workflow_library": [
-                            {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/request-override"}
-                        ],
+                        "id": "clip_001",
+                        "status": "pending",
+                        "workflow_id": "06_i2v_first_frame",
+                        "workflow_mode": "i2v_first_frame",
+                        "prompt": "move naturally",
                     }
-                )
+                ],
+            },
+        ), patch.object(handler, "_start_comfy_debug", return_value={"run_id": "debug-run"}) as start_debug, patch.object(
+            handler, "_update_task_comfy_debug_state"
+        ):
+            result = handler._start_task_comfy_debug(
+                {
+                    "task": "task_test",
+                    "item_id": "clip_001",
+                    "workflow_library": [
+                        {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/request-override"}
+                    ],
+                }
+            )
+        debug_payload = start_debug.call_args.args[0]
+        self.assertEqual(result["run_id"], "debug-run")
+        self.assertEqual(debug_payload["workflow_library"], current_library)
+        self.assertEqual(debug_payload["api_key"], "runtime-key")
 
     def test_runtime_voice_clone_metadata_reaches_cosyvoice_request(self) -> None:
         production_config = {
