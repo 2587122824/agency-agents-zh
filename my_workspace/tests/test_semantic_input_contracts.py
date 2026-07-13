@@ -3583,8 +3583,14 @@ class SemanticInputContractTests(unittest.TestCase):
             ["local_tts: Voiceover text exists, but no TTS provider is configured."],
         )
 
-    def test_packaging_graph_keeps_tts_dependency_for_usable_voice_text(self) -> None:
+    def test_packaging_graph_excludes_tts_when_system_audio_is_off(self) -> None:
         jobs = _packaging_graph_jobs({}, {"mode": "off", "provider": ""}, voice_text_usable=True)
+        jobs_by_id = {job["job_id"]: job for job in jobs}
+        self.assertNotIn("local_tts", jobs_by_id)
+        self.assertNotIn("local_tts", jobs_by_id["ffmpeg_compose"]["depends_on"])
+
+    def test_packaging_graph_keeps_tts_when_system_audio_is_enabled(self) -> None:
+        jobs = _packaging_graph_jobs({}, {"mode": "aliyun_cosyvoice", "provider": "aliyun_cosyvoice"}, voice_text_usable=True)
         jobs_by_id = {job["job_id"]: job for job in jobs}
         self.assertIn("local_tts", jobs_by_id)
         self.assertIn("local_tts", jobs_by_id["ffmpeg_compose"]["depends_on"])
@@ -5569,6 +5575,135 @@ class SemanticInputContractTests(unittest.TestCase):
             Image.new("RGB", size, color).save(path)
             files.append(path)
         return files
+
+    def test_package_rejects_timeline_ids_not_emitted_by_video_employee(self) -> None:
+        previous_outputs = [
+            {
+                "agent": "07_视频生成执行员",
+                "content": json.dumps(
+                    {
+                        "production_intents": {
+                            "video": [
+                                {"intent": "generate_broll_clip", "intent_id": "clip_001_sky"},
+                                {"intent": "generate_i2v_clip", "intent_id": "clip_002_tie_shoes"},
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ]
+        payload = {
+            "production_intents": {
+                "package": [
+                    {
+                        "intent": "build_edit_timeline",
+                        "timeline": [
+                            {"source_intent_id": "clip_001", "start_seconds": 0, "duration_seconds": 30},
+                            {"source_intent_id": "clip_002", "start_seconds": 30, "duration_seconds": 30},
+                        ],
+                    },
+                    {"intent": "review_missing_assets", "all_assets_ready": True},
+                    {"intent": "apply_delivery_spec", "delivery_resolution": "1080x1920", "fps": 24},
+                ]
+            },
+            "edit_timeline": {
+                "clips": [
+                    {"clip_id": "clip_001", "duration_seconds": 30},
+                    {"clip_id": "clip_002", "duration_seconds": 30},
+                ]
+            },
+            "delivery_spec": {"resolution": "1080x1920", "fps": 24},
+            "missing_assets": [],
+        }
+        result = validate_production_output(
+            {"agent": "22_剪辑成片执行师"},
+            json.dumps(payload, ensure_ascii=False),
+            {"duration_seconds": 60, "aspect_ratio": "9:16"},
+            previous_outputs,
+        )
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("不存在的上游 07 视频意图" in issue for issue in result["issues"]))
+        self.assertTrue(any("all_assets_ready" in issue for issue in result["issues"]))
+
+    def test_video_validator_rejects_multiple_sources_for_regular_i2v(self) -> None:
+        previous_outputs = [
+            {
+                "agent": "06_分镜生图设计师",
+                "content": json.dumps(
+                    {
+                        "production_intents": {
+                            "image": [
+                                {"intent": "generate_keyframe", "intent_id": "shot_a"},
+                                {"intent": "generate_keyframe", "intent_id": "shot_b"},
+                            ]
+                        }
+                    }
+                ),
+            }
+        ]
+        payload = {
+            "production_intents": {
+                "video": [
+                    {
+                        "intent": "generate_i2v_clip",
+                        "intent_id": "clip_strength",
+                        "source_intent_ids": ["shot_a", "shot_b"],
+                    }
+                ]
+            },
+            "video_prompts": [{"asset_tag": "clip_strength", "width": 480, "height": 848}],
+        }
+        result = validate_production_output(
+            {"agent": "07_视频生成执行员"},
+            json.dumps(payload),
+            {"aspect_ratio": "9:16"},
+            previous_outputs,
+        )
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("只能引用一张" in issue for issue in result["issues"]))
+
+    def test_reused_scene_requires_explicit_scene_anchor(self) -> None:
+        payload = {
+            "production_intents": {
+                "image": [
+                    {"intent": "generate_keyframe", "intent_id": "shot_1", "scene_id": "track"},
+                    {"intent": "generate_keyframe", "intent_id": "shot_2", "scene_id": "track"},
+                ]
+            },
+            "image_prompts": [
+                {"asset_tag": "shot_1", "width": 480, "height": 848},
+                {"asset_tag": "shot_2", "width": 480, "height": 848},
+            ],
+        }
+        result = validate_production_output(
+            {"agent": "06_分镜生图设计师"},
+            json.dumps(payload),
+            {"aspect_ratio": "9:16"},
+        )
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("没有绑定场景母版" in issue for issue in result["issues"]))
+
+    def test_quality_gate_never_automatically_retries_paid_visual_jobs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            payload_path = output_dir / "payload.json"
+            payload_path.write_text(
+                json.dumps({"image_prompts": [{"job_id": "shot_1", "type": "image", "mode": "keyframe"}]}),
+                encoding="utf-8",
+            )
+            with patch("my_codex_core.production_pipeline._run_comfyui_adapter") as adapter:
+                adapter.return_value = {"status": "success", "downloaded_files": [], "jobs": []}
+                result = _run_comfyui_adapter_with_quality_gate(
+                    payload_path,
+                    {"production_plan_visual_jobs": [{"job_id": "shot_1"}]},
+                    {"enabled": True, "min_score": 100, "max_attempts": 6},
+                    output_dir,
+                )
+            self.assertEqual(adapter.call_count, 1)
+            self.assertEqual(result["attempts"], 1)
+            report = json.loads((output_dir / "auto_quality_report.json").read_text(encoding="utf-8"))
+            self.assertFalse(report["automatic_retry"])
 
     @staticmethod
     def _write_two_character_fixture(root: Path) -> tuple[Path, Path]:

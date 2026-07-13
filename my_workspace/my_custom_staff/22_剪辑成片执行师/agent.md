@@ -97,10 +97,12 @@ version: 2026-06-30
 - 只描述剪辑节奏、镜头顺序、字幕/BGM/旁白关系和导出规格。
 - 可以要求“烧录字幕”“旁白期间压低 BGM”“输出 MP4 和旁挂 SRT”，但不要写具体 FFmpeg filter graph。
 - 如果 production_type 为 `asset_only` 且用户不需要成片，应明确 `needs_final_video=false`，只整理素材交付清单。
-- 先读取上游生产状态：如果上下文或 `production_manifest` 中某个视觉节点已经是 `success` / `comfyui_generated`，不得再把对应关键帧、三帧图片或视频片段写入 `missing_assets`。
+- 时间线的每个 `source_intent_id` 必须逐字匹配 07 的 `production_intents.video[].intent_id`；不得缩写、重编号、猜测或创建别名。
+- 员工阶段的 `all_assets_ready` 只表示上游意图引用完整，不代表运行时文件已经生成。真实素材就绪状态只由后端根据任务节点和实际文件计算。
 - 本地 TTS、字幕烧录、FFmpeg 合成属于你输出封装意图之后的系统包装执行阶段；只要 20 已给出旁白/字幕意图，就不要把“尚未生成 voiceover.wav / final_video.mp4”当作本步骤阻塞素材。
 - 只有真实缺少上游意图、素材节点失败、或用户明确要求人工补充的外部素材时，才使用 `review_missing_assets` 明确阻塞项和返工建议；存在非空 `missing_assets` 时不得同时声明“生产就绪”或“无阻塞”。
-- 当视觉节点成功且 20 已提供可执行旁白/字幕意图时，`missing_assets` 必须为 `[]`，`review_missing_assets.all_assets_ready=true`，允许系统进入 TTS/FFmpeg 包装阶段。
+- 当所有上游意图引用有效时，`missing_assets` 才能为 `[]`，`review_missing_assets.all_assets_ready=true`；后端仍会独立检查实际文件、质量复核状态和系统音频配置。
+- 系统音频关闭时，封装意图不得要求 TTS 成功或把缺少旁白音频列为阻塞项；字幕和无声画面可按系统配置独立包装。
 - 时间线必须从 0 秒开始连续排列，相邻片段不得重叠或留空档，所有片段时长之和必须等于目标成片时长。
 - 交付帧率统一为 `24fps`。最终交付分辨率按画幅锁定：横屏 `1920x1080`、竖屏 `1080x1920`、方形 `1080x1080`。
 

@@ -438,6 +438,8 @@ def run_auto_production(
             manifest["image_generation"]["downloaded_files"] = comfyui_adapter_result.get("downloaded_files", [])
             manifest["image_generation"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
             manifest["image_generation"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
+            manifest["image_generation"]["quality_status"] = comfyui_adapter_result.get("quality_status", "passed")
+            manifest["image_generation"]["review_job_ids"] = comfyui_adapter_result.get("review_job_ids", [])
             manifest["image_generation"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
             manifest["image_generation"]["production_job_state"] = comfyui_adapter_result.get("job_state_file", "")
             if comfyui_adapter_result.get("reason"):
@@ -494,6 +496,8 @@ def run_auto_production(
                 manifest["composition"]["visual_provider"] = comfyui_adapter_result.get("provider", manifest["composition"].get("visual_provider", ""))
             manifest["composition"]["quality_report"] = comfyui_adapter_result.get("quality_report", "")
             manifest["composition"]["quality_score"] = comfyui_adapter_result.get("quality_score", 0)
+            manifest["composition"]["quality_status"] = comfyui_adapter_result.get("quality_status", "passed")
+            manifest["composition"]["review_job_ids"] = comfyui_adapter_result.get("review_job_ids", [])
             manifest["composition"]["quality_attempts"] = comfyui_adapter_result.get("attempts", 1)
             manifest["composition"]["production_job_state"] = comfyui_adapter_result.get("job_state_file", "")
             manifest["artifacts"] = comfyui_adapter_result.get("artifacts", [])
@@ -588,19 +592,11 @@ def run_auto_production(
         return _finalize_production_manifest(task_dir, manifest, production_note_path, emit, "ComfyUI 素材门禁完成")
 
     material_enabled = mode in {"api_ready", "comfy_full"}
-    tts_required = bool(voice_text_quality.get("usable"))
-    tts_enabled = _voice_config_tts_enabled(voice_config) and tts_required
-    if tts_required and not tts_enabled:
-        manifest["audio"]["adapter_status"] = "not_configured"
-        _upsert_production_node(
-            manifest,
-            "local_tts",
-            stage="08_audio_visual_packaging",
-            mode="local_tts",
-            status="not_configured",
-            outputs=[],
-            error="Voiceover text exists, but no TTS provider is configured.",
-        )
+    tts_enabled = _voice_config_tts_enabled(voice_config) and bool(voice_text_quality.get("usable"))
+    tts_required = tts_enabled
+    if not _voice_config_tts_enabled(voice_config):
+        manifest["audio"]["adapter_status"] = "off"
+        manifest["audio"]["skip_reason"] = "system audio configuration is off"
     talking_image_requires_audio = _payload_has_required_mode(comfyui_payload, "talking_image")
     if material_enabled and tts_enabled and talking_image_requires_audio:
         emit("检测到数字人口播：先生成最终 WAV，再执行口型工作流", stage="production")
@@ -1001,7 +997,7 @@ def retry_production_job(
             manifest["audio"]["bgm_status"] = result.get("status", "skipped")
             result = {**result, "downloaded_files": ([result["file"]] if result.get("file") else [])}
         else:
-            result = _retry_ffmpeg_job(task_dir, paths, manifest, compose_config, emit)
+            result = _retry_ffmpeg_job(task_dir, paths, manifest, compose_config, voice_config, emit)
 
         if retry_job == "material" and isinstance(result.get("jobs"), list):
             for node in result["jobs"]:
@@ -1226,12 +1222,13 @@ def _retry_ffmpeg_job(
     paths: dict[str, Path],
     manifest: dict[str, Any],
     compose_config: dict[str, Any],
+    voice_config: dict[str, Any],
     emit,
 ) -> dict[str, Any]:
     emit("retrying local FFmpeg composition", stage="ffmpeg")
     _reconcile_successful_tts_node(paths, manifest)
     nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
-    tts_enabled = _manifest_requires_tts_for_packaging(manifest)
+    tts_enabled = _voice_config_tts_enabled(voice_config) and _manifest_requires_tts_for_packaging(manifest)
     if not tts_enabled:
         _mark_optional_audio_packaging_skipped(
             manifest,
@@ -1851,7 +1848,6 @@ def _run_comfyui_adapter_with_quality_gate(
             "attempts": 0,
         }
     enabled = _as_bool(quality_config.get("enabled"), default=True)
-    max_attempts = _safe_int(quality_config.get("max_attempts"), default=2, minimum=1, maximum=6)
     min_score = _safe_int(quality_config.get("min_score"), default=70, minimum=0, maximum=100)
     min_file_size_kb = _safe_int(quality_config.get("min_file_size_kb"), default=64, minimum=1, maximum=200000)
     if not enabled:
@@ -1863,70 +1859,49 @@ def _run_comfyui_adapter_with_quality_gate(
             result["attempts"] = 1
         return result
 
-    base_payload = _load_comfyui_payload_strict(comfyui_payload_path)
-    if not isinstance(base_payload, dict):
-        base_payload = {}
-
-    attempts: list[dict[str, Any]] = []
-    best_result: dict[str, Any] | None = None
-    best_score: dict[str, Any] = {"score": -1}
-    retry_job_ids: list[str] = []
-    for attempt in range(1, max_attempts + 1):
-        if progress_callback:
-            progress_callback(
-                {
-                    "event": "production_update",
-                    "stage": "comfyui",
-                    "message": f"ComfyUI 质量检查第 {attempt}/{max_attempts} 次尝试",
-                    "attempt": attempt,
-                    "max_attempts": max_attempts,
-                }
-            )
-        attempt_dir = output_dir / f"attempt_{attempt:02d}"
-        attempt_payload_path = attempt_dir / "comfyui_payload.json"
-        attempt_payload = (
-            _payload_for_targeted_attempt(base_payload, attempt, retry_job_ids)
-            if retry_job_ids
-            else _payload_for_attempt(base_payload, attempt)
+    if progress_callback:
+        progress_callback(
+            {
+                "event": "production_update",
+                "stage": "comfyui",
+                "message": "ComfyUI 素材生成后执行质量检查；发现问题时等待人工确认，不自动重试",
+                "attempt": 1,
+                "max_attempts": 1,
+            }
         )
-        attempt_dir.mkdir(parents=True, exist_ok=True)
-        attempt_payload_path.write_text(json.dumps(attempt_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        attempt_compose_config = dict(compose_config)
-        if retry_job_ids:
-            attempt_compose_config["force_retry_job_ids"] = retry_job_ids
-            attempt_compose_config["quality_retry_attempt"] = attempt
-        # Keep one stable adapter directory so completed jobs and remote task IDs
-        # survive quality attempts. Only failed job IDs are force-resubmitted.
-        result = _run_comfyui_adapter(attempt_payload_path, attempt_compose_config, output_dir, progress_callback=progress_callback)
-        score = _score_material_result(result or {}, min_file_size_kb, attempt_dir, compose_config)
-        score["attempt"] = attempt
-        score["payload_file"] = str(attempt_payload_path)
-        score["retried_job_ids"] = list(retry_job_ids)
-        attempts.append(score)
-        if score["score"] > int(best_score.get("score", -1)):
-            best_score = score
-            best_result = result
-        if result and result.get("status") == "skipped":
-            break
-        if result and result.get("status") == "success" and score["score"] >= min_score:
-            break
-        retry_job_ids = _quality_retry_job_ids(score, compose_config.get("production_plan_visual_jobs"), result or {})
-
-    report_path = _write_quality_report(output_dir, attempts, best_score, min_score, enabled=True)
-    if not best_result:
+    result = _run_comfyui_adapter(
+        comfyui_payload_path,
+        compose_config,
+        output_dir,
+        progress_callback=progress_callback,
+    )
+    score = _score_material_result(result or {}, min_file_size_kb, output_dir, compose_config)
+    score["attempt"] = 1
+    score["payload_file"] = str(comfyui_payload_path)
+    score["retried_job_ids"] = []
+    quality_status = str((score.get("visual_qc") or {}).get("status") or "passed")
+    report_path = _write_quality_report(output_dir, [score], score, min_score, enabled=True)
+    if not result:
         return {
             "status": "failed",
-            "quality_score": int(best_score.get("score", 0)),
+            "quality_status": "blocked",
+            "quality_score": int(score.get("score", 0)),
             "quality_report": str(report_path),
-            "attempts": len(attempts),
+            "attempts": 1,
         }
-    best_result = dict(best_result)
-    best_result["quality_score"] = int(best_score.get("score", 0))
-    best_result["quality_report"] = str(report_path)
-    best_result["attempts"] = len(attempts)
-    if best_result.get("status") in {"success", "partial_success"} and best_result["quality_score"] < min_score:
-        best_result["status"] = "quality_failed"
-    return best_result
+    checked_result = dict(result)
+    checked_result["quality_status"] = quality_status
+    checked_result["quality_score"] = int(score.get("score", 0))
+    checked_result["quality_report"] = str(report_path)
+    checked_result["attempts"] = 1
+    checked_result["review_job_ids"] = _quality_retry_job_ids(
+        score,
+        compose_config.get("production_plan_visual_jobs"),
+        result,
+    )
+    if quality_status in {"review_required", "blocked"}:
+        checked_result["reason"] = "visual quality review requires explicit user confirmation before targeted retry or packaging"
+    return checked_result
 
 
 def _restore_legacy_comfyui_job_state(output_dir: Path) -> Path | None:
@@ -2006,7 +1981,7 @@ def _payload_for_targeted_attempt(payload: dict[str, Any], attempt: int, job_ids
 def _quality_retry_job_ids(score: dict[str, Any], raw_jobs: Any, result: dict[str, Any] | None = None) -> list[str]:
     visual_qc = score.get("visual_qc") if isinstance(score.get("visual_qc"), dict) else {}
     selected: list[str] = []
-    for issue in visual_qc.get("errors") or []:
+    for issue in [*(visual_qc.get("errors") or []), *(visual_qc.get("warnings") or [])]:
         if not isinstance(issue, dict):
             continue
         job_id = str(issue.get("job_id") or "").strip()
@@ -2432,19 +2407,21 @@ def _inspect_visual_outputs(
                 records.append({"job_id": job_id, "type": "image", "file": str(path), "width": width, "height": height, "dhash": f"{image_hash:016x}"})
                 mode = str(job.get("workflow_mode") or job.get("mode") or "").lower()
                 character_id = str(job.get("character_id") or "").strip()
-                if character_id and mode.startswith("identity") and face_detector is not None:
+                face_visibility = str(job.get("face_visibility") or "optional").strip()
+                if character_id and face_visibility == "required" and face_detector is not None:
                     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                     faces = face_detector.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(24, 24))
                     if len(faces) == 0:
-                        errors.append({"code": "identity_face_missing", "job_id": job_id, "character_id": character_id})
+                        warnings.append({"code": "identity_face_missing", "job_id": job_id, "character_id": character_id})
                     elif any(x <= 2 or y <= 2 or x + w >= width - 2 or y + h >= height - 2 for x, y, w, h in faces):
-                        errors.append({"code": "identity_face_cropped", "job_id": job_id, "character_id": character_id})
-                if ocr is not None and not bool(job.get("allow_in_scene_text")):
+                        warnings.append({"code": "identity_face_cropped", "job_id": job_id, "character_id": character_id})
+                text_policy = str(job.get("text_policy") or "forbidden").strip()
+                if ocr is not None and text_policy == "forbidden":
                     try:
                         ocr_result, _ = ocr(frame)
                         detected = [str(row[1]) for row in (ocr_result or []) if isinstance(row, (list, tuple)) and len(row) > 1 and str(row[1]).strip()]
                         if detected:
-                            errors.append({"code": "unexpected_visual_text", "job_id": job_id, "text": detected[:8]})
+                            warnings.append({"code": "unexpected_visual_text", "job_id": job_id, "text": detected[:8]})
                     except Exception as exc:
                         warnings.append({"code": "text_qc_failed", "job_id": job_id, "message": str(exc)[:160]})
                 if expected_vertical and width >= height:
@@ -2486,7 +2463,7 @@ def _inspect_visual_outputs(
             else:
                 first_video_hashes[job_id] = (sample_hashes[0], str(path))
                 motion_distance = max(distance(sample_hashes[0], value) for value in sample_hashes[1:])
-                if motion_distance <= 2:
+                if motion_distance <= 10:
                     warnings.append({"code": "nearly_static_video", "job_id": job_id, "hash_distance": motion_distance})
             if expected_vertical and width >= height:
                 errors.append({"code": "wrong_video_orientation", "job_id": job_id, "width": width, "height": height})
@@ -2521,11 +2498,19 @@ def _inspect_visual_outputs(
 
     duplicate_video_first_frames(first_video_hashes, 2)
     duplicate_groups(keyframe_hashes, "duplicate_keyframe_image", 2)
+    contact_sheets = _write_visual_review_contact_sheets(records, jobs, errors, warnings, output_dir)
+    review_warnings = [
+        issue
+        for issue in warnings
+        if isinstance(issue, dict) and (issue.get("job_id") or issue.get("jobs"))
+    ]
     report = {
         "schema_version": 1,
         "passed": not errors,
+        "status": "blocked" if errors else ("review_required" if review_warnings else "passed"),
         "errors": errors,
         "warnings": warnings,
+        "contact_sheets": contact_sheets,
         "records": records,
         "manual_review_required": ["realistic_vs_anime_style", "large_text_or_ui_overlay", "shot_semantic_match", "human_anatomy"],
     }
@@ -2535,6 +2520,94 @@ def _inspect_visual_outputs(
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         report["report_file"] = str(report_path)
     return report
+
+
+def _write_visual_review_contact_sheets(
+    records: list[dict[str, Any]],
+    jobs: list[dict[str, Any]],
+    errors: list[dict[str, Any]],
+    warnings: list[dict[str, Any]],
+    output_dir: Path | None,
+) -> list[str]:
+    if output_dir is None:
+        return []
+    try:
+        import cv2  # type: ignore
+        import numpy as np  # type: ignore
+    except Exception:
+        return []
+
+    issue_codes: dict[str, list[str]] = {}
+    for issue in [*errors, *warnings]:
+        if not isinstance(issue, dict):
+            continue
+        code = str(issue.get("code") or "")
+        ids = [str(issue.get("job_id") or ""), *[str(value) for value in (issue.get("jobs") or [])]]
+        for job_id in ids:
+            if job_id and code:
+                issue_codes.setdefault(job_id, []).append(code)
+    jobs_by_id = {
+        str(job.get("job_id") or job.get("name") or ""): job
+        for job in jobs
+        if isinstance(job, dict)
+    }
+
+    def load_preview(record: dict[str, Any]):
+        path = Path(str(record.get("file") or ""))
+        if not path.is_file():
+            return None
+        if record.get("type") == "image":
+            data = np.fromfile(str(path), dtype=np.uint8)
+            return cv2.imdecode(data, cv2.IMREAD_COLOR)
+        cap = cv2.VideoCapture(str(path))
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if frame_count:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_count // 2)
+        ok, frame = cap.read()
+        cap.release()
+        return frame if ok else None
+
+    output_files: list[str] = []
+    for media_type, filename in (
+        ("image", "keyframes_contact_sheet.jpg"),
+        ("video", "video_midframes_contact_sheet.jpg"),
+    ):
+        entries = [record for record in records if record.get("type") == media_type]
+        tiles = []
+        for record in entries:
+            frame = load_preview(record)
+            if frame is None:
+                continue
+            job_id = str(record.get("job_id") or "")
+            job = jobs_by_id.get(job_id, {})
+            route = str(job.get("workflow_mode") or job.get("mode") or "")
+            issues = ",".join(dict.fromkeys(issue_codes.get(job_id, []))) or "passed"
+            tile = np.full((300, 220, 3), 245, dtype=np.uint8)
+            height, width = frame.shape[:2]
+            scale = min(210 / max(1, width), 240 / max(1, height))
+            preview = cv2.resize(frame, (max(1, int(width * scale)), max(1, int(height * scale))))
+            y = 5 + (240 - preview.shape[0]) // 2
+            x = 5 + (210 - preview.shape[1]) // 2
+            tile[y:y + preview.shape[0], x:x + preview.shape[1]] = preview
+            cv2.putText(tile, job_id[:30], (6, 258), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (20, 20, 20), 1, cv2.LINE_AA)
+            cv2.putText(tile, route[:30], (6, 275), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (70, 70, 70), 1, cv2.LINE_AA)
+            color = (20, 120, 20) if issues == "passed" else (30, 30, 190)
+            cv2.putText(tile, issues[:32], (6, 292), cv2.FONT_HERSHEY_SIMPLEX, 0.32, color, 1, cv2.LINE_AA)
+            tiles.append(tile)
+        if not tiles:
+            continue
+        columns = min(4, len(tiles))
+        rows = (len(tiles) + columns - 1) // columns
+        sheet = np.full((rows * 300, columns * 220, 3), 235, dtype=np.uint8)
+        for index, tile in enumerate(tiles):
+            row, column = divmod(index, columns)
+            sheet[row * 300:(row + 1) * 300, column * 220:(column + 1) * 220] = tile
+        output_path = output_dir / filename
+        encoded, buffer = cv2.imencode(".jpg", sheet, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        if encoded:
+            buffer.tofile(str(output_path))
+            output_files.append(str(output_path))
+    return output_files
 
 
 def _score_material_result(
@@ -2594,7 +2667,12 @@ def _write_quality_report(
         "enabled": enabled,
         "min_score": min_score,
         "best_score": int(best_score.get("score", 0)),
-        "passed": int(best_score.get("score", 0)) >= min_score,
+        "passed": (
+            int(best_score.get("score", 0)) >= min_score
+            and str((best_score.get("visual_qc") or {}).get("status") or "passed") == "passed"
+        ),
+        "status": str((best_score.get("visual_qc") or {}).get("status") or "passed"),
+        "automatic_retry": False,
         "attempt_count": len(attempts),
         "attempts": attempts,
     }
@@ -2893,7 +2971,7 @@ def _packaging_graph_jobs(
     voice_config: dict[str, Any],
     voice_text_usable: bool | None = None,
 ) -> list[dict[str, Any]]:
-    tts_enabled = voice_text_usable is True
+    tts_enabled = voice_text_usable is True and _voice_config_tts_enabled(voice_config)
     jobs: list[dict[str, Any]] = []
     if tts_enabled:
         jobs.append(
@@ -3054,6 +3132,17 @@ def _mark_optional_audio_packaging_skipped(manifest: dict[str, Any], job_id: str
 def _packaging_dependency_blockers(manifest: dict[str, Any], tts_enabled: bool, material_enabled: bool) -> list[str]:
     ok_statuses = {"success", "cached", "downloaded", "submitted", "skipped", "not_configured"}
     blockers: list[str] = []
+    image_quality = str((manifest.get("image_generation") or {}).get("quality_status") or "").strip()
+    visual_quality = str((manifest.get("composition") or {}).get("quality_status") or "").strip()
+    quality_status = visual_quality or image_quality
+    if quality_status in {"review_required", "blocked"}:
+        review_ids = (
+            (manifest.get("composition") or {}).get("review_job_ids")
+            or (manifest.get("image_generation") or {}).get("review_job_ids")
+            or []
+        )
+        detail = f" ({', '.join(str(value) for value in review_ids[:8])})" if review_ids else ""
+        blockers.append(f"visual_quality: {quality_status}{detail}")
     nodes = [node for node in (manifest.get("production_nodes") or []) if isinstance(node, dict)]
     visual_nodes = [node for node in nodes if str(node.get("stage") or "") == "visual"]
     for node in visual_nodes:

@@ -121,6 +121,8 @@ version: 2026-06-30
 - 默认工作尺寸使用 480p 工作画布：横屏 `848x480`，竖屏 `480x848`，方形 `480x480`。
 - `character_id`、`style_id`、工作尺寸、构图锁定属于系统级参数锁；你只需引用实体和描述镜头目标，不要试图在每条意图里重新改脸、改发型、改服装、改画风或改工作分辨率。
 - 对同一镜头的首 / 中 / 尾帧，只允许动作、表情微变化、运镜关系发生变化；角色身份、发型、服装主色、画风和主体构图必须继承同一套实体与风格锁。
+- 每个人物图片意图必须原样继承 23 的 `face_visibility`、`outfit_state_id`、`text_policy`。三个字段缺失或取值无效时停止输出并明确退回 23，不得从提示词补写。
+- 同一 `scene_id` 在多个图片意图中复用时，必须绑定 `scene_master_image` / `scene_reference_image`，或先输出带同一 `scene_id` 且 `asset_role=scene_base` 的 `generate_base_asset`。不得只绑定人物参考后独立重画背景。
 - 基础资产和普通关键帧不强制使用参考图；只有用户明确提供参考、或角色/产品一致性需要时才写参考资产需求。
 - 单人关键帧可以继续使用 `character_id`；多人同框关键帧必须使用 `characters` 数组，不要把多个人的身份混在一段普通提示词里。
 - `characters` 数组每项必须包含 `character_id`，并尽量填写 `role_in_frame`、`position`、`identity_priority`。`position` 要写清左/右/前/后/中心/互动对象，确保系统能把每个人的身份参考和站位分开传给关键帧工作流。
@@ -146,6 +148,8 @@ version: 2026-06-30
 - 是否避免强制填写底层 DAG 文件绑定。
 - 是否没有写 RunningHub 节点 ID 或 ComfyUI 数字节点 ID。
 - 是否优先引用正式实体 ID，而不是重复描述同一个角色/风格/产品/场景。
+- 每个人物镜头是否完整继承 `face_visibility`、`outfit_state_id`、`text_policy`。
+- 每个重复使用的 `scene_id` 是否具有明确场景锚点。
 
 ## 首中尾帧专项任务硬规则
 

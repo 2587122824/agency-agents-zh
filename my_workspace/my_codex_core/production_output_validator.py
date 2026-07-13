@@ -49,7 +49,7 @@ def validate_production_output(
         character_terms = _upstream_character_terms(previous_outputs or [])
         _validate_videos(payloads, expected_work, upstream_ids, character_terms, issues, effective_lock)
     elif agent.startswith("22_"):
-        _validate_package(payloads, duration, expected_delivery, issues)
+        _validate_package(payloads, duration, expected_delivery, issues, previous_outputs or [])
 
     return {
         "passed": not issues,
@@ -108,6 +108,8 @@ def _validate_images(payloads: list[dict[str, Any]], expected: tuple[int, int], 
     if intents and prompts and intent_payload is not compat_payload:
         issues.append("production_intents.image 与 image_prompts 必须位于同一个 JSON 对象中")
     ids: set[str] = set()
+    repeated_scenes: dict[str, list[dict[str, Any]]] = {}
+    scene_anchors: set[str] = set()
     for index, item in enumerate(intents, 1):
         intent = str(item.get("intent") or "")
         intent_id = str(item.get("intent_id") or "")
@@ -118,6 +120,36 @@ def _validate_images(payloads: list[dict[str, Any]], expected: tuple[int, int], 
         elif intent_id in ids:
             issues.append(f"图片 intent_id 重复：{intent_id}")
         ids.add(intent_id)
+        character_id = str(item.get("character_id") or "").strip()
+        if character_id and intent in {"generate_keyframe", "generate_three_frame_shot", "generate_cover_key_visual"}:
+            face_visibility = str(item.get("face_visibility") or "").strip()
+            if face_visibility not in {"required", "optional", "not_visible"}:
+                issues.append(
+                    f"人物图片意图 {intent_id or index} 的 face_visibility 必须为 required、optional 或 not_visible"
+                )
+            if not str(item.get("outfit_state_id") or "").strip():
+                issues.append(f"人物图片意图 {intent_id or index} 缺少 outfit_state_id")
+            text_policy = str(item.get("text_policy") or "").strip()
+            if text_policy not in {"forbidden", "allowed", "required"}:
+                issues.append(
+                    f"人物图片意图 {intent_id or index} 的 text_policy 必须为 forbidden、allowed 或 required"
+                )
+        scene_id = str(item.get("scene_id") or "").strip()
+        if scene_id:
+            repeated_scenes.setdefault(scene_id, []).append(item)
+            if intent == "generate_base_asset" and str(item.get("asset_role") or "").strip().lower() in {
+                "scene_base", "scene_reference", "background", "environment", "location"
+            }:
+                scene_anchors.add(scene_id)
+            if any(str(item.get(key) or "").strip() for key in (
+                "scene_master_image", "scene_reference", "scene_reference_image", "input_scene_image"
+            )):
+                scene_anchors.add(scene_id)
+    for scene_id, scene_items in repeated_scenes.items():
+        if len(scene_items) > 1 and scene_id not in scene_anchors:
+            issues.append(
+                f"场景 {scene_id} 被 {len(scene_items)} 个图片意图复用，但没有绑定场景母版或 generate_base_asset 场景基准图"
+            )
     for index, item in enumerate(prompts, 1):
         _validate_work_resolution(item, expected, f"image_prompts[{index}]", issues)
 
@@ -293,6 +325,11 @@ def _validate_videos(
             refs = list(dict.fromkeys([*_string_list(item.get("source_intent_ids")), *_reference_ids(item)]))
             if not refs:
                 issues.append(f"图生视频意图 {intent_id or index} 必须显式引用一张上游图片")
+            elif len(refs) != 1:
+                issues.append(
+                    f"图生视频意图 {intent_id or index} 只能引用一张上游图片，当前引用 {len(refs)} 张；"
+                    "请拆分镜头或显式使用受支持的多帧意图"
+                )
             for ref in refs:
                 if upstream_ids and ref not in upstream_ids:
                     issues.append(f"视频意图 {intent_id or index} 引用了不存在的上游图片：{ref}")
@@ -392,6 +429,7 @@ def _validate_package(
     duration: int,
     expected_delivery: tuple[int, int],
     issues: list[str],
+    previous_outputs: list[dict[str, str]],
 ) -> None:
     payload = _payload_with(payloads, "production_intents", "package")
     intents = _intent_group(payload, "package")
@@ -399,6 +437,8 @@ def _validate_package(
         issues.append("缺少可解析的 production_intents.package JSON 数组")
         return
     timeline_intent = next((item for item in intents if item.get("intent") == "build_edit_timeline"), None)
+    upstream_video_ids, has_video_output = _upstream_video_ids(previous_outputs)
+    unresolved_ids: list[str] = []
     detailed_timeline_valid = False
     if not isinstance(timeline_intent, dict):
         issues.append("缺少 build_edit_timeline 意图")
@@ -407,6 +447,9 @@ def _validate_package(
         previous_end = 0.0
         timeline_issue_count_before = len(issues)
         for index, clip in enumerate(timeline, 1):
+            source_id = str(clip.get("source_intent_id") or "").strip()
+            if has_video_output and (not source_id or source_id not in upstream_video_ids):
+                unresolved_ids.append(source_id or f"timeline[{index}]:empty")
             start = _number(clip.get("start_seconds"))
             clip_duration = _number(clip.get("duration_seconds"))
             if index == 1 and abs(start) > 0.25:
@@ -420,6 +463,18 @@ def _validate_package(
         detailed_timeline_valid = bool(timeline) and len(issues) == timeline_issue_count_before
     compact = payload.get("edit_timeline") if isinstance(payload.get("edit_timeline"), dict) else {}
     clips = compact.get("clips") if isinstance(compact.get("clips"), list) else []
+    if has_video_output:
+        for index, clip in enumerate(clips, 1):
+            if not isinstance(clip, dict):
+                continue
+            source_id = str(clip.get("source_intent_id") or clip.get("clip_id") or "").strip()
+            if not source_id or source_id not in upstream_video_ids:
+                unresolved_ids.append(source_id or f"edit_timeline.clips[{index}]:empty")
+    unresolved_ids = list(dict.fromkeys(unresolved_ids))
+    if unresolved_ids:
+        issues.append(
+            "剪辑时间线引用了不存在的上游 07 视频意图：" + "、".join(unresolved_ids[:12])
+        )
     if clips and duration and not detailed_timeline_valid:
         total = sum(_number(item.get("duration_seconds")) for item in clips)
         if abs(total - duration) > 0.5 and not _compact_timeline_reaches_duration(compact, duration):
@@ -444,6 +499,26 @@ def _validate_package(
     missing = payload.get("missing_assets") if isinstance(payload.get("missing_assets"), list) else []
     if missing:
         issues.append(f"仍有 {len(missing)} 项缺失素材，不能声明生产就绪或无阻塞项")
+    readiness = next((item for item in intents if item.get("intent") == "review_missing_assets"), None)
+    if isinstance(readiness, dict) and readiness.get("all_assets_ready") is True and (missing or unresolved_ids):
+        issues.append("review_missing_assets.all_assets_ready 不能在存在缺失素材或无效时间线引用时声明为 true")
+
+
+def _upstream_video_ids(previous_outputs: list[dict[str, str]]) -> tuple[set[str], bool]:
+    values: set[str] = set()
+    found = False
+    for output in previous_outputs:
+        if not str(output.get("agent") or "").startswith("07_"):
+            continue
+        found = True
+        payloads = _json_objects(output.get("content") or "")
+        payload = _payload_with(payloads, "production_intents", "video")
+        for item in _intent_group(payload, "video"):
+            for key in ("intent_id", "asset_tag", "job_id"):
+                value = str(item.get(key) or "").strip()
+                if value:
+                    values.add(value)
+    return values, found
 
 
 def _compact_timeline_reaches_duration(compact: dict[str, Any], duration: int) -> bool:

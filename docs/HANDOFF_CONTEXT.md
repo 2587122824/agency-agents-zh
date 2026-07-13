@@ -2,6 +2,18 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 Visual Contract And Review Gate
+
+- Employee 22 edit timelines now validate every detailed `source_intent_id` and compact `clip_id` against the exact video intent IDs emitted by employee 07. Unresolved references fail visibly, and `all_assets_ready=true` cannot override missing or invalid references.
+- Ordinary `generate_i2v_clip` accepts exactly one upstream image. Multiple images fail validation and compilation instead of silently binding only the first; multi-action work must be split or use an explicitly supported multi-frame intent.
+- Character image intents now require structured `face_visibility`, `outfit_state_id`, and `text_policy` fields. Reused `scene_id` values require an explicit scene master/reference or a `generate_base_asset` scene anchor. These fields are preserved in compiled image/video jobs.
+- Visual quality execution performs one paid provider attempt only. Deterministic media failures become `blocked`; face presence, OCR, duplicate, and low-motion findings become `review_required`. No automatic quality retry is issued. The quality report lists targeted job IDs, and task state exposes only explicit user-triggered retries.
+- Face detection runs only when `face_visibility=required`; back/feet/distant shots marked `not_visible` do not receive frontal-face errors. OCR and face findings are review warnings rather than hard identity claims. Low-motion review uses a perceptual hash distance threshold of 10.
+- QC writes `keyframes_contact_sheet.jpg` and `video_midframes_contact_sheet.jpg` beside `visual_content_qc.json`, with job ID, actual route, and issue labels.
+- System audio `mode=off` now removes TTS from the packaging graph and FFmpeg dependencies even when employee script text exists. Manual FFmpeg retry also follows the current system audio mode.
+- Staff 23/06/07/22 contracts document exact field ownership, scene anchoring, single-source I2V, exact timeline IDs, runtime readiness authority, and audio-off behavior.
+- Verification: 193 semantic-contract tests, `python -m compileall -q my_workspace`, and `git diff --check` passed before final commit.
+
 ## 2026-07-14 System Production Config Authority
 
 - The backend now persists a secret-free current system production config at `tmp/web_runtime_production_config.json`. RunningHub and CosyVoice credentials remain in their dedicated runtime credential files and are injected only when the current config explicitly selects those providers.

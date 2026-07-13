@@ -295,19 +295,28 @@ class TaskStateCenter:
         status = str(manifest.get("status") or self.summary.get("production_status") or ("running" if graph_backed else "off"))
         composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
         composition = self._normalized_composition_status(composition)
+        image_generation = manifest.get("image_generation") if isinstance(manifest.get("image_generation"), dict) else {}
+        quality = {
+            "status": str(composition.get("quality_status") or image_generation.get("quality_status") or ""),
+            "report": str(composition.get("quality_report") or image_generation.get("quality_report") or ""),
+            "review_job_ids": list(composition.get("review_job_ids") or image_generation.get("review_job_ids") or []),
+        }
+        allowed_retries = self._allowed_retries(jobs, nodes)
+        allowed_retries.extend(str(value) for value in quality["review_job_ids"] if str(value))
         return {
             "mode": str(manifest.get("mode") or "off"),
             "status": status,
             "manifest_file": str(manifest_path) if manifest_path.is_file() else "",
             "manifest_error": manifest_error,
             "composition": composition,
+            "quality": quality,
             "jobs": jobs,
             "history": history[-10:],
             "dag": dag,
             "tts": tts,
             "ffmpeg": ffmpeg,
             "manual_debug": manual,
-            "allowed_retries": self._allowed_retries(jobs, nodes),
+            "allowed_retries": list(dict.fromkeys(allowed_retries)),
             "graph_backed": graph_backed,
         }
 
@@ -345,6 +354,13 @@ class TaskStateCenter:
             blockers.append({"source": "manual_debug", "code": "awaiting_comfyui_confirmation", "message": "ComfyUI 调试队列等待人工确认"})
         if production.get("manifest_error"):
             blockers.append({"source": "production", "code": "invalid_manifest", "message": str(production["manifest_error"])})
+        quality = production.get("quality") if isinstance(production.get("quality"), dict) else {}
+        if quality.get("status") in {"review_required", "blocked"}:
+            review_ids = "、".join(str(value) for value in (quality.get("review_job_ids") or [])[:8])
+            message = "视觉素材等待人工复核"
+            if review_ids:
+                message += f"：{review_ids}"
+            blockers.append({"source": "quality", "code": str(quality.get("status")), "message": message})
         for node in production.get("dag", {}).get("blocked_nodes", []):
             blockers.append({"source": "dag", "code": str(node.get("job_id") or "blocked_node"), "message": str(node.get("blocked_reason") or node.get("error") or "生产节点阻塞")})
         for node in production.get("dag", {}).get("failed_nodes", []):
@@ -392,6 +408,14 @@ class TaskStateCenter:
             retry_action = f"retry:{job_id}" if job_id else "inspect_blockers"
             return {"action": retry_action, "label": f"处理生产节点：{job_id or '未知节点'}", "reason": str(first.get("blocked_reason") or first.get("error") or ""), "job_id": job_id}
         composition = production.get("composition") if isinstance(production.get("composition"), dict) else {}
+        quality = production.get("quality") if isinstance(production.get("quality"), dict) else {}
+        if quality.get("status") in {"review_required", "blocked"}:
+            return {
+                "action": "inspect_blockers",
+                "label": "复核视觉素材",
+                "reason": str(quality.get("status")),
+                "job_ids": quality.get("review_job_ids") or [],
+            }
         raw_missing_slots = composition.get("missing_workflow_slots") if isinstance(composition.get("missing_workflow_slots"), list) else []
         missing_slots = [item for item in raw_missing_slots if isinstance(item, dict) and not self._is_optional_missing_workflow_slot(item)]
         has_final_media = self._has_final_media(production)
@@ -430,6 +454,17 @@ class TaskStateCenter:
         if self._is_failed_status(production_status):
             diagnostics.append({"level": "error", "code": "production_failed", "message": f"自动生产失败：{production.get('status')}"})
         composition = production.get("composition") if isinstance(production.get("composition"), dict) else {}
+        quality = production.get("quality") if isinstance(production.get("quality"), dict) else {}
+        if quality.get("status") in {"review_required", "blocked"}:
+            diagnostics.append(
+                {
+                    "level": "warn" if quality.get("status") == "review_required" else "error",
+                    "code": str(quality.get("status")),
+                    "message": "视觉素材质检需要人工确认；系统没有自动重试或继续封装。",
+                    "details": {"job_ids": quality.get("review_job_ids") or [], "report": quality.get("report") or ""},
+                    "suggestion": "查看质量报告和联络表后，仅重试确认有问题的素材。",
+                }
+            )
         raw_missing_slots = composition.get("missing_workflow_slots") if isinstance(composition.get("missing_workflow_slots"), list) else []
         missing_slots = [item for item in raw_missing_slots if isinstance(item, dict) and not self._is_optional_missing_workflow_slot(item)]
         if missing_slots:

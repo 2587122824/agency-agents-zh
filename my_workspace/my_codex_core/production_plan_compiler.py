@@ -1756,6 +1756,9 @@ def _compile_video_intents(
             "style_id": str(intent.get("style_id") or ""),
             "product_id": str(intent.get("product_id") or ""),
             "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
+            "face_visibility": str(intent.get("face_visibility") or ""),
+            "outfit_state_id": str(intent.get("outfit_state_id") or ""),
+            "text_policy": str(intent.get("text_policy") or ""),
             "asset_tag": str(intent.get("asset_tag") or intent_name or intent_id),
             "source_intent_ids": _string_list(intent.get("source_intent_ids")),
             "depends_on": _string_list(intent.get("depends_on")),
@@ -1787,6 +1790,17 @@ def _compile_video_intents(
         if intent_name == "generate_three_frame_i2v_clip":
             _bind_three_frames(item, image_job_ids)
         elif effective_intent_name == "generate_i2v_clip":
+            source_refs = list(dict.fromkeys(_string_list(intent.get("source_intent_ids"))))
+            if not source_refs:
+                raise ValueError(
+                    f"I2V intent {intent_id} has no explicit upstream image; "
+                    "the image employee must produce the keyframe and the video employee must reference its intent_id"
+                )
+            if len(source_refs) != 1:
+                raise ValueError(
+                    f"I2V intent {intent_id} must reference exactly one upstream image; "
+                    f"received {len(source_refs)} references"
+                )
             _bind_first_source_image(item, image_job_ids)
             if not _has_bound_first_frame(item, image_job_ids):
                 raise ValueError(
@@ -1963,6 +1977,10 @@ def _image_prompt_item(
         "style_id": str(intent.get("style_id") or ""),
         "product_id": str(intent.get("product_id") or ""),
         "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
+        "face_visibility": str(intent.get("face_visibility") or ""),
+        "outfit_state_id": str(intent.get("outfit_state_id") or ""),
+        "text_policy": str(intent.get("text_policy") or ""),
+        "allow_in_scene_text": str(intent.get("text_policy") or "").strip() in {"allowed", "required"},
         "asset_tag": asset_tag,
         "depends_on": _string_list(intent.get("depends_on")),
         "input_bindings": intent.get("input_bindings") if isinstance(intent.get("input_bindings"), dict) else {},
