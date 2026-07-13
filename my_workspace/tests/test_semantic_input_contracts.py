@@ -2425,27 +2425,25 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(resolved_job["character_references"][0]["identity_image"], str(image_path))
             self.assertEqual(resolved_inputs["character_references[1].identity_image"], str(image_path))
 
-    def test_multi_character_keyframe_without_identity_images_falls_back_to_text_keyframe(self) -> None:
-        item = _image_prompt_item(
-            job_id="duo_shot_missing_refs",
-            prompt="Hero and mentor speak across a console",
-            intent={
-                "intent": "generate_keyframe",
-                "characters": [
-                    {"character_id": "hero", "position": "left"},
-                    {"character_id": "mentor", "position": "right"},
-                ],
-            },
-            contract={},
-            compatibility={},
-            render={"working_width": 480, "working_height": 848},
-            asset_tag="keyframe",
-            resolved_entities={},
-            notes=[],
-        )
-        self.assertEqual(item["workflow_id"], "04_keyframe")
-        self.assertEqual(item["workflow_mode"], "keyframe")
-        self.assertEqual(item["character_references"], [])
+    def test_multi_character_keyframe_without_identity_images_fails_strictly(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires character identity references"):
+            _image_prompt_item(
+                job_id="duo_shot_missing_refs",
+                prompt="Hero and mentor speak across a console",
+                intent={
+                    "intent": "generate_keyframe",
+                    "characters": [
+                        {"character_id": "hero", "position": "left"},
+                        {"character_id": "mentor", "position": "right"},
+                    ],
+                },
+                contract={},
+                compatibility={},
+                render={"working_width": 480, "working_height": 848},
+                asset_tag="keyframe",
+                resolved_entities={},
+                notes=[],
+            )
 
     def test_multi_character_pose_keyframe_uses_pose_layout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -3151,7 +3149,7 @@ class SemanticInputContractTests(unittest.TestCase):
     def test_api_adapter_skipped_is_failed_production_status(self) -> None:
         self.assertTrue(web_app.WorkflowWebHandler._is_failed_production_status("api_adapter_skipped"))
 
-    def test_unconfigured_multi_identity_keyframe_downgrades_to_identity_keyframe(self) -> None:
+    def test_unconfigured_multi_identity_keyframe_stays_strictly_required(self) -> None:
         visual_jobs = [
             {
                 "job_id": "shot_duo",
@@ -3193,11 +3191,64 @@ class SemanticInputContractTests(unittest.TestCase):
             },
             notes=notes,
         )
-        self.assertEqual(visual_jobs[0]["workflow_mode"], "identity_keyframe")
-        self.assertEqual(visual_jobs[0]["control_mode"], "identity_reference")
-        self.assertEqual(payload["image_prompts"][0]["workflow_mode"], "identity_keyframe")
-        self.assertEqual(payload["image_prompts"][0]["control_mode"], "identity_reference")
-        self.assertIn("multi_identity_keyframe", notes[0])
+        self.assertEqual(visual_jobs[0]["workflow_mode"], "multi_identity_keyframe")
+        self.assertEqual(visual_jobs[0]["control_mode"], "multi_identity_reference")
+        self.assertEqual(payload["image_prompts"][0]["workflow_mode"], "multi_identity_keyframe")
+        self.assertEqual(payload["image_prompts"][0]["control_mode"], "multi_identity_reference")
+        self.assertIn("strict visual routing", notes[0])
+
+    def test_character_keyframe_without_identity_reference_fails_strictly(self) -> None:
+        with self.assertRaisesRegex(ValueError, "requires character identity references"):
+            _image_prompt_item(
+                job_id="shot_missing_identity",
+                prompt="same protagonist in a dramatic close-up",
+                intent={
+                    "intent": "generate_keyframe",
+                    "characters": [{"character_id": "char_main"}],
+                },
+                contract={},
+                compatibility={},
+                render={"working_width": 480, "working_height": 848},
+                asset_tag="keyframe",
+                resolved_entities={"characters": [{"character_id": "char_main"}]},
+                notes=[],
+            )
+
+    def test_cover_key_visual_is_not_optional_by_default(self) -> None:
+        item = _image_prompt_item(
+            job_id="cover_001",
+            prompt="cinematic cover key visual",
+            intent={"intent": "generate_cover_key_visual"},
+            contract={},
+            compatibility={},
+            render={"working_width": 480, "working_height": 848},
+            asset_tag="cover",
+            resolved_entities={},
+            notes=[],
+        )
+        self.assertNotIn("optional_when_unconfigured", item)
+        self.assertEqual(
+            _required_workflow_slots([{**item, "type": "image"}]),
+            [
+                {
+                    "workflow_id": "03_style_cover_image",
+                    "mode": "cover_key_visual",
+                    "material_type": "image",
+                    "label": "03_style_cover_image / cover_key_visual",
+                }
+            ],
+        )
+
+    def test_old_optional_cover_payload_is_still_required(self) -> None:
+        self.assertFalse(
+            CloudComfyUIAdapter._is_optional_when_unconfigured(
+                {
+                    "workflow_id": "03_style_cover_image",
+                    "mode": "cover_key_visual",
+                    "optional_when_unconfigured": True,
+                }
+            )
+        )
 
     def test_local_ffmpeg_project_relative_output_path_not_nested(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

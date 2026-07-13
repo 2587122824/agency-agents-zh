@@ -36,6 +36,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 ## Production Pipeline Rules
 
 - Long-video workflow ends with local editing/composition as the final authority.
+- User preference: do not add hidden fallback/downgrade logic without asking first. For visual identity, keyframes, cover images, character/scene bindings, and material reuse, prefer explicit failure with a clear diagnostic over silently skipping, downgrading, or reusing stale assets.
 - ComfyUI/RunningHub is for visual material generation or preview clips, not final subtitle/audio burning by default.
 - `compose_config.tool == "runninghub"` in `comfy_full` means RunningHub is the visual material provider; it must still allow local FFmpeg final composition.
 - Audio/subtitle ownership:

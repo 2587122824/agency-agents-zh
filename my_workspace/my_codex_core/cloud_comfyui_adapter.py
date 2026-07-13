@@ -648,8 +648,6 @@ class CloudComfyUIAdapter:
 
     @staticmethod
     def _is_optional_when_unconfigured(job: dict[str, Any]) -> bool:
-        if CloudComfyUIAdapter._as_bool(job.get("optional_when_unconfigured"), default=False):
-            return True
         prompt_data = job.get("prompt_data") if isinstance(job.get("prompt_data"), dict) else {}
         text = " ".join(
             str(value or "").strip()
@@ -664,11 +662,19 @@ class CloudComfyUIAdapter:
                 prompt_data.get("capability"),
             )
         ).lower()
+        if (
+            "cover_key_visual" in text
+            or "generate_cover_key_visual" in text
+            or "keyframe" in text
+            or "character_base" in text
+            or "identity" in text
+        ):
+            return False
+        if CloudComfyUIAdapter._as_bool(job.get("optional_when_unconfigured"), default=False):
+            return True
         return (
             "enhance_video" in text
             or "video_enhance" in text
-            or "cover_key_visual" in text
-            or "generate_cover_key_visual" in text
             or "talking_image" in text
             or "generate_talking_image" in text
         )

@@ -2570,9 +2570,9 @@ def _image_prompt_item(
     if (img2img_style_requested or style_reference_requested):
         pass
     elif item.get("character_references") and not usable_character_references and workflow_id == "04_keyframe":
-        item["character_references"] = []
-        if notes is not None:
-            notes.append(f"image intent {job_id} downgraded to text keyframe because character references had no identity images")
+        raise ValueError(
+            f"image intent {job_id} requires character identity references, but no identity image or binding was resolved"
+        )
     elif workflow_id == "04_keyframe" and len(usable_character_references) > 1:
         item["character_references"] = usable_character_references
         workflow_mode = "multi_pose_identity_keyframe" if pose_reference else "multi_identity_keyframe"
@@ -2635,10 +2635,16 @@ def _image_prompt_item(
             notes.append(f"image intent {job_id} routed cover key visual to {workflow_mode} to preserve character identity")
     if workflow_id == "03_style_cover_image" and first_reference:
         item["input_reference_style"] = first_reference
-    if _bool_or_default(
+    optional_requested = _bool_or_default(
         intent.get("optional_when_unconfigured"),
-        default=_bool_or_default(contract.get("optional_when_unconfigured"), default=intent_name == "generate_cover_key_visual"),
-    ):
+        default=_bool_or_default(contract.get("optional_when_unconfigured"), default=False),
+    )
+    strict_visual_job = (
+        workflow_id == "04_keyframe"
+        or workflow_mode in {"cover_key_visual", "character_base"}
+        or str(item.get("character_id") or "").strip()
+    )
+    if optional_requested and not strict_visual_job:
         item["optional_when_unconfigured"] = True
     return item
 

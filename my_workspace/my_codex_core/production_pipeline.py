@@ -148,7 +148,11 @@ def run_auto_production(
     _write_text(comfyui_payload_path, json.dumps(comfyui_payload, ensure_ascii=False, indent=2) + "\n")
     packaging_jobs = _packaging_graph_jobs(comfyui_payload, voice_config, voice_text_quality.get("usable"))
     reusable_visual_result = None
-    if mode == "comfy_full" and not stop_after_comfyui:
+    if (
+        mode == "comfy_full"
+        and not stop_after_comfyui
+        and _as_bool(compose_config.get("reuse_existing_image_materials"), default=False)
+    ):
         reusable_visual_result = _completed_visual_result_for_reuse(
             previous_manifest,
             previous_production_plan,
@@ -939,7 +943,7 @@ def retry_production_job(
             compose_config["force_retry_job_id"] = requested_job_id
     if retry_job == "material":
         mode = _retry_mode(manifest, config, "material")
-        compose_config.setdefault("reuse_existing_image_materials", True)
+        compose_config.setdefault("reuse_existing_image_materials", False)
 
     def emit(message: str, stage: str = "production", **extra: Any) -> None:
         if not progress_callback:
@@ -1534,7 +1538,6 @@ def _downgrade_unconfigured_visual_jobs_for_available_slots(
     configured = _configured_workflow_slots(compose_config.get("workflow_library"))
     if not configured:
         return
-    payload_items = _payload_image_items_by_job_id(payload)
     for job in visual_jobs:
         if not isinstance(job, dict):
             continue
@@ -1544,16 +1547,9 @@ def _downgrade_unconfigured_visual_jobs_for_available_slots(
             continue
         if _workflow_slot_configured(configured, workflow_id, mode):
             continue
-        fallback_mode = _multi_character_keyframe_fallback_mode(job, configured)
-        if not fallback_mode:
-            continue
-        _set_visual_job_mode(job, fallback_mode)
-        _set_visual_job_mode(payload_items.get(str(job.get("job_id") or "")), fallback_mode)
-        job["workflow_fallback_from"] = mode
-        job["workflow_fallback_reason"] = "configured multi-character keyframe slot is unavailable"
         if notes is not None:
             notes.append(
-                f"image job {job.get('job_id') or job.get('id') or ''} downgraded from {mode} to {fallback_mode} because the multi-character keyframe slot is not configured"
+                f"image job {job.get('job_id') or job.get('id') or ''} requires {workflow_id} / {mode}; strict visual routing keeps the missing slot as a blocker"
             )
 
 
@@ -2960,8 +2956,6 @@ def _missing_workflow_slots(required: list[dict[str, str]], configured: list[dic
 
 
 def _optional_workflow_slot(job: dict[str, Any], workflow_id: str = "", mode: str = "") -> bool:
-    if _as_bool(job.get("optional_when_unconfigured"), default=False):
-        return True
     text = " ".join(
         str(value or "").strip()
         for value in (
@@ -2974,11 +2968,19 @@ def _optional_workflow_slot(job: dict[str, Any], workflow_id: str = "", mode: st
             job.get("capability"),
         )
     ).lower()
+    if (
+        "cover_key_visual" in text
+        or "generate_cover_key_visual" in text
+        or "keyframe" in text
+        or "character_base" in text
+        or "identity" in text
+    ):
+        return False
+    if _as_bool(job.get("optional_when_unconfigured"), default=False):
+        return True
     return (
         "enhance_video" in text
         or "video_enhance" in text
-        or "cover_key_visual" in text
-        or "generate_cover_key_visual" in text
         or "talking_image" in text
         or "generate_talking_image" in text
     )
