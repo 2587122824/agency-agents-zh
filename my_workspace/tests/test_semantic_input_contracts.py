@@ -24,6 +24,7 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
     _bind_first_source_video,
     _image_prompt_item,
     compile_production_plan,
+    load_production_templates,
 )
 from my_codex_core.production_entities import entity_context_for_ids, normalize_production_entities  # noqa: E402
 from my_codex_core.production_pipeline import (  # noqa: E402
@@ -63,6 +64,22 @@ from my_codex_core.task_state_center import TaskStateCenter  # noqa: E402
 class SemanticInputContractTests(unittest.TestCase):
     def setUp(self) -> None:
         self.workflows = {item["id"]: item for item in web_app.COMFY_DEBUG_WORKFLOWS}
+
+    def test_compiler_rejects_missing_production_type_instead_of_keyword_routing(self) -> None:
+        with self.assertRaisesRegex(ValueError, "must provide a valid production_type"):
+            compile_production_plan(
+                task_id="missing_route_type",
+                route_content='{"routing_reason":"这是一个带货产品视频"}',
+                image_content='{"production_intents":{"image":[]}}',
+                video_content='{"production_intents":{"video":[]}}',
+            )
+
+    def test_invalid_production_template_file_is_not_replaced_with_defaults(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "production_templates.json"
+            path.write_text('{"templates":', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "invalid JSON"):
+                load_production_templates(path)
 
     def test_comfy_debug_queue_requires_explicit_manual_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -4266,7 +4283,7 @@ class SemanticInputContractTests(unittest.TestCase):
             task_id="plain_live_action",
             route_content=json.dumps(
                 {
-                    "production_type": "commercial_story",
+                    "production_type": "custom",
                     "aspect_ratio": "9:16",
                     "style_id": "modern_live_action",
                 },

@@ -287,13 +287,17 @@ def load_production_templates(path: Path | None = None) -> dict[str, Any]:
     target = path or DEFAULT_TEMPLATE_PATH
     try:
         data = json.loads(target.read_text(encoding="utf-8-sig"))
-    except Exception:
-        data = {}
+    except OSError as exc:
+        raise ValueError(f"production template file cannot be read: {target}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"production template file is invalid JSON: {exc.msg} (line {exc.lineno}, column {exc.colno})"
+        ) from exc
     if not isinstance(data, dict):
-        data = {}
-    data.setdefault("global_defaults", {"render": {"working_width": 848, "working_height": 480, "delivery_width": 1920, "delivery_height": 1080, "frame_rate": 24, "aspect_ratio": "16:9"}})
-    data.setdefault("workflow_contracts", {"image": {}, "video": {}, "audio": {}, "package": {}})
-    data.setdefault("templates", {})
+        raise ValueError("production template file must contain a JSON object")
+    for key in ("global_defaults", "workflow_contracts", "templates"):
+        if not isinstance(data.get(key), dict):
+            raise ValueError(f"production template file is missing required object: {key}")
     return data
 
 
@@ -306,7 +310,9 @@ def _route_from_payload(payload: dict[str, Any], text: str, video_config: dict[s
     route = payload if isinstance(payload, dict) else {}
     production_type = str(route.get("production_type") or "").strip()
     if production_type not in PRODUCTION_TYPES:
-        production_type = _infer_production_type(text)
+        raise ValueError(
+            f"01 employee output must provide a valid production_type; received {production_type or 'empty'}"
+        )
     aspect_ratio = str(route.get("aspect_ratio") or video_config.get("aspect_ratio") or "16:9")
     return {
         "production_type": production_type,
@@ -318,29 +324,16 @@ def _route_from_payload(payload: dict[str, Any], text: str, video_config: dict[s
         "style_id": str(route.get("style_id") or route.get("visual_style_id") or "").strip(),
         "visual_style": str(route.get("visual_style") or route.get("style") or "").strip(),
         "style_description": str(route.get("style_description") or route.get("visual_style_description") or "").strip(),
-        "routing_reason": str(route.get("routing_reason") or "由production_plan_compiler根据01输出或关键词推断。"),
+        "routing_reason": str(route.get("routing_reason") or ""),
     }
-
-
-def _infer_production_type(text: str) -> str:
-    lowered = str(text or "").lower()
-    if any(word in lowered for word in ("带货", "产品", "商品", "卖点", "转化", "product", "promo")):
-        return "product_promo"
-    if any(word in lowered for word in ("口播", "数字人", "虚拟主播", "talking", "avatar", "lip")):
-        return "talking_avatar"
-    if any(word in lowered for word in ("只要素材", "素材", "asset_only", "asset only")):
-        return "asset_only"
-    if any(word in lowered for word in ("漫剧", "剧情", "短剧", "角色", "分镜", "story", "drama")):
-        return "drama_story"
-    return "custom"
 
 
 def _template_for_type(templates: dict[str, Any], production_type: str) -> dict[str, Any]:
     items = templates.get("templates") if isinstance(templates.get("templates"), dict) else {}
     template = items.get(production_type) if isinstance(items.get(production_type), dict) else {}
-    if not template and production_type != "custom":
-        template = items.get("custom") if isinstance(items.get("custom"), dict) else {}
-    return template if isinstance(template, dict) else {}
+    if not template:
+        raise ValueError(f"production template is not configured for production_type: {production_type}")
+    return template
 
 
 def _global_context_from_sources(
