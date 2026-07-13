@@ -1671,10 +1671,14 @@ def _run_api_ready_comfyui_image_adapter(
     image_payload = _payload_for_material_type(comfyui_payload, "image")
     image_compose_config = dict(compose_config)
     image_compose_config["execution_mode"] = "api_ready"
-    image_compose_config["production_plan_visual_jobs"] = _active_visual_jobs_for_mode(
+    active_visual_jobs = _active_visual_jobs_for_mode(
         "api_ready",
         compose_config.get("production_plan_visual_jobs"),
     )
+    payload_visual_jobs = _payload_visual_jobs(image_payload)
+    if payload_visual_jobs:
+        active_visual_jobs = payload_visual_jobs
+    image_compose_config["production_plan_visual_jobs"] = active_visual_jobs
     image_compose_config["packaging_jobs"] = []
     payload_path = output_dir / "api_ready_image_payload.json"
     payload_path.write_text(json.dumps(image_payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -1685,6 +1689,17 @@ def _run_api_ready_comfyui_image_adapter(
         output_dir,
         progress_callback=progress_callback,
     )
+
+
+def _payload_visual_jobs(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    jobs: list[dict[str, Any]] = []
+    for key in ("visual_jobs", "image_prompts", "video_prompts"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            jobs.extend(dict(item) for item in value if isinstance(item, dict))
+    return jobs
 
 
 def _payload_for_material_type(payload: dict[str, Any], material_type: str) -> dict[str, Any]:
@@ -1876,6 +1891,17 @@ def _run_comfyui_adapter_with_quality_gate(
     output_dir.mkdir(parents=True, exist_ok=True)
     _restore_legacy_comfyui_job_state(output_dir)
     preflight = _preflight_visual_jobs(compose_config.get("production_plan_visual_jobs"))
+    if not preflight["passed"]:
+        payload_jobs = _payload_visual_jobs(_load_comfyui_payload_with_fallback(comfyui_payload_path))
+        payload_preflight = _preflight_visual_jobs(payload_jobs)
+        if payload_preflight["passed"]:
+            payload_preflight.setdefault("warnings", []).append(
+                {
+                    "code": "preflight_recovered_from_payload",
+                    "message": "compose_config visual jobs were stale; refreshed preflight from current ComfyUI payload.",
+                }
+            )
+            preflight = payload_preflight
     preflight_path = output_dir / "visual_preflight_report.json"
     preflight_path.write_text(json.dumps(preflight, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     if not preflight["passed"]:

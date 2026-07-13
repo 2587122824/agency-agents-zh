@@ -37,6 +37,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _preflight_visual_jobs,
     _quality_check_voice_text,
     _quality_check_srt,
+    _run_comfyui_adapter_with_quality_gate,
     _required_workflow_slots,
     _srt_from_voice_text,
 )
@@ -3894,6 +3895,56 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertTrue(report["passed"])
         self.assertNotIn("missing_identity_binding", {item["code"] for item in report["errors"]})
         self.assertNotIn("character_without_identity_anchor", {item["code"] for item in report["errors"]})
+
+    def test_comfyui_preflight_recovers_from_payload_when_config_jobs_are_stale(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp)
+            payload_path = output_dir / "api_ready_image_payload.json"
+            payload_path.write_text(
+                json.dumps(
+                    {
+                        "image_prompts": [
+                            {
+                                "type": "image",
+                                "job_id": "asset_mei_master",
+                                "mode": "identity_keyframe",
+                                "character_id": "character_mei",
+                                "input_identity_image": "I:/refs/mei.jpg",
+                                "identity_anchor": {"file": "I:/refs/mei.jpg"},
+                                "input_bindings": {},
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            stale_config = {
+                "production_plan_visual_jobs": [
+                    {
+                        "type": "image",
+                        "job_id": "asset_mei_master",
+                        "mode": "identity_keyframe",
+                        "character_id": "character_mei",
+                        "input_bindings": {},
+                    }
+                ]
+            }
+
+            with patch("my_codex_core.production_pipeline._run_comfyui_adapter") as run_adapter:
+                run_adapter.return_value = {"status": "success", "downloaded_files": ["I:/out/frame.png"]}
+                result = _run_comfyui_adapter_with_quality_gate(
+                    payload_path,
+                    stale_config,
+                    {"enabled": False},
+                    output_dir,
+                )
+
+            report = json.loads((output_dir / "visual_preflight_report.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["status"], "success")
+            self.assertTrue(report["passed"])
+            self.assertEqual(report["errors"], [])
+            self.assertIn("preflight_recovered_from_payload", {item["code"] for item in report["warnings"]})
 
     def test_aliyun_duration_retry_rate_uses_actual_overrun(self) -> None:
         retry_rate = LocalTTSAdapter._aliyun_duration_retry_rate(None, actual_duration=78.1, target_duration=60.0)
