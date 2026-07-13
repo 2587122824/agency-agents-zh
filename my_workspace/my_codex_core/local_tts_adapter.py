@@ -300,48 +300,16 @@ class LocalTTSAdapter:
         }
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-        request = urllib_request.Request(
-            endpoint,
-            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
+        data, audio, error = self._submit_aliyun_cosyvoice_request(
+            endpoint=endpoint,
+            api_key=api_key,
+            payload=payload,
+            output_path=output_path,
+            response_path=response_path,
+            timeout=timeout,
         )
-        try:
-            with urllib_request.urlopen(request, timeout=timeout) as response:
-                raw = response.read()
-        except HTTPError as exc:
-            error_body = exc.read().decode("utf-8", errors="replace")
-            manifest.update({"status": "failed", "error": self._friendly_aliyun_error(exc.code, error_body)})
-            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return manifest
-        except (URLError, TimeoutError, OSError) as exc:
-            manifest.update({"status": "failed", "error": f"Aliyun CosyVoice request failed: {exc}"})
-            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return manifest
-
-        try:
-            data = json.loads(raw.decode("utf-8", errors="replace"))
-        except json.JSONDecodeError:
-            data = {}
-        response_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        audio = ((data.get("output") or {}).get("audio") or {}) if isinstance(data, dict) else {}
-        audio_url = str(audio.get("url") or "").strip()
-        audio_data = str(audio.get("data") or "").strip()
-        try:
-            if audio_data:
-                output_path.write_bytes(base64.b64decode(audio_data))
-            elif audio_url:
-                download_request = urllib_request.Request(audio_url, method="GET")
-                with urllib_request.urlopen(download_request, timeout=timeout) as response:
-                    output_path.write_bytes(response.read())
-            else:
-                manifest.update({"status": "failed", "error": "Aliyun CosyVoice response did not include output.audio.url or output.audio.data"})
-        except (OSError, ValueError, URLError, TimeoutError) as exc:
-            self._remove_stale_file(output_path)
-            manifest.update({"status": "failed", "error": f"Aliyun CosyVoice audio download failed: {exc}"})
+        if error:
+            manifest.update({"status": "failed", "error": error})
 
         if output_path.is_file():
             actual_duration = self._media_duration(output_path)
@@ -360,19 +328,145 @@ class LocalTTSAdapter:
             if isinstance(usage, dict):
                 manifest["usage"] = usage
             if target_duration and actual_duration and actual_duration > target_duration + 1.5:
-                manifest.update(
-                    {
-                        "status": "quality_failed",
-                        "error": (
-                            f"Synthesized voiceover is {actual_duration:.1f}s, longer than the "
-                            f"{target_duration:.1f}s target. Shorten the voiceover text or adjust speech rate."
-                        ),
-                        "duration_overrun_seconds": round(actual_duration - target_duration, 3),
+                retry_rate = self._aliyun_duration_retry_rate(payload_input.get("rate"), actual_duration, target_duration)
+                retry_enabled = str(voice_config.get("aliyun_auto_rate_retry") or "true").strip().lower() not in {
+                    "0",
+                    "false",
+                    "off",
+                    "disabled",
+                }
+                if retry_enabled and retry_rate:
+                    retry_input = dict(payload_input)
+                    retry_input["rate"] = retry_rate
+                    retry_payload = {"model": model, "input": retry_input}
+                    retry_response_path = output_dir / "aliyun_cosyvoice_response_duration_retry.json"
+                    retry_output_path = output_dir / f"voiceover_duration_retry.{audio_format}"
+                    self._remove_stale_file(retry_output_path)
+                    retry_data, retry_audio, retry_error = self._submit_aliyun_cosyvoice_request(
+                        endpoint=endpoint,
+                        api_key=api_key,
+                        payload=retry_payload,
+                        output_path=retry_output_path,
+                        response_path=retry_response_path,
+                        timeout=timeout,
+                    )
+                    manifest["duration_retry"] = {
+                        "enabled": True,
+                        "previous_duration_seconds": actual_duration,
+                        "previous_rate": payload_input.get("rate", 1.0),
+                        "retry_rate": retry_rate,
                     }
-                )
+                    if retry_error:
+                        manifest["duration_retry"]["error"] = retry_error
+                    elif retry_output_path.is_file():
+                        retry_duration = self._media_duration(retry_output_path)
+                        retry_output_path.replace(output_path)
+                        manifest.update(
+                            {
+                                "status": "success",
+                                "request_id": retry_data.get("request_id") if isinstance(retry_data, dict) else "",
+                                "response_file": str(retry_response_path),
+                                "audio_url_expires_at": retry_audio.get("expires_at", ""),
+                                "downloaded_files": [str(output_path)],
+                                "output_size_bytes": output_path.stat().st_size,
+                                "actual_duration_seconds": retry_duration,
+                                "aliyun_rate": retry_rate,
+                            }
+                        )
+                        retry_usage = retry_data.get("usage") if isinstance(retry_data, dict) else {}
+                        if isinstance(retry_usage, dict):
+                            manifest["usage"] = retry_usage
+                        if target_duration and retry_duration and retry_duration > target_duration + 1.5:
+                            manifest.update(
+                                {
+                                    "status": "quality_failed",
+                                    "error": (
+                                        f"Synthesized voiceover is {retry_duration:.1f}s, longer than the "
+                                        f"{target_duration:.1f}s target after automatic rate retry."
+                                    ),
+                                    "duration_overrun_seconds": round(retry_duration - target_duration, 3),
+                                }
+                            )
+                    data = retry_data or data
+                    audio = retry_audio or audio
+                if str(manifest.get("status") or "").lower() == "success" and target_duration and manifest.get("actual_duration_seconds"):
+                    actual_after_retry = _float_or_default(manifest.get("actual_duration_seconds"), 0.0)
+                    if actual_after_retry > target_duration + 1.5:
+                        manifest.update(
+                            {
+                                "status": "quality_failed",
+                                "error": (
+                                    f"Synthesized voiceover is {actual_after_retry:.1f}s, longer than the "
+                                    f"{target_duration:.1f}s target. Shorten the voiceover text or adjust speech rate."
+                                ),
+                                "duration_overrun_seconds": round(actual_after_retry - target_duration, 3),
+                            }
+                        )
 
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
+
+    def _submit_aliyun_cosyvoice_request(
+        self,
+        *,
+        endpoint: str,
+        api_key: str,
+        payload: dict[str, Any],
+        output_path: Path,
+        response_path: Path,
+        timeout: int,
+    ) -> tuple[dict[str, Any], dict[str, Any], str]:
+        request = urllib_request.Request(
+            endpoint,
+            data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urllib_request.urlopen(request, timeout=timeout) as response:
+                raw = response.read()
+        except HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            return {}, {}, self._friendly_aliyun_error(exc.code, error_body)
+        except (URLError, TimeoutError, OSError) as exc:
+            return {}, {}, f"Aliyun CosyVoice request failed: {exc}"
+
+        try:
+            data = json.loads(raw.decode("utf-8", errors="replace"))
+        except json.JSONDecodeError:
+            data = {}
+        response_path.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        audio = ((data.get("output") or {}).get("audio") or {}) if isinstance(data, dict) else {}
+        audio_url = str(audio.get("url") or "").strip()
+        audio_data = str(audio.get("data") or "").strip()
+        try:
+            if audio_data:
+                output_path.write_bytes(base64.b64decode(audio_data))
+            elif audio_url:
+                download_request = urllib_request.Request(audio_url, method="GET")
+                with urllib_request.urlopen(download_request, timeout=timeout) as response:
+                    output_path.write_bytes(response.read())
+            else:
+                return data, audio, "Aliyun CosyVoice response did not include output.audio.url or output.audio.data"
+        except (OSError, ValueError, URLError, TimeoutError) as exc:
+            self._remove_stale_file(output_path)
+            return data, audio, f"Aliyun CosyVoice audio download failed: {exc}"
+        return data, audio, ""
+
+    @staticmethod
+    def _aliyun_duration_retry_rate(current_rate: Any, actual_duration: float, target_duration: float) -> float:
+        if not actual_duration or not target_duration or actual_duration <= target_duration + 1.5:
+            return 0.0
+        current = _float_or_default(current_rate, 1.0)
+        current = max(0.5, min(current, 2.0))
+        ratio = actual_duration / max(1.0, target_duration)
+        retry_rate = min(2.0, max(current + 0.1, current * ratio * 1.03))
+        if retry_rate <= current + 0.01:
+            return 0.0
+        return round(retry_rate, 3)
 
     @staticmethod
     def _normalize_aliyun_preset_voice(voice: str, *, model: str = "cosyvoice-v1", is_custom_clone: bool = False) -> str:

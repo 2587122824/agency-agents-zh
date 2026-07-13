@@ -34,6 +34,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _payload_for_material_type,
     _payload_has_required_mode,
     _extract_voice_text,
+    _preflight_visual_jobs,
     _quality_check_voice_text,
     _quality_check_srt,
     _required_workflow_slots,
@@ -3873,6 +3874,32 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(result["status"], "success")
             self.assertEqual(captured_rate, 3)
             self.assertEqual(result["rate"], 3)
+
+    def test_visual_preflight_accepts_direct_identity_image_fields(self) -> None:
+        report = _preflight_visual_jobs(
+            [
+                {
+                    "type": "image",
+                    "job_id": "asset_mei_master",
+                    "mode": "identity_keyframe",
+                    "character_id": "character_mei",
+                    "input_identity_image": "I:/refs/mei.jpg",
+                    "input_base_image": "I:/refs/mei.jpg",
+                    "identity_anchor": {"file": "I:/refs/mei.jpg"},
+                    "input_bindings": {},
+                }
+            ]
+        )
+
+        self.assertTrue(report["passed"])
+        self.assertNotIn("missing_identity_binding", {item["code"] for item in report["errors"]})
+        self.assertNotIn("character_without_identity_anchor", {item["code"] for item in report["errors"]})
+
+    def test_aliyun_duration_retry_rate_uses_actual_overrun(self) -> None:
+        retry_rate = LocalTTSAdapter._aliyun_duration_retry_rate(None, actual_duration=78.1, target_duration=60.0)
+
+        self.assertGreaterEqual(retry_rate, 1.3)
+        self.assertLessEqual(retry_rate, 1.4)
 
     def test_wav_duration_uses_actual_payload_when_header_size_is_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

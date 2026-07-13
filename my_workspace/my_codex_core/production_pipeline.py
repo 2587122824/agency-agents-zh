@@ -2406,8 +2406,20 @@ def _preflight_visual_jobs(raw_jobs: Any) -> dict[str, Any]:
         bindings = job.get("input_bindings") if isinstance(job.get("input_bindings"), dict) else {}
         binding = bindings.get(key)
         if isinstance(binding, dict):
-            return str(binding.get("from_job") or "").strip()
-        return str(binding or "").strip()
+            source = str(binding.get("from_job") or binding.get("path") or binding.get("file") or "").strip()
+            if source:
+                return source
+        elif binding:
+            return str(binding).strip()
+        direct = str(job.get(key) or "").strip()
+        if direct:
+            return direct
+        if key == "input_identity_image":
+            anchor = job.get("identity_anchor") if isinstance(job.get("identity_anchor"), dict) else {}
+            anchor_file = str(anchor.get("file") or anchor.get("path") or "").strip()
+            if anchor_file:
+                return anchor_file
+        return ""
 
     for job in jobs:
         job_id = str(job.get("job_id") or job.get("id") or "")
