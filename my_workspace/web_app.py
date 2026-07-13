@@ -532,6 +532,17 @@ INDEX_HTML = r"""<!doctype html>
       grid-template-columns: minmax(0, 1fr);
       padding-top: 58px;
     }
+    .config-card.audio-debug-card::before {
+      right: 12px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .config-card.audio-debug-card::after {
+      top: 32px;
+      left: 12px;
+      right: 12px;
+    }
     .audio-debug-layout {
       display: grid;
       grid-template-columns: minmax(420px, 1fr) 420px;
