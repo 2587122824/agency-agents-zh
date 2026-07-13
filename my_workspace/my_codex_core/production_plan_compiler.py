@@ -64,34 +64,8 @@ VISUAL_STYLE_FAMILY_LABELS = {
     "infographic": "信息图/科普图解",
     "custom": "任务指定视觉风格",
 }
-UNIVERSAL_VISUAL_STYLE_POSITIVE = (
-    "全片视觉一致性约束：所有角色、场景、道具、关键帧、封面和视频片段必须保持同一个美术风格、同一种媒介质感、"
-    "同一套光线方向、色彩饱和度、镜头语言和画面颗粒；只允许根据剧情改变动作、表情、构图和局部道具。"
-    "不要在同一任务内混用真人摄影、3D渲染、2D插画、扁平贴纸、漫画、产品棚拍等不同视觉体系。"
-)
-UNIVERSAL_VISUAL_STYLE_NEGATIVE = (
-    "mixed visual styles, inconsistent art direction, inconsistent render medium, style drift, "
-    "photorealistic and cartoon mixed together, 2D and 3D mixed together, live-action background with illustrated subject, "
-    "different lighting style, different color palette, random material change, glossy wet skin unless requested, "
-    "flat sticker mixed with realistic render, any visible text, readable text, Chinese characters, subtitles, captions, "
-    "title text, logo, watermark, UI text, screen text, sign text, poster text, malformed text, gibberish text"
-)
-VISUAL_NO_TEXT_POSITIVE = "画面保持干净，不生成任何可读文字、标题、字幕、标签、UI、招牌字、水印或乱码；文字信息全部留给后期剪辑排版。"
-VISUAL_NO_TEXT_NEGATIVE = (
-    "visible text, readable text, Chinese text, English text, subtitles, captions, title, labels, logo, watermark, "
-    "UI, screen text, sign text, poster text, random letters, malformed characters, gibberish"
-)
 LINKED_CHARACTER_VARIANT_DENOISE = 1
 LINKED_CHARACTER_KEYFRAME_DENOISE = 1
-SCENE_BASE_NO_CHARACTER_PROMPT = (
-    "Background/location plate only: no protagonist, no recognizable foreground person, no character portrait, "
-    "no posed person at the main subject position. If the scene explicitly needs a crowd, keep people as distant "
-    "blurred anonymous silhouettes and do not borrow identity or style from any character reference."
-)
-SCENE_BASE_NO_CHARACTER_NEGATIVE = (
-    "protagonist, main character, recognizable person, portrait, posed foreground person, cartoon office worker, "
-    "character reference leakage, identity leakage"
-)
 SCENE_ASSET_ROLES = {"scene", "scene_base", "background", "bg", "environment", "location", "set"}
 PROMPT_REFERENCE_ARTIFACT_PATTERNS = (
     r"\bopenapi/[A-Za-z0-9._/\-]+\.(?:png|jpe?g|webp|mp4|mov|webm)\b",
@@ -434,8 +408,8 @@ def _attach_visual_style_blueprint(
         blueprint = {
             "style_family": family,
             "style_label": VISUAL_STYLE_FAMILY_LABELS.get(family, VISUAL_STYLE_FAMILY_LABELS["custom"]),
-            "positive_prompt": explicit_positive or _build_universal_visual_style_positive(family),
-            "negative_prompt": explicit_negative or UNIVERSAL_VISUAL_STYLE_NEGATIVE,
+            "positive_prompt": explicit_positive,
+            "negative_prompt": explicit_negative,
             "source": "explicit_global_context",
         }
         style["blueprint"] = blueprint
@@ -449,8 +423,8 @@ def _attach_visual_style_blueprint(
         "id": blueprint_id,
         "style_family": family,
         "style_label": VISUAL_STYLE_FAMILY_LABELS.get(family, VISUAL_STYLE_FAMILY_LABELS["custom"]),
-        "positive_prompt": _build_universal_visual_style_positive(family),
-        "negative_prompt": UNIVERSAL_VISUAL_STYLE_NEGATIVE,
+        "positive_prompt": "",
+        "negative_prompt": "",
     }
     blueprint["source"] = "production_plan_compiler_inference"
     style["blueprint"] = blueprint
@@ -458,15 +432,6 @@ def _attach_visual_style_blueprint(
         style["style_id"] = blueprint_id
     if not str(style.get("style_family") or "").strip():
         style["style_family"] = family
-    if not str(style.get("positive_prompt") or "").strip():
-        style["positive_prompt"] = blueprint.get("positive_prompt") or ""
-    if not str(style.get("negative_prompt") or "").strip():
-        style["negative_prompt"] = blueprint.get("negative_prompt") or ""
-
-
-def _build_universal_visual_style_positive(family: str) -> str:
-    label = VISUAL_STYLE_FAMILY_LABELS.get(str(family or "").strip(), VISUAL_STYLE_FAMILY_LABELS["custom"])
-    return f"本任务统一视觉风格锚点：{label}。{UNIVERSAL_VISUAL_STYLE_POSITIVE}"
 
 
 def _infer_visual_style_family(
@@ -617,7 +582,6 @@ def _compile_image_intents(
                 _apply_generated_scene_reference_policy(item, intent, prompts, notes)
                 _apply_linked_style_reference_policy(item, intent, global_context, notes)
                 _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
-                _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
                 _apply_visual_style_policy(item, global_context=global_context)
                 item["prompt"] = sanitize_generation_prompt(item.get("prompt") or "")
                 prompts.append(item)
@@ -651,7 +615,6 @@ def _compile_image_intents(
             overrides=overrides,
         )
         _apply_live_action_quality_policy(item, global_context=global_context, intent=intent)
-        _apply_img2img_style_edit_prompt_policy(item, intent=intent, notes=notes)
         _apply_visual_style_policy(item, global_context=global_context)
         item["prompt"] = sanitize_generation_prompt(item.get("prompt") or "")
         prompts.append(item)
@@ -683,19 +646,11 @@ def _apply_character_base_policy(
     is_animal = _looks_like_animal_character(character_text)
     if is_animal and _looks_like_turnaround_sheet(character_text):
         item["animal_character_reference_sheet"] = True
-        item["prompt"] = _append_prompt_once(
-            str(item.get("prompt") or ""),
-            "动物角色设定图要求：保持四足动物解剖结构，不要人型骨架，不要人类站姿，不要拟人化成人体；在同一张图中呈现同一只动物的正面、侧面、背面/背部视角，毛色、耳朵、眼睛、体型和尾巴完全一致，干净白底，无文字水印。",
-        )
         if notes is not None:
             notes.append(f"image intent {item.get('job_id')} kept on animal-safe character_base instead of humanoid turnaround")
 
     if master_reference and not _looks_like_turnaround_sheet(character_text):
         if _linked_master_base_asset_should_stay_text_to_image(character_text):
-            item["prompt"] = _append_prompt_once(
-                str(item.get("prompt") or ""),
-                "Use the linked character image only as a loose identity description. Create a new character asset from this prompt; do not copy the reference image's original pose, outfit, background, or crop.",
-            )
             if notes is not None:
                 notes.append(f"image intent {item.get('job_id')} kept on character_base to avoid copying the linked master image composition")
             return
@@ -720,22 +675,9 @@ def _apply_character_base_policy(
         item,
         intent,
         reference_job,
-        prompt_suffix=(
-            "鍙傝€冧笂涓€寮犺鑹茶瀹氬浘锛屽繀椤讳繚鎸佸悓涓€鍙姩鐗╃殑姣涜壊鍒嗗竷銆佽€虫湹褰㈢姸銆佺溂鐫涖€侀蓟鍙ｃ€佷綋鍨嬫瘮渚嬪拰灏惧反涓€鑷达紱鍙敼鍙樿〃鎯呭拰杞诲井鍔ㄤ綔锛屼笉鏀瑰彉鐗╃锛屼笉鍙樻垚浜哄瀷銆?"
-            if is_animal
-            else "鍙傝€冧笂涓€寮犺鑹茶瀹氬浘锛屽繀椤讳繚鎸佸悓涓€涓汉鐨勮劯鍨嬨€佸勾榫勬劅銆佷簲瀹樻瘮渚嬨€佸彂鍨嬨€佽偆鑹层€佽韩鏉愭瘮渚嬪拰鏈嶈涓€鑷达紱鍙敼鍙樿〃鎯呭拰杞诲井鍔ㄤ綔锛屼笉鎹㈣劯锛屼笉骞磋交鍖栵紝涓嶇（鐨紝涓嶆崲琛ｆ湇銆?"
-        ),
     )
     if not reference_job_id:
         return
-    item["prompt"] = _append_prompt_once(
-        str(item.get("prompt") or ""),
-        (
-            "参考上一张角色设定图，必须保持同一只动物的毛色分布、耳朵形状、眼睛、鼻口、体型比例和尾巴一致；只改变表情和轻微动作，不改变物种，不变成人型。"
-            if is_animal
-            else "参考上一张角色设定图，必须保持同一个人的脸型、年龄感、五官比例、发型、肤色、身材比例和服装一致；只改变表情和轻微动作，不换脸，不年轻化，不磨皮，不换衣服。"
-        ),
-    )
     if notes is not None:
         notes.append(f"image intent {item.get('job_id')} routed to img2img_style_keyframe using character master {reference_job_id}")
 
@@ -1202,10 +1144,6 @@ def _apply_linked_character_reference_policy(
         _merge_compat_list(item, "reference_images", [scene_reference])
     item["denoise"] = intent.get("denoise") or item.get("denoise") or LINKED_CHARACTER_KEYFRAME_DENOISE
     item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or item.get("ipadapter_weight") or 0.72
-    item["prompt"] = _append_prompt_once(
-        str(item.get("prompt") or ""),
-        "参考关联角色母版图，必须保持同一张脸、同一年龄感、同一发型、肤色、五官比例、身材比例和服装主特征；只改变当前镜头要求的表情、动作和轻微状态，不随机换人。",
-    )
     if notes is not None:
         routed_mode = item.get("workflow_mode") or "identity_keyframe"
         notes.append(f"image intent {item.get('job_id')} bound to linked character master image as {routed_mode}")
@@ -1378,14 +1316,6 @@ def _route_character_base_item_to_master_identity_keyframe(
     _merge_compat_list(item, "reference_images", [master_reference])
     item["denoise"] = intent.get("denoise") or LINKED_CHARACTER_VARIANT_DENOISE
     item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.58
-    item["prompt"] = _append_prompt_once(
-        str(item.get("prompt") or ""),
-        "参考关联角色母版图，必须保持同一张脸、同一年龄感、同一发型、肤色、五官比例、身材比例和服装主特征；只改变当前任务要求的表情、动作或轻微状态，不随机换人。",
-    )
-    item["prompt"] = _append_prompt_once(
-        str(item.get("prompt") or ""),
-        "Use the linked character image only as an identity anchor. Recompose the requested pose, outfit, expression, framing, and background from the prompt; do not copy the reference image's original seated pose, school uniform, background, or crop.",
-    )
     if notes is not None:
         notes.append(f"image intent {item.get('job_id')} routed to identity_keyframe from {reason}")
 
@@ -1394,8 +1324,6 @@ def _route_character_asset_item_to_reference_job(
     item: dict[str, Any],
     intent: dict[str, Any],
     reference_job: dict[str, Any],
-    *,
-    prompt_suffix: str,
 ) -> str:
     reference_job_id = str(reference_job.get("job_id") or reference_job.get("id") or "").strip()
     if not reference_job_id:
@@ -1498,78 +1426,6 @@ def _linked_master_base_asset_should_stay_text_to_image(text: str) -> bool:
     )
 
 
-def _append_prompt_once(prompt: str, addition: str) -> str:
-    base = str(prompt or "").strip()
-    extra = str(addition or "").strip()
-    if not extra or extra in base:
-        return base
-    return f"{base} {extra}".strip()
-
-
-def _apply_img2img_style_edit_prompt_policy(
-    item: dict[str, Any],
-    *,
-    intent: dict[str, Any] | None = None,
-    notes: list[str] | None = None,
-) -> None:
-    mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
-    if mode not in {"img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe"}:
-        return
-    intent_name = str((intent or {}).get("intent") or "").strip()
-    if intent_name == "generate_base_asset":
-        return
-    original = str(item.get("prompt") or "").strip()
-    if not original:
-        return
-    edited = _concise_img2img_style_edit_prompt(original)
-    if edited and edited != original:
-        item["production_prompt_before_img2img_edit"] = original
-        item["prompt"] = edited
-        if notes is not None:
-            notes.append(f"image intent {item.get('job_id')} uses concise img2img edit prompt for Qwen Image Edit")
-    negative = str(item.get("negative_prompt") or "").strip()
-    if negative and _looks_like_generic_safety_negative(negative):
-        item["production_negative_before_img2img_edit"] = negative
-        item["negative_prompt"] = ""
-
-
-def _concise_img2img_style_edit_prompt(prompt: str) -> str:
-    text = str(prompt or "").strip()
-    text = re.sub(r"(?i)\bplatform-safe\s+non-graphic\s+video,\s*fully\s+clothed\s+subjects,\s*family-safe\s+action\s+tone,\s*", "", text)
-    text = re.sub(r"\uff08\s*(?:character_id|scene_id)\s*:[^)]*\uff09", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\(\s*(?:character_id|scene_id)\s*:[^)]*\)", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"(?:\u7ad6\u5c4f\s*)?9:16[^\u3002\uff1b;,.]*", "", text)
-    text = re.sub(r"\u5de5\u4f5c\u5c3a\u5bf8\s*\d+\s*x\s*\d+[^\u3002\uff1b;,.]*", "", text, flags=re.IGNORECASE)
-    text = re.sub(r"\u53c2\u8003(?:\u5173\u8054|\u4e0a\u4e00\u5f20)?\u89d2\u8272[\s\S]*?(?:\u4e0d\u968f\u673a\u6362\u4eba|\u4e0d\u751f\u6210\u53e6\u4e00\u4e2a\u4eba|\u4e0d\u6362\u8863\u670d|\u4e0d\u53d8\u6210\u4eba\u578b)\u3002?", "", text)
-    text = re.sub(r"\u670d\u88c5\u3001\u53d1\u578b\u3001\u4e94\u5b98[^\u3002\uff1b;,.]*[\u3002\uff1b;,.]?", "", text)
-    text = re.sub(r"\u80cc\u666f\u4e3a\u5173\u8054\u573a\u666f\u56fa\u5b9a\u89c6\u89d2[\u3002\uff1b;,.]?", "", text)
-    text = re.sub(r"\s+", " ", text).strip(" ,.;\u3002\uff0c\uff1b")
-    if not text:
-        return str(prompt or "").strip()
-    if not re.search(r"^\s*(?:\u8ba9|\u5c06|\u628a|\u57fa\u4e8e)", text):
-        text = "\u8ba9\u56fe\u4e2d\u4eba\u7269" + re.sub(r"^\s*\u56fe\u4e2d\u4eba\u7269", "", text).strip()
-    return text
-
-
-def _looks_like_generic_safety_negative(negative: str) -> bool:
-    value = str(negative or "").lower()
-    safety_tokens = (
-        "nudity",
-        "sexual content",
-        "erotic",
-        "gore",
-        "unsafe content",
-        "graphic violence",
-    )
-    quality_tokens = (
-        "distorted body",
-        "distorted face",
-        "low quality",
-        "flicker",
-    )
-    return any(token in value for token in safety_tokens) and any(token in value for token in quality_tokens)
-
-
 def _apply_live_action_quality_policy(
     item: dict[str, Any],
     *,
@@ -1590,21 +1446,11 @@ def _apply_live_action_quality_policy(
     ).lower()
     if not _looks_like_live_action_context(text) or not _looks_like_retro_period_context(text):
         return
-    item["prompt"] = _append_prompt_once(
-        str(item.get("prompt") or ""),
-        (
-            "真人纪实质感：自然皮肤纹理、普通市井人物、真实街拍/手持摄影光线、2008年前后中国城市生活细节；"
-            "避免棚拍海报感、网红精修脸、夸张皮衣硬照、时尚大片姿势和过度锐化塑料质感。"
-            "画面中如需招牌/报纸/广告，只用模糊不可读背景文字，不生成可读乱码。"
-        ),
-    )
-    item["negative_prompt"] = _append_prompt_once(
-        str(item.get("negative_prompt") or ""),
-        (
-            "AI generated look, glossy poster, studio fashion shoot, celebrity portrait, beauty retouching, plastic skin, "
-            "random different face, inconsistent age, inconsistent protagonist, gibberish text, malformed Chinese text, readable fake signs"
-        ),
-    )
+    item["live_action_quality_context"] = {
+        "live_action": True,
+        "retro_period": True,
+        "source": "production_plan_compiler_detection",
+    }
 
 
 def _apply_visual_style_policy(item: dict[str, Any], *, global_context: dict[str, Any]) -> None:
@@ -1622,14 +1468,6 @@ def _apply_visual_style_policy(item: dict[str, Any], *, global_context: dict[str
         or style.get("negative_constraints")
         or ""
     ).strip()
-    if not positive and not negative:
-        return
-    if positive:
-        item["prompt"] = _append_prompt_once(str(item.get("prompt") or ""), positive)
-    mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
-    reference_edit_modes = {"img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe", "pose_identity_keyframe"}
-    if negative and mode not in reference_edit_modes:
-        item["negative_prompt"] = _append_prompt_once(str(item.get("negative_prompt") or ""), negative)
     item["visual_style_blueprint"] = {
         "id": str(blueprint.get("id") or style.get("style_id") or "").strip(),
         "style_family": str(blueprint.get("style_family") or style.get("style_family") or "").strip(),
@@ -1637,52 +1475,6 @@ def _apply_visual_style_policy(item: dict[str, Any], *, global_context: dict[str
         "positive_prompt": positive,
         "negative_prompt": negative,
     }
-    _apply_no_text_visual_policy(item)
-
-
-def _apply_no_text_visual_policy(item: dict[str, Any]) -> None:
-    item["prompt"] = _remove_text_generation_cues(str(item.get("prompt") or ""))
-    item["prompt"] = _append_prompt_once(str(item.get("prompt") or ""), VISUAL_NO_TEXT_POSITIVE)
-    mode = str(item.get("workflow_mode") or item.get("mode") or item.get("image_task_mode") or "").strip()
-    reference_edit_modes = {"img2img_style_keyframe", "identity_keyframe", "identity_scene_keyframe", "pose_identity_keyframe"}
-    if mode not in reference_edit_modes:
-        item["negative_prompt"] = _append_prompt_once(str(item.get("negative_prompt") or ""), VISUAL_NO_TEXT_NEGATIVE)
-
-
-def _remove_title_layout_generation_cues(prompt: str) -> str:
-    text = str(prompt or "")
-    text = re.sub(
-        r"(?i)(?:\u6784\u56fe\u65f6)?\s*(?:\u4e0a|\u4e0b|\u5de6|\u53f3)?\s*(?:\d+\s*/\s*\d+|\u4e09\u5206\u4e4b\u4e00|third)"
-        r"[^\u3002\uff1b;,.]*?(?:\u7528\u4e8e|\u65b9\u4fbf|\u53ef\u4f9b|\u9884\u7559|\u7559\u7ed9|for)"
-        r"[^\u3002\uff1b;,.]*?(?:\u6807\u9898|\u526f\u6807\u9898|\u5b57\u5e55|\u6587\u6848|\u6587\u5b57|title|subtitle|caption|copy|text)"
-        r"[^\u3002\uff1b;,.]*[\u3002\uff1b;,.]?",
-        " upper third clean empty space. ",
-        text,
-    )
-    text = re.sub(
-        r"(?i)(?:\u6807\u9898|\u526f\u6807\u9898|\u5b57\u5e55|\u6587\u6848|\u6587\u5b57|title|subtitle|caption|copy|text)"
-        r"[^\u3002\uff1b;,.]{0,16}(?:\u7559\u767d|\u9884\u7559|\u533a\u57df|area|space)"
-        r"[^\u3002\uff1b;,.]*[\u3002\uff1b;,.]?",
-        " clean empty space. ",
-        text,
-    )
-    text = re.sub(
-        r"(?i)(?:\u7559\u767d|\u9884\u7559)[^\u3002\uff1b;,.]{0,24}"
-        r"(?:\u6807\u9898|\u526f\u6807\u9898|\u5b57\u5e55|\u6587\u6848|\u6587\u5b57|title|subtitle|caption|copy|text)"
-        r"[^\u3002\uff1b;,.]*[\u3002\uff1b;,.]?",
-        " clean empty space. ",
-        text,
-    )
-    return re.sub(r"\s{2,}", " ", text).strip()
-
-
-def _remove_text_generation_cues(prompt: str) -> str:
-    text = _remove_title_layout_generation_cues(str(prompt or ""))
-    text = re.sub(r"画面内文字仅在明确要求时生成[；;，,。]?.*?(?:后期排版|排版)[。；;]?", "", text)
-    text = re.sub(r"(?:封面)?(?:主标题|副标题|标题|字幕|文字标签|文案)[:：][^。；;\\n]*[。；;]?", "", text)
-    text = re.sub(r"(?i)(?:title|subtitle|caption|text label)\\s*[:：][^.。；;\\n]*[.。；;]?", "", text)
-    text = re.sub(r"\\s{2,}", " ", text)
-    return text.strip(" ，,。；;")
 
 
 def _looks_like_live_action_context(text: str) -> bool:
@@ -1819,10 +1611,6 @@ def _apply_generated_character_reference_policy(
         item["input_reference_style"] = {"from_job": reference_job_id, "output": "output_final_image"}
         item["denoise"] = intent.get("denoise") or 1
         item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
-        item["prompt"] = _append_prompt_once(
-            str(item.get("prompt") or ""),
-            "参考上一张角色母版，必须保持同一个人的脸型、五官比例、年龄感、发型、肤色和身材比例一致；可以根据剧情阶段改变服装、精神状态和环境，但不换脸，不年轻化，不磨皮，不生成另一个人。",
-        )
         if notes is not None:
             notes.append(f"image intent {item.get('job_id')} bound to character master reference {reference_job_id}")
         return
@@ -1840,10 +1628,6 @@ def _apply_generated_character_reference_policy(
         item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), reference_job_id]))
         item["denoise"] = intent.get("denoise") or 1
         item["ipadapter_weight"] = intent.get("ipadapter_weight") or intent.get("reference_strength") or 0.72
-        item["prompt"] = _append_prompt_once(
-            str(item.get("prompt") or ""),
-            "主角必须参考角色母版，保持同一张脸、同一年龄感、同一发型和身材比例；只改变场景、动作、表情和服装阶段，不随机换人。",
-        )
         if notes is not None:
             notes.append(f"image intent {item.get('job_id')} inferred identity reference from {reference_job_id}")
 
@@ -1924,10 +1708,6 @@ def _apply_generated_scene_reference_policy(
     item["input_bindings"] = bindings
     item["depends_on"] = list(dict.fromkeys([*_string_list(item.get("depends_on")), scene_job_id]))
     item["scene_reference_binding"] = {"from_job": scene_job_id, "output": "output_final_image"}
-    item["prompt"] = _append_prompt_once(
-        str(item.get("prompt") or ""),
-        "Keep the linked scene/platform layout from the scene reference image; preserve the same room, platform height, floor, wall and camera-space continuity while changing only the character action.",
-    )
     if notes is not None:
         notes.append(f"image intent {item.get('job_id')} bound to generated scene reference {scene_job_id}")
 
@@ -2356,7 +2136,6 @@ def _ensure_video_keyframe_dependency(
     _apply_generated_character_reference_policy(keyframe_item, keyframe_intent, image_prompts, notes)
     _apply_linked_style_reference_policy(keyframe_item, keyframe_intent, global_context, notes)
     _apply_live_action_quality_policy(keyframe_item, global_context=global_context, intent=keyframe_intent)
-    _apply_img2img_style_edit_prompt_policy(keyframe_item, intent=keyframe_intent, notes=notes)
     _apply_visual_style_policy(keyframe_item, global_context=global_context)
     image_prompts.append(keyframe_item)
     image_jobs.append({"job_id": keyframe_id, "intent_id": keyframe_id, **keyframe_item})
@@ -2378,18 +2157,13 @@ def _sanitize_broll_character_prompt(
 ) -> tuple[str, list[str]]:
     text = str(prompt or "").strip()
     character_terms = _broll_character_terms(intent, global_context, resolved_entities)
-    removed: list[str] = []
-    for term in character_terms:
-        if not term or not re.search(re.escape(term), text, flags=re.IGNORECASE):
-            continue
-        text = re.sub(re.escape(term), "", text, flags=re.IGNORECASE)
-        removed.append(term)
-    text = re.sub(r"\s{2,}", " ", text).strip(" ，,。.;；、")
-    text = _append_prompt_once(
-        text,
-        "B-roll空镜要求：只拍摄环境、道具、光影、天气、建筑或氛围细节，不出现主角，不出现任何可识别角色，不生成新人物或新动物角色。",
-    )
-    return text, removed
+    leaked = [term for term in character_terms if term and re.search(re.escape(term), text, flags=re.IGNORECASE)]
+    if leaked:
+        raise ValueError(
+            "B-roll intent contains linked character terms but was not routed as a character shot: "
+            + ", ".join(leaked)
+        )
+    return text, []
 
 
 def _broll_character_terms(
@@ -2447,8 +2221,6 @@ def _apply_broll_no_character_policy(
 def _apply_scene_base_no_character_policy(item: dict[str, Any], notes: list[str] | None = None) -> None:
     item["character_id"] = ""
     item["scene_base_policy"] = "background_plate_no_character_reference"
-    item["prompt"] = _append_prompt_once(str(item.get("prompt") or ""), SCENE_BASE_NO_CHARACTER_PROMPT)
-    item["negative_prompt"] = _append_prompt_once(str(item.get("negative_prompt") or ""), SCENE_BASE_NO_CHARACTER_NEGATIVE)
     item["reference_images"] = []
     for key in (
         "input_identity_image",
@@ -2962,7 +2734,6 @@ def _repair_legacy_i2v_keyframe_dependencies(
         _apply_generated_character_reference_policy(keyframe_item, intent, image_prompts, notes)
         _apply_linked_style_reference_policy(keyframe_item, intent, global_context, notes)
         _apply_live_action_quality_policy(keyframe_item, global_context=global_context, intent=intent)
-        _apply_img2img_style_edit_prompt_policy(keyframe_item, intent=intent, notes=notes)
         image_prompts.append(keyframe_item)
         image_job_ids.add(source)
         notes.append(f"legacy i2v video prompt {item.get('job_id') or item.get('id') or ''} restored missing first-frame keyframe {source}")

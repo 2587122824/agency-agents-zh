@@ -899,7 +899,7 @@ class SemanticInputContractTests(unittest.TestCase):
             )
         )
 
-    def test_visual_prompt_policy_avoids_text_generation_cues(self) -> None:
+    def test_visual_prompt_policy_preserves_employee_prompt(self) -> None:
         plan = compile_production_plan(
             task_id="task_text_guard",
             route_content=json.dumps({"production_type": "drama_story", "visual_style": "3D卡通动画"}, ensure_ascii=False),
@@ -921,11 +921,11 @@ class SemanticInputContractTests(unittest.TestCase):
         )
 
         item = plan["compiled_payload"]["image_prompts"][0]
-        self.assertIn("不生成任何可读文字", item["prompt"])
-        self.assertNotIn("标题、字幕和大段文字", item["prompt"])
-        self.assertIn("visible text", item["negative_prompt"])
+        self.assertEqual(item["prompt"], "温暖卧室，清晨光线，床头柜和闹钟。")
+        self.assertEqual(item["negative_prompt"], "")
+        self.assertEqual(item["visual_style_blueprint"]["style_family"], "3d_cartoon")
 
-    def test_cover_title_layout_cue_becomes_clean_empty_space(self) -> None:
+    def test_cover_title_layout_cue_is_not_rewritten(self) -> None:
         plan = compile_production_plan(
             task_id="cover_title_guard",
             route_content='{"production_type":"drama_story"}',
@@ -946,9 +946,7 @@ class SemanticInputContractTests(unittest.TestCase):
         )
 
         item = plan["compiled_payload"]["image_prompts"][0]
-        self.assertIn("upper third clean empty space", item["prompt"])
-        self.assertNotIn("\u7528\u4e8e\u53e0\u52a0\u6807\u9898", item["prompt"])
-        self.assertNotIn("\u53e0\u52a0\u6807\u9898", item["prompt"])
+        self.assertEqual(item["prompt"], "\u4e3b\u89d2\u5728\u5915\u9633\u4e0b\u5fae\u7b11\u3002\u6784\u56fe\u65f6\u4e0a1/3\u7559\u767d\uff0c\u7528\u4e8e\u53e0\u52a0\u6807\u9898\u3002")
 
     def test_character_cover_key_visual_routes_to_identity_keyframe(self) -> None:
         linked_assets = {
@@ -990,6 +988,9 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(item["workflow_mode"], "identity_keyframe")
         self.assertEqual(item["control_mode"], "identity_reference")
         self.assertEqual(item["input_identity_image"], "my_workspace/my_asset_library/01_character_base/xiaomei.png")
+        self.assertEqual(item["prompt"], "Xiaomei crouches at the starting line, low angle cover visual.")
+        self.assertNotIn("school uniform", item["prompt"])
+        self.assertNotIn("全片视觉一致性约束", item["prompt"])
 
     def test_runninghub_text_node_sanitizer_removes_file_tokens(self) -> None:
         rows = CloudComfyUIAdapter._sanitize_text_node_info_values(
@@ -1369,7 +1370,7 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(item["workflow_mode"], "character_base")
             self.assertNotIn("input_base_image", item)
             self.assertNotIn("input_identity_image", item)
-            self.assertIn("do not copy the reference image", item["prompt"])
+            self.assertEqual(item["prompt"], "Generate a fullbody master image, standing pose, red sports outfit.")
 
     def test_three_frame_shot_uses_linked_character_master_image(self) -> None:
         image_content = json.dumps(
@@ -1726,7 +1727,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(item["reference_images"], [])
         self.assertNotIn("input_base_image", item)
         self.assertNotIn("input_identity_image", item)
-        self.assertIn("Background/location plate only", item["prompt"])
+        self.assertEqual(item["prompt"], "Bright office desk background with monitor, keyboard, white coffee cup and plant.")
 
     def test_environment_keyframe_with_identity_lock_false_does_not_inherit_single_character(self) -> None:
         image_content = json.dumps(
@@ -1958,8 +1959,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(item["workflow_id"], "01_base_asset_image")
         self.assertEqual(item["workflow_mode"], "character_base")
         self.assertTrue(item["animal_character_reference_sheet"])
-        self.assertIn("不要人型骨架", item["prompt"])
-        self.assertIn("四足动物", item["prompt"])
+        self.assertEqual(item["prompt"], "柯基狗狗主角三视图，正面、侧面、背面，星球国王披风")
 
     def test_animal_expression_sheet_uses_previous_reference_img2img(self) -> None:
         image_content = json.dumps(
@@ -2001,7 +2001,7 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertIn("asset_character_corgi_turnaround", expression["depends_on"])
         self.assertEqual(expression["denoise"], 1)
-        self.assertIn("不变成人型", expression["prompt"])
+        self.assertEqual(expression["prompt"], "柯基狗狗主角表情图，开心、惊讶、坚定、害怕")
 
     def test_human_expression_sheet_uses_previous_reference_img2img(self) -> None:
         image_content = json.dumps(
@@ -2042,8 +2042,7 @@ class SemanticInputContractTests(unittest.TestCase):
             {"from_job": "asset_character_main_base", "output": "output_final_image"},
         )
         self.assertEqual(expression["denoise"], 0.6)
-        self.assertIn("不换脸", expression["prompt"])
-        self.assertIn("不换衣服", expression["prompt"])
+        self.assertEqual(expression["prompt"], "角色表情图：坚定、自信、笃定，下巴微扬，目光平视前方")
 
     def test_generated_expression_assets_bind_first_character_master(self) -> None:
         image_content = json.dumps(
@@ -2098,7 +2097,7 @@ class SemanticInputContractTests(unittest.TestCase):
             "asset_piggy_worker_expression_tired",
         )
 
-    def test_linked_character_img2img_uses_concise_edit_prompt(self) -> None:
+    def test_linked_character_img2img_preserves_employee_prompt(self) -> None:
         image_content = json.dumps(
             {
                 "production_intents": {
@@ -2157,15 +2156,18 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(item["input_identity_image"], "my_workspace/my_asset_library/characters/xiaomei.png")
         self.assertEqual(item["input_base_image"], "my_workspace/my_asset_library/characters/xiaomei.png")
         self.assertEqual(item["input_scene_image"], "my_workspace/my_asset_library/scenes/dining.png")
-        self.assertTrue(item["prompt"].startswith("\u8ba9\u56fe\u4e2d\u4eba\u7269"))
+        self.assertTrue(item["prompt"].startswith("platform-safe non-graphic video"))
         self.assertIn("\u9910\u684c", item["prompt"])
         self.assertIn("\u70ed\u996d", item["prompt"])
-        self.assertNotIn("character_id", item["prompt"])
-        self.assertNotIn("scene_id", item["prompt"])
-        self.assertNotIn("\u5de5\u4f5c\u5c3a\u5bf8", item["prompt"])
-        self.assertNotIn("\u53c2\u8003\u5173\u8054\u89d2\u8272\u6bcd\u7248\u56fe", item["prompt"])
-        self.assertEqual(item["negative_prompt"], "")
-        self.assertIn("production_prompt_before_img2img_edit", item)
+        self.assertIn("character_id", item["prompt"])
+        self.assertIn("scene_id", item["prompt"])
+        self.assertIn("\u5de5\u4f5c\u5c3a\u5bf8", item["prompt"])
+        self.assertIn("\u53c2\u8003\u5173\u8054\u89d2\u8272\u6bcd\u7248\u56fe", item["prompt"])
+        self.assertEqual(
+            item["negative_prompt"],
+            "nudity, sexual content, gore, unsafe content, distorted body, distorted face, flicker, low quality",
+        )
+        self.assertNotIn("production_prompt_before_img2img_edit", item)
 
     def test_same_character_variant_and_unlabeled_protagonist_keyframe_bind_master(self) -> None:
         image_content = json.dumps(
@@ -2592,6 +2594,46 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertFalse(item.get("no_visible_characters", False))
             self.assertEqual(item["input_bindings"]["input_base_image"]["from_job"], "broll_palace_keyframe")
             self.assertIn("broll_palace_keyframe", {row["job_id"] for row in plan["compiled_payload"]["image_prompts"]})
+
+    def test_broll_does_not_silently_strip_linked_character_name(self) -> None:
+        source_content = json.dumps(
+            {
+                "linked_assets": {
+                    "characters": [
+                        {
+                            "character_id": "char_xiaomei",
+                            "name": "Xiaomei",
+                            "master_image": "my_workspace/my_asset_library/characters/xiaomei.png",
+                        }
+                    ],
+                    "assets": [],
+                    "scenes": [],
+                }
+            },
+            ensure_ascii=False,
+        )
+        video_content = json.dumps(
+            {
+                "production_intents": {
+                    "video": [
+                        {
+                            "intent": "generate_broll_clip",
+                            "intent_id": "clip_broll_invalid",
+                            "prompt": "Xiaomei walks through the station while the camera follows.",
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+
+        with self.assertRaisesRegex(ValueError, "B-roll intent contains linked character terms"):
+            compile_production_plan(
+                task_id="broll_character_strict_failure",
+                route_content='{"production_type":"custom"}',
+                video_content=video_content,
+                source_content=source_content,
+            )
 
     def test_i2v_missing_source_generates_keyframe_instead_of_broll(self) -> None:
         plan = compile_production_plan(
@@ -3668,7 +3710,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(preset["endpoint"], "")
         self.assertEqual(preset["node_info_list_json"], "[]")
 
-    def test_reference_image_job_sends_single_image_edit_prompt(self) -> None:
+    def test_reference_image_job_preserves_employee_prompt(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         source_prompt = (
             "\u732a\u732a\u6253\u5de5\u4eba7\u79cd\u57fa\u7840\u8868\u60c5\u72b6\u6001\u56fe\uff0c"
@@ -3690,18 +3732,24 @@ class SemanticInputContractTests(unittest.TestCase):
             },
             1,
         )
-        self.assertNotIn("7\u79cd", payload["prompt"])
-        self.assertNotIn("\u5206\u522b\u4e3a", payload["prompt"])
-        self.assertIn("\u53ea\u8f93\u51fa\u4e00\u5f20\u5b8c\u6574\u5355\u56fe", payload["prompt"])
+        self.assertEqual(payload["prompt"], source_prompt)
 
         built = adapter._build_runninghub_payload(
             payload,
             {"node_info_list_json": '[{"nodeId":"34","fieldName":"value","fieldValue":"{{prompt}}"}]'},
         )
         prompt_value = built["nodeInfoList"][0]["fieldValue"]
-        self.assertEqual(prompt_value, payload["prompt"])
-        self.assertNotIn("\u5206\u522b\u4e3a", prompt_value)
-        self.assertNotIn("7\u79cd", prompt_value)
+        self.assertEqual(prompt_value, source_prompt)
+
+    def test_runninghub_prompt_policies_do_not_rewrite_employee_text(self) -> None:
+        video_prompt = "A medic performs surgery while a rebel carries a weapon."
+        video_negative = "flicker, low quality"
+        image_prompt = "人物站在室内，保留面部与背景细节。"
+
+        self.assertEqual(CloudComfyUIAdapter._runninghub_safe_video_prompt(video_prompt), video_prompt)
+        self.assertEqual(CloudComfyUIAdapter._runninghub_safe_video_negative(video_negative), video_negative)
+        self.assertEqual(CloudComfyUIAdapter._single_reference_image_prompt(image_prompt), image_prompt)
+        self.assertEqual(CloudComfyUIAdapter._safe_style_reference_prompt(image_prompt), image_prompt)
 
     def test_runninghub_prompt_nodes_strip_asset_artifacts(self) -> None:
         leaked_asset_id = "a509cdff82fe430c87d1246907e2b80c"
@@ -3721,7 +3769,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("my_workspace/my_asset_library", prompt_value)
         self.assertNotIn("nodeId", prompt_value)
 
-    def test_live_action_retro_prompts_get_quality_guardrails(self) -> None:
+    def test_live_action_retro_context_does_not_rewrite_prompts(self) -> None:
         plan = compile_production_plan(
             task_id="live_action_quality",
             route_content=json.dumps(
@@ -3764,11 +3812,12 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         image_item = plan["compiled_payload"]["image_prompts"][0]
         video_item = plan["compiled_payload"]["video_prompts"][0]
-        self.assertIn("真人纪实质感", image_item["prompt"])
-        self.assertIn("模糊不可读背景文字", image_item["prompt"])
-        self.assertIn("gibberish text", image_item["negative_prompt"])
-        self.assertIn("真人纪实质感", video_item["prompt"])
-        self.assertIn("studio fashion shoot", video_item["negative_prompt"])
+        self.assertEqual(image_item["prompt"], "2008年市井街头，真人电影级复古画质，主角站在房产中介门口。")
+        self.assertEqual(video_item["prompt"], "2008年街边小卖部和公交站牌，复古市井烟火。")
+        self.assertEqual(image_item["negative_prompt"], "")
+        self.assertEqual(video_item["negative_prompt"], "")
+        self.assertTrue(image_item["live_action_quality_context"]["retro_period"])
+        self.assertTrue(video_item["live_action_quality_context"]["retro_period"])
 
     def test_plain_live_action_prompts_do_not_get_retro_guardrails(self) -> None:
         plan = compile_production_plan(
@@ -3803,7 +3852,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("旧式招牌", image_item["prompt"])
         self.assertNotIn("真人纪实质感", image_item["prompt"])
 
-    def test_visual_style_consistency_policy_is_generic(self) -> None:
+    def test_visual_style_consistency_is_metadata_only(self) -> None:
         plan = compile_production_plan(
             task_id="generic_style_consistency",
             route_content=json.dumps(
@@ -3849,14 +3898,15 @@ class SemanticInputContractTests(unittest.TestCase):
         image_item = plan["compiled_payload"]["image_prompts"][0]
         video_item = plan["compiled_payload"]["video_prompts"][0]
         style_lock = plan["parameter_policy"]["locks"]["style"]
-        self.assertIn("全片视觉一致性约束", image_item["prompt"])
-        self.assertIn("全片视觉一致性约束", video_item["prompt"])
-        self.assertIn("mixed visual styles", image_item["negative_prompt"])
-        self.assertIn("mixed visual styles", video_item["negative_prompt"])
+        self.assertEqual(image_item["prompt"], "一只透明玻璃水杯放在白色台面上。")
+        self.assertEqual(video_item["prompt"], "镜头缓慢环绕玻璃水杯，展示杯身高光。")
+        self.assertEqual(image_item["negative_prompt"], "")
+        self.assertEqual(video_item["negative_prompt"], "")
         self.assertEqual(image_item["visual_style_blueprint"]["style_family"], "product_render")
         self.assertEqual(video_item["visual_style_blueprint"]["style_family"], "product_render")
         self.assertTrue(style_lock["enabled"])
-        self.assertIn("全片视觉一致性约束", style_lock["positive_prompt"])
+        self.assertEqual(style_lock["positive_prompt"], "")
+        self.assertEqual(style_lock["negative_prompt"], "")
 
     def test_generated_scene_assets_bind_to_character_keyframes(self) -> None:
         plan = compile_production_plan(
