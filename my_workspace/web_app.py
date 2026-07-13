@@ -5159,6 +5159,7 @@ INDEX_HTML = r"""<!doctype html>
     let runtimeModelConfigFromServer = {};
     let runtimeComfyConfigFromServer = {};
     let runtimeVoiceConfigFromServer = {};
+    let runtimeComfyConfigSyncEnabled = false;
     const DEFAULT_LOCAL_MODEL = 'qwen3:8b-q4_K_M';
     const OLLAMA_BASE_URL = 'http://127.0.0.1:11434/v1';
     const SETTINGS_KEY = 'my_workspace.workflow_settings.v2';
@@ -6132,6 +6133,7 @@ INDEX_HTML = r"""<!doctype html>
     }
 
     function queueRuntimeComfyConfigSync(options = {}) {
+      if (!runtimeComfyConfigSyncEnabled) return;
       const payload = currentRuntimeComfyPayload();
       const hasAnyWorkflowConfig = Boolean(
         payload.api_key
@@ -6256,7 +6258,6 @@ INDEX_HTML = r"""<!doctype html>
       setIfExists(els.workflow, LONG_VIDEO_WORKFLOW_STEM);
       loadAudioDebugHistory().catch(() => {});
       queueRuntimeModelConfigSync({ remoteOnly: true });
-      queueRuntimeComfyConfigSync();
       queueRuntimeVoiceConfigSync();
     }
 
@@ -6270,19 +6271,19 @@ INDEX_HTML = r"""<!doctype html>
     function applyRuntimeComfyConfig(config) {
       if (!config || typeof config !== 'object') return;
       if (config.visual_provider) setIfExists(els.visualProvider, config.visual_provider);
-      if (config.base_url && !String(els.comfyBaseUrl?.value || '').trim()) {
+      if (config.base_url) {
         els.comfyBaseUrl.value = config.base_url;
       }
-      if (config.comfy_mcp_url && !String(els.comfyMcpUrl?.value || '').trim()) {
+      if (config.comfy_mcp_url) {
         els.comfyMcpUrl.value = config.comfy_mcp_url;
       }
-      if (config.workflow_endpoint && !String(els.comfyWorkflowEndpoint?.value || '').trim()) {
+      if (config.workflow_endpoint) {
         els.comfyWorkflowEndpoint.value = config.workflow_endpoint;
       }
-      if (config.node_info_list_json && config.node_info_list_json !== '[]' && !String(els.comfyNodeInfoList?.value || '').trim()) {
+      if (config.node_info_list_json && config.node_info_list_json !== '[]') {
         els.comfyNodeInfoList.value = config.node_info_list_json;
       }
-      if (config.poll_timeout_seconds && els.comfyPollTimeout && !String(els.comfyPollTimeout.value || '').trim()) {
+      if (config.poll_timeout_seconds && els.comfyPollTimeout) {
         els.comfyPollTimeout.value = String(config.poll_timeout_seconds);
       }
       if (Array.isArray(config.workflow_library) && config.workflow_library.length) {
@@ -7309,6 +7310,31 @@ INDEX_HTML = r"""<!doctype html>
         status: '',
         error: '',
       };
+    }
+
+    function refreshComfyDebugRuntimeFields() {
+      comfyDebugWorkflows.forEach(workflow => {
+        const modes = workflowModesForWorkflow(workflow);
+        const legacy = comfyDebugStateByWorkflowId.get(workflow.id);
+        const legacyMode = String(legacy?.workflowMode || modes[0]?.value || '');
+        modes.forEach(mode => {
+          const stateKey = comfyDebugLeafKey(workflow.id, mode.value);
+          const previous = comfyDebugStateByWorkflowId.get(stateKey)
+            || (mode.value === legacyMode ? legacy : null);
+          if (!previous) return;
+          const fresh = defaultComfyDebugStateForWorkflow(workflow, mode.value);
+          comfyDebugStateByWorkflowId.set(stateKey, {
+            ...previous,
+            workflowMode: mode.value,
+            endpoint: fresh.endpoint || '',
+            nodeInfoList: fresh.nodeInfoList || '[]',
+            pollTimeout: fresh.pollTimeout || '3600',
+          });
+        });
+        if (legacy && modes.some(mode => mode.value === legacyMode)) {
+          comfyDebugStateByWorkflowId.delete(workflow.id);
+        }
+      });
     }
 
     function setActiveComfyDebugWorkflow(id, forceLoad = true, mode = '') {
@@ -13849,10 +13875,12 @@ INDEX_HTML = r"""<!doctype html>
         comfyDebugWorkflows = Array.isArray(data.workflows)
           ? data.workflows.map(normalizeComfyDebugWorkflowDefinition)
           : [];
+        applyRuntimeComfyConfig(runtimeComfyConfigFromServer);
         ensureComfyDebugWorkflowsInLibrary();
         comfyDebugWorkflows.forEach(workflow => {
           normalizeComfyDebugWorkflowSavedConfig(getComfyWorkflowLibraryItemById(workflow.id), workflow);
         });
+        refreshComfyDebugRuntimeFields();
         saveSettings();
         if (pendingComfyDebugTarget?.workflowId) {
           activeComfyDebugWorkflowId = pendingComfyDebugTarget.workflowId;
@@ -15431,6 +15459,8 @@ INDEX_HTML = r"""<!doctype html>
         await restoreActiveRun();
       } catch (err) {
         setStatus(err.message, true);
+      } finally {
+        runtimeComfyConfigSyncEnabled = true;
       }
     })();
   </script>

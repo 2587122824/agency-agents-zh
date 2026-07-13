@@ -1405,6 +1405,18 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("comfyDebugDenoise", source)
         self.assertIn("productionEntityTurnaround", source)
 
+    def test_frontend_does_not_sync_stale_comfy_config_during_initialization(self) -> None:
+        source = (WORKSPACE / "my_workspace" / "web_app.py").read_text(encoding="utf-8")
+        self.assertIn("let runtimeComfyConfigSyncEnabled = false;", source)
+        self.assertIn("if (!runtimeComfyConfigSyncEnabled) return;", source)
+        self.assertIn("applyRuntimeComfyConfig(runtimeComfyConfigFromServer);", source)
+        self.assertIn("refreshComfyDebugRuntimeFields();", source)
+        self.assertIn("runtimeComfyConfigSyncEnabled = true;", source)
+        load_config = source.split("async function loadConfig()", 1)[1].split(
+            "function applyRuntimeVoiceConfig", 1
+        )[0]
+        self.assertNotIn("queueRuntimeComfyConfigSync();", load_config)
+
     def test_non_blocking_human_confirmation_bullet_is_not_declared(self) -> None:
         content = "## 人工确认（阻塞）\n- 无需人工确认，所有决策均在合理推断范围内。"
         self.assertFalse(declares_human_confirmation(content))
