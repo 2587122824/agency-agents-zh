@@ -3,7 +3,9 @@
   "name": "通用视频生产主流程",
   "description": "通用视频生产主工作流：数字员工负责需求拆解、脚本、分镜、生产意图、语音字幕和剪辑封装；系统编译器后续把 production_intents 编译为具体 ComfyUI / 本地 TTS / FFmpeg 生产图。第一版继续双轨输出，保留 image_prompts、video_prompts、语音字幕包和剪辑时间线兼容现有生产链路。",
   "input_required": [
-    "视频主题或产品信息",
+    "视频主题或产品信息"
+  ],
+  "input_optional": [
     "目标平台",
     "目标观众",
     "目标时长",
@@ -37,14 +39,14 @@
       "order": 4,
       "agent_id": "06_分镜生图设计师",
       "title": "图片与关键帧生产意图",
-      "task": "输出 production_intents.image，描述要生成的基础资产、角色/产品/场景图、封面 KV、关键帧、首中尾帧等生产意图。使用 intent 作为主语义，例如 generate_base_asset、generate_keyframe、generate_three_frame_shot。保留 image_prompts 作为兼容输出，但 workflow_id、workflow_mode、asset_tag、job_id、depends_on、input_bindings 仅作为兼容字段，不再要求员工承担最终 DAG 文件流转。",
+      "task": "逐项继承 23 的分镜视觉决策和用户关联资产，输出 production_intents.image，描述要生成的基础资产、角色/产品/场景图、封面 KV、关键帧、首中尾帧等生产意图。不得自行补写人物外观、服装、场景或画风。使用 intent 作为主语义，例如 generate_base_asset、generate_keyframe、generate_three_frame_shot。保留 image_prompts 作为兼容输出，但 workflow_id、workflow_mode、asset_tag、job_id、depends_on、input_bindings 仅作为兼容字段，不再要求员工承担最终 DAG 文件流转。",
       "output": "production_intents.image；兼容 image_prompts；角色/风格/尺寸/参考资产约束。"
     },
     {
       "order": 5,
       "agent_id": "20_语音字幕包装师",
       "title": "语音字幕生产意图",
-      "task": "输出 production_intents.audio，描述 generate_voiceover、build_subtitles、select_bgm 等意图。音频继续由本地 TTS、素材库和剪辑阶段处理，不进入 ComfyUI；只有 talking_image 会在系统编译阶段把最终 WAV 绑定给 ComfyUI 的 input_audio_file。",
+      "task": "逐字继承 03 的 TTS 纯文本，输出 production_intents.audio，描述 generate_voiceover、build_subtitles、select_bgm 等意图。不得改写旁白或猜测系统音色、TTS 引擎、语速和音调。音频继续由系统当前音频配置、本地 TTS、素材库和剪辑阶段处理，不进入 ComfyUI；只有 talking_image 会在系统编译阶段把最终 WAV 绑定给 ComfyUI 的 input_audio_file。",
       "output": "production_intents.audio；兼容语音字幕包；TTS 文案、字幕草稿、BGM 情绪标签。"
     },
     {

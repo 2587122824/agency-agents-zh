@@ -201,6 +201,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(extract_original_requirement(user_input), "小美的田径训练日记，竖屏1分钟")
         lock = build_requirement_lock(user_input)
         self.assertEqual(lock["original_requirement"], "小美的田径训练日记，竖屏1分钟")
+        self.assertEqual(lock["core_topic"], "小美的田径训练日记")
         self.assertEqual(lock["duration_seconds"], 60)
         self.assertEqual(lock["explicit_constraints"], ["竖屏"])
 
@@ -221,6 +222,41 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn("asset_id: xiaomei", prompt)
         self.assertNotIn("自动采用的默认值", prompt)
         self.assertNotIn("禁止凭空", prompt)
+
+    def test_step_prompt_exposes_only_role_specific_generated_context(self) -> None:
+        user_input = (
+            "小美的田径训练日记，竖屏1分钟\n\n"
+            "## 关联资产上下文\n- character_id: xiaomei\n\n"
+            "## ComfyUI 素材/预览配置\n- provider: runninghub\n\n"
+            "## 图片生成参数\n- positive_prompt: hidden runtime config\n\n"
+            "## 长期记忆\n- 服装：蓝色训练服\n"
+        )
+        workflow = {"name": "通用视频生产主流程", "description": "测试"}
+        image_prompt = WorkflowEngine._build_step_prompt(
+            workflow,
+            {"step": 4, "agent": "06_分镜生图设计师", "task": "生图", "output": "图片意图"},
+            user_input,
+            [],
+        )
+        audio_prompt = WorkflowEngine._build_step_prompt(
+            workflow,
+            {"step": 5, "agent": "20_语音字幕包装师", "task": "音频", "output": "音频意图"},
+            user_input,
+            [],
+        )
+
+        self.assertIn("character_id: xiaomei", image_prompt)
+        self.assertIn("服装：蓝色训练服", image_prompt)
+        self.assertNotIn("provider: runninghub", image_prompt)
+        self.assertNotIn("hidden runtime config", image_prompt)
+        self.assertNotIn("character_id: xiaomei", audio_prompt)
+        self.assertIn("服装：蓝色训练服", audio_prompt)
+        self.assertNotIn("provider: runninghub", audio_prompt)
+
+    def test_memory_templates_without_values_are_not_injected(self) -> None:
+        self.assertFalse(web_app._memory_document_has_user_values("# 标题\n## 小节\n- 角色名称：\n- 风格：\n"))
+        self.assertTrue(web_app._memory_document_has_user_values("# 标题\n- 角色名称：小美\n"))
+        self.assertEqual(web_app.WorkflowWebHandler._long_term_memory_context(None), "")
 
     def test_requirement_guard_accepts_storyboard_timestamp_reaching_target(self) -> None:
         lock = build_requirement_lock("小美的田径训练日记，竖屏1分钟")
@@ -323,7 +359,7 @@ class SemanticInputContractTests(unittest.TestCase):
 
         self.assertTrue(result["passed"], result["issues"])
 
-    def test_requirement_guard_rejects_unrelated_audio_package_even_with_duration(self) -> None:
+    def test_requirement_guard_does_not_apply_topic_word_matching_to_audio_stage(self) -> None:
         content = json.dumps(
             {
                 "production_intents": {
@@ -349,7 +385,7 @@ class SemanticInputContractTests(unittest.TestCase):
             5,
         )
 
-        self.assertFalse(result["passed"])
+        self.assertTrue(result["passed"], result["issues"])
 
     def test_video_validator_accepts_empty_video_intents_when_ai_video_disabled(self) -> None:
         content = json.dumps(
@@ -527,6 +563,56 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertIn('"resolution": "480x848"', wrapped)
         self.assertTrue(any("交付分辨率" in issue for issue in result["issues"]))
+
+    def test_audio_validator_requires_exact_script_inheritance(self) -> None:
+        script_text = "今天的训练很累，但我还是完成了最后一圈。"
+        previous_outputs = [
+            {
+                "agent": "03_口播脚本师",
+                "content": f"## 4. TTS纯文本\n```text\n{script_text}\n```",
+            }
+        ]
+        payload = {
+            "production_intents": {
+                "audio": [
+                    {
+                        "intent": "generate_voiceover",
+                        "voice_text": script_text,
+                        "target_duration_seconds": 10,
+                    },
+                    {
+                        "intent": "build_subtitles",
+                        "segments": [
+                            {"start_time": "00:00:00,000", "end_time": "00:00:10,000", "text": script_text}
+                        ],
+                    },
+                ]
+            },
+            "audio_package": {"voiceover_text": script_text, "subtitle_srt_draft": ""},
+        }
+        lock = build_requirement_lock("小美的田径训练日记，竖屏1分钟")
+
+        accepted = WorkflowEngine._combined_output_validation(
+            lock,
+            f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
+            {"step": 5, "agent": "20_语音字幕包装师"},
+            previous_outputs,
+        )
+        self.assertTrue(accepted["passed"], accepted["issues"])
+
+        payload["production_intents"]["audio"][0]["voice_text"] = "今天不训练，休息一天。"
+        rejected = validate_production_output(
+            {"agent": "20_语音字幕包装师"},
+            f"```json\n{json.dumps(payload, ensure_ascii=False)}\n```",
+            lock,
+            previous_outputs,
+        )
+        self.assertFalse(rejected["passed"])
+        self.assertTrue(any("未逐字继承" in issue for issue in rejected["issues"]), rejected["issues"])
+        inheritance_detail = next(
+            detail for detail in rejected["issue_details"] if "未逐字继承" in detail["message"]
+        )
+        self.assertEqual(inheritance_detail["source"], "员工岗位输出契约")
 
     def test_package_timeline_small_duration_gap_is_reported_without_rewrite(self) -> None:
         content = json.dumps(

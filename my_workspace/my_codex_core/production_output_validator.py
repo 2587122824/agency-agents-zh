@@ -43,7 +43,7 @@ def validate_production_output(
     elif agent.startswith("06_"):
         _validate_images(payloads, expected_work, issues)
     elif agent.startswith("20_"):
-        _validate_audio(payloads, duration, issues, effective_lock)
+        _validate_audio(payloads, duration, issues, effective_lock, previous_outputs or [])
     elif agent.startswith("07_"):
         upstream_ids = _upstream_image_ids(previous_outputs or [])
         _validate_videos(payloads, expected_work, upstream_ids, issues, effective_lock)
@@ -56,7 +56,7 @@ def validate_production_output(
         "issues": issues,
         "issue_details": [
             {
-                "source": "用户明确要求" if agent.startswith("03_") else "生产接口技术契约",
+                "source": _production_issue_source(agent, message),
                 "code": "production_contract_violation",
                 "message": message,
             }
@@ -121,7 +121,13 @@ def _validate_images(payloads: list[dict[str, Any]], expected: tuple[int, int], 
         _validate_work_resolution(item, expected, f"image_prompts[{index}]", issues)
 
 
-def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[str], requirement_lock: dict[str, Any]) -> None:
+def _validate_audio(
+    payloads: list[dict[str, Any]],
+    duration: int,
+    issues: list[str],
+    requirement_lock: dict[str, Any],
+    previous_outputs: list[dict[str, str]],
+) -> None:
     payload = _payload_with(payloads, "production_intents", "audio")
     intents = _intent_group(payload, "audio")
     if not intents:
@@ -136,6 +142,11 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
             issues.append("generate_voiceover 已禁用，但原始需求未明确不需要配音/旁白")
     else:
         voice_text = str(voice.get("voice_text") or "")
+        upstream_voice_text = _upstream_script_tts_text(previous_outputs)
+        if not upstream_voice_text:
+            issues.append("缺少上游 03_口播脚本师的 TTS 纯文本，无法验证旁白继承关系")
+        elif _normalize_spoken_text(voice_text) != _normalize_spoken_text(upstream_voice_text):
+            issues.append("旁白正文未逐字继承上游 03_口播脚本师的 TTS 纯文本")
         cjk_count = len(re.findall(r"[\u4e00-\u9fff]", voice_text))
         if duration and cjk_count > int(duration * 5.0):
             issues.append(f"旁白约 {cjk_count} 个汉字，无法在 {duration} 秒内自然读完")
@@ -171,6 +182,10 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
     if not audio_package:
         package_payload = _payload_with(payloads, "audio_package")
         audio_package = package_payload.get("audio_package") if isinstance(package_payload.get("audio_package"), dict) else {}
+    if isinstance(voice, dict) and not _intent_disabled(voice):
+        package_voice_text = str(audio_package.get("voiceover_text") or "")
+        if _normalize_spoken_text(package_voice_text) != _normalize_spoken_text(str(voice.get("voice_text") or "")):
+            issues.append("audio_package.voiceover_text 与 generate_voiceover.voice_text 不一致")
     srt = str(audio_package.get("subtitle_srt_draft") or "")
     srt = srt.replace("\\n", "\n").replace("\\r", "\r")
     if _intent_disabled(subtitles):
@@ -201,6 +216,33 @@ def _validate_audio(payloads: list[dict[str, Any]], duration: int, issues: list[
         subtitle_chars = len(re.findall(r"[\u4e00-\u9fff]", subtitle_text))
         if voice_chars and subtitle_chars < voice_chars * 0.9:
             issues.append("字幕文本覆盖不足，少于旁白正文的 90%")
+
+
+def _upstream_script_tts_text(previous_outputs: list[dict[str, str]]) -> str:
+    for output in previous_outputs:
+        if not isinstance(output, dict) or not str(output.get("agent") or "").startswith("03_"):
+            continue
+        return _extract_script_tts_text(str(output.get("content") or ""))
+    return ""
+
+
+def _normalize_spoken_text(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "")).strip()
+
+
+def _production_issue_source(agent: str, message: str) -> str:
+    if str(agent or "").startswith("03_"):
+        return "用户明确要求"
+    if any(
+        marker in str(message or "")
+        for marker in (
+            "上游 03_口播脚本师",
+            "旁白正文未逐字继承",
+            "audio_package.voiceover_text",
+        )
+    ):
+        return "员工岗位输出契约"
+    return "生产接口技术契约"
 
 
 def _validate_videos(

@@ -15,6 +15,7 @@ from .production_output_validator import validate_production_output
 from .requirement_guard import (
     build_requirement_lock,
     declares_human_confirmation,
+    extract_generated_context,
     extract_original_requirement,
     requirement_lock_prompt,
     validate_requirement_alignment,
@@ -1100,7 +1101,12 @@ class WorkflowEngine:
         step: dict,
         previous_outputs: list[dict[str, str]],
     ) -> dict:
-        requirement = validate_requirement_alignment(lock, content, int(step.get("step") or 0))
+        requirement = validate_requirement_alignment(
+            lock,
+            content,
+            int(step.get("step") or 0),
+            str(step.get("agent") or ""),
+        )
         contract = validate_production_output(step, content, lock, previous_outputs)
         issues = [*(requirement.get("issues") or []), *(contract.get("issues") or [])]
         issue_details = [
@@ -1132,9 +1138,8 @@ class WorkflowEngine:
         if not previous_text:
             previous_text = "无。"
         scoped_context = WorkflowEngine._scoped_video_context(step, production_config)
-        step_no = int(step.get("step") or 0)
         lock = build_requirement_lock(user_input)
-        prompt_input = extract_original_requirement(user_input) if step_no <= 3 else user_input
+        prompt_input = WorkflowEngine._scoped_user_context(step, user_input)
         locked_context = requirement_lock_prompt(lock)
 
         return f"""# 工作流执行任务
@@ -1183,6 +1188,23 @@ class WorkflowEngine:
         if not agent.startswith(allowed_prefixes):
             return ""
         return f"\n\n## 视频输出长期记忆\n{context}\n"
+
+    @staticmethod
+    def _scoped_user_context(step: dict, user_input: str) -> str:
+        original = extract_original_requirement(user_input)
+        agent = str(step.get("agent") or "")
+        allowed_markers: tuple[str, ...] = ()
+        if agent.startswith("06_"):
+            allowed_markers = (
+                "## 关联资产上下文",
+                "## 可复用素材库",
+                "## 参考图片",
+                "## 长期记忆",
+            )
+        elif agent.startswith(("07_", "20_", "22_")):
+            allowed_markers = ("## 长期记忆",)
+        context = extract_generated_context(user_input, allowed_markers)
+        return f"{original}\n\n{context}".strip() if context else original
 
     @staticmethod
     def _build_final_output(workflow: dict, user_input: str, step_outputs: list[dict[str, str]]) -> str:

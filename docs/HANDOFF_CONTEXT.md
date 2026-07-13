@@ -1,6 +1,6 @@
 # Handoff Context
 
-Last compacted: 2026-07-04
+Last compacted: 2026-07-13
 
 ## Project Snapshot
 
@@ -16,6 +16,19 @@ Last compacted: 2026-07-04
 Keep upstream agent folders untouched unless explicitly requested. Do not commit API keys, uploaded references, voice samples, generated task outputs, local model files, or large media assets.
 
 Old short-video, xiaohongshu, game, software-market, and platform-design workflows/staff are archived in place. Do not delete them unless explicitly requested.
+
+## 2026-07-13 Workflow Validation Repair
+
+- Generic topic-word validation is limited to content-authoring roles: `01_`, `03_`, `23_`, and `04_`. Delivery duration/aspect validation is limited to `01_`, `03_`, and `23_`.
+- Technical transformation/review roles `06_`, `20_`, `07_`, `05_`, and `22_` are not required to repeat title words. They are validated against their structured role contracts and upstream outputs.
+- `20_语音字幕包装师` must copy the exact TTS plain text from `03_口播脚本师` into both `generate_voiceover.voice_text` and `audio_package.voiceover_text`. Whitespace-only differences are allowed; creative rewriting fails with source `员工岗位输出契约`.
+- The original requirement's delivery suffix is removed from `core_topic`, so `小美的田径训练日记，竖屏1分钟` locks topic `小美的田径训练日记`, duration `60`, and portrait delivery separately.
+- Employee prompts receive role-scoped context. `06_` may see linked assets/reference images; `07_`/`20_`/`22_` may see explicitly selected long-term memory. Runtime ComfyUI/image/video configuration is not injected as employee prose.
+- Empty memory templates are not injected. Shipped character/style templates contain no default aspect ratio, generic identity restrictions, or generic negative prompts.
+- `06_` translates the visual decisions owned by `23_`; it must not invent age, skin tone, face, hair, clothing, or visual style. `07_` receives validation errors for invalid duration/FPS and may not silently downgrade missing three-frame work to first-frame I2V.
+- `20_` must not invent TTS engines, voice names, clone IDs, speed, or pitch. Runtime generation uses the selected system audio configuration.
+- The active long-video workflow requires only the topic/product information. Platform, audience, duration, purpose, available assets, and restrictions are optional inputs and remain `未指定` when omitted.
+- Verification on 2026-07-13: `python -m compileall -q my_workspace`, 157 semantic-contract tests, JSON validation, and the rejected real task `task_20260713_215010_*` step 20 regression all passed.
 
 ## Current UX Rules
 

@@ -85,6 +85,19 @@ DEFAULT_RUNNINGHUB_IMAGE_ENDPOINT = ""
 DEFAULT_RUNNINGHUB_VIDEO_ENDPOINT = ""
 RUN_JOBS: dict[str, dict] = {}
 RUN_JOBS_LOCK = threading.RLock()
+
+
+def _memory_document_has_user_values(content: str) -> bool:
+    for raw_line in str(content or "").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if re.fullmatch(r"[-*]\s*[^:：]+[:：]\s*", line):
+            continue
+        return True
+    return False
+
+
 IMAGE_EXTENSIONS = {
     ".png",
     ".jpg",
@@ -21869,7 +21882,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         sections = []
         for path in sorted(MEMORY_ROOT.glob("*.md")):
             content = path.read_text(encoding="utf-8", errors="replace").strip()
-            if content:
+            if content and _memory_document_has_user_values(content):
                 sections.append(f"### {path.name}\n{content}")
 
         if not sections:

@@ -116,7 +116,7 @@ version: 2026-06-30
 
 - 默认工作分辨率为 480p 级别：横屏 `848x480`、竖屏 `480x848`、方形 `480x480`；最终交付分辨率由后期增强或成片阶段处理。
 - 系统会锁定角色身份、画风、工作尺寸和全局帧率；你不要为了单个镜头重新指定不同脸型、发型、服装、画风或工作分辨率。
-- `generate_three_frame_i2v_clip` 固定按首 / 中 / 尾三帧、4 秒、24fps 规划；如果你写了其他时长或 fps，系统编译器会自动覆盖。
+- `generate_three_frame_i2v_clip` 固定按首 / 中 / 尾三帧、4 秒、24fps 规划；写入其他时长或 fps 会触发只读校验失败，系统不会自动覆盖。
 - 视频镜头允许变化的是动作、运镜、节奏和表情微变化，不允许把同一角色或同一风格改成另一套设定。
 - 多帧视频统一使用首 / 中 / 尾三帧；不要规划 `first_last_frame`。
 - `generate_three_frame_i2v_clip` 只能引用 06 已输出的三帧意图 ID，兼容层必须精确填写对应的 `reference_image`、`middle_frame_image`、`last_frame_image`，不得猜测文件名。
@@ -148,6 +148,6 @@ version: 2026-06-30
 - 如果上游只有 `generate_keyframe` 或单张 `asset_tag`，必须输出 `generate_i2v_clip` 或 `generate_broll_clip`；兼容 `video_prompts` 使用普通首帧/单图 I2V 模式，不得写 `first_middle_last`、`06C`、`three_frame`。
 - `generate_three_frame_i2v_clip.source_intent_ids` 必须引用上游三帧图片意图 ID，例如 `shot_003_three_frame`，不能引用普通 `keyframe_shot003`。
 - 首中尾帧兼容层必须显式绑定三帧：`reference_image = <three_frame_id>_start_frame`、`middle_frame_image = <three_frame_id>_middle_frame`、`last_frame_image = <three_frame_id>_end_frame`。
-- 如果需要首中尾帧但 06 没有提供三帧图片意图，不能提交不可执行的视频任务；应改为普通首帧 I2V，或输出 `repair_video` / 阻塞说明要求退回 06 补齐三帧。
+- 如果上游方案需要首中尾帧但 06 没有提供三帧图片意图，不能改成普通首帧 I2V 或其他模式；必须输出阻塞说明并要求退回 06 补齐三帧。
 - 不允许在同一个可执行 `generate_three_frame_i2v_clip` 里同时写 `entity_missing` 来承认缺三帧；缺三帧时就不要输出该可执行 clip。
 - 竖屏任务的兼容 `video_prompts.width/height` 必须是 `480/848`，不要沿用横屏 `848/480`。

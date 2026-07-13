@@ -28,6 +28,25 @@ def extract_original_requirement(user_input: str) -> str:
     return text[:cut_at].strip()
 
 
+def extract_generated_context(user_input: str, allowed_markers: tuple[str, ...]) -> str:
+    text = str(user_input or "")
+    sections: list[str] = []
+    marker_positions = sorted(
+        (index, marker)
+        for marker in GENERATED_CONTEXT_MARKERS
+        if (index := text.find(marker)) >= 0
+    )
+    allowed = set(allowed_markers)
+    for position, (start, marker) in enumerate(marker_positions):
+        if marker not in allowed:
+            continue
+        end = marker_positions[position + 1][0] if position + 1 < len(marker_positions) else len(text)
+        section = text[start:end].strip()
+        if section:
+            sections.append(section)
+    return "\n\n".join(sections)
+
+
 def build_requirement_lock(user_input: str) -> dict[str, Any]:
     original = extract_original_requirement(user_input)
     topic_match = re.search(
@@ -43,7 +62,7 @@ def build_requirement_lock(user_input: str) -> dict[str, Any]:
     )
     if english_topic_match:
         core_topic = english_topic_match.group(1).strip()
-    core_topic = re.sub(r"[。；;]+$", "", core_topic).strip()
+    core_topic = _strip_delivery_suffix(core_topic)
 
     duration_seconds = 0
     minute_match = re.search(r"(\d+(?:\.\d+)?)\s*分钟", original)
@@ -91,7 +110,12 @@ def requirement_lock_prompt(lock: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: int) -> dict[str, Any]:
+def validate_requirement_alignment(
+    lock: dict[str, Any],
+    content: str,
+    step_no: int,
+    agent_id: str = "",
+) -> dict[str, Any]:
     output = str(content or "").strip()
     topic = str(lock.get("core_topic") or "").strip()
     original = str(lock.get("original_requirement") or "")
@@ -104,7 +128,7 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
 
     if not output:
         add_issue("模型输出为空", "员工岗位输出契约", "empty_output")
-    if topic and output and not _production_package_can_omit_topic(output, lock):
+    if topic and output and _agent_requires_topic_validation(agent_id, step_no):
         topic_covered_by_package = _production_package_preserves_topic(output, lock)
         latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
         missing_latin = [token for token in latin_tokens if token.lower() not in output.lower()]
@@ -127,7 +151,7 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
         ):
             add_issue(f"输出未保持核心主题“{topic}”", "用户明确要求", "core_topic_missing")
 
-    if step_no <= 3:
+    if _agent_requires_delivery_validation(agent_id, step_no):
         duration = int(lock.get("duration_seconds") or 0)
         if duration and not _mentions_duration(output, duration):
             add_issue(f"输出未体现锁定时长 {duration} 秒", "用户明确要求", "duration_missing")
@@ -159,8 +183,38 @@ def validate_requirement_alignment(lock: dict[str, Any], content: str, step_no: 
     }
 
 
-def _production_package_can_omit_topic(content: str, lock: dict[str, Any]) -> bool:
-    return _audio_packaging_is_explicitly_disabled(content, lock) or _video_generation_is_explicitly_skipped(content, lock)
+def _strip_delivery_suffix(value: str) -> str:
+    text = re.sub(r"[。；;]+$", "", str(value or "")).strip()
+    delivery_segment = re.compile(
+        r"^(?:(?:横屏|竖屏|portrait|vertical|landscape|horizontal|16\s*:\s*9|9\s*:\s*16|1\s*:\s*1|"
+        r"\d+(?:\.\d+)?\s*(?:分钟|秒|mins?|minutes?|secs?|seconds?)|长视频|短视频|成片|视频)\s*)+$",
+        flags=re.IGNORECASE,
+    )
+    parts = [part.strip() for part in re.split(r"[，,；;|]", text) if part.strip()]
+    while len(parts) > 1 and delivery_segment.fullmatch(parts[-1]):
+        parts.pop()
+    text = "，".join(parts).strip()
+    trailing = re.compile(
+        r"(?:[，,；;\s]*(?:横屏|竖屏|portrait|vertical|landscape|horizontal|16\s*:\s*9|9\s*:\s*16|1\s*:\s*1|"
+        r"\d+(?:\.\d+)?\s*(?:分钟|秒|mins?|minutes?|secs?|seconds?)|长视频|短视频|成片))+$",
+        flags=re.IGNORECASE,
+    )
+    cleaned = trailing.sub("", text).strip(" ，,；;")
+    return cleaned or text
+
+
+def _agent_requires_topic_validation(agent_id: str, step_no: int) -> bool:
+    agent = str(agent_id or "").strip()
+    if agent:
+        return agent.startswith(("01_", "03_", "23_", "04_"))
+    return int(step_no or 0) <= 4
+
+
+def _agent_requires_delivery_validation(agent_id: str, step_no: int) -> bool:
+    agent = str(agent_id or "").strip()
+    if agent:
+        return agent.startswith(("01_", "03_", "23_"))
+    return int(step_no or 0) <= 3
 
 
 def _production_package_preserves_topic(content: str, lock: dict[str, Any]) -> bool:
@@ -316,42 +370,6 @@ def _collect_numeric_values_for_keys(value: Any, keys: set[str]) -> list[float]:
     return values
 
 
-def _audio_packaging_is_explicitly_disabled(content: str, lock: dict[str, Any]) -> bool:
-    for payload in _json_objects(content):
-        production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
-        audio_intents = production.get("audio") if isinstance(production.get("audio"), list) else []
-        if not audio_intents:
-            continue
-        relevant = {
-            str(item.get("intent") or ""): item
-            for item in audio_intents
-            if isinstance(item, dict) and item.get("intent") in {"generate_voiceover", "build_subtitles", "select_bgm"}
-        }
-        required_disabled = all(_intent_disabled(relevant.get(intent) or {}) for intent in ("generate_voiceover", "build_subtitles"))
-        optional_bgm_ok = "select_bgm" not in relevant or _intent_disabled(relevant["select_bgm"])
-        if required_disabled and optional_bgm_ok and _requirement_disables_voiceover(lock):
-            return True
-    return False
-
-
-def _video_generation_is_explicitly_skipped(content: str, lock: dict[str, Any]) -> bool:
-    if not _requirement_disables_ai_video(lock):
-        return False
-    for payload in _json_objects(content):
-        production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
-        if "video" not in production:
-            continue
-        video_intents = production.get("video")
-        video_prompts = payload.get("video_prompts")
-        if isinstance(video_intents, list) and not video_intents and isinstance(video_prompts, list) and not video_prompts:
-            return True
-        if isinstance(video_intents, list) and video_intents and all(
-            _video_intent_disabled(item) for item in video_intents if isinstance(item, dict)
-        ):
-            return True
-    return False
-
-
 def _json_objects(content: str) -> list[dict[str, Any]]:
     text = str(content or "").strip()
     candidates = re.findall(r"```json\s*(.*?)```", text, flags=re.IGNORECASE | re.DOTALL)
@@ -371,61 +389,6 @@ def _json_objects(content: str) -> list[dict[str, Any]]:
 def _strip_json_comments(value: str) -> str:
     text = re.sub(r"(?m)^\s*//.*$", "", str(value or ""))
     return re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-
-
-def _intent_disabled(intent: dict[str, Any]) -> bool:
-    return intent.get("enabled") is False or str(intent.get("status") or "").strip().lower() in {"disabled", "skipped"}
-
-
-def _video_intent_disabled(intent: dict[str, Any]) -> bool:
-    compatibility = intent.get("compatibility") if isinstance(intent.get("compatibility"), dict) else {}
-    constraints = intent.get("constraints") if isinstance(intent.get("constraints"), dict) else {}
-    return (
-        _intent_disabled(intent)
-        or str(intent.get("intent") or "") == "no_video_required"
-        or compatibility.get("skip_execution") is True
-        or constraints.get("skip_execution") is True
-        or (_number(intent.get("duration"), intent.get("duration_seconds")) == 0 and "skip" in json.dumps(intent, ensure_ascii=False).lower())
-    )
-
-
-def _number(*values: Any) -> float:
-    for value in values:
-        try:
-            if value not in (None, ""):
-                return float(value)
-        except (TypeError, ValueError):
-            continue
-    return 0.0
-
-
-def _requirement_text(lock: dict[str, Any]) -> str:
-    return " ".join(
-        str(value or "")
-        for value in (
-            lock.get("original_requirement"),
-            lock.get("production_type"),
-            lock.get("quality_mode"),
-            " ".join(str(item) for item in lock.get("explicit_constraints") or []),
-        )
-    )
-
-
-def _requirement_disables_voiceover(lock: dict[str, Any]) -> bool:
-    text = _requirement_text(lock)
-    lowered = text.lower()
-    return any(token in text for token in ("不需要配音", "无需配音", "不生成配音", "无配音", "不需要旁白", "无需旁白", "无旁白")) or any(
-        token in lowered for token in ("no voice", "no voiceover", "no narration", "without voice", "without narration")
-    )
-
-
-def _requirement_disables_ai_video(lock: dict[str, Any]) -> bool:
-    text = _requirement_text(lock)
-    lowered = text.lower()
-    return any(
-        token in text
-        for token in ("不生成AI视频", "不生成 AI 视频", "不需要AI视频", "不需要 AI 视频", "无需AI视频", "无AI视频", "只验证图片素材", "本地图片轮播预览")
-    ) or any(token in lowered for token in ("asset_only", "only image", "image-only", "no ai video", "without ai video"))
 
 
 def _topic_covered_by_salient_concepts(topic: str, output: str) -> bool:
