@@ -618,6 +618,12 @@ INDEX_HTML = r"""<!doctype html>
       align-items: stretch;
       min-width: 0;
     }
+    .audio-debug-history-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
     .audio-debug-history-card audio {
       width: 100%;
       min-width: 0;
@@ -8853,6 +8859,7 @@ INDEX_HTML = r"""<!doctype html>
       list.forEach((item, index) => {
         const row = document.createElement('div');
         row.className = 'audio-debug-history-card';
+        const runId = String(item.run_id || '').trim();
         const file = String(item.audio_file || '').trim();
         const status = String(item.status || '').trim();
         const duration = Number(item.actual_duration_seconds || 0);
@@ -8873,11 +8880,22 @@ INDEX_HTML = r"""<!doctype html>
           audio.src = mediaUrl('__audio_debug__', file);
           audio.title = file;
           controls.appendChild(audio);
+          const actions = document.createElement('div');
+          actions.className = 'audio-debug-history-actions';
           const open = document.createElement('button');
           open.type = 'button';
           open.textContent = '打开文件';
           open.onclick = () => window.open(mediaUrl('__audio_debug__', file), '_blank', 'noopener');
-          controls.appendChild(open);
+          actions.appendChild(open);
+          if (runId) {
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'danger';
+            remove.textContent = '删除';
+            remove.onclick = () => deleteAudioDebugRun(runId);
+            actions.appendChild(remove);
+          }
+          controls.appendChild(actions);
           row.appendChild(controls);
         } else {
           const error = String(item.error || '').trim();
@@ -8885,9 +8903,37 @@ INDEX_HTML = r"""<!doctype html>
           note.className = 'audio-debug-history-error';
           note.textContent = error ? `未生成音频：${error}` : '未生成音频文件。';
           row.appendChild(note);
+          if (runId) {
+            const actions = document.createElement('div');
+            actions.className = 'audio-debug-history-actions';
+            const remove = document.createElement('button');
+            remove.type = 'button';
+            remove.className = 'danger';
+            remove.textContent = '删除';
+            remove.onclick = () => deleteAudioDebugRun(runId);
+            actions.appendChild(remove);
+            row.appendChild(actions);
+          }
         }
         els.audioDebugResult.appendChild(row);
       });
+    }
+
+    async function deleteAudioDebugRun(runId) {
+      const normalizedRunId = String(runId || '').trim();
+      if (!normalizedRunId) return;
+      if (!window.confirm('确定删除这条调试音频吗？删除后本地音频文件也会一起移除。')) return;
+      try {
+        const result = await apiWithTimeout('/api/audio-debug-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ run_id: normalizedRunId }),
+        }, 30000);
+        renderAudioDebugHistory(result.history || []);
+        setStatus('已删除调试音频');
+      } catch (err) {
+        setStatus(err.message || '删除调试音频失败', true);
+      }
     }
 
     function selectedAliyunClone() {
@@ -15423,6 +15469,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._audio_debug_run(payload))
                 return
 
+            if parsed.path == "/api/audio-debug-delete":
+                self._send_json(self._delete_audio_debug_run(payload))
+                return
+
             if parsed.path == "/api/aliyun-cosyvoice-clone":
                 self._send_json(self._create_aliyun_cosyvoice_clone(payload))
                 return
@@ -21225,6 +21275,20 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if len(items) >= limit:
                 break
         return items
+
+    def _delete_audio_debug_run(self, payload: dict) -> dict:
+        run_id = str(payload.get("run_id") or "").strip()
+        if not re.fullmatch(r"\d{8}_\d{6}_[0-9a-fA-F]{8}", run_id):
+            raise ValueError("invalid audio debug run id")
+        runs_root = (OUTPUT_ROOT / AUDIO_DEBUG_TASK / "runs").resolve()
+        target = (runs_root / run_id).resolve()
+        if not self._is_relative_to(target, runs_root):
+            raise ValueError("invalid audio debug run path")
+        if target.exists():
+            if not target.is_dir():
+                raise ValueError("audio debug run path is not a directory")
+            shutil.rmtree(target)
+        return {"ok": True, "run_id": run_id, "history": self._audio_debug_history()}
 
     @staticmethod
     def _read_aliyun_voice_clones() -> list[dict]:
