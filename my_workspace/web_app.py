@@ -3618,13 +3618,13 @@ INDEX_HTML = r"""<!doctype html>
                     <input id="aliyunCloneLocalAudioFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
                   </label>
                   <label>公网基地址
-                    <input id="aliyunVoicePublicBaseUrl" autocomplete="off" spellcheck="false" placeholder="例如 https://你的域名 或 Cloudflare Tunnel 地址" />
+                    <input id="aliyunVoicePublicBaseUrl" autocomplete="off" spellcheck="false" placeholder="可选：你的域名；留空则尝试 RunningHub 上传" />
                   </label>
                   <label class="audio-debug-field-wide">参考音频公网 URL
                     <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
                   </label>
                 </div>
-                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机，可用于 VoxCPM2 本地仿声；如果设置了公网基地址，上传后会自动生成阿里云可读取的 URL。</div>
+                <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机；如果设置了公网基地址会拼出 URL，否则会尝试用 RunningHub 媒体上传获取云端 URL。</div>
               </div>
               <div class="audio-debug-clone-section">
                 <div class="audio-debug-clone-section-title">
@@ -8570,21 +8570,34 @@ INDEX_HTML = r"""<!doctype html>
       if (els.aliyunCloneLocalAudioHint) els.aliyunCloneLocalAudioHint.textContent = '正在上传本地个人音频...';
       try {
         const contentBase64 = await fileToBase64(file);
+        const hasPublicBaseUrl = /^https?:\/\//i.test(String(els.aliyunVoicePublicBaseUrl?.value || '').trim());
         const result = await api('/api/upload-voice-sample', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             filename: file.name,
             content_base64: contentBase64,
+            upload_to_runninghub: !hasPublicBaseUrl,
+            runninghub_api_key: els.comfyApiKey?.value?.trim() || els.comfyDebugApiKey?.value?.trim() || '',
+            runninghub_base_url: els.comfyBaseUrl?.value?.trim() || els.comfyDebugBaseUrl?.value?.trim() || '',
           }),
         });
         const storedPath = result.stored_path || '';
         const publicUrl = voiceSamplePublicUrl(result);
+        const runninghubUpload = result.runninghub_upload || {};
+        const runninghubUrl = String(runninghubUpload.url || '').trim();
+        const runninghubValue = String(runninghubUpload.value || '').trim();
         if (els.voiceReferenceAudioPath) els.voiceReferenceAudioPath.value = storedPath;
-        if (publicUrl && els.aliyunCloneAudioUrl) els.aliyunCloneAudioUrl.value = publicUrl;
+        if ((publicUrl || runninghubUrl) && els.aliyunCloneAudioUrl) els.aliyunCloneAudioUrl.value = publicUrl || runninghubUrl;
         if (els.aliyunCloneLocalAudioHint) {
           els.aliyunCloneLocalAudioHint.textContent = publicUrl
             ? `已保存到本机：${storedPath}。已生成公网 URL 并填入参考音频：${publicUrl}`
+            : runninghubUrl
+            ? `已保存到本机：${storedPath}。RunningHub 已返回公网 URL 并填入参考音频：${runninghubUrl}`
+            : runninghubUpload.ok && runninghubValue
+            ? `已保存到本机：${storedPath}。RunningHub 上传成功，但返回的是平台内部文件值（${runninghubValue}），不是阿里云可读取的公网 URL。`
+            : runninghubUpload.error
+            ? `已保存到本机：${storedPath}。RunningHub 上传未生成公网 URL：${runninghubUpload.error}`
             : storedPath
             ? `已保存到本机：${storedPath}。请填写公网基地址后重新选择音频，或手动填参考音频公网 URL。`
             : '已上传，但没有返回保存路径。';
@@ -20792,11 +20805,39 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
 
         relative_path = target.relative_to(WORKSPACE_ROOT).as_posix()
         media_path = f"/api/voice-sample-media?file={quote(relative_path, safe='')}"
-        return {
+        result = {
             "filename": filename,
             "stored_path": relative_path,
             "media_path": media_path,
             "size_bytes": len(audio_bytes),
+        }
+        if self._truthy(payload.get("upload_to_runninghub")):
+            result["runninghub_upload"] = self._upload_voice_sample_to_runninghub(target, payload)
+        return result
+
+    def _upload_voice_sample_to_runninghub(self, path: Path, payload: dict) -> dict:
+        saved = self._read_runtime_comfy_config(redact=False)
+        api_key = str(payload.get("runninghub_api_key") or payload.get("comfy_api_key") or saved.get("api_key") or "").strip()
+        base_url = str(payload.get("runninghub_base_url") or payload.get("comfy_base_url") or saved.get("base_url") or "https://www.runninghub.cn/openapi/v2").strip()
+        base_url = base_url.rstrip("/") or "https://www.runninghub.cn/openapi/v2"
+        if not api_key:
+            return {
+                "ok": False,
+                "error": "未配置 RunningHub/ComfyUI API Key，无法上传到 RunningHub 获取云端文件地址。",
+            }
+        try:
+            adapter = CloudComfyUIAdapter(base_url, api_key, "", progress_callback=None)
+            value = adapter._upload_runninghub_media(path)  # RunningHub's media endpoint supports images and other binary media.
+        except Exception as exc:
+            return {"ok": False, "error": str(exc), "base_url": base_url}
+        is_http_url = bool(re.match(r"^https?://", value, flags=re.I))
+        return {
+            "ok": True,
+            "value": value,
+            "url": value if is_http_url else "",
+            "is_public_url": is_http_url,
+            "base_url": base_url,
+            "note": "" if is_http_url else "RunningHub 返回的是平台内部文件值，不是阿里云可直接读取的公网 HTTP URL。",
         }
 
     def _audio_debug_run(self, payload: dict) -> dict:

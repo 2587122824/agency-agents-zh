@@ -2686,6 +2686,12 @@ class CloudComfyUIAdapter:
             ".jpeg": "image/jpeg",
             ".png": "image/png",
             ".webp": "image/webp",
+            ".mp3": "audio/mpeg",
+            ".wav": "audio/wav",
+            ".aac": "audio/aac",
+            ".m4a": "audio/mp4",
+            ".flac": "audio/flac",
+            ".ogg": "audio/ogg",
         }.get(path.suffix.lower(), "application/octet-stream")
         file_bytes = path.read_bytes()
         head = (
