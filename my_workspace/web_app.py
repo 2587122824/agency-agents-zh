@@ -15644,6 +15644,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                     if comfy_base_url:
                         production_compose_config["base_url"] = comfy_base_url
                 production_config = self._apply_runtime_comfy_config(production_config, payload)
+                production_config = self._hydrate_aliyun_clone_metadata(production_config)
                 production_config = self._ensure_voice_config_for_requirement(production_config, user_input)
             image_config = payload.get("image_config") or {}
             if isinstance(image_config, dict) and str(image_config.get("positive_prompt") or "").strip():
@@ -15985,6 +15986,39 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             production_config = {}
         # Voice selection is an explicit system configuration decision. A narration
         # requirement must not silently select a different TTS provider.
+        return production_config
+
+    @classmethod
+    def _hydrate_aliyun_clone_metadata(cls, production_config: dict) -> dict:
+        if not isinstance(production_config, dict):
+            return {}
+        voice_config = production_config.get("voice_config")
+        if not isinstance(voice_config, dict):
+            return production_config
+        mode = str(voice_config.get("mode") or "").strip().lower()
+        provider = str(voice_config.get("provider") or "").strip().lower()
+        if mode not in {"aliyun_cosyvoice", "cosyvoice"} and provider not in {"aliyun_cosyvoice", "cosyvoice"}:
+            return production_config
+        voice_id = str(voice_config.get("aliyun_voice") or voice_config.get("voice") or "").strip()
+        if not voice_id:
+            return production_config
+        clone = next(
+            (
+                item
+                for item in cls._read_aliyun_voice_clones()
+                if str(item.get("voice_id") or "").strip() == voice_id
+            ),
+            None,
+        )
+        if not clone:
+            return production_config
+        workspace_id = str(clone.get("workspace_id") or "").strip()
+        region = str(clone.get("region") or "cn-beijing").strip() or "cn-beijing"
+        target_model = str(clone.get("target_model") or "cosyvoice-v3-flash").strip() or "cosyvoice-v3-flash"
+        if workspace_id:
+            voice_config["aliyun_workspace_id"] = workspace_id
+        voice_config["aliyun_region"] = region
+        voice_config["aliyun_model"] = target_model
         return production_config
 
     @classmethod
@@ -20549,6 +20583,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if comfy_base_url:
                     production_compose_config["base_url"] = comfy_base_url
             production_config = self._apply_runtime_comfy_config(production_config, payload)
+            production_config = self._hydrate_aliyun_clone_metadata(production_config)
         summary = {}
         summary_path = task_dir / "run_summary.json"
         if summary_path.exists():
@@ -20632,6 +20667,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 if comfy_base_url:
                     production_compose_config["base_url"] = comfy_base_url
             production_config = self._apply_runtime_comfy_config(production_config, payload)
+            production_config = self._hydrate_aliyun_clone_metadata(production_config)
 
         summary = {}
         summary_path = task_dir / "run_summary.json"
@@ -21176,6 +21212,8 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("audio debug text is too long; max 8000 characters")
 
         voice_config = payload.get("voice_config") if isinstance(payload.get("voice_config"), dict) else {}
+        hydrated = self._hydrate_aliyun_clone_metadata({"voice_config": voice_config})
+        voice_config = hydrated.get("voice_config") if isinstance(hydrated.get("voice_config"), dict) else voice_config
         mode = str(voice_config.get("mode") or "").strip().lower()
         provider = str(voice_config.get("provider") or "").strip().lower()
         if mode in {"", "off"} or provider in {"", "none"}:

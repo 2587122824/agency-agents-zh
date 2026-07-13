@@ -2,6 +2,13 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 CosyVoice Retry Diagnosis
+
+- The latest retry of `task_20260713_215010_小美的田径训练日记_竖屏1分钟长视频` failed at `local_tts`, not in the visual workflow. Its saved snapshot contained 314 usable narration characters but still had `voice_config.mode=off` and an empty provider, so the explicit error was `TTS provider is not configured`; FFmpeg remained blocked and did not create a silent final video.
+- The selected clone `cosyvoice-v3-flash-myvoice-4e9822dcbccb402b98ba52b7515b7203` is saved with workspace `ws-kih2cydzfvfpb7ag`, region `cn-beijing`, and target model `cosyvoice-v3-flash`. When the user explicitly selects the Aliyun provider, new tasks, resume, production retry, and audio debug now hydrate those clone-owned metadata fields from the saved clone record. This does not turn on TTS when `mode=off`, select another voice, or supply an API key.
+- A real retry still requires the system configuration to be explicitly set to Aliyun CosyVoice and a valid DashScope API Key. The existing OSS `LTAI...` AccessKey is not a DashScope API Key and must not be substituted.
+- Verification: 169 semantic-contract tests, `python -m compileall -q my_workspace`, and `git diff --check` passed.
+
 ## 2026-07-14 LTX I2V Production Repair
 
 - The old first-frame I2V RunningHub workflow `2071735603636563970` failed at `LTX2_NAG(238)` because its GGUF model weights were dimension `4096` while the active connector expected `3840`.

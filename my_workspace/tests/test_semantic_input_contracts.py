@@ -4364,6 +4364,65 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertEqual(updated["voice_config"], {"mode": "off"})
 
+    def test_aliyun_clone_metadata_hydrates_selected_clone_without_changing_provider(self) -> None:
+        config = {
+            "voice_config": {
+                "mode": "aliyun_cosyvoice",
+                "provider": "aliyun_cosyvoice",
+                "aliyun_voice": "clone_voice_1",
+                "aliyun_model": "cosyvoice-v2",
+                "aliyun_workspace_id": "",
+            }
+        }
+        with patch.object(
+            web_app.WorkflowWebHandler,
+            "_read_aliyun_voice_clones",
+            return_value=[
+                {
+                    "voice_id": "clone_voice_1",
+                    "target_model": "cosyvoice-v3-flash",
+                    "workspace_id": "ws-test",
+                    "region": "cn-beijing",
+                }
+            ],
+        ):
+            updated = web_app.WorkflowWebHandler._hydrate_aliyun_clone_metadata(config)
+        voice = updated["voice_config"]
+        self.assertEqual(voice["mode"], "aliyun_cosyvoice")
+        self.assertEqual(voice["provider"], "aliyun_cosyvoice")
+        self.assertEqual(voice["aliyun_voice"], "clone_voice_1")
+        self.assertEqual(voice["aliyun_model"], "cosyvoice-v3-flash")
+        self.assertEqual(voice["aliyun_workspace_id"], "ws-test")
+        self.assertEqual(voice["aliyun_region"], "cn-beijing")
+
+    def test_aliyun_clone_metadata_does_not_enable_disabled_voice_config(self) -> None:
+        config = {
+            "voice_config": {
+                "mode": "off",
+                "provider": "",
+                "aliyun_voice": "clone_voice_1",
+                "aliyun_model": "cosyvoice-v1",
+                "aliyun_workspace_id": "",
+            }
+        }
+        with patch.object(
+            web_app.WorkflowWebHandler,
+            "_read_aliyun_voice_clones",
+            return_value=[
+                {
+                    "voice_id": "clone_voice_1",
+                    "target_model": "cosyvoice-v3-flash",
+                    "workspace_id": "ws-test",
+                    "region": "cn-beijing",
+                }
+            ],
+        ):
+            updated = web_app.WorkflowWebHandler._hydrate_aliyun_clone_metadata(config)
+        self.assertEqual(updated["voice_config"]["mode"], "off")
+        self.assertEqual(updated["voice_config"]["provider"], "")
+        self.assertEqual(updated["voice_config"]["aliyun_model"], "cosyvoice-v1")
+        self.assertEqual(updated["voice_config"]["aliyun_workspace_id"], "")
+
     def test_voxcpm2_timeout_does_not_switch_provider(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
