@@ -31,6 +31,8 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Verification on 2026-07-13: `python -m compileall -q my_workspace`, 157 semantic-contract tests, JSON validation, and the rejected real task `task_20260713_215010_*` step 20 regression all passed.
 - Production-output parsing accepts either one strict raw JSON object or one/more fenced `json` blocks, matching the staff output contract. It does not extract or repair JSON embedded in mixed prose.
 - Resuming an older task refreshes `video_memory_context` from the current `my_memory` files when that scope was enabled. Stale template text saved in an old `production_config_snapshot.json` is not reused.
+- `07_视频生成执行员` may use `generate_broll_clip` only for environment/object shots with no visible person or body part. Character names/IDs, identity locks, or visible body markers in B-roll fail employee-output validation; the employee must emit `generate_i2v_clip` with an explicit upstream character image.
+- The production compiler no longer promotes character B-roll to I2V. It raises an explicit classification error if invalid B-roll reaches compilation, so the backend does not silently change the employee's route or create a replacement creative route.
 
 ## Current UX Rules
 

@@ -427,6 +427,67 @@ class SemanticInputContractTests(unittest.TestCase):
 
         self.assertTrue(result["passed"], result["issues"])
 
+    def test_video_validator_rejects_character_broll_before_compilation(self) -> None:
+        previous_outputs = [
+            {
+                "agent": "06_分镜生图设计师",
+                "content": json.dumps(
+                    {
+                        "production_intents": {
+                            "image": [
+                                {
+                                    "intent": "generate_keyframe",
+                                    "intent_id": "keyframe_xiaomei",
+                                    "character_id": "character_xiaomei",
+                                }
+                            ]
+                        },
+                        "entity_requirements": {
+                            "characters": [
+                                {"character_id": "character_xiaomei", "name": "小美"}
+                            ]
+                        },
+                        "image_prompts": [
+                            {"asset_tag": "keyframe_xiaomei", "width": 480, "height": 848}
+                        ],
+                    },
+                    ensure_ascii=False,
+                ),
+            }
+        ]
+        payload = {
+            "production_intents": {
+                "video": [
+                    {
+                        "intent": "generate_broll_clip",
+                        "intent_id": "clip_named_character",
+                        "motion_plan": "小美手臂有节奏地前后摆动。",
+                    },
+                    {
+                        "intent": "generate_broll_clip",
+                        "intent_id": "clip_character_id",
+                        "character_id": "character_xiaomei",
+                        "motion_plan": "足部特写，跑鞋落地。",
+                    },
+                ]
+            },
+            "video_prompts": [
+                {"asset_tag": "clip_named_character", "width": 480, "height": 848},
+                {"asset_tag": "clip_character_id", "width": 480, "height": 848},
+            ],
+        }
+
+        result = validate_production_output(
+            {"agent": "07_视频生成执行员"},
+            json.dumps(payload, ensure_ascii=False),
+            build_requirement_lock("小美的田径训练日记，竖屏1分钟"),
+            previous_outputs,
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("clip_named_character" in issue for issue in result["issues"]), result["issues"])
+        self.assertTrue(any("clip_character_id" in issue for issue in result["issues"]), result["issues"])
+
     def test_requirement_guard_accepts_skipped_video_package_without_topic_terms(self) -> None:
         content = json.dumps(
             {
@@ -2694,7 +2755,7 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertIn("clip_001", item["depends_on"])
 
-    def test_broll_with_visible_character_is_promoted_to_i2v(self) -> None:
+    def test_broll_with_visible_character_fails_without_route_promotion(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             entity_path = root / "entities.json"
@@ -2747,20 +2808,14 @@ class SemanticInputContractTests(unittest.TestCase):
                 },
                 ensure_ascii=False,
             )
-            plan = compile_production_plan(
-                task_id="broll_character_sanitize_test",
-                route_content='{"production_type":"custom"}',
-                video_content=video_content,
-                entity_path=entity_path,
-                asset_library_path=library_path,
-            )
-            item = plan["compiled_payload"]["video_prompts"][0]
-            self.assertEqual(item["workflow_id"], "06_i2v_first_frame")
-            self.assertEqual(item["workflow_mode"], "i2v_first_frame")
-            self.assertEqual(item["character_id"], "corgi_king")
-            self.assertFalse(item.get("no_visible_characters", False))
-            self.assertEqual(item["input_bindings"]["input_base_image"]["from_job"], "broll_palace_keyframe")
-            self.assertIn("broll_palace_keyframe", {row["job_id"] for row in plan["compiled_payload"]["image_prompts"]})
+            with self.assertRaisesRegex(ValueError, "contains a visible character"):
+                compile_production_plan(
+                    task_id="broll_character_strict_test",
+                    route_content='{"production_type":"custom"}',
+                    video_content=video_content,
+                    entity_path=entity_path,
+                    asset_library_path=library_path,
+                )
 
     def test_broll_does_not_silently_strip_linked_character_name(self) -> None:
         source_content = json.dumps(

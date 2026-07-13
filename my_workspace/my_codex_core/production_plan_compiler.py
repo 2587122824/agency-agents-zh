@@ -1923,10 +1923,13 @@ def _compile_video_intents(
         intent = locked_intent
         parameter_overrides.extend(_tag_overrides(overrides, intent_id, "video"))
         prompt = sanitize_generation_prompt(intent.get("prompt") or intent.get("motion_plan") or intent.get("description") or intent.get("edit_note") or "")
-        broll_promoted_to_i2v = intent_name == "generate_broll_clip" and _video_intent_has_visible_character(intent, prompt)
-        broll_removed_character_terms: list[str] = []
-        if intent_name == "generate_broll_clip" and not broll_promoted_to_i2v:
-            prompt, broll_removed_character_terms = _sanitize_broll_character_prompt(
+        if intent_name == "generate_broll_clip":
+            if _video_intent_has_visible_character(intent, prompt):
+                raise ValueError(
+                    f"B-roll intent {intent_id} contains a visible character; "
+                    "the employee must classify it as generate_i2v_clip with an explicit upstream image"
+                )
+            _validate_broll_character_prompt(
                 prompt,
                 intent=intent,
                 global_context=global_context,
@@ -1937,12 +1940,7 @@ def _compile_video_intents(
         if not prompt:
             notes.append(f"video intent {intent_id} skipped because prompt is empty")
             continue
-        effective_intent_name = "generate_i2v_clip" if broll_promoted_to_i2v else intent_name
-        if broll_promoted_to_i2v:
-            workflow_id, workflow_mode = VIDEO_INTENT_ROUTES["generate_i2v_clip"]
-            notes.append(
-                f"video intent {intent_id} promoted from B-roll to image-to-video because it contains a visible character action"
-            )
+        effective_intent_name = intent_name
         entity_context = entity_context_for_ids(
             resolved_entities,
             character_id="" if effective_intent_name == "generate_broll_clip" else str(intent.get("character_id") or ""),
@@ -1989,7 +1987,7 @@ def _compile_video_intents(
             item["entity_context"] = entity_context
             _merge_compat_list(item, "reference_images", entity_context.get("reference_assets"))
         if effective_intent_name == "generate_broll_clip":
-            _apply_broll_no_character_policy(item, broll_removed_character_terms, notes)
+            _apply_broll_no_character_policy(item)
         attach_parameter_lock_metadata(
             item,
             global_context=global_context,
@@ -2016,7 +2014,6 @@ def _compile_video_intents(
                         image_jobs=image_jobs,
                         image_job_ids=image_job_ids,
                         notes=notes,
-                        promoted_from_broll=broll_promoted_to_i2v,
                     )
                     notes.append(
                         f"video intent {intent_id} generated first-frame keyframe dependency {generated} instead of using text-to-video"
@@ -2086,7 +2083,6 @@ def _ensure_video_keyframe_dependency(
     image_jobs: list[dict[str, Any]],
     image_job_ids: set[str],
     notes: list[str],
-    promoted_from_broll: bool = False,
 ) -> str:
     video_id = _safe_id(item.get("job_id") or item.get("id") or "")
     bound_source = _first_frame_binding_source(item)
@@ -2120,8 +2116,6 @@ def _ensure_video_keyframe_dependency(
         "scene_id": str(item.get("scene_id") or intent.get("scene_id") or intent.get("shot_id") or ""),
         "asset_tag": f"{video_id}_first_frame",
     }
-    if promoted_from_broll:
-        keyframe_intent["source_note"] = "promoted_from_character_broll"
     keyframe_item = _image_prompt_item(
         job_id=keyframe_id,
         prompt=str(keyframe_intent["prompt"]),
@@ -2148,13 +2142,13 @@ def _ensure_video_keyframe_dependency(
     return keyframe_id
 
 
-def _sanitize_broll_character_prompt(
+def _validate_broll_character_prompt(
     prompt: str,
     *,
     intent: dict[str, Any],
     global_context: dict[str, Any],
     resolved_entities: dict[str, Any],
-) -> tuple[str, list[str]]:
+) -> None:
     text = str(prompt or "").strip()
     character_terms = _broll_character_terms(intent, global_context, resolved_entities)
     leaked = [term for term in character_terms if term and re.search(re.escape(term), text, flags=re.IGNORECASE)]
@@ -2163,7 +2157,6 @@ def _sanitize_broll_character_prompt(
             "B-roll intent contains linked character terms but was not routed as a character shot: "
             + ", ".join(leaked)
         )
-    return text, []
 
 
 def _broll_character_terms(
@@ -2203,19 +2196,11 @@ def _broll_character_terms(
 
 def _apply_broll_no_character_policy(
     item: dict[str, Any],
-    removed_character_terms: list[str],
-    notes: list[str] | None = None,
 ) -> None:
     item["character_id"] = ""
     item["no_visible_characters"] = True
     item["broll_policy"] = "environment_only"
     item.pop("identity_image", None)
-    if removed_character_terms:
-        item["removed_character_terms"] = removed_character_terms
-        if notes is not None:
-            notes.append(
-                f"video intent {item.get('job_id')} sanitized B-roll character terms: {', '.join(removed_character_terms)}"
-            )
 
 
 def _apply_scene_base_no_character_policy(item: dict[str, Any], notes: list[str] | None = None) -> None:

@@ -46,7 +46,8 @@ def validate_production_output(
         _validate_audio(payloads, duration, issues, effective_lock, previous_outputs or [])
     elif agent.startswith("07_"):
         upstream_ids = _upstream_image_ids(previous_outputs or [])
-        _validate_videos(payloads, expected_work, upstream_ids, issues, effective_lock)
+        character_terms = _upstream_character_terms(previous_outputs or [])
+        _validate_videos(payloads, expected_work, upstream_ids, character_terms, issues, effective_lock)
     elif agent.startswith("22_"):
         _validate_package(payloads, duration, expected_delivery, issues)
 
@@ -249,6 +250,7 @@ def _validate_videos(
     payloads: list[dict[str, Any]],
     expected: tuple[int, int],
     upstream_ids: set[str],
+    character_terms: set[str],
     issues: list[str],
     requirement_lock: dict[str, Any],
 ) -> None:
@@ -291,6 +293,47 @@ def _validate_videos(
             for ref in _reference_ids(item):
                 if upstream_ids and ref not in upstream_ids:
                     issues.append(f"视频意图 {intent_id or index} 引用了不存在的上游图片：{ref}")
+        if intent == "generate_broll_clip":
+            prompt = " ".join(
+                str(item.get(key) or "")
+                for key in ("prompt", "motion_plan", "description", "shot_description")
+            )
+            constraints = item.get("constraints") if isinstance(item.get("constraints"), dict) else {}
+            leaked_terms = sorted(term for term in character_terms if term and term.lower() in prompt.lower())
+            visible_markers = (
+                "人物",
+                "主角",
+                "运动员",
+                "女孩",
+                "男孩",
+                "女性",
+                "男性",
+                "面部",
+                "脸部",
+                "眼睛",
+                "嘴唇",
+                "手臂",
+                "手部",
+                "脚部",
+                "足部",
+                "大腿",
+                "后背",
+                "肌肉",
+                "身体",
+                "出镜",
+            )
+            visible = (
+                bool(str(item.get("character_id") or "").strip())
+                or constraints.get("identity_lock") is True
+                or bool(leaked_terms)
+                or any(marker in prompt for marker in visible_markers)
+            )
+            if visible:
+                detail = f"（命中人物：{'、'.join(leaked_terms)}）" if leaked_terms else ""
+                issues.append(
+                    f"B-roll 意图 {intent_id or index} 包含可见人物或身体局部{detail}；"
+                    "必须由员工改为 generate_i2v_clip 并显式引用上游人物图片"
+                )
     for index, item in enumerate(prompts, 1):
         label = f"video_prompts[{index}]"
         mode_text = " ".join(str(item.get(key) or "") for key in ("video_task_mode", "workflow_id", "workflow_mode", "control_mode")).lower()
@@ -569,6 +612,31 @@ def _upstream_image_ids(previous_outputs: list[dict[str, str]]) -> set[str]:
                 if str(item.get(key) or "").strip():
                     values.add(str(item[key]).strip())
     return values
+
+
+def _upstream_character_terms(previous_outputs: list[dict[str, str]]) -> set[str]:
+    terms: set[str] = set()
+    for output in previous_outputs:
+        for payload in _json_objects(str(output.get("content") or "")):
+            _collect_character_terms(payload, terms)
+    return terms
+
+
+def _collect_character_terms(value: Any, terms: set[str], in_characters: bool = False) -> None:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            normalized_key = str(key).lower()
+            child_in_characters = in_characters or normalized_key == "characters"
+            if child_in_characters and normalized_key in {"character_id", "name", "alias"}:
+                text = str(child or "").strip()
+                if len(text) >= 2:
+                    terms.add(text)
+            elif child_in_characters and normalized_key == "aliases" and isinstance(child, list):
+                terms.update(str(item).strip() for item in child if len(str(item).strip()) >= 2)
+            _collect_character_terms(child, terms, child_in_characters)
+    elif isinstance(value, list):
+        for child in value:
+            _collect_character_terms(child, terms, in_characters)
 
 
 def _reference_ids(item: dict[str, Any]) -> list[str]:
