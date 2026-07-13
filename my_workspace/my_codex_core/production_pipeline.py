@@ -2567,6 +2567,27 @@ def _write_visual_review_contact_sheets(
         cap.release()
         return frame if ok else None
 
+    def load_image(path_value: Any):
+        path = Path(str(path_value or ""))
+        if not path.is_file():
+            return None
+        data = np.fromfile(str(path), dtype=np.uint8)
+        return cv2.imdecode(data, cv2.IMREAD_COLOR)
+
+    def make_tile(frame, title: str, route: str, issues: str):
+        tile = np.full((300, 220, 3), 245, dtype=np.uint8)
+        height, width = frame.shape[:2]
+        scale = min(210 / max(1, width), 240 / max(1, height))
+        preview = cv2.resize(frame, (max(1, int(width * scale)), max(1, int(height * scale))))
+        y = 5 + (240 - preview.shape[0]) // 2
+        x = 5 + (210 - preview.shape[1]) // 2
+        tile[y:y + preview.shape[0], x:x + preview.shape[1]] = preview
+        cv2.putText(tile, title[:30], (6, 258), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (20, 20, 20), 1, cv2.LINE_AA)
+        cv2.putText(tile, route[:30], (6, 275), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (70, 70, 70), 1, cv2.LINE_AA)
+        color = (20, 120, 20) if issues in {"passed", "reference"} else (30, 30, 190)
+        cv2.putText(tile, issues[:32], (6, 292), cv2.FONT_HERSHEY_SIMPLEX, 0.32, color, 1, cv2.LINE_AA)
+        return tile
+
     output_files: list[str] = []
     for media_type, filename in (
         ("image", "keyframes_contact_sheet.jpg"),
@@ -2582,18 +2603,11 @@ def _write_visual_review_contact_sheets(
             job = jobs_by_id.get(job_id, {})
             route = str(job.get("workflow_mode") or job.get("mode") or "")
             issues = ",".join(dict.fromkeys(issue_codes.get(job_id, []))) or "passed"
-            tile = np.full((300, 220, 3), 245, dtype=np.uint8)
-            height, width = frame.shape[:2]
-            scale = min(210 / max(1, width), 240 / max(1, height))
-            preview = cv2.resize(frame, (max(1, int(width * scale)), max(1, int(height * scale))))
-            y = 5 + (240 - preview.shape[0]) // 2
-            x = 5 + (210 - preview.shape[1]) // 2
-            tile[y:y + preview.shape[0], x:x + preview.shape[1]] = preview
-            cv2.putText(tile, job_id[:30], (6, 258), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (20, 20, 20), 1, cv2.LINE_AA)
-            cv2.putText(tile, route[:30], (6, 275), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (70, 70, 70), 1, cv2.LINE_AA)
-            color = (20, 120, 20) if issues == "passed" else (30, 30, 190)
-            cv2.putText(tile, issues[:32], (6, 292), cv2.FONT_HERSHEY_SIMPLEX, 0.32, color, 1, cv2.LINE_AA)
-            tiles.append(tile)
+            if media_type == "image" and str(job.get("character_id") or "").strip():
+                reference = load_image(job.get("input_identity_image") or job.get("identity_image"))
+                if reference is not None:
+                    tiles.append(make_tile(reference, f"REF {job_id}", "identity reference", "reference"))
+            tiles.append(make_tile(frame, job_id, route, issues))
         if not tiles:
             continue
         columns = min(4, len(tiles))
