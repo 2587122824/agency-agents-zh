@@ -551,14 +551,22 @@ INDEX_HTML = r"""<!doctype html>
       display: grid;
       grid-template-columns: minmax(420px, 1fr) 420px;
       gap: 18px;
-      align-items: start;
+      align-items: stretch;
+      min-height: 420px;
     }
     .audio-debug-compose {
       display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
       gap: 10px;
+      min-height: 0;
+    }
+    .audio-debug-compose label {
+      grid-template-rows: auto minmax(0, 1fr);
+      min-height: 0;
     }
     .audio-debug-layout textarea {
-      min-height: 220px;
+      min-height: 0;
+      height: 100%;
       font-size: 15px;
       background: #fcfcfd;
     }
@@ -574,14 +582,15 @@ INDEX_HTML = r"""<!doctype html>
     }
     .audio-debug-side {
       display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
       gap: 12px;
-      align-content: start;
+      min-height: 0;
     }
     .audio-debug-result {
       display: grid;
       gap: 8px;
       align-content: start;
-      max-height: 420px;
+      min-height: 0;
       overflow: auto;
       padding-right: 2px;
     }
@@ -694,6 +703,13 @@ INDEX_HTML = r"""<!doctype html>
     @media (max-width: 1100px) {
       .audio-debug-layout {
         grid-template-columns: 1fr;
+        min-height: 0;
+      }
+      .audio-debug-layout textarea {
+        min-height: 220px;
+      }
+      .audio-debug-result {
+        max-height: 420px;
       }
     }
     @media (max-width: 640px) {
