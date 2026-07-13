@@ -48,6 +48,7 @@ from my_codex_core.production_pipeline import (  # noqa: E402
     _run_local_tts_adapter,
     _run_comfyui_adapter_with_quality_gate,
     _required_workflow_slots,
+    retry_production_job,
     run_auto_production,
 )
 from my_codex_core.production_output_validator import validate_production_output  # noqa: E402
@@ -4555,6 +4556,148 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertTrue(raw["has_api_key"])
         self.assertEqual(redacted["api_key"], "")
         self.assertTrue(redacted["has_api_key"])
+
+    def test_current_system_production_config_keeps_audio_off_and_current_i2v_slot(self) -> None:
+        current_config = {
+            "mode": "comfy_full",
+            "voice_config": {"mode": "off", "provider": ""},
+            "compose_config": {
+                "visual_provider": "runninghub",
+                "workflow_library": [
+                    {
+                        "id": "06_i2v_first_frame",
+                        "endpoint": "/run/workflow/current-system-i2v",
+                        "node_info_list_json": "[]",
+                    }
+                ],
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            config_path = Path(tmp) / "runtime_production.json"
+            with patch.object(web_app, "RUNTIME_PRODUCTION_CONFIG_PATH", config_path), patch.object(
+                web_app.WorkflowWebHandler,
+                "_read_runtime_comfy_config",
+                return_value={
+                    "api_key": "runninghub-secret",
+                    "base_url": "https://www.runninghub.cn/openapi/v2",
+                    "workflow_library": [
+                        {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/stale-runtime-i2v"}
+                    ],
+                },
+            ), patch.object(
+                web_app.WorkflowWebHandler,
+                "_read_runtime_voice_config",
+                return_value={"api_key": "dashscope-secret", "has_api_key": True},
+            ):
+                web_app.WorkflowWebHandler._save_runtime_production_config(
+                    {"production_config": {**current_config, "aliyun_api_key": "must-not-persist"}}
+                )
+                resolved = web_app.WorkflowWebHandler._current_system_production_config()
+                persisted_text = config_path.read_text(encoding="utf-8")
+
+        self.assertNotIn("must-not-persist", persisted_text)
+        self.assertEqual(resolved["voice_config"], {"mode": "off", "provider": ""})
+        self.assertEqual(
+            resolved["compose_config"]["workflow_library"][0]["endpoint"],
+            "/run/workflow/current-system-i2v",
+        )
+        self.assertEqual(resolved["compose_config"]["api_key"], "runninghub-secret")
+
+    def test_current_system_config_replaces_old_task_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            task_dir = workspace / "my_task_output" / "task_current_config"
+            task_dir.mkdir(parents=True)
+            (task_dir / "production_config_snapshot.json").write_text(
+                json.dumps(
+                    {
+                        "mode": "comfy_full",
+                        "voice_config": {"mode": "aliyun_cosyvoice", "provider": "aliyun_cosyvoice"},
+                        "compose_config": {"workflow_endpoint": "/run/workflow/old-task"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+            current = {
+                "mode": "package_only",
+                "voice_config": {"mode": "off", "provider": ""},
+                "compose_config": {"workflow_endpoint": "/run/workflow/current-system"},
+            }
+
+            restored = WorkflowEngine(workspace)._restore_production_config(task_dir, current)
+
+        self.assertEqual(restored, current)
+        self.assertEqual(restored["voice_config"]["mode"], "off")
+        self.assertEqual(restored["compose_config"]["workflow_endpoint"], "/run/workflow/current-system")
+
+    def test_package_only_rejects_production_retry_instead_of_enabling_comfy_full(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "package_only.*does not allow production retries"):
+                retry_production_job(
+                    Path(tmp),
+                    "material",
+                    {
+                        "mode": "package_only",
+                        "voice_config": {"mode": "off", "provider": ""},
+                        "compose_config": {"workflow_library": []},
+                    },
+                )
+
+    def test_retry_request_cannot_override_package_only_system_config(self) -> None:
+        handler = web_app.WorkflowWebHandler.__new__(web_app.WorkflowWebHandler)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            handler,
+            "_safe_task_dir",
+            return_value=Path(tmp),
+        ), patch.object(
+            handler,
+            "_current_system_production_config",
+            return_value={
+                "mode": "package_only",
+                "voice_config": {"mode": "off", "provider": ""},
+                "compose_config": {"workflow_library": []},
+            },
+        ):
+            with self.assertRaisesRegex(ValueError, "package_only"):
+                handler._retry_production_job(
+                    {
+                        "task": "task_test",
+                        "job": "local_tts",
+                        "production_config": {
+                            "mode": "comfy_full",
+                            "voice_config": {
+                                "mode": "aliyun_cosyvoice",
+                                "provider": "aliyun_cosyvoice",
+                            },
+                        },
+                    }
+                )
+
+    def test_task_comfy_debug_cannot_bypass_package_only_system_config(self) -> None:
+        handler = web_app.WorkflowWebHandler.__new__(web_app.WorkflowWebHandler)
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            handler,
+            "_safe_task_dir",
+            return_value=Path(tmp),
+        ), patch.object(
+            handler,
+            "_current_system_production_config",
+            return_value={
+                "mode": "package_only",
+                "voice_config": {"mode": "off", "provider": ""},
+                "compose_config": {"workflow_library": []},
+            },
+        ):
+            with self.assertRaisesRegex(ValueError, "package_only"):
+                handler._start_task_comfy_debug(
+                    {
+                        "task": "task_test",
+                        "item_id": "clip_001",
+                        "workflow_library": [
+                            {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/request-override"}
+                        ],
+                    }
+                )
 
     def test_runtime_voice_clone_metadata_reaches_cosyvoice_request(self) -> None:
         production_config = {

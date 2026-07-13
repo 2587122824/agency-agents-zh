@@ -83,6 +83,7 @@ RUNTIME_STATE_ROOT = WORKSPACE_ROOT.parent / "tmp"
 RUNTIME_MODEL_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_model_config.json"
 RUNTIME_COMFY_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_comfy_config.json"
 RUNTIME_VOICE_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_voice_config.json"
+RUNTIME_PRODUCTION_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_runtime_production_config.json"
 PERSONAL_KNOWLEDGE_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_personal_knowledge_config.json"
 ALIYUN_VOICE_CLONES_PATH = RUNTIME_STATE_ROOT / "web_aliyun_voice_clones.json"
 OSS_VOICE_UPLOAD_CONFIG_PATH = RUNTIME_STATE_ROOT / "web_oss_voice_upload_config.json"
@@ -6188,6 +6189,17 @@ INDEX_HTML = r"""<!doctype html>
       syncRuntimeVoiceConfig({ timeoutMs: 8000 }).catch((err) => {
         console.warn('runtime voice config sync failed', err);
       });
+    }
+
+    async function syncRuntimeProductionConfig(productionConfig, options = {}) {
+      if (!productionConfig || typeof productionConfig !== 'object') {
+        throw new Error('当前系统生产配置无效');
+      }
+      return apiWithTimeout('/api/runtime-production-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ production_config: productionConfig }),
+      }, options.timeoutMs || 8000);
     }
 
     async function handleRuntimeModelConfigSave() {
@@ -13717,6 +13729,9 @@ INDEX_HTML = r"""<!doctype html>
       if (els.voiceMode.value === 'aliyun_cosyvoice' && !(els.aliyunTtsApiKey.value.trim() || els.aliyunCloneApiKey?.value?.trim() || hasSavedRuntimeVoiceApiKey())) {
         throw new Error('请先在系统配置填写阿里云 CosyVoice API Key');
       }
+      if (els.voiceMode.value === 'aliyun_cosyvoice') {
+        await syncRuntimeVoiceConfig({ requireComplete: true, timeoutMs: 12000 });
+      }
       const imageConfig = {
         tool: 'prompt_only',
         positive_prompt: '',
@@ -13808,6 +13823,8 @@ INDEX_HTML = r"""<!doctype html>
           min_file_size_kb: 64,
         },
       };
+      await syncRuntimeComfyConfig({ timeoutMs: 12000 });
+      await syncRuntimeProductionConfig(productionConfig, { timeoutMs: 12000 });
       return { imageConfig, videoConfig, productionConfig };
     }
 
@@ -15600,6 +15617,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._save_runtime_voice_config(payload))
                 return
 
+            if parsed.path == "/api/runtime-production-config":
+                self._send_json(self._save_runtime_production_config(payload))
+                return
+
             if parsed.path == "/api/test-comfy-mcp":
                 self._send_json(self._test_comfy_mcp(payload))
                 return
@@ -15678,30 +15699,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             if inherit_task:
                 user_input = self._append_inherited_task(user_input, inherit_task, inherit_mode)
             user_input = self._append_linked_assets(user_input, payload.get("linked_assets"))
-            production_config = payload.get("production_config") or {}
-            if memory_scope == "video_output" and isinstance(production_config, dict):
+            production_config = self._current_system_production_config()
+            if memory_scope == "video_output":
                 production_config["video_memory_context"] = self._long_term_memory_context()
-            if isinstance(production_config, dict):
-                production_image_config = production_config.get("image_config")
-                if isinstance(production_image_config, dict):
-                    production_image_config["api_key"] = str(payload.get("image_api_key") or "").strip()
-                    production_image_config["base_url"] = str(payload.get("image_base_url") or "").strip()
-                production_video_config = production_config.get("video_config")
-                if isinstance(production_video_config, dict):
-                    production_video_config["api_key"] = str(payload.get("video_api_key") or "").strip()
-                    production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
-                production_compose_config = production_config.get("compose_config")
-                if isinstance(production_compose_config, dict):
-                    comfy_api_key = str(payload.get("comfy_api_key") or "").strip()
-                    comfy_base_url = str(payload.get("comfy_base_url") or "").strip()
-                    if comfy_api_key:
-                        production_compose_config["api_key"] = comfy_api_key
-                    if comfy_base_url:
-                        production_compose_config["base_url"] = comfy_base_url
-                production_config = self._apply_runtime_comfy_config(production_config, payload)
-                production_config = self._apply_runtime_voice_config(production_config)
-                production_config = self._hydrate_aliyun_clone_metadata(production_config)
-                production_config = self._ensure_voice_config_for_requirement(production_config, user_input)
+            production_config = self._ensure_voice_config_for_requirement(production_config, user_input)
             image_config = payload.get("image_config") or {}
             if isinstance(image_config, dict) and str(image_config.get("positive_prompt") or "").strip():
                 user_input = self._append_image_config(user_input, image_config)
@@ -15767,6 +15768,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         runtime_model_config = self._read_runtime_model_config()
         runtime_comfy_config = self._read_runtime_comfy_config(redact=True)
         runtime_voice_config = self._read_runtime_voice_config(redact=True)
+        runtime_production_config = self._read_runtime_production_config()
         return {
             "workflows": workflows,
             "staff": staff,
@@ -15781,6 +15783,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "runtime_comfy_saved": bool(runtime_comfy_config.get("has_api_key") or runtime_comfy_config.get("workflow_library")),
             "runtime_voice_config": runtime_voice_config,
             "runtime_voice_saved": bool(runtime_voice_config.get("has_api_key")),
+            "runtime_production_config": runtime_production_config,
             "personal_knowledge_config": self._read_personal_knowledge_config(),
             "aliyun_voice_clones": self._read_aliyun_voice_clones(),
         }
@@ -16047,6 +16050,56 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             raise ValueError("runtime voice credentials may only be saved for aliyun_cosyvoice")
         self._write_runtime_voice_config(payload)
         return self._read_runtime_voice_config(redact=True)
+
+    @staticmethod
+    def _sanitize_runtime_production_config(value):
+        secret_keys = {"api_key", "access_token", "token", "password", "secret", "authorization"}
+
+        def is_secret_key(key: object) -> bool:
+            normalized = str(key).strip().lower()
+            return normalized in secret_keys or normalized.endswith("_api_key") or normalized.endswith("_token")
+
+        if isinstance(value, dict):
+            return {
+                str(key): WorkflowWebHandler._sanitize_runtime_production_config(item)
+                for key, item in value.items()
+                if not is_secret_key(key)
+            }
+        if isinstance(value, list):
+            return [WorkflowWebHandler._sanitize_runtime_production_config(item) for item in value]
+        return value
+
+    @staticmethod
+    def _read_runtime_production_config() -> dict:
+        try:
+            data = json.loads(RUNTIME_PRODUCTION_CONFIG_PATH.read_text(encoding="utf-8-sig")) if RUNTIME_PRODUCTION_CONFIG_PATH.is_file() else {}
+        except Exception:
+            data = {}
+        return data if isinstance(data, dict) else {}
+
+    @classmethod
+    def _save_runtime_production_config(cls, payload: dict) -> dict:
+        if not isinstance(payload, dict):
+            raise ValueError("production config must be a JSON object")
+        config = payload.get("production_config") if isinstance(payload.get("production_config"), dict) else payload
+        mode = str(config.get("mode") or "").strip()
+        if not mode:
+            raise ValueError("production mode is required")
+        sanitized = cls._sanitize_runtime_production_config(config)
+        sanitized["updated_at"] = time.time()
+        RUNTIME_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+        RUNTIME_PRODUCTION_CONFIG_PATH.write_text(json.dumps(sanitized, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        return sanitized
+
+    @classmethod
+    def _current_system_production_config(cls) -> dict:
+        production_config = cls._read_runtime_production_config()
+        if not production_config:
+            raise ValueError("system production config is not saved; save the current system config before running")
+        production_config.pop("updated_at", None)
+        production_config = cls._apply_runtime_comfy_config(production_config, {})
+        production_config = cls._apply_runtime_voice_config(production_config)
+        return cls._hydrate_aliyun_clone_metadata(production_config)
 
     @classmethod
     def _apply_runtime_voice_config(cls, production_config: dict) -> dict:
@@ -19037,6 +19090,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not task_name or not item_id:
             raise ValueError("task and item_id are required")
         task_dir = self._safe_task_dir(task_name)
+        production_config = self._current_system_production_config()
+        production_mode = str(production_config.get("mode") or "off").strip()
+        if production_mode in {"", "off", "package_only"}:
+            raise ValueError(f"当前系统生产模式为 {production_mode or 'off'}，不会执行首帧视频或其他 ComfyUI 任务")
+        compose_config = production_config.get("compose_config") if isinstance(production_config.get("compose_config"), dict) else {}
+        runtime_payload = dict(payload)
+        runtime_payload["api_key"] = str(compose_config.get("api_key") or "").strip()
+        runtime_payload["base_url"] = str(compose_config.get("base_url") or "").strip()
+        runtime_payload["workflow_library"] = compose_config.get("workflow_library") if isinstance(compose_config.get("workflow_library"), list) else []
         active_job = self._active_job_for_task(task_name, task_dir)
         if str((active_job or {}).get("status") or "").lower() in {"queued", "running"}:
             raise ValueError("Main task is still running; ComfyUI debug queue is locked until the current production step finishes.")
@@ -19053,7 +19115,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if item_id != current_id and not can_rerun:
             raise ValueError("请按 ComfyUI 调试队列顺序运行当前项")
         if item.get("group"):
-            return self._start_task_comfy_debug_group(task_dir, status, item, payload)
+            return self._start_task_comfy_debug_group(task_dir, status, item, runtime_payload)
         debug_payload = {
             "workflows": [item.get("workflow_id")],
             "workflow_mode": item.get("workflow_mode") or "",
@@ -19063,9 +19125,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "middle_frame_image": self._resolve_task_comfy_debug_reference(task_dir, status, item.get("middle_frame_image") or ""),
             "last_frame_image": self._resolve_task_comfy_debug_reference(task_dir, status, item.get("last_frame_image") or ""),
             "reference_images": self._resolve_task_comfy_debug_references(task_dir, status, item.get("reference_images") or []),
-            "api_key": str(payload.get("api_key") or "").strip(),
-            "base_url": str(payload.get("base_url") or "").strip(),
-            "workflow_library": payload.get("workflow_library") if isinstance(payload.get("workflow_library"), list) else [],
+            "api_key": runtime_payload["api_key"],
+            "base_url": runtime_payload["base_url"],
+            "workflow_library": runtime_payload["workflow_library"],
             "output_task": task_name,
             "output_subdir": "comfyui/manual_debug",
         }
@@ -20677,35 +20739,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _resume_task(self, payload: dict) -> dict:
         task = str(payload.get("task") or "").strip()
         task_dir = self._safe_task_dir(task)
-        production_config = payload.get("production_config") or {}
-        if isinstance(production_config, dict):
-            production_image_config = production_config.get("image_config")
-            if isinstance(production_image_config, dict):
-                image_api_key = str(payload.get("image_api_key") or "").strip()
-                image_base_url = str(payload.get("image_base_url") or "").strip()
-                if image_api_key:
-                    production_image_config["api_key"] = image_api_key
-                if image_base_url:
-                    production_image_config["base_url"] = image_base_url
-            production_video_config = production_config.get("video_config")
-            if isinstance(production_video_config, dict):
-                video_api_key = str(payload.get("video_api_key") or "").strip()
-                video_base_url = str(payload.get("video_base_url") or "").strip()
-                if video_api_key:
-                    production_video_config["api_key"] = video_api_key
-                if video_base_url:
-                    production_video_config["base_url"] = video_base_url
-            production_compose_config = production_config.get("compose_config")
-            if isinstance(production_compose_config, dict):
-                comfy_api_key = str(payload.get("comfy_api_key") or "").strip()
-                comfy_base_url = str(payload.get("comfy_base_url") or "").strip()
-                if comfy_api_key:
-                    production_compose_config["api_key"] = comfy_api_key
-                if comfy_base_url:
-                    production_compose_config["base_url"] = comfy_base_url
-            production_config = self._apply_runtime_comfy_config(production_config, payload)
-            production_config = self._apply_runtime_voice_config(production_config)
-            production_config = self._hydrate_aliyun_clone_metadata(production_config)
+        production_config = self._current_system_production_config()
         summary = {}
         summary_path = task_dir / "run_summary.json"
         if summary_path.exists():
@@ -20723,7 +20757,6 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             retry_payload = dict(payload)
             retry_payload["task"] = task
             retry_payload["job"] = production_resume_job
-            retry_payload["production_config"] = production_config if isinstance(production_config, dict) else {}
             return self._retry_production_job(retry_payload)
         runtime_model = self._resolve_runtime_model_request(payload)
         self._ensure_runtime_model_configured(runtime_model)
@@ -20770,27 +20803,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not retry_job:
             raise ValueError("job or job_id is required")
         task_dir = self._safe_task_dir(task)
-        production_config = payload.get("production_config") or {}
-        if isinstance(production_config, dict):
-            production_image_config = production_config.get("image_config")
-            if isinstance(production_image_config, dict):
-                production_image_config["api_key"] = str(payload.get("image_api_key") or "").strip()
-                production_image_config["base_url"] = str(payload.get("image_base_url") or "").strip()
-            production_video_config = production_config.get("video_config")
-            if isinstance(production_video_config, dict):
-                production_video_config["api_key"] = str(payload.get("video_api_key") or "").strip()
-                production_video_config["base_url"] = str(payload.get("video_base_url") or "").strip()
-            production_compose_config = production_config.get("compose_config")
-            if isinstance(production_compose_config, dict):
-                comfy_api_key = str(payload.get("comfy_api_key") or "").strip()
-                comfy_base_url = str(payload.get("comfy_base_url") or "").strip()
-                if comfy_api_key:
-                    production_compose_config["api_key"] = comfy_api_key
-                if comfy_base_url:
-                    production_compose_config["base_url"] = comfy_base_url
-            production_config = self._apply_runtime_comfy_config(production_config, payload)
-            production_config = self._apply_runtime_voice_config(production_config)
-            production_config = self._hydrate_aliyun_clone_metadata(production_config)
+        production_config = self._current_system_production_config()
+        production_mode = str(production_config.get("mode") or "off").strip()
+        if production_mode in {"", "off", "package_only"}:
+            raise ValueError(f"当前系统生产模式为 {production_mode or 'off'}，不会执行音频、首帧视频或其他生产重试")
 
         summary = {}
         summary_path = task_dir / "run_summary.json"

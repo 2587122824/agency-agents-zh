@@ -1755,7 +1755,9 @@ class WorkflowEngine:
                 saved = loaded if isinstance(loaded, dict) else {}
             except (json.JSONDecodeError, OSError):
                 saved = {}
-        merged = self._deep_merge_dicts(saved, incoming if isinstance(incoming, dict) else {})
+        # A complete incoming config is the current system authority. Saved task
+        # snapshots are audit records and must not restore old voice/workflow values.
+        merged = dict(incoming) if isinstance(incoming, dict) and incoming else saved
         if "video_memory_context" in saved or (
             isinstance(incoming, dict) and "video_memory_context" in incoming
         ):

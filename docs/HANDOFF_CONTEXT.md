@@ -2,6 +2,15 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 System Production Config Authority
+
+- The backend now persists a secret-free current system production config at `tmp/web_runtime_production_config.json`. RunningHub and CosyVoice credentials remain in their dedicated runtime credential files and are injected only when the current config explicitly selects those providers.
+- New tasks, resume, production retry, and task-scoped ComfyUI debug now use the backend current system config. Execution requests can no longer replace voice mode, production mode, workflow slots, endpoints, or node mappings with request-body values.
+- Old task snapshots and manifests are audit records only. Resume/retry no longer merges their old voice/workflow values into the current configuration.
+- Removed the material-retry behavior that changed `off` or `package_only` into `comfy_full`. Production retry and task-scoped ComfyUI debug now fail explicitly in `off`/`package_only`, so disabled audio and disabled visual production stay disabled.
+- The frontend waits for RunningHub/CosyVoice credential persistence, then saves the complete current production config before starting, resuming, or retrying work.
+- Verification: 186 semantic-contract tests, embedded frontend JavaScript syntax validation, `python -m compileall -q my_workspace`, and `git diff --check` passed.
+
 ## 2026-07-14 Strict Production Input Contracts
 
 - Production packaging now requires non-empty outputs from employees `01_`, `06_`, `07_`, `20_`, and `22_`. Missing outputs fail explicitly instead of creating placeholder prompt, voice, subtitle, or edit-plan files.

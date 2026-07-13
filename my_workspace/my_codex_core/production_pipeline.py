@@ -882,18 +882,14 @@ def retry_production_job(
     }.get(retry_job, requested_job_id)
 
     manifest_path = task_dir / "production_manifest.json"
-    saved_config = _read_json_object(task_dir / "production_config_snapshot.json")
-    config = _deep_merge_config(saved_config, production_config if isinstance(production_config, dict) else {})
+    config = dict(production_config) if isinstance(production_config, dict) else {}
+    configured_mode = str(config.get("mode") or "").strip()
+    if configured_mode in {"", "off", "package_only"}:
+        raise ValueError(f"current system production mode '{configured_mode or 'off'}' does not allow production retries")
     _write_production_config_snapshot(task_dir, config)
     if not manifest_path.is_file():
         if retry_job != "material":
             raise FileNotFoundError("production_manifest.json")
-        # A task may have completed employee planning while auto production was
-        # temporarily off. Material retry should compile a package from those
-        # persisted outputs instead of requiring a nonexistent manifest.
-        config = dict(config)
-        if str(config.get("mode") or "").strip() in {"", "off", "package_only"}:
-            config["mode"] = "comfy_full"
         step_outputs = _load_task_step_outputs(task_dir)
         if not step_outputs:
             raise ValueError("cannot bootstrap production manifest: employee outputs are missing")
@@ -1414,20 +1410,7 @@ def _update_run_summary_production_status(task_dir: Path, manifest: dict[str, An
 
 def _retry_mode(manifest: dict[str, Any], config: dict[str, Any], requested_job: str = "") -> str:
     configured = str(config.get("mode") or "").strip()
-    saved = str(manifest.get("mode") or "").strip()
-    composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
-    saved_execution = str(composition.get("execution_mode") or "").strip()
-    if str(requested_job or "").strip().lower() == "material":
-        material_modes = {"api_ready", "comfy_full"}
-        if configured in material_modes:
-            return configured
-        if saved in material_modes:
-            return saved
-        if saved_execution in material_modes:
-            return saved_execution
-    if configured and configured != "off":
-        return configured
-    return str(saved or configured or "off").strip()
+    return configured or "off"
 
 
 def _refresh_visual_plan_for_retry(
@@ -1524,23 +1507,11 @@ def _refresh_visual_plan_for_retry(
 
 
 def _retry_section_config(manifest: dict[str, Any], config: dict[str, Any], config_key: str, manifest_key: str) -> dict[str, Any]:
-    base = manifest.get(manifest_key) if isinstance(manifest.get(manifest_key), dict) else {}
-    override = config.get(config_key) if isinstance(config.get(config_key), dict) else {}
-    merged = dict(base)
-    merged.update({key: value for key, value in override.items() if value not in (None, "")})
-    return merged
+    return dict(config.get(config_key)) if isinstance(config.get(config_key), dict) else {}
 
 
 def _retry_quality_config(manifest: dict[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    override = config.get("quality_config") if isinstance(config.get("quality_config"), dict) else {}
-    composition = manifest.get("composition") if isinstance(manifest.get("composition"), dict) else {}
-    base = {
-        "enabled": composition.get("quality_gate_enabled", True),
-        "min_score": composition.get("quality_min_score", 70),
-        "max_attempts": composition.get("quality_max_attempts", 2),
-    }
-    base.update({key: value for key, value in override.items() if value not in (None, "")})
-    return base
+    return dict(config.get("quality_config")) if isinstance(config.get("quality_config"), dict) else {}
 
 
 def _record_unconfigured_multi_character_slots(
