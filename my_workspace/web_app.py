@@ -3468,25 +3468,28 @@ INDEX_HTML = r"""<!doctype html>
               </label>
               <label>音色
                 <select id="aliyunTtsVoice">
-                  <option value="longxiaochun" selected>龙小淳：自然女声</option>
-                  <option value="longxiaoxia">龙小夏：清亮女声</option>
-                  <option value="longxiaocheng">龙小诚：稳重男声</option>
-                  <option value="longxiaobai">龙小白：亲和女声</option>
-                  <option value="longlaotie">龙老铁：东北男声</option>
-                  <option value="longshu">龙书：沉稳叙述</option>
-                  <option value="longshuo">龙硕：专业解说</option>
-                  <option value="longtong">龙彤：温和女声</option>
-                  <option value="longwan">龙婉：温柔女声</option>
-                  <option value="longcheng">龙橙：自然男声</option>
-                  <option value="longhua">龙华：成熟男声</option>
-                  <option value="longjing">龙婧：清晰女声</option>
-                  <option value="longmiao">龙妙：亲切女声</option>
-                  <option value="longyue">龙悦：朗读女声</option>
-                  <option value="longyuan">龙媛：有声书女声</option>
-                  <option value="longfei">龙飞：播报男声</option>
-                  <option value="longxiang">龙祥：磁性男声</option>
-                  <option value="loongstella">Stella：中英双语女声</option>
-                  <option value="loongbella">Bella：中文女声</option>
+                  <optgroup label="内置预设音色">
+                    <option value="longxiaochun" selected>龙小淳：自然女声</option>
+                    <option value="longxiaoxia">龙小夏：清亮女声</option>
+                    <option value="longxiaocheng">龙小诚：稳重男声</option>
+                    <option value="longxiaobai">龙小白：亲和女声</option>
+                    <option value="longlaotie">龙老铁：东北男声</option>
+                    <option value="longshu">龙书：沉稳叙述</option>
+                    <option value="longshuo">龙硕：专业解说</option>
+                    <option value="longtong">龙彤：温和女声</option>
+                    <option value="longwan">龙婉：温柔女声</option>
+                    <option value="longcheng">龙橙：自然男声</option>
+                    <option value="longhua">龙华：成熟男声</option>
+                    <option value="longjing">龙婧：清晰女声</option>
+                    <option value="longmiao">龙妙：亲切女声</option>
+                    <option value="longyue">龙悦：朗读女声</option>
+                    <option value="longyuan">龙媛：有声书女声</option>
+                    <option value="longfei">龙飞：播报男声</option>
+                    <option value="longxiang">龙祥：磁性男声</option>
+                    <option value="loongstella">Stella：中英双语女声</option>
+                    <option value="loongbella">Bella：中文女声</option>
+                  </optgroup>
+                  <optgroup id="aliyunCloneVoiceTtsGroup" label="我的复刻音色"></optgroup>
                 </select>
               </label>
               <label>音频格式
@@ -3621,16 +3624,16 @@ INDEX_HTML = r"""<!doctype html>
                   <label>本地个人音频
                     <input id="aliyunCloneLocalAudioFile" type="file" accept="audio/wav,audio/mpeg,audio/mp4,audio/flac,audio/ogg,.wav,.mp3,.m4a,.flac,.ogg" />
                   </label>
-                  <label>公网基地址
+                  <label hidden>公网基地址
                     <input id="aliyunVoicePublicBaseUrl" autocomplete="off" spellcheck="false" placeholder="可选：你的域名；留空则使用后端 OSS 临时上传" />
                   </label>
-                  <label class="audio-debug-field-wide">参考音频公网 URL
+                  <label class="audio-debug-field-wide" hidden>参考音频公网 URL
                     <input id="aliyunCloneAudioUrl" autocomplete="off" spellcheck="false" placeholder="https://.../sample.wav" />
                   </label>
                 </div>
                 <div class="audio-debug-note" id="aliyunCloneLocalAudioHint">本地个人音频会保存到本机；如果设置了公网基地址会拼出 URL，否则会使用后端 OSS 私有桶生成临时签名 URL。</div>
               </div>
-              <div class="audio-debug-clone-section">
+              <div class="audio-debug-clone-section" hidden>
                 <div class="audio-debug-clone-section-title">
                   <strong>阿里云复刻配置</strong>
                 </div>
@@ -3683,7 +3686,7 @@ INDEX_HTML = r"""<!doctype html>
                   <span class="status" id="aliyunCloneStatus">未创建</span>
                 </div>
               </div>
-              <div class="audio-debug-clone-section audio-debug-saved-voice">
+              <div class="audio-debug-clone-section audio-debug-saved-voice" hidden>
                 <div class="audio-debug-clone-section-title">
                   <strong>使用复刻音色</strong>
                 </div>
@@ -6531,7 +6534,8 @@ INDEX_HTML = r"""<!doctype html>
       els.aliyunTtsWorkspaceId.value = settings.aliyunTtsWorkspaceId || settings.aliyunCloneWorkspaceId || '';
       els.aliyunTtsEndpoint.value = settings.aliyunTtsEndpoint || '';
       setIfExists(els.aliyunTtsModel, settings.aliyunTtsModel || 'cosyvoice-v1');
-      setIfExists(els.aliyunTtsVoice, normalizeAliyunTtsVoice(settings.aliyunTtsVoice));
+      renderAliyunCloneTtsOptions(settings.aliyunTtsVoice || '');
+      setIfExists(els.aliyunTtsVoice, [...(els.aliyunTtsVoice?.options || [])].some(option => option.value === settings.aliyunTtsVoice) ? settings.aliyunTtsVoice : normalizeAliyunTtsVoice(settings.aliyunTtsVoice));
       setIfExists(els.aliyunTtsFormat, settings.aliyunTtsFormat || 'wav');
       setIfExists(els.aliyunTtsSampleRate, settings.aliyunTtsSampleRate || '24000');
       els.aliyunTtsVolume.value = settings.aliyunTtsVolume || '';
@@ -8690,8 +8694,11 @@ INDEX_HTML = r"""<!doctype html>
 
     function buildVoiceConfig(referenceAudio = '') {
       const customAliyunVoice = String(els.aliyunCustomVoiceId?.value || '').trim();
-      const isCustomAliyunVoice = Boolean(customAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice');
-      const selectedClone = selectedAliyunClone();
+      const selectedTtsClone = selectedAliyunTtsClone();
+      const selectedClone = selectedTtsClone || selectedAliyunClone();
+      const selectedAliyunVoiceValue = String(els.aliyunTtsVoice?.value || '').trim();
+      const effectiveCustomAliyunVoice = selectedTtsClone?.voice_id || (customAliyunVoice && selectedAliyunVoiceValue === customAliyunVoice ? customAliyunVoice : '');
+      const isCustomAliyunVoice = Boolean(effectiveCustomAliyunVoice && els.voiceMode.value === 'aliyun_cosyvoice');
       const customAliyunModel = selectedClone?.target_model || els.aliyunCloneTargetModel?.value || els.aliyunTtsModel?.value || 'cosyvoice-v3-flash';
       const presetAliyunVoice = normalizeAliyunTtsVoice(els.aliyunTtsVoice.value);
       const presetAliyunModel = normalizeAliyunTtsModel(els.aliyunTtsModel?.value || 'cosyvoice-v1');
@@ -8715,7 +8722,7 @@ INDEX_HTML = r"""<!doctype html>
         aliyun_region: aliyunRegion,
         aliyun_endpoint: isCustomAliyunVoice ? (els.aliyunTtsEndpoint?.value?.trim() || '') : '',
         aliyun_model: isCustomAliyunVoice ? customAliyunModel : presetAliyunModel,
-        aliyun_voice: isCustomAliyunVoice ? customAliyunVoice : presetAliyunVoice,
+        aliyun_voice: isCustomAliyunVoice ? effectiveCustomAliyunVoice : presetAliyunVoice,
         aliyun_format: els.aliyunTtsFormat.value,
         aliyun_sample_rate: Number(els.aliyunTtsSampleRate?.value || 24000),
         aliyun_volume: els.aliyunTtsVolume?.value || '',
@@ -8790,24 +8797,50 @@ INDEX_HTML = r"""<!doctype html>
       return aliyunVoiceClones.find(item => String(item.voice_id || '') === voiceId) || null;
     }
 
-    function renderAliyunVoiceClones() {
-      if (!els.aliyunCloneVoiceSelect) return;
-      const current = els.aliyunCloneVoiceSelect.value || els.aliyunCustomVoiceId?.value || '';
-      els.aliyunCloneVoiceSelect.innerHTML = '';
-      const empty = document.createElement('option');
-      empty.value = '';
-      empty.textContent = aliyunVoiceClones.length ? '选择已保存音色' : '未保存复刻音色';
-      els.aliyunCloneVoiceSelect.appendChild(empty);
+    function selectedAliyunTtsClone() {
+      const voiceId = String(els.aliyunTtsVoice?.value || '').trim();
+      return aliyunVoiceClones.find(item => String(item.voice_id || '') === voiceId) || null;
+    }
+
+    function renderAliyunCloneTtsOptions(selectedValue = '') {
+      const group = document.getElementById('aliyunCloneVoiceTtsGroup');
+      if (!group) return;
+      const current = selectedValue || els.aliyunTtsVoice?.value || '';
+      group.innerHTML = '';
       aliyunVoiceClones.forEach(item => {
         const voiceId = String(item.voice_id || '').trim();
         if (!voiceId) return;
         const option = document.createElement('option');
         option.value = voiceId;
-        option.textContent = `${item.prefix || item.name || '复刻音色'} / ${voiceId}`;
-        els.aliyunCloneVoiceSelect.appendChild(option);
+        option.dataset.voiceKind = 'custom_clone';
+        option.textContent = `我的音色：${item.prefix || item.name || voiceId}（${voiceId}）`;
+        group.appendChild(option);
       });
-      if (current && [...els.aliyunCloneVoiceSelect.options].some(option => option.value === current)) {
-        els.aliyunCloneVoiceSelect.value = current;
+      if (current && [...(els.aliyunTtsVoice?.options || [])].some(option => option.value === current)) {
+        els.aliyunTtsVoice.value = current;
+      }
+    }
+
+    function renderAliyunVoiceClones() {
+      const current = els.aliyunCloneVoiceSelect?.value || els.aliyunCustomVoiceId?.value || els.aliyunTtsVoice?.value || '';
+      renderAliyunCloneTtsOptions(current);
+      if (els.aliyunCloneVoiceSelect) {
+        els.aliyunCloneVoiceSelect.innerHTML = '';
+        const empty = document.createElement('option');
+        empty.value = '';
+        empty.textContent = aliyunVoiceClones.length ? '选择已保存音色' : '未保存复刻音色';
+        els.aliyunCloneVoiceSelect.appendChild(empty);
+        aliyunVoiceClones.forEach(item => {
+          const voiceId = String(item.voice_id || '').trim();
+          if (!voiceId) return;
+          const option = document.createElement('option');
+          option.value = voiceId;
+          option.textContent = `${item.prefix || item.name || '复刻音色'} / ${voiceId}`;
+          els.aliyunCloneVoiceSelect.appendChild(option);
+        });
+        if (current && [...els.aliyunCloneVoiceSelect.options].some(option => option.value === current)) {
+          els.aliyunCloneVoiceSelect.value = current;
+        }
       }
     }
 
@@ -8818,6 +8851,7 @@ INDEX_HTML = r"""<!doctype html>
         return;
       }
       if (els.aliyunCustomVoiceId) els.aliyunCustomVoiceId.value = item.voice_id || '';
+      if (els.aliyunTtsVoice && item.voice_id) renderAliyunCloneTtsOptions(item.voice_id);
       if (els.voiceMode) setIfExists(els.voiceMode, 'aliyun_cosyvoice');
       if (els.aliyunCloneTargetModel && item.target_model) setIfExists(els.aliyunCloneTargetModel, item.target_model);
       if (els.aliyunTtsModel && item.target_model) setIfExists(els.aliyunTtsModel, item.target_model);
@@ -8895,6 +8929,8 @@ INDEX_HTML = r"""<!doctype html>
         if (voiceId) {
           els.aliyunCloneVoiceSelect.value = voiceId;
           useSelectedAliyunCloneVoice();
+          if (els.aliyunCloneAudioUrl) els.aliyunCloneAudioUrl.value = '';
+          if (els.aliyunCloneLocalAudioHint) els.aliyunCloneLocalAudioHint.textContent = `复刻音色已保存并选中：${voiceId}`;
         }
         if (els.aliyunCloneStatus) els.aliyunCloneStatus.textContent = voiceId ? `创建成功：${voiceId}` : '创建完成';
       } catch (err) {
