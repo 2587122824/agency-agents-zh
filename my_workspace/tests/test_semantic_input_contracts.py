@@ -4557,7 +4557,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(redacted["api_key"], "")
         self.assertTrue(redacted["has_api_key"])
 
-    def test_current_system_production_config_keeps_audio_off_and_current_i2v_slot(self) -> None:
+    def test_current_system_production_config_keeps_audio_off_and_uses_runtime_visual_slot(self) -> None:
         current_config = {
             "mode": "comfy_full",
             "voice_config": {"mode": "off", "provider": ""},
@@ -4581,7 +4581,7 @@ class SemanticInputContractTests(unittest.TestCase):
                     "api_key": "runninghub-secret",
                     "base_url": "https://www.runninghub.cn/openapi/v2",
                     "workflow_library": [
-                        {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/stale-runtime-i2v"}
+                        {"id": "06_i2v_first_frame", "endpoint": "/run/workflow/current-runtime-i2v"}
                     ],
                 },
             ), patch.object(
@@ -4599,7 +4599,7 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(resolved["voice_config"], {"mode": "off", "provider": ""})
         self.assertEqual(
             resolved["compose_config"]["workflow_library"][0]["endpoint"],
-            "/run/workflow/current-system-i2v",
+            "/run/workflow/current-runtime-i2v",
         )
         self.assertEqual(resolved["compose_config"]["api_key"], "runninghub-secret")
 

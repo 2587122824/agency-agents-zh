@@ -13732,6 +13732,7 @@ INDEX_HTML = r"""<!doctype html>
       if (els.voiceMode.value === 'aliyun_cosyvoice') {
         await syncRuntimeVoiceConfig({ requireComplete: true, timeoutMs: 12000 });
       }
+      await syncRuntimeComfyConfig({ timeoutMs: 12000 });
       const imageConfig = {
         tool: 'prompt_only',
         positive_prompt: '',
@@ -13823,7 +13824,6 @@ INDEX_HTML = r"""<!doctype html>
           min_file_size_kb: 64,
         },
       };
-      await syncRuntimeComfyConfig({ timeoutMs: 12000 });
       await syncRuntimeProductionConfig(productionConfig, { timeoutMs: 12000 });
       return { imageConfig, videoConfig, productionConfig };
     }
@@ -16097,7 +16097,25 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         if not production_config:
             raise ValueError("system production config is not saved; save the current system config before running")
         production_config.pop("updated_at", None)
-        production_config = cls._apply_runtime_comfy_config(production_config, {})
+        compose_config = production_config.get("compose_config")
+        if not isinstance(compose_config, dict):
+            compose_config = {}
+            production_config["compose_config"] = compose_config
+        runtime_comfy = cls._read_runtime_comfy_config(redact=False)
+        for key in (
+            "visual_provider",
+            "api_key",
+            "base_url",
+            "comfy_mcp_url",
+            "workflow_endpoint",
+            "node_info_list_json",
+            "poll_timeout_seconds",
+            "workflow_preset_id",
+            "workflow_preset_name",
+            "workflow_library",
+        ):
+            if key in runtime_comfy:
+                compose_config[key] = runtime_comfy[key]
         production_config = cls._apply_runtime_voice_config(production_config)
         return cls._hydrate_aliyun_clone_metadata(production_config)
 
