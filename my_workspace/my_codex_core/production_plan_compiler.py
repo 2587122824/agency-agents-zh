@@ -691,6 +691,14 @@ def _apply_character_base_policy(
             notes.append(f"image intent {item.get('job_id')} kept on animal-safe character_base instead of humanoid turnaround")
 
     if master_reference and not _looks_like_turnaround_sheet(character_text):
+        if _linked_master_base_asset_should_stay_text_to_image(character_text):
+            item["prompt"] = _append_prompt_once(
+                str(item.get("prompt") or ""),
+                "Use the linked character image only as a loose identity description. Create a new character asset from this prompt; do not copy the reference image's original pose, outfit, background, or crop.",
+            )
+            if notes is not None:
+                notes.append(f"image intent {item.get('job_id')} kept on character_base to avoid copying the linked master image composition")
+            return
         _route_character_base_item_to_master_identity_keyframe(
             item,
             intent,
@@ -1463,6 +1471,31 @@ def _looks_like_turnaround_sheet(text: str) -> bool:
 
 def _looks_like_expression_sheet(text: str) -> bool:
     return any(token in text for token in ("emotion", "expression", "emotions", "expressions", "表情", "情绪", "表情图"))
+
+
+def _linked_master_base_asset_should_stay_text_to_image(text: str) -> bool:
+    normalized = str(text or "").lower()
+    if _looks_like_expression_sheet(normalized):
+        return False
+    return any(
+        token in normalized
+        for token in (
+            "fullbody",
+            "full body",
+            "portrait",
+            "outfit",
+            "costume",
+            "wardrobe",
+            "全身",
+            "半身",
+            "面部特写",
+            "脸部特写",
+            "母版",
+            "服装",
+            "套装",
+            "站姿",
+        )
+    )
 
 
 def _append_prompt_once(prompt: str, addition: str) -> str:

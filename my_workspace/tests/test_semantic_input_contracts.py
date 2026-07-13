@@ -1225,6 +1225,73 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertEqual(item["denoise"], 1)
             self.assertNotEqual(item["workflow_mode"], "character_base")
 
+    def test_linked_character_fullbody_asset_stays_text_to_image_to_avoid_copying_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            entity_path = root / "entities.json"
+            library_path = root / "library.json"
+            entity_path.write_text(
+                json.dumps(
+                    {
+                        "characters": {
+                            "hero": {
+                                "character_id": "hero",
+                                "name": "Hero",
+                                "master_image": "asset_master",
+                            }
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            library_path.write_text(
+                json.dumps(
+                    [
+                        {
+                            "id": "asset_master",
+                            "asset_id": "asset_master",
+                            "file": "01_character_base/hero.png",
+                            "kind": "image",
+                            "tags": ["character_base"],
+                            "character_id": "hero",
+                            "approved": True,
+                        }
+                    ],
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            image_content = json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                "intent": "generate_base_asset",
+                                "intent_id": "hero_fullbody_master",
+                                "asset_role": "character",
+                                "character_id": "hero",
+                                "prompt": "Generate a fullbody master image, standing pose, red sports outfit.",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            )
+            plan = compile_production_plan(
+                task_id="linked_character_fullbody_text_to_image_test",
+                route_content='{"production_type":"custom"}',
+                image_content=image_content,
+                entity_path=entity_path,
+                asset_library_path=library_path,
+            )
+            item = plan["compiled_payload"]["image_prompts"][0]
+            self.assertEqual(item["workflow_id"], "01_base_asset_image")
+            self.assertEqual(item["workflow_mode"], "character_base")
+            self.assertNotIn("input_base_image", item)
+            self.assertNotIn("input_identity_image", item)
+            self.assertIn("do not copy the reference image", item["prompt"])
+
     def test_three_frame_shot_uses_linked_character_master_image(self) -> None:
         image_content = json.dumps(
             {
