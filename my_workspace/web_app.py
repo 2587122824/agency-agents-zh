@@ -15983,47 +15983,9 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
     def _ensure_voice_config_for_requirement(cls, production_config: dict, user_input: str) -> dict:
         if not isinstance(production_config, dict):
             production_config = {}
-        if not cls._requirement_requests_voice(user_input):
-            return production_config
-        voice_config = production_config.setdefault("voice_config", {})
-        if not isinstance(voice_config, dict):
-            voice_config = {}
-            production_config["voice_config"] = voice_config
-        mode = str(voice_config.get("mode") or "").strip().lower()
-        if mode not in {"", "off"}:
-            return production_config
-        voice_config.update(
-            {
-                "mode": "voxcpm2",
-                "provider": "voxcpm2",
-                "voice_preset": voice_config.get("voice_preset") or "warm_female",
-                "voice_preset_name": voice_config.get("voice_preset_name") or "VoxCPM2 本地仿声",
-                "auto_enabled_reason": "requirement_requested_voice",
-            }
-        )
+        # Voice selection is an explicit system configuration decision. A narration
+        # requirement must not silently select a different TTS provider.
         return production_config
-
-    @staticmethod
-    def _requirement_requests_voice(user_input: str) -> bool:
-        text = str(user_input or "").strip().lower()
-        if not text:
-            return False
-        return any(
-            token in text
-            for token in (
-                "配音",
-                "旁白",
-                "口播",
-                "解说",
-                "声音",
-                "语音",
-                "voiceover",
-                "voice over",
-                "narration",
-                "narrator",
-                "tts",
-            )
-        )
 
     @classmethod
     def _resolve_runtime_model_request(cls, payload: dict) -> dict:

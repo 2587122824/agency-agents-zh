@@ -4300,33 +4300,27 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(info_graph["workflow_mode"], "identity_keyframe")
         self.assertNotIn("input_scene_image", info_graph.get("input_bindings") or {})
 
-    def test_voice_requirement_enables_voxcpm2_fallback(self) -> None:
+    def test_voice_requirement_does_not_select_a_tts_provider(self) -> None:
         config = {"voice_config": {"mode": "off"}}
         updated = web_app.WorkflowWebHandler._ensure_voice_config_for_requirement(
             config,
             "30秒真人短视频，必须有中文旁白配音和字幕。",
         )
-        self.assertEqual(updated["voice_config"]["mode"], "voxcpm2")
-        self.assertEqual(updated["voice_config"]["provider"], "voxcpm2")
+        self.assertEqual(updated["voice_config"], {"mode": "off"})
 
-    def test_voxcpm2_timeout_falls_back_to_windows_sapi(self) -> None:
+    def test_voxcpm2_timeout_does_not_switch_provider(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
             adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
+            sapi_called = False
 
             def fake_timeout(command: str, timeout: int):
                 return None, True, "partial stdout", "partial stderr"
 
             def fake_sapi(voice_text: str, voice_config: dict, fallback_output_dir: Path):
-                output_file = fallback_output_dir / "voiceover.wav"
-                output_file.write_bytes(b"fallback wav")
-                return {
-                    "status": "success",
-                    "provider": "windows_sapi",
-                    "mode": "windows_sapi",
-                    "downloaded_files": [str(output_file)],
-                    "output_file": str(output_file),
-                }
+                nonlocal sapi_called
+                sapi_called = True
+                raise AssertionError("Windows SAPI must not run as an implicit fallback")
 
             adapter._run_shell_command = fake_timeout  # type: ignore[method-assign]
             adapter._run_windows_sapi = fake_sapi  # type: ignore[method-assign]
@@ -4337,90 +4331,13 @@ class SemanticInputContractTests(unittest.TestCase):
                 output_dir,
             )
 
-            self.assertEqual(result["status"], "success")
-            self.assertEqual(result["provider"], "windows_sapi")
-            self.assertEqual(result["fallback_from_provider"], "voxcpm2")
-            self.assertIn("timed out", result["fallback_reason"])
+            self.assertEqual(result["status"], "failed")
+            self.assertEqual(result["provider"], "voxcpm2")
+            self.assertIn("timed out", result["error"])
+            self.assertFalse(sapi_called)
             manifest = json.loads((output_dir / "local_tts_manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["fallback_from_provider"], "voxcpm2")
-
-    def test_long_voxcpm2_cpu_voiceover_uses_preemptive_sapi_fallback(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            output_dir = Path(tmp)
-            adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
-            shell_called = False
-
-            def fail_if_shell_runs(command: str, timeout: int):
-                nonlocal shell_called
-                shell_called = True
-                return None, True, "", ""
-
-            def fake_sapi(voice_text: str, voice_config: dict, fallback_output_dir: Path):
-                output_file = fallback_output_dir / "voiceover.wav"
-                output_file.write_bytes(b"fallback wav")
-                return {
-                    "status": "success",
-                    "provider": "windows_sapi",
-                    "mode": "windows_sapi",
-                    "downloaded_files": [str(output_file)],
-                    "output_file": str(output_file),
-                }
-
-            adapter._run_shell_command = fail_if_shell_runs  # type: ignore[method-assign]
-            adapter._run_windows_sapi = fake_sapi  # type: ignore[method-assign]
-
-            result = adapter.run(
-                "猪猪侠今天也要上班。" * 40,
-                {
-                    "mode": "voxcpm2",
-                    "provider": "voxcpm2",
-                    "preemptive_fallback_min_seconds": 1,
-                    "target_duration_seconds": 120,
-                },
-                output_dir,
-            )
-
-            self.assertFalse(shell_called)
-            self.assertEqual(result["status"], "success")
-            self.assertEqual(result["fallback_from_provider"], "voxcpm2")
-            self.assertIn("skipped", result["fallback_reason"])
-
-    def test_recommended_sapi_rate_overrides_default_zero_for_dense_fallback(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            output_dir = Path(tmp)
-            adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
-            captured_rate = None
-
-            def fake_sapi(voice_text: str, voice_config: dict, fallback_output_dir: Path):
-                nonlocal captured_rate
-                captured_rate = voice_config.get("sapi_rate")
-                output_file = fallback_output_dir / "voiceover.wav"
-                output_file.write_bytes(b"fallback wav")
-                return {
-                    "status": "success",
-                    "provider": "windows_sapi",
-                    "mode": "windows_sapi",
-                    "downloaded_files": [str(output_file)],
-                    "output_file": str(output_file),
-                    "rate": captured_rate,
-                }
-
-            adapter._run_windows_sapi = fake_sapi  # type: ignore[method-assign]
-            result = adapter._fallback_after_voxcpm2_failure(
-                "猪猪侠今天也要上班。" * 45,
-                {
-                    "mode": "voxcpm2",
-                    "provider": "voxcpm2",
-                    "sapi_rate": 0,
-                    "target_duration_seconds": 120,
-                },
-                output_dir,
-                {"status": "failed", "error": "timeout"},
-            )
-
-            self.assertEqual(result["status"], "success")
-            self.assertEqual(captured_rate, 3)
-            self.assertEqual(result["rate"], 3)
+            self.assertEqual(manifest["provider"], "voxcpm2")
+            self.assertNotIn("fallback_from_provider", manifest)
 
     def test_visual_preflight_accepts_direct_identity_image_fields(self) -> None:
         report = _preflight_visual_jobs(

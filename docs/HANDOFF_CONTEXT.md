@@ -2,6 +2,16 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 LTX I2V Production Repair
+
+- The old first-frame I2V RunningHub workflow `2071735603636563970` failed at `LTX2_NAG(238)` because its GGUF model weights were dimension `4096` while the active connector expected `3840`.
+- The validated first-frame I2V workflow is now `2069607607387639810`. It uses the non-GGUF LTX 2.3 canvas and preserves the raw staff motion prompt plus the explicit upstream first frame.
+- Material retry `c62cafacb2974d489bf7efa279734dbb` completed for `task_20260713_215010_小美的田径训练日记_竖屏1分钟长视频`: 39 jobs succeeded, 0 failed. All 12 character I2V clips were regenerated successfully through `2069607607387639810`; `clip_003_selfie_talk`, `clip_016_cta_talk`, and `enhance_all_clips` remained explicitly skipped because those optional slots were unconfigured.
+- Generated I2V files were verified as distinct H.264 MP4 files at 24fps and about 4.042 seconds each. The new workflow outputs `576x1024`; the two existing environment clips remain `448x832` and are normalized during final composition.
+- Visual review shows that the new I2V workflow follows its supplied first frame. Remaining character/clothing inconsistency comes from the previously generated upstream keyframes, not from prompt replacement or reuse of one output video.
+- Voice-provider fallback was removed. A narration requirement no longer silently enables VoxCPM2 when system audio is off, and VoxCPM2 failure/timeout no longer switches to Windows SAPI. The selected provider now returns its own visible failure and stops.
+- Verification: `python -m compileall -q my_workspace`, 161 semantic-contract tests, and focused no-TTS-fallback tests passed.
+
 ## Project Snapshot
 
 - Repo: `I:\Ai_WorkSpace\agency-agents-zh`

@@ -112,19 +112,6 @@ class LocalTTSAdapter:
             )
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             return manifest
-        if self._should_preempt_voxcpm2_cpu(mode, command, estimated_duration, needs_reference_audio, voice_config):
-            manifest.update(
-                {
-                    "status": "failed",
-                    "error": (
-                        "VoxCPM2 CPU synthesis was skipped for a long voiceover; "
-                        "using Windows SAPI fallback to keep final composition unblocked."
-                    ),
-                    "fallback_status": "preemptive",
-                }
-            )
-            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return self._fallback_after_voxcpm2_failure(voice_text, voice_config, output_dir, manifest)
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
         result, timed_out, timeout_stdout, timeout_stderr = self._run_shell_command(command, timeout)
@@ -141,7 +128,7 @@ class LocalTTSAdapter:
                 }
             )
             manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return self._fallback_after_voxcpm2_failure(voice_text, voice_config, output_dir, manifest)
+            return manifest
 
         stdout_path.write_text(result.stdout or "", encoding="utf-8")
         stderr_path.write_text(result.stderr or "", encoding="utf-8")
@@ -188,10 +175,6 @@ class LocalTTSAdapter:
                         "duration_overrun_seconds": round(actual_duration - target_duration, 3),
                     }
                 )
-
-        if str(manifest.get("status") or "").lower() == "failed":
-            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return self._fallback_after_voxcpm2_failure(voice_text, voice_config, output_dir, manifest)
 
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
@@ -535,57 +518,6 @@ class LocalTTSAdapter:
             )
         return f"Aliyun CosyVoice HTTP {status_code}: {text}"
 
-    def _fallback_after_voxcpm2_failure(
-        self,
-        voice_text: str,
-        voice_config: dict[str, Any],
-        output_dir: Path,
-        primary_manifest: dict[str, Any],
-    ) -> dict[str, Any]:
-        fallback_provider = str(
-            voice_config.get("fallback_provider")
-            or voice_config.get("fallback_tts_provider")
-            or "windows_sapi"
-        ).strip().lower()
-        if fallback_provider in {"", "off", "none", "disabled"}:
-            primary_manifest["fallback_status"] = "disabled"
-            manifest_path = output_dir / "local_tts_manifest.json"
-            manifest_path.write_text(json.dumps(primary_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return primary_manifest
-        if fallback_provider not in {"windows_sapi", "sapi"}:
-            primary_manifest["fallback_status"] = "unsupported"
-            primary_manifest["fallback_provider"] = fallback_provider
-            manifest_path = output_dir / "local_tts_manifest.json"
-            manifest_path.write_text(json.dumps(primary_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-            return primary_manifest
-
-        fallback_config = dict(voice_config)
-        fallback_config["mode"] = "windows_sapi"
-        fallback_config["provider"] = "windows_sapi"
-        fallback_config["timeout_seconds"] = voice_config.get("fallback_timeout_seconds") or 900
-        if voice_config.get("fallback_sapi_rate") is not None:
-            fallback_config["sapi_rate"] = _int_or_default(voice_config.get("fallback_sapi_rate"), 3, minimum=-10, maximum=10)
-        else:
-            recommended_rate = self._recommended_sapi_rate(voice_text, voice_config)
-            if recommended_rate:
-                fallback_config["sapi_rate"] = recommended_rate
-            elif "sapi_rate" not in fallback_config:
-                fallback_config["sapi_rate"] = 0
-        result = self._run_windows_sapi(voice_text, fallback_config, output_dir)
-        result.update(
-            {
-                "fallback_from_provider": "voxcpm2",
-                "fallback_reason": str(primary_manifest.get("error") or "VoxCPM2 synthesis failed"),
-                "primary_status": primary_manifest.get("status"),
-                "primary_error": primary_manifest.get("error"),
-                "primary_stdout_file": primary_manifest.get("stdout_file"),
-                "primary_stderr_file": primary_manifest.get("stderr_file"),
-            }
-        )
-        manifest_path = output_dir / "local_tts_manifest.json"
-        manifest_path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        return result
-
     @staticmethod
     def _effective_timeout(mode: str, requested_timeout: int, text: str, command: str) -> tuple[int, str]:
         timeout = requested_timeout
@@ -602,48 +534,6 @@ class LocalTTSAdapter:
                     f"raised from {requested_timeout} to {timeout} seconds based on {len(text)} characters."
                 )
         return timeout, note
-
-    @staticmethod
-    def _should_preempt_voxcpm2_cpu(
-        mode: str,
-        command: str,
-        estimated_duration: float,
-        needs_reference_audio: bool,
-        voice_config: dict[str, Any],
-    ) -> bool:
-        if needs_reference_audio:
-            return False
-        if str(voice_config.get("preemptive_fallback") or "").strip().lower() in {"0", "false", "off", "disabled"}:
-            return False
-        fallback_provider = str(
-            voice_config.get("fallback_provider")
-            or voice_config.get("fallback_tts_provider")
-            or "windows_sapi"
-        ).strip().lower()
-        if fallback_provider in {"", "off", "none", "disabled"}:
-            return False
-        command_lower = command.lower()
-        is_voxcpm_mode = mode in {"preset", "voxcpm2", "clone", "voice_clone"}
-        is_cpu = "--device cpu" in command_lower or " device=cpu" in command_lower
-        threshold = _float_or_default(voice_config.get("preemptive_fallback_min_seconds"), 45.0)
-        return is_voxcpm_mode and is_cpu and estimated_duration >= threshold
-
-    @staticmethod
-    def _recommended_sapi_rate(text: str, voice_config: dict[str, Any]) -> int:
-        explicit = voice_config.get("fallback_sapi_rate")
-        if explicit is not None:
-            return _int_or_default(explicit, 3, minimum=-10, maximum=10)
-        target_duration = _float_or_default(voice_config.get("target_duration_seconds"), 0.0)
-        if target_duration <= 0:
-            return 0
-        cjk_count = len(re.findall(r"[\u4e00-\u9fff]", str(text or "")))
-        latin_words = len(re.findall(r"[A-Za-z0-9]+", str(text or "")))
-        density = cjk_count + latin_words * 2
-        if target_duration <= 150 and density >= 350:
-            return 3
-        if target_duration <= 90 and density >= 220:
-            return 4
-        return 0
 
     @staticmethod
     def _estimate_speech_duration(text: str, voice_config: dict[str, Any]) -> float:
