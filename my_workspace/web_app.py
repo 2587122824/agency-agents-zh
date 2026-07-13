@@ -18896,7 +18896,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
             "02_turnaround": "01_image_z_image_turbo/runninghub_node_info_list_preset.json",
             "03_style_cover_image": "04_keyframe_image/runninghub_node_info_list_preset.json",
             "04_keyframe": "04_keyframe_image/runninghub_node_info_list_preset.json",
-            "06_i2v_first_frame": "02_ltx_video_2_3/runninghub_node_info_list_preset.json",
+            "06_i2v_first_frame": "06_i2v_first_frame_ltx_2_3/runninghub_node_info_list_preset.json",
             "06_i2v_first_last_frame": "06_i2v_first_last_frame_ltx_2_3/runninghub_node_info_list_preset.json",
             "06_i2v_first_middle_last_frame": "06_i2v_first_middle_last_frame_ltx_2_3/runninghub_node_info_list_preset.json",
             "10_broll_transition_video": "04_broll_material/runninghub_node_info_list_preset.json",

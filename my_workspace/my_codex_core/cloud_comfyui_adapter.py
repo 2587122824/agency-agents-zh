@@ -1778,9 +1778,16 @@ class CloudComfyUIAdapter:
             or workflow_key == "10_broll_transition_video"
             or mode_key == "broll_scene_video"
         )
-        is_first_frame_i2v_ltx = (
-            workflow_key in {"02_ltx_video_2_3", "06_i2v_first_frame"}
-            or mode_key == "i2v_first_frame"
+        # An explicit endpoint is authoritative. Only migrate old node rows when
+        # they target the optimized 207173 publication (or when no endpoint was
+        # supplied). Other first-frame publications can intentionally expose the
+        # older 2483/2004/4979 node contract and must not be silently rewritten.
+        is_first_frame_i2v_ltx = endpoint_text.endswith("/2071735603636563970") or (
+            not endpoint_text
+            and (
+                workflow_key in {"02_ltx_video_2_3", "06_i2v_first_frame"}
+                or mode_key == "i2v_first_frame"
+            )
         )
         if is_broll_ltx and {"2483", "2612", "3059"}.intersection(stale_node_ids):
             return json.dumps(cls._ltx_text_to_video_node_info(), ensure_ascii=False, indent=2)

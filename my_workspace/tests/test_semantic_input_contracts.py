@@ -4755,6 +4755,27 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn(("195", "bypass", False), row_keys)
         self.assertIn(("197", "bypass", False), row_keys)
 
+    def test_adapter_preserves_explicit_legacy_first_frame_publication_mapping(self) -> None:
+        configured_rows = [
+            {"nodeId": "2483", "fieldName": "text", "fieldValue": "{{prompt}}"},
+            {"nodeId": "2612", "fieldName": "text", "fieldValue": "{{negative_prompt}}"},
+            {"nodeId": "2004", "fieldName": "image", "fieldValue": "{{reference_image}}"},
+            {"nodeId": "4981", "fieldName": "resize_type.longer_size", "fieldValue": "{{long_side}}"},
+            {"nodeId": "4979", "fieldName": "value", "fieldValue": "{{frame_count}}"},
+            {"nodeId": "4978", "fieldName": "value", "fieldValue": "{{fps}}"},
+            {"nodeId": "4814", "fieldName": "noise_seed", "fieldValue": "{{seed}}"},
+            {"nodeId": "4977", "fieldName": "value", "fieldValue": False},
+            {"nodeId": "4823", "fieldName": "filename_prefix", "fieldValue": "video/ltx2.3-i2v-first-frame"},
+        ]
+        repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
+            json.dumps(configured_rows),
+            endpoint="/run/workflow/2069607607387639810",
+            workflow_id="06_i2v_first_frame",
+            workflow_mode="i2v_first_frame",
+        )
+
+        self.assertEqual(configured_rows, json.loads(repaired))
+
     def test_adapter_does_not_apply_first_frame_mapping_to_three_frame_endpoint(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
             json.dumps(

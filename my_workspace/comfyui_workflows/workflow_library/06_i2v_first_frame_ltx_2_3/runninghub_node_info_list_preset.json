@@ -1,0 +1,55 @@
+[
+  {
+    "nodeId": "2483",
+    "fieldName": "text",
+    "fieldValue": "{{prompt}}",
+    "description": "raw production motion prompt"
+  },
+  {
+    "nodeId": "2612",
+    "fieldName": "text",
+    "fieldValue": "{{negative_prompt}}",
+    "description": "raw production negative prompt"
+  },
+  {
+    "nodeId": "2004",
+    "fieldName": "image",
+    "fieldValue": "{{reference_image}}",
+    "description": "uploaded first-frame image"
+  },
+  {
+    "nodeId": "4981",
+    "fieldName": "resize_type.longer_size",
+    "fieldValue": "{{long_side}}",
+    "description": "resize longest edge before LTX preprocessing"
+  },
+  {
+    "nodeId": "4979",
+    "fieldName": "value",
+    "fieldValue": "{{frame_count}}",
+    "description": "authoritative frame count"
+  },
+  {
+    "nodeId": "4978",
+    "fieldName": "value",
+    "fieldValue": "{{fps}}",
+    "description": "sampling and output frame rate"
+  },
+  {
+    "nodeId": "4814",
+    "fieldName": "noise_seed",
+    "fieldValue": "{{seed}}",
+    "description": "sampling seed"
+  },
+  {
+    "nodeId": "4977",
+    "fieldName": "value",
+    "fieldValue": false,
+    "description": "keep first-frame conditioning enabled"
+  },
+  {
+    "nodeId": "4823",
+    "fieldName": "filename_prefix",
+    "fieldValue": "video/ltx2.3-i2v-first-frame"
+  }
+]
