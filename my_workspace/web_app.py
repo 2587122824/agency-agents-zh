@@ -1125,6 +1125,10 @@ INDEX_HTML = r"""<!doctype html>
     .automation-config .provider-grid.config-card.mapping-card {
       grid-template-columns: minmax(420px, 1.2fr) minmax(260px, .8fr) minmax(180px, .45fr);
     }
+    .aliyun-tuning-card .details-body {
+      grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) minmax(220px, 1fr);
+      gap: 12px;
+    }
     .comfy-mapping-grid textarea {
       min-height: 132px;
     }
@@ -3515,14 +3519,6 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
               <button class="danger" id="deleteAliyunCloneVoiceBtn" type="button" hidden>删除选中复刻音色</button>
-              <label>音频格式
-                <select id="aliyunTtsFormat">
-                  <option value="mp3">MP3</option>
-                  <option value="wav" selected>WAV</option>
-                  <option value="opus">OPUS</option>
-                  <option value="pcm">PCM</option>
-                </select>
-              </label>
               <label hidden>采样率
                 <select id="aliyunTtsSampleRate">
                   <option value="8000">8000 Hz</option>
@@ -3534,16 +3530,65 @@ INDEX_HTML = r"""<!doctype html>
                 </select>
               </label>
             </div>
+            <details id="aliyunTtsTuningCard" class="aliyun-tuning-card" hidden>
+              <summary><strong>阿里云高级调音</strong> <span class="muted small">情绪风格、语速、音量、音高和格式</span></summary>
+              <div class="details-body provider-grid">
+                <label>情绪 / 风格
+                  <select id="aliyunTtsStylePreset">
+                    <option value="" selected>默认</option>
+                    <option value="natural">自然口播</option>
+                    <option value="warm">温柔亲和</option>
+                    <option value="energetic">激昂有力</option>
+                    <option value="suspense">悬疑紧张</option>
+                    <option value="documentary">纪录片旁白</option>
+                    <option value="storytelling">故事叙述</option>
+                    <option value="clear_explainer">清晰解说</option>
+                  </select>
+                </label>
+                <label>语速
+                  <select id="aliyunTtsRate">
+                    <option value="" selected>默认</option>
+                    <option value="0.85">慢一点</option>
+                    <option value="1">正常</option>
+                    <option value="1.15">快一点</option>
+                    <option value="1.3">更快</option>
+                  </select>
+                </label>
+                <label>音量
+                  <select id="aliyunTtsVolume">
+                    <option value="" selected>默认</option>
+                    <option value="40">偏低</option>
+                    <option value="50">标准</option>
+                    <option value="70">偏高</option>
+                    <option value="90">更响</option>
+                  </select>
+                </label>
+                <label>音高
+                  <select id="aliyunTtsPitch">
+                    <option value="" selected>默认</option>
+                    <option value="0.9">低沉</option>
+                    <option value="1">正常</option>
+                    <option value="1.1">明亮</option>
+                    <option value="1.2">更亮</option>
+                  </select>
+                </label>
+                <label>输出格式
+                  <select id="aliyunTtsFormat">
+                    <option value="mp3">MP3</option>
+                    <option value="wav" selected>WAV</option>
+                    <option value="opus">OPUS</option>
+                    <option value="pcm">PCM</option>
+                  </select>
+                </label>
+                <label class="audio-debug-field-wide">风格补充
+                  <input id="aliyunTtsStyleNote" autocomplete="off" spellcheck="false" placeholder="可选：例如 更像知识区旁白、带一点少年感、语气更沉稳" />
+                </label>
+                <label hidden>风格指令
+                  <input id="aliyunTtsInstruction" autocomplete="off" spellcheck="false" placeholder="可选：例如 温和、清晰、科普解说感" />
+                </label>
+              </div>
+            </details>
             <div id="voiceAdvancedCard" class="provider-grid config-card" data-title="配音高级项" data-desc="仿声参考文本、VoxCPM2 命令模板和配音超时设置">
-              <label hidden>CosyVoice 音量
-                <input id="aliyunTtsVolume" type="number" min="0" max="100" step="1" placeholder="默认 50；范围 0-100" />
-              </label>
-              <label hidden>CosyVoice 语速
-                <input id="aliyunTtsRate" type="number" min="0.5" max="2" step="0.05" placeholder="默认 1.0；如 1.15 更快" />
-              </label>
-              <label hidden>CosyVoice 音调
-                <input id="aliyunTtsPitch" type="number" min="0.5" max="2" step="0.05" placeholder="默认 1.0" />
-              </label>
               <label hidden>OPUS 码率
                 <input id="aliyunTtsBitRate" type="number" min="16000" max="48000" step="1000" placeholder="仅 OPUS 常用；如 24000" />
               </label>
@@ -3552,9 +3597,6 @@ INDEX_HTML = r"""<!doctype html>
               </label>
               <label hidden>语言提示
                 <input id="aliyunTtsLanguageHint" autocomplete="off" spellcheck="false" placeholder="可选：zh / en / 粤语等语言提示" />
-              </label>
-              <label hidden>风格指令
-                <input id="aliyunTtsInstruction" autocomplete="off" spellcheck="false" placeholder="可选：例如 温和、清晰、科普解说感" />
               </label>
               <label hidden>SSML
                 <select id="aliyunTtsEnableSsml">
@@ -4558,6 +4600,7 @@ INDEX_HTML = r"""<!doctype html>
       voiceTimeout: document.getElementById('voiceTimeout'),
       voiceAdvancedCard: document.getElementById('voiceAdvancedCard'),
       aliyunTtsConfigCard: document.getElementById('aliyunTtsConfigCard'),
+      aliyunTtsTuningCard: document.getElementById('aliyunTtsTuningCard'),
       aliyunTtsApiKey: document.getElementById('aliyunTtsApiKey'),
       aliyunTtsWorkspaceId: document.getElementById('aliyunTtsWorkspaceId'),
       aliyunTtsEndpoint: document.getElementById('aliyunTtsEndpoint'),
@@ -4569,6 +4612,8 @@ INDEX_HTML = r"""<!doctype html>
       aliyunTtsVolume: document.getElementById('aliyunTtsVolume'),
       aliyunTtsRate: document.getElementById('aliyunTtsRate'),
       aliyunTtsPitch: document.getElementById('aliyunTtsPitch'),
+      aliyunTtsStylePreset: document.getElementById('aliyunTtsStylePreset'),
+      aliyunTtsStyleNote: document.getElementById('aliyunTtsStyleNote'),
       aliyunTtsBitRate: document.getElementById('aliyunTtsBitRate'),
       aliyunTtsSeed: document.getElementById('aliyunTtsSeed'),
       aliyunTtsLanguageHint: document.getElementById('aliyunTtsLanguageHint'),
@@ -6366,6 +6411,8 @@ INDEX_HTML = r"""<!doctype html>
         aliyunTtsVolume: els.aliyunTtsVolume.value,
         aliyunTtsRate: els.aliyunTtsRate.value,
         aliyunTtsPitch: els.aliyunTtsPitch.value,
+        aliyunTtsStylePreset: els.aliyunTtsStylePreset?.value || '',
+        aliyunTtsStyleNote: els.aliyunTtsStyleNote?.value || '',
         aliyunTtsBitRate: els.aliyunTtsBitRate.value,
         aliyunTtsSeed: els.aliyunTtsSeed.value,
         aliyunTtsLanguageHint: els.aliyunTtsLanguageHint.value,
@@ -6565,6 +6612,8 @@ INDEX_HTML = r"""<!doctype html>
       els.aliyunTtsVolume.value = settings.aliyunTtsVolume || '';
       els.aliyunTtsRate.value = settings.aliyunTtsRate || '';
       els.aliyunTtsPitch.value = settings.aliyunTtsPitch || '';
+      if (els.aliyunTtsStylePreset) setIfExists(els.aliyunTtsStylePreset, settings.aliyunTtsStylePreset || '');
+      if (els.aliyunTtsStyleNote) els.aliyunTtsStyleNote.value = settings.aliyunTtsStyleNote || '';
       els.aliyunTtsBitRate.value = settings.aliyunTtsBitRate || '';
       els.aliyunTtsSeed.value = settings.aliyunTtsSeed || '';
       els.aliyunTtsLanguageHint.value = settings.aliyunTtsLanguageHint || '';
@@ -7600,6 +7649,8 @@ INDEX_HTML = r"""<!doctype html>
         els.aliyunTtsVolume,
         els.aliyunTtsRate,
         els.aliyunTtsPitch,
+        els.aliyunTtsStylePreset,
+        els.aliyunTtsStyleNote,
         els.aliyunTtsBitRate,
         els.aliyunTtsSeed,
         els.aliyunTtsLanguageHint,
@@ -8678,6 +8729,7 @@ INDEX_HTML = r"""<!doctype html>
       const mode = els.voiceMode?.value || 'off';
       const isAliyun = mode === 'aliyun_cosyvoice';
       if (els.aliyunTtsConfigCard) els.aliyunTtsConfigCard.hidden = !isAliyun;
+      if (els.aliyunTtsTuningCard) els.aliyunTtsTuningCard.hidden = !isAliyun;
       if (els.voicePresetField) els.voicePresetField.hidden = isAliyun;
       if (els.voiceReferenceFileField) els.voiceReferenceFileField.hidden = isAliyun;
       if (els.voiceReferenceAudioPathField) els.voiceReferenceAudioPathField.hidden = isAliyun;
@@ -8716,6 +8768,24 @@ INDEX_HTML = r"""<!doctype html>
       if (mode === 'aliyun_cosyvoice') return 'aliyun_cosyvoice';
       if (['voxcpm2', 'preset'].includes(mode)) return 'voxcpm2';
       return '';
+    }
+
+    const ALIYUN_TTS_STYLE_INSTRUCTIONS = {
+      natural: '自然口播，语气平稳，表达清楚。',
+      warm: '温柔亲和，语气放松，有陪伴感。',
+      energetic: '激昂有力，节奏更有推动力，重点表达更明确。',
+      suspense: '悬疑紧张，语气克制，保留叙事张力。',
+      documentary: '纪录片旁白风格，沉稳、清晰、有画面感。',
+      storytelling: '故事叙述风格，情绪自然起伏，叙事感更强。',
+      clear_explainer: '清晰解说风格，吐字清楚，信息表达直接。',
+    };
+
+    function aliyunTtsInstructionText() {
+      const preset = String(els.aliyunTtsStylePreset?.value || '').trim();
+      const presetText = ALIYUN_TTS_STYLE_INSTRUCTIONS[preset] || '';
+      const styleNote = String(els.aliyunTtsStyleNote?.value || '').trim();
+      const legacyInstruction = String(els.aliyunTtsInstruction?.value || '').trim();
+      return [presetText, styleNote, legacyInstruction].filter(Boolean).join(' ');
     }
 
     function buildVoiceConfig(referenceAudio = '') {
@@ -8757,7 +8827,7 @@ INDEX_HTML = r"""<!doctype html>
         aliyun_bit_rate: els.aliyunTtsBitRate?.value || '',
         aliyun_seed: els.aliyunTtsSeed?.value || '',
         aliyun_language_hint: els.aliyunTtsLanguageHint?.value || '',
-        aliyun_instruction: els.aliyunTtsInstruction?.value || '',
+        aliyun_instruction: aliyunTtsInstructionText(),
         aliyun_enable_ssml: els.aliyunTtsEnableSsml?.value === 'on',
         aliyun_word_timestamp_enabled: els.aliyunTtsWordTimestamp?.value === 'on',
         aliyun_enable_aigc_tag: els.aliyunTtsEnableAigcTag?.value === 'on',
@@ -15174,6 +15244,8 @@ INDEX_HTML = r"""<!doctype html>
       els.aliyunTtsVolume.value = '';
       els.aliyunTtsRate.value = '';
       els.aliyunTtsPitch.value = '';
+      if (els.aliyunTtsStylePreset) els.aliyunTtsStylePreset.value = '';
+      if (els.aliyunTtsStyleNote) els.aliyunTtsStyleNote.value = '';
       els.aliyunTtsBitRate.value = '';
       els.aliyunTtsSeed.value = '';
       els.aliyunTtsLanguageHint.value = '';
