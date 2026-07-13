@@ -33,6 +33,8 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Resuming an older task refreshes `video_memory_context` from the current `my_memory` files when that scope was enabled. Stale template text saved in an old `production_config_snapshot.json` is not reused.
 - `07_视频生成执行员` may use `generate_broll_clip` only for environment/object shots with no visible person or body part. Character names/IDs, identity locks, or visible body markers in B-roll fail employee-output validation; the employee must emit `generate_i2v_clip` with an explicit upstream character image.
 - The production compiler no longer promotes character B-roll to I2V. It raises an explicit classification error if invalid B-roll reaches compilation, so the backend does not silently change the employee's route or create a replacement creative route.
+- `23_长视频策划编导` must classify visible body close-ups as character shots, and `06_分镜生图设计师` must produce an explicit character keyframe for every visible person/body-part shot. A negative clause such as `无人物出现` remains valid for environment/object B-roll.
+- I2V intents and legacy I2V prompts must reference an existing upstream image explicitly. The compiler no longer guesses a same-numbered keyframe or generates/restores a missing keyframe; missing or dangling image references fail compilation.
 
 ## Current UX Rules
 

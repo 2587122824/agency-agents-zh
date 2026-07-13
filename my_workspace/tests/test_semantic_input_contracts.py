@@ -488,6 +488,58 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertTrue(any("clip_named_character" in issue for issue in result["issues"]), result["issues"])
         self.assertTrue(any("clip_character_id" in issue for issue in result["issues"]), result["issues"])
 
+    def test_video_validator_accepts_environment_broll_with_no_people_clause(self) -> None:
+        payload = {
+            "production_intents": {
+                "video": [
+                    {
+                        "intent": "generate_broll_clip",
+                        "intent_id": "clip_phone_diary",
+                        "motion_plan": "手机架设在跑道边，日记本翻页，天空微亮，无人物出现。",
+                    }
+                ]
+            },
+            "video_prompts": [
+                {"asset_tag": "clip_phone_diary", "width": 480, "height": 848}
+            ],
+        }
+
+        result = validate_production_output(
+            {"agent": "07_视频生成执行员"},
+            json.dumps(payload, ensure_ascii=False),
+            build_requirement_lock("小美的田径训练日记，竖屏1分钟"),
+            [],
+        )
+
+        self.assertTrue(result["passed"], result["issues"])
+
+    def test_video_validator_rejects_i2v_without_explicit_upstream_image(self) -> None:
+        payload = {
+            "production_intents": {
+                "video": [
+                    {
+                        "intent": "generate_i2v_clip",
+                        "intent_id": "clip_arm_swing",
+                        "character_id": "character_xiaomei",
+                        "motion_plan": "小美手臂稳定摆动。",
+                    }
+                ]
+            },
+            "video_prompts": [
+                {"asset_tag": "clip_arm_swing", "width": 480, "height": 848}
+            ],
+        }
+
+        result = validate_production_output(
+            {"agent": "07_视频生成执行员"},
+            json.dumps(payload, ensure_ascii=False),
+            build_requirement_lock("小美的田径训练日记，竖屏1分钟"),
+            [],
+        )
+
+        self.assertFalse(result["passed"])
+        self.assertTrue(any("必须显式引用一张上游图片" in issue for issue in result["issues"]), result["issues"])
+
     def test_requirement_guard_accepts_skipped_video_package_without_topic_terms(self) -> None:
         content = json.dumps(
             {
@@ -2857,124 +2909,111 @@ class SemanticInputContractTests(unittest.TestCase):
                 source_content=source_content,
             )
 
-    def test_i2v_missing_source_generates_keyframe_instead_of_broll(self) -> None:
-        plan = compile_production_plan(
-            task_id="i2v_missing_source_keyframe",
-            route_content=json.dumps(
-                {
-                    "production_type": "drama_story",
-                    "aspect_ratio": "9:16",
-                    "global_context": {"characters": [{"character_id": "protagonist", "name": "主角"}]},
-                },
-                ensure_ascii=False,
-            ),
-            image_content=json.dumps(
-                {
-                    "production_intents": {
-                        "image": [
-                            {
-                                "intent": "generate_base_asset",
-                                "intent_id": "hero_master",
-                                "asset_role": "character",
-                                "character_id": "protagonist",
-                                "prompt": "2008年普通打工人主角，真人纪实感，同一张脸。",
-                            }
-                        ]
-                    }
-                },
-                ensure_ascii=False,
-            ),
-            video_content=json.dumps(
-                {
-                    "production_intents": {
-                        "video": [
-                            {
-                                "intent": "generate_i2v_clip",
-                                "intent_id": "clip_001",
-                                "character_id": "protagonist",
-                                "duration_seconds": 2,
-                                "prompt": "主角从出租屋醒来，看着2008年的旧手机，真人复古纪实画面。",
-                            }
-                        ]
-                    }
-                },
-                ensure_ascii=False,
-            ),
-        )
-        payload = plan["compiled_payload"]
-        video_item = payload["video_prompts"][0]
-        self.assertEqual(video_item["workflow_id"], "06_i2v_first_frame")
-        self.assertEqual(video_item["workflow_mode"], "i2v_first_frame")
-        self.assertEqual(video_item["duration"], 4)
-        self.assertEqual(video_item["fps"], 24)
-        self.assertIn("input_base_image", video_item["input_bindings"])
-        self.assertEqual(video_item["input_bindings"]["input_base_image"]["from_job"], "clip_001_keyframe")
-        self.assertIn("clip_001_keyframe", {row["job_id"] for row in payload["image_prompts"]})
-
-    def test_legacy_i2v_binding_restores_missing_keyframe_after_image_recompile(self) -> None:
-        plan = compile_production_plan(
-            task_id="legacy_i2v_retry_keyframe_restore",
-            route_content=json.dumps(
-                {
-                    "production_type": "custom",
-                    "aspect_ratio": "9:16",
-                },
-                ensure_ascii=False,
-            ),
-            image_content=json.dumps(
-                {
-                    "production_intents": {
-                        "image": [
-                            {
-                                "intent": "generate_base_asset",
-                                "intent_id": "asset_person_stand",
-                                "asset_role": "character",
-                                "character_id": "person_outline",
-                                "prompt": "简化人体轮廓站立母版。",
-                            }
-                        ]
-                    }
-                },
-                ensure_ascii=False,
-            ),
-            video_content=json.dumps(
-                {
-                    "video_prompts": [
-                        {
-                            "job_id": "clip_03_b_roll",
-                            "workflow_id": "06_i2v_first_frame",
-                            "workflow_mode": "i2v_first_frame",
-                            "character_id": "person_outline",
-                            "prompt": "人体轮廓做简单下落演示动画。",
-                            "input_bindings": {
-                                "input_base_image": {
-                                    "from_job": "clip_03_b_roll_keyframe",
-                                    "output": "output_final_image",
+    def test_i2v_missing_source_fails_without_generated_keyframe(self) -> None:
+        with self.assertRaisesRegex(ValueError, "has no explicit upstream image"):
+            compile_production_plan(
+                task_id="i2v_missing_source_keyframe",
+                route_content=json.dumps(
+                    {
+                        "production_type": "drama_story",
+                        "aspect_ratio": "9:16",
+                        "global_context": {"characters": [{"character_id": "protagonist", "name": "主角"}]},
+                    },
+                    ensure_ascii=False,
+                ),
+                image_content=json.dumps(
+                    {
+                        "production_intents": {
+                            "image": [
+                                {
+                                    "intent": "generate_base_asset",
+                                    "intent_id": "hero_master",
+                                    "asset_role": "character",
+                                    "character_id": "protagonist",
+                                    "prompt": "2008年普通打工人主角，真人纪实感，同一张脸。",
                                 }
-                            },
-                            "depends_on": ["clip_03_b_roll_keyframe"],
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                video_content=json.dumps(
+                    {
+                        "production_intents": {
+                            "video": [
+                                {
+                                    "intent": "generate_i2v_clip",
+                                    "intent_id": "clip_001",
+                                    "character_id": "protagonist",
+                                    "duration_seconds": 2,
+                                    "prompt": "主角从出租屋醒来，看着2008年的旧手机，真人复古纪实画面。",
+                                }
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+
+    def test_legacy_i2v_binding_fails_when_keyframe_is_missing(self) -> None:
+        with self.assertRaisesRegex(ValueError, "references missing upstream image"):
+            compile_production_plan(
+                task_id="legacy_i2v_missing_keyframe",
+                route_content=json.dumps(
+                    {
+                        "production_type": "custom",
+                        "aspect_ratio": "9:16",
+                    },
+                    ensure_ascii=False,
+                ),
+                image_content=json.dumps(
+                    {
+                        "production_intents": {
+                            "image": [
+                                {
+                                    "intent": "generate_base_asset",
+                                    "intent_id": "asset_person_stand",
+                                    "asset_role": "character",
+                                    "character_id": "person_outline",
+                                    "prompt": "简化人体轮廓站立母版。",
+                                }
+                            ]
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                video_content=json.dumps(
+                    {
+                        "video_prompts": [
+                            {
+                                "job_id": "clip_03_b_roll",
+                                "workflow_id": "06_i2v_first_frame",
+                                "workflow_mode": "i2v_first_frame",
+                                "character_id": "person_outline",
+                                "prompt": "人体轮廓做简单下落演示动画。",
+                                "input_bindings": {
+                                    "input_base_image": {
+                                        "from_job": "clip_03_b_roll_keyframe",
+                                        "output": "output_final_image",
+                                    }
+                                },
+                                "depends_on": ["clip_03_b_roll_keyframe"],
+                            }
+                        ]
+                    },
+                    ensure_ascii=False,
+                ),
+                existing_payload={
+                    "image_prompts": [
+                        {
+                            "job_id": "stale_legacy_image",
+                            "workflow_id": "04_keyframe",
+                            "workflow_mode": "keyframe",
+                            "prompt": "stale legacy image should be replaced by compiled image intents",
                         }
                     ]
                 },
-                ensure_ascii=False,
-            ),
-            existing_payload={
-                "image_prompts": [
-                    {
-                        "job_id": "stale_legacy_image",
-                        "workflow_id": "04_keyframe",
-                        "workflow_mode": "keyframe",
-                        "prompt": "stale legacy image should be replaced by compiled image intents",
-                    }
-                ]
-            },
-        )
-        payload = plan["compiled_payload"]
-        image_ids = {row["job_id"] for row in payload["image_prompts"]}
-        self.assertIn("asset_person_stand", image_ids)
-        self.assertIn("clip_03_b_roll_keyframe", image_ids)
-        self.assertNotIn("stale_legacy_image", image_ids)
-        self.assertIn("clip_03_b_roll_keyframe", {row["job_id"] for row in plan["visual_jobs"] if row["type"] == "image"})
+            )
 
     def test_task_comfy_debug_resolves_input_binding_reference(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

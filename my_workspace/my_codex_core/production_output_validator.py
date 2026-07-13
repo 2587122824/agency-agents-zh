@@ -290,7 +290,10 @@ def _validate_videos(
                 if upstream_ids and ref not in upstream_ids:
                     issues.append(f"视频意图 {intent_id or index} 引用了不存在的上游图片：{ref}")
         elif intent in {"generate_i2v_clip", "generate_talking_image"}:
-            for ref in _reference_ids(item):
+            refs = list(dict.fromkeys([*_string_list(item.get("source_intent_ids")), *_reference_ids(item)]))
+            if not refs:
+                issues.append(f"图生视频意图 {intent_id or index} 必须显式引用一张上游图片")
+            for ref in refs:
                 if upstream_ids and ref not in upstream_ids:
                     issues.append(f"视频意图 {intent_id or index} 引用了不存在的上游图片：{ref}")
         if intent == "generate_broll_clip":
@@ -300,6 +303,7 @@ def _validate_videos(
             )
             constraints = item.get("constraints") if isinstance(item.get("constraints"), dict) else {}
             leaked_terms = sorted(term for term in character_terms if term and term.lower() in prompt.lower())
+            marker_text = _text_without_negative_character_phrases(prompt)
             visible_markers = (
                 "人物",
                 "主角",
@@ -326,7 +330,7 @@ def _validate_videos(
                 bool(str(item.get("character_id") or "").strip())
                 or constraints.get("identity_lock") is True
                 or bool(leaked_terms)
-                or any(marker in prompt for marker in visible_markers)
+                or any(marker in marker_text for marker in visible_markers)
             )
             if visible:
                 detail = f"（命中人物：{'、'.join(leaked_terms)}）" if leaked_terms else ""
@@ -620,6 +624,20 @@ def _upstream_character_terms(previous_outputs: list[dict[str, str]]) -> set[str
         for payload in _json_objects(str(output.get("content") or "")):
             _collect_character_terms(payload, terms)
     return terms
+
+
+def _text_without_negative_character_phrases(value: str) -> str:
+    text = str(value or "")
+    negative_patterns = (
+        r"无(?:任何)?(?:可见)?人物(?:出现|出镜|形象|面部)?",
+        r"没有(?:任何)?(?:可见)?人物(?:出现|出镜|形象|面部)?",
+        r"不(?:出现|展示|拍摄|包含|含有)(?:任何)?(?:可见)?人物(?:形象|面部)?",
+        r"避免(?:任何)?人物(?:出现|出镜)",
+        r"no\s+(?:visible\s+)?(?:people|person|character)s?",
+    )
+    for pattern in negative_patterns:
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    return text
 
 
 def _collect_character_terms(value: Any, terms: set[str], in_characters: bool = False) -> None:
