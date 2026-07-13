@@ -556,11 +556,10 @@ INDEX_HTML = r"""<!doctype html>
     }
     .audio-debug-compose {
       display: grid;
-      grid-template-rows: minmax(140px, 1fr) auto auto;
+      grid-template-rows: minmax(0, 1fr) auto;
       gap: 10px;
       min-height: 0;
-      overflow: auto;
-      padding-right: 2px;
+      overflow: hidden;
     }
     .audio-debug-compose label {
       grid-template-rows: auto minmax(0, 1fr);
@@ -1137,9 +1136,6 @@ INDEX_HTML = r"""<!doctype html>
     .aliyun-tuning-card .details-body {
       grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) minmax(220px, 1fr);
       gap: 12px;
-    }
-    .audio-debug-compose .aliyun-tuning-card {
-      box-shadow: none;
     }
     .comfy-mapping-grid textarea {
       min-height: 132px;
@@ -3622,64 +3618,6 @@ INDEX_HTML = r"""<!doctype html>
                 <label>调试文本
                   <textarea id="audioDebugText" spellcheck="false" placeholder="输入要合成的旁白文本。使用 VoxCPM2 本地仿声时，会自动使用当前本人参考音频。"></textarea>
                 </label>
-                <details id="aliyunTtsTuningCard" class="aliyun-tuning-card" hidden>
-                  <summary><strong>阿里云高级调音</strong> <span class="muted small">情绪风格、语速、音量、音高和格式</span></summary>
-                  <div class="details-body provider-grid">
-                    <label>情绪 / 风格
-                      <select id="aliyunTtsStylePreset">
-                        <option value="" selected>默认</option>
-                        <option value="natural">自然口播</option>
-                        <option value="warm">温柔亲和</option>
-                        <option value="energetic">激昂有力</option>
-                        <option value="suspense">悬疑紧张</option>
-                        <option value="documentary">纪录片旁白</option>
-                        <option value="storytelling">故事叙述</option>
-                        <option value="clear_explainer">清晰解说</option>
-                      </select>
-                    </label>
-                    <label>语速
-                      <select id="aliyunTtsRate">
-                        <option value="" selected>默认</option>
-                        <option value="0.85">慢一点</option>
-                        <option value="1">正常</option>
-                        <option value="1.15">快一点</option>
-                        <option value="1.3">更快</option>
-                      </select>
-                    </label>
-                    <label>音量
-                      <select id="aliyunTtsVolume">
-                        <option value="" selected>默认</option>
-                        <option value="40">偏低</option>
-                        <option value="50">标准</option>
-                        <option value="70">偏高</option>
-                        <option value="90">更响</option>
-                      </select>
-                    </label>
-                    <label>音高
-                      <select id="aliyunTtsPitch">
-                        <option value="" selected>默认</option>
-                        <option value="0.9">低沉</option>
-                        <option value="1">正常</option>
-                        <option value="1.1">明亮</option>
-                        <option value="1.2">更亮</option>
-                      </select>
-                    </label>
-                    <label>输出格式
-                      <select id="aliyunTtsFormat">
-                        <option value="mp3">MP3</option>
-                        <option value="wav" selected>WAV</option>
-                        <option value="opus">OPUS</option>
-                        <option value="pcm">PCM</option>
-                      </select>
-                    </label>
-                    <label class="audio-debug-field-wide">风格补充
-                      <input id="aliyunTtsStyleNote" autocomplete="off" spellcheck="false" placeholder="可选：例如 更像知识区旁白、带一点少年感、语气更沉稳" />
-                    </label>
-                    <label hidden>风格指令
-                      <input id="aliyunTtsInstruction" autocomplete="off" spellcheck="false" placeholder="可选：例如 温和、清晰、科普解说感" />
-                    </label>
-                  </div>
-                </details>
                 <div class="audio-debug-actions">
                   <button class="primary" id="runAudioDebugBtn" type="button">生成调试音频</button>
                   <span class="status" id="audioDebugStatus">未生成</span>
@@ -3691,6 +3629,64 @@ INDEX_HTML = r"""<!doctype html>
               </div>
             </div>
           </div>
+            <details id="aliyunTtsTuningCard" class="aliyun-tuning-card" hidden>
+              <summary><strong>阿里云高级调音</strong> <span class="muted small">情绪风格、语速、音量、音高和格式</span></summary>
+              <div class="details-body provider-grid">
+                <label>情绪 / 风格
+                  <select id="aliyunTtsStylePreset">
+                    <option value="" selected>默认</option>
+                    <option value="natural">自然口播</option>
+                    <option value="warm">温柔亲和</option>
+                    <option value="energetic">激昂有力</option>
+                    <option value="suspense">悬疑紧张</option>
+                    <option value="documentary">纪录片旁白</option>
+                    <option value="storytelling">故事叙述</option>
+                    <option value="clear_explainer">清晰解说</option>
+                  </select>
+                </label>
+                <label>语速
+                  <select id="aliyunTtsRate">
+                    <option value="" selected>默认</option>
+                    <option value="0.85">慢一点</option>
+                    <option value="1">正常</option>
+                    <option value="1.15">快一点</option>
+                    <option value="1.3">更快</option>
+                  </select>
+                </label>
+                <label>音量
+                  <select id="aliyunTtsVolume">
+                    <option value="" selected>默认</option>
+                    <option value="40">偏低</option>
+                    <option value="50">标准</option>
+                    <option value="70">偏高</option>
+                    <option value="90">更响</option>
+                  </select>
+                </label>
+                <label>音高
+                  <select id="aliyunTtsPitch">
+                    <option value="" selected>默认</option>
+                    <option value="0.9">低沉</option>
+                    <option value="1">正常</option>
+                    <option value="1.1">明亮</option>
+                    <option value="1.2">更亮</option>
+                  </select>
+                </label>
+                <label>输出格式
+                  <select id="aliyunTtsFormat">
+                    <option value="mp3">MP3</option>
+                    <option value="wav" selected>WAV</option>
+                    <option value="opus">OPUS</option>
+                    <option value="pcm">PCM</option>
+                  </select>
+                </label>
+                <label class="audio-debug-field-wide">风格补充
+                  <input id="aliyunTtsStyleNote" autocomplete="off" spellcheck="false" placeholder="可选：例如 更像知识区旁白、带一点少年感、语气更沉稳" />
+                </label>
+                <label hidden>风格指令
+                  <input id="aliyunTtsInstruction" autocomplete="off" spellcheck="false" placeholder="可选：例如 温和、清晰、科普解说感" />
+                </label>
+              </div>
+            </details>
           <div class="config-card audio-debug-card" data-title="阿里云 CosyVoice 声音复刻" data-desc="创建本人授权的复刻音色，保存 voice_id 后可直接用于上方文本转音频">
             <div class="audio-debug-clone-shell">
               <div class="audio-debug-clone-section">
