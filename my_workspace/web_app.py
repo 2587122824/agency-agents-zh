@@ -1097,6 +1097,12 @@ INDEX_HTML = r"""<!doctype html>
       gap: 12px;
       align-items: start;
     }
+    #deleteAliyunCloneVoiceBtn {
+      align-self: end;
+      justify-self: start;
+      max-width: 180px;
+      white-space: nowrap;
+    }
     .automation-config .provider-grid.config-card {
       grid-template-columns: repeat(3, minmax(220px, 1fr));
     }
@@ -3492,6 +3498,7 @@ INDEX_HTML = r"""<!doctype html>
                   <optgroup id="aliyunCloneVoiceTtsGroup" label="我的复刻音色"></optgroup>
                 </select>
               </label>
+              <button class="danger" id="deleteAliyunCloneVoiceBtn" type="button" hidden>删除选中复刻音色</button>
               <label>音频格式
                 <select id="aliyunTtsFormat">
                   <option value="mp3">MP3</option>
@@ -4540,6 +4547,7 @@ INDEX_HTML = r"""<!doctype html>
       aliyunTtsEndpoint: document.getElementById('aliyunTtsEndpoint'),
       aliyunTtsModel: document.getElementById('aliyunTtsModel'),
       aliyunTtsVoice: document.getElementById('aliyunTtsVoice'),
+      deleteAliyunCloneVoiceBtn: document.getElementById('deleteAliyunCloneVoiceBtn'),
       aliyunTtsFormat: document.getElementById('aliyunTtsFormat'),
       aliyunTtsSampleRate: document.getElementById('aliyunTtsSampleRate'),
       aliyunTtsVolume: document.getElementById('aliyunTtsVolume'),
@@ -7653,8 +7661,10 @@ INDEX_HTML = r"""<!doctype html>
       els.voiceMode.addEventListener('change', syncVoiceCommandTemplateForMode);
       if (els.runAudioDebugBtn) els.runAudioDebugBtn.addEventListener('click', runAudioDebug);
       if (els.createAliyunCloneBtn) els.createAliyunCloneBtn.addEventListener('click', createAliyunCosyVoiceClone);
+      if (els.deleteAliyunCloneVoiceBtn) els.deleteAliyunCloneVoiceBtn.addEventListener('click', deleteSelectedAliyunCloneVoice);
       if (els.useAliyunCloneVoiceBtn) els.useAliyunCloneVoiceBtn.addEventListener('click', useSelectedAliyunCloneVoice);
       if (els.aliyunCloneLocalAudioFile) els.aliyunCloneLocalAudioFile.addEventListener('change', uploadAliyunCloneLocalAudio);
+      if (els.aliyunTtsVoice) els.aliyunTtsVoice.addEventListener('change', syncAliyunCloneDeleteVisibility);
     }
 
     function applyImageProviderDefaults() {
@@ -8802,6 +8812,15 @@ INDEX_HTML = r"""<!doctype html>
       return aliyunVoiceClones.find(item => String(item.voice_id || '') === voiceId) || null;
     }
 
+    function syncAliyunCloneDeleteVisibility() {
+      if (!els.deleteAliyunCloneVoiceBtn) return;
+      const item = selectedAliyunTtsClone();
+      const voiceId = String(item?.voice_id || '').trim();
+      els.deleteAliyunCloneVoiceBtn.hidden = !voiceId;
+      els.deleteAliyunCloneVoiceBtn.disabled = !voiceId;
+      els.deleteAliyunCloneVoiceBtn.title = voiceId ? `删除 ${voiceId}` : '';
+    }
+
     function renderAliyunCloneTtsOptions(selectedValue = '') {
       const group = document.getElementById('aliyunCloneVoiceTtsGroup');
       if (!group) return;
@@ -8819,6 +8838,7 @@ INDEX_HTML = r"""<!doctype html>
       if (current && [...(els.aliyunTtsVoice?.options || [])].some(option => option.value === current)) {
         els.aliyunTtsVoice.value = current;
       }
+      syncAliyunCloneDeleteVisibility();
     }
 
     function renderAliyunVoiceClones() {
@@ -8842,6 +8862,7 @@ INDEX_HTML = r"""<!doctype html>
           els.aliyunCloneVoiceSelect.value = current;
         }
       }
+      syncAliyunCloneDeleteVisibility();
     }
 
     function useSelectedAliyunCloneVoice() {
@@ -8860,7 +8881,60 @@ INDEX_HTML = r"""<!doctype html>
       if (els.aliyunCloneRegion && item.region) setIfExists(els.aliyunCloneRegion, item.region);
       syncVoiceModeVisibility();
       saveSettings();
+      syncAliyunCloneDeleteVisibility();
       setStatus(`已使用复刻音色：${item.voice_id}`);
+    }
+
+    async function deleteSelectedAliyunCloneVoice() {
+      const item = selectedAliyunTtsClone() || selectedAliyunClone();
+      const voiceId = String(item?.voice_id || '').trim();
+      if (!voiceId) {
+        setStatus('请先在系统配置的阿里云音色列表里选中一个复刻音色', true);
+        return;
+      }
+      if (!window.confirm(`确定删除这个复刻音色吗？\n${voiceId}\n\n删除后会从阿里云和本地音色列表移除。`)) return;
+      const apiKey = String(els.aliyunCloneApiKey?.value || els.aliyunTtsApiKey?.value || '').trim();
+      const workspaceId = String(item.workspace_id || els.aliyunCloneWorkspaceId?.value || els.aliyunTtsWorkspaceId?.value || '').trim();
+      if (!apiKey) {
+        setStatus('请先填写阿里云 API Key，再删除复刻音色', true);
+        return;
+      }
+      if (!workspaceId) {
+        setStatus('缺少 Workspace ID，无法删除阿里云复刻音色', true);
+        return;
+      }
+      const originalText = els.deleteAliyunCloneVoiceBtn?.textContent || '';
+      if (els.deleteAliyunCloneVoiceBtn) {
+        els.deleteAliyunCloneVoiceBtn.disabled = true;
+        els.deleteAliyunCloneVoiceBtn.textContent = '删除中...';
+      }
+      try {
+        const result = await apiWithTimeout('/api/aliyun-cosyvoice-clone-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            api_key: apiKey,
+            voice_id: voiceId,
+            workspace_id: workspaceId,
+            region: item.region || els.aliyunCloneRegion?.value || 'cn-beijing',
+          }),
+        }, 120000);
+        aliyunVoiceClones = Array.isArray(result.voices) ? result.voices : aliyunVoiceClones.filter(clone => String(clone.voice_id || '') !== voiceId);
+        if (els.aliyunCustomVoiceId && String(els.aliyunCustomVoiceId.value || '').trim() === voiceId) els.aliyunCustomVoiceId.value = '';
+        if (els.aliyunCloneVoiceSelect && String(els.aliyunCloneVoiceSelect.value || '').trim() === voiceId) els.aliyunCloneVoiceSelect.value = '';
+        if (els.aliyunTtsVoice && String(els.aliyunTtsVoice.value || '').trim() === voiceId) els.aliyunTtsVoice.value = 'longxiaochun';
+        renderAliyunVoiceClones();
+        saveSettings();
+        const warning = result.warning ? `（${result.warning}）` : '';
+        setStatus(`已删除复刻音色：${voiceId}${warning}`);
+      } catch (err) {
+        setStatus(err.message || '删除复刻音色失败', true);
+      } finally {
+        if (els.deleteAliyunCloneVoiceBtn) {
+          els.deleteAliyunCloneVoiceBtn.textContent = originalText || '删除选中复刻音色';
+          syncAliyunCloneDeleteVisibility();
+        }
+      }
     }
 
     function normalizeAliyunClonePrefix(value) {
@@ -15263,6 +15337,10 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 self._send_json(self._create_aliyun_cosyvoice_clone(payload))
                 return
 
+            if parsed.path == "/api/aliyun-cosyvoice-clone-delete":
+                self._send_json(self._delete_aliyun_cosyvoice_clone(payload))
+                return
+
             if parsed.path == "/api/upload-knowledge":
                 self._send_json(self._upload_knowledge(payload))
                 return
@@ -21160,6 +21238,63 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         voices.insert(0, voice)
         self._write_aliyun_voice_clones(voices[:50])
         return {"ok": True, "voice_id": voice_id, "voice": voice, "voices": voices[:50], "raw": data}
+
+    def _delete_aliyun_cosyvoice_clone(self, payload: dict) -> dict:
+        api_key = str(payload.get("api_key") or "").strip()
+        voice_id = str(payload.get("voice_id") or "").strip()
+        if not api_key:
+            raise ValueError("Aliyun API Key is required")
+        if not voice_id:
+            raise ValueError("voice_id is required")
+
+        voices = self._read_aliyun_voice_clones()
+        saved_voice = next((item for item in voices if str(item.get("voice_id") or "").strip() == voice_id), {})
+        workspace_id = str(payload.get("workspace_id") or saved_voice.get("workspace_id") or "").strip()
+        region = str(payload.get("region") or saved_voice.get("region") or "cn-beijing").strip() or "cn-beijing"
+        if not workspace_id:
+            raise ValueError("Aliyun Workspace ID is required")
+
+        endpoint = f"https://{workspace_id}.{region}.maas.aliyuncs.com/api/v1/services/audio/tts/customization"
+        request_payload = {
+            "model": "voice-enrollment",
+            "input": {
+                "action": "delete_voice",
+                "voice_id": voice_id,
+            },
+        }
+        request = urllib_request.Request(
+            endpoint,
+            data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        warning = ""
+        data: dict = {}
+        try:
+            with urllib_request.urlopen(request, timeout=90) as response:
+                raw = response.read()
+            try:
+                parsed = json.loads(raw.decode("utf-8", errors="replace")) if raw else {}
+            except json.JSONDecodeError as exc:
+                raise ValueError("Aliyun CosyVoice delete response was not valid JSON") from exc
+            data = parsed if isinstance(parsed, dict) else {}
+        except urllib_error.HTTPError as exc:
+            error_body = exc.read().decode("utf-8", errors="replace")
+            normalized = error_body.lower()
+            already_gone = exc.code == 404 or any(token in normalized for token in ("not found", "not_found", "not exist", "does not exist", "voice_not_exist"))
+            if not already_gone:
+                raise ValueError(f"Aliyun CosyVoice delete HTTP {exc.code}: {error_body[:1000]}") from exc
+            warning = "Aliyun voice was already missing; removed local record only"
+            data = {"http_status": exc.code, "error": error_body[:1000]}
+        except (urllib_error.URLError, TimeoutError, OSError) as exc:
+            raise ValueError(f"Aliyun CosyVoice delete request failed: {exc}") from exc
+
+        remaining = [item for item in voices if str(item.get("voice_id") or "").strip() != voice_id]
+        self._write_aliyun_voice_clones(remaining[:50])
+        return {"ok": True, "voice_id": voice_id, "voices": remaining[:50], "raw": data, "warning": warning}
 
     def _knowledge_files(self) -> list[dict]:
         knowledge_root = self._active_knowledge_root()
