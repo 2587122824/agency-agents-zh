@@ -198,12 +198,23 @@ class LocalTTSAdapter:
         model_default = "cosyvoice-v3-flash" if workspace_id else "cosyvoice-v1"
         model = str(voice_config.get("aliyun_model") or voice_config.get("model") or model_default).strip()
         if not workspace_id and model == "cosyvoice-v3-flash":
-            model = "cosyvoice-v1"
+            return {
+                "status": "failed",
+                "error": "Aliyun CosyVoice V3 requires aliyun_workspace_id; model downgrade is disabled",
+            }
+        configured_voice = str(voice_config.get("aliyun_voice") or voice_config.get("voice") or "").strip()
+        if not configured_voice:
+            return {"status": "failed", "error": "Aliyun CosyVoice voice is missing"}
         voice = self._normalize_aliyun_preset_voice(
-            str(voice_config.get("aliyun_voice") or voice_config.get("voice") or "longanyang").strip(),
+            configured_voice,
             model=model,
             is_custom_clone=bool(workspace_id),
         )
+        if not voice:
+            return {
+                "status": "failed",
+                "error": f"Aliyun CosyVoice voice is not valid for {model}: {configured_voice}",
+            }
         audio_format = str(voice_config.get("aliyun_format") or voice_config.get("format") or "wav").strip().lower()
         if audio_format not in {"mp3", "wav", "pcm", "opus"}:
             audio_format = "mp3"
@@ -311,80 +322,16 @@ class LocalTTSAdapter:
             if isinstance(usage, dict):
                 manifest["usage"] = usage
             if target_duration and actual_duration and actual_duration > target_duration + 1.5:
-                retry_rate = self._aliyun_duration_retry_rate(payload_input.get("rate"), actual_duration, target_duration)
-                retry_enabled = str(voice_config.get("aliyun_auto_rate_retry") or "true").strip().lower() not in {
-                    "0",
-                    "false",
-                    "off",
-                    "disabled",
-                }
-                if retry_enabled and retry_rate:
-                    retry_input = dict(payload_input)
-                    retry_input["rate"] = retry_rate
-                    retry_payload = {"model": model, "input": retry_input}
-                    retry_response_path = output_dir / "aliyun_cosyvoice_response_duration_retry.json"
-                    retry_output_path = output_dir / f"voiceover_duration_retry.{audio_format}"
-                    self._remove_stale_file(retry_output_path)
-                    retry_data, retry_audio, retry_error = self._submit_aliyun_cosyvoice_request(
-                        endpoint=endpoint,
-                        api_key=api_key,
-                        payload=retry_payload,
-                        output_path=retry_output_path,
-                        response_path=retry_response_path,
-                        timeout=timeout,
-                    )
-                    manifest["duration_retry"] = {
-                        "enabled": True,
-                        "previous_duration_seconds": actual_duration,
-                        "previous_rate": payload_input.get("rate", 1.0),
-                        "retry_rate": retry_rate,
+                manifest.update(
+                    {
+                        "status": "quality_failed",
+                        "error": (
+                            f"Synthesized voiceover is {actual_duration:.1f}s, longer than the "
+                            f"{target_duration:.1f}s target. Adjust the configured speech rate and retry explicitly."
+                        ),
+                        "duration_overrun_seconds": round(actual_duration - target_duration, 3),
                     }
-                    if retry_error:
-                        manifest["duration_retry"]["error"] = retry_error
-                    elif retry_output_path.is_file():
-                        retry_duration = self._media_duration(retry_output_path)
-                        retry_output_path.replace(output_path)
-                        manifest.update(
-                            {
-                                "status": "success",
-                                "request_id": retry_data.get("request_id") if isinstance(retry_data, dict) else "",
-                                "response_file": str(retry_response_path),
-                                "audio_url_expires_at": retry_audio.get("expires_at", ""),
-                                "downloaded_files": [str(output_path)],
-                                "output_size_bytes": output_path.stat().st_size,
-                                "actual_duration_seconds": retry_duration,
-                                "aliyun_rate": retry_rate,
-                            }
-                        )
-                        retry_usage = retry_data.get("usage") if isinstance(retry_data, dict) else {}
-                        if isinstance(retry_usage, dict):
-                            manifest["usage"] = retry_usage
-                        if target_duration and retry_duration and retry_duration > target_duration + 1.5:
-                            manifest.update(
-                                {
-                                    "status": "quality_failed",
-                                    "error": (
-                                        f"Synthesized voiceover is {retry_duration:.1f}s, longer than the "
-                                        f"{target_duration:.1f}s target after automatic rate retry."
-                                    ),
-                                    "duration_overrun_seconds": round(retry_duration - target_duration, 3),
-                                }
-                            )
-                    data = retry_data or data
-                    audio = retry_audio or audio
-                if str(manifest.get("status") or "").lower() == "success" and target_duration and manifest.get("actual_duration_seconds"):
-                    actual_after_retry = _float_or_default(manifest.get("actual_duration_seconds"), 0.0)
-                    if actual_after_retry > target_duration + 1.5:
-                        manifest.update(
-                            {
-                                "status": "quality_failed",
-                                "error": (
-                                    f"Synthesized voiceover is {actual_after_retry:.1f}s, longer than the "
-                                    f"{target_duration:.1f}s target. Shorten the voiceover text or adjust speech rate."
-                                ),
-                                "duration_overrun_seconds": round(actual_after_retry - target_duration, 3),
-                            }
-                        )
+                )
 
         manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         return manifest
@@ -440,26 +387,9 @@ class LocalTTSAdapter:
         return data, audio, ""
 
     @staticmethod
-    def _aliyun_duration_retry_rate(current_rate: Any, actual_duration: float, target_duration: float) -> float:
-        if not actual_duration or not target_duration or actual_duration <= target_duration + 1.5:
-            return 0.0
-        current = _float_or_default(current_rate, 1.0)
-        current = max(0.5, min(current, 2.0))
-        ratio = actual_duration / max(1.0, target_duration)
-        retry_rate = min(2.0, max(current + 0.1, current * ratio * 1.03))
-        if retry_rate <= current + 0.01:
-            return 0.0
-        return round(retry_rate, 3)
-
-    @staticmethod
     def _normalize_aliyun_preset_voice(voice: str, *, model: str = "cosyvoice-v1", is_custom_clone: bool = False) -> str:
         if is_custom_clone:
-            return voice or "longanyang"
-        v1_aliases = {
-            "longxiaochun_v3": "longxiaochun",
-            "longxiaoxia_v3": "longxiaoxia",
-            "longshu_v3": "longshu",
-        }
+            return voice
         allowed_v1_presets = {
             "longxiaochun",
             "longxiaoxia",
@@ -481,10 +411,9 @@ class LocalTTSAdapter:
             "loongstella",
             "loongbella",
         }
-        normalized = v1_aliases.get(voice, voice or "longxiaochun")
         if model == "cosyvoice-v1":
-            return normalized if normalized in allowed_v1_presets else "longxiaochun"
-        return normalized or "longxiaochun"
+            return voice if voice in allowed_v1_presets else ""
+        return voice
 
     @staticmethod
     def _aliyun_cosyvoice_endpoint(voice_config: dict[str, Any]) -> str:

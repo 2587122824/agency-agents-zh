@@ -4453,6 +4453,124 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(redacted["api_key"], "")
         self.assertTrue(redacted["has_api_key"])
 
+    def test_runtime_voice_clone_metadata_reaches_cosyvoice_request(self) -> None:
+        production_config = {
+            "voice_config": {
+                "mode": "aliyun_cosyvoice",
+                "provider": "aliyun_cosyvoice",
+                "aliyun_voice": "clone_voice_1",
+                "aliyun_format": "mp3",
+                "aliyun_sample_rate": 24000,
+            }
+        }
+        with patch.object(
+            web_app.WorkflowWebHandler,
+            "_read_runtime_voice_config",
+            return_value={"provider": "aliyun_cosyvoice", "api_key": "sk-test", "has_api_key": True},
+        ), patch.object(
+            web_app.WorkflowWebHandler,
+            "_read_aliyun_voice_clones",
+            return_value=[
+                {
+                    "voice_id": "clone_voice_1",
+                    "target_model": "cosyvoice-v3-flash",
+                    "workspace_id": "ws-test",
+                    "region": "cn-beijing",
+                }
+            ],
+        ):
+            production_config = web_app.WorkflowWebHandler._apply_runtime_voice_config(production_config)
+            production_config = web_app.WorkflowWebHandler._hydrate_aliyun_clone_metadata(production_config)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
+            requests: list[dict] = []
+
+            def fake_submit(**kwargs):
+                requests.append(kwargs)
+                kwargs["output_path"].write_bytes(b"fake-mp3")
+                kwargs["response_path"].write_text('{"request_id":"req-test"}\n', encoding="utf-8")
+                return {"request_id": "req-test"}, {"data": "mock"}, ""
+
+            adapter._submit_aliyun_cosyvoice_request = fake_submit  # type: ignore[method-assign]
+            adapter._media_duration = lambda path: 5.0  # type: ignore[method-assign]
+            result = adapter.run("测试复刻音色。", production_config["voice_config"], Path(tmp))
+            manifest_text = (Path(tmp) / "local_tts_manifest.json").read_text(encoding="utf-8")
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["model"], "cosyvoice-v3-flash")
+        self.assertEqual(result["voice"], "clone_voice_1")
+        self.assertEqual(len(requests), 1)
+        self.assertIn("ws-test.cn-beijing.maas.aliyuncs.com", requests[0]["endpoint"])
+        self.assertEqual(requests[0]["api_key"], "sk-test")
+        self.assertEqual(requests[0]["payload"]["model"], "cosyvoice-v3-flash")
+        self.assertNotIn("sk-test", manifest_text)
+
+    def test_cosyvoice_v3_without_workspace_fails_without_model_downgrade(self) -> None:
+        adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
+        result = adapter.run(
+            "测试。",
+            {
+                "mode": "aliyun_cosyvoice",
+                "provider": "aliyun_cosyvoice",
+                "aliyun_api_key": "sk-test",
+                "aliyun_model": "cosyvoice-v3-flash",
+                "aliyun_voice": "clone_voice_1",
+            },
+            Path(tempfile.gettempdir()),
+        )
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("requires aliyun_workspace_id", result["error"])
+        self.assertIn("downgrade is disabled", result["error"])
+
+    def test_cosyvoice_invalid_v1_voice_fails_without_default_voice_substitution(self) -> None:
+        adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
+        result = adapter.run(
+            "测试。",
+            {
+                "mode": "aliyun_cosyvoice",
+                "provider": "aliyun_cosyvoice",
+                "aliyun_api_key": "sk-test",
+                "aliyun_model": "cosyvoice-v1",
+                "aliyun_voice": "invalid_voice",
+            },
+            Path(tempfile.gettempdir()),
+        )
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("voice is not valid", result["error"])
+        self.assertIn("invalid_voice", result["error"])
+
+    def test_cosyvoice_duration_overrun_does_not_retry_without_explicit_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            adapter = LocalTTSAdapter(workspace_root=WORKSPACE / "my_workspace")
+            requests: list[dict] = []
+
+            def fake_submit(**kwargs):
+                requests.append(kwargs)
+                kwargs["output_path"].write_bytes(b"fake-mp3")
+                kwargs["response_path"].write_text("{}\n", encoding="utf-8")
+                return {}, {"data": "mock"}, ""
+
+            adapter._submit_aliyun_cosyvoice_request = fake_submit  # type: ignore[method-assign]
+            adapter._media_duration = lambda path: 70.0  # type: ignore[method-assign]
+            result = adapter.run(
+                "这是一段超出目标时长的测试旁白。",
+                {
+                    "mode": "aliyun_cosyvoice",
+                    "provider": "aliyun_cosyvoice",
+                    "aliyun_api_key": "sk-test",
+                    "aliyun_model": "cosyvoice-v1",
+                    "aliyun_voice": "longxiaochun",
+                    "aliyun_format": "mp3",
+                    "target_duration_seconds": 60,
+                },
+                Path(tmp),
+            )
+
+        self.assertEqual(result["status"], "quality_failed")
+        self.assertEqual(len(requests), 1)
+        self.assertNotIn("duration_retry", result)
+
     def test_voxcpm2_timeout_does_not_switch_provider(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)
@@ -4590,12 +4708,6 @@ class SemanticInputContractTests(unittest.TestCase):
             self.assertTrue(state["cache_hit"])
             self.assertTrue(state["recovered_from_manifest"])
             self.assertEqual(state["downloaded_files"], [str(image_path)])
-
-    def test_aliyun_duration_retry_rate_uses_actual_overrun(self) -> None:
-        retry_rate = LocalTTSAdapter._aliyun_duration_retry_rate(None, actual_duration=78.1, target_duration=60.0)
-
-        self.assertGreaterEqual(retry_rate, 1.3)
-        self.assertLessEqual(retry_rate, 1.4)
 
     def test_wav_duration_uses_actual_payload_when_header_size_is_placeholder(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -17,6 +17,14 @@ Last compacted: 2026-07-13
 - Production config snapshots already remove `aliyun_api_key` and every key ending in `_api_key`, so runtime injection does not leak credentials into task output.
 - Verification: 171 semantic-contract tests, `python -m compileall -q my_workspace`, inline browser-script syntax validation, and `git diff --check` passed.
 
+## 2026-07-14 CosyVoice Hidden Fallback Removal
+
+- Removed the automatic duration-overrun retry that silently increased CosyVoice speech rate and issued a second paid request. An overlong result now becomes `quality_failed` after the single selected request and tells the user to adjust the configured rate before an explicit retry.
+- Removed the silent `cosyvoice-v3-flash` to `cosyvoice-v1` downgrade when Workspace ID is missing. Invalid V3 configuration now fails visibly.
+- Removed invalid V1 voice substitution to `longxiaochun`. A missing or unsupported configured voice now fails visibly instead of synthesizing with a different voice.
+- A mocked end-to-end contract test verifies runtime credential injection, clone metadata hydration, the V3 Workspace endpoint, selected model/voice, audio file creation, and secret-free manifests. Additional tests prove no model downgrade, no default-voice substitution, and no automatic duration retry.
+- Verification: 174 semantic-contract tests, `python -m compileall -q my_workspace`, and `git diff --check` passed.
+
 ## 2026-07-14 LTX I2V Production Repair
 
 - The old first-frame I2V RunningHub workflow `2071735603636563970` failed at `LTX2_NAG(238)` because its GGUF model weights were dimension `4096` while the active connector expected `3840`.
