@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>片场 V2 · 创作工作台原型</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/prototype-v2/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark"><i data-lucide="clapperboard"></i></div>
+        <div><strong>片场</strong><span>创作系统 V2</span></div>
+      </div>
+
+      <button class="new-project"><i data-lucide="plus"></i><span>新建创作</span><kbd>N</kbd></button>
+
+      <nav class="primary-nav" aria-label="主导航">
+        <p class="nav-label">工作区</p>
+        <button class="nav-item active" data-view="create"><i data-lucide="message-square-text"></i><span>创作台</span></button>
+        <button class="nav-item" data-view="production"><i data-lucide="layers-3"></i><span>生产队列</span><b>8</b></button>
+        <button class="nav-item" data-view="review"><i data-lucide="scan-eye"></i><span>素材审核</span><b class="warn">3</b></button>
+        <button class="nav-item" data-view="timeline"><i data-lucide="list-video"></i><span>剪辑台</span></button>
+        <p class="nav-label">资源</p>
+        <button class="nav-item" data-view="assets"><i data-lucide="library"></i><span>资产库</span></button>
+        <button class="nav-item" data-view="settings"><i data-lucide="sliders-horizontal"></i><span>系统配置</span></button>
+      </nav>
+
+      <div class="recent-projects">
+        <p class="nav-label">最近项目</p>
+        <button class="project-row selected">
+          <span class="project-thumb thumb-track"></span>
+          <span><strong>田径训练日记</strong><small>方案待确认</small></span>
+          <i data-lucide="more-horizontal"></i>
+        </button>
+        <button class="project-row">
+          <span class="project-thumb thumb-studio"></span>
+          <span><strong>夏日穿搭记录</strong><small>素材审核中</small></span>
+        </button>
+      </div>
+
+      <div class="user-row">
+        <div class="avatar">M</div>
+        <div><strong>我的工作室</strong><span><i></i> 本地服务正常</span></div>
+        <i data-lucide="chevrons-up-down"></i>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div class="project-title">
+          <button class="icon-button mobile-menu" title="菜单"><i data-lucide="menu"></i></button>
+          <div><span>项目</span><strong>田径训练日记</strong></div>
+          <button class="status-pill"><span></span>草稿</button>
+        </div>
+        <div class="top-actions">
+          <button class="icon-button" title="项目记录"><i data-lucide="history"></i></button>
+          <button class="icon-button" title="更多操作"><i data-lucide="more-horizontal"></i></button>
+          <button class="outline-button"><i data-lucide="share-2"></i>分享预览</button>
+          <button class="primary-button" id="continueButton">确认方案并继续<i data-lucide="arrow-right"></i></button>
+        </div>
+      </header>
+
+      <div class="stepper" role="tablist">
+        <button class="step active" data-step="brief"><span>1</span><div><b>创作沟通</b><small>需求已整理</small></div></button>
+        <i data-lucide="chevron-right"></i>
+        <button class="step" data-step="plan"><span>2</span><div><b>方案确认</b><small>3 项待决定</small></div></button>
+        <i data-lucide="chevron-right"></i>
+        <button class="step" data-step="production"><span>3</span><div><b>素材生产</b><small>尚未开始</small></div></button>
+        <i data-lucide="chevron-right"></i>
+        <button class="step" data-step="review"><span>4</span><div><b>审核剪辑</b><small>等待素材</small></div></button>
+      </div>
+
+      <section class="screen active" id="screen-brief">
+        <div class="conversation-pane">
+          <div class="conversation-heading">
+            <div><p class="eyebrow">创作沟通</p><h1>先把想法说清楚，再开始生产。</h1><p>我会整理你的需求，并把影响成本和结果的决定留给你确认。</p></div>
+            <button class="icon-button" title="展开创作记录"><i data-lucide="panel-top-open"></i></button>
+          </div>
+
+          <div class="messages">
+            <article class="message user-message">
+              <div class="avatar user-avatar">M</div>
+              <div class="bubble"><p>做一个 45 秒竖屏的田径训练日记。主人公用我上传的女孩，真实、有力量感，但不要像广告。希望有清晨训练、力量训练和最后冲刺。</p><div class="attachment"><span class="attachment-image"></span><div><b>人物参考.jpg</b><small>2048 × 3072 · 已加入人物资产</small></div><i data-lucide="check-circle-2"></i></div></div>
+            </article>
+            <article class="message assistant-message">
+              <div class="avatar ai-avatar"><i data-lucide="sparkles"></i></div>
+              <div class="bubble">
+                <p>我整理成了一条从清晨准备到冲刺收尾的训练日记。人物身份全程锁定，训练服作为唯一服装状态；操场和健身房会先建立场景基准，再生产镜头。</p>
+                <div class="summary-grid">
+                  <div><span>成片规格</span><b>45 秒 · 9:16</b></div><div><span>叙事结构</span><b>准备 / 训练 / 冲刺</b></div><div><span>人物</span><b>1 位 · 身份已绑定</b></div><div><span>音频</span><b>关闭 · 纯画面</b></div>
+                </div>
+                <p>有三项会明显影响素材生产，我没有替你决定。可以在右侧逐项确认，也可以继续告诉我你希望怎么拍。</p>
+              </div>
+            </article>
+          </div>
+
+          <div class="composer">
+            <div class="quick-prompts">
+              <button>更像日常 vlog</button><button>加强冲刺段落</button><button>减少室内镜头</button>
+            </div>
+            <div class="composer-box">
+              <textarea id="chatInput" rows="2" placeholder="继续描述你的想法，或直接修改右侧决定…"></textarea>
+              <div class="composer-tools"><button class="icon-button" title="添加参考素材"><i data-lucide="paperclip"></i></button><button class="icon-button" title="语音输入"><i data-lucide="mic"></i></button><span>不会自动开始付费生产</span><button class="send-button" id="sendMessage" title="发送"><i data-lucide="arrow-up"></i></button></div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="decision-pane">
+          <div class="panel-heading"><div><p class="eyebrow">决策清单</p><h2>开始前确认</h2></div><span class="count-badge">3</span></div>
+          <div class="progress-line"><span style="width:50%"></span></div>
+          <p class="panel-note">已锁定 3 项，还剩 3 项需要你的选择。</p>
+
+          <div class="decision-card" data-decision="style">
+            <div class="decision-title"><span class="decision-icon amber"><i data-lucide="aperture"></i></span><div><b>画面质感</b><small>影响全部图片和视频提示</small></div><span class="required">待确认</span></div>
+            <div class="visual-options">
+              <button class="visual-option selected" data-value="纪实自然"><span class="style-preview style-documentary"></span><b>纪实自然</b><small>手持感、自然光</small></button>
+              <button class="visual-option" data-value="电影运动"><span class="style-preview style-cinematic"></span><b>电影运动</b><small>强对比、慢动作</small></button>
+            </div>
+          </div>
+
+          <div class="decision-card" data-decision="outfit">
+            <div class="decision-title"><span class="decision-icon blue"><i data-lucide="shirt"></i></span><div><b>训练服状态</b><small>跨镜头保持一致</small></div><span class="required">待确认</span></div>
+            <div class="select-row"><div><span class="color-swatch"></span><div><b>深灰训练背心 + 黑色短裤</b><small>outfit_training_01</small></div></div><button class="icon-button" title="更换"><i data-lucide="chevron-down"></i></button></div>
+          </div>
+
+          <div class="decision-card" data-decision="pace">
+            <div class="decision-title"><span class="decision-icon green"><i data-lucide="gauge"></i></span><div><b>剪辑节奏</b><small>决定镜头数量和平均时长</small></div><span class="required">待确认</span></div>
+            <div class="segmented"><button>舒缓</button><button class="selected">适中</button><button>紧凑</button></div>
+          </div>
+
+          <div class="locked-section"><div class="locked-title"><b>已从系统配置锁定</b><span>3 项</span></div><div class="locked-row"><i data-lucide="smartphone"></i><span>竖屏 9:16 · 480 × 848</span><i data-lucide="lock-keyhole"></i></div><div class="locked-row"><i data-lucide="volume-x"></i><span>音频关闭 · 不创建 TTS</span><i data-lucide="lock-keyhole"></i></div><div class="locked-row"><i data-lucide="workflow"></i><span>生产路由由明确合同决定</span><i data-lucide="lock-keyhole"></i></div></div>
+        </aside>
+      </section>
+
+      <section class="screen" id="screen-plan">
+        <div class="plan-layout">
+          <div class="plan-main">
+            <div class="section-title"><div><p class="eyebrow">方案确认</p><h1>45 秒训练日记</h1><p>以下内容确认后将成为不可猜测、不可自动改写的生产合同。</p></div><div class="version-chip"><i data-lucide="git-branch"></i>方案 v1</div></div>
+            <div class="story-arc">
+              <div class="arc-item active"><span>01</span><div><b>清晨准备</b><small>0–10s · 4 镜头</small></div></div><i data-lucide="arrow-right"></i>
+              <div class="arc-item"><span>02</span><div><b>力量训练</b><small>10–29s · 6 镜头</small></div></div><i data-lucide="arrow-right"></i>
+              <div class="arc-item"><span>03</span><div><b>冲刺收尾</b><small>29–45s · 5 镜头</small></div></div>
+            </div>
+            <div class="shot-table-wrap">
+              <div class="table-toolbar"><div><h2>分镜合同</h2><span>15 个镜头</span></div><div><button class="compact-button"><i data-lucide="filter"></i>筛选</button><button class="compact-button"><i data-lucide="columns-3"></i>字段</button></div></div>
+              <table class="shot-table"><thead><tr><th>镜头</th><th>内容与构图</th><th>人物 / 服装</th><th>场景锚点</th><th>时长</th><th>状态</th></tr></thead><tbody>
+                <tr><td><b>SH-001</b><span>环境空镜</span></td><td><div class="shot-cell"><span class="mini-thumb track-one"></span><div><b>晨雾中的跑道</b><small>广角 · 缓慢推进 · 无人物</small></div></div></td><td><span class="muted">不出现</span></td><td><a>scene_track_01</a></td><td>3.0s</td><td><span class="table-status locked">已锁定</span></td></tr>
+                <tr><td><b>SH-002</b><span>人物近景</span></td><td><div class="shot-cell"><span class="mini-thumb shoe-one"></span><div><b>低头系紧跑鞋</b><small>低机位 · 手部特写 · 禁止文字</small></div></div></td><td><a>char_main</a><small>outfit_training_01</small></td><td><a>scene_track_01</a></td><td>2.5s</td><td><span class="table-status locked">已锁定</span></td></tr>
+                <tr><td><b>SH-003</b><span>人物中景</span></td><td><div class="shot-cell"><span class="mini-thumb warm-one"></span><div><b>跑道边动态热身</b><small>侧面跟拍 · 明显运动</small></div></div></td><td><a>char_main</a><small>outfit_training_01</small></td><td><a>scene_track_01</a></td><td>4.0s</td><td><span class="table-status locked">已锁定</span></td></tr>
+                <tr class="needs-review"><td><b>SH-004</b><span>人物正脸</span></td><td><div class="shot-cell"><span class="mini-thumb face-one"></span><div><b>起跑前深呼吸</b><small>正面近景 · 身份强校验</small></div></div></td><td><a>char_main</a><small>outfit_training_01</small></td><td><a>scene_track_01</a></td><td>2.5s</td><td><span class="table-status review">需确认</span></td></tr>
+              </tbody></table>
+              <button class="show-all">展开其余 11 个镜头<i data-lucide="chevron-down"></i></button>
+            </div>
+          </div>
+          <aside class="plan-aside">
+            <div class="aside-block"><div class="aside-heading"><h3>一致性资产</h3><button class="icon-button" title="管理资产"><i data-lucide="settings-2"></i></button></div><div class="identity-card"><span class="identity-image"></span><div><b>主角 · 小美</b><small>身份参考已绑定</small><span class="good"><i data-lucide="badge-check"></i>可用于生产</span></div></div><div class="asset-row"><span class="scene-image"></span><div><b>室外跑道</b><small>场景基准待生成</small></div><span class="planned">已规划</span></div><div class="asset-row"><span class="gym-image"></span><div><b>力量训练区</b><small>场景基准待生成</small></div><span class="planned">已规划</span></div></div>
+            <div class="aside-block"><h3>生产预估</h3><div class="estimate-row"><span>基准资产</span><b>3 张</b></div><div class="estimate-row"><span>关键帧</span><b>12 张</b></div><div class="estimate-row"><span>视频片段</span><b>15 段</b></div><div class="estimate-row total"><span>预计调用</span><b>30 次</b></div><p class="estimate-note"><i data-lucide="info"></i>这里只估算，不会自动提交任务。</p></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-production">
+        <div class="production-view">
+          <div class="section-title"><div><p class="eyebrow">素材生产</p><h1>分阶段生产，每一步都看得见。</h1><p>只有上一阶段通过后，下一阶段才能由你手动开始。</p></div><button class="primary-button" id="startStage"><i data-lucide="play"></i>开始当前阶段</button></div>
+          <div class="stage-overview"><div class="stage-card done"><span><i data-lucide="check"></i></span><div><small>阶段 1</small><b>一致性基准</b><em>3 / 3 已确认</em></div></div><i data-lucide="chevron-right"></i><div class="stage-card active"><span>2</span><div><small>阶段 2</small><b>镜头关键帧</b><em>8 / 12 已完成</em></div></div><i data-lucide="chevron-right"></i><div class="stage-card"><span>3</span><div><small>阶段 3</small><b>动态视频</b><em>等待确认</em></div></div><i data-lucide="chevron-right"></i><div class="stage-card"><span>4</span><div><small>阶段 4</small><b>剪辑装配</b><em>等待素材</em></div></div></div>
+          <div class="production-grid">
+            <div class="job-panel"><div class="job-heading"><div><h2>关键帧队列</h2><span>阶段 2 / 4</span></div><div class="job-summary"><span><i class="dot done-dot"></i>8 完成</span><span><i class="dot running-dot"></i>1 运行</span><span><i class="dot wait-dot"></i>3 等待</span></div></div><div class="job-list" id="jobList"></div></div>
+            <aside class="event-panel"><div class="event-heading"><h3>执行记录</h3><button class="icon-button" title="筛选记录"><i data-lucide="list-filter"></i></button></div><div class="event-list"><div class="event"><span class="event-dot success"><i data-lucide="check"></i></span><div><b>SH-008 关键帧完成</b><small>实际路由：identity_scene_keyframe</small><time>刚刚</time></div></div><div class="event"><span class="event-dot info"><i data-lucide="upload-cloud"></i></span><div><b>SH-009 已提交</b><small>输入：人物参考 + 健身房基准</small><time>12:42</time></div></div><div class="event"><span class="event-dot neutral"><i data-lucide="shield-check"></i></span><div><b>阶段合同验证通过</b><small>12 个引用全部精确匹配</small><time>12:40</time></div></div></div><div class="cost-box"><div><span>本阶段调用</span><b>9 / 12</b></div><div><span>自动重试</span><b>0</b></div><div><span>路由替换</span><b>0</b></div></div></aside>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-review">
+        <div class="review-view">
+          <div class="section-title"><div><p class="eyebrow">素材审核</p><h1>先判断素材，再决定要不要重做。</h1><p>质量提示只负责指出风险，不会替你发起付费重试。</p></div><div class="review-actions"><button class="outline-button"><i data-lucide="layout-grid"></i>联络表</button><button class="primary-button" id="approveSelected"><i data-lucide="check"></i>通过已选素材</button></div></div>
+          <div class="review-toolbar"><div class="filter-tabs"><button class="selected" data-filter="all">全部 15</button><button data-filter="review">待审核 3</button><button data-filter="passed">已通过 8</button><button data-filter="waiting">生产中 4</button></div><div class="toolbar-actions"><button class="compact-button"><i data-lucide="arrow-up-down"></i>按镜头排序</button><button class="icon-button" title="网格视图"><i data-lucide="grid-2x2"></i></button></div></div>
+          <div class="asset-grid" id="assetGrid"></div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-timeline">
+        <div class="timeline-view">
+          <div class="section-title"><div><p class="eyebrow">剪辑台</p><h1>时间线只接收审核通过的素材。</h1><p>取舍发生在这里，原始生产合同和素材记录保持不变。</p></div><div class="review-actions"><button class="outline-button"><i data-lucide="wand-sparkles"></i>生成剪辑草案</button><button class="primary-button"><i data-lucide="play"></i>预览</button></div></div>
+          <div class="editor-shell">
+            <div class="preview-monitor"><div class="monitor-frame"><span class="vertical-preview"></span><button class="monitor-play"><i data-lucide="play"></i></button><div class="timecode">00:17:08 / 00:45:00</div></div><div class="monitor-controls"><button class="icon-button"><i data-lucide="skip-back"></i></button><button class="icon-button"><i data-lucide="play"></i></button><button class="icon-button"><i data-lucide="skip-forward"></i></button><span></span><button class="icon-button"><i data-lucide="volume-2"></i></button><button class="icon-button"><i data-lucide="maximize-2"></i></button></div></div>
+            <aside class="clip-inspector"><div class="aside-heading"><h3>镜头属性</h3><button class="icon-button"><i data-lucide="x"></i></button></div><div class="inspector-thumb track-two"></div><div class="inspector-field"><span>素材</span><b>SH-006 · 弯道加速</b></div><div class="inspector-grid"><div><span>入点</span><b>00:14:12</b></div><div><span>出点</span><b>00:18:12</b></div></div><div class="inspector-field"><span>裁切</span><div class="segmented"><button>适应</button><button class="selected">填充</button></div></div><div class="inspector-field"><span>音量</span><div class="range-row"><i data-lucide="volume-1"></i><input type="range" value="0"><b>0%</b></div></div></aside>
+            <div class="timeline-panel"><div class="timeline-tools"><button class="icon-button"><i data-lucide="mouse-pointer-2"></i></button><button class="icon-button"><i data-lucide="scissors"></i></button><span></span><button class="icon-button"><i data-lucide="undo-2"></i></button><button class="icon-button"><i data-lucide="redo-2"></i></button><div class="zoom-control"><i data-lucide="zoom-out"></i><input type="range" value="55"><i data-lucide="zoom-in"></i></div></div><div class="ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span><span>00:20</span><span>00:25</span><span>00:30</span><span>00:35</span><span>00:40</span><span>00:45</span></div><div class="tracks"><div class="track-label"><i data-lucide="video"></i><b>主画面</b><button><i data-lucide="eye"></i></button></div><div class="track-content clips"><span class="clip c1">SH-001<em>晨雾跑道</em></span><span class="clip c2">SH-002<em>系鞋带</em></span><span class="clip c3">SH-003<em>热身</em></span><span class="clip c4 selected">SH-006<em>弯道加速</em></span><span class="clip missing">待取舍<em>2.5s 空位</em></span><span class="clip c5">SH-012<em>起跑</em></span><span class="clip c6">SH-015<em>冲刺收尾</em></span></div><div class="track-label"><i data-lucide="type"></i><b>字幕</b><button><i data-lucide="eye-off"></i></button></div><div class="track-content disabled-track"><span>系统音频已关闭 · 本项目不创建字幕轨</span></div><div class="playhead"><b>00:17:08</b></div></div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen placeholder-screen" id="screen-assets"><i data-lucide="library-big"></i><h1>资产库</h1><p>人物、服装、场景和声音资产会在这里按实体管理。</p><button class="outline-button" data-goto="brief">返回创作台</button></section>
+      <section class="screen placeholder-screen" id="screen-settings"><i data-lucide="sliders-horizontal"></i><h1>系统配置</h1><p>模型、工作流和音频开关属于系统配置，不混入单个项目。</p><button class="outline-button" data-goto="brief">返回创作台</button></section>
+    </main>
+  </div>
+  <div class="toast" id="toast"><i data-lucide="check-circle-2"></i><span></span></div>
+  <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
+  <script src="/prototype-v2/app.js"></script>
+</body>
+</html>

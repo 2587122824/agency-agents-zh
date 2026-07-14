@@ -15477,6 +15477,15 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/":
                 self._send_html(INDEX_HTML)
+            elif parsed.path in {"/prototype-v2", "/prototype-v2/"}:
+                self._send_file_response(WORKSPACE_ROOT / "v2_prototype" / "index.html")
+            elif parsed.path.startswith("/prototype-v2/"):
+                relative_name = parsed.path.removeprefix("/prototype-v2/")
+                prototype_root = (WORKSPACE_ROOT / "v2_prototype").resolve()
+                target = (prototype_root / relative_name).resolve()
+                if not target.is_file() or not self._is_relative_to(target, prototype_root):
+                    raise FileNotFoundError(relative_name)
+                self._send_file_response(target)
             elif parsed.path == "/api/config":
                 self._send_json(self._config())
             elif parsed.path == "/api/system-health":

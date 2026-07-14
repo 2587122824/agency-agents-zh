@@ -2,6 +2,14 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 V2 Interactive Product Prototype
+
+- Added an isolated, frontend-only V2 product prototype at `/prototype-v2/`. It does not call models, production providers, or paid APIs and does not change the existing V1 workflow behavior.
+- The prototype covers the intended main flow: conversational requirement capture, explicit decision confirmation, structured shot contracts, staged material production, human-owned quality review, and an edit timeline that accepts reviewed assets.
+- The UI makes system-owned settings, user decisions, actual production routes, retry counts, and blocking states visible. It explicitly demonstrates audio-off behavior and does not simulate automatic retry, route replacement, prompt rewriting, or hidden fallback.
+- Added responsive layouts for desktop and mobile, plus interactive navigation, decision controls, mock production stages, review filters, asset selection, and timeline inspection.
+- The management server serves the prototype's static HTML/CSS/JS from `my_workspace/v2_prototype/`; the current production application remains at `/`.
+
 ## 2026-07-14 Special-Case Topic Fallback Removal
 
 - Removed all topic-specific semantic exceptions from the requirement guard, including the format-token allowlist and the dedicated concept matching previously written for individual story or subject patterns. The backend no longer accepts a changed topic by guessing that selected words or synonyms are close enough.
