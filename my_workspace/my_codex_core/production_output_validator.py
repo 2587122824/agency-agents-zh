@@ -132,14 +132,15 @@ def _validate_images(payloads: list[dict[str, Any]], expected: tuple[int, int], 
         ids.add(intent_id)
         character_id = str(item.get("character_id") or "").strip()
         if character_id and intent in {"generate_keyframe", "generate_three_frame_shot", "generate_cover_key_visual"}:
-            face_visibility = str(item.get("face_visibility") or "").strip()
+            constraints = item.get("constraints") if isinstance(item.get("constraints"), dict) else {}
+            face_visibility = str(item.get("face_visibility") or constraints.get("face_visibility") or "").strip()
             if face_visibility not in {"required", "optional", "not_visible"}:
                 issues.append(
                     f"人物图片意图 {intent_id or index} 的 face_visibility 必须为 required、optional 或 not_visible"
                 )
-            if not str(item.get("outfit_state_id") or "").strip():
+            if not str(item.get("outfit_state_id") or constraints.get("outfit_state_id") or "").strip():
                 issues.append(f"人物图片意图 {intent_id or index} 缺少 outfit_state_id")
-            text_policy = str(item.get("text_policy") or "").strip()
+            text_policy = str(item.get("text_policy") or constraints.get("text_policy") or "").strip()
             if text_policy not in {"forbidden", "allowed", "required"}:
                 issues.append(
                     f"人物图片意图 {intent_id or index} 的 text_policy 必须为 forbidden、allowed 或 required"
@@ -148,7 +149,7 @@ def _validate_images(payloads: list[dict[str, Any]], expected: tuple[int, int], 
         if scene_id:
             repeated_scenes.setdefault(scene_id, []).append(item)
             if intent == "generate_base_asset" and str(item.get("asset_role") or "").strip().lower() in {
-                "scene_base", "scene_reference", "background", "environment", "location"
+                "scene", "scene_base", "scene_reference", "background", "bg", "environment", "location", "set"
             }:
                 scene_anchors.add(scene_id)
             if any(str(item.get(key) or "").strip() for key in (

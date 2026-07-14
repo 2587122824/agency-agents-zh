@@ -1730,6 +1730,7 @@ def _compile_video_intents(
             notes.append(f"video intent {intent_id} skipped because prompt is empty")
             continue
         effective_intent_name = intent_name
+        intent_constraints = intent.get("constraints") if isinstance(intent.get("constraints"), dict) else {}
         entity_context = entity_context_for_ids(
             resolved_entities,
             character_id="" if effective_intent_name == "generate_broll_clip" else str(intent.get("character_id") or ""),
@@ -1756,9 +1757,9 @@ def _compile_video_intents(
             "style_id": str(intent.get("style_id") or ""),
             "product_id": str(intent.get("product_id") or ""),
             "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
-            "face_visibility": str(intent.get("face_visibility") or ""),
-            "outfit_state_id": str(intent.get("outfit_state_id") or ""),
-            "text_policy": str(intent.get("text_policy") or ""),
+            "face_visibility": str(intent.get("face_visibility") or intent_constraints.get("face_visibility") or ""),
+            "outfit_state_id": str(intent.get("outfit_state_id") or intent_constraints.get("outfit_state_id") or ""),
+            "text_policy": str(intent.get("text_policy") or intent_constraints.get("text_policy") or ""),
             "asset_tag": str(intent.get("asset_tag") or intent_name or intent_id),
             "source_intent_ids": _string_list(intent.get("source_intent_ids")),
             "depends_on": _string_list(intent.get("depends_on")),
@@ -1950,6 +1951,7 @@ def _image_prompt_item(
     notes: list[str] | None = None,
 ) -> dict[str, Any]:
     intent_name = str(intent.get("intent") or "").strip()
+    intent_constraints = intent.get("constraints") if isinstance(intent.get("constraints"), dict) else {}
     workflow_id, workflow_mode = _image_workflow_route(intent_name, intent, contract, compatibility)
     scene_base_item = workflow_mode == "scene_base" or str(intent.get("asset_role") or "").strip().lower() in SCENE_ASSET_ROLES
     entity_context = entity_context_for_ids(
@@ -1977,10 +1979,10 @@ def _image_prompt_item(
         "style_id": str(intent.get("style_id") or ""),
         "product_id": str(intent.get("product_id") or ""),
         "scene_id": str(intent.get("scene_id") or intent.get("shot_id") or ""),
-        "face_visibility": str(intent.get("face_visibility") or ""),
-        "outfit_state_id": str(intent.get("outfit_state_id") or ""),
-        "text_policy": str(intent.get("text_policy") or ""),
-        "allow_in_scene_text": str(intent.get("text_policy") or "").strip() in {"allowed", "required"},
+        "face_visibility": str(intent.get("face_visibility") or intent_constraints.get("face_visibility") or ""),
+        "outfit_state_id": str(intent.get("outfit_state_id") or intent_constraints.get("outfit_state_id") or ""),
+        "text_policy": str(intent.get("text_policy") or intent_constraints.get("text_policy") or ""),
+        "allow_in_scene_text": str(intent.get("text_policy") or intent_constraints.get("text_policy") or "").strip() in {"allowed", "required"},
         "asset_tag": asset_tag,
         "depends_on": _string_list(intent.get("depends_on")),
         "input_bindings": intent.get("input_bindings") if isinstance(intent.get("input_bindings"), dict) else {},

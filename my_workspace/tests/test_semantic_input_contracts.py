@@ -5798,6 +5798,93 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertFalse(result["passed"])
         self.assertTrue(any("没有绑定场景母版" in issue for issue in result["issues"]))
 
+    def test_character_controls_in_constraints_and_scene_role_are_valid(self) -> None:
+        controls = {
+            "face_visibility": "required",
+            "outfit_state_id": "xiaomei_underwear",
+            "text_policy": "forbidden",
+        }
+        payload = {
+            "production_intents": {
+                "image": [
+                    {
+                        "intent": "generate_base_asset",
+                        "intent_id": "asset_scene_front",
+                        "asset_role": "scene",
+                        "scene_id": "scene_fitting",
+                    },
+                    {
+                        "intent": "generate_keyframe",
+                        "intent_id": "shot_1",
+                        "character_id": "xiaomei",
+                        "scene_id": "scene_fitting",
+                        "constraints": controls,
+                    },
+                    {
+                        "intent": "generate_keyframe",
+                        "intent_id": "shot_2",
+                        "character_id": "xiaomei",
+                        "scene_id": "scene_fitting",
+                        "constraints": controls,
+                    },
+                ]
+            },
+            "image_prompts": [
+                {"asset_tag": "asset_scene_front", "width": 480, "height": 848},
+                {"asset_tag": "shot_1", "width": 480, "height": 848},
+                {"asset_tag": "shot_2", "width": 480, "height": 848},
+            ],
+        }
+        result = validate_production_output(
+            {"agent": "06_分镜生图设计师"},
+            json.dumps(payload, ensure_ascii=False),
+            {"aspect_ratio": "9:16"},
+        )
+        self.assertTrue(result["passed"], result["issues"])
+
+        plan = compile_production_plan(
+            task_id="nested_visual_controls",
+            route_content=json.dumps(
+                {"production_type": "drama_story", "aspect_ratio": "9:16"},
+                ensure_ascii=False,
+            ),
+            image_content=json.dumps(
+                {
+                    "production_intents": {
+                        "image": [
+                            {
+                                **payload["production_intents"]["image"][1],
+                                "prompt": "小美在试衣间正面展示服装",
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            video_content=json.dumps(
+                {
+                    "production_intents": {
+                        "video": [
+                            {
+                                "intent": "generate_i2v_clip",
+                                "intent_id": "clip_1",
+                                "source_intent_ids": ["shot_1"],
+                                "prompt": "小美自然转身展示服装",
+                                "constraints": controls,
+                            }
+                        ]
+                    }
+                },
+                ensure_ascii=False,
+            ),
+        )
+        image_job = plan["compiled_payload"]["image_prompts"][0]
+        video_job = plan["compiled_payload"]["video_prompts"][0]
+        for job in (image_job, video_job):
+            self.assertEqual(job["face_visibility"], "required")
+            self.assertEqual(job["outfit_state_id"], "xiaomei_underwear")
+            self.assertEqual(job["text_policy"], "forbidden")
+
     def test_quality_gate_never_automatically_retries_paid_visual_jobs(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             output_dir = Path(tmp)

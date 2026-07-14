@@ -2,6 +2,14 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 Nested Visual Control Contract Repair
+
+- The failed task `task_20260714_190103_小美的内衣试穿vlog_竖屏1分钟长视频` stopped at employee 06 before any paid visual jobs were submitted. Employee 06 had correctly copied `face_visibility`, `outfit_state_id`, and `text_policy` into each image intent's `constraints` object, but the validator and compiler only read those fields from the intent top level.
+- Visual validation and compilation now accept the three explicit controls from either the canonical `constraints` object or the legacy top level. The compiler promotes the selected values into standard image and video job fields; it does not infer values from prompt prose.
+- A `generate_base_asset` with `asset_role=scene` is now recognized as an explicit scene anchor, matching the compiler's existing scene-role vocabulary. Other accepted explicit aliases remain `scene_base`, `scene_reference`, `background`, `bg`, `environment`, `location`, and `set`.
+- Employee 06 documentation identifies `constraints` as the canonical location and retains top-level compatibility. No hidden field backfill, scene guessing, paid retry, or production resume was added.
+- Verification: 197 semantic-contract tests, real rejected employee-06 output regression, `python -m compileall -q my_workspace`, and `git diff --check` passed.
+
 ## 2026-07-14 Editor-Owned Subtitle Timing
 
 - Employee 20 now owns the complete voice/subtitle draft, not final edit timing. A subtitle draft ending after the target duration produces a contract warning and may continue to employee 22; employee 20 must not delete or rewrite employee 03 narration to force a fit.
