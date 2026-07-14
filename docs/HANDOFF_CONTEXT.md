@@ -2,6 +2,14 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 Special-Case Topic Fallback Removal
+
+- Removed all topic-specific semantic exceptions from the requirement guard, including the format-token allowlist and the dedicated concept matching previously written for individual story or subject patterns. The backend no longer accepts a changed topic by guessing that selected words or synonyms are close enough.
+- Topic ownership is now one uniform explicit contract. `requirement_lock_prompt` provides `core_topic`; employees 01, 03, 23, and 04 must copy it verbatim into their standard output anchor. Validation checks that exact anchor or an exact structured anchor field. It does not rewrite, infer, translate, or backfill the employee output.
+- Employee 03 guidance no longer contains product-, platform-, persona-, or attribute-specific prohibition examples. It states only the general provenance rule: factual descriptions require an explicit user, upstream, or linked-asset source; otherwise the field remains unspecified or neutral.
+- Historical rejected outputs without the exact anchor are not silently accepted. A user-initiated resume regenerates the employee output under the current contract; no automatic resume or reuse is performed.
+- Verification: 200 semantic-contract tests, `python -m compileall -q my_workspace`, `git diff --check`, and a repository search confirming the special-case topic functions and allowlist are absent.
+
 ## 2026-07-14 Requirement Ownership And Stale Run Repair
 
 - Requirement validation now has separate owners instead of one generic delivery gate: employees 01/03/23 retain duration validation, while only employees 01 and 23 must repeat explicit orientation/aspect constraints. Employee 03 owns topic, narration structure, and duration; a valid voiceover script no longer fails merely because it does not say `竖屏` or `9:16`.
@@ -9,13 +17,6 @@ Last compacted: 2026-07-13
 - The latest rejected script from `task_20260714_202854_小美的内衣试穿vlog_竖屏1分钟长视频` now passes both requirement alignment and the employee-03 production contract. Employee 03 still fails when duration is missing; employees 01 and 23 still fail when an explicit portrait requirement is missing.
 - Task state no longer lets an older in-memory `paused` run override a newer terminal `run_summary.json`. A paused/queued/running record older than a persisted `failed`, `completed`, or `cancelled` summary is ignored by both task detail and `/api/active-run`, so a failed task is shown as failed instead of appearing stuck at an earlier confirmation.
 - Verification: 200 semantic-contract tests, complete real rejected-output regression, `python -m compileall -q my_workspace`, and `git diff --check` passed. No automatic resume, output backfill, paid retry, or provider call was run.
-
-## 2026-07-14 Vlog Topic Validation Repair
-
-- The resumed task `task_20260714_194916_小美的内衣试穿vlog_竖屏1分钟长视频` stopped at employee 03 before production because the topic guard treated the format word `vlog` as a mandatory spoken English topic token. The script explicitly covered 小美, 内衣, and 试穿, and its production contract passed, but it did not say the word `vlog`.
-- In a mixed Chinese/Latin topic, `vlog` is now treated as a format marker rather than mandatory spoken subject matter. Other semantic Latin tokens remain mandatory; a topic containing only `vlog` still requires that token.
-- When a format marker is ignored, Chinese bigram coverage uses a stronger threshold. The real underwear try-on script passes, while an unrelated 小美田径训练 script remains blocked. No employee output is rewritten or backfilled.
-- Verification: 198 semantic-contract tests, the complete rejected employee-03 output regression, `python -m compileall -q my_workspace`, and `git diff --check` passed. No paid production job or automatic resume was run.
 
 ## 2026-07-14 Nested Visual Control Contract Repair
 
@@ -305,7 +306,7 @@ Old short-video, xiaohongshu, game, software-market, and platform-design workflo
 - Duration evidence accepts literal seconds/minutes, structured duration fields, plain second ranges, and `MM:SS` / `HH:MM:SS` storyboard ranges with common ASCII or Unicode dash characters. A timeline ending at `00:60` or `01:00` is valid evidence for a 60-second task.
 - Validation failures carry `issue_details` with a visible source such as `用户明确要求`, `员工岗位输出契约`, or `生产接口技术契约`. Only real timeout exceptions may show model-timeout guidance; ordinary validation errors must not suggest increasing Ollama timeout.
 - Model outputs are checked for topic retention, duration/structure coverage, ungrounded drift, and inappropriate confirmation blockers.
-- Topic-retention checks allow a narrow paraphrase pattern for the 2008 rebirth/business-opportunity story: if the locked topic is about a lifetime of work, missed wealth waves, and regret, outputs mentioning a worker/protagonist returning to or reborn in 2008 plus reversal/opportunity/business concepts count as on-topic even without repeating the full original sentence.
+- Topic-retention checks require the exact `core_topic` anchor supplied by the requirement lock. The backend does not maintain subject-specific synonym lists or infer that a paraphrase is equivalent.
 - 2008/retro/live-action visual guardrails are not global live-action constraints. Only add the 2008-era street-detail / old-signage / retro-period prompt additions when the requirement or style explicitly mentions 2008, retro, vintage, period, nostalgic, or similar era cues. Plain modern live-action prompts must not inherit those test-task constraints.
 - Only decisions affecting theme, platform specs, brand/product, budget, identity, copyright/compliance, or final delivery may require human confirmation.
 - Employee production-output validation is active for 03/06/20/07/22. Failed validation fails visibly on the first invalid output; do not auto-normalize employee output, auto-retry, reuse rejected candidate outputs, or auto-backfill missing material intents without asking the user first.

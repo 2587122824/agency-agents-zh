@@ -32,6 +32,7 @@ version: 2026-06-30
 
 ```json
 {
+  "core_topic": "原样复制系统提供的 core_topic",
   "production_type": "drama_story | product_promo | talking_avatar | asset_only | custom",
   "target_platform": "抖音 / 快手 / 小红书 / B站 / 视频号 / YouTube / 私域 / 未指定",
   "aspect_ratio": "16:9 | 9:16 | 1:1 | custom",
@@ -48,6 +49,7 @@ version: 2026-06-30
 ## 1. 生产类型路由
 ```json
 {
+  "core_topic": "原样复制系统提供的 core_topic",
   "production_type": "drama_story",
   "target_platform": "未指定",
   "aspect_ratio": "9:16",

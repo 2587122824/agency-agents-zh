@@ -17,9 +17,6 @@ GENERATED_CONTEXT_MARKERS = (
     "## 参考图片",
 )
 
-TOPIC_FORMAT_LATIN_TOKENS = frozenset({"vlog"})
-
-
 def extract_original_requirement(user_input: str) -> str:
     text = str(user_input or "").strip()
     cut_at = len(text)
@@ -104,7 +101,10 @@ def build_requirement_lock(user_input: str) -> dict[str, Any]:
 def requirement_lock_prompt(lock: dict[str, Any]) -> str:
     constraints = lock.get("explicit_constraints") or []
     duration = int(lock.get("duration_seconds") or 0)
+    topic = str(lock.get("core_topic") or "").strip()
     lines = ["## 用户明确约束（机器提取，只读）"]
+    if topic:
+        lines.append(f"- core_topic: {topic}")
     if duration:
         lines.append(f"- target_duration_seconds: {duration}")
     if constraints:
@@ -132,25 +132,7 @@ def validate_requirement_alignment(
         add_issue("模型输出为空", "员工岗位输出契约", "empty_output")
     if topic and output and _agent_requires_topic_validation(agent_id, step_no):
         topic_covered_by_package = _production_package_preserves_topic(output, lock)
-        required_latin, ignored_format_latin = _required_topic_latin_tokens(topic)
-        missing_latin = [token for token in required_latin if token.lower() not in output.lower()]
-        compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
-        common = {"一个", "主题", "视频", "短片", "风格", "时代", "状态", "人类", "之后", "后的"}
-        bigrams = list(
-            dict.fromkeys(
-                compact_topic[index : index + 2]
-                for index in range(max(0, len(compact_topic) - 1))
-                if compact_topic[index : index + 2] not in common
-            )
-        )
-        matched_bigrams = [token for token in bigrams if token in output]
-        minimum_matches = _minimum_topic_bigram_matches(bigrams, bool(ignored_format_latin))
-        topic_covered_by_concepts = _topic_covered_by_salient_concepts(topic, output)
-        if (
-            not topic_covered_by_package
-            and not topic_covered_by_concepts
-            and (missing_latin or (minimum_matches and len(matched_bigrams) < minimum_matches))
-        ):
+        if topic not in output and not topic_covered_by_package:
             add_issue(f"输出未保持核心主题“{topic}”", "用户明确要求", "core_topic_missing")
 
     if _agent_requires_duration_validation(agent_id, step_no):
@@ -235,26 +217,6 @@ def _agent_requires_structure_validation(agent_id: str, step_no: int) -> bool:
     return int(step_no or 0) <= 3
 
 
-def _required_topic_latin_tokens(topic: str) -> tuple[list[str], list[str]]:
-    tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", str(topic or ""))))
-    semantic = [token for token in tokens if token.lower() not in TOPIC_FORMAT_LATIN_TOKENS]
-    ignored_format = [token for token in tokens if token.lower() in TOPIC_FORMAT_LATIN_TOKENS]
-    has_chinese_topic = bool(re.search(r"[\u4e00-\u9fff]", str(topic or "")))
-    if semantic or has_chinese_topic:
-        return semantic, ignored_format
-    return tokens, []
-
-
-def _minimum_topic_bigram_matches(bigrams: list[str], ignored_format_latin: bool) -> int:
-    count = len(set(bigrams))
-    if not count:
-        return 0
-    minimum = min(3, max(1, count // 6))
-    if ignored_format_latin:
-        minimum = max(minimum, min(3, max(1, (count + 1) // 2)))
-    return minimum
-
-
 def _production_package_preserves_topic(content: str, lock: dict[str, Any]) -> bool:
     """Accept structured packages that preserve the locked task without verbatim prose."""
     topic = str(lock.get("core_topic") or "").strip()
@@ -276,46 +238,7 @@ def _production_package_preserves_topic(content: str, lock: dict[str, Any]) -> b
         )
         if anchor_text and _topic_text_covers(topic, anchor_text):
             return True
-
-        production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
-        audio_intents = production.get("audio") if isinstance(production.get("audio"), list) else []
-        if audio_intents:
-            audio_text = _collect_audio_package_text(payload)
-            if audio_text and _audio_package_text_preserves_topic(topic, audio_text, payload, lock):
-                return True
     return False
-
-
-def _collect_audio_package_text(payload: dict[str, Any]) -> str:
-    return " ".join(
-        part
-        for part in (
-            _collect_text_for_keys(
-                payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {},
-                {
-                    "voice_text",
-                    "subtitle_segments",
-                    "text",
-                    "description",
-                    "mood_tags",
-                    "mix_guidance",
-                    "segments",
-                    "sfx",
-                },
-            ),
-            _collect_text_for_keys(
-                payload.get("audio_package") if isinstance(payload.get("audio_package"), dict) else {},
-                {
-                    "voiceover_text",
-                    "subtitle_srt_draft",
-                    "bgm_keywords",
-                    "voice",
-                    "voice_style",
-                },
-            ),
-        )
-        if part
-    )
 
 
 def _collect_text_for_keys(value: Any, keys: set[str]) -> str:
@@ -339,33 +262,8 @@ def _collect_text_for_keys(value: Any, keys: set[str]) -> str:
     return " ".join(parts)
 
 
-def _audio_package_text_preserves_topic(topic: str, audio_text: str, payload: dict[str, Any], lock: dict[str, Any]) -> bool:
-    if _topic_text_covers(topic, audio_text):
-        return True
-    if not _package_duration_matches(payload, lock):
-        return False
-    return _topic_covered_by_salient_concepts(topic, audio_text)
-
-
 def _topic_text_covers(topic: str, text: str) -> bool:
-    if not topic or not text:
-        return False
-    if topic in text:
-        return True
-    required_latin, ignored_format_latin = _required_topic_latin_tokens(topic)
-    if any(token.lower() not in text.lower() for token in required_latin):
-        return False
-    compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
-    common = {"一个", "主题", "视频", "短片", "风格", "竖屏", "横屏"}
-    bigrams = [
-        compact_topic[index : index + 2]
-        for index in range(max(0, len(compact_topic) - 1))
-        if compact_topic[index : index + 2] not in common
-    ]
-    if not bigrams:
-        return bool(required_latin)
-    matched = [token for token in dict.fromkeys(bigrams) if token in text]
-    return len(matched) >= _minimum_topic_bigram_matches(bigrams, bool(ignored_format_latin))
+    return bool(topic and text and topic in text)
 
 
 def _package_duration_matches(payload: dict[str, Any], lock: dict[str, Any]) -> bool:
@@ -427,126 +325,6 @@ def _json_objects(content: str) -> list[dict[str, Any]]:
 def _strip_json_comments(value: str) -> str:
     text = re.sub(r"(?m)^\s*//.*$", "", str(value or ""))
     return re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-
-
-def _topic_covered_by_salient_concepts(topic: str, output: str) -> bool:
-    """Accept semantically faithful scripts that use paraphrases instead of exact topic bigrams."""
-    compact_topic = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]", "", str(topic or ""))
-    text = str(output or "")
-    if not compact_topic or not text:
-        return False
-
-    # The long-video guard previously required exact Chinese bigrams from the topic.
-    # For themes such as “AI时代人类极大提高生产力后的生活状态”, a valid script often
-    # says “效率提升 / 工作完成 / 时间归还 / 岗位消失 / 算法茧房” without repeating
-    # “生产力” verbatim. Keep this narrow: require the AI anchor plus several
-    # productivity/life-state concepts before treating the topic as covered.
-    rebirth_2008_topic = (
-        "打工" in topic
-        and any(term in topic for term in ("错过", "风口", "平庸", "碌碌", "省吃俭用", "暴富"))
-    )
-    if rebirth_2008_topic:
-        concept_families = (
-            ("打工", "工薪", "上班", "打工人"),
-            ("2008", "穿越", "重生", "回到"),
-            ("逆袭", "翻盘", "机会", "商机", "风口", "房价", "互联网"),
-        )
-        if all(any(term in text for term in family) for family in concept_families):
-            return True
-
-    day_in_life_topic = (
-        any(term in topic for term in ("一天", "一日", "日常", "vlog", "VLOG"))
-        and any(term in topic for term in ("打工", "上班", "职场", "工作", "工薪"))
-    )
-    if day_in_life_topic:
-        concept_families = (
-            ("打工", "上班", "工作", "开会", "电脑", "回消息", "地铁", "通勤"),
-            ("一天", "清晨", "闹钟", "下班", "回家", "日常", "重复"),
-            ("我", "主角", "她", "他", "小美", "主人公"),
-        )
-        if all(any(term in text for term in family) for family in concept_families):
-            return True
-
-    topic_mentions_ai = bool(re.search(r"AI|人工智能", topic, flags=re.IGNORECASE))
-    output_mentions_ai = bool(re.search(r"AI|人工智能", text, flags=re.IGNORECASE))
-    productivity_topic = "生产力" in topic or ("生产" in topic and "提高" in topic)
-    if topic_mentions_ai and productivity_topic and output_mentions_ai:
-        concept_terms = (
-            "生产力",
-            "效率",
-            "工作",
-            "时间",
-            "生活",
-            "医疗",
-            "教育",
-            "岗位",
-            "算法",
-            "意义",
-            "焦虑",
-            "创造",
-            "协作",
-        )
-        matched = [term for term in concept_terms if term in text]
-        return len(matched) >= 3
-
-    lower_topic = str(topic or "").lower()
-    lower_text = text.lower()
-    english_city_efficiency_quiet_topic = (
-        "ai" in lower_topic
-        and "city" in lower_topic
-        and ("efficient" in lower_topic or "efficiency" in lower_topic)
-        and ("quiet" in lower_topic or "silent" in lower_topic)
-    )
-    if english_city_efficiency_quiet_topic:
-        concept_families = (
-            (r"AI|artificial intelligence|\u4eba\u5de5\u667a\u80fd",),
-            (r"city|urban|\u57ce\u5e02|\u90fd\u5e02",),
-            (r"efficient|efficiency|\u9ad8\u6548|\u6548\u7387",),
-            (r"quiet|silent|silence|\u5b89\u9759|\u5b81\u9759|\u9759\u8c27|\u65e0\u58f0|\u9759\u9ed8",),
-        )
-        if all(any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in family) for family in concept_families):
-            return True
-
-    english_ai_productivity_topic = "ai" in lower_topic and (
-        "productivity" in lower_topic
-        or "productive" in lower_topic
-        or ("work" in lower_topic and ("improve" in lower_topic or "automation" in lower_topic))
-    )
-    if english_ai_productivity_topic and re.search(r"AI|artificial intelligence|人工智能", text, flags=re.IGNORECASE):
-        concept_terms = (
-            "productivity",
-            "productive",
-            "efficiency",
-            "work",
-            "routine",
-            "automation",
-            "time",
-            "life",
-            "worker",
-            "organize",
-            "labor",
-            "leisure",
-        )
-        matched = [term for term in concept_terms if term in lower_text]
-        if len(matched) >= 3:
-            return True
-        chinese_terms = (
-            "生产力",
-            "效率",
-            "工作",
-            "重复劳动",
-            "自动",
-            "时间",
-            "生活",
-            "清晨",
-            "散步",
-            "提前",
-            "下班",
-        )
-        chinese_matched = [term for term in chinese_terms if term in text]
-        return len(chinese_matched) >= 3
-
-    return False
 
 
 def declares_human_confirmation(content: str) -> bool:

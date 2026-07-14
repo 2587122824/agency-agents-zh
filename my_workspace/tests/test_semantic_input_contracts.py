@@ -58,6 +58,7 @@ from my_codex_core.requirement_guard import (  # noqa: E402
     build_requirement_lock,
     declares_human_confirmation,
     extract_original_requirement,
+    requirement_lock_prompt,
     validate_requirement_alignment,
 )
 from my_codex_core.reference_snapshot import snapshot_linked_assets  # noqa: E402
@@ -231,8 +232,9 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(lock["core_topic"], "小美的田径训练日记")
         self.assertEqual(lock["duration_seconds"], 60)
         self.assertEqual(lock["explicit_constraints"], ["竖屏"])
+        self.assertIn("- core_topic: 小美的田径训练日记", requirement_lock_prompt(lock))
 
-    def test_requirement_guard_treats_vlog_as_format_not_spoken_topic(self) -> None:
+    def test_requirement_guard_requires_exact_core_topic_anchor(self) -> None:
         lock = {
             "core_topic": "小美的内衣试穿vlog",
             "original_requirement": "小美的内衣试穿vlog，竖屏1分钟",
@@ -241,6 +243,7 @@ class SemanticInputContractTests(unittest.TestCase):
         }
         on_topic = (
             "# 长视频口播脚本\n"
+            "- 核心主题：小美的内衣试穿vlog\n"
             "- 目标时长：60秒\n"
             "- 画幅：竖屏 9:16\n"
             "小美今天展示内衣试穿过程，并介绍面料、承托和穿着感受。"
@@ -258,13 +261,14 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertFalse(rejected["passed"])
         self.assertTrue(any(item["code"] == "core_topic_missing" for item in rejected["issue_details"]))
 
-        english_only = validate_requirement_alignment(
-            {"core_topic": "vlog", "original_requirement": "vlog"},
-            "unrelated production notes",
+        paraphrase_only = validate_requirement_alignment(
+            lock,
+            "# 长视频口播脚本\n- 目标时长：60秒\n- 画幅：竖屏 9:16\n小美展示试穿过程。",
             2,
             "03_口播脚本师",
         )
-        self.assertFalse(english_only["passed"])
+        self.assertFalse(paraphrase_only["passed"])
+        self.assertTrue(any(item["code"] == "core_topic_missing" for item in paraphrase_only["issue_details"]))
 
     def test_requirement_guard_assigns_delivery_format_to_01_and_23_only(self) -> None:
         lock = {
@@ -275,6 +279,7 @@ class SemanticInputContractTests(unittest.TestCase):
         }
         script_without_aspect = (
             "# 长视频口播脚本\n"
+            "- 核心主题：小美的内衣试穿vlog\n"
             "- 目标时长：60秒\n"
             "小美今天展示内衣试穿过程，并介绍实际穿着感受。"
         )
@@ -294,7 +299,7 @@ class SemanticInputContractTests(unittest.TestCase):
 
         missing_duration = validate_requirement_alignment(
             lock,
-            "# 长视频口播脚本\n小美今天展示内衣试穿过程。",
+            "# 长视频口播脚本\n- 核心主题：小美的内衣试穿vlog\n小美今天展示内衣试穿过程。",
             2,
             "03_口播脚本师",
         )
@@ -3731,7 +3736,7 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertTrue(result["passed"], result["issues"])
 
-    def test_requirement_guard_accepts_2008_rebirth_paraphrase(self) -> None:
+    def test_requirement_guard_does_not_accept_topic_paraphrase_as_anchor(self) -> None:
         result = validate_requirement_alignment(
             {
                 "core_topic": "上辈子我勤恳打工一辈子，省吃俭用依旧平庸碌碌，眼睁睁错过所有暴富风口，遗憾终身",
@@ -3741,7 +3746,8 @@ class SemanticInputContractTests(unittest.TestCase):
             "本次任务的核心是：为一段30秒、9:16竖屏、关于打工人穿越回2008年逆袭的短视频，规划图片资产。画面覆盖房价、互联网、商机和时代机会。",
             4,
         )
-        self.assertTrue(result["passed"], result["issues"])
+        self.assertFalse(result["passed"])
+        self.assertTrue(any(item["code"] == "core_topic_missing" for item in result["issue_details"]))
 
     def test_unconfigured_talking_image_slot_is_optional(self) -> None:
         slots = _required_workflow_slots(
