@@ -27,6 +27,11 @@ version: 2026-06-30
       {
         "intent": "build_edit_timeline",
         "intent_id": "edit_timeline_main",
+        "subtitle_edit": {
+          "policy": "retime",
+          "target_end_seconds": 58,
+          "reason": "完整字幕草稿超过成片时长，按剪辑节奏等比例重排到片尾前。"
+        },
         "timeline": [
           {
             "order": 1,
@@ -104,6 +109,8 @@ version: 2026-06-30
 - 当所有上游意图引用有效时，`missing_assets` 才能为 `[]`，`review_missing_assets.all_assets_ready=true`；后端仍会独立检查实际文件、质量复核状态和系统音频配置。
 - 系统音频关闭时，封装意图不得要求 TTS 成功或把缺少旁白音频列为阻塞项；字幕和无声画面可按系统配置独立包装。
 - 时间线必须从 0 秒开始连续排列，相邻片段不得重叠或留空档，所有片段时长之和必须等于目标成片时长。
+- 如果 20 的字幕草稿超过目标成片时长，必须在 `build_edit_timeline.subtitle_edit` 中显式选择：`retime`（保留全文并按比例重排）、`trim`（按 `target_end_seconds` 舍弃超出内容）或 `disable`（成片不使用字幕）。`retime`/`trim` 必须填写不超过成片时长的 `target_end_seconds` 和选择原因。
+- 字幕草稿未超时则不要输出 `subtitle_edit`；系统不会自行选择策略，也不会在缺少决策时自动裁切。
 - 交付帧率统一为 `24fps`。最终交付分辨率按画幅锁定：横屏 `1920x1080`、竖屏 `1080x1920`、方形 `1080x1080`。
 
 ## 输出检查
@@ -115,6 +122,7 @@ version: 2026-06-30
 - 是否有交付规格。
 - 是否列出缺失素材和返工建议。
 - 时间线是否连续、无重叠/空档且总时长等于目标时长。
+- 上游字幕超时是否已经通过 `subtitle_edit` 作出明确、可执行的剪辑决定。
 - 交付尺寸是否匹配画幅并固定为 24fps。
 - 是否避免在存在缺失素材时错误声明可直接成片。
 - 是否没有写具体 FFmpeg filter 命令。

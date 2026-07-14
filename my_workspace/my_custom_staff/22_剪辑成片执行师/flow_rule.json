@@ -26,6 +26,7 @@
     "review_missing_assets"
   ],
   "quality_gate": [
+    "如果20的字幕草稿超过目标成片时长，build_edit_timeline.subtitle_edit必须显式选择retime、trim或disable；系统不得自行裁切",
     "必须输出production_intents.package",
     "需要成片时必须输出build_edit_timeline和package_final_video",
     "必须输出delivery_spec或apply_delivery_spec",

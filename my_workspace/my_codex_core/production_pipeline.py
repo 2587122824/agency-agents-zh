@@ -108,8 +108,15 @@ def run_auto_production(
     elif not voice_text_quality["usable"]:
         raise ValueError(f"20_语音字幕包装师配音稿无效：{voice_text_quality.get('reason') or voice_text_quality.get('status')}")
     subtitle_srt = _extract_srt(audio_content)
+    subtitle_edit = _extract_subtitle_edit_decision(edit_content)
+    if subtitle_srt and subtitle_edit:
+        subtitle_srt = _apply_subtitle_edit_decision(subtitle_srt, subtitle_edit)
     subtitle_srt_quality = _quality_check_srt(subtitle_srt)
-    subtitles_disabled = _audio_intent_disabled(audio_content, "build_subtitles") or _is_no_voiceover_marker(subtitle_srt)
+    subtitles_disabled = (
+        _audio_intent_disabled(audio_content, "build_subtitles")
+        or _is_no_voiceover_marker(subtitle_srt)
+        or str(subtitle_edit.get("policy") or "").strip().lower() == "disable"
+    )
     if subtitles_disabled:
         subtitle_srt = ""
         subtitle_srt_quality = {"usable": False, "status": "disabled", "reason": "voiceover/subtitle disabled", "entries": 0}
@@ -287,6 +294,7 @@ def run_auto_production(
             "subtitle_status": subtitle_srt_quality["status"],
             "subtitle_reason": subtitle_srt_quality["reason"],
             "subtitle_entries": subtitle_srt_quality["entries"],
+            "subtitle_edit": subtitle_edit,
             "reference_audio_provided": bool(str(voice_config.get("reference_audio") or "").strip()),
             "reference_text_provided": bool(str(voice_config.get("reference_text") or "").strip()),
             "adapter_status": "pending" if str(voice_config.get("mode") or "").strip().lower() not in {"", "off"} else "not_configured",
@@ -3365,6 +3373,92 @@ def _extract_voice_text(content: str) -> str:
         if voice_text:
             return _clean_extracted_voice_text(voice_text)
     return ""
+
+
+def _extract_subtitle_edit_decision(content: str) -> dict[str, Any]:
+    payload = _json_payload_with(content, "production_intents", "package")
+    production = payload.get("production_intents") if isinstance(payload.get("production_intents"), dict) else {}
+    intents = production.get("package") if isinstance(production.get("package"), list) else []
+    timeline = next(
+        (
+            item
+            for item in intents
+            if isinstance(item, dict) and str(item.get("intent") or "") == "build_edit_timeline"
+        ),
+        {},
+    )
+    decision = timeline.get("subtitle_edit") if isinstance(timeline, dict) else {}
+    if not isinstance(decision, dict):
+        decision = payload.get("subtitle_edit") if isinstance(payload.get("subtitle_edit"), dict) else {}
+    if not decision:
+        return {}
+    policy = str(decision.get("policy") or "").strip().lower()
+    if policy not in {"retime", "trim", "disable"}:
+        raise ValueError("22_剪辑成片执行师的 subtitle_edit.policy 必须为 retime、trim 或 disable")
+    normalized = dict(decision)
+    normalized["policy"] = policy
+    return normalized
+
+
+def _apply_subtitle_edit_decision(srt: str, decision: dict[str, Any]) -> str:
+    policy = str(decision.get("policy") or "").strip().lower()
+    if not policy:
+        return srt
+    if policy == "disable":
+        return ""
+    try:
+        target_end_ms = int(round(float(decision.get("target_end_seconds") or 0) * 1000))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("subtitle_edit.target_end_seconds 不是有效数字") from exc
+    if target_end_ms <= 0:
+        raise ValueError("subtitle_edit.target_end_seconds 必须大于 0")
+
+    entries: list[tuple[int, int, str]] = []
+    for block in re.split(r"\r?\n\s*\r?\n", str(srt or "").strip()):
+        lines = [line.rstrip() for line in block.splitlines()]
+        if len(lines) < 3:
+            continue
+        match = re.match(r"^\s*([^\s]+)\s*-->\s*([^\s]+)\s*$", lines[1])
+        if not match:
+            continue
+        start_ms = _parse_srt_time_ms(match.group(1))
+        end_ms = _parse_srt_time_ms(match.group(2))
+        if start_ms < 0 or end_ms <= start_ms:
+            continue
+        entries.append((start_ms, end_ms, "\n".join(lines[2:]).strip()))
+    if not entries:
+        raise ValueError("无法执行 subtitle_edit：字幕草稿没有可解析的 SRT 条目")
+
+    edited: list[tuple[int, int, str]] = []
+    if policy == "retime":
+        source_end_ms = max(end for _, end, _ in entries)
+        scale = target_end_ms / source_end_ms
+        for start_ms, end_ms, text in entries:
+            new_start = int(round(start_ms * scale))
+            new_end = min(target_end_ms, int(round(end_ms * scale)))
+            if new_end > new_start:
+                edited.append((new_start, new_end, text))
+    elif policy == "trim":
+        for start_ms, end_ms, text in entries:
+            if start_ms >= target_end_ms:
+                continue
+            edited.append((start_ms, min(end_ms, target_end_ms), text))
+    else:
+        raise ValueError(f"不支持的 subtitle_edit.policy：{policy}")
+    if not edited:
+        raise ValueError("subtitle_edit 执行后没有保留任何字幕条目")
+    return "\n\n".join(
+        f"{index}\n{_format_srt_time_ms(start_ms)} --> {_format_srt_time_ms(end_ms)}\n{text}"
+        for index, (start_ms, end_ms, text) in enumerate(edited, 1)
+    ) + "\n"
+
+
+def _format_srt_time_ms(value: int) -> str:
+    milliseconds = max(0, int(value))
+    hours, remainder = divmod(milliseconds, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, millis = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
 
 
 def _audio_intent_disabled(content: str, intent_name: str) -> bool:

@@ -28,10 +28,12 @@ from my_codex_core.production_plan_compiler import (  # noqa: E402
 )
 from my_codex_core.production_entities import entity_context_for_ids, normalize_production_entities  # noqa: E402
 from my_codex_core.production_pipeline import (  # noqa: E402
+    _apply_subtitle_edit_decision,
     _active_visual_jobs_for_mode,
     _audio_intent_disabled,
     _clean_voice_text,
     _extract_srt,
+    _extract_subtitle_edit_decision,
     _filter_skip_execution_visual_nodes,
     _json_objects_from_blocks,
     _load_comfyui_payload_strict,
@@ -818,6 +820,118 @@ class SemanticInputContractTests(unittest.TestCase):
             detail for detail in rejected["issue_details"] if "未逐字继承" in detail["message"]
         )
         self.assertEqual(inheritance_detail["source"], "员工岗位输出契约")
+
+    def test_audio_subtitle_overrun_is_deferred_to_editor_as_warning(self) -> None:
+        script_text = "今天练习瑜伽，让身体慢慢舒展开来。"
+        previous_outputs = [
+            {"agent": "03_口播脚本师", "content": f"## 4. TTS纯文本\n```text\n{script_text}\n```"}
+        ]
+        payload = {
+            "production_intents": {
+                "audio": [
+                    {"intent": "generate_voiceover", "voice_text": script_text, "target_duration_seconds": 58},
+                    {
+                        "intent": "build_subtitles",
+                        "subtitle_segments": [
+                            {"start_time": "00:00:00,000", "end_time": "00:01:20,000", "text": script_text}
+                        ],
+                    },
+                    {"intent": "select_bgm"},
+                ]
+            },
+            "audio_package": {
+                "voiceover_text": script_text,
+                "subtitle_srt_draft": f"1\n00:00:00,000 --> 00:01:20,000\n{script_text}\n",
+            },
+        }
+        result = validate_production_output(
+            {"agent": "20_语音字幕包装师"},
+            json.dumps(payload, ensure_ascii=False),
+            {"duration_seconds": 60},
+            previous_outputs,
+        )
+        self.assertTrue(result["passed"], result["issues"])
+        self.assertTrue(any("必须由 22_剪辑成片执行师" in warning for warning in result["warnings"]))
+
+    def test_editor_must_explicitly_resolve_upstream_subtitle_overrun(self) -> None:
+        video_output = {
+            "agent": "07_视频生成执行员",
+            "content": json.dumps({"production_intents": {"video": [{"intent": "generate_broll_clip", "intent_id": "clip_001"}]}}),
+        }
+        audio_output = {
+            "agent": "20_语音字幕包装师",
+            "content": json.dumps(
+                {
+                    "production_intents": {
+                        "audio": [
+                            {
+                                "intent": "build_subtitles",
+                                "subtitle_segments": [
+                                    {"start_time": "00:00:00,000", "end_time": "00:01:20,000", "text": "完整字幕"}
+                                ],
+                            }
+                        ]
+                    },
+                    "audio_package": {"subtitle_srt_draft": "1\n00:00:00,000 --> 00:01:20,000\n完整字幕\n"},
+                },
+                ensure_ascii=False,
+            ),
+        }
+        package = {
+            "production_intents": {
+                "package": [
+                    {
+                        "intent": "build_edit_timeline",
+                        "timeline": [{"source_intent_id": "clip_001", "start_seconds": 0, "duration_seconds": 60}],
+                    },
+                    {"intent": "apply_delivery_spec", "delivery_resolution": "1080x1920", "fps": 24},
+                ]
+            },
+            "delivery_spec": {"resolution": "1080x1920", "fps": 24},
+            "missing_assets": [],
+        }
+        rejected = validate_production_output(
+            {"agent": "22_剪辑成片执行师"},
+            json.dumps(package, ensure_ascii=False),
+            {"duration_seconds": 60, "aspect_ratio": "9:16"},
+            [video_output, audio_output],
+        )
+        self.assertFalse(rejected["passed"])
+        self.assertTrue(any("subtitle_edit" in issue for issue in rejected["issues"]))
+
+        package["production_intents"]["package"][0]["subtitle_edit"] = {
+            "policy": "retime",
+            "target_end_seconds": 58,
+            "reason": "保留全文并适配剪辑节奏",
+        }
+        accepted = validate_production_output(
+            {"agent": "22_剪辑成片执行师"},
+            json.dumps(package, ensure_ascii=False),
+            {"duration_seconds": 60, "aspect_ratio": "9:16"},
+            [video_output, audio_output],
+        )
+        self.assertTrue(accepted["passed"], accepted["issues"])
+
+    def test_editor_retime_decision_is_applied_to_srt_without_backend_policy_choice(self) -> None:
+        package_content = json.dumps(
+            {
+                "production_intents": {
+                    "package": [
+                        {
+                            "intent": "build_edit_timeline",
+                            "subtitle_edit": {"policy": "retime", "target_end_seconds": 58, "reason": "剪辑决定"},
+                        }
+                    ]
+                }
+            },
+            ensure_ascii=False,
+        )
+        decision = _extract_subtitle_edit_decision(package_content)
+        source = "1\n00:00:00,000 --> 00:00:40,000\n前半段\n\n2\n00:00:40,000 --> 00:01:20,000\n后半段\n"
+        edited = _apply_subtitle_edit_decision(source, decision)
+        self.assertIn("00:00:58,000", edited)
+        self.assertIn("前半段", edited)
+        self.assertIn("后半段", edited)
 
     def test_package_timeline_small_duration_gap_is_reported_without_rewrite(self) -> None:
         content = json.dumps(

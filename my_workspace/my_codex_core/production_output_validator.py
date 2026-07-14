@@ -32,6 +32,7 @@ def validate_production_output(
 ) -> dict[str, Any]:
     agent = str(step.get("agent") or "")
     issues: list[str] = []
+    warnings: list[str] = []
     payloads = _json_objects(content)
     effective_lock = _effective_requirement_lock(requirement_lock, payloads, previous_outputs or [])
     duration = int(effective_lock.get("duration_seconds") or 0)
@@ -43,7 +44,7 @@ def validate_production_output(
     elif agent.startswith("06_"):
         _validate_images(payloads, expected_work, issues)
     elif agent.startswith("20_"):
-        _validate_audio(payloads, duration, issues, effective_lock, previous_outputs or [])
+        _validate_audio(payloads, duration, issues, warnings, effective_lock, previous_outputs or [])
     elif agent.startswith("07_"):
         upstream_ids = _upstream_image_ids(previous_outputs or [])
         character_terms = _upstream_character_terms(previous_outputs or [])
@@ -55,6 +56,7 @@ def validate_production_output(
         "passed": not issues,
         "agent": agent,
         "issues": issues,
+        "warnings": warnings,
         "issue_details": [
             {
                 "source": _production_issue_source(agent, message),
@@ -62,6 +64,14 @@ def validate_production_output(
                 "message": message,
             }
             for message in issues
+        ],
+        "warning_details": [
+            {
+                "source": _production_issue_source(agent, message),
+                "code": "production_contract_warning",
+                "message": message,
+            }
+            for message in warnings
         ],
         "expected_work_resolution": f"{expected_work[0]}x{expected_work[1]}",
         "expected_delivery_resolution": f"{expected_delivery[0]}x{expected_delivery[1]}",
@@ -158,6 +168,7 @@ def _validate_audio(
     payloads: list[dict[str, Any]],
     duration: int,
     issues: list[str],
+    warnings: list[str],
     requirement_lock: dict[str, Any],
     previous_outputs: list[dict[str, str]],
 ) -> None:
@@ -236,7 +247,9 @@ def _validate_audio(
     if invalid_times:
         issues.append(f"字幕存在非法时间码：{', '.join(invalid_times[:3])}")
     if duration and max_end > duration + 0.25:
-        issues.append(f"字幕结束于 {max_end:g} 秒，超过成片 {duration} 秒")
+        warnings.append(
+            f"字幕草稿结束于 {max_end:g} 秒，超过成片 {duration} 秒；必须由 22_剪辑成片执行师显式选择 retime、trim 或 disable"
+        )
     if isinstance(voice, dict):
         voice_chars = len(re.findall(r"[\u4e00-\u9fff]", str(voice.get("voice_text") or "")))
         subtitle_text = "\n".join(
@@ -461,6 +474,25 @@ def _validate_package(
         if duration and abs(previous_end - duration) > 0.5:
             issues.append(f"详细剪辑时间轴结束于 {previous_end:g} 秒，不等于目标 {duration} 秒")
         detailed_timeline_valid = bool(timeline) and len(issues) == timeline_issue_count_before
+    subtitle_end = _upstream_subtitle_end(previous_outputs)
+    if duration and subtitle_end > duration + 0.25:
+        subtitle_edit = {}
+        if isinstance(timeline_intent, dict) and isinstance(timeline_intent.get("subtitle_edit"), dict):
+            subtitle_edit = timeline_intent["subtitle_edit"]
+        elif isinstance(payload.get("subtitle_edit"), dict):
+            subtitle_edit = payload["subtitle_edit"]
+        policy = str(subtitle_edit.get("policy") or "").strip().lower()
+        if policy not in {"retime", "trim", "disable"}:
+            issues.append(
+                f"上游字幕草稿结束于 {subtitle_end:g} 秒，超过成片 {duration} 秒；"
+                "build_edit_timeline.subtitle_edit 必须显式选择 retime、trim 或 disable"
+            )
+        elif policy in {"retime", "trim"}:
+            target_end = _number(subtitle_edit.get("target_end_seconds"))
+            if target_end <= 0 or target_end > duration:
+                issues.append(
+                    f"subtitle_edit.target_end_seconds 必须大于 0 且不超过 {duration} 秒，当前为 {target_end:g}"
+                )
     compact = payload.get("edit_timeline") if isinstance(payload.get("edit_timeline"), dict) else {}
     clips = compact.get("clips") if isinstance(compact.get("clips"), list) else []
     if has_video_output:
@@ -519,6 +551,37 @@ def _upstream_video_ids(previous_outputs: list[dict[str, str]]) -> tuple[set[str
                 if value:
                     values.add(value)
     return values, found
+
+
+def _upstream_subtitle_end(previous_outputs: list[dict[str, str]]) -> float:
+    max_end = 0.0
+    for output in previous_outputs:
+        if not str(output.get("agent") or "").startswith("20_"):
+            continue
+        payloads = _json_objects(output.get("content") or "")
+        payload = _payload_with(payloads, "production_intents", "audio")
+        subtitles = next(
+            (item for item in _intent_group(payload, "audio") if item.get("intent") == "build_subtitles"),
+            {},
+        )
+        segments = subtitles.get("segments") if isinstance(subtitles, dict) else []
+        if not isinstance(segments, list):
+            segments = subtitles.get("subtitle_segments") if isinstance(subtitles, dict) else []
+        for segment in segments if isinstance(segments, list) else []:
+            if not isinstance(segment, dict):
+                continue
+            _, parsed = _segment_time_seconds(
+                segment,
+                ("end_time", "end", "end_timecode", "end_time_seconds", "end_seconds"),
+            )
+            if parsed is not None:
+                max_end = max(max_end, parsed)
+        package = payload.get("audio_package") if isinstance(payload.get("audio_package"), dict) else {}
+        for raw in re.findall(r"-->\s*([^\n\r]+)", str(package.get("subtitle_srt_draft") or "")):
+            parsed = _time_seconds(raw.strip())
+            if parsed is not None:
+                max_end = max(max_end, parsed)
+    return max_end
 
 
 def _compact_timeline_reaches_duration(compact: dict[str, Any], duration: int) -> bool:

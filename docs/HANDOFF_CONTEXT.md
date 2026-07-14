@@ -2,6 +2,14 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 Editor-Owned Subtitle Timing
+
+- Employee 20 now owns the complete voice/subtitle draft, not final edit timing. A subtitle draft ending after the target duration produces a contract warning and may continue to employee 22; employee 20 must not delete or rewrite employee 03 narration to force a fit.
+- When an upstream subtitle draft overruns, employee 22 must explicitly set `build_edit_timeline.subtitle_edit.policy` to `retime`, `trim`, or `disable`. `retime` and `trim` also require `target_end_seconds` within the final duration. Missing or invalid decisions fail visibly.
+- Production applies only the explicit employee-22 decision: `retime` proportionally rescales all SRT timestamps, `trim` removes/caps entries at the selected endpoint, and `disable` omits subtitles. The backend does not choose a policy or silently repair timing.
+- The rejected 80-second subtitle output from `task_20260714_072738_小美的瑜伽训练日记_竖屏1分钟长视频` now passes employee-20 validation with a warning and is ready to be regenerated/resumed from step 5; no paid production retry was run.
+- Verification: 196 semantic-contract tests, real rejected-output regression, `python -m compileall -q my_workspace`, and `git diff --check` passed.
+
 ## 2026-07-14 Visual Contract And Review Gate
 
 - Employee 22 edit timelines now validate every detailed `source_intent_id` and compact `clip_id` against the exact video intent IDs emitted by employee 07. Unresolved references fail visibly, and `all_assets_ready=true` cannot override missing or invalid references.
