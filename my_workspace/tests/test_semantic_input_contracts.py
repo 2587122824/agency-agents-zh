@@ -232,6 +232,40 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(lock["duration_seconds"], 60)
         self.assertEqual(lock["explicit_constraints"], ["竖屏"])
 
+    def test_requirement_guard_treats_vlog_as_format_not_spoken_topic(self) -> None:
+        lock = {
+            "core_topic": "小美的内衣试穿vlog",
+            "original_requirement": "小美的内衣试穿vlog，竖屏1分钟",
+            "duration_seconds": 60,
+            "explicit_constraints": ["竖屏"],
+        }
+        on_topic = (
+            "# 长视频口播脚本\n"
+            "- 目标时长：60秒\n"
+            "- 画幅：竖屏 9:16\n"
+            "小美今天展示内衣试穿过程，并介绍面料、承托和穿着感受。"
+        )
+        accepted = validate_requirement_alignment(lock, on_topic, 2, "03_口播脚本师")
+        self.assertTrue(accepted["passed"], accepted["issues"])
+
+        off_topic = (
+            "# 小美的田径训练日记\n"
+            "- 目标时长：60秒\n"
+            "- 画幅：竖屏 9:16\n"
+            "小美完成热身、短跑和拉伸训练。"
+        )
+        rejected = validate_requirement_alignment(lock, off_topic, 2, "03_口播脚本师")
+        self.assertFalse(rejected["passed"])
+        self.assertTrue(any(item["code"] == "core_topic_missing" for item in rejected["issue_details"]))
+
+        english_only = validate_requirement_alignment(
+            {"core_topic": "vlog", "original_requirement": "vlog"},
+            "unrelated production notes",
+            2,
+            "03_口播脚本师",
+        )
+        self.assertFalse(english_only["passed"])
+
     def test_early_step_prompt_contains_compact_requirement_without_asset_duplication(self) -> None:
         user_input = (
             "小美的田径训练日记，竖屏1分钟\n\n"

@@ -17,6 +17,8 @@ GENERATED_CONTEXT_MARKERS = (
     "## 参考图片",
 )
 
+TOPIC_FORMAT_LATIN_TOKENS = frozenset({"vlog"})
+
 
 def extract_original_requirement(user_input: str) -> str:
     text = str(user_input or "").strip()
@@ -130,8 +132,8 @@ def validate_requirement_alignment(
         add_issue("模型输出为空", "员工岗位输出契约", "empty_output")
     if topic and output and _agent_requires_topic_validation(agent_id, step_no):
         topic_covered_by_package = _production_package_preserves_topic(output, lock)
-        latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
-        missing_latin = [token for token in latin_tokens if token.lower() not in output.lower()]
+        required_latin, ignored_format_latin = _required_topic_latin_tokens(topic)
+        missing_latin = [token for token in required_latin if token.lower() not in output.lower()]
         compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
         common = {"一个", "主题", "视频", "短片", "风格", "时代", "状态", "人类", "之后", "后的"}
         bigrams = list(
@@ -142,7 +144,7 @@ def validate_requirement_alignment(
             )
         )
         matched_bigrams = [token for token in bigrams if token in output]
-        minimum_matches = min(3, max(1, len(bigrams) // 6)) if bigrams else 0
+        minimum_matches = _minimum_topic_bigram_matches(bigrams, bool(ignored_format_latin))
         topic_covered_by_concepts = _topic_covered_by_salient_concepts(topic, output)
         if (
             not topic_covered_by_package
@@ -215,6 +217,26 @@ def _agent_requires_delivery_validation(agent_id: str, step_no: int) -> bool:
     if agent:
         return agent.startswith(("01_", "03_", "23_"))
     return int(step_no or 0) <= 3
+
+
+def _required_topic_latin_tokens(topic: str) -> tuple[list[str], list[str]]:
+    tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", str(topic or ""))))
+    semantic = [token for token in tokens if token.lower() not in TOPIC_FORMAT_LATIN_TOKENS]
+    ignored_format = [token for token in tokens if token.lower() in TOPIC_FORMAT_LATIN_TOKENS]
+    has_chinese_topic = bool(re.search(r"[\u4e00-\u9fff]", str(topic or "")))
+    if semantic or has_chinese_topic:
+        return semantic, ignored_format
+    return tokens, []
+
+
+def _minimum_topic_bigram_matches(bigrams: list[str], ignored_format_latin: bool) -> int:
+    count = len(set(bigrams))
+    if not count:
+        return 0
+    minimum = min(3, max(1, count // 6))
+    if ignored_format_latin:
+        minimum = max(minimum, min(3, max(1, (count + 1) // 2)))
+    return minimum
 
 
 def _production_package_preserves_topic(content: str, lock: dict[str, Any]) -> bool:
@@ -314,8 +336,8 @@ def _topic_text_covers(topic: str, text: str) -> bool:
         return False
     if topic in text:
         return True
-    latin_tokens = list(dict.fromkeys(re.findall(r"[A-Za-z][A-Za-z0-9_-]+", topic)))
-    if any(token.lower() not in text.lower() for token in latin_tokens):
+    required_latin, ignored_format_latin = _required_topic_latin_tokens(topic)
+    if any(token.lower() not in text.lower() for token in required_latin):
         return False
     compact_topic = re.sub(r"[^\u4e00-\u9fff]", "", topic)
     common = {"一个", "主题", "视频", "短片", "风格", "竖屏", "横屏"}
@@ -325,9 +347,9 @@ def _topic_text_covers(topic: str, text: str) -> bool:
         if compact_topic[index : index + 2] not in common
     ]
     if not bigrams:
-        return bool(latin_tokens)
+        return bool(required_latin)
     matched = [token for token in dict.fromkeys(bigrams) if token in text]
-    return len(matched) >= min(3, max(1, len(set(bigrams)) // 5))
+    return len(matched) >= _minimum_topic_bigram_matches(bigrams, bool(ignored_format_latin))
 
 
 def _package_duration_matches(payload: dict[str, Any], lock: dict[str, Any]) -> bool:

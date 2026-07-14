@@ -2,6 +2,13 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 Vlog Topic Validation Repair
+
+- The resumed task `task_20260714_194916_小美的内衣试穿vlog_竖屏1分钟长视频` stopped at employee 03 before production because the topic guard treated the format word `vlog` as a mandatory spoken English topic token. The script explicitly covered 小美, 内衣, and 试穿, and its production contract passed, but it did not say the word `vlog`.
+- In a mixed Chinese/Latin topic, `vlog` is now treated as a format marker rather than mandatory spoken subject matter. Other semantic Latin tokens remain mandatory; a topic containing only `vlog` still requires that token.
+- When a format marker is ignored, Chinese bigram coverage uses a stronger threshold. The real underwear try-on script passes, while an unrelated 小美田径训练 script remains blocked. No employee output is rewritten or backfilled.
+- Verification: 198 semantic-contract tests, the complete rejected employee-03 output regression, `python -m compileall -q my_workspace`, and `git diff --check` passed. No paid production job or automatic resume was run.
+
 ## 2026-07-14 Nested Visual Control Contract Repair
 
 - The failed task `task_20260714_190103_小美的内衣试穿vlog_竖屏1分钟长视频` stopped at employee 06 before any paid visual jobs were submitted. Employee 06 had correctly copied `face_visibility`, `outfit_state_id`, and `text_policy` into each image intent's `constraints` object, but the validator and compiler only read those fields from the intent top level.
