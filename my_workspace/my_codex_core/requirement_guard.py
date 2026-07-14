@@ -153,10 +153,11 @@ def validate_requirement_alignment(
         ):
             add_issue(f"输出未保持核心主题“{topic}”", "用户明确要求", "core_topic_missing")
 
-    if _agent_requires_delivery_validation(agent_id, step_no):
+    if _agent_requires_duration_validation(agent_id, step_no):
         duration = int(lock.get("duration_seconds") or 0)
         if duration and not _mentions_duration(output, duration):
             add_issue(f"输出未体现锁定时长 {duration} 秒", "用户明确要求", "duration_missing")
+    if _agent_requires_delivery_format_validation(agent_id, step_no):
         for constraint in lock.get("explicit_constraints") or []:
             if _is_delivery_format_constraint(str(constraint)) and not _mentions_delivery_format(output, str(constraint)):
                 add_issue(
@@ -164,6 +165,7 @@ def validate_requirement_alignment(
                     "用户明确要求",
                     "delivery_format_missing",
                 )
+    if _agent_requires_structure_validation(agent_id, step_no):
         for polarity in ("正面", "负面"):
             if polarity in original and polarity not in output:
                 add_issue(f"输出遗漏原始结构约束“{polarity}”", "用户明确要求", "structure_missing")
@@ -212,7 +214,21 @@ def _agent_requires_topic_validation(agent_id: str, step_no: int) -> bool:
     return int(step_no or 0) <= 4
 
 
-def _agent_requires_delivery_validation(agent_id: str, step_no: int) -> bool:
+def _agent_requires_duration_validation(agent_id: str, step_no: int) -> bool:
+    agent = str(agent_id or "").strip()
+    if agent:
+        return agent.startswith(("01_", "03_", "23_"))
+    return int(step_no or 0) <= 3
+
+
+def _agent_requires_delivery_format_validation(agent_id: str, step_no: int) -> bool:
+    agent = str(agent_id or "").strip()
+    if agent:
+        return agent.startswith(("01_", "23_"))
+    return int(step_no or 0) in {1, 3}
+
+
+def _agent_requires_structure_validation(agent_id: str, step_no: int) -> bool:
     agent = str(agent_id or "").strip()
     if agent:
         return agent.startswith(("01_", "03_", "23_"))

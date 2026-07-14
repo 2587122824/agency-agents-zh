@@ -2,6 +2,14 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-14 Requirement Ownership And Stale Run Repair
+
+- Requirement validation now has separate owners instead of one generic delivery gate: employees 01/03/23 retain duration validation, while only employees 01 and 23 must repeat explicit orientation/aspect constraints. Employee 03 owns topic, narration structure, and duration; a valid voiceover script no longer fails merely because it does not say `竖屏` or `9:16`.
+- Employee 03's contract explicitly forbids inventing default platforms, personas, brands, styles, materials, functions, prices, selling points, or product effects. Missing non-blocking information stays `未指定` or uses neutral wording; the employee must not append a non-blocking confirmation/assumption section. This is a prompt contract, not backend content rewriting.
+- The latest rejected script from `task_20260714_202854_小美的内衣试穿vlog_竖屏1分钟长视频` now passes both requirement alignment and the employee-03 production contract. Employee 03 still fails when duration is missing; employees 01 and 23 still fail when an explicit portrait requirement is missing.
+- Task state no longer lets an older in-memory `paused` run override a newer terminal `run_summary.json`. A paused/queued/running record older than a persisted `failed`, `completed`, or `cancelled` summary is ignored by both task detail and `/api/active-run`, so a failed task is shown as failed instead of appearing stuck at an earlier confirmation.
+- Verification: 200 semantic-contract tests, complete real rejected-output regression, `python -m compileall -q my_workspace`, and `git diff --check` passed. No automatic resume, output backfill, paid retry, or provider call was run.
+
 ## 2026-07-14 Vlog Topic Validation Repair
 
 - The resumed task `task_20260714_194916_小美的内衣试穿vlog_竖屏1分钟长视频` stopped at employee 03 before production because the topic guard treated the format word `vlog` as a mandatory spoken English topic token. The script explicitly covered 小美, 内衣, and 试穿, and its production contract passed, but it did not say the word `vlog`.

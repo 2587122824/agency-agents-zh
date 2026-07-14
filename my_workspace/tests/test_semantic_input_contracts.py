@@ -266,6 +266,41 @@ class SemanticInputContractTests(unittest.TestCase):
         )
         self.assertFalse(english_only["passed"])
 
+    def test_requirement_guard_assigns_delivery_format_to_01_and_23_only(self) -> None:
+        lock = {
+            "core_topic": "小美的内衣试穿vlog",
+            "original_requirement": "小美的内衣试穿vlog，竖屏1分钟",
+            "duration_seconds": 60,
+            "explicit_constraints": ["竖屏"],
+        }
+        script_without_aspect = (
+            "# 长视频口播脚本\n"
+            "- 目标时长：60秒\n"
+            "小美今天展示内衣试穿过程，并介绍实际穿着感受。"
+        )
+        script_result = validate_requirement_alignment(
+            lock,
+            script_without_aspect,
+            2,
+            "03_口播脚本师",
+        )
+        self.assertTrue(script_result["passed"], script_result["issues"])
+
+        for step_no, agent_id in ((1, "01_需求拆解专员"), (3, "23_长视频策划编导")):
+            with self.subTest(agent_id=agent_id):
+                result = validate_requirement_alignment(lock, script_without_aspect, step_no, agent_id)
+                self.assertFalse(result["passed"])
+                self.assertTrue(any(item["code"] == "delivery_format_missing" for item in result["issue_details"]))
+
+        missing_duration = validate_requirement_alignment(
+            lock,
+            "# 长视频口播脚本\n小美今天展示内衣试穿过程。",
+            2,
+            "03_口播脚本师",
+        )
+        self.assertFalse(missing_duration["passed"])
+        self.assertTrue(any(item["code"] == "duration_missing" for item in missing_duration["issue_details"]))
+
     def test_early_step_prompt_contains_compact_requirement_without_asset_duplication(self) -> None:
         user_input = (
             "小美的田径训练日记，竖屏1分钟\n\n"
@@ -1150,6 +1185,48 @@ class SemanticInputContractTests(unittest.TestCase):
             state = center.build()
             self.assertNotIn("run_comfy_debug", state["allowed_actions"])
             self.assertNotEqual(state["next_action"].get("action"), "run_comfy_debug")
+
+    def test_terminal_task_summary_supersedes_stale_paused_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            task_dir = Path(tmp)
+            summary_path = task_dir / "run_summary.json"
+            summary = {"status": "failed", "current_step": 2, "error": "employee validation failed"}
+            summary_path.write_text(json.dumps(summary, ensure_ascii=False), encoding="utf-8")
+            stale_job = {
+                "run_id": "stale_pause",
+                "status": "paused",
+                "task_name": "task_test",
+                "task_dir": str(task_dir),
+                "updated_at": summary_path.stat().st_mtime - 10,
+            }
+            with web_app.RUN_JOBS_LOCK:
+                previous = dict(web_app.RUN_JOBS)
+                web_app.RUN_JOBS.clear()
+                web_app.RUN_JOBS["stale_pause"] = stale_job
+            try:
+                self.assertIsNone(web_app.WorkflowWebHandler._active_job_for_task("task_test", task_dir))
+                active = web_app.WorkflowWebHandler.__new__(web_app.WorkflowWebHandler)._active_run()
+                self.assertIsNone(active["run"])
+                state = TaskStateCenter(
+                    task_dir=task_dir,
+                    task_name="task_test",
+                    summary=summary,
+                    files=[],
+                    active_job=web_app.WorkflowWebHandler._active_job_for_task("task_test", task_dir),
+                ).build()
+                self.assertEqual(state["state"], "failed")
+
+                current_job = dict(stale_job, run_id="current_pause", updated_at=summary_path.stat().st_mtime + 10)
+                with web_app.RUN_JOBS_LOCK:
+                    web_app.RUN_JOBS.clear()
+                    web_app.RUN_JOBS["current_pause"] = current_job
+                active_job = web_app.WorkflowWebHandler._active_job_for_task("task_test", task_dir)
+                self.assertIsNotNone(active_job)
+                self.assertEqual(active_job["run_id"], "current_pause")
+            finally:
+                with web_app.RUN_JOBS_LOCK:
+                    web_app.RUN_JOBS.clear()
+                    web_app.RUN_JOBS.update(previous)
 
     def test_task_state_does_not_complete_without_final_media_after_employee_steps(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

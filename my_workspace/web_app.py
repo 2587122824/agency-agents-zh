@@ -16617,7 +16617,7 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 for job in jobs:
                     if job.get("debug_type") == "comfy_debug":
                         continue
-                    if job.get("status") in status_group:
+                    if job.get("status") in status_group and not self._job_superseded_by_task_summary(job):
                         return {"run": json.loads(json.dumps(job, ensure_ascii=False))}
         return {"run": None}
 
@@ -17630,9 +17630,32 @@ class WorkflowWebHandler(BaseHTTPRequestHandler):
                 # task card permanently failed even though every output exists.
                 if job.get("status") not in {"queued", "running", "paused"}:
                     continue
+                if WorkflowWebHandler._job_superseded_by_task_summary(job):
+                    continue
                 if str(job.get("task_name") or "") == task_name or str(job.get("task_dir") or "") == str(task_dir):
                     return json.loads(json.dumps(job, ensure_ascii=False))
         return None
+
+    @staticmethod
+    def _job_superseded_by_task_summary(job: dict) -> bool:
+        task_dir_text = str(job.get("task_dir") or "").strip()
+        if not task_dir_text:
+            return False
+        summary_path = Path(task_dir_text) / "run_summary.json"
+        if not summary_path.is_file():
+            return False
+        try:
+            summary = json.loads(summary_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return False
+        summary_status = str(summary.get("status") or "").strip().lower() if isinstance(summary, dict) else ""
+        if summary_status not in {"failed", "error", "completed", "success", "cancelled", "canceled"}:
+            return False
+        try:
+            job_updated_at = float(job.get("updated_at") or 0)
+        except (TypeError, ValueError):
+            job_updated_at = 0
+        return summary_path.stat().st_mtime >= job_updated_at
 
     @classmethod
     def _task_status_steps(cls, task_dir: Path, summary: dict, files: list[str], active_job: dict | None) -> list[dict]:
