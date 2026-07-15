@@ -2,6 +2,13 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Prototype Readability Pass
+
+- Increased prototype typography across the dashboard, creation decisions, plan tables, production queue, events, review cards, impact dialog, and editor timeline. Important labels and content now use 12-13px, while supporting text generally uses 10-11px instead of the previous 7-9px range.
+- Increased table rows, queue rows, segmented controls, locked-setting rows, affected-item rows, and production-phase cells so larger text does not overlap or compress adjacent content.
+- Fixed the project-control navigation regression where the sidebar `create` route returned to the overview instead of opening the `brief` creation screen.
+- Verified the dashboard, creation console, plan table, and review grid at 1440x900 with no horizontal overflow. Verified the mobile review layout at 390x844 remains single-column with no horizontal scrolling.
+
 ## 2026-07-15 V2 Prototype Product-Control Update
 
 - Updated the frontend-only `/prototype-v2/` experience to match the V2 design baseline without changing V1 production behavior or calling providers.

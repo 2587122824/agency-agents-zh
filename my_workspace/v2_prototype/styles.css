@@ -254,6 +254,75 @@ h1, h2, h3, p { letter-spacing: 0; }
 .placeholder-screen { text-align:center; padding:12vh 20px; }.placeholder-screen.active { display:block; }.placeholder-screen > svg { width:38px; height:38px; color:var(--accent); }.placeholder-screen h1 { font-size:25px; }.placeholder-screen p { color:var(--muted); font-size:12px; margin-bottom:20px; }
 .toast { position:fixed; left:50%; bottom:24px; transform:translate(-50%,15px); opacity:0; pointer-events:none; display:flex; align-items:center; gap:8px; background:#1f2226;color:white;border-radius:6px;padding:10px 14px;box-shadow:var(--shadow);font-size:11px;transition:.22s ease;z-index:20; }.toast.show { opacity:1;transform:translate(-50%,0); }.toast svg { width:15px;color:#73c99b; }
 
+/* Readability pass: preserve information density without relying on sub-10px text. */
+.nav-label, .project-title span, .status-pill, .step small, .eyebrow { font-size: 11px; }
+.project-row strong, .user-row strong, .step b { font-size: 12px; }
+.project-row small, .user-row span { font-size: 10px; }
+.step > span { font-size: 11px; }
+.attachment b, .summary-grid span, .quick-prompts button, .panel-note, .locked-title b { font-size: 11px; }
+.attachment small, .composer-tools > span, .summary-grid b { font-size: 10px; }
+.summary-grid b { font-size: 12px; }
+.risk-badge, .severity, .required, .low-label { font-size: 10px !important; }
+.decision-title b { font-size: 13px; }
+.decision-title small, .decision-impact-link, .select-row small, .segmented button, .locked-title span, .locked-row span { font-size: 11px; }
+.visual-option b, .select-row b { font-size: 12px; }
+.visual-option small { font-size: 10px; line-height: 1.4; }
+.segmented button { padding: 9px 5px; }
+.locked-row { min-height: 40px; height: auto; }
+.version-chip, .version-stack span, .arc-item > span, .arc-item small { font-size: 11px; }
+.arc-item b { font-size: 13px; }
+.table-toolbar h2, .job-heading h2, .panel-heading-row h2 { font-size: 15px; }
+.table-toolbar span, .job-heading span, .compact-button, .show-all { font-size: 11px; }
+.compact-button { min-height: 34px; }
+.shot-table th { height: 40px; font-size: 10px; }
+.shot-table td { padding: 12px 10px; font-size: 11px; }
+.shot-table td > span, .shot-table td > small, .shot-cell small { font-size: 10px; }
+.shot-cell b { font-size: 12px; }
+.table-status { font-size: 10px; }
+.aside-block h3 { font-size: 14px; }
+.identity-card b, .asset-row b { font-size: 12px; }
+.identity-card small, .asset-row small, .good, .planned, .estimate-note { font-size: 10px; }
+.estimate-row { font-size: 11px; padding: 9px 0; }
+.estimate-row.total { font-size: 12px; }
+.status-strip span, .status-strip small, .project-progress-panel .panel-heading-row > span, .ledger-panel .panel-heading-row > span { font-size: 10px; }
+.action-count, .snapshot-state { font-size: 10px; }
+.action-copy { font-size: 12px; }
+.affected-list > div { min-height: 66px; }
+.affected-list b { font-size: 12px; }
+.affected-list small { font-size: 10px; }
+.fact-list > div, .text-button { font-size: 11px; }
+.phase-list button { min-height: 98px; }
+.phase-list b { font-size: 12px; }
+.phase-list small, .phase-list em { font-size: 10px; }
+.ledger-summary span, .compact-events small { font-size: 10px; }
+.ledger-summary b, .compact-events b { font-size: 11px; }
+.dialog-copy { font-size: 12px; }
+.impact-summary span, .dialog-warning { font-size: 10px; }
+.impact-detail h3 { font-size: 13px; }
+.impact-detail p { padding: 9px 0; font-size: 11px; }
+.stage-card > span { font-size: 11px; }
+.stage-card small, .stage-card em { font-size: 10px; }
+.stage-card b { font-size: 12px; }
+.job-row { min-height: 74px; }
+.job-name b { font-size: 12px; }
+.job-name small, .job-route small, .job-route b, .job-state { font-size: 10px; }
+.event-heading h3 { font-size: 14px; }
+.event b { font-size: 11px; }
+.event small, .event time, .cost-box div { font-size: 10px; }
+.filter-tabs button { font-size: 11px; }
+.asset-duration, .qc-pill { font-size: 9px; }
+.asset-title b { font-size: 12px; }
+.asset-info p, .issue-row { font-size: 10px; line-height: 1.45; }
+.timecode { font-size: 10px; }
+.clip-inspector h3 { font-size: 13px; }
+.inspector-field > span, .inspector-grid span { font-size: 10px; }
+.inspector-field > b, .inspector-grid b, .range-row b { font-size: 11px; }
+.ruler { font-size: 9px; }
+.track-label b, .disabled-track { font-size: 10px; }
+.clip { font-size: 9px; }
+.playhead b { font-size: 9px; }
+.toast { font-size: 12px; }
+
 @media (max-width: 1100px) {
   .app-shell { grid-template-columns: 210px minmax(0,1fr); }
   #screen-brief.active { grid-template-columns: minmax(0,1fr) 330px; }

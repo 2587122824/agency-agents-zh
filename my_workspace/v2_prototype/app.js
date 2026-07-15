@@ -53,7 +53,8 @@ function showToast(message) {
 }
 
 function switchScreen(name) {
-  const normalized = ['overview','brief','plan','production','review','timeline','assets','settings'].includes(name) ? name : 'overview';
+  const requested = name === 'create' ? 'brief' : name;
+  const normalized = ['overview','brief','plan','production','review','timeline','assets','settings'].includes(requested) ? requested : 'overview';
   currentScreen = normalized;
   document.querySelectorAll('.screen').forEach(screen => screen.classList.toggle('active', screen.id === `screen-${normalized}`));
   const stepMap = { create:'brief', brief:'brief', plan:'plan', production:'production', review:'review', timeline:'review' };
