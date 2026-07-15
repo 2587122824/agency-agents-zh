@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,6 +19,7 @@ class AnalyzeProductionImpact(ProductionCommand):
     keyframe_workflow_slot_version_id: str
     video_workflow_slot_version_id: str
     tts_workflow_slot_version_id: str | None = None
+    pricing_catalog_version_id: str | None = None
 
 
 class CreateProductionSnapshot(ProductionCommand):
@@ -26,11 +28,19 @@ class CreateProductionSnapshot(ProductionCommand):
     confirm_contract_scope: bool
 
 
+class LockProductionSnapshot(ProductionCommand):
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    expected_estimated_cost: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    expected_currency: str = Field(pattern=r"^[A-Z]{3,12}$")
+    confirm_high_risk_cost: bool
+
+
 class ImpactAnalysisRead(BaseModel):
     id: str
     project_id: str
     plan_version_id: str
     production_config_version_id: str
+    pricing_catalog_version_id: str | None
     status: str
     selection: dict
     manifest: dict
@@ -53,6 +63,9 @@ class DAGNodeRead(BaseModel):
     input_contract: dict
     output_contract: dict
     workflow_slot_version_id: str | None
+    pricing_rule_id: str | None
+    pricing_quantity: float | None
+    pricing_unit: str | None
     estimated_cost: float | None
     currency: str | None
 
@@ -70,6 +83,7 @@ class ProductionSnapshotRead(BaseModel):
     project_id: str
     plan_version_id: str
     production_config_version_id: str
+    pricing_catalog_version_id: str | None
     impact_analysis_id: str
     snapshot_number: int
     status: str
@@ -98,6 +112,7 @@ class PublishedConfigChoice(BaseModel):
     display_name: str
     video_specs: list[dict]
     workflow_slots: list[dict]
+    pricing_catalogs: list[dict]
 
 
 class ProductionPreparationView(BaseModel):

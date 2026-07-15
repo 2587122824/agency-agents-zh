@@ -2,6 +2,18 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Pricing And Snapshot Lock Sprint 6
+
+- Added versioned `PricingCatalogVersion` and exact `PricingRule` configuration components plus per-node pricing metadata and `CostEvent` audit rows under `v2/`.
+- Pricing rules bind one exact workflow-slot version and support explicit `call` or `output_second` units, six-decimal calculation, and optional minimum charge. Missing rules or inapplicable units block analysis; there is no average price, zero-price assumption, or provider default.
+- Production impact can explicitly select a pricing catalog from the same published production configuration. The backend calculates every provider-bound DAG node and persists the exact pricing rule, quantity, unit, amount, currency, and aggregate estimate.
+- Added a separate high-risk snapshot lock command. It requires the current contract hash, exact expected amount, exact currency, and explicit confirmation. A stale hash, wrong amount/currency, unpublished/expired catalog, or node-total mismatch blocks locking.
+- Successful locking changes only `preparing -> locked` and `cost_status=estimated -> confirmed`. It writes one confirmed `estimated` CostEvent per provider node; it does not represent a charge, create WorkItems, activate the snapshot, call a provider, or incur cost.
+- Added price-catalog editing to `/settings`, including exact workflow rules, unit price, minimum charge, currency, effective window, and confirmation threshold. Existing configurations may remain without pricing but cannot lock new snapshots.
+- Added price selection, six-decimal estimate display, and an independent cost-confirmation modal to the plan page. No configuration, workflow, video spec, or price catalog is auto-selected.
+- Added Alembic revision `20260715_06`. Verification passed with 14 backend tests, Python compileall, TypeScript/Vite build, fresh six-revision migration, a complete temporary-browser flow through `locked / confirmed`, desktop/mobile layout checks, and no browser console warnings/errors. The temporary database and service were removed after verification.
+- Next slice: explicit snapshot activation, deterministic WorkItem compilation from locked DAG nodes, execution leases/idempotency, and a no-provider Mock Worker path. Do not connect real provider adapters before activation and submission confirmation boundaries are implemented.
+
 ## 2026-07-15 V2 Production Preparation Sprint 5
 
 - Added persisted `ProductionImpactAnalysis`, immutable `ProductionSnapshot`, `SnapshotEntityVersion`, `DAGNode`, and `DependencyEdge` contracts under `v2/` with Alembic revision `20260715_05`.

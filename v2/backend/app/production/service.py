@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import timezone
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -10,6 +12,7 @@ from ..db.models import (
     AudioConfigVersion,
     CommandReceipt,
     ConfigurationReference,
+    CostEvent,
     DAGNode,
     DependencyEdge,
     EntityVersion,
@@ -17,14 +20,18 @@ from ..db.models import (
     ProductionConfigVersion,
     ProductionImpactAnalysis,
     ProductionSnapshot,
+    PricingCatalogVersion,
+    PricingRule,
+    ProviderConfigVersion,
     Project,
     ProjectEvent,
     Shot,
     SnapshotEntityVersion,
     VideoSpecVersion,
     WorkflowSlotVersion,
+    utc_now,
 )
-from .contracts import AnalyzeProductionImpact, CreateProductionSnapshot
+from .contracts import AnalyzeProductionImpact, CreateProductionSnapshot, LockProductionSnapshot
 
 
 class ProductionConflictError(ValueError):
@@ -40,6 +47,16 @@ class ProductionNotFoundError(ValueError):
 def _hash(payload: dict) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _money(value: Decimal) -> Decimal:
+    return value.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+
+
+def _utc(value):
+    if value is None:
+        return None
+    return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
 
 
 def _receipt(session: Session, project_id: str, command_id: str, command_type: str):
@@ -163,6 +180,58 @@ def _compile_manifest(plan: PlanVersion, shots: list[Shot], selection: dict, out
     return {"nodes": nodes, "edges": edges}
 
 
+def _price_dag(
+    session: Session,
+    pricing: PricingCatalogVersion,
+    dag: dict,
+    total_duration_seconds: Decimal,
+) -> tuple[Decimal | None, list[dict]]:
+    rules = list(session.scalars(select(PricingRule).where(
+        PricingRule.pricing_catalog_version_id == pricing.id
+    )))
+    rule_by_slot = {rule.workflow_slot_version_id: rule for rule in rules}
+    errors: list[dict] = []
+    total = Decimal("0")
+    for node in dag["nodes"]:
+        slot_id = node["workflow_slot_version_id"]
+        if not slot_id:
+            node["estimated_cost"] = None
+            node["currency"] = None
+            continue
+        rule = rule_by_slot.get(slot_id)
+        if not rule:
+            errors.append({
+                "code": "PRICING_RULE_MISSING",
+                "path": f"dag.{node['node_key']}",
+                "message": "所选价格目录没有该工作流槽位的精确规则。",
+            })
+            continue
+        if rule.unit == "call":
+            quantity = Decimal("1")
+        elif rule.unit == "output_second" and node["kind"] == "generate_i2v_clip":
+            quantity = Decimal(str(node["input_contract"]["duration_ms"])) / Decimal("1000")
+        elif rule.unit == "output_second" and node["kind"] == "generate_tts":
+            quantity = total_duration_seconds
+        else:
+            errors.append({
+                "code": "PRICING_UNIT_NOT_APPLICABLE",
+                "path": f"dag.{node['node_key']}",
+                "message": f"计价单位 {rule.unit} 不适用于节点类型 {node['kind']}。",
+            })
+            continue
+        amount = Decimal(str(rule.unit_price)) * quantity
+        if rule.minimum_charge is not None:
+            amount = max(amount, Decimal(str(rule.minimum_charge)))
+        amount = _money(amount)
+        node["estimated_cost"] = float(amount)
+        node["currency"] = pricing.currency
+        node["pricing_rule_id"] = rule.id
+        node["pricing_quantity"] = float(quantity)
+        node["pricing_unit"] = rule.unit
+        total += amount
+    return (None if errors else _money(total)), errors
+
+
 def analyze_impact(session: Session, project: Project, payload: AnalyzeProductionImpact) -> dict:
     receipt = _receipt(session, project.id, payload.command_id, "production.impact.analyze")
     if receipt:
@@ -196,6 +265,9 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
     tts_slot = None
     if payload.tts_workflow_slot_version_id:
         tts_slot = _component(session, WorkflowSlotVersion, payload.tts_workflow_slot_version_id, config.id, "tts_workflow_slot", errors)
+    pricing = None
+    if payload.pricing_catalog_version_id:
+        pricing = _component(session, PricingCatalogVersion, payload.pricing_catalog_version_id, config.id, "pricing_catalog", errors)
 
     if video_spec and video_spec.aspect_ratio != aspect_ratio:
         errors.append({"code": "VIDEO_SPEC_ASPECT_RATIO_MISMATCH", "path": "video_spec_version_id", "message": "视频规格画幅与项目已确认画幅不一致。"})
@@ -233,6 +305,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         "keyframe_workflow_slot_version_id": payload.keyframe_workflow_slot_version_id,
         "video_workflow_slot_version_id": payload.video_workflow_slot_version_id,
         "tts_workflow_slot_version_id": payload.tts_workflow_slot_version_id,
+        "pricing_catalog_version_id": payload.pricing_catalog_version_id,
     }
     output_spec = {} if not video_spec else {
         "video_spec_version_id": video_spec.id,
@@ -245,6 +318,22 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         "pixel_format": video_spec.pixel_format,
     }
     dag = _compile_manifest(plan, shots, selection, output_spec, audio_mode) if keyframe_slot and video_slot else {"nodes": [], "edges": []}
+    estimated_cost = None
+    if pricing:
+        now = utc_now()
+        if pricing.effective_from and now < _utc(pricing.effective_from):
+            errors.append({"code": "PRICING_NOT_EFFECTIVE", "path": "pricing_catalog_version_id", "message": "价格目录尚未到生效时间。"})
+        if pricing.effective_to and now >= _utc(pricing.effective_to):
+            errors.append({"code": "PRICING_EXPIRED", "path": "pricing_catalog_version_id", "message": "价格目录已过有效期。"})
+        priced_total, pricing_errors = _price_dag(
+            session,
+            pricing,
+            dag,
+            Decimal(str(sum(shot.duration_ms for shot in shots))) / Decimal("1000"),
+        )
+        errors.extend(pricing_errors)
+        if not pricing_errors:
+            estimated_cost = priced_total
     manifest = {
         "project_id": project.id,
         "plan_version_id": plan.id,
@@ -256,17 +345,24 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         "entity_version_ids": sorted(entity_ids),
         "shots": [_shot_contract(shot) for shot in shots],
         "dag": dag,
+        "pricing": None if not pricing else {
+            "pricing_catalog_version_id": pricing.id,
+            "catalog_key": pricing.catalog_key,
+            "currency": pricing.currency,
+            "confirmation_threshold": pricing.confirmation_threshold,
+        },
     }
     analysis_hash = _hash(manifest)
     estimated_calls = sum(1 for node in dag["nodes"] if node["workflow_slot_version_id"])
-    blockers = [{
+    blockers = [] if pricing and estimated_cost is not None and not errors else [{
         "code": "COST_ESTIMATE_REQUIRED",
-        "message": "系统配置尚未包含价格目录；快照只能进入 preparing，不能激活执行。",
+        "message": "必须显式选择覆盖全部生产槽位的有效价格目录，快照才能锁定。",
     }]
     analysis = ProductionImpactAnalysis(
         project_id=project.id,
         plan_version_id=plan.id,
         production_config_version_id=config.id,
+        pricing_catalog_version_id=pricing.id if pricing else None,
         status="blocked" if errors else "awaiting_confirmation",
         selection=selection,
         manifest=manifest,
@@ -274,7 +370,9 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         validation_errors=errors,
         execution_blockers=blockers,
         estimated_call_count=estimated_calls,
-        cost_status="not_configured",
+        cost_status="estimated" if estimated_cost is not None and not errors else "not_configured",
+        estimated_cost=float(estimated_cost) if estimated_cost is not None and not errors else None,
+        currency=pricing.currency if pricing and estimated_cost is not None and not errors else None,
         created_by=payload.actor_id,
     )
     session.add(analysis)
@@ -318,6 +416,7 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
         project_id=project.id,
         plan_version_id=plan.id,
         production_config_version_id=config.id,
+        pricing_catalog_version_id=analysis.pricing_catalog_version_id,
         impact_analysis_id=analysis.id,
         snapshot_number=snapshot_number,
         status="preparing",
@@ -359,6 +458,91 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
     return _snapshot_dict(session, snapshot)
 
 
+def lock_snapshot(
+    session: Session,
+    project: Project,
+    snapshot_id: str,
+    payload: LockProductionSnapshot,
+) -> dict:
+    receipt = _receipt(session, project.id, payload.command_id, "production.snapshot.lock")
+    if receipt:
+        row = session.get(ProductionSnapshot, receipt.result_id)
+        if not row:
+            raise ProductionConflictError("COMMAND_RESULT_MISSING", "快照锁定命令结果不存在。")
+        return _snapshot_dict(session, row)
+    snapshot = session.get(ProductionSnapshot, snapshot_id)
+    if not snapshot or snapshot.project_id != project.id:
+        raise ProductionNotFoundError("Production snapshot not found")
+    if snapshot.status != "preparing":
+        raise ProductionConflictError("SNAPSHOT_NOT_PREPARING", f"快照状态 {snapshot.status} 不能锁定。")
+    if snapshot.contract_hash != payload.expected_contract_hash:
+        raise ProductionConflictError("SNAPSHOT_CONTRACT_HASH_MISMATCH", "快照合同哈希不匹配，请刷新后重新确认。")
+    if snapshot.cost_status != "estimated" or snapshot.estimated_cost is None or not snapshot.currency:
+        raise ProductionConflictError("SNAPSHOT_COST_NOT_ESTIMATED", "快照尚未完成确定性成本估算。")
+    expected = _money(payload.expected_estimated_cost)
+    actual = _money(Decimal(str(snapshot.estimated_cost)))
+    if expected != actual or payload.expected_currency != snapshot.currency:
+        raise ProductionConflictError("SNAPSHOT_COST_MISMATCH", "确认的金额或币种与当前快照估算不一致。")
+    if not payload.confirm_high_risk_cost:
+        raise ProductionConflictError("HIGH_RISK_COST_CONFIRMATION_REQUIRED", "锁定生产快照必须明确确认预计费用。")
+    pricing = session.get(PricingCatalogVersion, snapshot.pricing_catalog_version_id)
+    if not pricing or pricing.status != "published":
+        raise ProductionConflictError("PRICING_CATALOG_NOT_PUBLISHED", "价格目录已不可用于新快照锁定。")
+    now = utc_now()
+    if pricing.effective_from and now < _utc(pricing.effective_from):
+        raise ProductionConflictError("PRICING_NOT_EFFECTIVE", "价格目录尚未生效。")
+    if pricing.effective_to and now >= _utc(pricing.effective_to):
+        raise ProductionConflictError("PRICING_EXPIRED", "价格目录已过有效期。")
+
+    nodes = list(session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot.id)))
+    priced_total = _money(sum(
+        (Decimal(str(node.estimated_cost)) for node in nodes if node.workflow_slot_version_id),
+        Decimal("0"),
+    ))
+    if priced_total != actual or any(
+        node.workflow_slot_version_id and (node.estimated_cost is None or not node.pricing_rule_id)
+        for node in nodes
+    ):
+        raise ProductionConflictError("SNAPSHOT_NODE_COST_MISMATCH", "DAG 节点成本明细与快照总额不一致。")
+
+    for node in nodes:
+        if not node.workflow_slot_version_id:
+            continue
+        workflow = session.get(WorkflowSlotVersion, node.workflow_slot_version_id)
+        provider = session.get(ProviderConfigVersion, workflow.provider_config_version_id) if workflow else None
+        if not workflow or not provider:
+            raise ProductionConflictError("SNAPSHOT_PRICING_REFERENCE_MISSING", "成本事件无法解析精确工作流或供应商版本。")
+        session.add(CostEvent(
+            project_id=project.id,
+            snapshot_id=snapshot.id,
+            provider=provider.provider_key,
+            provider_operation=workflow.slot_key,
+            kind="estimated",
+            amount=node.estimated_cost,
+            currency=snapshot.currency,
+            status="confirmed",
+        ))
+    snapshot.status = "locked"
+    snapshot.cost_status = "confirmed"
+    snapshot.execution_blockers = []
+    snapshot.locked_at = now
+    _save_receipt(session, project.id, payload.command_id, "production.snapshot.lock", "production_snapshot", snapshot.id)
+    session.add(ProjectEvent(
+        project_id=project.id,
+        event_type="production.snapshot_locked.v1",
+        message="生产快照费用已确认并锁定",
+        data={
+            "snapshot_id": snapshot.id,
+            "contract_hash": snapshot.contract_hash,
+            "estimated_cost": snapshot.estimated_cost,
+            "currency": snapshot.currency,
+            "above_confirmation_threshold": actual >= _money(Decimal(str(pricing.confirmation_threshold))),
+        },
+    ))
+    session.commit()
+    return _snapshot_dict(session, snapshot)
+
+
 def preparation_view(session: Session, project: Project) -> dict:
     active_plan = session.scalar(select(PlanVersion).where(
         PlanVersion.project_id == project.id,
@@ -372,6 +556,9 @@ def preparation_view(session: Session, project: Project) -> dict:
     for config in configs:
         videos = list(session.scalars(select(VideoSpecVersion).where(VideoSpecVersion.production_config_version_id == config.id)))
         workflows = list(session.scalars(select(WorkflowSlotVersion).where(WorkflowSlotVersion.production_config_version_id == config.id)))
+        pricing_catalogs = list(session.scalars(select(PricingCatalogVersion).where(
+            PricingCatalogVersion.production_config_version_id == config.id
+        )))
         choices.append({
             "id": config.id,
             "config_key": config.config_key,
@@ -379,6 +566,15 @@ def preparation_view(session: Session, project: Project) -> dict:
             "display_name": config.display_name,
             "video_specs": [{"id": row.id, "key": row.spec_key, "display_name": row.display_name, "aspect_ratio": row.aspect_ratio, "width": row.width, "height": row.height, "fps": row.fps} for row in videos],
             "workflow_slots": [{"id": row.id, "key": row.slot_key, "display_name": row.display_name, "operation_kind": row.operation_kind, "supported_video_spec_ids": row.supported_video_spec_ids} for row in workflows],
+            "pricing_catalogs": [{
+                "id": row.id,
+                "key": row.catalog_key,
+                "display_name": row.display_name,
+                "currency": row.currency,
+                "confirmation_threshold": row.confirmation_threshold,
+                "effective_from": row.effective_from,
+                "effective_to": row.effective_to,
+            } for row in pricing_catalogs],
         })
     analyses = list(session.scalars(select(ProductionImpactAnalysis).where(
         ProductionImpactAnalysis.project_id == project.id
@@ -390,8 +586,12 @@ def preparation_view(session: Session, project: Project) -> dict:
         next_action = {"code": "CONFIRM_PLAN", "label": "先确认方案", "incurs_production_cost": False}
     elif not choices:
         next_action = {"code": "PUBLISH_CONFIGURATION", "label": "发布生产配置", "incurs_production_cost": False}
-    elif snapshots:
-        next_action = {"code": "CONFIGURE_PRICING", "label": "配置成本目录后再激活执行", "incurs_production_cost": False}
+    elif snapshots and snapshots[0].status == "preparing" and snapshots[0].cost_status == "estimated":
+        next_action = {"code": "CONFIRM_PRODUCTION_COST", "label": "确认预计费用并锁定快照", "incurs_production_cost": False}
+    elif snapshots and snapshots[0].status == "preparing":
+        next_action = {"code": "CONFIGURE_PRICING", "label": "发布含价格目录的新配置并创建新快照", "incurs_production_cost": False}
+    elif snapshots and snapshots[0].status == "locked":
+        next_action = {"code": "ACTIVATE_SNAPSHOT", "label": "确认激活锁定快照", "incurs_production_cost": False}
     else:
         next_action = {"code": "ANALYZE_PRODUCTION_IMPACT", "label": "选择精确配置并分析生产影响", "incurs_production_cost": False}
     return {

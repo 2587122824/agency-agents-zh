@@ -240,6 +240,7 @@ export interface ProductionImpactAnalysis {
   project_id: string
   plan_version_id: string
   production_config_version_id: string
+  pricing_catalog_version_id: string | null
   status: string
   selection: Record<string, string | null>
   manifest: {
@@ -268,6 +269,7 @@ export interface ProductionSnapshot {
   project_id: string
   plan_version_id: string
   production_config_version_id: string
+  pricing_catalog_version_id: string | null
   impact_analysis_id: string
   snapshot_number: number
   status: string
@@ -285,7 +287,7 @@ export interface ProductionSnapshot {
   created_at: string
   locked_at: string | null
   entity_versions: Array<{ entity_version_id: string; role: string }>
-  nodes: Array<{ id: string; node_key: string; kind: string; shot_id: string | null; workflow_slot_version_id: string | null; input_contract: Record<string, unknown>; output_contract: Record<string, unknown> }>
+  nodes: Array<{ id: string; node_key: string; kind: string; shot_id: string | null; workflow_slot_version_id: string | null; pricing_rule_id: string | null; pricing_quantity: number | null; pricing_unit: string | null; estimated_cost: number | null; currency: string | null; input_contract: Record<string, unknown>; output_contract: Record<string, unknown> }>
   edges: Array<{ id: string; parent_node_id: string; child_node_id: string; dependency_type: string; input_slot: string | null }>
 }
 
@@ -300,6 +302,7 @@ export interface ProductionPreparation {
     display_name: string
     video_specs: Array<{ id: string; key: string; display_name: string; aspect_ratio: string; width: number; height: number; fps: number }>
     workflow_slots: Array<{ id: string; key: string; display_name: string; operation_kind: string; supported_video_spec_ids: string[] }>
+    pricing_catalogs: Array<{ id: string; key: string; display_name: string; currency: string; confirmation_threshold: number; effective_from: string | null; effective_to: string | null }>
   }>
   analyses: ProductionImpactAnalysis[]
   snapshots: ProductionSnapshot[]
@@ -403,6 +406,21 @@ export interface StoragePolicyDraft {
   local_root_ref?: string | null
 }
 
+export interface PricingCatalogDraft {
+  catalog_key: string
+  display_name: string
+  currency: string
+  confirmation_threshold: number
+  effective_from?: string | null
+  effective_to?: string | null
+  rules: Array<{
+    workflow_slot_key: string
+    unit: 'call' | 'output_second'
+    unit_price: number
+    minimum_charge?: number | null
+  }>
+}
+
 export interface SystemConfigurationDraft {
   config_key: string
   display_name: string
@@ -413,6 +431,7 @@ export interface SystemConfigurationDraft {
   video_specs: VideoSpecDraft[]
   audio: AudioConfigDraft
   storage: StoragePolicyDraft
+  pricing?: PricingCatalogDraft | null
 }
 
 export interface ConfigurationComponent {

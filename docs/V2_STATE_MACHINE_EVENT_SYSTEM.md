@@ -158,6 +158,8 @@ stateDiagram-v2
 
 影响分析确认可以创建不可修改的 `preparing` 快照，以冻结选择并生成可审计 DAG；这不等同于锁定或激活。若 `cost_status=not_configured`，快照必须保留 `COST_ESTIMATE_REQUIRED`，且禁止创建 WorkItem。`preparing -> locked` 仍要求价格目录、实际预计成本和独立费用确认全部存在。
 
+锁定命令必须验证快照仍为 `preparing`、合同哈希未变化、价格目录仍已发布且在有效期内、所有供应商节点均有精确价格规则、节点金额合计等于快照总额，并要求用户回传同币种的精确预计金额与高风险确认。成功后转为 `locked / cost_status=confirmed` 并记录 `production.snapshot_locked.v1`；不激活快照、不创建 WorkItem、不调用供应商。
+
 ## 6. 工作项与尝试状态机
 
 ### 6.1 WorkItem 状态

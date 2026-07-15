@@ -331,6 +331,7 @@ class ProductionImpactAnalysis(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
     plan_version_id: Mapped[str] = mapped_column(ForeignKey("plan_versions.id"), index=True)
     production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    pricing_catalog_version_id: Mapped[str | None] = mapped_column(ForeignKey("pricing_catalog_versions.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), default="awaiting_confirmation", index=True)
     selection: Mapped[dict] = mapped_column(JSON)
     manifest: Mapped[dict] = mapped_column(JSON)
@@ -353,6 +354,7 @@ class ProductionSnapshot(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
     plan_version_id: Mapped[str] = mapped_column(ForeignKey("plan_versions.id"), index=True)
     production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    pricing_catalog_version_id: Mapped[str | None] = mapped_column(ForeignKey("pricing_catalog_versions.id"), nullable=True, index=True)
     impact_analysis_id: Mapped[str] = mapped_column(ForeignKey("production_impact_analyses.id"), unique=True)
     snapshot_number: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(24), default="preparing", index=True)
@@ -394,6 +396,9 @@ class DAGNode(Base):
     input_contract: Mapped[dict] = mapped_column(JSON)
     output_contract: Mapped[dict] = mapped_column(JSON)
     workflow_slot_version_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_slot_versions.id"), nullable=True)
+    pricing_rule_id: Mapped[str | None] = mapped_column(ForeignKey("pricing_rules.id"), nullable=True)
+    pricing_quantity: Mapped[float | None] = mapped_column(nullable=True)
+    pricing_unit: Mapped[str | None] = mapped_column(String(32), nullable=True)
     estimated_cost: Mapped[float | None] = mapped_column(nullable=True)
     currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -577,6 +582,56 @@ class StoragePolicyVersion(Base):
     status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PricingCatalogVersion(Base):
+    __tablename__ = "pricing_catalog_versions"
+    __table_args__ = (UniqueConstraint("catalog_key", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("pricing_catalog"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    catalog_key: Mapped[str] = mapped_column(String(120), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(160))
+    currency: Mapped[str] = mapped_column(String(12))
+    confirmation_threshold: Mapped[float] = mapped_column()
+    effective_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PricingRule(Base):
+    __tablename__ = "pricing_rules"
+    __table_args__ = (UniqueConstraint("pricing_catalog_version_id", "workflow_slot_version_id"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("pricing_rule"))
+    pricing_catalog_version_id: Mapped[str] = mapped_column(ForeignKey("pricing_catalog_versions.id"), index=True)
+    provider_config_version_id: Mapped[str] = mapped_column(ForeignKey("provider_config_versions.id"), index=True)
+    workflow_slot_version_id: Mapped[str] = mapped_column(ForeignKey("workflow_slot_versions.id"), index=True)
+    operation_kind: Mapped[str] = mapped_column(String(80))
+    unit: Mapped[str] = mapped_column(String(32))
+    unit_price: Mapped[float] = mapped_column()
+    minimum_charge: Mapped[float | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class CostEvent(Base):
+    __tablename__ = "cost_events"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("cost_event"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    work_attempt_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    provider: Mapped[str] = mapped_column(String(120))
+    provider_operation: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(24))
+    amount: Mapped[float] = mapped_column()
+    currency: Mapped[str] = mapped_column(String(12))
+    provider_reference: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    status: Mapped[str] = mapped_column(String(24))
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class ProductionConfigComponent(Base):

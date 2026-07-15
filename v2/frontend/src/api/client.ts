@@ -75,11 +75,18 @@ export const api = {
     keyframe_workflow_slot_version_id: string
     video_workflow_slot_version_id: string
     tts_workflow_slot_version_id?: string | null
+    pricing_catalog_version_id?: string | null
   }) => request<ProductionImpactAnalysis>(`/projects/${projectId}/production-impact-analyses`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', ...payload }),
   }),
   createProductionSnapshot: (projectId: string, impact: ProductionImpactAnalysis) => request<ProductionSnapshot>(`/projects/${projectId}/production-snapshots`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', impact_analysis_id: impact.id, analysis_hash: impact.analysis_hash, confirm_contract_scope: true }),
+  }),
+  lockProductionSnapshot: (projectId: string, snapshot: ProductionSnapshot) => request<ProductionSnapshot>(`/projects/${projectId}/production-snapshots/${snapshot.id}:lock`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', expected_contract_hash: snapshot.contract_hash,
+      expected_estimated_cost: snapshot.estimated_cost, expected_currency: snapshot.currency, confirm_high_risk_cost: true,
+    }),
   }),
   systemConfigurations: () => request<SystemConfigurationSummary[]>('/system-config/versions'),
   systemConfiguration: (id: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}`),

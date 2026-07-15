@@ -96,6 +96,7 @@ from ..production.contracts import (
     AnalyzeProductionImpact,
     CreateProductionSnapshot,
     ImpactAnalysisRead,
+    LockProductionSnapshot,
     ProductionPreparationView,
     ProductionSnapshotRead,
 )
@@ -104,6 +105,7 @@ from ..production.service import (
     ProductionNotFoundError,
     analyze_impact,
     create_snapshot,
+    lock_snapshot,
     preparation_view,
 )
 from ..projects.service import (
@@ -326,6 +328,25 @@ def production_snapshot_create(
 ):
     try:
         return create_snapshot(session, require_project(session, project_id), payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots/{snapshot_id}:lock",
+    response_model=ProductionSnapshotRead,
+)
+def production_snapshot_lock(
+    project_id: str,
+    snapshot_id: str,
+    payload: LockProductionSnapshot,
+    session: Session = Depends(get_session),
+):
+    try:
+        return lock_snapshot(session, require_project(session, project_id), snapshot_id, payload)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProductionConflictError as exc:

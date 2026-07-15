@@ -14,7 +14,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import Project, RequirementVersion
+from v2.backend.app.db.models import CostEvent, Project, RequirementVersion
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -485,7 +485,7 @@ def create_confirmed_plan(client: TestClient) -> tuple[dict, dict]:
     return project, plan
 
 
-def publish_visual_production_configuration(client: TestClient) -> dict:
+def publish_visual_production_configuration(client: TestClient, with_pricing: bool = False) -> dict:
     configuration = valid_system_configuration()
     configuration["providers"][0]["capabilities"].append("video_generation")
     configuration["workflow_slots"].append({
@@ -505,6 +505,17 @@ def publish_visual_production_configuration(client: TestClient) -> dict:
         }],
         "supported_video_spec_keys": ["vertical_480p"],
     })
+    if with_pricing:
+        configuration["pricing"] = {
+            "catalog_key": "visual_pricing_cny",
+            "display_name": "视觉生产价格",
+            "currency": "CNY",
+            "confirmation_threshold": 0.5,
+            "rules": [
+                {"workflow_slot_key": "keyframe_image", "unit": "call", "unit_price": 0.1},
+                {"workflow_slot_key": "first_frame_video", "unit": "output_second", "unit_price": 0.02},
+            ],
+        }
     draft = client.post("/api/v1/system-config/versions", json={
         "command_id": "snapshot-config-create-001",
         "configuration": configuration,
@@ -621,6 +632,104 @@ def test_production_impact_blocks_wrong_explicit_workflow_kind(client: TestClien
     )
     assert blocked.status_code == 409
     assert blocked.headers["x-error-code"] == "IMPACT_ANALYSIS_BLOCKED"
+
+
+def test_priced_snapshot_requires_exact_high_risk_cost_confirmation(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    config = publish_visual_production_configuration(client, with_pricing=True)
+    cloned_config = client.post(
+        f"/api/v1/system-config/versions/{config['id']}:clone-draft",
+        json={"command_id": "priced-config-clone-001", "display_name": "视觉生产价格副本"},
+    ).json()
+    assert any(item["component_type"] == "pricing_catalog" for item in cloned_config["components"])
+    cloned_diff = client.get(
+        f"/api/v1/system-config/versions/{cloned_config['id']}/diff?base_version_id={config['id']}"
+    ).json()
+    assert cloned_diff["changed_components"] == []
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    impact = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "priced-impact-command-001",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    ).json()
+    assert impact["status"] == "awaiting_confirmation"
+    assert impact["execution_blockers"] == []
+    assert impact["cost_status"] == "estimated"
+    assert impact["estimated_cost"] == 0.9
+    assert impact["currency"] == "CNY"
+
+    snapshot = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "priced-snapshot-command-001",
+            "impact_analysis_id": impact["id"],
+            "analysis_hash": impact["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    ).json()
+    assert snapshot["status"] == "preparing"
+    assert snapshot["cost_status"] == "estimated"
+    assert sum(item["estimated_cost"] or 0 for item in snapshot["nodes"]) == pytest.approx(0.9)
+
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:lock",
+        json={
+            "command_id": "snapshot-lock-unconfirmed-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": 0.9,
+            "expected_currency": "CNY",
+            "confirm_high_risk_cost": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "HIGH_RISK_COST_CONFIRMATION_REQUIRED"
+
+    wrong_amount = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:lock",
+        json={
+            "command_id": "snapshot-lock-wrong-cost-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": 0.8,
+            "expected_currency": "CNY",
+            "confirm_high_risk_cost": True,
+        },
+    )
+    assert wrong_amount.status_code == 409
+    assert wrong_amount.headers["x-error-code"] == "SNAPSHOT_COST_MISMATCH"
+
+    lock_command = {
+        "command_id": "snapshot-lock-confirmed-001",
+        "expected_contract_hash": snapshot["contract_hash"],
+        "expected_estimated_cost": 0.9,
+        "expected_currency": "CNY",
+        "confirm_high_risk_cost": True,
+    }
+    locked = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:lock",
+        json=lock_command,
+    )
+    replayed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:lock",
+        json=lock_command,
+    )
+    assert locked.status_code == 200
+    assert replayed.json()["id"] == snapshot["id"]
+    assert locked.json()["status"] == "locked"
+    assert locked.json()["cost_status"] == "confirmed"
+    assert locked.json()["locked_at"]
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["work_items"] == []
+    with SessionLocal() as session:
+        cost_events = list(session.scalars(select(CostEvent).where(CostEvent.snapshot_id == snapshot["id"])))
+        assert len(cost_events) == 6
+        assert all(item.kind == "estimated" and item.status == "confirmed" for item in cost_events)
+        assert sum(item.amount for item in cost_events) == pytest.approx(0.9)
 
 
 def test_system_configuration_publish_is_versioned_and_explicit(client: TestClient) -> None:

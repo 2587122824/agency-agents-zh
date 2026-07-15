@@ -256,6 +256,8 @@ flowchart LR
 
 生产准备采用两次显式命令：先提交已确认 `PlanVersion`、已发布 `ProductionConfigVersion`、视频规格、关键帧槽位、视频槽位和按音频模式需要的 TTS 槽位，生成带哈希的影响分析；用户确认该精确范围后才创建不可修改的 `preparing` 快照并编译 DAG。若价格目录尚未配置，快照保留 `cost_status=not_configured` 和 `COST_ESTIMATE_REQUIRED`，不得锁定、激活、创建 WorkItem 或调用供应商；系统不得把未知成本写成零。
 
+价格目录必须作为同一 `ProductionConfigVersion` 的已发布组件被显式选择，每条规则精确绑定一个工作流槽位。影响分析按节点计算数量、单价、最低收费和六位小数金额；缺少规则或计价单位不适用时阻断。`preparing -> locked` 使用独立高风险命令，同时提交合同哈希、预计总额和币种；三者完全一致并明确确认后才写入 `estimated / confirmed` 成本事件。锁定不是扣费，也不创建 WorkItem 或调用供应商。
+
 ## 10. 类型化实体
 
 ### 10.1 人物实体

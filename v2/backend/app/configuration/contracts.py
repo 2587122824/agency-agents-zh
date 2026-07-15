@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
@@ -137,6 +138,29 @@ class StoragePolicyDraft(StrictContract):
     local_root_ref: str | None = Field(default=None, max_length=160)
 
 
+class PricingRuleDraft(StrictContract):
+    workflow_slot_key: Key
+    unit: Literal["call", "output_second"]
+    unit_price: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    minimum_charge: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=6)
+
+
+class PricingCatalogDraft(StrictContract):
+    catalog_key: Key = Field(pattern=r"^[a-z][a-z0-9_.-]{1,119}$")
+    display_name: str = Field(min_length=1, max_length=160)
+    currency: str = Field(pattern=r"^[A-Z]{3,12}$")
+    confirmation_threshold: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
+    rules: list[PricingRuleDraft] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def effective_range_is_valid(self):
+        if self.effective_from and self.effective_to and self.effective_to <= self.effective_from:
+            raise ValueError("effective_to must be later than effective_from")
+        return self
+
+
 class ConfigurationDraftBody(StrictContract):
     config_key: Key = Field(pattern=r"^[a-z][a-z0-9_.-]{1,119}$")
     display_name: str = Field(min_length=1, max_length=160)
@@ -147,6 +171,7 @@ class ConfigurationDraftBody(StrictContract):
     video_specs: list[VideoSpecDraft] = Field(min_length=1)
     audio: AudioConfigDraft
     storage: StoragePolicyDraft
+    pricing: PricingCatalogDraft | None = None
 
 
 class CreateConfiguration(ConfigurationCommand):

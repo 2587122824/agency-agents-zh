@@ -13,6 +13,8 @@ from ..db.models import (
     ConfigurationEvent,
     ConfigurationReference,
     ModelConfigVersion,
+    PricingCatalogVersion,
+    PricingRule,
     ProductionConfigComponent,
     ProductionConfigVersion,
     ProviderConfigVersion,
@@ -49,6 +51,7 @@ COMPONENT_MODELS = {
     "video_spec": VideoSpecVersion,
     "audio": AudioConfigVersion,
     "storage": StoragePolicyVersion,
+    "pricing_catalog": PricingCatalogVersion,
 }
 
 
@@ -298,6 +301,50 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
     session.flush()
     _component_link(session, config.id, "storage", storage.id)
 
+    if draft.pricing:
+        pricing = PricingCatalogVersion(
+            production_config_version_id=config.id,
+            catalog_key=draft.pricing.catalog_key,
+            version_number=_next_version(
+                session,
+                PricingCatalogVersion,
+                PricingCatalogVersion.catalog_key,
+                draft.pricing.catalog_key,
+            ),
+            display_name=draft.pricing.display_name,
+            currency=draft.pricing.currency,
+            confirmation_threshold=float(draft.pricing.confirmation_threshold),
+            effective_from=draft.pricing.effective_from,
+            effective_to=draft.pricing.effective_to,
+        )
+        session.add(pricing)
+        session.flush()
+        _component_link(session, config.id, "pricing_catalog", pricing.id)
+        seen_pricing_slots: set[str] = set()
+        for rule in draft.pricing.rules:
+            workflow = workflow_by_key.get(rule.workflow_slot_key)
+            if not workflow:
+                raise ConfigurationConflictError(
+                    "PRICING_WORKFLOW_NOT_IN_DRAFT",
+                    f"价格规则引用的工作流槽位 {rule.workflow_slot_key} 不在本配置草稿中。",
+                )
+            if rule.workflow_slot_key in seen_pricing_slots:
+                raise ConfigurationConflictError(
+                    "DUPLICATE_PRICING_WORKFLOW",
+                    f"工作流槽位 {rule.workflow_slot_key} 存在重复价格规则。",
+                )
+            seen_pricing_slots.add(rule.workflow_slot_key)
+            session.add(PricingRule(
+                pricing_catalog_version_id=pricing.id,
+                provider_config_version_id=workflow.provider_config_version_id,
+                workflow_slot_version_id=workflow.id,
+                operation_kind=workflow.operation_kind,
+                unit=rule.unit,
+                unit_price=float(rule.unit_price),
+                minimum_charge=float(rule.minimum_charge) if rule.minimum_charge is not None else None,
+            ))
+        session.flush()
+
 
 def _component_rows(session: Session, config_id: str) -> dict[str, list]:
     return {
@@ -383,7 +430,7 @@ def _component_summary(component_type: str, row, lookups: dict[str, dict[str, ob
             "loudness_target": row.loudness_target,
             "temporary_upload_policy_version_id": row.temporary_upload_policy_version_id,
         }
-    else:
+    elif component_type == "storage":
         key = row.policy_key
         details = {
             "backend_kind": row.backend_kind,
@@ -395,6 +442,23 @@ def _component_summary(component_type: str, row, lookups: dict[str, dict[str, ob
             "public_url_policy": row.public_url_policy,
             "lifecycle_days": row.lifecycle_days,
             "local_root_ref": row.local_root_ref,
+        }
+    else:
+        key = row.catalog_key
+        details = {
+            "currency": row.currency,
+            "confirmation_threshold": row.confirmation_threshold,
+            "effective_from": row.effective_from,
+            "effective_to": row.effective_to,
+            "rules": [{
+                "id": rule.id,
+                "provider_config_version_id": rule.provider_config_version_id,
+                "workflow_slot_version_id": rule.workflow_slot_version_id,
+                "operation_kind": rule.operation_kind,
+                "unit": rule.unit,
+                "unit_price": rule.unit_price,
+                "minimum_charge": rule.minimum_charge,
+            } for rule in lookups.get("pricing_rules", {}).get(row.id, [])],
         }
     return {
         "id": row.id,
@@ -409,7 +473,16 @@ def _component_summary(component_type: str, row, lookups: dict[str, dict[str, ob
 
 def _component_summaries(session: Session, config_id: str) -> list[dict]:
     rows = _component_rows(session, config_id)
-    lookups: dict[str, dict[str, object]] = {}
+    pricing_ids = [row.id for row in rows["pricing_catalog"]]
+    pricing_rules = list(session.scalars(select(PricingRule).where(
+        PricingRule.pricing_catalog_version_id.in_(pricing_ids)
+    ).order_by(PricingRule.workflow_slot_version_id))) if pricing_ids else []
+    lookups: dict[str, dict[str, object]] = {
+        "pricing_rules": {
+            catalog_id: [rule for rule in pricing_rules if rule.pricing_catalog_version_id == catalog_id]
+            for catalog_id in pricing_ids
+        }
+    }
     return [
         _component_summary(component_type, row, lookups)
         for component_type in COMPONENT_MODELS
@@ -519,6 +592,21 @@ def _validate(session: Session, config: ProductionConfigVersion) -> list[dict]:
             missing = [field for field in ("region_ref", "bucket_ref", "credential_ref", "lifecycle_days") if not getattr(storage, field)]
             if missing:
                 errors.append({"code": "OSS_FIELDS_REQUIRED", "path": "storage", "missing": missing})
+    if len(rows["pricing_catalog"]) > 1:
+        errors.append({"code": "PRICING_CATALOG_COUNT_INVALID", "path": "pricing", "message": "一个配置版本最多只能有一个价格目录。"})
+    if rows["pricing_catalog"]:
+        pricing = rows["pricing_catalog"][0]
+        rules = list(session.scalars(select(PricingRule).where(
+            PricingRule.pricing_catalog_version_id == pricing.id
+        )))
+        if not rules:
+            errors.append({"code": "PRICING_RULE_REQUIRED", "path": "pricing.rules", "message": "价格目录至少需要一条精确工作流规则。"})
+        for rule in rules:
+            workflow = workflows.get(rule.workflow_slot_version_id)
+            if not workflow:
+                errors.append({"code": "PRICING_WORKFLOW_MISSING", "path": f"pricing.rules.{rule.id}"})
+            elif workflow.provider_config_version_id != rule.provider_config_version_id or workflow.operation_kind != rule.operation_kind:
+                errors.append({"code": "PRICING_RULE_MISMATCH", "path": f"pricing.rules.{rule.id}", "message": "价格规则与工作流供应商或操作类型不一致。"})
     return errors
 
 
@@ -526,7 +614,12 @@ def _delete_components(session: Session, config_id: str) -> None:
     session.execute(delete(ProductionConfigComponent).where(
         ProductionConfigComponent.production_config_version_id == config_id
     ))
-    for model in (AudioConfigVersion, WorkflowSlotVersion, ModelConfigVersion, VideoSpecVersion, ProviderConfigVersion, StoragePolicyVersion):
+    pricing_ids = list(session.scalars(select(PricingCatalogVersion.id).where(
+        PricingCatalogVersion.production_config_version_id == config_id
+    )))
+    if pricing_ids:
+        session.execute(delete(PricingRule).where(PricingRule.pricing_catalog_version_id.in_(pricing_ids)))
+    for model in (PricingCatalogVersion, AudioConfigVersion, WorkflowSlotVersion, ModelConfigVersion, VideoSpecVersion, ProviderConfigVersion, StoragePolicyVersion):
         session.execute(delete(model).where(model.production_config_version_id == config_id))
     session.flush()
 
@@ -728,6 +821,24 @@ def _draft_from_config(session: Session, config: ProductionConfigVersion, displa
     }
     storage_item = by_type["storage"][0]
     storage = {"policy_key": storage_item["key"], "display_name": storage_item["display_name"], **storage_item["details"]}
+    pricing = None
+    if by_type["pricing_catalog"]:
+        pricing_item = by_type["pricing_catalog"][0]
+        pricing_details = pricing_item["details"]
+        pricing = {
+            "catalog_key": pricing_item["key"],
+            "display_name": pricing_item["display_name"],
+            "currency": pricing_details["currency"],
+            "confirmation_threshold": pricing_details["confirmation_threshold"],
+            "effective_from": pricing_details["effective_from"],
+            "effective_to": pricing_details["effective_to"],
+            "rules": [{
+                "workflow_slot_key": workflow_key_by_id[rule["workflow_slot_version_id"]],
+                "unit": rule["unit"],
+                "unit_price": rule["unit_price"],
+                "minimum_charge": rule["minimum_charge"],
+            } for rule in pricing_details["rules"]],
+        }
     return ConfigurationDraftBody.model_validate({
         "config_key": config.config_key,
         "display_name": display_name or f"{config.display_name} 副本",
@@ -738,6 +849,7 @@ def _draft_from_config(session: Session, config: ProductionConfigVersion, displa
         "video_specs": videos,
         "audio": audio,
         "storage": storage,
+        "pricing": pricing,
     })
 
 
@@ -882,6 +994,14 @@ def _semantic_components(session: Session, config_id: str) -> dict[tuple[str, st
         if item["component_type"] == "audio":
             workflow_id = details.pop("tts_workflow_slot_version_id", None)
             details["tts_workflow_slot_key"] = keys_by_type["workflow_slot"].get(workflow_id)
+        if item["component_type"] == "pricing_catalog":
+            details["rules"] = [{
+                "workflow_slot_key": keys_by_type["workflow_slot"].get(rule["workflow_slot_version_id"]),
+                "operation_kind": rule["operation_kind"],
+                "unit": rule["unit"],
+                "unit_price": rule["unit_price"],
+                "minimum_charge": rule["minimum_charge"],
+            } for rule in details["rules"]]
         identity = (item["component_type"], item["key"])
         semantic[identity] = {
             "component_type": item["component_type"],
@@ -897,7 +1017,17 @@ def component_versions(session: Session, component_type: str) -> list[dict]:
     if not model:
         raise ConfigurationNotFoundError("Unknown configuration component type")
     rows = list(session.scalars(select(model).order_by(model.created_at.desc())))
-    return [_component_summary(component_type, row, {}) for row in rows]
+    lookups: dict[str, dict[str, object]] = {}
+    if component_type == "pricing_catalog":
+        catalog_ids = [row.id for row in rows]
+        rules = list(session.scalars(select(PricingRule).where(
+            PricingRule.pricing_catalog_version_id.in_(catalog_ids)
+        ).order_by(PricingRule.workflow_slot_version_id))) if catalog_ids else []
+        lookups["pricing_rules"] = {
+            catalog_id: [rule for rule in rules if rule.pricing_catalog_version_id == catalog_id]
+            for catalog_id in catalog_ids
+        }
+    return [_component_summary(component_type, row, lookups) for row in rows]
 
 
 def workflow_slot_versions(session: Session, slot_key: str) -> list[dict]:
