@@ -660,13 +660,14 @@ occurred_at
 
 ## 14. Repository 边界
 
-当前实施状态和逐步迁移边界见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。Project、Event、Decision 和项目级 Command Receipt 已有协议、SQLAlchemy 实现与合同测试；其余聚合仍未完成，因此完整 Repository 条目不得标记完成。
+当前实施状态和逐步迁移边界见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。Project、Event、Decision、项目级 Command Receipt 和 Creation 聚合已有协议、SQLAlchemy 实现与合同测试；其余聚合仍未完成，因此完整 Repository 条目不得标记完成。
 
 建议接口：
 
 ```text
 ProjectRepository
 ConversationRepository
+CreationRepository
 DecisionRepository
 PlanRepository
 SnapshotRepository

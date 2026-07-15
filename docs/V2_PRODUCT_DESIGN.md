@@ -677,6 +677,7 @@ GET  /api/v1/projects/{project_id}/events
 逐项完成度、证据和仍需确认的边界见 [V2 实现状态](./V2_IMPLEMENTATION_STATUS.md)。复合条目只有全部实现后才勾选；部分完成不会以勾选代替缺口说明。
 
 Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。
+当前创作中心的对话、需求候选、澄清、附件绑定和创作阶段实体访问已统一通过 `CreationRepository`；该迁移不改变候选或确认语义。
 
 ## 23. 首期验收标准
 

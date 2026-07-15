@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.models import (
@@ -24,7 +23,12 @@ from ..db.models import (
     utc_now,
 )
 from ..core.config import RUNTIME_ROOT
-from ..repositories import SqlAlchemyCommandRepository
+from ..repositories import (
+    CreationRepository,
+    SqlAlchemyCommandRepository,
+    SqlAlchemyCreationRepository,
+    SqlAlchemyEventRepository,
+)
 from .contracts import (
     AcceptCandidate,
     AttachmentCreate,
@@ -49,7 +53,13 @@ class CreationNotFoundError(LookupError):
 
 
 def _event(session: Session, project_id: str, event_type: str, message: str, data: dict | None = None) -> None:
-    session.add(ProjectEvent(project_id=project_id, event_type=event_type, message=message, data=data or {}))
+    SqlAlchemyEventRepository(session).add(
+        ProjectEvent(project_id=project_id, event_type=event_type, message=message, data=data or {})
+    )
+
+
+def _creation(session: Session) -> CreationRepository:
+    return SqlAlchemyCreationRepository(session)
 
 
 def _receipt(session: Session, project_id: str, command_id: str) -> CommandReceipt | None:
@@ -74,13 +84,14 @@ def _save_receipt(
 
 
 def _receipt_result(session: Session, receipt: CommandReceipt, model_type):
-    result = session.get(model_type, receipt.result_id)
+    result = SqlAlchemyCommandRepository(session).get_result(model_type, receipt.result_id)
     if result is None:
         raise CreationConflictError("IDEMPOTENCY_RESULT_MISSING", "幂等命令的原始结果不存在。")
     return result
 
 
 def ensure_initial_requirement(session: Session, project: Project) -> RequirementVersion:
+    repository = _creation(session)
     active = active_requirement(session, project.id)
     if active:
         return active
@@ -99,30 +110,27 @@ def ensure_initial_requirement(session: Session, project: Project) -> Requiremen
         field_sources=sources,
         created_by="project.create",
     )
-    session.add(version)
-    session.flush()
+    repository.add(version)
+    repository.flush()
     _event(session, project.id, "requirement.confirmed.v1", "初始需求版本已建立", {"requirement_version_id": version.id})
     return version
 
 
 def active_requirement(session: Session, project_id: str) -> RequirementVersion | None:
-    return session.scalar(
-        select(RequirementVersion)
-        .where(RequirementVersion.project_id == project_id, RequirementVersion.is_active.is_(True))
-        .order_by(RequirementVersion.version_number.desc())
-    )
+    return _creation(session).active_requirement(project_id)
 
 
 def consumed_message_ids(session: Session, version: RequirementVersion) -> set[str]:
     if not version.candidate_id:
         return set()
-    candidate = session.get(RequirementCandidate, version.candidate_id)
+    repository = _creation(session)
+    candidate = repository.requirement_candidate(version.candidate_id)
     if not candidate:
         return set()
-    run = session.get(AgentRun, candidate.agent_run_id)
+    run = repository.agent_run(candidate.agent_run_id)
     if not run:
         return set()
-    manifest = session.get(AgentInputManifest, run.input_manifest_id)
+    manifest = repository.agent_manifest(run.input_manifest_id)
     return set(manifest.message_ids) if manifest else set()
 
 
@@ -135,10 +143,8 @@ def sync_clarifications(
     field_sources: dict | None = None,
     candidate_id: str | None = None,
 ) -> list[ClarificationRequest]:
-    existing = list(session.scalars(select(ClarificationRequest).where(
-        ClarificationRequest.project_id == project.id,
-        ClarificationRequest.status == "pending",
-    )))
+    repository = _creation(session)
+    existing = repository.pending_clarifications(project.id)
     for clarification in existing:
         if clarification.base_requirement_version_id != base.id:
             clarification.status = "stale"
@@ -161,8 +167,8 @@ def sync_clarifications(
             options=item["options"],
             risk_level=item["risk_level"],
         )
-        session.add(clarification)
-        session.flush()
+        repository.add(clarification)
+        repository.flush()
         pending_for_base[clarification.field_key] = clarification
         _event(session, project.id, "clarification.requested.v1", "需求字段需要用户澄清", {
             "clarification_id": clarification.id,
@@ -173,11 +179,12 @@ def sync_clarifications(
 
 
 def add_message(session: Session, project: Project, payload: MessageCreate) -> Message:
+    repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, Message)
     if payload.reply_to_message_id:
-        reply = session.get(Message, payload.reply_to_message_id)
+        reply = repository.message(payload.reply_to_message_id)
         if not reply or reply.project_id != project.id:
             raise CreationNotFoundError("Reply message not found")
     message = Message(
@@ -186,12 +193,9 @@ def add_message(session: Session, project: Project, payload: MessageCreate) -> M
         content=payload.content.strip(),
         reply_to_message_id=payload.reply_to_message_id,
     )
-    session.add(message)
-    session.flush()
-    stale_candidates = list(session.scalars(select(RequirementCandidate).where(
-        RequirementCandidate.project_id == project.id,
-        RequirementCandidate.status == "awaiting_review",
-    )))
+    repository.add(message)
+    repository.flush()
+    stale_candidates = repository.reviewable_candidates(project.id)
     for candidate in stale_candidates:
         candidate.status = "stale"
         candidate.decided_at = utc_now()
@@ -203,17 +207,11 @@ def add_message(session: Session, project: Project, payload: MessageCreate) -> M
 
 
 def _manifest_payload(session: Session, project: Project, base: RequirementVersion) -> dict:
+    repository = _creation(session)
     consumed = consumed_message_ids(session, base)
-    messages = list(session.scalars(
-        select(Message).where(Message.project_id == project.id).order_by(Message.created_at, Message.id)
-    ))
+    messages = repository.manifest_messages(project.id)
     messages = [item for item in messages if item.id not in consumed]
-    bindings = list(session.scalars(
-        select(AttachmentBinding).where(
-            AttachmentBinding.project_id == project.id,
-            AttachmentBinding.status == "confirmed",
-        ).order_by(AttachmentBinding.confirmed_at, AttachmentBinding.id)
-    ))
+    bindings = repository.confirmed_bindings(project.id)
     return {
         "active_requirement": {"id": base.id, "fields": base.fields},
         "messages": [{"id": item.id, "content": item.content, "reply_to": item.reply_to_message_id} for item in messages],
@@ -226,6 +224,7 @@ def _manifest_payload(session: Session, project: Project, base: RequirementVersi
 
 
 def generate_candidate(session: Session, project: Project, payload: GenerateCandidate) -> RequirementCandidate:
+    repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, RequirementCandidate)
@@ -248,16 +247,16 @@ def generate_candidate(session: Session, project: Project, payload: GenerateCand
         input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
         payload=manifest_payload,
     )
-    session.add(manifest)
-    session.flush()
+    repository.add(manifest)
+    repository.flush()
     run = AgentRun(
         project_id=project.id,
         status="running",
         input_manifest_id=manifest.id,
         started_at=utc_now(),
     )
-    session.add(run)
-    session.flush()
+    repository.add(run)
+    repository.flush()
     _event(session, project.id, "agent.run_created.v1", "Creative Mock Agent 已开始", {"agent_run_id": run.id})
 
     fields = dict(base.fields)
@@ -283,8 +282,8 @@ def generate_candidate(session: Session, project: Project, payload: GenerateCand
         field_sources=sources,
         change_summary=changes,
     )
-    session.add(candidate)
-    session.flush()
+    repository.add(candidate)
+    repository.flush()
     run.status = "succeeded"
     run.raw_output = {"requirement_candidate": fields, "change_summary": changes}
     run.parsed_candidate_id = candidate.id
@@ -302,10 +301,11 @@ def accept_candidate(
     candidate_id: str,
     payload: AcceptCandidate,
 ) -> RequirementVersion:
+    repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, RequirementVersion)
-    candidate = session.get(RequirementCandidate, candidate_id)
+    candidate = repository.requirement_candidate(candidate_id)
     if not candidate or candidate.project_id != project.id:
         raise CreationNotFoundError("Candidate not found")
     active = active_requirement(session, project.id)
@@ -336,15 +336,11 @@ def accept_candidate(
         candidate_id=candidate.id,
         created_by=payload.actor_id,
     )
-    session.add(version)
-    session.flush()
+    repository.add(version)
+    repository.flush()
     candidate.status = "accepted"
     candidate.decided_at = utc_now()
-    for pending in session.scalars(select(RequirementCandidate).where(
-        RequirementCandidate.project_id == project.id,
-        RequirementCandidate.status == "awaiting_review",
-        RequirementCandidate.id != candidate.id,
-    )):
+    for pending in repository.reviewable_candidates(project.id, exclude_id=candidate.id):
         pending.status = "stale"
         pending.decided_at = utc_now()
     _save_receipt(session, project.id, payload.command_id, "candidate.accept", "requirement_version", version.id)
@@ -361,10 +357,11 @@ def resolve_clarification(
     clarification_id: str,
     payload: ResolveClarification,
 ) -> RequirementVersion:
+    repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, RequirementVersion)
-    clarification = session.get(ClarificationRequest, clarification_id)
+    clarification = repository.clarification(clarification_id)
     if not clarification or clarification.project_id != project.id:
         raise CreationNotFoundError("Clarification not found")
     active = active_requirement(session, project.id)
@@ -392,21 +389,16 @@ def resolve_clarification(
         field_sources=sources,
         created_by=payload.actor_id,
     )
-    session.add(version)
-    session.flush()
+    repository.add(version)
+    repository.flush()
     clarification.status = "resolved"
     clarification.resolution = value
     clarification.resolved_at = utc_now()
-    for item in session.scalars(select(ClarificationRequest).where(
-        ClarificationRequest.project_id == project.id,
-        ClarificationRequest.status == "pending",
-        ClarificationRequest.id != clarification.id,
-    )):
+    for item in repository.pending_clarifications(project.id):
+        if item.id == clarification.id:
+            continue
         item.status = "stale"
-    for candidate in session.scalars(select(RequirementCandidate).where(
-        RequirementCandidate.project_id == project.id,
-        RequirementCandidate.status == "awaiting_review",
-    )):
+    for candidate in repository.reviewable_candidates(project.id):
         candidate.status = "stale"
         candidate.decided_at = utc_now()
     _save_receipt(session, project.id, payload.command_id, "clarification.resolve", "requirement_version", version.id)
@@ -428,10 +420,11 @@ def reject_candidate(
     candidate_id: str,
     payload: RejectCandidate,
 ) -> RequirementCandidate:
+    repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, RequirementCandidate)
-    candidate = session.get(RequirementCandidate, candidate_id)
+    candidate = repository.requirement_candidate(candidate_id)
     if not candidate or candidate.project_id != project.id:
         raise CreationNotFoundError("Candidate not found")
     if candidate.status != "awaiting_review":
@@ -451,11 +444,12 @@ def register_attachment(
     payload: AttachmentCreate,
     file_bytes: bytes,
 ) -> Attachment:
+    repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, Attachment)
     if payload.message_id:
-        message = session.get(Message, payload.message_id)
+        message = repository.message(payload.message_id)
         if not message or message.project_id != project.id:
             raise CreationNotFoundError("Message not found")
     detected_type = detect_media_type(file_bytes)
@@ -474,8 +468,8 @@ def register_attachment(
         storage_path="pending",
         verification_status="verified",
     )
-    session.add(attachment)
-    session.flush()
+    repository.add(attachment)
+    repository.flush()
     suffix = Path(payload.original_filename).suffix.lower()[:12]
     target_dir = RUNTIME_ROOT / "uploads" / project.id
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -510,10 +504,11 @@ def bind_attachment(
     attachment_id: str,
     payload: BindingCreate,
 ) -> AttachmentBinding:
+    repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, AttachmentBinding)
-    attachment = session.get(Attachment, attachment_id)
+    attachment = repository.attachment(attachment_id)
     if not attachment or attachment.project_id != project.id:
         raise CreationNotFoundError("Attachment not found")
     if attachment.verification_status != "verified":
@@ -529,7 +524,7 @@ def bind_attachment(
             "product_reference": "product",
             "voice_sample": "voice",
         }[payload.binding_type]
-        entity = session.get(Entity, payload.entity_id)
+        entity = repository.entity(payload.entity_id)
         if entity and (entity.project_id != project.id or entity.entity_type != entity_type):
             raise CreationConflictError("ENTITY_TYPE_CONFLICT", "实体 ID 已存在，但项目或实体类型不匹配。")
         if not entity:
@@ -539,10 +534,10 @@ def bind_attachment(
                 entity_type=entity_type,
                 display_name=payload.entity_id,
             )
-            session.add(entity)
-            session.flush()
+            repository.add(entity)
+            repository.flush()
         if payload.entity_version_id:
-            selected_version = session.get(EntityVersion, payload.entity_version_id)
+            selected_version = repository.entity_version(payload.entity_version_id)
             if (
                 not selected_version
                 or selected_version.project_id != project.id
@@ -552,10 +547,7 @@ def bind_attachment(
                 raise CreationConflictError("ENTITY_VERSION_NOT_FOUND", "明确选择的实体版本不存在或不可使用。")
             entity_version_id = selected_version.id
         else:
-            active_version = session.scalar(select(EntityVersion).where(
-                EntityVersion.entity_id == entity.id,
-                EntityVersion.is_active.is_(True),
-            ))
+            active_version = repository.active_entity_version(entity.id)
             next_version = (active_version.version_number + 1) if active_version else 1
             if active_version:
                 active_version.is_active = False
@@ -567,8 +559,8 @@ def bind_attachment(
                 source_attachment_id=attachment.id,
                 created_by=payload.actor_id,
             )
-            session.add(selected_version)
-            session.flush()
+            repository.add(selected_version)
+            repository.flush()
             entity_version_id = selected_version.id
             _event(session, project.id, "entity.version_confirmed.v1", "附件绑定已创建实体版本", {
                 "entity_id": entity.id,
@@ -583,8 +575,8 @@ def bind_attachment(
         entity_version_id=entity_version_id,
         confirmed_by=payload.actor_id,
     )
-    session.add(binding)
-    session.flush()
+    repository.add(binding)
+    repository.flush()
     _save_receipt(session, project.id, payload.command_id, "attachment.bind", "attachment_binding", binding.id)
     _event(session, project.id, "attachment.binding_confirmed.v1", "用户已确认附件绑定", {
         "attachment_id": attachment.id, "binding_id": binding.id, "binding_type": binding.binding_type,
@@ -594,30 +586,19 @@ def bind_attachment(
 
 
 def creation_center_view(session: Session, project: Project) -> dict:
+    repository = _creation(session)
     active = ensure_initial_requirement(session, project)
     sync_clarifications(session, project, active)
     session.commit()
-    messages = list(session.scalars(select(Message).where(Message.project_id == project.id).order_by(Message.created_at)))
-    candidates = list(session.scalars(select(RequirementCandidate).where(
-        RequirementCandidate.project_id == project.id,
-    ).order_by(RequirementCandidate.created_at.desc())))
-    runs = list(session.scalars(select(AgentRun).where(
-        AgentRun.project_id == project.id,
-    ).order_by(AgentRun.started_at.desc())))
-    attachments = list(session.scalars(select(Attachment).where(
-        Attachment.project_id == project.id,
-    ).order_by(Attachment.created_at.desc())))
-    binding_rows = list(session.scalars(select(AttachmentBinding).where(
-        AttachmentBinding.project_id == project.id,
-    ).order_by(AttachmentBinding.confirmed_at)))
+    messages = repository.view_messages(project.id)
+    candidates = repository.candidate_history(project.id)
+    runs = repository.agent_runs(project.id)
+    attachments = repository.attachments(project.id)
+    binding_rows = repository.bindings(project.id)
     bindings_by_attachment: dict[str, list[AttachmentBinding]] = {}
     for binding in binding_rows:
         bindings_by_attachment.setdefault(binding.attachment_id, []).append(binding)
-    clarifications = list(session.scalars(select(ClarificationRequest).where(
-        ClarificationRequest.project_id == project.id,
-        ClarificationRequest.status == "pending",
-        ClarificationRequest.base_requirement_version_id == active.id,
-    ).order_by(ClarificationRequest.created_at)))
+    clarifications = repository.active_pending_clarifications(project.id, active.id)
     current = next((item for item in candidates if item.status == "awaiting_review"), None)
     confirmed_attachment_ids = {
         binding.attachment_id for binding in binding_rows if binding.status == "confirmed"

@@ -14,6 +14,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 | `EventRepository` | 追加项目事件、按项目和序号游标读取 | 项目、决策应用服务与 SSE |
 | `DecisionRepository` | 按项目/键查重、按项目/ID 读取、追加和刷新 | 决策账本服务 |
 | `CommandRepository` | 按 `(project_id, command_id)` 精确读取、追加不可变回执 | 创作、规划、生产、质量、剪辑、交付服务 |
+| `CreationRepository` | 对话、需求版本、需求候选、Agent 清单/运行、澄清、附件/绑定及创作时实体版本查询 | 创作中心服务 |
 
 系统配置使用独立的 `ConfigurationCommandReceipt`，不属于项目级 `CommandRepository`，本轮没有迁移或合并。
 
@@ -50,11 +51,10 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 
 以下聚合仍存在直接 SQLAlchemy 查询，Repository 总体条目保持“部分完成”：
 
-- Conversation / Requirement / AgentRun
 - Plan / Shot
 - Configuration
 - Snapshot / DAG / Work
-- Entity / Attachment
+- Entity registry read projections（创作阶段的 Entity / Attachment 写入和读取已迁移）
 - Asset / Quality
 - Timeline / Delivery
 - Cost
@@ -69,6 +69,7 @@ Repository 合同测试覆盖：
 - 事件按项目隔离、游标递增和数量限制。
 - 决策键及决策 ID 的项目隔离。
 - 相同 command ID 在不同项目中的隔离，以及回执字段原样持久化。
+- 创作聚合的活动版本、状态过滤、历史排序、项目隔离和精确 ID 读取。
 - 现有 API 全量测试继续验证六个业务阶段的幂等重放和命令冲突行为。
 
 本实现不包含数据库迁移、Provider 调用、重试、兜底、路由替换、提示词改写、状态转移或费用事件。

@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Creation Repository Sprint 16
+
+- Added a typed `CreationRepository` covering messages, requirement versions/candidates, Agent manifests/runs, clarifications, attachments/bindings, and entity/version access used by the creation center.
+- Migrated the full creation service away from direct SQLAlchemy query and persistence calls while preserving every existing filter, ordering rule, project ownership check, candidate transition, clarification transition, attachment verification, and entity-binding rule.
+- Added `CommandRepository.get_result` so idempotent creation-command replay no longer performs direct ORM reads in the application service.
+- Added a creation repository contract test covering active-version selection, project isolation, status filters, history ordering, confirmed bindings, attachments, clarifications, and exact-ID reads.
+- Updated repository, product, data-model, implementation-status, and handoff documentation. Repository migration remains partial because planning, production, registry, quality, editor, delivery, cost, work, and configuration projections still contain direct data access.
+- No schema migration, Outbox, Unit of Work, project-state change, candidate semantic change, provider call, retry, fallback, route substitution, confirmation change, or cost event was introduced.
+- Verification target: 35 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Decision And Command Repositories Sprint 15
 
 - Added `DecisionRepository` and project-scoped `CommandRepository` protocols plus SQLAlchemy implementations.
