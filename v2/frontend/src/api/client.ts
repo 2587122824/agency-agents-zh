@@ -41,6 +41,9 @@ export const api = {
   rejectRequirementCandidate: (projectId: string, candidateId: string, reason: string) => request<RequirementCandidate>(`/projects/${projectId}/requirement-candidates/${candidateId}:reject`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', reason }),
   }),
+  resolveClarification: (projectId: string, clarificationId: string, baseVersionId: string, value: unknown) => request<RequirementVersion>(`/projects/${projectId}/clarifications/${clarificationId}:resolve`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId, value }),
+  }),
   registerAttachment: (projectId: string, file: File) => {
     const form = new FormData()
     form.set('command_id', crypto.randomUUID())

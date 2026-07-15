@@ -132,7 +132,17 @@ export interface CreationCenter {
   messages: CreationMessage[]
   current_candidate: RequirementCandidate | null
   candidate_history: RequirementCandidate[]
-  pending_clarifications: Array<{ id: string; field_key: string; question: string; risk_level: string; status: string }>
+  pending_clarifications: Array<{
+    id: string
+    base_requirement_version_id: string
+    field_key: string
+    reason_code: string
+    question: string
+    options: Array<{ value: unknown; label: string }>
+    risk_level: string
+    status: string
+    resolution: unknown
+  }>
   latest_agent_run: AgentRun | null
   agent_runs: AgentRun[]
   attachments: CreationAttachment[]

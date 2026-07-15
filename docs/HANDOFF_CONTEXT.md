@@ -2,6 +2,22 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Creation Center Sprint 2
+
+- Added a deterministic `RequirementCompletenessEvaluator` for the current blocking fields: core topic, duration, aspect ratio, and audio mode. It validates both value presence and allowed provenance; optional fields remain unspecified and never create questions.
+- Added version-bound `ClarificationRequest` records with reason code, controlled options, risk level, explicit resolution, and stale handling. Resolving a clarification creates a new immutable RequirementVersion with `source=user_confirmation`; it never overwrites the previous version or infers another field.
+- Candidate generation now stops before creating an AgentRun when blocking clarifications exist. Candidate acceptance also validates completeness and records `validation_failed` rather than repairing invalid output.
+- Agent input now contains only messages not already consumed by the candidate behind the active RequirementVersion. After requirement acceptance, the backend returns `REQUIREMENT_READY_FOR_PLANNING`; a repeated generation command without new input fails as `NO_NEW_REQUIREMENT_INPUT`.
+- Updated the creation-center UI with a high/medium risk clarification card, controlled option buttons, explicit field scope, and a ready-for-planning state. The old repeat-generation button is no longer shown after all messages are consumed.
+- Added Alembic revision `20260715_02` for clarification contracts. Verification passed with 7 backend tests, Python compileall, TypeScript/Vite build, fresh two-revision migration, runtime requirement v1 -> candidate -> v2 flow, repeat-generation rejection, and HTTP 200 checks on API/frontend. No model/provider call, automatic retry, fallback, prompt rewrite, or inferred value was added.
+
+## 2026-07-15 Three-Frame QwenVL Peak-VRAM Repair
+
+- The next explicit 10-second / 24fps debug run passed node validation but failed at `417 / CLIPTextEncode` with `VRAM grow failed: 770707456 bytes` (about 735 MiB).
+- The persisted request proved `417.text` was empty, so this was not prompt-length growth. The imported nodeInfoList kept the FP16 QwenVL model resident through `426.keep_model_loaded=true`, leaving insufficient peak VRAM for the LTX text encoder.
+- The three-frame preset, backend runtime repair, and frontend normalizer now force `426.keep_model_loaded=false`. QwenVL is released before LTX text encoding; no model, quantization, workflow endpoint, duration, FPS, or generated-frame mapping was changed.
+- No automatic retry or additional provider call was made.
+
 ## 2026-07-15 V2 Creation Center Sprint 1
 
 - Implemented the first real V2 creation-center vertical slice entirely under `v2/`; V1 and its provider adapters remain untouched.

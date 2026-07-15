@@ -13,6 +13,10 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
+from v2.backend.app.db.session import SessionLocal
+from v2.backend.app.db.models import RequirementVersion
+from v2.backend.app.creation.completeness import evaluate_requirement
+from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
 
 
@@ -146,6 +150,18 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
     assert accepted.status_code == 200
     assert accepted.json()["version_number"] == 2
     assert replayed_accept.json()["id"] == accepted.json()["id"]
+    ready = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert ready["next_action"]["code"] == "REQUIREMENT_READY_FOR_PLANNING"
+
+    no_new_input = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={
+            "command_id": "generate-command-002",
+            "expected_base_version_id": accepted.json()["id"],
+        },
+    )
+    assert no_new_input.status_code == 409
+    assert no_new_input.headers["x-error-code"] == "NO_NEW_REQUIREMENT_INPUT"
 
 
 def test_new_message_makes_pending_candidate_stale(client: TestClient) -> None:
@@ -215,3 +231,71 @@ def test_attachment_content_type_mismatch_is_blocked(client: TestClient) -> None
     )
     assert response.status_code == 409
     assert response.headers["x-error-code"] == "ATTACHMENT_TYPE_MISMATCH"
+
+
+def test_completeness_evaluator_does_not_block_optional_fields() -> None:
+    fields = {
+        "core_topic": "明确主题",
+        "duration_seconds": 30,
+        "aspect_ratio": "9:16",
+        "audio_mode": "off",
+    }
+    sources = {key: {"type": "user"} for key in fields}
+    assert evaluate_requirement(fields, sources) == []
+    fields.pop("audio_mode")
+    missing = evaluate_requirement(fields, sources)
+    assert [item["field_key"] for item in missing] == ["audio_mode"]
+    assert missing[0]["risk_level"] == "high"
+
+
+def test_clarification_resolution_creates_new_requirement_version(client: TestClient) -> None:
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    base_id = initial["active_requirement"]["id"]
+    with SessionLocal() as session:
+        active = session.scalar(select(RequirementVersion).where(RequirementVersion.id == base_id))
+        fields = dict(active.fields)
+        sources = dict(active.field_sources)
+        fields.pop("audio_mode")
+        sources.pop("audio_mode")
+        active.fields = fields
+        active.field_sources = sources
+        session.commit()
+
+    blocked = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert blocked["next_action"]["code"] == "RESOLVE_REQUIRED_CLARIFICATIONS"
+    assert len(blocked["pending_clarifications"]) == 1
+    clarification = blocked["pending_clarifications"][0]
+    assert clarification["field_key"] == "audio_mode"
+    assert [item["value"] for item in clarification["options"]] == ["off", "voiceover"]
+
+    invalid = client.post(
+        f"/api/v1/projects/{project['id']}/clarifications/{clarification['id']}:resolve",
+        json={
+            "command_id": "clarification-command-001",
+            "expected_base_version_id": base_id,
+            "value": "auto",
+        },
+    )
+    assert invalid.status_code == 409
+    assert invalid.headers["x-error-code"] == "VALUE_NOT_ALLOWED"
+
+    command = {
+        "command_id": "clarification-command-002",
+        "actor_id": "test-user",
+        "expected_base_version_id": base_id,
+        "value": "off",
+    }
+    resolved = client.post(
+        f"/api/v1/projects/{project['id']}/clarifications/{clarification['id']}:resolve",
+        json=command,
+    )
+    replay = client.post(
+        f"/api/v1/projects/{project['id']}/clarifications/{clarification['id']}:resolve",
+        json=command,
+    )
+    assert resolved.status_code == 200
+    assert resolved.json()["version_number"] == 2
+    assert resolved.json()["fields"]["audio_mode"] == "off"
+    assert resolved.json()["field_sources"]["audio_mode"]["type"] == "user_confirmation"
+    assert replay.json()["id"] == resolved.json()["id"]

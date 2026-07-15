@@ -28,6 +28,11 @@ class RejectCandidate(CommandContext):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class ResolveClarification(CommandContext):
+    expected_base_version_id: str
+    value: Any
+
+
 class AttachmentCreate(CommandContext):
     original_filename: str = Field(min_length=1, max_length=255)
     mime_type: str = Field(pattern=r"^(image|audio|video)/[a-zA-Z0-9.+-]+$")
@@ -99,8 +104,11 @@ class AgentRunRead(BaseModel):
 class ClarificationRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    base_requirement_version_id: str
     field_key: str
+    reason_code: str
     question: str
+    options: list[dict[str, Any]]
     risk_level: str
     status: str
     resolution: Any | None

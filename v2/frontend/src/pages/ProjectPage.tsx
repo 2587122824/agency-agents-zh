@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Bot, Check, ChevronDown, Clock3, FileAudio, FileImage, History, Link2, MessageSquareText, Paperclip, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { ArrowLeft, Bot, Check, CheckCircle2, ChevronDown, CircleAlert, Clock3, FileAudio, FileImage, History, Link2, MessageSquareText, Paperclip, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
@@ -41,6 +41,7 @@ function AttachmentRow({ item, onBind, busy }: { item: CreationAttachment; onBin
 export function ProjectPage() {
   const { projectId = '' } = useParams()
   const [message, setMessage] = useState('')
+  const [clarificationValue, setClarificationValue] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const queryClient = useQueryClient()
@@ -53,6 +54,10 @@ export function ProjectPage() {
   const generate = useMutation({ mutationFn: () => api.generateRequirementCandidate(projectId, center.data!.active_requirement.id), onSuccess: refresh })
   const accept = useMutation({ mutationFn: () => api.acceptRequirementCandidate(projectId, center.data!.current_candidate!.id, center.data!.active_requirement.id), onSuccess: refresh })
   const reject = useMutation({ mutationFn: () => api.rejectRequirementCandidate(projectId, center.data!.current_candidate!.id, '用户认为当前候选不符合创作方向'), onSuccess: refresh })
+  const resolveClarification = useMutation({ mutationFn: (value: unknown) => {
+    const clarification = center.data!.pending_clarifications[0]
+    return api.resolveClarification(projectId, clarification.id, center.data!.active_requirement.id, value)
+  }, onSuccess: async () => { setClarificationValue(''); await refresh() } })
   const register = useMutation({ mutationFn: (file: File) => api.registerAttachment(projectId, file), onSuccess: refresh })
   const bind = useMutation({ mutationFn: ({ attachmentId, type }: { attachmentId: string; type: 'identity_reference' | 'voice_sample' | 'inspiration_only' }) => api.bindAttachment(projectId, attachmentId, type, type === 'identity_reference' ? 'char_main' : type === 'voice_sample' ? 'voice_main' : undefined), onSuccess: refresh })
 
@@ -62,7 +67,8 @@ export function ProjectPage() {
   const data = project.data
   const creation = center.data
   const candidate = creation.current_candidate
-  const error = commandError(addMessage, generate, accept, reject, register, bind)
+  const clarification = creation.pending_clarifications[0]
+  const error = commandError(addMessage, generate, accept, reject, resolveClarification, register, bind)
 
   return <>
     <PageHeader eyebrow="CREATION CENTER" title={data.title} description="对话负责提出需求，候选经过明确确认后才成为正式版本。" actions={<Link className="secondaryButton" to="/"><ArrowLeft size={15} />项目列表</Link>} />
@@ -86,14 +92,19 @@ export function ProjectPage() {
       </section>
 
       <section className={styles.requirements}>
-        <div className={styles.panelHeading}><div><Bot size={18} /><div><span>结构化状态</span><h2>{candidate ? '需求候选' : '正式需求'}</h2></div></div><b className={candidate ? styles.pendingTag : styles.confirmedTag}>{candidate ? '待确认' : '已生效'}</b></div>
+        <div className={styles.panelHeading}><div><Bot size={18} /><div><span>结构化状态</span><h2>{clarification ? '需要你的决策' : candidate ? '需求候选' : '正式需求'}</h2></div></div><b className={clarification || candidate ? styles.pendingTag : styles.confirmedTag}>{clarification ? '阻断' : candidate ? '待确认' : '已生效'}</b></div>
+        {clarification && <div className={styles.clarification}>
+          <div className={styles.clarificationTitle}><CircleAlert size={19} /><div><span>{clarification.risk_level === 'high' ? '高风险确认' : '中风险确认'}</span><h3>{clarification.question}</h3></div></div>
+          <p>此回答只更新 <code>{clarification.field_key}</code>，不会推断或修改其他需求。</p>
+          {clarification.options.length ? <div className={styles.optionList}>{clarification.options.map(option => <button key={String(option.value)} disabled={resolveClarification.isPending} onClick={() => resolveClarification.mutate(option.value)}>{option.label}</button>)}</div> : <form className={styles.clarificationForm} onSubmit={event => { event.preventDefault(); const value = clarification.field_key === 'duration_seconds' ? Number(clarificationValue) : clarificationValue; resolveClarification.mutate(value) }}><input required type={clarification.field_key === 'duration_seconds' ? 'number' : 'text'} min={clarification.field_key === 'duration_seconds' ? 5 : undefined} value={clarificationValue} onChange={event => setClarificationValue(event.target.value)} /><button className="primaryButton" disabled={resolveClarification.isPending}>确认</button></form>}
+        </div>}
         <div className={styles.fieldList}>
           {Object.entries(candidate?.fields ?? creation.active_requirement.fields).map(([key, value]) => {
             const source = (candidate?.field_sources ?? creation.active_requirement.field_sources)[key]
             return <div className={styles.field} key={key}><span>{fieldLabels[key] ?? key}</span><p>{key === 'duration_seconds' ? `${String(value)} 秒` : key === 'audio_mode' ? value === 'off' ? '关闭' : '旁白' : String(value)}</p><small data-agent={source?.type === 'agent_proposal'}>{sourceLabels[source?.type ?? 'user'] ?? source?.type ?? '用户输入'}</small></div>
           })}
         </div>
-        {candidate ? <div className={styles.candidateActions}><div><strong>候选不会自动生效</strong><span>确认后将创建 requirement_v{creation.active_requirement.version_number + 1}，旧版本保留。</span></div><button className="secondaryButton" onClick={() => reject.mutate()} disabled={reject.isPending}><X size={15} />拒绝</button><button className="primaryButton" onClick={() => accept.mutate()} disabled={accept.isPending}><Check size={15} />确认并创建新版本</button></div> : <div className={styles.generateBox}><div><Sparkles size={18} /><p><strong>整理最新消息为候选</strong><span>只读取活动版本、消息和已确认附件绑定。</span></p></div><button className="primaryButton" onClick={() => generate.mutate()} disabled={!creation.messages.length || generate.isPending}>{generate.isPending ? '正在生成…' : '运行 Mock Agent'}</button></div>}
+        {candidate ? <div className={styles.candidateActions}><div><strong>候选不会自动生效</strong><span>确认后将创建 requirement_v{creation.active_requirement.version_number + 1}，旧版本保留。</span></div><button className="secondaryButton" onClick={() => reject.mutate()} disabled={reject.isPending}><X size={15} />拒绝</button><button className="primaryButton" onClick={() => accept.mutate()} disabled={accept.isPending}><Check size={15} />确认并创建新版本</button></div> : creation.next_action.code === 'GENERATE_REQUIREMENT_CANDIDATE' ? <div className={styles.generateBox}><div><Sparkles size={18} /><p><strong>整理最新消息为候选</strong><span>只读取活动版本、未消费消息和已确认附件绑定。</span></p></div><button className="primaryButton" onClick={() => generate.mutate()} disabled={generate.isPending}>{generate.isPending ? '正在生成…' : '运行 Mock Agent'}</button></div> : creation.next_action.code === 'REQUIREMENT_READY_FOR_PLANNING' ? <div className={styles.readyBox}><CheckCircle2 size={19} /><p><strong>需求版本已完整</strong><span>下一阶段将基于当前版本生成创意方案候选。</span></p></div> : null}
       </section>
 
       <aside className={styles.side}>

@@ -13,6 +13,7 @@ from ..db.models import (
     Attachment,
     AttachmentBinding,
     CommandReceipt,
+    ClarificationRequest,
     Message,
     Project,
     ProjectEvent,
@@ -29,7 +30,9 @@ from .contracts import (
     MessageCreate,
     NextAction,
     RejectCandidate,
+    ResolveClarification,
 )
+from .completeness import evaluate_requirement, validate_clarification_value
 
 
 class CreationConflictError(ValueError):
@@ -112,6 +115,65 @@ def active_requirement(session: Session, project_id: str) -> RequirementVersion 
     )
 
 
+def consumed_message_ids(session: Session, version: RequirementVersion) -> set[str]:
+    if not version.candidate_id:
+        return set()
+    candidate = session.get(RequirementCandidate, version.candidate_id)
+    if not candidate:
+        return set()
+    run = session.get(AgentRun, candidate.agent_run_id)
+    if not run:
+        return set()
+    manifest = session.get(AgentInputManifest, run.input_manifest_id)
+    return set(manifest.message_ids) if manifest else set()
+
+
+def sync_clarifications(
+    session: Session,
+    project: Project,
+    base: RequirementVersion,
+    *,
+    fields: dict | None = None,
+    field_sources: dict | None = None,
+    candidate_id: str | None = None,
+) -> list[ClarificationRequest]:
+    existing = list(session.scalars(select(ClarificationRequest).where(
+        ClarificationRequest.project_id == project.id,
+        ClarificationRequest.status == "pending",
+    )))
+    for clarification in existing:
+        if clarification.base_requirement_version_id != base.id:
+            clarification.status = "stale"
+    missing = evaluate_requirement(fields or base.fields, field_sources or base.field_sources)
+    pending_for_base = {
+        item.field_key: item
+        for item in existing
+        if item.base_requirement_version_id == base.id and item.status == "pending"
+    }
+    for item in missing:
+        if item["field_key"] in pending_for_base:
+            continue
+        clarification = ClarificationRequest(
+            project_id=project.id,
+            candidate_id=candidate_id,
+            base_requirement_version_id=base.id,
+            field_key=item["field_key"],
+            reason_code=item["reason_code"],
+            question=item["question"],
+            options=item["options"],
+            risk_level=item["risk_level"],
+        )
+        session.add(clarification)
+        session.flush()
+        pending_for_base[clarification.field_key] = clarification
+        _event(session, project.id, "clarification.requested.v1", "需求字段需要用户澄清", {
+            "clarification_id": clarification.id,
+            "field_key": clarification.field_key,
+            "risk_level": clarification.risk_level,
+        })
+    return [pending_for_base[item["field_key"]] for item in missing]
+
+
 def add_message(session: Session, project: Project, payload: MessageCreate) -> Message:
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
@@ -143,9 +205,11 @@ def add_message(session: Session, project: Project, payload: MessageCreate) -> M
 
 
 def _manifest_payload(session: Session, project: Project, base: RequirementVersion) -> dict:
+    consumed = consumed_message_ids(session, base)
     messages = list(session.scalars(
         select(Message).where(Message.project_id == project.id).order_by(Message.created_at, Message.id)
     ))
+    messages = [item for item in messages if item.id not in consumed]
     bindings = list(session.scalars(
         select(AttachmentBinding).where(
             AttachmentBinding.project_id == project.id,
@@ -170,7 +234,13 @@ def generate_candidate(session: Session, project: Project, payload: GenerateCand
     base = ensure_initial_requirement(session, project)
     if base.id != payload.expected_base_version_id:
         raise CreationConflictError("PROJECT_VERSION_CONFLICT", "活动需求版本已变化，请刷新后重新生成候选。")
+    pending_clarifications = sync_clarifications(session, project, base)
+    if pending_clarifications:
+        session.commit()
+        raise CreationConflictError("REQUIREMENT_INCOMPLETE", "请先解决阻断性的需求澄清。")
     manifest_payload = _manifest_payload(session, project, base)
+    if not manifest_payload["messages"]:
+        raise CreationConflictError("NO_NEW_REQUIREMENT_INPUT", "没有尚未处理的新需求消息。")
     serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     manifest = AgentInputManifest(
         project_id=project.id,
@@ -245,6 +315,20 @@ def accept_candidate(
         raise CreationConflictError("CANDIDATE_BASE_VERSION_STALE", "这个候选基于旧需求版本，不能确认。")
     if candidate.status != "awaiting_review":
         raise CreationConflictError("CANDIDATE_NOT_REVIEWABLE", f"候选状态为 {candidate.status}，不能确认。")
+    missing = evaluate_requirement(candidate.fields, candidate.field_sources)
+    if missing:
+        candidate.status = "validation_failed"
+        candidate.validation_errors = missing
+        sync_clarifications(
+            session,
+            project,
+            active,
+            fields=candidate.fields,
+            field_sources=candidate.field_sources,
+            candidate_id=candidate.id,
+        )
+        session.commit()
+        raise CreationConflictError("CANDIDATE_REQUIREMENT_INCOMPLETE", "候选缺少阻断字段，不能确认。")
     active.is_active = False
     version = RequirementVersion(
         project_id=project.id,
@@ -268,6 +352,73 @@ def accept_candidate(
     _save_receipt(session, project.id, payload.command_id, "candidate.accept", "requirement_version", version.id)
     _event(session, project.id, "requirement.confirmed.v1", "需求候选已提升为正式版本", {
         "candidate_id": candidate.id, "requirement_version_id": version.id,
+    })
+    session.commit()
+    return version
+
+
+def resolve_clarification(
+    session: Session,
+    project: Project,
+    clarification_id: str,
+    payload: ResolveClarification,
+) -> RequirementVersion:
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, RequirementVersion)
+    clarification = session.get(ClarificationRequest, clarification_id)
+    if not clarification or clarification.project_id != project.id:
+        raise CreationNotFoundError("Clarification not found")
+    active = active_requirement(session, project.id)
+    if (
+        not active
+        or active.id != payload.expected_base_version_id
+        or clarification.base_requirement_version_id != active.id
+    ):
+        raise CreationConflictError("CLARIFICATION_BASE_VERSION_STALE", "这个澄清基于旧需求版本，不能提交。")
+    if clarification.status != "pending":
+        raise CreationConflictError("CLARIFICATION_NOT_PENDING", f"澄清状态为 {clarification.status}，不能提交。")
+    try:
+        value = validate_clarification_value(clarification.field_key, payload.value)
+    except ValueError as exc:
+        raise CreationConflictError(str(exc), "澄清值不符合字段合同。") from exc
+    fields = dict(active.fields)
+    sources = dict(active.field_sources)
+    fields[clarification.field_key] = value
+    sources[clarification.field_key] = {"type": "user_confirmation", "reference_id": clarification.id}
+    active.is_active = False
+    version = RequirementVersion(
+        project_id=project.id,
+        version_number=active.version_number + 1,
+        fields=fields,
+        field_sources=sources,
+        created_by=payload.actor_id,
+    )
+    session.add(version)
+    session.flush()
+    clarification.status = "resolved"
+    clarification.resolution = value
+    clarification.resolved_at = utc_now()
+    for item in session.scalars(select(ClarificationRequest).where(
+        ClarificationRequest.project_id == project.id,
+        ClarificationRequest.status == "pending",
+        ClarificationRequest.id != clarification.id,
+    )):
+        item.status = "stale"
+    for candidate in session.scalars(select(RequirementCandidate).where(
+        RequirementCandidate.project_id == project.id,
+        RequirementCandidate.status == "awaiting_review",
+    )):
+        candidate.status = "stale"
+        candidate.decided_at = utc_now()
+    _save_receipt(session, project.id, payload.command_id, "clarification.resolve", "requirement_version", version.id)
+    _event(session, project.id, "clarification.resolved.v1", "用户已解决需求澄清", {
+        "clarification_id": clarification.id,
+        "requirement_version_id": version.id,
+        "field_key": clarification.field_key,
+    })
+    _event(session, project.id, "requirement.confirmed.v1", "澄清结果已创建新的需求版本", {
+        "requirement_version_id": version.id,
     })
     session.commit()
     return version
@@ -391,6 +542,7 @@ def bind_attachment(
 
 def creation_center_view(session: Session, project: Project) -> dict:
     active = ensure_initial_requirement(session, project)
+    sync_clarifications(session, project, active)
     session.commit()
     messages = list(session.scalars(select(Message).where(Message.project_id == project.id).order_by(Message.created_at)))
     candidates = list(session.scalars(select(RequirementCandidate).where(
@@ -408,14 +560,29 @@ def creation_center_view(session: Session, project: Project) -> dict:
     bindings_by_attachment: dict[str, list[AttachmentBinding]] = {}
     for binding in binding_rows:
         bindings_by_attachment.setdefault(binding.attachment_id, []).append(binding)
+    clarifications = list(session.scalars(select(ClarificationRequest).where(
+        ClarificationRequest.project_id == project.id,
+        ClarificationRequest.status == "pending",
+        ClarificationRequest.base_requirement_version_id == active.id,
+    ).order_by(ClarificationRequest.created_at)))
     current = next((item for item in candidates if item.status == "awaiting_review"), None)
     unbound = [item for item in attachments if not bindings_by_attachment.get(item.id)]
-    if current:
+    consumed = consumed_message_ids(session, active)
+    unconsumed_messages = [item for item in messages if item.id not in consumed]
+    if clarifications:
+        next_action = NextAction(
+            code="RESOLVE_REQUIRED_CLARIFICATIONS",
+            target_ids=[item.id for item in clarifications],
+            label="解决阻断性需求",
+        )
+    elif current:
         next_action = NextAction(code="REVIEW_REQUIREMENT_CANDIDATE", target_ids=[current.id], label="审核需求候选")
     elif unbound:
         next_action = NextAction(code="CLASSIFY_ATTACHMENT", target_ids=[item.id for item in unbound], label="确认附件用途")
-    elif messages:
+    elif unconsumed_messages:
         next_action = NextAction(code="GENERATE_REQUIREMENT_CANDIDATE", label="生成需求候选")
+    elif messages:
+        next_action = NextAction(code="REQUIREMENT_READY_FOR_PLANNING", label="进入创意方案规划")
     else:
         next_action = NextAction(code="ADD_REQUIREMENT_MESSAGE", label="补充创作需求")
     return {
@@ -424,7 +591,7 @@ def creation_center_view(session: Session, project: Project) -> dict:
         "messages": messages,
         "current_candidate": current,
         "candidate_history": candidates,
-        "pending_clarifications": [],
+        "pending_clarifications": clarifications,
         "latest_agent_run": runs[0] if runs else None,
         "agent_runs": runs,
         "attachments": [

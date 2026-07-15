@@ -29,6 +29,7 @@ from ..creation.contracts import (
     MessageCreate,
     MessageRead,
     RejectCandidate,
+    ResolveClarification,
     RequirementVersionRead,
 )
 from ..creation.service import (
@@ -41,6 +42,7 @@ from ..creation.service import (
     generate_candidate,
     register_attachment,
     reject_candidate,
+    resolve_clarification,
 )
 from ..db.session import get_session
 from ..decisions.service import DecisionConflictError, add_decision, resolve_decision
@@ -154,6 +156,25 @@ def requirement_candidate_reject(
     project = require_project(session, project_id)
     try:
         return reject_candidate(session, project, candidate_id, payload)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/clarifications/{clarification_id}:resolve",
+    response_model=RequirementVersionRead,
+)
+def clarification_resolve(
+    project_id: str,
+    clarification_id: str,
+    payload: ResolveClarification,
+    session: Session = Depends(get_session),
+):
+    project = require_project(session, project_id)
+    try:
+        return resolve_clarification(session, project, clarification_id, payload)
     except CreationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CreationConflictError as exc:
