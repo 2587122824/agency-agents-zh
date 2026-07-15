@@ -9,6 +9,7 @@ from ..db.models import (
     AttachmentBinding,
     ClarificationRequest,
     CommandReceipt,
+    CreativeBriefCandidate,
     Decision,
     Entity,
     EntityVersion,
@@ -17,6 +18,9 @@ from ..db.models import (
     ProjectEvent,
     RequirementCandidate,
     RequirementVersion,
+    PlanVersion,
+    Shot,
+    ShotPlanCandidate,
     WorkItem,
 )
 
@@ -34,6 +38,7 @@ CreationRecord = (
     | RequirementCandidate
     | RequirementVersion
 )
+PlanningRecord = AgentInputManifest | AgentRun | CreativeBriefCandidate | PlanVersion | Shot | ShotPlanCandidate
 
 
 class ProjectRepository(Protocol):
@@ -136,3 +141,45 @@ class CreationRepository(Protocol):
         project_id: str,
         requirement_version_id: str,
     ) -> list[ClarificationRequest]: ...
+
+
+class PlanningRepository(Protocol):
+    def add(self, record: PlanningRecord) -> None: ...
+
+    def flush(self) -> None: ...
+
+    def confirmed_binding_versions(self, project_id: str) -> list[AttachmentBinding]: ...
+
+    def confirmed_binding_ids(self, project_id: str) -> list[str]: ...
+
+    def active_brief_for_requirement(
+        self,
+        project_id: str,
+        requirement_version_id: str,
+    ) -> CreativeBriefCandidate | None: ...
+
+    def creative_brief(self, candidate_id: str) -> CreativeBriefCandidate | None: ...
+
+    def entity_version(self, version_id: str) -> EntityVersion | None: ...
+
+    def reviewable_shot_plan_for_requirement(
+        self,
+        project_id: str,
+        requirement_version_id: str,
+    ) -> ShotPlanCandidate | None: ...
+
+    def shot_plan(self, candidate_id: str) -> ShotPlanCandidate | None: ...
+
+    def active_plans(self, project_id: str) -> list[PlanVersion]: ...
+
+    def next_plan_version_number(self, project_id: str) -> int: ...
+
+    def shots(self, plan_version_id: str) -> list[Shot]: ...
+
+    def brief_history(self, project_id: str) -> list[CreativeBriefCandidate]: ...
+
+    def shot_plan_history(self, project_id: str) -> list[ShotPlanCandidate]: ...
+
+    def plan_history(self, project_id: str) -> list[PlanVersion]: ...
+
+    def active_entity_versions(self, project_id: str) -> list[tuple[EntityVersion, Entity]]: ...

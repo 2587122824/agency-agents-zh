@@ -12,14 +12,18 @@ from v2.backend.app.db.models import (
     Attachment,
     AttachmentBinding,
     ClarificationRequest,
+    CreativeBriefCandidate,
     Decision,
     Entity,
     EntityVersion,
     Message,
+    PlanVersion,
     Project,
     ProjectEvent,
     RequirementCandidate,
     RequirementVersion,
+    Shot,
+    ShotPlanCandidate,
     WorkItem,
     utc_now,
 )
@@ -29,6 +33,7 @@ from v2.backend.app.repositories import (
     SqlAlchemyCreationRepository,
     SqlAlchemyDecisionRepository,
     SqlAlchemyEventRepository,
+    SqlAlchemyPlanningRepository,
     SqlAlchemyProjectRepository,
 )
 
@@ -421,5 +426,211 @@ def test_creation_repository_contract_preserves_filters_order_and_project_scope(
             assert [row.id for row in creation.bindings(project.id)] == [confirmed_binding.id, pending_binding.id]
             assert [row.id for row in creation.agent_runs(project.id)] == [run.id]
             assert creation.view_messages(other.id) == []
+    finally:
+        engine.dispose()
+
+
+def test_planning_repository_contract_preserves_versions_history_and_shot_order() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            creation = SqlAlchemyCreationRepository(session)
+            planning = SqlAlchemyPlanningRepository(session)
+            now = utc_now()
+            project = Project(
+                title="Planning",
+                core_topic="Planning repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            other = Project(
+                title="Other",
+                core_topic="Planning isolation",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            projects.add(project)
+            projects.add(other)
+            projects.flush()
+            old_requirement = RequirementVersion(
+                project_id=project.id,
+                version_number=1,
+                fields={"version": 1},
+                is_active=False,
+            )
+            requirement = RequirementVersion(
+                project_id=project.id,
+                version_number=2,
+                fields={"version": 2},
+                is_active=True,
+            )
+            creation.add(old_requirement)
+            creation.add(requirement)
+            creation.flush()
+            manifest = AgentInputManifest(
+                project_id=project.id,
+                base_requirement_version_id=requirement.id,
+                input_hash="d" * 64,
+                payload={},
+            )
+            planning.add(manifest)
+            planning.flush()
+            run = AgentRun(
+                project_id=project.id,
+                input_manifest_id=manifest.id,
+                status="succeeded",
+                started_at=now,
+            )
+            planning.add(run)
+            planning.flush()
+            old_brief = CreativeBriefCandidate(
+                project_id=project.id,
+                requirement_version_id=old_requirement.id,
+                agent_run_id=run.id,
+                status="accepted",
+                brief={"version": 1},
+                created_at=now - timedelta(minutes=2),
+            )
+            current_brief = CreativeBriefCandidate(
+                project_id=project.id,
+                requirement_version_id=requirement.id,
+                agent_run_id=run.id,
+                brief={"version": 2},
+                created_at=now - timedelta(minutes=1),
+            )
+            planning.add(old_brief)
+            planning.add(current_brief)
+            planning.flush()
+            old_shot_plan = ShotPlanCandidate(
+                project_id=project.id,
+                requirement_version_id=old_requirement.id,
+                creative_brief_candidate_id=old_brief.id,
+                agent_run_id=run.id,
+                status="accepted",
+                shots=[],
+                created_at=now - timedelta(minutes=2),
+            )
+            current_shot_plan = ShotPlanCandidate(
+                project_id=project.id,
+                requirement_version_id=requirement.id,
+                creative_brief_candidate_id=current_brief.id,
+                agent_run_id=run.id,
+                shots=[],
+                created_at=now - timedelta(minutes=1),
+            )
+            planning.add(old_shot_plan)
+            planning.add(current_shot_plan)
+            planning.flush()
+            old_plan = PlanVersion(
+                project_id=project.id,
+                version_number=1,
+                requirement_version_id=old_requirement.id,
+                shot_plan_candidate_id=old_shot_plan.id,
+                creative_brief=old_brief.brief,
+                status="superseded",
+                is_active=False,
+            )
+            active_plan = PlanVersion(
+                project_id=project.id,
+                version_number=2,
+                requirement_version_id=requirement.id,
+                shot_plan_candidate_id=current_shot_plan.id,
+                creative_brief=current_brief.brief,
+                is_active=True,
+            )
+            planning.add(old_plan)
+            planning.add(active_plan)
+            planning.flush()
+            later_shot = Shot(
+                project_id=project.id,
+                plan_version_id=active_plan.id,
+                shot_code="SH-002",
+                sequence_number=2,
+                duration_ms=5000,
+                shot_type="concept",
+                face_visibility="not_visible",
+                text_policy="forbidden",
+                motion_requirement="moderate",
+                composition="Second",
+                action="Second",
+            )
+            earlier_shot = Shot(
+                project_id=project.id,
+                plan_version_id=active_plan.id,
+                shot_code="SH-001",
+                sequence_number=1,
+                duration_ms=5000,
+                shot_type="concept",
+                face_visibility="not_visible",
+                text_policy="forbidden",
+                motion_requirement="moderate",
+                composition="First",
+                action="First",
+            )
+            planning.add(later_shot)
+            planning.add(earlier_shot)
+
+            entity = Entity(
+                id="scene-main",
+                project_id=project.id,
+                entity_type="scene",
+                display_name="Scene",
+            )
+            creation.add(entity)
+            creation.flush()
+            entity_version = EntityVersion(
+                project_id=project.id,
+                entity_id=entity.id,
+                version_number=1,
+                status="confirmed",
+                is_active=True,
+            )
+            creation.add(entity_version)
+            attachment = Attachment(
+                project_id=project.id,
+                original_filename="scene.png",
+                mime_type="image/png",
+                byte_size=1,
+                content_hash="e" * 64,
+                storage_path="scene.png",
+            )
+            creation.add(attachment)
+            creation.flush()
+            binding = AttachmentBinding(
+                project_id=project.id,
+                attachment_id=attachment.id,
+                binding_type="scene_reference",
+                entity_id=entity.id,
+                entity_version_id=entity_version.id,
+            )
+            creation.add(binding)
+            session.commit()
+
+            assert planning.active_brief_for_requirement(project.id, requirement.id).id == current_brief.id  # type: ignore[union-attr]
+            assert planning.creative_brief(current_brief.id).project_id == project.id  # type: ignore[union-attr]
+            assert planning.reviewable_shot_plan_for_requirement(project.id, requirement.id).id == current_shot_plan.id  # type: ignore[union-attr]
+            assert planning.shot_plan(current_shot_plan.id).project_id == project.id  # type: ignore[union-attr]
+            assert [row.id for row in planning.active_plans(project.id)] == [active_plan.id]
+            assert planning.next_plan_version_number(project.id) == 3
+            assert [row.id for row in planning.shots(active_plan.id)] == [earlier_shot.id, later_shot.id]
+            assert [row.id for row in planning.brief_history(project.id)] == [current_brief.id, old_brief.id]
+            assert [row.id for row in planning.shot_plan_history(project.id)] == [current_shot_plan.id, old_shot_plan.id]
+            assert [row.id for row in planning.plan_history(project.id)] == [active_plan.id, old_plan.id]
+            assert [row.id for row in planning.confirmed_binding_versions(project.id)] == [binding.id]
+            assert planning.confirmed_binding_ids(project.id) == [binding.id]
+            assert planning.entity_version(entity_version.id).id == entity_version.id  # type: ignore[union-attr]
+            assert [(version.id, row.id) for version, row in planning.active_entity_versions(project.id)] == [
+                (entity_version.id, entity.id)
+            ]
+            assert planning.brief_history(other.id) == []
+            assert planning.next_plan_version_number(other.id) == 1
     finally:
         engine.dispose()

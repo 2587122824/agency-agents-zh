@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..db.models import (
@@ -10,6 +10,7 @@ from ..db.models import (
     AttachmentBinding,
     ClarificationRequest,
     CommandReceipt,
+    CreativeBriefCandidate,
     Decision,
     Entity,
     EntityVersion,
@@ -18,9 +19,12 @@ from ..db.models import (
     ProjectEvent,
     RequirementCandidate,
     RequirementVersion,
+    PlanVersion,
+    Shot,
+    ShotPlanCandidate,
     WorkItem,
 )
-from .contracts import CreationRecord, ModelT
+from .contracts import CreationRecord, ModelT, PlanningRecord
 
 
 class SqlAlchemyProjectRepository:
@@ -245,3 +249,112 @@ class SqlAlchemyCreationRepository:
                 ClarificationRequest.base_requirement_version_id == requirement_version_id,
             ).order_by(ClarificationRequest.created_at)
         ))
+
+
+class SqlAlchemyPlanningRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, record: PlanningRecord) -> None:
+        self.session.add(record)
+
+    def flush(self) -> None:
+        self.session.flush()
+
+    def confirmed_binding_versions(self, project_id: str) -> list[AttachmentBinding]:
+        return list(self.session.scalars(
+            select(AttachmentBinding)
+            .join(EntityVersion, EntityVersion.id == AttachmentBinding.entity_version_id)
+            .where(
+                AttachmentBinding.project_id == project_id,
+                AttachmentBinding.status == "confirmed",
+                EntityVersion.status == "confirmed",
+            )
+            .order_by(AttachmentBinding.confirmed_at, AttachmentBinding.id)
+        ))
+
+    def confirmed_binding_ids(self, project_id: str) -> list[str]:
+        return list(self.session.scalars(
+            select(AttachmentBinding.id).where(
+                AttachmentBinding.project_id == project_id,
+                AttachmentBinding.status == "confirmed",
+                AttachmentBinding.entity_version_id.is_not(None),
+            ).order_by(AttachmentBinding.confirmed_at, AttachmentBinding.id)
+        ))
+
+    def active_brief_for_requirement(
+        self,
+        project_id: str,
+        requirement_version_id: str,
+    ) -> CreativeBriefCandidate | None:
+        return self.session.scalar(select(CreativeBriefCandidate).where(
+            CreativeBriefCandidate.project_id == project_id,
+            CreativeBriefCandidate.requirement_version_id == requirement_version_id,
+            CreativeBriefCandidate.status.in_(("awaiting_review", "accepted")),
+        ))
+
+    def creative_brief(self, candidate_id: str) -> CreativeBriefCandidate | None:
+        return self.session.get(CreativeBriefCandidate, candidate_id)
+
+    def entity_version(self, version_id: str) -> EntityVersion | None:
+        return self.session.get(EntityVersion, version_id)
+
+    def reviewable_shot_plan_for_requirement(
+        self,
+        project_id: str,
+        requirement_version_id: str,
+    ) -> ShotPlanCandidate | None:
+        return self.session.scalar(select(ShotPlanCandidate).where(
+            ShotPlanCandidate.project_id == project_id,
+            ShotPlanCandidate.requirement_version_id == requirement_version_id,
+            ShotPlanCandidate.status == "awaiting_review",
+        ))
+
+    def shot_plan(self, candidate_id: str) -> ShotPlanCandidate | None:
+        return self.session.get(ShotPlanCandidate, candidate_id)
+
+    def active_plans(self, project_id: str) -> list[PlanVersion]:
+        return list(self.session.scalars(select(PlanVersion).where(
+            PlanVersion.project_id == project_id,
+            PlanVersion.is_active.is_(True),
+        )))
+
+    def next_plan_version_number(self, project_id: str) -> int:
+        current = self.session.scalar(select(func.max(PlanVersion.version_number)).where(
+            PlanVersion.project_id == project_id,
+        ))
+        return (current or 0) + 1
+
+    def shots(self, plan_version_id: str) -> list[Shot]:
+        return list(self.session.scalars(
+            select(Shot).where(Shot.plan_version_id == plan_version_id).order_by(Shot.sequence_number)
+        ))
+
+    def brief_history(self, project_id: str) -> list[CreativeBriefCandidate]:
+        return list(self.session.scalars(
+            select(CreativeBriefCandidate)
+            .where(CreativeBriefCandidate.project_id == project_id)
+            .order_by(CreativeBriefCandidate.created_at.desc())
+        ))
+
+    def shot_plan_history(self, project_id: str) -> list[ShotPlanCandidate]:
+        return list(self.session.scalars(
+            select(ShotPlanCandidate)
+            .where(ShotPlanCandidate.project_id == project_id)
+            .order_by(ShotPlanCandidate.created_at.desc())
+        ))
+
+    def plan_history(self, project_id: str) -> list[PlanVersion]:
+        return list(self.session.scalars(
+            select(PlanVersion)
+            .where(PlanVersion.project_id == project_id)
+            .order_by(PlanVersion.version_number.desc())
+        ))
+
+    def active_entity_versions(self, project_id: str) -> list[tuple[EntityVersion, Entity]]:
+        return list(self.session.execute(
+            select(EntityVersion, Entity)
+            .join(Entity, Entity.id == EntityVersion.entity_id)
+            .where(EntityVersion.project_id == project_id, EntityVersion.is_active.is_(True))
+            .order_by(Entity.entity_type, Entity.id)
+        ).all())

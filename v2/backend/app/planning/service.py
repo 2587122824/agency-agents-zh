@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..creation.completeness import evaluate_requirement
@@ -20,10 +19,7 @@ from ..creation.service import (
 from ..db.models import (
     AgentInputManifest,
     AgentRun,
-    AttachmentBinding,
     CreativeBriefCandidate,
-    Entity,
-    EntityVersion,
     PlanVersion,
     Project,
     RequirementVersion,
@@ -31,7 +27,12 @@ from ..db.models import (
     ShotPlanCandidate,
     utc_now,
 )
+from ..repositories import PlanningRepository, SqlAlchemyPlanningRepository
 from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction
+
+
+def _planning(session: Session) -> PlanningRepository:
+    return SqlAlchemyPlanningRepository(session)
 
 
 def _confirmed_binding_versions(session: Session, project_id: str) -> dict[str, list[str]]:
@@ -42,16 +43,7 @@ def _confirmed_binding_versions(session: Session, project_id: str) -> dict[str, 
         "product_reference": [],
         "voice_sample": [],
     }
-    rows = session.scalars(
-        select(AttachmentBinding)
-        .join(EntityVersion, EntityVersion.id == AttachmentBinding.entity_version_id)
-        .where(
-            AttachmentBinding.project_id == project_id,
-            AttachmentBinding.status == "confirmed",
-            EntityVersion.status == "confirmed",
-        )
-        .order_by(AttachmentBinding.confirmed_at, AttachmentBinding.id)
-    )
+    rows = _planning(session).confirmed_binding_versions(project_id)
     for row in rows:
         if row.binding_type in result and row.entity_version_id not in result[row.binding_type]:
             result[row.binding_type].append(row.entity_version_id)
@@ -65,6 +57,7 @@ def _create_manifest(
     role: str,
     extra: dict | None = None,
 ) -> AgentInputManifest:
+    repository = _planning(session)
     bindings = _confirmed_binding_versions(session, project.id)
     payload = {
         "active_requirement": {"id": requirement.id, "fields": requirement.fields},
@@ -73,11 +66,7 @@ def _create_manifest(
         **(extra or {}),
     }
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    binding_ids = list(session.scalars(select(AttachmentBinding.id).where(
-        AttachmentBinding.project_id == project.id,
-        AttachmentBinding.status == "confirmed",
-        AttachmentBinding.entity_version_id.is_not(None),
-    ).order_by(AttachmentBinding.confirmed_at, AttachmentBinding.id)))
+    binding_ids = repository.confirmed_binding_ids(project.id)
     manifest = AgentInputManifest(
         project_id=project.id,
         base_requirement_version_id=requirement.id,
@@ -86,12 +75,13 @@ def _create_manifest(
         payload=payload,
         system_config_version=f"v2.{role}.mock.v1",
     )
-    session.add(manifest)
-    session.flush()
+    repository.add(manifest)
+    repository.flush()
     return manifest
 
 
 def _start_run(session: Session, project: Project, manifest: AgentInputManifest, role: str, schema: str) -> AgentRun:
+    repository = _planning(session)
     run = AgentRun(
         project_id=project.id,
         agent_role=role,
@@ -103,8 +93,8 @@ def _start_run(session: Session, project: Project, manifest: AgentInputManifest,
         output_schema_version=schema,
         started_at=utc_now(),
     )
-    session.add(run)
-    session.flush()
+    repository.add(run)
+    repository.flush()
     _event(session, project.id, "agent.run_created.v1", f"{role.title()} Mock Agent 已开始", {"agent_run_id": run.id})
     return run
 
@@ -121,6 +111,7 @@ def _finish_run(session: Session, project: Project, run: AgentRun, candidate_id:
 
 
 def generate_brief(session: Session, project: Project, payload: GenerateBrief) -> CreativeBriefCandidate:
+    repository = _planning(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, CreativeBriefCandidate)
@@ -131,11 +122,7 @@ def generate_brief(session: Session, project: Project, payload: GenerateBrief) -
         sync_clarifications(session, project, requirement)
         session.commit()
         raise CreationConflictError("REQUIREMENT_INCOMPLETE", "需求仍有阻断字段，不能生成创意方案。")
-    existing = session.scalar(select(CreativeBriefCandidate).where(
-        CreativeBriefCandidate.project_id == project.id,
-        CreativeBriefCandidate.requirement_version_id == requirement.id,
-        CreativeBriefCandidate.status.in_(("awaiting_review", "accepted")),
-    ))
+    existing = repository.active_brief_for_requirement(project.id, requirement.id)
     if existing:
         raise CreationConflictError("BRIEF_ALREADY_EXISTS", "当前需求版本已有待审或已接受的创意方案。")
     manifest = _create_manifest(session, project, requirement, "creative")
@@ -173,8 +160,8 @@ def generate_brief(session: Session, project: Project, payload: GenerateBrief) -
         brief=brief,
         field_sources=sources,
     )
-    session.add(candidate)
-    session.flush()
+    repository.add(candidate)
+    repository.flush()
     _finish_run(session, project, run, candidate.id, {"creative_brief_candidate": brief})
     _save_receipt(session, project.id, payload.command_id, "brief.generate", "creative_brief_candidate", candidate.id)
     _event(session, project.id, "plan.brief_candidate_created.v1", "创意方案候选等待用户审核", {"candidate_id": candidate.id})
@@ -189,10 +176,11 @@ def decide_brief(
     payload: DecideBrief,
     accept: bool,
 ) -> CreativeBriefCandidate:
+    repository = _planning(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, CreativeBriefCandidate)
-    candidate = session.get(CreativeBriefCandidate, candidate_id)
+    candidate = repository.creative_brief(candidate_id)
     requirement = active_requirement(session, project.id)
     if not candidate or candidate.project_id != project.id:
         raise CreationNotFoundError("Creative brief candidate not found")
@@ -248,6 +236,7 @@ def _build_shots(requirement: RequirementVersion, brief: CreativeBriefCandidate)
 
 
 def validate_shots(session: Session, project_id: str, requirement: RequirementVersion, shots: list[dict]) -> list[dict]:
+    repository = _planning(session)
     errors: list[dict] = []
     if not shots:
         return [{"code": "SHOTS_REQUIRED", "field": "shots"}]
@@ -271,29 +260,26 @@ def validate_shots(session: Session, project_id: str, requirement: RequirementVe
         if item.get("motion_requirement") not in {"static", "moderate", "significant"}:
             errors.append({"code": "MOTION_REQUIREMENT_INVALID", "shot_code": item.get("shot_code")})
     for version_id in referenced:
-        version = session.get(EntityVersion, version_id)
+        version = repository.entity_version(version_id)
         if not version or version.project_id != project_id or version.status != "confirmed":
             errors.append({"code": "ENTITY_VERSION_NOT_FOUND", "entity_version_id": version_id})
     return errors
 
 
 def generate_shot_plan(session: Session, project: Project, payload: GenerateShotPlan) -> ShotPlanCandidate:
+    repository = _planning(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, ShotPlanCandidate)
     requirement = active_requirement(session, project.id)
-    brief = session.get(CreativeBriefCandidate, payload.creative_brief_candidate_id)
+    brief = repository.creative_brief(payload.creative_brief_candidate_id)
     if not requirement or requirement.id != payload.expected_requirement_version_id:
         raise CreationConflictError("REQUIREMENT_VERSION_CONFLICT", "活动需求版本已变化。")
     if not brief or brief.project_id != project.id or brief.requirement_version_id != requirement.id:
         raise CreationNotFoundError("Accepted creative brief not found")
     if brief.status != "accepted":
         raise CreationConflictError("BRIEF_NOT_ACCEPTED", "创意方案必须先由用户确认。")
-    existing = session.scalar(select(ShotPlanCandidate).where(
-        ShotPlanCandidate.project_id == project.id,
-        ShotPlanCandidate.requirement_version_id == requirement.id,
-        ShotPlanCandidate.status == "awaiting_review",
-    ))
+    existing = repository.reviewable_shot_plan_for_requirement(project.id, requirement.id)
     if existing:
         raise CreationConflictError("SHOT_PLAN_ALREADY_EXISTS", "当前需求版本已有待审分镜候选。")
     manifest = _create_manifest(session, project, requirement, "director", {
@@ -311,8 +297,8 @@ def generate_shot_plan(session: Session, project: Project, payload: GenerateShot
         shots=shots,
         validation_errors=errors,
     )
-    session.add(candidate)
-    session.flush()
+    repository.add(candidate)
+    repository.flush()
     _finish_run(session, project, run, candidate.id, {"shot_plan_candidate": shots})
     if errors:
         run.status = "validation_failed"
@@ -334,11 +320,12 @@ def decide_shot_plan(
     payload: DecideShotPlan,
     accept: bool,
 ):
+    repository = _planning(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         result = _receipt_result(session, receipt, PlanVersion if accept else ShotPlanCandidate)
         return _plan_dict(session, result) if accept else result
-    candidate = session.get(ShotPlanCandidate, candidate_id)
+    candidate = repository.shot_plan(candidate_id)
     requirement = active_requirement(session, project.id)
     if not candidate or candidate.project_id != project.id:
         raise CreationNotFoundError("Shot plan candidate not found")
@@ -360,18 +347,13 @@ def decide_shot_plan(
         candidate.validation_errors = errors
         session.commit()
         raise CreationConflictError("SHOT_PLAN_VALIDATION_FAILED", "分镜候选合同验证失败。")
-    brief = session.get(CreativeBriefCandidate, candidate.creative_brief_candidate_id)
+    brief = repository.creative_brief(candidate.creative_brief_candidate_id)
     if not brief or brief.status != "accepted":
         raise CreationConflictError("BRIEF_NOT_ACCEPTED", "关联的创意方案不再可用。")
-    for plan in session.scalars(select(PlanVersion).where(
-        PlanVersion.project_id == project.id,
-        PlanVersion.is_active.is_(True),
-    )):
+    for plan in repository.active_plans(project.id):
         plan.is_active = False
         plan.status = "superseded"
-    version_number = (session.scalar(select(func.max(PlanVersion.version_number)).where(
-        PlanVersion.project_id == project.id,
-    )) or 0) + 1
+    version_number = repository.next_plan_version_number(project.id)
     plan = PlanVersion(
         project_id=project.id,
         version_number=version_number,
@@ -380,10 +362,10 @@ def decide_shot_plan(
         creative_brief=brief.brief,
         confirmed_by=payload.actor_id,
     )
-    session.add(plan)
-    session.flush()
+    repository.add(plan)
+    repository.flush()
     for item in candidate.shots:
-        session.add(Shot(project_id=project.id, plan_version_id=plan.id, **item))
+        repository.add(Shot(project_id=project.id, plan_version_id=plan.id, **item))
     candidate.status = "accepted"
     candidate.decided_at = utc_now()
     _save_receipt(session, project.id, payload.command_id, "shot_plan.accept", "plan_version", plan.id)
@@ -414,7 +396,7 @@ def _shot_dict(shot: Shot) -> dict:
 
 
 def _plan_dict(session: Session, plan: PlanVersion) -> dict:
-    shots = list(session.scalars(select(Shot).where(Shot.plan_version_id == plan.id).order_by(Shot.sequence_number)))
+    shots = _planning(session).shots(plan.id)
     return {
         "id": plan.id,
         "version_number": plan.version_number,
@@ -432,18 +414,13 @@ def _plan_dict(session: Session, plan: PlanVersion) -> dict:
 
 
 def planning_center_view(session: Session, project: Project) -> dict:
+    repository = _planning(session)
     requirement = active_requirement(session, project.id)
     if not requirement:
         raise CreationConflictError("REQUIREMENT_NOT_FOUND", "项目没有活动需求版本。")
-    briefs = list(session.scalars(select(CreativeBriefCandidate).where(
-        CreativeBriefCandidate.project_id == project.id,
-    ).order_by(CreativeBriefCandidate.created_at.desc())))
-    shot_candidates = list(session.scalars(select(ShotPlanCandidate).where(
-        ShotPlanCandidate.project_id == project.id,
-    ).order_by(ShotPlanCandidate.created_at.desc())))
-    plans = list(session.scalars(select(PlanVersion).where(
-        PlanVersion.project_id == project.id,
-    ).order_by(PlanVersion.version_number.desc())))
+    briefs = repository.brief_history(project.id)
+    shot_candidates = repository.shot_plan_history(project.id)
+    plans = repository.plan_history(project.id)
     for item in briefs:
         if item.requirement_version_id != requirement.id and item.status == "awaiting_review":
             item.status = "stale"
@@ -467,12 +444,7 @@ def planning_center_view(session: Session, project: Project) -> dict:
         next_action = PlanningNextAction(code="REVIEW_CREATIVE_BRIEF", label="审核创意方案", target_ids=[current_brief.id])
     else:
         next_action = PlanningNextAction(code="GENERATE_CREATIVE_BRIEF", label="生成创意方案候选")
-    entity_rows = session.execute(
-        select(EntityVersion, Entity)
-        .join(Entity, Entity.id == EntityVersion.entity_id)
-        .where(EntityVersion.project_id == project.id, EntityVersion.is_active.is_(True))
-        .order_by(Entity.entity_type, Entity.id)
-    ).all()
+    entity_rows = repository.active_entity_versions(project.id)
     return {
         "project_id": project.id,
         "active_requirement": requirement,

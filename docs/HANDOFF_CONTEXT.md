@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Planning Repository Sprint 17
+
+- Added a typed `PlanningRepository` covering Creative Brief candidates, Shot Plan candidates, immutable PlanVersion records, Shots, confirmed entity bindings, and planning history projections.
+- Migrated the full planning service away from direct SQLAlchemy query and persistence calls while preserving candidate uniqueness, requirement ownership, validation, explicit acceptance/rejection, superseding active plans, project-scoped version numbering, and Shot ordering.
+- Planning view stale-marking remains an application-service decision and still commits explicitly; it was not moved into the Repository or changed.
+- Added a planning repository contract test covering status filters, project isolation, history ordering, active plan selection, next-version calculation, Shot order, confirmed bindings, and active entity references.
+- Updated repository, product, data-model, implementation-status, and handoff documentation. Structured Shot editing remains incomplete and no candidate revision semantics were introduced.
+- No schema migration, Outbox, Unit of Work, project-state change, provider call, retry, fallback, route substitution, confirmation change, or cost event was introduced.
+- Verification target: 36 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Creation Repository Sprint 16
 
 - Added a typed `CreationRepository` covering messages, requirement versions/candidates, Agent manifests/runs, clarifications, attachments/bindings, and entity/version access used by the creation center.

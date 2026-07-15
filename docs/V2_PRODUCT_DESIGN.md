@@ -678,6 +678,7 @@ GET  /api/v1/projects/{project_id}/events
 
 Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。
 当前创作中心的对话、需求候选、澄清、附件绑定和创作阶段实体访问已统一通过 `CreationRepository`；该迁移不改变候选或确认语义。
+当前规划中心的 Brief、分镜候选、不可变方案版本、Shot 和实体引用已统一通过 `PlanningRepository`；结构化分镜编辑仍未实现，不能因数据层迁移而标记完成。
 
 ## 23. 首期验收标准
 
