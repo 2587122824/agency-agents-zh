@@ -234,3 +234,154 @@ export interface PlanningCenter {
     incurs_production_cost: boolean
   }
 }
+
+export interface NodeBindingDraft {
+  node_id: string
+  field_path: string
+  value_source: string
+  value_type: 'string' | 'integer' | 'number' | 'boolean' | 'image' | 'audio' | 'json'
+  required: boolean
+}
+
+export interface ProviderConfigDraft {
+  provider_key: string
+  display_name: string
+  adapter_kind: string
+  region?: string | null
+  base_url: string
+  credential_ref?: string | null
+  capabilities: string[]
+  request_timeout_seconds: number
+  poll_interval_seconds: number
+  max_concurrency: number
+}
+
+export interface ModelConfigDraft {
+  config_key: string
+  display_name: string
+  agent_role: 'creative' | 'director' | 'qc' | 'editor'
+  provider_key: string
+  provider_model_id: string
+  input_contract_version: string
+  output_schema_version: string
+  prompt_contract_version: string
+  context_window?: number | null
+  max_output_tokens?: number | null
+  sampling: Record<string, unknown>
+  capability_tags: string[]
+}
+
+export interface WorkflowSlotDraft {
+  slot_key: string
+  display_name: string
+  operation_kind: string
+  provider_key: string
+  provider_workflow_id: string
+  provider_workflow_version?: string | null
+  model_config_key?: string | null
+  input_schema_version: string
+  output_schema_version: string
+  node_info_list: NodeBindingDraft[]
+  supported_video_spec_keys: string[]
+  capability_tags: string[]
+}
+
+export interface VideoSpecDraft {
+  spec_key: string
+  display_name: string
+  width: number
+  height: number
+  aspect_ratio: '9:16' | '16:9' | '1:1'
+  fps: number
+  duration_min_seconds: number
+  duration_max_seconds: number
+  frame_count_rule: Record<string, unknown>
+  container: string
+  video_codec: string
+  pixel_format: string
+  bitrate_policy: Record<string, unknown>
+  safe_crop: Record<string, unknown>
+}
+
+export interface AudioConfigDraft {
+  config_key: string
+  display_name: string
+  supported_modes: Array<'off' | 'voiceover'>
+  tts_workflow_slot_key?: string | null
+  default_voice_entity_version_id?: string | null
+  sample_rate: number
+  channels: 1 | 2
+  format: string
+  speaking_rate_min: number
+  speaking_rate_max: number
+  loudness_target?: number | null
+  temporary_upload_policy_version_id?: string | null
+}
+
+export interface StoragePolicyDraft {
+  policy_key: string
+  display_name: string
+  backend_kind: 'local' | 'oss'
+  region_ref?: string | null
+  bucket_ref?: string | null
+  credential_ref?: string | null
+  allowed_mime_types: string[]
+  max_file_size_bytes: number
+  public_url_policy: 'none' | 'signed' | 'public' | 'temporary_public'
+  lifecycle_days?: number | null
+  local_root_ref?: string | null
+}
+
+export interface SystemConfigurationDraft {
+  config_key: string
+  display_name: string
+  description?: string | null
+  providers: ProviderConfigDraft[]
+  models: ModelConfigDraft[]
+  workflow_slots: WorkflowSlotDraft[]
+  video_specs: VideoSpecDraft[]
+  audio: AudioConfigDraft
+  storage: StoragePolicyDraft
+}
+
+export interface ConfigurationComponent {
+  id: string
+  component_type: string
+  key: string
+  version_number: number
+  display_name: string
+  status: string
+  details: Record<string, unknown>
+}
+
+export interface SystemConfigurationSummary {
+  id: string
+  config_key: string
+  version_number: number
+  display_name: string
+  description: string | null
+  status: string
+  row_version: number
+  config_hash: string | null
+  component_count: number
+  validation_error_count: number
+  published_at: string | null
+  updated_at: string
+}
+
+export interface SystemConfigurationVersion extends Omit<SystemConfigurationSummary, 'component_count' | 'validation_error_count'> {
+  supersedes_version_id: string | null
+  validation_report: Array<{ code?: string; path?: string; message?: string; slot_key?: string; missing?: string[] }>
+  created_by: string
+  created_at: string
+  components: ConfigurationComponent[]
+  references: Array<{ ref_type: string; ref_id: string; created_at: string }>
+}
+
+export interface SystemConfigurationDiff {
+  version_id: string
+  base_version_id: string
+  changed_components: Array<{ component_type: string; key: string; before: ConfigurationComponent | null; after: ConfigurationComponent | null }>
+  high_risk_changes: string[]
+  incurs_production_cost: boolean
+}

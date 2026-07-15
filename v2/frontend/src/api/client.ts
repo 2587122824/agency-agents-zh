@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, ShotPlanCandidate, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -67,4 +67,25 @@ export const api = {
   decideShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, accept: boolean) => request<PlanVersion | ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:${accept ? 'accept' : 'reject'}`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, reason: accept ? undefined : '用户拒绝当前分镜方案' }),
   }),
+  systemConfigurations: () => request<SystemConfigurationSummary[]>('/system-config/versions'),
+  systemConfiguration: (id: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}`),
+  createSystemConfiguration: (configuration: SystemConfigurationDraft) => request<SystemConfigurationVersion>('/system-config/versions', {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', configuration }),
+  }),
+  reviseSystemConfiguration: (id: string, rowVersion: number, configuration: SystemConfigurationDraft) => request<SystemConfigurationVersion>(`/system-config/versions/${id}:revise`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: rowVersion, configuration }),
+  }),
+  validateSystemConfiguration: (id: string, rowVersion: number) => request<SystemConfigurationVersion>(`/system-config/versions/${id}:validate`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: rowVersion }),
+  }),
+  publishSystemConfiguration: (id: string, rowVersion: number) => request<SystemConfigurationVersion>(`/system-config/versions/${id}:publish`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: rowVersion, confirm_high_risk_changes: true }),
+  }),
+  retireSystemConfiguration: (id: string, rowVersion: number) => request<SystemConfigurationVersion>(`/system-config/versions/${id}:retire`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: rowVersion, confirm_reference_impact: true }),
+  }),
+  cloneSystemConfiguration: (id: string, displayName: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}:clone-draft`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', display_name: displayName }),
+  }),
+  systemConfigurationDiff: (id: string, baseVersionId: string) => request<SystemConfigurationDiff>(`/system-config/versions/${id}/diff?base_version_id=${encodeURIComponent(baseVersionId)}`),
 }

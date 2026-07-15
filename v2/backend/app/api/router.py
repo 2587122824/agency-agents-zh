@@ -17,6 +17,34 @@ from ..contracts.project import (
     WorkItemRead,
 )
 from ..core.config import settings
+from ..configuration.contracts import (
+    CloneConfiguration,
+    ComponentSummary,
+    ConfigurationDiffRead,
+    ConfigurationVersionRead,
+    ConfigurationVersionSummary,
+    CreateConfiguration,
+    PublishConfiguration,
+    RetireConfiguration,
+    ReviseConfiguration,
+    ValidateConfiguration,
+)
+from ..configuration.service import (
+    ConfigurationConflictError,
+    ConfigurationNotFoundError,
+    clone_configuration,
+    component_versions,
+    configuration_diff,
+    configuration_read,
+    create_configuration,
+    list_configurations,
+    publish_configuration,
+    require_configuration,
+    retire_configuration,
+    revise_configuration,
+    validate_configuration,
+    workflow_slot_versions,
+)
 from ..creation.contracts import (
     AcceptCandidate,
     AttachmentCreate,
@@ -81,6 +109,10 @@ def creation_error(exc: CreationConflictError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
 
 
+def configuration_error(exc: ConfigurationConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
+
+
 def require_project(session: Session, project_id: str):
     project = get_project(session, project_id)
     if not project:
@@ -91,6 +123,124 @@ def require_project(session: Session, project_id: str):
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name, "version": settings.app_version}
+
+
+@router.get("/system-config/versions", response_model=list[ConfigurationVersionSummary])
+def system_config_versions(session: Session = Depends(get_session)):
+    return list_configurations(session)
+
+
+@router.post(
+    "/system-config/versions",
+    response_model=ConfigurationVersionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def system_config_create(payload: CreateConfiguration, session: Session = Depends(get_session)):
+    try:
+        return create_configuration(session, payload)
+    except ConfigurationConflictError as exc:
+        session.rollback()
+        raise configuration_error(exc) from exc
+
+
+@router.get("/system-config/versions/{config_id}", response_model=ConfigurationVersionRead)
+def system_config_get(config_id: str, session: Session = Depends(get_session)):
+    try:
+        return configuration_read(session, require_configuration(session, config_id))
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/system-config/versions/{config_id}:revise", response_model=ConfigurationVersionRead)
+def system_config_revise(config_id: str, payload: ReviseConfiguration, session: Session = Depends(get_session)):
+    try:
+        return revise_configuration(session, require_configuration(session, config_id), payload)
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConfigurationConflictError as exc:
+        session.rollback()
+        raise configuration_error(exc) from exc
+
+
+@router.post("/system-config/versions/{config_id}:validate", response_model=ConfigurationVersionRead)
+def system_config_validate(config_id: str, payload: ValidateConfiguration, session: Session = Depends(get_session)):
+    try:
+        return validate_configuration(session, require_configuration(session, config_id), payload)
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConfigurationConflictError as exc:
+        session.rollback()
+        raise configuration_error(exc) from exc
+
+
+@router.post("/system-config/versions/{config_id}:publish", response_model=ConfigurationVersionRead)
+def system_config_publish(config_id: str, payload: PublishConfiguration, session: Session = Depends(get_session)):
+    try:
+        return publish_configuration(session, require_configuration(session, config_id), payload)
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConfigurationConflictError as exc:
+        session.rollback()
+        raise configuration_error(exc) from exc
+
+
+@router.post("/system-config/versions/{config_id}:retire", response_model=ConfigurationVersionRead)
+def system_config_retire(config_id: str, payload: RetireConfiguration, session: Session = Depends(get_session)):
+    try:
+        return retire_configuration(session, require_configuration(session, config_id), payload)
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConfigurationConflictError as exc:
+        session.rollback()
+        raise configuration_error(exc) from exc
+
+
+@router.post(
+    "/system-config/versions/{config_id}:clone-draft",
+    response_model=ConfigurationVersionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def system_config_clone(config_id: str, payload: CloneConfiguration, session: Session = Depends(get_session)):
+    try:
+        return clone_configuration(session, require_configuration(session, config_id), payload)
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ConfigurationConflictError as exc:
+        session.rollback()
+        raise configuration_error(exc) from exc
+
+
+@router.get("/system-config/versions/{config_id}/diff", response_model=ConfigurationDiffRead)
+def system_config_diff(config_id: str, base_version_id: str, session: Session = Depends(get_session)):
+    try:
+        return configuration_diff(
+            session,
+            require_configuration(session, config_id),
+            require_configuration(session, base_version_id),
+        )
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/system-config/versions/{config_id}/references", response_model=list[dict])
+def system_config_references(config_id: str, session: Session = Depends(get_session)):
+    try:
+        return configuration_read(session, require_configuration(session, config_id))["references"]
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/system-config/components/{component_type}", response_model=list[ComponentSummary])
+def system_config_components(component_type: str, session: Session = Depends(get_session)):
+    try:
+        return component_versions(session, component_type)
+    except ConfigurationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/system-config/workflow-slots/{slot_key}/versions", response_model=list[ComponentSummary])
+def system_config_workflow_versions(slot_key: str, session: Session = Depends(get_session)):
+    return workflow_slot_versions(session, slot_key)
 
 
 @router.get("/projects", response_model=list[ProjectRead])

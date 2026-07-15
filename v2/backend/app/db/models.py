@@ -322,3 +322,216 @@ class Shot(Base):
     composition: Mapped[str] = mapped_column(String(500))
     action: Mapped[str] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ProductionConfigVersion(Base):
+    __tablename__ = "production_config_versions"
+    __table_args__ = (UniqueConstraint("config_key", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("production_config"))
+    config_key: Mapped[str] = mapped_column(String(120), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    supersedes_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("production_config_versions.id"), nullable=True
+    )
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
+    config_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    validation_report: Mapped[list] = mapped_column(JSON, default=list)
+    created_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+
+class ProviderConfigVersion(Base):
+    __tablename__ = "provider_config_versions"
+    __table_args__ = (UniqueConstraint("provider_key", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("provider_config"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    provider_key: Mapped[str] = mapped_column(String(120), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(160))
+    adapter_kind: Mapped[str] = mapped_column(String(80))
+    region: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    base_url: Mapped[str] = mapped_column(String(500))
+    credential_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    capabilities: Mapped[list] = mapped_column(JSON, default=list)
+    request_timeout_seconds: Mapped[int] = mapped_column(Integer)
+    poll_interval_seconds: Mapped[int] = mapped_column(Integer)
+    max_concurrency: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ModelConfigVersion(Base):
+    __tablename__ = "model_config_versions"
+    __table_args__ = (UniqueConstraint("config_key", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("model_config"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    config_key: Mapped[str] = mapped_column(String(120), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(160))
+    agent_role: Mapped[str] = mapped_column(String(24))
+    provider_config_version_id: Mapped[str] = mapped_column(ForeignKey("provider_config_versions.id"))
+    provider_model_id: Mapped[str] = mapped_column(String(200))
+    input_contract_version: Mapped[str] = mapped_column(String(80))
+    output_schema_version: Mapped[str] = mapped_column(String(80))
+    prompt_contract_version: Mapped[str] = mapped_column(String(80))
+    context_window: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sampling: Mapped[dict] = mapped_column(JSON, default=dict)
+    capability_tags: Mapped[list] = mapped_column(JSON, default=list)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VideoSpecVersion(Base):
+    __tablename__ = "video_spec_versions"
+    __table_args__ = (UniqueConstraint("spec_key", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("video_spec"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    spec_key: Mapped[str] = mapped_column(String(120), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(160))
+    width: Mapped[int] = mapped_column(Integer)
+    height: Mapped[int] = mapped_column(Integer)
+    aspect_ratio: Mapped[str] = mapped_column(String(16))
+    fps: Mapped[int] = mapped_column(Integer)
+    duration_min_seconds: Mapped[int] = mapped_column(Integer)
+    duration_max_seconds: Mapped[int] = mapped_column(Integer)
+    frame_count_rule: Mapped[dict] = mapped_column(JSON)
+    container: Mapped[str] = mapped_column(String(24))
+    video_codec: Mapped[str] = mapped_column(String(40))
+    pixel_format: Mapped[str] = mapped_column(String(40))
+    bitrate_policy: Mapped[dict] = mapped_column(JSON, default=dict)
+    safe_crop: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WorkflowSlotVersion(Base):
+    __tablename__ = "workflow_slot_versions"
+    __table_args__ = (UniqueConstraint("slot_key", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("workflow_slot"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    slot_key: Mapped[str] = mapped_column(String(120), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(160))
+    operation_kind: Mapped[str] = mapped_column(String(80), index=True)
+    provider_config_version_id: Mapped[str] = mapped_column(ForeignKey("provider_config_versions.id"))
+    provider_workflow_id: Mapped[str] = mapped_column(String(200))
+    provider_workflow_version: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    model_config_version_id: Mapped[str | None] = mapped_column(ForeignKey("model_config_versions.id"), nullable=True)
+    input_schema_version: Mapped[str] = mapped_column(String(80))
+    output_schema_version: Mapped[str] = mapped_column(String(80))
+    node_info_list: Mapped[list] = mapped_column(JSON)
+    supported_video_spec_ids: Mapped[list] = mapped_column(JSON, default=list)
+    capability_tags: Mapped[list] = mapped_column(JSON, default=list)
+    validation_status: Mapped[str] = mapped_column(String(32), default="not_validated")
+    validation_report: Mapped[list] = mapped_column(JSON, default=list)
+    tested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class AudioConfigVersion(Base):
+    __tablename__ = "audio_config_versions"
+    __table_args__ = (UniqueConstraint("config_key", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("audio_config"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    config_key: Mapped[str] = mapped_column(String(120), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(160))
+    supported_modes: Mapped[list] = mapped_column(JSON)
+    tts_workflow_slot_version_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_slot_versions.id"), nullable=True)
+    default_voice_entity_version_id: Mapped[str | None] = mapped_column(ForeignKey("entity_versions.id"), nullable=True)
+    sample_rate: Mapped[int] = mapped_column(Integer)
+    channels: Mapped[int] = mapped_column(Integer)
+    format: Mapped[str] = mapped_column(String(24))
+    speaking_rate_range: Mapped[dict] = mapped_column(JSON)
+    loudness_target: Mapped[float | None] = mapped_column(nullable=True)
+    temporary_upload_policy_version_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class StoragePolicyVersion(Base):
+    __tablename__ = "storage_policy_versions"
+    __table_args__ = (UniqueConstraint("policy_key", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("storage_policy"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    policy_key: Mapped[str] = mapped_column(String(120), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    display_name: Mapped[str] = mapped_column(String(160))
+    backend_kind: Mapped[str] = mapped_column(String(24))
+    region_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    bucket_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    credential_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    allowed_mime_types: Mapped[list] = mapped_column(JSON)
+    max_file_size_bytes: Mapped[int] = mapped_column(Integer)
+    public_url_policy: Mapped[str] = mapped_column(String(40))
+    lifecycle_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    local_root_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="draft", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProductionConfigComponent(Base):
+    __tablename__ = "production_config_components"
+    __table_args__ = (UniqueConstraint("production_config_version_id", "component_type", "component_version_id"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("config_component"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    component_type: Mapped[str] = mapped_column(String(40), index=True)
+    component_version_id: Mapped[str] = mapped_column(String(48), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ConfigurationReference(Base):
+    __tablename__ = "configuration_references"
+    __table_args__ = (UniqueConstraint("production_config_version_id", "ref_type", "ref_id"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("config_reference"))
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    ref_type: Mapped[str] = mapped_column(String(24))
+    ref_id: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ConfigurationCommandReceipt(Base):
+    __tablename__ = "configuration_command_receipts"
+    __table_args__ = (UniqueConstraint("command_id"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("config_command"))
+    command_id: Mapped[str] = mapped_column(String(80))
+    command_type: Mapped[str] = mapped_column(String(80))
+    result_type: Mapped[str] = mapped_column(String(80))
+    result_id: Mapped[str] = mapped_column(String(48))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ConfigurationEvent(Base):
+    __tablename__ = "configuration_events"
+
+    sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    event_type: Mapped[str] = mapped_column(String(80), index=True)
+    actor_id: Mapped[str] = mapped_column(String(48))
+    command_id: Mapped[str] = mapped_column(String(80))
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

@@ -392,3 +392,223 @@ def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> 
     final = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert final["next_action"]["code"] == "PLAN_CONFIRMED"
     assert final["active_plan"]["id"] == plan["id"]
+
+
+def valid_system_configuration() -> dict:
+    return {
+        "config_key": "studio_primary",
+        "display_name": "主生产配置",
+        "description": "显式测试配置，不连接供应商",
+        "providers": [{
+            "provider_key": "mock_visual",
+            "display_name": "Mock 视觉供应商",
+            "adapter_kind": "mock",
+            "base_url": "https://provider.invalid/api",
+            "capabilities": ["image_generation"],
+            "request_timeout_seconds": 60,
+            "poll_interval_seconds": 5,
+            "max_concurrency": 1,
+        }],
+        "models": [],
+        "workflow_slots": [{
+            "slot_key": "keyframe_image",
+            "display_name": "关键帧图片",
+            "operation_kind": "image_generation",
+            "provider_key": "mock_visual",
+            "provider_workflow_id": "mock-workflow-not-executable",
+            "input_schema_version": "keyframe-input.v1",
+            "output_schema_version": "image-output.v1",
+            "node_info_list": [{
+                "node_id": "prompt",
+                "field_path": "text",
+                "value_source": "shot.action",
+                "value_type": "string",
+                "required": True,
+            }],
+            "supported_video_spec_keys": ["vertical_480p"],
+        }],
+        "video_specs": [{
+            "spec_key": "vertical_480p",
+            "display_name": "竖屏工作规格",
+            "width": 480,
+            "height": 848,
+            "aspect_ratio": "9:16",
+            "fps": 24,
+            "duration_min_seconds": 1,
+            "duration_max_seconds": 30,
+            "frame_count_rule": {"type": "duration_times_fps"},
+            "container": "mp4",
+            "video_codec": "h264",
+            "pixel_format": "yuv420p",
+        }],
+        "audio": {
+            "config_key": "audio_off",
+            "display_name": "关闭音频",
+            "supported_modes": ["off"],
+            "sample_rate": 48000,
+            "channels": 2,
+            "format": "wav",
+            "speaking_rate_min": 0.8,
+            "speaking_rate_max": 1.2,
+        },
+        "storage": {
+            "policy_key": "local_runtime",
+            "display_name": "本地运行目录",
+            "backend_kind": "local",
+            "allowed_mime_types": ["image/png", "video/mp4", "audio/wav"],
+            "max_file_size_bytes": 524288000,
+            "public_url_policy": "none",
+            "local_root_ref": "v2.runtime.assets",
+        },
+    }
+
+
+def test_system_configuration_publish_is_versioned_and_explicit(client: TestClient) -> None:
+    create_command = {
+        "command_id": "config-create-command-001",
+        "actor_id": "test-admin",
+        "configuration": valid_system_configuration(),
+    }
+    created = client.post("/api/v1/system-config/versions", json=create_command)
+    replayed = client.post("/api/v1/system-config/versions", json=create_command)
+    assert created.status_code == 201
+    draft = created.json()
+    assert replayed.json()["id"] == draft["id"]
+    assert draft["status"] == "draft"
+    assert len(draft["components"]) == 5
+    assert all("secret" not in str(item).lower() for item in draft["components"])
+
+    validated = client.post(
+        f"/api/v1/system-config/versions/{draft['id']}:validate",
+        json={
+            "command_id": "config-validate-command-001",
+            "actor_id": "test-admin",
+            "expected_row_version": draft["row_version"],
+        },
+    )
+    assert validated.status_code == 200
+    ready = validated.json()
+    assert ready["status"] == "ready"
+    assert ready["config_hash"]
+    assert ready["validation_report"] == []
+
+    unconfirmed = client.post(
+        f"/api/v1/system-config/versions/{draft['id']}:publish",
+        json={
+            "command_id": "config-publish-command-001",
+            "actor_id": "test-admin",
+            "expected_row_version": ready["row_version"],
+            "confirm_high_risk_changes": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "HIGH_RISK_CONFIRMATION_REQUIRED"
+
+    published = client.post(
+        f"/api/v1/system-config/versions/{draft['id']}:publish",
+        json={
+            "command_id": "config-publish-command-002",
+            "actor_id": "test-admin",
+            "expected_row_version": ready["row_version"],
+            "confirm_high_risk_changes": True,
+        },
+    )
+    assert published.status_code == 200
+    authority = published.json()
+    assert authority["status"] == "published"
+    assert all(item["status"] == "published" for item in authority["components"])
+
+    immutable = client.post(
+        f"/api/v1/system-config/versions/{draft['id']}:revise",
+        json={
+            "command_id": "config-revise-command-001",
+            "expected_row_version": authority["row_version"],
+            "configuration": valid_system_configuration(),
+        },
+    )
+    assert immutable.status_code == 409
+    assert immutable.headers["x-error-code"] == "CONFIGURATION_IMMUTABLE"
+
+    cloned = client.post(
+        f"/api/v1/system-config/versions/{draft['id']}:clone-draft",
+        json={"command_id": "config-clone-command-001", "display_name": "主生产配置 v2 草稿"},
+    )
+    assert cloned.status_code == 201
+    clone = cloned.json()
+    assert clone["status"] == "draft"
+    assert clone["version_number"] == 2
+    assert clone["supersedes_version_id"] == draft["id"]
+    diff = client.get(
+        f"/api/v1/system-config/versions/{clone['id']}/diff?base_version_id={draft['id']}"
+    )
+    assert diff.status_code == 200
+    assert diff.json()["incurs_production_cost"] is False
+    assert diff.json()["changed_components"] == []
+    assert diff.json()["high_risk_changes"] == []
+
+    reused_command = client.post(
+        f"/api/v1/system-config/versions/{clone['id']}:validate",
+        json={
+            "command_id": "config-clone-command-001",
+            "expected_row_version": clone["row_version"],
+        },
+    )
+    assert reused_command.status_code == 409
+    assert reused_command.headers["x-error-code"] == "COMMAND_ID_REUSED"
+
+
+def test_system_configuration_validation_fails_without_route_substitution(client: TestClient) -> None:
+    configuration = valid_system_configuration()
+    configuration["providers"][0]["capabilities"] = ["video_generation"]
+    configuration["workflow_slots"][0]["node_info_list"].append(
+        dict(configuration["workflow_slots"][0]["node_info_list"][0])
+    )
+    response = client.post("/api/v1/system-config/versions", json={
+        "command_id": "config-create-invalid-001",
+        "configuration": configuration,
+    })
+    assert response.status_code == 201
+    created = response.json()
+    validated = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:validate",
+        json={
+            "command_id": "config-validate-invalid-001",
+            "expected_row_version": created["row_version"],
+        },
+    )
+    assert validated.status_code == 200
+    invalid = validated.json()
+    assert invalid["status"] == "validation_failed"
+    assert any(item["code"] == "PROVIDER_CAPABILITY_MISSING" for item in invalid["validation_report"])
+    assert any(item["code"] == "NODE_BINDING_DUPLICATE" for item in invalid["validation_report"])
+    assert any(item["key"] == "mock_visual" for item in invalid["components"])
+
+    publish = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:publish",
+        json={
+            "command_id": "config-publish-invalid-001",
+            "expected_row_version": invalid["row_version"],
+            "confirm_high_risk_changes": True,
+        },
+    )
+    assert publish.status_code == 409
+    assert publish.headers["x-error-code"] == "CONFIGURATION_NOT_READY"
+
+
+def test_system_configuration_contract_rejects_secret_fields(client: TestClient) -> None:
+    configuration = valid_system_configuration()
+    configuration["providers"][0]["api_key"] = "must-not-enter-database"
+    response = client.post("/api/v1/system-config/versions", json={
+        "command_id": "config-secret-command-001",
+        "configuration": configuration,
+    })
+    assert response.status_code == 422
+    assert client.get("/api/v1/system-config/versions").json() == []
+
+    configuration = valid_system_configuration()
+    configuration["providers"][0]["base_url"] = "https://user:password@provider.invalid/api"
+    embedded = client.post("/api/v1/system-config/versions", json={
+        "command_id": "config-secret-command-002",
+        "configuration": configuration,
+    })
+    assert embedded.status_code == 422

@@ -2,6 +2,20 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 System Configuration Sprint 4
+
+- Added the first persisted V2 system-configuration authority under `v2/`: production configuration versions and exact provider, model, workflow-slot, video-spec, audio, and storage-policy component versions.
+- Configuration lifecycle is explicit: `draft -> validating -> validation_failed | ready -> published -> retired`. Published and retired versions are immutable; changes require cloning a new draft.
+- Added strict create, revise, validate, publish, retire, clone, diff, reference, component-history, and workflow-slot-history APIs. Mutating commands require idempotent `command_id`; versioned commands also require `expected_row_version`.
+- Command replay now rejects a `command_id` reused for another command type. Configuration diffs compare semantic component keys and values instead of database row IDs, so an unchanged clone reports no false high-risk change.
+- Publishing requires explicit high-risk confirmation and a matching validated configuration hash. Retiring records reference impact. Neither action creates snapshots, work items, provider calls, or production cost.
+- Provider and storage secrets are never accepted as configuration fields. The registry stores only `credential_ref`; provider base URLs reject embedded credentials, query strings, and fragments.
+- Workflow validation checks exact provider capability, model and video-spec references, NodeInfoList completeness and duplicate bindings, audio/TTS compatibility, and storage requirements. Invalid values block publication and are never repaired or rerouted.
+- Added the API-backed `/settings` page with version history, typed multi-component editing, NodeInfoList rows, validation reports, semantic diffs, references, configuration hashes, explicit publish/retire dialogs, and clone-to-draft behavior.
+- Runtime configuration remains empty until the user creates and publishes a real configuration. No fake provider setup or hidden default was inserted.
+- Added Alembic revision `20260715_04`. Verification passed with 11 backend tests, Python compileall, TypeScript/Vite production build, fresh and runtime migrations at `20260715_04`, API/frontend HTTP checks, and desktop/mobile browser inspection. The settings editor has no page-level horizontal overflow at 1440x900 or 390x844 and emits no browser console warnings/errors.
+- Next slice: explicit published-config impact analysis, immutable `ProductionSnapshot`, and deterministic `DAGNode` / `DependencyEdge` compilation. Do not create WorkItems or paid submissions before the separate cost-confirmation boundary exists.
+
 ## 2026-07-15 V2 Creation Center Sprint 3
 
 - Added the first planning vertical slice under `v2/`: an accepted `RequirementVersion` can produce a `CreativeBriefCandidate`, explicit user acceptance makes it available to the Director stage, and an accepted `ShotPlanCandidate` creates an immutable `PlanVersion` with persisted `Shot` rows.
