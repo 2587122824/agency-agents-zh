@@ -31,10 +31,10 @@ export function DashboardPage() {
   }
 
   return <>
-    <PageHeader eyebrow="V2 FOUNDATION" title="创作系统骨架" description="界面、合同、状态和执行进程已经分开，当前不会调用生产供应商。" actions={<button className="primaryButton" onClick={() => setShowForm(value => !value)}><Plus size={15} />新建项目</button>} />
+    <PageHeader eyebrow="V2 CREATION" title="创作中心" description="从对话和附件形成可审计候选，确认后才创建正式需求版本。" actions={<button className="primaryButton" onClick={() => setShowForm(value => !value)}><Plus size={15} />新建项目</button>} />
     <div className={styles.content}>
       <section className={styles.hero}>
-        <div><span>FRAMEWORK STATUS</span><h2>从一个可解释的项目状态开始。</h2><p>这不是对旧管理台的继续拆补，而是一套新的模块化边界。每个生产动作都需要已确认合同和明确工作项。</p><div className={styles.health}><i className={health.data?.status === 'ok' ? styles.ok : styles.wait}></i><strong>{health.isPending ? '正在连接 V2 API' : health.isError ? 'V2 API 未连接' : 'V2 API 与 SQLite 正常'}</strong><small>{health.data ? `v${health.data.version}` : ''}</small></div></div>
+        <div><span>CREATION SPRINT 1</span><h2>让需求先成为可信版本。</h2><p>消息、附件、Agent 输入和候选都有独立记录。AI 只提出候选，用户确认后才进入权威需求历史。</p><div className={styles.health}><i className={health.data?.status === 'ok' ? styles.ok : styles.wait}></i><strong>{health.isPending ? '正在连接 V2 API' : health.isError ? 'V2 API 未连接' : 'V2 API 与 SQLite 正常'}</strong><small>{health.data ? `v${health.data.version}` : ''}</small></div></div>
         <div className={styles.heroImage} aria-label="视频创作工作画面"></div>
       </section>
 

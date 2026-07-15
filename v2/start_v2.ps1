@@ -28,6 +28,15 @@ Get-CimInstance Win32_Process |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $Python = (Get-Command python).Source
+Push-Location (Join-Path $Root "backend")
+try {
+  & $Python -m alembic upgrade head
+  if ($LASTEXITCODE -ne 0) {
+    throw "V2 database migration failed."
+  }
+} finally {
+  Pop-Location
+}
 Start-Process -FilePath $Python `
   -ArgumentList "-m", "uvicorn", "v2.backend.app.main:app", "--host", "127.0.0.1", "--port", "$Port" `
   -WorkingDirectory $RepoRoot `

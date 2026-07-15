@@ -2,6 +2,23 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Creation Center Sprint 1
+
+- Implemented the first real V2 creation-center vertical slice entirely under `v2/`; V1 and its provider adapters remain untouched.
+- Added immutable `RequirementVersion` records, user messages, audited `AgentInputManifest` and `AgentRun` records, requirement candidates, clarification storage, attachments, explicit attachment bindings, and command receipts for idempotency.
+- Project creation now establishes `requirement_v1`. The deterministic Mock Creative Agent reads only the active requirement, persisted messages, and confirmed attachment bindings. A successful run creates an `awaiting_review` candidate only; explicit acceptance creates the next requirement version and preserves history.
+- New messages make unresolved candidates stale. Candidate acceptance validates the exact active base version, and repeated commands return their first persisted result. No automatic retry, model call, provider call, prompt rewrite, route substitution, hidden default, or inferred entity binding was added.
+- Attachment upload is now real rather than metadata-only. The backend reads the file, validates supported media signatures, computes SHA-256, writes under `v2/runtime/uploads`, and only then records `verified`. Upload success does not bind identity or voice; those remain separate user commands with explicit entity IDs.
+- Replaced the V2 project contract screen with an API-backed creation center showing the authority/candidate version bar, conversation, per-field provenance, explicit candidate confirmation, attachment binding state, AgentRun history, cost boundary, and one backend-evaluated next action.
+- Added an Alembic baseline/creation migration with compatibility for the earlier `create_all` preview schema. `start_v2.ps1` now applies migrations before starting API and Worker.
+- Verification passed: 5 backend API tests, Python compileall, TypeScript/Vite production build, fresh Alembic migration test (14 tables), runtime requirement v1 -> candidate -> v2 smoke flow, real attachment upload smoke flow, API health, and scoped `git diff --check`. Browser-control setup returned blank tabs, so screenshot-level desktop/mobile interaction verification remains for the next frontend pass.
+
+## 2026-07-15 Three-Frame QwenVL Frame-Count Repair
+
+- A user-triggered 10-second / 24fps debug run failed before generation because imported nodeInfoList incorrectly sent the computed `240` video frames to `426.frame_count`; RunningHub identified node 426 as `Allab_QwenVL_Advanced` and rejected values above 64.
+- Removed `426.frame_count` from the three-frame nodeInfoList. It is a QwenVL media-sampling control, not the generated-video length. The computed `{{frame_count}}` remains mapped only to `424.length` and `373.frames_number`.
+- Runtime repair and the debug frontend normalizer now remove this invalid row from imported or saved three-frame mappings. No automatic retry or additional provider call is performed.
+
 ## 2026-07-15 First/Middle/Last I2V Duration And FPS Mapping
 
 - Updated only the `06_i2v_first_middle_last_frame / i2v_first_middle_last_frame` RunningHub node mapping so the debug form controls the published workflow instead of retaining imported fixed values.

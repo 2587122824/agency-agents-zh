@@ -7,7 +7,7 @@ from pathlib import Path
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 V2_ROOT = BACKEND_ROOT.parent
-RUNTIME_ROOT = V2_ROOT / "runtime"
+RUNTIME_ROOT = Path(os.getenv("V2_RUNTIME_ROOT", str(V2_ROOT / "runtime"))).resolve()
 FRONTEND_DIST = V2_ROOT / "frontend" / "dist"
 
 

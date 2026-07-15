@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from ..contracts.project import ProjectCreate
 from ..db.models import Project, ProjectEvent, WorkItem
+from ..creation.service import ensure_initial_requirement
 
 
 class ProjectConflictError(ValueError):
@@ -28,6 +29,7 @@ def create_project(session: Session, payload: ProjectCreate) -> Project:
     project = Project(**payload.model_dump())
     session.add(project)
     session.flush()
+    ensure_initial_requirement(session, project)
     session.add(ProjectEvent(project_id=project.id, event_type="project.created", message="项目草稿已创建"))
     session.commit()
     return get_project(session, project.id)  # type: ignore[return-value]

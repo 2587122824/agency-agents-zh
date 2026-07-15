@@ -1,11 +1,12 @@
-import type { Decision, Health, Project, ProjectCreate, ProjectDetail, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, Decision, Health, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const isFormData = init?.body instanceof FormData
   const response = await fetch(`${API_ROOT}${path}`, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { ...(!isFormData ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
   })
   if (!response.ok) {
     const payload = (await response.json().catch(() => null)) as { detail?: string } | null
@@ -27,4 +28,27 @@ export const api = {
   confirmProject: (projectId: string) => request<ProjectDetail>(`/projects/${projectId}/confirm`, { method: 'POST' }),
   queueValidation: (projectId: string) =>
     request<WorkItem>(`/projects/${projectId}/queue`, { method: 'POST', body: JSON.stringify({ kind: 'contract_validation' }) }),
+  creationCenter: (projectId: string) => request<CreationCenter>(`/projects/${projectId}/creation-center`),
+  addMessage: (projectId: string, content: string) => request<CreationMessage>(`/projects/${projectId}/messages`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', content }),
+  }),
+  generateRequirementCandidate: (projectId: string, baseVersionId: string) => request<RequirementCandidate>(`/projects/${projectId}/requirement-candidates:generate`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId }),
+  }),
+  acceptRequirementCandidate: (projectId: string, candidateId: string, baseVersionId: string) => request<RequirementVersion>(`/projects/${projectId}/requirement-candidates/${candidateId}:accept`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId }),
+  }),
+  rejectRequirementCandidate: (projectId: string, candidateId: string, reason: string) => request<RequirementCandidate>(`/projects/${projectId}/requirement-candidates/${candidateId}:reject`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', reason }),
+  }),
+  registerAttachment: (projectId: string, file: File) => {
+    const form = new FormData()
+    form.set('command_id', crypto.randomUUID())
+    form.set('actor_id', 'local-user')
+    form.set('file', file)
+    return request<CreationAttachment>(`/projects/${projectId}/attachments`, { method: 'POST', body: form })
+  },
+  bindAttachment: (projectId: string, attachmentId: string, bindingType: 'identity_reference' | 'voice_sample' | 'inspiration_only', entityId?: string) => request<AttachmentBinding>(`/projects/${projectId}/attachments/${attachmentId}/bindings`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', binding_type: bindingType, entity_id: entityId, entity_version_id: entityId ? `${entityId}_v1` : undefined }),
+  }),
 }
