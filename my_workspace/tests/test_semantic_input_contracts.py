@@ -5682,6 +5682,20 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertIn(marker, web_app.INDEX_HTML)
         self.assertIn("defaultDenoise: workflowModeDef.default_denoise || workflowModeDef.defaultDenoise || ''", web_app.INDEX_HTML)
 
+    def test_debug_first_frame_normalizer_respects_explicit_publication(self) -> None:
+        self.assertIn(
+            "function normalizeComfyNodeInfoForDebugMode(raw, workflowId = activeComfyDebugWorkflowId, mode = activeComfyDebugWorkflowMode, endpoint = '')",
+            web_app.INDEX_HTML,
+        )
+        self.assertIn(
+            "const usesOptimizedFirstFramePublication = !endpointKey || endpointKey.endsWith('/2071735603636563970');",
+            web_app.INDEX_HTML,
+        )
+        self.assertNotIn(
+            "endpointKey.endsWith('/2069607607387639810')",
+            web_app.INDEX_HTML,
+        )
+
     def test_adapter_defaults_blank_img2img_denoise_node_info(self) -> None:
         adapter = CloudComfyUIAdapter("https://example.invalid", "key", "/run/workflow/test")
         config = {

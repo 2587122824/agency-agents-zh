@@ -7397,11 +7397,12 @@ INDEX_HTML = r"""<!doctype html>
       }
     }
 
-    function normalizeComfyNodeInfoForDebugMode(raw, workflowId = activeComfyDebugWorkflowId, mode = activeComfyDebugWorkflowMode) {
+    function normalizeComfyNodeInfoForDebugMode(raw, workflowId = activeComfyDebugWorkflowId, mode = activeComfyDebugWorkflowMode, endpoint = '') {
       const text = sanitizeComfyVisualNodeInfoList(raw);
       if (text === '[]') return text;
       const workflowKey = String(workflowId || '').trim();
       const modeKey = String(mode || '').trim();
+      const endpointKey = String(endpoint || '').trim();
       if (workflowKey === '06_i2v_first_middle_last_frame' || modeKey === 'i2v_first_middle_last_frame') {
         try {
           const parsed = JSON.parse(text);
@@ -7431,7 +7432,8 @@ INDEX_HTML = r"""<!doctype html>
           return text;
         }
       }
-      if (['02_ltx_video_2_3', '06_i2v_first_frame'].includes(workflowKey) || modeKey === 'i2v_first_frame') {
+      const usesOptimizedFirstFramePublication = !endpointKey || endpointKey.endsWith('/2071735603636563970');
+      if (usesOptimizedFirstFramePublication && (['02_ltx_video_2_3', '06_i2v_first_frame'].includes(workflowKey) || modeKey === 'i2v_first_frame')) {
         try {
           const parsed = JSON.parse(text);
           if (Array.isArray(parsed)) {
@@ -8175,9 +8177,14 @@ INDEX_HTML = r"""<!doctype html>
         const text = await file.text();
         const data = JSON.parse(text);
         const nodeInfo = nodeInfoFromImportedJson(data);
-        const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(JSON.stringify(nodeInfo, null, 2), activeComfyDebugWorkflowId, activeComfyDebugWorkflowMode);
-        els.comfyDebugNodeInfoList.value = normalizedNodeInfo;
         const endpoint = findEndpointInImportedJson(data);
+        const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(
+          JSON.stringify(nodeInfo, null, 2),
+          activeComfyDebugWorkflowId,
+          activeComfyDebugWorkflowMode,
+          endpoint || els.comfyDebugEndpoint?.value || ''
+        );
+        els.comfyDebugNodeInfoList.value = normalizedNodeInfo;
         if (endpoint && els.comfyDebugEndpoint) {
           els.comfyDebugEndpoint.value = endpoint;
         }
@@ -14080,7 +14087,12 @@ INDEX_HTML = r"""<!doctype html>
       const savedConfig = getComfyWorkflowLibraryItemById(item.id);
       const modeConfig = getComfyWorkflowModeConfig(item, activeComfyDebugWorkflowMode, true) || savedConfig || {};
       const endpoint = fallbackComfyDebugEndpoint(item, modeConfig);
-      const nodeInfo = normalizeComfyNodeInfoForDebugMode(modeConfig.nodeInfoList || item.default_node_info || '[]', item.id, activeComfyDebugWorkflowMode);
+      const nodeInfo = normalizeComfyNodeInfoForDebugMode(
+        modeConfig.nodeInfoList || item.default_node_info || '[]',
+        item.id,
+        activeComfyDebugWorkflowMode,
+        endpoint
+      );
       const width = modeConfig.defaultWidth || item.default_width || '';
       const height = modeConfig.defaultHeight || item.default_height || '';
       const duration = modeConfig.defaultDuration || item.default_duration || '';
@@ -14140,7 +14152,12 @@ INDEX_HTML = r"""<!doctype html>
       if (!item.modeConfigs || typeof item.modeConfigs !== 'object') item.modeConfigs = {};
       const modeConfig = item.modeConfigs[mode] || normalizeComfyModeConfig({}, item);
       modeConfig.endpoint = els.comfyDebugEndpoint.value.trim();
-      modeConfig.nodeInfoList = normalizeComfyNodeInfoForDebugMode(els.comfyDebugNodeInfoList.value.trim() || '[]', workflow.id, mode);
+      modeConfig.nodeInfoList = normalizeComfyNodeInfoForDebugMode(
+        els.comfyDebugNodeInfoList.value.trim() || '[]',
+        workflow.id,
+        mode,
+        els.comfyDebugEndpoint.value.trim()
+      );
       modeConfig.pollTimeout = els.comfyDebugPollTimeout.value || '3600';
       modeConfig.defaultWidth = els.comfyDebugWidth.value.trim();
       modeConfig.defaultHeight = els.comfyDebugHeight.value.trim();
@@ -14233,7 +14250,12 @@ INDEX_HTML = r"""<!doctype html>
       renderComfyDebugRunning(selected);
       setStatus(`ComfyUI 调试已开始：${selected.name || selected.id}`, false);
       try {
-        const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(els.comfyDebugNodeInfoList.value.trim(), selected.id, workflowModeDef?.value || '');
+        const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(
+          els.comfyDebugNodeInfoList.value.trim(),
+          selected.id,
+          workflowModeDef?.value || '',
+          els.comfyDebugEndpoint.value.trim()
+        );
         els.comfyDebugNodeInfoList.value = normalizedNodeInfo;
         const data = await api('/api/comfy-debug-run', {
           method: 'POST',
@@ -14715,7 +14737,12 @@ INDEX_HTML = r"""<!doctype html>
       const baseUrl = fallbackComfyDebugBaseUrl(endpoint);
       const apiKey = String(els.comfyDebugApiKey.value.trim() || els.comfyApiKey.value.trim()).trim();
       validateComfyDebugProviderConfig(endpoint, baseUrl, apiKey);
-      const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(els.comfyDebugNodeInfoList.value.trim(), selected.id, workflowModeDef?.value || '');
+      const normalizedNodeInfo = normalizeComfyNodeInfoForDebugMode(
+        els.comfyDebugNodeInfoList.value.trim(),
+        selected.id,
+        workflowModeDef?.value || '',
+        endpoint
+      );
       els.comfyDebugNodeInfoList.value = normalizedNodeInfo;
       validateComfyDebugSemanticContract(requiredInputs, endpoint, normalizedNodeInfo);
       return {

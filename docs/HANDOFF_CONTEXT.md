@@ -2,6 +2,13 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 First-Frame I2V Runtime Slot Restore
+
+- Restored only the frontend/runtime `06_i2v_first_frame / i2v_first_frame` slot to the previously validated RunningHub workflow `2069607607387639810`.
+- Restored its matching 9-row node mapping: prompt `2483.text`, negative prompt `2612.text`, first frame `2004.image`, longest edge `4981.resize_type.longer_size`, frame count `4979.value`, FPS `4978.value`, seed `4814.noise_seed`, conditioning switch `4977.value=false`, and output prefix `4823.filename_prefix`.
+- Fixed the ComfyUI debug frontend normalizer so an explicit `2069607607387639810` endpoint keeps that 9-row mapping instead of replacing it with the incompatible `2071735603636563970` mapping. The existing normalization remains scoped to the explicitly selected optimized publication or an unconfigured endpoint.
+- The runtime update was applied through `/api/runtime-comfy-config`. Every other workflow entry was hash-checked and remained unchanged. No task was started and no provider call was made.
+
 ## 2026-07-15 V2 Creation Prototype Contract States
 
 - Updated `/prototype-v2/` creation UI to represent the creation-center contracts instead of presenting Agent prose as already-authoritative project state.
