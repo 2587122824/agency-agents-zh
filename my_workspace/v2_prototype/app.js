@@ -102,6 +102,55 @@ document.querySelectorAll('.quick-prompts button').forEach(button => button.addE
   document.querySelector('#chatInput').focus();
 }));
 
+document.querySelector('#toggleVersionHistory').addEventListener('click', event => {
+  const history = document.querySelector('#versionHistory');
+  history.hidden = !history.hidden;
+  event.currentTarget.childNodes[0].textContent = history.hidden ? '查看历史' : '收起历史';
+  event.currentTarget.querySelector('svg')?.setAttribute('data-lucide', history.hidden ? 'chevron-down' : 'chevron-up');
+  lucide.createIcons();
+});
+
+document.querySelector('#retryAgentPrototype').addEventListener('click', () => {
+  showToast('已记录用户重新生成命令，原型没有调用模型');
+});
+
+document.querySelector('#markInspirationOnly').addEventListener('click', () => {
+  const card = document.querySelector('#identityClarification');
+  card.classList.add('needs-input');
+  card.querySelector('.clarification-heading b').textContent = '人物身份仍未确定';
+  card.querySelector('.clarification-heading small').textContent = '这张图片仅作为灵感，人物镜头仍缺少身份参考';
+  document.querySelector('#attachmentStatus').textContent = '2048 × 3072 · 已验证 · inspiration_only';
+  const state = document.querySelector('#attachmentState');
+  state.className = 'attachment-state pending';
+  state.innerHTML = '<i data-lucide="image"></i>灵感素材';
+  document.querySelector('#characterSummary').textContent = '1 位 · 缺少身份参考';
+  document.querySelector('#characterSource').textContent = '灵感素材 · 未绑定';
+  document.querySelector('#decisionPanelNote').textContent = '人物身份仍是阻断项，需要绑定其他参考或重新确认。';
+  lucide.createIcons();
+  showToast('已标记为灵感素材，人物身份阻断仍然保留');
+});
+
+document.querySelector('#confirmIdentityBinding').addEventListener('click', () => {
+  const card = document.querySelector('#identityClarification');
+  card.className = 'clarification-card resolved';
+  card.innerHTML = '<div class="clarification-heading"><span class="decision-icon green"><i data-lucide="user-check"></i></span><div><span>澄清已解决</span><b>人物参考已绑定到 char_main</b><small>binding_type: identity_reference · 由用户明确确认</small></div><span class="risk-badge resolved">已确认</span></div><p class="clarification-resolution"><i data-lucide="badge-check"></i>AttachmentBinding 已成为当前候选的有效来源</p>';
+  document.querySelector('#attachmentStatus').textContent = '2048 × 3072 · 已验证 · 已绑定 char_main';
+  const state = document.querySelector('#attachmentState');
+  state.className = 'attachment-state bound';
+  state.innerHTML = '<i data-lucide="badge-check"></i>已绑定';
+  document.querySelector('#characterSummary').textContent = '1 位 · 身份已绑定';
+  const characterSource = document.querySelector('#characterSource');
+  characterSource.className = 'source-tag user';
+  characterSource.textContent = '附件 + 用户确认';
+  document.querySelector('#candidateStatusCopy').textContent = '身份阻断已解决，还剩 3 个方案决策；全部确认后才能把 candidate_02 提升为新的需求版本。';
+  document.querySelector('#decisionCountBadge').textContent = '3';
+  document.querySelector('#decisionProgress').style.width = '57%';
+  document.querySelector('#decisionPanelNote').textContent = '阻断澄清已解决，还剩 3 个方案决策。';
+  document.querySelector('#planDecisionCount').textContent = '3 项待决定';
+  lucide.createIcons();
+  showToast('身份绑定已确认，只更新候选来源，不会开始生产');
+});
+
 document.querySelector('#sendMessage').addEventListener('click', () => {
   const input = document.querySelector('#chatInput');
   if (!input.value.trim()) return showToast('先写下你想调整的内容');

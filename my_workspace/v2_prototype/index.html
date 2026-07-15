@@ -69,7 +69,7 @@
       <div class="stepper" role="tablist">
         <button class="step" data-step="brief"><span>1</span><div><b>创作沟通</b><small>需求已整理</small></div></button>
         <i data-lucide="chevron-right"></i>
-        <button class="step" data-step="plan"><span>2</span><div><b>方案确认</b><small>3 项待决定</small></div></button>
+        <button class="step" data-step="plan"><span>2</span><div><b>方案确认</b><small id="planDecisionCount">4 项待决定</small></div></button>
         <i data-lucide="chevron-right"></i>
         <button class="step" data-step="production"><span>3</span><div><b>素材生产</b><small>尚未开始</small></div></button>
         <i data-lucide="chevron-right"></i>
@@ -144,19 +144,34 @@
             <button class="icon-button" title="展开创作记录"><i data-lucide="panel-top-open"></i></button>
           </div>
 
+          <div class="requirement-context">
+            <div class="requirement-statebar">
+              <div class="requirement-version"><span><i data-lucide="file-check-2"></i>requirement_v1</span><b>当前已确认</b></div>
+              <i data-lucide="arrow-right"></i>
+              <div class="requirement-version candidate"><span><i data-lucide="sparkles"></i>candidate_02</span><b>等待你确认</b></div>
+              <div class="agent-run-state"><span class="run-dot"></span><div><b>Creative Agent</b><small>Schema 已验证 · 不是权威版本</small></div></div>
+              <button class="text-button" id="toggleVersionHistory">查看历史<i data-lucide="chevron-down"></i></button>
+            </div>
+            <div class="version-history" id="versionHistory" hidden>
+              <div><i data-lucide="history"></i><span><b>candidate_01</b><small>基于旧消息 · stale · 不能确认</small></span><em>已过期</em></div>
+              <div><i data-lucide="circle-x"></i><span><b>AgentRun creative_008</b><small>模型请求失败 · 没有自动重试</small></span><button class="compact-button" id="retryAgentPrototype">重新生成</button></div>
+            </div>
+          </div>
+
           <div class="messages">
             <article class="message user-message">
               <div class="avatar user-avatar">M</div>
-              <div class="bubble"><p>做一个 45 秒竖屏的田径训练日记。主人公用我上传的女孩，真实、有力量感，但不要像广告。希望有清晨训练、力量训练和最后冲刺。</p><div class="attachment"><span class="attachment-image"></span><div><b>人物参考.jpg</b><small>2048 × 3072 · 已加入人物资产</small></div><i data-lucide="check-circle-2"></i></div></div>
+              <div class="bubble"><p>做一个 45 秒竖屏的田径训练日记。主人公用我上传的女孩，真实、有力量感，但不要像广告。希望有清晨训练、力量训练和最后冲刺。</p><div class="attachment"><span class="attachment-image"></span><div><b>人物参考.jpg</b><small id="attachmentStatus">2048 × 3072 · 已上传并验证 · 等待身份绑定</small></div><span class="attachment-state pending" id="attachmentState"><i data-lucide="link-2"></i>待绑定</span></div></div>
             </article>
             <article class="message assistant-message">
               <div class="avatar ai-avatar"><i data-lucide="sparkles"></i></div>
               <div class="bubble">
-                <p>我整理成了一条从清晨准备到冲刺收尾的训练日记。人物身份全程锁定，训练服作为唯一服装状态；操场和健身房会先建立场景基准，再生产镜头。</p>
+                <div class="candidate-heading"><span>AI 候选</span><b>candidate_02</b><small>尚未生效</small></div>
+                <p>我整理成了一条从清晨准备到冲刺收尾的训练日记。上传图片已识别为人物参考候选，需要你确认身份绑定；训练服、操场和健身房仍是待确认的方案内容。</p>
                 <div class="summary-grid">
-                  <div><span>成片规格</span><b>45 秒 · 9:16</b></div><div><span>叙事结构</span><b>准备 / 训练 / 冲刺</b></div><div><span>人物</span><b>1 位 · 身份已绑定</b></div><div><span>音频</span><b>关闭 · 纯画面</b></div>
+                  <div><span>成片规格</span><b>45 秒 · 9:16</b><em class="source-tag user">用户输入</em></div><div><span>叙事结构</span><b>准备 / 训练 / 冲刺</b><em class="source-tag agent">AI 建议</em></div><div><span>人物</span><b id="characterSummary">1 位 · 等待身份绑定</b><em class="source-tag pending" id="characterSource">附件 · 待用户确认</em></div><div><span>音频</span><b>关闭 · 纯画面</b><em class="source-tag system">系统配置 v3</em></div>
                 </div>
-                <p>有三项会明显影响素材生产，我没有替你决定。可以在右侧逐项确认，也可以继续告诉我你希望怎么拍。</p>
+                <p id="candidateStatusCopy">当前有 1 个阻断澄清和 3 个方案决策。我没有替你确认，处理完成后才能把候选提升为新的需求版本。</p>
               </div>
             </article>
           </div>
@@ -173,9 +188,15 @@
         </div>
 
         <aside class="decision-pane">
-          <div class="panel-heading"><div><p class="eyebrow">决策清单</p><h2>开始前确认</h2></div><span class="count-badge">3</span></div>
-          <div class="progress-line"><span style="width:50%"></span></div>
-          <p class="panel-note">已锁定 3 项，还剩 3 项需要你的选择。</p>
+          <div class="panel-heading"><div><p class="eyebrow">澄清与决策</p><h2>开始前确认</h2></div><span class="count-badge" id="decisionCountBadge">4</span></div>
+          <div class="progress-line"><span id="decisionProgress" style="width:43%"></span></div>
+          <p class="panel-note" id="decisionPanelNote">1 个阻断澄清，3 个方案决策等待处理。</p>
+
+          <div class="clarification-card" id="identityClarification">
+            <div class="clarification-heading"><span class="decision-icon red"><i data-lucide="user-check"></i></span><div><span>阻断澄清</span><b>将这张图片绑定为主角身份？</b><small>上传成功不代表身份参考已经生效</small></div><span class="risk-badge high">高风险</span></div>
+            <div class="binding-preview"><span class="attachment-image"></span><div><b>人物参考.jpg</b><small>分类候选：identity_reference</small><em>目标实体：char_main</em></div></div>
+            <div class="clarification-actions"><button class="outline-button" id="markInspirationOnly">仅作为灵感</button><button class="primary-button" id="confirmIdentityBinding"><i data-lucide="link-2"></i>确认身份绑定</button></div>
+          </div>
 
           <div class="decision-card" data-decision="style">
             <div class="decision-title"><span class="decision-icon amber"><i data-lucide="aperture"></i></span><div><b>画面质感</b><small>影响全部图片和视频提示</small></div><span class="risk-badge medium">中风险</span></div>

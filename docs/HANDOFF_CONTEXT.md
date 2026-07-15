@@ -2,6 +2,15 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Creation Prototype Contract States
+
+- Updated `/prototype-v2/` creation UI to represent the creation-center contracts instead of presenting Agent prose as already-authoritative project state.
+- Added an explicit `requirement_v1 -> candidate_02` version bar, current Creative Agent validation state, and expandable history showing a stale candidate plus a failed AgentRun with no automatic retry.
+- AI output is visibly labeled as a candidate that has not taken effect. Each requirement summary field now shows its source as user input, Agent proposal, user-confirmed attachment, or versioned system configuration.
+- Upload verification and identity binding are separate. The prototype starts with a high-risk blocking clarification; choosing `inspiration_only` keeps the identity blocker, while explicit confirmation creates the visible `identity_reference -> char_main` binding state and reduces the unresolved count.
+- Replaced the incorrect external identity-reference image with the existing athlete image used elsewhere in the prototype.
+- Verified desktop layout and the complete history/inspiration/binding interaction flow. Verified mobile creation content remains within the viewport and the version bar wraps without horizontal overflow. No browser console errors were observed.
+
 ## 2026-07-15 V2 Creation Center Design Baseline
 
 - Added `docs/V2_CREATION_CENTER_DESIGN.md` as the focused implementation specification for converting conversations and attachments into confirmed RequirementVersion and PlanVersion records.
