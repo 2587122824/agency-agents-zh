@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from ..db.models import (
     Asset,
-    CommandReceipt,
     DeliveryAttempt,
     Project,
     ProjectEvent,
@@ -20,6 +19,7 @@ from ..db.models import (
     TimelineItem,
     utc_now,
 )
+from ..repositories import SqlAlchemyCommandRepository
 from ..quality.service import (
     QualityConflictError,
     asset_read,
@@ -50,10 +50,7 @@ def _hash(payload: dict) -> str:
 
 
 def _receipt(session: Session, project_id: str, command_id: str, command_type: str):
-    receipt = session.scalar(select(CommandReceipt).where(
-        CommandReceipt.project_id == project_id,
-        CommandReceipt.command_id == command_id,
-    ))
+    receipt = SqlAlchemyCommandRepository(session).get(project_id, command_id)
     if not receipt:
         return None
     if receipt.command_type != command_type:
@@ -69,13 +66,13 @@ def _save_receipt(
     result_type: str,
     result_id: str,
 ) -> None:
-    session.add(CommandReceipt(
-        project_id=project_id,
-        command_id=command_id,
-        command_type=command_type,
-        result_type=result_type,
-        result_id=result_id,
-    ))
+    SqlAlchemyCommandRepository(session).add(
+        project_id,
+        command_id,
+        command_type,
+        result_type,
+        result_id,
+    )
 
 
 def _require_attempt(session: Session, project: Project, attempt_id: str) -> DeliveryAttempt:

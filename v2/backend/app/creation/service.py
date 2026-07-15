@@ -24,6 +24,7 @@ from ..db.models import (
     utc_now,
 )
 from ..core.config import RUNTIME_ROOT
+from ..repositories import SqlAlchemyCommandRepository
 from .contracts import (
     AcceptCandidate,
     AttachmentCreate,
@@ -52,12 +53,7 @@ def _event(session: Session, project_id: str, event_type: str, message: str, dat
 
 
 def _receipt(session: Session, project_id: str, command_id: str) -> CommandReceipt | None:
-    return session.scalar(
-        select(CommandReceipt).where(
-            CommandReceipt.project_id == project_id,
-            CommandReceipt.command_id == command_id,
-        )
-    )
+    return SqlAlchemyCommandRepository(session).get(project_id, command_id)
 
 
 def _save_receipt(
@@ -68,13 +64,13 @@ def _save_receipt(
     result_type: str,
     result_id: str,
 ) -> None:
-    session.add(CommandReceipt(
-        project_id=project_id,
-        command_id=command_id,
-        command_type=command_type,
-        result_type=result_type,
-        result_id=result_id,
-    ))
+    SqlAlchemyCommandRepository(session).add(
+        project_id,
+        command_id,
+        command_type,
+        result_type,
+        result_id,
+    )
 
 
 def _receipt_result(session: Session, receipt: CommandReceipt, model_type):

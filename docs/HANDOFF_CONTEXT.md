@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Decision And Command Repositories Sprint 15
+
+- Added `DecisionRepository` and project-scoped `CommandRepository` protocols plus SQLAlchemy implementations.
+- Migrated decision persistence and event writes to Decision/Event repositories without changing draft-only editing, duplicate-key rejection, or immutable resolved decisions.
+- Migrated shared project command-receipt reads/writes across creation, planning, production, quality, editor, and delivery services. Each service retains its existing command-type and replay validation semantics.
+- Configuration command receipts remain a separate configuration aggregate and were not changed.
+- Added decision and command repository contract tests plus `docs/V2_REPOSITORY_IMPLEMENTATION.md`; updated product, data-model, implementation-status, and handoff documentation.
+- Repository migration remains partial. No Outbox, Unit of Work, schema migration, state-machine change, provider call, retry, fallback, route substitution, confirmation change, or cost event was introduced.
+- Verification target: 34 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Repository Boundary Sprint 14
 
 - Added explicit `ProjectRepository` and `EventRepository` protocols plus SQLAlchemy implementations under `v2/backend/app/repositories/`.

@@ -676,6 +676,8 @@ GET  /api/v1/projects/{project_id}/events
 
 逐项完成度、证据和仍需确认的边界见 [V2 实现状态](./V2_IMPLEMENTATION_STATUS.md)。复合条目只有全部实现后才勾选；部分完成不会以勾选代替缺口说明。
 
+Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。
+
 ## 23. 首期验收标准
 
 - 用户可以通过对话建立一个项目草稿。

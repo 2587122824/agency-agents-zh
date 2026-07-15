@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from ..db.models import (
     AudioConfigVersion,
-    CommandReceipt,
     ConfigurationReference,
     CostEvent,
     DAGNode,
@@ -33,6 +32,7 @@ from ..db.models import (
     WorkItem,
     utc_now,
 )
+from ..repositories import SqlAlchemyCommandRepository
 from .contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
@@ -68,10 +68,7 @@ def _utc(value):
 
 
 def _receipt(session: Session, project_id: str, command_id: str, command_type: str):
-    receipt = session.scalar(select(CommandReceipt).where(
-        CommandReceipt.project_id == project_id,
-        CommandReceipt.command_id == command_id,
-    ))
+    receipt = SqlAlchemyCommandRepository(session).get(project_id, command_id)
     if not receipt:
         return None
     if receipt.command_type != command_type:
@@ -80,13 +77,13 @@ def _receipt(session: Session, project_id: str, command_id: str, command_type: s
 
 
 def _save_receipt(session: Session, project_id: str, command_id: str, command_type: str, result_type: str, result_id: str):
-    session.add(CommandReceipt(
-        project_id=project_id,
-        command_id=command_id,
-        command_type=command_type,
-        result_type=result_type,
-        result_id=result_id,
-    ))
+    SqlAlchemyCommandRepository(session).add(
+        project_id,
+        command_id,
+        command_type,
+        result_type,
+        result_id,
+    )
 
 
 def _impact_dict(row: ProductionImpactAnalysis) -> dict:

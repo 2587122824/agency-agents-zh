@@ -3,7 +3,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
-from ..db.models import Project, ProjectEvent, WorkItem
+from ..db.models import CommandReceipt, Decision, Project, ProjectEvent, WorkItem
 
 
 class SqlAlchemyProjectRepository:
@@ -47,3 +47,58 @@ class SqlAlchemyEventRepository:
             .limit(limit)
         )
         return list(self.session.scalars(statement))
+
+
+class SqlAlchemyDecisionRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def get_by_key(self, project_id: str, key: str) -> Decision | None:
+        return self.session.scalar(
+            select(Decision).where(Decision.project_id == project_id, Decision.key == key)
+        )
+
+    def get_for_project(self, project_id: str, decision_id: str) -> Decision | None:
+        return self.session.scalar(
+            select(Decision).where(Decision.project_id == project_id, Decision.id == decision_id)
+        )
+
+    def add(self, decision: Decision) -> None:
+        self.session.add(decision)
+
+    def flush(self) -> None:
+        self.session.flush()
+
+    def refresh(self, decision: Decision) -> None:
+        self.session.refresh(decision)
+
+
+class SqlAlchemyCommandRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def get(self, project_id: str, command_id: str) -> CommandReceipt | None:
+        return self.session.scalar(
+            select(CommandReceipt).where(
+                CommandReceipt.project_id == project_id,
+                CommandReceipt.command_id == command_id,
+            )
+        )
+
+    def add(
+        self,
+        project_id: str,
+        command_id: str,
+        command_type: str,
+        result_type: str,
+        result_id: str,
+    ) -> CommandReceipt:
+        receipt = CommandReceipt(
+            project_id=project_id,
+            command_id=command_id,
+            command_type=command_type,
+            result_type=result_type,
+            result_id=result_id,
+        )
+        self.session.add(receipt)
+        return receipt

@@ -1,20 +1,38 @@
 from __future__ import annotations
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..contracts.project import DecisionCreate
 from ..db.models import Decision, Project, ProjectEvent, utc_now
+from ..repositories import (
+    DecisionRepository,
+    EventRepository,
+    SqlAlchemyDecisionRepository,
+    SqlAlchemyEventRepository,
+)
 
 
 class DecisionConflictError(ValueError):
     pass
 
 
-def add_decision(session: Session, project: Project, payload: DecisionCreate) -> Decision:
-    existing = session.scalar(
-        select(Decision).where(Decision.project_id == project.id, Decision.key == payload.key)
-    )
+def _repositories(
+    session: Session,
+    decisions: DecisionRepository | None = None,
+    events: EventRepository | None = None,
+) -> tuple[DecisionRepository, EventRepository]:
+    return decisions or SqlAlchemyDecisionRepository(session), events or SqlAlchemyEventRepository(session)
+
+
+def add_decision(
+    session: Session,
+    project: Project,
+    payload: DecisionCreate,
+    decisions: DecisionRepository | None = None,
+    events: EventRepository | None = None,
+) -> Decision:
+    decision_repository, event_repository = _repositories(session, decisions, events)
+    existing = decision_repository.get_by_key(project.id, payload.key)
     if existing:
         raise DecisionConflictError(f"决策键已存在：{payload.key}")
     if project.status != "draft":
@@ -22,9 +40,9 @@ def add_decision(session: Session, project: Project, payload: DecisionCreate) ->
     decision = Decision(project_id=project.id, source="user", **payload.model_dump())
     if decision.status == "resolved":
         decision.resolved_at = utc_now()
-    session.add(decision)
-    session.flush()
-    session.add(
+    decision_repository.add(decision)
+    decision_repository.flush()
+    event_repository.add(
         ProjectEvent(
             project_id=project.id,
             event_type="decision.created",
@@ -33,14 +51,20 @@ def add_decision(session: Session, project: Project, payload: DecisionCreate) ->
         )
     )
     session.commit()
-    session.refresh(decision)
+    decision_repository.refresh(decision)
     return decision
 
 
-def resolve_decision(session: Session, project: Project, decision_id: str, value: object) -> Decision:
-    decision = session.scalar(
-        select(Decision).where(Decision.id == decision_id, Decision.project_id == project.id)
-    )
+def resolve_decision(
+    session: Session,
+    project: Project,
+    decision_id: str,
+    value: object,
+    decisions: DecisionRepository | None = None,
+    events: EventRepository | None = None,
+) -> Decision:
+    decision_repository, event_repository = _repositories(session, decisions, events)
+    decision = decision_repository.get_for_project(project.id, decision_id)
     if not decision:
         raise LookupError(decision_id)
     if project.status != "draft":
@@ -50,7 +74,7 @@ def resolve_decision(session: Session, project: Project, decision_id: str, value
     decision.value = value
     decision.status = "resolved"
     decision.resolved_at = utc_now()
-    session.add(
+    event_repository.add(
         ProjectEvent(
             project_id=project.id,
             event_type="decision.resolved",
@@ -59,5 +83,5 @@ def resolve_decision(session: Session, project: Project, decision_id: str, value
         )
     )
     session.commit()
-    session.refresh(decision)
+    decision_repository.refresh(decision)
     return decision
