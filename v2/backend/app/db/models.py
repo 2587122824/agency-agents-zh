@@ -324,6 +324,94 @@ class Shot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class ProductionImpactAnalysis(Base):
+    __tablename__ = "production_impact_analyses"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("impact"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    plan_version_id: Mapped[str] = mapped_column(ForeignKey("plan_versions.id"), index=True)
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32), default="awaiting_confirmation", index=True)
+    selection: Mapped[dict] = mapped_column(JSON)
+    manifest: Mapped[dict] = mapped_column(JSON)
+    analysis_hash: Mapped[str] = mapped_column(String(64), index=True)
+    validation_errors: Mapped[list] = mapped_column(JSON, default=list)
+    execution_blockers: Mapped[list] = mapped_column(JSON, default=list)
+    estimated_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    cost_status: Mapped[str] = mapped_column(String(32), default="not_configured")
+    estimated_cost: Mapped[float | None] = mapped_column(nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class ProductionSnapshot(Base):
+    __tablename__ = "production_snapshots"
+    __table_args__ = (UniqueConstraint("project_id", "snapshot_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("snapshot"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    plan_version_id: Mapped[str] = mapped_column(ForeignKey("plan_versions.id"), index=True)
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    impact_analysis_id: Mapped[str] = mapped_column(ForeignKey("production_impact_analyses.id"), unique=True)
+    snapshot_number: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(24), default="preparing", index=True)
+    audio_mode: Mapped[str] = mapped_column(String(24))
+    output_spec: Mapped[dict] = mapped_column(JSON)
+    selection: Mapped[dict] = mapped_column(JSON)
+    contract: Mapped[dict] = mapped_column(JSON)
+    contract_hash: Mapped[str] = mapped_column(String(64), index=True)
+    estimated_call_count: Mapped[int] = mapped_column(Integer, default=0)
+    cost_status: Mapped[str] = mapped_column(String(32), default="not_configured")
+    estimated_cost: Mapped[float | None] = mapped_column(nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    execution_blockers: Mapped[list] = mapped_column(JSON, default=list)
+    created_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class SnapshotEntityVersion(Base):
+    __tablename__ = "snapshot_entity_versions"
+    __table_args__ = (UniqueConstraint("snapshot_id", "entity_version_id", "role"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("snapshot_entity"))
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    entity_version_id: Mapped[str] = mapped_column(ForeignKey("entity_versions.id"), index=True)
+    role: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DAGNode(Base):
+    __tablename__ = "dag_nodes"
+    __table_args__ = (UniqueConstraint("snapshot_id", "node_key"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("dag_node"))
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    node_key: Mapped[str] = mapped_column(String(160))
+    kind: Mapped[str] = mapped_column(String(80), index=True)
+    shot_id: Mapped[str | None] = mapped_column(ForeignKey("shots.id"), nullable=True, index=True)
+    input_contract: Mapped[dict] = mapped_column(JSON)
+    output_contract: Mapped[dict] = mapped_column(JSON)
+    workflow_slot_version_id: Mapped[str | None] = mapped_column(ForeignKey("workflow_slot_versions.id"), nullable=True)
+    estimated_cost: Mapped[float | None] = mapped_column(nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DependencyEdge(Base):
+    __tablename__ = "dependency_edges"
+    __table_args__ = (UniqueConstraint("snapshot_id", "parent_node_id", "child_node_id", "input_slot"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("dag_edge"))
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    parent_node_id: Mapped[str] = mapped_column(ForeignKey("dag_nodes.id"), index=True)
+    child_node_id: Mapped[str] = mapped_column(ForeignKey("dag_nodes.id"), index=True)
+    dependency_type: Mapped[str] = mapped_column(String(24))
+    input_slot: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class ProductionConfigVersion(Base):
     __tablename__ = "production_config_versions"
     __table_args__ = (UniqueConstraint("config_key", "version_number"),)

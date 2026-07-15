@@ -235,6 +235,77 @@ export interface PlanningCenter {
   }
 }
 
+export interface ProductionImpactAnalysis {
+  id: string
+  project_id: string
+  plan_version_id: string
+  production_config_version_id: string
+  status: string
+  selection: Record<string, string | null>
+  manifest: {
+    audio_mode: string
+    output_spec: Record<string, unknown>
+    entity_version_ids: string[]
+    shots: ShotContract[]
+    dag: {
+      nodes: Array<{ node_key: string; kind: string; workflow_slot_version_id: string | null; input_contract: Record<string, unknown> }>
+      edges: Array<{ parent_node_key: string; child_node_key: string; dependency_type: string; input_slot: string | null }>
+    }
+  }
+  analysis_hash: string
+  validation_errors: Array<{ code: string; path?: string; message?: string }>
+  execution_blockers: Array<{ code: string; message: string }>
+  estimated_call_count: number
+  cost_status: string
+  estimated_cost: number | null
+  currency: string | null
+  created_by: string
+  created_at: string
+}
+
+export interface ProductionSnapshot {
+  id: string
+  project_id: string
+  plan_version_id: string
+  production_config_version_id: string
+  impact_analysis_id: string
+  snapshot_number: number
+  status: string
+  audio_mode: string
+  output_spec: Record<string, unknown>
+  selection: Record<string, string | null>
+  contract: Record<string, unknown>
+  contract_hash: string
+  estimated_call_count: number
+  cost_status: string
+  estimated_cost: number | null
+  currency: string | null
+  execution_blockers: Array<{ code: string; message: string }>
+  created_by: string
+  created_at: string
+  locked_at: string | null
+  entity_versions: Array<{ entity_version_id: string; role: string }>
+  nodes: Array<{ id: string; node_key: string; kind: string; shot_id: string | null; workflow_slot_version_id: string | null; input_contract: Record<string, unknown>; output_contract: Record<string, unknown> }>
+  edges: Array<{ id: string; parent_node_id: string; child_node_id: string; dependency_type: string; input_slot: string | null }>
+}
+
+export interface ProductionPreparation {
+  project_id: string
+  active_plan_id: string | null
+  audio_mode: string
+  published_configurations: Array<{
+    id: string
+    config_key: string
+    version_number: number
+    display_name: string
+    video_specs: Array<{ id: string; key: string; display_name: string; aspect_ratio: string; width: number; height: number; fps: number }>
+    workflow_slots: Array<{ id: string; key: string; display_name: string; operation_kind: string; supported_video_spec_ids: string[] }>
+  }>
+  analyses: ProductionImpactAnalysis[]
+  snapshots: ProductionSnapshot[]
+  next_action: { code: string; label: string; incurs_production_cost: boolean }
+}
+
 export interface NodeBindingDraft {
   node_id: string
   field_path: string

@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -66,6 +66,20 @@ export const api = {
   }),
   decideShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, accept: boolean) => request<PlanVersion | ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:${accept ? 'accept' : 'reject'}`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, reason: accept ? undefined : '用户拒绝当前分镜方案' }),
+  }),
+  productionPreparation: (projectId: string) => request<ProductionPreparation>(`/projects/${projectId}/production-preparation`),
+  analyzeProductionImpact: (projectId: string, payload: {
+    plan_version_id: string
+    production_config_version_id: string
+    video_spec_version_id: string
+    keyframe_workflow_slot_version_id: string
+    video_workflow_slot_version_id: string
+    tts_workflow_slot_version_id?: string | null
+  }) => request<ProductionImpactAnalysis>(`/projects/${projectId}/production-impact-analyses`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', ...payload }),
+  }),
+  createProductionSnapshot: (projectId: string, impact: ProductionImpactAnalysis) => request<ProductionSnapshot>(`/projects/${projectId}/production-snapshots`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', impact_analysis_id: impact.id, analysis_hash: impact.analysis_hash, confirm_contract_scope: true }),
   }),
   systemConfigurations: () => request<SystemConfigurationSummary[]>('/system-config/versions'),
   systemConfiguration: (id: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}`),

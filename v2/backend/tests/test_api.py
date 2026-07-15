@@ -14,7 +14,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import RequirementVersion
+from v2.backend.app.db.models import Project, RequirementVersion
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -461,6 +461,166 @@ def valid_system_configuration() -> dict:
             "local_root_ref": "v2.runtime.assets",
         },
     }
+
+
+def create_confirmed_plan(client: TestClient) -> tuple[dict, dict]:
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "snapshot-brief-generate-001", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "snapshot-brief-accept-001", "expected_requirement_version_id": requirement_id},
+    )
+    shots = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={"command_id": "snapshot-shots-generate-001", "expected_requirement_version_id": requirement_id, "creative_brief_candidate_id": brief["id"]},
+    ).json()
+    plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shots['id']}:accept",
+        json={"command_id": "snapshot-shots-accept-001", "expected_requirement_version_id": requirement_id},
+    ).json()
+    return project, plan
+
+
+def publish_visual_production_configuration(client: TestClient) -> dict:
+    configuration = valid_system_configuration()
+    configuration["providers"][0]["capabilities"].append("video_generation")
+    configuration["workflow_slots"].append({
+        "slot_key": "first_frame_video",
+        "display_name": "首帧视频",
+        "operation_kind": "video_generation",
+        "provider_key": "mock_visual",
+        "provider_workflow_id": "mock-video-workflow-not-executable",
+        "input_schema_version": "i2v-input.v1",
+        "output_schema_version": "video-output.v1",
+        "node_info_list": [{
+            "node_id": "source",
+            "field_path": "image",
+            "value_source": "source_image",
+            "value_type": "image",
+            "required": True,
+        }],
+        "supported_video_spec_keys": ["vertical_480p"],
+    })
+    draft = client.post("/api/v1/system-config/versions", json={
+        "command_id": "snapshot-config-create-001",
+        "configuration": configuration,
+    }).json()
+    ready = client.post(
+        f"/api/v1/system-config/versions/{draft['id']}:validate",
+        json={"command_id": "snapshot-config-validate-001", "expected_row_version": draft["row_version"]},
+    ).json()
+    response = client.post(
+        f"/api/v1/system-config/versions/{draft['id']}:publish",
+        json={"command_id": "snapshot-config-publish-001", "expected_row_version": ready["row_version"], "confirm_high_risk_changes": True},
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
+def test_production_impact_and_snapshot_compile_exact_dag_without_work_items(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    with SessionLocal() as session:
+        stale_project = session.get(Project, project["id"])
+        stale_project.audio_mode = "voiceover"
+        session.commit()
+    config = publish_visual_production_configuration(client)
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    selection = {
+        "plan_version_id": plan["id"],
+        "production_config_version_id": config["id"],
+        "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+        "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+        "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+    }
+    analysis_command = {"command_id": "production-impact-command-001", **selection}
+    analyzed = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json=analysis_command,
+    )
+    replayed = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json=analysis_command,
+    )
+    assert analyzed.status_code == 201
+    impact = analyzed.json()
+    assert replayed.json()["id"] == impact["id"]
+    assert impact["status"] == "awaiting_confirmation"
+    assert impact["manifest"]["audio_mode"] == "off"
+    assert impact["validation_errors"] == []
+    assert impact["estimated_call_count"] == 6
+    assert impact["cost_status"] == "not_configured"
+    assert impact["execution_blockers"][0]["code"] == "COST_ESTIMATE_REQUIRED"
+    video_nodes = [item for item in impact["manifest"]["dag"]["nodes"] if item["kind"] == "generate_i2v_clip"]
+    assert len(video_nodes) == 3
+    assert all(len(item["input_contract"]["source_image_node_keys"]) == 1 for item in video_nodes)
+
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "production-snapshot-command-001",
+            "impact_analysis_id": impact["id"],
+            "analysis_hash": impact["analysis_hash"],
+            "confirm_contract_scope": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "CONTRACT_SCOPE_CONFIRMATION_REQUIRED"
+
+    snapshot_command = {
+        "command_id": "production-snapshot-command-002",
+        "impact_analysis_id": impact["id"],
+        "analysis_hash": impact["analysis_hash"],
+        "confirm_contract_scope": True,
+    }
+    created = client.post(f"/api/v1/projects/{project['id']}/production-snapshots", json=snapshot_command)
+    replayed_snapshot = client.post(f"/api/v1/projects/{project['id']}/production-snapshots", json=snapshot_command)
+    assert created.status_code == 201
+    snapshot = created.json()
+    assert replayed_snapshot.json()["id"] == snapshot["id"]
+    assert snapshot["status"] == "preparing"
+    assert snapshot["locked_at"] is None
+    assert len(snapshot["nodes"]) == 7
+    assert len(snapshot["edges"]) == 6
+    assert all(item["kind"] != "generate_tts" for item in snapshot["nodes"])
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["work_items"] == []
+    references = client.get(f"/api/v1/system-config/versions/{config['id']}/references").json()
+    assert references == [{"ref_type": "snapshot", "ref_id": snapshot["id"], "created_at": references[0]["created_at"]}]
+
+
+def test_production_impact_blocks_wrong_explicit_workflow_kind(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    config = publish_visual_production_configuration(client)
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    analyzed = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "production-impact-invalid-001",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+        },
+    )
+    assert analyzed.status_code == 201
+    impact = analyzed.json()
+    assert impact["status"] == "blocked"
+    assert any(item["code"] == "VIDEO_SLOT_KIND_INVALID" for item in impact["validation_errors"])
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "production-snapshot-invalid-001",
+            "impact_analysis_id": impact["id"],
+            "analysis_hash": impact["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "IMPACT_ANALYSIS_BLOCKED"
 
 
 def test_system_configuration_publish_is_versioned_and_explicit(client: TestClient) -> None:

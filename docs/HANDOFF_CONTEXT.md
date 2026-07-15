@@ -2,6 +2,19 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Production Preparation Sprint 5
+
+- Added persisted `ProductionImpactAnalysis`, immutable `ProductionSnapshot`, `SnapshotEntityVersion`, `DAGNode`, and `DependencyEdge` contracts under `v2/` with Alembic revision `20260715_05`.
+- Production routing is fully explicit: the user selects one published configuration version, one exact video-spec version, one keyframe workflow-slot version, one video workflow-slot version, and a TTS slot only when the confirmed plan uses voiceover. No first option is selected automatically.
+- Impact analysis validates exact ownership and publication state, operation kinds, workflow/video-spec compatibility, shot durations, entity versions, plan activity, audio/TTS compatibility, and plan/config hashes. Errors remain visible and never trigger route substitution, ID guessing, prompt rewriting, or repair.
+- The deterministic compiler creates one keyframe node and one I2V node per shot. Every ordinary I2V node has exactly one required `source_image` edge; audio-off plans create no TTS node. A final timeline-contract node depends on the exact generated clips.
+- Production reads `audio_mode` and `aspect_ratio` from the confirmed `PlanVersion.creative_brief`, not mutable or stale project summary columns.
+- Explicit scope confirmation creates an immutable `preparing` snapshot, exact configuration reference, entity-version freezes, DAG nodes, and dependency edges. There is no snapshot revise endpoint.
+- Pricing is deliberately not inferred. Until a pricing catalog exists, snapshots keep `cost_status=not_configured`, `estimated_cost=null`, and `COST_ESTIMATE_REQUIRED`; they cannot lock, activate, create WorkItems, call providers, or incur cost.
+- Added `/projects/{project_id}/production-preparation`, impact-analysis creation, and snapshot creation APIs plus the API-backed production preparation section on the plan page.
+- Verification passed with 13 backend tests, Python compileall, TypeScript/Vite build, fresh five-revision migration, runtime migration at `20260715_05`, desktop/mobile browser checks, no page-level horizontal overflow, and no browser console warnings/errors.
+- Next slice: versioned pricing catalog, deterministic cost calculation, separate high-risk cost confirmation, and `preparing -> locked`. Do not create WorkItems or provider submissions before that boundary is complete.
+
 ## 2026-07-15 V2 System Configuration Sprint 4
 
 - Added the first persisted V2 system-configuration authority under `v2/`: production configuration versions and exact provider, model, workflow-slot, video-spec, audio, and storage-policy component versions.

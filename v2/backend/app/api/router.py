@@ -92,6 +92,20 @@ from ..planning.service import (
     generate_shot_plan,
     planning_center_view,
 )
+from ..production.contracts import (
+    AnalyzeProductionImpact,
+    CreateProductionSnapshot,
+    ImpactAnalysisRead,
+    ProductionPreparationView,
+    ProductionSnapshotRead,
+)
+from ..production.service import (
+    ProductionConflictError,
+    ProductionNotFoundError,
+    analyze_impact,
+    create_snapshot,
+    preparation_view,
+)
 from ..projects.service import (
     ProjectConflictError,
     confirm_project,
@@ -110,6 +124,10 @@ def creation_error(exc: CreationConflictError) -> HTTPException:
 
 
 def configuration_error(exc: ConfigurationConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
+
+
+def production_error(exc: ProductionConflictError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
 
 
@@ -270,6 +288,49 @@ def planning_center(project_id: str, session: Session = Depends(get_session)):
         return planning_center_view(session, project)
     except CreationConflictError as exc:
         raise creation_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/production-preparation", response_model=ProductionPreparationView)
+def production_preparation(project_id: str, session: Session = Depends(get_session)):
+    return preparation_view(session, require_project(session, project_id))
+
+
+@router.post(
+    "/projects/{project_id}/production-impact-analyses",
+    response_model=ImpactAnalysisRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def production_impact_analyze(
+    project_id: str,
+    payload: AnalyzeProductionImpact,
+    session: Session = Depends(get_session),
+):
+    try:
+        return analyze_impact(session, require_project(session, project_id), payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots",
+    response_model=ProductionSnapshotRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def production_snapshot_create(
+    project_id: str,
+    payload: CreateProductionSnapshot,
+    session: Session = Depends(get_session),
+):
+    try:
+        return create_snapshot(session, require_project(session, project_id), payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
 
 
 @router.post(

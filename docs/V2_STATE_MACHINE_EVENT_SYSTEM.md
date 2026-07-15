@@ -156,6 +156,8 @@ stateDiagram-v2
 
 快照锁定守卫包括：所有 ID 精确解析、DAG 无环、输出规格有效、系统槽位显式存在、音频关闭时无 TTS 节点、预计成本已计算。任一失败进入项目 `blocked`，不补字段或替换配置。
 
+影响分析确认可以创建不可修改的 `preparing` 快照，以冻结选择并生成可审计 DAG；这不等同于锁定或激活。若 `cost_status=not_configured`，快照必须保留 `COST_ESTIMATE_REQUIRED`，且禁止创建 WorkItem。`preparing -> locked` 仍要求价格目录、实际预计成本和独立费用确认全部存在。
+
 ## 6. 工作项与尝试状态机
 
 ### 6.1 WorkItem 状态

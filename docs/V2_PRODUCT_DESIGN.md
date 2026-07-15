@@ -254,6 +254,8 @@ flowchart LR
 
 每次实际生产还必须创建不可变的 `ProductionSnapshot`，冻结方案版本、决策版本、实体版本、系统规格和显式选择的供应商配置。所有工作项和素材必须绑定该快照。旧快照仍可审计，但其迟到结果不能推进当前活动方案的项目状态。
 
+生产准备采用两次显式命令：先提交已确认 `PlanVersion`、已发布 `ProductionConfigVersion`、视频规格、关键帧槽位、视频槽位和按音频模式需要的 TTS 槽位，生成带哈希的影响分析；用户确认该精确范围后才创建不可修改的 `preparing` 快照并编译 DAG。若价格目录尚未配置，快照保留 `cost_status=not_configured` 和 `COST_ESTIMATE_REQUIRED`，不得锁定、激活、创建 WorkItem 或调用供应商；系统不得把未知成本写成零。
+
 ## 10. 类型化实体
 
 ### 10.1 人物实体

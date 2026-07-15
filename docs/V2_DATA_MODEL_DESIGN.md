@@ -215,6 +215,8 @@ locked_at / created_at
 
 `locked` 后禁止修改。任何变化创建新快照。旧快照结果可保留和查看，但不能推进活动快照状态。
 
+`preparing` 快照同样不提供原地修订接口。它可以在用户确认精确影响分析后持久化合同与 DAG，但当价格目录缺失时必须保留 `cost_status=not_configured`、`estimated_cost=null` 和确定性的执行阻断；只有完成成本核算与独立费用确认后才允许进入 `locked`。未知成本不能按零成本处理。
+
 精确冻结关系：
 
 ```text
