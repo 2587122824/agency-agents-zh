@@ -35,6 +35,18 @@ class LockProductionSnapshot(ProductionCommand):
     confirm_high_risk_cost: bool
 
 
+class ActivateProductionSnapshot(ProductionCommand):
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+
+
+class SubmitProduction(ProductionCommand):
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    expected_estimated_cost: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    expected_currency: str = Field(pattern=r"^[A-Z]{3,12}$")
+    expected_dag_node_ids: list[str] = Field(min_length=1)
+    confirm_high_risk_submission: bool
+
+
 class ImpactAnalysisRead(BaseModel):
     id: str
     project_id: str
@@ -100,9 +112,59 @@ class ProductionSnapshotRead(BaseModel):
     created_by: str
     created_at: datetime
     locked_at: datetime | None
+    activated_at: datetime | None
     entity_versions: list[dict]
     nodes: list[DAGNodeRead]
     edges: list[DependencyEdgeRead]
+
+
+class WorkAttemptRead(BaseModel):
+    id: str
+    work_item_id: str
+    attempt_number: int
+    trigger: str
+    provider: str
+    provider_task_id: str | None
+    request_fingerprint: str
+    request_manifest: dict
+    response_manifest: dict | None
+    state: str
+    execution_lock_owner: str | None
+    execution_lock_expires_at: datetime | None
+    submitted_at: datetime | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    error_code: str | None
+    error_detail: str | None
+    created_at: datetime
+
+
+class ExecutionWorkItemRead(BaseModel):
+    id: str
+    project_id: str
+    snapshot_id: str
+    dag_node_id: str
+    node_key: str
+    kind: str
+    status: str
+    error: str | None
+    priority: int
+    request_fingerprint: str
+    current_attempt_id: str
+    available_at: datetime
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    attempts: list[WorkAttemptRead]
+
+
+class ProductionExecutionView(BaseModel):
+    project_id: str
+    project_status: str
+    active_snapshot_id: str | None
+    snapshot: ProductionSnapshotRead | None
+    work_items: list[ExecutionWorkItemRead]
+    blockers: list[dict]
 
 
 class PublishedConfigChoice(BaseModel):

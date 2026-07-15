@@ -744,3 +744,13 @@ project_01
 - 删除被引用素材时明确阻止并列出引用。
 - Worker 崩溃恢复不会仅因租约过期而重复付费提交。
 - SQLite 和 PostgreSQL Repository 通过同一合同测试。
+
+## 19. 执行授权落地约束
+
+- `Project.active_snapshot_id` 指向项目唯一活动快照。
+- `WorkItem(snapshot_id, dag_node_id)` 唯一，保证一个快照节点只编译一次。
+- `WorkItem.request_fingerprint` 对不可变执行清单做规范化 SHA-256；清单包含快照、合同哈希、节点、输入输出合同、工作流、供应商和适配器版本引用。
+- 每个首次提交的 WorkItem 只创建 `attempt_number=1`、`trigger=explicit_submission` 的 WorkAttempt。
+- Worker 通过 `execution_lock_owner` 与 `execution_lock_expires_at` 记录租约；租约不是自动重试授权。
+- Mock 完成记录 `media_created=false` 和空 `provider_task_id`，不得创建 Asset 或 charged CostEvent。
+- 本地时间线节点只记录所消费的父 WorkItem ID，不生成最终视频文件。

@@ -2,6 +2,17 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Execution Authorization Sprint 7
+
+- Added explicit `locked -> active -> submitted` production authorization. Activation changes the project's active snapshot only and creates zero WorkItems; submission independently revalidates contract hash, confirmed amount/currency, the exact complete DAG node list, and high-risk confirmation.
+- Submission deterministically creates one unique WorkItem and one initial WorkAttempt per DAG node. Request fingerprints cover immutable snapshot, node, workflow, provider, adapter, and input/output contracts. Command replay is idempotent.
+- Added dependency-aware Worker leasing. Only explicitly configured `adapter_kind=mock` nodes and local timeline-contract nodes execute. Mock responses set `media_created=false` and never create provider task IDs, assets, charged CostEvents, network requests, retries, or fallback routes.
+- Unconnected real adapters block with `PROVIDER_ADAPTER_NOT_CONNECTED`; required descendants block with `DEPENDENCY_BLOCKED` rather than hanging. No second attempt is created.
+- Replaced the obsolete production queue prototype with snapshot, WorkItem, WorkAttempt, fingerprint, progress, and blocker views. Plan review now has separate activation and high-risk submission controls.
+- Stabilized configuration semantic diffs by sorting pricing rules by workflow key instead of random database IDs.
+- Added Alembic revision `20260715_07`. Verification target: 17 backend tests, Python compileall, TypeScript/Vite build, fresh seven-revision migration, browser desktop/mobile checks, push, and restart on `8766`.
+- Next slice: Asset persistence and lifecycle plus QC/review contracts. Do not connect real provider adapters until real output reconciliation, cost charging, and user-confirmed retry semantics are designed.
+
 ## 2026-07-15 V2 Pricing And Snapshot Lock Sprint 6
 
 - Added versioned `PricingCatalogVersion` and exact `PricingRule` configuration components plus per-node pricing metadata and `CostEvent` audit rows under `v2/`.

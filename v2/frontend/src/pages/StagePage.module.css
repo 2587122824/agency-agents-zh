@@ -1,2 +1,47 @@
-.content { max-width:1180px;margin:auto;padding:22px 34px 50px; }.stageBar { min-height:78px;padding:13px 17px;display:flex;align-items:center;background:white;border:1px solid #e0e2dd;border-radius:7px; }.stageBar > div { flex:1;display:grid;grid-template-columns:28px 1fr;column-gap:8px; }.stageBar > div > span { grid-row:1/3;width:27px;height:27px;border:1px solid #cfd2cd;border-radius:50%;display:grid;place-items:center;font-size:9px; }.stageBar > div b { font-size:10px; }.stageBar > div small { color:#858a8e;font-size:8px; }.stageBar > svg { width:15px;color:#b9bcb8;margin:0 8px; }.stageBar .active > span { background:#191c20;color:white;border-color:#191c20; }.list { margin-top:16px;background:white;border:1px solid #e0e2dd;border-radius:7px; }.list header { min-height:62px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e0e2dd; }.list header span { color:#d84e29;font-size:8px;font-weight:700; }.list header h2 { margin:3px 0 0;font-size:14px; }.list header > b { width:25px;height:25px;border-radius:50%;background:#edefeb;display:grid;place-items:center;font-size:8px; }.list article { min-height:68px;padding:9px 14px;display:grid;grid-template-columns:30px minmax(0,1fr) auto auto;gap:10px;align-items:center;border-bottom:1px solid #eceeeb; }.state { width:27px;height:27px;border-radius:50%;background:#edefeb;display:grid;place-items:center; }.state svg { width:13px; }.list article > div { display:grid;gap:3px; }.list article strong { font-size:10px; }.list article small { color:#858a8e;font-size:8px; }.list article em { font-style:normal;font-size:8px;padding:5px 7px;border-radius:10px;background:#edefeb; }.notice { margin-top:12px;border-left:3px solid #d84e29;padding:10px 13px;background:#fff; }.notice strong { font-size:10px; }.notice p { margin:4px 0;color:#777c80;font-size:9px; }.empty { padding:40px;text-align:center;color:#858a8e;font-size:9px; }
-@media(max-width:700px){.content{padding:16px}.stageBar{overflow-x:auto}.stageBar>div{min-width:120px}.list article{grid-template-columns:30px minmax(0,1fr) auto}.list article em{display:none}}
+.content { max-width:1280px;margin:auto;padding:24px 34px 52px; }
+.stageBar { min-height:82px;padding:14px 18px;display:flex;align-items:center;background:white;border:1px solid #e0e2dd;border-radius:7px; }
+.stageBar > div { flex:1;display:grid;grid-template-columns:32px 1fr;column-gap:10px; }
+.stageBar > div > span { grid-row:1/3;width:30px;height:30px;border:1px solid #cfd2cd;border-radius:50%;display:grid;place-items:center;font-size:11px; }
+.stageBar > div b { font-size:13px; }
+.stageBar > div small { color:#777d80;font-size:11px; }
+.stageBar > svg { width:16px;color:#b9bcb8;margin:0 10px; }
+.stageBar .active > span { background:#191c20;color:white;border-color:#191c20; }
+.executionLayout { margin-top:18px;display:grid;grid-template-columns:minmax(280px,0.34fr) minmax(0,1fr);gap:16px;align-items:start; }
+.list,.executionPanel { background:white;border:1px solid #e0e2dd;border-radius:7px;overflow:hidden; }
+.list header,.executionHeader { min-height:68px;padding:0 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e0e2dd; }
+.list header span,.executionHeader span { color:#c74624;font-size:10px;font-weight:700; }
+.list header h2,.executionHeader h2 { margin:4px 0 0;font-size:17px; }
+.list header > b { width:28px;height:28px;border-radius:50%;background:#edefeb;display:grid;place-items:center;font-size:11px; }
+.projectRow { width:100%;min-height:72px;padding:10px 14px;display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:11px;align-items:center;border:0;border-bottom:1px solid #eceeeb;background:#fff;text-align:left;cursor:pointer; }
+.projectRow:hover,.projectRow[data-selected="true"] { background:#f6f7f4; }
+.projectRow[data-selected="true"] { box-shadow:inset 3px 0 #d84e29; }
+.state,.nodeState { width:30px;height:30px;border-radius:50%;background:#edefeb;display:grid;place-items:center; }
+.state svg,.nodeState svg { width:15px; }
+.projectRow > div { display:grid;gap:4px;min-width:0; }
+.projectRow strong { font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.projectRow small { color:#777d80;font-size:10px;overflow:hidden;text-overflow:ellipsis; }
+.projectRow em,.workList article > em { font-style:normal;font-size:10px;padding:5px 8px;border-radius:10px;background:#edefeb; }
+.executionHeader > div:last-child { display:grid;text-align:right; }
+.executionHeader > div:last-child strong { font-size:17px; }
+.executionHeader > div:last-child small { color:#777d80;font-size:10px; }
+.workList article { min-height:78px;padding:11px 16px;display:grid;grid-template-columns:34px minmax(0,1fr) 130px auto;gap:12px;align-items:center;border-bottom:1px solid #eceeeb; }
+.workList article[data-status="blocked"] { background:#fff8f6; }
+.nodeMain { display:grid;gap:3px;min-width:0; }
+.nodeMain strong { font-size:13px; }
+.nodeMain span { color:#62686b;font-size:11px; }
+.nodeMain code { color:#8a8e90;font-size:10px; }
+.attempt { display:grid;gap:2px;border-left:1px solid #e3e5e1;padding-left:12px; }
+.attempt small { color:#8a8e90;font-size:9px; }
+.attempt strong { font-size:11px; }
+.attempt span { color:#62686b;font-size:10px; }
+.blocker { margin:12px 14px 0;padding:11px 12px;display:flex;gap:10px;background:#fff1ed;border:1px solid #efc9be;border-radius:5px;color:#8e321a; }
+.blocker svg { flex:none; }
+.blocker div { display:grid;gap:3px; }
+.blocker strong { font-size:12px; }
+.blocker span { font-size:11px;word-break:break-word; }
+.executionEmpty,.empty { min-height:190px;padding:32px;display:grid;place-items:center;align-content:center;gap:8px;text-align:center;color:#777d80;font-size:12px; }
+.executionEmpty strong { color:#272b2e;font-size:14px; }
+.notice { margin-top:14px;border-left:3px solid #d84e29;padding:12px 15px;background:#fff; }
+.notice strong { font-size:13px; }
+.notice p { margin:5px 0;color:#696f72;font-size:12px;line-height:1.6; }
+@media(max-width:800px){.content{padding:16px}.stageBar{overflow-x:auto}.stageBar>div{min-width:145px}.executionLayout{grid-template-columns:1fr}.workList article{grid-template-columns:32px minmax(0,1fr) auto}.attempt{display:none}.workList article>em{display:none}}

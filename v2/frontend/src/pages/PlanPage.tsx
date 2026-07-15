@@ -38,6 +38,7 @@ export function PlanPage() {
   const [ttsSlotId, setTtsSlotId] = useState('')
   const [pricingCatalogId, setPricingCatalogId] = useState('')
   const [confirmCost, setConfirmCost] = useState(false)
+  const [confirmSubmit, setConfirmSubmit] = useState(false)
   const latestSnapshot = preparation.data?.snapshots[0]
   const refresh = () => client.invalidateQueries({ queryKey: ['planning-center', projectId] })
   const generateBrief = useMutation({ mutationFn: () => api.generateCreativeBrief(projectId, planning.data!.active_requirement.id), onSuccess: refresh })
@@ -47,12 +48,14 @@ export function PlanPage() {
   const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, { plan_version_id: planning.data!.active_plan!.id, production_config_version_id: configId, video_spec_version_id: videoSpecId, keyframe_workflow_slot_version_id: keyframeSlotId, video_workflow_slot_version_id: videoSlotId, tts_workflow_slot_version_id: ttsSlotId || null, pricing_catalog_version_id: pricingCatalogId || null }) })
   const createSnapshot = useMutation({ mutationFn: () => api.createProductionSnapshot(projectId, analyzeImpact.data!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
   const lockSnapshot = useMutation({ mutationFn: () => api.lockProductionSnapshot(projectId, latestSnapshot!), onSuccess: async () => { setConfirmCost(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
+  const activateSnapshot = useMutation({ mutationFn: () => api.activateProductionSnapshot(projectId, latestSnapshot!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
+  const submitProduction = useMutation({ mutationFn: () => api.submitProduction(projectId, latestSnapshot!), onSuccess: async () => { setConfirmSubmit(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
   if (project.isPending || planning.isPending) return <div className={styles.loading}>正在读取方案合同…</div>
   if (!project.data || !planning.data || project.error || planning.error) return <div className={styles.loading}>方案读取失败：{project.error?.message || planning.error?.message}</div>
   const data = planning.data
   const brief = data.current_brief_candidate ?? data.accepted_brief_candidate
   const shots = data.active_plan?.shots ?? data.current_shot_candidate?.shots ?? []
-  const error = generateBrief.error || decideBrief.error || generateShots.error || decideShots.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error
+  const error = generateBrief.error || decideBrief.error || generateShots.error || decideShots.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
   const selectedConfig = preparation.data?.published_configurations.find(item => item.id === configId)
   const keyframeSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'image_generation') ?? []
   const videoSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'video_generation') ?? []
@@ -89,9 +92,9 @@ export function PlanPage() {
             <header><Calculator size={17} /><div><strong>{impact.status === 'blocked' ? '生产合同存在阻断' : '影响分析等待确认'}</strong><span>{impact.manifest.shots.length} 个镜头 · {impact.estimated_call_count} 次计划调用 · {impact.estimated_cost === null ? '费用未核算' : `预计 ${impact.currency} ${impact.estimated_cost.toFixed(6)}`}</span></div><code>{impact.analysis_hash.slice(0, 12)}</code></header>
             {impact.validation_errors.map(item => <article key={`${item.code}:${item.path}`}><b>{item.code}</b><span>{item.message ?? item.path}</span></article>)}
             {impact.execution_blockers.map(item => <article className={styles.costBlocker} key={item.code}><b>{item.code}</b><span>{item.message}</span></article>)}
-            {impact.status === 'awaiting_confirmation' && <footer><p><strong>确认后创建不可修改的 preparing 快照</strong><span>价格目录尚未实现，因此快照不会激活、不会生成 WorkItem。</span></p><button className="primaryButton" disabled={createSnapshot.isPending} onClick={() => createSnapshot.mutate()}><LockKeyhole size={14} />确认精确范围并创建快照</button></footer>}
+            {impact.status === 'awaiting_confirmation' && <footer><p><strong>确认后创建不可修改的 preparing 快照</strong><span>创建快照不会激活执行，也不会生成 WorkItem。</span></p><button className="primaryButton" disabled={createSnapshot.isPending} onClick={() => createSnapshot.mutate()}><LockKeyhole size={14} />确认精确范围并创建快照</button></footer>}
           </div>}
-          {preparation.data?.snapshots.map(snapshot => <div className={styles.snapshotRow} key={snapshot.id}><LockKeyhole size={17} /><div><strong>snapshot_{snapshot.snapshot_number} · {snapshot.status}</strong><span>{snapshot.nodes.length} 个 DAG 节点 · {snapshot.edges.length} 条依赖 · {snapshot.estimated_cost === null ? '费用未核算' : `${snapshot.currency} ${snapshot.estimated_cost.toFixed(6)}`}</span><code>{snapshot.contract_hash}</code></div>{snapshot.status === 'preparing' && snapshot.cost_status === 'estimated' ? <button className="primaryButton" onClick={() => setConfirmCost(true)}>确认费用并锁定</button> : <em>{snapshot.status === 'locked' ? '费用已确认' : '等待成本核算'}</em>}</div>)}
+          {preparation.data?.snapshots.map(snapshot => <div className={styles.snapshotRow} key={snapshot.id}><LockKeyhole size={17} /><div><strong>snapshot_{snapshot.snapshot_number} · {snapshot.status}</strong><span>{snapshot.nodes.length} 个 DAG 节点 · {snapshot.edges.length} 条依赖 · {snapshot.estimated_cost === null ? '费用未核算' : `${snapshot.currency} ${snapshot.estimated_cost.toFixed(6)}`}</span><code>{snapshot.contract_hash}</code></div>{snapshot.status === 'preparing' && snapshot.cost_status === 'estimated' ? <button className="primaryButton" onClick={() => setConfirmCost(true)}>确认费用并锁定</button> : snapshot.status === 'locked' ? <button className="primaryButton" disabled={activateSnapshot.isPending} onClick={() => activateSnapshot.mutate()}>激活快照</button> : snapshot.status === 'active' ? <button className="primaryButton" onClick={() => setConfirmSubmit(true)}>提交生产</button> : snapshot.status === 'submitted' || snapshot.status.startsWith('execution_') ? <Link className="secondaryButton" to="/production">查看执行</Link> : <em>{snapshot.status}</em>}</div>)}
         </section>}
       </section>
       <aside className={styles.aside}>
@@ -103,5 +106,6 @@ export function PlanPage() {
       </aside>
     </main>
     {confirmCost && latestSnapshot && <div className={styles.costModal}><section><header><Calculator size={20} /><div><span>HIGH RISK COST CONFIRMATION</span><h2>确认 snapshot_{latestSnapshot.snapshot_number} 预计费用</h2></div></header><div className={styles.costAmount}><small>预计生产费用</small><strong>{latestSnapshot.currency} {latestSnapshot.estimated_cost?.toFixed(6)}</strong><span>{latestSnapshot.estimated_call_count} 次计划供应商调用</span></div><p>确认将锁定合同哈希、精确价格目录和每个 DAG 节点的费用明细。本步骤不创建 WorkItem、不调用供应商，也不会实际扣费。</p><code>{latestSnapshot.contract_hash}</code><footer><button className="secondaryButton" onClick={() => setConfirmCost(false)}>取消</button><button className="primaryButton" disabled={lockSnapshot.isPending} onClick={() => lockSnapshot.mutate()}><LockKeyhole size={14} />确认金额并锁定</button></footer></section></div>}
+    {confirmSubmit && latestSnapshot && <div className={styles.costModal}><section><header><Network size={20} /><div><span>HIGH RISK PRODUCTION SUBMISSION</span><h2>提交 snapshot_{latestSnapshot.snapshot_number} 完整 DAG</h2></div></header><div className={styles.costAmount}><small>已确认预计费用</small><strong>{latestSnapshot.currency} {latestSnapshot.estimated_cost?.toFixed(6)}</strong><span>{latestSnapshot.nodes.length} 个节点 · {latestSnapshot.estimated_call_count} 次计划调用</span></div><p>提交会按当前不可变快照创建一组 WorkItem 与初始 WorkAttempt。系统会再次核对合同哈希、金额、币种和完整节点列表；不会补节点、改名、换工作流或自动重试。</p><code>{latestSnapshot.contract_hash}</code><footer><button className="secondaryButton" onClick={() => setConfirmSubmit(false)}>取消</button><button className="primaryButton" disabled={submitProduction.isPending} onClick={() => submitProduction.mutate()}><ShieldCheck size={14} />确认并提交生产</button></footer></section></div>}
   </>
 }

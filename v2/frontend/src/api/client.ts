@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -88,6 +88,17 @@ export const api = {
       expected_estimated_cost: snapshot.estimated_cost, expected_currency: snapshot.currency, confirm_high_risk_cost: true,
     }),
   }),
+  activateProductionSnapshot: (projectId: string, snapshot: ProductionSnapshot) => request<ProductionSnapshot>(`/projects/${projectId}/production-snapshots/${snapshot.id}:activate`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_contract_hash: snapshot.contract_hash }),
+  }),
+  submitProduction: (projectId: string, snapshot: ProductionSnapshot) => request<ProductionExecution>(`/projects/${projectId}/production-snapshots/${snapshot.id}:submit`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', expected_contract_hash: snapshot.contract_hash,
+      expected_estimated_cost: snapshot.estimated_cost, expected_currency: snapshot.currency,
+      expected_dag_node_ids: snapshot.nodes.map(node => node.id), confirm_high_risk_submission: true,
+    }),
+  }),
+  productionExecution: (projectId: string) => request<ProductionExecution>(`/projects/${projectId}/production-execution`),
   systemConfigurations: () => request<SystemConfigurationSummary[]>('/system-config/versions'),
   systemConfiguration: (id: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}`),
   createSystemConfiguration: (configuration: SystemConfigurationDraft) => request<SystemConfigurationVersion>('/system-config/versions', {

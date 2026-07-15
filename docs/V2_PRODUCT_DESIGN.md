@@ -927,3 +927,27 @@ GET /api/v1/system-config/workflow-slots/{slot_key}/versions
 - 音频关闭的快照不包含 TTS 工作项。
 - 配置错误不会触发模型、供应商、工作流或输出格式替换。
 - 发布配置不会调用生产供应商或产生生产费用。
+
+## 31. 生产授权与首期执行边界
+
+生产必须依次经过四个独立命令边界：
+
+```text
+preparing -> locked -> active -> submitted -> execution_completed | execution_blocked
+```
+
+- `locked` 只表示合同和预计费用已确认，不创建 WorkItem。
+- `active` 只表示该快照成为项目唯一活动快照，仍不创建 WorkItem。
+- `submitted` 必须再次提交精确合同哈希、金额、币种和完整 DAG 节点 ID；随后一对一创建 WorkItem 与首个 WorkAttempt。
+- 节点 ID 缺失、重复或额外添加均阻断，不做名称猜测或部分提交。
+- 首期 Worker 只执行明确配置为 `mock` 的适配器和本地时间线合同节点。其他适配器返回 `PROVIDER_ADAPTER_NOT_CONNECTED`，不发送网络请求。
+- Mock 响应只证明编排路径可执行，不伪造图片、视频、音频、供应商任务 ID 或实际扣费。
+- 系统不创建第二次尝试；后续重试必须由单独的用户确认命令设计并实现。
+
+接口：
+
+```text
+POST /api/v1/projects/{project_id}/production-snapshots/{snapshot_id}:activate
+POST /api/v1/projects/{project_id}/production-snapshots/{snapshot_id}:submit
+GET  /api/v1/projects/{project_id}/production-execution
+```

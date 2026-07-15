@@ -564,3 +564,28 @@ configuration.runtime_blocked.v1
 - 运行时凭据失败不触发供应商、模型或工作流切换。
 - 配置发布不创建 WorkItem、不调用供应商、不记录生产费用。
 - 项目采用新配置前必须展示影响范围并创建新快照。
+
+## 18. 快照激活与执行状态机
+
+```text
+locked --ActivateSnapshot--> active --SubmitProduction--> submitted
+submitted --all work completed--> execution_completed
+submitted --any deterministic blocker--> execution_blocked
+```
+
+守卫条件：
+
+- 激活要求锁定快照、已确认费用、合同哈希匹配、无执行阻断，且项目没有其他活动快照。
+- 激活事件不创建 WorkItem，不调用供应商，不记录 charged 成本。
+- 提交要求活动快照、合同哈希匹配、金额与币种匹配、完整且无重复的 DAG 节点 ID，以及高风险提交确认。
+- 提交命令重放返回第一次执行视图；不同命令 ID 不能对已经提交的快照再次编译任务。
+- Required 父节点未完成时子节点不可领取；父节点 blocked 时子节点明确进入 `DEPENDENCY_BLOCKED`。
+- 未连接适配器只阻断当前真实节点及其依赖，不创建替代节点、第二次尝试或隐藏路由。
+
+新增事件：
+
+```text
+production.snapshot_activated.v1
+production.submitted.v1
+production.work_finished.v1
+```

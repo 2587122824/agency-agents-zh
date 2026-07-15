@@ -14,7 +14,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import CostEvent, Project, RequirementVersion
+from v2.backend.app.db.models import CostEvent, Project, RequirementVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -485,8 +485,9 @@ def create_confirmed_plan(client: TestClient) -> tuple[dict, dict]:
     return project, plan
 
 
-def publish_visual_production_configuration(client: TestClient, with_pricing: bool = False) -> dict:
+def publish_visual_production_configuration(client: TestClient, with_pricing: bool = False, adapter_kind: str = "mock") -> dict:
     configuration = valid_system_configuration()
+    configuration["providers"][0]["adapter_kind"] = adapter_kind
     configuration["providers"][0]["capabilities"].append("video_generation")
     configuration["workflow_slots"].append({
         "slot_key": "first_frame_video",
@@ -530,6 +531,44 @@ def publish_visual_production_configuration(client: TestClient, with_pricing: bo
     )
     assert response.status_code == 200
     return response.json()
+
+
+def create_locked_snapshot(client: TestClient, adapter_kind: str = "mock") -> tuple[dict, dict]:
+    project, plan = create_confirmed_plan(client)
+    config = publish_visual_production_configuration(client, with_pricing=True, adapter_kind=adapter_kind)
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    impact = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "execution-impact-command-001",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    ).json()
+    snapshot = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "execution-snapshot-command-001",
+            "impact_analysis_id": impact["id"],
+            "analysis_hash": impact["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    ).json()
+    locked = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:lock",
+        json={
+            "command_id": "execution-lock-command-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "confirm_high_risk_cost": True,
+        },
+    ).json()
+    return project, locked
 
 
 def test_production_impact_and_snapshot_compile_exact_dag_without_work_items(client: TestClient) -> None:
@@ -730,6 +769,129 @@ def test_priced_snapshot_requires_exact_high_risk_cost_confirmation(client: Test
         assert len(cost_events) == 6
         assert all(item.kind == "estimated" and item.status == "confirmed" for item in cost_events)
         assert sum(item.amount for item in cost_events) == pytest.approx(0.9)
+
+
+def test_snapshot_activation_and_exact_submission_are_separate_and_idempotent(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activate_command = {
+        "command_id": "execution-activate-command-001",
+        "expected_contract_hash": snapshot["contract_hash"],
+    }
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json=activate_command,
+    )
+    replayed_activation = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json=activate_command,
+    )
+    assert activated.status_code == 200
+    assert replayed_activation.json()["id"] == snapshot["id"]
+    assert activated.json()["status"] == "active"
+    assert activated.json()["activated_at"]
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["work_items"] == []
+
+    node_ids = [node["id"] for node in activated.json()["nodes"]]
+    base_submit = {
+        "expected_contract_hash": snapshot["contract_hash"],
+        "expected_estimated_cost": snapshot["estimated_cost"],
+        "expected_currency": snapshot["currency"],
+        "confirm_high_risk_submission": True,
+    }
+    wrong_nodes = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={"command_id": "execution-submit-wrong-nodes", **base_submit, "expected_dag_node_ids": node_ids[:-1]},
+    )
+    assert wrong_nodes.status_code == 409
+    assert wrong_nodes.headers["x-error-code"] == "DAG_NODE_LIST_MISMATCH"
+    wrong_amount = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={"command_id": "execution-submit-wrong-cost1", **base_submit, "expected_estimated_cost": 0.8, "expected_dag_node_ids": node_ids},
+    )
+    assert wrong_amount.status_code == 409
+    assert wrong_amount.headers["x-error-code"] == "SNAPSHOT_COST_MISMATCH"
+
+    submit_command = {"command_id": "execution-submit-command-001", **base_submit, "expected_dag_node_ids": node_ids}
+    submitted = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json=submit_command,
+    )
+    replayed_submit = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json=submit_command,
+    )
+    assert submitted.status_code == 202
+    execution = submitted.json()
+    assert replayed_submit.json()["active_snapshot_id"] == snapshot["id"]
+    assert len(execution["work_items"]) == len(node_ids)
+    assert {item["dag_node_id"] for item in execution["work_items"]} == set(node_ids)
+    assert all(len(item["attempts"]) == 1 for item in execution["work_items"])
+    assert all(item["attempts"][0]["provider_task_id"] is None for item in execution["work_items"])
+    with SessionLocal() as session:
+        assert len(list(session.scalars(select(WorkItem)))) == len(node_ids)
+        assert len(list(session.scalars(select(WorkAttempt)))) == len(node_ids)
+        assert len({item.request_fingerprint for item in session.scalars(select(WorkItem))}) == len(node_ids)
+
+
+def test_mock_worker_obeys_dag_order_and_makes_no_provider_submission(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "worker-activate-command-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "worker-submit-command-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert process_one("test-worker") is True
+    first = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    completed = [item for item in first["work_items"] if item["status"] == "completed"]
+    assert len(completed) == 1
+    assert completed[0]["kind"] == "generate_keyframe"
+    for _ in range(len(activated["nodes"]) - 1):
+        assert process_one("test-worker") is True
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    assert all(item["status"] == "completed" for item in execution["work_items"])
+    assert execution["project_status"] == "quality_review"
+    assert execution["snapshot"]["status"] == "execution_completed"
+    assert all(item["attempts"][0]["provider_task_id"] is None for item in execution["work_items"])
+    assert all(item["attempts"][0]["response_manifest"]["media_created"] is False for item in execution["work_items"])
+    with SessionLocal() as session:
+        cost_events = list(session.scalars(select(CostEvent).where(CostEvent.snapshot_id == snapshot["id"])))
+        assert all(item.kind == "estimated" and item.status == "confirmed" for item in cost_events)
+
+
+def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "blocked-activate-command-1", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "blocked-submit-command-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert process_one("test-worker") is True
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    blocked = [item for item in execution["work_items"] if item["status"] == "blocked"]
+    assert len(blocked) == 1
+    assert blocked[0]["attempts"][0]["error_code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
+    assert len(blocked[0]["attempts"]) == 1
+    assert blocked[0]["attempts"][0]["provider_task_id"] is None
 
 
 def test_system_configuration_publish_is_versioned_and_explicit(client: TestClient) -> None:

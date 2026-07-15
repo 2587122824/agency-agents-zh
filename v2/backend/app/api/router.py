@@ -93,20 +93,26 @@ from ..planning.service import (
     planning_center_view,
 )
 from ..production.contracts import (
+    ActivateProductionSnapshot,
     AnalyzeProductionImpact,
     CreateProductionSnapshot,
     ImpactAnalysisRead,
     LockProductionSnapshot,
+    ProductionExecutionView,
     ProductionPreparationView,
     ProductionSnapshotRead,
+    SubmitProduction,
 )
 from ..production.service import (
     ProductionConflictError,
     ProductionNotFoundError,
+    activate_snapshot,
     analyze_impact,
     create_snapshot,
+    execution_view,
     lock_snapshot,
     preparation_view,
+    submit_production,
 )
 from ..projects.service import (
     ProjectConflictError,
@@ -352,6 +358,53 @@ def production_snapshot_lock(
     except ProductionConflictError as exc:
         session.rollback()
         raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots/{snapshot_id}:activate",
+    response_model=ProductionSnapshotRead,
+)
+def production_snapshot_activate(
+    project_id: str,
+    snapshot_id: str,
+    payload: ActivateProductionSnapshot,
+    session: Session = Depends(get_session),
+):
+    try:
+        return activate_snapshot(session, require_project(session, project_id), snapshot_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots/{snapshot_id}:submit",
+    response_model=ProductionExecutionView,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def production_snapshot_submit(
+    project_id: str,
+    snapshot_id: str,
+    payload: SubmitProduction,
+    session: Session = Depends(get_session),
+):
+    try:
+        return submit_production(session, require_project(session, project_id), snapshot_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.get(
+    "/projects/{project_id}/production-execution",
+    response_model=ProductionExecutionView,
+)
+def production_execution(project_id: str, session: Session = Depends(get_session)):
+    return execution_view(session, require_project(session, project_id))
 
 
 @router.post(

@@ -29,9 +29,17 @@ from ..db.models import (
     SnapshotEntityVersion,
     VideoSpecVersion,
     WorkflowSlotVersion,
+    WorkAttempt,
+    WorkItem,
     utc_now,
 )
-from .contracts import AnalyzeProductionImpact, CreateProductionSnapshot, LockProductionSnapshot
+from .contracts import (
+    ActivateProductionSnapshot,
+    AnalyzeProductionImpact,
+    CreateProductionSnapshot,
+    LockProductionSnapshot,
+    SubmitProduction,
+)
 
 
 class ProductionConflictError(ValueError):
@@ -543,6 +551,205 @@ def lock_snapshot(
     return _snapshot_dict(session, snapshot)
 
 
+def activate_snapshot(
+    session: Session,
+    project: Project,
+    snapshot_id: str,
+    payload: ActivateProductionSnapshot,
+) -> dict:
+    receipt = _receipt(session, project.id, payload.command_id, "production.snapshot.activate")
+    if receipt:
+        row = session.get(ProductionSnapshot, receipt.result_id)
+        if not row:
+            raise ProductionConflictError("COMMAND_RESULT_MISSING", "Snapshot activation result no longer exists.")
+        return _snapshot_dict(session, row)
+    snapshot = session.get(ProductionSnapshot, snapshot_id)
+    if not snapshot or snapshot.project_id != project.id:
+        raise ProductionNotFoundError("Production snapshot not found")
+    if snapshot.status != "locked" or snapshot.cost_status != "confirmed" or not snapshot.locked_at:
+        raise ProductionConflictError("SNAPSHOT_NOT_LOCKED", "Only a locked snapshot with confirmed cost can be activated.")
+    if snapshot.contract_hash != payload.expected_contract_hash:
+        raise ProductionConflictError("SNAPSHOT_CONTRACT_HASH_MISMATCH", "Snapshot contract hash does not match.")
+    if snapshot.execution_blockers:
+        raise ProductionConflictError("SNAPSHOT_HAS_EXECUTION_BLOCKERS", "Snapshot still has execution blockers.")
+    if project.active_snapshot_id and project.active_snapshot_id != snapshot.id:
+        raise ProductionConflictError("PROJECT_HAS_ACTIVE_SNAPSHOT", "The project already has another active snapshot.")
+    if session.scalar(select(WorkItem.id).where(WorkItem.snapshot_id == snapshot.id)):
+        raise ProductionConflictError("SNAPSHOT_ALREADY_SUBMITTED", "This snapshot already has execution work items.")
+
+    now = utc_now()
+    snapshot.status = "active"
+    snapshot.activated_at = now
+    project.active_snapshot_id = snapshot.id
+    project.status = "production_ready"
+    _save_receipt(session, project.id, payload.command_id, "production.snapshot.activate", "production_snapshot", snapshot.id)
+    session.add(ProjectEvent(
+        project_id=project.id,
+        event_type="production.snapshot_activated.v1",
+        message="Production snapshot activated; no work items were created.",
+        data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash},
+    ))
+    session.commit()
+    return _snapshot_dict(session, snapshot)
+
+
+def _execution_manifest(
+    snapshot: ProductionSnapshot,
+    node: DAGNode,
+    workflow: WorkflowSlotVersion | None,
+    provider: ProviderConfigVersion | None,
+) -> dict:
+    return {
+        "schema_version": "production-work-request.v1",
+        "snapshot_id": snapshot.id,
+        "contract_hash": snapshot.contract_hash,
+        "dag_node_id": node.id,
+        "node_key": node.node_key,
+        "kind": node.kind,
+        "input_contract": node.input_contract,
+        "output_contract": node.output_contract,
+        "workflow_slot_version_id": workflow.id if workflow else None,
+        "provider_config_version_id": provider.id if provider else None,
+        "provider_key": provider.provider_key if provider else "local",
+        "adapter_kind": provider.adapter_kind if provider else "local",
+        "provider_workflow_id": workflow.provider_workflow_id if workflow else None,
+    }
+
+
+def submit_production(
+    session: Session,
+    project: Project,
+    snapshot_id: str,
+    payload: SubmitProduction,
+) -> dict:
+    receipt = _receipt(session, project.id, payload.command_id, "production.snapshot.submit")
+    if receipt:
+        row = session.get(ProductionSnapshot, receipt.result_id)
+        if not row:
+            raise ProductionConflictError("COMMAND_RESULT_MISSING", "Production submission result no longer exists.")
+        return execution_view(session, project)
+    snapshot = session.get(ProductionSnapshot, snapshot_id)
+    if not snapshot or snapshot.project_id != project.id:
+        raise ProductionNotFoundError("Production snapshot not found")
+    if project.active_snapshot_id != snapshot.id or snapshot.status != "active" or not snapshot.activated_at:
+        raise ProductionConflictError("SNAPSHOT_NOT_ACTIVE", "Only the project's active snapshot can be submitted.")
+    if snapshot.contract_hash != payload.expected_contract_hash:
+        raise ProductionConflictError("SNAPSHOT_CONTRACT_HASH_MISMATCH", "Snapshot contract hash does not match.")
+    if snapshot.cost_status != "confirmed" or snapshot.estimated_cost is None or not snapshot.currency:
+        raise ProductionConflictError("SNAPSHOT_COST_NOT_CONFIRMED", "Snapshot cost is not confirmed.")
+    if (
+        _money(payload.expected_estimated_cost) != _money(Decimal(str(snapshot.estimated_cost)))
+        or payload.expected_currency != snapshot.currency
+    ):
+        raise ProductionConflictError("SNAPSHOT_COST_MISMATCH", "Submitted amount or currency does not match the locked snapshot.")
+    if not payload.confirm_high_risk_submission:
+        raise ProductionConflictError("HIGH_RISK_SUBMISSION_CONFIRMATION_REQUIRED", "Production submission requires explicit confirmation.")
+
+    nodes = list(session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot.id).order_by(DAGNode.node_key)))
+    actual_ids = [node.id for node in nodes]
+    if len(payload.expected_dag_node_ids) != len(set(payload.expected_dag_node_ids)):
+        raise ProductionConflictError("DAG_NODE_LIST_HAS_DUPLICATES", "Submitted DAG node list contains duplicates.")
+    if set(payload.expected_dag_node_ids) != set(actual_ids) or len(payload.expected_dag_node_ids) != len(actual_ids):
+        raise ProductionConflictError("DAG_NODE_LIST_MISMATCH", "Submitted DAG node list must exactly match the snapshot DAG.")
+    if session.scalar(select(WorkItem.id).where(WorkItem.snapshot_id == snapshot.id)):
+        raise ProductionConflictError("SNAPSHOT_ALREADY_SUBMITTED", "This snapshot already has work items.")
+
+    now = utc_now()
+    for node in nodes:
+        workflow = session.get(WorkflowSlotVersion, node.workflow_slot_version_id) if node.workflow_slot_version_id else None
+        provider = session.get(ProviderConfigVersion, workflow.provider_config_version_id) if workflow else None
+        if node.workflow_slot_version_id and (not workflow or not provider):
+            raise ProductionConflictError("EXECUTION_ROUTE_REFERENCE_MISSING", f"Node {node.node_key} has an unresolved execution route.")
+        manifest = _execution_manifest(snapshot, node, workflow, provider)
+        fingerprint = _hash(manifest)
+        item = WorkItem(
+            project_id=project.id,
+            snapshot_id=snapshot.id,
+            dag_node_id=node.id,
+            kind=node.kind,
+            payload=manifest,
+            status="queued",
+            priority=100,
+            request_fingerprint=fingerprint,
+            available_at=now,
+        )
+        session.add(item)
+        session.flush()
+        attempt = WorkAttempt(
+            work_item_id=item.id,
+            attempt_number=1,
+            trigger="explicit_submission",
+            provider=manifest["provider_key"],
+            request_fingerprint=fingerprint,
+            request_manifest=manifest,
+            state="created",
+        )
+        session.add(attempt)
+        session.flush()
+        item.current_attempt_id = attempt.id
+
+    snapshot.status = "submitted"
+    project.status = "producing"
+    _save_receipt(session, project.id, payload.command_id, "production.snapshot.submit", "production_snapshot", snapshot.id)
+    session.add(ProjectEvent(
+        project_id=project.id,
+        event_type="production.submitted.v1",
+        message="Production DAG submitted after explicit confirmation.",
+        data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash, "dag_node_ids": actual_ids},
+    ))
+    session.commit()
+    return execution_view(session, project)
+
+
+def execution_view(session: Session, project: Project) -> dict:
+    snapshot = session.get(ProductionSnapshot, project.active_snapshot_id) if project.active_snapshot_id else None
+    items = [] if not snapshot else list(session.scalars(select(WorkItem).where(
+        WorkItem.snapshot_id == snapshot.id
+    ).order_by(WorkItem.created_at, WorkItem.id)))
+    attempts = [] if not items else list(session.scalars(select(WorkAttempt).where(
+        WorkAttempt.work_item_id.in_([item.id for item in items])
+    ).order_by(WorkAttempt.work_item_id, WorkAttempt.attempt_number)))
+    attempts_by_item: dict[str, list[dict]] = {}
+    for attempt in attempts:
+        attempts_by_item.setdefault(attempt.work_item_id, []).append({
+            column.name: getattr(attempt, column.name) for column in attempt.__table__.columns
+        })
+    node_by_id = {} if not snapshot else {
+        node.id: node for node in session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot.id))
+    }
+    work_rows = []
+    for item in items:
+        node = node_by_id[item.dag_node_id]
+        work_rows.append({
+            "id": item.id,
+            "project_id": item.project_id,
+            "snapshot_id": item.snapshot_id,
+            "dag_node_id": item.dag_node_id,
+            "node_key": node.node_key,
+            "kind": item.kind,
+            "status": item.status,
+            "error": item.error,
+            "priority": item.priority,
+            "request_fingerprint": item.request_fingerprint,
+            "current_attempt_id": item.current_attempt_id,
+            "available_at": item.available_at,
+            "created_at": item.created_at,
+            "started_at": item.started_at,
+            "finished_at": item.finished_at,
+            "attempts": attempts_by_item.get(item.id, []),
+        })
+    blockers = [{"work_item_id": item.id, "node_key": node_by_id[item.dag_node_id].node_key, "error": item.error}
+                for item in items if item.status == "blocked"]
+    return {
+        "project_id": project.id,
+        "project_status": project.status,
+        "active_snapshot_id": project.active_snapshot_id,
+        "snapshot": _snapshot_dict(session, snapshot) if snapshot else None,
+        "work_items": work_rows,
+        "blockers": blockers,
+    }
+
+
 def preparation_view(session: Session, project: Project) -> dict:
     active_plan = session.scalar(select(PlanVersion).where(
         PlanVersion.project_id == project.id,
@@ -592,6 +799,10 @@ def preparation_view(session: Session, project: Project) -> dict:
         next_action = {"code": "CONFIGURE_PRICING", "label": "发布含价格目录的新配置并创建新快照", "incurs_production_cost": False}
     elif snapshots and snapshots[0].status == "locked":
         next_action = {"code": "ACTIVATE_SNAPSHOT", "label": "确认激活锁定快照", "incurs_production_cost": False}
+    elif snapshots and snapshots[0].status == "active":
+        next_action = {"code": "SUBMIT_PRODUCTION", "label": "确认完整 DAG 并提交生产", "incurs_production_cost": True}
+    elif snapshots and snapshots[0].status == "submitted":
+        next_action = {"code": "VIEW_PRODUCTION", "label": "查看生产执行", "incurs_production_cost": False}
     else:
         next_action = {"code": "ANALYZE_PRODUCTION_IMPACT", "label": "选择精确配置并分析生产影响", "incurs_production_cost": False}
     return {

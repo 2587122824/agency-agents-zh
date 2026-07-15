@@ -6,7 +6,10 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
-ProjectStatus = Literal["draft", "confirmed", "queued", "in_progress", "review_required", "blocked", "completed"]
+ProjectStatus = Literal[
+    "draft", "confirmed", "queued", "in_progress", "review_required", "blocked", "completed",
+    "contract_ready", "production_ready", "producing", "quality_review",
+]
 DecisionStatus = Literal["pending", "resolved"]
 AudioMode = Literal["off", "voiceover"]
 
@@ -54,10 +57,17 @@ class WorkItemRead(BaseModel):
 
     id: str
     project_id: str
+    snapshot_id: str | None
+    dag_node_id: str | None
     kind: str
     payload: dict
     status: str
     error: str | None
+    priority: int
+    request_fingerprint: str | None
+    current_attempt_id: str | None
+    available_at: datetime
+    row_version: int
     created_at: datetime
     started_at: datetime | None
     finished_at: datetime | None

@@ -6,6 +6,10 @@ export type ProjectStatus =
   | 'review_required'
   | 'blocked'
   | 'completed'
+  | 'contract_ready'
+  | 'production_ready'
+  | 'producing'
+  | 'quality_review'
 
 export interface ProjectCreate {
   title: string
@@ -286,9 +290,59 @@ export interface ProductionSnapshot {
   created_by: string
   created_at: string
   locked_at: string | null
+  activated_at: string | null
   entity_versions: Array<{ entity_version_id: string; role: string }>
   nodes: Array<{ id: string; node_key: string; kind: string; shot_id: string | null; workflow_slot_version_id: string | null; pricing_rule_id: string | null; pricing_quantity: number | null; pricing_unit: string | null; estimated_cost: number | null; currency: string | null; input_contract: Record<string, unknown>; output_contract: Record<string, unknown> }>
   edges: Array<{ id: string; parent_node_id: string; child_node_id: string; dependency_type: string; input_slot: string | null }>
+}
+
+export interface WorkAttempt {
+  id: string
+  work_item_id: string
+  attempt_number: number
+  trigger: string
+  provider: string
+  provider_task_id: string | null
+  request_fingerprint: string
+  request_manifest: Record<string, unknown>
+  response_manifest: Record<string, unknown> | null
+  state: string
+  execution_lock_owner: string | null
+  execution_lock_expires_at: string | null
+  submitted_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  error_code: string | null
+  error_detail: string | null
+  created_at: string
+}
+
+export interface ExecutionWorkItem {
+  id: string
+  project_id: string
+  snapshot_id: string
+  dag_node_id: string
+  node_key: string
+  kind: string
+  status: string
+  error: string | null
+  priority: number
+  request_fingerprint: string
+  current_attempt_id: string
+  available_at: string
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+  attempts: WorkAttempt[]
+}
+
+export interface ProductionExecution {
+  project_id: string
+  project_status: string
+  active_snapshot_id: string | null
+  snapshot: ProductionSnapshot | null
+  work_items: ExecutionWorkItem[]
+  blockers: Array<{ work_item_id: string; node_key: string; error: string }>
 }
 
 export interface ProductionPreparation {

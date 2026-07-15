@@ -995,13 +995,13 @@ def _semantic_components(session: Session, config_id: str) -> dict[tuple[str, st
             workflow_id = details.pop("tts_workflow_slot_version_id", None)
             details["tts_workflow_slot_key"] = keys_by_type["workflow_slot"].get(workflow_id)
         if item["component_type"] == "pricing_catalog":
-            details["rules"] = [{
+            details["rules"] = sorted([{
                 "workflow_slot_key": keys_by_type["workflow_slot"].get(rule["workflow_slot_version_id"]),
                 "operation_kind": rule["operation_kind"],
                 "unit": rule["unit"],
                 "unit_price": rule["unit_price"],
                 "minimum_charge": rule["minimum_charge"],
-            } for rule in details["rules"]]
+            } for rule in details["rules"]], key=lambda rule: (rule["workflow_slot_key"] or "", rule["operation_kind"]))
         identity = (item["component_type"], item["key"])
         semantic[identity] = {
             "component_type": item["component_type"],

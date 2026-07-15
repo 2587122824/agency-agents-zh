@@ -27,6 +27,7 @@ class Project(Base):
     aspect_ratio: Mapped[str] = mapped_column(String(16))
     audio_mode: Mapped[str] = mapped_column(String(24))
     status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
+    active_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("production_snapshots.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
@@ -55,18 +56,54 @@ class Decision(Base):
 
 class WorkItem(Base):
     __tablename__ = "work_items"
+    __table_args__ = (UniqueConstraint("snapshot_id", "dag_node_id"),)
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("work"))
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("production_snapshots.id"), nullable=True, index=True)
+    dag_node_id: Mapped[str | None] = mapped_column(ForeignKey("dag_nodes.id"), nullable=True, index=True)
     kind: Mapped[str] = mapped_column(String(80))
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(24), default="queued", index=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    priority: Mapped[int] = mapped_column(Integer, default=100)
+    request_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    current_attempt_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="work_items")
+
+
+class WorkAttempt(Base):
+    __tablename__ = "work_attempts"
+    __table_args__ = (
+        UniqueConstraint("work_item_id", "attempt_number"),
+        UniqueConstraint("provider", "provider_task_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("attempt"))
+    work_item_id: Mapped[str] = mapped_column(ForeignKey("work_items.id"), index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    trigger: Mapped[str] = mapped_column(String(32))
+    provider: Mapped[str] = mapped_column(String(120))
+    provider_task_id: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    request_manifest: Mapped[dict] = mapped_column(JSON)
+    response_manifest: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    state: Mapped[str] = mapped_column(String(32), default="created", index=True)
+    execution_lock_owner: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    execution_lock_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class ProjectEvent(Base):
@@ -371,6 +408,7 @@ class ProductionSnapshot(Base):
     created_by: Mapped[str] = mapped_column(String(48), default="local-user")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class SnapshotEntityVersion(Base):
