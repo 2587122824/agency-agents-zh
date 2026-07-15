@@ -1,7 +1,7 @@
 # 片场 V2 数据模型设计
 
 > 状态：设计基线
-> 版本：0.1
+> 版本：0.2
 > 更新日期：2026-07-15
 > 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
 > 配套文档：[V2 状态机与事件系统设计](./V2_STATE_MACHINE_EVENT_SYSTEM.md)
@@ -236,14 +236,147 @@ SnapshotEntityVersion
 ```text
 id
 version_number
+status: draft | validating | validation_failed | ready | published | retired
+display_name
+supersedes_version_id nullable
+row_version
 video_spec_json
 audio_policy_json
 provider_slot_bindings_json
+model_registry_version
+provider_registry_version
 workflow_registry_version
+storage_policy_version_id
+quality_policy_version_id
+execution_policy_version_id
+pricing_catalog_version_id
+config_hash
+created_by
+published_at nullable
 created_at
 ```
 
 生产配置版本不保存密钥。快照通过 `system_config_version_id` 精确绑定配置；运行时凭据只由后端密钥存储按已选供应商注入，不能改变供应商、模型或工作流选择。
+
+`published` 版本不可修改。编辑已发布配置时复制为新 `draft`，验证和发布后形成新的 `id + version_number`。`config_hash` 用于验证组件集合未被篡改，不能代替各组件的精确外键。
+
+#### 7.3.1 ModelConfigVersion
+
+```text
+id
+config_key / version_number / display_name
+agent_role: creative | director | qc | editor
+provider_config_version_id / provider_model_id
+input_contract_version / output_schema_version / prompt_contract_version
+context_window nullable / max_output_tokens nullable
+sampling_json / capability_tags_json
+status: draft | published | retired
+created_at / published_at
+```
+
+唯一约束：`(config_key, version_number)`。AgentRun 保存 `model_config_version_id`；仅保存供应商和模型名称不足以承担版本审计。
+
+#### 7.3.2 ProviderConfigVersion
+
+```text
+id
+provider_key / version_number / display_name
+adapter_kind / region nullable / base_url
+credential_ref
+capabilities_json
+request_timeout_seconds / poll_interval_seconds / max_concurrency
+status: draft | published | retired
+created_at / published_at
+```
+
+`credential_ref` 指向后端密钥存储，不使用数据库外键，不返回前端原文。供应商配置不包含备用供应商、自动降级顺序或错误改路由规则。
+
+#### 7.3.3 WorkflowSlotVersion
+
+```text
+id
+slot_key / version_number / display_name / operation_kind
+provider_config_version_id
+provider_workflow_id / provider_workflow_version nullable
+model_config_version_id nullable
+input_schema_version / output_schema_version
+node_info_list_json
+supported_video_spec_ids_json / capability_tags_json
+validation_status / validation_report_json / tested_at nullable
+status: draft | published | retired
+created_at / published_at
+```
+
+唯一约束：`(slot_key, version_number)`。`node_info_list_json` 每项必须包含节点 ID、字段路径、值来源、值类型和是否必填。发布验证要求所有必填输入有且只有一个来源，输出合同可解析，引用的供应商、模型和视频规格均为已发布版本。
+
+#### 7.3.4 Media And Runtime Policies
+
+```text
+VideoSpecVersion
+  id / spec_key / version_number / status
+  width / height / aspect_ratio / fps
+  duration_min_seconds / duration_max_seconds / frame_count_rule_json
+  container / video_codec / pixel_format / bitrate_policy_json / safe_crop_json
+
+AudioConfigVersion
+  id / config_key / version_number / status
+  supported_modes_json / tts_workflow_slot_version_id nullable
+  default_voice_entity_version_id nullable
+  sample_rate / channels / format
+  speaking_rate_range_json / loudness_target nullable
+  temporary_upload_policy_version_id nullable
+
+StoragePolicyVersion
+  id / policy_key / version_number / status
+  backend_kind: local | oss
+  region_ref nullable / bucket_ref nullable / credential_ref nullable
+  allowed_mime_types_json / max_file_size_bytes
+  public_url_policy / lifecycle_days nullable / local_root_ref nullable
+
+QualityPolicyVersion
+  id / policy_key / version_number / status
+  deterministic_checks_json / review_checks_json
+  motion_thresholds_json / face_visibility_rules_json / result_mapping_json
+
+ExecutionPolicyVersion
+  id / policy_key / version_number / status
+  worker_concurrency / lease_seconds / submit_timeout_seconds
+  poll_interval_seconds / reconciliation_window_seconds
+
+PricingCatalogVersion
+  id / catalog_key / version_number / status / currency
+  effective_from / effective_to nullable
+```
+
+执行策略不包含自动付费重试次数、备用工作流或供应商降级字段。价格明细使用独立 `PricingRule`：
+
+```text
+id
+pricing_catalog_version_id
+provider_config_version_id
+operation_kind
+workflow_slot_version_id nullable
+unit / unit_price / minimum_charge nullable
+```
+
+#### 7.3.5 配置引用
+
+```text
+ProductionConfigComponent
+  production_config_version_id
+  component_type
+  component_version_id
+
+ConfigurationReference
+  production_config_version_id
+  ref_type: project | plan | snapshot | work_attempt
+  ref_id
+  created_at
+```
+
+`ProductionConfigComponent` 使用 `(production_config_version_id, component_type, component_version_id)` 复合唯一约束。实现可以保留聚合 JSON 作为读取优化，但 JSON 不能取代精确组件引用。
+
+配置删除前必须查询 `ConfigurationReference`。存在历史快照、工作尝试或成本记录时只允许 `retired`，禁止物理删除。
 
 ### 7.4 Template 与 TemplateVersion
 
@@ -520,6 +653,7 @@ QualityRepository
 TimelineRepository
 EventRepository
 CostRepository
+ConfigurationRepository
 ```
 
 规则：
@@ -556,6 +690,11 @@ asset(project_id, snapshot_id, state)
 qc_report(asset_id, status)
 event(project_id, sequence)
 cost_event(project_id, snapshot_id, occurred_at)
+production_config_version(status, version_number)
+model_config_version(config_key, version_number)
+provider_config_version(provider_key, version_number)
+workflow_slot_version(slot_key, version_number)
+configuration_reference(production_config_version_id, ref_type)
 ```
 
 所有 Schema 变化通过 Alembic：先增加可兼容字段和回填脚本，再启用非空/唯一约束。禁止在应用启动时临时修改表结构或用默认对象掩盖迁移失败。

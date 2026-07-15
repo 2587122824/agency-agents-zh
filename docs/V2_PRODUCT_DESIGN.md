@@ -1,7 +1,7 @@
 # 片场 V2 产品设计文档
 
 > 状态：框架阶段
-> 版本：0.2
+> 版本：0.3
 > 更新日期：2026-07-15
 > 产品原型：<http://127.0.0.1:8765/prototype-v2/>
 > V2 应用骨架：<http://127.0.0.1:8766/>
@@ -750,3 +750,176 @@ v2\start_v2.bat -NoBrowser
 - Pydantic Schema、数据库迁移和自动化测试是实现证据；实现与文档冲突时先停止开发并更新设计，不静默兼容。
 
 项目状态以状态机文档为准，实体字段以数据模型文档为准。本文中的简化示例不得覆盖专项文档中的完整约束。
+
+## 30. 系统配置设计
+
+### 30.1 目标与边界
+
+系统配置负责声明 V2 可以使用哪些模型、供应商、工作流和媒体规格，以及这些能力如何被生产快照精确引用。它不负责替用户选择创作内容，也不能在运行时根据错误自动改变路由。
+
+系统配置遵循以下原则：
+
+- 配置先形成草稿，通过确定性验证后才能发布为不可变版本。
+- 项目和生产快照只引用已发布的精确配置版本，不读取“当前页面最新值”。
+- 发布新配置不修改已有 RequirementVersion、PlanVersion、ProductionSnapshot、WorkItem 或素材。
+- 供应商、模型、工作流或输出规格发生变化时，必须创建新配置版本；需要重做时再由用户确认新的影响范围和费用。
+- 密钥、令牌和签名材料只保存于后端密钥存储；配置记录只保存 `credential_ref`。
+- 未配置、已停用、能力不匹配或凭据不可用时明确阻断，不切换供应商、模型、工作流或输出格式。
+
+### 30.2 配置模块
+
+| 模块 | 用户可管理内容 | 关键约束 |
+|---|---|---|
+| 模型注册表 | 模型用途、供应商模型 ID、上下文限制、输入输出 Schema、Prompt 合同版本、启用状态 | 一个 AgentRun 必须记录精确模型配置版本；不允许自动切换模型 |
+| 供应商注册表 | 适配器类型、区域、API 地址、能力声明、凭据引用、请求超时、轮询策略、并发上限 | 凭据不返回前端；适配器不参与路由决策 |
+| 工作流槽位 | 稳定槽位键、媒体类型、供应商、工作流 ID/版本、模型绑定、NodeInfoList、输入输出合同 | 槽位必须显式选择并完整验证；缺失或不匹配时阻断 |
+| 视频规格 | 宽高、画幅、FPS、时长范围、帧数规则、编码器、码率、容器、安全裁切区域 | 所有视觉工作流输出必须归一到快照冻结的视频规格 |
+| 音频配置 | 音频模式、TTS 槽位、模型、系统音色与复刻音色选择范围、采样率、格式、语速和响度范围 | 项目音频关闭时不创建任何 TTS、音频注入或字幕音频依赖 |
+| 存储与临时上传 | 本地或 OSS 后端、Bucket/区域引用、允许 MIME、文件上限、公网 URL 策略、生命周期 | 访问密钥仅后端持有；临时对象按明确生命周期删除 |
+| 质量策略 | 文件完整性、尺寸、人脸、OCR、身份相似度、重复度、动态阈值及适用镜头类型 | 主观或概率性问题进入 `review_required`，不触发自动付费重试 |
+| 执行策略 | Worker 并发、租约、轮询间隔、提交超时、对账窗口 | 不提供自动付费重试、路由替换或降级开关 |
+| 成本目录 | 币种、供应商操作、估算单价、生效时间和费用确认阈值 | 预计、实际、扣费和退款分开记录，不从日志猜费用 |
+
+### 30.3 模型配置
+
+每个模型配置至少展示：
+
+```text
+config_key / display_name
+agent_role: creative | director | qc | editor
+provider_config_version_id
+provider_model_id
+input_contract_version / output_schema_version
+prompt_contract_version
+context_window / max_output_tokens
+capability_tags[]
+status
+```
+
+`temperature`、采样参数或结构化输出模式若允许配置，也必须进入模型配置版本和 AgentRun 审计。模型配置不能包含“失败时改用其他模型”字段。
+
+### 30.4 供应商与工作流槽位
+
+供应商配置声明能力和连接边界；工作流槽位声明一次具体生产调用的合同。二者分开管理，避免把业务槽位直接等同于供应商接口。
+
+工作流槽位至少包括：
+
+```text
+slot_key / display_name
+operation_kind
+provider_config_version_id
+provider_workflow_id / provider_workflow_version
+model_config_version_id nullable
+input_schema_version / output_schema_version
+node_info_list_json
+supported_video_spec_ids[]
+capability_tags[]
+validation_status / tested_at
+status
+```
+
+`slot_key` 是计划和 DAG 使用的稳定语义 ID，例如首帧视频、多帧视频、图片生成或语音合成。供应商工作流 ID、节点映射或模型发生变化时创建新槽位版本，不覆盖已发布版本。
+
+NodeInfoList 必须逐项记录节点 ID、字段路径、值来源和类型。编译器只能使用已登记映射；不得根据节点名称、提示词或历史配置猜测缺失字段。
+
+### 30.5 视频与音频规格
+
+视频规格至少定义：
+
+```text
+width / height / aspect_ratio
+fps
+duration_min_seconds / duration_max_seconds
+frame_count_rule
+container / video_codec / pixel_format
+bitrate_policy
+safe_crop_json
+```
+
+音频配置至少定义：
+
+```text
+supported_modes[]
+tts_workflow_slot_id nullable
+default_voice_entity_version_id nullable
+sample_rate / channels / format
+speaking_rate_min / speaking_rate_max
+loudness_target
+temporary_upload_policy_id nullable
+```
+
+默认音色只有在声明、可见、带版本且允许低风险默认时才能物化。复刻声音必须是用户明确确认的 `voice_sample` 绑定和声音实体版本，上传成功不能自动选中。
+
+### 30.6 配置管理体验
+
+系统配置页面包含以下视图：
+
+1. 配置版本列表：显示草稿、验证失败、可发布、已发布和已停用版本。
+2. 配置编辑器：按模块编辑草稿，显示字段来源、引用对象和确定性校验错误。
+3. 版本差异：展示供应商、模型、工作流节点、媒体规格、质量阈值和成本变化。
+4. 引用关系：展示哪些项目、方案和生产快照仍引用该版本。
+5. 发布确认：列出影响范围；发布本身不创建项目快照、不启动 Worker，也不产生供应商费用。
+
+已发布版本只读。被任何历史快照引用的版本不能删除，只能停用；停用仅阻止新快照选择，不影响历史审计和已提交供应商任务的对账。
+
+### 30.7 配置确认等级
+
+| 变化 | 确认要求 |
+|---|---|
+| 展示名称、说明文字 | 普通保存草稿 |
+| 非付费运行参数、质量审核阈值 | 发布前显示差异并确认 |
+| 模型、供应商、工作流 ID、NodeInfoList、视频或音频规格 | 强确认并创建新配置版本 |
+| 凭据引用、区域、成本规则 | 管理员确认；前端不显示密钥原文 |
+| 已有项目改用新配置 | 单独执行影响分析，确认新快照和预计费用 |
+
+任何配置确认都不等于确认生产。生产仍要求项目合同、快照、工作项和费用边界分别成立。
+
+### 30.8 首期实施范围
+
+系统配置首期按以下顺序实现：
+
+1. ProductionConfigVersion 与配置发布状态机。
+2. 模型、供应商和工作流槽位注册表。
+3. 视频规格、音频配置和存储策略。
+4. 快照绑定、引用检查与配置差异。
+5. 质量策略、执行策略和成本目录。
+
+在注册表与版本合同完成前，不接入真实生产 Provider Adapter，也不把 V1 管理台 JSON 直接作为 V2 权威配置。
+
+### 30.9 配置 API 边界
+
+命令使用显式动作并携带 `command_id`、`expected_row_version` 和操作者：
+
+```text
+POST /api/v1/system-config/versions
+POST /api/v1/system-config/versions/{id}:validate
+POST /api/v1/system-config/versions/{id}:publish
+POST /api/v1/system-config/versions/{id}:retire
+POST /api/v1/system-config/versions/{id}:clone-draft
+POST /api/v1/system-config/versions/{id}:evaluate-impact
+```
+
+查询接口：
+
+```text
+GET /api/v1/system-config/versions
+GET /api/v1/system-config/versions/{id}
+GET /api/v1/system-config/versions/{id}/diff?base_version_id=...
+GET /api/v1/system-config/versions/{id}/references
+GET /api/v1/system-config/components/{component_type}
+GET /api/v1/system-config/workflow-slots/{slot_key}/versions
+```
+
+组件草稿写入必须使用类型化 Schema，不提供接收任意 JSON 并直接发布的通用接口。凭据写入使用独立后端秘密管理边界，所有读取响应只返回引用 ID、掩码状态和验证时间。
+
+### 30.10 验收标准
+
+- 任意发布版本都能列出全部精确组件版本和配置哈希。
+- 修改已发布字段只能产生新草稿，不原地更新。
+- 工作流节点映射不完整时发布失败并列出节点与字段。
+- 发布和停用不修改现有生产快照。
+- 被引用版本不能删除，引用项目和快照可以查询。
+- API、事件和前端均不返回供应商密钥原文。
+- 音频关闭的快照不包含 TTS 工作项。
+- 配置错误不会触发模型、供应商、工作流或输出格式替换。
+- 发布配置不会调用生产供应商或产生生产费用。

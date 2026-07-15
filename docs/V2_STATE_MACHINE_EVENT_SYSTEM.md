@@ -1,7 +1,7 @@
 # 片场 V2 状态机与事件系统设计
 
 > 状态：设计基线
-> 版本：0.1
+> 版本：0.2
 > 更新日期：2026-07-15
 > 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
 > 配套文档：[V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md)
@@ -451,3 +451,112 @@ SSE 只读取已提交事件。状态更新成功但事件缺失、或事件存�
 - 失败不会自动创建新工作尝试。
 - 取消后结果可审计，但不能推进项目。
 - 每个状态转移都有对应持久事件，重复消费无副作用。
+
+## 17. 系统配置状态机
+
+### 17.1 配置版本状态
+
+```text
+draft
+validating
+validation_failed
+ready
+published
+retired
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> validating: ValidateConfiguration
+    validating --> validation_failed: ConfigurationInvalid
+    validation_failed --> draft: ReviseConfigurationDraft
+    validating --> ready: ConfigurationValidated
+    ready --> draft: ReviseConfigurationDraft
+    ready --> published: PublishConfiguration
+    published --> retired: RetireConfiguration
+```
+
+`published` 和 `retired` 均不可编辑。修改已发布配置必须创建新草稿版本；`retired` 只禁止新快照选择，不使历史快照、工作尝试、素材或成本记录失效。
+
+### 17.2 转移守卫
+
+| 当前状态 | 命令 | 责任方 | 守卫 | 目标状态 | 事件 |
+|---|---|---|---|---|---|
+| `draft` | `ValidateConfiguration` | user/admin | 草稿 `row_version` 匹配 | `validating` | `configuration.validation_started.v1` |
+| `validating` | `ConfigurationInvalid` | system | 存在确定性字段或引用错误 | `validation_failed` | `configuration.validation_failed.v1` |
+| `validating` | `ConfigurationValidated` | system | 全部确定性守卫通过 | `ready` | `configuration.validated.v1` |
+| `validation_failed` | `ReviseConfigurationDraft` | user/admin | 提交明确字段修改 | `draft` | `configuration.draft_revised.v1` |
+| `ready` | `PublishConfiguration` | user/admin | 差异已展示；强确认字段已确认 | `published` | `configuration.published.v1` |
+| `published` | `RetireConfiguration` | user/admin | 已展示引用范围 | `retired` | `configuration.retired.v1` |
+
+发布验证至少包括：
+
+- 所有组件引用精确存在且处于可发布或已发布状态。
+- 模型用途、输入合同、输出 Schema 和 Agent 角色兼容。
+- 供应商能力覆盖工作流槽位声明的操作类型。
+- 工作流 NodeInfoList 的必填节点、字段路径、值来源和类型完整且无重复绑定。
+- 视频规格与工作流输出尺寸、画幅、FPS 和帧数能力兼容。
+- 音频关闭策略不会产生 TTS、音频注入或字幕音频依赖。
+- OSS 或其他外部存储只保存可解析的凭据引用，不保存密钥原文。
+- QC 结果映射只能产生 `passed`、`review_required` 或 `blocked`，不能配置自动重试。
+- 执行策略不存在备用供应商、备用工作流、自动付费重试或输出修复规则。
+- 成本目录的币种、单位和生效时间明确，不使用猜测价格。
+
+### 17.3 发布与项目影响
+
+发布配置只产生一个新的可选权威版本，不执行以下动作：
+
+- 不修改项目当前需求、方案或决策。
+- 不替换活动 ProductionSnapshot 的 `system_config_version_id`。
+- 不取消、重提或迁移已有 WorkItem 和 WorkAttempt。
+- 不调用供应商，不产生模型或生产费用。
+- 不使旧配置生成的素材自动过期。
+
+项目希望采用新配置时必须执行配置影响分析，展示变化的模型、供应商、工作流、媒体规格、预计调用和费用。用户确认后创建新的 ProductionSnapshot；已有快照保持不可变。
+
+### 17.4 运行时配置错误
+
+发布时验证成功不代表运行时外部条件永远有效。凭据过期、供应商工作流被删除、区域不可达或供应商能力变化时：
+
+1. 当前 WorkAttempt 记录真实错误并进入 `blocked` 或 `reconciliation_required`。
+2. 项目显示责任模块、配置版本、供应商槽位和原始错误摘要。
+3. 系统不尝试其他凭据、模型、供应商、工作流、输出格式或本地替代路径。
+4. 管理员修复配置时创建并发布新版本。
+5. 项目是否改用新版本必须由用户执行影响确认和新快照命令。
+
+### 17.5 并发与引用
+
+- 配置草稿写命令携带 `command_id` 和 `expected_row_version`。
+- 同一 `command_id` 重放返回第一次结果，不重复验证或发布。
+- 发布使用唯一约束保证同一个配置集合版本只发布一次。
+- 快照创建事务读取已发布配置并写入精确组件引用；发布状态在事务内变化时返回版本冲突。
+- 被引用配置不能删除。停用和引用检查必须在同一事务中写入持久事件。
+
+### 17.6 配置事件
+
+```text
+configuration.draft_created.v1
+configuration.draft_revised.v1
+configuration.validation_started.v1
+configuration.validation_failed.v1
+configuration.validated.v1
+configuration.published.v1
+configuration.retired.v1
+configuration.impact_evaluated.v1
+snapshot.configuration_selected.v1
+configuration.runtime_blocked.v1
+```
+
+事件保存配置版本 ID、组件版本 ID、操作者、关联命令和必要差异摘要，不保存密钥、完整请求头、NodeInfoList 中的秘密值或供应商令牌。
+
+### 17.7 配置验收
+
+- 草稿存在无效组件引用时不能发布，并返回逐字段错误。
+- 工作流缺少必填 NodeInfoList 映射时明确失败，不从其他版本复制。
+- 发布新版本不改变已有快照的配置 ID。
+- 停用被历史快照引用的版本后，历史任务仍可审计和对账。
+- 音频关闭配置编译出的 DAG 不包含 TTS 节点。
+- 运行时凭据失败不触发供应商、模型或工作流切换。
+- 配置发布不创建 WorkItem、不调用供应商、不记录生产费用。
+- 项目采用新配置前必须展示影响范围并创建新快照。

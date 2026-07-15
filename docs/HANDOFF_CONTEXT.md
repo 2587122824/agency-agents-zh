@@ -2,6 +2,14 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 System Configuration Design Baseline
+
+- Expanded `docs/V2_PRODUCT_DESIGN.md` to v0.3 with a complete system-configuration product contract instead of creating another design document. It now defines configuration goals, nine configuration modules, model/provider/workflow-slot fields, NodeInfoList ownership, video/audio policies, management UX, confirmation levels, implementation order, API boundaries, and acceptance criteria.
+- Expanded `docs/V2_DATA_MODEL_DESIGN.md` to v0.2 with versioned ProductionConfig, ModelConfig, ProviderConfig, WorkflowSlot, VideoSpec, AudioConfig, StoragePolicy, QualityPolicy, ExecutionPolicy, PricingCatalog, PricingRule, component-reference, and configuration-reference contracts. Secret values remain outside the database and snapshots.
+- Expanded `docs/V2_STATE_MACHINE_EVENT_SYSTEM.md` to v0.2 with the configuration `draft -> validating -> ready -> published -> retired` lifecycle, transition guards, publication impact semantics, runtime configuration failure behavior, concurrency, events, and acceptance tests.
+- Publishing or retiring configuration never mutates an existing project or ProductionSnapshot, creates WorkItems, calls a provider, or incurs production cost. Adopting a new configuration requires explicit impact analysis and a new snapshot.
+- No automatic paid retry, provider/model/workflow substitution, output repair, hidden default, or fallback setting was introduced. Missing or invalid configuration blocks with exact errors.
+
 ## 2026-07-15 V2 Creation Center Sprint 2
 
 - Added a deterministic `RequirementCompletenessEvaluator` for the current blocking fields: core topic, duration, aspect ratio, and audio mode. It validates both value presence and allowed provenance; optional fields remain unspecified and never create questions.
