@@ -5555,6 +5555,7 @@ class SemanticInputContractTests(unittest.TestCase):
                     {"nodeId": "436", "fieldName": "value", "fieldValue": 16},
                     {"nodeId": "412", "fieldName": "value", "fieldValue": "{{fps}}"},
                     {"nodeId": "426", "fieldName": "frame_count", "fieldValue": "{{frame_count}}"},
+                    {"nodeId": "426", "fieldName": "keep_model_loaded", "fieldValue": True},
                     {"nodeId": "413", "fieldName": "filename_prefix", "fieldValue": "three-frame"},
                 ]
             ),
@@ -5572,11 +5573,13 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertEqual(row_values[("373", "frame_rate")], "{{fps}}")
         self.assertEqual(row_values[("413", "frame_rate")], "{{fps}}")
         self.assertNotIn(("426", "frame_count"), row_values)
+        self.assertIs(row_values[("426", "keep_model_loaded")], False)
 
     def test_three_frame_frontend_drops_qwenvl_frame_count_override(self) -> None:
         source = Path(web_app.__file__).read_text(encoding="utf-8")
         self.assertIn("String(item.nodeId ?? '') === '426'", source)
         self.assertIn("String(item.fieldName ?? '') === 'frame_count'", source)
+        self.assertIn("fieldName === 'keep_model_loaded') return { ...item, fieldValue: false }", source)
 
     def test_adapter_treats_207173_as_first_frame_endpoint(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(

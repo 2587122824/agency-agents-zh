@@ -1881,6 +1881,10 @@ class CloudComfyUIAdapter:
                     row["fieldName"] = "preset_prompt"
                     row["fieldValue"] = "Describe this image in detail."
                     changed = True
+                elif node_id == "426" and field_name == "keep_model_loaded" and row.get("fieldValue") is not False:
+                    row = dict(row)
+                    row["fieldValue"] = False
+                    changed = True
                 elif node_id == "412" and field_name == "value" and str(row.get("fieldValue") or "") != "{{fps}}":
                     row = dict(row)
                     row["fieldValue"] = "{{fps}}"
@@ -1895,6 +1899,14 @@ class CloudComfyUIAdapter:
                 if (node_id, field_name) in seen_three_frame_parameter_rows:
                     continue
                 repaired.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": field_value})
+                changed = True
+            if not any(
+                isinstance(row, dict)
+                and str(row.get("nodeId") or "") == "426"
+                and str(row.get("fieldName") or "") == "keep_model_loaded"
+                for row in repaired
+            ):
+                repaired.append({"nodeId": "426", "fieldName": "keep_model_loaded", "fieldValue": False})
                 changed = True
         if changed and (
             endpoint_text.endswith("/2069402773254397953")

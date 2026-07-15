@@ -7420,6 +7420,7 @@ INDEX_HTML = r"""<!doctype html>
             if (nodeId === '449' && fieldName === 'image') return { ...item, fieldValue: '{{input_last_frame}}' };
             if (nodeId === '426' && fieldName === 'seed') return { ...item, fieldName: 'preset_prompt', fieldValue: 'Describe this image in detail.' };
             if (nodeId === '426' && fieldName === 'preset_prompt') return { ...item, fieldValue: 'Describe this image in detail.' };
+            if (nodeId === '426' && fieldName === 'keep_model_loaded') return { ...item, fieldValue: false };
             return item;
           });
           const hasRow = (nodeId, fieldName) => normalized.some(item => (
@@ -7431,6 +7432,7 @@ INDEX_HTML = r"""<!doctype html>
           if (!hasRow('448', 'image')) normalized.unshift({ nodeId: '448', fieldName: 'image', fieldValue: '{{input_middle_frame}}' });
           if (!hasRow('449', 'image')) normalized.unshift({ nodeId: '449', fieldName: 'image', fieldValue: '{{input_last_frame}}' });
           if (!hasRow('426', 'preset_prompt')) normalized.push({ nodeId: '426', fieldName: 'preset_prompt', fieldValue: 'Describe this image in detail.' });
+          if (!hasRow('426', 'keep_model_loaded')) normalized.push({ nodeId: '426', fieldName: 'keep_model_loaded', fieldValue: false });
           return JSON.stringify(normalized, null, 2);
         } catch {
           return text;

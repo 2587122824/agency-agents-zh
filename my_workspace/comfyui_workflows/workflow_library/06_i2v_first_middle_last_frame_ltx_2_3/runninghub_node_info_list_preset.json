@@ -114,6 +114,12 @@
     "description": "QwenVL preset prompt enum value"
   },
   {
+    "nodeId": "426",
+    "fieldName": "keep_model_loaded",
+    "fieldValue": false,
+    "description": "release QwenVL before LTX text encoding to reduce peak VRAM"
+  },
+  {
     "nodeId": "362",
     "fieldName": "noise_seed",
     "fieldValue": "{{seed}}",

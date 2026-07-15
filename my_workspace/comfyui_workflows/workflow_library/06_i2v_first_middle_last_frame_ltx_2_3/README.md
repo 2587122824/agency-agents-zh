@@ -20,6 +20,7 @@ It does not replace 06B first/last-frame generation.
 - `{{fps}}` is sent to `412.value`, `373.frame_rate`, and `413.frame_rate`.
 - `{{frame_count}}` is calculated from duration x FPS and sent to `424.length` and `373.frames_number`.
 - Do not send `{{frame_count}}` to `426.frame_count`. Node 426 is `Allab_QwenVL_Advanced`; its sampling control is capped at 64 and is not the generated clip length.
+- Set `426.keep_model_loaded=false` so the FP16 QwenVL model is released before LTX `CLIPTextEncode`; retaining it caused a subsequent 735 MiB VRAM allocation to fail on the published RunningHub machine.
 - Runtime configuration repair keeps these six rows parameterized when a full RunningHub node list is imported; it does not change any other workflow slot.
 
 ## Current Wiring
