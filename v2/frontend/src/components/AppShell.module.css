@@ -1,0 +1,14 @@
+.shell { min-height: 100vh; display: grid; grid-template-columns: 224px minmax(0, 1fr); background: #f5f6f3; }
+.sidebar { position: sticky; top: 0; height: 100vh; padding: 20px 14px; background: #fbfbf9; border-right: 1px solid #e0e2dd; display: flex; flex-direction: column; }
+.brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 24px; }
+.brand > span { width: 34px; height: 34px; border-radius: 7px; display: grid; place-items: center; color: white; background: #191c20; }
+.brand > div { display: grid; }.brand strong { font-size: 17px; }.brand small { color: #85898d; font-size: 10px; }
+.sidebar nav { display: grid; gap: 3px; }
+.sidebar nav p { margin: 17px 10px 5px; color: #969a9d; font-size: 10px; font-weight: 700; }
+.sidebar nav a { height: 38px; padding: 0 10px; border-radius: 6px; display: flex; align-items: center; gap: 9px; color: #5d6267; text-decoration: none; font-size: 12px; }
+.sidebar nav a:hover, .sidebar nav a.active { background: #e9eae6; color: #171a1e; }
+.sidebar nav a.active { box-shadow: inset 2px 0 #e45e38; font-weight: 700; }
+.boundary { margin-top: auto; padding: 11px; border: 1px solid #e0e2dd; border-radius: 7px; display: flex; gap: 8px; align-items: center; background: white; }
+.boundary > div { display: grid; gap: 2px; }.boundary strong { font-size: 10px; }.boundary small { color: #74797d; font-size: 8px; }
+.main { min-width: 0; }
+@media (max-width: 760px) { .shell { grid-template-columns: 1fr; }.sidebar { position: static; height: auto; max-width: 100%; padding: 12px; overflow: hidden; }.brand { padding-bottom: 10px; }.sidebar nav { width: 100%; display: flex; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }.sidebar nav::-webkit-scrollbar { display: none; }.sidebar nav p, .boundary { display: none; }.sidebar nav a { flex: none; }.main { min-width: 0; } }

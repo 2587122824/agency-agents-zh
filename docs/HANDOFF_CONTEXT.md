@@ -2,6 +2,17 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Modular Application Foundation
+
+- Added an isolated V2 application under `v2/`. V1 remains unchanged on port `8765`; V2 runs on port `8766` and does not import V1 production adapters.
+- V2 backend uses FastAPI, Pydantic v2, SQLAlchemy 2, Alembic, and SQLite. Projects, append-only user decisions, work items, and project events are persisted as separate database entities.
+- Project confirmation is explicit: unresolved decisions return a visible conflict. Only a confirmed project can enqueue the registered `contract_validation` work kind.
+- A separate database-backed Worker claims queued work atomically, executes only registered work kinds, and writes persisted events. Unknown kinds block explicitly; there is no route guessing, provider downgrade, automatic retry, prompt rewrite, or output repair.
+- Project events are available through SSE and work across the API and Worker process boundary because the database, rather than process memory, is authoritative.
+- V2 frontend uses React, TypeScript, Vite, React Router, TanStack Query, Zustand, CSS Modules, and Lucide. It includes API-backed project creation, contract/decision views, queue submission, and reserved review/editor/entity/config module routes.
+- The production build is served by FastAPI. `v2/start_v2.ps1` starts the API and Worker together; the V2 runtime database and logs remain ignored under `v2/runtime/`.
+- Verification completed with the production frontend build, TypeScript checking, Python compileall, API contract tests, SSE read, desktop/mobile browser checks, and a real local draft -> confirm -> queue -> worker -> `review_required` smoke flow. No external provider or paid production call was made.
+
 ## 2026-07-14 V2 Interactive Product Prototype
 
 - Added an isolated, frontend-only V2 product prototype at `/prototype-v2/`. It does not call models, production providers, or paid APIs and does not change the existing V1 workflow behavior.

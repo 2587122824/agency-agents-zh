@@ -1,0 +1,1 @@
+"""Deterministic DAG compilation boundary."""

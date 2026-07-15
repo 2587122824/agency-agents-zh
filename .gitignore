@@ -14,6 +14,15 @@ my_workspace/my_task_output/
 my_workspace/my_voice_samples/
 my_workspace/web_app_*.log
 
+# V2 local runtime and frontend build output
+v2/runtime/
+v2/frontend/node_modules/
+v2/frontend/dist/
+v2/backend/tests/test_studio.db
+v2/frontend/*.tsbuildinfo
+v2/frontend/vite.config.js
+v2/frontend/vite.config.d.ts
+
 # Asset-library metadata is tracked, generated media is local-only
 my_workspace/my_asset_library/**/*.png
 my_workspace/my_asset_library/**/*.jpg
