@@ -712,3 +712,42 @@ export interface DeliveryWorkspace {
   attempts: DeliveryAttempt[]
   next_action: { code: string; label: string }
 }
+
+export interface ControlNextAction {
+  code: string
+  label: string
+  path: string
+  incurs_production_cost: boolean
+  confirmation_level: 'none' | 'normal' | 'high'
+}
+
+export interface ProjectControlSummary {
+  project_id: string
+  title: string
+  core_topic: string
+  duration_seconds: number
+  aspect_ratio: string
+  audio_mode: string
+  persisted_status: ProjectStatus
+  evaluated_stage: 'requirements' | 'planning' | 'production_preparation' | 'production' | 'quality_review' | 'editing' | 'delivery' | 'completed'
+  stage_label: string
+  active_plan_version: number | null
+  active_snapshot_number: number | null
+  active_snapshot_status: string | null
+  work_counts: Record<string, number>
+  asset_counts: Record<string, number>
+  blocker_count: number
+  latest_event_at: string | null
+  updated_at: string
+  next_action: ControlNextAction
+}
+
+export interface ProjectControl extends ProjectControlSummary {
+  active_plan: { id: string; version_number: number; status: string; requirement_version_id: string; contract_schema_version: string; confirmed_at: string } | null
+  active_snapshot: { id: string; snapshot_number: number; status: string; contract_hash: string; cost_status: string; estimated_cost: number | null; currency: string | null; estimated_call_count: number } | null
+  delivery: { id: string; status: string; timeline_id: string; request_fingerprint: string; final_asset_id: string | null; error_code: string | null } | null
+  costs: Array<{ currency: string; estimated_confirmed: number; charged_confirmed: number; adjusted_confirmed: number; refunded_confirmed: number; pending_event_count: number }>
+  blockers: Array<{ source_type: string; source_id: string; code: string; message: string; evidence: Record<string, unknown>; affected_node_keys: string[] }>
+  routes: Array<{ work_item_id: string; work_item_status: string; node_key: string | null; attempt_id: string; attempt_number: number; attempt_state: string; provider: string; adapter_kind: string | null; provider_workflow_id: string | null; provider_task_id: string | null; request_fingerprint: string; error_code: string | null }>
+  recent_events: Array<{ sequence: number; event_type: string; message: string; data: Record<string, unknown>; created_at: string }>
+}

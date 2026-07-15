@@ -17,6 +17,8 @@ from ..contracts.project import (
     QueueRequest,
     WorkItemRead,
 )
+from ..control.contracts import ProjectControlSummary, ProjectControlView
+from ..control.service import project_control_view, project_controls
 from ..core.config import RUNTIME_ROOT, settings
 from ..delivery.contracts import (
     AuthorizeDelivery,
@@ -216,6 +218,16 @@ def require_project(session: Session, project_id: str):
 @router.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": settings.app_name, "version": settings.app_version}
+
+
+@router.get("/project-controls", response_model=list[ProjectControlSummary])
+def project_control_list(session: Session = Depends(get_session)):
+    return project_controls(session)
+
+
+@router.get("/projects/{project_id}/control-center", response_model=ProjectControlView)
+def project_control_detail(project_id: str, session: Session = Depends(get_session)):
+    return project_control_view(session, require_project(session, project_id))
 
 
 @router.get("/system-config/versions", response_model=list[ConfigurationVersionSummary])

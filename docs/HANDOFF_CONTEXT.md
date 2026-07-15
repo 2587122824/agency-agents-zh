@@ -2,6 +2,17 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-16 V2 Project Control Console Sprint 11
+
+- Added read-only project control projections under `v2/backend/app/control/` and API routes for project summaries and detailed control evidence.
+- The projection exposes both persisted Project status and a separately evaluated navigation stage; reads never mutate or commit project state.
+- Blockers are classified from snapshot, WorkItem, QCReport, and DeliveryAttempt record types, never error-message keyword matching.
+- Costs remain separated by currency and status. Actual routes come only from frozen WorkAttempt manifests and execution records.
+- Replaced the static architecture homepage with an API-backed project console and added `/projects/:projectId/control` for blockers, costs, routes, and recent events.
+- Added `docs/V2_PROJECT_CONTROL_IMPLEMENTATION.md` and updated product, data-model, and state-machine documents.
+- Verification target: 28 backend tests, Python compileall, TypeScript/Vite build, desktop/mobile browser checks, push, and restart on `8766`.
+- No provider call, retry, fallback, route substitution, state repair, or new state transition was introduced.
+
 ## 2026-07-16 V2 Final Delivery Contracts Sprint 10
 
 - Added `Project.delivery_asset_id` and persisted `DeliveryAttempt` under Alembic revision `20260716_10`.

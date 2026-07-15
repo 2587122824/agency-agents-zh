@@ -463,6 +463,17 @@ DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表
 
 控制台状态来自后端状态评估器和持久事件，不能由员工文本、前端计数或供应商任务状态直接推断。
 
+首期控制台使用只读投影，不新增或覆盖项目状态。接口同时返回 `persisted_status` 与 `evaluated_stage`：前者是命令写入的权威生命周期状态，后者仅根据当前方案、活动快照、工作项、素材、时间线和交付记录计算页面导航阶段。两者不一致时必须同时展示，禁止前端把展示阶段写回数据库。
+
+阻断按记录类型收集，包括快照执行阻断、blocked WorkItem、blocked QCReport 和 blocked DeliveryAttempt；不得通过错误文案关键词归类。供应商、适配器、工作流和任务 ID 只读取已冻结的 WorkAttempt 请求清单与执行记录。费用按币种分别汇总，不跨币种折算，也不把预计费用显示为实际扣费。
+
+首期查询接口：
+
+```text
+GET /api/v1/project-controls
+GET /api/v1/projects/{project_id}/control-center
+```
+
 ## 17. 技术架构
 
 ```mermaid
@@ -639,7 +650,7 @@ GET  /api/v1/projects/{project_id}/events
 
 ### Sprint 4：产品界面与完整闭环
 
-- [ ] 项目控制台
+- [x] 项目控制台
 - [ ] 方案确认页面
 - [ ] 素材联络表
 - [ ] QC 结构化报告

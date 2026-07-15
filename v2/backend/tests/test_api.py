@@ -88,6 +88,30 @@ def test_project_contract_and_explicit_confirmation(client: TestClient) -> None:
     assert processed.json()["work_items"][0]["status"] == "completed"
 
 
+def test_project_control_list_uses_persisted_facts_for_new_project(client: TestClient) -> None:
+    project = create_creation_project(client)
+    controls = client.get("/api/v1/project-controls")
+    assert controls.status_code == 200
+    summary = next(row for row in controls.json() if row["project_id"] == project["id"])
+    assert summary["persisted_status"] == "draft"
+    assert summary["evaluated_stage"] == "requirements"
+    assert summary["active_plan_version"] is None
+    assert summary["active_snapshot_number"] is None
+    assert summary["blocker_count"] == 0
+    assert summary["next_action"] == {
+        "code": "CONTINUE_REQUIREMENTS",
+        "label": "继续确认创作需求",
+        "path": f"/projects/{project['id']}",
+        "incurs_production_cost": False,
+        "confirmation_level": "none",
+    }
+    detail = client.get(f"/api/v1/projects/{project['id']}/control-center")
+    assert detail.status_code == 200
+    assert detail.json()["recent_events"][0]["event_type"] == "project.created"
+    assert detail.json()["costs"] == []
+    assert detail.json()["routes"] == []
+
+
 def create_creation_project(client: TestClient) -> dict:
     response = client.post(
         "/api/v1/projects",
@@ -990,6 +1014,55 @@ def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClien
     assert blocked[0]["attempts"][0]["provider_task_id"] is None
 
 
+def test_project_control_exposes_exact_production_route_cost_and_blocker(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "control-activate-command-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    submitted = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "control-submit-command-001",
+            "expected_contract_hash": activated["contract_hash"],
+            "expected_estimated_cost": activated["estimated_cost"],
+            "expected_currency": activated["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert submitted.status_code == 202
+    assert process_one("control-test-worker") is True
+
+    response = client.get(f"/api/v1/projects/{project['id']}/control-center")
+    assert response.status_code == 200
+    control = response.json()
+    assert control["persisted_status"] == "blocked"
+    assert control["evaluated_stage"] == "production"
+    assert control["active_plan_version"] == 1
+    assert control["active_snapshot_status"] == "execution_blocked"
+    assert control["work_counts"]["blocked"] == 1
+    assert control["blocker_count"] >= 1
+    work_blocker = next(item for item in control["blockers"] if item["source_type"] == "work_item")
+    assert work_blocker["code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
+    assert work_blocker["affected_node_keys"]
+    blocked_route = next(item for item in control["routes"] if item["attempt_state"] == "blocked")
+    assert blocked_route["provider"] == "mock_visual"
+    assert blocked_route["adapter_kind"] == "runninghub"
+    assert blocked_route["provider_workflow_id"] == "mock-workflow-not-executable"
+    assert blocked_route["provider_task_id"] is None
+    assert control["next_action"]["code"] == "VIEW_PRODUCTION_BLOCKERS"
+    assert control["costs"] == [{
+        "currency": "CNY",
+        "estimated_confirmed": 0.9,
+        "charged_confirmed": 0.0,
+        "adjusted_confirmed": 0.0,
+        "refunded_confirmed": 0.0,
+        "pending_event_count": 0,
+    }]
+    assert any(event["event_type"] == "production.work_finished.v1" for event in control["recent_events"])
+
+
 def test_asset_registration_verification_qc_and_human_approval_are_explicit(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client)
     activated = client.post(
@@ -1573,6 +1646,11 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     download = client.get(f"/api/v1/projects/{project['id']}/assets/{result['final_asset']['id']}/content")
     assert download.status_code == 200
     assert download.content == content
+    control = client.get(f"/api/v1/projects/{project['id']}/control-center").json()
+    assert control["evaluated_stage"] == "completed"
+    assert control["delivery"]["status"] == "verified"
+    assert control["next_action"]["code"] == "DOWNLOAD_DELIVERY"
+    assert control["next_action"]["path"] == "/editor"
     with SessionLocal() as session:
         assert len(list(session.scalars(select(DeliveryAttempt)))) == 1
         assert len(list(session.scalars(select(WorkAttempt)))) == work_attempt_count

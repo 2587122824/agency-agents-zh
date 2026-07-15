@@ -664,3 +664,30 @@ project.completed.v1
 ```
 
 命令重放通过 CommandReceipt 返回第一次结果。不同命令 ID 不能为同一时间线创建第二个交付尝试；租约、刷新、服务重启或再次上传都不是重试授权。
+
+## 21. 项目控制台阶段投影
+
+控制台的 `evaluated_stage` 是只读导航投影，不是第二套项目状态机。投影优先级由已存在的权威记录决定：
+
+```text
+completed
+delivery
+editing
+quality_review
+production
+production_preparation
+planning
+requirements
+```
+
+较后阶段的确定记录优先，例如已验证交付优先于历史 blocked WorkItem，确认时间线优先于生产快照。投影不消费事件、不写 Project.status，也不触发任何状态转移。
+
+`next_action` 是确定性页面导航建议，只能指向已有显式命令所在页面。它不能执行命令、代替确认、创建重试或改变费用边界。刷新控制台只重新查询数据库；不得触发 Worker、供应商轮询、状态修复或事件写入。
+
+验收要求：
+
+- 同一数据库事实重复查询得到相同阶段与下一步。
+- `persisted_status` 与 `evaluated_stage` 同时可见，不互相覆盖。
+- 阻断分类不依赖错误消息中的特殊字样。
+- 不同币种成本保持分离，未确认事件只计数不计入已确认金额。
+- 实际路由只展示冻结 WorkAttempt 记录，不猜测或替换供应商与工作流。

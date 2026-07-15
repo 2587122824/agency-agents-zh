@@ -815,3 +815,23 @@ output_registered_at nullable, verified_at nullable
 - 失败的 DeliveryAttempt 保留错误证据，不删除、不覆盖、不自动创建下一尝试。
 
 完成守卫要求 DeliveryAttempt、Asset、Timeline、Project 和真实文件事实在同一事务结论中一致。仅有员工输出、上传成功响应或前端状态均不能建立 `completed` 权威。
+
+## 22. 项目控制台只读投影
+
+项目控制台不新增持久化表。`ProjectControlView` 在查询时从现有权威记录构建：
+
+```text
+Project
+PlanVersion(active)
+ProductionSnapshot(active or latest)
+WorkItem -> WorkAttempt
+Asset -> QCReport -> QCFinding
+Timeline(latest)
+DeliveryAttempt(latest)
+CostEvent
+ProjectEvent
+```
+
+投影同时返回 `persisted_status` 和 `evaluated_stage`，后者不是 Project 字段，也不能作为写命令输入。`evaluated_stage` 只用于把页面定位到需求、规划、生产准备、生产、质量审核、剪辑、交付或完成阶段。
+
+执行路由来自不可变的 `WorkAttempt.request_manifest`，供应商任务 ID 来自 WorkAttempt；控制台不从 DAG 名称、员工输出或错误文本推断路由。阻断来源使用 `source_type + source_id + code + evidence`，费用按 CostEvent 的原始币种和 kind/status 聚合。查询不创建事件、不提交事务、不修复状态。
