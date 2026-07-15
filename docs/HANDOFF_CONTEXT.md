@@ -2,6 +2,17 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-16 V2 Entity Registry Sprint 12
+
+- Replaced the asset-library placeholder with a read-only typed entity registry for character, outfit, scene, product, and voice entities.
+- Registry rows expose exact immutable versions, active-version flags, source attachments, confirmed bindings, Shot/Plan references, and ProductionSnapshot references.
+- Added guarded read-only source attachment content access. Paths must remain inside V2 runtime storage; missing or unavailable files fail explicitly.
+- Browser preview failure remains visible and never triggers transcoding, repair, replacement, or inferred source selection.
+- Moved the business route from `/assets` to `/library` because `/assets/*` is owned by Vite production static files.
+- Added `docs/V2_ENTITY_REGISTRY_IMPLEMENTATION.md` and updated product, data-model, and state-machine documents.
+- Verification target: 28 backend tests, Python compileall, TypeScript/Vite build, desktop/mobile browser checks, push, and restart on `8766`.
+- No entity mutation command, provider call, retry, fallback, state transition, or cost event was introduced.
+
 ## 2026-07-16 V2 Project Control Console Sprint 11
 
 - Added read-only project control projections under `v2/backend/app/control/` and API routes for project summaries and detailed control evidence.

@@ -17,7 +17,7 @@ const nav = [
   { to: '/production', label: '生产队列', icon: Boxes },
   { to: '/review', label: '素材审核', icon: ScanEye },
   { to: '/editor', label: '剪辑台', icon: ListVideo },
-  { to: '/assets', label: '资产库', icon: Library },
+  { to: '/library', label: '资产库', icon: Library },
   { to: '/settings', label: '系统配置', icon: Settings2 },
 ]
 

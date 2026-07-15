@@ -179,6 +179,13 @@ from ..quality.service import (
     run_asset_qc,
     verify_asset,
 )
+from ..registry.contracts import EntityRegistryView
+from ..registry.service import (
+    RegistryConflictError,
+    RegistryNotFoundError,
+    attachment_content_path,
+    entity_registry_view,
+)
 
 
 router = APIRouter()
@@ -228,6 +235,11 @@ def project_control_list(session: Session = Depends(get_session)):
 @router.get("/projects/{project_id}/control-center", response_model=ProjectControlView)
 def project_control_detail(project_id: str, session: Session = Depends(get_session)):
     return project_control_view(session, require_project(session, project_id))
+
+
+@router.get("/entity-registry", response_model=EntityRegistryView)
+def entity_registry(session: Session = Depends(get_session)):
+    return entity_registry_view(session)
 
 
 @router.get("/system-config/versions", response_model=list[ConfigurationVersionSummary])
@@ -767,6 +779,17 @@ def project_asset_content(project_id: str, asset_id: str, session: Session = Dep
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except QualityConflictError as exc:
         raise quality_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/attachments/{attachment_id}/content")
+def project_attachment_content(project_id: str, attachment_id: str, session: Session = Depends(get_session)):
+    try:
+        path, media_type = attachment_content_path(session, require_project(session, project_id), attachment_id)
+        return FileResponse(path, media_type=media_type)
+    except RegistryNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RegistryConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
 
 
 @router.post(

@@ -436,6 +436,21 @@ VoiceDetail
 
 同一实体的更新创建新 `EntityVersion`。服装与人物通过 ID 关联，不从描述判断所属关系。
 
+### 8.3 实体注册表只读投影
+
+`EntityRegistryView` 不新增持久化表，从以下记录构建：
+
+```text
+Entity -> EntityVersion -> Attachment
+                      -> AttachmentBinding
+                      -> SnapshotEntityVersion -> ProductionSnapshot
+                      -> Shot -> PlanVersion
+```
+
+每个版本同时返回来源附件、确认绑定、快照引用和分镜角色引用。活动版本由 `EntityVersion.is_active` 明确标记，不按最大版本号猜测。查询不会改变 `Entity.status`、`EntityVersion.is_active` 或任何绑定关系。
+
+来源附件内容接口只允许读取同项目、状态为 `verified` 且解析后路径仍位于 `RUNTIME_ROOT` 内的文件。该读取不提升附件状态，也不把浏览器可解码性当作新的数据库事实；完整媒体合同校验若要增强，必须由独立验证命令和版本化规则实现。
+
 ## 9. 分镜、DAG 与依赖
 
 ### 9.1 Shot

@@ -751,3 +751,45 @@ export interface ProjectControl extends ProjectControlSummary {
   routes: Array<{ work_item_id: string; work_item_status: string; node_key: string | null; attempt_id: string; attempt_number: number; attempt_state: string; provider: string; adapter_kind: string | null; provider_workflow_id: string | null; provider_task_id: string | null; request_fingerprint: string; error_code: string | null }>
   recent_events: Array<{ sequence: number; event_type: string; message: string; data: Record<string, unknown>; created_at: string }>
 }
+
+export interface RegistryAttachment {
+  id: string
+  original_filename: string
+  mime_type: string
+  byte_size: number
+  content_hash: string
+  verification_status: string
+  created_at: string
+}
+
+export interface RegistryEntityVersion {
+  id: string
+  version_number: number
+  attributes: Record<string, unknown>
+  status: string
+  is_active: boolean
+  created_by: string
+  created_at: string
+  source_attachment: RegistryAttachment | null
+  bindings: Array<{ id: string; binding_type: string; status: string; confirmed_by: string; confirmed_at: string }>
+  snapshot_references: Array<{ snapshot_id: string; snapshot_number: number; snapshot_status: string; role: string }>
+  shot_references: Array<{ plan_version_id: string; plan_version_number: number; shot_id: string; shot_code: string; role: string }>
+}
+
+export interface RegistryEntity {
+  id: string
+  project_id: string
+  project_title: string
+  entity_type: 'character' | 'outfit' | 'scene' | 'product' | 'voice'
+  display_name: string
+  status: string
+  created_at: string
+  active_version_id: string | null
+  versions: RegistryEntityVersion[]
+}
+
+export interface EntityRegistry {
+  projects: Array<{ id: string; title: string; status: string }>
+  counts: Record<string, number>
+  entities: RegistryEntity[]
+}

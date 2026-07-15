@@ -256,6 +256,49 @@ def test_attachment_registration_does_not_create_binding(client: TestClient) -> 
         "display_name": "char_main",
         "version_number": 1,
     }]
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "registry-brief-generate-001", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "registry-brief-accept-001", "expected_requirement_version_id": requirement_id},
+    )
+    shots = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "registry-shots-generate-001",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shots['id']}:accept",
+        json={"command_id": "registry-shots-accept-001", "expected_requirement_version_id": requirement_id},
+    )
+    registry = client.get("/api/v1/entity-registry")
+    assert registry.status_code == 200
+    view = registry.json()
+    assert view["counts"] == {"character": 1, "outfit": 0, "scene": 0, "product": 0, "voice": 0}
+    entity = view["entities"][0]
+    assert entity["id"] == "char_main"
+    assert entity["project_id"] == project["id"]
+    assert entity["active_version_id"] == bound.json()["entity_version_id"]
+    version = entity["versions"][0]
+    assert version["attributes"] == {"binding_type": "identity_reference"}
+    assert version["source_attachment"]["id"] == attachment["id"]
+    assert version["bindings"][0]["binding_type"] == "identity_reference"
+    assert version["snapshot_references"] == []
+    assert [item["shot_code"] for item in version["shot_references"]] == ["SH-001", "SH-002", "SH-003"]
+    assert all(item["role"] == "character" for item in version["shot_references"])
+    content = client.get(f"/api/v1/projects/{project['id']}/attachments/{attachment['id']}/content")
+    assert content.status_code == 200
+    assert content.headers["content-type"] == "image/png"
+    assert content.content == png
+    other_project = create_creation_project(client)
+    cross_project = client.get(f"/api/v1/projects/{other_project['id']}/attachments/{attachment['id']}/content")
+    assert cross_project.status_code == 404
 
 
 def test_attachment_content_type_mismatch_is_blocked(client: TestClient) -> None:
