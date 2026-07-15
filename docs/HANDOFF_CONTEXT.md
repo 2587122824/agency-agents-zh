@@ -4,6 +4,7 @@ Last compacted: 2026-07-13
 
 ## 2026-07-15 V2 Modular Application Foundation
 
+- The authoritative V2 product and architecture design is documented in `docs/V2_PRODUCT_DESIGN.md`. Future state-machine, confirmation-boundary, fallback, retry, provider, and paid-call changes should update that document and receive user confirmation before implementation.
 - Added an isolated V2 application under `v2/`. V1 remains unchanged on port `8765`; V2 runs on port `8766` and does not import V1 production adapters.
 - V2 backend uses FastAPI, Pydantic v2, SQLAlchemy 2, Alembic, and SQLite. Projects, append-only user decisions, work items, and project events are persisted as separate database entities.
 - Project confirmation is explicit: unresolved decisions return a visible conflict. Only a confirmed project can enqueue the registered `contract_validation` work kind.
