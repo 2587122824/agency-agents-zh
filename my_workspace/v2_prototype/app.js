@@ -21,6 +21,8 @@ const assets = [
 
 const stateLabels = { done:'已完成', running:'生成中', waiting:'等待中' };
 const qcLabels = { review:'待审核', passed:'已通过', waiting:'生产中' };
+let currentScreen = 'overview';
+let impactMode = 'outfit';
 
 function renderJobs() {
   document.querySelector('#jobList').innerHTML = jobs.map(job => `
@@ -51,18 +53,37 @@ function showToast(message) {
 }
 
 function switchScreen(name) {
-  const normalized = ['brief','plan','production','review','timeline','assets','settings'].includes(name) ? name : 'brief';
+  const normalized = ['overview','brief','plan','production','review','timeline','assets','settings'].includes(name) ? name : 'overview';
+  currentScreen = normalized;
   document.querySelectorAll('.screen').forEach(screen => screen.classList.toggle('active', screen.id === `screen-${normalized}`));
   const stepMap = { create:'brief', brief:'brief', plan:'plan', production:'production', review:'review', timeline:'review' };
   document.querySelectorAll('.step').forEach(step => step.classList.toggle('active', step.dataset.step === (stepMap[normalized] || '')));
   document.querySelectorAll('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === (normalized === 'brief' || normalized === 'plan' ? 'create' : normalized)));
+  document.querySelector('.workspace').classList.toggle('dashboard-mode', normalized === 'overview');
+  updatePrimaryAction(normalized);
   document.querySelector('.sidebar').classList.remove('open');
+}
+
+function updatePrimaryAction(screen) {
+  const button = document.querySelector('#continueButton');
+  const labels = {
+    overview: '处理待审核素材',
+    brief: '检查创作方案',
+    plan: '确认方案并创建快照',
+    production: '查看素材审核',
+    review: '进入剪辑台',
+    timeline: '检查交付条件',
+    assets: '返回项目控制台',
+    settings: '返回项目控制台',
+  };
+  button.childNodes[0].textContent = labels[screen] || '返回项目控制台';
 }
 
 document.querySelectorAll('.step').forEach(step => step.addEventListener('click', () => switchScreen(step.dataset.step)));
 document.querySelectorAll('.nav-item').forEach(item => item.addEventListener('click', () => switchScreen(item.dataset.view)));
 document.querySelectorAll('[data-goto]').forEach(button => button.addEventListener('click', () => switchScreen(button.dataset.goto)));
 document.querySelector('.mobile-menu').addEventListener('click', () => document.querySelector('.sidebar').classList.toggle('open'));
+document.querySelector('.project-row.selected').addEventListener('click', () => switchScreen('overview'));
 
 document.querySelectorAll('.visual-option').forEach(option => option.addEventListener('click', () => {
   option.parentElement.querySelectorAll('.visual-option').forEach(item => item.classList.remove('selected'));
@@ -88,8 +109,10 @@ document.querySelector('#sendMessage').addEventListener('click', () => {
 });
 
 document.querySelector('#continueButton').addEventListener('click', () => {
-  switchScreen('plan');
-  showToast('已进入方案确认，不会开始生产');
+  const targets = { overview:'review', brief:'plan', production:'review', review:'timeline', assets:'overview', settings:'overview' };
+  if (currentScreen === 'plan') return openImpact('snapshot');
+  if (currentScreen === 'timeline') return showToast('仍有 1 个时间线空位，暂不满足交付条件');
+  switchScreen(targets[currentScreen] || 'overview');
 });
 
 document.querySelector('#startStage').addEventListener('click', () => showToast('原型演示：需要二次确认后才会提交生产'));
@@ -105,6 +128,73 @@ document.querySelector('#approveSelected').addEventListener('click', () => {
   });
   lucide.createIcons();
   showToast(`已通过 ${selected.length} 个素材，仅更新审核状态`);
+});
+
+function setImpactValue(id, value) {
+  document.querySelector(id).textContent = value;
+}
+
+function openImpact(mode) {
+  impactMode = mode;
+  const dialog = document.querySelector('#impactDialog');
+  const items = document.querySelector('#impactItems');
+  if (mode === 'retry') {
+    const selected = [...document.querySelectorAll('.asset-card.selected')];
+    if (!selected.length) return showToast('请先选择要重做的素材');
+    const count = selected.length;
+    document.querySelector('#impactTitle').textContent = `重做已选 ${count} 个素材`;
+    document.querySelector('#impactDescription').textContent = '只会为选中的素材创建新尝试，并重新评估它们的真实下游依赖。';
+    setImpactValue('#impactShots', String(count));
+    setImpactValue('#impactAssets', String(count));
+    setImpactValue('#impactCalls', String(count));
+    setImpactValue('#impactCost', `¥ ${(count * 1.55).toFixed(2)}`);
+    items.innerHTML = selected.map(card => `<p><i data-lucide="clapperboard"></i>${card.dataset.id} · 新工作尝试</p>`).join('') + '<p><i data-lucide="git-compare-arrows"></i>仅失效真实引用这些素材的下游结果</p>';
+    document.querySelector('#impactWarning').textContent = '确认后只记录本次用户重做请求；原型不会调用供应商或扣费。';
+    document.querySelector('#confirmImpact').textContent = `确认重做 ${count} 项`;
+  } else if (mode === 'snapshot') {
+    document.querySelector('#impactTitle').textContent = '确认方案并创建生产快照';
+    document.querySelector('#impactDescription').textContent = '系统将冻结当前决策、实体版本、分镜合同、视频规格和生产配置。';
+    setImpactValue('#impactShots', '15');
+    setImpactValue('#impactAssets', '0');
+    setImpactValue('#impactCalls', '30');
+    setImpactValue('#impactCost', '¥ 24.80');
+    items.innerHTML = '<p><i data-lucide="git-branch"></i>plan_v1 · 已确认方案</p><p><i data-lucide="camera"></i>snapshot_001 · 待锁定</p><p><i data-lucide="volume-x"></i>音频关闭 · 不创建 TTS 节点</p>';
+    document.querySelector('#impactWarning').textContent = '创建快照不会开始付费生产，提交生产时仍需再次确认费用。';
+    document.querySelector('#confirmImpact').textContent = '创建 snapshot_001';
+  } else {
+    document.querySelector('#impactTitle').textContent = '修改训练服状态';
+    document.querySelector('#impactDescription').textContent = '这项修改会创建新方案和新生产快照，不会覆盖当前结果。';
+    setImpactValue('#impactShots', '12');
+    setImpactValue('#impactAssets', '20');
+    setImpactValue('#impactCalls', '27');
+    setImpactValue('#impactCost', '¥ 22.40');
+    items.innerHTML = '<p><i data-lucide="user-round"></i>char_main 与 outfit_training_01</p><p><i data-lucide="clapperboard"></i>SH-002 至 SH-015 的人物镜头</p><p><i data-lucide="list-video"></i>当前剪辑草案需要重新验证</p>';
+    document.querySelector('#impactWarning').textContent = '确认后只创建 plan_v2 草稿，不会自动生产或扣费。';
+    document.querySelector('#confirmImpact').textContent = '创建 plan_v2 草稿';
+  }
+  lucide.createIcons();
+  dialog.showModal();
+}
+
+function closeImpact() {
+  document.querySelector('#impactDialog').close();
+}
+
+document.querySelectorAll('[data-open-impact]').forEach(button => button.addEventListener('click', () => openImpact(button.dataset.openImpact)));
+document.querySelector('#retrySelected').addEventListener('click', () => openImpact('retry'));
+document.querySelector('#closeImpact').addEventListener('click', closeImpact);
+document.querySelector('#cancelImpact').addEventListener('click', closeImpact);
+document.querySelector('#impactDialog').addEventListener('click', event => {
+  if (event.target === event.currentTarget) closeImpact();
+});
+document.querySelector('#confirmImpact').addEventListener('click', () => {
+  const messages = {
+    retry: '已记录选中素材的重做确认，原型未发起付费调用',
+    snapshot: '已确认创建 snapshot_001，原型未提交生产',
+    outfit: '已创建 plan_v2 变更草稿，当前快照保持不变',
+  };
+  closeImpact();
+  showToast(messages[impactMode]);
 });
 
 document.querySelectorAll('.filter-tabs button').forEach(button => button.addEventListener('click', () => {

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>片场 V2 · 创作工作台原型</title>
+  <title>片场 V2 · 项目生产控制台原型</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -21,7 +21,8 @@
 
       <nav class="primary-nav" aria-label="主导航">
         <p class="nav-label">工作区</p>
-        <button class="nav-item active" data-view="create"><i data-lucide="message-square-text"></i><span>创作台</span></button>
+        <button class="nav-item active" data-view="overview"><i data-lucide="layout-dashboard"></i><span>项目控制台</span></button>
+        <button class="nav-item" data-view="create"><i data-lucide="message-square-text"></i><span>创作台</span></button>
         <button class="nav-item" data-view="production"><i data-lucide="layers-3"></i><span>生产队列</span><b>8</b></button>
         <button class="nav-item" data-view="review"><i data-lucide="scan-eye"></i><span>素材审核</span><b class="warn">3</b></button>
         <button class="nav-item" data-view="timeline"><i data-lucide="list-video"></i><span>剪辑台</span></button>
@@ -34,7 +35,7 @@
         <p class="nav-label">最近项目</p>
         <button class="project-row selected">
           <span class="project-thumb thumb-track"></span>
-          <span><strong>田径训练日记</strong><small>方案待确认</small></span>
+          <span><strong>田径训练日记</strong><small>3 个素材待审核</small></span>
           <i data-lucide="more-horizontal"></i>
         </button>
         <button class="project-row">
@@ -50,23 +51,23 @@
       </div>
     </aside>
 
-    <main class="workspace">
+    <main class="workspace dashboard-mode">
       <header class="topbar">
         <div class="project-title">
           <button class="icon-button mobile-menu" title="菜单"><i data-lucide="menu"></i></button>
           <div><span>项目</span><strong>田径训练日记</strong></div>
-          <button class="status-pill"><span></span>草稿</button>
+          <button class="status-pill review-state"><span></span>素材审核</button>
         </div>
         <div class="top-actions">
           <button class="icon-button" title="项目记录"><i data-lucide="history"></i></button>
           <button class="icon-button" title="更多操作"><i data-lucide="more-horizontal"></i></button>
           <button class="outline-button"><i data-lucide="share-2"></i>分享预览</button>
-          <button class="primary-button" id="continueButton">确认方案并继续<i data-lucide="arrow-right"></i></button>
+          <button class="primary-button" id="continueButton">处理待审核素材<i data-lucide="arrow-right"></i></button>
         </div>
       </header>
 
       <div class="stepper" role="tablist">
-        <button class="step active" data-step="brief"><span>1</span><div><b>创作沟通</b><small>需求已整理</small></div></button>
+        <button class="step" data-step="brief"><span>1</span><div><b>创作沟通</b><small>需求已整理</small></div></button>
         <i data-lucide="chevron-right"></i>
         <button class="step" data-step="plan"><span>2</span><div><b>方案确认</b><small>3 项待决定</small></div></button>
         <i data-lucide="chevron-right"></i>
@@ -75,7 +76,68 @@
         <button class="step" data-step="review"><span>4</span><div><b>审核剪辑</b><small>等待素材</small></div></button>
       </div>
 
-      <section class="screen active" id="screen-brief">
+      <section class="screen active" id="screen-overview">
+        <div class="overview-view">
+          <div class="overview-heading">
+            <div><p class="eyebrow">项目控制台</p><h1>田径训练日记</h1><p>当前只需要处理 3 个待审核素材，生产不会自动继续。</p></div>
+            <div class="version-stack"><span><i data-lucide="git-branch"></i>plan_v1</span><span><i data-lucide="camera"></i>snapshot_001</span></div>
+          </div>
+
+          <div class="status-strip" aria-label="项目状态摘要">
+            <div><span>项目阶段</span><b><i class="status-dot review"></i>quality_review</b><small>素材人工审核</small></div>
+            <div><span>生产进度</span><b>23 / 30</b><small>1 运行 · 6 等待</small></div>
+            <div><span>审核结论</span><b>3 待处理</b><small>8 已通过</small></div>
+            <div><span>本快照费用</span><b>¥ 18.60</b><small>预计 ¥ 24.80</small></div>
+          </div>
+
+          <div class="overview-grid">
+            <section class="next-action-panel">
+              <div class="panel-heading-row"><div><p class="eyebrow">下一步</p><h2>审核人物与动作表现</h2></div><span class="action-count">3 项</span></div>
+              <p class="action-copy">QC 只提示人物相似度和动作姿态风险，需要你决定通过、保留备选或指定重做。</p>
+              <div class="affected-list">
+                <div><span class="mini-thumb warm-one"></span><div><b>SH-003 · 动态热身</b><small>人物相似度建议人工确认</small></div><span class="severity medium">中风险</span></div>
+                <div><span class="mini-thumb face-one"></span><div><b>SH-004 · 起跑前深呼吸</b><small>正脸身份建议人工确认</small></div><span class="severity high">高风险</span></div>
+                <div><span class="mini-thumb track-two"></span><div><b>SH-012 · 蹲踞式起跑</b><small>动作姿态建议人工确认</small></div><span class="severity medium">中风险</span></div>
+              </div>
+              <button class="primary-button action-primary" data-goto="review"><i data-lucide="scan-eye"></i>进入素材审核</button>
+            </section>
+
+            <section class="project-facts-panel">
+              <div class="panel-heading-row"><h2>活动生产快照</h2><span class="snapshot-state"><i data-lucide="lock-keyhole"></i>已锁定</span></div>
+              <dl class="fact-list">
+                <div><dt>方案版本</dt><dd>plan_v1</dd></div>
+                <div><dt>生产快照</dt><dd>snapshot_001</dd></div>
+                <div><dt>视频规格</dt><dd>9:16 · 480 × 848</dd></div>
+                <div><dt>音频策略</dt><dd>关闭 · 无 TTS 节点</dd></div>
+                <div><dt>模板来源</dt><dd>未使用模板</dd></div>
+              </dl>
+              <button class="text-button" data-goto="plan">查看冻结合同<i data-lucide="arrow-up-right"></i></button>
+            </section>
+
+            <section class="project-progress-panel">
+              <div class="panel-heading-row"><h2>生产阶段</h2><span>活动快照</span></div>
+              <div class="phase-list">
+                <button class="complete" data-goto="production"><i data-lucide="check"></i><span><b>一致性基准</b><small>3 / 3 已确认</small></span><em>完成</em></button>
+                <button class="complete" data-goto="production"><i data-lucide="check"></i><span><b>镜头关键帧</b><small>12 / 12 已生成</small></span><em>完成</em></button>
+                <button class="active" data-goto="review"><i data-lucide="scan-eye"></i><span><b>动态视频与审核</b><small>3 项等待人工判断</small></span><em>当前</em></button>
+                <button data-goto="timeline"><i data-lucide="list-video"></i><span><b>剪辑与交付</b><small>等待审核素材</small></span><em>未开始</em></button>
+              </div>
+            </section>
+
+            <section class="ledger-panel">
+              <div class="panel-heading-row"><h2>费用与事件</h2><button class="icon-button" title="查看完整事件"><i data-lucide="history"></i></button></div>
+              <div class="ledger-summary"><div><span>已扣费</span><b>¥ 18.60</b></div><div><span>待执行预计</span><b>¥ 6.20</b></div><div><span>退款</span><b>¥ 0.00</b></div></div>
+              <div class="compact-events">
+                <div><i data-lucide="badge-check"></i><span><b>asset.verified.v1</b><small>SH-008 · 刚刚</small></span></div>
+                <div><i data-lucide="circle-alert"></i><span><b>quality.review_required.v1</b><small>SH-004 · 2 分钟前</small></span></div>
+                <div><i data-lucide="wallet-cards"></i><span><b>cost.charged.v1</b><small>¥ 1.55 · 3 分钟前</small></span></div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+
+      <section class="screen" id="screen-brief">
         <div class="conversation-pane">
           <div class="conversation-heading">
             <div><p class="eyebrow">创作沟通</p><h1>先把想法说清楚，再开始生产。</h1><p>我会整理你的需求，并把影响成本和结果的决定留给你确认。</p></div>
@@ -116,7 +178,7 @@
           <p class="panel-note">已锁定 3 项，还剩 3 项需要你的选择。</p>
 
           <div class="decision-card" data-decision="style">
-            <div class="decision-title"><span class="decision-icon amber"><i data-lucide="aperture"></i></span><div><b>画面质感</b><small>影响全部图片和视频提示</small></div><span class="required">待确认</span></div>
+            <div class="decision-title"><span class="decision-icon amber"><i data-lucide="aperture"></i></span><div><b>画面质感</b><small>影响全部图片和视频提示</small></div><span class="risk-badge medium">中风险</span></div>
             <div class="visual-options">
               <button class="visual-option selected" data-value="纪实自然"><span class="style-preview style-documentary"></span><b>纪实自然</b><small>手持感、自然光</small></button>
               <button class="visual-option" data-value="电影运动"><span class="style-preview style-cinematic"></span><b>电影运动</b><small>强对比、慢动作</small></button>
@@ -124,23 +186,24 @@
           </div>
 
           <div class="decision-card" data-decision="outfit">
-            <div class="decision-title"><span class="decision-icon blue"><i data-lucide="shirt"></i></span><div><b>训练服状态</b><small>跨镜头保持一致</small></div><span class="required">待确认</span></div>
-            <div class="select-row"><div><span class="color-swatch"></span><div><b>深灰训练背心 + 黑色短裤</b><small>outfit_training_01</small></div></div><button class="icon-button" title="更换"><i data-lucide="chevron-down"></i></button></div>
+            <div class="decision-title"><span class="decision-icon blue"><i data-lucide="shirt"></i></span><div><b>训练服状态</b><small>跨镜头保持一致</small></div><span class="risk-badge high">高风险</span></div>
+            <div class="select-row"><div><span class="color-swatch"></span><div><b>深灰训练背心 + 黑色短裤</b><small>outfit_training_01</small></div></div><button class="icon-button" title="更换并查看影响" data-open-impact="outfit"><i data-lucide="chevron-down"></i></button></div>
+            <button class="decision-impact-link" data-open-impact="outfit"><i data-lucide="git-compare-arrows"></i>修改前查看影响范围</button>
           </div>
 
           <div class="decision-card" data-decision="pace">
-            <div class="decision-title"><span class="decision-icon green"><i data-lucide="gauge"></i></span><div><b>剪辑节奏</b><small>决定镜头数量和平均时长</small></div><span class="required">待确认</span></div>
+            <div class="decision-title"><span class="decision-icon green"><i data-lucide="gauge"></i></span><div><b>剪辑节奏</b><small>决定镜头数量和平均时长</small></div><span class="risk-badge medium">中风险</span></div>
             <div class="segmented"><button>舒缓</button><button class="selected">适中</button><button>紧凑</button></div>
           </div>
 
-          <div class="locked-section"><div class="locked-title"><b>已从系统配置锁定</b><span>3 项</span></div><div class="locked-row"><i data-lucide="smartphone"></i><span>竖屏 9:16 · 480 × 848</span><i data-lucide="lock-keyhole"></i></div><div class="locked-row"><i data-lucide="volume-x"></i><span>音频关闭 · 不创建 TTS</span><i data-lucide="lock-keyhole"></i></div><div class="locked-row"><i data-lucide="workflow"></i><span>生产路由由明确合同决定</span><i data-lucide="lock-keyhole"></i></div></div>
+          <div class="locked-section"><div class="locked-title"><b>可见的低风险默认与系统锁定</b><span>4 项</span></div><div class="locked-row"><i data-lucide="type"></i><span>字幕字体：系统默认 v3</span><span class="low-label">低风险</span></div><div class="locked-row"><i data-lucide="smartphone"></i><span>竖屏 9:16 · 480 × 848</span><i data-lucide="lock-keyhole"></i></div><div class="locked-row"><i data-lucide="volume-x"></i><span>音频关闭 · 不创建 TTS</span><i data-lucide="lock-keyhole"></i></div><div class="locked-row"><i data-lucide="workflow"></i><span>生产路由由明确合同决定</span><i data-lucide="lock-keyhole"></i></div></div>
         </aside>
       </section>
 
       <section class="screen" id="screen-plan">
         <div class="plan-layout">
           <div class="plan-main">
-            <div class="section-title"><div><p class="eyebrow">方案确认</p><h1>45 秒训练日记</h1><p>以下内容确认后将成为不可猜测、不可自动改写的生产合同。</p></div><div class="version-chip"><i data-lucide="git-branch"></i>方案 v1</div></div>
+            <div class="section-title"><div><p class="eyebrow">方案确认</p><h1>45 秒训练日记</h1><p>以下内容确认后将成为不可猜测、不可自动改写的生产合同。</p></div><div class="version-cluster"><div class="version-chip"><i data-lucide="git-branch"></i>plan_v1</div><div class="version-chip pending"><i data-lucide="camera"></i>快照待创建</div></div></div>
             <div class="story-arc">
               <div class="arc-item active"><span>01</span><div><b>清晨准备</b><small>0–10s · 4 镜头</small></div></div><i data-lucide="arrow-right"></i>
               <div class="arc-item"><span>02</span><div><b>力量训练</b><small>10–29s · 6 镜头</small></div></div><i data-lucide="arrow-right"></i>
@@ -159,14 +222,14 @@
           </div>
           <aside class="plan-aside">
             <div class="aside-block"><div class="aside-heading"><h3>一致性资产</h3><button class="icon-button" title="管理资产"><i data-lucide="settings-2"></i></button></div><div class="identity-card"><span class="identity-image"></span><div><b>主角 · 小美</b><small>身份参考已绑定</small><span class="good"><i data-lucide="badge-check"></i>可用于生产</span></div></div><div class="asset-row"><span class="scene-image"></span><div><b>室外跑道</b><small>场景基准待生成</small></div><span class="planned">已规划</span></div><div class="asset-row"><span class="gym-image"></span><div><b>力量训练区</b><small>场景基准待生成</small></div><span class="planned">已规划</span></div></div>
-            <div class="aside-block"><h3>生产预估</h3><div class="estimate-row"><span>基准资产</span><b>3 张</b></div><div class="estimate-row"><span>关键帧</span><b>12 张</b></div><div class="estimate-row"><span>视频片段</span><b>15 段</b></div><div class="estimate-row total"><span>预计调用</span><b>30 次</b></div><p class="estimate-note"><i data-lucide="info"></i>这里只估算，不会自动提交任务。</p></div>
+            <div class="aside-block"><h3>生产预估</h3><div class="estimate-row"><span>基准资产</span><b>3 张</b></div><div class="estimate-row"><span>关键帧</span><b>12 张</b></div><div class="estimate-row"><span>视频片段</span><b>15 段</b></div><div class="estimate-row"><span>预计调用</span><b>30 次</b></div><div class="estimate-row total"><span>预计费用</span><b>¥ 24.80</b></div><p class="estimate-note"><i data-lucide="info"></i>确认后只创建冻结快照，提交付费生产仍需再次确认。</p></div>
           </aside>
         </div>
       </section>
 
       <section class="screen" id="screen-production">
         <div class="production-view">
-          <div class="section-title"><div><p class="eyebrow">素材生产</p><h1>分阶段生产，每一步都看得见。</h1><p>只有上一阶段通过后，下一阶段才能由你手动开始。</p></div><button class="primary-button" id="startStage"><i data-lucide="play"></i>开始当前阶段</button></div>
+          <div class="section-title"><div><p class="eyebrow">素材生产 · snapshot_001</p><h1>分阶段生产，每一步都看得见。</h1><p>只有上一阶段通过后，下一阶段才能由你手动开始。</p></div><button class="primary-button" id="startStage"><i data-lucide="play"></i>开始当前阶段</button></div>
           <div class="stage-overview"><div class="stage-card done"><span><i data-lucide="check"></i></span><div><small>阶段 1</small><b>一致性基准</b><em>3 / 3 已确认</em></div></div><i data-lucide="chevron-right"></i><div class="stage-card active"><span>2</span><div><small>阶段 2</small><b>镜头关键帧</b><em>8 / 12 已完成</em></div></div><i data-lucide="chevron-right"></i><div class="stage-card"><span>3</span><div><small>阶段 3</small><b>动态视频</b><em>等待确认</em></div></div><i data-lucide="chevron-right"></i><div class="stage-card"><span>4</span><div><small>阶段 4</small><b>剪辑装配</b><em>等待素材</em></div></div></div>
           <div class="production-grid">
             <div class="job-panel"><div class="job-heading"><div><h2>关键帧队列</h2><span>阶段 2 / 4</span></div><div class="job-summary"><span><i class="dot done-dot"></i>8 完成</span><span><i class="dot running-dot"></i>1 运行</span><span><i class="dot wait-dot"></i>3 等待</span></div></div><div class="job-list" id="jobList"></div></div>
@@ -177,7 +240,7 @@
 
       <section class="screen" id="screen-review">
         <div class="review-view">
-          <div class="section-title"><div><p class="eyebrow">素材审核</p><h1>先判断素材，再决定要不要重做。</h1><p>质量提示只负责指出风险，不会替你发起付费重试。</p></div><div class="review-actions"><button class="outline-button"><i data-lucide="layout-grid"></i>联络表</button><button class="primary-button" id="approveSelected"><i data-lucide="check"></i>通过已选素材</button></div></div>
+          <div class="section-title"><div><p class="eyebrow">素材审核 · snapshot_001</p><h1>先判断素材，再决定要不要重做。</h1><p>质量提示只负责指出风险，不会替你发起付费重试。</p></div><div class="review-actions"><button class="outline-button" id="retrySelected"><i data-lucide="refresh-cw"></i>查看重做影响</button><button class="primary-button" id="approveSelected"><i data-lucide="check"></i>通过已选素材</button></div></div>
           <div class="review-toolbar"><div class="filter-tabs"><button class="selected" data-filter="all">全部 15</button><button data-filter="review">待审核 3</button><button data-filter="passed">已通过 8</button><button data-filter="waiting">生产中 4</button></div><div class="toolbar-actions"><button class="compact-button"><i data-lucide="arrow-up-down"></i>按镜头排序</button><button class="icon-button" title="网格视图"><i data-lucide="grid-2x2"></i></button></div></div>
           <div class="asset-grid" id="assetGrid"></div>
         </div>
@@ -198,6 +261,16 @@
       <section class="screen placeholder-screen" id="screen-settings"><i data-lucide="sliders-horizontal"></i><h1>系统配置</h1><p>模型、工作流和音频开关属于系统配置，不混入单个项目。</p><button class="outline-button" data-goto="brief">返回创作台</button></section>
     </main>
   </div>
+  <dialog class="impact-dialog" id="impactDialog">
+    <div class="dialog-heading"><div><p class="eyebrow">变更影响分析</p><h2 id="impactTitle">修改训练服状态</h2></div><button class="icon-button" id="closeImpact" title="关闭"><i data-lucide="x"></i></button></div>
+    <p class="dialog-copy" id="impactDescription">这项修改会创建新方案和新生产快照，不会覆盖当前结果。</p>
+    <div class="impact-summary">
+      <div><span>受影响镜头</span><b id="impactShots">12</b></div><div><span>过期素材</span><b id="impactAssets">20</b></div><div><span>新增调用</span><b id="impactCalls">27</b></div><div><span>预计新增费用</span><b id="impactCost">¥ 22.40</b></div>
+    </div>
+    <div class="impact-detail"><h3>影响范围</h3><div id="impactItems"><p><i data-lucide="user-round"></i>char_main 与 outfit_training_01</p><p><i data-lucide="clapperboard"></i>SH-002 至 SH-015 的人物镜头</p><p><i data-lucide="list-video"></i>当前剪辑草案需要重新验证</p></div></div>
+    <div class="dialog-warning"><i data-lucide="shield-alert"></i><span id="impactWarning">确认后只创建 plan_v2 草稿，不会自动生产或扣费。</span></div>
+    <div class="dialog-actions"><button class="outline-button" id="cancelImpact">暂不修改</button><button class="primary-button" id="confirmImpact">创建 plan_v2 草稿</button></div>
+  </dialog>
   <div class="toast" id="toast"><i data-lucide="check-circle-2"></i><span></span></div>
   <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.min.js"></script>
   <script src="/prototype-v2/app.js"></script>

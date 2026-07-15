@@ -2,6 +2,15 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Prototype Product-Control Update
+
+- Updated the frontend-only `/prototype-v2/` experience to match the V2 design baseline without changing V1 production behavior or calling providers.
+- Added a project control dashboard showing the computed project stage, active `plan_v1` / `snapshot_001`, production and review counts, actual/estimated/refunded cost summaries, the single next action, production phases, and recent persisted-event examples.
+- Creation decisions now show low/medium/high confirmation risk. Low-risk defaults are visible and versioned, high-risk outfit changes expose an impact analysis, and the plan page distinguishes the confirmed plan from the not-yet-created production snapshot.
+- Added an impact-confirmation dialog for plan snapshot creation, decision changes, and user-selected asset retries. It displays affected shots/assets, exact new calls, estimated cost, and downstream invalidation before recording the user's intent.
+- Asset review now supports selecting exact materials and viewing retry impact. The prototype explicitly states that confirmation does not call providers or charge money; no automatic retry, route replacement, or hidden fallback was introduced.
+- Verified JavaScript syntax, unique interactive IDs, balanced CSS blocks, desktop layout at 1440x900, mobile layout at 390x844, no horizontal overflow, review navigation, asset selection, and the retry-impact dialog.
+
 ## 2026-07-15 V2 Product, Data, And State Design Baseline
 
 - Expanded `docs/V2_PRODUCT_DESIGN.md` to version 0.2 with confirmation risk levels, decision impact UX, immutable production snapshots, a project control dashboard, strict AI Agent contracts, visible cost confirmation, an explicit/versioned V2.1 template reservation, a concrete 30-second demo flow, and a state/data-first implementation order.
