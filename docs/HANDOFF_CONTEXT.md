@@ -2,6 +2,13 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 First/Middle/Last I2V Duration And FPS Mapping
+
+- Updated only the `06_i2v_first_middle_last_frame / i2v_first_middle_last_frame` RunningHub node mapping so the debug form controls the published workflow instead of retaining imported fixed values.
+- Duration now maps to `436.value={{duration}}`; FPS maps to `412.value`, `373.frame_rate`, and `413.frame_rate`; computed total frames map to `424.length` and `373.frames_number` through `{{frame_count}}`.
+- Runtime node-list repair now replaces stale fixed values and appends any missing rows for those six fields while preserving all unrelated imported rows and every other workflow slot.
+- No generation request or paid provider call was made as part of this configuration repair.
+
 ## 2026-07-15 First-Frame I2V Runtime Slot Restore
 
 - Restored only the frontend/runtime `06_i2v_first_frame / i2v_first_frame` slot to the previously validated RunningHub workflow `2069607607387639810`.

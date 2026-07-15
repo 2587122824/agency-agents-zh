@@ -14,6 +14,13 @@ It does not replace 06B first/last-frame generation.
 - Baseline: 4 seconds, LTX guide workflow
 - Status: experimental, use only when the same shot can plausibly pass through all three frames
 
+## Duration and frame-rate mapping
+
+- `{{duration}}` is sent to `436.value` as clip seconds.
+- `{{fps}}` is sent to `412.value`, `373.frame_rate`, and `413.frame_rate`.
+- `{{frame_count}}` is calculated from duration x FPS and sent to `424.length` and `373.frames_number`.
+- Runtime configuration repair keeps these six rows parameterized when a full RunningHub node list is imported; it does not change any other workflow slot.
+
 ## Current Wiring
 
 ```text

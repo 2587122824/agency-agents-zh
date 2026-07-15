@@ -5548,6 +5548,29 @@ class SemanticInputContractTests(unittest.TestCase):
         self.assertNotIn(("426", "seed", "{{seed}}"), row_keys)
         self.assertIn(("426", "preset_prompt", "Describe this image in detail."), row_keys)
 
+    def test_adapter_repairs_three_frame_duration_fps_and_frame_count_rows(self) -> None:
+        repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
+            json.dumps(
+                [
+                    {"nodeId": "436", "fieldName": "value", "fieldValue": 16},
+                    {"nodeId": "412", "fieldName": "value", "fieldValue": "{{fps}}"},
+                    {"nodeId": "413", "fieldName": "filename_prefix", "fieldValue": "three-frame"},
+                ]
+            ),
+            endpoint="/run/workflow/2072296894507872257",
+            workflow_id="06_i2v_first_middle_last_frame",
+            workflow_mode="i2v_first_middle_last_frame",
+        )
+
+        rows = json.loads(repaired)
+        row_values = {(row["nodeId"], row["fieldName"]): row["fieldValue"] for row in rows}
+        self.assertEqual(row_values[("436", "value")], "{{duration}}")
+        self.assertEqual(row_values[("412", "value")], "{{fps}}")
+        self.assertEqual(row_values[("424", "length")], "{{frame_count}}")
+        self.assertEqual(row_values[("373", "frames_number")], "{{frame_count}}")
+        self.assertEqual(row_values[("373", "frame_rate")], "{{fps}}")
+        self.assertEqual(row_values[("413", "frame_rate")], "{{fps}}")
+
     def test_adapter_treats_207173_as_first_frame_endpoint(self) -> None:
         repaired = CloudComfyUIAdapter._repair_known_runninghub_node_info(
             json.dumps(

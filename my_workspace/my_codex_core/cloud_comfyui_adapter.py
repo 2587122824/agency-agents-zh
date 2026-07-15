@@ -1817,6 +1817,15 @@ class CloudComfyUIAdapter:
         # avoiding RunningHub NODE_INFO_MISMATCH.
         repaired = []
         changed = False
+        three_frame_parameter_rows = {
+            ("436", "value"): "{{duration}}",
+            ("412", "value"): "{{fps}}",
+            ("424", "length"): "{{frame_count}}",
+            ("373", "frames_number"): "{{frame_count}}",
+            ("373", "frame_rate"): "{{fps}}",
+            ("413", "frame_rate"): "{{fps}}",
+        }
+        seen_three_frame_parameter_rows: set[tuple[str, str]] = set()
         for row in rows:
             if isinstance(row, dict) and str(row.get("nodeId") or "") == "60" and str(row.get("fieldName") or "").lower() == "text":
                 changed = True
@@ -1841,6 +1850,14 @@ class CloudComfyUIAdapter:
             if is_three_frame_ltx and isinstance(row, dict):
                 node_id = str(row.get("nodeId") or "")
                 field_name = str(row.get("fieldName") or "")
+                parameter_key = (node_id, field_name)
+                if parameter_key in three_frame_parameter_rows:
+                    seen_three_frame_parameter_rows.add(parameter_key)
+                    expected_value = three_frame_parameter_rows[parameter_key]
+                    if row.get("fieldValue") != expected_value:
+                        row = dict(row)
+                        row["fieldValue"] = expected_value
+                        changed = True
                 if node_id == "448" and field_name == "image" and str(row.get("fieldValue") or "") == "{{reference_image}}":
                     row = dict(row)
                     row["fieldValue"] = "{{input_middle_frame}}"
@@ -1867,6 +1884,12 @@ class CloudComfyUIAdapter:
                     row["fieldValue"] = "{{fps}}"
                     changed = True
             repaired.append(row)
+        if is_three_frame_ltx:
+            for (node_id, field_name), field_value in three_frame_parameter_rows.items():
+                if (node_id, field_name) in seen_three_frame_parameter_rows:
+                    continue
+                repaired.append({"nodeId": node_id, "fieldName": field_name, "fieldValue": field_value})
+                changed = True
         if changed and (
             endpoint_text.endswith("/2069402773254397953")
             or endpoint_text.endswith("/2067423263386591234")
