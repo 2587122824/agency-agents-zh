@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -20,6 +20,7 @@ export const api = {
   projects: () => request<Project[]>('/projects'),
   projectControls: () => request<ProjectControlSummary[]>('/project-controls'),
   projectControl: (id: string) => request<ProjectControl>(`/projects/${id}/control-center`),
+  contactSheet: (id: string) => request<MaterialContactSheet>(`/projects/${id}/contact-sheet`),
   entityRegistry: () => request<EntityRegistry>('/entity-registry'),
   project: (id: string) => request<ProjectDetail>(`/projects/${id}`),
   createProject: (payload: ProjectCreate) =>

@@ -1,5 +1,16 @@
 # Handoff Context
 
+## 2026-07-16 V2 Material Contact Sheet Sprint 13
+
+- Added a project-level read-only material contact sheet at `/projects/:projectId/contact-sheet` and `GET /api/v1/projects/{project_id}/contact-sheet`.
+- The projection reads only `Project.active_snapshot_id`; missing or invalid active snapshots return an explicit empty state and never substitute latest or historical snapshots.
+- Numbered cards expose exact Asset, DAG node, Shot contract, WorkAttempt route, declared parent nodes and all registered outputs, EntityVersion/source attachments, QC findings, review decisions, and output gaps.
+- Dependency evidence never invents a selected upstream Asset because current execution manifests do not freeze the exact consumed `asset_id`.
+- Preview failures remain visible and never trigger transcoding, repair, replacement, inferred binding, retry, or provider work.
+- Added `docs/V2_CONTACT_SHEET_IMPLEMENTATION.md` and updated product, data-model, and state-machine documents.
+- Verification target: 30 backend tests, Python compileall, TypeScript/Vite build, desktop/mobile browser checks, push, and restart on `8766`.
+- No schema migration, mutation command, state transition, provider call, retry, fallback, route substitution, or cost event was introduced.
+
 Last compacted: 2026-07-13
 
 ## 2026-07-16 V2 Entity Registry Sprint 12

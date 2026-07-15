@@ -119,6 +119,10 @@
   font-size: 16px;
   margin: 4px 0 0;
 }
+.summary > div:first-child > a {
+  width: max-content;
+  margin-top: 9px;
+}
 .summary > div:not(:first-child) {
   display: grid;
   text-align: center;

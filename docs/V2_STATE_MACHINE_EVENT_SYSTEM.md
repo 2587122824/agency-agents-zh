@@ -697,3 +697,9 @@ requirements
 实体资产库没有独立状态机，也不产生事件。`GET /entity-registry` 和来源附件读取只投影已存在的 Entity、EntityVersion、AttachmentBinding、Shot 与 SnapshotEntityVersion 记录。
 
 页面筛选、搜索、展开版本和选择查看项均不是命令，不能改变活动实体版本或生产合同。来源文件缺失、路径越界或不可预览只返回明确错误或显示证据，不触发文件修复、版本替换、重新上传或实体解绑。
+
+## 23. 素材联络表查询边界
+
+`GET /projects/{project_id}/contact-sheet` 不是命令，没有独立状态机，也不产生事件。它只投影 `Project.active_snapshot_id` 指向快照内已经持久化的 DAG、工作尝试、素材、QC、分镜和实体版本事实。
+
+无活动快照时返回空态，不发生状态回退或历史快照替代。预览失败、输出缺口、缺少 WorkAttempt 或缺少实体来源均保持为可见证据，不触发 Worker、供应商轮询、状态修复、重试、路由替换或费用记录。

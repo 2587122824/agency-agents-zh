@@ -850,3 +850,19 @@ ProjectEvent
 投影同时返回 `persisted_status` 和 `evaluated_stage`，后者不是 Project 字段，也不能作为写命令输入。`evaluated_stage` 只用于把页面定位到需求、规划、生产准备、生产、质量审核、剪辑、交付或完成阶段。
 
 执行路由来自不可变的 `WorkAttempt.request_manifest`，供应商任务 ID 来自 WorkAttempt；控制台不从 DAG 名称、员工输出或错误文本推断路由。阻断来源使用 `source_type + source_id + code + evidence`，费用按 CostEvent 的原始币种和 kind/status 聚合。查询不创建事件、不提交事务、不修复状态。
+
+## 23. 素材联络表只读投影
+
+素材联络表不新增持久化实体。`MaterialContactSheetView` 从项目当前活动快照的既有权威记录构建：
+
+```text
+Project.active_snapshot_id -> ProductionSnapshot
+ProductionSnapshot -> DAGNode -> DependencyEdge
+DAGNode -> WorkItem -> WorkAttempt
+DAGNode -> Asset -> QCReport -> QCFinding
+Shot -> EntityVersion -> Entity / Attachment
+```
+
+所有 Shot、EntityVersion、Entity 和 Attachment 查询同时校验 `project_id`；素材同时校验 `project_id + snapshot_id`。路由字段只读取 Asset 绑定的 WorkAttempt 及其冻结请求清单。
+
+`DependencyEdge` 只证明节点级依赖，不能证明执行时采用了父节点的哪个 Asset。投影返回父节点全部已登记输出，不生成推断的 `selected_asset_id`。查询不新增 CommandReceipt、ProjectEvent、WorkAttempt、CostEvent 或其他记录。

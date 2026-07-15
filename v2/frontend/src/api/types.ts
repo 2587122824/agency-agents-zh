@@ -409,6 +409,71 @@ export interface QualityReview {
   next_action: { code: string; label: string }
 }
 
+export interface ContactSheetEntityReference {
+  role: 'character' | 'scene' | 'outfit'
+  entity_id: string
+  entity_name: string
+  entity_type: string
+  entity_version_id: string
+  version_number: number
+  source_attachment_id: string | null
+  source_filename: string | null
+  source_mime_type: string | null
+}
+
+export interface ContactSheetEntry {
+  number: number
+  node_id: string | null
+  node_key: string | null
+  node_kind: string | null
+  asset: ProductionAsset
+  shot: {
+    id: string
+    shot_code: string
+    sequence_number: number
+    duration_ms: number
+    shot_type: string
+    face_visibility: string
+    text_policy: string
+    motion_requirement: string
+    composition: string
+    action: string
+  } | null
+  route: {
+    work_item_id: string
+    work_item_status: string
+    attempt_id: string
+    attempt_number: number
+    attempt_state: string
+    provider: string
+    adapter_kind: string | null
+    provider_workflow_id: string | null
+    provider_task_id: string | null
+    request_fingerprint: string
+  } | null
+  dependencies: Array<{
+    edge_id: string
+    dependency_type: string
+    input_slot: string | null
+    parent_node_id: string
+    parent_node_key: string
+    registered_assets: Array<{ id: string; asset_type: string; role: string; state: string; content_hash: string | null }>
+  }>
+  entity_references: ContactSheetEntityReference[]
+}
+
+export interface MaterialContactSheet {
+  project_id: string
+  project_title: string
+  project_status: string
+  generated_at: string
+  snapshot: { id: string; snapshot_number: number; status: string; contract_hash: string; plan_version_id: string } | null
+  entries: ContactSheetEntry[]
+  output_gaps: Array<{ code: string; dag_node_id: string; node_key: string; work_item_id: string | null; message: string }>
+  counts: Record<string, number>
+  boundary: string
+}
+
 export interface ProductionPreparation {
   project_id: string
   active_plan_id: string | null

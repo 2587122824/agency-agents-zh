@@ -18,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import Asset, AssetReviewDecision, CostEvent, DAGNode, DeliveryAttempt, Project, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkAttempt, WorkItem
+from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -1185,6 +1185,178 @@ def test_asset_registration_verification_qc_and_human_approval_are_explicit(clie
     with SessionLocal() as session:
         assert len(list(session.scalars(select(WorkAttempt).where(WorkAttempt.work_item_id == item["id"])))) == 1
         assert session.scalar(select(AssetReviewDecision).where(AssetReviewDecision.asset_id == asset["id"])) is not None
+
+
+def test_contact_sheet_does_not_substitute_a_snapshot_or_create_records(client: TestClient) -> None:
+    project = client.post("/api/v1/projects", json={
+        "title": "Contact sheet empty state",
+        "core_topic": "Read only projection",
+        "duration_seconds": 15,
+        "aspect_ratio": "9:16",
+        "audio_mode": "off",
+    }).json()
+    with SessionLocal() as session:
+        before = (
+            len(list(session.scalars(select(CommandReceipt)))),
+            len(list(session.scalars(select(ProjectEvent)))),
+            len(list(session.scalars(select(WorkAttempt)))),
+            len(list(session.scalars(select(CostEvent)))),
+        )
+    response = client.get(f"/api/v1/projects/{project['id']}/contact-sheet")
+    assert response.status_code == 200
+    view = response.json()
+    assert view["snapshot"] is None
+    assert view["entries"] == []
+    assert view["counts"] == {}
+    assert "不会改用最新或历史快照" in view["boundary"]
+    with SessionLocal() as session:
+        after = (
+            len(list(session.scalars(select(CommandReceipt)))),
+            len(list(session.scalars(select(ProjectEvent)))),
+            len(list(session.scalars(select(WorkAttempt)))),
+            len(list(session.scalars(select(CostEvent)))),
+        )
+    assert after == before
+
+
+def test_contact_sheet_projects_exact_route_dependencies_entities_and_qc(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "contact-activate-command-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "contact-submit-command-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    item, response_manifest, _ = attach_local_provider_output(project, snapshot, 480, 848)
+    response_hash = hashlib.sha256(json.dumps(
+        response_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    image_asset = client.post(
+        f"/api/v1/projects/{project['id']}/work-attempts/{item['attempt_id']}/assets",
+        json={
+            "command_id": "contact-register-command-001",
+            "output_index": 0,
+            "expected_response_manifest_hash": response_hash,
+        },
+    ).json()
+    image_asset = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{image_asset['id']}:verify",
+        json={"command_id": "contact-verify-command-001", "expected_row_version": image_asset["row_version"]},
+    ).json()
+    report = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{image_asset['id']}:run-qc",
+        json={"command_id": "contact-qc-command-001", "expected_row_version": image_asset["row_version"]},
+    ).json()
+
+    with SessionLocal() as session:
+        image = session.get(Asset, image_asset["id"])
+        image_node = session.get(DAGNode, image.dag_node_id)
+        edge = session.scalar(select(DependencyEdge).where(
+            DependencyEdge.snapshot_id == snapshot["id"],
+            DependencyEdge.parent_node_id == image_node.id,
+        ))
+        video_node = session.get(DAGNode, edge.child_node_id)
+        shot = session.get(Shot, image_node.shot_id)
+        attachment = Attachment(
+            project_id=project["id"],
+            original_filename="identity-reference.png",
+            mime_type="image/png",
+            byte_size=10,
+            content_hash=hashlib.sha256(b"identity").hexdigest(),
+            storage_path="attachments/identity-reference.png",
+        )
+        entity = Entity(
+            id="contact_character",
+            project_id=project["id"],
+            entity_type="character",
+            display_name="Contact Character",
+        )
+        session.add_all([attachment, entity])
+        session.flush()
+        version = EntityVersion(
+            project_id=project["id"],
+            entity_id=entity.id,
+            version_number=1,
+            attributes={"identity": "confirmed"},
+            source_attachment_id=attachment.id,
+        )
+        session.add(version)
+        session.flush()
+        shot.character_entity_version_ids = [version.id]
+        video_asset = Asset(
+            project_id=project["id"],
+            snapshot_id=snapshot["id"],
+            work_attempt_id=None,
+            dag_node_id=video_node.id,
+            output_index=0,
+            asset_type="video",
+            role="shot_clip",
+            uri=f"runtime://assets/contact/{video_node.id}.mp4",
+            storage_backend="local",
+            provider_output_manifest={"registered_for_projection_test": True},
+            content_hash=hashlib.sha256(video_node.id.encode()).hexdigest(),
+            mime_type="video/mp4",
+            byte_size=100,
+            width=480,
+            height=848,
+            duration_ms=shot.duration_ms,
+            state="approved",
+        )
+        session.add(video_asset)
+        session.commit()
+        video_asset_id = video_asset.id
+        entity_version_id = version.id
+        before = (
+            len(list(session.scalars(select(CommandReceipt)))),
+            len(list(session.scalars(select(ProjectEvent)))),
+            len(list(session.scalars(select(WorkAttempt)))),
+            len(list(session.scalars(select(CostEvent)))),
+        )
+
+    response = client.get(f"/api/v1/projects/{project['id']}/contact-sheet")
+    assert response.status_code == 200
+    view = response.json()
+    assert view["snapshot"]["id"] == snapshot["id"]
+    assert [entry["number"] for entry in view["entries"]] == list(range(1, len(view["entries"]) + 1))
+    image_entry = next(entry for entry in view["entries"] if entry["asset"]["id"] == image_asset["id"])
+    video_entry = next(entry for entry in view["entries"] if entry["asset"]["id"] == video_asset_id)
+    assert image_entry["route"] == {
+        "work_item_id": item["id"],
+        "work_item_status": "completed",
+        "attempt_id": item["attempt_id"],
+        "attempt_number": 1,
+        "attempt_state": "completed",
+        "provider": "mock_visual",
+        "adapter_kind": "mock",
+        "provider_workflow_id": "mock-workflow-not-executable",
+        "provider_task_id": None,
+        "request_fingerprint": image_entry["route"]["request_fingerprint"],
+    }
+    assert image_entry["asset"]["latest_qc_report"]["id"] == report["id"]
+    assert image_entry["shot"]["id"] == video_entry["shot"]["id"]
+    assert image_entry["entity_references"][0]["entity_version_id"] == entity_version_id
+    dependency = video_entry["dependencies"][0]
+    assert dependency["parent_node_id"] == image_entry["node_id"]
+    assert [asset["id"] for asset in dependency["registered_assets"]] == [image_asset["id"]]
+    assert video_entry["route"] is None
+    assert "不推断" in view["boundary"]
+    with SessionLocal() as session:
+        after = (
+            len(list(session.scalars(select(CommandReceipt)))),
+            len(list(session.scalars(select(ProjectEvent)))),
+            len(list(session.scalars(select(WorkAttempt)))),
+            len(list(session.scalars(select(CostEvent)))),
+        )
+    assert after == before
 
 
 def test_deterministic_asset_contract_failure_blocks_without_retry(client: TestClient) -> None:

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, CheckCircle2, Clock3, FileCheck2, Image, RefreshCw, ShieldAlert, X } from 'lucide-react'
+import { AlertTriangle, Check, CheckCircle2, Clock3, FileCheck2, Images, Image, RefreshCw, ShieldAlert, X } from 'lucide-react'
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 
 import { api } from '../api/client'
 import type { ProductionAsset } from '../api/types'
@@ -42,7 +43,7 @@ export function ReviewPage() {
         {!projectId && <div className={styles.empty}><FileCheck2 /><strong>选择一个项目开始审核</strong><span>素材必须先完成真实文件验证，才能生成 QC 报告。</span></div>}
         {quality.isPending && projectId && <div className={styles.empty}>正在读取质量事实…</div>}
         {quality.data && <>
-          <div className={styles.summary}><div><span>NEXT ACTION</span><h2>{quality.data.next_action.label}</h2></div>{Object.entries(quality.data.counts).map(([state, count]) => <div key={state}><strong>{count}</strong><small>{state}</small></div>)}</div>
+          <div className={styles.summary}><div><span>NEXT ACTION</span><h2>{quality.data.next_action.label}</h2><Link className="secondaryButton" to={`/projects/${projectId}/contact-sheet`}><Images size={14} />素材联络表</Link></div>{Object.entries(quality.data.counts).map(([state, count]) => <div key={state}><strong>{count}</strong><small>{state}</small></div>)}</div>
           {quality.data.output_gaps.map(gap => <article className={styles.gap} key={gap.dag_node_id}><ShieldAlert /><div><strong>{gap.node_key}</strong><span>{gap.code} · {gap.message}</span></div></article>)}
           <div className={styles.assetGrid}>{quality.data.assets.map(asset => <article className={styles.assetCard} key={asset.id} data-state={asset.state}>
             <div className={styles.preview}>{asset.content_hash && asset.asset_type === 'image' ? <img src={mediaUrl(asset)} alt={asset.node_key ?? asset.role} /> : asset.content_hash && asset.asset_type === 'video' ? <video src={mediaUrl(asset)} controls preload="metadata" /> : <Image />}</div>

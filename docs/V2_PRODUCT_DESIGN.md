@@ -667,7 +667,7 @@ GET  /api/v1/projects/{project_id}/events
 
 - [x] 项目控制台
 - [ ] 方案确认页面
-- [ ] 素材联络表
+- [x] 素材联络表
 - [ ] QC 结构化报告
 - [ ] 人工审核操作
 - [ ] 精确依赖重试
@@ -1039,3 +1039,11 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 ```
 
 完整合同见 [V2 最终交付合同实现](./V2_DELIVERY_IMPLEMENTATION.md)。
+
+## 36. 素材联络表实现边界
+
+素材联络表是当前活动生产快照的项目级只读证据视图。它按编号并排展示 Asset、分镜合同、实际 WorkAttempt 路由、DependencyEdge、实体版本来源、QC 报告和人工审核结论，帮助用户在剪辑取舍前核对素材连续性与生产事实。
+
+联络表只读取 `Project.active_snapshot_id`；没有活动快照时显示空态，不自动采用最新或历史快照。依赖区展示声明父节点及其全部登记输出。由于当前执行清单没有冻结实际消费的上游 `asset_id`，系统不得猜测或标记某个输出被采用。
+
+该页面没有批准、拒绝、重试、替换或生产按钮。预览失败只显示错误并保留证据，不触发转码、文件修复、路由切换或重新生成。详细合同见 [V2 素材联络表实现](./V2_CONTACT_SHEET_IMPLEMENTATION.md)。

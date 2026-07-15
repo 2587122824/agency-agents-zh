@@ -186,6 +186,8 @@ from ..registry.service import (
     attachment_content_path,
     entity_registry_view,
 )
+from ..contact_sheet.contracts import MaterialContactSheetView
+from ..contact_sheet.service import material_contact_sheet_view
 
 
 router = APIRouter()
@@ -235,6 +237,11 @@ def project_control_list(session: Session = Depends(get_session)):
 @router.get("/projects/{project_id}/control-center", response_model=ProjectControlView)
 def project_control_detail(project_id: str, session: Session = Depends(get_session)):
     return project_control_view(session, require_project(session, project_id))
+
+
+@router.get("/projects/{project_id}/contact-sheet", response_model=MaterialContactSheetView)
+def project_contact_sheet(project_id: str, session: Session = Depends(get_session)):
+    return material_contact_sheet_view(session, require_project(session, project_id))
 
 
 @router.get("/entity-registry", response_model=EntityRegistryView)
