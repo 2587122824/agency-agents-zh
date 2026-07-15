@@ -2,6 +2,16 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Product, Data, And State Design Baseline
+
+- Expanded `docs/V2_PRODUCT_DESIGN.md` to version 0.2 with confirmation risk levels, decision impact UX, immutable production snapshots, a project control dashboard, strict AI Agent contracts, visible cost confirmation, an explicit/versioned V2.1 template reservation, a concrete 30-second demo flow, and a state/data-first implementation order.
+- Added `docs/V2_DATA_MODEL_DESIGN.md` as the authoritative entity and persistence specification. It defines the complete ER model, version and snapshot ownership, exact DAG dependency types, WorkItem/WorkAttempt idempotency, asset/QC/timeline lifecycles, cost ledger, Repository boundaries, SQLite constraints, PostgreSQL migration boundaries, indexes, and an end-to-end data chain.
+- Added `docs/V2_STATE_MACHINE_EVENT_SYSTEM.md` as the authoritative lifecycle specification. It defines project/work/asset/plan/snapshot/QC/delivery states, guarded transition matrices, `blocked_from_state`, active-snapshot handling, Worker crash reconciliation, cancellation semantics, the persisted event envelope, Outbox/SSE recovery, idempotent consumers, and a concrete event trace.
+- Product defaults must be declared, visible, versioned, and attributable. Templates must be explicitly selected and versioned. Optional DAG dependencies never authorize replacement inputs.
+- AI Agents only produce candidate contracts. They cannot create WorkItems, invoke providers, mutate authoritative state, or write production assets.
+- No design introduces automatic paid retry, workflow/provider substitution, prompt rewriting, output repair, hidden defaults, or fallback. Any retry or changed production scope requires explicit user selection, impact display, and cost confirmation.
+- Documentation authority is split deliberately: product behavior belongs to `V2_PRODUCT_DESIGN.md`, entity/field rules to `V2_DATA_MODEL_DESIGN.md`, and state/event semantics to `V2_STATE_MACHINE_EVENT_SYSTEM.md`.
+
 ## 2026-07-15 V2 Modular Application Foundation
 
 - GitHub Actions now separates repository agent validation from V2 application validation. The legacy `CI` workflow excludes `v2/` Markdown from agent-frontmatter scanning, while `V2 CI` runs Python contract tests and the TypeScript production build for V2 changes.

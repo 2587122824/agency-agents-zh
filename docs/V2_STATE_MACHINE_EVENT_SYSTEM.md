@@ -1,0 +1,453 @@
+# 片场 V2 状态机与事件系统设计
+
+> 状态：设计基线
+> 版本：0.1
+> 更新日期：2026-07-15
+> 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
+> 配套文档：[V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md)
+
+## 1. 目标
+
+本文定义项目、工作项、素材、方案、快照、质量审核与交付的状态语义，以及驱动状态变化的命令、守卫和持久事件。
+
+核心约束：
+
+- 状态变化必须源于显式命令或已验证事实。
+- Worker 只能报告工作事实，不能直接宣称项目完成。
+- 项目状态由活动方案和活动快照的持久事实计算。
+- 阻断、恢复、取消和用户重做都必须有事件证据。
+- 不自动重试、不替换工作流、不降级供应商、不修复输出。
+
+## 2. 状态职责
+
+| 聚合 | 状态所有者 | 禁止行为 |
+|---|---|---|
+| Project | ProjectStateEvaluator + 显式项目命令 | Worker 或前端直接写 `completed` |
+| PlanVersion | PlanApplicationService | Agent 直接确认方案 |
+| ProductionSnapshot | SnapshotService | 锁定后修改合同 |
+| WorkItem / WorkAttempt | WorkOrchestrator | 供应商回调直接改项目状态 |
+| Asset | AssetService | 仅凭 URI 标记文件可用 |
+| QCReport | QualityService + 用户审核命令 | 检测器替用户做主观通过决定 |
+| Timeline / Delivery | EditorService / DeliveryService | 最终文件不存在时完成项目 |
+
+## 3. 项目状态机
+
+### 3.1 状态定义
+
+```text
+draft                    项目已创建，尚无可确认需求
+collecting_requirements  正在形成新的需求版本
+decision_required        存在必须由用户处理的决策
+planning                 正在形成方案候选
+plan_review              方案候选等待用户确认
+contract_ready           已确认方案，生产合同待冻结或验证
+production_ready         活动快照已锁定且生产前检查通过
+producing                活动快照存在运行中或待执行生产工作
+quality_review           生产素材需要人工审核或确定性问题处理
+editing                   正在生成或确认时间线
+delivery_ready           时间线已确认，可执行最终导出
+completed                最终交付文件存在且验证通过
+blocked                  确定性问题阻止当前阶段继续
+cancelled                用户明确取消项目
+```
+
+`failed` 不作为项目终态。具体失败属于工作尝试、素材验证或交付尝试；项目根据是否仍有合法用户动作进入 `blocked` 或相应审核状态。
+
+### 3.2 主流程
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> collecting_requirements: AddMessage
+    collecting_requirements --> decision_required: DecisionsDetected
+    collecting_requirements --> planning: RequirementConfirmed
+    decision_required --> planning: RequiredDecisionsConfirmed
+    planning --> plan_review: PlanCandidateCreated
+    plan_review --> collecting_requirements: RequestPlanChange
+    plan_review --> contract_ready: ConfirmPlan
+    contract_ready --> production_ready: SnapshotLockedAndValidated
+    production_ready --> producing: SubmitProduction
+    producing --> quality_review: ProductionBatchSettled
+    quality_review --> producing: ConfirmSelectedRetry
+    quality_review --> editing: ApproveRequiredAssets
+    editing --> delivery_ready: ConfirmTimeline
+    delivery_ready --> completed: DeliveryVerified
+    completed --> collecting_requirements: StartNewPlanVersion
+```
+
+任一非终态可因确定性守卫失败进入 `blocked`；任一非 `completed` 状态可由用户取消。图中省略这些公共边，具体规则见下表。
+
+### 3.3 项目转移矩阵
+
+| 来源 | 命令/事实 | Actor | 守卫 | 目标 | 事件 |
+|---|---|---|---|---|---|
+| `draft` | `AddMessage` | user | 消息有效持久化 | `collecting_requirements` | `message.added.v1`, `project.state_changed.v1` |
+| `collecting_requirements` | `ConfirmRequirement` | user | 需求候选有效；无高/中风险待决策 | `planning` | `requirement.confirmed.v1` |
+| `collecting_requirements` | `DecisionsDetected` | system | 存在待用户处理决策 | `decision_required` | `decision.requested.v1` |
+| `decision_required` | `ResolveDecisionSet` | user | 所有阻断决策已确认或拒绝 | `planning` | `decision.resolved.v1`, `project.state_changed.v1` |
+| `planning` | `SubmitPlanCandidate` | agent | 候选通过 Schema，输入版本仍有效 | `plan_review` | `plan.candidate_created.v1` |
+| `plan_review` | `ConfirmPlan` | user | 无未解决高/中风险决策；影响和费用可见 | `contract_ready` | `plan.confirmed.v1` |
+| `plan_review` | `RequestPlanChange` | user | 变更请求已记录 | `collecting_requirements` | `plan.change_requested.v1` |
+| `contract_ready` | `LockSnapshot` | user/system | 合同、引用、配置和成本预估验证通过 | `production_ready` | `snapshot.locked.v1` |
+| `production_ready` | `SubmitProduction` | user | 付费范围已确认；快照仍为活动版本 | `producing` | `production.submitted.v1` |
+| `producing` | `EvaluateProduction` | system | 当前批次无 queued/running；素材事实已落库 | `quality_review` | `production.batch_settled.v1` |
+| `quality_review` | `ConfirmSelectedRetry` | user | 精确工作项、影响范围和预计费用已确认 | `producing` | `work.retry_requested.v1` |
+| `quality_review` | `ApproveRequiredAssets` | user | 剪辑所需素材均 approved；无确定性阻断 | `editing` | `quality.stage_approved.v1` |
+| `editing` | `ConfirmTimeline` | user | 引用、时长、规格验证通过 | `delivery_ready` | `timeline.confirmed.v1` |
+| `delivery_ready` | `VerifyDelivery` | system | 最终文件存在、可读、哈希与规格有效 | `completed` | `delivery.verified.v1`, `project.completed.v1` |
+| `completed` | `StartNewPlanVersion` | user | 保留旧交付和审计链 | `collecting_requirements` | `plan.revision_started.v1` |
+| 任一非终态 | `BlockProject` | system | 存在确定性、不可继续的问题 | `blocked` | `project.blocked.v1` |
+| `blocked` | `ResolveBlock` | user/system | 原状态守卫重新评估通过 | 动态返回所记录的原状态 | `project.block_resolved.v1` |
+| 任一非 `completed` | `CancelProject` | user | 明确确认取消影响 | `cancelled` | `project.cancelled.v1` |
+
+### 3.4 Blocked 语义
+
+进入 `blocked` 时必须持久化：
+
+```text
+blocked_from_state
+reason_code
+responsible_aggregate_type / id
+allowed_commands[]
+blocked_at
+```
+
+解除阻断不是“继续运行”按钮的别名。`ResolveBlock` 必须重新执行原目标状态守卫；通过后只回到 `blocked_from_state`，再由显式命令推进。若守卫仍失败，保留 `blocked` 并追加新的诊断事件。
+
+项目阻断不触发自动重试或合同修改。
+
+## 4. 活动版本与迟到结果
+
+项目同时只能有一个 `active_plan_version_id` 和一个 `active_snapshot_id`，历史快照可继续展示或完成正在进行的供应商对账。
+
+规则：
+
+1. 新快照激活后，旧快照标记 `superseded`。
+2. 旧快照的供应商结果仍按原工作尝试入库并产生事件。
+3. 状态评估器只读取活动快照事实；旧快照迟到成功不能推进项目。
+4. 旧快照迟到失败不会把新快照项目设为 `blocked`，但会产生带快照 ID 的诊断事件。
+5. 用户希望采用旧结果时，必须通过明确的素材选用/方案变更命令建立新引用，不能自动搬运。
+
+## 5. 方案与快照生命周期
+
+### 5.1 PlanVersion
+
+```mermaid
+stateDiagram-v2
+    [*] --> candidate
+    candidate --> review: CandidateValidated
+    review --> confirmed: ConfirmPlan
+    review --> superseded: RejectOrRevise
+    confirmed --> superseded: NewPlanActivated
+```
+
+`confirmed` 内容不可变。方案确认只代表创意合同被接受，不代表生产素材就绪。
+
+### 5.2 ProductionSnapshot
+
+```mermaid
+stateDiagram-v2
+    [*] --> preparing
+    preparing --> locked: LockSnapshot
+    locked --> active: ActivateSnapshot
+    active --> superseded: ActivateNewSnapshot
+    superseded --> archived: ArchiveSnapshot
+```
+
+快照锁定守卫包括：所有 ID 精确解析、DAG 无环、输出规格有效、系统槽位显式存在、音频关闭时无 TTS 节点、预计成本已计算。任一失败进入项目 `blocked`，不补字段或替换配置。
+
+## 6. 工作项与尝试状态机
+
+### 6.1 WorkItem 状态
+
+```text
+queued
+running
+completed
+review_required
+blocked
+cancelled
+skipped
+```
+
+`WorkItem` 表达节点总体状态，`WorkAttempt` 表达一次实际执行。一个用户确认的重做创建新尝试并重新评估工作项，不覆盖旧尝试。
+
+### 6.2 WorkAttempt 状态
+
+```text
+created
+claimed
+submitting
+submitted
+polling
+succeeded
+failed
+cancel_requested
+cancelled
+reconciliation_required
+```
+
+### 6.3 尝试转移矩阵
+
+| 来源 | 命令/事实 | Actor | 守卫 | 目标 | 事件 |
+|---|---|---|---|---|---|
+| `created` | `ClaimAttempt` | worker | 依赖满足；租约条件更新成功 | `claimed` | `work.attempt_claimed.v1` |
+| `claimed` | `BeginSubmit` | worker | 指纹与快照仍有效 | `submitting` | `provider.submit_started.v1` |
+| `submitting` | `ProviderAccepted` | adapter | 任务 ID 已持久化 | `submitted` | `provider.task_accepted.v1` |
+| `submitted` | `PollProvider` | worker | 租约有效 | `polling` | `provider.poll_started.v1` |
+| `polling` | `ProviderCompleted` | adapter | 响应可验证 | `succeeded` | `provider.task_completed.v1` |
+| `claimed/submitting/submitted/polling` | `ExecutionFailed` | worker | 真实错误已分类 | `failed` | `work.attempt_failed.v1` |
+| `submitting` | `SubmissionOutcomeUnknown` | worker | 可能已提交但任务 ID 未确认 | `reconciliation_required` | `provider.reconciliation_required.v1` |
+| 非终态 | `RequestCancel` | user | 记录取消影响 | `cancel_requested` | `work.cancel_requested.v1` |
+| `cancel_requested` | `ProviderCancelled` | adapter/system | 供应商或本地执行确认停止 | `cancelled` | `work.attempt_cancelled.v1` |
+
+失败后不自动创建第二次尝试。工作项根据失败类型进入 `blocked` 或 `review_required`；只有 `ConfirmSelectedRetry` 才能创建下一尝试。
+
+### 6.4 依赖就绪
+
+节点可领取需要同时满足：
+
+- 所有 `required` 父节点 `completed`，且所需输出素材已 `verified` 或 `approved`
+- 当前快照为活动快照，或命令明确允许完成历史对账
+- 工作项为 `queued` 且 `available_at` 已到
+- 不存在有效执行租约
+- 用户已确认本批付费范围
+
+`optional` 父节点失败不阻断，但不会自动注入其他素材。`informational` 边不参与领取。
+
+## 7. Worker 崩溃与幂等
+
+### 7.1 供应商提交前崩溃
+
+若尚未进入 `submitting`，租约过期后可由另一个 Worker 重新领取同一尝试。若已写 `submitting` 但没有网络提交证据，仍先进入对账流程，不直接假设未提交。
+
+### 7.2 提交后、任务 ID 持久化前崩溃
+
+这是重复扣费风险最高的状态。处理方式：
+
+1. 将尝试置为 `reconciliation_required`。
+2. 使用请求指纹和供应商幂等键查询；供应商不支持查询时要求人工处理。
+3. 未证明原请求未提交前，不得重新提交。
+4. 用户选择再次付费执行时，创建新尝试并明确展示风险。
+
+### 7.3 供应商完成后、素材落库前崩溃
+
+使用已持久化的 `provider_task_id` 重新获取同一结果，按内容哈希幂等创建素材。不得发起新生成请求。
+
+### 7.4 租约
+
+租约包含 owner、过期时间和心跳。租约过期只释放处理权，不改变业务尝试次数，也不授权付费重试。
+
+## 8. 素材与 QC 状态
+
+### 8.1 Asset 生命周期
+
+```mermaid
+stateDiagram-v2
+    [*] --> created
+    created --> verified: VerifyFile
+    created --> archived: InvalidFileRecorded
+    verified --> review_required: QCFindingNeedsReview
+    verified --> approved: DeterministicQCPassed
+    review_required --> approved: UserApproves
+    review_required --> archived: UserRejects
+    approved --> used: AddToConfirmedTimeline
+    created --> deleted: DeleteUnreferenced
+    verified --> deleted: DeleteUnreferenced
+    approved --> archived: ArchiveUnused
+    archived --> deleted: DeleteUnreferenced
+```
+
+确定性损坏不把无效文件标记为 `verified`，对应工作项进入 `blocked`。删除前必须通过引用检查。
+
+### 8.2 QC 结论
+
+```text
+passed           确定性规则通过，可按合同进入 approved
+review_required  身份相似度、疑似文字、构图、低动态等需要人判断
+blocked          文件损坏、尺寸无效、引用缺失等确定性问题
+```
+
+`face_visibility=not_visible` 不运行正脸要求；OCR 和身份相似度默认是审核证据，不直接触发付费重试。
+
+### 8.3 人工审核命令
+
+| 命令 | 结果 |
+|---|---|
+| `ApproveAsset` | 记录审核人和依据，素材进入 `approved` |
+| `RejectAsset` | 素材进入 `archived`，列出受影响下游 |
+| `RequestAssetRetry` | 展示精确节点、依赖和费用，确认后创建新尝试 |
+| `KeepForAlternative` | 保留素材但不进入当前时间线 |
+
+## 9. 时间线与交付状态
+
+```mermaid
+stateDiagram-v2
+    [*] --> candidate
+    candidate --> review: ValidateTimeline
+    review --> confirmed: ConfirmTimeline
+    review --> superseded: ReviseTimeline
+    confirmed --> exported: DeliveryAssetVerified
+```
+
+导出尝试失败时项目进入 `blocked`，时间线仍保持 `confirmed`。用户处理真实错误后可明确重新导出；系统不改时间线、不关闭音频、不移除字幕来兜底。
+
+项目完成守卫：
+
+- 当前活动快照对应的确认时间线存在
+- 最终交付 `Asset` 类型为 `final_delivery`
+- 文件实际存在、可读取、哈希和媒体规格验证通过
+- 交付素材绑定当前项目和活动快照
+- 无未解决的交付级阻断
+
+## 10. 取消语义
+
+- 项目取消由用户显式发起，记录影响和可能已发生费用。
+- 尚未提交供应商的工作尝试直接取消。
+- 已提交供应商的任务调用供应商取消能力；不支持取消时继续对账，但结果不得推进已取消项目。
+- 取消不删除已生成素材、成本和事件。
+- 重新开始通过新方案/快照命令完成，不把 `cancelled` 原地改回 `producing`。
+
+## 11. 事件信封
+
+所有领域事件使用同一结构：
+
+```json
+{
+  "event_id": "evt_01",
+  "event_type": "work.attempt_failed.v1",
+  "aggregate_type": "work_attempt",
+  "aggregate_id": "attempt_01",
+  "project_id": "project_01",
+  "snapshot_id": "snapshot_001",
+  "sequence": 42,
+  "causation_id": "cmd_01",
+  "correlation_id": "flow_01",
+  "actor": {
+    "type": "worker",
+    "id": "worker_local_01"
+  },
+  "occurred_at": "2026-07-15T10:00:00Z",
+  "schema_version": 1,
+  "payload": {
+    "error_code": "PROVIDER_TIMEOUT",
+    "retry_created": false
+  }
+}
+```
+
+字段规则：
+
+- `sequence` 在项目内严格递增，用于 SSE 游标和顺序恢复。
+- `causation_id` 指向触发当前事实的命令或事件。
+- 同一用户操作、Worker 执行或供应商调用共享 `correlation_id`。
+- `snapshot_id` 对非生产事件可为空。
+- `payload` 使用按事件类型注册的版本化 Schema。
+- 不写入密钥、完整供应商请求头或二进制内容。
+
+## 12. 事件命名与版本
+
+命名格式：`<domain>.<fact>.v<major>`，使用已发生事实，例如：
+
+```text
+project.state_changed.v1
+decision.resolved.v1
+snapshot.locked.v1
+work.attempt_claimed.v1
+provider.task_accepted.v1
+asset.verified.v1
+quality.review_required.v1
+timeline.confirmed.v1
+delivery.verified.v1
+cost.charged.v1
+```
+
+只新增字段且旧消费者可忽略时不提升 major；删除字段、改变语义或单位时创建新 major，旧事件永久保持可读。
+
+## 13. 事务、Outbox 与 SSE
+
+### 13.1 写入事务
+
+每次状态变化在一个数据库事务中完成：
+
+1. 校验命令幂等键和聚合 `row_version`。
+2. 读取并验证当前状态守卫。
+3. 更新权威聚合。
+4. 插入 Event/Outbox 记录并分配项目序列。
+5. 提交事务。
+
+SSE 只读取已提交事件。状态更新成功但事件缺失、或事件存在但状态未提交都不允许发生。
+
+### 13.2 SSE 游标
+
+- 客户端使用 `Last-Event-ID` 或 `after_sequence` 重连。
+- 服务端按 `(project_id, sequence)` 返回事件。
+- 心跳不进入领域事件表。
+- 游标早于保留窗口时返回明确的 `resync_required`，客户端重新获取项目快照后续订。
+- SSE 断开不影响 Worker 和项目状态。
+
+### 13.3 消费者幂等
+
+消费者记录 `(consumer_name, event_id)` 或最后处理序列。重复事件必须无副作用；不得因 SSE 重连重复创建工作项、素材、成本或通知。
+
+## 14. 状态评估器
+
+`ProjectStateEvaluator` 接收项目 ID，在同一活动版本范围内读取持久事实，给出目标状态和原因，不直接执行供应商调用。
+
+优先级：
+
+1. 用户已取消 -> `cancelled`
+2. 存在当前阶段确定性阻断 -> `blocked`
+3. 最终交付通过完成守卫 -> `completed`
+4. 存在待用户决策 -> `decision_required`
+5. 根据活动方案、快照、工作项、QC 和时间线计算主流程状态
+
+状态评估必须可重复：相同数据库事实得到相同结果。Agent 文本中的 `all_assets_ready`、供应商页面状态和前端本地计数都不是输入事实。
+
+## 15. 端到端事件轨迹
+
+30 秒竖屏健身广告、音频关闭的最小轨迹：
+
+```text
+001 project.created.v1
+002 message.added.v1
+003 requirement.candidate_created.v1
+004 decision.requested.v1              人物身份，高风险
+005 decision.resolved.v1               用户确认
+006 requirement.confirmed.v1
+007 plan.candidate_created.v1
+008 plan.confirmed.v1
+009 snapshot.locked.v1                 合同中无 TTS
+010 production.estimate_created.v1
+011 production.submitted.v1            用户确认预计费用
+012 work.attempt_claimed.v1
+013 provider.task_accepted.v1
+014 cost.charged.v1
+015 provider.task_completed.v1
+016 asset.created.v1
+017 asset.verified.v1
+018 quality.review_required.v1
+019 asset.approved.v1                   用户审核
+020 quality.stage_approved.v1
+021 timeline.candidate_created.v1
+022 timeline.confirmed.v1
+023 delivery.export_started.v1
+024 asset.created.v1                    final_delivery
+025 delivery.verified.v1
+026 project.completed.v1
+```
+
+若第 18 步用户不满意，系统只产生审核结论；直到用户确认费用并选择目标后才产生 `work.retry_requested.v1` 和新的 `WorkAttempt`。
+
+## 16. 状态与事件验收
+
+- Worker 完成一个节点不会直接把项目设为完成。
+- 最终文件不存在或未验证时，`completed` 守卫失败。
+- 任一阻断记录原状态、稳定原因码和允许操作。
+- 解除阻断重新评估守卫，不自动继续付费生产。
+- 旧快照迟到结果不会推进活动项目状态。
+- API/Worker 重启后，事件序列和 SSE 游标连续可恢复。
+- 供应商提交结果未知时进入对账，不重复提交。
+- 失败不会自动创建新工作尝试。
+- 取消后结果可审计，但不能推进项目。
+- 每个状态转移都有对应持久事件，重复消费无副作用。
