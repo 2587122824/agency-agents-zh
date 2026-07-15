@@ -7407,7 +7407,11 @@ INDEX_HTML = r"""<!doctype html>
         try {
           const parsed = JSON.parse(text);
           if (!Array.isArray(parsed)) return text;
-          const normalized = parsed.map(item => {
+          const normalized = parsed.filter(item => !(
+            item && typeof item === 'object'
+            && String(item.nodeId ?? '') === '426'
+            && String(item.fieldName ?? '') === 'frame_count'
+          )).map(item => {
             if (!item || typeof item !== 'object') return item;
             const nodeId = String(item.nodeId ?? '');
             const fieldName = String(item.fieldName ?? '');

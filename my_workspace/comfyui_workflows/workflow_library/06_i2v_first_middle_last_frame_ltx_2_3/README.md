@@ -19,6 +19,7 @@ It does not replace 06B first/last-frame generation.
 - `{{duration}}` is sent to `436.value` as clip seconds.
 - `{{fps}}` is sent to `412.value`, `373.frame_rate`, and `413.frame_rate`.
 - `{{frame_count}}` is calculated from duration x FPS and sent to `424.length` and `373.frames_number`.
+- Do not send `{{frame_count}}` to `426.frame_count`. Node 426 is `Allab_QwenVL_Advanced`; its sampling control is capped at 64 and is not the generated clip length.
 - Runtime configuration repair keeps these six rows parameterized when a full RunningHub node list is imported; it does not change any other workflow slot.
 
 ## Current Wiring

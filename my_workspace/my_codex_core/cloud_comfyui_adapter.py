@@ -1850,6 +1850,12 @@ class CloudComfyUIAdapter:
             if is_three_frame_ltx and isinstance(row, dict):
                 node_id = str(row.get("nodeId") or "")
                 field_name = str(row.get("fieldName") or "")
+                if node_id == "426" and field_name == "frame_count":
+                    # Allab_QwenVL_Advanced limits this image/video sampling
+                    # control to 64. It is not the generated clip frame count;
+                    # the latter belongs to 424.length and 373.frames_number.
+                    changed = True
+                    continue
                 parameter_key = (node_id, field_name)
                 if parameter_key in three_frame_parameter_rows:
                     seen_three_frame_parameter_rows.add(parameter_key)
