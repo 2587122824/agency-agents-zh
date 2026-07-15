@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Clock3, FileVideo2, Film, ListVideo, Music2, Plus, RefreshCw, Save, Scissors, Subtitles, Trash2, Video, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Clock3, Download, FileVideo2, Film, ListVideo, Music2, Plus, RefreshCw, Save, Scissors, ShieldCheck, Subtitles, Trash2, Upload, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api/client'
@@ -45,10 +45,14 @@ export function EditorPage() {
   const [subtitleEnabled, setSubtitleEnabled] = useState(false)
   const [gapSeconds, setGapSeconds] = useState(2)
   const [confirming, setConfirming] = useState<Timeline | null>(null)
+  const [authorizingDelivery, setAuthorizingDelivery] = useState(false)
+  const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
   const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects, refetchInterval: 5000 })
   const workspace = useQuery({ queryKey: ['editor-workspace', projectId], queryFn: () => api.editorWorkspace(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
+  const delivery = useQuery({ queryKey: ['delivery-workspace', projectId], queryFn: () => api.deliveryWorkspace(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['editor-workspace', projectId] })
+    await client.invalidateQueries({ queryKey: ['delivery-workspace', projectId] })
     await client.invalidateQueries({ queryKey: ['projects'] })
   }
   const stage = useMutation({ mutationFn: () => api.approveQualityStage(projectId, workspace.data!.active_snapshot_id!), onSuccess: refresh })
@@ -64,10 +68,14 @@ export function EditorPage() {
   })
   const validate = useMutation({ mutationFn: (timeline: Timeline) => api.validateTimeline(projectId, timeline), onSuccess: async timeline => { setSelectedTimelineId(timeline.id); await refresh() } })
   const confirm = useMutation({ mutationFn: (timeline: Timeline) => api.confirmTimeline(projectId, timeline), onSuccess: async timeline => { setConfirming(null); setSelectedTimelineId(timeline.id); await refresh() } })
-  const editorProjects = projects.data?.filter(project => ['quality_review', 'editing', 'delivery_ready'].includes(project.status)) ?? []
+  const authorize = useMutation({ mutationFn: () => api.authorizeDelivery(projectId, delivery.data!), onSuccess: async () => { setAuthorizingDelivery(false); await refresh() } })
+  const upload = useMutation({ mutationFn: () => api.uploadDelivery(projectId, delivery.data!.attempts[0], deliveryFile!), onSuccess: async () => { setDeliveryFile(null); await refresh() } })
+  const verify = useMutation({ mutationFn: () => api.verifyDelivery(projectId, delivery.data!.attempts[0]), onSuccess: refresh })
+  const editorProjects = projects.data?.filter(project => ['quality_review', 'editing', 'delivery_ready', 'blocked', 'completed'].includes(project.status)) ?? []
   const selectedTimeline = workspace.data?.timelines.find(row => row.id === selectedTimelineId) ?? workspace.data?.timelines[0] ?? null
   const selectedAsset = workspace.data?.available_assets.find(asset => asset.id === selectedAssetId) ?? null
-  const error = workspace.error || stage.error || save.error || validate.error || confirm.error
+  const deliveryAttempt = delivery.data?.attempts[0] ?? null
+  const error = workspace.error || delivery.error || stage.error || save.error || validate.error || confirm.error || authorize.error || upload.error || verify.error
 
   useEffect(() => {
     setSelectedTimelineId('')
@@ -75,6 +83,8 @@ export function EditorPage() {
     setRevisionBase(null)
     setSelectedDraftIndex(null)
     setSelectedAssetId('')
+    setAuthorizingDelivery(false)
+    setDeliveryFile(null)
   }, [projectId])
 
   const timelineDuration = useMemo(() => draftItems.reduce((maximum, item) => Math.max(maximum, item.timeline_out_ms), 0), [draftItems])
@@ -222,10 +232,25 @@ export function EditorPage() {
               </article>)}
             </section>
           </>}
+
+          {delivery.data && ['delivery_ready', 'blocked', 'completed'].includes(delivery.data.project_status) && <section className={styles.delivery} data-status={delivery.data.project_status}>
+            <header><div><span>FINAL DELIVERY</span><h3>最终交付</h3></div><em>{delivery.data.next_action.label}</em></header>
+            {delivery.data.confirmed_timeline && <dl>
+              <div><dt>时间线</dt><dd>v{delivery.data.confirmed_timeline.version_number} · {delivery.data.confirmed_timeline.status}</dd></div>
+              <div><dt>合同哈希</dt><dd><code>{delivery.data.confirmed_timeline.contract_hash}</code></dd></div>
+              {deliveryAttempt && <div><dt>请求指纹</dt><dd><code>{deliveryAttempt.request_fingerprint}</code></dd></div>}
+            </dl>}
+            {!deliveryAttempt && delivery.data.confirmed_timeline && <div className={styles.deliveryAction}><ShieldCheck /><span><strong>等待交付授权</strong><small>当前确认时间线尚未创建交付尝试</small></span><button className="primaryButton" onClick={() => setAuthorizingDelivery(true)}>授权交付</button></div>}
+            {deliveryAttempt?.status === 'authorized' && <div className={styles.deliveryAction}><Upload /><span><strong>上传最终 MP4</strong><small>{deliveryFile?.name ?? '尚未选择文件'}</small></span><label className="secondaryButton"><Upload size={14} />选择文件<input type="file" accept="video/mp4,.mp4" onChange={event => setDeliveryFile(event.target.files?.[0] ?? null)} /></label><button className="primaryButton" disabled={!deliveryFile || upload.isPending} onClick={() => upload.mutate()}>上传并登记</button></div>}
+            {deliveryAttempt?.status === 'output_registered' && <div className={styles.deliveryAction}><ShieldCheck /><span><strong>{deliveryAttempt.final_asset?.role}</strong><small>{deliveryAttempt.final_asset?.byte_size?.toLocaleString()} bytes · unverified</small></span><button className="primaryButton" disabled={verify.isPending} onClick={() => verify.mutate()}>验证交付文件</button></div>}
+            {deliveryAttempt?.status === 'blocked' && <div className={styles.deliveryBlocked}><AlertTriangle /><div><strong>{deliveryAttempt.error_code}</strong><pre>{JSON.stringify(deliveryAttempt.error_detail, null, 2)}</pre></div></div>}
+            {deliveryAttempt?.status === 'verified' && deliveryAttempt.final_asset && <div className={styles.deliveryAction}><Check /><span><strong>交付文件已验证</strong><small>{deliveryAttempt.final_asset.width}×{deliveryAttempt.final_asset.height} · {seconds(deliveryAttempt.final_asset.duration_ms)}</small></span><a className="primaryButton" href={`/api/v1/projects/${projectId}/assets/${deliveryAttempt.final_asset.id}/content`}><Download size={14} />下载 MP4</a></div>}
+          </section>}
         </>}
         {error && <div className={styles.error}>{error.message}</div>}
       </section>
     </main>
     {confirming && <div className={styles.modal}><section><header><Check /><div><span>TIMELINE AUTHORITY</span><h2>确认剪辑合同 v{confirming.version_number}</h2></div></header><dl><div><dt>快照</dt><dd>{confirming.snapshot_id}</dd></div><div><dt>合同哈希</dt><dd><code>{confirming.contract_hash}</code></dd></div><div><dt>片段</dt><dd>{confirming.items.length}</dd></div></dl><p>确认后该版本不可修改，引用素材进入 used，项目进入 delivery_ready。本操作不会导出、调用供应商或产生费用。</p><footer><button className="secondaryButton" onClick={() => setConfirming(null)}><X size={14} />取消</button><button className="primaryButton" disabled={confirm.isPending} onClick={() => confirm.mutate(confirming)}><Check size={14} />确认当前范围</button></footer></section></div>}
+    {authorizingDelivery && delivery.data?.confirmed_timeline && <div className={styles.modal}><section><header><ShieldCheck /><div><span>DELIVERY AUTHORITY</span><h2>授权最终交付</h2></div></header><dl><div><dt>时间线</dt><dd>v{delivery.data.confirmed_timeline.version_number}</dd></div><div><dt>合同哈希</dt><dd><code>{delivery.data.confirmed_timeline.contract_hash}</code></dd></div><div><dt>执行方式</dt><dd>external_upload</dd></div></dl><p>本次授权只冻结交付请求，不启动渲染器、不调用供应商，也不产生费用。每条时间线当前只允许一次交付尝试。</p><footer><button className="secondaryButton" onClick={() => setAuthorizingDelivery(false)}><X size={14} />取消</button><button className="primaryButton" disabled={authorize.isPending} onClick={() => authorize.mutate()}><ShieldCheck size={14} />确认授权</button></footer></section></div>}
   </>
 }

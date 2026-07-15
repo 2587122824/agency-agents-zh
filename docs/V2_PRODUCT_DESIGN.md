@@ -988,3 +988,28 @@ GET  /api/v1/projects/{project_id}/production-execution
 时间线仅引用当前活动快照、同一项目且状态为 `approved` 或 `used` 的素材。显式空位可以留在候选中用于取舍，但不能确认；系统不自动补素材、裁切、变速或重排。已有时间线后必须从指定版本创建修订，确认版本不可原地修改。
 
 具体表结构、命令、错误码、API 和验收矩阵见 [V2 时间线剪辑合同实现](./V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
+
+## 34. 最终交付实现边界
+
+最终交付只消费当前活动快照中精确一个 `confirmed` 时间线。首期执行方式为 `external_upload`：用户先确认时间线合同哈希并授权，系统冻结请求清单和 SHA-256 指纹，但不启动 FFmpeg、渲染器或供应商。
+
+上传的 MP4 先登记为 `created` 的 `final_delivery` Asset。完成态只能由后端读取真实文件后计算：
+
+- SHA-256 与字节数必须和上传流事实一致。
+- 文件签名必须是 MP4，不能只依赖扩展名或 MIME 声明。
+- 宽度、高度和时长必须符合快照输出规格。
+- 文件必须位于快照绑定的明确存储策略中。
+- 当前时间线、素材哈希、活动快照和请求指纹必须保持不变。
+
+验证通过后，Asset 进入 `verified`、时间线进入 `exported`、项目写入 `delivery_asset_id` 并进入 `completed`。验证失败会持久化 `blocked` QC 证据并归档该文件；时间线保持 `confirmed`。系统不自动再上传、不创建第二次 DeliveryAttempt，也不更换渲染方式。
+
+接口：
+
+```text
+GET  /api/v1/projects/{project_id}/delivery-workspace
+POST /api/v1/projects/{project_id}/deliveries:authorize
+POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}/output
+POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
+```
+
+完整合同见 [V2 最终交付合同实现](./V2_DELIVERY_IMPLEMENTATION.md)。

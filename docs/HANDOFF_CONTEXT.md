@@ -2,6 +2,18 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-16 V2 Final Delivery Contracts Sprint 10
+
+- Added `Project.delivery_asset_id` and persisted `DeliveryAttempt` under Alembic revision `20260716_10`.
+- Final delivery consumes exactly one current active-snapshot `confirmed` timeline. Explicit authorization freezes an immutable request manifest and fingerprint but starts no renderer, provider, WorkItem, WorkAttempt, or charged CostEvent.
+- The first execution kind is `external_upload`. Multipart MP4 uploads are streamed to random temporary files with in-stream SHA-256 and size limits; every exit path removes temporary files.
+- Uploaded files register as unverified `final_delivery` Assets. Deterministic verification re-reads the file and checks hash, byte size, MP4 signature, dimensions, duration, storage policy, current timeline, snapshot, and all input asset hashes.
+- Passing verification marks the Asset `verified`, Timeline `exported`, and Project `completed`. Failure persists blocked QC evidence, archives only the failed final file, preserves the confirmed timeline, and creates no retry or second attempt.
+- Integrated authorization, upload, verification, blocked evidence, and completed download into `/editor`; blocked and completed projects remain visible.
+- Added `docs/V2_DELIVERY_IMPLEMENTATION.md` and updated product, data-model, and state-machine documents.
+- Verification target: 26 backend tests, Python compileall, TypeScript/Vite build, fresh ten-revision migration, desktop/mobile browser checks, push, and restart on `8766`.
+- Next slice must be designed before implementation. Do not add delivery retry, local rendering, provider execution, alternate upload paths, or unblock semantics without explicit user confirmation.
+
 ## 2026-07-16 V2 Timeline Editor Contracts Sprint 9
 
 - Added persisted `Timeline` and `TimelineItem` records under Alembic revision `20260716_09`, including immutable version lineage, exact active-snapshot ownership, row-version guards, validation evidence, and contract hashes.

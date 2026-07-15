@@ -18,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import Asset, AssetReviewDecision, CostEvent, DAGNode, Project, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkAttempt, WorkItem
+from v2.backend.app.db.models import Asset, AssetReviewDecision, CostEvent, DAGNode, DeliveryAttempt, Project, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -1204,6 +1204,65 @@ def timeline_items_for_assets(video_assets: list[dict]) -> list[dict]:
     return items
 
 
+def create_confirmed_timeline(client: TestClient) -> tuple[dict, dict, dict]:
+    project, snapshot = create_locked_snapshot(client)
+    video_assets = seed_editor_assets(client, project, snapshot)
+    stage = client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "delivery-stage-approve-001", "expected_snapshot_id": snapshot["id"]},
+    )
+    assert stage.status_code == 200
+    timeline = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "delivery-timeline-create-001",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": timeline_items_for_assets(video_assets),
+        },
+    ).json()
+    timeline = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:validate",
+        json={"command_id": "delivery-timeline-validate-001", "expected_row_version": timeline["row_version"]},
+    ).json()
+    timeline = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:confirm",
+        json={
+            "command_id": "delivery-timeline-confirm-001",
+            "expected_row_version": timeline["row_version"],
+            "expected_contract_hash": timeline["contract_hash"],
+            "confirm_delivery_scope": True,
+        },
+    ).json()
+    return project, snapshot, timeline
+
+
+def synthetic_mp4(width: int, height: int, duration_ms: int) -> bytes:
+    def box(kind: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I4s", len(payload) + 8, kind) + payload
+    timescale = 1000
+    mvhd = box(b"mvhd", b"\x00\x00\x00\x00" + struct.pack(">IIII", 0, 0, timescale, duration_ms))
+    tkhd = box(b"tkhd", struct.pack(">II", width << 16, height << 16))
+    return box(b"ftyp", b"isom\x00\x00\x02\x00isom") + box(b"moov", mvhd + box(b"trak", tkhd))
+
+
+def authorize_delivery_attempt(client: TestClient, project: dict, timeline: dict) -> dict:
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/deliveries:authorize",
+        json={
+            "command_id": "delivery-authorize-command-001",
+            "actor_id": "test-user",
+            "timeline_id": timeline["id"],
+            "expected_timeline_contract_hash": timeline["contract_hash"],
+            "execution_kind": "external_upload",
+            "confirm_delivery_authorization": True,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
 def test_quality_stage_and_timeline_confirmation_are_explicit_and_idempotent(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client)
     activated = client.post(
@@ -1418,6 +1477,155 @@ def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(
     assert old["status"] == "confirmed"
     assert old["items"] == first["items"]
     assert workspace["project_status"] == "editing"
+
+
+def test_delivery_authorization_and_verified_mp4_complete_project_without_execution(client: TestClient) -> None:
+    project, snapshot, timeline = create_confirmed_timeline(client)
+    with SessionLocal() as session:
+        work_attempt_count = len(list(session.scalars(select(WorkAttempt))))
+        cost_event_count = len(list(session.scalars(select(CostEvent))))
+
+    denied = client.post(
+        f"/api/v1/projects/{project['id']}/deliveries:authorize",
+        json={
+            "command_id": "delivery-authorize-denied-01",
+            "timeline_id": timeline["id"],
+            "expected_timeline_contract_hash": timeline["contract_hash"],
+            "execution_kind": "external_upload",
+            "confirm_delivery_authorization": False,
+        },
+    )
+    assert denied.status_code == 409
+    assert denied.headers["x-error-code"] == "DELIVERY_AUTHORIZATION_REQUIRED"
+
+    attempt = authorize_delivery_attempt(client, project, timeline)
+    replay = authorize_delivery_attempt(client, project, timeline)
+    assert replay["id"] == attempt["id"]
+    assert attempt["status"] == "authorized"
+    assert attempt["request_manifest"]["timeline_contract_hash"] == timeline["contract_hash"]
+    assert attempt["request_manifest"]["output_spec"]["duration_ms"] == 30_000
+
+    second = client.post(
+        f"/api/v1/projects/{project['id']}/deliveries:authorize",
+        json={
+            "command_id": "delivery-authorize-second-001",
+            "timeline_id": timeline["id"],
+            "expected_timeline_contract_hash": timeline["contract_hash"],
+            "execution_kind": "external_upload",
+            "confirm_delivery_authorization": True,
+        },
+    )
+    assert second.status_code == 409
+    assert second.headers["x-error-code"] == "DELIVERY_ATTEMPT_EXISTS"
+
+    content = synthetic_mp4(480, 848, 30_000)
+    rejected_upload = client.post(
+        f"/api/v1/projects/{project['id']}/delivery-attempts/{attempt['id']}/output",
+        data={
+            "command_id": "delivery-upload-wrong-fp01",
+            "actor_id": "test-user",
+            "expected_request_fingerprint": "0" * 64,
+            "expected_row_version": attempt["row_version"],
+        },
+        files={"file": ("delivery.mp4", content, "video/mp4")},
+    )
+    assert rejected_upload.status_code == 409
+    assert rejected_upload.headers["x-error-code"] == "DELIVERY_REQUEST_FINGERPRINT_MISMATCH"
+    assert not list((TEST_RUNTIME / "uploads" / "delivery").glob("*.upload"))
+
+    uploaded = client.post(
+        f"/api/v1/projects/{project['id']}/delivery-attempts/{attempt['id']}/output",
+        data={
+            "command_id": "delivery-upload-command-001",
+            "actor_id": "test-user",
+            "expected_request_fingerprint": attempt["request_fingerprint"],
+            "expected_row_version": attempt["row_version"],
+        },
+        files={"file": ("delivery.mp4", content, "video/mp4")},
+    )
+    assert uploaded.status_code == 201
+    attempt = uploaded.json()
+    assert attempt["status"] == "output_registered"
+    assert attempt["final_asset"]["asset_type"] == "final_delivery"
+    assert attempt["final_asset"]["state"] == "created"
+
+    verified = client.post(
+        f"/api/v1/projects/{project['id']}/delivery-attempts/{attempt['id']}:verify",
+        json={
+            "command_id": "delivery-verify-command-001",
+            "actor_id": "test-user",
+            "expected_row_version": attempt["row_version"],
+            "expected_asset_row_version": attempt["final_asset"]["row_version"],
+        },
+    )
+    assert verified.status_code == 200
+    result = verified.json()
+    assert result["status"] == "verified"
+    assert result["final_asset"]["state"] == "verified"
+    assert result["final_asset"]["content_hash"] == hashlib.sha256(content).hexdigest()
+    assert result["final_asset"]["width"] == 480
+    assert result["final_asset"]["height"] == 848
+    assert result["final_asset"]["duration_ms"] == 30_000
+    workspace = client.get(f"/api/v1/projects/{project['id']}/delivery-workspace").json()
+    assert workspace["project_status"] == "completed"
+    assert workspace["delivery_asset_id"] == result["final_asset"]["id"]
+    assert workspace["confirmed_timeline"]["status"] == "exported"
+    download = client.get(f"/api/v1/projects/{project['id']}/assets/{result['final_asset']['id']}/content")
+    assert download.status_code == 200
+    assert download.content == content
+    with SessionLocal() as session:
+        assert len(list(session.scalars(select(DeliveryAttempt)))) == 1
+        assert len(list(session.scalars(select(WorkAttempt)))) == work_attempt_count
+        assert len(list(session.scalars(select(CostEvent)))) == cost_event_count
+        assert session.get(Project, project["id"]).active_snapshot_id == snapshot["id"]
+
+
+def test_delivery_verification_blocks_invalid_dimensions_without_retry_or_timeline_mutation(client: TestClient) -> None:
+    project, _, timeline = create_confirmed_timeline(client)
+    attempt = authorize_delivery_attempt(client, project, timeline)
+    content = synthetic_mp4(576, 1024, 30_000)
+    uploaded = client.post(
+        f"/api/v1/projects/{project['id']}/delivery-attempts/{attempt['id']}/output",
+        data={
+            "command_id": "delivery-upload-invalid-001",
+            "expected_request_fingerprint": attempt["request_fingerprint"],
+            "expected_row_version": attempt["row_version"],
+        },
+        files={"file": ("wrong-size.mp4", content, "video/mp4")},
+    ).json()
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/delivery-attempts/{attempt['id']}:verify",
+        json={
+            "command_id": "delivery-verify-invalid-001",
+            "expected_row_version": uploaded["row_version"],
+            "expected_asset_row_version": uploaded["final_asset"]["row_version"],
+        },
+    )
+    assert blocked.status_code == 200
+    result = blocked.json()
+    assert result["status"] == "blocked"
+    assert result["error_code"] == "DELIVERY_DIMENSIONS_INVALID"
+    assert result["error_detail"]["actual"] == [576, 1024]
+    assert result["final_asset"]["state"] == "archived"
+    assert result["final_asset"]["latest_qc_report"]["status"] == "blocked"
+    assert result["final_asset"]["latest_qc_report"]["findings"][0]["code"] == "DELIVERY_DIMENSIONS_INVALID"
+    workspace = client.get(f"/api/v1/projects/{project['id']}/delivery-workspace").json()
+    assert workspace["project_status"] == "blocked"
+    assert workspace["confirmed_timeline"]["status"] == "confirmed"
+    denied_second = client.post(
+        f"/api/v1/projects/{project['id']}/deliveries:authorize",
+        json={
+            "command_id": "delivery-authorize-after-block",
+            "timeline_id": timeline["id"],
+            "expected_timeline_contract_hash": timeline["contract_hash"],
+            "execution_kind": "external_upload",
+            "confirm_delivery_authorization": True,
+        },
+    )
+    assert denied_second.status_code == 409
+    with SessionLocal() as session:
+        assert len(list(session.scalars(select(DeliveryAttempt)))) == 1
+        assert session.get(Timeline, timeline["id"]).status == "confirmed"
 
 
 def test_system_configuration_publish_is_versioned_and_explicit(client: TestClient) -> None:

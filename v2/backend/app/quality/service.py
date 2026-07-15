@@ -211,6 +211,22 @@ def _storage_policy(session: Session, snapshot_id: str) -> StoragePolicyVersion:
     return policies[0]
 
 
+def resolve_local_asset_path(uri: str) -> Path:
+    return _local_asset_path(uri)
+
+
+def sha256_file(path: Path) -> tuple[str, int]:
+    return _sha256_file(path)
+
+
+def probe_media(path: Path, declared_type: str) -> dict:
+    return _probe(path, declared_type)
+
+
+def storage_policy_for_snapshot(session: Session, snapshot_id: str) -> StoragePolicyVersion:
+    return _storage_policy(session, snapshot_id)
+
+
 def register_attempt_asset(session: Session, project: Project, attempt_id: str, payload: RegisterAttemptAsset) -> dict:
     receipt = _receipt(session, project.id, payload.command_id, "asset.register_output")
     if receipt:

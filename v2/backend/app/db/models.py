@@ -28,6 +28,7 @@ class Project(Base):
     audio_mode: Mapped[str] = mapped_column(String(24))
     status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
     active_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("production_snapshots.id"), nullable=True, index=True)
+    delivery_asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
@@ -222,6 +223,29 @@ class TimelineItem(Base):
     timeline_out_ms: Mapped[int] = mapped_column(Integer)
     transform: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DeliveryAttempt(Base):
+    __tablename__ = "delivery_attempts"
+    __table_args__ = (UniqueConstraint("timeline_id", "attempt_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("delivery"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    timeline_id: Mapped[str] = mapped_column(ForeignKey("timelines.id"), index=True)
+    attempt_number: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(32), default="authorized", index=True)
+    execution_kind: Mapped[str] = mapped_column(String(32))
+    request_manifest: Mapped[dict] = mapped_column(JSON)
+    request_fingerprint: Mapped[str] = mapped_column(String(64), index=True)
+    final_asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id"), nullable=True, unique=True)
+    error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    error_detail: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    output_registered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ProjectEvent(Base):

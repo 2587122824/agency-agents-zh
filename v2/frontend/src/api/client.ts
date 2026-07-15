@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, EditorWorkspace, Health, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, Health, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -127,6 +127,29 @@ export const api = {
   }),
   confirmTimeline: (projectId: string, timeline: Timeline) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:confirm`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: timeline.row_version, expected_contract_hash: timeline.contract_hash, confirm_delivery_scope: true }),
+  }),
+  deliveryWorkspace: (projectId: string) => request<DeliveryWorkspace>(`/projects/${projectId}/delivery-workspace`),
+  authorizeDelivery: (projectId: string, workspace: DeliveryWorkspace) => request<DeliveryAttempt>(`/projects/${projectId}/deliveries:authorize`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', timeline_id: workspace.confirmed_timeline!.id,
+      expected_timeline_contract_hash: workspace.confirmed_timeline!.contract_hash,
+      execution_kind: 'external_upload', confirm_delivery_authorization: true,
+    }),
+  }),
+  uploadDelivery: (projectId: string, attempt: DeliveryAttempt, file: File) => {
+    const form = new FormData()
+    form.set('command_id', crypto.randomUUID())
+    form.set('actor_id', 'local-user')
+    form.set('expected_request_fingerprint', attempt.request_fingerprint)
+    form.set('expected_row_version', String(attempt.row_version))
+    form.set('file', file)
+    return request<DeliveryAttempt>(`/projects/${projectId}/delivery-attempts/${attempt.id}/output`, { method: 'POST', body: form })
+  },
+  verifyDelivery: (projectId: string, attempt: DeliveryAttempt) => request<DeliveryAttempt>(`/projects/${projectId}/delivery-attempts/${attempt.id}:verify`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: attempt.row_version,
+      expected_asset_row_version: attempt.final_asset!.row_version,
+    }),
   }),
   systemConfigurations: () => request<SystemConfigurationSummary[]>('/system-config/versions'),
   systemConfiguration: (id: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}`),

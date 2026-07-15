@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, StreamingResponse
@@ -16,7 +17,23 @@ from ..contracts.project import (
     QueueRequest,
     WorkItemRead,
 )
-from ..core.config import settings
+from ..core.config import RUNTIME_ROOT, settings
+from ..delivery.contracts import (
+    AuthorizeDelivery,
+    DeliveryAttemptRead,
+    DeliveryWorkspaceView,
+    RegisterDeliveryOutput,
+    VerifyDelivery,
+)
+from ..delivery.service import (
+    DeliveryConflictError,
+    DeliveryNotFoundError,
+    authorize_delivery,
+    delivery_upload_limit,
+    delivery_workspace,
+    register_delivery_output,
+    verify_delivery,
+)
 from ..configuration.contracts import (
     CloneConfiguration,
     ComponentSummary,
@@ -178,6 +195,10 @@ def production_error(exc: ProductionConflictError) -> HTTPException:
 
 
 def quality_error(exc: QualityConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
+
+
+def delivery_error(exc: DeliveryConflictError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
 
 
@@ -461,6 +482,110 @@ def project_quality_review(project_id: str, session: Session = Depends(get_sessi
 @router.get("/projects/{project_id}/editor-workspace", response_model=EditorWorkspaceView)
 def project_editor_workspace(project_id: str, session: Session = Depends(get_session)):
     return editor_workspace(session, require_project(session, project_id))
+
+
+@router.get("/projects/{project_id}/delivery-workspace", response_model=DeliveryWorkspaceView)
+def project_delivery_workspace(project_id: str, session: Session = Depends(get_session)):
+    return delivery_workspace(session, require_project(session, project_id))
+
+
+@router.post(
+    "/projects/{project_id}/deliveries:authorize",
+    response_model=DeliveryAttemptRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_delivery_authorize(
+    project_id: str,
+    payload: AuthorizeDelivery,
+    session: Session = Depends(get_session),
+):
+    try:
+        return authorize_delivery(session, require_project(session, project_id), payload)
+    except DeliveryNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DeliveryConflictError as exc:
+        session.rollback()
+        raise delivery_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/delivery-attempts/{attempt_id}/output",
+    response_model=DeliveryAttemptRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def project_delivery_output_register(
+    project_id: str,
+    attempt_id: str,
+    command_id: str = Form(..., min_length=8, max_length=80),
+    actor_id: str = Form("local-user", min_length=1, max_length=48),
+    expected_request_fingerprint: str = Form(..., min_length=64, max_length=64),
+    expected_row_version: int = Form(..., ge=1),
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+):
+    project = require_project(session, project_id)
+    try:
+        maximum_bytes = delivery_upload_limit(session, project, attempt_id)
+    except DeliveryNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DeliveryConflictError as exc:
+        raise delivery_error(exc) from exc
+    if file.content_type != "video/mp4":
+        raise HTTPException(status_code=422, detail="最终交付当前只接受 video/mp4 文件。")
+
+    temporary_dir = RUNTIME_ROOT / "uploads" / "delivery"
+    temporary_dir.mkdir(parents=True, exist_ok=True)
+    temporary_path = temporary_dir / f"{uuid4().hex}.upload"
+    digest = hashlib.sha256()
+    byte_size = 0
+    try:
+        with temporary_path.open("xb") as output:
+            while chunk := await file.read(1024 * 1024):
+                byte_size += len(chunk)
+                if byte_size > maximum_bytes:
+                    raise HTTPException(status_code=413, detail="交付文件超过当前快照的存储策略上限。")
+                digest.update(chunk)
+                output.write(chunk)
+        if byte_size == 0:
+            raise HTTPException(status_code=422, detail="交付文件不能为空。")
+        payload = RegisterDeliveryOutput(
+            command_id=command_id,
+            actor_id=actor_id,
+            expected_request_fingerprint=expected_request_fingerprint,
+            expected_row_version=expected_row_version,
+            original_filename=file.filename or "delivery.mp4",
+            mime_type=file.content_type,
+            content_hash=digest.hexdigest(),
+            byte_size=byte_size,
+        )
+        return register_delivery_output(session, project, attempt_id, payload, temporary_path)
+    except DeliveryNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DeliveryConflictError as exc:
+        session.rollback()
+        raise delivery_error(exc) from exc
+    finally:
+        await file.close()
+        temporary_path.unlink(missing_ok=True)
+
+
+@router.post(
+    "/projects/{project_id}/delivery-attempts/{attempt_id}:verify",
+    response_model=DeliveryAttemptRead,
+)
+def project_delivery_verify(
+    project_id: str,
+    attempt_id: str,
+    payload: VerifyDelivery,
+    session: Session = Depends(get_session),
+):
+    try:
+        return verify_delivery(session, require_project(session, project_id), attempt_id, payload)
+    except DeliveryNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except DeliveryConflictError as exc:
+        session.rollback()
+        raise delivery_error(exc) from exc
 
 
 @router.post("/projects/{project_id}/quality-stage:approve", response_model=EditorWorkspaceView)

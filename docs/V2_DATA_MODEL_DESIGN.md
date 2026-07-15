@@ -786,3 +786,32 @@ rationale, actor_id, created_at
 QCReport 保留检测器原始 `passed/review_required/blocked` 结论；人工审核不会覆盖检测结论，而是追加 ReviewDecision 并改变 Asset 生命周期状态。这样可以区分“检测器要求复核”和“用户最终批准”。
 
 当前本地媒体探测支持 PNG、JPEG、WAV、MP4、UTF-8 SRT 和 JSON 项目文件。MP4 从容器 box 读取画面尺寸和时长，不接受调用方提交的替代元数据。未支持签名直接阻断，不按扩展名猜测格式。
+
+## 21. 最终交付数据合同
+
+`Project.delivery_asset_id` 只在最终文件通过确定性验证后写入，指向唯一的 `final_delivery` Asset。
+
+`DeliveryAttempt`：
+
+```text
+id, project_id, snapshot_id, timeline_id
+attempt_number
+status: authorized | output_registered | verified | blocked
+execution_kind: external_upload
+request_manifest, request_fingerprint
+final_asset_id nullable
+error_code nullable, error_detail nullable
+row_version, created_by, created_at
+output_registered_at nullable, verified_at nullable
+```
+
+约束：
+
+- `(timeline_id, attempt_number)` 唯一；首期每条确认时间线只允许 `attempt_number=1`。
+- `final_asset_id` 唯一，避免一个最终文件被多个交付尝试声明。
+- 请求清单冻结时间线合同哈希、逐项素材 ID 与内容哈希、剪辑区间、变换和输出规格。
+- `request_fingerprint` 是规范化请求清单的 SHA-256，不包含上传文件路径或可变时间戳。
+- 上传文件以 `work_attempt_id=null`、`dag_node_id=null` 的独立 Asset 登记，不能伪装成供应商 WorkAttempt 输出。
+- 失败的 DeliveryAttempt 保留错误证据，不删除、不覆盖、不自动创建下一尝试。
+
+完成守卫要求 DeliveryAttempt、Asset、Timeline、Project 和真实文件事实在同一事务结论中一致。仅有员工输出、上传成功响应或前端状态均不能建立 `completed` 权威。

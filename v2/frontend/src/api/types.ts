@@ -673,3 +673,42 @@ export interface EditorWorkspace {
   timelines: Timeline[]
   next_action: { code: string; label: string }
 }
+
+export interface DeliveryAttempt {
+  id: string
+  project_id: string
+  snapshot_id: string
+  timeline_id: string
+  attempt_number: number
+  status: 'authorized' | 'output_registered' | 'verified' | 'blocked'
+  execution_kind: 'external_upload'
+  request_manifest: Record<string, unknown>
+  request_fingerprint: string
+  final_asset_id: string | null
+  final_asset: ProductionAsset | null
+  error_code: string | null
+  error_detail: Record<string, unknown> | null
+  row_version: number
+  created_by: string
+  created_at: string
+  output_registered_at: string | null
+  verified_at: string | null
+}
+
+export interface DeliveryWorkspace {
+  project_id: string
+  project_title: string
+  project_status: ProjectStatus
+  active_snapshot_id: string | null
+  delivery_asset_id: string | null
+  confirmed_timeline: {
+    id: string
+    version_number: number
+    status: 'confirmed' | 'exported'
+    contract_hash: string
+    output_spec: Record<string, unknown>
+    confirmed_at: string
+  } | null
+  attempts: DeliveryAttempt[]
+  next_action: { code: string; label: string }
+}

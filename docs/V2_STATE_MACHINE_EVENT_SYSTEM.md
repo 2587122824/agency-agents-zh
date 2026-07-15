@@ -633,3 +633,34 @@ quality.blocked.v1
 asset.approved.v1
 asset.rejected.v1
 ```
+
+## 20. 最终交付状态机
+
+```text
+Project delivery_ready
+  --AuthorizeDelivery--> DeliveryAttempt authorized
+  --RegisterDeliveryOutput--> output_registered
+  --VerifyDelivery passed--> verified + Timeline exported + Project completed
+  --VerifyDelivery failed--> blocked + Project blocked
+```
+
+守卫：
+
+- 授权要求当前活动快照精确存在一个 `confirmed` 时间线、合同哈希匹配且用户明确确认。
+- 授权只创建请求清单和指纹，不执行渲染、不创建 WorkItem、WorkAttempt 或 charged CostEvent。
+- 文件登记要求精确请求指纹、DeliveryAttempt `row_version`、`video/mp4` 和快照存储策略。
+- 验证前再次计算当前交付清单；快照、时间线或输入素材事实变化时拒绝旧结果。
+- 完成要求真实文件哈希、字节数、MP4 签名、尺寸、时长和存储策略全部通过。
+- 失败后时间线保持 `confirmed`，项目进入 `blocked`；当前版本没有解除阻断或重试命令。
+
+事件：
+
+```text
+delivery.authorized.v1
+asset.created.v1
+delivery.blocked.v1
+delivery.verified.v1
+project.completed.v1
+```
+
+命令重放通过 CommandReceipt 返回第一次结果。不同命令 ID 不能为同一时间线创建第二个交付尝试；租约、刷新、服务重启或再次上传都不是重试授权。
