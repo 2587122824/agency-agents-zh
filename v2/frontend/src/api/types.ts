@@ -154,3 +154,83 @@ export interface CreationCenter {
     incurs_production_cost: boolean
   }
 }
+
+export interface CreativeBriefCandidate {
+  id: string
+  requirement_version_id: string
+  agent_run_id: string
+  status: string
+  brief: Record<string, unknown>
+  field_sources: Record<string, { type?: string; reference_id?: string | null }>
+  validation_errors: Array<Record<string, unknown>>
+  created_at: string
+  decided_at: string | null
+}
+
+export interface ShotContract {
+  shot_code: string
+  sequence_number: number
+  duration_ms: number
+  shot_type: string
+  scene_entity_version_id: string | null
+  character_entity_version_ids: string[]
+  outfit_entity_version_ids: string[]
+  face_visibility: string
+  text_policy: string
+  motion_requirement: string
+  composition: string
+  action: string
+}
+
+export interface ShotPlanCandidate {
+  id: string
+  requirement_version_id: string
+  creative_brief_candidate_id: string
+  agent_run_id: string
+  status: string
+  shots: ShotContract[]
+  validation_errors: Array<Record<string, unknown>>
+  created_at: string
+  decided_at: string | null
+}
+
+export interface PlanVersion {
+  id: string
+  version_number: number
+  requirement_version_id: string
+  shot_plan_candidate_id: string
+  status: string
+  creative_brief: Record<string, unknown>
+  contract_schema_version: string
+  is_active: boolean
+  confirmed_at: string
+  confirmed_by: string
+  created_at: string
+  shots: ShotContract[]
+}
+
+export interface PlanningCenter {
+  project_id: string
+  active_requirement: RequirementVersion
+  current_brief_candidate: CreativeBriefCandidate | null
+  accepted_brief_candidate: CreativeBriefCandidate | null
+  current_shot_candidate: ShotPlanCandidate | null
+  active_plan: PlanVersion | null
+  brief_history: CreativeBriefCandidate[]
+  shot_plan_history: ShotPlanCandidate[]
+  plan_history: PlanVersion[]
+  entity_versions: Array<{
+    id: string
+    entity_id: string
+    entity_type: string
+    display_name: string
+    version_number: number
+  }>
+  next_action: {
+    code: string
+    label: string
+    target_ids: string[]
+    incurs_model_cost: boolean
+    incurs_production_cost: boolean
+  }
+}

@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, Decision, Health, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, ShotPlanCandidate, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -52,6 +52,19 @@ export const api = {
     return request<CreationAttachment>(`/projects/${projectId}/attachments`, { method: 'POST', body: form })
   },
   bindAttachment: (projectId: string, attachmentId: string, bindingType: 'identity_reference' | 'voice_sample' | 'inspiration_only', entityId?: string) => request<AttachmentBinding>(`/projects/${projectId}/attachments/${attachmentId}/bindings`, {
-    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', binding_type: bindingType, entity_id: entityId, entity_version_id: entityId ? `${entityId}_v1` : undefined }),
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', binding_type: bindingType, entity_id: entityId }),
+  }),
+  planningCenter: (projectId: string) => request<PlanningCenter>(`/projects/${projectId}/planning-center`),
+  generateCreativeBrief: (projectId: string, requirementVersionId: string) => request<CreativeBriefCandidate>(`/projects/${projectId}/creative-brief-candidates:generate`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId }),
+  }),
+  decideCreativeBrief: (projectId: string, candidateId: string, requirementVersionId: string, accept: boolean) => request<CreativeBriefCandidate>(`/projects/${projectId}/creative-brief-candidates/${candidateId}:${accept ? 'accept' : 'reject'}`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, reason: accept ? undefined : '用户拒绝当前创意方案' }),
+  }),
+  generateShotPlan: (projectId: string, requirementVersionId: string, briefCandidateId: string) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates:generate`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, creative_brief_candidate_id: briefCandidateId }),
+  }),
+  decideShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, accept: boolean) => request<PlanVersion | ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:${accept ? 'accept' : 'reject'}`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, reason: accept ? undefined : '用户拒绝当前分镜方案' }),
   }),
 }

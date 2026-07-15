@@ -47,6 +47,23 @@ from ..creation.service import (
 from ..db.session import get_session
 from ..decisions.service import DecisionConflictError, add_decision, resolve_decision
 from ..events.service import project_event_stream
+from ..planning.contracts import (
+    CreativeBriefCandidateRead,
+    DecideBrief,
+    DecideShotPlan,
+    GenerateBrief,
+    GenerateShotPlan,
+    PlanningCenterView,
+    PlanVersionRead,
+    ShotPlanCandidateRead,
+)
+from ..planning.service import (
+    decide_brief,
+    decide_shot_plan,
+    generate_brief,
+    generate_shot_plan,
+    planning_center_view,
+)
 from ..projects.service import (
     ProjectConflictError,
     confirm_project,
@@ -94,6 +111,116 @@ def projects_get(project_id: str, session: Session = Depends(get_session)):
 @router.get("/projects/{project_id}/creation-center", response_model=CreationCenterView)
 def creation_center(project_id: str, session: Session = Depends(get_session)):
     return creation_center_view(session, require_project(session, project_id))
+
+
+@router.get("/projects/{project_id}/planning-center", response_model=PlanningCenterView)
+def planning_center(project_id: str, session: Session = Depends(get_session)):
+    project = require_project(session, project_id)
+    try:
+        return planning_center_view(session, project)
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/creative-brief-candidates:generate",
+    response_model=CreativeBriefCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def creative_brief_generate(project_id: str, payload: GenerateBrief, session: Session = Depends(get_session)):
+    project = require_project(session, project_id)
+    try:
+        return generate_brief(session, project, payload)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/creative-brief-candidates/{candidate_id}:accept",
+    response_model=CreativeBriefCandidateRead,
+)
+def creative_brief_accept(
+    project_id: str,
+    candidate_id: str,
+    payload: DecideBrief,
+    session: Session = Depends(get_session),
+):
+    try:
+        return decide_brief(session, require_project(session, project_id), candidate_id, payload, True)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/creative-brief-candidates/{candidate_id}:reject",
+    response_model=CreativeBriefCandidateRead,
+)
+def creative_brief_reject(
+    project_id: str,
+    candidate_id: str,
+    payload: DecideBrief,
+    session: Session = Depends(get_session),
+):
+    try:
+        return decide_brief(session, require_project(session, project_id), candidate_id, payload, False)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/shot-plan-candidates:generate",
+    response_model=ShotPlanCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def shot_plan_generate(project_id: str, payload: GenerateShotPlan, session: Session = Depends(get_session)):
+    try:
+        return generate_shot_plan(session, require_project(session, project_id), payload)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/shot-plan-candidates/{candidate_id}:accept",
+    response_model=PlanVersionRead,
+)
+def shot_plan_accept(
+    project_id: str,
+    candidate_id: str,
+    payload: DecideShotPlan,
+    session: Session = Depends(get_session),
+):
+    try:
+        return decide_shot_plan(session, require_project(session, project_id), candidate_id, payload, True)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/shot-plan-candidates/{candidate_id}:reject",
+    response_model=ShotPlanCandidateRead,
+)
+def shot_plan_reject(
+    project_id: str,
+    candidate_id: str,
+    payload: DecideShotPlan,
+    session: Session = Depends(get_session),
+):
+    try:
+        return decide_shot_plan(session, require_project(session, project_id), candidate_id, payload, False)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
 
 
 @router.post("/projects/{project_id}/messages", response_model=MessageRead, status_code=status.HTTP_201_CREATED)

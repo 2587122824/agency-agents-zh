@@ -221,3 +221,104 @@ class CommandReceipt(Base):
     result_type: Mapped[str] = mapped_column(String(80))
     result_id: Mapped[str] = mapped_column(String(48))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class Entity(Base):
+    __tablename__ = "entities"
+    __table_args__ = (UniqueConstraint("project_id", "id"),)
+
+    id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    entity_type: Mapped[str] = mapped_column(String(32), index=True)
+    display_name: Mapped[str] = mapped_column(String(160))
+    status: Mapped[str] = mapped_column(String(24), default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class EntityVersion(Base):
+    __tablename__ = "entity_versions"
+    __table_args__ = (UniqueConstraint("entity_id", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("entity_version"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    entity_id: Mapped[str] = mapped_column(ForeignKey("entities.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    attributes: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(24), default="confirmed")
+    source_attachment_id: Mapped[str | None] = mapped_column(ForeignKey("attachments.id"), nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_by: Mapped[str] = mapped_column(String(48), default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class CreativeBriefCandidate(Base):
+    __tablename__ = "creative_brief_candidates"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("brief_candidate"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    requirement_version_id: Mapped[str] = mapped_column(ForeignKey("requirement_versions.id"), index=True)
+    agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"))
+    status: Mapped[str] = mapped_column(String(32), default="awaiting_review", index=True)
+    brief: Mapped[dict] = mapped_column(JSON)
+    field_sources: Mapped[dict] = mapped_column(JSON, default=dict)
+    validation_errors: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ShotPlanCandidate(Base):
+    __tablename__ = "shot_plan_candidates"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("shot_candidate"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    requirement_version_id: Mapped[str] = mapped_column(ForeignKey("requirement_versions.id"), index=True)
+    creative_brief_candidate_id: Mapped[str] = mapped_column(ForeignKey("creative_brief_candidates.id"))
+    agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"))
+    status: Mapped[str] = mapped_column(String(32), default="awaiting_review", index=True)
+    shots: Mapped[list] = mapped_column(JSON)
+    validation_errors: Mapped[list] = mapped_column(JSON, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class PlanVersion(Base):
+    __tablename__ = "plan_versions"
+    __table_args__ = (UniqueConstraint("project_id", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("plan"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    requirement_version_id: Mapped[str] = mapped_column(ForeignKey("requirement_versions.id"), index=True)
+    shot_plan_candidate_id: Mapped[str] = mapped_column(ForeignKey("shot_plan_candidates.id"))
+    status: Mapped[str] = mapped_column(String(24), default="confirmed", index=True)
+    creative_brief: Mapped[dict] = mapped_column(JSON)
+    contract_schema_version: Mapped[str] = mapped_column(String(48), default="shot-plan.v1")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    confirmed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    confirmed_by: Mapped[str] = mapped_column(String(48), default="user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class Shot(Base):
+    __tablename__ = "shots"
+    __table_args__ = (
+        UniqueConstraint("plan_version_id", "shot_code"),
+        UniqueConstraint("plan_version_id", "sequence_number"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("shot"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    plan_version_id: Mapped[str] = mapped_column(ForeignKey("plan_versions.id"), index=True)
+    shot_code: Mapped[str] = mapped_column(String(32))
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    duration_ms: Mapped[int] = mapped_column(Integer)
+    shot_type: Mapped[str] = mapped_column(String(40))
+    scene_entity_version_id: Mapped[str | None] = mapped_column(ForeignKey("entity_versions.id"), nullable=True)
+    character_entity_version_ids: Mapped[list] = mapped_column(JSON, default=list)
+    outfit_entity_version_ids: Mapped[list] = mapped_column(JSON, default=list)
+    face_visibility: Mapped[str] = mapped_column(String(24))
+    text_policy: Mapped[str] = mapped_column(String(24))
+    motion_requirement: Mapped[str] = mapped_column(String(24))
+    composition: Mapped[str] = mapped_column(String(500))
+    action: Mapped[str] = mapped_column(String(1000))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

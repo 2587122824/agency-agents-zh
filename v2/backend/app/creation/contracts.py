@@ -143,7 +143,7 @@ class AttachmentView(AttachmentRead):
 
 class NextAction(BaseModel):
     code: str
-    target_ids: list[str] = []
+    target_ids: list[str] = Field(default_factory=list)
     label: str
     incurs_model_cost: bool = False
     incurs_production_cost: bool = False

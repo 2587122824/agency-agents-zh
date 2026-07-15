@@ -215,11 +215,19 @@ def test_attachment_registration_does_not_create_binding(client: TestClient) -> 
             "command_id": "binding-command-002",
             "binding_type": "identity_reference",
             "entity_id": "char_main",
-            "entity_version_id": "char_main_v1",
         },
     )
     assert bound.status_code == 201
     assert bound.json()["confirmed_by"] == "local-user"
+    assert bound.json()["entity_version_id"].startswith("entity_version_")
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["entity_versions"] == [{
+        "id": bound.json()["entity_version_id"],
+        "entity_id": "char_main",
+        "entity_type": "character",
+        "display_name": "char_main",
+        "version_number": 1,
+    }]
 
 
 def test_attachment_content_type_mismatch_is_blocked(client: TestClient) -> None:
@@ -299,3 +307,88 @@ def test_clarification_resolution_creates_new_requirement_version(client: TestCl
     assert resolved.json()["fields"]["audio_mode"] == "off"
     assert resolved.json()["field_sources"]["audio_mode"]["type"] == "user_confirmation"
     assert replay.json()["id"] == resolved.json()["id"]
+
+
+def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> None:
+    project = create_creation_project(client)
+    creation = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    requirement_id = creation["active_requirement"]["id"]
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["next_action"]["code"] == "GENERATE_CREATIVE_BRIEF"
+
+    brief_command = {
+        "command_id": "brief-generate-command-001",
+        "expected_requirement_version_id": requirement_id,
+    }
+    generated_brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json=brief_command,
+    )
+    replayed_brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json=brief_command,
+    )
+    assert generated_brief.status_code == 201
+    brief = generated_brief.json()
+    assert replayed_brief.json()["id"] == brief["id"]
+    assert brief["status"] == "awaiting_review"
+    assert brief["brief"]["visual_style"] is None
+    assert brief["brief"]["assumptions"] == []
+    before_accept = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert before_accept["active_plan"] is None
+    assert before_accept["next_action"]["code"] == "REVIEW_CREATIVE_BRIEF"
+
+    accepted_brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={
+            "command_id": "brief-accept-command-001",
+            "expected_requirement_version_id": requirement_id,
+        },
+    )
+    assert accepted_brief.status_code == 200
+    assert accepted_brief.json()["status"] == "accepted"
+    after_brief = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert after_brief["next_action"]["code"] == "GENERATE_SHOT_PLAN"
+
+    generated_shots = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "shots-generate-command-001",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    )
+    assert generated_shots.status_code == 201
+    shot_candidate = generated_shots.json()
+    assert shot_candidate["status"] == "awaiting_review"
+    assert len(shot_candidate["shots"]) == 3
+    assert sum(item["duration_ms"] for item in shot_candidate["shots"]) == 30_000
+    assert all(item["scene_entity_version_id"] is None for item in shot_candidate["shots"])
+    assert all(item["character_entity_version_ids"] == [] for item in shot_candidate["shots"])
+    assert "provider" not in str(shot_candidate["shots"]).lower()
+    before_plan = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert before_plan["active_plan"] is None
+    assert before_plan["next_action"]["code"] == "REVIEW_SHOT_PLAN"
+
+    accept_command = {
+        "command_id": "shots-accept-command-001",
+        "actor_id": "test-user",
+        "expected_requirement_version_id": requirement_id,
+    }
+    accepted_plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shot_candidate['id']}:accept",
+        json=accept_command,
+    )
+    replayed_plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shot_candidate['id']}:accept",
+        json=accept_command,
+    )
+    assert accepted_plan.status_code == 200
+    plan = accepted_plan.json()
+    assert replayed_plan.json()["id"] == plan["id"]
+    assert plan["version_number"] == 1
+    assert plan["confirmed_by"] == "test-user"
+    assert len(plan["shots"]) == 3
+    final = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert final["next_action"]["code"] == "PLAN_CONFIRMED"
+    assert final["active_plan"]["id"] == plan["id"]

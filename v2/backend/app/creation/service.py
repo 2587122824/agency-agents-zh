@@ -14,6 +14,8 @@ from ..db.models import (
     AttachmentBinding,
     CommandReceipt,
     ClarificationRequest,
+    Entity,
+    EntityVersion,
     Message,
     Project,
     ProjectEvent,
@@ -522,12 +524,67 @@ def bind_attachment(
         raise CreationConflictError("ATTACHMENT_NOT_VERIFIED", "附件尚未通过验证，不能绑定。")
     if payload.binding_type != "inspiration_only" and not payload.entity_id:
         raise CreationConflictError("ENTITY_ID_REQUIRED", "该绑定类型必须明确选择实体 ID。")
+    entity_version_id = None
+    if payload.binding_type != "inspiration_only":
+        entity_type = {
+            "identity_reference": "character",
+            "outfit_reference": "outfit",
+            "scene_reference": "scene",
+            "product_reference": "product",
+            "voice_sample": "voice",
+        }[payload.binding_type]
+        entity = session.get(Entity, payload.entity_id)
+        if entity and (entity.project_id != project.id or entity.entity_type != entity_type):
+            raise CreationConflictError("ENTITY_TYPE_CONFLICT", "实体 ID 已存在，但项目或实体类型不匹配。")
+        if not entity:
+            entity = Entity(
+                id=payload.entity_id,
+                project_id=project.id,
+                entity_type=entity_type,
+                display_name=payload.entity_id,
+            )
+            session.add(entity)
+            session.flush()
+        if payload.entity_version_id:
+            selected_version = session.get(EntityVersion, payload.entity_version_id)
+            if (
+                not selected_version
+                or selected_version.project_id != project.id
+                or selected_version.entity_id != entity.id
+                or selected_version.status != "confirmed"
+            ):
+                raise CreationConflictError("ENTITY_VERSION_NOT_FOUND", "明确选择的实体版本不存在或不可使用。")
+            entity_version_id = selected_version.id
+        else:
+            active_version = session.scalar(select(EntityVersion).where(
+                EntityVersion.entity_id == entity.id,
+                EntityVersion.is_active.is_(True),
+            ))
+            next_version = (active_version.version_number + 1) if active_version else 1
+            if active_version:
+                active_version.is_active = False
+            selected_version = EntityVersion(
+                project_id=project.id,
+                entity_id=entity.id,
+                version_number=next_version,
+                attributes={"binding_type": payload.binding_type},
+                source_attachment_id=attachment.id,
+                created_by=payload.actor_id,
+            )
+            session.add(selected_version)
+            session.flush()
+            entity_version_id = selected_version.id
+            _event(session, project.id, "entity.version_confirmed.v1", "附件绑定已创建实体版本", {
+                "entity_id": entity.id,
+                "entity_version_id": selected_version.id,
+                "entity_type": entity.entity_type,
+            })
     binding = AttachmentBinding(
         project_id=project.id,
         attachment_id=attachment.id,
         binding_type=payload.binding_type,
         entity_id=payload.entity_id,
-        entity_version_id=payload.entity_version_id,
+        entity_version_id=entity_version_id,
         confirmed_by=payload.actor_id,
     )
     session.add(binding)
@@ -566,7 +623,10 @@ def creation_center_view(session: Session, project: Project) -> dict:
         ClarificationRequest.base_requirement_version_id == active.id,
     ).order_by(ClarificationRequest.created_at)))
     current = next((item for item in candidates if item.status == "awaiting_review"), None)
-    unbound = [item for item in attachments if not bindings_by_attachment.get(item.id)]
+    confirmed_attachment_ids = {
+        binding.attachment_id for binding in binding_rows if binding.status == "confirmed"
+    }
+    unbound = [item for item in attachments if item.id not in confirmed_attachment_ids]
     consumed = consumed_message_ids(session, active)
     unconsumed_messages = [item for item in messages if item.id not in consumed]
     if clarifications:

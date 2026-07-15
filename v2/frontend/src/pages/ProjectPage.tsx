@@ -26,7 +26,7 @@ function commandError(...mutations: Array<{ error: Error | null }>) {
 }
 
 function AttachmentRow({ item, onBind, busy }: { item: CreationAttachment; onBind: (type: 'identity_reference' | 'voice_sample' | 'inspiration_only') => void; busy: boolean }) {
-  const binding = item.bindings.at(-1)
+  const binding = [...item.bindings].reverse().find(value => value.status === 'confirmed')
   const isAudio = item.mime_type.startsWith('audio/')
   return <article className={styles.attachmentRow}>
     <span className={styles.fileIcon}>{isAudio ? <FileAudio size={18} /> : <FileImage size={18} />}</span>
@@ -104,7 +104,7 @@ export function ProjectPage() {
             return <div className={styles.field} key={key}><span>{fieldLabels[key] ?? key}</span><p>{key === 'duration_seconds' ? `${String(value)} 秒` : key === 'audio_mode' ? value === 'off' ? '关闭' : '旁白' : String(value)}</p><small data-agent={source?.type === 'agent_proposal'}>{sourceLabels[source?.type ?? 'user'] ?? source?.type ?? '用户输入'}</small></div>
           })}
         </div>
-        {candidate ? <div className={styles.candidateActions}><div><strong>候选不会自动生效</strong><span>确认后将创建 requirement_v{creation.active_requirement.version_number + 1}，旧版本保留。</span></div><button className="secondaryButton" onClick={() => reject.mutate()} disabled={reject.isPending}><X size={15} />拒绝</button><button className="primaryButton" onClick={() => accept.mutate()} disabled={accept.isPending}><Check size={15} />确认并创建新版本</button></div> : creation.next_action.code === 'GENERATE_REQUIREMENT_CANDIDATE' ? <div className={styles.generateBox}><div><Sparkles size={18} /><p><strong>整理最新消息为候选</strong><span>只读取活动版本、未消费消息和已确认附件绑定。</span></p></div><button className="primaryButton" onClick={() => generate.mutate()} disabled={generate.isPending}>{generate.isPending ? '正在生成…' : '运行 Mock Agent'}</button></div> : creation.next_action.code === 'REQUIREMENT_READY_FOR_PLANNING' ? <div className={styles.readyBox}><CheckCircle2 size={19} /><p><strong>需求版本已完整</strong><span>下一阶段将基于当前版本生成创意方案候选。</span></p></div> : null}
+        {candidate ? <div className={styles.candidateActions}><div><strong>候选不会自动生效</strong><span>确认后将创建 requirement_v{creation.active_requirement.version_number + 1}，旧版本保留。</span></div><button className="secondaryButton" onClick={() => reject.mutate()} disabled={reject.isPending}><X size={15} />拒绝</button><button className="primaryButton" onClick={() => accept.mutate()} disabled={accept.isPending}><Check size={15} />确认并创建新版本</button></div> : creation.next_action.code === 'GENERATE_REQUIREMENT_CANDIDATE' ? <div className={styles.generateBox}><div><Sparkles size={18} /><p><strong>整理最新消息为候选</strong><span>只读取活动版本、未消费消息和已确认附件绑定。</span></p></div><button className="primaryButton" onClick={() => generate.mutate()} disabled={generate.isPending}>{generate.isPending ? '正在生成…' : '运行 Mock Agent'}</button></div> : creation.next_action.code === 'REQUIREMENT_READY_FOR_PLANNING' ? <div className={styles.readyBox}><CheckCircle2 size={19} /><p><strong>需求版本已完整</strong><span>下一阶段将基于当前版本生成创意方案候选。</span></p><Link className="primaryButton" to={`/projects/${projectId}/plan`}>进入方案确认</Link></div> : null}
       </section>
 
       <aside className={styles.side}>

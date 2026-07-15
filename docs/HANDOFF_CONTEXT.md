@@ -2,6 +2,17 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Creation Center Sprint 3
+
+- Added the first planning vertical slice under `v2/`: an accepted `RequirementVersion` can produce a `CreativeBriefCandidate`, explicit user acceptance makes it available to the Director stage, and an accepted `ShotPlanCandidate` creates an immutable `PlanVersion` with persisted `Shot` rows.
+- Added typed `Entity` and `EntityVersion` records. Explicit non-inspiration attachment bindings now resolve to a real confirmed entity version; uploads still create no identity, voice, outfit, scene, or product binding by themselves. Existing string-only bindings migrate to `legacy_unresolved` instead of being inferred or repaired.
+- Creative and Director runs use audited `AgentInputManifest` and `AgentRun` records. Manifests store confirmed attachment-binding IDs and the exact confirmed entity-version references read by the candidate. The deterministic Mock Agents make no model, provider, workflow, storage, or paid production call.
+- Creative Brief preserves confirmed topic, duration, aspect ratio, audio mode, and entity references. Optional visual style stays unspecified and assumptions stay empty. The Director proposes three structured shots whose durations exactly match the confirmed requirement; it does not select providers or workflow slots.
+- Added `/api/v1/projects/{project_id}/planning-center` plus explicit generate, accept, and reject commands for Creative Brief and shot-plan candidates. Command receipts remain idempotent, stale requirement versions are rejected, and no candidate becomes authority without an explicit accept command.
+- Added the API-backed `/projects/:projectId/plan` page with requirement/brief/plan version visibility, field provenance, candidate review controls, structured shot contracts, confirmed entity versions, the single backend-evaluated next action, and an explicit no-snapshot/no-cost boundary.
+- Added Alembic revision `20260715_03`. Verification passed with 8 backend tests, Python compileall, TypeScript/Vite production build, a fresh three-revision migration test, a runtime upload -> entity binding -> brief -> shot plan -> `plan_v1` smoke flow, desktop/mobile browser checks, and no browser console errors. Mobile has no page-level horizontal overflow; the shot table scrolls only inside its own container.
+- No ProductionSnapshot, WorkItem, provider call, workflow choice, paid retry, fallback, prompt rewrite, output repair, inferred binding, or hidden default was introduced.
+
 ## 2026-07-15 V2 System Configuration Design Baseline
 
 - Expanded `docs/V2_PRODUCT_DESIGN.md` to v0.3 with a complete system-configuration product contract instead of creating another design document. It now defines configuration goals, nine configuration modules, model/provider/workflow-slot fields, NodeInfoList ownership, video/audio policies, management UX, confirmation levels, implementation order, API boundaries, and acceptance criteria.
