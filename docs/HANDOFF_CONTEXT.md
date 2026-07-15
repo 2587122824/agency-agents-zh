@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Repository Boundary Sprint 14
+
+- Added explicit `ProjectRepository` and `EventRepository` protocols plus SQLAlchemy implementations under `v2/backend/app/repositories/`.
+- Refactored the project application service and SSE event polling to use repository interfaces while keeping transaction ownership, project states, event payloads, cursor ordering, API responses, and execution behavior unchanged.
+- Added shared SQLite repository contract tests for project ordering/relationship loading and project-scoped event cursor ordering/limits.
+- Added `docs/V2_IMPLEMENTATION_STATUS.md` as an evidence-based implementation index and corrected stale completed items in the product checklist.
+- Repository migration remains partial. Other aggregates still use direct SQLAlchemy queries; no claim of a complete repository layer is made.
+- No Outbox, event-envelope migration, project-state transition change, schema migration, provider call, retry, fallback, route substitution, confirmation change, or cost event was introduced.
+- Verification target: 32 backend tests, Python compileall, Vite build, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Material Contact Sheet Sprint 13
 
 - Added a project-level read-only material contact sheet at `/projects/:projectId/contact-sheet` and `GET /api/v1/projects/{project_id}/contact-sheet`.

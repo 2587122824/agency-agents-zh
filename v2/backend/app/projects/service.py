@@ -1,41 +1,58 @@
 from __future__ import annotations
 
-from sqlalchemy import select
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session
 
 from ..contracts.project import ProjectCreate
 from ..db.models import Project, ProjectEvent, WorkItem
 from ..creation.service import ensure_initial_requirement
+from ..repositories import EventRepository, ProjectRepository, SqlAlchemyEventRepository, SqlAlchemyProjectRepository
 
 
 class ProjectConflictError(ValueError):
     pass
 
 
-def list_projects(session: Session) -> list[Project]:
-    return list(session.scalars(select(Project).order_by(Project.updated_at.desc())))
+def _repositories(
+    session: Session,
+    projects: ProjectRepository | None = None,
+    events: EventRepository | None = None,
+) -> tuple[ProjectRepository, EventRepository]:
+    return projects or SqlAlchemyProjectRepository(session), events or SqlAlchemyEventRepository(session)
 
 
-def get_project(session: Session, project_id: str) -> Project | None:
-    statement = (
-        select(Project)
-        .where(Project.id == project_id)
-        .options(selectinload(Project.decisions), selectinload(Project.work_items))
-    )
-    return session.scalar(statement)
+def list_projects(session: Session, projects: ProjectRepository | None = None) -> list[Project]:
+    project_repository, _ = _repositories(session, projects=projects)
+    return project_repository.list_recent()
 
 
-def create_project(session: Session, payload: ProjectCreate) -> Project:
+def get_project(session: Session, project_id: str, projects: ProjectRepository | None = None) -> Project | None:
+    project_repository, _ = _repositories(session, projects=projects)
+    return project_repository.get(project_id, with_workspace=True)
+
+
+def create_project(
+    session: Session,
+    payload: ProjectCreate,
+    projects: ProjectRepository | None = None,
+    events: EventRepository | None = None,
+) -> Project:
+    project_repository, event_repository = _repositories(session, projects, events)
     project = Project(**payload.model_dump())
-    session.add(project)
-    session.flush()
+    project_repository.add(project)
+    project_repository.flush()
     ensure_initial_requirement(session, project)
-    session.add(ProjectEvent(project_id=project.id, event_type="project.created", message="项目草稿已创建"))
+    event_repository.add(ProjectEvent(project_id=project.id, event_type="project.created", message="项目草稿已创建"))
     session.commit()
-    return get_project(session, project.id)  # type: ignore[return-value]
+    return project_repository.get(project.id, with_workspace=True)  # type: ignore[return-value]
 
 
-def confirm_project(session: Session, project: Project) -> Project:
+def confirm_project(
+    session: Session,
+    project: Project,
+    projects: ProjectRepository | None = None,
+    events: EventRepository | None = None,
+) -> Project:
+    project_repository, event_repository = _repositories(session, projects, events)
     pending = [decision for decision in project.decisions if decision.status == "pending"]
     if pending:
         keys = ", ".join(decision.key for decision in pending)
@@ -43,19 +60,25 @@ def confirm_project(session: Session, project: Project) -> Project:
     if project.status != "draft":
         raise ProjectConflictError(f"只有 draft 项目可以确认，当前状态：{project.status}")
     project.status = "confirmed"
-    session.add(ProjectEvent(project_id=project.id, event_type="project.confirmed", message="生产合同已由用户确认"))
+    event_repository.add(ProjectEvent(project_id=project.id, event_type="project.confirmed", message="生产合同已由用户确认"))
     session.commit()
-    return get_project(session, project.id)  # type: ignore[return-value]
+    return project_repository.get(project.id, with_workspace=True)  # type: ignore[return-value]
 
 
-def queue_contract_validation(session: Session, project: Project) -> WorkItem:
+def queue_contract_validation(
+    session: Session,
+    project: Project,
+    projects: ProjectRepository | None = None,
+    events: EventRepository | None = None,
+) -> WorkItem:
+    project_repository, event_repository = _repositories(session, projects, events)
     if project.status != "confirmed":
         raise ProjectConflictError("项目必须先明确确认，才能加入验证队列")
     item = WorkItem(project_id=project.id, kind="contract_validation", payload={"project_id": project.id})
     project.status = "queued"
-    session.add(item)
-    session.flush()
-    session.add(
+    project_repository.add_work_item(item)
+    project_repository.flush()
+    event_repository.add(
         ProjectEvent(
             project_id=project.id,
             event_type="work.queued",
@@ -64,5 +87,5 @@ def queue_contract_validation(session: Session, project: Project) -> WorkItem:
         )
     )
     session.commit()
-    session.refresh(item)
+    project_repository.refresh_work_item(item)
     return item

@@ -4,10 +4,9 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 
-from sqlalchemy import select
-
 from ..db.models import ProjectEvent
 from ..db.session import SessionLocal
+from ..repositories import SqlAlchemyEventRepository
 
 
 def serialize_event(event: ProjectEvent) -> str:
@@ -27,14 +26,7 @@ async def project_event_stream(project_id: str, after: int = 0) -> AsyncIterator
     idle_ticks = 0
     while True:
         with SessionLocal() as session:
-            events = list(
-                session.scalars(
-                    select(ProjectEvent)
-                    .where(ProjectEvent.project_id == project_id, ProjectEvent.sequence > cursor)
-                    .order_by(ProjectEvent.sequence)
-                    .limit(100)
-                )
-            )
+            events = SqlAlchemyEventRepository(session).list_after(project_id, cursor, limit=100)
         if events:
             idle_ticks = 0
             for event in events:
