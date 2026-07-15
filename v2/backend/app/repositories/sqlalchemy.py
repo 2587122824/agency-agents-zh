@@ -10,21 +10,35 @@ from ..db.models import (
     AttachmentBinding,
     ClarificationRequest,
     CommandReceipt,
+    ConfigurationReference,
+    CostEvent,
     CreativeBriefCandidate,
+    DAGNode,
     Decision,
+    DependencyEdge,
     Entity,
     EntityVersion,
     Message,
     Project,
     ProjectEvent,
+    PricingCatalogVersion,
+    PricingRule,
+    ProductionConfigVersion,
+    ProductionImpactAnalysis,
+    ProductionSnapshot,
+    ProviderConfigVersion,
     RequirementCandidate,
     RequirementVersion,
     PlanVersion,
     Shot,
     ShotPlanCandidate,
+    SnapshotEntityVersion,
+    VideoSpecVersion,
+    WorkflowSlotVersion,
+    WorkAttempt,
     WorkItem,
 )
-from .contracts import CreationRecord, ModelT, PlanningRecord
+from .contracts import CreationRecord, ModelT, PlanningRecord, ProductionRecord
 
 
 class SqlAlchemyProjectRepository:
@@ -358,3 +372,148 @@ class SqlAlchemyPlanningRepository:
             .where(EntityVersion.project_id == project_id, EntityVersion.is_active.is_(True))
             .order_by(Entity.entity_type, Entity.id)
         ).all())
+
+
+class SqlAlchemyProductionRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, record: ProductionRecord) -> None:
+        self.session.add(record)
+
+    def flush(self) -> None:
+        self.session.flush()
+
+    def component(self, model_type: type[ModelT], component_id: str) -> ModelT | None:
+        return self.session.get(model_type, component_id)
+
+    def snapshot_entities(self, snapshot_id: str) -> list[SnapshotEntityVersion]:
+        return list(self.session.scalars(
+            select(SnapshotEntityVersion)
+            .where(SnapshotEntityVersion.snapshot_id == snapshot_id)
+            .order_by(SnapshotEntityVersion.role, SnapshotEntityVersion.entity_version_id)
+        ))
+
+    def snapshot_nodes(self, snapshot_id: str, *, ordered: bool = False) -> list[DAGNode]:
+        statement = select(DAGNode).where(DAGNode.snapshot_id == snapshot_id)
+        if ordered:
+            statement = statement.order_by(DAGNode.node_key)
+        return list(self.session.scalars(statement))
+
+    def snapshot_edges(self, snapshot_id: str) -> list[DependencyEdge]:
+        return list(self.session.scalars(
+            select(DependencyEdge)
+            .where(DependencyEdge.snapshot_id == snapshot_id)
+            .order_by(DependencyEdge.parent_node_id, DependencyEdge.child_node_id)
+        ))
+
+    def pricing_rules(self, pricing_catalog_version_id: str) -> list[PricingRule]:
+        return list(self.session.scalars(select(PricingRule).where(
+            PricingRule.pricing_catalog_version_id == pricing_catalog_version_id
+        )))
+
+    def impact_analysis(self, analysis_id: str) -> ProductionImpactAnalysis | None:
+        return self.session.get(ProductionImpactAnalysis, analysis_id)
+
+    def plan(self, plan_id: str) -> PlanVersion | None:
+        return self.session.get(PlanVersion, plan_id)
+
+    def configuration(self, config_id: str) -> ProductionConfigVersion | None:
+        return self.session.get(ProductionConfigVersion, config_id)
+
+    def plan_shots(self, plan_id: str) -> list[Shot]:
+        return list(self.session.scalars(
+            select(Shot).where(Shot.plan_version_id == plan_id).order_by(Shot.sequence_number)
+        ))
+
+    def entity_version(self, version_id: str) -> EntityVersion | None:
+        return self.session.get(EntityVersion, version_id)
+
+    def snapshot_for_impact(self, analysis_id: str) -> ProductionSnapshot | None:
+        return self.session.scalar(select(ProductionSnapshot).where(
+            ProductionSnapshot.impact_analysis_id == analysis_id
+        ))
+
+    def next_snapshot_number(self, project_id: str) -> int:
+        current = self.session.scalar(select(func.max(ProductionSnapshot.snapshot_number)).where(
+            ProductionSnapshot.project_id == project_id
+        ))
+        return (current or 0) + 1
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None:
+        return self.session.get(ProductionSnapshot, snapshot_id)
+
+    def pricing_catalog(self, pricing_id: str) -> PricingCatalogVersion | None:
+        return self.session.get(PricingCatalogVersion, pricing_id)
+
+    def workflow(self, workflow_id: str) -> WorkflowSlotVersion | None:
+        return self.session.get(WorkflowSlotVersion, workflow_id)
+
+    def provider(self, provider_id: str) -> ProviderConfigVersion | None:
+        return self.session.get(ProviderConfigVersion, provider_id)
+
+    def has_work_items(self, snapshot_id: str) -> bool:
+        return self.session.scalar(select(WorkItem.id).where(WorkItem.snapshot_id == snapshot_id)) is not None
+
+    def work_items(self, snapshot_id: str) -> list[WorkItem]:
+        return list(self.session.scalars(
+            select(WorkItem)
+            .where(WorkItem.snapshot_id == snapshot_id)
+            .order_by(WorkItem.created_at, WorkItem.id)
+        ))
+
+    def work_attempts(self, work_item_ids: list[str]) -> list[WorkAttempt]:
+        if not work_item_ids:
+            return []
+        return list(self.session.scalars(
+            select(WorkAttempt)
+            .where(WorkAttempt.work_item_id.in_(work_item_ids))
+            .order_by(WorkAttempt.work_item_id, WorkAttempt.attempt_number)
+        ))
+
+    def active_plan(self, project_id: str) -> PlanVersion | None:
+        return self.session.scalar(
+            select(PlanVersion)
+            .where(
+                PlanVersion.project_id == project_id,
+                PlanVersion.is_active.is_(True),
+                PlanVersion.status == "confirmed",
+            )
+            .order_by(PlanVersion.version_number.desc())
+        )
+
+    def published_configurations(self) -> list[ProductionConfigVersion]:
+        return list(self.session.scalars(
+            select(ProductionConfigVersion)
+            .where(ProductionConfigVersion.status == "published")
+            .order_by(ProductionConfigVersion.published_at.desc())
+        ))
+
+    def video_specs(self, config_id: str) -> list[VideoSpecVersion]:
+        return list(self.session.scalars(select(VideoSpecVersion).where(
+            VideoSpecVersion.production_config_version_id == config_id
+        )))
+
+    def workflows(self, config_id: str) -> list[WorkflowSlotVersion]:
+        return list(self.session.scalars(select(WorkflowSlotVersion).where(
+            WorkflowSlotVersion.production_config_version_id == config_id
+        )))
+
+    def pricing_catalogs(self, config_id: str) -> list[PricingCatalogVersion]:
+        return list(self.session.scalars(select(PricingCatalogVersion).where(
+            PricingCatalogVersion.production_config_version_id == config_id
+        )))
+
+    def impact_history(self, project_id: str) -> list[ProductionImpactAnalysis]:
+        return list(self.session.scalars(
+            select(ProductionImpactAnalysis)
+            .where(ProductionImpactAnalysis.project_id == project_id)
+            .order_by(ProductionImpactAnalysis.created_at.desc())
+        ))
+
+    def snapshot_history(self, project_id: str) -> list[ProductionSnapshot]:
+        return list(self.session.scalars(
+            select(ProductionSnapshot)
+            .where(ProductionSnapshot.project_id == project_id)
+            .order_by(ProductionSnapshot.snapshot_number.desc())
+        ))

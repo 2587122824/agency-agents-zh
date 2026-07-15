@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Production Repository Sprint 18
+
+- Added a typed `ProductionRepository` covering impact analyses, immutable snapshots, frozen entity references, DAG nodes/edges, configuration and pricing reads, confirmed CostEvent writes, deterministic WorkItem/Attempt compilation, and preparation/execution projections.
+- Migrated the full production service away from direct SQLAlchemy query and persistence calls while preserving exact route selection, pricing rules, snapshot numbering, contract hashes, DAG node lists, cost confirmation, activation, explicit submission, and idempotent command replay.
+- Production events now use the existing EventRepository inside the same application transaction. No Outbox or asynchronous publication was introduced.
+- Added a production repository contract test covering snapshot/analysis history, project isolation, snapshot numbering, entity and DAG ordering, dependency edges, WorkItem detection, and WorkAttempt ordering.
+- Updated repository, product, data-model, implementation-status, and handoff documentation. Worker lease/claim queries remain outside this Repository migration.
+- No schema migration, state-machine change, provider call, retry creation, fallback, route substitution, confirmation change, or new cost behavior was introduced.
+- Verification target: 37 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Planning Repository Sprint 17
 
 - Added a typed `PlanningRepository` covering Creative Brief candidates, Shot Plan candidates, immutable PlanVersion records, Shots, confirmed entity bindings, and planning history projections.

@@ -21,7 +21,7 @@
 | 数据库队列与独立 Worker | 已完成 | `WorkItem`、`WorkAttempt`、`workers/worker.py` |
 | SSE 事件流与游标恢复 | 已完成 | `ProjectEvent`、`events/service.py`、`Last-Event-ID` |
 | 项目状态机与统一评估器 | 部分完成 | 项目控制台有只读阶段评估；状态写入仍分布在应用服务中，尚无统一转移器 |
-| Repository 接口 | 部分完成 | 已完成 Project/Event/Decision/Command/Creation/Planning 协议、SQLAlchemy 实现和合同测试；创作与规划服务已无直接 ORM 查询，其余聚合仍待迁移 |
+| Repository 接口 | 部分完成 | 已完成 Project/Event/Decision/Command/Creation/Planning/Production 协议、SQLAlchemy 实现和合同测试；创作、规划和生产服务已无直接 ORM 查询，其余聚合仍待迁移 |
 | 事件信封与 Outbox | 部分完成 | 已有持久事件、项目序列和 SSE；尚无完整事件信封与 Outbox 发布边界 |
 
 ## 创作、合同与编排

@@ -5,22 +5,18 @@ import json
 from datetime import timezone
 from decimal import Decimal, ROUND_HALF_UP
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db.models import (
-    AudioConfigVersion,
     ConfigurationReference,
     CostEvent,
     DAGNode,
     DependencyEdge,
-    EntityVersion,
     PlanVersion,
     ProductionConfigVersion,
     ProductionImpactAnalysis,
     ProductionSnapshot,
     PricingCatalogVersion,
-    PricingRule,
     ProviderConfigVersion,
     Project,
     ProjectEvent,
@@ -32,7 +28,12 @@ from ..db.models import (
     WorkItem,
     utc_now,
 )
-from ..repositories import SqlAlchemyCommandRepository
+from ..repositories import (
+    ProductionRepository,
+    SqlAlchemyCommandRepository,
+    SqlAlchemyEventRepository,
+    SqlAlchemyProductionRepository,
+)
 from .contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
@@ -50,6 +51,14 @@ class ProductionConflictError(ValueError):
 
 class ProductionNotFoundError(ValueError):
     pass
+
+
+def _production(session: Session) -> ProductionRepository:
+    return SqlAlchemyProductionRepository(session)
+
+
+def _event(session: Session, event: ProjectEvent) -> None:
+    SqlAlchemyEventRepository(session).add(event)
 
 
 def _hash(payload: dict) -> str:
@@ -91,15 +100,10 @@ def _impact_dict(row: ProductionImpactAnalysis) -> dict:
 
 
 def _snapshot_dict(session: Session, row: ProductionSnapshot) -> dict:
-    entities = list(session.scalars(select(SnapshotEntityVersion).where(
-        SnapshotEntityVersion.snapshot_id == row.id
-    ).order_by(SnapshotEntityVersion.role, SnapshotEntityVersion.entity_version_id)))
-    nodes = list(session.scalars(select(DAGNode).where(
-        DAGNode.snapshot_id == row.id
-    ).order_by(DAGNode.node_key)))
-    edges = list(session.scalars(select(DependencyEdge).where(
-        DependencyEdge.snapshot_id == row.id
-    ).order_by(DependencyEdge.parent_node_id, DependencyEdge.child_node_id)))
+    repository = _production(session)
+    entities = repository.snapshot_entities(row.id)
+    nodes = repository.snapshot_nodes(row.id, ordered=True)
+    edges = repository.snapshot_edges(row.id)
     result = {column.name: getattr(row, column.name) for column in row.__table__.columns}
     result["entity_versions"] = [{"entity_version_id": item.entity_version_id, "role": item.role} for item in entities]
     result["nodes"] = [{column.name: getattr(item, column.name) for column in item.__table__.columns if column.name not in {"snapshot_id", "created_at"}} for item in nodes]
@@ -108,7 +112,7 @@ def _snapshot_dict(session: Session, row: ProductionSnapshot) -> dict:
 
 
 def _component(session: Session, model, component_id: str, config_id: str, label: str, errors: list[dict]):
-    row = session.get(model, component_id)
+    row = _production(session).component(model, component_id)
     if not row or row.production_config_version_id != config_id:
         errors.append({"code": f"{label.upper()}_NOT_IN_CONFIGURATION", "path": label, "message": f"{label} 不属于所选配置版本。"})
         return None
@@ -191,9 +195,7 @@ def _price_dag(
     dag: dict,
     total_duration_seconds: Decimal,
 ) -> tuple[Decimal | None, list[dict]]:
-    rules = list(session.scalars(select(PricingRule).where(
-        PricingRule.pricing_catalog_version_id == pricing.id
-    )))
+    rules = _production(session).pricing_rules(pricing.id)
     rule_by_slot = {rule.workflow_slot_version_id: rule for rule in rules}
     errors: list[dict] = []
     total = Decimal("0")
@@ -238,20 +240,21 @@ def _price_dag(
 
 
 def analyze_impact(session: Session, project: Project, payload: AnalyzeProductionImpact) -> dict:
+    repository = _production(session)
     receipt = _receipt(session, project.id, payload.command_id, "production.impact.analyze")
     if receipt:
-        row = session.get(ProductionImpactAnalysis, receipt.result_id)
+        row = repository.impact_analysis(receipt.result_id)
         if not row:
             raise ProductionConflictError("COMMAND_RESULT_MISSING", "影响分析命令结果不存在。")
         return _impact_dict(row)
 
     errors: list[dict] = []
-    plan = session.get(PlanVersion, payload.plan_version_id)
+    plan = repository.plan(payload.plan_version_id)
     if not plan or plan.project_id != project.id:
         raise ProductionNotFoundError("Plan version not found in project")
     if plan.status != "confirmed" or not plan.is_active:
         errors.append({"code": "PLAN_NOT_ACTIVE", "path": "plan_version_id", "message": "只能分析当前已确认方案。"})
-    config = session.get(ProductionConfigVersion, payload.production_config_version_id)
+    config = repository.configuration(payload.production_config_version_id)
     if not config:
         raise ProductionNotFoundError("Production configuration version not found")
     if config.status != "published":
@@ -290,14 +293,14 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
     if tts_slot and tts_slot.operation_kind != "tts":
         errors.append({"code": "TTS_SLOT_KIND_INVALID", "path": "tts_workflow_slot_version_id", "message": "TTS 槽位的 operation_kind 必须是 tts。"})
 
-    shots = list(session.scalars(select(Shot).where(Shot.plan_version_id == plan.id).order_by(Shot.sequence_number)))
+    shots = repository.plan_shots(plan.id)
     if not shots:
         errors.append({"code": "PLAN_HAS_NO_SHOTS", "path": "plan_version_id", "message": "方案没有分镜。"})
     entity_ids: set[str] = set()
     for shot in shots:
         refs = ([shot.scene_entity_version_id] if shot.scene_entity_version_id else []) + shot.character_entity_version_ids + shot.outfit_entity_version_ids
         for entity_id in refs:
-            entity = session.get(EntityVersion, entity_id)
+            entity = repository.entity_version(entity_id)
             if not entity or entity.project_id != project.id or entity.status != "confirmed":
                 errors.append({"code": "ENTITY_VERSION_INVALID", "path": f"shots.{shot.shot_code}", "entity_version_id": entity_id})
             else:
@@ -380,22 +383,23 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         currency=pricing.currency if pricing and estimated_cost is not None and not errors else None,
         created_by=payload.actor_id,
     )
-    session.add(analysis)
-    session.flush()
+    repository.add(analysis)
+    repository.flush()
     _save_receipt(session, project.id, payload.command_id, "production.impact.analyze", "production_impact_analysis", analysis.id)
-    session.add(ProjectEvent(project_id=project.id, event_type="production.impact_evaluated.v1", message="生产影响分析已生成", data={"analysis_id": analysis.id, "analysis_hash": analysis.analysis_hash, "validation_errors": errors}))
+    _event(session, ProjectEvent(project_id=project.id, event_type="production.impact_evaluated.v1", message="生产影响分析已生成", data={"analysis_id": analysis.id, "analysis_hash": analysis.analysis_hash, "validation_errors": errors}))
     session.commit()
     return _impact_dict(analysis)
 
 
 def create_snapshot(session: Session, project: Project, payload: CreateProductionSnapshot) -> dict:
+    repository = _production(session)
     receipt = _receipt(session, project.id, payload.command_id, "production.snapshot.create")
     if receipt:
-        row = session.get(ProductionSnapshot, receipt.result_id)
+        row = repository.snapshot(receipt.result_id)
         if not row:
             raise ProductionConflictError("COMMAND_RESULT_MISSING", "快照命令结果不存在。")
         return _snapshot_dict(session, row)
-    analysis = session.get(ProductionImpactAnalysis, payload.impact_analysis_id)
+    analysis = repository.impact_analysis(payload.impact_analysis_id)
     if not analysis or analysis.project_id != project.id:
         raise ProductionNotFoundError("Production impact analysis not found")
     if analysis.status != "awaiting_confirmation" or analysis.validation_errors:
@@ -404,18 +408,16 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
         raise ProductionConflictError("IMPACT_ANALYSIS_HASH_MISMATCH", "影响分析内容已变化，请重新确认。")
     if not payload.confirm_contract_scope:
         raise ProductionConflictError("CONTRACT_SCOPE_CONFIRMATION_REQUIRED", "创建不可变快照前必须确认精确生产范围。")
-    if session.scalar(select(ProductionSnapshot).where(ProductionSnapshot.impact_analysis_id == analysis.id)):
+    if repository.snapshot_for_impact(analysis.id):
         raise ProductionConflictError("IMPACT_ANALYSIS_ALREADY_USED", "该影响分析已经创建过快照。")
-    plan = session.get(PlanVersion, analysis.plan_version_id)
-    config = session.get(ProductionConfigVersion, analysis.production_config_version_id)
+    plan = repository.plan(analysis.plan_version_id)
+    config = repository.configuration(analysis.production_config_version_id)
     if not plan or plan.project_id != project.id or not plan.is_active or plan.status != "confirmed":
         raise ProductionConflictError("PLAN_CHANGED_AFTER_ANALYSIS", "当前方案已变化，必须重新分析。")
     if not config or config.status != "published" or config.config_hash != analysis.manifest.get("production_config_hash"):
         raise ProductionConflictError("CONFIGURATION_CHANGED_AFTER_ANALYSIS", "配置状态或哈希已变化，必须重新分析。")
 
-    snapshot_number = (session.scalar(select(func.max(ProductionSnapshot.snapshot_number)).where(
-        ProductionSnapshot.project_id == project.id
-    )) or 0) + 1
+    snapshot_number = repository.next_snapshot_number(project.id)
     contract = {"schema_version": "production-snapshot.v1", **analysis.manifest}
     snapshot = ProductionSnapshot(
         project_id=project.id,
@@ -437,28 +439,28 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
         execution_blockers=analysis.execution_blockers,
         created_by=payload.actor_id,
     )
-    session.add(snapshot)
-    session.flush()
+    repository.add(snapshot)
+    repository.flush()
     for entity_id in analysis.manifest["entity_version_ids"]:
-        session.add(SnapshotEntityVersion(snapshot_id=snapshot.id, entity_version_id=entity_id, role="shot_reference"))
+        repository.add(SnapshotEntityVersion(snapshot_id=snapshot.id, entity_version_id=entity_id, role="shot_reference"))
     node_by_key: dict[str, DAGNode] = {}
     for contract_node in analysis.manifest["dag"]["nodes"]:
         node = DAGNode(snapshot_id=snapshot.id, **contract_node)
-        session.add(node)
-        session.flush()
+        repository.add(node)
+        repository.flush()
         node_by_key[node.node_key] = node
     for contract_edge in analysis.manifest["dag"]["edges"]:
-        session.add(DependencyEdge(
+        repository.add(DependencyEdge(
             snapshot_id=snapshot.id,
             parent_node_id=node_by_key[contract_edge["parent_node_key"]].id,
             child_node_id=node_by_key[contract_edge["child_node_key"]].id,
             dependency_type=contract_edge["dependency_type"],
             input_slot=contract_edge["input_slot"],
         ))
-    session.add(ConfigurationReference(production_config_version_id=config.id, ref_type="snapshot", ref_id=snapshot.id))
+    repository.add(ConfigurationReference(production_config_version_id=config.id, ref_type="snapshot", ref_id=snapshot.id))
     analysis.status = "confirmed"
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.create", "production_snapshot", snapshot.id)
-    session.add(ProjectEvent(project_id=project.id, event_type="production.snapshot_prepared.v1", message="不可变生产快照已创建，等待成本核算", data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash, "status": snapshot.status}))
+    _event(session, ProjectEvent(project_id=project.id, event_type="production.snapshot_prepared.v1", message="不可变生产快照已创建，等待成本核算", data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash, "status": snapshot.status}))
     session.commit()
     return _snapshot_dict(session, snapshot)
 
@@ -469,13 +471,14 @@ def lock_snapshot(
     snapshot_id: str,
     payload: LockProductionSnapshot,
 ) -> dict:
+    repository = _production(session)
     receipt = _receipt(session, project.id, payload.command_id, "production.snapshot.lock")
     if receipt:
-        row = session.get(ProductionSnapshot, receipt.result_id)
+        row = repository.snapshot(receipt.result_id)
         if not row:
             raise ProductionConflictError("COMMAND_RESULT_MISSING", "快照锁定命令结果不存在。")
         return _snapshot_dict(session, row)
-    snapshot = session.get(ProductionSnapshot, snapshot_id)
+    snapshot = repository.snapshot(snapshot_id)
     if not snapshot or snapshot.project_id != project.id:
         raise ProductionNotFoundError("Production snapshot not found")
     if snapshot.status != "preparing":
@@ -490,7 +493,7 @@ def lock_snapshot(
         raise ProductionConflictError("SNAPSHOT_COST_MISMATCH", "确认的金额或币种与当前快照估算不一致。")
     if not payload.confirm_high_risk_cost:
         raise ProductionConflictError("HIGH_RISK_COST_CONFIRMATION_REQUIRED", "锁定生产快照必须明确确认预计费用。")
-    pricing = session.get(PricingCatalogVersion, snapshot.pricing_catalog_version_id)
+    pricing = repository.pricing_catalog(snapshot.pricing_catalog_version_id)
     if not pricing or pricing.status != "published":
         raise ProductionConflictError("PRICING_CATALOG_NOT_PUBLISHED", "价格目录已不可用于新快照锁定。")
     now = utc_now()
@@ -499,7 +502,7 @@ def lock_snapshot(
     if pricing.effective_to and now >= _utc(pricing.effective_to):
         raise ProductionConflictError("PRICING_EXPIRED", "价格目录已过有效期。")
 
-    nodes = list(session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot.id)))
+    nodes = repository.snapshot_nodes(snapshot.id)
     priced_total = _money(sum(
         (Decimal(str(node.estimated_cost)) for node in nodes if node.workflow_slot_version_id),
         Decimal("0"),
@@ -513,11 +516,11 @@ def lock_snapshot(
     for node in nodes:
         if not node.workflow_slot_version_id:
             continue
-        workflow = session.get(WorkflowSlotVersion, node.workflow_slot_version_id)
-        provider = session.get(ProviderConfigVersion, workflow.provider_config_version_id) if workflow else None
+        workflow = repository.workflow(node.workflow_slot_version_id)
+        provider = repository.provider(workflow.provider_config_version_id) if workflow else None
         if not workflow or not provider:
             raise ProductionConflictError("SNAPSHOT_PRICING_REFERENCE_MISSING", "成本事件无法解析精确工作流或供应商版本。")
-        session.add(CostEvent(
+        repository.add(CostEvent(
             project_id=project.id,
             snapshot_id=snapshot.id,
             provider=provider.provider_key,
@@ -532,7 +535,7 @@ def lock_snapshot(
     snapshot.execution_blockers = []
     snapshot.locked_at = now
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.lock", "production_snapshot", snapshot.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="production.snapshot_locked.v1",
         message="生产快照费用已确认并锁定",
@@ -554,13 +557,14 @@ def activate_snapshot(
     snapshot_id: str,
     payload: ActivateProductionSnapshot,
 ) -> dict:
+    repository = _production(session)
     receipt = _receipt(session, project.id, payload.command_id, "production.snapshot.activate")
     if receipt:
-        row = session.get(ProductionSnapshot, receipt.result_id)
+        row = repository.snapshot(receipt.result_id)
         if not row:
             raise ProductionConflictError("COMMAND_RESULT_MISSING", "Snapshot activation result no longer exists.")
         return _snapshot_dict(session, row)
-    snapshot = session.get(ProductionSnapshot, snapshot_id)
+    snapshot = repository.snapshot(snapshot_id)
     if not snapshot or snapshot.project_id != project.id:
         raise ProductionNotFoundError("Production snapshot not found")
     if snapshot.status != "locked" or snapshot.cost_status != "confirmed" or not snapshot.locked_at:
@@ -571,7 +575,7 @@ def activate_snapshot(
         raise ProductionConflictError("SNAPSHOT_HAS_EXECUTION_BLOCKERS", "Snapshot still has execution blockers.")
     if project.active_snapshot_id and project.active_snapshot_id != snapshot.id:
         raise ProductionConflictError("PROJECT_HAS_ACTIVE_SNAPSHOT", "The project already has another active snapshot.")
-    if session.scalar(select(WorkItem.id).where(WorkItem.snapshot_id == snapshot.id)):
+    if repository.has_work_items(snapshot.id):
         raise ProductionConflictError("SNAPSHOT_ALREADY_SUBMITTED", "This snapshot already has execution work items.")
 
     now = utc_now()
@@ -580,7 +584,7 @@ def activate_snapshot(
     project.active_snapshot_id = snapshot.id
     project.status = "production_ready"
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.activate", "production_snapshot", snapshot.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="production.snapshot_activated.v1",
         message="Production snapshot activated; no work items were created.",
@@ -619,13 +623,14 @@ def submit_production(
     snapshot_id: str,
     payload: SubmitProduction,
 ) -> dict:
+    repository = _production(session)
     receipt = _receipt(session, project.id, payload.command_id, "production.snapshot.submit")
     if receipt:
-        row = session.get(ProductionSnapshot, receipt.result_id)
+        row = repository.snapshot(receipt.result_id)
         if not row:
             raise ProductionConflictError("COMMAND_RESULT_MISSING", "Production submission result no longer exists.")
         return execution_view(session, project)
-    snapshot = session.get(ProductionSnapshot, snapshot_id)
+    snapshot = repository.snapshot(snapshot_id)
     if not snapshot or snapshot.project_id != project.id:
         raise ProductionNotFoundError("Production snapshot not found")
     if project.active_snapshot_id != snapshot.id or snapshot.status != "active" or not snapshot.activated_at:
@@ -642,19 +647,19 @@ def submit_production(
     if not payload.confirm_high_risk_submission:
         raise ProductionConflictError("HIGH_RISK_SUBMISSION_CONFIRMATION_REQUIRED", "Production submission requires explicit confirmation.")
 
-    nodes = list(session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot.id).order_by(DAGNode.node_key)))
+    nodes = repository.snapshot_nodes(snapshot.id, ordered=True)
     actual_ids = [node.id for node in nodes]
     if len(payload.expected_dag_node_ids) != len(set(payload.expected_dag_node_ids)):
         raise ProductionConflictError("DAG_NODE_LIST_HAS_DUPLICATES", "Submitted DAG node list contains duplicates.")
     if set(payload.expected_dag_node_ids) != set(actual_ids) or len(payload.expected_dag_node_ids) != len(actual_ids):
         raise ProductionConflictError("DAG_NODE_LIST_MISMATCH", "Submitted DAG node list must exactly match the snapshot DAG.")
-    if session.scalar(select(WorkItem.id).where(WorkItem.snapshot_id == snapshot.id)):
+    if repository.has_work_items(snapshot.id):
         raise ProductionConflictError("SNAPSHOT_ALREADY_SUBMITTED", "This snapshot already has work items.")
 
     now = utc_now()
     for node in nodes:
-        workflow = session.get(WorkflowSlotVersion, node.workflow_slot_version_id) if node.workflow_slot_version_id else None
-        provider = session.get(ProviderConfigVersion, workflow.provider_config_version_id) if workflow else None
+        workflow = repository.workflow(node.workflow_slot_version_id) if node.workflow_slot_version_id else None
+        provider = repository.provider(workflow.provider_config_version_id) if workflow else None
         if node.workflow_slot_version_id and (not workflow or not provider):
             raise ProductionConflictError("EXECUTION_ROUTE_REFERENCE_MISSING", f"Node {node.node_key} has an unresolved execution route.")
         manifest = _execution_manifest(snapshot, node, workflow, provider)
@@ -670,8 +675,8 @@ def submit_production(
             request_fingerprint=fingerprint,
             available_at=now,
         )
-        session.add(item)
-        session.flush()
+        repository.add(item)
+        repository.flush()
         attempt = WorkAttempt(
             work_item_id=item.id,
             attempt_number=1,
@@ -681,14 +686,14 @@ def submit_production(
             request_manifest=manifest,
             state="created",
         )
-        session.add(attempt)
-        session.flush()
+        repository.add(attempt)
+        repository.flush()
         item.current_attempt_id = attempt.id
 
     snapshot.status = "submitted"
     project.status = "producing"
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.submit", "production_snapshot", snapshot.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="production.submitted.v1",
         message="Production DAG submitted after explicit confirmation.",
@@ -699,20 +704,17 @@ def submit_production(
 
 
 def execution_view(session: Session, project: Project) -> dict:
-    snapshot = session.get(ProductionSnapshot, project.active_snapshot_id) if project.active_snapshot_id else None
-    items = [] if not snapshot else list(session.scalars(select(WorkItem).where(
-        WorkItem.snapshot_id == snapshot.id
-    ).order_by(WorkItem.created_at, WorkItem.id)))
-    attempts = [] if not items else list(session.scalars(select(WorkAttempt).where(
-        WorkAttempt.work_item_id.in_([item.id for item in items])
-    ).order_by(WorkAttempt.work_item_id, WorkAttempt.attempt_number)))
+    repository = _production(session)
+    snapshot = repository.snapshot(project.active_snapshot_id) if project.active_snapshot_id else None
+    items = [] if not snapshot else repository.work_items(snapshot.id)
+    attempts = repository.work_attempts([item.id for item in items])
     attempts_by_item: dict[str, list[dict]] = {}
     for attempt in attempts:
         attempts_by_item.setdefault(attempt.work_item_id, []).append({
             column.name: getattr(attempt, column.name) for column in attempt.__table__.columns
         })
     node_by_id = {} if not snapshot else {
-        node.id: node for node in session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot.id))
+        node.id: node for node in repository.snapshot_nodes(snapshot.id)
     }
     work_rows = []
     for item in items:
@@ -748,21 +750,14 @@ def execution_view(session: Session, project: Project) -> dict:
 
 
 def preparation_view(session: Session, project: Project) -> dict:
-    active_plan = session.scalar(select(PlanVersion).where(
-        PlanVersion.project_id == project.id,
-        PlanVersion.is_active.is_(True),
-        PlanVersion.status == "confirmed",
-    ).order_by(PlanVersion.version_number.desc()))
-    configs = list(session.scalars(select(ProductionConfigVersion).where(
-        ProductionConfigVersion.status == "published"
-    ).order_by(ProductionConfigVersion.published_at.desc())))
+    repository = _production(session)
+    active_plan = repository.active_plan(project.id)
+    configs = repository.published_configurations()
     choices = []
     for config in configs:
-        videos = list(session.scalars(select(VideoSpecVersion).where(VideoSpecVersion.production_config_version_id == config.id)))
-        workflows = list(session.scalars(select(WorkflowSlotVersion).where(WorkflowSlotVersion.production_config_version_id == config.id)))
-        pricing_catalogs = list(session.scalars(select(PricingCatalogVersion).where(
-            PricingCatalogVersion.production_config_version_id == config.id
-        )))
+        videos = repository.video_specs(config.id)
+        workflows = repository.workflows(config.id)
+        pricing_catalogs = repository.pricing_catalogs(config.id)
         choices.append({
             "id": config.id,
             "config_key": config.config_key,
@@ -780,12 +775,8 @@ def preparation_view(session: Session, project: Project) -> dict:
                 "effective_to": row.effective_to,
             } for row in pricing_catalogs],
         })
-    analyses = list(session.scalars(select(ProductionImpactAnalysis).where(
-        ProductionImpactAnalysis.project_id == project.id
-    ).order_by(ProductionImpactAnalysis.created_at.desc())))
-    snapshots = list(session.scalars(select(ProductionSnapshot).where(
-        ProductionSnapshot.project_id == project.id
-    ).order_by(ProductionSnapshot.snapshot_number.desc())))
+    analyses = repository.impact_history(project.id)
+    snapshots = repository.snapshot_history(project.id)
     if not active_plan:
         next_action = {"code": "CONFIRM_PLAN", "label": "先确认方案", "incurs_production_cost": False}
     elif not choices:

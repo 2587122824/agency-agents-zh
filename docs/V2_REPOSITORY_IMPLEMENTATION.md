@@ -16,6 +16,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 | `CommandRepository` | 按 `(project_id, command_id)` 精确读取、追加不可变回执 | 创作、规划、生产、质量、剪辑、交付服务 |
 | `CreationRepository` | 对话、需求版本、需求候选、Agent 清单/运行、澄清、附件/绑定及创作时实体版本查询 | 创作中心服务 |
 | `PlanningRepository` | Creative Brief、Shot Plan、PlanVersion、Shot、已确认实体引用和规划历史 | 规划中心服务 |
+| `ProductionRepository` | 影响分析、快照、DAG、价格组件、费用记录、WorkItem/Attempt 编译和生产准备/执行投影 | 生产服务 |
 
 系统配置使用独立的 `ConfigurationCommandReceipt`，不属于项目级 `CommandRepository`，本轮没有迁移或合并。
 
@@ -53,7 +54,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 以下聚合仍存在直接 SQLAlchemy 查询，Repository 总体条目保持“部分完成”：
 
 - Configuration
-- Snapshot / DAG / Work
+- Worker lease / claim queries（生产服务的 Snapshot / DAG / Work 编译和读取已迁移）
 - Entity registry read projections（创作阶段的 Entity / Attachment 写入和读取已迁移）
 - Asset / Quality
 - Timeline / Delivery
@@ -71,6 +72,7 @@ Repository 合同测试覆盖：
 - 相同 command ID 在不同项目中的隔离，以及回执字段原样持久化。
 - 创作聚合的活动版本、状态过滤、历史排序、项目隔离和精确 ID 读取。
 - 规划聚合的候选状态过滤、历史倒序、方案版本递增、镜头顺序和活动实体引用。
+- 生产聚合的快照编号、DAG/依赖顺序、项目历史、WorkItem/Attempt 顺序和精确组件读取。
 - 现有 API 全量测试继续验证六个业务阶段的幂等重放和命令冲突行为。
 
 本实现不包含数据库迁移、Provider 调用、重试、兜底、路由替换、提示词改写、状态转移或费用事件。

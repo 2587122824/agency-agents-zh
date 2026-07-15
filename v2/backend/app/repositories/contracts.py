@@ -9,18 +9,32 @@ from ..db.models import (
     AttachmentBinding,
     ClarificationRequest,
     CommandReceipt,
+    ConfigurationReference,
+    CostEvent,
     CreativeBriefCandidate,
+    DAGNode,
     Decision,
+    DependencyEdge,
     Entity,
     EntityVersion,
     Message,
     Project,
     ProjectEvent,
+    PricingCatalogVersion,
+    PricingRule,
+    ProductionConfigVersion,
+    ProductionImpactAnalysis,
+    ProductionSnapshot,
+    ProviderConfigVersion,
     RequirementCandidate,
     RequirementVersion,
     PlanVersion,
     Shot,
     ShotPlanCandidate,
+    SnapshotEntityVersion,
+    VideoSpecVersion,
+    WorkflowSlotVersion,
+    WorkAttempt,
     WorkItem,
 )
 
@@ -39,6 +53,17 @@ CreationRecord = (
     | RequirementVersion
 )
 PlanningRecord = AgentInputManifest | AgentRun | CreativeBriefCandidate | PlanVersion | Shot | ShotPlanCandidate
+ProductionRecord = (
+    ConfigurationReference
+    | CostEvent
+    | DAGNode
+    | DependencyEdge
+    | ProductionImpactAnalysis
+    | ProductionSnapshot
+    | SnapshotEntityVersion
+    | WorkAttempt
+    | WorkItem
+)
 
 
 class ProjectRepository(Protocol):
@@ -183,3 +208,61 @@ class PlanningRepository(Protocol):
     def plan_history(self, project_id: str) -> list[PlanVersion]: ...
 
     def active_entity_versions(self, project_id: str) -> list[tuple[EntityVersion, Entity]]: ...
+
+
+class ProductionRepository(Protocol):
+    def add(self, record: ProductionRecord) -> None: ...
+
+    def flush(self) -> None: ...
+
+    def component(self, model_type: type[ModelT], component_id: str) -> ModelT | None: ...
+
+    def snapshot_entities(self, snapshot_id: str) -> list[SnapshotEntityVersion]: ...
+
+    def snapshot_nodes(self, snapshot_id: str, *, ordered: bool = False) -> list[DAGNode]: ...
+
+    def snapshot_edges(self, snapshot_id: str) -> list[DependencyEdge]: ...
+
+    def pricing_rules(self, pricing_catalog_version_id: str) -> list[PricingRule]: ...
+
+    def impact_analysis(self, analysis_id: str) -> ProductionImpactAnalysis | None: ...
+
+    def plan(self, plan_id: str) -> PlanVersion | None: ...
+
+    def configuration(self, config_id: str) -> ProductionConfigVersion | None: ...
+
+    def plan_shots(self, plan_id: str) -> list[Shot]: ...
+
+    def entity_version(self, version_id: str) -> EntityVersion | None: ...
+
+    def snapshot_for_impact(self, analysis_id: str) -> ProductionSnapshot | None: ...
+
+    def next_snapshot_number(self, project_id: str) -> int: ...
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None: ...
+
+    def pricing_catalog(self, pricing_id: str) -> PricingCatalogVersion | None: ...
+
+    def workflow(self, workflow_id: str) -> WorkflowSlotVersion | None: ...
+
+    def provider(self, provider_id: str) -> ProviderConfigVersion | None: ...
+
+    def has_work_items(self, snapshot_id: str) -> bool: ...
+
+    def work_items(self, snapshot_id: str) -> list[WorkItem]: ...
+
+    def work_attempts(self, work_item_ids: list[str]) -> list[WorkAttempt]: ...
+
+    def active_plan(self, project_id: str) -> PlanVersion | None: ...
+
+    def published_configurations(self) -> list[ProductionConfigVersion]: ...
+
+    def video_specs(self, config_id: str) -> list[VideoSpecVersion]: ...
+
+    def workflows(self, config_id: str) -> list[WorkflowSlotVersion]: ...
+
+    def pricing_catalogs(self, config_id: str) -> list[PricingCatalogVersion]: ...
+
+    def impact_history(self, project_id: str) -> list[ProductionImpactAnalysis]: ...
+
+    def snapshot_history(self, project_id: str) -> list[ProductionSnapshot]: ...

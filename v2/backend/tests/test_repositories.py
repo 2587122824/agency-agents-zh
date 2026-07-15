@@ -13,17 +13,23 @@ from v2.backend.app.db.models import (
     AttachmentBinding,
     ClarificationRequest,
     CreativeBriefCandidate,
+    DAGNode,
     Decision,
+    DependencyEdge,
     Entity,
     EntityVersion,
     Message,
     PlanVersion,
     Project,
     ProjectEvent,
+    ProductionImpactAnalysis,
+    ProductionSnapshot,
     RequirementCandidate,
     RequirementVersion,
     Shot,
     ShotPlanCandidate,
+    SnapshotEntityVersion,
+    WorkAttempt,
     WorkItem,
     utc_now,
 )
@@ -34,6 +40,7 @@ from v2.backend.app.repositories import (
     SqlAlchemyDecisionRepository,
     SqlAlchemyEventRepository,
     SqlAlchemyPlanningRepository,
+    SqlAlchemyProductionRepository,
     SqlAlchemyProjectRepository,
 )
 
@@ -632,5 +639,175 @@ def test_planning_repository_contract_preserves_versions_history_and_shot_order(
             ]
             assert planning.brief_history(other.id) == []
             assert planning.next_plan_version_number(other.id) == 1
+    finally:
+        engine.dispose()
+
+
+def test_production_repository_contract_preserves_snapshot_dag_and_work_order() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            production = SqlAlchemyProductionRepository(session)
+            now = utc_now()
+            project = Project(
+                title="Production",
+                core_topic="Production repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            other = Project(
+                title="Other",
+                core_topic="Production isolation",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            projects.add(project)
+            projects.add(other)
+            projects.flush()
+            old_analysis = ProductionImpactAnalysis(
+                project_id=project.id,
+                plan_version_id="plan-old",
+                production_config_version_id="config-1",
+                selection={},
+                manifest={},
+                analysis_hash="a" * 64,
+                created_at=now - timedelta(minutes=2),
+            )
+            current_analysis = ProductionImpactAnalysis(
+                project_id=project.id,
+                plan_version_id="plan-current",
+                production_config_version_id="config-1",
+                selection={},
+                manifest={},
+                analysis_hash="b" * 64,
+                created_at=now - timedelta(minutes=1),
+            )
+            production.add(old_analysis)
+            production.add(current_analysis)
+            production.flush()
+            old_snapshot = ProductionSnapshot(
+                project_id=project.id,
+                plan_version_id="plan-old",
+                production_config_version_id="config-1",
+                impact_analysis_id=old_analysis.id,
+                snapshot_number=1,
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="c" * 64,
+            )
+            current_snapshot = ProductionSnapshot(
+                project_id=project.id,
+                plan_version_id="plan-current",
+                production_config_version_id="config-1",
+                impact_analysis_id=current_analysis.id,
+                snapshot_number=2,
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="d" * 64,
+            )
+            production.add(old_snapshot)
+            production.add(current_snapshot)
+            production.flush()
+            character_ref = SnapshotEntityVersion(
+                snapshot_id=current_snapshot.id,
+                entity_version_id="entity-character",
+                role="character",
+            )
+            scene_ref = SnapshotEntityVersion(
+                snapshot_id=current_snapshot.id,
+                entity_version_id="entity-scene",
+                role="scene",
+            )
+            production.add(scene_ref)
+            production.add(character_ref)
+            later_node = DAGNode(
+                snapshot_id=current_snapshot.id,
+                node_key="shot.002.video",
+                kind="generate_i2v_clip",
+                input_contract={},
+                output_contract={},
+            )
+            earlier_node = DAGNode(
+                snapshot_id=current_snapshot.id,
+                node_key="shot.001.keyframe",
+                kind="generate_keyframe",
+                input_contract={},
+                output_contract={},
+            )
+            production.add(later_node)
+            production.add(earlier_node)
+            production.flush()
+            edge = DependencyEdge(
+                snapshot_id=current_snapshot.id,
+                parent_node_id=earlier_node.id,
+                child_node_id=later_node.id,
+                dependency_type="required",
+                input_slot="source_image",
+            )
+            production.add(edge)
+            work = WorkItem(
+                project_id=project.id,
+                snapshot_id=current_snapshot.id,
+                dag_node_id=earlier_node.id,
+                kind=earlier_node.kind,
+                payload={},
+                created_at=now,
+            )
+            production.add(work)
+            production.flush()
+            second_attempt = WorkAttempt(
+                work_item_id=work.id,
+                attempt_number=2,
+                trigger="contract_fixture",
+                provider="mock",
+                request_fingerprint="f" * 64,
+                request_manifest={},
+                state="created",
+            )
+            first_attempt = WorkAttempt(
+                work_item_id=work.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="mock",
+                request_fingerprint="e" * 64,
+                request_manifest={},
+                state="created",
+            )
+            production.add(second_attempt)
+            production.add(first_attempt)
+            session.commit()
+
+            assert production.impact_analysis(current_analysis.id).id == current_analysis.id  # type: ignore[union-attr]
+            assert production.snapshot(current_snapshot.id).id == current_snapshot.id  # type: ignore[union-attr]
+            assert production.component(ProductionSnapshot, current_snapshot.id).id == current_snapshot.id  # type: ignore[union-attr]
+            assert production.snapshot_for_impact(current_analysis.id).id == current_snapshot.id  # type: ignore[union-attr]
+            assert production.next_snapshot_number(project.id) == 3
+            assert production.next_snapshot_number(other.id) == 1
+            assert [row.id for row in production.snapshot_history(project.id)] == [current_snapshot.id, old_snapshot.id]
+            assert [row.id for row in production.impact_history(project.id)] == [current_analysis.id, old_analysis.id]
+            assert [row.id for row in production.snapshot_entities(current_snapshot.id)] == [character_ref.id, scene_ref.id]
+            assert [row.id for row in production.snapshot_nodes(current_snapshot.id, ordered=True)] == [
+                earlier_node.id,
+                later_node.id,
+            ]
+            assert [row.id for row in production.snapshot_edges(current_snapshot.id)] == [edge.id]
+            assert production.has_work_items(current_snapshot.id) is True
+            assert production.has_work_items(old_snapshot.id) is False
+            assert [row.id for row in production.work_items(current_snapshot.id)] == [work.id]
+            assert [row.id for row in production.work_attempts([work.id])] == [first_attempt.id, second_attempt.id]
+            assert production.work_attempts([]) == []
+            assert production.snapshot_history(other.id) == []
     finally:
         engine.dispose()
