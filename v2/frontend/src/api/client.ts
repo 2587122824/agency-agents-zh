@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -99,6 +99,19 @@ export const api = {
     }),
   }),
   productionExecution: (projectId: string) => request<ProductionExecution>(`/projects/${projectId}/production-execution`),
+  qualityReview: (projectId: string) => request<QualityReview>(`/projects/${projectId}/quality-review`),
+  verifyAsset: (projectId: string, asset: ProductionAsset) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:verify`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version }),
+  }),
+  runAssetQC: (projectId: string, asset: ProductionAsset) => request<QCReport>(`/projects/${projectId}/assets/${asset.id}:run-qc`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version }),
+  }),
+  reviewAsset: (projectId: string, asset: ProductionAsset, decision: 'approve' | 'reject', rationale: string) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:${decision}`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version,
+      qc_report_id: asset.latest_qc_report?.id, rationale,
+    }),
+  }),
   systemConfigurations: () => request<SystemConfigurationSummary[]>('/system-config/versions'),
   systemConfiguration: (id: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}`),
   createSystemConfiguration: (configuration: SystemConfigurationDraft) => request<SystemConfigurationVersion>('/system-config/versions', {

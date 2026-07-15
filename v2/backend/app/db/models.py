@@ -106,6 +106,82 @@ class WorkAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class Asset(Base):
+    __tablename__ = "assets"
+    __table_args__ = (
+        UniqueConstraint("work_attempt_id", "output_index"),
+        UniqueConstraint("storage_backend", "uri"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("asset"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    work_attempt_id: Mapped[str | None] = mapped_column(ForeignKey("work_attempts.id"), nullable=True, index=True)
+    dag_node_id: Mapped[str | None] = mapped_column(ForeignKey("dag_nodes.id"), nullable=True, index=True)
+    output_index: Mapped[int] = mapped_column(Integer)
+    asset_type: Mapped[str] = mapped_column(String(32), index=True)
+    role: Mapped[str] = mapped_column(String(80))
+    uri: Mapped[str] = mapped_column(String(500))
+    storage_backend: Mapped[str] = mapped_column(String(40))
+    provider_output_manifest: Mapped[dict] = mapped_column(JSON)
+    content_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    mime_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    byte_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    state: Mapped[str] = mapped_column(String(32), default="created", index=True)
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class QCReport(Base):
+    __tablename__ = "qc_reports"
+    __table_args__ = (UniqueConstraint("asset_id", "report_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("qc_report"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id"), index=True)
+    report_number: Mapped[int] = mapped_column(Integer)
+    ruleset_version: Mapped[str] = mapped_column(String(80))
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    analyzer: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    reviewed_by: Mapped[str | None] = mapped_column(String(48), nullable=True)
+
+
+class QCFinding(Base):
+    __tablename__ = "qc_findings"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("qc_finding"))
+    qc_report_id: Mapped[str] = mapped_column(ForeignKey("qc_reports.id"), index=True)
+    code: Mapped[str] = mapped_column(String(80), index=True)
+    severity: Mapped[str] = mapped_column(String(24))
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+    contract_field: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    disposition: Mapped[str] = mapped_column(String(32))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class AssetReviewDecision(Base):
+    __tablename__ = "asset_review_decisions"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("asset_review"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id"), index=True)
+    qc_report_id: Mapped[str] = mapped_column(ForeignKey("qc_reports.id"), index=True)
+    decision: Mapped[str] = mapped_column(String(24))
+    rationale: Mapped[str] = mapped_column(String(1000))
+    actor_id: Mapped[str] = mapped_column(String(48))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class ProjectEvent(Base):
     __tablename__ = "project_events"
 

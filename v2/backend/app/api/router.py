@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..contracts.project import (
@@ -122,6 +122,25 @@ from ..projects.service import (
     list_projects,
     queue_contract_validation,
 )
+from ..quality.contracts import (
+    AssetRead,
+    QCReportRead,
+    QualityReviewView,
+    RegisterAttemptAsset,
+    ReviewAsset,
+    RunAssetQC,
+    VerifyAsset,
+)
+from ..quality.service import (
+    QualityConflictError,
+    QualityNotFoundError,
+    asset_content_path,
+    quality_review_view,
+    register_attempt_asset,
+    review_asset,
+    run_asset_qc,
+    verify_asset,
+)
 
 
 router = APIRouter()
@@ -136,6 +155,10 @@ def configuration_error(exc: ConfigurationConflictError) -> HTTPException:
 
 
 def production_error(exc: ProductionConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
+
+
+def quality_error(exc: QualityConflictError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
 
 
@@ -405,6 +428,94 @@ def production_snapshot_submit(
 )
 def production_execution(project_id: str, session: Session = Depends(get_session)):
     return execution_view(session, require_project(session, project_id))
+
+
+@router.get("/projects/{project_id}/quality-review", response_model=QualityReviewView)
+def project_quality_review(project_id: str, session: Session = Depends(get_session)):
+    return quality_review_view(session, require_project(session, project_id))
+
+
+@router.post(
+    "/projects/{project_id}/work-attempts/{attempt_id}/assets",
+    response_model=AssetRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def work_attempt_asset_register(
+    project_id: str,
+    attempt_id: str,
+    payload: RegisterAttemptAsset,
+    session: Session = Depends(get_session),
+):
+    try:
+        return register_attempt_asset(session, require_project(session, project_id), attempt_id, payload)
+    except QualityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except QualityConflictError as exc:
+        session.rollback()
+        raise quality_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/assets/{asset_id}:verify", response_model=AssetRead)
+def project_asset_verify(
+    project_id: str,
+    asset_id: str,
+    payload: VerifyAsset,
+    session: Session = Depends(get_session),
+):
+    try:
+        return verify_asset(session, require_project(session, project_id), asset_id, payload)
+    except QualityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except QualityConflictError as exc:
+        session.rollback()
+        raise quality_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/assets/{asset_id}:run-qc", response_model=QCReportRead)
+def project_asset_run_qc(
+    project_id: str,
+    asset_id: str,
+    payload: RunAssetQC,
+    session: Session = Depends(get_session),
+):
+    try:
+        return run_asset_qc(session, require_project(session, project_id), asset_id, payload)
+    except QualityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except QualityConflictError as exc:
+        session.rollback()
+        raise quality_error(exc) from exc
+
+
+def _review_asset_command(project_id: str, asset_id: str, payload: ReviewAsset, decision: str, session: Session):
+    try:
+        return review_asset(session, require_project(session, project_id), asset_id, payload, decision)
+    except QualityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except QualityConflictError as exc:
+        session.rollback()
+        raise quality_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/assets/{asset_id}:approve", response_model=AssetRead)
+def project_asset_approve(project_id: str, asset_id: str, payload: ReviewAsset, session: Session = Depends(get_session)):
+    return _review_asset_command(project_id, asset_id, payload, "approved", session)
+
+
+@router.post("/projects/{project_id}/assets/{asset_id}:reject", response_model=AssetRead)
+def project_asset_reject(project_id: str, asset_id: str, payload: ReviewAsset, session: Session = Depends(get_session)):
+    return _review_asset_command(project_id, asset_id, payload, "rejected", session)
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/content")
+def project_asset_content(project_id: str, asset_id: str, session: Session = Depends(get_session)):
+    try:
+        path, media_type = asset_content_path(session, require_project(session, project_id), asset_id)
+        return FileResponse(path, media_type=media_type)
+    except QualityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except QualityConflictError as exc:
+        raise quality_error(exc) from exc
 
 
 @router.post(

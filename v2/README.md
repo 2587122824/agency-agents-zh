@@ -44,6 +44,7 @@ v2\start_v2.bat -NoBrowser
 - `decisions/`: append-only user decision ledger.
 - `events/`: persisted event stream used by SSE.
 - `workers/`: explicit work-item execution.
+- `quality/`: verified provider outputs, deterministic QC evidence, and explicit human review.
 - `providers/`: future provider adapters; currently intentionally empty.
 
 No automatic retry, route substitution, prompt rewriting, output repair, or

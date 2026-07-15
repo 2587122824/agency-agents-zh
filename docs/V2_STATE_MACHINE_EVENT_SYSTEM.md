@@ -589,3 +589,33 @@ production.snapshot_activated.v1
 production.submitted.v1
 production.work_finished.v1
 ```
+
+## 19. 素材验证与人工审核命令
+
+```text
+RegisterAttemptAsset: completed WorkAttempt + exact response hash + exact output index
+VerifyAsset: created -> verified | archived(blocked evidence)
+RunAssetQC: verified -> approved | review_required | archived
+ApproveAsset: review_required -> approved
+RejectAsset: review_required -> archived
+```
+
+守卫与事件：
+
+- `RegisterAttemptAsset` 要求响应明确 `media_created=true`，输出类型与 DAG output contract 一致，存储适配器已连接。
+- 文件验证失败不是瞬时 API 错误：系统持久化 QCReport/QCFinding，事件为 `quality.blocked.v1`，对应 WorkItem 与 Project 可见阻断。
+- `RunAssetQC` 的规则集版本写入报告。尺寸与时长不符为 `blocked`；未连接主观分析器的内容为 `review_required`。
+- 人工审核要求匹配最新 QCReport、Asset row_version 和非空依据；一个 QCReport 只能产生一次人工决定。
+- 所有命令通过 CommandReceipt 幂等重放；命令重放不创建第二份素材、报告或决定。
+- 拒绝素材不创建 WorkAttempt，不触发付费重试，不改变工作流选择。
+
+事件：
+
+```text
+asset.created.v1
+asset.verified.v1
+quality.review_required.v1
+quality.blocked.v1
+asset.approved.v1
+asset.rejected.v1
+```

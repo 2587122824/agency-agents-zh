@@ -2,6 +2,17 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-16 V2 Asset Lifecycle And Quality Review Sprint 8
+
+- Added persisted `Asset`, `QCReport`, `QCFinding`, and append-only `AssetReviewDecision` records under `v2/` with Alembic revision `20260716_08`.
+- Provider outputs can be registered only from a completed WorkAttempt whose persisted response manifest explicitly has `media_created=true`, an exact output index, a matching response hash, and an output type matching the DAG contract. Mock responses cannot become assets.
+- Asset verification reads the real local file, computes SHA-256, probes PNG/JPEG/WAV/MP4/SRT/JSON media facts, and compares the provider-declared hash/MIME. Missing, changed, corrupt, or mismatched files persist blocked QC evidence and archive the asset instead of leaving an ephemeral API error.
+- The versioned `v2.file-contract.v1` ruleset checks deterministic dimensions, video duration, and references. Visual/audio content enters `review_required` while subjective analyzers are disconnected; it is never silently passed.
+- Added explicit approve/reject commands with row-version guards, exact QC report binding, required rationale, actor audit, idempotent command receipts, and no retry or production call. Rejection archives only.
+- Replaced the `/review` placeholder with an API-backed quality workspace showing real previews, hashes, dimensions, findings, downstream DAG impact, output gaps, and human-decision dialogs.
+- Verification target: 21 backend tests, Python compileall, TypeScript/Vite build, fresh eight-revision migration, browser desktop/mobile checks, push, and restart on `8766`.
+- Next slice: confirmed Timeline candidate/editor contracts that can reference only approved assets. Do not implement retry commands or real providers until retry cost confirmation and provider reconciliation contracts are designed.
+
 ## 2026-07-15 V2 Execution Authorization Sprint 7
 
 - Added explicit `locked -> active -> submitted` production authorization. Activation changes the project's active snapshot only and creates zero WorkItems; submission independently revalidates contract hash, confirmed amount/currency, the exact complete DAG node list, and high-risk confirmation.

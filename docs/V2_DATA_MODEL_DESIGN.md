@@ -754,3 +754,32 @@ project_01
 - Worker 通过 `execution_lock_owner` 与 `execution_lock_expires_at` 记录租约；租约不是自动重试授权。
 - Mock 完成记录 `media_created=false` 和空 `provider_task_id`，不得创建 Asset 或 charged CostEvent。
 - 本地时间线节点只记录所消费的父 WorkItem ID，不生成最终视频文件。
+
+## 20. 素材与审核落地约束
+
+`Asset` 额外保存：
+
+```text
+dag_node_id
+output_index
+provider_output_manifest
+row_version
+archived_at
+```
+
+- `(work_attempt_id, output_index)` 唯一，阻止同一供应商输出重复登记。
+- `(storage_backend, uri)` 唯一，阻止同一存储对象被伪装成多个素材。
+- `provider_output_manifest` 保存该输出在供应商响应中的原始结构；文件探测结果写入独立的哈希、MIME、尺寸和时长字段。
+- `created` Asset 的 `content_hash` 为空；只有后端重新读取文件并匹配供应商声明哈希后才写入。
+
+新增 `AssetReviewDecision`：
+
+```text
+id, project_id, asset_id, qc_report_id
+decision: approved | rejected
+rationale, actor_id, created_at
+```
+
+QCReport 保留检测器原始 `passed/review_required/blocked` 结论；人工审核不会覆盖检测结论，而是追加 ReviewDecision 并改变 Asset 生命周期状态。这样可以区分“检测器要求复核”和“用户最终批准”。
+
+当前本地媒体探测支持 PNG、JPEG、WAV、MP4、UTF-8 SRT 和 JSON 项目文件。MP4 从容器 box 读取画面尺寸和时长，不接受调用方提交的替代元数据。未支持签名直接阻断，不按扩展名猜测格式。

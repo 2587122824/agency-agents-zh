@@ -345,6 +345,68 @@ export interface ProductionExecution {
   blockers: Array<{ work_item_id: string; node_key: string; error: string }>
 }
 
+export interface QCFinding {
+  id: string
+  code: string
+  severity: string
+  evidence: Record<string, unknown>
+  contract_field: string | null
+  disposition: string
+  created_at: string
+}
+
+export interface QCReport {
+  id: string
+  report_number: number
+  ruleset_version: string
+  status: string
+  analyzer: string
+  created_at: string
+  reviewed_at: string | null
+  reviewed_by: string | null
+  findings: QCFinding[]
+}
+
+export interface ProductionAsset {
+  id: string
+  project_id: string
+  snapshot_id: string
+  work_attempt_id: string | null
+  dag_node_id: string | null
+  node_key: string | null
+  output_index: number
+  asset_type: string
+  role: string
+  uri: string
+  storage_backend: string
+  content_hash: string | null
+  mime_type: string | null
+  byte_size: number | null
+  width: number | null
+  height: number | null
+  duration_ms: number | null
+  state: string
+  row_version: number
+  created_at: string
+  verified_at: string | null
+  approved_at: string | null
+  archived_at: string | null
+  latest_qc_report: QCReport | null
+  review_decisions: Array<{ id: string; decision: string; rationale: string; actor_id: string; created_at: string }>
+  affected_downstream_node_keys: string[]
+}
+
+export interface QualityReview {
+  project_id: string
+  project_status: string
+  active_snapshot_id: string | null
+  assets: ProductionAsset[]
+  output_gaps: Array<{ code: string; dag_node_id: string; node_key: string; work_item_id: string | null; message: string }>
+  counts: Record<string, number>
+  stage_ready: boolean
+  next_action: { code: string; label: string }
+}
+
 export interface ProductionPreparation {
   project_id: string
   active_plan_id: string | null

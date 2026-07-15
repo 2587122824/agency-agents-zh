@@ -1,1 +1,1 @@
-"""Quality reports and human review gates."""
+"""Asset lifecycle and quality review services."""

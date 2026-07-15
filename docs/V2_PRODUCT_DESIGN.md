@@ -951,3 +951,32 @@ POST /api/v1/projects/{project_id}/production-snapshots/{snapshot_id}:activate
 POST /api/v1/projects/{project_id}/production-snapshots/{snapshot_id}:submit
 GET  /api/v1/projects/{project_id}/production-execution
 ```
+
+## 32. 素材登记与质量审核实现边界
+
+供应商任务完成不等于素材可用。适配器必须先持久化不可变响应清单：
+
+```json
+{
+  "media_created": true,
+  "outputs": [{
+    "uri": "runtime://assets/...",
+    "storage_backend": "local",
+    "asset_type": "image",
+    "role": "keyframe",
+    "mime_type": "image/png",
+    "content_hash": "sha256..."
+  }]
+}
+```
+
+后端按精确 `output_index` 登记 `created` Asset，并再次校验整个响应清单哈希。随后：
+
+1. `VerifyAsset` 读取真实文件、计算 SHA-256、探测 MIME、尺寸和时长；不信任前端或适配器传入的文件事实。
+2. 文件缺失、哈希不符、媒体损坏或 MIME 不符会产生持久化 `blocked` QC 证据、归档 Asset 并阻断对应 WorkItem。
+3. `RunAssetQC` 使用版本化 `v2.file-contract.v1` 检查输出尺寸、视频时长和 DAG 引用。
+4. 尚未连接视觉或音频分析器时，视觉和音频内容进入 `review_required`，不会被伪装成 `passed`。
+5. `ApproveAsset` 与 `RejectAsset` 必须记录审核依据、审核人和 QCReport；拒绝只归档，不创建重试。
+6. Mock 响应的 `media_created=false` 无法登记为素材，审核页明确显示模拟执行没有媒体结果。
+
+审核页面按项目展示真实素材、文件规格、内容哈希、QC findings、人工决定和受影响的下游 DAG 节点。只有每个必需媒体节点至少存在一个 `approved` 或 `used` 素材时，质量阶段才可进入剪辑。

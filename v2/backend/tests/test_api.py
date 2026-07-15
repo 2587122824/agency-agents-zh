@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 import os
+import hashlib
+import json
+import struct
+import zlib
 from pathlib import Path
 
 import pytest
@@ -14,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import CostEvent, Project, RequirementVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import Asset, AssetReviewDecision, CostEvent, Project, QCFinding, QCReport, RequirementVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -571,6 +575,44 @@ def create_locked_snapshot(client: TestClient, adapter_kind: str = "mock") -> tu
     return project, locked
 
 
+def solid_png(width: int, height: int) -> bytes:
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", zlib.crc32(kind + payload) & 0xFFFFFFFF)
+    rows = b"".join(b"\x00" + b"\x20\x80\xc0" * width for _ in range(height))
+    return b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b"")
+
+
+def attach_local_provider_output(project: dict, snapshot: dict, width: int, height: int, node_index: int = 0) -> tuple[dict, dict, str]:
+    with SessionLocal() as session:
+        items = list(session.scalars(select(WorkItem).where(
+            WorkItem.snapshot_id == snapshot["id"],
+            WorkItem.kind == "generate_keyframe",
+        ).order_by(WorkItem.created_at, WorkItem.id)))
+        item = items[node_index]
+        attempt = session.get(WorkAttempt, item.current_attempt_id)
+        content = solid_png(width, height)
+        relative = f"quality/{item.id}.png"
+        path = TEST_RUNTIME / "assets" / "quality" / f"{item.id}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        output = {
+            "uri": f"runtime://assets/{relative}",
+            "storage_backend": "local",
+            "asset_type": "image",
+            "role": "keyframe",
+            "mime_type": "image/png",
+            "content_hash": hashlib.sha256(content).hexdigest(),
+        }
+        response_manifest = {"schema_version": "provider-response.v1", "media_created": True, "outputs": [output]}
+        attempt.state = "completed"
+        attempt.response_manifest = response_manifest
+        attempt.finished_at = attempt.created_at
+        item.status = "completed"
+        item.finished_at = item.created_at
+        session.commit()
+        return {"id": item.id, "attempt_id": attempt.id}, response_manifest, relative
+
+
 def test_production_impact_and_snapshot_compile_exact_dag_without_work_items(client: TestClient) -> None:
     project, plan = create_confirmed_plan(client)
     with SessionLocal() as session:
@@ -892,6 +934,200 @@ def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClien
     assert blocked[0]["attempts"][0]["error_code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
     assert len(blocked[0]["attempts"]) == 1
     assert blocked[0]["attempts"][0]["provider_task_id"] is None
+
+
+def test_asset_registration_verification_qc_and_human_approval_are_explicit(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "quality-activate-command-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "quality-submit-command-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    item, response_manifest, _ = attach_local_provider_output(project, snapshot, 480, 848)
+    response_hash = hashlib.sha256(json.dumps(response_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    register_command = {
+        "command_id": "quality-register-command-001",
+        "output_index": 0,
+        "expected_response_manifest_hash": response_hash,
+    }
+    registered = client.post(
+        f"/api/v1/projects/{project['id']}/work-attempts/{item['attempt_id']}/assets",
+        json=register_command,
+    )
+    replayed = client.post(
+        f"/api/v1/projects/{project['id']}/work-attempts/{item['attempt_id']}/assets",
+        json=register_command,
+    )
+    assert registered.status_code == 201
+    asset = registered.json()
+    assert replayed.json()["id"] == asset["id"]
+    assert asset["state"] == "created"
+    assert asset["content_hash"] is None
+
+    verified = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:verify",
+        json={"command_id": "quality-verify-command-001", "expected_row_version": asset["row_version"]},
+    )
+    assert verified.status_code == 200
+    asset = verified.json()
+    assert asset["state"] == "verified"
+    assert asset["width"] == 480 and asset["height"] == 848
+    assert asset["content_hash"] == response_manifest["outputs"][0]["content_hash"]
+
+    qc = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:run-qc",
+        json={"command_id": "quality-qc-command-001", "expected_row_version": asset["row_version"]},
+    )
+    assert qc.status_code == 200
+    report = qc.json()
+    assert report["status"] == "review_required"
+    assert [finding["code"] for finding in report["findings"]] == ["VISUAL_CONTENT_REVIEW_REQUIRED"]
+    review_view = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()
+    pending_asset = next(row for row in review_view["assets"] if row["id"] == asset["id"])
+    assert pending_asset["state"] == "review_required"
+    assert "project.timeline" in pending_asset["affected_downstream_node_keys"]
+
+    approved = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:approve",
+        json={
+            "command_id": "quality-approve-command-001",
+            "expected_row_version": pending_asset["row_version"],
+            "qc_report_id": report["id"],
+            "rationale": "Composition and subject continuity are acceptable.",
+        },
+    )
+    assert approved.status_code == 200
+    assert approved.json()["state"] == "approved"
+    assert approved.json()["review_decisions"][0]["decision"] == "approved"
+    content = client.get(f"/api/v1/projects/{project['id']}/assets/{asset['id']}/content")
+    assert content.status_code == 200
+    assert content.headers["content-type"].startswith("image/png")
+    with SessionLocal() as session:
+        assert len(list(session.scalars(select(WorkAttempt).where(WorkAttempt.work_item_id == item["id"])))) == 1
+        assert session.scalar(select(AssetReviewDecision).where(AssetReviewDecision.asset_id == asset["id"])) is not None
+
+
+def test_deterministic_asset_contract_failure_blocks_without_retry(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "bad-asset-activate-0001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "bad-asset-submit-000001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    item, response_manifest, _ = attach_local_provider_output(project, snapshot, 32, 32)
+    response_hash = hashlib.sha256(json.dumps(response_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    asset = client.post(
+        f"/api/v1/projects/{project['id']}/work-attempts/{item['attempt_id']}/assets",
+        json={"command_id": "bad-asset-register-0001", "output_index": 0, "expected_response_manifest_hash": response_hash},
+    ).json()
+    asset = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:verify",
+        json={"command_id": "bad-asset-verify-000001", "expected_row_version": asset["row_version"]},
+    ).json()
+    report = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:run-qc",
+        json={"command_id": "bad-asset-qc-command1", "expected_row_version": asset["row_version"]},
+    ).json()
+    assert report["status"] == "blocked"
+    assert report["findings"][0]["code"] == "MEDIA_DIMENSIONS_INVALID"
+    review_view = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()
+    archived = next(row for row in review_view["assets"] if row["id"] == asset["id"])
+    assert archived["state"] == "archived"
+    assert review_view["project_status"] == "blocked"
+    with SessionLocal() as session:
+        attempts = list(session.scalars(select(WorkAttempt).where(WorkAttempt.work_item_id == item["id"])))
+        assert len(attempts) == 1
+        assert len(list(session.scalars(select(QCFinding).where(QCFinding.qc_report_id == report["id"])))) == 1
+
+
+def test_mock_response_cannot_be_registered_as_an_asset(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "mock-asset-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "mock-asset-submit-00001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert process_one("mock-asset-worker") is True
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    completed = next(item for item in execution["work_items"] if item["status"] == "completed")
+    attempt = completed["attempts"][0]
+    manifest_hash = hashlib.sha256(json.dumps(attempt["response_manifest"], ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/work-attempts/{attempt['id']}/assets",
+        json={"command_id": "mock-register-asset-0001", "output_index": 0, "expected_response_manifest_hash": manifest_hash},
+    )
+    assert response.status_code == 409
+    assert response.headers["x-error-code"] == "ATTEMPT_CREATED_NO_MEDIA"
+    with SessionLocal() as session:
+        assert list(session.scalars(select(Asset))) == []
+
+
+def test_file_verification_failure_is_persisted_as_blocked_evidence(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "file-block-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "file-block-submit-0001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    item, response_manifest, relative = attach_local_provider_output(project, snapshot, 480, 848)
+    response_hash = hashlib.sha256(json.dumps(response_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    asset = client.post(
+        f"/api/v1/projects/{project['id']}/work-attempts/{item['attempt_id']}/assets",
+        json={"command_id": "file-block-register-001", "output_index": 0, "expected_response_manifest_hash": response_hash},
+    ).json()
+    (TEST_RUNTIME / "assets" / Path(relative)).write_bytes(b"changed after provider manifest")
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:verify",
+        json={"command_id": "file-block-verify-0001", "expected_row_version": asset["row_version"]},
+    )
+    assert blocked.status_code == 200
+    result = blocked.json()
+    assert result["state"] == "archived"
+    assert result["latest_qc_report"]["status"] == "blocked"
+    assert result["latest_qc_report"]["findings"][0]["code"] == "ASSET_CONTENT_HASH_MISMATCH"
+    view = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()
+    assert any(gap["code"] == "OUTPUT_NOT_APPROVED" for gap in view["output_gaps"])
+    assert view["project_status"] == "blocked"
 
 
 def test_system_configuration_publish_is_versioned_and_explicit(client: TestClient) -> None:
