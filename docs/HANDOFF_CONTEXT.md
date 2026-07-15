@@ -10,7 +10,7 @@ Last compacted: 2026-07-13
 - A separate database-backed Worker claims queued work atomically, executes only registered work kinds, and writes persisted events. Unknown kinds block explicitly; there is no route guessing, provider downgrade, automatic retry, prompt rewrite, or output repair.
 - Project events are available through SSE and work across the API and Worker process boundary because the database, rather than process memory, is authoritative.
 - V2 frontend uses React, TypeScript, Vite, React Router, TanStack Query, Zustand, CSS Modules, and Lucide. It includes API-backed project creation, contract/decision views, queue submission, and reserved review/editor/entity/config module routes.
-- The production build is served by FastAPI. `v2/start_v2.ps1` starts the API and Worker together; the V2 runtime database and logs remain ignored under `v2/runtime/`.
+- The production build is served by FastAPI. `v2/start_v2.bat` invokes `v2/start_v2.ps1` with a process-scoped execution-policy bypass and starts the API and Worker together; the V2 runtime database and logs remain ignored under `v2/runtime/`.
 - Verification completed with the production frontend build, TypeScript checking, Python compileall, API contract tests, SSE read, desktop/mobile browser checks, and a real local draft -> confirm -> queue -> worker -> `review_required` smoke flow. No external provider or paid production call was made.
 
 ## 2026-07-14 V2 Interactive Product Prototype

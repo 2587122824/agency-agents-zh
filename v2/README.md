@@ -30,6 +30,13 @@ python -m v2.backend.app.workers.worker
 
 Open <http://127.0.0.1:8766>. V1 remains available on port `8765`.
 
+After installing dependencies and building once, Windows users can start the
+API and Worker together with:
+
+```powershell
+v2\start_v2.bat -NoBrowser
+```
+
 ## Boundaries
 
 - `contracts/`: API and domain contracts. Missing fields fail validation.

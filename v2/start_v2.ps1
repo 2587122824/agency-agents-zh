@@ -21,7 +21,10 @@ Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinu
   ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }
 
 Get-CimInstance Win32_Process |
-  Where-Object { $_.CommandLine -like "*v2.backend.app.workers.worker*" } |
+  Where-Object {
+    $_.Name -like "python*" -and
+    $_.CommandLine -like "*-m v2.backend.app.workers.worker*"
+  } |
   ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $Python = (Get-Command python).Source
