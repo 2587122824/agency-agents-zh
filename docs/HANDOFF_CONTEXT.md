@@ -2,6 +2,16 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-15 V2 Creation Center Design Baseline
+
+- Added `docs/V2_CREATION_CENTER_DESIGN.md` as the focused implementation specification for converting conversations and attachments into confirmed RequirementVersion and PlanVersion records.
+- The creation center now has explicit contracts for requirement field completeness, deterministic clarification, AgentInputManifest context assembly, candidate lifecycles, attachment verification and entity binding, Creative/Director Agent boundaries, AgentRun auditing, structured diffs, change impact, command idempotency, optimistic concurrency, stale-result rejection, API commands/queries, events, UI states, and acceptance tests.
+- Context assembly uses the active requirement/plan versions, current message, explicit reply links, current confirmed decisions, entity versions, attachment bindings, and a non-secret system configuration version. It never reads an unbounded transcript or implicit shared Agent memory.
+- Agent success only creates a candidate. Schema validation and explicit confirmation promote candidates to RequirementVersion or PlanVersion; old candidates become stale when their base version changes.
+- Upload success never creates an identity reference automatically. Identity, voice, and other high-risk attachment bindings require explicit user confirmation.
+- Missing optional fields remain unspecified. Only deterministic blocking-field rules create clarification requests. No automatic retry, output repair, prompt rewrite, model switch, hidden template, inferred entity binding, or stale-output overwrite is allowed.
+- The implementation order starts with repositories, candidate/version records, input manifests, AgentRun audit, idempotency, and Mock Agent tests before connecting a real model or any production provider.
+
 ## 2026-07-15 V2 Prototype Readability Pass
 
 - Increased prototype typography across the dashboard, creation decisions, plan tables, production queue, events, review cards, impact dialog, and editor timeline. Important labels and content now use 12-13px, while supporting text generally uses 10-11px instead of the previous 7-9px range.
