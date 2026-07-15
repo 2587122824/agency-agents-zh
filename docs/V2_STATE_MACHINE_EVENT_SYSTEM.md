@@ -296,6 +296,20 @@ stateDiagram-v2
 
 导出尝试失败时项目进入 `blocked`，时间线仍保持 `confirmed`。用户处理真实错误后可明确重新导出；系统不改时间线、不关闭音频、不移除字幕来兜底。
 
+时间线命令细化为：
+
+```text
+ApproveQualityStage: quality_review -> editing
+CreateTimelineCandidate: editing -> candidate
+ReviseTimelineCandidate: candidate | review | confirmed -> new candidate version
+ValidateTimeline: candidate -> review | candidate(with errors)
+ConfirmTimeline: review -> confirmed; Project -> delivery_ready; referenced Asset -> used
+```
+
+已有版本后禁止创建无父版本的平行候选。确认新版本时，旧 `confirmed` 版本进入 `superseded`；创建修订本身不会提前废弃仍在交付使用的确认版本。
+
+完整守卫见 [V2 时间线剪辑合同实现](./V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
+
 项目完成守卫：
 
 - 当前活动快照对应的确认时间线存在

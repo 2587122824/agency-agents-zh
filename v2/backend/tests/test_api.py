@@ -18,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import Asset, AssetReviewDecision, CostEvent, Project, QCFinding, QCReport, RequirementVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import Asset, AssetReviewDecision, CostEvent, DAGNode, Project, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -613,6 +613,60 @@ def attach_local_provider_output(project: dict, snapshot: dict, width: int, heig
         return {"id": item.id, "attempt_id": attempt.id}, response_manifest, relative
 
 
+def seed_editor_assets(client: TestClient, project: dict, snapshot: dict) -> list[dict]:
+    with SessionLocal() as session:
+        is_active = session.get(Project, project["id"]).active_snapshot_id == snapshot["id"]
+    if not is_active:
+        activated = client.post(
+            f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+            json={"command_id": "editor-activate-command-001", "expected_contract_hash": snapshot["contract_hash"]},
+        )
+        assert activated.status_code == 200
+    with SessionLocal() as session:
+        nodes = list(session.scalars(select(DAGNode).where(
+            DAGNode.snapshot_id == snapshot["id"],
+        ).order_by(DAGNode.node_key)))
+        video_assets = []
+        for index, node in enumerate(nodes):
+            media_type = node.output_contract.get("media_type")
+            if media_type not in {"image", "video", "audio"}:
+                continue
+            shot = session.get(Shot, node.shot_id) if node.shot_id else None
+            asset = Asset(
+                project_id=project["id"],
+                snapshot_id=snapshot["id"],
+                work_attempt_id=None,
+                dag_node_id=node.id,
+                output_index=index,
+                asset_type=media_type,
+                role=node.output_contract.get("role", media_type),
+                uri=f"runtime://assets/editor/{node.id}.{media_type}",
+                storage_backend="local",
+                provider_output_manifest={"seeded_for_test": True},
+                content_hash=hashlib.sha256(node.id.encode()).hexdigest(),
+                mime_type={"image": "image/png", "video": "video/mp4", "audio": "audio/wav"}[media_type],
+                byte_size=100,
+                width=480 if media_type in {"image", "video"} else None,
+                height=848 if media_type in {"image", "video"} else None,
+                duration_ms=shot.duration_ms if media_type == "video" and shot else None,
+                state="approved",
+                verified_at=None,
+                approved_at=None,
+            )
+            session.add(asset)
+            session.flush()
+            if media_type == "video":
+                video_assets.append({
+                    "id": asset.id,
+                    "node_key": node.node_key,
+                    "duration_ms": asset.duration_ms,
+                })
+        stale_project = session.get(Project, project["id"])
+        stale_project.status = "quality_review"
+        session.commit()
+        return sorted(video_assets, key=lambda row: row["node_key"])
+
+
 def test_production_impact_and_snapshot_compile_exact_dag_without_work_items(client: TestClient) -> None:
     project, plan = create_confirmed_plan(client)
     with SessionLocal() as session:
@@ -1128,6 +1182,242 @@ def test_file_verification_failure_is_persisted_as_blocked_evidence(client: Test
     view = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()
     assert any(gap["code"] == "OUTPUT_NOT_APPROVED" for gap in view["output_gaps"])
     assert view["project_status"] == "blocked"
+
+
+def timeline_items_for_assets(video_assets: list[dict]) -> list[dict]:
+    cursor = 0
+    items = []
+    for sequence, asset in enumerate(video_assets, start=1):
+        duration = asset["duration_ms"]
+        items.append({
+            "track_type": "main_video",
+            "sequence_number": sequence,
+            "asset_id": asset["id"],
+            "label": asset["node_key"],
+            "source_in_ms": 0,
+            "source_out_ms": duration,
+            "timeline_in_ms": cursor,
+            "timeline_out_ms": cursor + duration,
+            "transform": {"fit": "cover"},
+        })
+        cursor += duration
+    return items
+
+
+def test_quality_stage_and_timeline_confirmation_are_explicit_and_idempotent(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "editor-empty-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    )
+    assert activated.status_code == 200
+    with SessionLocal() as session:
+        session.get(Project, project["id"]).status = "quality_review"
+        session.commit()
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "editor-stage-blocked-001", "expected_snapshot_id": snapshot["id"]},
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "QUALITY_STAGE_NOT_READY"
+
+    video_assets = seed_editor_assets(client, project, snapshot)
+    stage_command = {"command_id": "editor-stage-approve-001", "expected_snapshot_id": snapshot["id"]}
+    approved = client.post(f"/api/v1/projects/{project['id']}/quality-stage:approve", json=stage_command)
+    replayed = client.post(f"/api/v1/projects/{project['id']}/quality-stage:approve", json=stage_command)
+    assert approved.status_code == 200
+    assert replayed.json()["project_status"] == "editing"
+    assert approved.json()["quality_stage_ready"] is True
+    assert next(row for row in client.get("/api/v1/projects").json() if row["id"] == project["id"])["status"] == "editing"
+
+    create_command = {
+        "command_id": "timeline-create-command-001",
+        "expected_snapshot_id": snapshot["id"],
+        "source": "user",
+        "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+        "items": timeline_items_for_assets(video_assets),
+    }
+    created = client.post(f"/api/v1/projects/{project['id']}/timeline-candidates", json=create_command)
+    replayed_candidate = client.post(f"/api/v1/projects/{project['id']}/timeline-candidates", json=create_command)
+    assert created.status_code == 201
+    timeline = created.json()
+    assert replayed_candidate.json()["id"] == timeline["id"]
+    assert timeline["status"] == "candidate"
+
+    validated = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:validate",
+        json={"command_id": "timeline-validate-command-001", "expected_row_version": timeline["row_version"]},
+    )
+    assert validated.status_code == 200
+    timeline = validated.json()
+    assert timeline["status"] == "review"
+    assert timeline["validation_report"] == []
+    assert timeline["contract_hash"]
+
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:confirm",
+        json={
+            "command_id": "timeline-confirm-denied-001",
+            "expected_row_version": timeline["row_version"],
+            "expected_contract_hash": timeline["contract_hash"],
+            "confirm_delivery_scope": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "TIMELINE_CONFIRMATION_REQUIRED"
+    confirmed_command = {
+        "command_id": "timeline-confirm-command-001",
+        "expected_row_version": timeline["row_version"],
+        "expected_contract_hash": timeline["contract_hash"],
+        "confirm_delivery_scope": True,
+    }
+    confirmed = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:confirm",
+        json=confirmed_command,
+    )
+    replayed_confirmation = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:confirm",
+        json=confirmed_command,
+    )
+    assert confirmed.status_code == 200
+    assert replayed_confirmation.json()["status"] == "confirmed"
+    assert confirmed.json()["status"] == "confirmed"
+    workspace = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
+    assert workspace["project_status"] == "delivery_ready"
+    assert next(row for row in client.get("/api/v1/projects").json() if row["id"] == project["id"])["status"] == "delivery_ready"
+    assert all(asset["state"] == "used" for asset in workspace["available_assets"] if asset["asset_type"] == "video")
+    with SessionLocal() as session:
+        assert session.scalar(select(Timeline).where(Timeline.project_id == project["id"])) is not None
+        assert len(list(session.scalars(select(WorkAttempt)))) == 0
+
+
+def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    video_assets = seed_editor_assets(client, project, snapshot)
+    client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "editor-stage-approve-002", "expected_snapshot_id": snapshot["id"]},
+    )
+    items = timeline_items_for_assets(video_assets)
+    items[0]["source_out_ms"] += 1000
+    items[1]["asset_id"] = None
+    items[1]["gap_reason"] = "等待用户取舍"
+    with SessionLocal() as session:
+        asset = session.get(Asset, video_assets[2]["id"])
+        asset.state = "verified"
+        session.commit()
+    candidate = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "timeline-invalid-create-001",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": items,
+        },
+    ).json()
+    validated = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{candidate['id']}:validate",
+        json={"command_id": "timeline-invalid-check-001", "expected_row_version": candidate["row_version"]},
+    ).json()
+    codes = {row["code"] for row in validated["validation_report"]}
+    assert validated["status"] == "candidate"
+    assert "SOURCE_RANGE_EXCEEDS_ASSET" in codes
+    assert "TIMELINE_SPEED_CHANGE_UNDECLARED" in codes
+    assert "TIMELINE_GAP_UNRESOLVED" in codes
+    assert "TIMELINE_ASSET_NOT_APPROVED" in codes
+    confirm = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{candidate['id']}:confirm",
+        json={
+            "command_id": "timeline-invalid-confirm-01",
+            "expected_row_version": validated["row_version"],
+            "expected_contract_hash": validated["contract_hash"],
+            "confirm_delivery_scope": True,
+        },
+    )
+    assert confirm.status_code == 409
+    assert confirm.headers["x-error-code"] == "TIMELINE_NOT_READY_FOR_CONFIRMATION"
+
+
+def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    video_assets = seed_editor_assets(client, project, snapshot)
+    client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "editor-stage-approve-003", "expected_snapshot_id": snapshot["id"]},
+    )
+    items = timeline_items_for_assets(video_assets)
+    unbound_agent = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "timeline-agent-unbound-001",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "editor_assistant",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": items,
+        },
+    )
+    assert unbound_agent.status_code == 409
+    assert unbound_agent.headers["x-error-code"] == "EDITOR_AGENT_RUN_INVALID"
+    first = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "timeline-revision-base-001",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": items,
+        },
+    ).json()
+    first = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{first['id']}:validate",
+        json={"command_id": "timeline-revision-validate1", "expected_row_version": first["row_version"]},
+    ).json()
+    first = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{first['id']}:confirm",
+        json={
+            "command_id": "timeline-revision-confirm1",
+            "expected_row_version": first["row_version"],
+            "expected_contract_hash": first["contract_hash"],
+            "confirm_delivery_scope": True,
+        },
+    ).json()
+    unlinked = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "timeline-unlinked-version-02",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": items,
+        },
+    )
+    assert unlinked.status_code == 409
+    assert unlinked.headers["x-error-code"] == "TIMELINE_REVISION_REQUIRED"
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{first['id']}:revise",
+        json={
+            "command_id": "timeline-revision-create-002",
+            "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": first["row_version"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": list(reversed([
+                {**item, "sequence_number": len(items) - index}
+                for index, item in enumerate(items)
+            ])),
+        },
+    )
+    assert revised.status_code == 201
+    second = revised.json()
+    assert second["version_number"] == 2
+    assert second["supersedes_timeline_id"] == first["id"]
+    assert second["status"] == "candidate"
+    workspace = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
+    old = next(row for row in workspace["timelines"] if row["id"] == first["id"])
+    assert old["status"] == "confirmed"
+    assert old["items"] == first["items"]
+    assert workspace["project_status"] == "editing"
 
 
 def test_system_configuration_publish_is_versioned_and_explicit(client: TestClient) -> None:

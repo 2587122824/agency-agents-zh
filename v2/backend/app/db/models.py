@@ -182,6 +182,48 @@ class AssetReviewDecision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class Timeline(Base):
+    __tablename__ = "timelines"
+    __table_args__ = (UniqueConstraint("project_id", "version_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("timeline"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    supersedes_timeline_id: Mapped[str | None] = mapped_column(ForeignKey("timelines.id"), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(24), default="candidate", index=True)
+    source: Mapped[str] = mapped_column(String(32))
+    source_agent_run_id: Mapped[str | None] = mapped_column(ForeignKey("agent_runs.id"), nullable=True, index=True)
+    output_spec: Mapped[dict] = mapped_column(JSON)
+    track_config: Mapped[dict] = mapped_column(JSON)
+    validation_report: Mapped[list] = mapped_column(JSON, default=list)
+    contract_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class TimelineItem(Base):
+    __tablename__ = "timeline_items"
+    __table_args__ = (UniqueConstraint("timeline_id", "track_type", "sequence_number"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("timeline_item"))
+    timeline_id: Mapped[str] = mapped_column(ForeignKey("timelines.id"), index=True)
+    track_type: Mapped[str] = mapped_column(String(24), index=True)
+    sequence_number: Mapped[int] = mapped_column(Integer)
+    asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)
+    label: Mapped[str] = mapped_column(String(160))
+    gap_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_in_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_out_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timeline_in_ms: Mapped[int] = mapped_column(Integer)
+    timeline_out_ms: Mapped[int] = mapped_column(Integer)
+    transform: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class ProjectEvent(Base):
     __tablename__ = "project_events"
 

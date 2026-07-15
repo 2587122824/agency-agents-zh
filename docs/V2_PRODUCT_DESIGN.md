@@ -645,7 +645,7 @@ GET  /api/v1/projects/{project_id}/events
 - [ ] QC 结构化报告
 - [ ] 人工审核操作
 - [ ] 精确依赖重试
-- [ ] 剪辑时间线合同
+- [x] 剪辑时间线合同
 - [ ] 最终交付检查
 
 ## 23. 首期验收标准
@@ -980,3 +980,11 @@ GET  /api/v1/projects/{project_id}/production-execution
 6. Mock 响应的 `media_created=false` 无法登记为素材，审核页明确显示模拟执行没有媒体结果。
 
 审核页面按项目展示真实素材、文件规格、内容哈希、QC findings、人工决定和受影响的下游 DAG 节点。只有每个必需媒体节点至少存在一个 `approved` 或 `used` 素材时，质量阶段才可进入剪辑。
+
+## 33. 时间线剪辑合同实现边界
+
+剪辑阶段通过单独的 `ApproveQualityStage` 命令从 `quality_review` 进入 `editing`，不能由员工字段或前端按钮状态直接放行。时间线先作为候选保存，确定性校验通过后进入 `review`，用户精确确认合同哈希后才成为 `confirmed`。
+
+时间线仅引用当前活动快照、同一项目且状态为 `approved` 或 `used` 的素材。显式空位可以留在候选中用于取舍，但不能确认；系统不自动补素材、裁切、变速或重排。已有时间线后必须从指定版本创建修订，确认版本不可原地修改。
+
+具体表结构、命令、错误码、API 和验收矩阵见 [V2 时间线剪辑合同实现](./V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。

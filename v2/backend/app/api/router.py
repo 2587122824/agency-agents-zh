@@ -75,6 +75,25 @@ from ..creation.service import (
 from ..db.session import get_session
 from ..decisions.service import DecisionConflictError, add_decision, resolve_decision
 from ..events.service import project_event_stream
+from ..editor.contracts import (
+    ApproveQualityStage,
+    ConfirmTimeline,
+    CreateTimelineCandidate,
+    EditorWorkspaceView,
+    ReviseTimelineCandidate,
+    TimelineRead,
+    ValidateTimeline,
+)
+from ..editor.service import (
+    EditorConflictError,
+    EditorNotFoundError,
+    approve_quality_stage,
+    confirm_timeline,
+    create_timeline_candidate,
+    editor_workspace,
+    revise_timeline_candidate,
+    validate_timeline,
+)
 from ..planning.contracts import (
     CreativeBriefCandidateRead,
     DecideBrief,
@@ -159,6 +178,10 @@ def production_error(exc: ProductionConflictError) -> HTTPException:
 
 
 def quality_error(exc: QualityConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
+
+
+def editor_error(exc: EditorConflictError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
 
 
@@ -433,6 +456,97 @@ def production_execution(project_id: str, session: Session = Depends(get_session
 @router.get("/projects/{project_id}/quality-review", response_model=QualityReviewView)
 def project_quality_review(project_id: str, session: Session = Depends(get_session)):
     return quality_review_view(session, require_project(session, project_id))
+
+
+@router.get("/projects/{project_id}/editor-workspace", response_model=EditorWorkspaceView)
+def project_editor_workspace(project_id: str, session: Session = Depends(get_session)):
+    return editor_workspace(session, require_project(session, project_id))
+
+
+@router.post("/projects/{project_id}/quality-stage:approve", response_model=EditorWorkspaceView)
+def project_quality_stage_approve(
+    project_id: str,
+    payload: ApproveQualityStage,
+    session: Session = Depends(get_session),
+):
+    try:
+        return approve_quality_stage(session, require_project(session, project_id), payload)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/timeline-candidates",
+    response_model=TimelineRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_timeline_candidate_create(
+    project_id: str,
+    payload: CreateTimelineCandidate,
+    session: Session = Depends(get_session),
+):
+    try:
+        return create_timeline_candidate(session, require_project(session, project_id), payload)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/timelines/{timeline_id}:revise",
+    response_model=TimelineRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_timeline_revise(
+    project_id: str,
+    timeline_id: str,
+    payload: ReviseTimelineCandidate,
+    session: Session = Depends(get_session),
+):
+    try:
+        return revise_timeline_candidate(session, require_project(session, project_id), timeline_id, payload)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/timelines/{timeline_id}:validate", response_model=TimelineRead)
+def project_timeline_validate(
+    project_id: str,
+    timeline_id: str,
+    payload: ValidateTimeline,
+    session: Session = Depends(get_session),
+):
+    try:
+        return validate_timeline(session, require_project(session, project_id), timeline_id, payload)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/timelines/{timeline_id}:confirm", response_model=TimelineRead)
+def project_timeline_confirm(
+    project_id: str,
+    timeline_id: str,
+    payload: ConfirmTimeline,
+    session: Session = Depends(get_session),
+):
+    try:
+        return confirm_timeline(session, require_project(session, project_id), timeline_id, payload)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
 
 
 @router.post(

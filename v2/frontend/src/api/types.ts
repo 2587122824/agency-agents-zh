@@ -10,6 +10,8 @@ export type ProjectStatus =
   | 'production_ready'
   | 'producing'
   | 'quality_review'
+  | 'editing'
+  | 'delivery_ready'
 
 export interface ProjectCreate {
   title: string
@@ -590,4 +592,84 @@ export interface SystemConfigurationDiff {
   changed_components: Array<{ component_type: string; key: string; before: ConfigurationComponent | null; after: ConfigurationComponent | null }>
   high_risk_changes: string[]
   incurs_production_cost: boolean
+}
+
+export interface EditorAsset {
+  id: string
+  snapshot_id: string
+  dag_node_id: string | null
+  node_key: string | null
+  asset_type: 'video' | 'audio' | 'subtitle'
+  role: string
+  duration_ms: number | null
+  width: number | null
+  height: number | null
+  state: 'approved' | 'used'
+  content_hash: string | null
+}
+
+export interface TimelineItem {
+  id: string
+  track_type: 'main_video' | 'audio' | 'subtitle'
+  sequence_number: number
+  asset_id: string | null
+  asset_state: string | null
+  asset_type: string | null
+  asset_duration_ms: number | null
+  label: string
+  gap_reason: string | null
+  source_in_ms: number | null
+  source_out_ms: number | null
+  timeline_in_ms: number
+  timeline_out_ms: number
+  transform: Record<string, unknown>
+}
+
+export interface Timeline {
+  id: string
+  project_id: string
+  snapshot_id: string
+  version_number: number
+  supersedes_timeline_id: string | null
+  status: 'candidate' | 'review' | 'confirmed' | 'exported' | 'superseded'
+  source: 'user' | 'editor_assistant'
+  source_agent_run_id: string | null
+  output_spec: Record<string, unknown>
+  track_config: { audio_enabled: boolean; subtitle_enabled: boolean }
+  validation_report: Array<{ code: string; path: string; message: string; evidence: Record<string, unknown> }>
+  contract_hash: string | null
+  row_version: number
+  created_by: string
+  created_at: string
+  validated_at: string | null
+  confirmed_at: string | null
+  items: TimelineItem[]
+}
+
+export interface TimelineItemDraft {
+  track_type: 'main_video' | 'audio' | 'subtitle'
+  sequence_number: number
+  asset_id: string | null
+  label: string
+  gap_reason?: string | null
+  source_in_ms: number | null
+  source_out_ms: number | null
+  timeline_in_ms: number
+  timeline_out_ms: number
+  transform: Record<string, unknown>
+}
+
+export interface EditorWorkspace {
+  project_id: string
+  project_title: string
+  project_status: string
+  active_snapshot_id: string | null
+  duration_ms: number
+  aspect_ratio: string
+  audio_mode: string
+  quality_stage_ready: boolean
+  quality_output_gaps: Array<{ code: string; node_key: string; message: string }>
+  available_assets: EditorAsset[]
+  timelines: Timeline[]
+  next_action: { code: string; label: string }
 }

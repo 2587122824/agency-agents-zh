@@ -45,6 +45,7 @@ v2\start_v2.bat -NoBrowser
 - `events/`: persisted event stream used by SSE.
 - `workers/`: explicit work-item execution.
 - `quality/`: verified provider outputs, deterministic QC evidence, and explicit human review.
+- `editor/`: immutable timeline candidates, deterministic reference validation, and explicit confirmation.
 - `providers/`: future provider adapters; currently intentionally empty.
 
 No automatic retry, route substitution, prompt rewriting, output repair, or

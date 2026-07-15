@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, Health, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, EditorWorkspace, Health, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -111,6 +111,22 @@ export const api = {
       command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version,
       qc_report_id: asset.latest_qc_report?.id, rationale,
     }),
+  }),
+  editorWorkspace: (projectId: string) => request<EditorWorkspace>(`/projects/${projectId}/editor-workspace`),
+  approveQualityStage: (projectId: string, snapshotId: string) => request<EditorWorkspace>(`/projects/${projectId}/quality-stage:approve`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: snapshotId }),
+  }),
+  createTimelineCandidate: (projectId: string, snapshotId: string, source: 'user' | 'editor_assistant', trackConfig: { audio_enabled: boolean; subtitle_enabled: boolean }, items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timeline-candidates`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: snapshotId, source, track_config: trackConfig, items }),
+  }),
+  reviseTimelineCandidate: (projectId: string, timeline: Timeline, trackConfig: { audio_enabled: boolean; subtitle_enabled: boolean }, items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:revise`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: timeline.snapshot_id, expected_row_version: timeline.row_version, source: 'user', track_config: trackConfig, items }),
+  }),
+  validateTimeline: (projectId: string, timeline: Timeline) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:validate`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: timeline.row_version }),
+  }),
+  confirmTimeline: (projectId: string, timeline: Timeline) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:confirm`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: timeline.row_version, expected_contract_hash: timeline.contract_hash, confirm_delivery_scope: true }),
   }),
   systemConfigurations: () => request<SystemConfigurationSummary[]>('/system-config/versions'),
   systemConfiguration: (id: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}`),

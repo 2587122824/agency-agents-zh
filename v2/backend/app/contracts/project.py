@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ProjectStatus = Literal[
     "draft", "confirmed", "queued", "in_progress", "review_required", "blocked", "completed",
-    "contract_ready", "production_ready", "producing", "quality_review",
+    "contract_ready", "production_ready", "producing", "quality_review", "editing", "delivery_ready",
 ]
 DecisionStatus = Literal["pending", "resolved"]
 AudioMode = Literal["off", "voiceover"]

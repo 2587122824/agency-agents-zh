@@ -2,6 +2,17 @@
 
 Last compacted: 2026-07-13
 
+## 2026-07-16 V2 Timeline Editor Contracts Sprint 9
+
+- Added persisted `Timeline` and `TimelineItem` records under Alembic revision `20260716_09`, including immutable version lineage, exact active-snapshot ownership, row-version guards, validation evidence, and contract hashes.
+- Added explicit `ApproveQualityStage`, `CreateTimelineCandidate`, `ReviseTimelineCandidate`, `ValidateTimeline`, and `ConfirmTimeline` commands. Existing projects must revise a named version rather than create an unlinked parallel candidate.
+- Timeline validation blocks unresolved gaps, unapproved/cross-project/cross-snapshot/wrong-type assets, unknown or exceeded source durations, undeclared speed changes, overlaps, main-track holes, output overruns, and disabled/empty enabled tracks. It never rewrites or repairs a candidate.
+- `source=editor_assistant` requires an exact completed editor AgentRun from the same project. A source label alone has no authority.
+- Confirmation requires the exact validated hash, row version, and explicit scope acknowledgement. It marks referenced assets `used`, supersedes the prior confirmed version, and moves the project to `delivery_ready`; it performs no export, provider call, retry, or cost event.
+- Replaced `/editor` with an API-backed editor workspace covering quality-stage admission, approved asset bin, monitor, video/audio/subtitle tracks, explicit gaps, four time fields, immutable version history, structured validation findings, revision, and confirmation.
+- Added `docs/V2_TIMELINE_EDITOR_IMPLEMENTATION.md` as the implementation contract. Verification target: 24 backend tests, Python compileall, TypeScript/Vite build, fresh nine-revision migration, desktop/mobile browser checks, push, and restart on `8766`.
+- Next slice: DeliveryAttempt and final-delivery Asset contracts consuming only the current confirmed timeline. Do not invoke FFmpeg or providers until delivery authorization, idempotency, file verification, and retry semantics are explicit.
+
 ## 2026-07-16 V2 Asset Lifecycle And Quality Review Sprint 8
 
 - Added persisted `Asset`, `QCReport`, `QCFinding`, and append-only `AssetReviewDecision` records under `v2/` with Alembic revision `20260716_08`.
