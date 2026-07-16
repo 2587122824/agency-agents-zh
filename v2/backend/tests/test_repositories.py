@@ -51,6 +51,7 @@ from v2.backend.app.repositories import (
     SqlAlchemyPlanningRepository,
     SqlAlchemyProductionRepository,
     SqlAlchemyQualityRepository,
+    SqlAlchemyWorkRepository,
     SqlAlchemyProjectRepository,
 )
 
@@ -1350,5 +1351,120 @@ def test_delivery_repository_contract_preserves_confirmed_scope_attempts_and_uri
             assert [row.id for row in delivery.project_attempts(project.id)] == [second_attempt.id, first_attempt.id]
             assert delivery.project_attempts(other.id) == []
             assert delivery.assets_by_ids([]) == []
+    finally:
+        engine.dispose()
+
+
+def test_work_repository_contract_preserves_candidate_order_dependencies_and_atomic_claim() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            production = SqlAlchemyProductionRepository(session)
+            work_repository = SqlAlchemyWorkRepository(session)
+            now = utc_now()
+            project = Project(
+                title="Worker",
+                core_topic="Work repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            projects.add(project)
+            projects.flush()
+            parent_node = DAGNode(
+                snapshot_id="snapshot-worker",
+                node_key="shot.001.keyframe",
+                kind="generate_keyframe",
+                input_contract={},
+                output_contract={},
+            )
+            child_node = DAGNode(
+                snapshot_id="snapshot-worker",
+                node_key="shot.001.video",
+                kind="generate_i2v_clip",
+                input_contract={},
+                output_contract={},
+            )
+            production.add(parent_node)
+            production.add(child_node)
+            production.flush()
+            edge = DependencyEdge(
+                snapshot_id="snapshot-worker",
+                parent_node_id=parent_node.id,
+                child_node_id=child_node.id,
+                dependency_type="required",
+                input_slot="source_image",
+            )
+            production.add(edge)
+            parent = WorkItem(
+                project_id=project.id,
+                snapshot_id="snapshot-worker",
+                dag_node_id=parent_node.id,
+                kind=parent_node.kind,
+                payload={},
+                status="completed",
+                priority=20,
+                available_at=now - timedelta(minutes=1),
+                created_at=now - timedelta(minutes=2),
+            )
+            child = WorkItem(
+                project_id=project.id,
+                snapshot_id="snapshot-worker",
+                dag_node_id=child_node.id,
+                kind=child_node.kind,
+                payload={},
+                status="queued",
+                priority=10,
+                request_fingerprint="a" * 64,
+                available_at=now - timedelta(minutes=1),
+                created_at=now - timedelta(minutes=1),
+            )
+            future = WorkItem(
+                project_id=project.id,
+                snapshot_id="snapshot-other",
+                kind="future",
+                payload={},
+                status="queued",
+                priority=1,
+                available_at=now + timedelta(minutes=1),
+            )
+            production.add(parent)
+            production.add(child)
+            production.add(future)
+            production.flush()
+            attempt = WorkAttempt(
+                work_item_id=child.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="mock",
+                request_fingerprint=child.request_fingerprint,
+                request_manifest={},
+                state="created",
+            )
+            production.add(attempt)
+            production.flush()
+            child.current_attempt_id = attempt.id
+            session.commit()
+
+            assert [row.id for row in work_repository.lease_candidates(now)] == [child.id]
+            assert [row.id for row in work_repository.required_parent_items(child)] == [parent.id]
+            assert work_repository.required_parent_items(parent) == []
+            assert set(work_repository.snapshot_work_states("snapshot-worker")) == {"completed", "queued"}
+            assert work_repository.attempt(attempt.id).id == attempt.id  # type: ignore[union-attr]
+            assert work_repository.project(project.id).id == project.id  # type: ignore[union-attr]
+            assert work_repository.snapshot("missing") is None
+            assert work_repository.claim(child, now) is True
+            session.commit()
+            claimed = work_repository.work_item(child.id)
+            assert claimed is not None
+            assert claimed.status == "in_progress"
+            assert claimed.row_version == 2
+            assert work_repository.claim(claimed, now) is False
     finally:
         engine.dispose()

@@ -683,6 +683,7 @@ Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository �
 当前质量服务的素材登记、文件验证记录、QC findings、人工审核证据和 DAG 下游影响已统一通过 `QualityRepository`；内容分析器未连接时仍进入 `review_required`，不会伪装为通过。
 当前剪辑服务的时间线版本链、轨道条目、素材验证读取、确认版本替代和素材箱投影已统一通过 `EditorRepository`；Repository 不自动补位、重排、裁切或变速。
 当前交付服务的确认时间线、冻结输入素材、DeliveryAttempt、最终 Asset URI 和交付 QC 已统一通过 `DeliveryRepository`；失败仍只记录阻断证据，不创建第二次交付尝试。
+当前 Worker 的候选领取、必需父依赖、WorkAttempt、项目/快照权威读取和乐观锁 claim 已统一通过 `WorkRepository`；候选排序与原子领取条件保持不变。
 
 ## 23. 首期验收标准
 

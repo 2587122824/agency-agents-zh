@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Work Repository Sprint 22
+
+- Added a typed `WorkRepository` covering lease candidate ordering, availability windows, required-parent dependencies, snapshot WorkItem states, exact WorkAttempt/Project/Snapshot reads, and optimistic atomic claim.
+- Migrated the Worker away from direct SQLAlchemy queries while preserving priority ordering, dependency blocking, legacy local contract validation, request-fingerprint checks, lease ownership/expiry, mock/local execution, unconnected-provider blocking, and aggregate state evaluation.
+- Worker terminal events use the existing EventRepository inside the same transaction. No Outbox or asynchronous publication was introduced.
+- Added a Work repository contract test covering availability filtering, priority order, required parents, snapshot state reads, exact references, and status+row_version claim guards.
+- Updated repository, product, data-model, implementation-status, and handoff documentation.
+- No schema migration, second WorkAttempt, provider call, retry, fallback, route substitution, lease-policy change, or project-state semantic change was introduced.
+- Verification target: 41 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Delivery Repository Sprint 21
 
 - Added a typed `DeliveryRepository` covering exact confirmed-timeline scope, stable TimelineItem order, frozen input Assets, one DeliveryAttempt per timeline, final Asset URI lookup, delivery QC numbering, and delivery workspace projections.

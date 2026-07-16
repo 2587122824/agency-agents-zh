@@ -20,6 +20,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 | `QualityRepository` | Asset 登记、存储策略、QCReport/QCFinding、人工审核、DAG 下游影响和质量工作区投影 | 质量服务 |
 | `EditorRepository` | Timeline/TimelineItem 版本链、素材验证读取、确认版本替代和剪辑素材箱投影 | 剪辑服务 |
 | `DeliveryRepository` | 确认时间线、冻结输入素材、DeliveryAttempt、最终 Asset URI、交付 QC 和工作区投影 | 交付服务 |
+| `WorkRepository` | 可领取候选、必需父依赖、快照工作状态、WorkAttempt、原子 claim 和执行权威读取 | Worker |
 
 系统配置使用独立的 `ConfigurationCommandReceipt`，不属于项目级 `CommandRepository`，本轮没有迁移或合并。
 
@@ -57,7 +58,6 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 以下聚合仍存在直接 SQLAlchemy 查询，Repository 总体条目保持“部分完成”：
 
 - Configuration
-- Worker lease / claim queries（生产服务的 Snapshot / DAG / Work 编译和读取已迁移）
 - Entity registry read projections（创作阶段的 Entity / Attachment 写入和读取已迁移）
 - Cost
 
@@ -77,6 +77,7 @@ Repository 合同测试覆盖：
 - 质量聚合的输出索引、素材历史、QC 编号、finding/审核顺序、DAG 下游和项目隔离。
 - 剪辑聚合的时间线版本、轨道条目顺序、确认版本、素材箱过滤和 DAG 节点映射。
 - 交付聚合的确认范围、输入条目、尝试唯一性、最终 URI、QC 编号和工作区顺序。
+- Worker 的候选排序、可用时间、必需父依赖、快照状态集合和乐观锁原子 claim。
 - 现有 API 全量测试继续验证六个业务阶段的幂等重放和命令冲突行为。
 
 本实现不包含数据库迁移、Provider 调用、重试、兜底、路由替换、提示词改写、状态转移或费用事件。

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from datetime import datetime
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from ..db.models import (
@@ -795,3 +796,66 @@ class SqlAlchemyDeliveryRepository:
             .where(DeliveryAttempt.project_id == project_id)
             .order_by(DeliveryAttempt.attempt_number.desc())
         ))
+
+
+class SqlAlchemyWorkRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def required_parent_items(self, item: WorkItem) -> list[WorkItem]:
+        parent_node_ids = list(self.session.scalars(select(DependencyEdge.parent_node_id).where(
+            DependencyEdge.snapshot_id == item.snapshot_id,
+            DependencyEdge.child_node_id == item.dag_node_id,
+            DependencyEdge.dependency_type == "required",
+        )))
+        if not parent_node_ids:
+            return []
+        return list(self.session.scalars(select(WorkItem).where(
+            WorkItem.snapshot_id == item.snapshot_id,
+            WorkItem.dag_node_id.in_(parent_node_ids),
+        )))
+
+    def snapshot_work_states(self, snapshot_id: str) -> list[str]:
+        return list(self.session.scalars(select(WorkItem.status).where(
+            WorkItem.snapshot_id == snapshot_id
+        )))
+
+    def lease_candidates(self, available_at: datetime, *, limit: int = 50) -> list[WorkItem]:
+        return list(self.session.scalars(
+            select(WorkItem)
+            .where(WorkItem.status == "queued", WorkItem.available_at <= available_at)
+            .order_by(WorkItem.priority, WorkItem.created_at, WorkItem.id)
+            .limit(limit)
+        ))
+
+    def attempt(self, attempt_id: str) -> WorkAttempt | None:
+        return self.session.get(WorkAttempt, attempt_id)
+
+    def project(self, project_id: str) -> Project | None:
+        return self.session.get(Project, project_id)
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None:
+        return self.session.get(ProductionSnapshot, snapshot_id)
+
+    def claim(self, item: WorkItem, started_at: datetime) -> bool:
+        claimed = self.session.execute(
+            update(WorkItem)
+            .where(
+                WorkItem.id == item.id,
+                WorkItem.status == "queued",
+                WorkItem.row_version == item.row_version,
+            )
+            .values(
+                status="in_progress",
+                started_at=started_at,
+                row_version=item.row_version + 1,
+                updated_at=started_at,
+            )
+        )
+        return claimed.rowcount == 1
+
+    def work_item(self, work_item_id: str) -> WorkItem | None:
+        return self.session.get(WorkItem, work_item_id)
+
+    def flush(self) -> None:
+        self.session.flush()

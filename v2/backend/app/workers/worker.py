@@ -5,11 +5,9 @@ import socket
 import time
 from datetime import timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy.orm import Session
 
 from ..db.models import (
-    DAGNode,
-    DependencyEdge,
     ProductionSnapshot,
     Project,
     ProjectEvent,
@@ -18,27 +16,30 @@ from ..db.models import (
     utc_now,
 )
 from ..db.session import SessionLocal, create_schema
+from ..repositories import (
+    SqlAlchemyEventRepository,
+    SqlAlchemyWorkRepository,
+    WorkRepository,
+)
 
 
 LEASE_SECONDS = 60
 
 
-def _required_parent_items(session, item: WorkItem) -> list[WorkItem]:
-    parent_node_ids = list(session.scalars(select(DependencyEdge.parent_node_id).where(
-        DependencyEdge.snapshot_id == item.snapshot_id,
-        DependencyEdge.child_node_id == item.dag_node_id,
-        DependencyEdge.dependency_type == "required",
-    )))
-    if not parent_node_ids:
-        return []
-    return list(session.scalars(select(WorkItem).where(
-        WorkItem.snapshot_id == item.snapshot_id,
-        WorkItem.dag_node_id.in_(parent_node_ids),
-    )))
+def _work(session: Session) -> WorkRepository:
+    return SqlAlchemyWorkRepository(session)
 
 
-def _update_aggregate_state(session, project: Project, snapshot: ProductionSnapshot) -> None:
-    states = list(session.scalars(select(WorkItem.status).where(WorkItem.snapshot_id == snapshot.id)))
+def _event(session: Session, event: ProjectEvent) -> None:
+    SqlAlchemyEventRepository(session).add(event)
+
+
+def _required_parent_items(session: Session, item: WorkItem) -> list[WorkItem]:
+    return _work(session).required_parent_items(item)
+
+
+def _update_aggregate_state(session: Session, project: Project, snapshot: ProductionSnapshot) -> None:
+    states = _work(session).snapshot_work_states(snapshot.id)
     if states and all(state == "completed" for state in states):
         snapshot.status = "execution_completed"
         project.status = "quality_review"
@@ -79,20 +80,18 @@ def _finish_completed(session, item: WorkItem, attempt: WorkAttempt, response: d
 def process_one(worker_id: str | None = None) -> bool:
     owner = worker_id or f"v2-worker:{socket.gethostname()}"
     with SessionLocal() as session:
+        repository = _work(session)
         now = utc_now()
-        candidates = list(session.scalars(select(WorkItem).where(
-            WorkItem.status == "queued",
-            WorkItem.available_at <= now,
-        ).order_by(WorkItem.priority, WorkItem.created_at, WorkItem.id).limit(50)))
+        candidates = repository.lease_candidates(now, limit=50)
         selected: WorkItem | None = None
         for item in candidates:
             parents = _required_parent_items(session, item)
             if any(parent.status == "blocked" for parent in parents):
-                attempt = session.get(WorkAttempt, item.current_attempt_id)
+                attempt = repository.attempt(item.current_attempt_id)
                 if attempt and attempt.state == "created":
                     _finish_blocked(session, item, attempt, "DEPENDENCY_BLOCKED", "A required parent work item is blocked.")
-                    project = session.get(Project, item.project_id)
-                    snapshot = session.get(ProductionSnapshot, item.snapshot_id)
+                    project = repository.project(item.project_id)
+                    snapshot = repository.snapshot(item.snapshot_id)
                     if project and snapshot:
                         _update_aggregate_state(session, project, snapshot)
                     session.commit()
@@ -106,7 +105,7 @@ def process_one(worker_id: str | None = None) -> bool:
         # Compatibility for the pre-snapshot V2 contract check. It is local-only
         # and cannot create provider work or become part of a production DAG.
         if selected.kind == "contract_validation" and not selected.snapshot_id:
-            project = session.get(Project, selected.project_id)
+            project = repository.project(selected.project_id)
             now = utc_now()
             selected.started_at = now
             selected.finished_at = now
@@ -114,7 +113,7 @@ def process_one(worker_id: str | None = None) -> bool:
             selected.row_version += 1
             if project:
                 project.status = "review_required"
-                session.add(ProjectEvent(
+                _event(session, ProjectEvent(
                     project_id=project.id,
                     event_type="contract.validated",
                     message="Legacy local contract validation completed.",
@@ -123,19 +122,10 @@ def process_one(worker_id: str | None = None) -> bool:
             session.commit()
             return True
 
-        attempt = session.get(WorkAttempt, selected.current_attempt_id)
+        attempt = repository.attempt(selected.current_attempt_id)
         if not attempt or attempt.state != "created" or attempt.request_fingerprint != selected.request_fingerprint:
             return False
-        claimed = session.execute(
-            update(WorkItem)
-            .where(
-                WorkItem.id == selected.id,
-                WorkItem.status == "queued",
-                WorkItem.row_version == selected.row_version,
-            )
-            .values(status="in_progress", started_at=now, row_version=selected.row_version + 1, updated_at=now)
-        )
-        if claimed.rowcount != 1:
+        if not repository.claim(selected, now):
             session.rollback()
             return False
         attempt.state = "running"
@@ -144,10 +134,10 @@ def process_one(worker_id: str | None = None) -> bool:
         attempt.execution_lock_expires_at = now + timedelta(seconds=LEASE_SECONDS)
         session.commit()
 
-        item = session.get(WorkItem, selected.id)
-        attempt = session.get(WorkAttempt, selected.current_attempt_id)
-        project = session.get(Project, item.project_id) if item else None
-        snapshot = session.get(ProductionSnapshot, item.snapshot_id) if item else None
+        item = repository.work_item(selected.id)
+        attempt = repository.attempt(selected.current_attempt_id)
+        project = repository.project(item.project_id) if item else None
+        snapshot = repository.snapshot(item.snapshot_id) if item else None
         if not item or not attempt:
             return False
         if not project or not snapshot:
@@ -180,9 +170,9 @@ def process_one(worker_id: str | None = None) -> bool:
                 "PROVIDER_ADAPTER_NOT_CONNECTED",
                 f"Adapter {manifest.get('adapter_kind')!r} is not connected to the V2 worker.",
             )
-        session.flush()
+        repository.flush()
         _update_aggregate_state(session, project, snapshot)
-        session.add(ProjectEvent(
+        _event(session, ProjectEvent(
             project_id=project.id,
             event_type="production.work_finished.v1",
             message="Production work item reached a terminal state.",
