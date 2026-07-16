@@ -145,6 +145,8 @@ from ..planning.service import (
     planning_center_view,
     revise_shot_plan,
 )
+from ..providers.contracts import ProviderReadinessView
+from ..providers.readiness import provider_readiness
 from ..production.contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
@@ -295,6 +297,11 @@ def project_decision_change_impact_analyze(
 @router.get("/entity-registry", response_model=EntityRegistryView)
 def entity_registry(session: Session = Depends(get_session)):
     return entity_registry_view(session)
+
+
+@router.get("/system-config/provider-readiness", response_model=ProviderReadinessView)
+def system_config_provider_readiness(session: Session = Depends(get_session)):
+    return provider_readiness(session)
 
 
 @router.get("/system-config/versions", response_model=list[ConfigurationVersionSummary])

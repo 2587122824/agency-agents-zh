@@ -764,6 +764,27 @@ export interface SystemConfigurationDiff {
   incurs_production_cost: boolean
 }
 
+export interface ProviderReadinessItem {
+  configuration_version_id: string
+  configuration_display_name: string
+  configuration_version_number: number
+  provider_version_id: string
+  provider_display_name: string
+  adapter_kind: string
+  capabilities: string[]
+  adapter_registered: boolean
+  external: boolean | null
+  credential_required: boolean | null
+  credential_state: 'not_configured' | 'unsupported_reference' | 'not_authorized' | 'missing' | 'available'
+  status: 'connected' | 'adapter_not_connected' | 'credential_not_ready'
+}
+
+export interface ProviderReadiness {
+  network_probe_performed: boolean
+  external_execution_enabled: boolean
+  providers: ProviderReadinessItem[]
+}
+
 export interface EditorAsset {
   id: string
   snapshot_id: string

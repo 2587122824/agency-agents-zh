@@ -345,7 +345,9 @@ status: draft | published | retired
 created_at / published_at
 ```
 
-`credential_ref` 指向后端密钥存储，不使用数据库外键，不返回前端原文。供应商配置不包含备用供应商、自动降级顺序或错误改路由规则。
+`credential_ref` 指向后端密钥存储，不使用数据库外键。当前实现只接受 `env://VARIABLE_NAME`，且变量名必须进入后端 `V2_CREDENTIAL_ENV_ALLOWLIST`；解析器不尝试别名、大小写修正或其他引用格式。配置详情可以返回引用本身用于版本审计和草稿修订，但 Provider 连接状态接口不返回引用名，所有 API、事件和日志都不得返回秘密值。
+
+供应商配置不包含备用供应商、自动降级顺序或错误改路由规则。配置已发布、适配器已注册、凭据可读取、网络可达和本次付费执行已确认是相互独立的状态，不通过单个布尔字段合并。
 
 #### 7.3.3 WorkflowSlotVersion
 

@@ -21,6 +21,7 @@ from ..orchestration.project_transitions import (
     block_project,
     transition_project,
 )
+from ..providers import ProviderAdapterError, ProviderExecutionRequest, default_provider_registry
 from ..repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyWorkRepository,
@@ -197,23 +198,8 @@ def process_one(worker_id: str | None = None) -> bool:
             return True
 
         manifest = attempt.request_manifest
-        if manifest.get("adapter_kind") == "mock":
-            _finish_completed(session, item, attempt, {
-                "schema_version": "mock-provider-response.v1",
-                "result": "simulated",
-                "request_fingerprint": attempt.request_fingerprint,
-                "media_created": False,
-                "provider_task_id": None,
-            })
-        elif item.kind == "assemble_timeline_contract" and manifest.get("adapter_kind") == "local":
-            parents = _required_parent_items(session, item)
-            _finish_completed(session, item, attempt, {
-                "schema_version": "timeline-contract-result.v1",
-                "result": "contract_assembled",
-                "input_work_item_ids": [parent.id for parent in parents],
-                "media_created": False,
-            })
-        else:
+        adapter = default_provider_registry().resolve(manifest.get("adapter_kind"), item.kind)
+        if adapter is None:
             _finish_blocked(
                 session,
                 item,
@@ -221,6 +207,19 @@ def process_one(worker_id: str | None = None) -> bool:
                 "PROVIDER_ADAPTER_NOT_CONNECTED",
                 f"Adapter {manifest.get('adapter_kind')!r} is not connected to the V2 worker.",
             )
+        else:
+            parents = _required_parent_items(session, item)
+            try:
+                response = adapter.execute(ProviderExecutionRequest(
+                    work_kind=item.kind,
+                    request_fingerprint=attempt.request_fingerprint,
+                    request_manifest=manifest,
+                    parent_work_item_ids=tuple(parent.id for parent in parents),
+                ))
+            except ProviderAdapterError as exc:
+                _finish_blocked(session, item, attempt, exc.code, exc.detail)
+            else:
+                _finish_completed(session, item, attempt, response)
         repository.flush()
         _update_aggregate_state(session, project, snapshot, owner, item, attempt)
         _event(session, ProjectEvent(

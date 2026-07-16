@@ -2642,3 +2642,52 @@ def test_system_configuration_contract_rejects_secret_fields(client: TestClient)
         "configuration": configuration,
     })
     assert embedded.status_code == 422
+
+
+def test_provider_readiness_is_read_only_and_does_not_enable_unregistered_adapter(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration = valid_system_configuration()
+    configuration["providers"][0].update({
+        "provider_key": "runninghub_visual",
+        "display_name": "RunningHub",
+        "adapter_kind": "runninghub",
+        "credential_ref": "env://READINESS_TEST_API_KEY",
+    })
+    configuration["workflow_slots"][0]["provider_key"] = "runninghub_visual"
+    created = client.post("/api/v1/system-config/versions", json={
+        "command_id": "provider-readiness-create-001",
+        "configuration": configuration,
+    }).json()
+    ready = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:validate",
+        json={"command_id": "provider-readiness-validate1", "expected_row_version": created["row_version"]},
+    ).json()
+    published = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:publish",
+        json={
+            "command_id": "provider-readiness-publish1",
+            "expected_row_version": ready["row_version"],
+            "confirm_high_risk_changes": True,
+        },
+    )
+    assert published.status_code == 200
+    monkeypatch.setenv("V2_CREDENTIAL_ENV_ALLOWLIST", "READINESS_TEST_API_KEY")
+    monkeypatch.setenv("READINESS_TEST_API_KEY", "must-never-be-returned")
+
+    response = client.get("/api/v1/system-config/provider-readiness")
+    assert response.status_code == 200
+    view = response.json()
+    assert view["network_probe_performed"] is False
+    assert view["external_execution_enabled"] is False
+    assert len(view["providers"]) == 1
+    provider = view["providers"][0]
+    assert provider["provider_display_name"] == "RunningHub"
+    assert provider["adapter_kind"] == "runninghub"
+    assert provider["adapter_registered"] is False
+    assert provider["credential_state"] == "available"
+    assert provider["status"] == "adapter_not_connected"
+    serialized = response.text
+    assert "must-never-be-returned" not in serialized
+    assert "READINESS_TEST_API_KEY" not in serialized

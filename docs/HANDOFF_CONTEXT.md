@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-17 V2 Provider Foundation and Readiness Sprint 38
+
+- Added an exact `ProviderAdapter` protocol and registry. The default registry contains only the existing non-network `mock` adapter and the local timeline-contract adapter.
+- Migrated Worker execution to resolve the exact frozen `adapter_kind + work_kind`. Unknown or unsupported pairs block with `PROVIDER_ADAPTER_NOT_CONNECTED`; no Provider, route, workflow, prompt, or output substitution occurs.
+- Added an environment credential resolver. The only implemented reference is `env://VARIABLE_NAME`, and the variable name must also appear in `V2_CREDENTIAL_ENV_ALLOWLIST`. No alias, case correction, V1 import, or alternative secret scheme is attempted.
+- Added read-only `GET /api/v1/system-config/provider-readiness` and a settings-page connection panel. It reports published configuration, adapter, and credential states without a network probe, external task, or fee, and never returns secret values or environment variable names.
+- Added `docs/V2_PROVIDER_FOUNDATION_IMPLEMENTATION.md` and updated product, data-model, implementation-status, and handoff documentation.
+- RunningHub, CosyVoice, OSS, external HTTP clients, network probes, paid calls, retries, recovery commands, route substitution, workflow replacement, prompt rewriting, and V1 Provider reuse remain absent and require explicit user confirmation.
+- Verification completed with 110 backend tests, Python compileall, Vite production build, Alembic `20260717_16 (head)`, desktop and 390px settings checks, no horizontal overflow, and an explicit RunningHub adapter-not-connected state. Push and final `8766` API/Worker restart remain the release steps.
+
 ## 2026-07-17 V2 Event Envelope, Outbox, and Production Queue UX Sprint 37
 
 - Added Alembic `20260717_16`, a complete versioned ProjectEvent envelope, stable `event_id`, project-local `project_sequence`, explicit aggregate/actor/correlation fields, and a per-Project sequence allocator.
