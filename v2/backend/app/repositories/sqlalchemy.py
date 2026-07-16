@@ -38,12 +38,14 @@ from ..db.models import (
     ShotPlanCandidate,
     SnapshotEntityVersion,
     StoragePolicyVersion,
+    Timeline,
+    TimelineItem,
     VideoSpecVersion,
     WorkflowSlotVersion,
     WorkAttempt,
     WorkItem,
 )
-from .contracts import CreationRecord, ModelT, PlanningRecord, ProductionRecord, QualityRecord
+from .contracts import CreationRecord, EditorRecord, ModelT, PlanningRecord, ProductionRecord, QualityRecord
 
 
 class SqlAlchemyProjectRepository:
@@ -621,4 +623,83 @@ class SqlAlchemyQualityRepository:
     def snapshot_nodes(self, snapshot_id: str) -> list[DAGNode]:
         return list(self.session.scalars(
             select(DAGNode).where(DAGNode.snapshot_id == snapshot_id).order_by(DAGNode.node_key)
+        ))
+
+
+class SqlAlchemyEditorRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, record: EditorRecord) -> None:
+        self.session.add(record)
+
+    def flush(self) -> None:
+        self.session.flush()
+
+    def timeline(self, timeline_id: str) -> Timeline | None:
+        return self.session.get(Timeline, timeline_id)
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None:
+        return self.session.get(ProductionSnapshot, snapshot_id)
+
+    def agent_run(self, run_id: str) -> AgentRun | None:
+        return self.session.get(AgentRun, run_id)
+
+    def timeline_items(self, timeline_id: str) -> list[TimelineItem]:
+        return list(self.session.scalars(
+            select(TimelineItem)
+            .where(TimelineItem.timeline_id == timeline_id)
+            .order_by(TimelineItem.track_type, TimelineItem.sequence_number)
+        ))
+
+    def has_timeline(self, project_id: str) -> bool:
+        return self.session.scalar(select(Timeline.id).where(Timeline.project_id == project_id)) is not None
+
+    def next_timeline_version(self, project_id: str) -> int:
+        current = self.session.scalar(select(func.max(Timeline.version_number)).where(
+            Timeline.project_id == project_id
+        ))
+        return (current or 0) + 1
+
+    def asset(self, asset_id: str) -> Asset | None:
+        return self.session.get(Asset, asset_id)
+
+    def confirmed_timelines(self, project_id: str, *, exclude_id: str) -> list[Timeline]:
+        return list(self.session.scalars(select(Timeline).where(
+            Timeline.project_id == project_id,
+            Timeline.status == "confirmed",
+            Timeline.id != exclude_id,
+        )))
+
+    def timeline_asset_ids(self, timeline_id: str) -> list[str]:
+        return list(self.session.scalars(select(TimelineItem.asset_id).where(
+            TimelineItem.timeline_id == timeline_id,
+            TimelineItem.asset_id.is_not(None),
+        )))
+
+    def assets_by_ids(self, asset_ids: list[str]) -> list[Asset]:
+        if not asset_ids:
+            return []
+        return list(self.session.scalars(select(Asset).where(Asset.id.in_(asset_ids))))
+
+    def available_assets(self, project_id: str, snapshot_id: str) -> list[Asset]:
+        return list(self.session.scalars(
+            select(Asset)
+            .where(
+                Asset.project_id == project_id,
+                Asset.snapshot_id == snapshot_id,
+                Asset.state.in_(["approved", "used"]),
+                Asset.asset_type.in_(["video", "audio", "subtitle"]),
+            )
+            .order_by(Asset.asset_type, Asset.created_at, Asset.id)
+        ))
+
+    def dag_nodes_by_ids(self, node_ids: list[str]) -> list[DAGNode]:
+        if not node_ids:
+            return []
+        return list(self.session.scalars(select(DAGNode).where(DAGNode.id.in_(node_ids))))
+
+    def timeline_history(self, project_id: str) -> list[Timeline]:
+        return list(self.session.scalars(
+            select(Timeline).where(Timeline.project_id == project_id).order_by(Timeline.version_number.desc())
         ))

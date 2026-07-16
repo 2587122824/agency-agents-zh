@@ -18,6 +18,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 | `PlanningRepository` | Creative Brief、Shot Plan、PlanVersion、Shot、已确认实体引用和规划历史 | 规划中心服务 |
 | `ProductionRepository` | 影响分析、快照、DAG、价格组件、费用记录、WorkItem/Attempt 编译和生产准备/执行投影 | 生产服务 |
 | `QualityRepository` | Asset 登记、存储策略、QCReport/QCFinding、人工审核、DAG 下游影响和质量工作区投影 | 质量服务 |
+| `EditorRepository` | Timeline/TimelineItem 版本链、素材验证读取、确认版本替代和剪辑素材箱投影 | 剪辑服务 |
 
 系统配置使用独立的 `ConfigurationCommandReceipt`，不属于项目级 `CommandRepository`，本轮没有迁移或合并。
 
@@ -57,7 +58,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 - Configuration
 - Worker lease / claim queries（生产服务的 Snapshot / DAG / Work 编译和读取已迁移）
 - Entity registry read projections（创作阶段的 Entity / Attachment 写入和读取已迁移）
-- Timeline / Delivery
+- Delivery（Timeline / TimelineItem 的剪辑阶段读写已迁移）
 - Cost
 
 迁移这些聚合时必须保持现有查询排序、项目隔离、关系加载、锁和事务行为，不以 Repository 重构为理由改变状态机或命令合同。
@@ -74,6 +75,7 @@ Repository 合同测试覆盖：
 - 规划聚合的候选状态过滤、历史倒序、方案版本递增、镜头顺序和活动实体引用。
 - 生产聚合的快照编号、DAG/依赖顺序、项目历史、WorkItem/Attempt 顺序和精确组件读取。
 - 质量聚合的输出索引、素材历史、QC 编号、finding/审核顺序、DAG 下游和项目隔离。
+- 剪辑聚合的时间线版本、轨道条目顺序、确认版本、素材箱过滤和 DAG 节点映射。
 - 现有 API 全量测试继续验证六个业务阶段的幂等重放和命令冲突行为。
 
 本实现不包含数据库迁移、Provider 调用、重试、兜底、路由替换、提示词改写、状态转移或费用事件。

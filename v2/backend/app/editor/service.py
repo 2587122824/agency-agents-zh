@@ -3,13 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db.models import (
-    Asset,
-    AgentRun,
-    DAGNode,
     Project,
     ProjectEvent,
     ProductionSnapshot,
@@ -17,7 +13,12 @@ from ..db.models import (
     TimelineItem,
     utc_now,
 )
-from ..repositories import SqlAlchemyCommandRepository
+from ..repositories import (
+    EditorRepository,
+    SqlAlchemyCommandRepository,
+    SqlAlchemyEditorRepository,
+    SqlAlchemyEventRepository,
+)
 from ..quality.service import quality_review_view
 from .contracts import (
     ApproveQualityStage,
@@ -36,6 +37,14 @@ class EditorConflictError(ValueError):
 
 class EditorNotFoundError(ValueError):
     pass
+
+
+def _editor(session: Session) -> EditorRepository:
+    return SqlAlchemyEditorRepository(session)
+
+
+def _event(session: Session, event: ProjectEvent) -> None:
+    SqlAlchemyEventRepository(session).add(event)
 
 
 def _hash(payload: dict) -> str:
@@ -70,7 +79,7 @@ def _save_receipt(
 
 
 def _require_timeline(session: Session, project: Project, timeline_id: str) -> Timeline:
-    timeline = session.get(Timeline, timeline_id)
+    timeline = _editor(session).timeline(timeline_id)
     if not timeline or timeline.project_id != project.id:
         raise EditorNotFoundError("Timeline not found")
     return timeline
@@ -82,7 +91,7 @@ def _require_active_snapshot(session: Session, project: Project, snapshot_id: st
             "ACTIVE_SNAPSHOT_MISMATCH",
             "时间线必须精确绑定当前活动生产快照，请刷新后重试。",
         )
-    snapshot = session.get(ProductionSnapshot, snapshot_id)
+    snapshot = _editor(session).snapshot(snapshot_id)
     if not snapshot or snapshot.project_id != project.id:
         raise EditorNotFoundError("Production snapshot not found")
     return snapshot
@@ -110,7 +119,7 @@ def approve_quality_stage(
         )
     project.status = "editing"
     _save_receipt(session, project.id, payload.command_id, "quality.stage.approve", "project", project.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="quality.stage_approved.v1",
         message="User confirmed that the approved asset set may enter editing.",
@@ -136,9 +145,7 @@ def _item_contract(item: TimelineItem) -> dict:
 
 
 def _timeline_contract(session: Session, timeline: Timeline) -> dict:
-    items = list(session.scalars(select(TimelineItem).where(
-        TimelineItem.timeline_id == timeline.id,
-    ).order_by(TimelineItem.track_type, TimelineItem.sequence_number)))
+    items = _editor(session).timeline_items(timeline.id)
     return {
         "contract_version": "v2.timeline-contract.v1",
         "project_id": timeline.project_id,
@@ -151,8 +158,9 @@ def _timeline_contract(session: Session, timeline: Timeline) -> dict:
 
 
 def _add_items(session: Session, timeline: Timeline, items) -> None:
+    repository = _editor(session)
     for item in items:
-        session.add(TimelineItem(
+        repository.add(TimelineItem(
             timeline_id=timeline.id,
             track_type=item.track_type,
             sequence_number=item.sequence_number,
@@ -174,6 +182,7 @@ def _create_candidate(
     supersedes: Timeline | None,
     command_type: str,
 ) -> dict:
+    repository = _editor(session)
     receipt = _receipt(session, project.id, payload.command_id, command_type)
     if receipt:
         return timeline_read(session, _require_timeline(session, project, receipt.result_id))
@@ -184,7 +193,7 @@ def _create_candidate(
             "项目必须先明确完成质量阶段，才能创建时间线候选。",
         )
     if payload.source == "editor_assistant":
-        run = session.get(AgentRun, payload.source_agent_run_id) if payload.source_agent_run_id else None
+        run = repository.agent_run(payload.source_agent_run_id) if payload.source_agent_run_id else None
         if not run or run.project_id != project.id or run.agent_role != "editor" or run.status != "completed":
             raise EditorConflictError(
                 "EDITOR_AGENT_RUN_INVALID",
@@ -201,7 +210,7 @@ def _create_candidate(
             "TIMELINE_SEQUENCE_DUPLICATE",
             "同一轨道的 sequence_number 必须唯一。",
         )
-    if not supersedes and session.scalar(select(Timeline.id).where(Timeline.project_id == project.id)):
+    if not supersedes and repository.has_timeline(project.id):
         raise EditorConflictError(
             "TIMELINE_REVISION_REQUIRED",
             "项目已有时间线版本，必须从指定版本创建修订。",
@@ -214,9 +223,7 @@ def _create_candidate(
             raise EditorConflictError("TIMELINE_ROW_VERSION_MISMATCH", "时间线已变化，请刷新后重试。")
         if supersedes.status in {"exported", "superseded"}:
             raise EditorConflictError("TIMELINE_NOT_REVISABLE", "已导出或已被替代的时间线不能再修订。")
-    version = (session.scalar(select(func.max(Timeline.version_number)).where(
-        Timeline.project_id == project.id,
-    )) or 0) + 1
+    version = repository.next_timeline_version(project.id)
     timeline = Timeline(
         project_id=project.id,
         snapshot_id=snapshot.id,
@@ -230,15 +237,15 @@ def _create_candidate(
         validation_report=[],
         created_by=payload.actor_id,
     )
-    session.add(timeline)
-    session.flush()
+    repository.add(timeline)
+    repository.flush()
     _add_items(session, timeline, payload.items)
     if supersedes and supersedes.status in {"candidate", "review"}:
         supersedes.status = "superseded"
         supersedes.row_version += 1
     project.status = "editing"
     _save_receipt(session, project.id, payload.command_id, command_type, "timeline", timeline.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="timeline.candidate_created.v1",
         message="An explicit timeline candidate was recorded for review.",
@@ -278,10 +285,9 @@ def _error(code: str, path: str, message: str, **evidence) -> dict:
 
 
 def _validate_items(session: Session, project: Project, timeline: Timeline) -> list[dict]:
+    repository = _editor(session)
     errors: list[dict] = []
-    items = list(session.scalars(select(TimelineItem).where(
-        TimelineItem.timeline_id == timeline.id,
-    ).order_by(TimelineItem.track_type, TimelineItem.sequence_number)))
+    items = repository.timeline_items(timeline.id)
     track_items: dict[str, list[TimelineItem]] = {"main_video": [], "audio": [], "subtitle": []}
     expected_types = {"main_video": "video", "audio": "audio", "subtitle": "subtitle"}
     duration_ms = project.duration_seconds * 1000
@@ -321,7 +327,7 @@ def _validate_items(session: Session, project: Project, timeline: Timeline) -> l
                 gap_reason=item.gap_reason,
             ))
             continue
-        asset = session.get(Asset, item.asset_id)
+        asset = repository.asset(item.asset_id)
         if not asset:
             errors.append(_error("TIMELINE_ASSET_NOT_FOUND", path, "引用素材不存在。", asset_id=item.asset_id))
             continue
@@ -433,7 +439,7 @@ def validate_timeline(
     timeline.status = "candidate" if errors else "review"
     timeline.row_version += 1
     _save_receipt(session, project.id, payload.command_id, "timeline.validate", "timeline", timeline.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="timeline.validation_failed.v1" if errors else "timeline.validated.v1",
         message="Timeline contract validation completed.",
@@ -449,6 +455,7 @@ def confirm_timeline(
     timeline_id: str,
     payload: ConfirmTimeline,
 ) -> dict:
+    repository = _editor(session)
     receipt = _receipt(session, project.id, payload.command_id, "timeline.confirm")
     if receipt:
         return timeline_read(session, _require_timeline(session, project, receipt.result_id))
@@ -464,19 +471,12 @@ def confirm_timeline(
     if not payload.confirm_delivery_scope:
         raise EditorConflictError("TIMELINE_CONFIRMATION_REQUIRED", "必须明确确认当前剪辑范围。")
     now = utc_now()
-    previous = list(session.scalars(select(Timeline).where(
-        Timeline.project_id == project.id,
-        Timeline.status == "confirmed",
-        Timeline.id != timeline.id,
-    )))
+    previous = repository.confirmed_timelines(project.id, exclude_id=timeline.id)
     for row in previous:
         row.status = "superseded"
         row.row_version += 1
-    asset_ids = list(session.scalars(select(TimelineItem.asset_id).where(
-        TimelineItem.timeline_id == timeline.id,
-        TimelineItem.asset_id.is_not(None),
-    )))
-    for asset in session.scalars(select(Asset).where(Asset.id.in_(asset_ids))):
+    asset_ids = repository.timeline_asset_ids(timeline.id)
+    for asset in repository.assets_by_ids(asset_ids):
         if asset.state == "approved":
             asset.state = "used"
             asset.row_version += 1
@@ -485,7 +485,7 @@ def confirm_timeline(
     timeline.row_version += 1
     project.status = "delivery_ready"
     _save_receipt(session, project.id, payload.command_id, "timeline.confirm", "timeline", timeline.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="timeline.confirmed.v1",
         message="User confirmed the exact timeline contract.",
@@ -501,14 +501,11 @@ def confirm_timeline(
 
 
 def timeline_read(session: Session, timeline: Timeline) -> dict:
-    items = list(session.scalars(select(TimelineItem).where(
-        TimelineItem.timeline_id == timeline.id,
-    ).order_by(TimelineItem.track_type, TimelineItem.sequence_number)))
+    repository = _editor(session)
+    items = repository.timeline_items(timeline.id)
     assets = {
         asset.id: asset
-        for asset in session.scalars(select(Asset).where(Asset.id.in_([
-            item.asset_id for item in items if item.asset_id
-        ])))
+        for asset in repository.assets_by_ids([item.asset_id for item in items if item.asset_id])
     } if any(item.asset_id for item in items) else {}
     result = {column.name: getattr(timeline, column.name) for column in timeline.__table__.columns}
     result["items"] = []
@@ -523,19 +520,15 @@ def timeline_read(session: Session, timeline: Timeline) -> dict:
 
 
 def editor_workspace(session: Session, project: Project) -> dict:
+    repository = _editor(session)
     quality = quality_review_view(session, project)
     assets = []
     if project.active_snapshot_id:
-        rows = list(session.scalars(select(Asset).where(
-            Asset.project_id == project.id,
-            Asset.snapshot_id == project.active_snapshot_id,
-            Asset.state.in_(["approved", "used"]),
-            Asset.asset_type.in_(["video", "audio", "subtitle"]),
-        ).order_by(Asset.asset_type, Asset.created_at, Asset.id)))
+        rows = repository.available_assets(project.id, project.active_snapshot_id)
         node_ids = [row.dag_node_id for row in rows if row.dag_node_id]
         nodes = {
             node.id: node
-            for node in session.scalars(select(DAGNode).where(DAGNode.id.in_(node_ids)))
+            for node in repository.dag_nodes_by_ids(node_ids)
         } if node_ids else {}
         assets = [{
             "id": row.id,
@@ -550,9 +543,7 @@ def editor_workspace(session: Session, project: Project) -> dict:
             "state": row.state,
             "content_hash": row.content_hash,
         } for row in rows]
-    timelines = list(session.scalars(select(Timeline).where(
-        Timeline.project_id == project.id,
-    ).order_by(Timeline.version_number.desc())))
+    timelines = repository.timeline_history(project.id)
     if project.status == "quality_review":
         next_action = {
             "code": "APPROVE_QUALITY_STAGE" if quality["stage_ready"] else "REVIEW_REQUIRED_ASSETS",

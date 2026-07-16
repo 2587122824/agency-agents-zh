@@ -33,6 +33,8 @@ from v2.backend.app.db.models import (
     Shot,
     ShotPlanCandidate,
     SnapshotEntityVersion,
+    Timeline,
+    TimelineItem,
     WorkAttempt,
     WorkItem,
     utc_now,
@@ -43,6 +45,7 @@ from v2.backend.app.repositories import (
     SqlAlchemyCreationRepository,
     SqlAlchemyDecisionRepository,
     SqlAlchemyEventRepository,
+    SqlAlchemyEditorRepository,
     SqlAlchemyPlanningRepository,
     SqlAlchemyProductionRepository,
     SqlAlchemyQualityRepository,
@@ -992,5 +995,174 @@ def test_quality_repository_contract_preserves_asset_qc_review_and_dag_queries()
             assert [row.id for row in quality.snapshot_nodes("snapshot-quality")] == [parent_node.id, child_node.id]
             assert quality.project_assets(other.id) == []
             assert quality.dag_nodes_by_ids(set()) == []
+    finally:
+        engine.dispose()
+
+
+def test_editor_repository_contract_preserves_timeline_versions_items_and_asset_bin() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            editor = SqlAlchemyEditorRepository(session)
+            production = SqlAlchemyProductionRepository(session)
+            quality = SqlAlchemyQualityRepository(session)
+            now = utc_now()
+            project = Project(
+                title="Editor",
+                core_topic="Editor repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            other = Project(
+                title="Other",
+                core_topic="Editor isolation",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            projects.add(project)
+            projects.add(other)
+            projects.flush()
+            video_node = DAGNode(
+                snapshot_id="snapshot-editor",
+                node_key="shot.001.video",
+                kind="generate_i2v_clip",
+                input_contract={},
+                output_contract={"media_type": "video"},
+            )
+            audio_node = DAGNode(
+                snapshot_id="snapshot-editor",
+                node_key="project.audio",
+                kind="generate_tts",
+                input_contract={},
+                output_contract={"media_type": "audio"},
+            )
+            production.add(video_node)
+            production.add(audio_node)
+            production.flush()
+            video_asset = Asset(
+                project_id=project.id,
+                snapshot_id="snapshot-editor",
+                dag_node_id=video_node.id,
+                output_index=0,
+                asset_type="video",
+                role="clip",
+                uri="runtime://assets/editor-video.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="approved",
+                duration_ms=10000,
+                created_at=now,
+            )
+            audio_asset = Asset(
+                project_id=project.id,
+                snapshot_id="snapshot-editor",
+                dag_node_id=audio_node.id,
+                output_index=0,
+                asset_type="audio",
+                role="voiceover",
+                uri="runtime://assets/editor-audio.wav",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="used",
+                duration_ms=10000,
+                created_at=now,
+            )
+            excluded_asset = Asset(
+                project_id=project.id,
+                snapshot_id="snapshot-editor",
+                output_index=0,
+                asset_type="image",
+                role="keyframe",
+                uri="runtime://assets/editor-image.png",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="approved",
+                created_at=now,
+            )
+            quality.add(video_asset)
+            quality.add(audio_asset)
+            quality.add(excluded_asset)
+            quality.flush()
+            confirmed = Timeline(
+                project_id=project.id,
+                snapshot_id="snapshot-editor",
+                version_number=1,
+                status="confirmed",
+                source="user",
+                output_spec={},
+                track_config={},
+            )
+            editor.add(confirmed)
+            editor.flush()
+            candidate = Timeline(
+                project_id=project.id,
+                snapshot_id="snapshot-editor",
+                version_number=2,
+                status="candidate",
+                source="user",
+                output_spec={},
+                track_config={},
+                supersedes_timeline_id=confirmed.id,
+            )
+            editor.add(candidate)
+            editor.flush()
+            later_item = TimelineItem(
+                timeline_id=candidate.id,
+                track_type="main_video",
+                sequence_number=2,
+                asset_id=video_asset.id,
+                label="Second",
+                source_in_ms=5000,
+                source_out_ms=10000,
+                timeline_in_ms=5000,
+                timeline_out_ms=10000,
+            )
+            earlier_item = TimelineItem(
+                timeline_id=candidate.id,
+                track_type="main_video",
+                sequence_number=1,
+                asset_id=video_asset.id,
+                label="First",
+                source_in_ms=0,
+                source_out_ms=5000,
+                timeline_in_ms=0,
+                timeline_out_ms=5000,
+            )
+            editor.add(later_item)
+            editor.add(earlier_item)
+            session.commit()
+
+            assert editor.timeline(candidate.id).id == candidate.id  # type: ignore[union-attr]
+            assert editor.has_timeline(project.id) is True
+            assert editor.has_timeline(other.id) is False
+            assert editor.next_timeline_version(project.id) == 3
+            assert editor.next_timeline_version(other.id) == 1
+            assert [row.id for row in editor.timeline_items(candidate.id)] == [earlier_item.id, later_item.id]
+            assert [row.id for row in editor.confirmed_timelines(project.id, exclude_id=candidate.id)] == [confirmed.id]
+            assert editor.timeline_asset_ids(candidate.id) == [video_asset.id, video_asset.id]
+            assert {row.id for row in editor.assets_by_ids([video_asset.id, audio_asset.id])} == {
+                video_asset.id,
+                audio_asset.id,
+            }
+            assert [row.id for row in editor.available_assets(project.id, "snapshot-editor")] == [
+                audio_asset.id,
+                video_asset.id,
+            ]
+            assert {row.id for row in editor.dag_nodes_by_ids([video_node.id, audio_node.id])} == {
+                video_node.id,
+                audio_node.id,
+            }
+            assert [row.id for row in editor.timeline_history(project.id)] == [candidate.id, confirmed.id]
+            assert editor.timeline_history(other.id) == []
+            assert editor.assets_by_ids([]) == []
+            assert editor.dag_nodes_by_ids([]) == []
     finally:
         engine.dispose()

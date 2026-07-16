@@ -681,6 +681,7 @@ Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository �
 当前规划中心的 Brief、分镜候选、不可变方案版本、Shot 和实体引用已统一通过 `PlanningRepository`；结构化分镜编辑仍未实现，不能因数据层迁移而标记完成。
 当前生产服务的影响分析、快照、DAG、费用明细、WorkItem/Attempt 编译和准备/执行投影已统一通过 `ProductionRepository`；费用确认、激活和提交仍是三个独立显式命令。
 当前质量服务的素材登记、文件验证记录、QC findings、人工审核证据和 DAG 下游影响已统一通过 `QualityRepository`；内容分析器未连接时仍进入 `review_required`，不会伪装为通过。
+当前剪辑服务的时间线版本链、轨道条目、素材验证读取、确认版本替代和素材箱投影已统一通过 `EditorRepository`；Repository 不自动补位、重排、裁切或变速。
 
 ## 23. 首期验收标准
 

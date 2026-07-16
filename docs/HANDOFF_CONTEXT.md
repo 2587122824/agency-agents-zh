@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Editor Repository Sprint 20
+
+- Added a typed `EditorRepository` covering Timeline/TimelineItem version chains, stable track ordering, exact Asset reads, confirmed-timeline superseding, available asset-bin filtering, and DAG-node projection.
+- Migrated the full editor service away from direct SQLAlchemy query and persistence calls while preserving quality-stage approval, explicit candidate creation/revision, deterministic validation, contract hashes, row-version checks, exact confirmation, and approved-to-used Asset transitions.
+- Editor events now use the existing EventRepository inside the same application transaction. No Outbox or asynchronous publication was introduced.
+- Added an editor repository contract test covering project isolation, next timeline versions, item ordering, confirmed versions, asset IDs, available-asset filters, DAG node mapping, and timeline history.
+- Updated repository, product, data-model, implementation-status, and handoff documentation.
+- No schema migration, automatic timeline generation, gap filling, reordering, cropping, speed change, export, provider call, retry, fallback, or confirmation change was introduced.
+- Verification target: 39 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Quality Repository Sprint 19
 
 - Added a typed `QualityRepository` covering Asset registration, exact provider-output indices, storage-policy resolution, QCReport/QCFinding persistence, human review decisions, DAG downstream impact, and quality workspace projections.
