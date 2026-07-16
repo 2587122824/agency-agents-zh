@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -22,6 +22,10 @@ export const api = {
   projectControl: (id: string) => request<ProjectControl>(`/projects/${id}/control-center`),
   contactSheet: (id: string) => request<MaterialContactSheet>(`/projects/${id}/contact-sheet`),
   decisionImpactGraph: (id: string) => request<DecisionImpactGraph>(`/projects/${id}/decision-impact-graph`),
+  decisionChangeImpacts: (id: string) => request<DecisionChangeImpactWorkspace>(`/projects/${id}/decision-change-impact-analyses`),
+  analyzeDecisionChange: (projectId: string, decisionId: string, proposedValue: unknown) => request<DecisionChangeImpactAnalysis>(`/projects/${projectId}/decisions/${decisionId}/change-impact-analyses`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', proposed_value: proposedValue }),
+  }),
   entityRegistry: () => request<EntityRegistry>('/entity-registry'),
   project: (id: string) => request<ProjectDetail>(`/projects/${id}`),
   createProject: (payload: ProjectCreate) =>

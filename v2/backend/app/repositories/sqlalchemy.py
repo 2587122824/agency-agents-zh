@@ -20,6 +20,8 @@ from ..db.models import (
     CreativeBriefCandidate,
     DAGNode,
     Decision,
+    DecisionChangeImpactAnalysis,
+    DecisionChangeImpactTarget,
     DeliveryAttempt,
     DependencyEdge,
     Entity,
@@ -1246,6 +1248,18 @@ class SqlAlchemyImpactRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def add(self, record) -> None:
+        self.session.add(record)
+
+    def flush(self) -> None:
+        self.session.flush()
+
+    def decision(self, project_id: str, decision_id: str) -> Decision | None:
+        return self.session.scalar(select(Decision).where(
+            Decision.project_id == project_id,
+            Decision.id == decision_id,
+        ))
+
     def decisions(self, project_id: str) -> list[Decision]:
         return list(self.session.scalars(
             select(Decision).where(Decision.project_id == project_id).order_by(Decision.created_at, Decision.id)
@@ -1312,3 +1326,41 @@ class SqlAlchemyImpactRepository:
         if not timeline_ids:
             return []
         return list(self.session.scalars(select(TimelineItem).where(TimelineItem.timeline_id.in_(timeline_ids))))
+
+    def entity_versions(self, project_id: str) -> list[EntityVersion]:
+        return list(self.session.scalars(
+            select(EntityVersion)
+            .where(EntityVersion.project_id == project_id)
+            .order_by(EntityVersion.entity_id, EntityVersion.version_number, EntityVersion.id)
+        ))
+
+    def entities(self, project_id: str) -> list[Entity]:
+        return list(self.session.scalars(
+            select(Entity)
+            .where(Entity.project_id == project_id)
+            .order_by(Entity.entity_type, Entity.display_name, Entity.id)
+        ))
+
+    def change_analysis(
+        self,
+        project_id: str,
+        analysis_id: str,
+    ) -> DecisionChangeImpactAnalysis | None:
+        return self.session.scalar(select(DecisionChangeImpactAnalysis).where(
+            DecisionChangeImpactAnalysis.project_id == project_id,
+            DecisionChangeImpactAnalysis.id == analysis_id,
+        ))
+
+    def change_analysis_history(self, project_id: str) -> list[DecisionChangeImpactAnalysis]:
+        return list(self.session.scalars(
+            select(DecisionChangeImpactAnalysis)
+            .where(DecisionChangeImpactAnalysis.project_id == project_id)
+            .order_by(DecisionChangeImpactAnalysis.created_at.desc(), DecisionChangeImpactAnalysis.id.desc())
+        ))
+
+    def change_analysis_targets(self, analysis_id: str) -> list[DecisionChangeImpactTarget]:
+        return list(self.session.scalars(
+            select(DecisionChangeImpactTarget)
+            .where(DecisionChangeImpactTarget.analysis_id == analysis_id)
+            .order_by(DecisionChangeImpactTarget.record_type, DecisionChangeImpactTarget.record_id)
+        ))

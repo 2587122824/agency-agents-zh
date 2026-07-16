@@ -60,6 +60,7 @@ export interface DecisionImpactSummary {
   decision_id: string
   key: string
   label: string
+  current_value: unknown
   status: string
   observation_status: 'observed' | 'not_observed'
   direct_manifest_ids: string[]
@@ -76,6 +77,49 @@ export interface DecisionImpactGraph {
   decisions: DecisionImpactSummary[]
   nodes: DecisionImpactNode[]
   edges: DecisionImpactEdge[]
+  boundary: string
+}
+
+export interface DecisionChangeImpactTarget {
+  id: string
+  record_type: string
+  record_id: string
+  label: string
+  record_status: string
+  authority: string
+  impact_kind: 'review_candidate'
+  reason_code: 'OBSERVED_DECISION_LINEAGE'
+  included_in_estimate: boolean
+  estimated_work_units: number
+  estimated_cost: number | null
+  currency: string | null
+  evidence: Record<string, unknown>
+}
+
+export interface DecisionChangeImpactAnalysis {
+  id: string
+  project_id: string
+  decision_id: string
+  status: 'completed' | 'insufficient_evidence'
+  scope: 'observed_lineage_with_active_cost'
+  current_value: unknown
+  proposed_value: unknown
+  observed_manifest_ids: string[]
+  target_counts: Record<string, number>
+  estimated_work_count: number
+  cost_status: 'estimated' | 'not_applicable' | 'not_configured' | 'mixed_currency'
+  estimated_cost: number | null
+  currency: string | null
+  analysis_hash: string
+  active_snapshot_id: string | null
+  created_by: string
+  created_at: string
+  targets: DecisionChangeImpactTarget[]
+}
+
+export interface DecisionChangeImpactWorkspace {
+  project_id: string
+  analyses: DecisionChangeImpactAnalysis[]
   boundary: string
 }
 

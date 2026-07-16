@@ -370,6 +370,7 @@ ConfirmTimeline: review -> confirmed; Project -> delivery_ready; referenced Asse
 ```text
 project.state_changed.v1
 decision.resolved.v1
+decision.change_impact_analyzed.v1
 snapshot.locked.v1
 work.attempt_claimed.v1
 provider.task_accepted.v1

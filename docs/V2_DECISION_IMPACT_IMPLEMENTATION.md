@@ -2,7 +2,7 @@
 
 版本：v0.1
 
-状态：已实现已观测链路；前瞻影响估算未实现
+状态：已实现已观测链路；前瞻报告由独立不可变分析聚合实现
 
 实现目录：`v2/backend/app/impact/`、`v2/frontend/src/pages/DecisionImpactPage.tsx`
 
@@ -52,11 +52,11 @@ GET /api/v1/projects/{project_id}/decision-impact-graph
 - 去重后的节点与有向关系。
 - 明确的证据边界说明。
 
-查询不创建 CommandReceipt、ProjectEvent、WorkItem、CostEvent 或任何影响记录。
+该 GET 查询不创建 CommandReceipt、ProjectEvent、WorkItem、CostEvent 或任何影响记录。变更提案使用独立 POST 命令和持久化聚合，见 [V2 前瞻决策变更影响分析实现](./V2_PROSPECTIVE_DECISION_IMPACT_IMPLEMENTATION.md)。
 
 ## 5. Repository 边界
 
-只读 `ImpactRepository` 按项目读取 Decision、Manifest、AgentRun、候选、需求版本、方案、分镜、快照、DAG、工作项、素材和时间线。应用服务负责节点建模、精确边连接、可达性计算和摘要，不把图计算规则下沉到 SQL 查询。
+`ImpactRepository` 按项目读取 Decision、Manifest、AgentRun、候选、需求版本、方案、分镜、实体、快照、DAG、工作项、素材和时间线，并持久化独立的变更影响报告及目标。应用服务负责节点建模、精确边连接、可达性计算和摘要，不把图计算规则下沉到 SQL 查询。图 GET 仍严格只读。
 
 ## 6. 页面
 
@@ -64,14 +64,11 @@ GET /api/v1/projects/{project_id}/decision-impact-graph
 
 页面左侧列出决策及已观测状态，右侧按记录类型展示选中决策的传播证据、关系名称、状态与活动权威标记。页面只有刷新和返回控制台，不提供失效、重做、重试或生产按钮。
 
-## 7. 未实现边界
+## 7. 独立前瞻报告边界
 
-- 未持久化设计文档中的 `DecisionImpact` 前瞻分析记录。
-- 未估算尚未发生的工作项、供应商调用次数或费用。
-- 未实现已确认 Decision 的新版本、supersedes 链或变更确认命令。
-- 未自动标记任何方案、快照、素材或时间线失效。
+当前已持久化 `DecisionChangeImpactAnalysis/Target`，并使用活动快照已有 DAG 价格估算潜在工作量和费用。它不会估算不存在的节点、猜测未来路由或写入 CostEvent。
 
-这些能力会改变决策版本、项目状态、付费范围或重做边界，实施前必须单独确认。
+仍未实现已确认 Decision 的新版本、supersedes 链、变更确认命令或任何自动失效。实际应用变更会改变决策版本、项目状态、付费范围或重做边界，实施前必须再次确认。
 
 ## 8. 验收
 

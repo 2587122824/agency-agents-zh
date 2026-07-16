@@ -19,6 +19,8 @@ from ..db.models import (
     CreativeBriefCandidate,
     DAGNode,
     Decision,
+    DecisionChangeImpactAnalysis,
+    DecisionChangeImpactTarget,
     DeliveryAttempt,
     DependencyEdge,
     Entity,
@@ -67,6 +69,7 @@ CreationRecord = (
     | RequirementVersion
 )
 PlanningRecord = AgentInputManifest | AgentRun | CreativeBriefCandidate | PlanVersion | Shot | ShotPlanCandidate
+ImpactRecord = DecisionChangeImpactAnalysis | DecisionChangeImpactTarget
 ProductionRecord = (
     ConfigurationReference
     | CostEvent
@@ -547,6 +550,12 @@ class ContactSheetRepository(Protocol):
 
 
 class ImpactRepository(Protocol):
+    def add(self, record: ImpactRecord) -> None: ...
+
+    def flush(self) -> None: ...
+
+    def decision(self, project_id: str, decision_id: str) -> Decision | None: ...
+
     def decisions(self, project_id: str) -> list[Decision]: ...
 
     def manifests(self, project_id: str) -> list[AgentInputManifest]: ...
@@ -576,3 +585,13 @@ class ImpactRepository(Protocol):
     def timelines(self, project_id: str) -> list[Timeline]: ...
 
     def timeline_items(self, timeline_ids: set[str]) -> list[TimelineItem]: ...
+
+    def entity_versions(self, project_id: str) -> list[EntityVersion]: ...
+
+    def entities(self, project_id: str) -> list[Entity]: ...
+
+    def change_analysis(self, project_id: str, analysis_id: str) -> DecisionChangeImpactAnalysis | None: ...
+
+    def change_analysis_history(self, project_id: str) -> list[DecisionChangeImpactAnalysis]: ...
+
+    def change_analysis_targets(self, analysis_id: str) -> list[DecisionChangeImpactTarget]: ...

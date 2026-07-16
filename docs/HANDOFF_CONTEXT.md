@@ -1,5 +1,16 @@
 # Handoff Context
 
+## 2026-07-16 V2 Prospective Decision Impact Sprint 29
+
+- Added immutable DecisionChangeImpactAnalysis and DecisionChangeImpactTarget records for proposed changes to resolved decisions, with command idempotency and project isolation.
+- Extended exact observed lineage through persisted Creative Brief/Shot entity-version IDs to EntityVersion/Entity; no key, label, prompt, or name inference is used.
+- Added active-authority cost evidence: only reachable provider DAG nodes in Project.active_snapshot_id contribute work units and frozen estimated cost. Missing prices, mixed currencies, and no applicable nodes remain explicit; no currency conversion or zero-cost substitution occurs.
+- Added POST `/projects/{project_id}/decisions/{decision_id}/change-impact-analyses` and GET `/projects/{project_id}/decision-change-impact-analyses` plus a typed proposal/report panel on the decision-impact page.
+- Analysis writes only the immutable report, targets, command receipt, and `decision.change_impact_analyzed.v1` event. It does not mutate Decision, Project, Plan, Snapshot, Asset, WorkItem, route, or CostEvent state.
+- Added `docs/V2_PROSPECTIVE_DECISION_IMPACT_IMPLEMENTATION.md` and updated product, data-model, observed-lineage, repository, state/event, implementation-status, and handoff documentation.
+- No provider/model call, decision version creation, invalidation, regeneration, retry, fallback, route/workflow substitution, prompt rewrite, project-state change, cost confirmation, or actual charge was introduced.
+- Verification target: backend full suite, Python compileall, Vite build, fresh and runtime Alembic `20260716_12 (head)`, desktop/mobile browser checks, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Structured Shot Plan Revision Sprint 28
 
 - Added immutable `ShotPlanCandidate` revision lineage with `supersedes_candidate_id`, revision number, source, actor provenance, row version, and nullable AgentRun provenance for user revisions.

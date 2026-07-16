@@ -94,8 +94,19 @@ from ..creation.service import (
 from ..db.session import get_session
 from ..decisions.service import DecisionConflictError, add_decision, resolve_decision
 from ..events.service import project_event_stream
-from ..impact.contracts import DecisionImpactGraphView
-from ..impact.service import decision_impact_graph_view
+from ..impact.contracts import (
+    AnalyzeDecisionChangeImpact,
+    DecisionChangeImpactAnalysisRead,
+    DecisionChangeImpactWorkspace,
+    DecisionImpactGraphView,
+)
+from ..impact.service import (
+    ImpactConflictError,
+    ImpactNotFoundError,
+    analyze_decision_change,
+    decision_change_impact_workspace,
+    decision_impact_graph_view,
+)
 from ..editor.contracts import (
     ApproveQualityStage,
     ConfirmTimeline,
@@ -251,6 +262,34 @@ def project_contact_sheet(project_id: str, session: Session = Depends(get_sessio
 @router.get("/projects/{project_id}/decision-impact-graph", response_model=DecisionImpactGraphView)
 def project_decision_impact_graph(project_id: str, session: Session = Depends(get_session)):
     return decision_impact_graph_view(session, require_project(session, project_id))
+
+
+@router.get(
+    "/projects/{project_id}/decision-change-impact-analyses",
+    response_model=DecisionChangeImpactWorkspace,
+)
+def project_decision_change_impacts(project_id: str, session: Session = Depends(get_session)):
+    return decision_change_impact_workspace(session, require_project(session, project_id))
+
+
+@router.post(
+    "/projects/{project_id}/decisions/{decision_id}/change-impact-analyses",
+    response_model=DecisionChangeImpactAnalysisRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_decision_change_impact_analyze(
+    project_id: str,
+    decision_id: str,
+    payload: AnalyzeDecisionChangeImpact,
+    session: Session = Depends(get_session),
+):
+    try:
+        return analyze_decision_change(session, require_project(session, project_id), decision_id, payload)
+    except ImpactNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ImpactConflictError as exc:
+        session.rollback()
+        raise HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
 
 
 @router.get("/entity-registry", response_model=EntityRegistryView)

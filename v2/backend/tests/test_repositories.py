@@ -20,6 +20,8 @@ from v2.backend.app.db.models import (
     CreativeBriefCandidate,
     DAGNode,
     Decision,
+    DecisionChangeImpactAnalysis,
+    DecisionChangeImpactTarget,
     DeliveryAttempt,
     DependencyEdge,
     Entity,
@@ -2789,6 +2791,51 @@ def test_impact_repository_contract_preserves_project_lineage_and_exact_scope() 
                 timeline_in_ms=0,
                 timeline_out_ms=10000,
             )
+            entity = Entity(
+                id="entity-impact",
+                project_id=project.id,
+                entity_type="character",
+                display_name="Runner",
+            )
+            entity_version = EntityVersion(
+                id="entity-version-impact",
+                project_id=project.id,
+                entity_id=entity.id,
+                version_number=1,
+                status="confirmed",
+                is_active=True,
+            )
+            change_analysis = DecisionChangeImpactAnalysis(
+                id="decision-change-impact",
+                project_id=project.id,
+                decision_id=decision.id,
+                status="completed",
+                scope="observed_lineage_with_active_cost",
+                current_value="documentary",
+                proposed_value="cinematic",
+                observed_manifest_ids=[manifest.id],
+                target_counts={"shot": 1},
+                estimated_work_count=1,
+                cost_status="estimated",
+                estimated_cost=0.25,
+                currency="CNY",
+                analysis_hash="c" * 64,
+                active_snapshot_id=snapshot.id,
+            )
+            change_target = DecisionChangeImpactTarget(
+                id="decision-change-target",
+                analysis_id=change_analysis.id,
+                record_type="shot",
+                record_id=shot.id,
+                label=shot.shot_code,
+                record_status="contract",
+                authority="recorded",
+                included_in_estimate=True,
+                estimated_work_units=1,
+                estimated_cost=0.25,
+                currency="CNY",
+                evidence={"node_id": f"shot:{shot.id}"},
+            )
             session.add_all([
                 decision,
                 other_decision,
@@ -2806,6 +2853,10 @@ def test_impact_repository_contract_preserves_project_lineage_and_exact_scope() 
                 asset,
                 timeline,
                 timeline_item,
+                entity,
+                entity_version,
+                change_analysis,
+                change_target,
             ])
             session.commit()
 
@@ -2824,6 +2875,14 @@ def test_impact_repository_contract_preserves_project_lineage_and_exact_scope() 
             assert [row.id for row in impact.assets(project.id)] == [asset.id]
             assert [row.id for row in impact.timelines(project.id)] == [timeline.id]
             assert [row.id for row in impact.timeline_items({timeline.id})] == [timeline_item.id]
+            assert [row.id for row in impact.entities(project.id)] == [entity.id]
+            assert [row.id for row in impact.entity_versions(project.id)] == [entity_version.id]
+            assert impact.decision(project.id, decision.id).id == decision.id  # type: ignore[union-attr]
+            assert impact.decision(other.id, decision.id) is None
+            assert impact.change_analysis(project.id, change_analysis.id).id == change_analysis.id  # type: ignore[union-attr]
+            assert impact.change_analysis(other.id, change_analysis.id) is None
+            assert [row.id for row in impact.change_analysis_history(project.id)] == [change_analysis.id]
+            assert [row.id for row in impact.change_analysis_targets(change_analysis.id)] == [change_target.id]
             assert [row.id for row in impact.decisions(other.id)] == [other_decision.id]
             assert impact.manifests(other.id) == []
             assert impact.dag_nodes(set()) == []

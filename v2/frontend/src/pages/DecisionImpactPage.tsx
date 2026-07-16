@@ -1,14 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, CheckCircle2, CircleDot, GitBranch, Network, RefreshCw, ShieldAlert } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import type { DecisionImpactNode } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
+import { DecisionChangeAnalysisPanel } from '../components/DecisionChangeAnalysisPanel'
 import styles from './DecisionImpactPage.module.css'
 
 const typeLabels: Record<string, string> = {
+  entity: '实体', entity_version: '实体版本',
   manifest: '输入清单', agent_run: 'Agent 运行', requirement_candidate: '需求候选',
   requirement_version: '需求版本', creative_brief: '创意方案', shot_plan: '分镜候选',
   plan: '方案版本', shot: '分镜', snapshot: '生产快照', dag_node: 'DAG 节点',
@@ -34,6 +36,7 @@ export function DecisionImpactPage() {
   const { projectId = '' } = useParams()
   const client = useQueryClient()
   const graph = useQuery({ queryKey: ['decision-impact', projectId], queryFn: () => api.decisionImpactGraph(projectId), enabled: Boolean(projectId), refetchInterval: 10000 })
+  const changeImpacts = useQuery({ queryKey: ['decision-change-impacts', projectId], queryFn: () => api.decisionChangeImpacts(projectId), enabled: Boolean(projectId), refetchInterval: 10000 })
   const [selectedId, setSelectedId] = useState('')
   useEffect(() => {
     if (graph.data?.decisions[0] && !graph.data.decisions.some(item => item.decision_id === selectedId)) {
@@ -51,6 +54,8 @@ export function DecisionImpactPage() {
     }
     return result
   }, [graph.data, visibleIds])
+  const analyzeChange = useMutation({ mutationFn: (value: unknown) => api.analyzeDecisionChange(projectId, selected!.decision_id, value), onSuccess: () => client.invalidateQueries({ queryKey: ['decision-change-impacts', projectId] }) })
+  const selectedAnalyses = (changeImpacts.data?.analyses ?? []).filter(item => item.decision_id === selected?.decision_id)
 
   return <>
     <PageHeader eyebrow="DECISION LINEAGE" title={graph.data?.project_title ?? '决策影响'} description="已观测决策传播证据" actions={<><Link className="secondaryButton" to={`/projects/${projectId}/control`}><ArrowLeft size={14} />返回控制台</Link><button className="secondaryButton" onClick={() => client.invalidateQueries({ queryKey: ['decision-impact', projectId] })}><RefreshCw size={14} />刷新</button></>} />
@@ -89,6 +94,7 @@ export function DecisionImpactPage() {
             </div>}
           </section>
         </div>
+        {selected && <DecisionChangeAnalysisPanel key={selected.decision_id} decision={selected} analyses={selectedAnalyses} pending={analyzeChange.isPending} error={analyzeChange.error?.message ?? changeImpacts.error?.message ?? null} onAnalyze={value => analyzeChange.mutate(value)} />}
         <footer className={styles.boundary}>{graph.data.boundary}</footer>
       </>}
     </main>

@@ -55,6 +55,52 @@ class Decision(Base):
     project: Mapped[Project] = relationship(back_populates="decisions")
 
 
+class DecisionChangeImpactAnalysis(Base):
+    __tablename__ = "decision_change_impact_analyses"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("decision_impact"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    decision_id: Mapped[str] = mapped_column(ForeignKey("decisions.id"), index=True)
+    status: Mapped[str] = mapped_column(String(32), index=True)
+    scope: Mapped[str] = mapped_column(String(40), default="observed_lineage_with_active_cost")
+    current_value: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    proposed_value: Mapped[object | None] = mapped_column(JSON, nullable=True)
+    observed_manifest_ids: Mapped[list] = mapped_column(JSON, default=list)
+    target_counts: Mapped[dict] = mapped_column(JSON, default=dict)
+    estimated_work_count: Mapped[int] = mapped_column(Integer, default=0)
+    cost_status: Mapped[str] = mapped_column(String(32), default="not_applicable")
+    estimated_cost: Mapped[float | None] = mapped_column(nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    analysis_hash: Mapped[str] = mapped_column(String(64), index=True)
+    active_snapshot_id: Mapped[str | None] = mapped_column(
+        ForeignKey("production_snapshots.id"), nullable=True, index=True
+    )
+    created_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class DecisionChangeImpactTarget(Base):
+    __tablename__ = "decision_change_impact_targets"
+    __table_args__ = (UniqueConstraint("analysis_id", "record_type", "record_id"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("impact_target"))
+    analysis_id: Mapped[str] = mapped_column(
+        ForeignKey("decision_change_impact_analyses.id"), index=True
+    )
+    record_type: Mapped[str] = mapped_column(String(40), index=True)
+    record_id: Mapped[str] = mapped_column(String(48), index=True)
+    label: Mapped[str] = mapped_column(String(200))
+    record_status: Mapped[str] = mapped_column(String(40))
+    authority: Mapped[str] = mapped_column(String(24))
+    impact_kind: Mapped[str] = mapped_column(String(32), default="review_candidate")
+    reason_code: Mapped[str] = mapped_column(String(80), default="OBSERVED_DECISION_LINEAGE")
+    included_in_estimate: Mapped[bool] = mapped_column(Boolean, default=False)
+    estimated_work_units: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost: Mapped[float | None] = mapped_column(nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    evidence: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
 class WorkItem(Base):
     __tablename__ = "work_items"
     __table_args__ = (UniqueConstraint("snapshot_id", "dag_node_id"),)

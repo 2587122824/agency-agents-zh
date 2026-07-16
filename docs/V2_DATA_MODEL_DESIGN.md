@@ -152,24 +152,42 @@ supersedes_decision_id nullable
 - `high` 风险只能由用户确认。
 - 已确认记录不可原位修改，修改时通过 `supersedes_decision_id` 新建记录。
 
-### 6.2 DecisionImpact
+### 6.2 DecisionChangeImpactAnalysis
 
 ```text
 id
+project_id
 decision_id
-target_type: entity | entity_version | shot | plan | snapshot | asset | timeline
-target_id nullable
-selector nullable
-impact_kind: invalidates | regenerates | recomputes | informational
-reason_code
-estimated_work_count nullable
+status: completed | insufficient_evidence
+scope: observed_lineage_with_active_cost
+current_value_json
+proposed_value_json
+observed_manifest_ids_json
+target_counts_json
+estimated_work_count
+cost_status: estimated | not_applicable | not_configured | mixed_currency
 estimated_cost nullable
 currency nullable
+analysis_hash
+active_snapshot_id nullable
+created_by / created_at
 ```
 
-`selector` 只能用于尚未实例化的候选范围，并使用受控语法，例如 `shot.character_id=char_01`。快照创建前必须解析为精确目标；不能在执行时模糊匹配。
+### 6.3 DecisionChangeImpactTarget
 
-首期尚未持久化 `DecisionImpact`。当前实现使用 `AgentInputManifest.decision_ids` 和现有精确外键计算 `scope=observed_lineage` 的只读证据图，不写 `impact_kind`，不估算未来工作或费用。该实现不能替代前瞻变更分析；未观测决策不得解释为无影响。
+```text
+id / analysis_id
+record_type / record_id
+label / record_status / authority
+impact_kind: review_candidate
+reason_code: OBSERVED_DECISION_LINEAGE
+included_in_estimate
+estimated_work_units
+estimated_cost / currency nullable
+evidence_json
+```
+
+历史传播图仍使用 `AgentInputManifest.decision_ids` 和精确外键计算 `scope=observed_lineage`。前瞻报告只把该图中已有业务记录持久化为候选审核目标，不使用 selector、通配符或名称推断。费用只汇总当前活动快照中可达 DAGNode 已冻结的价格；报告不写 CostEvent，也不具有失效或重做权限。
 
 ## 7. 方案、快照与模板
 

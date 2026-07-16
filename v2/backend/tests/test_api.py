@@ -18,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkAttempt, WorkItem
+from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -731,6 +731,30 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
         json={"command_id": "impact-shots-accept", "expected_requirement_version_id": requirement_id, "expected_candidate_row_version": shot_plan["row_version"]},
     ).json()
     with SessionLocal() as session:
+        entity = Entity(
+            id="impact-character",
+            project_id=project["id"],
+            entity_type="character",
+            display_name="训练者",
+        )
+        session.add(entity)
+        session.flush()
+        version = EntityVersion(
+            id="impact-character-v1",
+            project_id=project["id"],
+            entity_id=entity.id,
+            version_number=1,
+            status="confirmed",
+            is_active=True,
+        )
+        session.add(version)
+        first_shot = session.scalar(select(Shot).where(
+            Shot.project_id == project["id"],
+            Shot.plan_version_id == plan["id"],
+            Shot.sequence_number == 1,
+        ))
+        first_shot.character_entity_version_ids = [version.id]
+        session.commit()
         events_before = len(list(session.scalars(select(ProjectEvent).where(
             ProjectEvent.project_id == project["id"]
         ))))
@@ -743,12 +767,15 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
     resolved_summary = summaries[resolved.json()["id"]]
     pending_summary = summaries[pending.json()["id"]]
     assert resolved_summary["observation_status"] == "observed"
+    assert resolved_summary["current_value"] == "documentary"
     assert len(resolved_summary["direct_manifest_ids"]) == 3
     assert resolved_summary["downstream_counts"]["requirement_candidate"] == 1
     assert resolved_summary["downstream_counts"]["requirement_version"] == 1
     assert resolved_summary["downstream_counts"]["shot_plan"] == 2
     assert resolved_summary["downstream_counts"]["plan"] == 1
     assert resolved_summary["downstream_counts"]["shot"] == 3
+    assert resolved_summary["downstream_counts"]["entity_version"] == 1
+    assert resolved_summary["downstream_counts"]["entity"] == 1
     assert pending_summary["observation_status"] == "not_observed"
     assert pending_summary["direct_manifest_ids"] == []
     assert pending_summary["downstream_node_ids"] == []
@@ -761,11 +788,83 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
         for edge in graph["edges"]
     )
     assert "不会按决策名称推断" in graph["boundary"]
+    analyze_command = {
+        "command_id": "decision-change-impact-analyze",
+        "actor_id": "impact-reviewer",
+        "proposed_value": "cinematic",
+    }
+    analyzed = client.post(
+        f"/api/v1/projects/{project['id']}/decisions/{resolved.json()['id']}/change-impact-analyses",
+        json=analyze_command,
+    )
+    replayed = client.post(
+        f"/api/v1/projects/{project['id']}/decisions/{resolved.json()['id']}/change-impact-analyses",
+        json=analyze_command,
+    )
+    assert analyzed.status_code == 201
+    analysis = analyzed.json()
+    assert replayed.json()["id"] == analysis["id"]
+    mismatched_replay = client.post(
+        f"/api/v1/projects/{project['id']}/decisions/{resolved.json()['id']}/change-impact-analyses",
+        json={**analyze_command, "proposed_value": "illustration"},
+    )
+    assert mismatched_replay.status_code == 409
+    assert mismatched_replay.headers["x-error-code"] == "COMMAND_REPLAY_MISMATCH"
+    assert analysis["status"] == "completed"
+    assert analysis["current_value"] == "documentary"
+    assert analysis["proposed_value"] == "cinematic"
+    assert analysis["target_counts"]["shot"] == 3
+    assert analysis["target_counts"]["entity_version"] == 1
+    assert analysis["target_counts"]["entity"] == 1
+    assert analysis["estimated_work_count"] == 0
+    assert analysis["cost_status"] == "not_applicable"
+    assert analysis["estimated_cost"] is None
+    assert all(item["impact_kind"] == "review_candidate" for item in analysis["targets"])
+    assert all(item["included_in_estimate"] is False for item in analysis["targets"])
+    workspace = client.get(
+        f"/api/v1/projects/{project['id']}/decision-change-impact-analyses"
+    ).json()
+    assert [item["id"] for item in workspace["analyses"]] == [analysis["id"]]
+    assert "不会创建重做或重试任务" in workspace["boundary"]
+    unchanged = client.post(
+        f"/api/v1/projects/{project['id']}/decisions/{resolved.json()['id']}/change-impact-analyses",
+        json={"command_id": "decision-change-impact-unchanged", "proposed_value": "documentary"},
+    )
+    assert unchanged.status_code == 409
+    assert unchanged.headers["x-error-code"] == "DECISION_VALUE_UNCHANGED"
     with SessionLocal() as session:
         events_after = len(list(session.scalars(select(ProjectEvent).where(
             ProjectEvent.project_id == project["id"]
         ))))
-    assert events_after == events_before
+        stored_decision = session.get(Decision, resolved.json()["id"])
+        assert stored_decision.value == "documentary"
+        assert len(list(session.scalars(select(CostEvent).where(CostEvent.project_id == project["id"])))) == 0
+        assert len(list(session.scalars(select(WorkItem).where(WorkItem.project_id == project["id"])))) == 0
+    assert events_after == events_before + 1
+
+
+def test_unobserved_decision_change_analysis_persists_insufficient_evidence(client: TestClient) -> None:
+    project = create_creation_project(client)
+    decision = client.post(
+        f"/api/v1/projects/{project['id']}/decisions",
+        json={
+            "key": "visual_style",
+            "label": "画面风格",
+            "value": "documentary",
+            "status": "resolved",
+        },
+    ).json()
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/decisions/{decision['id']}/change-impact-analyses",
+        json={"command_id": "unobserved-impact-analysis", "proposed_value": "cinematic"},
+    )
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["status"] == "insufficient_evidence"
+    assert analysis["observed_manifest_ids"] == []
+    assert analysis["target_counts"] == {}
+    assert analysis["targets"] == []
+    assert analysis["cost_status"] == "not_applicable"
 
 
 def publish_visual_production_configuration(client: TestClient, with_pricing: bool = False, adapter_kind: str = "mock") -> dict:
@@ -852,6 +951,139 @@ def create_locked_snapshot(client: TestClient, adapter_kind: str = "mock") -> tu
         },
     ).json()
     return project, locked
+
+
+def create_observed_active_snapshot(client: TestClient) -> tuple[dict, dict, dict]:
+    project = create_creation_project(client)
+    decision = client.post(
+        f"/api/v1/projects/{project['id']}/decisions",
+        json={
+            "key": "visual_style",
+            "label": "画面风格",
+            "value": "documentary",
+            "status": "resolved",
+        },
+    ).json()
+    requirement_id = client.get(
+        f"/api/v1/projects/{project['id']}/creation-center"
+    ).json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "observed-brief-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "observed-brief-accept", "expected_requirement_version_id": requirement_id},
+    )
+    shot_plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "observed-shots-generate",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    ).json()
+    plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shot_plan['id']}:accept",
+        json={
+            "command_id": "observed-shots-accept",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": shot_plan["row_version"],
+        },
+    ).json()
+    config = publish_visual_production_configuration(client, with_pricing=True)
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    production_impact = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "observed-production-impact",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    ).json()
+    snapshot = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "observed-snapshot-create",
+            "impact_analysis_id": production_impact["id"],
+            "analysis_hash": production_impact["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    ).json()
+    locked = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:lock",
+        json={
+            "command_id": "observed-snapshot-lock",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "confirm_high_risk_cost": True,
+        },
+    ).json()
+    active = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{locked['id']}:activate",
+        json={
+            "command_id": "observed-snapshot-activate",
+            "expected_contract_hash": locked["contract_hash"],
+        },
+    ).json()
+    return project, decision, active
+
+
+def test_decision_change_impact_estimates_only_active_frozen_dag_cost(client: TestClient) -> None:
+    project, decision, snapshot = create_observed_active_snapshot(client)
+    before_project = client.get(f"/api/v1/projects/{project['id']}").json()
+    with SessionLocal() as session:
+        persisted_project = session.get(Project, project["id"])
+        active_snapshot_id = persisted_project.active_snapshot_id
+        cost_event_count = len(list(session.scalars(select(CostEvent).where(
+            CostEvent.project_id == project["id"]
+        ))))
+        project_event_count = len(list(session.scalars(select(ProjectEvent).where(
+            ProjectEvent.project_id == project["id"]
+        ))))
+        assert len(list(session.scalars(select(WorkItem).where(WorkItem.project_id == project["id"])))) == 0
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/decisions/{decision['id']}/change-impact-analyses",
+        json={
+            "command_id": "active-decision-change-impact",
+            "actor_id": "cost-reviewer",
+            "proposed_value": "cinematic",
+        },
+    )
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["active_snapshot_id"] == snapshot["id"]
+    assert analysis["status"] == "completed"
+    assert analysis["estimated_work_count"] == 6
+    assert analysis["cost_status"] == "estimated"
+    assert analysis["estimated_cost"] == pytest.approx(0.9)
+    assert analysis["currency"] == "CNY"
+    estimated_targets = [item for item in analysis["targets"] if item["included_in_estimate"]]
+    assert len(estimated_targets) == 6
+    assert {item["record_type"] for item in estimated_targets} == {"dag_node"}
+    assert sum(item["estimated_cost"] for item in estimated_targets) == pytest.approx(0.9)
+    assert analysis["target_counts"]["dag_node"] == 7
+    assert analysis["target_counts"]["snapshot"] == 1
+
+    after_project = client.get(f"/api/v1/projects/{project['id']}").json()
+    assert after_project["status"] == before_project["status"]
+    with SessionLocal() as session:
+        assert session.get(Project, project["id"]).active_snapshot_id == active_snapshot_id
+        assert len(list(session.scalars(select(CostEvent).where(
+            CostEvent.project_id == project["id"]
+        )))) == cost_event_count
+        assert len(list(session.scalars(select(ProjectEvent).where(
+            ProjectEvent.project_id == project["id"]
+        )))) == project_event_count + 1
+        assert len(list(session.scalars(select(WorkItem).where(WorkItem.project_id == project["id"])))) == 0
+        stored = session.get(DecisionChangeImpactAnalysis, analysis["id"])
+        assert stored.analysis_hash == analysis["analysis_hash"]
 
 
 def solid_png(width: int, height: int) -> bytes:

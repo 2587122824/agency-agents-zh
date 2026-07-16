@@ -17,11 +17,11 @@
 |---|---|---|
 | React + TypeScript + Vite | 已完成 | `v2/frontend`，生产构建持续通过 |
 | FastAPI + Pydantic | 已完成 | `v2/backend/app/main.py`、`api/router.py` |
-| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_11_*` |
+| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_12_*` |
 | 数据库队列与独立 Worker | 已完成 | `WorkItem`、`WorkAttempt`、`workers/worker.py` |
 | SSE 事件流与游标恢复 | 已完成 | `ProjectEvent`、`events/service.py`、`Last-Event-ID` |
 | 项目状态机与统一评估器 | 部分完成 | 项目控制台有只读阶段评估；状态写入仍分布在应用服务中，尚无统一转移器 |
-| Repository 接口 | 已完成 | Project/Event/Decision/Command/Creation/Planning/Production/Quality/Editor/Delivery/Work/Configuration/Registry/Control/ContactSheet 均有协议、SQLAlchemy 实现和合同测试；当前应用服务、Worker 与业务只读投影已无直接 ORM 查询 |
+| Repository 接口 | 已完成 | Project/Event/Decision/Command/Creation/Planning/Production/Quality/Editor/Delivery/Work/Configuration/Registry/Control/ContactSheet/Impact 均有协议、SQLAlchemy 实现和合同测试；当前应用服务、Worker 与业务投影已无直接 ORM 查询 |
 | 事件信封与 Outbox | 部分完成 | 已有持久事件、项目序列和 SSE；尚无完整事件信封与 Outbox 发布边界 |
 
 ## 创作、合同与编排
@@ -32,7 +32,7 @@
 | 类型化实体与不可变版本 | 已完成 | `Entity`、`EntityVersion`、实体资产库页面 |
 | 方案候选与显式确认 | 已完成 | Creative/Director AgentRun、候选接受命令、方案页 |
 | 结构化分镜编辑 | 已完成 | 类型化逐镜头 patch、候选替代链、行版本冲突、方案页编辑器与版本历史；不开放自由 JSON 或提示词覆盖 |
-| 决策影响图 | 部分完成 | 已有生产配置/快照影响分析和只读已观测 Decision 传播图；尚无持久化前瞻影响、未来工作量/费用估算或变更确认命令 |
+| 决策影响分析 | 已完成 | 已观测传播图、持久化变更提案报告、精确目标、活动快照工作量与冻结价格汇总；按确认边界不提供应用变更、失效、重做或重试命令 |
 | 生产快照、DAG 与依赖验证 | 已完成 | `ProductionSnapshot`、`DAGNode`、`DependencyEdge` 与确定性编译测试 |
 | 工作流槽位注册表 | 已完成 | 版本化系统配置、WorkflowSlot、NodeInfoList 验证和设置页 |
 | 调用与费用估算 | 已完成 | `ProductionImpactAnalysis`、版本化价格目录与精确金额确认 |
@@ -55,6 +55,6 @@
 
 ## 当前安全开发顺序
 
-1. 评审持久化前瞻 DecisionImpact、未来工作量与费用估算语义；实施前确认，现有已观测图保持只读。
-2. 单独评审项目状态转移器与 Outbox；二者都不得在重构中顺带引入。
+1. 单独评审项目状态转移器与 Outbox；二者都不得在重构中顺带引入。
+2. 若要把决策影响报告转成实际变更，必须先确认 Decision 版本链、选择范围、费用和状态转移语义。
 3. Provider、OSS、FFmpeg 与重试保持冻结，直到用户明确授权对应边界。
