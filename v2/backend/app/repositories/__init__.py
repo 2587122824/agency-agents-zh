@@ -1,6 +1,7 @@
 from .contracts import (
     CommandRepository,
     ConfigurationRepository,
+    ControlRepository,
     CreationRepository,
     DecisionRepository,
     DeliveryRepository,
@@ -16,6 +17,7 @@ from .contracts import (
 from .sqlalchemy import (
     SqlAlchemyCommandRepository,
     SqlAlchemyConfigurationRepository,
+    SqlAlchemyControlRepository,
     SqlAlchemyCreationRepository,
     SqlAlchemyDecisionRepository,
     SqlAlchemyDeliveryRepository,
@@ -32,6 +34,7 @@ from .sqlalchemy import (
 __all__ = [
     "CommandRepository",
     "ConfigurationRepository",
+    "ControlRepository",
     "CreationRepository",
     "DecisionRepository",
     "DeliveryRepository",
@@ -45,6 +48,7 @@ __all__ = [
     "WorkRepository",
     "SqlAlchemyCommandRepository",
     "SqlAlchemyConfigurationRepository",
+    "SqlAlchemyControlRepository",
     "SqlAlchemyCreationRepository",
     "SqlAlchemyDecisionRepository",
     "SqlAlchemyDeliveryRepository",

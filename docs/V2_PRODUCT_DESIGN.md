@@ -482,6 +482,8 @@ DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表
 
 首期控制台使用只读投影，不新增或覆盖项目状态。接口同时返回 `persisted_status` 与 `evaluated_stage`：前者是命令写入的权威生命周期状态，后者仅根据当前方案、活动快照、工作项、素材、时间线和交付记录计算页面导航阶段。两者不一致时必须同时展示，禁止前端把展示阶段写回数据库。
 
+后端通过只读 `ControlRepository` 获取方案、快照、执行、素材/QC、费用、时间线、交付与事件事实。Repository 不计算阶段、不归类阻塞、不汇总跨币种费用，也不从错误文本推断路由；这些投影规则由控制台应用服务显式维护。
+
 阻断按记录类型收集，包括快照执行阻断、blocked WorkItem、blocked QCReport 和 blocked DeliveryAttempt；不得通过错误文案关键词归类。供应商、适配器、工作流和任务 ID 只读取已冻结的 WorkAttempt 请求清单与执行记录。费用按币种分别汇总，不跨币种折算，也不把预计费用显示为实际扣费。
 
 首期查询接口：

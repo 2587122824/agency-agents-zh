@@ -1,5 +1,14 @@
 # Handoff Context
 
+## 2026-07-16 V2 Project Control Repository Sprint 25
+
+- Added a read-only typed `ControlRepository` covering active plans, exact and historical snapshots, WorkItems/Attempts, Assets, blocked QC evidence, DAG nodes, timelines, deliveries, planning-candidate existence, costs, events, and ordered projects.
+- Migrated the project-control projection away from direct SQLAlchemy queries while preserving persisted-status versus evaluated-stage separation, authority-snapshot selection, stage priority, structured blocker classification, per-currency cost totals, frozen WorkAttempt routes, recent-event limits, and next-action semantics.
+- Added a Control repository contract test covering project/snapshot isolation, ordering, active/latest selection, blocked-report selection, planning candidates, costs, events, and empty item-ID behavior.
+- Updated the dedicated control implementation document plus repository, product, data-model, implementation-status, and handoff documentation.
+- No schema migration, project-state write, stage-rule change, cost conversion, route inference, provider call, retry, fallback, route substitution, confirmation change, or next-action execution was introduced.
+- Verification target: 44 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Entity Registry Repository Sprint 24
 
 - Added a read-only typed `RegistryRepository` covering globally ordered projects, entities and immutable versions; exact source attachments; confirmed bindings; plans, Shots, snapshots, and frozen entity references.

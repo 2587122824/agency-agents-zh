@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.models import (
@@ -23,6 +22,7 @@ from ..db.models import (
     WorkItem,
 )
 from ..quality.service import asset_read
+from ..repositories import ControlRepository, SqlAlchemyControlRepository
 
 
 STAGE_LABELS = {
@@ -37,28 +37,27 @@ STAGE_LABELS = {
 }
 
 
-def _active_plan(session: Session, project: Project) -> PlanVersion | None:
-    return session.scalar(select(PlanVersion).where(
-        PlanVersion.project_id == project.id,
-        PlanVersion.is_active.is_(True),
-    ).order_by(PlanVersion.version_number.desc()).limit(1))
+def _active_plan(repository: ControlRepository, project: Project) -> PlanVersion | None:
+    return repository.active_plan(project.id)
 
 
-def _snapshots(session: Session, project: Project) -> tuple[ProductionSnapshot | None, ProductionSnapshot | None]:
-    rows = list(session.scalars(select(ProductionSnapshot).where(
-        ProductionSnapshot.project_id == project.id,
-    ).order_by(ProductionSnapshot.snapshot_number.desc())))
+def _snapshots(
+    repository: ControlRepository,
+    project: Project,
+) -> tuple[ProductionSnapshot | None, ProductionSnapshot | None]:
+    rows = repository.snapshots(project.id)
     latest = rows[0] if rows else None
-    active = session.get(ProductionSnapshot, project.active_snapshot_id) if project.active_snapshot_id else None
+    active = repository.snapshot(project.active_snapshot_id) if project.active_snapshot_id else None
     return active, latest
 
 
-def _attempts_for_items(session: Session, items: list[WorkItem]) -> dict[str, list[WorkAttempt]]:
+def _attempts_for_items(
+    repository: ControlRepository,
+    items: list[WorkItem],
+) -> dict[str, list[WorkAttempt]]:
     if not items:
         return {}
-    rows = list(session.scalars(select(WorkAttempt).where(
-        WorkAttempt.work_item_id.in_([item.id for item in items]),
-    ).order_by(WorkAttempt.work_item_id, WorkAttempt.attempt_number)))
+    rows = repository.attempts_for_items([item.id for item in items])
     result: dict[str, list[WorkAttempt]] = defaultdict(list)
     for row in rows:
         result[row.work_item_id].append(row)
@@ -157,7 +156,7 @@ def _next_action(
     return {"code": "CONTINUE_REQUIREMENTS", "label": "继续确认创作需求", "path": project_path}
 
 
-def _costs(session: Session, project: Project) -> list[dict]:
+def _costs(repository: ControlRepository, project: Project) -> list[dict]:
     totals: dict[str, dict[str, float | int]] = defaultdict(lambda: {
         "estimated_confirmed": 0.0,
         "charged_confirmed": 0.0,
@@ -165,7 +164,7 @@ def _costs(session: Session, project: Project) -> list[dict]:
         "refunded_confirmed": 0.0,
         "pending_event_count": 0,
     })
-    for event in session.scalars(select(CostEvent).where(CostEvent.project_id == project.id)):
+    for event in repository.cost_events(project.id):
         row = totals[event.currency]
         if event.status != "confirmed":
             row["pending_event_count"] += 1
@@ -177,6 +176,7 @@ def _costs(session: Session, project: Project) -> list[dict]:
 
 
 def _blockers(
+    repository: ControlRepository,
     session: Session,
     project: Project,
     snapshot: ProductionSnapshot | None,
@@ -188,7 +188,7 @@ def _blockers(
     blockers: list[dict] = []
     nodes = {
         node.id: node.node_key
-        for node in session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot.id))
+        for node in repository.dag_nodes(snapshot.id)
     } if snapshot else {}
     if snapshot:
         for index, item in enumerate(snapshot.execution_blockers or []):
@@ -213,13 +213,10 @@ def _blockers(
             "affected_node_keys": [nodes[item.dag_node_id]] if item.dag_node_id in nodes else [],
         })
     for asset in assets:
-        report = session.scalar(select(QCReport).where(
-            QCReport.asset_id == asset.id,
-            QCReport.status == "blocked",
-        ).order_by(QCReport.report_number.desc()).limit(1))
+        report = repository.latest_blocked_report(asset.id)
         if not report:
             continue
-        findings = list(session.scalars(select(QCFinding).where(QCFinding.qc_report_id == report.id).order_by(QCFinding.created_at)))
+        findings = repository.findings(report.id)
         asset_row = asset_read(session, asset)
         for finding in findings:
             blockers.append({
@@ -243,32 +240,22 @@ def _blockers(
 
 
 def _project_control(session: Session, project: Project, include_detail: bool) -> dict:
-    plan = _active_plan(session, project)
-    active_snapshot, latest_snapshot = _snapshots(session, project)
+    repository = SqlAlchemyControlRepository(session)
+    plan = _active_plan(repository, project)
+    active_snapshot, latest_snapshot = _snapshots(repository, project)
     authority_snapshot = active_snapshot or latest_snapshot
-    items = list(session.scalars(select(WorkItem).where(
-        WorkItem.project_id == project.id,
-        *([WorkItem.snapshot_id == authority_snapshot.id] if authority_snapshot else []),
-    ).order_by(WorkItem.created_at)))
-    attempts = _attempts_for_items(session, items)
-    assets = list(session.scalars(select(Asset).where(
-        Asset.project_id == project.id,
-        *([Asset.snapshot_id == authority_snapshot.id] if authority_snapshot else []),
-    ).order_by(Asset.created_at)))
-    timeline = session.scalar(select(Timeline).where(Timeline.project_id == project.id).order_by(Timeline.version_number.desc()).limit(1))
-    delivery = session.scalar(select(DeliveryAttempt).where(DeliveryAttempt.project_id == project.id).order_by(DeliveryAttempt.created_at.desc()).limit(1))
-    has_planning_candidate = bool(session.scalar(select(CreativeBriefCandidate.id).where(
-        CreativeBriefCandidate.project_id == project.id,
-    ).limit(1)) or session.scalar(select(ShotPlanCandidate.id).where(
-        ShotPlanCandidate.project_id == project.id,
-    ).limit(1)))
+    snapshot_id = authority_snapshot.id if authority_snapshot else None
+    items = repository.work_items(project.id, snapshot_id)
+    attempts = _attempts_for_items(repository, items)
+    assets = repository.assets(project.id, snapshot_id)
+    timeline = repository.latest_timeline(project.id)
+    delivery = repository.latest_delivery(project.id)
+    has_planning_candidate = repository.has_planning_candidate(project.id)
     work_counts = Counter(item.status for item in items)
     asset_counts = Counter(asset.state for asset in assets)
-    blockers = _blockers(session, project, authority_snapshot, items, attempts, assets, delivery)
+    blockers = _blockers(repository, session, project, authority_snapshot, items, attempts, assets, delivery)
     stage = _stage(project, plan, active_snapshot, latest_snapshot, timeline, delivery, has_planning_candidate)
-    events = list(session.scalars(select(ProjectEvent).where(
-        ProjectEvent.project_id == project.id,
-    ).order_by(ProjectEvent.sequence.desc()).limit(20)))
+    events = repository.events(project.id)
     next_action = _next_action(project, stage, active_snapshot, latest_snapshot, timeline, delivery, work_counts, asset_counts)
     result = {
         "project_id": project.id,
@@ -294,7 +281,7 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
         return result
     node_keys = {
         node.id: node.node_key
-        for node in session.scalars(select(DAGNode).where(DAGNode.snapshot_id == authority_snapshot.id))
+        for node in repository.dag_nodes(authority_snapshot.id)
     } if authority_snapshot else {}
     routes = []
     for item in items:
@@ -341,7 +328,7 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
             "final_asset_id": delivery.final_asset_id,
             "error_code": delivery.error_code,
         },
-        "costs": _costs(session, project),
+        "costs": _costs(repository, project),
         "blockers": blockers,
         "routes": routes,
         "recent_events": [{column.name: getattr(event, column.name) for column in event.__table__.columns if column.name != "project_id"} for event in events],
@@ -350,7 +337,7 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
 
 
 def project_controls(session: Session) -> list[dict]:
-    projects = list(session.scalars(select(Project).order_by(Project.updated_at.desc())))
+    projects = SqlAlchemyControlRepository(session).projects()
     return [_project_control(session, project, False) for project in projects]
 
 

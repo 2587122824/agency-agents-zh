@@ -1,6 +1,6 @@
 # 片场 V2 项目控制台实现
 
-版本：v0.1
+版本：v0.2
 
 状态：已实现
 
@@ -41,6 +41,17 @@ GET /api/v1/projects/{project_id}/control-center
 ```
 
 列表接口用于首页总控，详情接口用于单项目证据视图。两者都是只读 GET，不创建命令回执或事件。
+
+## 4.1 Repository 边界
+
+只读 `ControlRepository` 负责精确读取：
+
+- 活动方案、项目快照和显式活动快照 ID。
+- 当前权威快照范围内的 WorkItem、WorkAttempt、Asset、DAGNode 与 blocked QC 证据。
+- 最新时间线、最新交付尝试、规划候选存在性和最近 20 条项目事件。
+- 原始 CostEvent 与项目更新时间排序。
+
+Control 应用服务继续负责权威快照选择、阶段优先级、阻塞证据结构、费用按币种聚合、实际路由展示和下一步导航。Repository 不写项目状态，不执行下一步，不根据错误文案分类，也不把未确认费用计入确认金额。
 
 ## 5. 页面
 

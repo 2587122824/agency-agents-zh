@@ -1033,3 +1033,104 @@ class SqlAlchemyRegistryRepository:
 
     def attachment(self, attachment_id: str) -> Attachment | None:
         return self.session.get(Attachment, attachment_id)
+
+
+class SqlAlchemyControlRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def active_plan(self, project_id: str) -> PlanVersion | None:
+        return self.session.scalar(
+            select(PlanVersion)
+            .where(PlanVersion.project_id == project_id, PlanVersion.is_active.is_(True))
+            .order_by(PlanVersion.version_number.desc())
+            .limit(1)
+        )
+
+    def snapshots(self, project_id: str) -> list[ProductionSnapshot]:
+        return list(self.session.scalars(
+            select(ProductionSnapshot)
+            .where(ProductionSnapshot.project_id == project_id)
+            .order_by(ProductionSnapshot.snapshot_number.desc())
+        ))
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None:
+        return self.session.get(ProductionSnapshot, snapshot_id)
+
+    def attempts_for_items(self, work_item_ids: list[str]) -> list[WorkAttempt]:
+        if not work_item_ids:
+            return []
+        return list(self.session.scalars(
+            select(WorkAttempt)
+            .where(WorkAttempt.work_item_id.in_(work_item_ids))
+            .order_by(WorkAttempt.work_item_id, WorkAttempt.attempt_number)
+        ))
+
+    def cost_events(self, project_id: str) -> list[CostEvent]:
+        return list(self.session.scalars(select(CostEvent).where(CostEvent.project_id == project_id)))
+
+    def dag_nodes(self, snapshot_id: str) -> list[DAGNode]:
+        return list(self.session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot_id)))
+
+    def latest_blocked_report(self, asset_id: str) -> QCReport | None:
+        return self.session.scalar(
+            select(QCReport)
+            .where(QCReport.asset_id == asset_id, QCReport.status == "blocked")
+            .order_by(QCReport.report_number.desc())
+            .limit(1)
+        )
+
+    def findings(self, report_id: str) -> list[QCFinding]:
+        return list(self.session.scalars(
+            select(QCFinding)
+            .where(QCFinding.qc_report_id == report_id)
+            .order_by(QCFinding.created_at)
+        ))
+
+    def work_items(self, project_id: str, snapshot_id: str | None) -> list[WorkItem]:
+        statement = select(WorkItem).where(WorkItem.project_id == project_id)
+        if snapshot_id is not None:
+            statement = statement.where(WorkItem.snapshot_id == snapshot_id)
+        return list(self.session.scalars(statement.order_by(WorkItem.created_at)))
+
+    def assets(self, project_id: str, snapshot_id: str | None) -> list[Asset]:
+        statement = select(Asset).where(Asset.project_id == project_id)
+        if snapshot_id is not None:
+            statement = statement.where(Asset.snapshot_id == snapshot_id)
+        return list(self.session.scalars(statement.order_by(Asset.created_at)))
+
+    def latest_timeline(self, project_id: str) -> Timeline | None:
+        return self.session.scalar(
+            select(Timeline)
+            .where(Timeline.project_id == project_id)
+            .order_by(Timeline.version_number.desc())
+            .limit(1)
+        )
+
+    def latest_delivery(self, project_id: str) -> DeliveryAttempt | None:
+        return self.session.scalar(
+            select(DeliveryAttempt)
+            .where(DeliveryAttempt.project_id == project_id)
+            .order_by(DeliveryAttempt.created_at.desc())
+            .limit(1)
+        )
+
+    def has_planning_candidate(self, project_id: str) -> bool:
+        brief_id = self.session.scalar(
+            select(CreativeBriefCandidate.id).where(CreativeBriefCandidate.project_id == project_id).limit(1)
+        )
+        shot_plan_id = self.session.scalar(
+            select(ShotPlanCandidate.id).where(ShotPlanCandidate.project_id == project_id).limit(1)
+        )
+        return bool(brief_id or shot_plan_id)
+
+    def events(self, project_id: str, *, limit: int = 20) -> list[ProjectEvent]:
+        return list(self.session.scalars(
+            select(ProjectEvent)
+            .where(ProjectEvent.project_id == project_id)
+            .order_by(ProjectEvent.sequence.desc())
+            .limit(limit)
+        ))
+
+    def projects(self) -> list[Project]:
+        return list(self.session.scalars(select(Project).order_by(Project.updated_at.desc())))

@@ -16,6 +16,7 @@ from v2.backend.app.db.models import (
     ClarificationRequest,
     ConfigurationCommandReceipt,
     ConfigurationReference,
+    CostEvent,
     CreativeBriefCandidate,
     DAGNode,
     Decision,
@@ -52,6 +53,7 @@ from v2.backend.app.db.session import Base
 from v2.backend.app.repositories import (
     SqlAlchemyCommandRepository,
     SqlAlchemyConfigurationRepository,
+    SqlAlchemyControlRepository,
     SqlAlchemyCreationRepository,
     SqlAlchemyDecisionRepository,
     SqlAlchemyDeliveryRepository,
@@ -1877,5 +1879,384 @@ def test_registry_repository_contract_preserves_global_projection_order_and_exac
             assert registry.attachments_by_ids(set()) == []
             assert registry.bindings_by_entity_version_ids(set()) == []
             assert registry.snapshot_entity_versions(set()) == []
+    finally:
+        engine.dispose()
+
+
+def test_control_repository_contract_preserves_authority_scope_history_and_ordering() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            control = SqlAlchemyControlRepository(session)
+            now = utc_now()
+            project = Project(
+                id="project-control",
+                title="Control",
+                core_topic="Control repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+                updated_at=now,
+            )
+            other = Project(
+                id="project-control-other",
+                title="Other",
+                core_topic="Control isolation",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+                updated_at=now - timedelta(minutes=1),
+            )
+            projects.add(project)
+            projects.add(other)
+            projects.flush()
+            first_plan = PlanVersion(
+                id="plan-control-1",
+                project_id=project.id,
+                version_number=1,
+                requirement_version_id="requirement-control-1",
+                shot_plan_candidate_id="shot-plan-control-1",
+                creative_brief={},
+                is_active=True,
+            )
+            latest_plan = PlanVersion(
+                id="plan-control-2",
+                project_id=project.id,
+                version_number=2,
+                requirement_version_id="requirement-control-2",
+                shot_plan_candidate_id="shot-plan-control-2",
+                creative_brief={},
+                is_active=True,
+            )
+            session.add_all([first_plan, latest_plan])
+            session.flush()
+            first_snapshot = ProductionSnapshot(
+                id="snapshot-control-1",
+                project_id=project.id,
+                plan_version_id=first_plan.id,
+                production_config_version_id="config-control",
+                impact_analysis_id="impact-control-1",
+                snapshot_number=1,
+                status="locked",
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="a" * 64,
+            )
+            latest_snapshot = ProductionSnapshot(
+                id="snapshot-control-2",
+                project_id=project.id,
+                plan_version_id=latest_plan.id,
+                production_config_version_id="config-control",
+                impact_analysis_id="impact-control-2",
+                snapshot_number=2,
+                status="submitted",
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="b" * 64,
+            )
+            other_snapshot = ProductionSnapshot(
+                id="snapshot-control-other",
+                project_id=other.id,
+                plan_version_id="plan-control-other",
+                production_config_version_id="config-control",
+                impact_analysis_id="impact-control-other",
+                snapshot_number=1,
+                status="submitted",
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="c" * 64,
+            )
+            session.add_all([first_snapshot, latest_snapshot, other_snapshot])
+            session.flush()
+            node = DAGNode(
+                id="node-control",
+                snapshot_id=latest_snapshot.id,
+                node_key="shot.001.video",
+                kind="generate_i2v_clip",
+                input_contract={},
+                output_contract={"media_type": "video"},
+            )
+            earlier_item = WorkItem(
+                id="work-control-1",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                dag_node_id=node.id,
+                kind=node.kind,
+                payload={},
+                status="completed",
+                created_at=now - timedelta(minutes=2),
+            )
+            later_item = WorkItem(
+                id="work-control-2",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                kind="contract_validation",
+                payload={},
+                status="blocked",
+                created_at=now - timedelta(minutes=1),
+            )
+            historical_item = WorkItem(
+                id="work-control-history",
+                project_id=project.id,
+                snapshot_id=first_snapshot.id,
+                kind="contract_validation",
+                payload={},
+                status="completed",
+                created_at=now - timedelta(minutes=3),
+            )
+            session.add_all([node, later_item, earlier_item, historical_item])
+            session.flush()
+            second_attempt = WorkAttempt(
+                id="attempt-control-2",
+                work_item_id=earlier_item.id,
+                attempt_number=2,
+                trigger="explicit_submission",
+                provider="mock",
+                request_fingerprint="d" * 64,
+                request_manifest={},
+                state="completed",
+            )
+            first_attempt = WorkAttempt(
+                id="attempt-control-1",
+                work_item_id=earlier_item.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="mock",
+                request_fingerprint="e" * 64,
+                request_manifest={},
+                state="completed",
+            )
+            earlier_asset = Asset(
+                id="asset-control-1",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                dag_node_id=node.id,
+                output_index=0,
+                asset_type="video",
+                role="clip",
+                uri="runtime://assets/control-1.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="approved",
+                created_at=now - timedelta(minutes=2),
+            )
+            later_asset = Asset(
+                id="asset-control-2",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                output_index=0,
+                asset_type="video",
+                role="clip",
+                uri="runtime://assets/control-2.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="archived",
+                created_at=now - timedelta(minutes=1),
+            )
+            historical_asset = Asset(
+                id="asset-control-history",
+                project_id=project.id,
+                snapshot_id=first_snapshot.id,
+                output_index=0,
+                asset_type="video",
+                role="clip",
+                uri="runtime://assets/control-history.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="approved",
+                created_at=now - timedelta(minutes=3),
+            )
+            session.add_all([
+                second_attempt,
+                first_attempt,
+                earlier_asset,
+                later_asset,
+                historical_asset,
+            ])
+            session.flush()
+            blocked_report_one = QCReport(
+                id="report-control-1",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                asset_id=later_asset.id,
+                report_number=1,
+                ruleset_version="control.v1",
+                status="blocked",
+                analyzer="contract",
+            )
+            blocked_report_two = QCReport(
+                id="report-control-2",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                asset_id=later_asset.id,
+                report_number=2,
+                ruleset_version="control.v1",
+                status="blocked",
+                analyzer="contract",
+            )
+            session.add_all([blocked_report_one, blocked_report_two])
+            session.flush()
+            later_finding = QCFinding(
+                id="finding-control-2",
+                qc_report_id=blocked_report_two.id,
+                code="SECOND",
+                severity="blocked",
+                disposition="blocked",
+                created_at=now,
+            )
+            earlier_finding = QCFinding(
+                id="finding-control-1",
+                qc_report_id=blocked_report_two.id,
+                code="FIRST",
+                severity="blocked",
+                disposition="blocked",
+                created_at=now - timedelta(minutes=1),
+            )
+            timeline_one = Timeline(
+                id="timeline-control-1",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                version_number=1,
+                status="candidate",
+                source="user",
+                output_spec={},
+                track_config={},
+            )
+            timeline_two = Timeline(
+                id="timeline-control-2",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                version_number=2,
+                status="confirmed",
+                source="user",
+                output_spec={},
+                track_config={},
+            )
+            delivery_one = DeliveryAttempt(
+                id="delivery-control-1",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                timeline_id=timeline_one.id,
+                attempt_number=1,
+                status="authorized",
+                execution_kind="external_upload",
+                request_manifest={},
+                request_fingerprint="f" * 64,
+                created_at=now - timedelta(minutes=1),
+            )
+            delivery_two = DeliveryAttempt(
+                id="delivery-control-2",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                timeline_id=timeline_two.id,
+                attempt_number=1,
+                status="verified",
+                execution_kind="external_upload",
+                request_manifest={},
+                request_fingerprint="1" * 64,
+                created_at=now,
+            )
+            candidate = CreativeBriefCandidate(
+                id="brief-control",
+                project_id=project.id,
+                requirement_version_id="requirement-control-2",
+                agent_run_id="agent-run-control",
+                brief={},
+            )
+            cost = CostEvent(
+                id="cost-control",
+                project_id=project.id,
+                snapshot_id=latest_snapshot.id,
+                provider="mock",
+                provider_operation="generate_i2v_clip",
+                kind="estimated",
+                amount=1.25,
+                currency="CNY",
+                status="confirmed",
+            )
+            event_one = ProjectEvent(
+                project_id=project.id,
+                event_type="control.one",
+                message="One",
+            )
+            event_two = ProjectEvent(
+                project_id=project.id,
+                event_type="control.two",
+                message="Two",
+            )
+            event_three = ProjectEvent(
+                project_id=project.id,
+                event_type="control.three",
+                message="Three",
+            )
+            session.add_all([
+                later_finding,
+                earlier_finding,
+                timeline_one,
+                timeline_two,
+                delivery_one,
+                delivery_two,
+                candidate,
+                cost,
+                event_one,
+                event_two,
+                event_three,
+            ])
+            session.commit()
+
+            assert control.active_plan(project.id).id == latest_plan.id  # type: ignore[union-attr]
+            assert [row.id for row in control.snapshots(project.id)] == [latest_snapshot.id, first_snapshot.id]
+            assert control.snapshot(latest_snapshot.id).id == latest_snapshot.id  # type: ignore[union-attr]
+            assert [row.id for row in control.attempts_for_items([earlier_item.id])] == [
+                first_attempt.id,
+                second_attempt.id,
+            ]
+            assert [row.id for row in control.cost_events(project.id)] == [cost.id]
+            assert [row.id for row in control.dag_nodes(latest_snapshot.id)] == [node.id]
+            assert control.latest_blocked_report(later_asset.id).id == blocked_report_two.id  # type: ignore[union-attr]
+            assert [row.id for row in control.findings(blocked_report_two.id)] == [
+                earlier_finding.id,
+                later_finding.id,
+            ]
+            assert [row.id for row in control.work_items(project.id, latest_snapshot.id)] == [
+                earlier_item.id,
+                later_item.id,
+            ]
+            assert [row.id for row in control.work_items(project.id, None)] == [
+                historical_item.id,
+                earlier_item.id,
+                later_item.id,
+            ]
+            assert [row.id for row in control.assets(project.id, latest_snapshot.id)] == [
+                earlier_asset.id,
+                later_asset.id,
+            ]
+            assert [row.id for row in control.assets(project.id, None)] == [
+                historical_asset.id,
+                earlier_asset.id,
+                later_asset.id,
+            ]
+            assert control.latest_timeline(project.id).id == timeline_two.id  # type: ignore[union-attr]
+            assert control.latest_delivery(project.id).id == delivery_two.id  # type: ignore[union-attr]
+            assert control.has_planning_candidate(project.id) is True
+            assert control.has_planning_candidate(other.id) is False
+            assert [row.sequence for row in control.events(project.id, limit=2)] == [
+                event_three.sequence,
+                event_two.sequence,
+            ]
+            assert [row.id for row in control.projects()] == [project.id, other.id]
+            assert control.attempts_for_items([]) == []
     finally:
         engine.dispose()
