@@ -11,7 +11,7 @@
 - Successful outputs download deterministically under `runtime://assets/providers/runninghub/<fingerprint>/...` with MIME, hash, byte size, type, and role. Existing explicit asset registration and QC remain authoritative.
 - The currently published V1-imported RunningHub configuration still contains legacy placeholder sources and is not compatible with the strict adapter. It was not mutated. A user-confirmed new configuration version is required before any future real connectivity test.
 - Added `docs/V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md` and updated product, data-model, state/event, implementation-status, and handoff documentation.
-- Verification before release: 116 backend tests passed, including fake transport and persisted submit/poll restart behavior; Python compileall, frontend production build, Alembic current/head at `20260717_16`, desktop/mobile browser checks, and diff audit passed. Commit/push and the final `8766` restart remain release steps.
+- Verification completed with 116 backend tests, including fake transport and persisted submit/poll restart behavior; Python compileall, frontend production build, Alembic current/head at `20260717_16`, desktop/mobile browser checks, and diff audit passed. Commit `fb6f9056` was pushed to `main`; the final `8766` API/Worker restart, health check, and error-log check passed.
 - The previously exposed RunningHub access key must remain unused and should be rotated before any later real test.
 
 ## 2026-07-17 V2 Provider Foundation and Readiness Sprint 38
