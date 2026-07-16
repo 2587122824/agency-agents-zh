@@ -21,20 +21,13 @@ from ..db.models import (
     WorkAttempt,
     WorkItem,
 )
+from ..orchestration.project_state import (
+    ProjectStateFacts,
+    SnapshotStateFact,
+    evaluate_project_state,
+)
 from ..quality.service import asset_read
 from ..repositories import ControlRepository, SqlAlchemyControlRepository
-
-
-STAGE_LABELS = {
-    "requirements": "需求确认",
-    "planning": "方案规划",
-    "production_preparation": "生产准备",
-    "production": "生产执行",
-    "quality_review": "素材审核",
-    "editing": "剪辑",
-    "delivery": "最终交付",
-    "completed": "已完成",
-}
 
 
 def _active_plan(repository: ControlRepository, project: Project) -> PlanVersion | None:
@@ -62,98 +55,6 @@ def _attempts_for_items(
     for row in rows:
         result[row.work_item_id].append(row)
     return result
-
-
-def _stage(
-    project: Project,
-    plan: PlanVersion | None,
-    snapshot: ProductionSnapshot | None,
-    latest_snapshot: ProductionSnapshot | None,
-    timeline: Timeline | None,
-    delivery: DeliveryAttempt | None,
-    has_planning_candidate: bool,
-) -> str:
-    if project.delivery_asset_id or (delivery and delivery.status == "verified"):
-        return "completed"
-    if delivery or (timeline and timeline.status in {"confirmed", "exported"}) or project.status == "delivery_ready":
-        return "delivery"
-    if timeline or project.status == "editing":
-        return "editing"
-    authority = snapshot or latest_snapshot
-    if project.status == "quality_review" or (authority and authority.status == "execution_completed"):
-        return "quality_review"
-    if authority and authority.status in {"submitted", "execution_blocked"}:
-        return "production"
-    if authority or plan:
-        return "production_preparation"
-    if has_planning_candidate:
-        return "planning"
-    return "requirements"
-
-
-def _next_action(
-    project: Project,
-    stage: str,
-    snapshot: ProductionSnapshot | None,
-    latest_snapshot: ProductionSnapshot | None,
-    timeline: Timeline | None,
-    delivery: DeliveryAttempt | None,
-    work_counts: Counter,
-    asset_counts: Counter,
-) -> dict:
-    project_path = f"/projects/{project.id}"
-    if stage == "completed":
-        return {"code": "DOWNLOAD_DELIVERY", "label": "查看并下载最终交付", "path": "/editor"}
-    if stage == "delivery":
-        if not delivery:
-            return {"code": "AUTHORIZE_DELIVERY", "label": "授权确认时间线交付", "path": "/editor", "confirmation_level": "high"}
-        if delivery.status == "authorized":
-            return {"code": "UPLOAD_DELIVERY", "label": "上传最终 MP4", "path": "/editor"}
-        if delivery.status == "output_registered":
-            return {"code": "VERIFY_DELIVERY", "label": "验证最终交付文件", "path": "/editor", "confirmation_level": "normal"}
-        if delivery.status == "blocked":
-            return {"code": "VIEW_DELIVERY_BLOCK", "label": "查看交付阻断证据", "path": "/editor"}
-        return {"code": "VIEW_DELIVERY", "label": "查看最终交付", "path": "/editor"}
-    if stage == "editing":
-        if not timeline:
-            return {"code": "CREATE_TIMELINE", "label": "创建时间线候选", "path": "/editor"}
-        if timeline.status == "candidate":
-            return {"code": "VALIDATE_TIMELINE", "label": "校验时间线候选", "path": "/editor"}
-        if timeline.status == "review":
-            return {"code": "CONFIRM_TIMELINE", "label": "确认剪辑合同", "path": "/editor", "confirmation_level": "high"}
-        return {"code": "VIEW_TIMELINE", "label": "查看剪辑时间线", "path": "/editor"}
-    if stage == "quality_review":
-        if asset_counts["created"]:
-            label = f"验证 {asset_counts['created']} 个已登记素材"
-        elif asset_counts["verified"]:
-            label = f"执行 {asset_counts['verified']} 个素材 QC"
-        elif asset_counts["review_required"]:
-            label = f"审核 {asset_counts['review_required']} 个素材"
-        else:
-            label = "查看素材审核与输出缺口"
-        return {"code": "OPEN_QUALITY_REVIEW", "label": label, "path": "/review"}
-    authority = snapshot or latest_snapshot
-    if stage == "production":
-        if work_counts["blocked"]:
-            return {"code": "VIEW_PRODUCTION_BLOCKERS", "label": f"查看 {work_counts['blocked']} 个生产阻断", "path": "/production"}
-        if work_counts["in_progress"] or work_counts["queued"]:
-            return {"code": "MONITOR_PRODUCTION", "label": "查看生产执行进度", "path": "/production"}
-        return {"code": "VIEW_PRODUCTION", "label": "查看生产执行", "path": "/production"}
-    if stage == "production_preparation":
-        if not authority:
-            return {"code": "ANALYZE_PRODUCTION_IMPACT", "label": "选择配置并分析生产影响", "path": f"{project_path}/plan"}
-        if authority.status == "preparing" and authority.cost_status == "estimated":
-            return {"code": "CONFIRM_PRODUCTION_COST", "label": "确认预计费用并锁定快照", "path": f"{project_path}/plan", "confirmation_level": "high"}
-        if authority.status == "preparing":
-            return {"code": "CONFIGURE_PRICING", "label": "补齐价格目录后创建新快照", "path": f"{project_path}/plan"}
-        if authority.status == "locked":
-            return {"code": "ACTIVATE_SNAPSHOT", "label": "激活锁定快照", "path": f"{project_path}/plan", "confirmation_level": "high"}
-        if authority.status == "active":
-            return {"code": "SUBMIT_PRODUCTION", "label": "确认完整 DAG 并提交生产", "path": f"{project_path}/plan", "incurs_production_cost": True, "confirmation_level": "high"}
-        return {"code": "OPEN_PRODUCTION_PREPARATION", "label": "查看生产准备", "path": f"{project_path}/plan"}
-    if stage == "planning":
-        return {"code": "CONTINUE_PLANNING", "label": "继续审核创意与分镜候选", "path": f"{project_path}/plan"}
-    return {"code": "CONTINUE_REQUIREMENTS", "label": "继续确认创作需求", "path": project_path}
 
 
 def _costs(repository: ControlRepository, project: Project) -> list[dict]:
@@ -254,9 +155,27 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
     work_counts = Counter(item.status for item in items)
     asset_counts = Counter(asset.state for asset in assets)
     blockers = _blockers(repository, session, project, authority_snapshot, items, attempts, assets, delivery)
-    stage = _stage(project, plan, active_snapshot, latest_snapshot, timeline, delivery, has_planning_candidate)
+    evaluation = evaluate_project_state(ProjectStateFacts(
+        project_id=project.id,
+        persisted_status=project.status,
+        has_delivery_asset=project.delivery_asset_id is not None,
+        delivery_status=delivery.status if delivery else None,
+        timeline_status=timeline.status if timeline else None,
+        active_snapshot=None if not active_snapshot else SnapshotStateFact(
+            status=active_snapshot.status,
+            cost_status=active_snapshot.cost_status,
+        ),
+        latest_snapshot=None if not latest_snapshot else SnapshotStateFact(
+            status=latest_snapshot.status,
+            cost_status=latest_snapshot.cost_status,
+        ),
+        has_active_plan=plan is not None,
+        has_planning_candidate=has_planning_candidate,
+        work_counts=work_counts,
+        asset_counts=asset_counts,
+    ))
+    stage = evaluation.stage
     events = repository.events(project.id)
-    next_action = _next_action(project, stage, active_snapshot, latest_snapshot, timeline, delivery, work_counts, asset_counts)
     result = {
         "project_id": project.id,
         "title": project.title,
@@ -266,7 +185,7 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
         "audio_mode": project.audio_mode,
         "persisted_status": project.status,
         "evaluated_stage": stage,
-        "stage_label": STAGE_LABELS[stage],
+        "stage_label": evaluation.stage_label,
         "active_plan_version": plan.version_number if plan else None,
         "active_snapshot_number": authority_snapshot.snapshot_number if authority_snapshot else None,
         "active_snapshot_status": authority_snapshot.status if authority_snapshot else None,
@@ -275,7 +194,7 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
         "blocker_count": len(blockers),
         "latest_event_at": events[0].created_at if events else None,
         "updated_at": project.updated_at,
-        "next_action": next_action,
+        "next_action": evaluation.next_action.as_dict(),
     }
     if not include_detail:
         return result

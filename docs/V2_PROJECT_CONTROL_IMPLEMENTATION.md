@@ -1,10 +1,10 @@
 # 片场 V2 项目控制台实现
 
-版本：v0.2
+版本：v0.3
 
 状态：已实现
 
-实现目录：`v2/backend/app/control/`、`v2/frontend/src/pages/DashboardPage.tsx`、`v2/frontend/src/pages/ProjectControlPage.tsx`
+实现目录：`v2/backend/app/control/`、`v2/backend/app/orchestration/project_state.py`、`v2/frontend/src/pages/DashboardPage.tsx`、`v2/frontend/src/pages/ProjectControlPage.tsx`
 
 ## 1. 范围
 
@@ -17,7 +17,9 @@
 - `persisted_status`：Project 表中的权威状态。
 - `evaluated_stage`：由现有权威记录计算的页面导航阶段。
 
-阶段投影不写回 Project。完成交付、交付尝试、时间线、质量状态、生产执行、快照和方案按从后到前的优先级判断，因此历史阻断不会遮盖已经成立的后续权威事实。
+阶段投影由不依赖 ORM 的纯函数 `evaluate_project_state(ProjectStateFacts)` 计算，不写回 Project。完成交付、交付尝试、时间线、质量状态、生产执行、快照和方案按从后到前的优先级判断，因此历史阻断不会遮盖已经成立的后续权威事实。活动快照存在时优先于最新历史快照。
+
+该评估器不是权威项目状态转移器。它不执行命令、不写事件，也不根据结果自动修改 `Project.status`。完整输入、优先级和未实现边界见 [V2 项目状态评估器实现](./V2_PROJECT_STATE_EVALUATOR_IMPLEMENTATION.md)。
 
 ## 3. 汇总事实
 
@@ -51,7 +53,7 @@ GET /api/v1/projects/{project_id}/control-center
 - 最新时间线、最新交付尝试、规划候选存在性和最近 20 条项目事件。
 - 原始 CostEvent 与项目更新时间排序。
 
-Control 应用服务继续负责权威快照选择、阶段优先级、阻塞证据结构、费用按币种聚合、实际路由展示和下一步导航。Repository 不写项目状态，不执行下一步，不根据错误文案分类，也不把未确认费用计入确认金额。
+Control 应用服务继续负责权威快照选择、阻塞证据结构、费用按币种聚合和实际路由展示，并将显式事实交给纯项目状态评估器计算阶段与下一步。Repository 和评估器都不写项目状态、不执行下一步、不根据错误文案分类，也不把未确认费用计入确认金额。
 
 ## 5. 页面
 
@@ -68,3 +70,5 @@ Control 应用服务继续负责权威快照选择、阶段优先级、阻塞证
 - 费用不跨币种合并，未确认事件不进入确认金额。
 - 前端桌面和手机布局无页面级横向溢出。
 - 查询和页面不引入供应商调用、重试、兜底或隐藏状态转换。
+- 纯评估器重复读取相同事实得到相同阶段与下一步，且不修改输入计数。
+- 活动快照存在时，最新历史快照不能覆盖其阶段判断。

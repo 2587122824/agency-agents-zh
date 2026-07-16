@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Read-only Project State Evaluator Sprint 30
+
+- Added a pure, ORM-free `ProjectStateFacts -> ProjectStateEvaluation` module for the existing control-stage and next-action rules.
+- Centralized deterministic stage priority, active-snapshot authority, next-action confirmation metadata, and production-cost disclosure without changing the control API.
+- Refactored the project control projection to collect persisted facts and delegate only stage/next-action interpretation to the evaluator.
+- Added focused tests for all stage priorities, active-versus-latest snapshot authority, preparation/production/QC/editor/delivery actions, repeatability, and input non-mutation.
+- Added `docs/V2_PROJECT_STATE_EVALUATOR_IMPLEMENTATION.md` and updated product, project-control, state/event, implementation-status, and handoff documentation.
+- This is not a Project status transitioner: existing status writes remain unchanged. No event, Outbox, migration, command, provider/model call, cost event, retry, fallback, route/workflow substitution, prompt rewrite, state write, or automatic next-action execution was introduced.
+- Verification target: full backend suite, Python compileall, Vite build, Alembic `20260716_12 (head)`, repository-boundary audit, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Prospective Decision Impact Sprint 29
 
 - Added immutable DecisionChangeImpactAnalysis and DecisionChangeImpactTarget records for proposed changes to resolved decisions, with command idempotency and project isolation.

@@ -20,7 +20,7 @@
 | SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_12_*` |
 | 数据库队列与独立 Worker | 已完成 | `WorkItem`、`WorkAttempt`、`workers/worker.py` |
 | SSE 事件流与游标恢复 | 已完成 | `ProjectEvent`、`events/service.py`、`Last-Event-ID` |
-| 项目状态机与统一评估器 | 部分完成 | 项目控制台有只读阶段评估；状态写入仍分布在应用服务中，尚无统一转移器 |
+| 项目状态机与统一评估器 | 部分完成 | `orchestration/project_state.py` 已提供无 ORM 的纯事实评估器并由控制台统一调用；状态写入仍分布在应用服务中，尚无权威转移器、blocked 恢复合同或迁移 |
 | Repository 接口 | 已完成 | Project/Event/Decision/Command/Creation/Planning/Production/Quality/Editor/Delivery/Work/Configuration/Registry/Control/ContactSheet/Impact 均有协议、SQLAlchemy 实现和合同测试；当前应用服务、Worker 与业务投影已无直接 ORM 查询 |
 | 事件信封与 Outbox | 部分完成 | 已有持久事件、项目序列和 SSE；尚无完整事件信封与 Outbox 发布边界 |
 
@@ -55,6 +55,6 @@
 
 ## 当前安全开发顺序
 
-1. 单独评审项目状态转移器与 Outbox；二者都不得在重构中顺带引入。
+1. 只读项目状态评估器已经收敛；下一步需单独评审权威项目状态转移器与 Outbox，二者都不得在重构中顺带引入。
 2. 若要把决策影响报告转成实际变更，必须先确认 Decision 版本链、选择范围、费用和状态转移语义。
 3. Provider、OSS、FFmpeg 与重试保持冻结，直到用户明确授权对应边界。
