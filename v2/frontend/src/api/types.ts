@@ -448,7 +448,7 @@ export interface ProductionExecution {
   active_snapshot_id: string | null
   snapshot: ProductionSnapshot | null
   work_items: ExecutionWorkItem[]
-  blockers: Array<{ work_item_id: string; node_key: string; error: string }>
+  blockers: Array<{ work_item_id: string; node_key: string; error_code: string | null; error: string | null }>
 }
 
 export interface QCFinding {
@@ -930,7 +930,7 @@ export interface ProjectControl extends ProjectControlSummary {
   costs: Array<{ currency: string; estimated_confirmed: number; charged_confirmed: number; adjusted_confirmed: number; refunded_confirmed: number; pending_event_count: number }>
   blockers: Array<{ source_type: string; source_id: string; code: string; message: string; evidence: Record<string, unknown>; affected_node_keys: string[] }>
   routes: Array<{ work_item_id: string; work_item_status: string; node_key: string | null; attempt_id: string; attempt_number: number; attempt_state: string; provider: string; adapter_kind: string | null; provider_workflow_id: string | null; provider_task_id: string | null; request_fingerprint: string; error_code: string | null }>
-  recent_events: Array<{ sequence: number; event_type: string; message: string; data: Record<string, unknown>; created_at: string }>
+  recent_events: Array<{ sequence: number; event_id: string; event_type: string; aggregate_type: string; aggregate_id: string; message: string; data: Record<string, unknown>; created_at: string }>
 }
 
 export interface RegistryAttachment {

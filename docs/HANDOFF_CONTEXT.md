@@ -1,5 +1,20 @@
 # Handoff Context
 
+## 2026-07-17 V2 Event Envelope, Outbox, and Production Queue UX Sprint 37
+
+- Added Alembic `20260717_16`, a complete versioned ProjectEvent envelope, stable `event_id`, project-local `project_sequence`, explicit aggregate/actor/correlation fields, and a per-Project sequence allocator.
+- EventRepository now atomically creates one pending OutboxMessage for every new event. Historical events migrate as published. The explicit batch publisher marks success only after the sink accepts the envelope; sink failures remain pending and are raised without waiting, retrying, or changing business state.
+- SSE now uses the project-local sequence for `id` and `Last-Event-ID` and shares the exact event envelope with Outbox publication.
+- Existing application events now use versioned names and explicit aggregate/actor metadata. No event type or aggregate is inferred from message text.
+- The production queue now presents project/work/attempt states, work kinds, disconnected-provider failures, and dependency blocks in ordinary Chinese. IDs, node keys, fingerprints, raw providers, error codes, and raw errors are contained in collapsed technical details.
+- Production blockers are grouped by exact structured `error_code`, with one summary and affected-step count per group; every original blocker remains visible in the group's technical details.
+- Production WorkItems are returned in deterministic topological order from persisted DAG nodes and dependency edges. Creation time and node-name semantics are not used as dependency authority; missing edge nodes or cycles fail explicitly.
+- Added `docs/V2_EVENT_OUTBOX_IMPLEMENTATION.md` and updated product, data-model, state/event, repository, implementation-status, and handoff documentation.
+- No Provider, OSS, FFmpeg, external broker, automatic Outbox scheduler, retry, fallback, route substitution, prompt rewrite, recovery command, or production-cost behavior was introduced.
+- Verification completed with 107 backend tests, Python compileall, Vite production build, Alembic `20260717_16 (head)`, desktop DOM/visual checks, two grouped blocker summaries, topological timeline-last ordering, and no desktop horizontal overflow. Push and final `8766` restart remain the release steps.
+
+Runtime migration note: the local runtime database had an empty `outbox_messages` table pre-created by an accidental default-runtime test import before Alembic ran. SQLite partially applied the DDL before failing. The existing projects and configuration were preserved; 122 historical events received deterministic envelope fields and project-local sequences, 122 matching Outbox rows were recorded as `published`, required indexes were verified, and the runtime database was stamped at `20260717_16`. Fresh-database migration tests remain the authoritative reproducibility check.
+
 ## 2026-07-16 V2 Production Preparation Plain-language UX Sprint 36
 
 - Replaced backend-oriented production-preparation labels with creator-facing Chinese terms: production configuration, video specification, workflow slots, pricing catalog, snapshots, DAG nodes, WorkItems, and execution states now appear as制作配置、画面规格、图片/视频/配音生成方案、计费方案、制作方案、制作步骤、制作任务和可理解状态。

@@ -289,7 +289,7 @@ def register_attempt_asset(session: Session, project: Project, attempt_id: str, 
     repository.add(asset)
     repository.flush()
     _save_receipt(session, project.id, payload.command_id, "asset.register_output", "asset", asset.id)
-    _event(session, ProjectEvent(project_id=project.id, event_type="asset.created.v1", message="Provider output registered as an unverified asset.", data={"asset_id": asset.id, "work_attempt_id": attempt.id, "output_index": payload.output_index}))
+    _event(session, ProjectEvent(project_id=project.id, snapshot_id=asset.snapshot_id, event_type="asset.created.v1", aggregate_type="asset", aggregate_id=asset.id, actor_type="user", actor_id=payload.actor_id, causation_id=payload.command_id, message="Provider output registered as an unverified asset.", data={"asset_id": asset.id, "work_attempt_id": attempt.id, "output_index": payload.output_index}))
     session.commit()
     return asset_read(session, asset)
 
@@ -331,7 +331,7 @@ def verify_asset(session: Session, project: Project, asset_id: str, payload: Ver
     asset.verified_at = utc_now()
     asset.row_version += 1
     _save_receipt(session, project.id, payload.command_id, "asset.verify", "asset", asset.id)
-    _event(session, ProjectEvent(project_id=project.id, event_type="asset.verified.v1", message="Asset file and content hash verified.", data={"asset_id": asset.id, "content_hash": asset.content_hash, "byte_size": asset.byte_size}))
+    _event(session, ProjectEvent(project_id=project.id, snapshot_id=asset.snapshot_id, event_type="asset.verified.v1", aggregate_type="asset", aggregate_id=asset.id, actor_type="system", actor_id=payload.actor_id, causation_id=payload.command_id, message="Asset file and content hash verified.", data={"asset_id": asset.id, "content_hash": asset.content_hash, "byte_size": asset.byte_size}))
     session.commit()
     return asset_read(session, asset)
 
@@ -386,7 +386,13 @@ def _record_file_block(
     _save_receipt(session, project.id, payload.command_id, "asset.verify", "asset", asset.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=asset.snapshot_id,
         event_type="quality.blocked.v1",
+        aggregate_type="asset",
+        aggregate_id=asset.id,
+        actor_type="system",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="Registered asset failed deterministic file verification.",
         data={"asset_id": asset.id, "qc_report_id": report.id, "code": code, "evidence": evidence},
     ))
@@ -493,7 +499,7 @@ def run_asset_qc(session: Session, project: Project, asset_id: str, payload: Run
     asset.row_version += 1
     _save_receipt(session, project.id, payload.command_id, "quality.run", "qc_report", report.id)
     event_type = "quality.review_required.v1" if status == "review_required" else "quality.blocked.v1" if status == "blocked" else "asset.approved.v1"
-    _event(session, ProjectEvent(project_id=project.id, event_type=event_type, message="Asset quality contract evaluated.", data={"asset_id": asset.id, "qc_report_id": report.id, "status": status}))
+    _event(session, ProjectEvent(project_id=project.id, snapshot_id=asset.snapshot_id, event_type=event_type, aggregate_type="qc_report", aggregate_id=report.id, actor_type="system", actor_id=payload.actor_id, causation_id=payload.command_id, message="Asset quality contract evaluated.", data={"asset_id": asset.id, "qc_report_id": report.id, "status": status}))
     session.commit()
     return qc_report_read(session, report)
 
@@ -536,7 +542,7 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
         event_data={"asset_id": asset.id, "qc_report_id": report.id},
     )
     _save_receipt(session, project.id, payload.command_id, command_type, "asset", asset.id)
-    _event(session, ProjectEvent(project_id=project.id, event_type=event_type, message="Human asset review decision recorded.", data={"asset_id": asset.id, "qc_report_id": report.id, "decision": decision, "rationale": payload.rationale}))
+    _event(session, ProjectEvent(project_id=project.id, snapshot_id=asset.snapshot_id, event_type=event_type, aggregate_type="qc_report", aggregate_id=report.id, actor_type="user", actor_id=payload.actor_id, causation_id=payload.command_id, message="Human asset review decision recorded.", data={"asset_id": asset.id, "qc_report_id": report.id, "decision": decision, "rationale": payload.rationale}))
     session.commit()
     return asset_read(session, asset)
 

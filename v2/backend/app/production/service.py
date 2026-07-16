@@ -389,7 +389,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
     repository.add(analysis)
     repository.flush()
     _save_receipt(session, project.id, payload.command_id, "production.impact.analyze", "production_impact_analysis", analysis.id)
-    _event(session, ProjectEvent(project_id=project.id, event_type="production.impact_evaluated.v1", message="生产影响分析已生成", data={"analysis_id": analysis.id, "analysis_hash": analysis.analysis_hash, "validation_errors": errors}))
+    _event(session, ProjectEvent(project_id=project.id, event_type="production.impact_evaluated.v1", aggregate_type="production_impact_analysis", aggregate_id=analysis.id, actor_type="user", actor_id=payload.actor_id, causation_id=payload.command_id, message="生产影响分析已生成", data={"analysis_id": analysis.id, "analysis_hash": analysis.analysis_hash, "validation_errors": errors}))
     session.commit()
     return _impact_dict(analysis)
 
@@ -463,7 +463,7 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
     repository.add(ConfigurationReference(production_config_version_id=config.id, ref_type="snapshot", ref_id=snapshot.id))
     analysis.status = "confirmed"
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.create", "production_snapshot", snapshot.id)
-    _event(session, ProjectEvent(project_id=project.id, event_type="production.snapshot_prepared.v1", message="不可变生产快照已创建，等待成本核算", data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash, "status": snapshot.status}))
+    _event(session, ProjectEvent(project_id=project.id, snapshot_id=snapshot.id, event_type="production.snapshot_prepared.v1", aggregate_type="production_snapshot", aggregate_id=snapshot.id, actor_type="user", actor_id=payload.actor_id, causation_id=payload.command_id, message="不可变生产快照已创建，等待成本核算", data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash, "status": snapshot.status}))
     transition_project(
         session,
         project,
@@ -548,7 +548,13 @@ def lock_snapshot(
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.lock", "production_snapshot", snapshot.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=snapshot.id,
         event_type="production.snapshot_locked.v1",
+        aggregate_type="production_snapshot",
+        aggregate_id=snapshot.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="生产快照费用已确认并锁定",
         data={
             "snapshot_id": snapshot.id,
@@ -612,7 +618,13 @@ def activate_snapshot(
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.activate", "production_snapshot", snapshot.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=snapshot.id,
         event_type="production.snapshot_activated.v1",
+        aggregate_type="production_snapshot",
+        aggregate_id=snapshot.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="Production snapshot activated; no work items were created.",
         data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash},
     ))
@@ -728,7 +740,13 @@ def submit_production(
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.submit", "production_snapshot", snapshot.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=snapshot.id,
         event_type="production.submitted.v1",
+        aggregate_type="production_snapshot",
+        aggregate_id=snapshot.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="Production DAG submitted after explicit confirmation.",
         data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash, "dag_node_ids": actual_ids},
     ))
@@ -740,15 +758,45 @@ def execution_view(session: Session, project: Project) -> dict:
     repository = _production(session)
     snapshot = repository.snapshot(project.active_snapshot_id) if project.active_snapshot_id else None
     items = [] if not snapshot else repository.work_items(snapshot.id)
+    if snapshot:
+        nodes = repository.snapshot_nodes(snapshot.id)
+        edges = repository.snapshot_edges(snapshot.id)
+        node_by_id = {node.id: node for node in nodes}
+        item_by_node_id = {item.dag_node_id: item for item in items}
+        indegree = {node.id: 0 for node in nodes}
+        children: dict[str, list[str]] = {node.id: [] for node in nodes}
+        for edge in edges:
+            if edge.parent_node_id not in node_by_id or edge.child_node_id not in node_by_id:
+                raise ProductionConflictError(
+                    "DAG_EDGE_NODE_MISSING",
+                    "A persisted dependency edge references a node outside the active snapshot.",
+                )
+            indegree[edge.child_node_id] += 1
+            children[edge.parent_node_id].append(edge.child_node_id)
+        ready = sorted(
+            (node_id for node_id, count in indegree.items() if count == 0),
+            key=lambda node_id: (node_by_id[node_id].node_key, node_id),
+        )
+        ordered_node_ids: list[str] = []
+        while ready:
+            node_id = ready.pop(0)
+            ordered_node_ids.append(node_id)
+            for child_id in sorted(children[node_id], key=lambda value: (node_by_id[value].node_key, value)):
+                indegree[child_id] -= 1
+                if indegree[child_id] == 0:
+                    ready.append(child_id)
+                    ready.sort(key=lambda value: (node_by_id[value].node_key, value))
+        if len(ordered_node_ids) != len(nodes):
+            raise ProductionConflictError("DAG_CYCLE_DETECTED", "The active snapshot dependency graph contains a cycle.")
+        items = [item_by_node_id[node_id] for node_id in ordered_node_ids if node_id in item_by_node_id]
+    else:
+        node_by_id = {}
     attempts = repository.work_attempts([item.id for item in items])
     attempts_by_item: dict[str, list[dict]] = {}
     for attempt in attempts:
         attempts_by_item.setdefault(attempt.work_item_id, []).append({
             column.name: getattr(attempt, column.name) for column in attempt.__table__.columns
         })
-    node_by_id = {} if not snapshot else {
-        node.id: node for node in repository.snapshot_nodes(snapshot.id)
-    }
     work_rows = []
     for item in items:
         node = node_by_id[item.dag_node_id]
@@ -770,8 +818,18 @@ def execution_view(session: Session, project: Project) -> dict:
             "finished_at": item.finished_at,
             "attempts": attempts_by_item.get(item.id, []),
         })
-    blockers = [{"work_item_id": item.id, "node_key": node_by_id[item.dag_node_id].node_key, "error": item.error}
-                for item in items if item.status == "blocked"]
+    blockers = []
+    for item in items:
+        if item.status != "blocked":
+            continue
+        attempts = attempts_by_item.get(item.id, [])
+        latest_attempt = attempts[-1] if attempts else None
+        blockers.append({
+            "work_item_id": item.id,
+            "node_key": node_by_id[item.dag_node_id].node_key,
+            "error_code": latest_attempt["error_code"] if latest_attempt else None,
+            "error": item.error,
+        })
     return {
         "project_id": project.id,
         "project_status": project.status,

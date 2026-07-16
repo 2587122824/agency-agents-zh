@@ -129,7 +129,13 @@ def approve_quality_stage(
     _save_receipt(session, project.id, payload.command_id, "quality.stage.approve", "project", project.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=payload.expected_snapshot_id,
         event_type="quality.stage_approved.v1",
+        aggregate_type="project",
+        aggregate_id=project.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="User confirmed that the approved asset set may enter editing.",
         data={"snapshot_id": payload.expected_snapshot_id, "actor_id": payload.actor_id},
     ))
@@ -262,7 +268,13 @@ def _create_candidate(
     _save_receipt(session, project.id, payload.command_id, command_type, "timeline", timeline.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=snapshot.id,
         event_type="timeline.candidate_created.v1",
+        aggregate_type="timeline",
+        aggregate_id=timeline.id,
+        actor_type="user" if payload.source == "user" else "system",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="An explicit timeline candidate was recorded for review.",
         data={
             "timeline_id": timeline.id,
@@ -456,7 +468,13 @@ def validate_timeline(
     _save_receipt(session, project.id, payload.command_id, "timeline.validate", "timeline", timeline.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=timeline.snapshot_id,
         event_type="timeline.validation_failed.v1" if errors else "timeline.validated.v1",
+        aggregate_type="timeline",
+        aggregate_id=timeline.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="Timeline contract validation completed.",
         data={"timeline_id": timeline.id, "error_count": len(errors), "contract_hash": timeline.contract_hash},
     ))
@@ -509,7 +527,13 @@ def confirm_timeline(
     _save_receipt(session, project.id, payload.command_id, "timeline.confirm", "timeline", timeline.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=timeline.snapshot_id,
         event_type="timeline.confirmed.v1",
+        aggregate_type="timeline",
+        aggregate_id=timeline.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="User confirmed the exact timeline contract.",
         data={
             "timeline_id": timeline.id,

@@ -56,7 +56,16 @@ class CreationNotFoundError(LookupError):
 
 def _event(session: Session, project_id: str, event_type: str, message: str, data: dict | None = None) -> None:
     SqlAlchemyEventRepository(session).add(
-        ProjectEvent(project_id=project_id, event_type=event_type, message=message, data=data or {})
+        ProjectEvent(
+            project_id=project_id,
+            event_type=event_type,
+            aggregate_type="project",
+            aggregate_id=project_id,
+            actor_type="system",
+            actor_id="application",
+            message=message,
+            data=data or {},
+        )
     )
 
 

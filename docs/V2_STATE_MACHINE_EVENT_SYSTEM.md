@@ -419,6 +419,10 @@ SSE 只读取已提交事件。状态更新成功但事件缺失、或事件存�
 
 消费者记录 `(consumer_name, event_id)` 或最后处理序列。重复事件必须无副作用；不得因 SSE 重连重复创建工作项、素材、成本或通知。
 
+### 13.4 当前实现
+
+Alembic `20260717_16` 与 Event/Outbox Repository 已实现统一信封、项目内序号、事务内待发布记录和显式批次发布器。发布器失败直接返回并保留 `pending`，不自动再次调用。SSE 和 Outbox 共用同一信封序列化；当前永久保留事件，所以尚不存在需要返回 `resync_required` 的保留窗口。详见 [V2 事件信封与 Outbox 实现](./V2_EVENT_OUTBOX_IMPLEMENTATION.md)。
+
 ## 14. 状态评估器
 
 `ProjectStateEvaluator` 接收项目 ID，在同一活动版本范围内读取持久事实，给出目标状态和原因，不直接执行供应商调用。

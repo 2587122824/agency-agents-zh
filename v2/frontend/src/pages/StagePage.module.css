@@ -30,6 +30,9 @@
 .nodeMain strong { font-size:13px; }
 .nodeMain span { color:#62686b;font-size:11px; }
 .nodeMain code { color:#8a8e90;font-size:10px; }
+.nodeMain details,.blocker details { margin-top:3px; }
+.nodeMain summary,.blocker summary { color:#777d80;font-size:10px;cursor:pointer; }
+.nodeMain details code,.blocker details code { display:block;margin-top:5px;white-space:normal;word-break:break-all;line-height:1.5; }
 .attempt { display:grid;gap:2px;border-left:1px solid #e3e5e1;padding-left:12px; }
 .attempt small { color:#8a8e90;font-size:9px; }
 .attempt strong { font-size:11px; }
@@ -39,6 +42,8 @@
 .blocker div { display:grid;gap:3px; }
 .blocker strong { font-size:12px; }
 .blocker span { font-size:11px;word-break:break-word; }
+.blocker details code { color:#8e321a;font-size:10px; }
+.blockerDetails { display:grid;gap:5px; }
 .executionEmpty,.empty { min-height:190px;padding:32px;display:grid;place-items:center;align-content:center;gap:8px;text-align:center;color:#777d80;font-size:12px; }
 .executionEmpty strong { color:#272b2e;font-size:14px; }
 .notice { margin-top:14px;border-left:3px solid #d84e29;padding:12px 15px;background:#fff; }

@@ -261,7 +261,16 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
         "costs": _costs(repository, project),
         "blockers": blockers,
         "routes": routes,
-        "recent_events": [{column.name: getattr(event, column.name) for column in event.__table__.columns if column.name != "project_id"} for event in events],
+        "recent_events": [{
+            "sequence": event.project_sequence,
+            "event_id": event.event_id,
+            "event_type": event.event_type,
+            "aggregate_type": event.aggregate_type,
+            "aggregate_id": event.aggregate_id,
+            "message": event.message,
+            "data": event.data,
+            "created_at": event.created_at,
+        } for event in events],
     })
     return result
 

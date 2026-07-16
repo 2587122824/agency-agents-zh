@@ -646,7 +646,7 @@ GET  /api/v1/projects/{project_id}/events
 - [x] 项目和决策账本
 - [ ] 项目状态机与状态评估器
 - [ ] 完整数据模型与 Repository 接口
-- [ ] 事件信封、Outbox 和 SSE 游标
+- [x] 事件信封、Outbox 和 SSE 项目游标
 - [x] 方案版本与生产快照
 
 其中只读阶段评估器和当前命令面的权威状态转移器均已实现；该复合条目仍未勾选，因为 `ResolveBlock`、取消和重新开版命令尚未实现。边界见 [V2 项目状态评估器实现](./V2_PROJECT_STATE_EVALUATOR_IMPLEMENTATION.md) 与 [V2 权威项目状态转移器实现](./V2_PROJECT_STATE_TRANSITION_IMPLEMENTATION.md)。
@@ -997,6 +997,8 @@ preparing -> locked -> active -> submitted -> execution_completed | execution_bl
 - 首期 Worker 只执行明确配置为 `mock` 的适配器和本地时间线合同节点。其他适配器返回 `PROVIDER_ADAPTER_NOT_CONNECTED`，不发送网络请求。
 - Mock 响应只证明编排路径可执行，不伪造图片、视频、音频、供应商任务 ID 或实际扣费。
 - 系统不创建第二次尝试；后续重试必须由单独的用户确认命令设计并实现。
+- 制作页面的步骤顺序由活动快照中持久化的 `DAGNode + DependencyEdge` 做确定性拓扑排序；同一层只以稳定节点键打破并列，不从节点名称、类型或创建时间推断依赖。边引用缺失节点或图中存在环时明确失败。
+- 制作页面按结构化 `error_code` 合并同类阻塞摘要并显示影响步骤数量；原始节点键、错误代码和错误详情仍逐项保留在技术详情中。界面不解析错误字符串，也不因合并展示而合并、修改或解除任何 WorkItem。
 
 接口：
 

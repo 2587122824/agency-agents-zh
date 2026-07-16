@@ -27,6 +27,7 @@ from ..db.models import (
     EntityVersion,
     Message,
     ModelConfigVersion,
+    OutboxMessage,
     Project,
     ProjectEvent,
     PricingCatalogVersion,
@@ -143,6 +144,14 @@ class EventRepository(Protocol):
     def add(self, event: ProjectEvent) -> None: ...
 
     def list_after(self, project_id: str, sequence: int, *, limit: int = 100) -> list[ProjectEvent]: ...
+
+    def get_by_event_id(self, event_id: str) -> ProjectEvent | None: ...
+
+
+class OutboxRepository(Protocol):
+    def list_pending(self, *, limit: int = 100, now: datetime | None = None) -> list[OutboxMessage]: ...
+
+    def mark_published(self, message_id: str, *, published_at: datetime) -> bool: ...
 
 
 class DecisionRepository(Protocol):

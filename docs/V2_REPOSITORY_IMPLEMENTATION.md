@@ -36,7 +36,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 - 应用服务仍负责一个命令的完整事务，并在同一事务内写业务记录、命令回执和已有项目事件。
 - `flush` 和 `refresh` 只在应用服务需要数据库生成 ID 或重新读取字段时显式调用。
 - ProjectStateRepository 不创建事件；转移器通过 EventRepository 追加状态事件，调用方应用服务把业务记录、状态和事件一次 commit。
-- 当前没有引入 Unit of Work、Outbox 或后台事件发布器。
+- 当前没有引入通用 Unit of Work 或后台自动事件发布器；EventRepository 已在业务事务内同步创建 Outbox，OutboxRepository 和显式批次发布器已单独实现。
 
 ## 3. 幂等语义
 
@@ -64,7 +64,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 
 当前 V2 应用服务、Worker 与业务只读投影均通过 typed Repository 接口访问数据库。直接 `select/get/execute` 仅存在于 `repositories/sqlalchemy.py` 的 SQLAlchemy 实现中。
 
-这一完成状态只证明当前持久化访问边界已隔离。统一项目状态转移器已使用独立 ProjectStateRepository，但仍不表示已实现 Unit of Work、Outbox、PostgreSQL 适配、解除阻断或未来尚未设计的聚合。新增业务聚合时仍必须先定义 Repository 合同和排序/隔离测试，不得把 ORM 查询重新散落到应用服务。
+这一完成状态只证明当前持久化访问边界已隔离。统一项目状态转移器已使用独立 ProjectStateRepository，事件写入也已具有 Transactional Outbox；但仍不表示已实现通用 Unit of Work、PostgreSQL 适配、解除阻断或未来尚未设计的聚合。新增业务聚合时仍必须先定义 Repository 合同和排序/隔离测试，不得把 ORM 查询重新散落到应用服务。
 
 ## 6. 验证
 
@@ -85,6 +85,7 @@ Repository 合同测试覆盖：
 - 配置聚合的全局回执、语义版本号、组件/价格排序、引用与版本历史，以及草稿组件删除的版本隔离。
 - 实体资产库的全局稳定排序、精确附件读取、实体版本、方案/分镜和生产快照引用。
 - 项目控制台的活动/最新权威读取、跨快照过滤、执行尝试、阻塞 QC、费用、时间线、交付和最近事件。
+- ProductionRepository 提供活动快照的精确 DAG 节点、依赖边、WorkItem 和 WorkAttempt 事实；制作执行投影在 Repository 之外按这些持久化边拓扑排序，创建时间和节点名称都不具有依赖权威。
 - 素材联络表的活动快照、节点/依赖/素材排序、实际尝试、项目/方案分镜与实体来源隔离。
 - 决策影响聚合的项目隔离、清单冻结、候选/实体/版本/生产/时间线精确传播、报告历史和目标顺序。
 - 现有 API 全量测试继续验证六个业务阶段的幂等重放和命令冲突行为。

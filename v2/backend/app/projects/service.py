@@ -42,7 +42,7 @@ def create_project(
     project_repository.add(project)
     project_repository.flush()
     ensure_initial_requirement(session, project)
-    event_repository.add(ProjectEvent(project_id=project.id, event_type="project.created", message="项目草稿已创建"))
+    event_repository.add(ProjectEvent(project_id=project.id, event_type="project.created.v1", aggregate_type="project", aggregate_id=project.id, actor_type="user", actor_id="local-user", message="项目草稿已创建"))
     session.commit()
     return project_repository.get(project.id, with_workspace=True)  # type: ignore[return-value]
 
@@ -67,7 +67,7 @@ def confirm_project(
         actor_type="user",
         actor_id="local-user",
     )
-    event_repository.add(ProjectEvent(project_id=project.id, event_type="project.confirmed", message="生产合同已由用户确认"))
+    event_repository.add(ProjectEvent(project_id=project.id, event_type="project.confirmed.v1", aggregate_type="project", aggregate_id=project.id, actor_type="user", actor_id="local-user", message="生产合同已由用户确认"))
     session.commit()
     return project_repository.get(project.id, with_workspace=True)  # type: ignore[return-value]
 
@@ -94,7 +94,11 @@ def queue_contract_validation(
     event_repository.add(
         ProjectEvent(
             project_id=project.id,
-            event_type="work.queued",
+            event_type="work.queued.v1",
+            aggregate_type="work_item",
+            aggregate_id=item.id,
+            actor_type="user",
+            actor_id="local-user",
             message="合同验证已加入队列",
             data={"work_item_id": item.id, "kind": item.kind},
         )

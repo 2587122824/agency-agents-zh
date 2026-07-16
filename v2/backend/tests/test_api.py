@@ -153,7 +153,7 @@ def test_project_control_list_uses_persisted_facts_for_new_project(client: TestC
     }
     detail = client.get(f"/api/v1/projects/{project['id']}/control-center")
     assert detail.status_code == 200
-    assert detail.json()["recent_events"][0]["event_type"] == "project.created"
+    assert detail.json()["recent_events"][0]["event_type"] == "project.created.v1"
     assert detail.json()["costs"] == []
     assert detail.json()["routes"] == []
 
@@ -1545,6 +1545,9 @@ def test_snapshot_activation_and_exact_submission_are_separate_and_idempotent(cl
     assert replayed_submit.json()["active_snapshot_id"] == snapshot["id"]
     assert len(execution["work_items"]) == len(node_ids)
     assert {item["dag_node_id"] for item in execution["work_items"]} == set(node_ids)
+    execution_positions = {item["dag_node_id"]: index for index, item in enumerate(execution["work_items"])}
+    for edge in activated.json()["edges"]:
+        assert execution_positions[edge["parent_node_id"]] < execution_positions[edge["child_node_id"]]
     assert all(len(item["attempts"]) == 1 for item in execution["work_items"])
     assert all(item["attempts"][0]["provider_task_id"] is None for item in execution["work_items"])
     with SessionLocal() as session:

@@ -228,6 +228,10 @@ def transition_project(
     event_repository.add(ProjectEvent(
         project_id=project.id,
         event_type="project.state_changed.v1",
+        aggregate_type="project",
+        aggregate_id=project.id,
+        actor_type=actor_type,
+        actor_id=actor_id,
         message=f"Project state changed from {from_state} to {target}.",
         data={
             "from_state": from_state,
@@ -276,6 +280,10 @@ def block_project(
         event_repository.add(ProjectEvent(
             project_id=project.id,
             event_type="project.block_diagnostic.v1",
+            aggregate_type="project",
+            aggregate_id=project.id,
+            actor_type=actor_type,
+            actor_id=actor_id,
             message="Additional project block evidence was recorded without replacing the original block.",
             data=evidence,
         ))
@@ -309,6 +317,10 @@ def block_project(
     event_repository.add(ProjectEvent(
         project_id=project.id,
         event_type="project.blocked.v1",
+        aggregate_type="project",
+        aggregate_id=project.id,
+        actor_type=actor_type,
+        actor_id=actor_id,
         message=f"Project was blocked from {from_state} by {reason_code}.",
         data={
             "from_state": from_state,

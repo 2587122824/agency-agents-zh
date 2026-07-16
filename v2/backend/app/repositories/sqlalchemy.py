@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+import re
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
@@ -28,6 +29,7 @@ from ..db.models import (
     EntityVersion,
     Message,
     ModelConfigVersion,
+    OutboxMessage,
     Project,
     ProjectEvent,
     PricingCatalogVersion,
@@ -53,6 +55,8 @@ from ..db.models import (
     WorkAttempt,
     WorkItem,
     AudioConfigVersion,
+    new_id,
+    utc_now,
 )
 from .contracts import (
     ConfigurationComponentRecord,
@@ -161,16 +165,66 @@ class SqlAlchemyEventRepository:
         self.session = session
 
     def add(self, event: ProjectEvent) -> None:
+        if not re.fullmatch(r"[a-z0-9_]+(?:\.[a-z0-9_]+)+\.v[1-9][0-9]*", event.event_type):
+            raise ValueError(f"Project event type {event.event_type!r} is not versioned.")
+        if not event.aggregate_type or not event.aggregate_id:
+            raise ValueError("Project event aggregate_type and aggregate_id are required.")
+        if not event.actor_type or not event.actor_id:
+            raise ValueError("Project event actor_type and actor_id are required.")
+        if event.data is None:
+            event.data = {}
+        if not isinstance(event.data, dict):
+            raise ValueError("Project event payload must be an object.")
+        if not event.event_id:
+            event.event_id = new_id("event")
+        if not event.correlation_id:
+            event.correlation_id = event.event_id
+        next_sequence = self.session.scalar(
+            update(Project)
+            .where(Project.id == event.project_id)
+            .values(event_sequence=Project.event_sequence + 1)
+            .returning(Project.event_sequence)
+        )
+        if next_sequence is None:
+            raise ValueError(f"Project {event.project_id!r} does not exist for event allocation.")
+        event.project_sequence = next_sequence
         self.session.add(event)
+        self.session.add(OutboxMessage(event_id=event.event_id, project_id=event.project_id))
 
     def list_after(self, project_id: str, sequence: int, *, limit: int = 100) -> list[ProjectEvent]:
         statement = (
             select(ProjectEvent)
-            .where(ProjectEvent.project_id == project_id, ProjectEvent.sequence > sequence)
-            .order_by(ProjectEvent.sequence)
+            .where(ProjectEvent.project_id == project_id, ProjectEvent.project_sequence > sequence)
+            .order_by(ProjectEvent.project_sequence)
             .limit(limit)
         )
         return list(self.session.scalars(statement))
+
+    def get_by_event_id(self, event_id: str) -> ProjectEvent | None:
+        return self.session.scalar(select(ProjectEvent).where(ProjectEvent.event_id == event_id))
+
+
+class SqlAlchemyOutboxRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def list_pending(self, *, limit: int = 100, now: datetime | None = None) -> list[OutboxMessage]:
+        current = now or utc_now()
+        statement = (
+            select(OutboxMessage)
+            .where(OutboxMessage.status == "pending", OutboxMessage.available_at <= current)
+            .order_by(OutboxMessage.created_at, OutboxMessage.id)
+            .limit(limit)
+        )
+        return list(self.session.scalars(statement))
+
+    def mark_published(self, message_id: str, *, published_at: datetime) -> bool:
+        result = self.session.execute(
+            update(OutboxMessage)
+            .where(OutboxMessage.id == message_id, OutboxMessage.status == "pending")
+            .values(status="published", published_at=published_at)
+        )
+        return result.rowcount == 1
 
 
 class SqlAlchemyDecisionRepository:
@@ -1216,7 +1270,7 @@ class SqlAlchemyControlRepository:
         return list(self.session.scalars(
             select(ProjectEvent)
             .where(ProjectEvent.project_id == project_id)
-            .order_by(ProjectEvent.sequence.desc())
+            .order_by(ProjectEvent.project_sequence.desc())
             .limit(limit)
         ))
 

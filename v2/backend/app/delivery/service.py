@@ -215,7 +215,13 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
     _save_receipt(session, project.id, payload.command_id, "delivery.authorize", "delivery_attempt", attempt.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=timeline.snapshot_id,
         event_type="delivery.authorized.v1",
+        aggregate_type="delivery_attempt",
+        aggregate_id=attempt.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="User authorized an exact delivery request without starting a renderer.",
         data={
             "delivery_attempt_id": attempt.id,
@@ -311,7 +317,13 @@ def register_delivery_output(
     _save_receipt(session, project.id, payload.command_id, "delivery.output.register", "delivery_attempt", attempt.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=attempt.snapshot_id,
         event_type="asset.created.v1",
+        aggregate_type="asset",
+        aggregate_id=asset.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="Uploaded final delivery file registered as an unverified asset.",
         data={"delivery_attempt_id": attempt.id, "asset_id": asset.id, "request_fingerprint": attempt.request_fingerprint},
     ))
@@ -374,7 +386,13 @@ def _block_delivery(
     _save_receipt(session, project.id, payload.command_id, "delivery.verify", "delivery_attempt", attempt.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=attempt.snapshot_id,
         event_type="delivery.blocked.v1",
+        aggregate_type="delivery_attempt",
+        aggregate_id=attempt.id,
+        actor_type="system",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="Final delivery file failed deterministic verification.",
         data={"delivery_attempt_id": attempt.id, "asset_id": asset.id, "qc_report_id": report.id, "code": code, "evidence": evidence},
     ))
@@ -488,13 +506,25 @@ def verify_delivery(
     _save_receipt(session, project.id, payload.command_id, "delivery.verify", "delivery_attempt", attempt.id)
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=attempt.snapshot_id,
         event_type="delivery.verified.v1",
+        aggregate_type="delivery_attempt",
+        aggregate_id=attempt.id,
+        actor_type="system",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="Final delivery file passed deterministic verification.",
         data={"delivery_attempt_id": attempt.id, "asset_id": asset.id, "content_hash": content_hash},
     ))
     _event(session, ProjectEvent(
         project_id=project.id,
+        snapshot_id=attempt.snapshot_id,
         event_type="project.completed.v1",
+        aggregate_type="project",
+        aggregate_id=project.id,
+        actor_type="system",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
         message="Project completed after the final delivery asset passed all completion guards.",
         data={"delivery_attempt_id": attempt.id, "delivery_asset_id": asset.id, "timeline_id": timeline.id},
     ))

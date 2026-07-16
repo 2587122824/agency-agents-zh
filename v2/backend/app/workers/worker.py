@@ -162,7 +162,11 @@ def process_one(worker_id: str | None = None) -> bool:
                 )
                 _event(session, ProjectEvent(
                     project_id=project.id,
-                    event_type="contract.validated",
+                    event_type="contract.validated.v1",
+                    aggregate_type="work_item",
+                    aggregate_id=selected.id,
+                    actor_type="worker",
+                    actor_id=owner,
                     message="Legacy local contract validation completed.",
                     data={"work_item_id": selected.id},
                 ))
@@ -221,7 +225,12 @@ def process_one(worker_id: str | None = None) -> bool:
         _update_aggregate_state(session, project, snapshot, owner, item, attempt)
         _event(session, ProjectEvent(
             project_id=project.id,
+            snapshot_id=snapshot.id,
             event_type="production.work_finished.v1",
+            aggregate_type="work_attempt",
+            aggregate_id=attempt.id,
+            actor_type="worker",
+            actor_id=owner,
             message="Production work item reached a terminal state.",
             data={
                 "snapshot_id": snapshot.id,

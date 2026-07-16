@@ -28,6 +28,7 @@ class Project(Base):
     audio_mode: Mapped[str] = mapped_column(String(24))
     status: Mapped[str] = mapped_column(String(32), default="draft", index=True)
     row_version: Mapped[int] = mapped_column(Integer, default=1)
+    event_sequence: Mapped[int] = mapped_column(Integer, default=0)
     state_changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     state_actor_type: Mapped[str] = mapped_column(String(16), default="system")
     state_changed_by: Mapped[str] = mapped_column(String(80), default="system")
@@ -307,12 +308,39 @@ class DeliveryAttempt(Base):
 
 class ProjectEvent(Base):
     __tablename__ = "project_events"
+    __table_args__ = (
+        UniqueConstraint("event_id"),
+        UniqueConstraint("project_id", "project_sequence"),
+    )
 
     sequence: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(48), default=lambda: new_id("event"))
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    project_sequence: Mapped[int] = mapped_column(Integer)
+    snapshot_id: Mapped[str | None] = mapped_column(String(48), nullable=True, index=True)
     event_type: Mapped[str] = mapped_column(String(80))
+    aggregate_type: Mapped[str] = mapped_column(String(40), index=True)
+    aggregate_id: Mapped[str] = mapped_column(String(80), index=True)
+    causation_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    correlation_id: Mapped[str] = mapped_column(String(80), index=True)
+    actor_type: Mapped[str] = mapped_column(String(24))
+    actor_id: Mapped[str] = mapped_column(String(80))
+    schema_version: Mapped[int] = mapped_column(Integer, default=1)
     message: Mapped[str] = mapped_column(String(500))
     data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class OutboxMessage(Base):
+    __tablename__ = "outbox_messages"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("outbox"))
+    event_id: Mapped[str] = mapped_column(ForeignKey("project_events.event_id"), unique=True, index=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    topic: Mapped[str] = mapped_column(String(80), default="project.events")
+    status: Mapped[str] = mapped_column(String(24), default="pending", index=True)
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

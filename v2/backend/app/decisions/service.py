@@ -55,7 +55,11 @@ def add_decision(
     event_repository.add(
         ProjectEvent(
             project_id=project.id,
-            event_type="decision.created",
+            event_type="decision.created.v1",
+            aggregate_type="decision",
+            aggregate_id=decision.id,
+            actor_type="user",
+            actor_id="local-user",
             message=f"已登记决策：{decision.label}",
             data={"decision_id": decision.id, "key": decision.key, "status": decision.status},
         )
@@ -107,7 +111,11 @@ def resolve_decision(
     event_repository.add(
         ProjectEvent(
             project_id=project.id,
-            event_type="decision.resolved",
+            event_type="decision.resolved.v1",
+            aggregate_type="decision",
+            aggregate_id=decision.id,
+            actor_type="user",
+            actor_id="local-user",
             message=f"已确认决策：{decision.label}",
             data={"decision_id": decision.id, "key": decision.key},
         )

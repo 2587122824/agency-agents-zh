@@ -142,15 +142,16 @@ def test_event_repository_contract_preserves_project_cursor_order_and_limit() ->
             projects.add(first)
             projects.add(second)
             projects.flush()
-            events.add(ProjectEvent(project_id=first.id, event_type="first", message="first"))
-            events.add(ProjectEvent(project_id=second.id, event_type="other", message="other"))
-            events.add(ProjectEvent(project_id=first.id, event_type="second", message="second"))
+            events.add(ProjectEvent(project_id=first.id, event_type="project.first.v1", aggregate_type="project", aggregate_id=first.id, actor_type="system", actor_id="test", message="first"))
+            events.add(ProjectEvent(project_id=second.id, event_type="project.other.v1", aggregate_type="project", aggregate_id=second.id, actor_type="system", actor_id="test", message="other"))
+            events.add(ProjectEvent(project_id=first.id, event_type="project.second.v1", aggregate_type="project", aggregate_id=first.id, actor_type="system", actor_id="test", message="second"))
             session.commit()
 
             rows = events.list_after(first.id, 0, limit=1)
-            assert [row.event_type for row in rows] == ["first"]
-            remaining = events.list_after(first.id, rows[0].sequence, limit=100)
-            assert [row.event_type for row in remaining] == ["second"]
+            assert [row.event_type for row in rows] == ["project.first.v1"]
+            remaining = events.list_after(first.id, rows[0].project_sequence, limit=100)
+            assert [row.event_type for row in remaining] == ["project.second.v1"]
+            assert [row.project_sequence for row in rows + remaining] == [1, 2]
     finally:
         engine.dispose()
 
@@ -2227,17 +2228,35 @@ def test_control_repository_contract_preserves_authority_scope_history_and_order
             )
             event_one = ProjectEvent(
                 project_id=project.id,
-                event_type="control.one",
+                project_sequence=1,
+                event_type="control.one.v1",
+                aggregate_type="project",
+                aggregate_id=project.id,
+                correlation_id="control-one",
+                actor_type="system",
+                actor_id="test",
                 message="One",
             )
             event_two = ProjectEvent(
                 project_id=project.id,
-                event_type="control.two",
+                project_sequence=2,
+                event_type="control.two.v1",
+                aggregate_type="project",
+                aggregate_id=project.id,
+                correlation_id="control-two",
+                actor_type="system",
+                actor_id="test",
                 message="Two",
             )
             event_three = ProjectEvent(
                 project_id=project.id,
-                event_type="control.three",
+                project_sequence=3,
+                event_type="control.three.v1",
+                aggregate_type="project",
+                aggregate_id=project.id,
+                correlation_id="control-three",
+                actor_type="system",
+                actor_id="test",
                 message="Three",
             )
             session.add_all([
