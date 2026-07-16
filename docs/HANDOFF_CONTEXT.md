@@ -1,5 +1,14 @@
 # Handoff Context
 
+## 2026-07-16 V2 Production Preparation Plain-language UX Sprint 36
+
+- Replaced backend-oriented production-preparation labels with creator-facing Chinese terms: production configuration, video specification, workflow slots, pricing catalog, snapshots, DAG nodes, WorkItems, and execution states now appear as制作配置、画面规格、图片/视频/配音生成方案、计费方案、制作方案、制作步骤、制作任务和可理解状态。
+- Removed workflow technical keys from primary select labels and moved exact configuration/component IDs, keys, internal statuses, error codes, dependency counts, and contract hashes into collapsed technical-detail sections.
+- Added typed presentation mappings for known production validation/cost codes and snapshot states. These mappings only change display text; unknown cost still blocks locking and paid execution.
+- Published configuration `production_config_5f14f4c3491440c89bda8635ded05e57` as `V1 导入配置 v3（文案修正）`; it corrects imported Chinese display names while preserving the v2 workflow IDs, NodeInfoList, media specification, provider references, audio-off policy, and absent pricing catalog. The older published v2 remains available for audit.
+- No API, database schema, state transition, confirmation boundary, pricing calculation, provider call, retry, fallback, route substitution, prompt rewrite, or automatic recovery changed.
+- Verification completed with 104 backend tests, Python compileall, TypeScript/Vite production build, Alembic `20260716_15 (head)`, desktop DOM terminology checks, and a 390px no-overflow browser check.
+
 ## 2026-07-16 V2 Runtime-second Pricing Sprint 35
 
 - Added `runtime_second` as an explicit pricing unit for cloud ComfyUI/runtime-billed workflows. Each such rule must provide a positive `estimated_runtime_seconds`; the field is rejected for `call` and `output_second` rules.
