@@ -1,5 +1,12 @@
 # Handoff Context
 
+## 2026-07-16 V2 Imported Configuration Compatibility Correction Sprint 34
+
+- The published V1-imported configuration was correctly rejected during production impact analysis because its keyframe workflow did not declare support for the selected `480x848/24fps` video specification and it contained no pricing catalog.
+- Revised the existing cloned configuration `production_config_206b6312e68340f99113d81a1a8a8058` to version label `V1 导入配置 v2（规格修正）`; both image and first-frame video slots now explicitly reference the same vertical video specification. Deterministic validation passes and the configuration is `ready`.
+- Pricing remains intentionally absent because V1 contains no authoritative RunningHub unit prices. No zero price, synthetic currency, guessed provider rate, publication, fallback, route substitution, or cost bypass was introduced.
+- To complete this configuration, the user must provide or confirm the authoritative currency, image-generation unit price, and first-frame-video unit price/unit. The corrected draft must then be published explicitly and selected for a new impact analysis.
+
 ## 2026-07-16 V2 V1 Configuration Import Sprint 33
 
 - Created V2 production configuration version `production_config_e564690650c1492d8f03b40d0106af58` from the current V1 runtime settings.
