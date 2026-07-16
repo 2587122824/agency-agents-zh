@@ -1,5 +1,14 @@
 # Handoff Context
 
+## 2026-07-16 V2 Entity Registry Repository Sprint 24
+
+- Added a read-only typed `RegistryRepository` covering globally ordered projects, entities and immutable versions; exact source attachments; confirmed bindings; plans, Shots, snapshots, and frozen entity references.
+- Migrated the entity-registry projection and guarded attachment content lookup away from direct SQLAlchemy queries while preserving active-version authority, exact-ID references, project ownership checks, runtime-root path confinement, verified-file requirements, and explicit missing-file behavior.
+- Added a Registry repository contract test covering stable ordering, exact reads, empty-ID behavior, plan/Shot references, snapshot references, and missing attachments.
+- Updated the dedicated registry implementation document plus repository, product, data-model, implementation-status, and handoff documentation.
+- No schema migration, entity mutation, active-version inference, attachment substitution, preview repair, provider call, retry, fallback, route substitution, confirmation change, or project-state change was introduced.
+- Verification target: 43 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Configuration Repository Sprint 23
 
 - Added a typed `ConfigurationRepository` covering aggregate command receipts, exact configuration reads, semantic version numbering, stable component and pricing reads, scoped draft-component deletion, references, configuration history, and workflow-slot history.

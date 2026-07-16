@@ -1,6 +1,6 @@
 # 片场 V2 实体资产库实现
 
-版本：v0.1
+版本：v0.2
 
 状态：已实现
 
@@ -68,6 +68,17 @@ GET /api/v1/projects/{project_id}/attachments/{attachment_id}/content
 ```
 
 两个接口都不创建 CommandReceipt、ProjectEvent、WorkItem 或 CostEvent。
+
+## 6.1 Repository 边界
+
+只读 `RegistryRepository` 负责以下持久化事实：
+
+- 项目、实体与实体版本的稳定排序。
+- 按精确 ID 集合读取来源附件与确认绑定。
+- 读取方案、分镜、生产快照与冻结实体版本引用。
+- 按精确附件 ID 读取附件记录。
+
+Registry 应用服务负责把这些事实组合为返回视图，并继续掌握活动版本、引用角色、项目归属和附件内容安全规则。Repository 不推断活动版本，不按最高版本替代 `is_active`，不猜测未声明引用，也不检查或改写磁盘文件。
 
 ## 7. 验收
 

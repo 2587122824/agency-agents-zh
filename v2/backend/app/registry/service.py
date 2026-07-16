@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from pathlib import Path
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import RUNTIME_ROOT
@@ -18,6 +17,7 @@ from ..db.models import (
     Shot,
     SnapshotEntityVersion,
 )
+from ..repositories import SqlAlchemyRegistryRepository
 
 
 class RegistryNotFoundError(LookupError):
@@ -31,31 +31,28 @@ class RegistryConflictError(ValueError):
 
 
 def entity_registry_view(session: Session) -> dict:
-    projects = list(session.scalars(select(Project).order_by(Project.updated_at.desc(), Project.id)))
+    repository = SqlAlchemyRegistryRepository(session)
+    projects = repository.projects()
     project_map = {item.id: item for item in projects}
-    entities = list(session.scalars(select(Entity).order_by(Entity.entity_type, Entity.display_name, Entity.id)))
-    versions = list(session.scalars(select(EntityVersion).order_by(EntityVersion.entity_id, EntityVersion.version_number.desc())))
+    entities = repository.entities()
+    versions = repository.entity_versions()
     version_ids = {item.id for item in versions}
 
     attachment_ids = {item.source_attachment_id for item in versions if item.source_attachment_id}
     attachments = {
-        item.id: item for item in session.scalars(select(Attachment).where(Attachment.id.in_(attachment_ids)))
+        item.id: item for item in repository.attachments_by_ids(attachment_ids)
     } if attachment_ids else {}
     bindings_by_version: dict[str, list[AttachmentBinding]] = defaultdict(list)
     if version_ids:
-        for item in session.scalars(select(AttachmentBinding).where(
-            AttachmentBinding.entity_version_id.in_(version_ids),
-        ).order_by(AttachmentBinding.confirmed_at, AttachmentBinding.id)):
+        for item in repository.bindings_by_entity_version_ids(version_ids):
             bindings_by_version[item.entity_version_id].append(item)
 
     snapshots = {
-        item.id: item for item in session.scalars(select(ProductionSnapshot))
+        item.id: item for item in repository.snapshots()
     }
     snapshot_refs: dict[str, list[dict]] = defaultdict(list)
     if version_ids:
-        for item in session.scalars(select(SnapshotEntityVersion).where(
-            SnapshotEntityVersion.entity_version_id.in_(version_ids),
-        ).order_by(SnapshotEntityVersion.created_at, SnapshotEntityVersion.id)):
+        for item in repository.snapshot_entity_versions(version_ids):
             snapshot = snapshots.get(item.snapshot_id)
             if snapshot:
                 snapshot_refs[item.entity_version_id].append({
@@ -65,10 +62,10 @@ def entity_registry_view(session: Session) -> dict:
                     "role": item.role,
                 })
 
-    plans = {item.id: item for item in session.scalars(select(PlanVersion))}
+    plans = {item.id: item for item in repository.plans()}
     shot_refs: dict[str, list[dict]] = defaultdict(list)
     if version_ids:
-        for shot in session.scalars(select(Shot).order_by(Shot.plan_version_id, Shot.sequence_number)):
+        for shot in repository.shots():
             plan = plans.get(shot.plan_version_id)
             if not plan:
                 continue
@@ -143,7 +140,7 @@ def entity_registry_view(session: Session) -> dict:
 
 
 def attachment_content_path(session: Session, project: Project, attachment_id: str) -> tuple[Path, str]:
-    attachment = session.get(Attachment, attachment_id)
+    attachment = SqlAlchemyRegistryRepository(session).attachment(attachment_id)
     if not attachment or attachment.project_id != project.id:
         raise RegistryNotFoundError("Attachment not found")
     if attachment.verification_status != "verified":

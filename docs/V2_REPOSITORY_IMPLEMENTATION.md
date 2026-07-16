@@ -1,6 +1,6 @@
 # 片场 V2 Repository 边界实现
 
-> 实现版本：Sprint 14-23
+> 实现版本：Sprint 14-24
 >
 > 目标：把持久化查询和 ORM 构造逐步移出应用服务，同时保持现有产品合同、事务边界和状态语义不变。
 
@@ -22,6 +22,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 | `DeliveryRepository` | 确认时间线、冻结输入素材、DeliveryAttempt、最终 Asset URI、交付 QC 和工作区投影 | 交付服务 |
 | `WorkRepository` | 可领取候选、必需父依赖、快照工作状态、WorkAttempt、原子 claim 和执行权威读取 | Worker |
 | `ConfigurationRepository` | 配置命令回执、语义版本号、组件和价格规则、引用、版本历史及草稿组件隔离删除 | 系统配置服务 |
+| `RegistryRepository` | 全局实体/版本、来源附件、确认绑定、方案/分镜引用、快照引用及附件精确读取 | 实体资产库只读投影 |
 
 系统配置继续使用独立的全局 `ConfigurationCommandReceipt`，不属于项目级 `CommandRepository`，Repository 迁移没有合并或改变两者的幂等作用域。
 
@@ -58,7 +59,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 
 以下只读投影或辅助聚合仍存在直接 SQLAlchemy 查询，Repository 总体条目保持“部分完成”：
 
-- Entity registry read projections（创作阶段的 Entity / Attachment 写入和读取已迁移）
+- Project control 与 material contact sheet 只读投影
 - Cost
 
 迁移这些聚合时必须保持现有查询排序、项目隔离、关系加载、锁和事务行为，不以 Repository 重构为理由改变状态机或命令合同。
@@ -79,6 +80,7 @@ Repository 合同测试覆盖：
 - 交付聚合的确认范围、输入条目、尝试唯一性、最终 URI、QC 编号和工作区顺序。
 - Worker 的候选排序、可用时间、必需父依赖、快照状态集合和乐观锁原子 claim。
 - 配置聚合的全局回执、语义版本号、组件/价格排序、引用与版本历史，以及草稿组件删除的版本隔离。
+- 实体资产库的全局稳定排序、精确附件读取、实体版本、方案/分镜和生产快照引用。
 - 现有 API 全量测试继续验证六个业务阶段的幂等重放和命令冲突行为。
 
 本实现不包含数据库迁移、Provider 调用、重试、兜底、路由替换、提示词改写、状态转移或费用事件。

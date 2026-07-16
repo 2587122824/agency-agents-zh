@@ -976,3 +976,60 @@ class SqlAlchemyConfigurationRepository:
             .where(WorkflowSlotVersion.slot_key == slot_key)
             .order_by(WorkflowSlotVersion.version_number.desc(), WorkflowSlotVersion.id.desc())
         ))
+
+
+class SqlAlchemyRegistryRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def projects(self) -> list[Project]:
+        return list(self.session.scalars(
+            select(Project).order_by(Project.updated_at.desc(), Project.id)
+        ))
+
+    def entities(self) -> list[Entity]:
+        return list(self.session.scalars(
+            select(Entity).order_by(Entity.entity_type, Entity.display_name, Entity.id)
+        ))
+
+    def entity_versions(self) -> list[EntityVersion]:
+        return list(self.session.scalars(
+            select(EntityVersion).order_by(EntityVersion.entity_id, EntityVersion.version_number.desc())
+        ))
+
+    def attachments_by_ids(self, attachment_ids: set[str]) -> list[Attachment]:
+        if not attachment_ids:
+            return []
+        return list(self.session.scalars(select(Attachment).where(Attachment.id.in_(attachment_ids))))
+
+    def bindings_by_entity_version_ids(self, entity_version_ids: set[str]) -> list[AttachmentBinding]:
+        if not entity_version_ids:
+            return []
+        return list(self.session.scalars(
+            select(AttachmentBinding)
+            .where(AttachmentBinding.entity_version_id.in_(entity_version_ids))
+            .order_by(AttachmentBinding.confirmed_at, AttachmentBinding.id)
+        ))
+
+    def snapshots(self) -> list[ProductionSnapshot]:
+        return list(self.session.scalars(select(ProductionSnapshot)))
+
+    def snapshot_entity_versions(self, entity_version_ids: set[str]) -> list[SnapshotEntityVersion]:
+        if not entity_version_ids:
+            return []
+        return list(self.session.scalars(
+            select(SnapshotEntityVersion)
+            .where(SnapshotEntityVersion.entity_version_id.in_(entity_version_ids))
+            .order_by(SnapshotEntityVersion.created_at, SnapshotEntityVersion.id)
+        ))
+
+    def plans(self) -> list[PlanVersion]:
+        return list(self.session.scalars(select(PlanVersion)))
+
+    def shots(self) -> list[Shot]:
+        return list(self.session.scalars(
+            select(Shot).order_by(Shot.plan_version_id, Shot.sequence_number)
+        ))
+
+    def attachment(self, attachment_id: str) -> Attachment | None:
+        return self.session.get(Attachment, attachment_id)

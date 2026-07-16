@@ -60,6 +60,7 @@ from v2.backend.app.repositories import (
     SqlAlchemyPlanningRepository,
     SqlAlchemyProductionRepository,
     SqlAlchemyQualityRepository,
+    SqlAlchemyRegistryRepository,
     SqlAlchemyWorkRepository,
     SqlAlchemyProjectRepository,
 )
@@ -1677,5 +1678,204 @@ def test_configuration_repository_contract_preserves_versions_history_and_scoped
             assert session.get(ProductionConfigComponent, retained_link.id) is not None
             assert repository.configuration(retained.id) is not None
             assert [row.id for row in repository.all_components("provider")] == [retained_provider.id]
+    finally:
+        engine.dispose()
+
+
+def test_registry_repository_contract_preserves_global_projection_order_and_exact_reads() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            registry = SqlAlchemyRegistryRepository(session)
+            now = utc_now()
+            earlier_project = Project(
+                id="project-registry-earlier",
+                title="Earlier",
+                core_topic="Registry ordering",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+                updated_at=now - timedelta(minutes=1),
+            )
+            later_project = Project(
+                id="project-registry-later",
+                title="Later",
+                core_topic="Registry ordering",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+                updated_at=now,
+            )
+            projects.add(earlier_project)
+            projects.add(later_project)
+            projects.flush()
+            scene = Entity(
+                id="entity-scene",
+                project_id=later_project.id,
+                entity_type="scene",
+                display_name="Arena",
+            )
+            character = Entity(
+                id="entity-character",
+                project_id=later_project.id,
+                entity_type="character",
+                display_name="Zoe",
+            )
+            attachment = Attachment(
+                id="attachment-registry",
+                project_id=later_project.id,
+                original_filename="reference.png",
+                mime_type="image/png",
+                byte_size=128,
+                content_hash="a" * 64,
+                storage_path="attachments/reference.png",
+            )
+            session.add_all([scene, character, attachment])
+            session.flush()
+            older_version = EntityVersion(
+                id="version-character-1",
+                project_id=later_project.id,
+                entity_id=character.id,
+                version_number=1,
+                attributes={"name": "Zoe v1"},
+                source_attachment_id=attachment.id,
+                is_active=False,
+            )
+            active_version = EntityVersion(
+                id="version-character-2",
+                project_id=later_project.id,
+                entity_id=character.id,
+                version_number=2,
+                attributes={"name": "Zoe v2"},
+                source_attachment_id=attachment.id,
+                is_active=True,
+            )
+            scene_version = EntityVersion(
+                id="version-scene-1",
+                project_id=later_project.id,
+                entity_id=scene.id,
+                version_number=1,
+                attributes={"name": "Arena"},
+                is_active=True,
+            )
+            session.add_all([older_version, active_version, scene_version])
+            session.flush()
+            later_binding = AttachmentBinding(
+                id="binding-later",
+                project_id=later_project.id,
+                attachment_id=attachment.id,
+                binding_type="character_reference",
+                entity_id=character.id,
+                entity_version_id=active_version.id,
+                confirmed_at=now,
+            )
+            earlier_binding = AttachmentBinding(
+                id="binding-earlier",
+                project_id=later_project.id,
+                attachment_id=attachment.id,
+                binding_type="character_reference",
+                entity_id=character.id,
+                entity_version_id=active_version.id,
+                confirmed_at=now - timedelta(minutes=1),
+            )
+            plan = PlanVersion(
+                id="plan-registry",
+                project_id=later_project.id,
+                version_number=1,
+                requirement_version_id="requirement-registry",
+                shot_plan_candidate_id="shot-plan-registry",
+                creative_brief={},
+            )
+            later_shot = Shot(
+                id="shot-registry-2",
+                project_id=later_project.id,
+                plan_version_id=plan.id,
+                shot_code="SH-002",
+                sequence_number=2,
+                duration_ms=5000,
+                shot_type="action",
+                character_entity_version_ids=[active_version.id],
+                outfit_entity_version_ids=[],
+                face_visibility="required",
+                text_policy="forbidden",
+                motion_requirement="high",
+                composition="Medium",
+                action="Run",
+            )
+            earlier_shot = Shot(
+                id="shot-registry-1",
+                project_id=later_project.id,
+                plan_version_id=plan.id,
+                shot_code="SH-001",
+                sequence_number=1,
+                duration_ms=5000,
+                shot_type="establishing",
+                scene_entity_version_id=scene_version.id,
+                character_entity_version_ids=[],
+                outfit_entity_version_ids=[],
+                face_visibility="not_visible",
+                text_policy="forbidden",
+                motion_requirement="low",
+                composition="Wide",
+                action="Establish arena",
+            )
+            snapshot = ProductionSnapshot(
+                id="snapshot-registry",
+                project_id=later_project.id,
+                plan_version_id=plan.id,
+                production_config_version_id="config-registry",
+                impact_analysis_id="impact-registry",
+                snapshot_number=1,
+                status="locked",
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="b" * 64,
+            )
+            snapshot_ref = SnapshotEntityVersion(
+                id="snapshot-entity-registry",
+                snapshot_id=snapshot.id,
+                entity_version_id=active_version.id,
+                role="character",
+            )
+            session.add_all([
+                later_binding,
+                earlier_binding,
+                plan,
+                later_shot,
+                earlier_shot,
+                snapshot,
+                snapshot_ref,
+            ])
+            session.commit()
+
+            assert [row.id for row in registry.projects()] == [later_project.id, earlier_project.id]
+            assert [row.id for row in registry.entities()] == [character.id, scene.id]
+            assert [row.id for row in registry.entity_versions()] == [
+                active_version.id,
+                older_version.id,
+                scene_version.id,
+            ]
+            assert [row.id for row in registry.attachments_by_ids({attachment.id})] == [attachment.id]
+            assert [row.id for row in registry.bindings_by_entity_version_ids({active_version.id})] == [
+                earlier_binding.id,
+                later_binding.id,
+            ]
+            assert [row.id for row in registry.snapshots()] == [snapshot.id]
+            assert [row.id for row in registry.snapshot_entity_versions({active_version.id})] == [snapshot_ref.id]
+            assert [row.id for row in registry.plans()] == [plan.id]
+            assert [row.id for row in registry.shots()] == [earlier_shot.id, later_shot.id]
+            assert registry.attachment(attachment.id).id == attachment.id  # type: ignore[union-attr]
+            assert registry.attachment("attachment-missing") is None
+            assert registry.attachments_by_ids(set()) == []
+            assert registry.bindings_by_entity_version_ids(set()) == []
+            assert registry.snapshot_entity_versions(set()) == []
     finally:
         engine.dispose()
