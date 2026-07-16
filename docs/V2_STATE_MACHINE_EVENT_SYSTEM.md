@@ -188,6 +188,8 @@ skipped
 
 ### 6.2 WorkAttempt 状态
 
+RunningHub 的实际实现暂不引入独立 `polling` 持久状态：一次 Worker 周期取得轮询租约，网络请求结束后仍落回 `submitted`，或进入 `completed / blocked`。这不改变“一个任务号只对应一次提交”的约束。Worker 在调用提交前先提交 `submitting` 状态；若进程在任务号落库前中断，恢复流程写入 `PROVIDER_SUBMISSION_RECONCILIATION_REQUIRED`，不得重新提交。供应商仍在运行时只更新响应证据和下次可查询时间，不产生完成事件；终态才写现有生产完成事件并评估聚合状态。
+
 ```text
 created
 claimed

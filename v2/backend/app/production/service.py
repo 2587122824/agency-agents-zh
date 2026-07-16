@@ -22,6 +22,7 @@ from ..db.models import (
     ProjectEvent,
     Shot,
     SnapshotEntityVersion,
+    StoragePolicyVersion,
     VideoSpecVersion,
     WorkflowSlotVersion,
     WorkAttempt,
@@ -162,7 +163,11 @@ def _compile_manifest(plan: PlanVersion, shots: list[Shot], selection: dict, out
             "kind": "generate_i2v_clip",
             "shot_id": shot.id,
             "workflow_slot_version_id": selection["video_workflow_slot_version_id"],
-            "input_contract": {"source_image_node_keys": [image_key], "duration_ms": shot.duration_ms},
+            "input_contract": {
+                "shot": _shot_contract(shot),
+                "source_image_node_keys": [image_key],
+                "duration_ms": shot.duration_ms,
+            },
             "output_contract": {"media_type": "video", "video_spec_version_id": selection["video_spec_version_id"]},
         })
         edges.append({"parent_node_key": image_key, "child_node_key": video_key, "dependency_type": "required", "input_slot": "source_image"})
@@ -637,9 +642,22 @@ def _execution_manifest(
     node: DAGNode,
     workflow: WorkflowSlotVersion | None,
     provider: ProviderConfigVersion | None,
+    video_spec: VideoSpecVersion | None,
+    storage: StoragePolicyVersion | None,
 ) -> dict:
+    duration_ms = node.input_contract.get("duration_ms")
+    fps = video_spec.fps if video_spec else None
+    frame_rule = video_spec.frame_count_rule if video_spec else None
+    frame_count = (
+        round(duration_ms * fps / 1000)
+        if isinstance(duration_ms, int)
+        and fps
+        and isinstance(frame_rule, dict)
+        and frame_rule.get("type") == "duration_times_fps"
+        else None
+    )
     return {
-        "schema_version": "production-work-request.v1",
+        "schema_version": "production-work-request.v2",
         "snapshot_id": snapshot.id,
         "contract_hash": snapshot.contract_hash,
         "dag_node_id": node.id,
@@ -649,9 +667,47 @@ def _execution_manifest(
         "output_contract": node.output_contract,
         "workflow_slot_version_id": workflow.id if workflow else None,
         "provider_config_version_id": provider.id if provider else None,
+        "provider": None if not provider else {
+            "provider_key": provider.provider_key,
+            "adapter_kind": provider.adapter_kind,
+            "base_url": provider.base_url,
+            "credential_ref": provider.credential_ref,
+            "request_timeout_seconds": provider.request_timeout_seconds,
+            "poll_interval_seconds": provider.poll_interval_seconds,
+            "max_concurrency": provider.max_concurrency,
+        },
         "provider_key": provider.provider_key if provider else "local",
         "adapter_kind": provider.adapter_kind if provider else "local",
+        "workflow": None if not workflow else {
+            "provider_workflow_id": workflow.provider_workflow_id,
+            "provider_workflow_version": workflow.provider_workflow_version,
+            "input_schema_version": workflow.input_schema_version,
+            "output_schema_version": workflow.output_schema_version,
+            "node_info_list": workflow.node_info_list,
+        },
         "provider_workflow_id": workflow.provider_workflow_id if workflow else None,
+        "video_spec": None if not video_spec else {
+            "video_spec_version_id": video_spec.id,
+            "width": video_spec.width,
+            "height": video_spec.height,
+            "aspect_ratio": video_spec.aspect_ratio,
+            "fps": video_spec.fps,
+            "frame_count_rule": video_spec.frame_count_rule,
+            "frame_count": frame_count,
+            "long_side": max(video_spec.width, video_spec.height),
+            "container": video_spec.container,
+            "video_codec": video_spec.video_codec,
+            "pixel_format": video_spec.pixel_format,
+            "safe_crop": video_spec.safe_crop,
+        },
+        "storage_policy": None if not storage else {
+            "storage_policy_version_id": storage.id,
+            "backend_kind": storage.backend_kind,
+            "allowed_mime_types": storage.allowed_mime_types,
+            "max_file_size_bytes": storage.max_file_size_bytes,
+            "public_url_policy": storage.public_url_policy,
+            "local_root_ref": storage.local_root_ref,
+        },
     }
 
 
@@ -695,12 +751,17 @@ def submit_production(
         raise ProductionConflictError("SNAPSHOT_ALREADY_SUBMITTED", "This snapshot already has work items.")
 
     now = utc_now()
+    video_spec = repository.component(VideoSpecVersion, snapshot.selection["video_spec_version_id"])
+    storage_policies = repository.storage_policies(snapshot.production_config_version_id)
+    if len(storage_policies) != 1:
+        raise ProductionConflictError("STORAGE_POLICY_COUNT_INVALID", "The frozen configuration must contain exactly one storage policy.")
+    storage = storage_policies[0]
     for node in nodes:
         workflow = repository.workflow(node.workflow_slot_version_id) if node.workflow_slot_version_id else None
         provider = repository.provider(workflow.provider_config_version_id) if workflow else None
         if node.workflow_slot_version_id and (not workflow or not provider):
             raise ProductionConflictError("EXECUTION_ROUTE_REFERENCE_MISSING", f"Node {node.node_key} has an unresolved execution route.")
-        manifest = _execution_manifest(snapshot, node, workflow, provider)
+        manifest = _execution_manifest(snapshot, node, workflow, provider, video_spec, storage)
         fingerprint = _hash(manifest)
         item = WorkItem(
             project_id=project.id,

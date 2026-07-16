@@ -774,9 +774,10 @@ export interface ProviderReadinessItem {
   capabilities: string[]
   adapter_registered: boolean
   external: boolean | null
+  execution_enabled: boolean | null
   credential_required: boolean | null
   credential_state: 'not_configured' | 'unsupported_reference' | 'not_authorized' | 'missing' | 'available'
-  status: 'connected' | 'adapter_not_connected' | 'credential_not_ready'
+  status: 'connected' | 'adapter_not_connected' | 'execution_disabled' | 'credential_not_ready'
 }
 
 export interface ProviderReadiness {

@@ -20,7 +20,7 @@ const emptyDraft = (): SystemConfigurationDraft => ({
 
 const componentLabels: Record<string, string> = { provider: '服务供应商', model: '模型', workflow_slot: '工作流槽位', video_spec: '视频规格', audio: '音频策略', storage: '存储策略', pricing_catalog: '价格目录' }
 const statusLabels: Record<string, string> = { draft: '草稿', validating: '校验中', validation_failed: '校验失败', ready: '可发布', published: '已发布', retired: '已停用' }
-const readinessLabels = { connected: '执行能力已就绪', adapter_not_connected: '执行组件尚未接通', credential_not_ready: '后端凭据尚未就绪' } as const
+const readinessLabels = { connected: '执行能力已就绪', adapter_not_connected: '执行组件尚未接通', execution_disabled: '真实执行授权未开启', credential_not_ready: '后端凭据尚未就绪' } as const
 const credentialLabels = { not_configured: '未登记后端凭据引用', unsupported_reference: '凭据引用格式暂不支持', not_authorized: '后端尚未授权读取该凭据', missing: '后端环境中没有对应凭据', available: '后端凭据已就绪' } as const
 
 function groupComponents(components: ConfigurationComponent[]) {

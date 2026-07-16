@@ -1,5 +1,19 @@
 # Handoff Context
 
+## 2026-07-17 V2 RunningHub Adapter Sprint 39
+
+- User explicitly authorized implementation and registration of RunningHub image/video adapters but prohibited network tests, real task submission, and fees. No network call was made in this sprint.
+- Added an independent V2 RunningHub adapter and injectable transport. The default registry now includes RunningHub, but `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` defaults to false; readiness reports `execution_disabled` without probing the network.
+- Added `production-work-request.v2`, freezing Provider URL/credential reference/timeouts, exact workflow ID/version/NodeInfoList, structured Shot input, video specification, and the single storage policy. Existing external v1 manifests block instead of reloading missing fields.
+- RunningHub NodeInfoList accepts only declared structured sources and `literal:<JSON>`. Legacy placeholders such as `{{prompt}}` are rejected before transport; no prompt synthesis, rewrite, route guess, workflow replacement, or V1 adapter reuse occurs.
+- I2V requires exactly one `source_image` binding and exactly one local image output from the required parent WorkAttempt response manifest. Missing/multiple/nonlocal inputs block and are never reduced to the first item.
+- Worker external execution is persisted in two phases: commit `submitting`, submit once, persist `provider_task_id`, then poll that exact task. Restart resumes polling; an unknown submission outcome becomes explicit reconciliation blocking and is never resubmitted.
+- Successful outputs download deterministically under `runtime://assets/providers/runninghub/<fingerprint>/...` with MIME, hash, byte size, type, and role. Existing explicit asset registration and QC remain authoritative.
+- The currently published V1-imported RunningHub configuration still contains legacy placeholder sources and is not compatible with the strict adapter. It was not mutated. A user-confirmed new configuration version is required before any future real connectivity test.
+- Added `docs/V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md` and updated product, data-model, state/event, implementation-status, and handoff documentation.
+- Verification before release: 116 backend tests passed, including fake transport and persisted submit/poll restart behavior; Python compileall, frontend production build, Alembic current/head at `20260717_16`, desktop/mobile browser checks, and diff audit passed. Commit/push and the final `8766` restart remain release steps.
+- The previously exposed RunningHub access key must remain unused and should be rotated before any later real test.
+
 ## 2026-07-17 V2 Provider Foundation and Readiness Sprint 38
 
 - Added an exact `ProviderAdapter` protocol and registry. The default registry contains only the existing non-network `mock` adapter and the local timeline-contract adapter.

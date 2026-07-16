@@ -591,6 +591,10 @@ created_at / updated_at / row_version
 
 ### 10.2 WorkAttempt
 
+RunningHub 外部执行使用 `production-work-request.v2`。`request_manifest` 必须冻结 Provider 地址与凭据引用、超时/轮询/并发参数、Workflow ID/版本/NodeInfoList、结构化 Shot 输入、视频规格和唯一存储策略；秘密值不进入清单。外部 Attempt 的持久状态至少区分 `submitting`、`submitted`、`completed`、`blocked`：`provider_task_id` 一旦返回必须先持久化，后续轮询只能使用该值。`submitting` 且没有任务号表示提交结果可能未知，不能解释为“尚未提交”并再次调用。
+
+`response_manifest.outputs[]` 是 I2V 父输入和后续素材登记的唯一输出证据。I2V 必须从必需父 WorkAttempt 得到恰好一个 `asset_type=image`、`storage_backend=local` 的输出；文件名、节点名、数组第一项或历史 Asset 均不能替代该关系。
+
 ```text
 id
 work_item_id

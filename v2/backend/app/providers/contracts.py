@@ -17,9 +17,10 @@ class ProviderReadinessItem(BaseModel):
     capabilities: list[str]
     adapter_registered: bool
     external: bool | None
+    execution_enabled: bool | None
     credential_required: bool | None
     credential_state: CredentialState
-    status: Literal["connected", "adapter_not_connected", "credential_not_ready"]
+    status: Literal["connected", "adapter_not_connected", "execution_disabled", "credential_not_ready"]
 
 
 class ProviderReadinessView(BaseModel):

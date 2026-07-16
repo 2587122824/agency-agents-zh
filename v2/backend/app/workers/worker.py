@@ -21,7 +21,13 @@ from ..orchestration.project_transitions import (
     block_project,
     transition_project,
 )
-from ..providers import ProviderAdapterError, ProviderExecutionRequest, default_provider_registry
+from ..providers import (
+    ExternalProviderAdapter,
+    ProviderAdapterError,
+    ProviderAdapterRegistry,
+    ProviderExecutionRequest,
+    default_provider_registry,
+)
 from ..repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyWorkRepository,
@@ -118,11 +124,129 @@ def _finish_completed(session, item: WorkItem, attempt: WorkAttempt, response: d
     attempt.execution_lock_expires_at = None
 
 
-def process_one(worker_id: str | None = None) -> bool:
+def _provider_request(
+    session: Session,
+    item: WorkItem,
+    attempt: WorkAttempt,
+    parents: list[WorkItem],
+) -> ProviderExecutionRequest:
+    outputs: list[dict] = []
+    repository = _work(session)
+    for parent in parents:
+        parent_attempt = repository.attempt(parent.current_attempt_id)
+        parent_outputs = (parent_attempt.response_manifest or {}).get("outputs") if parent_attempt else None
+        if isinstance(parent_outputs, list):
+            outputs.extend(output for output in parent_outputs if isinstance(output, dict))
+    return ProviderExecutionRequest(
+        work_kind=item.kind,
+        request_fingerprint=attempt.request_fingerprint,
+        request_manifest=attempt.request_manifest,
+        parent_work_item_ids=tuple(parent.id for parent in parents),
+        parent_outputs=tuple(outputs),
+    )
+
+
+def _record_terminal_event(
+    session: Session,
+    owner: str,
+    project: Project,
+    snapshot: ProductionSnapshot,
+    item: WorkItem,
+    attempt: WorkAttempt,
+) -> None:
+    _update_aggregate_state(session, project, snapshot, owner, item, attempt)
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=snapshot.id,
+        event_type="production.work_finished.v1",
+        aggregate_type="work_attempt",
+        aggregate_id=attempt.id,
+        actor_type="worker",
+        actor_id=owner,
+        message="Production work item reached a terminal state.",
+        data={
+            "snapshot_id": snapshot.id,
+            "work_item_id": item.id,
+            "dag_node_id": item.dag_node_id,
+            "status": item.status,
+            "error_code": attempt.error_code,
+        },
+    ))
+
+
+def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterRegistry | None = None) -> bool:
     owner = worker_id or f"v2-worker:{socket.gethostname()}"
+    adapters = adapter_registry or default_provider_registry()
     with SessionLocal() as session:
         repository = _work(session)
         now = utc_now()
+
+        polling = repository.poll_candidates(now, limit=50)
+        if polling:
+            selected = polling[0]
+            attempt = repository.attempt(selected.current_attempt_id)
+            if not attempt or not repository.claim_attempt(attempt, owner, now + timedelta(seconds=LEASE_SECONDS), now):
+                session.rollback()
+                return False
+            session.commit()
+
+            item = repository.work_item(selected.id)
+            attempt = repository.attempt(selected.current_attempt_id)
+            project = repository.project(item.project_id) if item else None
+            snapshot = repository.snapshot(item.snapshot_id) if item else None
+            if not item or not attempt or not project or not snapshot:
+                return False
+            if attempt.state == "submitting" and not attempt.provider_task_id:
+                _finish_blocked(
+                    session,
+                    item,
+                    attempt,
+                    "PROVIDER_SUBMISSION_RECONCILIATION_REQUIRED",
+                    "A prior external submission may have occurred before its task ID was persisted.",
+                )
+            else:
+                adapter = adapters.resolve(attempt.request_manifest.get("adapter_kind"), item.kind)
+                if adapter is None or not isinstance(adapter, ExternalProviderAdapter):
+                    _finish_blocked(
+                        session,
+                        item,
+                        attempt,
+                        "PROVIDER_ADAPTER_NOT_CONNECTED",
+                        "The persisted external provider adapter is not connected.",
+                    )
+                else:
+                    parents = _required_parent_items(session, item)
+                    request = _provider_request(session, item, attempt, parents)
+                    # Keep provider I/O outside a database transaction. The
+                    # persisted lease remains the execution authority.
+                    session.commit()
+                    try:
+                        result = adapter.poll(request, str(attempt.provider_task_id))
+                    except ProviderAdapterError as exc:
+                        _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                    else:
+                        attempt.response_manifest = result.response_manifest
+                        attempt.execution_lock_owner = None
+                        attempt.execution_lock_expires_at = None
+                        if result.state == "running":
+                            attempt.state = "submitted"
+                            poll_seconds = int(attempt.request_manifest.get("provider", {}).get("poll_interval_seconds") or 10)
+                            item.available_at = utc_now() + timedelta(seconds=poll_seconds)
+                        elif result.state == "failed":
+                            _finish_blocked(
+                                session,
+                                item,
+                                attempt,
+                                result.error_code or "PROVIDER_TASK_FAILED",
+                                result.error_detail or "The provider task failed.",
+                            )
+                        else:
+                            _finish_completed(session, item, attempt, result.response_manifest)
+            if item.status in {"completed", "blocked"}:
+                _record_terminal_event(session, owner, project, snapshot, item, attempt)
+            session.commit()
+            return True
+
         candidates = repository.lease_candidates(now, limit=50)
         selected: WorkItem | None = None
         for item in candidates:
@@ -198,7 +322,7 @@ def process_one(worker_id: str | None = None) -> bool:
             return True
 
         manifest = attempt.request_manifest
-        adapter = default_provider_registry().resolve(manifest.get("adapter_kind"), item.kind)
+        adapter = adapters.resolve(manifest.get("adapter_kind"), item.kind)
         if adapter is None:
             _finish_blocked(
                 session,
@@ -209,36 +333,33 @@ def process_one(worker_id: str | None = None) -> bool:
             )
         else:
             parents = _required_parent_items(session, item)
-            try:
-                response = adapter.execute(ProviderExecutionRequest(
-                    work_kind=item.kind,
-                    request_fingerprint=attempt.request_fingerprint,
-                    request_manifest=manifest,
-                    parent_work_item_ids=tuple(parent.id for parent in parents),
-                ))
-            except ProviderAdapterError as exc:
-                _finish_blocked(session, item, attempt, exc.code, exc.detail)
+            request = _provider_request(session, item, attempt, parents)
+            if isinstance(adapter, ExternalProviderAdapter):
+                attempt.state = "submitting"
+                session.commit()
+                try:
+                    submission = adapter.submit(request)
+                except ProviderAdapterError as exc:
+                    _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                else:
+                    attempt.provider_task_id = submission.provider_task_id
+                    attempt.response_manifest = submission.response_manifest
+                    attempt.state = "submitted"
+                    attempt.submitted_at = utc_now()
+                    attempt.execution_lock_owner = None
+                    attempt.execution_lock_expires_at = None
+                    poll_seconds = int(manifest.get("provider", {}).get("poll_interval_seconds") or 10)
+                    item.available_at = utc_now() + timedelta(seconds=poll_seconds)
             else:
-                _finish_completed(session, item, attempt, response)
+                try:
+                    response = adapter.execute(request)
+                except ProviderAdapterError as exc:
+                    _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                else:
+                    _finish_completed(session, item, attempt, response)
         repository.flush()
-        _update_aggregate_state(session, project, snapshot, owner, item, attempt)
-        _event(session, ProjectEvent(
-            project_id=project.id,
-            snapshot_id=snapshot.id,
-            event_type="production.work_finished.v1",
-            aggregate_type="work_attempt",
-            aggregate_id=attempt.id,
-            actor_type="worker",
-            actor_id=owner,
-            message="Production work item reached a terminal state.",
-            data={
-                "snapshot_id": snapshot.id,
-                "work_item_id": item.id,
-                "dag_node_id": item.dag_node_id,
-                "status": item.status,
-                "error_code": attempt.error_code,
-            },
-        ))
+        if item.status in {"completed", "blocked"}:
+            _record_terminal_event(session, owner, project, snapshot, item, attempt)
         session.commit()
         return True
 

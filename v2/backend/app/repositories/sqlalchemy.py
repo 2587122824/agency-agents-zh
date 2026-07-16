@@ -681,6 +681,11 @@ class SqlAlchemyProductionRepository:
             PricingCatalogVersion.production_config_version_id == config_id
         )))
 
+    def storage_policies(self, config_id: str) -> list[StoragePolicyVersion]:
+        return list(self.session.scalars(select(StoragePolicyVersion).where(
+            StoragePolicyVersion.production_config_version_id == config_id
+        )))
+
     def impact_history(self, project_id: str) -> list[ProductionImpactAnalysis]:
         return list(self.session.scalars(
             select(ProductionImpactAnalysis)
@@ -988,6 +993,20 @@ class SqlAlchemyWorkRepository:
             .limit(limit)
         ))
 
+    def poll_candidates(self, available_at: datetime, *, limit: int = 50) -> list[WorkItem]:
+        return list(self.session.scalars(
+            select(WorkItem)
+            .join(WorkAttempt, WorkAttempt.id == WorkItem.current_attempt_id)
+            .where(
+                WorkItem.status == "in_progress",
+                WorkItem.available_at <= available_at,
+                WorkAttempt.state.in_(["submitting", "submitted"]),
+                (WorkAttempt.execution_lock_expires_at.is_(None) | (WorkAttempt.execution_lock_expires_at <= available_at)),
+            )
+            .order_by(WorkItem.priority, WorkItem.created_at, WorkItem.id)
+            .limit(limit)
+        ))
+
     def attempt(self, attempt_id: str) -> WorkAttempt | None:
         return self.session.get(WorkAttempt, attempt_id)
 
@@ -1011,6 +1030,18 @@ class SqlAlchemyWorkRepository:
                 row_version=item.row_version + 1,
                 updated_at=started_at,
             )
+        )
+        return claimed.rowcount == 1
+
+    def claim_attempt(self, attempt: WorkAttempt, owner: str, expires_at: datetime, now: datetime) -> bool:
+        claimed = self.session.execute(
+            update(WorkAttempt)
+            .where(
+                WorkAttempt.id == attempt.id,
+                WorkAttempt.state.in_(["submitting", "submitted"]),
+                (WorkAttempt.execution_lock_expires_at.is_(None) | (WorkAttempt.execution_lock_expires_at <= now)),
+            )
+            .values(execution_lock_owner=owner, execution_lock_expires_at=expires_at)
         )
         return claimed.rowcount == 1
 

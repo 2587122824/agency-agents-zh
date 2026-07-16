@@ -26,6 +26,8 @@ def provider_readiness(
             credential = resolver.resolve(provider.credential_ref)
             if adapter is None:
                 status = "adapter_not_connected"
+            elif adapter.external and not adapter.execution_enabled:
+                status = "execution_disabled"
             elif adapter.requires_credential and not credential.available:
                 status = "credential_not_ready"
             else:
@@ -40,6 +42,7 @@ def provider_readiness(
                 "capabilities": list(provider.capabilities or []),
                 "adapter_registered": adapter is not None,
                 "external": adapter.external if adapter else None,
+                "execution_enabled": adapter.execution_enabled if adapter else None,
                 "credential_required": adapter.requires_credential if adapter else None,
                 "credential_state": credential.state,
                 "status": status,

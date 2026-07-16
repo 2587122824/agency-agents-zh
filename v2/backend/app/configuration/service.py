@@ -40,6 +40,36 @@ class ConfigurationConflictError(ValueError):
         self.code = code
 
 
+_RUNNINGHUB_NODE_SOURCES = {
+    "duration_ms",
+    "source_image",
+    "seed",
+    "shot.action",
+    "shot.composition",
+    "shot.duration_ms",
+    "shot.face_visibility",
+    "shot.motion_requirement",
+    "shot.text_policy",
+    "video_spec.width",
+    "video_spec.height",
+    "video_spec.fps",
+    "video_spec.long_side",
+    "video_spec.frame_count",
+}
+
+
+def _runninghub_source_is_supported(source: str) -> bool:
+    if source in _RUNNINGHUB_NODE_SOURCES:
+        return True
+    if not source.startswith("literal:"):
+        return False
+    try:
+        json.loads(source[len("literal:"):])
+    except json.JSONDecodeError:
+        return False
+    return True
+
+
 class ConfigurationNotFoundError(ValueError):
     pass
 
@@ -557,6 +587,31 @@ def _validate(repository: ConfigurationRepository, config: ProductionConfigVersi
             if identity in seen:
                 slot_errors.append({"code": "NODE_BINDING_DUPLICATE", "path": f"node_info_list.{index}"})
             seen.add(identity)
+            source = str(binding.get("value_source") or "")
+            if provider and provider.adapter_kind == "runninghub" and not _runninghub_source_is_supported(source):
+                slot_errors.append({
+                    "code": "RUNNINGHUB_NODE_SOURCE_UNSUPPORTED",
+                    "path": f"node_info_list.{index}.value_source",
+                    "value_source": source,
+                })
+            if (
+                provider
+                and provider.adapter_kind == "runninghub"
+                and source == "source_image"
+                and workflow.operation_kind != "video_generation"
+            ):
+                slot_errors.append({
+                    "code": "RUNNINGHUB_SOURCE_IMAGE_NOT_APPLICABLE",
+                    "path": f"node_info_list.{index}.value_source",
+                })
+        if provider and provider.adapter_kind == "runninghub" and workflow.operation_kind == "video_generation":
+            source_image_count = sum(binding.get("value_source") == "source_image" for binding in bindings)
+            if source_image_count != 1:
+                slot_errors.append({
+                    "code": "RUNNINGHUB_I2V_SOURCE_IMAGE_COUNT_INVALID",
+                    "path": "node_info_list",
+                    "actual": source_image_count,
+                })
         workflow.validation_report = slot_errors
         workflow.validation_status = "invalid" if slot_errors else "valid"
         errors.extend({**error, "slot_key": workflow.slot_key} for error in slot_errors)

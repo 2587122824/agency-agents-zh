@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+import os
 
 from .base import ProviderAdapter
 from .builtin import LocalTimelineAdapter, MockProviderAdapter
+from .runninghub import RunningHubAdapter
 
 
 class ProviderAdapterRegistry:
@@ -31,4 +33,5 @@ class ProviderAdapterRegistry:
 
 
 def default_provider_registry() -> ProviderAdapterRegistry:
-    return ProviderAdapterRegistry((MockProviderAdapter(), LocalTimelineAdapter()))
+    external_enabled = os.getenv("V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED", "").strip().lower() in {"1", "true", "yes"}
+    return ProviderAdapterRegistry((MockProviderAdapter(), LocalTimelineAdapter(), RunningHubAdapter(execution_enabled=external_enabled)))

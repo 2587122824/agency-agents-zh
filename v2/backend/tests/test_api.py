@@ -22,6 +22,8 @@ from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, Com
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
+from v2.backend.app.providers import ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
+from v2.backend.app.providers.registry import ProviderAdapterRegistry
 
 
 @pytest.fixture()
@@ -1591,6 +1593,93 @@ def test_mock_worker_obeys_dag_order_and_makes_no_provider_submission(client: Te
         assert all(item.kind == "estimated" and item.status == "confirmed" for item in cost_events)
 
 
+class FakePersistedExternalAdapter:
+    adapter_kind = "runninghub"
+    display_name = "Fake RunningHub"
+    external = True
+    execution_enabled = True
+    requires_credential = True
+    supported_work_kinds = frozenset({"generate_keyframe", "generate_i2v_clip"})
+
+    def __init__(self) -> None:
+        self.submit_count = 0
+        self.poll_count = 0
+
+    def execute(self, request: ProviderExecutionRequest) -> dict:
+        raise AssertionError("External adapter execute() must not be used")
+
+    def submit(self, request: ProviderExecutionRequest) -> ProviderSubmission:
+        self.submit_count += 1
+        return ProviderSubmission("persisted-task-1", {"schema_version": "fake-submission.v1"})
+
+    def poll(self, request: ProviderExecutionRequest, provider_task_id: str) -> ProviderPollResult:
+        assert provider_task_id == "persisted-task-1"
+        self.poll_count += 1
+        if self.poll_count == 1:
+            return ProviderPollResult("running", {"schema_version": "fake-poll.v1", "remote_status": "RUNNING"})
+        return ProviderPollResult("succeeded", {
+            "schema_version": "provider-response.v1",
+            "media_created": True,
+            "outputs": [{
+                "uri": "runtime://assets/providers/fake/output.png",
+                "storage_backend": "local",
+                "asset_type": "image",
+                "role": "provider_output",
+                "mime_type": "image/png",
+                "content_hash": "a" * 64,
+            }],
+        })
+
+
+def test_external_worker_persists_task_id_and_resumes_poll_without_resubmit(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "external-persist-activate", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "external-persist-submit",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    adapter = FakePersistedExternalAdapter()
+    registry = ProviderAdapterRegistry((adapter,))
+
+    assert process_one("external-worker", registry) is True
+    with SessionLocal() as session:
+        attempt = session.scalar(select(WorkAttempt).where(WorkAttempt.provider_task_id == "persisted-task-1"))
+        item = session.get(WorkItem, attempt.work_item_id)
+        assert attempt.state == "submitted"
+        assert item.status == "in_progress"
+        item.available_at = item.created_at
+        session.commit()
+
+    assert process_one("external-worker-after-restart", registry) is True
+    assert adapter.submit_count == 1
+    assert adapter.poll_count == 1
+    with SessionLocal() as session:
+        attempt = session.scalar(select(WorkAttempt).where(WorkAttempt.provider_task_id == "persisted-task-1"))
+        item = session.get(WorkItem, attempt.work_item_id)
+        assert attempt.state == "submitted"
+        item.available_at = item.created_at
+        session.commit()
+
+    assert process_one("external-worker-after-second-restart", registry) is True
+    assert adapter.submit_count == 1
+    assert adapter.poll_count == 2
+    with SessionLocal() as session:
+        attempt = session.scalar(select(WorkAttempt).where(WorkAttempt.provider_task_id == "persisted-task-1"))
+        item = session.get(WorkItem, attempt.work_item_id)
+        assert attempt.state == "completed"
+        assert item.status == "completed"
+
+
 def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
     activated = client.post(
@@ -1612,13 +1701,13 @@ def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClien
     execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
     blocked = [item for item in execution["work_items"] if item["status"] == "blocked"]
     assert len(blocked) == 1
-    assert blocked[0]["attempts"][0]["error_code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
+    assert blocked[0]["attempts"][0]["error_code"] == "EXTERNAL_PROVIDER_EXECUTION_DISABLED"
     assert len(blocked[0]["attempts"]) == 1
     assert blocked[0]["attempts"][0]["provider_task_id"] is None
     state = client.get(f"/api/v1/projects/{project['id']}").json()
     assert state["status"] == "blocked"
     assert state["blocked_from_state"] == "producing"
-    assert state["state_reason_code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
+    assert state["state_reason_code"] == "EXTERNAL_PROVIDER_EXECUTION_DISABLED"
     assert state["blocked_responsible_aggregate_type"] == "work_item"
     assert state["blocked_responsible_aggregate_id"] == blocked[0]["id"]
     assert state["blocked_allowed_commands"] == []
@@ -1649,7 +1738,7 @@ def test_project_control_exposes_exact_production_route_cost_and_blocker(client:
     assert response.status_code == 200
     control = response.json()
     assert control["persisted_status"] == "blocked"
-    assert control["state_reason_code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
+    assert control["state_reason_code"] == "EXTERNAL_PROVIDER_EXECUTION_DISABLED"
     assert control["blocked_from_state"] == "producing"
     assert control["blocked_responsible_aggregate_type"] == "work_item"
     assert control["evaluated_stage"] == "production"
@@ -1658,7 +1747,7 @@ def test_project_control_exposes_exact_production_route_cost_and_blocker(client:
     assert control["work_counts"]["blocked"] == 1
     assert control["blocker_count"] >= 1
     work_blocker = next(item for item in control["blockers"] if item["source_type"] == "work_item")
-    assert work_blocker["code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
+    assert work_blocker["code"] == "EXTERNAL_PROVIDER_EXECUTION_DISABLED"
     assert work_blocker["affected_node_keys"]
     blocked_route = next(item for item in control["routes"] if item["attempt_state"] == "blocked")
     assert control["blocked_responsible_aggregate_id"] == blocked_route["work_item_id"]
@@ -2685,9 +2774,10 @@ def test_provider_readiness_is_read_only_and_does_not_enable_unregistered_adapte
     provider = view["providers"][0]
     assert provider["provider_display_name"] == "RunningHub"
     assert provider["adapter_kind"] == "runninghub"
-    assert provider["adapter_registered"] is False
+    assert provider["adapter_registered"] is True
+    assert provider["execution_enabled"] is False
     assert provider["credential_state"] == "available"
-    assert provider["status"] == "adapter_not_connected"
+    assert provider["status"] == "execution_disabled"
     serialized = response.text
     assert "must-never-be-returned" not in serialized
     assert "READINESS_TEST_API_KEY" not in serialized

@@ -667,8 +667,8 @@ GET  /api/v1/projects/{project_id}/events
 
 ### Sprint 3：执行、供应商与资产
 
-- [ ] RunningHub 图片适配器
-- [ ] RunningHub 视频适配器
+- [x] RunningHub 图片适配器（已注册，真实执行默认关闭，尚未联网验收）
+- [x] RunningHub 首帧视频适配器（已注册，严格单父图片，真实执行默认关闭，尚未联网验收）
 - [ ] CosyVoice 适配器
 - [ ] OSS 临时音频上传
 - [ ] FFmpeg 合成适配器
@@ -883,6 +883,10 @@ Provider 的连接状态必须拆成独立事实：配置已发布、凭据可�
 首期凭据引用只支持 `env://VARIABLE_NAME`。变量名还必须出现在后端 `V2_CREDENTIAL_ENV_ALLOWLIST` 白名单中；数据库和前端均不保存或返回变量值。连接状态接口也不返回变量名，防止配置读取接口泄露后端秘密布局。完整实现见 [V2 Provider 基础层实现](./V2_PROVIDER_FOUNDATION_IMPLEMENTATION.md)。
 
 Worker 只按 WorkAttempt 冻结清单中的精确 `adapter_kind + work_kind` 解析注册表。未注册或能力不匹配时明确阻断，不借用 V1 适配器，不按名称猜测，也不选择另一个 Provider。
+
+RunningHub 使用独立的提交与轮询合同。Worker 在外部请求前持久化 `submitting`，返回后立即保存精确 `provider_task_id`；重启只轮询已保存任务号。提交结果未知或可能在任务号落库前中断时进入人工对账阻断，禁止重新提交。真实外部执行还必须由后端 `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 明确开启，默认关闭；注册适配器、凭据可读和允许真实执行是三个独立事实。
+
+RunningHub 的 WorkAttempt 必须使用 `production-work-request.v2` 冻结 Provider、Workflow、完整 NodeInfoList、结构化 Shot、视频规格和存储策略。适配器只解析声明的结构化来源和 `literal:<JSON>`；不支持旧式 `{{prompt}}` 占位符，不生成或重写提示词。I2V 必须恰好绑定并消费一个父图片输出，多个输入不得静默取第一项。完整边界见 [V2 RunningHub 图片/视频适配器实现](./V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md)。
 
 ### 30.5 视频与音频规格
 

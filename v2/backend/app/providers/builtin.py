@@ -11,6 +11,7 @@ class MockProviderAdapter:
     adapter_kind: str = "mock"
     display_name: str = "Mock"
     external: bool = False
+    execution_enabled: bool = True
     requires_credential: bool = False
     supported_work_kinds: frozenset[str] = frozenset({
         "generate_keyframe",
@@ -34,6 +35,7 @@ class LocalTimelineAdapter:
     adapter_kind: str = "local"
     display_name: str = "Local timeline contract"
     external: bool = False
+    execution_enabled: bool = True
     requires_credential: bool = False
     supported_work_kinds: frozenset[str] = frozenset({"assemble_timeline_contract"})
 

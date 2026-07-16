@@ -1,13 +1,21 @@
 from __future__ import annotations
 
-from v2.backend.app.providers import EnvironmentCredentialResolver, ProviderExecutionRequest
+from pathlib import Path
+
+import pytest
+
+from v2.backend.app.providers import EnvironmentCredentialResolver, ProviderAdapterError, ProviderExecutionRequest
 from v2.backend.app.providers.registry import default_provider_registry
+from v2.backend.app.providers.runninghub import RunningHubAdapter
+import v2.backend.app.providers.runninghub as runninghub_module
 
 
 def test_provider_registry_resolves_only_exact_registered_work_kind() -> None:
     registry = default_provider_registry()
-    assert registry.get("runninghub") is None
-    assert registry.resolve("runninghub", "generate_keyframe") is None
+    runninghub = registry.get("runninghub")
+    assert runninghub is not None
+    assert runninghub.execution_enabled is False
+    assert registry.resolve("runninghub", "generate_keyframe") is runninghub
     assert registry.resolve("local", "generate_keyframe") is None
     local = registry.resolve("local", "assemble_timeline_contract")
     assert local is not None
@@ -40,3 +48,151 @@ def test_environment_credential_resolver_requires_exact_allowlist_and_never_infe
     assert available.secret == "server-secret"
     assert "server-secret" not in repr(available)
     assert allowed.resolve("env://MISSING_KEY").state == "missing"
+
+
+class FakeRunningHubTransport:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+        self.submit_response = {"taskId": "rh-task-1", "status": "RUNNING"}
+        self.query_response = {"taskId": "rh-task-1", "status": "RUNNING"}
+        self.download_response = (b"image-bytes", "image/png")
+
+    def post_json(self, url: str, payload: dict, timeout: int) -> dict:
+        self.calls.append(("post_json", url, payload, timeout))
+        return self.query_response if url.endswith("/query") else self.submit_response
+
+    def upload(self, url: str, api_key: str, path: Path, mime_type: str, timeout: int) -> dict:
+        self.calls.append(("upload", url, api_key, path, mime_type, timeout))
+        return {"data": {"fileName": "uploaded/input.png"}}
+
+    def download(self, url: str, timeout: int, max_bytes: int) -> tuple[bytes, str | None]:
+        self.calls.append(("download", url, timeout, max_bytes))
+        return self.download_response
+
+
+def runninghub_manifest(bindings: list[dict], media_type: str = "image") -> dict:
+    return {
+        "schema_version": "production-work-request.v2",
+        "adapter_kind": "runninghub",
+        "input_contract": {
+            "shot": {"action": "run", "composition": "wide"},
+            "duration_ms": 4000,
+        },
+        "output_contract": {"media_type": media_type},
+        "provider": {
+            "provider_key": "runninghub",
+            "adapter_kind": "runninghub",
+            "base_url": "https://www.runninghub.cn/openapi/v2",
+            "credential_ref": "env://RUNNINGHUB_API_KEY",
+            "request_timeout_seconds": 60,
+            "poll_interval_seconds": 5,
+            "max_concurrency": 1,
+        },
+        "workflow": {
+            "provider_workflow_id": "workflow-1",
+            "provider_workflow_version": "v1",
+            "node_info_list": bindings,
+        },
+        "video_spec": {"width": 480, "height": 848, "fps": 24, "long_side": 848, "frame_count": 96},
+        "storage_policy": {
+            "backend_kind": "local",
+            "local_root_ref": "v2.runtime.assets",
+            "allowed_mime_types": ["image/png", "video/mp4"],
+            "max_file_size_bytes": 1024 * 1024,
+        },
+    }
+
+
+def enabled_adapter(transport: FakeRunningHubTransport) -> RunningHubAdapter:
+    return RunningHubAdapter(
+        execution_enabled=True,
+        transport=transport,
+        credential_resolver=EnvironmentCredentialResolver(
+            {"RUNNINGHUB_API_KEY": "test-secret"},
+            {"RUNNINGHUB_API_KEY"},
+        ),
+    )
+
+
+def test_runninghub_disabled_gate_prevents_transport_calls() -> None:
+    transport = FakeRunningHubTransport()
+    adapter = RunningHubAdapter(
+        execution_enabled=False,
+        transport=transport,
+        credential_resolver=EnvironmentCredentialResolver({}, set()),
+    )
+    request = ProviderExecutionRequest("generate_keyframe", "a" * 64, runninghub_manifest([]))
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.submit(request)
+    assert caught.value.code == "EXTERNAL_PROVIDER_EXECUTION_DISABLED"
+    assert transport.calls == []
+
+
+def test_runninghub_resolves_only_declared_node_sources() -> None:
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    bindings = [
+        {"node_id": "1", "field_path": "text", "value_source": "shot.action", "value_type": "string", "required": True},
+        {"node_id": "2", "field_path": "width", "value_source": "video_spec.width", "value_type": "integer", "required": True},
+        {"node_id": "3", "field_path": "flag", "value_source": "literal:true", "value_type": "boolean", "required": True},
+    ]
+    request = ProviderExecutionRequest("generate_keyframe", "b" * 64, runninghub_manifest(bindings))
+    result = adapter.submit(request)
+    assert result.provider_task_id == "rh-task-1"
+    payload = transport.calls[0][2]
+    assert payload["nodeInfoList"] == [
+        {"nodeId": "1", "fieldName": "text", "fieldValue": "run"},
+        {"nodeId": "2", "fieldName": "width", "fieldValue": 480},
+        {"nodeId": "3", "fieldName": "flag", "fieldValue": True},
+    ]
+    assert payload["apiKey"] == "test-secret"
+    assert "test-secret" not in repr(result)
+
+
+def test_runninghub_rejects_legacy_prompt_placeholder_before_transport() -> None:
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    bindings = [{"node_id": "1", "field_path": "text", "value_source": "{{prompt}}", "value_type": "string", "required": True}]
+    request = ProviderExecutionRequest("generate_keyframe", "c" * 64, runninghub_manifest(bindings))
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.submit(request)
+    assert caught.value.code == "NODE_BINDING_SOURCE_UNSUPPORTED"
+    assert transport.calls == []
+
+
+def test_runninghub_i2v_requires_exactly_one_local_parent_image(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    bindings = [{"node_id": "1", "field_path": "image", "value_source": "source_image", "value_type": "image", "required": True}]
+    manifest = runninghub_manifest(bindings, "video")
+    request = ProviderExecutionRequest("generate_i2v_clip", "d" * 64, manifest, parent_outputs=())
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.submit(request)
+    assert caught.value.code == "I2V_PARENT_IMAGE_COUNT_INVALID"
+    assert transport.calls == []
+
+    image_path = tmp_path / "assets" / "parents" / "input.png"
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(b"png")
+    parent = {"uri": "runtime://assets/parents/input.png", "storage_backend": "local", "asset_type": "image", "mime_type": "image/png"}
+    request = ProviderExecutionRequest("generate_i2v_clip", "e" * 64, manifest, parent_outputs=(parent,))
+    adapter.submit(request)
+    assert transport.calls[0][0] == "upload"
+    assert transport.calls[1][2]["nodeInfoList"][0]["fieldValue"] == "uploaded/input.png"
+
+
+def test_runninghub_poll_downloads_deterministic_local_output(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    transport = FakeRunningHubTransport()
+    transport.query_response = {"taskId": "rh-task-1", "status": "SUCCESS", "results": [{"url": "https://files.invalid/result.png"}]}
+    adapter = enabled_adapter(transport)
+    request = ProviderExecutionRequest("generate_keyframe", "f" * 64, runninghub_manifest([
+        {"node_id": "1", "field_path": "text", "value_source": "shot.action", "value_type": "string", "required": True}
+    ]))
+    result = adapter.poll(request, "rh-task-1")
+    assert result.state == "succeeded"
+    output = result.response_manifest["outputs"][0]
+    assert output["uri"] == f"runtime://assets/providers/runninghub/{'f' * 64}/output-00.png"
+    assert (tmp_path / "assets" / "providers" / "runninghub" / ("f" * 64) / "output-00.png").read_bytes() == b"image-bytes"
+    assert transport.calls[0][2] == {"taskId": "rh-task-1"}
