@@ -556,6 +556,90 @@ def create_confirmed_plan(client: TestClient) -> tuple[dict, dict]:
     return project, plan
 
 
+def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inference(client: TestClient) -> None:
+    project = create_creation_project(client)
+    resolved = client.post(
+        f"/api/v1/projects/{project['id']}/decisions",
+        json={
+            "key": "visual_style",
+            "label": "画面风格",
+            "value": "documentary",
+            "status": "resolved",
+        },
+    )
+    pending = client.post(
+        f"/api/v1/projects/{project['id']}/decisions",
+        json={"key": "character_identity", "label": "人物身份", "status": "pending"},
+    )
+    assert resolved.status_code == 201
+    assert pending.status_code == 201
+    base_requirement_id = client.get(
+        f"/api/v1/projects/{project['id']}/creation-center"
+    ).json()["active_requirement"]["id"]
+    client.post(
+        f"/api/v1/projects/{project['id']}/messages",
+        json={"command_id": "impact-message", "content": "保持纪实训练风格"},
+    )
+    requirement_candidate = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "impact-requirement-generate", "expected_base_version_id": base_requirement_id},
+    ).json()
+    requirement = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates/{requirement_candidate['id']}:accept",
+        json={"command_id": "impact-requirement-accept", "expected_base_version_id": base_requirement_id},
+    ).json()
+    requirement_id = requirement["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "impact-brief-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "impact-brief-accept", "expected_requirement_version_id": requirement_id},
+    )
+    shot_plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "impact-shots-generate",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    ).json()
+    plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shot_plan['id']}:accept",
+        json={"command_id": "impact-shots-accept", "expected_requirement_version_id": requirement_id},
+    ).json()
+    with SessionLocal() as session:
+        events_before = len(list(session.scalars(select(ProjectEvent).where(
+            ProjectEvent.project_id == project["id"]
+        ))))
+
+    response = client.get(f"/api/v1/projects/{project['id']}/decision-impact-graph")
+    assert response.status_code == 200
+    graph = response.json()
+    assert graph["scope"] == "observed_lineage"
+    summaries = {item["decision_id"]: item for item in graph["decisions"]}
+    resolved_summary = summaries[resolved.json()["id"]]
+    pending_summary = summaries[pending.json()["id"]]
+    assert resolved_summary["observation_status"] == "observed"
+    assert len(resolved_summary["direct_manifest_ids"]) == 3
+    assert resolved_summary["downstream_counts"]["requirement_candidate"] == 1
+    assert resolved_summary["downstream_counts"]["requirement_version"] == 1
+    assert resolved_summary["downstream_counts"]["plan"] == 1
+    assert resolved_summary["downstream_counts"]["shot"] == 3
+    assert pending_summary["observation_status"] == "not_observed"
+    assert pending_summary["direct_manifest_ids"] == []
+    assert pending_summary["downstream_node_ids"] == []
+    plan_node = next(item for item in graph["nodes"] if item["record_id"] == plan["id"])
+    assert plan_node["record_type"] == "plan"
+    assert "不会按决策名称推断" in graph["boundary"]
+    with SessionLocal() as session:
+        events_after = len(list(session.scalars(select(ProjectEvent).where(
+            ProjectEvent.project_id == project["id"]
+        ))))
+    assert events_after == events_before
+
+
 def publish_visual_production_configuration(client: TestClient, with_pricing: bool = False, adapter_kind: str = "mock") -> dict:
     configuration = valid_system_configuration()
     configuration["providers"][0]["adapter_kind"] = adapter_kind

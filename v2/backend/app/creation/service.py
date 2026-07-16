@@ -27,6 +27,7 @@ from ..repositories import (
     CreationRepository,
     SqlAlchemyCommandRepository,
     SqlAlchemyCreationRepository,
+    SqlAlchemyDecisionRepository,
     SqlAlchemyEventRepository,
 )
 from .contracts import (
@@ -212,12 +213,17 @@ def _manifest_payload(session: Session, project: Project, base: RequirementVersi
     messages = repository.manifest_messages(project.id)
     messages = [item for item in messages if item.id not in consumed]
     bindings = repository.confirmed_bindings(project.id)
+    decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
     return {
         "active_requirement": {"id": base.id, "fields": base.fields},
         "messages": [{"id": item.id, "content": item.content, "reply_to": item.reply_to_message_id} for item in messages],
         "confirmed_attachment_bindings": [
             {"id": item.id, "type": item.binding_type, "entity_id": item.entity_id}
             for item in bindings
+        ],
+        "confirmed_decisions": [
+            {"id": item.id, "key": item.key, "label": item.label, "value": item.value, "source": item.source}
+            for item in decisions
         ],
         "system_config_version": "v2.creation.mock.v1",
     }
@@ -243,6 +249,7 @@ def generate_candidate(session: Session, project: Project, payload: GenerateCand
         project_id=project.id,
         base_requirement_version_id=base.id,
         message_ids=[item["id"] for item in manifest_payload["messages"]],
+        decision_ids=[item["id"] for item in manifest_payload["confirmed_decisions"]],
         attachment_binding_ids=[item["id"] for item in manifest_payload["confirmed_attachment_bindings"]],
         input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
         payload=manifest_payload,

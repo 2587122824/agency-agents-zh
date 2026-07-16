@@ -59,6 +59,7 @@ from v2.backend.app.repositories import (
     SqlAlchemyDecisionRepository,
     SqlAlchemyDeliveryRepository,
     SqlAlchemyEventRepository,
+    SqlAlchemyImpactRepository,
     SqlAlchemyEditorRepository,
     SqlAlchemyPlanningRepository,
     SqlAlchemyProductionRepository,
@@ -180,9 +181,25 @@ def test_decision_repository_contract_scopes_keys_and_ids_to_project() -> None:
             projects.add(first)
             projects.add(second)
             projects.flush()
-            first_decision = Decision(project_id=first.id, key="visual_style", label="Style")
+            first_decision = Decision(
+                project_id=first.id,
+                key="visual_style",
+                label="Style",
+                value="documentary",
+                status="resolved",
+                created_at=utc_now() - timedelta(minutes=1),
+            )
+            later_resolved = Decision(
+                project_id=first.id,
+                key="audio_mode",
+                label="Audio",
+                value="off",
+                status="resolved",
+                created_at=utc_now(),
+            )
             second_decision = Decision(project_id=second.id, key="visual_style", label="Other style")
             decisions.add(first_decision)
+            decisions.add(later_resolved)
             decisions.add(second_decision)
             decisions.flush()
             session.commit()
@@ -191,6 +208,11 @@ def test_decision_repository_contract_scopes_keys_and_ids_to_project() -> None:
             assert decisions.get_by_key(second.id, "visual_style").id == second_decision.id  # type: ignore[union-attr]
             assert decisions.get_for_project(first.id, second_decision.id) is None
             assert decisions.get_by_key(first.id, "missing") is None
+            assert [row.id for row in decisions.resolved_for_project(first.id)] == [
+                first_decision.id,
+                later_resolved.id,
+            ]
+            assert decisions.resolved_for_project(second.id) == []
     finally:
         engine.dispose()
 
@@ -2566,5 +2588,231 @@ def test_contact_sheet_repository_contract_preserves_snapshot_scope_and_evidence
             assert contact_sheet.entity_versions(project.id, set()) == []
             assert contact_sheet.entities(project.id, set()) == []
             assert contact_sheet.attachments(project.id, set()) == []
+    finally:
+        engine.dispose()
+
+
+def test_impact_repository_contract_preserves_project_lineage_and_exact_scope() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            impact = SqlAlchemyImpactRepository(session)
+            project = Project(
+                id="project-impact",
+                title="Impact",
+                core_topic="Impact repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            other = Project(
+                id="project-impact-other",
+                title="Other",
+                core_topic="Impact isolation",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            projects.add(project)
+            projects.add(other)
+            projects.flush()
+            decision = Decision(
+                id="decision-impact",
+                project_id=project.id,
+                key="visual_style",
+                label="Style",
+                value="documentary",
+                status="resolved",
+            )
+            other_decision = Decision(
+                id="decision-impact-other",
+                project_id=other.id,
+                key="visual_style",
+                label="Other style",
+                value="cinematic",
+                status="resolved",
+            )
+            requirement = RequirementVersion(
+                id="requirement-impact",
+                project_id=project.id,
+                version_number=1,
+                fields={},
+                candidate_id="candidate-impact",
+            )
+            manifest = AgentInputManifest(
+                id="manifest-impact",
+                project_id=project.id,
+                base_requirement_version_id=requirement.id,
+                decision_ids=[decision.id],
+                input_hash="a" * 64,
+                payload={},
+            )
+            run = AgentRun(
+                id="run-impact",
+                project_id=project.id,
+                agent_role="creative",
+                status="succeeded",
+                input_manifest_id=manifest.id,
+            )
+            candidate = RequirementCandidate(
+                id="candidate-impact",
+                project_id=project.id,
+                base_requirement_version_id=requirement.id,
+                agent_run_id=run.id,
+                status="accepted",
+                fields={},
+            )
+            brief = CreativeBriefCandidate(
+                id="brief-impact",
+                project_id=project.id,
+                requirement_version_id=requirement.id,
+                agent_run_id=run.id,
+                status="accepted",
+                brief={},
+            )
+            shot_plan = ShotPlanCandidate(
+                id="shot-plan-impact",
+                project_id=project.id,
+                requirement_version_id=requirement.id,
+                creative_brief_candidate_id=brief.id,
+                agent_run_id=run.id,
+                status="accepted",
+                shots=[],
+            )
+            plan = PlanVersion(
+                id="plan-impact",
+                project_id=project.id,
+                version_number=1,
+                requirement_version_id=requirement.id,
+                shot_plan_candidate_id=shot_plan.id,
+                creative_brief={},
+            )
+            shot = Shot(
+                id="shot-impact",
+                project_id=project.id,
+                plan_version_id=plan.id,
+                shot_code="SH-001",
+                sequence_number=1,
+                duration_ms=10000,
+                shot_type="action",
+                character_entity_version_ids=[],
+                outfit_entity_version_ids=[],
+                face_visibility="required",
+                text_policy="forbidden",
+                motion_requirement="high",
+                composition="Medium",
+                action="Run",
+            )
+            snapshot = ProductionSnapshot(
+                id="snapshot-impact",
+                project_id=project.id,
+                plan_version_id=plan.id,
+                production_config_version_id="config-impact",
+                impact_analysis_id="analysis-impact",
+                snapshot_number=1,
+                status="submitted",
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="b" * 64,
+            )
+            node = DAGNode(
+                id="node-impact",
+                snapshot_id=snapshot.id,
+                node_key="shot.001.video",
+                kind="generate_i2v_clip",
+                shot_id=shot.id,
+                input_contract={},
+                output_contract={"media_type": "video"},
+            )
+            work_item = WorkItem(
+                id="work-impact",
+                project_id=project.id,
+                snapshot_id=snapshot.id,
+                dag_node_id=node.id,
+                kind=node.kind,
+                payload={},
+            )
+            asset = Asset(
+                id="asset-impact",
+                project_id=project.id,
+                snapshot_id=snapshot.id,
+                dag_node_id=node.id,
+                output_index=0,
+                asset_type="video",
+                role="clip",
+                uri="runtime://assets/impact.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="approved",
+            )
+            timeline = Timeline(
+                id="timeline-impact",
+                project_id=project.id,
+                snapshot_id=snapshot.id,
+                version_number=1,
+                status="confirmed",
+                source="user",
+                output_spec={},
+                track_config={},
+            )
+            timeline_item = TimelineItem(
+                id="timeline-item-impact",
+                timeline_id=timeline.id,
+                track_type="main_video",
+                sequence_number=1,
+                asset_id=asset.id,
+                label="SH-001",
+                source_in_ms=0,
+                source_out_ms=10000,
+                timeline_in_ms=0,
+                timeline_out_ms=10000,
+            )
+            session.add_all([
+                decision,
+                other_decision,
+                requirement,
+                manifest,
+                run,
+                candidate,
+                brief,
+                shot_plan,
+                plan,
+                shot,
+                snapshot,
+                node,
+                work_item,
+                asset,
+                timeline,
+                timeline_item,
+            ])
+            session.commit()
+
+            assert [row.id for row in impact.decisions(project.id)] == [decision.id]
+            assert [row.id for row in impact.manifests(project.id)] == [manifest.id]
+            assert [row.id for row in impact.agent_runs(project.id)] == [run.id]
+            assert [row.id for row in impact.requirement_candidates(project.id)] == [candidate.id]
+            assert [row.id for row in impact.requirement_versions(project.id)] == [requirement.id]
+            assert [row.id for row in impact.creative_briefs(project.id)] == [brief.id]
+            assert [row.id for row in impact.shot_plans(project.id)] == [shot_plan.id]
+            assert [row.id for row in impact.plans(project.id)] == [plan.id]
+            assert [row.id for row in impact.shots(project.id)] == [shot.id]
+            assert [row.id for row in impact.snapshots(project.id)] == [snapshot.id]
+            assert [row.id for row in impact.dag_nodes({snapshot.id})] == [node.id]
+            assert [row.id for row in impact.work_items(project.id)] == [work_item.id]
+            assert [row.id for row in impact.assets(project.id)] == [asset.id]
+            assert [row.id for row in impact.timelines(project.id)] == [timeline.id]
+            assert [row.id for row in impact.timeline_items({timeline.id})] == [timeline_item.id]
+            assert [row.id for row in impact.decisions(other.id)] == [other_decision.id]
+            assert impact.manifests(other.id) == []
+            assert impact.dag_nodes(set()) == []
+            assert impact.timeline_items(set()) == []
     finally:
         engine.dispose()

@@ -27,7 +27,7 @@ from ..db.models import (
     ShotPlanCandidate,
     utc_now,
 )
-from ..repositories import PlanningRepository, SqlAlchemyPlanningRepository
+from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction
 
 
@@ -59,9 +59,14 @@ def _create_manifest(
 ) -> AgentInputManifest:
     repository = _planning(session)
     bindings = _confirmed_binding_versions(session, project.id)
+    decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
     payload = {
         "active_requirement": {"id": requirement.id, "fields": requirement.fields},
         "confirmed_entity_versions": bindings,
+        "confirmed_decisions": [
+            {"id": item.id, "key": item.key, "label": item.label, "value": item.value, "source": item.source}
+            for item in decisions
+        ],
         "system_config_version": "v2.creation.mock.v1",
         **(extra or {}),
     }
@@ -70,6 +75,7 @@ def _create_manifest(
     manifest = AgentInputManifest(
         project_id=project.id,
         base_requirement_version_id=requirement.id,
+        decision_ids=[item.id for item in decisions],
         attachment_binding_ids=binding_ids,
         input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
         payload=payload,

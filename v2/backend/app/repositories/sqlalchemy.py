@@ -133,6 +133,13 @@ class SqlAlchemyDecisionRepository:
             select(Decision).where(Decision.project_id == project_id, Decision.id == decision_id)
         )
 
+    def resolved_for_project(self, project_id: str) -> list[Decision]:
+        return list(self.session.scalars(
+            select(Decision)
+            .where(Decision.project_id == project_id, Decision.status == "resolved")
+            .order_by(Decision.created_at, Decision.id)
+        ))
+
     def add(self, decision: Decision) -> None:
         self.session.add(decision)
 
@@ -1206,3 +1213,75 @@ class SqlAlchemyContactSheetRepository:
             Attachment.project_id == project_id,
             Attachment.id.in_(attachment_ids),
         )))
+
+
+class SqlAlchemyImpactRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def decisions(self, project_id: str) -> list[Decision]:
+        return list(self.session.scalars(
+            select(Decision).where(Decision.project_id == project_id).order_by(Decision.created_at, Decision.id)
+        ))
+
+    def manifests(self, project_id: str) -> list[AgentInputManifest]:
+        return list(self.session.scalars(
+            select(AgentInputManifest)
+            .where(AgentInputManifest.project_id == project_id)
+            .order_by(AgentInputManifest.created_at, AgentInputManifest.id)
+        ))
+
+    def agent_runs(self, project_id: str) -> list[AgentRun]:
+        return list(self.session.scalars(
+            select(AgentRun).where(AgentRun.project_id == project_id).order_by(AgentRun.started_at, AgentRun.id)
+        ))
+
+    def requirement_candidates(self, project_id: str) -> list[RequirementCandidate]:
+        return list(self.session.scalars(select(RequirementCandidate).where(
+            RequirementCandidate.project_id == project_id
+        )))
+
+    def requirement_versions(self, project_id: str) -> list[RequirementVersion]:
+        return list(self.session.scalars(select(RequirementVersion).where(
+            RequirementVersion.project_id == project_id
+        )))
+
+    def creative_briefs(self, project_id: str) -> list[CreativeBriefCandidate]:
+        return list(self.session.scalars(select(CreativeBriefCandidate).where(
+            CreativeBriefCandidate.project_id == project_id
+        )))
+
+    def shot_plans(self, project_id: str) -> list[ShotPlanCandidate]:
+        return list(self.session.scalars(select(ShotPlanCandidate).where(
+            ShotPlanCandidate.project_id == project_id
+        )))
+
+    def plans(self, project_id: str) -> list[PlanVersion]:
+        return list(self.session.scalars(select(PlanVersion).where(PlanVersion.project_id == project_id)))
+
+    def shots(self, project_id: str) -> list[Shot]:
+        return list(self.session.scalars(select(Shot).where(Shot.project_id == project_id)))
+
+    def snapshots(self, project_id: str) -> list[ProductionSnapshot]:
+        return list(self.session.scalars(select(ProductionSnapshot).where(
+            ProductionSnapshot.project_id == project_id
+        )))
+
+    def dag_nodes(self, snapshot_ids: set[str]) -> list[DAGNode]:
+        if not snapshot_ids:
+            return []
+        return list(self.session.scalars(select(DAGNode).where(DAGNode.snapshot_id.in_(snapshot_ids))))
+
+    def work_items(self, project_id: str) -> list[WorkItem]:
+        return list(self.session.scalars(select(WorkItem).where(WorkItem.project_id == project_id)))
+
+    def assets(self, project_id: str) -> list[Asset]:
+        return list(self.session.scalars(select(Asset).where(Asset.project_id == project_id)))
+
+    def timelines(self, project_id: str) -> list[Timeline]:
+        return list(self.session.scalars(select(Timeline).where(Timeline.project_id == project_id)))
+
+    def timeline_items(self, timeline_ids: set[str]) -> list[TimelineItem]:
+        if not timeline_ids:
+            return []
+        return list(self.session.scalars(select(TimelineItem).where(TimelineItem.timeline_id.in_(timeline_ids))))

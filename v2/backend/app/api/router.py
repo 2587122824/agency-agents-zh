@@ -94,6 +94,8 @@ from ..creation.service import (
 from ..db.session import get_session
 from ..decisions.service import DecisionConflictError, add_decision, resolve_decision
 from ..events.service import project_event_stream
+from ..impact.contracts import DecisionImpactGraphView
+from ..impact.service import decision_impact_graph_view
 from ..editor.contracts import (
     ApproveQualityStage,
     ConfirmTimeline,
@@ -242,6 +244,11 @@ def project_control_detail(project_id: str, session: Session = Depends(get_sessi
 @router.get("/projects/{project_id}/contact-sheet", response_model=MaterialContactSheetView)
 def project_contact_sheet(project_id: str, session: Session = Depends(get_session)):
     return material_contact_sheet_view(session, require_project(session, project_id))
+
+
+@router.get("/projects/{project_id}/decision-impact-graph", response_model=DecisionImpactGraphView)
+def project_decision_impact_graph(project_id: str, session: Session = Depends(get_session)):
+    return decision_impact_graph_view(session, require_project(session, project_id))
 
 
 @router.get("/entity-registry", response_model=EntityRegistryView)

@@ -1,0 +1,49 @@
+.page { padding: 22px 26px 40px; display: grid; gap: 18px; }
+.state, .error, .empty { min-height: 220px; display: grid; place-items: center; color: #73787c; }
+.error { color: #9b351d; }
+.empty { gap: 8px; align-content: center; }
+.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid #dfe1dd; background: #fff; }
+.metrics div { min-height: 82px; padding: 15px 18px; display: grid; gap: 5px; border-right: 1px solid #dfe1dd; }
+.metrics div:last-child { border-right: 0; }
+.metrics span, .decisions header span, .selection span { color: #73787c; font-size: 11px; font-weight: 700; }
+.metrics strong { font-size: 25px; }
+.layout { display: grid; grid-template-columns: minmax(250px, 310px) minmax(0, 1fr); border: 1px solid #dfe1dd; background: #fff; min-height: 560px; }
+.decisions { border-right: 1px solid #dfe1dd; padding: 18px 0; }
+.decisions header { padding: 0 18px 14px; }
+.decisions h2, .selection h2 { margin: 4px 0 0; font-size: 18px; }
+.decisions button { width: 100%; min-height: 68px; border: 0; border-top: 1px solid #dfe1dd; background: transparent; color: inherit; display: grid; grid-template-columns: 28px minmax(0, 1fr) 28px; align-items: center; gap: 10px; padding: 10px 16px; text-align: left; cursor: pointer; }
+.decisions button:last-child { border-bottom: 1px solid #dfe1dd; }
+.decisions button:hover, .decisions button[data-selected='true'] { background: #f5f6f3; }
+.decisions button[data-selected='true'] { box-shadow: inset 3px 0 #c74624; }
+.decisions button i { color: #73787c; }
+.decisions button i svg { width: 17px; }
+.decisions button span { min-width: 0; display: grid; gap: 4px; }
+.decisions button strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.decisions code, .selection code { color: #73787c; font-size: 11px; overflow-wrap: anywhere; }
+.decisions button b { font-size: 12px; color: #73787c; text-align: right; }
+.lineage { min-width: 0; padding: 20px; }
+.selection { display: flex; justify-content: space-between; gap: 20px; align-items: end; padding-bottom: 18px; border-bottom: 1px solid #dfe1dd; }
+.selection dl { margin: 0; display: grid; grid-template-columns: repeat(3, minmax(76px, 1fr)); }
+.selection dl div { padding: 0 14px; border-left: 1px solid #dfe1dd; display: grid; gap: 3px; }
+.selection dt { color: #73787c; font-size: 11px; }
+.selection dd { margin: 0; font-size: 18px; font-weight: 700; }
+.notObserved { min-height: 330px; display: flex; justify-content: center; align-items: center; gap: 14px; color: #73787c; }
+.notObserved svg { width: 28px; height: 28px; }
+.notObserved strong { color: #171a1e; }
+.notObserved p { margin: 4px 0 0; font-size: 13px; }
+.groups { display: grid; gap: 20px; padding-top: 18px; }
+.groups > section { border-top: 1px solid #dfe1dd; }
+.groups > section > header { min-height: 38px; display: flex; align-items: center; gap: 8px; color: #73787c; font-size: 12px; }
+.groups > section > header svg { width: 14px; }
+.groups > section > header b { margin-left: auto; }
+.nodeRow { min-height: 54px; display: grid; grid-template-columns: 24px minmax(0, 1fr) minmax(90px, auto) minmax(100px, auto); gap: 10px; align-items: center; padding: 8px 10px; border-top: 1px solid #dfe1dd; }
+.nodeRow:last-child { border-bottom: 1px solid #dfe1dd; }
+.nodeRow[data-authority='active'] { background: #fff5f1; }
+.nodeRow i { color: #73787c; }
+.nodeRow div { min-width: 0; display: grid; gap: 3px; }
+.nodeRow strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nodeRow code, .nodeRow small { color: #73787c; font-size: 10px; }
+.nodeRow > span { font-size: 11px; font-weight: 700; }
+.boundary { padding: 12px 14px; border-left: 3px solid #8c9290; color: #73787c; font-size: 12px; line-height: 1.6; }
+@media (max-width: 900px) { .page { padding: 16px; } .metrics { grid-template-columns: repeat(2, 1fr); } .metrics div:nth-child(2) { border-right: 0; } .metrics div:nth-child(-n+2) { border-bottom: 1px solid #dfe1dd; } .layout { grid-template-columns: 1fr; } .decisions { border-right: 0; border-bottom: 1px solid #dfe1dd; } .selection { align-items: start; flex-direction: column; } }
+@media (max-width: 560px) { .nodeRow { grid-template-columns: 22px minmax(0, 1fr) auto; } .nodeRow small { grid-column: 2 / -1; } .selection dl { width: 100%; } }

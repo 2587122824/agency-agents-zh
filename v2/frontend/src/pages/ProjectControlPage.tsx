@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileCheck2, GitBranch, RefreshCw, Route, Workflow } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileCheck2, GitBranch, Network, RefreshCw, Route, Workflow } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
 import { api } from '../api/client'
@@ -25,7 +25,7 @@ export function ProjectControlPage() {
   const data = control.data
 
   return <>
-    <PageHeader eyebrow="PROJECT CONTROL" title={data?.title ?? '项目控制台'} description={data?.core_topic ?? '读取项目权威状态与执行证据。'} actions={<><button className="secondaryButton" onClick={refresh}><RefreshCw size={14} />刷新</button>{data && <Link className="primaryButton" to={data.next_action.path}>{data.next_action.label}<ArrowRight size={14} /></Link>}</>} />
+    <PageHeader eyebrow="PROJECT CONTROL" title={data?.title ?? '项目控制台'} description={data?.core_topic ?? '读取项目权威状态与执行证据。'} actions={<><button className="secondaryButton" onClick={refresh}><RefreshCw size={14} />刷新</button>{data && <Link className="secondaryButton" to={`/projects/${projectId}/decision-impact`}><Network size={14} />决策影响</Link>}{data && <Link className="primaryButton" to={data.next_action.path}>{data.next_action.label}<ArrowRight size={14} /></Link>}</>} />
     <main className={styles.page}>
       {control.isPending && <div className={styles.empty}>正在读取项目状态...</div>}
       {control.error && <div className={styles.error}>{control.error.message}</div>}

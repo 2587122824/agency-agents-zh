@@ -744,6 +744,7 @@ RequirementDiff
 - 连续消息产生的旧 Agent 迟到结果不能覆盖新需求。
 - 同一 `command_id` 重放不重复调用模型。
 - API 重启后候选、运行状态和下一步操作一致。
+- 创建、Creative 与 Director Agent 的输入清单冻结同项目全部已解决 Decision 的精确 ID、键和值；Pending Decision 不进入清单，历史清单不补写。
 - SSE 重连不重复应用事件。
 - Agent 失败不触发自动重试。
 

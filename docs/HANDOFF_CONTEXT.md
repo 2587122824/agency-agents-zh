@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Observed Decision Impact Sprint 27
+
+- Fixed AgentInputManifest decision provenance: creation, creative, and director manifests now freeze exact resolved Decision IDs and structured values; pending decisions and historical manifests remain untouched.
+- Added a read-only `ImpactRepository`, `GET /projects/{project_id}/decision-impact-graph`, and a project-level decision-lineage page.
+- The graph follows only persisted IDs and foreign keys from Decision through manifests, Agent runs, candidates, versions, plans, Shots, snapshots, DAG/Work/Asset records, and timelines.
+- Added Repository and API tests covering project isolation, resolved-only manifest capture, observed propagation to Plan/Shot, unobserved decisions, and query non-mutation.
+- Added `docs/V2_DECISION_IMPACT_IMPLEMENTATION.md` and updated product, creation-center, data-model, repository, implementation-status, and handoff documentation.
+- No schema migration, prospective impact estimate, invalidation, Decision version mutation, provider call, cost event, retry, fallback, route substitution, or project-state change was introduced.
+- Verification target: 47 backend tests, Python compileall, Vite build, desktop/mobile browser checks, Alembic head, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Contact Sheet Repository Sprint 26
 
 - Added a read-only typed `ContactSheetRepository` covering the exact active snapshot, ordered DAG nodes and dependency edges, project/plan Shots, snapshot Assets, WorkItems/Attempts, and project-scoped EntityVersion/Entity/Attachment reads.

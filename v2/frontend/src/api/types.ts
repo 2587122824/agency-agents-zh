@@ -40,6 +40,45 @@ export interface Decision {
   resolved_at: string | null
 }
 
+export interface DecisionImpactNode {
+  node_id: string
+  record_type: string
+  record_id: string
+  label: string
+  status: string
+  authority: string
+  details: Record<string, unknown>
+}
+
+export interface DecisionImpactEdge {
+  source_node_id: string
+  target_node_id: string
+  relation: string
+}
+
+export interface DecisionImpactSummary {
+  decision_id: string
+  key: string
+  label: string
+  status: string
+  observation_status: 'observed' | 'not_observed'
+  direct_manifest_ids: string[]
+  downstream_node_ids: string[]
+  downstream_counts: Record<string, number>
+  active_downstream_count: number
+}
+
+export interface DecisionImpactGraph {
+  project_id: string
+  project_title: string
+  generated_at: string
+  scope: 'observed_lineage'
+  decisions: DecisionImpactSummary[]
+  nodes: DecisionImpactNode[]
+  edges: DecisionImpactEdge[]
+  boundary: string
+}
+
 export interface WorkItem {
   id: string
   project_id: string
