@@ -8,7 +8,7 @@
 - Added read-only `GET /api/v1/system-config/provider-readiness` and a settings-page connection panel. It reports published configuration, adapter, and credential states without a network probe, external task, or fee, and never returns secret values or environment variable names.
 - Added `docs/V2_PROVIDER_FOUNDATION_IMPLEMENTATION.md` and updated product, data-model, implementation-status, and handoff documentation.
 - RunningHub, CosyVoice, OSS, external HTTP clients, network probes, paid calls, retries, recovery commands, route substitution, workflow replacement, prompt rewriting, and V1 Provider reuse remain absent and require explicit user confirmation.
-- Verification completed with 110 backend tests, Python compileall, Vite production build, Alembic `20260717_16 (head)`, desktop and 390px settings checks, no horizontal overflow, and an explicit RunningHub adapter-not-connected state. Push and final `8766` API/Worker restart remain the release steps.
+- Verification completed with 110 backend tests, Python compileall, Vite production build, Alembic `20260717_16 (head)`, desktop and 390px settings checks, no horizontal overflow, and an explicit RunningHub adapter-not-connected state. Commit `b2265c1f` was pushed to `main`; the final `8766` API/Worker restart and health/log checks passed.
 
 ## 2026-07-17 V2 Event Envelope, Outbox, and Production Queue UX Sprint 37
 
