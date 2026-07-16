@@ -4,7 +4,7 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, inspect, select
 from sqlalchemy.orm import Session
 
 from v2.backend.app.db.models import (
@@ -90,6 +90,9 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
     command.upgrade(config, "head")
 
     upgraded_engine = create_engine(f"sqlite:///{database.as_posix()}")
+    assert "estimated_runtime_seconds" in {
+        column["name"] for column in inspect(upgraded_engine).get_columns("pricing_rules")
+    }
     with Session(upgraded_engine) as session:
         upgraded = session.scalar(select(Project).where(Project.id == project_id))
         assert upgraded is not None

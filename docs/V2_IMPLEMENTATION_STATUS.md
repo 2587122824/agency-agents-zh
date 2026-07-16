@@ -17,7 +17,7 @@
 |---|---|---|
 | React + TypeScript + Vite | 已完成 | `v2/frontend`，生产构建持续通过 |
 | FastAPI + Pydantic | 已完成 | `v2/backend/app/main.py`、`api/router.py` |
-| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_14_*` |
+| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_15_*` |
 | 数据库队列与独立 Worker | 已完成 | `WorkItem`、`WorkAttempt`、`workers/worker.py` |
 | SSE 事件流与游标恢复 | 已完成 | `ProjectEvent`、`events/service.py`、`Last-Event-ID` |
 | 项目状态机与统一评估器 | 部分完成 | 纯事实评估器和当前命令面的权威转移器已实现；应用服务/Worker 无直接状态赋值，具备原子行版本、结构化 blocked 和状态事件。缺口为 ResolveBlock、CancelProject、StartNewPlanVersion 与精确重试转移 |
@@ -35,7 +35,7 @@
 | 决策影响分析 | 已完成 | 已观测传播图、持久化变更提案报告、精确目标、活动快照工作量与冻结价格汇总；按确认边界不提供应用变更、失效、重做或重试命令 |
 | 生产快照、DAG 与依赖验证 | 已完成 | `ProductionSnapshot`、`DAGNode`、`DependencyEdge` 与确定性编译测试 |
 | 工作流槽位注册表 | 已完成 | 版本化系统配置、WorkflowSlot、NodeInfoList 验证和设置页；配置及组件技术键由界面生成并隐藏，关联项按名称选择，支持的视频规格按列表勾选 |
-| 调用与费用估算 | 已完成 | `ProductionImpactAnalysis`、版本化价格目录与精确金额确认 |
+| 调用与费用估算 | 已完成 | `ProductionImpactAnalysis`、版本化价格目录、按调用/输出秒数/云端运行秒数计价与精确金额确认；运行秒估价只使用工作流规则的显式预计量 |
 | 阶段确认门禁 | 已完成 | 需求、方案、快照、费用、执行、质量、时间线、交付均使用显式命令 |
 
 ## 执行、素材与交付

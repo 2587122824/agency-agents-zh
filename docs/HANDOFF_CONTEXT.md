@@ -1,5 +1,13 @@
 # Handoff Context
 
+## 2026-07-16 V2 Runtime-second Pricing Sprint 35
+
+- Added `runtime_second` as an explicit pricing unit for cloud ComfyUI/runtime-billed workflows. Each such rule must provide a positive `estimated_runtime_seconds`; the field is rejected for `call` and `output_second` rules.
+- Production impact pricing now multiplies the runtime-second unit price by the workflow rule's explicit per-invocation estimate for every matching DAG node. It never derives runtime from output media duration, task history, a zero default, or another workflow.
+- Configuration creation, validation, publication, planning, and preparing-snapshot creation still permit an absent pricing catalog. Unknown cost continues to block snapshot locking and paid execution; no cost bypass was added.
+- Added Alembic `20260716_15`, configuration clone/diff/read support, settings-editor controls, focused API/contract/migration tests, and product/data-model/implementation documentation.
+- Actual runtime charging remains unimplemented until a real Provider Adapter returns authoritative runtime evidence. No actual charged CostEvent, provider call, automatic estimate, fallback, retry, route substitution, or publication was introduced.
+
 ## 2026-07-16 V2 Imported Configuration Compatibility Correction Sprint 34
 
 - The published V1-imported configuration was correctly rejected during production impact analysis because its keyframe workflow did not declare support for the selected `480x848/24fps` video specification and it contained no pricing catalog.

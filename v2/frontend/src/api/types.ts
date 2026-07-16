@@ -702,9 +702,10 @@ export interface PricingCatalogDraft {
   effective_to?: string | null
   rules: Array<{
     workflow_slot_key: string
-    unit: 'call' | 'output_second'
+    unit: 'call' | 'output_second' | 'runtime_second'
     unit_price: number
     minimum_charge?: number | null
+    estimated_runtime_seconds?: number | null
   }>
 }
 

@@ -412,8 +412,12 @@ pricing_catalog_version_id
 provider_config_version_id
 operation_kind
 workflow_slot_version_id nullable
-unit / unit_price / minimum_charge nullable
+unit: call | output_second | runtime_second
+unit_price / minimum_charge nullable
+estimated_runtime_seconds nullable
 ```
+
+`estimated_runtime_seconds` 仅在 `unit=runtime_second` 时必填且必须大于零；其他计价单位必须为空。该字段是工作流每次调用的生产前预计量，不是实际运行证据。DAG 中每个引用该规则的节点按该预计量独立估价。实际运行秒数未来只能来自供应商任务结果并进入实际 CostEvent，不能由输出媒体时长、历史均值或系统默认值代替。
 
 #### 7.3.5 配置引用
 

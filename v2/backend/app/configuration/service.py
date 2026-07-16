@@ -344,6 +344,7 @@ def _create_components(
                 unit=rule.unit,
                 unit_price=float(rule.unit_price),
                 minimum_charge=float(rule.minimum_charge) if rule.minimum_charge is not None else None,
+                estimated_runtime_seconds=float(rule.estimated_runtime_seconds) if rule.estimated_runtime_seconds is not None else None,
             ))
         repository.flush()
 
@@ -451,6 +452,7 @@ def _component_summary(component_type: str, row, lookups: dict[str, dict[str, ob
                 "unit": rule.unit,
                 "unit_price": rule.unit_price,
                 "minimum_charge": rule.minimum_charge,
+                "estimated_runtime_seconds": rule.estimated_runtime_seconds,
             } for rule in lookups.get("pricing_rules", {}).get(row.id, [])],
         }
     return {
@@ -596,6 +598,10 @@ def _validate(repository: ConfigurationRepository, config: ProductionConfigVersi
                 errors.append({"code": "PRICING_WORKFLOW_MISSING", "path": f"pricing.rules.{rule.id}"})
             elif workflow.provider_config_version_id != rule.provider_config_version_id or workflow.operation_kind != rule.operation_kind:
                 errors.append({"code": "PRICING_RULE_MISMATCH", "path": f"pricing.rules.{rule.id}", "message": "价格规则与工作流供应商或操作类型不一致。"})
+            if rule.unit == "runtime_second" and (rule.estimated_runtime_seconds is None or rule.estimated_runtime_seconds <= 0):
+                errors.append({"code": "PRICING_RUNTIME_ESTIMATE_REQUIRED", "path": f"pricing.rules.{rule.id}.estimated_runtime_seconds"})
+            elif rule.unit != "runtime_second" and rule.estimated_runtime_seconds is not None:
+                errors.append({"code": "PRICING_RUNTIME_ESTIMATE_NOT_APPLICABLE", "path": f"pricing.rules.{rule.id}.estimated_runtime_seconds"})
     return errors
 
 
@@ -817,6 +823,7 @@ def _draft_from_config(
                 "unit": rule["unit"],
                 "unit_price": rule["unit_price"],
                 "minimum_charge": rule["minimum_charge"],
+                "estimated_runtime_seconds": rule["estimated_runtime_seconds"],
             } for rule in pricing_details["rules"]],
         }
     return ConfigurationDraftBody.model_validate({
@@ -990,6 +997,7 @@ def _semantic_components(
                 "unit": rule["unit"],
                 "unit_price": rule["unit_price"],
                 "minimum_charge": rule["minimum_charge"],
+                "estimated_runtime_seconds": rule["estimated_runtime_seconds"],
             } for rule in details["rules"]], key=lambda rule: (rule["workflow_slot_key"] or "", rule["operation_kind"]))
         identity = (item["component_type"], item["key"])
         semantic[identity] = {

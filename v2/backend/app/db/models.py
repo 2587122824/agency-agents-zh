@@ -858,6 +858,7 @@ class PricingRule(Base):
     unit: Mapped[str] = mapped_column(String(32))
     unit_price: Mapped[float] = mapped_column()
     minimum_charge: Mapped[float | None] = mapped_column(nullable=True)
+    estimated_runtime_seconds: Mapped[float | None] = mapped_column(nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

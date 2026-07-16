@@ -918,7 +918,12 @@ def test_unobserved_decision_change_analysis_persists_insufficient_evidence(clie
     assert analysis["cost_status"] == "not_applicable"
 
 
-def publish_visual_production_configuration(client: TestClient, with_pricing: bool = False, adapter_kind: str = "mock") -> dict:
+def publish_visual_production_configuration(
+    client: TestClient,
+    with_pricing: bool = False,
+    adapter_kind: str = "mock",
+    runtime_pricing: bool = False,
+) -> dict:
     configuration = valid_system_configuration()
     configuration["providers"][0]["adapter_kind"] = adapter_kind
     configuration["providers"][0]["capabilities"].append("video_generation")
@@ -947,7 +952,12 @@ def publish_visual_production_configuration(client: TestClient, with_pricing: bo
             "confirmation_threshold": 0.5,
             "rules": [
                 {"workflow_slot_key": "keyframe_image", "unit": "call", "unit_price": 0.1},
-                {"workflow_slot_key": "first_frame_video", "unit": "output_second", "unit_price": 0.02},
+                {
+                    "workflow_slot_key": "first_frame_video",
+                    "unit": "runtime_second" if runtime_pricing else "output_second",
+                    "unit_price": 0.02,
+                    **({"estimated_runtime_seconds": 12} if runtime_pricing else {}),
+                },
             ],
         }
     draft = client.post("/api/v1/system-config/versions", json={
@@ -964,6 +974,58 @@ def publish_visual_production_configuration(client: TestClient, with_pricing: bo
     )
     assert response.status_code == 200
     return response.json()
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        {"workflow_slot_key": "keyframe_image", "unit": "runtime_second", "unit_price": 0.1},
+        {"workflow_slot_key": "keyframe_image", "unit": "call", "unit_price": 0.1, "estimated_runtime_seconds": 12},
+    ],
+)
+def test_pricing_runtime_estimate_contract_rejects_ambiguous_rules(client: TestClient, rule: dict) -> None:
+    configuration = valid_system_configuration()
+    configuration["pricing"] = {
+        "catalog_key": "invalid_runtime_pricing",
+        "display_name": "Invalid runtime pricing",
+        "currency": "CNY",
+        "confirmation_threshold": 0,
+        "rules": [rule],
+    }
+    response = client.post("/api/v1/system-config/versions", json={
+        "command_id": f"invalid-runtime-pricing-{rule['unit']}",
+        "configuration": configuration,
+    })
+    assert response.status_code == 422
+
+
+def test_runtime_second_pricing_uses_explicit_workflow_runtime_per_dag_node(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    config = publish_visual_production_configuration(client, with_pricing=True, runtime_pricing=True)
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "runtime-second-impact-command",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    )
+    assert response.status_code == 201
+    impact = response.json()
+    assert impact["validation_errors"] == []
+    assert impact["execution_blockers"] == []
+    assert impact["cost_status"] == "estimated"
+    assert impact["estimated_cost"] == pytest.approx(1.02)
+    video_nodes = [node for node in impact["manifest"]["dag"]["nodes"] if node["kind"] == "generate_i2v_clip"]
+    assert len(video_nodes) == 3
+    assert all(node["pricing_unit"] == "runtime_second" for node in video_nodes)
+    assert all(node["pricing_quantity"] == 12 for node in video_nodes)
+    assert all(node["estimated_cost"] == pytest.approx(0.24) for node in video_nodes)
 
 
 def create_locked_snapshot(client: TestClient, adapter_kind: str = "mock") -> tuple[dict, dict]:

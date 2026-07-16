@@ -140,9 +140,18 @@ class StoragePolicyDraft(StrictContract):
 
 class PricingRuleDraft(StrictContract):
     workflow_slot_key: Key
-    unit: Literal["call", "output_second"]
+    unit: Literal["call", "output_second", "runtime_second"]
     unit_price: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
     minimum_charge: Decimal | None = Field(default=None, ge=0, max_digits=18, decimal_places=6)
+    estimated_runtime_seconds: Decimal | None = Field(default=None, gt=0, max_digits=12, decimal_places=3)
+
+    @model_validator(mode="after")
+    def runtime_estimate_matches_unit(self):
+        if self.unit == "runtime_second" and self.estimated_runtime_seconds is None:
+            raise ValueError("estimated_runtime_seconds is required for runtime_second pricing")
+        if self.unit != "runtime_second" and self.estimated_runtime_seconds is not None:
+            raise ValueError("estimated_runtime_seconds is only valid for runtime_second pricing")
+        return self
 
 
 class PricingCatalogDraft(StrictContract):

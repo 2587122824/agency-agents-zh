@@ -216,6 +216,8 @@ def _price_dag(
             continue
         if rule.unit == "call":
             quantity = Decimal("1")
+        elif rule.unit == "runtime_second" and rule.estimated_runtime_seconds is not None:
+            quantity = Decimal(str(rule.estimated_runtime_seconds))
         elif rule.unit == "output_second" and node["kind"] == "generate_i2v_clip":
             quantity = Decimal(str(node["input_contract"]["duration_ms"])) / Decimal("1000")
         elif rule.unit == "output_second" and node["kind"] == "generate_tts":
