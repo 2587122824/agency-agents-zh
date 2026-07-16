@@ -37,8 +37,12 @@ export function ProjectControlPage() {
             <div><dt>快照</dt><dd>{data.active_snapshot_number ? `#${data.active_snapshot_number}` : '--'}</dd></div>
             <div><dt>快照状态</dt><dd>{data.active_snapshot_status ?? '--'}</dd></div>
             <div><dt>最近事件</dt><dd>{timestamp(data.latest_event_at)}</dd></div>
+            <div><dt>状态版本</dt><dd>v{data.state_row_version}</dd></div>
+            <div><dt>状态触发器</dt><dd>{data.state_trigger}</dd></div>
+            <div><dt>状态操作者</dt><dd>{data.state_actor_type}:{data.state_changed_by}</dd></div>
+            <div><dt>状态时间</dt><dd>{timestamp(data.state_changed_at)}</dd></div>
           </dl>
-          <aside><strong>{data.next_action.label}</strong><span>{data.next_action.code}</span><small>{data.next_action.confirmation_level === 'high' ? '强确认' : data.next_action.confirmation_level === 'normal' ? '普通确认' : '无需确认'} · 生产费用{data.next_action.incurs_production_cost ? '是' : '否'}</small></aside>
+          <aside><strong>{data.next_action.label}</strong><span>{data.next_action.code}</span><small>{data.next_action.confirmation_level === 'high' ? '强确认' : data.next_action.confirmation_level === 'normal' ? '普通确认' : '无需确认'} · 生产费用{data.next_action.incurs_production_cost ? '是' : '否'}</small>{data.state_reason_code && <div className={styles.stateBlock}><b>{data.state_reason_code}</b><span>{data.blocked_from_state ?? '--'} → blocked</span><small>{data.blocked_responsible_aggregate_type}:{data.blocked_responsible_aggregate_id}</small></div>}</aside>
         </section>
 
         <section className={styles.metrics}>

@@ -487,7 +487,7 @@ DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表
 
 首期控制台使用只读投影，不新增或覆盖项目状态。接口同时返回 `persisted_status` 与 `evaluated_stage`：前者是命令写入的权威生命周期状态，后者仅根据当前方案、活动快照、工作项、素材、时间线和交付记录计算页面导航阶段。两者不一致时必须同时展示，禁止前端把展示阶段写回数据库。
 
-后端通过只读 `ControlRepository` 获取方案、快照、执行、素材/QC、费用、时间线、交付与事件事实。Repository 不计算阶段、不归类阻塞、不汇总跨币种费用，也不从错误文本推断路由。控制台把类型化事实交给纯函数项目状态评估器；评估器不依赖 ORM、不写状态、不执行下一步。权威 Project 状态转移器仍是独立待评审能力，不能由页面阶段投影替代。
+后端通过只读 `ControlRepository` 获取方案、快照、执行、素材/QC、费用、时间线、交付与事件事实。Repository 不计算阶段、不归类阻塞、不汇总跨币种费用，也不从错误文本推断路由。控制台把类型化事实交给纯函数项目状态评估器；评估器不依赖 ORM、不写状态、不执行下一步。权威 Project 状态写入统一由显式触发器和 `status + row_version` 条件更新完成，并在同一事务产生状态事件；页面阶段投影不能替代转移器。
 
 阻断按记录类型收集，包括快照执行阻断、blocked WorkItem、blocked QCReport 和 blocked DeliveryAttempt；不得通过错误文案关键词归类。供应商、适配器、工作流和任务 ID 只读取已冻结的 WorkAttempt 请求清单与执行记录。费用按币种分别汇总，不跨币种折算，也不把预计费用显示为实际扣费。
 
@@ -647,7 +647,7 @@ GET  /api/v1/projects/{project_id}/events
 - [ ] 事件信封、Outbox 和 SSE 游标
 - [x] 方案版本与生产快照
 
-其中只读项目阶段与下一步评估器已实现并接入控制台；该复合条目仍未勾选，因为权威状态转移器、blocked 恢复合同与状态写入迁移尚未实现。实现边界见 [V2 项目状态评估器实现](./V2_PROJECT_STATE_EVALUATOR_IMPLEMENTATION.md)。
+其中只读阶段评估器和当前命令面的权威状态转移器均已实现；该复合条目仍未勾选，因为 `ResolveBlock`、取消和重新开版命令尚未实现。边界见 [V2 项目状态评估器实现](./V2_PROJECT_STATE_EVALUATOR_IMPLEMENTATION.md) 与 [V2 权威项目状态转移器实现](./V2_PROJECT_STATE_TRANSITION_IMPLEMENTATION.md)。
 
 ### Sprint 2：决策、合同与编排
 

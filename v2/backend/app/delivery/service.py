@@ -22,6 +22,11 @@ from ..repositories import (
     SqlAlchemyDeliveryRepository,
     SqlAlchemyEventRepository,
 )
+from ..orchestration.project_transitions import (
+    ProjectStateTrigger,
+    block_project,
+    transition_project,
+)
 from ..quality.service import (
     QualityConflictError,
     asset_read,
@@ -356,7 +361,16 @@ def _block_delivery(
     attempt.error_code = code
     attempt.error_detail = evidence
     attempt.row_version += 1
-    project.status = "blocked"
+    block_project(
+        session,
+        project,
+        reason_code=code,
+        responsible_aggregate_type="delivery_attempt",
+        responsible_aggregate_id=attempt.id,
+        actor_type="system",
+        actor_id=payload.actor_id,
+        event_data={"asset_id": asset.id, "qc_report_id": report.id},
+    )
     _save_receipt(session, project.id, payload.command_id, "delivery.verify", "delivery_attempt", attempt.id)
     _event(session, ProjectEvent(
         project_id=project.id,
@@ -463,7 +477,14 @@ def verify_delivery(
     timeline.status = "exported"
     timeline.row_version += 1
     project.delivery_asset_id = asset.id
-    project.status = "completed"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.DELIVERY_VERIFIED,
+        actor_type="system",
+        actor_id=payload.actor_id,
+        event_data={"delivery_attempt_id": attempt.id, "delivery_asset_id": asset.id},
+    )
     _save_receipt(session, project.id, payload.command_id, "delivery.verify", "delivery_attempt", attempt.id)
     _event(session, ProjectEvent(
         project_id=project.id,

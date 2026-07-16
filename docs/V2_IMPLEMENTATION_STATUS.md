@@ -17,10 +17,10 @@
 |---|---|---|
 | React + TypeScript + Vite | 已完成 | `v2/frontend`，生产构建持续通过 |
 | FastAPI + Pydantic | 已完成 | `v2/backend/app/main.py`、`api/router.py` |
-| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_12_*` |
+| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_14_*` |
 | 数据库队列与独立 Worker | 已完成 | `WorkItem`、`WorkAttempt`、`workers/worker.py` |
 | SSE 事件流与游标恢复 | 已完成 | `ProjectEvent`、`events/service.py`、`Last-Event-ID` |
-| 项目状态机与统一评估器 | 部分完成 | `orchestration/project_state.py` 已提供无 ORM 的纯事实评估器并由控制台统一调用；状态写入仍分布在应用服务中，尚无权威转移器、blocked 恢复合同或迁移 |
+| 项目状态机与统一评估器 | 部分完成 | 纯事实评估器和当前命令面的权威转移器已实现；应用服务/Worker 无直接状态赋值，具备原子行版本、结构化 blocked 和状态事件。缺口为 ResolveBlock、CancelProject、StartNewPlanVersion 与精确重试转移 |
 | Repository 接口 | 已完成 | Project/Event/Decision/Command/Creation/Planning/Production/Quality/Editor/Delivery/Work/Configuration/Registry/Control/ContactSheet/Impact 均有协议、SQLAlchemy 实现和合同测试；当前应用服务、Worker 与业务投影已无直接 ORM 查询 |
 | 事件信封与 Outbox | 部分完成 | 已有持久事件、项目序列和 SSE；尚无完整事件信封与 Outbox 发布边界 |
 
@@ -55,6 +55,6 @@
 
 ## 当前安全开发顺序
 
-1. 只读项目状态评估器已经收敛；下一步需单独评审权威项目状态转移器与 Outbox，二者都不得在重构中顺带引入。
+1. 只读评估器与当前命令面的权威状态转移器已完成；下一步单独评审事件信封与 Outbox，不与恢复、重试或 Provider 一并引入。
 2. 若要把决策影响报告转成实际变更，必须先确认 Decision 版本链、选择范围、费用和状态转移语义。
 3. Provider、OSS、FFmpeg 与重试保持冻结，直到用户明确授权对应边界。

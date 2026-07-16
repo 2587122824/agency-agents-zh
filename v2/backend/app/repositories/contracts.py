@@ -118,6 +118,27 @@ class ProjectRepository(Protocol):
     def refresh_work_item(self, item: WorkItem) -> None: ...
 
 
+class ProjectStateRepository(Protocol):
+    def transition_state(
+        self,
+        project: Project,
+        *,
+        expected_status: str,
+        expected_row_version: int,
+        target_status: str,
+        changed_at: datetime,
+        actor_type: str,
+        actor_id: str,
+        trigger: str,
+        reason_code: str | None,
+        blocked_from_state: str | None,
+        responsible_aggregate_type: str | None,
+        responsible_aggregate_id: str | None,
+        allowed_commands: list[str],
+        blocked_at: datetime | None,
+    ) -> bool: ...
+
+
 class EventRepository(Protocol):
     def add(self, event: ProjectEvent) -> None: ...
 

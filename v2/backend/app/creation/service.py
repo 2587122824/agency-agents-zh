@@ -23,6 +23,7 @@ from ..db.models import (
     utc_now,
 )
 from ..core.config import RUNTIME_ROOT
+from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from ..repositories import (
     CreationRepository,
     SqlAlchemyCommandRepository,
@@ -203,6 +204,14 @@ def add_message(session: Session, project: Project, payload: MessageCreate) -> M
         _event(session, project.id, "candidate.stale.v1", "新消息使旧候选过期", {"candidate_id": candidate.id})
     _save_receipt(session, project.id, payload.command_id, "message.add", "message", message.id)
     _event(session, project.id, "conversation.message_added.v1", "用户需求消息已保存", {"message_id": message.id})
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.MESSAGE_ADDED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"message_id": message.id},
+    )
     session.commit()
     return message
 
@@ -354,6 +363,15 @@ def accept_candidate(
     _event(session, project.id, "requirement.confirmed.v1", "需求候选已提升为正式版本", {
         "candidate_id": candidate.id, "requirement_version_id": version.id,
     })
+    if not any(item.status == "pending" for item in project.decisions):
+        transition_project(
+            session,
+            project,
+            ProjectStateTrigger.REQUIREMENT_CONFIRMED,
+            actor_type="user",
+            actor_id=payload.actor_id,
+            event_data={"requirement_version_id": version.id},
+        )
     session.commit()
     return version
 
@@ -417,6 +435,17 @@ def resolve_clarification(
     _event(session, project.id, "requirement.confirmed.v1", "澄清结果已创建新的需求版本", {
         "requirement_version_id": version.id,
     })
+    if not evaluate_requirement(fields, sources) and not any(
+        item.status == "pending" for item in project.decisions
+    ):
+        transition_project(
+            session,
+            project,
+            ProjectStateTrigger.REQUIREMENT_CONFIRMED,
+            actor_type="user",
+            actor_id=payload.actor_id,
+            event_data={"requirement_version_id": version.id},
+        )
     session.commit()
     return version
 

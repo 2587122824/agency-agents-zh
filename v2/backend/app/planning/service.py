@@ -28,6 +28,7 @@ from ..db.models import (
     utc_now,
 )
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
+from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, ReviseShotPlan
 
 
@@ -128,6 +129,12 @@ def generate_brief(session: Session, project: Project, payload: GenerateBrief) -
         sync_clarifications(session, project, requirement)
         session.commit()
         raise CreationConflictError("REQUIREMENT_INCOMPLETE", "需求仍有阻断字段，不能生成创意方案。")
+    pending_decisions = [item.key for item in project.decisions if item.status == "pending"]
+    if pending_decisions:
+        raise CreationConflictError(
+            "PROJECT_DECISIONS_UNRESOLVED",
+            f"仍有未解决决策：{', '.join(sorted(pending_decisions))}。",
+        )
     existing = repository.active_brief_for_requirement(project.id, requirement.id)
     if existing:
         raise CreationConflictError("BRIEF_ALREADY_EXISTS", "当前需求版本已有待审或已接受的创意方案。")
@@ -171,6 +178,14 @@ def generate_brief(session: Session, project: Project, payload: GenerateBrief) -
     _finish_run(session, project, run, candidate.id, {"creative_brief_candidate": brief})
     _save_receipt(session, project.id, payload.command_id, "brief.generate", "creative_brief_candidate", candidate.id)
     _event(session, project.id, "plan.brief_candidate_created.v1", "创意方案候选等待用户审核", {"candidate_id": candidate.id})
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.BRIEF_CANDIDATE_CREATED,
+        actor_type="system",
+        actor_id="creative-agent",
+        event_data={"candidate_id": candidate.id},
+    )
     session.commit()
     return candidate
 
@@ -204,6 +219,14 @@ def decide_brief(
         "candidate_id": candidate.id,
         "accepted": accept,
     })
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.BRIEF_ACCEPTED if accept else ProjectStateTrigger.BRIEF_REJECTED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"candidate_id": candidate.id},
+    )
     session.commit()
     return candidate
 
@@ -317,6 +340,14 @@ def generate_shot_plan(session: Session, project: Project, payload: GenerateShot
         })
     else:
         _event(session, project.id, "plan.shot_candidate_created.v1", "分镜候选等待用户审核", {"candidate_id": candidate.id})
+        transition_project(
+            session,
+            project,
+            ProjectStateTrigger.SHOT_CANDIDATE_CREATED,
+            actor_type="system",
+            actor_id="director-agent",
+            event_data={"candidate_id": candidate.id},
+        )
     _save_receipt(session, project.id, payload.command_id, "shot_plan.generate", "shot_plan_candidate", candidate.id)
     session.commit()
     return candidate
@@ -387,6 +418,14 @@ def revise_shot_plan(
         "changed_shot_codes": targets,
         "actor_id": payload.actor_id,
     })
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.SHOT_CANDIDATE_REVISED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"candidate_id": revised.id},
+    )
     session.commit()
     return revised
 
@@ -425,6 +464,14 @@ def decide_shot_plan(
             raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重试。")
         _save_receipt(session, project.id, payload.command_id, "shot_plan.reject", "shot_plan_candidate", candidate.id)
         _event(session, project.id, "plan.shot_candidate_rejected.v1", "用户已拒绝分镜候选", {"candidate_id": candidate.id})
+        transition_project(
+            session,
+            project,
+            ProjectStateTrigger.SHOT_PLAN_REJECTED,
+            actor_type="user",
+            actor_id=payload.actor_id,
+            event_data={"candidate_id": candidate.id},
+        )
         session.commit()
         return candidate
     errors = validate_shots(session, project.id, requirement, candidate.shots)
@@ -471,6 +518,14 @@ def decide_shot_plan(
         "plan_version_id": plan.id,
         "version_number": plan.version_number,
     })
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.SHOT_PLAN_ACCEPTED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"plan_version_id": plan.id},
+    )
     session.commit()
     return _plan_dict(session, plan)
 

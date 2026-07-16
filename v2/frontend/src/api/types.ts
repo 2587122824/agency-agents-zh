@@ -1,5 +1,9 @@
 export type ProjectStatus =
   | 'draft'
+  | 'collecting_requirements'
+  | 'decision_required'
+  | 'planning'
+  | 'plan_review'
   | 'confirmed'
   | 'queued'
   | 'in_progress'
@@ -12,6 +16,7 @@ export type ProjectStatus =
   | 'quality_review'
   | 'editing'
   | 'delivery_ready'
+  | 'cancelled'
 
 export interface ProjectCreate {
   title: string
@@ -23,6 +28,17 @@ export interface ProjectCreate {
 
 export interface Project extends ProjectCreate {
   id: string
+  row_version: number
+  state_changed_at: string
+  state_actor_type: string
+  state_changed_by: string
+  state_trigger: string
+  state_reason_code: string | null
+  blocked_from_state: string | null
+  blocked_responsible_aggregate_type: string | null
+  blocked_responsible_aggregate_id: string | null
+  blocked_allowed_commands: string[]
+  blocked_at: string | null
   status: ProjectStatus
   created_at: string
   updated_at: string
@@ -882,6 +898,17 @@ export interface ProjectControlSummary {
   aspect_ratio: string
   audio_mode: string
   persisted_status: ProjectStatus
+  state_row_version: number
+  state_changed_at: string
+  state_actor_type: string
+  state_changed_by: string
+  state_trigger: string
+  state_reason_code: string | null
+  blocked_from_state: string | null
+  blocked_responsible_aggregate_type: string | null
+  blocked_responsible_aggregate_id: string | null
+  blocked_allowed_commands: string[]
+  blocked_at: string | null
   evaluated_stage: 'requirements' | 'planning' | 'production_preparation' | 'production' | 'quality_review' | 'editing' | 'delivery' | 'completed'
   stage_label: string
   active_plan_version: number | null

@@ -2,14 +2,15 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .api.router import router
 from .core.config import FRONTEND_DIST, settings
 from .db.session import create_schema
+from .orchestration.project_transitions import ProjectStateConflictError
 
 
 @asynccontextmanager
@@ -32,6 +33,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.exception_handler(ProjectStateConflictError)
+async def project_state_conflict(_: Request, exc: ProjectStateConflictError) -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={"detail": str(exc)},
+        headers={"X-Error-Code": exc.code},
+    )
+
+
 app.include_router(router, prefix=settings.api_prefix)
 
 

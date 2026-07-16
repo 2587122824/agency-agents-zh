@@ -25,6 +25,11 @@ from ..repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyQualityRepository,
 )
+from ..orchestration.project_transitions import (
+    ProjectStateTrigger,
+    block_project,
+    transition_project,
+)
 from .contracts import RegisterAttemptAsset, ReviewAsset, RunAssetQC, VerifyAsset
 
 
@@ -368,7 +373,16 @@ def _record_file_block(
         item.status = "blocked"
         item.error = f"{code}: registered output failed file verification"
         item.row_version += 1
-    project.status = "blocked"
+    block_project(
+        session,
+        project,
+        reason_code=code,
+        responsible_aggregate_type="asset",
+        responsible_aggregate_id=asset.id,
+        actor_type="system",
+        actor_id=payload.actor_id,
+        event_data={"qc_report_id": report.id},
+    )
     _save_receipt(session, project.id, payload.command_id, "asset.verify", "asset", asset.id)
     _event(session, ProjectEvent(
         project_id=project.id,
@@ -445,14 +459,37 @@ def run_asset_qc(session: Session, project: Project, asset_id: str, payload: Run
             item.status = "blocked"
             item.error = "ASSET_QC_BLOCKED: deterministic file contract failed"
             item.row_version += 1
-        project.status = "blocked"
+        block_project(
+            session,
+            project,
+            reason_code="ASSET_QC_BLOCKED",
+            responsible_aggregate_type="asset",
+            responsible_aggregate_id=asset.id,
+            actor_type="system",
+            actor_id=payload.actor_id,
+            event_data={"qc_report_id": report.id},
+        )
     elif status == "review_required":
         asset.state = "review_required"
-        project.status = "quality_review"
+        transition_project(
+            session,
+            project,
+            ProjectStateTrigger.QUALITY_RECORDED,
+            actor_type="system",
+            actor_id=payload.actor_id,
+            event_data={"asset_id": asset.id, "qc_report_id": report.id},
+        )
     else:
         asset.state = "approved"
         asset.approved_at = now
-        project.status = "quality_review"
+        transition_project(
+            session,
+            project,
+            ProjectStateTrigger.QUALITY_RECORDED,
+            actor_type="system",
+            actor_id=payload.actor_id,
+            event_data={"asset_id": asset.id, "qc_report_id": report.id},
+        )
     asset.row_version += 1
     _save_receipt(session, project.id, payload.command_id, "quality.run", "qc_report", report.id)
     event_type = "quality.review_required.v1" if status == "review_required" else "quality.blocked.v1" if status == "blocked" else "asset.approved.v1"
@@ -490,7 +527,14 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
         asset.archived_at = now
         event_type = "asset.rejected.v1"
     asset.row_version += 1
-    project.status = "quality_review"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.QUALITY_RECORDED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"asset_id": asset.id, "qc_report_id": report.id},
+    )
     _save_receipt(session, project.id, payload.command_id, command_type, "asset", asset.id)
     _event(session, ProjectEvent(project_id=project.id, event_type=event_type, message="Human asset review decision recorded.", data={"asset_id": asset.id, "qc_report_id": report.id, "decision": decision, "rationale": payload.rationale}))
     session.commit()

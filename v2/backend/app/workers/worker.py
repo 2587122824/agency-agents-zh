@@ -16,6 +16,11 @@ from ..db.models import (
     utc_now,
 )
 from ..db.session import SessionLocal, create_schema
+from ..orchestration.project_transitions import (
+    ProjectStateTrigger,
+    block_project,
+    transition_project,
+)
 from ..repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyWorkRepository,
@@ -38,16 +43,51 @@ def _required_parent_items(session: Session, item: WorkItem) -> list[WorkItem]:
     return _work(session).required_parent_items(item)
 
 
-def _update_aggregate_state(session: Session, project: Project, snapshot: ProductionSnapshot) -> None:
+def _update_aggregate_state(
+    session: Session,
+    project: Project,
+    snapshot: ProductionSnapshot,
+    actor_id: str,
+    current_item: WorkItem | None = None,
+    current_attempt: WorkAttempt | None = None,
+) -> None:
     states = _work(session).snapshot_work_states(snapshot.id)
     if states and all(state == "completed" for state in states):
         snapshot.status = "execution_completed"
-        project.status = "quality_review"
+        transition_project(
+            session,
+            project,
+            ProjectStateTrigger.PRODUCTION_SETTLED,
+            actor_type="system",
+            actor_id=actor_id,
+            event_data={"snapshot_id": snapshot.id},
+        )
     elif "blocked" in states:
         snapshot.status = "execution_blocked"
-        project.status = "blocked"
+        current_failed = current_attempt is not None and current_attempt.state == "blocked"
+        block_project(
+            session,
+            project,
+            reason_code=(
+                current_attempt.error_code
+                if current_failed and current_attempt.error_code
+                else "SNAPSHOT_EXECUTION_BLOCKED"
+            ),
+            responsible_aggregate_type="work_item" if current_failed and current_item else "production_snapshot",
+            responsible_aggregate_id=current_item.id if current_failed and current_item else snapshot.id,
+            actor_type="system",
+            actor_id=actor_id,
+            event_data={"snapshot_id": snapshot.id},
+        )
     else:
-        project.status = "producing"
+        transition_project(
+            session,
+            project,
+            ProjectStateTrigger.PRODUCTION_PROGRESS,
+            actor_type="system",
+            actor_id=actor_id,
+            event_data={"snapshot_id": snapshot.id},
+        )
 
 
 def _finish_blocked(session, item: WorkItem, attempt: WorkAttempt, code: str, detail: str) -> None:
@@ -93,7 +133,7 @@ def process_one(worker_id: str | None = None) -> bool:
                     project = repository.project(item.project_id)
                     snapshot = repository.snapshot(item.snapshot_id)
                     if project and snapshot:
-                        _update_aggregate_state(session, project, snapshot)
+                        _update_aggregate_state(session, project, snapshot, owner, item, attempt)
                     session.commit()
                     return True
             if all(parent.status == "completed" for parent in parents):
@@ -112,7 +152,14 @@ def process_one(worker_id: str | None = None) -> bool:
             selected.status = "completed"
             selected.row_version += 1
             if project:
-                project.status = "review_required"
+                transition_project(
+                    session,
+                    project,
+                    ProjectStateTrigger.LEGACY_VALIDATION_COMPLETED,
+                    actor_type="system",
+                    actor_id=owner,
+                    event_data={"work_item_id": selected.id},
+                )
                 _event(session, ProjectEvent(
                     project_id=project.id,
                     event_type="contract.validated",
@@ -171,7 +218,7 @@ def process_one(worker_id: str | None = None) -> bool:
                 f"Adapter {manifest.get('adapter_kind')!r} is not connected to the V2 worker.",
             )
         repository.flush()
-        _update_aggregate_state(session, project, snapshot)
+        _update_aggregate_state(session, project, snapshot, owner, item, attempt)
         _event(session, ProjectEvent(
             project_id=project.id,
             event_type="production.work_finished.v1",

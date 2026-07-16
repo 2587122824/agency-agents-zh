@@ -1,5 +1,17 @@
 # Handoff Context
 
+## 2026-07-16 V2 Authoritative Project State Transitioner Sprint 31
+
+- Added Project row-version, state provenance, reason, and structured first-block fields under Alembic `20260716_13`, plus exact persisted planning-candidate authority backfill under `20260716_14` for existing projects.
+- Added typed ProjectStateTrigger rules and an atomic ProjectStateRepository update guarded by exact current status and row version.
+- Migrated every application-service and Worker Project status write to the transitioner; direct assignments remain prohibited.
+- Added pending-Decision planning guards, requirement-aware decision resolution, formal creation/planning/production/quality/editor/delivery transitions, and isolated legacy local-contract triggers.
+- Added first-block immutability: later block evidence creates `project.block_diagnostic.v1` without replacing the original reason or responsible aggregate. Terminal projects cannot be blocked by late failures.
+- Project control now exposes state version, trigger, actor/time, blocked-from state, reason code, responsible aggregate, and allowed commands without adding recovery or retry controls.
+- Added `docs/V2_PROJECT_STATE_TRANSITION_IMPLEMENTATION.md` and updated product, creation-center, data-model, state/event, evaluator, repository, control, implementation-status, and handoff documents.
+- No ResolveBlock, CancelProject, StartNewPlanVersion, retry, invalidation, Outbox, provider/model/OSS/FFmpeg call, route/workflow substitution, prompt rewrite, automatic transition, or cost behavior was introduced.
+- Verification target: full backend suite, Python compileall, Vite build, fresh/runtime Alembic `20260716_14 (head)`, direct-write and Repository-boundary audits, desktop/mobile browser checks, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Read-only Project State Evaluator Sprint 30
 
 - Added a pure, ORM-free `ProjectStateFacts -> ProjectStateEvaluation` module for the existing control-stage and next-action rules.

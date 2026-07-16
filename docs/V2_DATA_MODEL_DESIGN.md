@@ -84,19 +84,29 @@ row_version         乐观锁版本
 ```text
 id
 title
-state
+status
+row_version
+state_changed_at
+state_actor_type / state_changed_by
+state_trigger
+state_reason_code nullable
 blocked_from_state nullable
+blocked_responsible_aggregate_type nullable
+blocked_responsible_aggregate_id nullable
+blocked_allowed_commands[]
+blocked_at nullable
 active_requirement_version_id nullable
 active_plan_version_id nullable
 active_snapshot_id nullable
 delivery_asset_id nullable
-state_reason_code nullable
-created_at / updated_at / row_version
+created_at / updated_at
 ```
 
 约束：
 
-- `state` 只能由项目状态评估器或显式项目命令更新。
+- `status` 只能由权威项目状态转移器根据显式命令或已验证事实更新；只读状态评估器不能写回。
+- 状态更新必须匹配 `expected_status + row_version`；成功后版本递增并在同一事务追加项目状态事件。
+- 首次 blocked 必须冻结原状态、原因码和责任聚合；后续诊断不得覆盖首次来源。
 - `delivery_asset_id` 必须指向已验证、未删除的最终交付素材。
 - `active_snapshot_id` 必须属于同一项目和 `active_plan_version_id`。
 

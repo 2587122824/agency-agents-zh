@@ -2,7 +2,7 @@
 
 > 实现版本：Sprint 30
 >
-> 状态：只读评估器已实现；权威状态转移器未实现
+> 状态：只读评估器已实现；权威状态转移器见独立实现文档
 >
 > 实现目录：`v2/backend/app/orchestration/project_state.py`
 
@@ -108,7 +108,7 @@ GET /api/v1/projects/{project_id}/control-center
 - 自动重试、失效、路由替换、工作流替换、提示词重写或输出修复。
 - 事件信封、Outbox 或异步发布器。
 
-现有应用服务中的 Project.status 写入点仍保持原样。统一状态转移器会改变状态语义，必须单独设计、评审和确认后才能迁移。
+Sprint 31 已经在单独确认后实现权威状态转移器；评估器仍保持只读且不会调用转移器。详见 [V2 权威项目状态转移器实现](./V2_PROJECT_STATE_TRANSITION_IMPLEMENTATION.md)。
 
 ## 8. 验证
 

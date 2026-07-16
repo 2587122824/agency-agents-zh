@@ -718,6 +718,8 @@ RequirementDiff
 
 前端不能使用本地消息数量、动画状态或 Agent 文案设置项目状态。
 
+当前实现由权威项目状态转移器写入需求与规划阶段：消息、Decision、需求确认、Brief/分镜候选及方案确认各自提交显式触发器。pending Decision 存在时不能进入方案生成；最后一个 Decision 解决后，由决策服务根据活动需求的确定性完整性选择 `planning` 或 `collecting_requirements`。转移器不读取员工文本或提示词猜测状态。
+
 ## 20. 测试验收
 
 ### 20.1 需求与上下文

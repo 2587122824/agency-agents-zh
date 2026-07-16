@@ -19,6 +19,7 @@ from ..repositories import (
     SqlAlchemyEditorRepository,
     SqlAlchemyEventRepository,
 )
+from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from ..quality.service import quality_review_view
 from .contracts import (
     ApproveQualityStage,
@@ -117,7 +118,14 @@ def approve_quality_stage(
             "QUALITY_STAGE_NOT_READY",
             "当前快照仍有未批准或缺失的必需素材，不能进入剪辑。",
         )
-    project.status = "editing"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.QUALITY_STAGE_APPROVED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"snapshot_id": payload.expected_snapshot_id},
+    )
     _save_receipt(session, project.id, payload.command_id, "quality.stage.approve", "project", project.id)
     _event(session, ProjectEvent(
         project_id=project.id,
@@ -243,7 +251,14 @@ def _create_candidate(
     if supersedes and supersedes.status in {"candidate", "review"}:
         supersedes.status = "superseded"
         supersedes.row_version += 1
-    project.status = "editing"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.TIMELINE_CANDIDATE_CREATED,
+        actor_type="user" if payload.source == "user" else "system",
+        actor_id=payload.actor_id,
+        event_data={"timeline_id": timeline.id, "snapshot_id": snapshot.id},
+    )
     _save_receipt(session, project.id, payload.command_id, command_type, "timeline", timeline.id)
     _event(session, ProjectEvent(
         project_id=project.id,
@@ -483,7 +498,14 @@ def confirm_timeline(
     timeline.status = "confirmed"
     timeline.confirmed_at = now
     timeline.row_version += 1
-    project.status = "delivery_ready"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.TIMELINE_CONFIRMED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"timeline_id": timeline.id},
+    )
     _save_receipt(session, project.id, payload.command_id, "timeline.confirm", "timeline", timeline.id)
     _event(session, ProjectEvent(
         project_id=project.id,

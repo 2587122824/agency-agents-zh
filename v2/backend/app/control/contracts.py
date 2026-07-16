@@ -21,6 +21,17 @@ class ProjectControlSummary(BaseModel):
     aspect_ratio: str
     audio_mode: str
     persisted_status: str
+    state_row_version: int
+    state_changed_at: datetime
+    state_actor_type: str
+    state_changed_by: str
+    state_trigger: str
+    state_reason_code: str | None
+    blocked_from_state: str | None
+    blocked_responsible_aggregate_type: str | None
+    blocked_responsible_aggregate_id: str | None
+    blocked_allowed_commands: list[str]
+    blocked_at: datetime | None
     evaluated_stage: str
     stage_label: str
     active_plan_version: int | None

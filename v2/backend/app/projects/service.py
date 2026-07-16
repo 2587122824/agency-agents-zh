@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from ..contracts.project import ProjectCreate
 from ..db.models import Project, ProjectEvent, WorkItem
 from ..creation.service import ensure_initial_requirement
+from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from ..repositories import EventRepository, ProjectRepository, SqlAlchemyEventRepository, SqlAlchemyProjectRepository
 
 
@@ -57,9 +58,15 @@ def confirm_project(
     if pending:
         keys = ", ".join(decision.key for decision in pending)
         raise ProjectConflictError(f"以下决策尚未确认：{keys}")
-    if project.status != "draft":
-        raise ProjectConflictError(f"只有 draft 项目可以确认，当前状态：{project.status}")
-    project.status = "confirmed"
+    if project.status not in {"draft", "collecting_requirements", "planning"}:
+        raise ProjectConflictError(f"旧版合同确认不允许项目从 {project.status} 转移")
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.LEGACY_CONTRACT_CONFIRMED,
+        actor_type="user",
+        actor_id="local-user",
+    )
     event_repository.add(ProjectEvent(project_id=project.id, event_type="project.confirmed", message="生产合同已由用户确认"))
     session.commit()
     return project_repository.get(project.id, with_workspace=True)  # type: ignore[return-value]
@@ -75,7 +82,13 @@ def queue_contract_validation(
     if project.status != "confirmed":
         raise ProjectConflictError("项目必须先明确确认，才能加入验证队列")
     item = WorkItem(project_id=project.id, kind="contract_validation", payload={"project_id": project.id})
-    project.status = "queued"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.LEGACY_VALIDATION_QUEUED,
+        actor_type="user",
+        actor_id="local-user",
+    )
     project_repository.add_work_item(item)
     project_repository.flush()
     event_repository.add(

@@ -34,6 +34,7 @@ from ..repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyProductionRepository,
 )
+from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from .contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
@@ -461,6 +462,14 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
     analysis.status = "confirmed"
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.create", "production_snapshot", snapshot.id)
     _event(session, ProjectEvent(project_id=project.id, event_type="production.snapshot_prepared.v1", message="不可变生产快照已创建，等待成本核算", data={"snapshot_id": snapshot.id, "contract_hash": snapshot.contract_hash, "status": snapshot.status}))
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.SNAPSHOT_PREPARED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"snapshot_id": snapshot.id},
+    )
     session.commit()
     return _snapshot_dict(session, snapshot)
 
@@ -547,6 +556,14 @@ def lock_snapshot(
             "above_confirmation_threshold": actual >= _money(Decimal(str(pricing.confirmation_threshold))),
         },
     ))
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.SNAPSHOT_LOCKED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"snapshot_id": snapshot.id},
+    )
     session.commit()
     return _snapshot_dict(session, snapshot)
 
@@ -582,7 +599,14 @@ def activate_snapshot(
     snapshot.status = "active"
     snapshot.activated_at = now
     project.active_snapshot_id = snapshot.id
-    project.status = "production_ready"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.SNAPSHOT_ACTIVATED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"snapshot_id": snapshot.id},
+    )
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.activate", "production_snapshot", snapshot.id)
     _event(session, ProjectEvent(
         project_id=project.id,
@@ -691,7 +715,14 @@ def submit_production(
         item.current_attempt_id = attempt.id
 
     snapshot.status = "submitted"
-    project.status = "producing"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.PRODUCTION_SUBMITTED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"snapshot_id": snapshot.id, "dag_node_ids": actual_ids},
+    )
     _save_receipt(session, project.id, payload.command_id, "production.snapshot.submit", "production_snapshot", snapshot.id)
     _event(session, ProjectEvent(
         project_id=project.id,

@@ -7,8 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 ProjectStatus = Literal[
-    "draft", "confirmed", "queued", "in_progress", "review_required", "blocked", "completed",
-    "contract_ready", "production_ready", "producing", "quality_review", "editing", "delivery_ready",
+    "draft", "collecting_requirements", "decision_required", "planning", "plan_review",
+    "contract_ready", "production_ready", "producing", "quality_review", "editing",
+    "delivery_ready", "blocked", "completed", "cancelled",
+    "confirmed", "queued", "in_progress", "review_required",
 ]
 DecisionStatus = Literal["pending", "resolved"]
 AudioMode = Literal["off", "voiceover"]
@@ -27,6 +29,17 @@ class ProjectRead(ProjectCreate):
 
     id: str
     status: ProjectStatus
+    row_version: int
+    state_changed_at: datetime
+    state_actor_type: str
+    state_changed_by: str
+    state_trigger: str
+    state_reason_code: str | None
+    blocked_from_state: str | None
+    blocked_responsible_aggregate_type: str | None
+    blocked_responsible_aggregate_id: str | None
+    blocked_allowed_commands: list[str]
+    blocked_at: datetime | None
     created_at: datetime
     updated_at: datetime
 

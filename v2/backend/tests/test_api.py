@@ -60,6 +60,9 @@ def test_project_contract_and_explicit_confirmation(client: TestClient) -> None:
     )
     assert decision.status_code == 201
     decision_id = decision.json()["id"]
+    decision_required = client.get(f"/api/v1/projects/{project['id']}").json()
+    assert decision_required["status"] == "decision_required"
+    assert decision_required["row_version"] == 2
 
     blocked = client.post(f"/api/v1/projects/{project['id']}/confirm")
     assert blocked.status_code == 409
@@ -69,10 +72,14 @@ def test_project_contract_and_explicit_confirmation(client: TestClient) -> None:
         json={"value": "documentary"},
     )
     assert resolved.status_code == 200
+    collecting = client.get(f"/api/v1/projects/{project['id']}").json()
+    assert collecting["status"] == "planning"
+    assert collecting["row_version"] == 3
 
     confirmed = client.post(f"/api/v1/projects/{project['id']}/confirm")
     assert confirmed.status_code == 200
     assert confirmed.json()["status"] == "confirmed"
+    assert confirmed.json()["state_trigger"] == "legacy_contract_confirmed"
 
     queued = client.post(
         f"/api/v1/projects/{project['id']}/queue",
@@ -85,7 +92,42 @@ def test_project_contract_and_explicit_confirmation(client: TestClient) -> None:
     processed = client.get(f"/api/v1/projects/{project['id']}")
     assert processed.status_code == 200
     assert processed.json()["status"] == "review_required"
+    assert processed.json()["state_trigger"] == "legacy_validation_completed"
     assert processed.json()["work_items"][0]["status"] == "completed"
+
+
+def test_pending_decision_blocks_planning_until_explicit_resolution(client: TestClient) -> None:
+    project = create_creation_project(client)
+    pending = client.post(
+        f"/api/v1/projects/{project['id']}/decisions",
+        json={"key": "visual_style", "label": "画面风格", "status": "pending"},
+    )
+    assert pending.status_code == 201
+    requirement_id = client.get(
+        f"/api/v1/projects/{project['id']}/creation-center"
+    ).json()["active_requirement"]["id"]
+
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "pending-gate-brief", "expected_requirement_version_id": requirement_id},
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "PROJECT_DECISIONS_UNRESOLVED"
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "decision_required"
+
+    resolved = client.post(
+        f"/api/v1/projects/{project['id']}/decisions/{pending.json()['id']}/resolve",
+        json={"value": "documentary"},
+    )
+    assert resolved.status_code == 200
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "resolved-gate-brief", "expected_requirement_version_id": requirement_id},
+    )
+    assert generated.status_code == 201
+    state = client.get(f"/api/v1/projects/{project['id']}").json()
+    assert state["status"] == "plan_review"
+    assert state["state_trigger"] == "brief_candidate_created"
 
 
 def test_project_control_list_uses_persisted_facts_for_new_project(client: TestClient) -> None:
@@ -94,6 +136,10 @@ def test_project_control_list_uses_persisted_facts_for_new_project(client: TestC
     assert controls.status_code == 200
     summary = next(row for row in controls.json() if row["project_id"] == project["id"])
     assert summary["persisted_status"] == "draft"
+    assert summary["state_row_version"] == 1
+    assert summary["state_trigger"] == "project_created"
+    assert summary["state_reason_code"] is None
+    assert summary["blocked_from_state"] is None
     assert summary["evaluated_stage"] == "requirements"
     assert summary["active_plan_version"] is None
     assert summary["active_snapshot_number"] is None
@@ -675,12 +721,7 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
             "status": "resolved",
         },
     )
-    pending = client.post(
-        f"/api/v1/projects/{project['id']}/decisions",
-        json={"key": "character_identity", "label": "人物身份", "status": "pending"},
-    )
     assert resolved.status_code == 201
-    assert pending.status_code == 201
     base_requirement_id = client.get(
         f"/api/v1/projects/{project['id']}/creation-center"
     ).json()["active_requirement"]["id"]
@@ -731,6 +772,16 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
         json={"command_id": "impact-shots-accept", "expected_requirement_version_id": requirement_id, "expected_candidate_row_version": shot_plan["row_version"]},
     ).json()
     with SessionLocal() as session:
+        pending = Decision(
+            project_id=project["id"],
+            key="character_identity",
+            label="人物身份",
+            status="pending",
+            source="user",
+        )
+        session.add(pending)
+        session.flush()
+        pending_id = pending.id
         entity = Entity(
             id="impact-character",
             project_id=project["id"],
@@ -765,7 +816,7 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
     assert graph["scope"] == "observed_lineage"
     summaries = {item["decision_id"]: item for item in graph["decisions"]}
     resolved_summary = summaries[resolved.json()["id"]]
-    pending_summary = summaries[pending.json()["id"]]
+    pending_summary = summaries[pending_id]
     assert resolved_summary["observation_status"] == "observed"
     assert resolved_summary["current_value"] == "documentary"
     assert len(resolved_summary["direct_manifest_ids"]) == 3
@@ -1499,6 +1550,14 @@ def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClien
     assert blocked[0]["attempts"][0]["error_code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
     assert len(blocked[0]["attempts"]) == 1
     assert blocked[0]["attempts"][0]["provider_task_id"] is None
+    state = client.get(f"/api/v1/projects/{project['id']}").json()
+    assert state["status"] == "blocked"
+    assert state["blocked_from_state"] == "producing"
+    assert state["state_reason_code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
+    assert state["blocked_responsible_aggregate_type"] == "work_item"
+    assert state["blocked_responsible_aggregate_id"] == blocked[0]["id"]
+    assert state["blocked_allowed_commands"] == []
+    assert state["blocked_at"] is not None
 
 
 def test_project_control_exposes_exact_production_route_cost_and_blocker(client: TestClient) -> None:
@@ -1525,6 +1584,9 @@ def test_project_control_exposes_exact_production_route_cost_and_blocker(client:
     assert response.status_code == 200
     control = response.json()
     assert control["persisted_status"] == "blocked"
+    assert control["state_reason_code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
+    assert control["blocked_from_state"] == "producing"
+    assert control["blocked_responsible_aggregate_type"] == "work_item"
     assert control["evaluated_stage"] == "production"
     assert control["active_plan_version"] == 1
     assert control["active_snapshot_status"] == "execution_blocked"
@@ -1534,6 +1596,7 @@ def test_project_control_exposes_exact_production_route_cost_and_blocker(client:
     assert work_blocker["code"] == "PROVIDER_ADAPTER_NOT_CONNECTED"
     assert work_blocker["affected_node_keys"]
     blocked_route = next(item for item in control["routes"] if item["attempt_state"] == "blocked")
+    assert control["blocked_responsible_aggregate_id"] == blocked_route["work_item_id"]
     assert blocked_route["provider"] == "mock_visual"
     assert blocked_route["adapter_kind"] == "runninghub"
     assert blocked_route["provider_workflow_id"] == "mock-workflow-not-executable"

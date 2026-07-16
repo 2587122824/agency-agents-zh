@@ -14,6 +14,7 @@ from .contracts import (
     QualityRepository,
     RegistryRepository,
     ProjectRepository,
+    ProjectStateRepository,
     WorkRepository,
 )
 from .sqlalchemy import (
@@ -32,6 +33,7 @@ from .sqlalchemy import (
     SqlAlchemyQualityRepository,
     SqlAlchemyRegistryRepository,
     SqlAlchemyProjectRepository,
+    SqlAlchemyProjectStateRepository,
     SqlAlchemyWorkRepository,
 )
 
@@ -51,6 +53,7 @@ __all__ = [
     "QualityRepository",
     "RegistryRepository",
     "ProjectRepository",
+    "ProjectStateRepository",
     "WorkRepository",
     "SqlAlchemyCommandRepository",
     "SqlAlchemyConfigurationRepository",
@@ -67,5 +70,6 @@ __all__ = [
     "SqlAlchemyQualityRepository",
     "SqlAlchemyRegistryRepository",
     "SqlAlchemyProjectRepository",
+    "SqlAlchemyProjectStateRepository",
     "SqlAlchemyWorkRepository",
 ]

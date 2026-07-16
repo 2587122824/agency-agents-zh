@@ -1,7 +1,7 @@
 # 片场 V2 状态机与事件系统设计
 
 > 状态：设计基线
-> 版本：0.3
+> 版本：0.4
 > 更新日期：2026-07-16
 > 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
 > 配套文档：[V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md)
@@ -22,7 +22,7 @@
 
 | 聚合 | 状态所有者 | 禁止行为 |
 |---|---|---|
-| Project | ProjectStateEvaluator + 显式项目命令 | Worker 或前端直接写 `completed` |
+| Project | ProjectStateTransitioner + 显式项目命令/已验证事实 | Worker、应用服务或前端直接赋值 `status` |
 | PlanVersion | PlanApplicationService | Agent 直接确认方案 |
 | ProductionSnapshot | SnapshotService | 锁定后修改合同 |
 | WorkItem / WorkAttempt | WorkOrchestrator | 供应商回调直接改项目状态 |
@@ -115,6 +115,16 @@ blocked_at
 解除阻断不是“继续运行”按钮的别名。`ResolveBlock` 必须重新执行原目标状态守卫；通过后只回到 `blocked_from_state`，再由显式命令推进。若守卫仍失败，保留 `blocked` 并追加新的诊断事件。
 
 项目阻断不触发自动重试或合同修改。
+
+### 3.5 当前转移器实现边界
+
+Sprint 31 已实现 `orchestration/project_transitions.py`：所有当前应用服务和 Worker 的 Project 状态写入均使用枚举触发器，经 `ProjectStateRepository` 按 `status + row_version` 原子更新，并与 `project.state_changed.v1` 或 `project.blocked.v1` 在同一调用方事务提交。
+
+Creative Brief 生成命令自身具备需求完整性和 pending Decision 守卫，因此初始需求已经完整的项目可从 `draft/collecting_requirements` 直接进入 `plan_review`。最后一个 Decision 解决时，决策服务先明确判断活动需求是否完整，再提交进入 `planning` 或返回 `collecting_requirements` 的不同触发器；转移器不读取需求并自行决定。
+
+首次 blocked 冻结 `blocked_from_state`、`state_reason_code`、责任聚合、允许命令和时间。后续阻断只追加 `project.block_diagnostic.v1`，不能覆盖首次证据。
+
+当前实现尚未开放矩阵中的 `ResolveBlock`、`CancelProject`、`StartNewPlanVersion` 和 `ConfirmSelectedRetry`。这些设计行仍是目标合同，不代表 API 已实现。旧 `/confirm -> /queue` 本地合同验证使用独立 `legacy_*` 触发器，不属于正式生产状态链。
 
 ## 4. 活动版本与迟到结果
 

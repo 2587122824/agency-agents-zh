@@ -104,6 +104,58 @@ class SqlAlchemyProjectRepository:
         self.session.refresh(item)
 
 
+class SqlAlchemyProjectStateRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def transition_state(
+        self,
+        project: Project,
+        *,
+        expected_status: str,
+        expected_row_version: int,
+        target_status: str,
+        changed_at: datetime,
+        actor_type: str,
+        actor_id: str,
+        trigger: str,
+        reason_code: str | None,
+        blocked_from_state: str | None,
+        responsible_aggregate_type: str | None,
+        responsible_aggregate_id: str | None,
+        allowed_commands: list[str],
+        blocked_at: datetime | None,
+    ) -> bool:
+        self.session.flush()
+        result = self.session.execute(
+            update(Project)
+            .where(
+                Project.id == project.id,
+                Project.status == expected_status,
+                Project.row_version == expected_row_version,
+            )
+            .values(
+                status=target_status,
+                row_version=expected_row_version + 1,
+                state_changed_at=changed_at,
+                state_actor_type=actor_type,
+                state_changed_by=actor_id,
+                state_trigger=trigger,
+                state_reason_code=reason_code,
+                blocked_from_state=blocked_from_state,
+                blocked_responsible_aggregate_type=responsible_aggregate_type,
+                blocked_responsible_aggregate_id=responsible_aggregate_id,
+                blocked_allowed_commands=allowed_commands,
+                blocked_at=blocked_at,
+            )
+        )
+        if result.rowcount != 1:
+            return False
+        self.session.expire(project)
+        self.session.refresh(project)
+        return True
+
+
 class SqlAlchemyEventRepository:
     def __init__(self, session: Session) -> None:
         self.session = session

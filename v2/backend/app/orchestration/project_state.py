@@ -98,11 +98,17 @@ def evaluate_stage(facts: ProjectStateFacts) -> ProjectStage:
         authority is not None and authority.status == "execution_completed"
     ):
         return "quality_review"
-    if authority is not None and authority.status in {"submitted", "execution_blocked"}:
+    if facts.persisted_status == "producing" or (
+        authority is not None and authority.status in {"submitted", "execution_blocked"}
+    ):
         return "production"
-    if authority is not None or facts.has_active_plan:
+    if (
+        facts.persisted_status in {"contract_ready", "production_ready"}
+        or authority is not None
+        or facts.has_active_plan
+    ):
         return "production_preparation"
-    if facts.has_planning_candidate:
+    if facts.persisted_status in {"planning", "plan_review"} or facts.has_planning_candidate:
         return "planning"
     return "requirements"
 
