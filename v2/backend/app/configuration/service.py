@@ -4,7 +4,6 @@ import hashlib
 import json
 from collections import Counter
 
-from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from ..db.models import (
@@ -23,6 +22,7 @@ from ..db.models import (
     WorkflowSlotVersion,
     utc_now,
 )
+from ..repositories import ConfigurationRepository, SqlAlchemyConfigurationRepository
 from .contracts import (
     CloneConfiguration,
     ConfigurationDraftBody,
@@ -55,25 +55,22 @@ COMPONENT_MODELS = {
 }
 
 
-def _receipt(session: Session, command_id: str) -> ConfigurationCommandReceipt | None:
-    return session.scalar(select(ConfigurationCommandReceipt).where(
-        ConfigurationCommandReceipt.command_id == command_id
-    ))
-
-
-def _receipt_result(session: Session, receipt: ConfigurationCommandReceipt) -> ProductionConfigVersion:
-    result = session.get(ProductionConfigVersion, receipt.result_id)
+def _receipt_result(
+    repository: ConfigurationRepository,
+    receipt: ConfigurationCommandReceipt,
+) -> ProductionConfigVersion:
+    result = repository.configuration(receipt.result_id)
     if not result:
         raise ConfigurationConflictError("COMMAND_RESULT_MISSING", "命令结果不存在，不能静默重新执行。")
     return result
 
 
 def _replay_receipt(
-    session: Session,
+    repository: ConfigurationRepository,
     command_id: str,
     command_type: str,
 ) -> ProductionConfigVersion | None:
-    receipt = _receipt(session, command_id)
+    receipt = repository.receipt(command_id)
     if not receipt:
         return None
     if receipt.command_type != command_type:
@@ -81,11 +78,16 @@ def _replay_receipt(
             "COMMAND_ID_REUSED",
             f"命令 ID 已用于 {receipt.command_type}，不能用于 {command_type}。",
         )
-    return _receipt_result(session, receipt)
+    return _receipt_result(repository, receipt)
 
 
-def _save_receipt(session: Session, command_id: str, command_type: str, result_id: str) -> None:
-    session.add(ConfigurationCommandReceipt(
+def _save_receipt(
+    repository: ConfigurationRepository,
+    command_id: str,
+    command_type: str,
+    result_id: str,
+) -> None:
+    repository.add(ConfigurationCommandReceipt(
         command_id=command_id,
         command_type=command_type,
         result_type="production_config_version",
@@ -94,24 +96,20 @@ def _save_receipt(session: Session, command_id: str, command_type: str, result_i
 
 
 def _event(
-    session: Session,
+    repository: ConfigurationRepository,
     config_id: str,
     event_type: str,
     actor_id: str,
     command_id: str,
     data: dict | None = None,
 ) -> None:
-    session.add(ConfigurationEvent(
+    repository.add(ConfigurationEvent(
         production_config_version_id=config_id,
         event_type=event_type,
         actor_id=actor_id,
         command_id=command_id,
         data=data or {},
     ))
-
-
-def _next_version(session: Session, model, key_column, key: str) -> int:
-    return (session.scalar(select(func.max(model.version_number)).where(key_column == key)) or 0) + 1
 
 
 def _assert_unique_keys(draft: ConfigurationDraftBody) -> None:
@@ -130,15 +128,24 @@ def _assert_unique_keys(draft: ConfigurationDraftBody) -> None:
         raise ConfigurationConflictError("DUPLICATE_COMPONENT_KEY", f"组件键重复：{duplicates}")
 
 
-def _component_link(session: Session, config_id: str, component_type: str, component_id: str) -> None:
-    session.add(ProductionConfigComponent(
+def _component_link(
+    repository: ConfigurationRepository,
+    config_id: str,
+    component_type: str,
+    component_id: str,
+) -> None:
+    repository.add(ProductionConfigComponent(
         production_config_version_id=config_id,
         component_type=component_type,
         component_version_id=component_id,
     ))
 
 
-def _create_components(session: Session, config: ProductionConfigVersion, draft: ConfigurationDraftBody) -> None:
+def _create_components(
+    repository: ConfigurationRepository,
+    config: ProductionConfigVersion,
+    draft: ConfigurationDraftBody,
+) -> None:
     _assert_unique_keys(draft)
     provider_by_key: dict[str, ProviderConfigVersion] = {}
     model_by_key: dict[str, ModelConfigVersion] = {}
@@ -149,7 +156,7 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
         row = ProviderConfigVersion(
             production_config_version_id=config.id,
             provider_key=item.provider_key,
-            version_number=_next_version(session, ProviderConfigVersion, ProviderConfigVersion.provider_key, item.provider_key),
+            version_number=repository.next_component_version("provider", item.provider_key),
             display_name=item.display_name,
             adapter_kind=item.adapter_kind,
             region=item.region,
@@ -160,16 +167,16 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
             poll_interval_seconds=item.poll_interval_seconds,
             max_concurrency=item.max_concurrency,
         )
-        session.add(row)
-        session.flush()
+        repository.add(row)
+        repository.flush()
         provider_by_key[item.provider_key] = row
-        _component_link(session, config.id, "provider", row.id)
+        _component_link(repository, config.id, "provider", row.id)
 
     for item in draft.video_specs:
         row = VideoSpecVersion(
             production_config_version_id=config.id,
             spec_key=item.spec_key,
-            version_number=_next_version(session, VideoSpecVersion, VideoSpecVersion.spec_key, item.spec_key),
+            version_number=repository.next_component_version("video_spec", item.spec_key),
             display_name=item.display_name,
             width=item.width,
             height=item.height,
@@ -184,10 +191,10 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
             bitrate_policy=item.bitrate_policy,
             safe_crop=item.safe_crop,
         )
-        session.add(row)
-        session.flush()
+        repository.add(row)
+        repository.flush()
         video_by_key[item.spec_key] = row
-        _component_link(session, config.id, "video_spec", row.id)
+        _component_link(repository, config.id, "video_spec", row.id)
 
     for item in draft.models:
         provider = provider_by_key.get(item.provider_key)
@@ -199,7 +206,7 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
         row = ModelConfigVersion(
             production_config_version_id=config.id,
             config_key=item.config_key,
-            version_number=_next_version(session, ModelConfigVersion, ModelConfigVersion.config_key, item.config_key),
+            version_number=repository.next_component_version("model", item.config_key),
             display_name=item.display_name,
             agent_role=item.agent_role,
             provider_config_version_id=provider.id,
@@ -212,10 +219,10 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
             sampling=item.sampling,
             capability_tags=item.capability_tags,
         )
-        session.add(row)
-        session.flush()
+        repository.add(row)
+        repository.flush()
         model_by_key[item.config_key] = row
-        _component_link(session, config.id, "model", row.id)
+        _component_link(repository, config.id, "model", row.id)
 
     for item in draft.workflow_slots:
         provider = provider_by_key.get(item.provider_key)
@@ -239,7 +246,7 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
         row = WorkflowSlotVersion(
             production_config_version_id=config.id,
             slot_key=item.slot_key,
-            version_number=_next_version(session, WorkflowSlotVersion, WorkflowSlotVersion.slot_key, item.slot_key),
+            version_number=repository.next_component_version("workflow_slot", item.slot_key),
             display_name=item.display_name,
             operation_kind=item.operation_kind,
             provider_config_version_id=provider.id,
@@ -252,10 +259,10 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
             supported_video_spec_ids=[video_by_key[key].id for key in item.supported_video_spec_keys],
             capability_tags=item.capability_tags,
         )
-        session.add(row)
-        session.flush()
+        repository.add(row)
+        repository.flush()
         workflow_by_key[item.slot_key] = row
-        _component_link(session, config.id, "workflow_slot", row.id)
+        _component_link(repository, config.id, "workflow_slot", row.id)
 
     tts_slot = workflow_by_key.get(draft.audio.tts_workflow_slot_key) if draft.audio.tts_workflow_slot_key else None
     if draft.audio.tts_workflow_slot_key and not tts_slot:
@@ -266,7 +273,7 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
     audio = AudioConfigVersion(
         production_config_version_id=config.id,
         config_key=draft.audio.config_key,
-        version_number=_next_version(session, AudioConfigVersion, AudioConfigVersion.config_key, draft.audio.config_key),
+        version_number=repository.next_component_version("audio", draft.audio.config_key),
         display_name=draft.audio.display_name,
         supported_modes=draft.audio.supported_modes,
         tts_workflow_slot_version_id=tts_slot.id if tts_slot else None,
@@ -278,14 +285,14 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
         loudness_target=draft.audio.loudness_target,
         temporary_upload_policy_version_id=draft.audio.temporary_upload_policy_version_id,
     )
-    session.add(audio)
-    session.flush()
-    _component_link(session, config.id, "audio", audio.id)
+    repository.add(audio)
+    repository.flush()
+    _component_link(repository, config.id, "audio", audio.id)
 
     storage = StoragePolicyVersion(
         production_config_version_id=config.id,
         policy_key=draft.storage.policy_key,
-        version_number=_next_version(session, StoragePolicyVersion, StoragePolicyVersion.policy_key, draft.storage.policy_key),
+        version_number=repository.next_component_version("storage", draft.storage.policy_key),
         display_name=draft.storage.display_name,
         backend_kind=draft.storage.backend_kind,
         region_ref=draft.storage.region_ref,
@@ -297,29 +304,24 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
         lifecycle_days=draft.storage.lifecycle_days,
         local_root_ref=draft.storage.local_root_ref,
     )
-    session.add(storage)
-    session.flush()
-    _component_link(session, config.id, "storage", storage.id)
+    repository.add(storage)
+    repository.flush()
+    _component_link(repository, config.id, "storage", storage.id)
 
     if draft.pricing:
         pricing = PricingCatalogVersion(
             production_config_version_id=config.id,
             catalog_key=draft.pricing.catalog_key,
-            version_number=_next_version(
-                session,
-                PricingCatalogVersion,
-                PricingCatalogVersion.catalog_key,
-                draft.pricing.catalog_key,
-            ),
+            version_number=repository.next_component_version("pricing_catalog", draft.pricing.catalog_key),
             display_name=draft.pricing.display_name,
             currency=draft.pricing.currency,
             confirmation_threshold=float(draft.pricing.confirmation_threshold),
             effective_from=draft.pricing.effective_from,
             effective_to=draft.pricing.effective_to,
         )
-        session.add(pricing)
-        session.flush()
-        _component_link(session, config.id, "pricing_catalog", pricing.id)
+        repository.add(pricing)
+        repository.flush()
+        _component_link(repository, config.id, "pricing_catalog", pricing.id)
         seen_pricing_slots: set[str] = set()
         for rule in draft.pricing.rules:
             workflow = workflow_by_key.get(rule.workflow_slot_key)
@@ -334,7 +336,7 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
                     f"工作流槽位 {rule.workflow_slot_key} 存在重复价格规则。",
                 )
             seen_pricing_slots.add(rule.workflow_slot_key)
-            session.add(PricingRule(
+            repository.add(PricingRule(
                 pricing_catalog_version_id=pricing.id,
                 provider_config_version_id=workflow.provider_config_version_id,
                 workflow_slot_version_id=workflow.id,
@@ -343,16 +345,7 @@ def _create_components(session: Session, config: ProductionConfigVersion, draft:
                 unit_price=float(rule.unit_price),
                 minimum_charge=float(rule.minimum_charge) if rule.minimum_charge is not None else None,
             ))
-        session.flush()
-
-
-def _component_rows(session: Session, config_id: str) -> dict[str, list]:
-    return {
-        component_type: list(session.scalars(select(model).where(
-            model.production_config_version_id == config_id
-        ).order_by(model.created_at, model.id)))
-        for component_type, model in COMPONENT_MODELS.items()
-    }
+        repository.flush()
 
 
 def _provider_details(row: ProviderConfigVersion) -> dict:
@@ -471,12 +464,10 @@ def _component_summary(component_type: str, row, lookups: dict[str, dict[str, ob
     }
 
 
-def _component_summaries(session: Session, config_id: str) -> list[dict]:
-    rows = _component_rows(session, config_id)
+def _component_summaries(repository: ConfigurationRepository, config_id: str) -> list[dict]:
+    rows = repository.component_rows(config_id)
     pricing_ids = [row.id for row in rows["pricing_catalog"]]
-    pricing_rules = list(session.scalars(select(PricingRule).where(
-        PricingRule.pricing_catalog_version_id.in_(pricing_ids)
-    ).order_by(PricingRule.workflow_slot_version_id))) if pricing_ids else []
+    pricing_rules = repository.pricing_rules(pricing_ids, ordered=True)
     lookups: dict[str, dict[str, object]] = {
         "pricing_rules": {
             catalog_id: [rule for rule in pricing_rules if rule.pricing_catalog_version_id == catalog_id]
@@ -490,16 +481,16 @@ def _component_summaries(session: Session, config_id: str) -> list[dict]:
     ]
 
 
-def _canonical_components(session: Session, config_id: str) -> list[dict]:
+def _canonical_components(repository: ConfigurationRepository, config_id: str) -> list[dict]:
     return sorted(
-        _component_summaries(session, config_id),
+        _component_summaries(repository, config_id),
         key=lambda item: (item["component_type"], item["key"], item["version_number"]),
     )
 
 
-def _calculate_hash(session: Session, config: ProductionConfigVersion) -> str:
+def _calculate_hash(repository: ConfigurationRepository, config: ProductionConfigVersion) -> str:
     components = []
-    for item in _canonical_components(session, config.id):
+    for item in _canonical_components(repository, config.id):
         stable = dict(item)
         stable.pop("status", None)
         components.append(stable)
@@ -512,8 +503,8 @@ def _calculate_hash(session: Session, config: ProductionConfigVersion) -> str:
     return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
 
-def _validate(session: Session, config: ProductionConfigVersion) -> list[dict]:
-    rows = _component_rows(session, config.id)
+def _validate(repository: ConfigurationRepository, config: ProductionConfigVersion) -> list[dict]:
+    rows = repository.component_rows(config.id)
     errors: list[dict] = []
     providers = {row.id: row for row in rows["provider"]}
     models = {row.id: row for row in rows["model"]}
@@ -596,9 +587,7 @@ def _validate(session: Session, config: ProductionConfigVersion) -> list[dict]:
         errors.append({"code": "PRICING_CATALOG_COUNT_INVALID", "path": "pricing", "message": "一个配置版本最多只能有一个价格目录。"})
     if rows["pricing_catalog"]:
         pricing = rows["pricing_catalog"][0]
-        rules = list(session.scalars(select(PricingRule).where(
-            PricingRule.pricing_catalog_version_id == pricing.id
-        )))
+        rules = repository.pricing_rules([pricing.id])
         if not rules:
             errors.append({"code": "PRICING_RULE_REQUIRED", "path": "pricing.rules", "message": "价格目录至少需要一条精确工作流规则。"})
         for rule in rules:
@@ -610,29 +599,14 @@ def _validate(session: Session, config: ProductionConfigVersion) -> list[dict]:
     return errors
 
 
-def _delete_components(session: Session, config_id: str) -> None:
-    session.execute(delete(ProductionConfigComponent).where(
-        ProductionConfigComponent.production_config_version_id == config_id
-    ))
-    pricing_ids = list(session.scalars(select(PricingCatalogVersion.id).where(
-        PricingCatalogVersion.production_config_version_id == config_id
-    )))
-    if pricing_ids:
-        session.execute(delete(PricingRule).where(PricingRule.pricing_catalog_version_id.in_(pricing_ids)))
-    for model in (PricingCatalogVersion, AudioConfigVersion, WorkflowSlotVersion, ModelConfigVersion, VideoSpecVersion, ProviderConfigVersion, StoragePolicyVersion):
-        session.execute(delete(model).where(model.production_config_version_id == config_id))
-    session.flush()
-
-
 def create_configuration(session: Session, payload: CreateConfiguration) -> dict:
-    replay = _replay_receipt(session, payload.command_id, "configuration.create")
+    repository = SqlAlchemyConfigurationRepository(session)
+    replay = _replay_receipt(repository, payload.command_id, "configuration.create")
     if replay:
-        return configuration_read(session, replay)
+        return _configuration_read(repository, replay)
     draft = payload.configuration
     _assert_unique_keys(draft)
-    version_number = _next_version(
-        session, ProductionConfigVersion, ProductionConfigVersion.config_key, draft.config_key
-    )
+    version_number = repository.next_configuration_version(draft.config_key)
     config = ProductionConfigVersion(
         config_key=draft.config_key,
         version_number=version_number,
@@ -640,16 +614,16 @@ def create_configuration(session: Session, payload: CreateConfiguration) -> dict
         description=draft.description,
         created_by=payload.actor_id,
     )
-    session.add(config)
-    session.flush()
-    _create_components(session, config, draft)
-    _save_receipt(session, payload.command_id, "configuration.create", config.id)
-    _event(session, config.id, "configuration.draft_created.v1", payload.actor_id, payload.command_id, {
+    repository.add(config)
+    repository.flush()
+    _create_components(repository, config, draft)
+    _save_receipt(repository, payload.command_id, "configuration.create", config.id)
+    _event(repository, config.id, "configuration.draft_created.v1", payload.actor_id, payload.command_id, {
         "version_number": config.version_number,
-        "component_count": len(_component_summaries(session, config.id)),
+        "component_count": len(_component_summaries(repository, config.id)),
     })
     session.commit()
-    return configuration_read(session, config)
+    return _configuration_read(repository, config)
 
 
 def revise_configuration(
@@ -657,9 +631,10 @@ def revise_configuration(
     config: ProductionConfigVersion,
     payload: ReviseConfiguration,
 ) -> dict:
-    replay = _replay_receipt(session, payload.command_id, "configuration.revise")
+    repository = SqlAlchemyConfigurationRepository(session)
+    replay = _replay_receipt(repository, payload.command_id, "configuration.revise")
     if replay:
-        return configuration_read(session, replay)
+        return _configuration_read(repository, replay)
     if config.status not in {"draft", "validation_failed", "ready"}:
         raise ConfigurationConflictError("CONFIGURATION_IMMUTABLE", "已发布或停用配置不能原地修改。")
     if config.row_version != payload.expected_row_version:
@@ -667,20 +642,20 @@ def revise_configuration(
     if payload.configuration.config_key != config.config_key:
         raise ConfigurationConflictError("CONFIG_KEY_IMMUTABLE", "配置系列键不能在草稿修订中改变。")
     _assert_unique_keys(payload.configuration)
-    _delete_components(session, config.id)
+    repository.delete_components(config.id)
     config.display_name = payload.configuration.display_name
     config.description = payload.configuration.description
     config.status = "draft"
     config.validation_report = []
     config.config_hash = None
     config.row_version += 1
-    _create_components(session, config, payload.configuration)
-    _save_receipt(session, payload.command_id, "configuration.revise", config.id)
-    _event(session, config.id, "configuration.draft_revised.v1", payload.actor_id, payload.command_id, {
+    _create_components(repository, config, payload.configuration)
+    _save_receipt(repository, payload.command_id, "configuration.revise", config.id)
+    _event(repository, config.id, "configuration.draft_revised.v1", payload.actor_id, payload.command_id, {
         "row_version": config.row_version,
     })
     session.commit()
-    return configuration_read(session, config)
+    return _configuration_read(repository, config)
 
 
 def validate_configuration(
@@ -688,31 +663,32 @@ def validate_configuration(
     config: ProductionConfigVersion,
     payload: ValidateConfiguration,
 ) -> dict:
-    replay = _replay_receipt(session, payload.command_id, "configuration.validate")
+    repository = SqlAlchemyConfigurationRepository(session)
+    replay = _replay_receipt(repository, payload.command_id, "configuration.validate")
     if replay:
-        return configuration_read(session, replay)
+        return _configuration_read(repository, replay)
     if config.status not in {"draft", "validation_failed"}:
         raise ConfigurationConflictError("CONFIGURATION_NOT_VALIDATABLE", f"配置状态 {config.status} 不能校验。")
     if config.row_version != payload.expected_row_version:
         raise ConfigurationConflictError("CONFIGURATION_VERSION_CONFLICT", "配置已被其他命令修改，请刷新。")
     config.status = "validating"
-    _event(session, config.id, "configuration.validation_started.v1", payload.actor_id, payload.command_id)
-    errors = _validate(session, config)
+    _event(repository, config.id, "configuration.validation_started.v1", payload.actor_id, payload.command_id)
+    errors = _validate(repository, config)
     config.validation_report = errors
-    config.config_hash = None if errors else _calculate_hash(session, config)
+    config.config_hash = None if errors else _calculate_hash(repository, config)
     config.status = "validation_failed" if errors else "ready"
     config.row_version += 1
     _event(
-        session,
+        repository,
         config.id,
         "configuration.validation_failed.v1" if errors else "configuration.validated.v1",
         payload.actor_id,
         payload.command_id,
         {"errors": errors, "config_hash": config.config_hash},
     )
-    _save_receipt(session, payload.command_id, "configuration.validate", config.id)
+    _save_receipt(repository, payload.command_id, "configuration.validate", config.id)
     session.commit()
-    return configuration_read(session, config)
+    return _configuration_read(repository, config)
 
 
 def publish_configuration(
@@ -720,33 +696,34 @@ def publish_configuration(
     config: ProductionConfigVersion,
     payload: PublishConfiguration,
 ) -> dict:
-    replay = _replay_receipt(session, payload.command_id, "configuration.publish")
+    repository = SqlAlchemyConfigurationRepository(session)
+    replay = _replay_receipt(repository, payload.command_id, "configuration.publish")
     if replay:
-        return configuration_read(session, replay)
+        return _configuration_read(repository, replay)
     if config.status != "ready":
         raise ConfigurationConflictError("CONFIGURATION_NOT_READY", "配置必须先通过确定性校验。")
     if config.row_version != payload.expected_row_version:
         raise ConfigurationConflictError("CONFIGURATION_VERSION_CONFLICT", "配置已变化，请刷新后重新确认。")
     if not payload.confirm_high_risk_changes:
         raise ConfigurationConflictError("HIGH_RISK_CONFIRMATION_REQUIRED", "发布包含供应商、工作流和媒体规格，必须强确认。")
-    recalculated = _calculate_hash(session, config)
+    recalculated = _calculate_hash(repository, config)
     if not config.config_hash or config.config_hash != recalculated:
         raise ConfigurationConflictError("CONFIGURATION_HASH_MISMATCH", "配置内容在校验后发生变化，必须重新校验。")
     now = utc_now()
     config.status = "published"
     config.published_at = now
     config.row_version += 1
-    for rows in _component_rows(session, config.id).values():
+    for rows in repository.component_rows(config.id).values():
         for row in rows:
             row.status = "published"
             row.published_at = now
-    _event(session, config.id, "configuration.published.v1", payload.actor_id, payload.command_id, {
+    _event(repository, config.id, "configuration.published.v1", payload.actor_id, payload.command_id, {
         "config_hash": config.config_hash,
-        "component_ids": [item["id"] for item in _component_summaries(session, config.id)],
+        "component_ids": [item["id"] for item in _component_summaries(repository, config.id)],
     })
-    _save_receipt(session, payload.command_id, "configuration.publish", config.id)
+    _save_receipt(repository, payload.command_id, "configuration.publish", config.id)
     session.commit()
-    return configuration_read(session, config)
+    return _configuration_read(repository, config)
 
 
 def retire_configuration(
@@ -754,33 +731,36 @@ def retire_configuration(
     config: ProductionConfigVersion,
     payload: RetireConfiguration,
 ) -> dict:
-    replay = _replay_receipt(session, payload.command_id, "configuration.retire")
+    repository = SqlAlchemyConfigurationRepository(session)
+    replay = _replay_receipt(repository, payload.command_id, "configuration.retire")
     if replay:
-        return configuration_read(session, replay)
+        return _configuration_read(repository, replay)
     if config.status != "published":
         raise ConfigurationConflictError("CONFIGURATION_NOT_PUBLISHED", "只有已发布配置可以停用。")
     if config.row_version != payload.expected_row_version:
         raise ConfigurationConflictError("CONFIGURATION_VERSION_CONFLICT", "配置已变化，请刷新。")
-    refs = list(session.scalars(select(ConfigurationReference).where(
-        ConfigurationReference.production_config_version_id == config.id
-    )))
+    refs = repository.references(config.id)
     if refs and not payload.confirm_reference_impact:
         raise ConfigurationConflictError("REFERENCE_IMPACT_CONFIRMATION_REQUIRED", "配置已有引用，停用前必须确认引用范围。")
     config.status = "retired"
     config.row_version += 1
-    for rows in _component_rows(session, config.id).values():
+    for rows in repository.component_rows(config.id).values():
         for row in rows:
             row.status = "retired"
-    _event(session, config.id, "configuration.retired.v1", payload.actor_id, payload.command_id, {
+    _event(repository, config.id, "configuration.retired.v1", payload.actor_id, payload.command_id, {
         "references": [{"ref_type": item.ref_type, "ref_id": item.ref_id} for item in refs],
     })
-    _save_receipt(session, payload.command_id, "configuration.retire", config.id)
+    _save_receipt(repository, payload.command_id, "configuration.retire", config.id)
     session.commit()
-    return configuration_read(session, config)
+    return _configuration_read(repository, config)
 
 
-def _draft_from_config(session: Session, config: ProductionConfigVersion, display_name: str | None = None) -> ConfigurationDraftBody:
-    components = _component_summaries(session, config.id)
+def _draft_from_config(
+    repository: ConfigurationRepository,
+    config: ProductionConfigVersion,
+    display_name: str | None = None,
+) -> ConfigurationDraftBody:
+    components = _component_summaries(repository, config.id)
     by_type: dict[str, list[dict]] = {key: [] for key in COMPONENT_MODELS}
     for item in components:
         by_type[item["component_type"]].append(item)
@@ -858,35 +838,35 @@ def clone_configuration(
     config: ProductionConfigVersion,
     payload: CloneConfiguration,
 ) -> dict:
-    replay = _replay_receipt(session, payload.command_id, "configuration.clone")
+    repository = SqlAlchemyConfigurationRepository(session)
+    replay = _replay_receipt(repository, payload.command_id, "configuration.clone")
     if replay:
-        return configuration_read(session, replay)
+        return _configuration_read(repository, replay)
     if config.status not in {"published", "retired"}:
         raise ConfigurationConflictError("CONFIGURATION_NOT_CLONEABLE", "只有已发布或已停用配置可以复制为新草稿。")
-    draft = _draft_from_config(session, config, payload.display_name)
+    draft = _draft_from_config(repository, config, payload.display_name)
     new_config = ProductionConfigVersion(
         config_key=config.config_key,
-        version_number=_next_version(session, ProductionConfigVersion, ProductionConfigVersion.config_key, config.config_key),
+        version_number=repository.next_configuration_version(config.config_key),
         display_name=draft.display_name,
         description=draft.description,
         supersedes_version_id=config.id,
         created_by=payload.actor_id,
     )
-    session.add(new_config)
-    session.flush()
-    _create_components(session, new_config, draft)
-    _save_receipt(session, payload.command_id, "configuration.clone", new_config.id)
-    _event(session, new_config.id, "configuration.draft_created.v1", payload.actor_id, payload.command_id, {
+    repository.add(new_config)
+    repository.flush()
+    _create_components(repository, new_config, draft)
+    _save_receipt(repository, payload.command_id, "configuration.clone", new_config.id)
+    _event(repository, new_config.id, "configuration.draft_created.v1", payload.actor_id, payload.command_id, {
         "supersedes_version_id": config.id,
     })
     session.commit()
-    return configuration_read(session, new_config)
+    return _configuration_read(repository, new_config)
 
 
 def list_configurations(session: Session) -> list[dict]:
-    configs = list(session.scalars(select(ProductionConfigVersion).order_by(
-        ProductionConfigVersion.created_at.desc()
-    )))
+    repository = SqlAlchemyConfigurationRepository(session)
+    configs = repository.configurations()
     result = []
     for config in configs:
         result.append({
@@ -898,7 +878,7 @@ def list_configurations(session: Session) -> list[dict]:
             "status": config.status,
             "row_version": config.row_version,
             "config_hash": config.config_hash,
-            "component_count": len(_component_summaries(session, config.id)),
+            "component_count": len(_component_summaries(repository, config.id)),
             "validation_error_count": len(config.validation_report or []),
             "published_at": config.published_at,
             "updated_at": config.updated_at,
@@ -907,16 +887,21 @@ def list_configurations(session: Session) -> list[dict]:
 
 
 def require_configuration(session: Session, config_id: str) -> ProductionConfigVersion:
-    config = session.get(ProductionConfigVersion, config_id)
+    config = SqlAlchemyConfigurationRepository(session).configuration(config_id)
     if not config:
         raise ConfigurationNotFoundError("System configuration version not found")
     return config
 
 
 def configuration_read(session: Session, config: ProductionConfigVersion) -> dict:
-    refs = list(session.scalars(select(ConfigurationReference).where(
-        ConfigurationReference.production_config_version_id == config.id
-    ).order_by(ConfigurationReference.created_at)))
+    return _configuration_read(SqlAlchemyConfigurationRepository(session), config)
+
+
+def _configuration_read(
+    repository: ConfigurationRepository,
+    config: ProductionConfigVersion,
+) -> dict:
+    refs = repository.references(config.id)
     return {
         "id": config.id,
         "config_key": config.config_key,
@@ -932,7 +917,7 @@ def configuration_read(session: Session, config: ProductionConfigVersion) -> dic
         "published_at": config.published_at,
         "created_at": config.created_at,
         "updated_at": config.updated_at,
-        "components": _component_summaries(session, config.id),
+        "components": _component_summaries(repository, config.id),
         "references": [{
             "ref_type": item.ref_type,
             "ref_id": item.ref_id,
@@ -946,8 +931,9 @@ def configuration_diff(
     config: ProductionConfigVersion,
     base: ProductionConfigVersion,
 ) -> dict:
-    current = _semantic_components(session, config.id)
-    previous = _semantic_components(session, base.id)
+    repository = SqlAlchemyConfigurationRepository(session)
+    current = _semantic_components(repository, config.id)
+    previous = _semantic_components(repository, base.id)
     changed = []
     high_risk = []
     for identity in sorted(set(current) | set(previous)):
@@ -966,8 +952,11 @@ def configuration_diff(
     }
 
 
-def _semantic_components(session: Session, config_id: str) -> dict[tuple[str, str], dict]:
-    items = _canonical_components(session, config_id)
+def _semantic_components(
+    repository: ConfigurationRepository,
+    config_id: str,
+) -> dict[tuple[str, str], dict]:
+    items = _canonical_components(repository, config_id)
     keys_by_type = {
         component_type: {
             item["id"]: item["key"]
@@ -1013,16 +1002,14 @@ def _semantic_components(session: Session, config_id: str) -> dict[tuple[str, st
 
 
 def component_versions(session: Session, component_type: str) -> list[dict]:
-    model = COMPONENT_MODELS.get(component_type)
-    if not model:
+    if component_type not in COMPONENT_MODELS:
         raise ConfigurationNotFoundError("Unknown configuration component type")
-    rows = list(session.scalars(select(model).order_by(model.created_at.desc())))
+    repository = SqlAlchemyConfigurationRepository(session)
+    rows = repository.all_components(component_type)
     lookups: dict[str, dict[str, object]] = {}
     if component_type == "pricing_catalog":
         catalog_ids = [row.id for row in rows]
-        rules = list(session.scalars(select(PricingRule).where(
-            PricingRule.pricing_catalog_version_id.in_(catalog_ids)
-        ).order_by(PricingRule.workflow_slot_version_id))) if catalog_ids else []
+        rules = repository.pricing_rules(catalog_ids, ordered=True)
         lookups["pricing_rules"] = {
             catalog_id: [rule for rule in rules if rule.pricing_catalog_version_id == catalog_id]
             for catalog_id in catalog_ids
@@ -1031,7 +1018,5 @@ def component_versions(session: Session, component_type: str) -> list[dict]:
 
 
 def workflow_slot_versions(session: Session, slot_key: str) -> list[dict]:
-    rows = list(session.scalars(select(WorkflowSlotVersion).where(
-        WorkflowSlotVersion.slot_key == slot_key
-    ).order_by(WorkflowSlotVersion.version_number.desc())))
+    rows = SqlAlchemyConfigurationRepository(session).workflow_slot_versions(slot_key)
     return [_component_summary("workflow_slot", row, {}) for row in rows]

@@ -1051,6 +1051,19 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 完整合同见 [V2 最终交付合同实现](./V2_DELIVERY_IMPLEMENTATION.md)。
 
+## 35. 系统配置持久化边界
+
+系统配置应用服务通过独立的 `ConfigurationRepository` 访问配置版本、组件版本、价格规则、引用、配置事件与全局配置命令回执。Repository 只保存和读取事实，不决定配置是否可校验、发布、停用或克隆。
+
+以下规则继续由应用服务掌握：
+
+- `draft / validation_failed / ready / published / retired` 生命周期守卫与 `row_version` 冲突检查。
+- NodeInfoList 完整性、重复绑定、供应商能力、媒体规格、音频和价格规则的确定性校验。
+- `config_hash` 计算、发布后的组件不可变语义、高风险发布确认和停用引用影响确认。
+- 命令 ID 类型冲突与回执结果缺失必须明确失败，不重新执行、不猜测结果。
+
+配置聚合的 `ConfigurationCommandReceipt` 是全局作用域，不与项目级 `(project_id, command_id)` 回执合并。草稿修订只删除目标配置版本的组件链接、价格规则和组件记录；不得影响同系列其他版本。该边界不引入自动工作流选择、供应商替换、默认路由、重试或降级。
+
 ## 36. 素材联络表实现边界
 
 素材联络表是当前活动生产快照的项目级只读证据视图。它按编号并排展示 Asset、分镜合同、实际 WorkAttempt 路由、DependencyEdge、实体版本来源、QC 报告和人工审核结论，帮助用户在剪辑取舍前核对素材连续性与生产事实。

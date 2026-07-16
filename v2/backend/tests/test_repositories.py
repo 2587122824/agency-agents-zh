@@ -14,6 +14,8 @@ from v2.backend.app.db.models import (
     Attachment,
     AttachmentBinding,
     ClarificationRequest,
+    ConfigurationCommandReceipt,
+    ConfigurationReference,
     CreativeBriefCandidate,
     DAGNode,
     Decision,
@@ -22,11 +24,16 @@ from v2.backend.app.db.models import (
     Entity,
     EntityVersion,
     Message,
+    PricingCatalogVersion,
+    PricingRule,
     PlanVersion,
     Project,
     ProjectEvent,
+    ProductionConfigComponent,
+    ProductionConfigVersion,
     ProductionImpactAnalysis,
     ProductionSnapshot,
+    ProviderConfigVersion,
     QCFinding,
     QCReport,
     RequirementCandidate,
@@ -36,6 +43,7 @@ from v2.backend.app.db.models import (
     SnapshotEntityVersion,
     Timeline,
     TimelineItem,
+    WorkflowSlotVersion,
     WorkAttempt,
     WorkItem,
     utc_now,
@@ -43,6 +51,7 @@ from v2.backend.app.db.models import (
 from v2.backend.app.db.session import Base
 from v2.backend.app.repositories import (
     SqlAlchemyCommandRepository,
+    SqlAlchemyConfigurationRepository,
     SqlAlchemyCreationRepository,
     SqlAlchemyDecisionRepository,
     SqlAlchemyDeliveryRepository,
@@ -1466,5 +1475,207 @@ def test_work_repository_contract_preserves_candidate_order_dependencies_and_ato
             assert claimed.status == "in_progress"
             assert claimed.row_version == 2
             assert work_repository.claim(claimed, now) is False
+    finally:
+        engine.dispose()
+
+
+def test_configuration_repository_contract_preserves_versions_history_and_scoped_deletion() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            repository = SqlAlchemyConfigurationRepository(session)
+            now = utc_now()
+            target = ProductionConfigVersion(
+                id="config-target",
+                config_key="studio",
+                version_number=1,
+                display_name="Target draft",
+                created_at=now - timedelta(minutes=2),
+            )
+            retained = ProductionConfigVersion(
+                id="config-retained",
+                config_key="studio",
+                version_number=2,
+                display_name="Retained draft",
+                created_at=now - timedelta(minutes=1),
+            )
+            repository.add(target)
+            repository.add(retained)
+            repository.flush()
+
+            target_provider = ProviderConfigVersion(
+                id="provider-target",
+                production_config_version_id=target.id,
+                provider_key="runninghub",
+                version_number=1,
+                display_name="Target provider",
+                adapter_kind="runninghub",
+                base_url="https://example.invalid",
+                capabilities=["generate_i2v_clip"],
+                request_timeout_seconds=30,
+                poll_interval_seconds=2,
+                max_concurrency=1,
+                created_at=now - timedelta(minutes=2),
+            )
+            retained_provider = ProviderConfigVersion(
+                id="provider-retained",
+                production_config_version_id=retained.id,
+                provider_key="runninghub",
+                version_number=2,
+                display_name="Retained provider",
+                adapter_kind="runninghub",
+                base_url="https://example.invalid",
+                capabilities=["generate_i2v_clip"],
+                request_timeout_seconds=30,
+                poll_interval_seconds=2,
+                max_concurrency=1,
+                created_at=now - timedelta(minutes=1),
+            )
+            first_workflow = WorkflowSlotVersion(
+                id="workflow-a",
+                production_config_version_id=target.id,
+                slot_key="first_frame_video",
+                version_number=1,
+                display_name="First frame A",
+                operation_kind="generate_i2v_clip",
+                provider_config_version_id=target_provider.id,
+                provider_workflow_id="workflow-1",
+                input_schema_version="v1",
+                output_schema_version="v1",
+                node_info_list=[],
+                created_at=now - timedelta(minutes=2),
+            )
+            second_workflow = WorkflowSlotVersion(
+                id="workflow-z",
+                production_config_version_id=target.id,
+                slot_key="alternate_video",
+                version_number=1,
+                display_name="Alternate",
+                operation_kind="generate_i2v_clip",
+                provider_config_version_id=target_provider.id,
+                provider_workflow_id="workflow-2",
+                input_schema_version="v1",
+                output_schema_version="v1",
+                node_info_list=[],
+                created_at=now - timedelta(minutes=2),
+            )
+            retained_workflow = WorkflowSlotVersion(
+                id="workflow-retained",
+                production_config_version_id=retained.id,
+                slot_key="first_frame_video",
+                version_number=2,
+                display_name="First frame B",
+                operation_kind="generate_i2v_clip",
+                provider_config_version_id=retained_provider.id,
+                provider_workflow_id="workflow-3",
+                input_schema_version="v1",
+                output_schema_version="v1",
+                node_info_list=[],
+                created_at=now - timedelta(minutes=1),
+            )
+            catalog = PricingCatalogVersion(
+                id="catalog-target",
+                production_config_version_id=target.id,
+                catalog_key="default",
+                version_number=1,
+                display_name="Target pricing",
+                currency="CNY",
+                confirmation_threshold=1,
+            )
+            repository.add(target_provider)
+            repository.add(retained_provider)
+            repository.add(first_workflow)
+            repository.add(second_workflow)
+            repository.add(retained_workflow)
+            repository.add(catalog)
+            repository.flush()
+            later_rule = PricingRule(
+                pricing_catalog_version_id=catalog.id,
+                provider_config_version_id=target_provider.id,
+                workflow_slot_version_id=second_workflow.id,
+                operation_kind="generate_i2v_clip",
+                unit="task",
+                unit_price=2,
+            )
+            earlier_rule = PricingRule(
+                pricing_catalog_version_id=catalog.id,
+                provider_config_version_id=target_provider.id,
+                workflow_slot_version_id=first_workflow.id,
+                operation_kind="generate_i2v_clip",
+                unit="task",
+                unit_price=1,
+            )
+            repository.add(later_rule)
+            repository.add(earlier_rule)
+            for component_type, component_id in (
+                ("provider", target_provider.id),
+                ("workflow_slot", first_workflow.id),
+                ("workflow_slot", second_workflow.id),
+                ("pricing_catalog", catalog.id),
+            ):
+                repository.add(ProductionConfigComponent(
+                    production_config_version_id=target.id,
+                    component_type=component_type,
+                    component_version_id=component_id,
+                ))
+            retained_link = ProductionConfigComponent(
+                production_config_version_id=retained.id,
+                component_type="provider",
+                component_version_id=retained_provider.id,
+            )
+            repository.add(retained_link)
+            earlier_ref = ConfigurationReference(
+                production_config_version_id=target.id,
+                ref_type="snapshot",
+                ref_id="snapshot-1",
+                created_at=now - timedelta(minutes=2),
+            )
+            later_ref = ConfigurationReference(
+                production_config_version_id=target.id,
+                ref_type="snapshot",
+                ref_id="snapshot-2",
+                created_at=now - timedelta(minutes=1),
+            )
+            receipt = ConfigurationCommandReceipt(
+                command_id="configuration-command",
+                command_type="configuration.create",
+                result_type="production_config_version",
+                result_id=target.id,
+            )
+            repository.add(later_ref)
+            repository.add(earlier_ref)
+            repository.add(receipt)
+            session.commit()
+
+            assert repository.receipt(receipt.command_id).id == receipt.id  # type: ignore[union-attr]
+            assert repository.configuration(target.id).id == target.id  # type: ignore[union-attr]
+            assert repository.next_configuration_version("studio") == 3
+            assert repository.next_component_version("provider", "runninghub") == 3
+            rows = repository.component_rows(target.id)
+            assert [row.id for row in rows["workflow_slot"]] == [first_workflow.id, second_workflow.id]
+            assert [row.id for row in repository.pricing_rules([catalog.id], ordered=True)] == [
+                earlier_rule.id,
+                later_rule.id,
+            ]
+            assert [row.id for row in repository.references(target.id)] == [earlier_ref.id, later_ref.id]
+            assert [row.id for row in repository.configurations()] == [retained.id, target.id]
+            assert [row.id for row in repository.workflow_slot_versions("first_frame_video")] == [
+                retained_workflow.id,
+                first_workflow.id,
+            ]
+
+            repository.delete_components(target.id)
+            session.commit()
+
+            assert all(not rows for rows in repository.component_rows(target.id).values())
+            assert repository.pricing_rules([catalog.id]) == []
+            assert session.get(ProductionConfigComponent, retained_link.id) is not None
+            assert repository.configuration(retained.id) is not None
+            assert [row.id for row in repository.all_components("provider")] == [retained_provider.id]
     finally:
         engine.dispose()

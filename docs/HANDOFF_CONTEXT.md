@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Configuration Repository Sprint 23
+
+- Added a typed `ConfigurationRepository` covering aggregate command receipts, exact configuration reads, semantic version numbering, stable component and pricing reads, scoped draft-component deletion, references, configuration history, and workflow-slot history.
+- Migrated the configuration application service away from direct SQLAlchemy queries and persistence calls while preserving lifecycle guards, row-version checks, idempotent command replay, high-risk publication confirmation, deterministic validation, NodeInfoList validation, config hashes, immutable publication semantics, and reference-impact confirmation.
+- The configuration aggregate retains its independent global `ConfigurationCommandReceipt`; it was not merged into the project-scoped `CommandRepository`.
+- Added a configuration repository contract test covering ordering, semantic versions, reference reads, command receipts, and deletion isolation across configuration versions.
+- Updated repository, product, data-model, implementation-status, and handoff documentation.
+- No schema migration, Unit of Work, Outbox, provider call, retry, fallback, route substitution, workflow/model selection change, publication-confirmation change, or configuration-state semantic change was introduced.
+- Verification target: 42 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Work Repository Sprint 22
 
 - Added a typed `WorkRepository` covering lease candidate ordering, availability windows, required-parent dependencies, snapshot WorkItem states, exact WorkAttempt/Project/Snapshot reads, and optimistic atomic claim.

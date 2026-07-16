@@ -12,6 +12,8 @@ from ..db.models import (
     AttachmentBinding,
     ClarificationRequest,
     CommandReceipt,
+    ConfigurationCommandReceipt,
+    ConfigurationEvent,
     ConfigurationReference,
     CostEvent,
     CreativeBriefCandidate,
@@ -22,10 +24,12 @@ from ..db.models import (
     Entity,
     EntityVersion,
     Message,
+    ModelConfigVersion,
     Project,
     ProjectEvent,
     PricingCatalogVersion,
     PricingRule,
+    ProductionConfigComponent,
     ProductionConfigVersion,
     ProductionImpactAnalysis,
     ProductionSnapshot,
@@ -45,6 +49,7 @@ from ..db.models import (
     WorkflowSlotVersion,
     WorkAttempt,
     WorkItem,
+    AudioConfigVersion,
 )
 
 
@@ -76,6 +81,24 @@ ProductionRecord = (
 QualityRecord = Asset | AssetReviewDecision | QCFinding | QCReport
 EditorRecord = Timeline | TimelineItem
 DeliveryRecord = Asset | DeliveryAttempt | QCFinding | QCReport
+ConfigurationComponentRecord = (
+    ProviderConfigVersion
+    | ModelConfigVersion
+    | WorkflowSlotVersion
+    | VideoSpecVersion
+    | AudioConfigVersion
+    | StoragePolicyVersion
+    | PricingCatalogVersion
+)
+ConfigurationRecord = (
+    ConfigurationCommandReceipt
+    | ConfigurationEvent
+    | ConfigurationReference
+    | ProductionConfigVersion
+    | ProductionConfigComponent
+    | ConfigurationComponentRecord
+    | PricingRule
+)
 
 
 class ProjectRepository(Protocol):
@@ -406,3 +429,31 @@ class WorkRepository(Protocol):
     def work_item(self, work_item_id: str) -> WorkItem | None: ...
 
     def flush(self) -> None: ...
+
+
+class ConfigurationRepository(Protocol):
+    def add(self, record: ConfigurationRecord) -> None: ...
+
+    def flush(self) -> None: ...
+
+    def receipt(self, command_id: str) -> ConfigurationCommandReceipt | None: ...
+
+    def configuration(self, config_id: str) -> ProductionConfigVersion | None: ...
+
+    def next_configuration_version(self, config_key: str) -> int: ...
+
+    def next_component_version(self, component_type: str, key: str) -> int: ...
+
+    def component_rows(self, config_id: str) -> dict[str, list[ConfigurationComponentRecord]]: ...
+
+    def pricing_rules(self, catalog_ids: list[str], *, ordered: bool = False) -> list[PricingRule]: ...
+
+    def delete_components(self, config_id: str) -> None: ...
+
+    def references(self, config_id: str) -> list[ConfigurationReference]: ...
+
+    def configurations(self) -> list[ProductionConfigVersion]: ...
+
+    def all_components(self, component_type: str) -> list[ConfigurationComponentRecord]: ...
+
+    def workflow_slot_versions(self, slot_key: str) -> list[WorkflowSlotVersion]: ...

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from ..db.models import (
@@ -13,6 +13,8 @@ from ..db.models import (
     AttachmentBinding,
     ClarificationRequest,
     CommandReceipt,
+    ConfigurationCommandReceipt,
+    ConfigurationEvent,
     ConfigurationReference,
     CostEvent,
     CreativeBriefCandidate,
@@ -23,10 +25,12 @@ from ..db.models import (
     Entity,
     EntityVersion,
     Message,
+    ModelConfigVersion,
     Project,
     ProjectEvent,
     PricingCatalogVersion,
     PricingRule,
+    ProductionConfigComponent,
     ProductionConfigVersion,
     ProductionImpactAnalysis,
     ProductionSnapshot,
@@ -46,8 +50,11 @@ from ..db.models import (
     WorkflowSlotVersion,
     WorkAttempt,
     WorkItem,
+    AudioConfigVersion,
 )
 from .contracts import (
+    ConfigurationComponentRecord,
+    ConfigurationRecord,
     CreationRecord,
     DeliveryRecord,
     EditorRecord,
@@ -56,6 +63,17 @@ from .contracts import (
     ProductionRecord,
     QualityRecord,
 )
+
+
+CONFIGURATION_COMPONENT_MODELS = {
+    "provider": (ProviderConfigVersion, "provider_key"),
+    "model": (ModelConfigVersion, "config_key"),
+    "workflow_slot": (WorkflowSlotVersion, "slot_key"),
+    "video_spec": (VideoSpecVersion, "spec_key"),
+    "audio": (AudioConfigVersion, "config_key"),
+    "storage": (StoragePolicyVersion, "policy_key"),
+    "pricing_catalog": (PricingCatalogVersion, "catalog_key"),
+}
 
 
 class SqlAlchemyProjectRepository:
@@ -859,3 +877,102 @@ class SqlAlchemyWorkRepository:
 
     def flush(self) -> None:
         self.session.flush()
+
+
+class SqlAlchemyConfigurationRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, record: ConfigurationRecord) -> None:
+        self.session.add(record)
+
+    def flush(self) -> None:
+        self.session.flush()
+
+    def receipt(self, command_id: str) -> ConfigurationCommandReceipt | None:
+        return self.session.scalar(select(ConfigurationCommandReceipt).where(
+            ConfigurationCommandReceipt.command_id == command_id
+        ))
+
+    def configuration(self, config_id: str) -> ProductionConfigVersion | None:
+        return self.session.get(ProductionConfigVersion, config_id)
+
+    def next_configuration_version(self, config_key: str) -> int:
+        current = self.session.scalar(select(func.max(ProductionConfigVersion.version_number)).where(
+            ProductionConfigVersion.config_key == config_key
+        ))
+        return (current or 0) + 1
+
+    def next_component_version(self, component_type: str, key: str) -> int:
+        model, key_field_name = CONFIGURATION_COMPONENT_MODELS[component_type]
+        key_column = getattr(model, key_field_name)
+        current = self.session.scalar(select(func.max(model.version_number)).where(key_column == key))
+        return (current or 0) + 1
+
+    def component_rows(self, config_id: str) -> dict[str, list[ConfigurationComponentRecord]]:
+        return {
+            component_type: list(self.session.scalars(
+                select(model)
+                .where(model.production_config_version_id == config_id)
+                .order_by(model.created_at, model.id)
+            ))
+            for component_type, (model, _) in CONFIGURATION_COMPONENT_MODELS.items()
+        }
+
+    def pricing_rules(self, catalog_ids: list[str], *, ordered: bool = False) -> list[PricingRule]:
+        if not catalog_ids:
+            return []
+        statement = select(PricingRule).where(PricingRule.pricing_catalog_version_id.in_(catalog_ids))
+        if ordered:
+            statement = statement.order_by(PricingRule.workflow_slot_version_id, PricingRule.id)
+        return list(self.session.scalars(statement))
+
+    def delete_components(self, config_id: str) -> None:
+        self.session.execute(delete(ProductionConfigComponent).where(
+            ProductionConfigComponent.production_config_version_id == config_id
+        ))
+        pricing_ids = list(self.session.scalars(select(PricingCatalogVersion.id).where(
+            PricingCatalogVersion.production_config_version_id == config_id
+        )))
+        if pricing_ids:
+            self.session.execute(delete(PricingRule).where(
+                PricingRule.pricing_catalog_version_id.in_(pricing_ids)
+            ))
+        deletion_order = (
+            PricingCatalogVersion,
+            AudioConfigVersion,
+            WorkflowSlotVersion,
+            ModelConfigVersion,
+            VideoSpecVersion,
+            ProviderConfigVersion,
+            StoragePolicyVersion,
+        )
+        for model in deletion_order:
+            self.session.execute(delete(model).where(model.production_config_version_id == config_id))
+        self.session.flush()
+
+    def references(self, config_id: str) -> list[ConfigurationReference]:
+        return list(self.session.scalars(
+            select(ConfigurationReference)
+            .where(ConfigurationReference.production_config_version_id == config_id)
+            .order_by(ConfigurationReference.created_at, ConfigurationReference.id)
+        ))
+
+    def configurations(self) -> list[ProductionConfigVersion]:
+        return list(self.session.scalars(
+            select(ProductionConfigVersion)
+            .order_by(ProductionConfigVersion.created_at.desc(), ProductionConfigVersion.id.desc())
+        ))
+
+    def all_components(self, component_type: str) -> list[ConfigurationComponentRecord]:
+        model, _ = CONFIGURATION_COMPONENT_MODELS[component_type]
+        return list(self.session.scalars(
+            select(model).order_by(model.created_at.desc(), model.id.desc())
+        ))
+
+    def workflow_slot_versions(self, slot_key: str) -> list[WorkflowSlotVersion]:
+        return list(self.session.scalars(
+            select(WorkflowSlotVersion)
+            .where(WorkflowSlotVersion.slot_key == slot_key)
+            .order_by(WorkflowSlotVersion.version_number.desc(), WorkflowSlotVersion.id.desc())
+        ))
