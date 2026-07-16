@@ -1074,4 +1074,6 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 联络表只读取 `Project.active_snapshot_id`；没有活动快照时显示空态，不自动采用最新或历史快照。依赖区展示声明父节点及其全部登记输出。由于当前执行清单没有冻结实际消费的上游 `asset_id`，系统不得猜测或标记某个输出被采用。
 
+后端通过只读 `ContactSheetRepository` 获取活动快照、DAG/依赖、素材、WorkItem/WorkAttempt、分镜和实体来源事实。Repository 不生成卡片编号、不选择上游素材、不推断路由或实体引用；应用服务只组合精确持久化记录，并继续复用质量模块的确定性 QC 投影。
+
 该页面没有批准、拒绝、重试、替换或生产按钮。预览失败只显示错误并保留证据，不触发转码、文件修复、路由切换或重新生成。详细合同见 [V2 素材联络表实现](./V2_CONTACT_SHEET_IMPLEMENTATION.md)。

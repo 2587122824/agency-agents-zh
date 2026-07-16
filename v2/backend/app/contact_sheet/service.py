@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.models import (
@@ -20,6 +19,7 @@ from ..db.models import (
     utc_now,
 )
 from ..quality.service import asset_read, quality_review_view
+from ..repositories import SqlAlchemyContactSheetRepository
 
 
 def _entity_reference_rows(
@@ -58,7 +58,8 @@ def _entity_reference_rows(
 
 
 def material_contact_sheet_view(session: Session, project: Project) -> dict:
-    snapshot = session.get(ProductionSnapshot, project.active_snapshot_id) if project.active_snapshot_id else None
+    repository = SqlAlchemyContactSheetRepository(session)
+    snapshot = repository.snapshot(project.active_snapshot_id) if project.active_snapshot_id else None
     if not snapshot or snapshot.project_id != project.id:
         return {
             "project_id": project.id,
@@ -72,41 +73,26 @@ def material_contact_sheet_view(session: Session, project: Project) -> dict:
             "boundary": "\u6ca1\u6709\u6d3b\u52a8\u751f\u4ea7\u5feb\u7167\uff1b\u8054\u7edc\u8868\u4e0d\u4f1a\u6539\u7528\u6700\u65b0\u6216\u5386\u53f2\u5feb\u7167\u3002",
         }
 
-    nodes = list(session.scalars(select(DAGNode).where(
-        DAGNode.snapshot_id == snapshot.id,
-    ).order_by(DAGNode.node_key, DAGNode.id)))
+    nodes = repository.nodes(snapshot.id)
     node_map = {item.id: item for item in nodes}
     shots = {
-        item.id: item for item in session.scalars(select(Shot).where(
-            Shot.project_id == project.id,
-            Shot.plan_version_id == snapshot.plan_version_id,
-        ))
+        item.id: item for item in repository.shots(project.id, snapshot.plan_version_id)
     }
-    assets = list(session.scalars(select(Asset).where(
-        Asset.project_id == project.id,
-        Asset.snapshot_id == snapshot.id,
-    ).order_by(Asset.created_at, Asset.id)))
+    assets = repository.assets(project.id, snapshot.id)
     assets_by_node: dict[str, list[Asset]] = defaultdict(list)
     for asset in assets:
         if asset.dag_node_id:
             assets_by_node[asset.dag_node_id].append(asset)
 
     edges_by_child: dict[str, list[DependencyEdge]] = defaultdict(list)
-    for edge in session.scalars(select(DependencyEdge).where(
-        DependencyEdge.snapshot_id == snapshot.id,
-    ).order_by(DependencyEdge.child_node_id, DependencyEdge.input_slot, DependencyEdge.id)):
+    for edge in repository.edges(snapshot.id):
         edges_by_child[edge.child_node_id].append(edge)
 
     items = {
-        item.id: item for item in session.scalars(select(WorkItem).where(
-            WorkItem.project_id == project.id,
-            WorkItem.snapshot_id == snapshot.id,
-        ))
+        item.id: item for item in repository.work_items(project.id, snapshot.id)
     }
     attempts = {
-        item.id: item for item in session.scalars(select(WorkAttempt).where(
-            WorkAttempt.work_item_id.in_(list(items)),
-        ))
+        item.id: item for item in repository.attempts_for_items(set(items))
     } if items else {}
 
     version_ids: set[str] = set()
@@ -116,24 +102,15 @@ def material_contact_sheet_view(session: Session, project: Project) -> dict:
         version_ids.update(shot.character_entity_version_ids or [])
         version_ids.update(shot.outfit_entity_version_ids or [])
     versions = {
-        item.id: item for item in session.scalars(select(EntityVersion).where(
-            EntityVersion.project_id == project.id,
-            EntityVersion.id.in_(version_ids),
-        ))
+        item.id: item for item in repository.entity_versions(project.id, version_ids)
     } if version_ids else {}
     entity_ids = {item.entity_id for item in versions.values()}
     entities = {
-        item.id: item for item in session.scalars(select(Entity).where(
-            Entity.project_id == project.id,
-            Entity.id.in_(entity_ids),
-        ))
+        item.id: item for item in repository.entities(project.id, entity_ids)
     } if entity_ids else {}
     attachment_ids = {item.source_attachment_id for item in versions.values() if item.source_attachment_id}
     attachments = {
-        item.id: item for item in session.scalars(select(Attachment).where(
-            Attachment.project_id == project.id,
-            Attachment.id.in_(attachment_ids),
-        ))
+        item.id: item for item in repository.attachments(project.id, attachment_ids)
     } if attachment_ids else {}
 
     ordered_assets: list[Asset] = []

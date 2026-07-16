@@ -53,6 +53,7 @@ from v2.backend.app.db.session import Base
 from v2.backend.app.repositories import (
     SqlAlchemyCommandRepository,
     SqlAlchemyConfigurationRepository,
+    SqlAlchemyContactSheetRepository,
     SqlAlchemyControlRepository,
     SqlAlchemyCreationRepository,
     SqlAlchemyDecisionRepository,
@@ -2258,5 +2259,312 @@ def test_control_repository_contract_preserves_authority_scope_history_and_order
             ]
             assert [row.id for row in control.projects()] == [project.id, other.id]
             assert control.attempts_for_items([]) == []
+    finally:
+        engine.dispose()
+
+
+def test_contact_sheet_repository_contract_preserves_snapshot_scope_and_evidence_order() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            contact_sheet = SqlAlchemyContactSheetRepository(session)
+            now = utc_now()
+            project = Project(
+                id="project-contact",
+                title="Contact sheet",
+                core_topic="Contact repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            other = Project(
+                id="project-contact-other",
+                title="Other",
+                core_topic="Contact isolation",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            projects.add(project)
+            projects.add(other)
+            projects.flush()
+            snapshot = ProductionSnapshot(
+                id="snapshot-contact",
+                project_id=project.id,
+                plan_version_id="plan-contact",
+                production_config_version_id="config-contact",
+                impact_analysis_id="impact-contact",
+                snapshot_number=1,
+                status="submitted",
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="a" * 64,
+            )
+            other_snapshot = ProductionSnapshot(
+                id="snapshot-contact-other",
+                project_id=other.id,
+                plan_version_id="plan-contact-other",
+                production_config_version_id="config-contact",
+                impact_analysis_id="impact-contact-other",
+                snapshot_number=1,
+                status="submitted",
+                audio_mode="off",
+                output_spec={},
+                selection={},
+                contract={},
+                contract_hash="b" * 64,
+            )
+            session.add_all([snapshot, other_snapshot])
+            session.flush()
+            parent_node = DAGNode(
+                id="node-contact-a",
+                snapshot_id=snapshot.id,
+                node_key="shot.001.image",
+                kind="generate_keyframe",
+                input_contract={},
+                output_contract={"media_type": "image"},
+            )
+            child_node = DAGNode(
+                id="node-contact-z",
+                snapshot_id=snapshot.id,
+                node_key="shot.001.video",
+                kind="generate_i2v_clip",
+                input_contract={},
+                output_contract={"media_type": "video"},
+            )
+            other_node = DAGNode(
+                id="node-contact-other",
+                snapshot_id=other_snapshot.id,
+                node_key="other",
+                kind="generate_keyframe",
+                input_contract={},
+                output_contract={},
+            )
+            session.add_all([child_node, parent_node, other_node])
+            session.flush()
+            shot = Shot(
+                id="shot-contact",
+                project_id=project.id,
+                plan_version_id=snapshot.plan_version_id,
+                shot_code="SH-001",
+                sequence_number=1,
+                duration_ms=10000,
+                shot_type="action",
+                character_entity_version_ids=["version-contact"],
+                outfit_entity_version_ids=[],
+                face_visibility="required",
+                text_policy="forbidden",
+                motion_requirement="high",
+                composition="Medium",
+                action="Run",
+            )
+            other_shot = Shot(
+                id="shot-contact-other",
+                project_id=other.id,
+                plan_version_id=snapshot.plan_version_id,
+                shot_code="SH-002",
+                sequence_number=2,
+                duration_ms=10000,
+                shot_type="action",
+                character_entity_version_ids=[],
+                outfit_entity_version_ids=[],
+                face_visibility="not_visible",
+                text_policy="forbidden",
+                motion_requirement="low",
+                composition="Wide",
+                action="Other",
+            )
+            earlier_asset = Asset(
+                id="asset-contact-1",
+                project_id=project.id,
+                snapshot_id=snapshot.id,
+                dag_node_id=parent_node.id,
+                output_index=0,
+                asset_type="image",
+                role="keyframe",
+                uri="runtime://assets/contact-1.png",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="approved",
+                created_at=now - timedelta(minutes=1),
+            )
+            later_asset = Asset(
+                id="asset-contact-2",
+                project_id=project.id,
+                snapshot_id=snapshot.id,
+                dag_node_id=child_node.id,
+                output_index=0,
+                asset_type="video",
+                role="clip",
+                uri="runtime://assets/contact-2.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="approved",
+                created_at=now,
+            )
+            other_asset = Asset(
+                id="asset-contact-other",
+                project_id=other.id,
+                snapshot_id=other_snapshot.id,
+                output_index=0,
+                asset_type="image",
+                role="keyframe",
+                uri="runtime://assets/contact-other.png",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="approved",
+            )
+            first_edge = DependencyEdge(
+                id="edge-contact-a",
+                snapshot_id=snapshot.id,
+                parent_node_id=parent_node.id,
+                child_node_id=child_node.id,
+                dependency_type="required",
+                input_slot="first_frame",
+            )
+            second_edge = DependencyEdge(
+                id="edge-contact-z",
+                snapshot_id=snapshot.id,
+                parent_node_id=parent_node.id,
+                child_node_id=child_node.id,
+                dependency_type="informational",
+                input_slot="reference",
+            )
+            work_item = WorkItem(
+                id="work-contact",
+                project_id=project.id,
+                snapshot_id=snapshot.id,
+                dag_node_id=child_node.id,
+                kind=child_node.kind,
+                payload={},
+                status="completed",
+            )
+            other_work_item = WorkItem(
+                id="work-contact-other",
+                project_id=other.id,
+                snapshot_id=other_snapshot.id,
+                dag_node_id=other_node.id,
+                kind=other_node.kind,
+                payload={},
+                status="completed",
+            )
+            session.add_all([
+                shot,
+                other_shot,
+                earlier_asset,
+                later_asset,
+                other_asset,
+                second_edge,
+                first_edge,
+                work_item,
+                other_work_item,
+            ])
+            session.flush()
+            attempt = WorkAttempt(
+                id="attempt-contact",
+                work_item_id=work_item.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="mock",
+                request_fingerprint="c" * 64,
+                request_manifest={},
+                state="completed",
+            )
+            other_attempt = WorkAttempt(
+                id="attempt-contact-other",
+                work_item_id=other_work_item.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="mock",
+                request_fingerprint="d" * 64,
+                request_manifest={},
+                state="completed",
+            )
+            entity = Entity(
+                id="entity-contact",
+                project_id=project.id,
+                entity_type="character",
+                display_name="Runner",
+            )
+            other_entity = Entity(
+                id="entity-contact-other",
+                project_id=other.id,
+                entity_type="character",
+                display_name="Other",
+            )
+            attachment = Attachment(
+                id="attachment-contact",
+                project_id=project.id,
+                original_filename="runner.png",
+                mime_type="image/png",
+                byte_size=128,
+                content_hash="e" * 64,
+                storage_path="attachments/runner.png",
+            )
+            other_attachment = Attachment(
+                id="attachment-contact-other",
+                project_id=other.id,
+                original_filename="other.png",
+                mime_type="image/png",
+                byte_size=128,
+                content_hash="f" * 64,
+                storage_path="attachments/other.png",
+            )
+            session.add_all([attempt, other_attempt, entity, other_entity, attachment, other_attachment])
+            session.flush()
+            version = EntityVersion(
+                id="version-contact",
+                project_id=project.id,
+                entity_id=entity.id,
+                version_number=1,
+                attributes={},
+                source_attachment_id=attachment.id,
+            )
+            other_version = EntityVersion(
+                id="version-contact-other",
+                project_id=other.id,
+                entity_id=other_entity.id,
+                version_number=1,
+                attributes={},
+                source_attachment_id=other_attachment.id,
+            )
+            session.add_all([version, other_version])
+            session.commit()
+
+            assert contact_sheet.snapshot(snapshot.id).id == snapshot.id  # type: ignore[union-attr]
+            assert contact_sheet.snapshot("snapshot-missing") is None
+            assert [row.id for row in contact_sheet.nodes(snapshot.id)] == [parent_node.id, child_node.id]
+            assert [row.id for row in contact_sheet.shots(project.id, snapshot.plan_version_id)] == [shot.id]
+            assert [row.id for row in contact_sheet.assets(project.id, snapshot.id)] == [
+                earlier_asset.id,
+                later_asset.id,
+            ]
+            assert [row.id for row in contact_sheet.edges(snapshot.id)] == [first_edge.id, second_edge.id]
+            assert [row.id for row in contact_sheet.work_items(project.id, snapshot.id)] == [work_item.id]
+            assert [row.id for row in contact_sheet.attempts_for_items({work_item.id})] == [attempt.id]
+            assert [row.id for row in contact_sheet.entity_versions(
+                project.id,
+                {version.id, other_version.id},
+            )] == [version.id]
+            assert [row.id for row in contact_sheet.entities(
+                project.id,
+                {entity.id, other_entity.id},
+            )] == [entity.id]
+            assert [row.id for row in contact_sheet.attachments(
+                project.id,
+                {attachment.id, other_attachment.id},
+            )] == [attachment.id]
+            assert contact_sheet.attempts_for_items(set()) == []
+            assert contact_sheet.entity_versions(project.id, set()) == []
+            assert contact_sheet.entities(project.id, set()) == []
+            assert contact_sheet.attachments(project.id, set()) == []
     finally:
         engine.dispose()

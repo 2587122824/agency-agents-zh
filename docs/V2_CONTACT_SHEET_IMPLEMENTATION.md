@@ -1,6 +1,6 @@
 # 片场 V2 素材联络表实现
 
-版本：v0.1
+版本：v0.2
 
 状态：已实现
 
@@ -50,6 +50,17 @@ GET /api/v1/projects/{project_id}/attachments/{attachment_id}/content
 ```
 
 前端路由：`/projects/{project_id}/contact-sheet`。素材审核页在选中项目后提供入口。联络表支持直接访问和刷新，没有写操作控件。
+
+## 5.1 Repository 边界
+
+只读 `ContactSheetRepository` 负责精确读取：
+
+- `Project.active_snapshot_id` 指向的快照记录。
+- 快照内按稳定顺序读取的 DAGNode、DependencyEdge 与 Asset。
+- 同项目、同方案的 Shot，以及同项目、同快照的 WorkItem/WorkAttempt。
+- 按显式 ID 集合且限定项目读取的 EntityVersion、Entity 与 Attachment。
+
+Contact Sheet 应用服务继续负责空态、卡片编号、节点内输出排序、依赖证据、实际尝试路由和实体引用组装。Repository 不采用最新快照替代活动快照，不推断 selected asset，不从节点名或错误文本猜测路由，也不搜索其他项目补齐实体或附件。
 
 ## 6. 验收
 

@@ -1134,3 +1134,75 @@ class SqlAlchemyControlRepository:
 
     def projects(self) -> list[Project]:
         return list(self.session.scalars(select(Project).order_by(Project.updated_at.desc())))
+
+
+class SqlAlchemyContactSheetRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None:
+        return self.session.get(ProductionSnapshot, snapshot_id)
+
+    def nodes(self, snapshot_id: str) -> list[DAGNode]:
+        return list(self.session.scalars(
+            select(DAGNode)
+            .where(DAGNode.snapshot_id == snapshot_id)
+            .order_by(DAGNode.node_key, DAGNode.id)
+        ))
+
+    def shots(self, project_id: str, plan_version_id: str) -> list[Shot]:
+        return list(self.session.scalars(select(Shot).where(
+            Shot.project_id == project_id,
+            Shot.plan_version_id == plan_version_id,
+        )))
+
+    def assets(self, project_id: str, snapshot_id: str) -> list[Asset]:
+        return list(self.session.scalars(
+            select(Asset)
+            .where(Asset.project_id == project_id, Asset.snapshot_id == snapshot_id)
+            .order_by(Asset.created_at, Asset.id)
+        ))
+
+    def edges(self, snapshot_id: str) -> list[DependencyEdge]:
+        return list(self.session.scalars(
+            select(DependencyEdge)
+            .where(DependencyEdge.snapshot_id == snapshot_id)
+            .order_by(DependencyEdge.child_node_id, DependencyEdge.input_slot, DependencyEdge.id)
+        ))
+
+    def work_items(self, project_id: str, snapshot_id: str) -> list[WorkItem]:
+        return list(self.session.scalars(select(WorkItem).where(
+            WorkItem.project_id == project_id,
+            WorkItem.snapshot_id == snapshot_id,
+        )))
+
+    def attempts_for_items(self, work_item_ids: set[str]) -> list[WorkAttempt]:
+        if not work_item_ids:
+            return []
+        return list(self.session.scalars(select(WorkAttempt).where(
+            WorkAttempt.work_item_id.in_(work_item_ids)
+        )))
+
+    def entity_versions(self, project_id: str, version_ids: set[str]) -> list[EntityVersion]:
+        if not version_ids:
+            return []
+        return list(self.session.scalars(select(EntityVersion).where(
+            EntityVersion.project_id == project_id,
+            EntityVersion.id.in_(version_ids),
+        )))
+
+    def entities(self, project_id: str, entity_ids: set[str]) -> list[Entity]:
+        if not entity_ids:
+            return []
+        return list(self.session.scalars(select(Entity).where(
+            Entity.project_id == project_id,
+            Entity.id.in_(entity_ids),
+        )))
+
+    def attachments(self, project_id: str, attachment_ids: set[str]) -> list[Attachment]:
+        if not attachment_ids:
+            return []
+        return list(self.session.scalars(select(Attachment).where(
+            Attachment.project_id == project_id,
+            Attachment.id.in_(attachment_ids),
+        )))

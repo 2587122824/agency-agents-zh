@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Contact Sheet Repository Sprint 26
+
+- Added a read-only typed `ContactSheetRepository` covering the exact active snapshot, ordered DAG nodes and dependency edges, project/plan Shots, snapshot Assets, WorkItems/Attempts, and project-scoped EntityVersion/Entity/Attachment reads.
+- Migrated the material-contact-sheet projection away from direct SQLAlchemy queries while preserving explicit empty state, active-snapshot ownership, deterministic card ordering, exact WorkAttempt routes, declared dependency evidence, project/plan entity isolation, and the prohibition on inferred selected upstream Assets.
+- Added a Contact Sheet repository contract test covering snapshot/project isolation, node/edge/asset ordering, exact evidence reads, cross-project exclusions, and empty-ID behavior.
+- Completed the current application-service Repository migration: direct SQLAlchemy access is now confined to SQLAlchemy Repository implementations; application services and read projections use typed interfaces.
+- Updated the dedicated contact-sheet implementation document plus repository, product, data-model, implementation-status, and handoff documentation.
+- No schema migration, mutation command, selected-asset inference, preview repair, provider call, retry, fallback, route substitution, confirmation change, or project-state change was introduced.
+- Verification target: 45 backend tests, Python compileall, Vite build, Alembic head, repository-boundary audit, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Project Control Repository Sprint 25
 
 - Added a read-only typed `ControlRepository` covering active plans, exact and historical snapshots, WorkItems/Attempts, Assets, blocked QC evidence, DAG nodes, timelines, deliveries, planning-candidate existence, costs, events, and ordered projects.

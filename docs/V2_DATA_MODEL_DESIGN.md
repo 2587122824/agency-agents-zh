@@ -660,7 +660,7 @@ occurred_at
 
 ## 14. Repository 边界
 
-当前实施状态和逐步迁移边界见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。Project、Event、Decision、项目级 Command Receipt、Creation、Planning、Production、Quality、Editor、Delivery、Work、Configuration、Registry 和 Control 已有协议、SQLAlchemy 实现与合同测试；素材联络表只读投影仍未完成，因此完整 Repository 条目不得标记完成。
+当前实施状态和逐步迁移边界见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。Project、Event、Decision、项目级 Command Receipt、Creation、Planning、Production、Quality、Editor、Delivery、Work、Configuration、Registry、Control 和 ContactSheet 均已有协议、SQLAlchemy 实现与合同测试。当前应用服务、Worker 与业务只读投影不再直接访问 ORM；该结论不包含尚未实现的 Unit of Work、Outbox 或 PostgreSQL 适配。
 
 建议接口：
 

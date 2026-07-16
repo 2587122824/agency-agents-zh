@@ -1,6 +1,6 @@
 # 片场 V2 Repository 边界实现
 
-> 实现版本：Sprint 14-25
+> 实现版本：Sprint 14-26
 >
 > 目标：把持久化查询和 ORM 构造逐步移出应用服务，同时保持现有产品合同、事务边界和状态语义不变。
 
@@ -24,6 +24,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 | `ConfigurationRepository` | 配置命令回执、语义版本号、组件和价格规则、引用、版本历史及草稿组件隔离删除 | 系统配置服务 |
 | `RegistryRepository` | 全局实体/版本、来源附件、确认绑定、方案/分镜引用、快照引用及附件精确读取 | 实体资产库只读投影 |
 | `ControlRepository` | 活动方案、权威快照、执行/素材/QC、费用、时间线、交付、事件和项目顺序 | 项目控制台只读投影 |
+| `ContactSheetRepository` | 活动快照、DAG/依赖、素材、实际尝试路由、分镜与实体来源证据 | 素材联络表只读投影 |
 
 系统配置继续使用独立的全局 `ConfigurationCommandReceipt`，不属于项目级 `CommandRepository`，Repository 迁移没有合并或改变两者的幂等作用域。
 
@@ -56,13 +57,11 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 - 已确认决策不能覆盖。
 - 决策创建和确认事件与决策记录在同一事务提交。
 
-## 5. 未完成范围
+## 5. 当前完成边界
 
-以下只读投影或辅助聚合仍存在直接 SQLAlchemy 查询，Repository 总体条目保持“部分完成”：
+当前 V2 应用服务、Worker 与业务只读投影均通过 typed Repository 接口访问数据库。直接 `select/get/execute` 仅存在于 `repositories/sqlalchemy.py` 的 SQLAlchemy 实现中。
 
-- Material contact sheet 只读投影
-
-迁移这些聚合时必须保持现有查询排序、项目隔离、关系加载、锁和事务行为，不以 Repository 重构为理由改变状态机或命令合同。
+这一完成状态只证明当前持久化访问边界已隔离，不表示已实现 Unit of Work、Outbox、PostgreSQL 适配、统一项目状态转移器或未来尚未设计的聚合。新增业务聚合时仍必须先定义 Repository 合同和排序/隔离测试，不得把 ORM 查询重新散落到应用服务。
 
 ## 6. 验证
 
@@ -82,6 +81,7 @@ Repository 合同测试覆盖：
 - 配置聚合的全局回执、语义版本号、组件/价格排序、引用与版本历史，以及草稿组件删除的版本隔离。
 - 实体资产库的全局稳定排序、精确附件读取、实体版本、方案/分镜和生产快照引用。
 - 项目控制台的活动/最新权威读取、跨快照过滤、执行尝试、阻塞 QC、费用、时间线、交付和最近事件。
+- 素材联络表的活动快照、节点/依赖/素材排序、实际尝试、项目/方案分镜与实体来源隔离。
 - 现有 API 全量测试继续验证六个业务阶段的幂等重放和命令冲突行为。
 
 本实现不包含数据库迁移、Provider 调用、重试、兜底、路由替换、提示词改写、状态转移或费用事件。
