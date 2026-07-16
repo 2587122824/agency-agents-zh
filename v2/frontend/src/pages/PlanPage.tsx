@@ -1,11 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, BadgeCheck, Calculator, Check, CircleAlert, Clapperboard, GitBranch, Layers3, LockKeyhole, Network, ShieldCheck, Sparkles, Users, X } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, Calculator, Check, CircleAlert, Clapperboard, GitBranch, Layers3, LockKeyhole, Network, Pencil, ShieldCheck, Sparkles, Users, X } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 import { useState } from 'react'
 
 import { api } from '../api/client'
 import type { ShotContract } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
+import { ShotPlanRevisionEditor } from '../components/ShotPlanRevisionEditor'
 import styles from './PlanPage.module.css'
 
 const briefLabels: Record<string, string> = {
@@ -39,12 +40,14 @@ export function PlanPage() {
   const [pricingCatalogId, setPricingCatalogId] = useState('')
   const [confirmCost, setConfirmCost] = useState(false)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
+  const [editingShots, setEditingShots] = useState(false)
   const latestSnapshot = preparation.data?.snapshots[0]
   const refresh = () => client.invalidateQueries({ queryKey: ['planning-center', projectId] })
   const generateBrief = useMutation({ mutationFn: () => api.generateCreativeBrief(projectId, planning.data!.active_requirement.id), onSuccess: refresh })
   const decideBrief = useMutation({ mutationFn: (accept: boolean) => api.decideCreativeBrief(projectId, planning.data!.current_brief_candidate!.id, planning.data!.active_requirement.id, accept), onSuccess: refresh })
   const generateShots = useMutation({ mutationFn: () => api.generateShotPlan(projectId, planning.data!.active_requirement.id, planning.data!.accepted_brief_candidate!.id), onSuccess: refresh })
-  const decideShots = useMutation({ mutationFn: (accept: boolean) => api.decideShotPlan(projectId, planning.data!.current_shot_candidate!.id, planning.data!.active_requirement.id, accept), onSuccess: refresh })
+  const reviseShots = useMutation({ mutationFn: (patches: Array<{ target_shot_code: string; changes: Partial<ShotContract> }>) => api.reviseShotPlan(projectId, planning.data!.current_shot_candidate!.id, planning.data!.active_requirement.id, planning.data!.current_shot_candidate!.row_version, patches), onSuccess: async () => { setEditingShots(false); await refresh() } })
+  const decideShots = useMutation({ mutationFn: (accept: boolean) => api.decideShotPlan(projectId, planning.data!.current_shot_candidate!.id, planning.data!.active_requirement.id, planning.data!.current_shot_candidate!.row_version, accept), onSuccess: refresh })
   const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, { plan_version_id: planning.data!.active_plan!.id, production_config_version_id: configId, video_spec_version_id: videoSpecId, keyframe_workflow_slot_version_id: keyframeSlotId, video_workflow_slot_version_id: videoSlotId, tts_workflow_slot_version_id: ttsSlotId || null, pricing_catalog_version_id: pricingCatalogId || null }) })
   const createSnapshot = useMutation({ mutationFn: () => api.createProductionSnapshot(projectId, analyzeImpact.data!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
   const lockSnapshot = useMutation({ mutationFn: () => api.lockProductionSnapshot(projectId, latestSnapshot!), onSuccess: async () => { setConfirmCost(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
@@ -55,7 +58,7 @@ export function PlanPage() {
   const data = planning.data
   const brief = data.current_brief_candidate ?? data.accepted_brief_candidate
   const shots = data.active_plan?.shots ?? data.current_shot_candidate?.shots ?? []
-  const error = generateBrief.error || decideBrief.error || generateShots.error || decideShots.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
+  const error = generateBrief.error || decideBrief.error || generateShots.error || reviseShots.error || decideShots.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
   const selectedConfig = preparation.data?.published_configurations.find(item => item.id === configId)
   const keyframeSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'image_generation') ?? []
   const videoSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'video_generation') ?? []
@@ -74,7 +77,7 @@ export function PlanPage() {
           {brief ? <div className={styles.briefGrid}>{Object.entries(brief.brief).filter(([key]) => key !== 'assumptions').map(([key, value]) => <div key={key}><span>{briefLabels[key] ?? key}</span><strong>{displayValue(key, value)}</strong><small>{brief.field_sources[key]?.type === 'agent_proposal' ? 'Agent 建议' : brief.field_sources[key]?.type === 'unspecified' ? '未指定' : '已确认来源'}</small></div>)}</div> : <div className={styles.empty}><Sparkles size={24} /><strong>当前需求可以进入方案规划</strong><span>运行 Mock Creative Agent 不产生模型或生产费用。</span><button className="primaryButton" disabled={generateBrief.isPending} onClick={() => generateBrief.mutate()}>{generateBrief.isPending ? '正在生成…' : '生成创意方案候选'}</button></div>}
           {data.current_brief_candidate && <div className={styles.reviewBar}><p><strong>候选尚未生效</strong><span>接受后 Director 才能读取这份 Creative Brief。</span></p><button className="secondaryButton" onClick={() => decideBrief.mutate(false)} disabled={decideBrief.isPending}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideBrief.mutate(true)} disabled={decideBrief.isPending}><Check size={14} />接受方案</button></div>}
         </div>
-        {shots.length ? <><ShotTable shots={shots} locked={Boolean(data.active_plan)} />{data.current_shot_candidate && <div className={styles.reviewBar}><p><strong>分镜候选尚未生效</strong><span>确认后创建不可变 plan_v{data.plan_history.length + 1}。</span></p><button className="secondaryButton" onClick={() => decideShots.mutate(false)} disabled={decideShots.isPending}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideShots.mutate(true)} disabled={decideShots.isPending}><Check size={14} />确认分镜合同</button></div>}</> : data.accepted_brief_candidate && <div className={styles.generateShots}><Clapperboard size={22} /><div><strong>Creative Brief 已接受</strong><span>Director 将生成结构化分镜候选，不选择供应商或工作流。</span></div><button className="primaryButton" onClick={() => generateShots.mutate()} disabled={generateShots.isPending}>{generateShots.isPending ? '正在生成…' : '生成分镜候选'}</button></div>}
+        {shots.length ? <><ShotTable shots={shots} locked={Boolean(data.active_plan)} />{data.current_shot_candidate && editingShots && <ShotPlanRevisionEditor candidate={data.current_shot_candidate} entities={data.entity_versions} saving={reviseShots.isPending} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} />}{data.current_shot_candidate && <div className={styles.reviewBar}><p><strong>分镜候选 v{data.current_shot_candidate.revision_number} 尚未生效</strong><span>确认后创建不可变 plan_v{data.plan_history.length + 1}。</span></p><button className="secondaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起编辑' : '结构化修订'}</button><button className="secondaryButton" onClick={() => decideShots.mutate(false)} disabled={decideShots.isPending || editingShots}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideShots.mutate(true)} disabled={decideShots.isPending || editingShots}><Check size={14} />确认分镜合同</button></div>}</> : data.accepted_brief_candidate && <div className={styles.generateShots}><Clapperboard size={22} /><div><strong>Creative Brief 已接受</strong><span>Director 将生成结构化分镜候选，不选择供应商或工作流。</span></div><button className="primaryButton" onClick={() => generateShots.mutate()} disabled={generateShots.isPending}>{generateShots.isPending ? '正在生成…' : '生成分镜候选'}</button></div>}
         {data.active_plan && <section className={styles.productionPrep}>
           <div className={styles.panelHeading}><div><Network size={18} /><span><small>PRODUCTION PREPARATION</small><h2>生产影响与快照</h2></span></div><em data-accepted={Boolean(preparation.data?.snapshots.length)}>{preparation.data?.snapshots.length ? `snapshot_${preparation.data.snapshots[0].snapshot_number}` : '尚未创建'}</em></div>
           {preparation.data?.published_configurations.length ? <>
@@ -100,6 +103,7 @@ export function PlanPage() {
       <aside className={styles.aside}>
         <section className={styles.next}><span>唯一下一步</span><h3>{nextAction.label}</h3><p>模型费用：否 · 生产费用：{nextAction.incurs_production_cost ? '是' : '否'}</p></section>
         <section className={styles.entities}><div className={styles.asideTitle}><div><Users size={17} /><h3>已确认实体版本</h3></div><b>{data.entity_versions.length}</b></div>{data.entity_versions.length ? data.entity_versions.map(entity => <article key={entity.id}><BadgeCheck size={16} /><div><strong>{entity.display_name}</strong><span>{entity.entity_type} · v{entity.version_number}</span><small>{entity.id}</small></div></article>) : <div className={styles.asideEmpty}>当前没有实体绑定；分镜会明确显示未绑定，不创建隐式人物或场景。</div>}</section>
+        {data.shot_plan_history.length > 0 && <section className={styles.candidateHistory}><div className={styles.asideTitle}><div><GitBranch size={17} /><h3>分镜候选版本</h3></div><b>{data.shot_plan_history.length}</b></div>{data.shot_plan_history.map(candidate => <article key={candidate.id} data-current={candidate.id === data.current_shot_candidate?.id}><div><strong>候选 v{candidate.revision_number}</strong><span>{candidate.source === 'user_revision' ? '用户修订' : 'Director 生成'} · {candidate.status}</span></div><small>{candidate.id.slice(-10)}</small></article>)}</section>}
         <section className={styles.boundary}><CircleAlert size={17} /><div><strong>确认边界</strong><p>{data.active_plan ? 'plan 已锁定。后续修改必须创建新需求和新方案版本。' : '当前操作只创建候选或方案版本，不创建生产快照。'}</p></div></section>
         {data.active_plan && <section className={styles.planState}><LockKeyhole size={18} /><div><strong>{latestSnapshot ? `snapshot_${latestSnapshot.snapshot_number} · ${latestSnapshot.status}` : `plan_v${data.active_plan.version_number}`}</strong><span>{latestSnapshot ? `${latestSnapshot.nodes.length} 个 DAG 节点 · ${latestSnapshot.cost_status}` : `${data.active_plan.shots.length} 个镜头 · 生产快照尚未创建`}</span></div></section>}
         {error && <div className={styles.error}>{error.message}</div>}

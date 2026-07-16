@@ -28,7 +28,7 @@ from ..db.models import (
     utc_now,
 )
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
-from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction
+from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, ReviseShotPlan
 
 
 def _planning(session: Session) -> PlanningRepository:
@@ -299,9 +299,12 @@ def generate_shot_plan(session: Session, project: Project, payload: GenerateShot
         requirement_version_id=requirement.id,
         creative_brief_candidate_id=brief.id,
         agent_run_id=run.id,
+        revision_number=1,
+        source="director_agent",
         status="validation_failed" if errors else "awaiting_review",
         shots=shots,
         validation_errors=errors,
+        created_by=payload.actor_id,
     )
     repository.add(candidate)
     repository.flush()
@@ -317,6 +320,75 @@ def generate_shot_plan(session: Session, project: Project, payload: GenerateShot
     _save_receipt(session, project.id, payload.command_id, "shot_plan.generate", "shot_plan_candidate", candidate.id)
     session.commit()
     return candidate
+
+
+def revise_shot_plan(
+    session: Session,
+    project: Project,
+    candidate_id: str,
+    payload: ReviseShotPlan,
+) -> ShotPlanCandidate:
+    repository = _planning(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, ShotPlanCandidate)
+    candidate = repository.shot_plan(candidate_id)
+    requirement = active_requirement(session, project.id)
+    if not candidate or candidate.project_id != project.id:
+        raise CreationNotFoundError("Shot plan candidate not found")
+    if not requirement or requirement.id != payload.expected_requirement_version_id or candidate.requirement_version_id != requirement.id:
+        raise CreationConflictError("SHOT_PLAN_BASE_VERSION_STALE", "分镜候选基于旧需求版本，不能修订。")
+    if candidate.status != "awaiting_review":
+        raise CreationConflictError("SHOT_PLAN_NOT_REVISABLE", f"分镜候选状态为 {candidate.status}，不能修订。")
+    if candidate.row_version != payload.expected_candidate_row_version:
+        raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重新编辑。")
+    targets = [item.target_shot_code for item in payload.patches]
+    if len(targets) != len(set(targets)):
+        raise CreationConflictError("SHOT_PATCH_TARGET_DUPLICATE", "一次修订中不能重复修改同一个镜头。")
+    indexed = {str(item["shot_code"]): dict(item) for item in candidate.shots}
+    missing = [target for target in targets if target not in indexed]
+    if missing:
+        raise CreationConflictError("SHOT_PATCH_TARGET_NOT_FOUND", f"找不到待修改镜头：{', '.join(missing)}。")
+    for patch in payload.patches:
+        changes = patch.changes.model_dump(exclude_unset=True)
+        indexed[patch.target_shot_code].update(changes)
+    revised_shots = sorted(indexed.values(), key=lambda item: int(item["sequence_number"]))
+    errors = validate_shots(session, project.id, requirement, revised_shots)
+    if errors:
+        codes = ", ".join(sorted({str(item.get("code")) for item in errors}))
+        raise CreationConflictError("SHOT_PLAN_REVISION_INVALID", f"修订后的分镜合同验证失败：{codes}。")
+    revised = ShotPlanCandidate(
+        project_id=project.id,
+        requirement_version_id=requirement.id,
+        creative_brief_candidate_id=candidate.creative_brief_candidate_id,
+        agent_run_id=None,
+        supersedes_candidate_id=candidate.id,
+        revision_number=candidate.revision_number + 1,
+        source="user_revision",
+        status="awaiting_review",
+        shots=revised_shots,
+        validation_errors=[],
+        created_by=payload.actor_id,
+    )
+    repository.add(revised)
+    repository.flush()
+    if not repository.transition_reviewable_shot_plan(
+        candidate.id,
+        payload.expected_candidate_row_version,
+        "superseded",
+        utc_now(),
+    ):
+        raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重新编辑。")
+    _save_receipt(session, project.id, payload.command_id, "shot_plan.revise", "shot_plan_candidate", revised.id)
+    _event(session, project.id, "plan.shot_candidate_revised.v1", "用户创建了新的分镜候选修订", {
+        "candidate_id": revised.id,
+        "supersedes_candidate_id": candidate.id,
+        "revision_number": revised.revision_number,
+        "changed_shot_codes": targets,
+        "actor_id": payload.actor_id,
+    })
+    session.commit()
+    return revised
 
 
 def decide_shot_plan(
@@ -339,23 +411,44 @@ def decide_shot_plan(
         raise CreationConflictError("SHOT_PLAN_BASE_VERSION_STALE", "分镜候选基于旧需求版本，不能处理。")
     if candidate.status != "awaiting_review":
         raise CreationConflictError("SHOT_PLAN_NOT_REVIEWABLE", f"分镜候选状态为 {candidate.status}。")
+    if candidate.row_version != payload.expected_candidate_row_version:
+        raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重试。")
     if not accept:
-        candidate.status = "rejected"
-        candidate.decided_at = utc_now()
-        candidate.validation_errors = [{"code": "USER_REJECTED", "message": payload.reason or "用户拒绝候选"}]
+        rejection = [{"code": "USER_REJECTED", "message": payload.reason or "用户拒绝候选"}]
+        if not repository.transition_reviewable_shot_plan(
+            candidate.id,
+            payload.expected_candidate_row_version,
+            "rejected",
+            utc_now(),
+            rejection,
+        ):
+            raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重试。")
         _save_receipt(session, project.id, payload.command_id, "shot_plan.reject", "shot_plan_candidate", candidate.id)
         _event(session, project.id, "plan.shot_candidate_rejected.v1", "用户已拒绝分镜候选", {"candidate_id": candidate.id})
         session.commit()
         return candidate
     errors = validate_shots(session, project.id, requirement, candidate.shots)
     if errors:
-        candidate.status = "validation_failed"
-        candidate.validation_errors = errors
+        if not repository.transition_reviewable_shot_plan(
+            candidate.id,
+            payload.expected_candidate_row_version,
+            "validation_failed",
+            utc_now(),
+            errors,
+        ):
+            raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重试。")
         session.commit()
         raise CreationConflictError("SHOT_PLAN_VALIDATION_FAILED", "分镜候选合同验证失败。")
     brief = repository.creative_brief(candidate.creative_brief_candidate_id)
     if not brief or brief.status != "accepted":
         raise CreationConflictError("BRIEF_NOT_ACCEPTED", "关联的创意方案不再可用。")
+    if not repository.transition_reviewable_shot_plan(
+        candidate.id,
+        payload.expected_candidate_row_version,
+        "accepted",
+        utc_now(),
+    ):
+        raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重试。")
     for plan in repository.active_plans(project.id):
         plan.is_active = False
         plan.status = "superseded"
@@ -372,8 +465,6 @@ def decide_shot_plan(
     repository.flush()
     for item in candidate.shots:
         repository.add(Shot(project_id=project.id, plan_version_id=plan.id, **item))
-    candidate.status = "accepted"
-    candidate.decided_at = utc_now()
     _save_receipt(session, project.id, payload.command_id, "shot_plan.accept", "plan_version", plan.id)
     _event(session, project.id, "plan.confirmed.v1", "分镜候选已提升为不可变方案版本", {
         "candidate_id": candidate.id,

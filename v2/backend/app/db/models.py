@@ -452,10 +452,17 @@ class ShotPlanCandidate(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
     requirement_version_id: Mapped[str] = mapped_column(ForeignKey("requirement_versions.id"), index=True)
     creative_brief_candidate_id: Mapped[str] = mapped_column(ForeignKey("creative_brief_candidates.id"))
-    agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"))
+    agent_run_id: Mapped[str | None] = mapped_column(ForeignKey("agent_runs.id"), nullable=True)
+    supersedes_candidate_id: Mapped[str | None] = mapped_column(
+        ForeignKey("shot_plan_candidates.id"), nullable=True, index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(32), default="director_agent")
     status: Mapped[str] = mapped_column(String(32), default="awaiting_review", index=True)
     shots: Mapped[list] = mapped_column(JSON)
     validation_errors: Mapped[list] = mapped_column(JSON, default=list)
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[str] = mapped_column(String(48), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

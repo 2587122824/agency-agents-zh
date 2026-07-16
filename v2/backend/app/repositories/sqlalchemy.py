@@ -369,6 +369,33 @@ class SqlAlchemyPlanningRepository:
     def shot_plan(self, candidate_id: str) -> ShotPlanCandidate | None:
         return self.session.get(ShotPlanCandidate, candidate_id)
 
+    def transition_reviewable_shot_plan(
+        self,
+        candidate_id: str,
+        expected_row_version: int,
+        status: str,
+        decided_at: datetime,
+        validation_errors: list[dict] | None = None,
+    ) -> bool:
+        values: dict = {
+            "status": status,
+            "decided_at": decided_at,
+            "row_version": ShotPlanCandidate.row_version + 1,
+        }
+        if validation_errors is not None:
+            values["validation_errors"] = validation_errors
+        result = self.session.execute(
+            update(ShotPlanCandidate)
+            .where(
+                ShotPlanCandidate.id == candidate_id,
+                ShotPlanCandidate.status == "awaiting_review",
+                ShotPlanCandidate.row_version == expected_row_version,
+            )
+            .values(**values)
+            .execution_options(synchronize_session="fetch")
+        )
+        return result.rowcount == 1
+
     def active_plans(self, project_id: str) -> list[PlanVersion]:
         return list(self.session.scalars(select(PlanVersion).where(
             PlanVersion.project_id == project_id,

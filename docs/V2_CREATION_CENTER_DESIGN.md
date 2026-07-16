@@ -323,6 +323,7 @@ stateDiagram-v2
     awaiting_review --> accepted: UserOrAllowedPolicyAccepts
     awaiting_review --> rejected: UserRejects
     awaiting_review --> stale: BaseVersionChanged
+    awaiting_review --> superseded: UserCreatesStructuredRevision
     accepted --> superseded: NewVersionConfirmed
 ```
 
@@ -333,6 +334,9 @@ stateDiagram-v2
 - 基础版本变化后，未处理候选立即 `stale`。
 - `stale` 候选可以查看和比较，但不能确认。
 - 候选确认命令必须携带候选 ID、基础版本 ID 和 `row_version`。
+- `ShotPlanCandidate` 修订必须创建新候选并记录 `supersedes_candidate_id`，不得原地覆盖 `shots`。
+- 分镜 patch 只接受合同定义的逐镜头字段；未知字段、重复目标和不存在的 `shot_code` 明确失败。
+- 修订验证失败不改变来源候选；成功后只有新候选保持 `awaiting_review`。
 
 ## 9. Agent 角色与合同
 

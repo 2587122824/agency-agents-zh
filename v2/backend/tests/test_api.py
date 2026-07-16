@@ -275,7 +275,7 @@ def test_attachment_registration_does_not_create_binding(client: TestClient) -> 
     ).json()
     client.post(
         f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shots['id']}:accept",
-        json={"command_id": "registry-shots-accept-001", "expected_requirement_version_id": requirement_id},
+        json={"command_id": "registry-shots-accept-001", "expected_requirement_version_id": requirement_id, "expected_candidate_row_version": shots["row_version"]},
     )
     registry = client.get("/api/v1/entity-registry")
     assert registry.status_code == 200
@@ -445,6 +445,7 @@ def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> 
         "command_id": "shots-accept-command-001",
         "actor_id": "test-user",
         "expected_requirement_version_id": requirement_id,
+        "expected_candidate_row_version": shot_candidate["row_version"],
     }
     accepted_plan = client.post(
         f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shot_candidate['id']}:accept",
@@ -463,6 +464,113 @@ def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> 
     final = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert final["next_action"]["code"] == "PLAN_CONFIRMED"
     assert final["active_plan"]["id"] == plan["id"]
+
+
+def test_shot_plan_revision_creates_a_new_reviewable_candidate(client: TestClient) -> None:
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "revision-brief-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "revision-brief-accept", "expected_requirement_version_id": requirement_id},
+    )
+    original = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "revision-shots-generate",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    ).json()
+    command = {
+        "command_id": "revision-shots-revise",
+        "actor_id": "test-editor",
+        "expected_requirement_version_id": requirement_id,
+        "expected_candidate_row_version": original["row_version"],
+        "patches": [{
+            "target_shot_code": "SH-002",
+            "changes": {"action": "展示训练动作细节", "motion_requirement": "moderate"},
+        }],
+    }
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:revise",
+        json=command,
+    )
+    replay = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:revise",
+        json=command,
+    )
+    assert response.status_code == 201
+    revised = response.json()
+    assert replay.json()["id"] == revised["id"]
+    assert revised["supersedes_candidate_id"] == original["id"]
+    assert revised["revision_number"] == 2
+    assert revised["source"] == "user_revision"
+    assert revised["agent_run_id"] is None
+    assert revised["created_by"] == "test-editor"
+    assert revised["shots"][1]["action"] == "展示训练动作细节"
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["current_shot_candidate"]["id"] == revised["id"]
+    history = {item["id"]: item for item in planning["shot_plan_history"]}
+    assert history[original["id"]]["status"] == "superseded"
+    stale_accept = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:accept",
+        json={
+            "command_id": "revision-stale-accept",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": original["row_version"],
+        },
+    )
+    assert stale_accept.status_code == 409
+    assert stale_accept.headers["x-error-code"] == "SHOT_PLAN_NOT_REVIEWABLE"
+    accepted = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{revised['id']}:accept",
+        json={
+            "command_id": "revision-latest-accept",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": revised["row_version"],
+        },
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["shot_plan_candidate_id"] == revised["id"]
+
+
+def test_invalid_shot_plan_revision_does_not_supersede_source(client: TestClient) -> None:
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "invalid-revision-brief-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "invalid-revision-brief-accept", "expected_requirement_version_id": requirement_id},
+    )
+    original = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "invalid-revision-shots-generate",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    ).json()
+    invalid = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:revise",
+        json={
+            "command_id": "invalid-revision-command",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": original["row_version"],
+            "patches": [{"target_shot_code": "SH-002", "changes": {"sequence_number": 1}}],
+        },
+    )
+    assert invalid.status_code == 409
+    assert invalid.headers["x-error-code"] == "SHOT_PLAN_REVISION_INVALID"
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["current_shot_candidate"]["id"] == original["id"]
+    assert len(planning["shot_plan_history"]) == 1
 
 
 def valid_system_configuration() -> dict:
@@ -551,7 +659,7 @@ def create_confirmed_plan(client: TestClient) -> tuple[dict, dict]:
     ).json()
     plan = client.post(
         f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shots['id']}:accept",
-        json={"command_id": "snapshot-shots-accept-001", "expected_requirement_version_id": requirement_id},
+        json={"command_id": "snapshot-shots-accept-001", "expected_requirement_version_id": requirement_id, "expected_candidate_row_version": shots["row_version"]},
     ).json()
     return project, plan
 
@@ -605,9 +713,22 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
             "creative_brief_candidate_id": brief["id"],
         },
     ).json()
+    generated_shot_plan = shot_plan
+    shot_plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{generated_shot_plan['id']}:revise",
+        json={
+            "command_id": "impact-shots-revise",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": generated_shot_plan["row_version"],
+            "patches": [{
+                "target_shot_code": "SH-002",
+                "changes": {"composition": "侧面中景跟拍"},
+            }],
+        },
+    ).json()
     plan = client.post(
         f"/api/v1/projects/{project['id']}/shot-plan-candidates/{shot_plan['id']}:accept",
-        json={"command_id": "impact-shots-accept", "expected_requirement_version_id": requirement_id},
+        json={"command_id": "impact-shots-accept", "expected_requirement_version_id": requirement_id, "expected_candidate_row_version": shot_plan["row_version"]},
     ).json()
     with SessionLocal() as session:
         events_before = len(list(session.scalars(select(ProjectEvent).where(
@@ -625,6 +746,7 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
     assert len(resolved_summary["direct_manifest_ids"]) == 3
     assert resolved_summary["downstream_counts"]["requirement_candidate"] == 1
     assert resolved_summary["downstream_counts"]["requirement_version"] == 1
+    assert resolved_summary["downstream_counts"]["shot_plan"] == 2
     assert resolved_summary["downstream_counts"]["plan"] == 1
     assert resolved_summary["downstream_counts"]["shot"] == 3
     assert pending_summary["observation_status"] == "not_observed"
@@ -632,6 +754,12 @@ def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inferenc
     assert pending_summary["downstream_node_ids"] == []
     plan_node = next(item for item in graph["nodes"] if item["record_id"] == plan["id"])
     assert plan_node["record_type"] == "plan"
+    assert any(
+        edge["source_node_id"] == f"shot_plan:{generated_shot_plan['id']}"
+        and edge["target_node_id"] == f"shot_plan:{shot_plan['id']}"
+        and edge["relation"] == "superseded_by"
+        for edge in graph["edges"]
+    )
     assert "不会按决策名称推断" in graph["boundary"]
     with SessionLocal() as session:
         events_after = len(list(session.scalars(select(ProjectEvent).where(

@@ -1,5 +1,16 @@
 # Handoff Context
 
+## 2026-07-16 V2 Structured Shot Plan Revision Sprint 28
+
+- Added immutable `ShotPlanCandidate` revision lineage with `supersedes_candidate_id`, revision number, source, actor provenance, row version, and nullable AgentRun provenance for user revisions.
+- Added a typed per-shot patch command and `POST /projects/{project_id}/shot-plan-candidates/{candidate_id}:revise`; invalid revisions leave the source candidate unchanged, while valid revisions atomically supersede it.
+- Acceptance, rejection, and revision now require the exact candidate row version and use an atomic Repository transition. Superseded candidates cannot be confirmed; concurrent commands cannot create two latest candidates, and only the latest `awaiting_review` candidate can create an immutable PlanVersion.
+- Added a dedicated structured revision editor and candidate history to the plan page. It edits only declared Shot fields and confirmed entity IDs; no free JSON, provider parameters, workflow IDs, or prompt override input exists.
+- Added the exact `superseded_by` candidate edge to the observed decision lineage without attributing user revisions to an AgentRun.
+- Added `docs/V2_SHOT_PLAN_REVISION_IMPLEMENTATION.md` and updated product, creation-center, data-model, repository, implementation-status, and handoff documentation.
+- No model/provider call, cost event, retry, fallback, route substitution, prompt rewrite, output repair, project-state change, snapshot change, or automatic regeneration was introduced.
+- Verification target: backend full suite, Python compileall, Vite build, Alembic `20260716_11 (head)`, desktop/mobile browser checks, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Observed Decision Impact Sprint 27
 
 - Fixed AgentInputManifest decision provenance: creation, creative, and director manifests now freeze exact resolved Decision IDs and structured values; pending decisions and historical manifests remain untouched.

@@ -232,6 +232,15 @@ class PlanningRepository(Protocol):
 
     def shot_plan(self, candidate_id: str) -> ShotPlanCandidate | None: ...
 
+    def transition_reviewable_shot_plan(
+        self,
+        candidate_id: str,
+        expected_row_version: int,
+        status: str,
+        decided_at: datetime,
+        validation_errors: list[dict] | None = None,
+    ) -> bool: ...
+
     def active_plans(self, project_id: str) -> list[PlanVersion]: ...
 
     def next_plan_version_number(self, project_id: str) -> int: ...

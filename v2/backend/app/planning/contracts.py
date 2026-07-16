@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..creation.contracts import CommandContext, RequirementVersionRead
 
@@ -24,7 +24,51 @@ class GenerateShotPlan(CommandContext):
 
 class DecideShotPlan(CommandContext):
     expected_requirement_version_id: str
+    expected_candidate_row_version: int = Field(ge=1)
     reason: str | None = Field(default=None, max_length=500)
+
+
+class ShotContractPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    shot_code: str | None = Field(default=None, min_length=1, max_length=32)
+    sequence_number: int | None = Field(default=None, ge=1)
+    duration_ms: int | None = Field(default=None, gt=0)
+    shot_type: str | None = Field(default=None, min_length=1, max_length=40)
+    scene_entity_version_id: str | None = Field(default=None, max_length=48)
+    character_entity_version_ids: list[str] | None = None
+    outfit_entity_version_ids: list[str] | None = None
+    face_visibility: Literal["required", "optional", "not_visible"] | None = None
+    text_policy: Literal["forbidden", "allowed", "required"] | None = None
+    motion_requirement: Literal["static", "moderate", "significant"] | None = None
+    composition: str | None = Field(default=None, min_length=1, max_length=500)
+    action: str | None = Field(default=None, min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_patch(self):
+        if not self.model_fields_set:
+            raise ValueError("at least one structured shot field is required")
+        nullable = {"scene_entity_version_id"}
+        invalid_nulls = [field for field in self.model_fields_set if field not in nullable and getattr(self, field) is None]
+        if invalid_nulls:
+            raise ValueError(f"fields cannot be null: {', '.join(sorted(invalid_nulls))}")
+        for field in ("character_entity_version_ids", "outfit_entity_version_ids"):
+            values = getattr(self, field)
+            if values is not None and (len(values) != len(set(values)) or any(not value for value in values)):
+                raise ValueError(f"{field} must contain unique non-empty IDs")
+        return self
+
+
+class ShotRevision(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    target_shot_code: str = Field(min_length=1, max_length=32)
+    changes: ShotContractPatch
+
+
+class ReviseShotPlan(CommandContext):
+    model_config = ConfigDict(extra="forbid")
+    expected_requirement_version_id: str
+    expected_candidate_row_version: int = Field(ge=1)
+    patches: list[ShotRevision] = Field(min_length=1, max_length=200)
 
 
 class CreativeBriefCandidateRead(BaseModel):
@@ -60,10 +104,15 @@ class ShotPlanCandidateRead(BaseModel):
     id: str
     requirement_version_id: str
     creative_brief_candidate_id: str
-    agent_run_id: str
+    agent_run_id: str | None
+    supersedes_candidate_id: str | None
+    revision_number: int
+    source: str
     status: str
     shots: list[ShotContract]
     validation_errors: list[dict[str, Any]]
+    row_version: int
+    created_by: str
     created_at: datetime
     decided_at: datetime | None
 

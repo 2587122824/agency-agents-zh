@@ -231,10 +231,15 @@ export interface ShotPlanCandidate {
   id: string
   requirement_version_id: string
   creative_brief_candidate_id: string
-  agent_run_id: string
+  agent_run_id: string | null
+  supersedes_candidate_id: string | null
+  revision_number: number
+  source: 'director_agent' | 'user_revision'
   status: string
   shots: ShotContract[]
   validation_errors: Array<Record<string, unknown>>
+  row_version: number
+  created_by: string
   created_at: string
   decided_at: string | null
 }

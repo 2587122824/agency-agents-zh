@@ -108,7 +108,10 @@ def decision_impact_graph_view(
     shot_plans = repository.shot_plans(project.id)
     for item in shot_plans:
         add_node("shot_plan", item.id, "分镜候选", item.status, "candidate")
-        add_edge("agent_run", item.agent_run_id, "shot_plan", item.id, "produced")
+        if item.agent_run_id:
+            add_edge("agent_run", item.agent_run_id, "shot_plan", item.id, "produced")
+        if item.supersedes_candidate_id:
+            add_edge("shot_plan", item.supersedes_candidate_id, "shot_plan", item.id, "superseded_by")
         add_edge("creative_brief", item.creative_brief_candidate_id, "shot_plan", item.id, "directed_from")
         add_edge("requirement_version", item.requirement_version_id, "shot_plan", item.id, "planned_from")
 

@@ -123,6 +123,7 @@ from ..planning.contracts import (
     GenerateShotPlan,
     PlanningCenterView,
     PlanVersionRead,
+    ReviseShotPlan,
     ShotPlanCandidateRead,
 )
 from ..planning.service import (
@@ -131,6 +132,7 @@ from ..planning.service import (
     generate_brief,
     generate_shot_plan,
     planning_center_view,
+    revise_shot_plan,
 )
 from ..production.contracts import (
     ActivateProductionSnapshot,
@@ -865,6 +867,25 @@ def creative_brief_reject(
 def shot_plan_generate(project_id: str, payload: GenerateShotPlan, session: Session = Depends(get_session)):
     try:
         return generate_shot_plan(session, require_project(session, project_id), payload)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/shot-plan-candidates/{candidate_id}:revise",
+    response_model=ShotPlanCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def shot_plan_revise(
+    project_id: str,
+    candidate_id: str,
+    payload: ReviseShotPlan,
+    session: Session = Depends(get_session),
+):
+    try:
+        return revise_shot_plan(session, require_project(session, project_id), candidate_id, payload)
     except CreationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CreationConflictError as exc:

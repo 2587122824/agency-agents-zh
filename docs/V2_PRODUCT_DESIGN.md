@@ -254,6 +254,8 @@ flowchart LR
 
 用户确认后生成不可变方案版本，例如 `plan_v1`。后续修改创建 `plan_v2`，不能直接覆盖已进入生产的版本。
 
+确认前的分镜候选同样不允许原地覆盖。用户通过逐镜头结构化字段创建新的 `ShotPlanCandidate` 修订，新候选记录 `supersedes_candidate_id`，旧候选进入 `superseded`；只有最新待审候选可以确认并生成 `PlanVersion`。修订接口不接受自由 JSON、供应商字段、工作流 ID 或提示词覆盖，完整实现见 [V2 结构化分镜候选修订实现](./V2_SHOT_PLAN_REVISION_IMPLEMENTATION.md)。
+
 每次实际生产还必须创建不可变的 `ProductionSnapshot`，冻结方案版本、决策版本、实体版本、系统规格和显式选择的供应商配置。所有工作项和素材必须绑定该快照。旧快照仍可审计，但其迟到结果不能推进当前活动方案的项目状态。
 
 生产准备采用两次显式命令：先提交已确认 `PlanVersion`、已发布 `ProductionConfigVersion`、视频规格、关键帧槽位、视频槽位和按音频模式需要的 TTS 槽位，生成带哈希的影响分析；用户确认该精确范围后才创建不可修改的 `preparing` 快照并编译 DAG。若价格目录尚未配置，快照保留 `cost_status=not_configured` 和 `COST_ESTIMATE_REQUIRED`，不得锁定、激活、创建 WorkItem 或调用供应商；系统不得把未知成本写成零。
@@ -351,6 +353,8 @@ GET /api/v1/projects/{project_id}/attachments/{attachment_id}/content
 ```
 
 约束字段由规划明确指定，后端不能从提示词推断。
+
+候选编辑只允许修改上述结构化镜头字段，并按原 `shot_code` 精确定位。修改先在内存副本中进行完整合同验证；验证失败不创建候选版本、不替代旧候选，也不调用 Director Agent。首期不在修订命令中增加或删除镜头。
 
 ## 12. 生产 DAG
 
@@ -650,7 +654,7 @@ GET  /api/v1/projects/{project_id}/events
 - [x] 需求摘要版本
 - [x] 方案版本
 - [x] 类型化人物、服装、场景和声音实体
-- [ ] 分镜合同编辑器
+- [x] 分镜合同编辑器
 - [ ] 决策影响分析
 - [x] DAG 合同
 - [x] 依赖验证器
@@ -684,7 +688,7 @@ GET  /api/v1/projects/{project_id}/events
 
 Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。
 当前创作中心的对话、需求候选、澄清、附件绑定和创作阶段实体访问已统一通过 `CreationRepository`；该迁移不改变候选或确认语义。
-当前规划中心的 Brief、分镜候选、不可变方案版本、Shot 和实体引用已统一通过 `PlanningRepository`；结构化分镜编辑仍未实现，不能因数据层迁移而标记完成。
+当前规划中心的 Brief、分镜候选版本链、不可变方案版本、Shot 和实体引用已统一通过 `PlanningRepository`；方案页支持逐镜头结构化修订，旧候选不可覆盖且只有最新候选可以确认。
 当前生产服务的影响分析、快照、DAG、费用明细、WorkItem/Attempt 编译和准备/执行投影已统一通过 `ProductionRepository`；费用确认、激活和提交仍是三个独立显式命令。
 当前质量服务的素材登记、文件验证记录、QC findings、人工审核证据和 DAG 下游影响已统一通过 `QualityRepository`；内容分析器未连接时仍进入 `review_required`，不会伪装为通过。
 当前剪辑服务的时间线版本链、轨道条目、素材验证读取、确认版本替代和素材箱投影已统一通过 `EditorRepository`；Repository 不自动补位、重排、裁切或变速。

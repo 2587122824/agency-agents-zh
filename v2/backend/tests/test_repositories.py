@@ -685,6 +685,20 @@ def test_planning_repository_contract_preserves_versions_history_and_shot_order(
             ]
             assert planning.brief_history(other.id) == []
             assert planning.next_plan_version_number(other.id) == 1
+            assert planning.transition_reviewable_shot_plan(
+                current_shot_plan.id,
+                1,
+                "superseded",
+                now,
+            ) is True
+            assert planning.transition_reviewable_shot_plan(
+                current_shot_plan.id,
+                1,
+                "accepted",
+                now,
+            ) is False
+            assert current_shot_plan.status == "superseded"
+            assert current_shot_plan.row_version == 2
     finally:
         engine.dispose()
 

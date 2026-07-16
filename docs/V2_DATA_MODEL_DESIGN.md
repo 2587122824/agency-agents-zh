@@ -173,7 +173,28 @@ currency nullable
 
 ## 7. 方案、快照与模板
 
-### 7.1 PlanVersion
+### 7.1 ShotPlanCandidate
+
+```text
+id
+project_id
+requirement_version_id
+creative_brief_candidate_id
+agent_run_id nullable
+supersedes_candidate_id nullable
+revision_number
+source: director_agent | user_revision
+status: awaiting_review | accepted | rejected | stale | superseded | validation_failed
+shots_json
+validation_errors_json
+row_version
+created_by
+created_at / decided_at
+```
+
+Director 根候选绑定 `AgentRun`；用户修订不伪装成 Agent 输出，通过 `supersedes_candidate_id` 继承精确候选来源。修订只允许从当前 `awaiting_review` 候选创建，成功后旧候选进入 `superseded`。无效 patch 在创建新记录前失败。
+
+### 7.2 PlanVersion
 
 ```text
 id
@@ -189,7 +210,7 @@ created_at
 
 确认后的 `PlanVersion` 和所属 `Shot` 不可变。修改创建下一版本。
 
-### 7.2 ProductionSnapshot
+### 7.3 ProductionSnapshot
 
 ```text
 id

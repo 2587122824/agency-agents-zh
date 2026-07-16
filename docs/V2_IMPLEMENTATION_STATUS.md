@@ -17,7 +17,7 @@
 |---|---|---|
 | React + TypeScript + Vite | 已完成 | `v2/frontend`，生产构建持续通过 |
 | FastAPI + Pydantic | 已完成 | `v2/backend/app/main.py`、`api/router.py` |
-| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_10_*` |
+| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260716_11_*` |
 | 数据库队列与独立 Worker | 已完成 | `WorkItem`、`WorkAttempt`、`workers/worker.py` |
 | SSE 事件流与游标恢复 | 已完成 | `ProjectEvent`、`events/service.py`、`Last-Event-ID` |
 | 项目状态机与统一评估器 | 部分完成 | 项目控制台有只读阶段评估；状态写入仍分布在应用服务中，尚无统一转移器 |
@@ -31,7 +31,7 @@
 | 对话、需求版本、方案版本 | 已完成 | `Message`、`RequirementVersion`、`PlanVersion` 与创作/规划 API |
 | 类型化实体与不可变版本 | 已完成 | `Entity`、`EntityVersion`、实体资产库页面 |
 | 方案候选与显式确认 | 已完成 | Creative/Director AgentRun、候选接受命令、方案页 |
-| 结构化分镜编辑 | 部分完成 | 已生成和展示结构化 Shot；尚无用户逐项修订候选分镜的命令与编辑器 |
+| 结构化分镜编辑 | 已完成 | 类型化逐镜头 patch、候选替代链、行版本冲突、方案页编辑器与版本历史；不开放自由 JSON 或提示词覆盖 |
 | 决策影响图 | 部分完成 | 已有生产配置/快照影响分析和只读已观测 Decision 传播图；尚无持久化前瞻影响、未来工作量/费用估算或变更确认命令 |
 | 生产快照、DAG 与依赖验证 | 已完成 | `ProductionSnapshot`、`DAGNode`、`DependencyEdge` 与确定性编译测试 |
 | 工作流槽位注册表 | 已完成 | 版本化系统配置、WorkflowSlot、NodeInfoList 验证和设置页 |
@@ -55,7 +55,6 @@
 
 ## 当前安全开发顺序
 
-1. 评审结构化分镜候选修订合同与候选版本语义，实施前确认。
-2. 评审持久化前瞻 DecisionImpact、未来工作量与费用估算语义；实施前确认，现有已观测图保持只读。
-3. 单独评审项目状态转移器与 Outbox；二者都不得在重构中顺带引入。
-4. Provider、OSS、FFmpeg 与重试保持冻结，直到用户明确授权对应边界。
+1. 评审持久化前瞻 DecisionImpact、未来工作量与费用估算语义；实施前确认，现有已观测图保持只读。
+2. 单独评审项目状态转移器与 Outbox；二者都不得在重构中顺带引入。
+3. Provider、OSS、FFmpeg 与重试保持冻结，直到用户明确授权对应边界。

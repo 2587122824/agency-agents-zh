@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -69,8 +69,11 @@ export const api = {
   generateShotPlan: (projectId: string, requirementVersionId: string, briefCandidateId: string) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates:generate`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, creative_brief_candidate_id: briefCandidateId }),
   }),
-  decideShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, accept: boolean) => request<PlanVersion | ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:${accept ? 'accept' : 'reject'}`, {
-    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, reason: accept ? undefined : '用户拒绝当前分镜方案' }),
+  reviseShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, rowVersion: number, patches: Array<{ target_shot_code: string; changes: Partial<ShotContract> }>) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:revise`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, expected_candidate_row_version: rowVersion, patches }),
+  }),
+  decideShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, rowVersion: number, accept: boolean) => request<PlanVersion | ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:${accept ? 'accept' : 'reject'}`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, expected_candidate_row_version: rowVersion, reason: accept ? undefined : '用户拒绝当前分镜方案' }),
   }),
   productionPreparation: (projectId: string) => request<ProductionPreparation>(`/projects/${projectId}/production-preparation`),
   analyzeProductionImpact: (projectId: string, payload: {
