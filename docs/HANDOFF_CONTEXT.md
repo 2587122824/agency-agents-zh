@@ -1,5 +1,13 @@
 # Handoff Context
 
+## 2026-07-16 V2 System-generated Configuration Keys UX Sprint 32
+
+- Removed manual technical-key entry from the system-configuration editor. New configuration, provider, model, workflow, video, audio, storage, and pricing drafts receive stable generated keys; revision drafts preserve all existing keys.
+- Clarified Provider as an external capability/API service provider and changed visible labels to service supplier without changing persisted contracts.
+- Changed cross-component selectors to display human names while retaining exact keys as values, and replaced comma-separated supported-video-spec keys with an explicit checkbox list.
+- Updated the product design and implementation status. No schema, API contract, configuration lifecycle, publication, routing, provider call, retry, fallback, state, or cost semantic changed.
+- Verification target: full backend suite, Python compileall, Vite build, desktop/mobile browser checks, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Authoritative Project State Transitioner Sprint 31
 
 - Added Project row-version, state provenance, reason, and structured first-block fields under Alembic `20260716_13`, plus exact persisted planning-candidate authority backfill under `20260716_14` for existing projects.
