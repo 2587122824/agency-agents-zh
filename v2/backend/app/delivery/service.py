@@ -4,7 +4,6 @@ import hashlib
 import json
 from pathlib import Path
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..db.models import (
@@ -12,14 +11,17 @@ from ..db.models import (
     DeliveryAttempt,
     Project,
     ProjectEvent,
-    ProductionSnapshot,
     QCFinding,
     QCReport,
     Timeline,
-    TimelineItem,
     utc_now,
 )
-from ..repositories import SqlAlchemyCommandRepository
+from ..repositories import (
+    DeliveryRepository,
+    SqlAlchemyCommandRepository,
+    SqlAlchemyDeliveryRepository,
+    SqlAlchemyEventRepository,
+)
 from ..quality.service import (
     QualityConflictError,
     asset_read,
@@ -42,6 +44,14 @@ class DeliveryConflictError(ValueError):
 
 class DeliveryNotFoundError(ValueError):
     pass
+
+
+def _delivery(session: Session) -> DeliveryRepository:
+    return SqlAlchemyDeliveryRepository(session)
+
+
+def _event(session: Session, event: ProjectEvent) -> None:
+    SqlAlchemyEventRepository(session).add(event)
 
 
 def _hash(payload: dict) -> str:
@@ -76,21 +86,18 @@ def _save_receipt(
 
 
 def _require_attempt(session: Session, project: Project, attempt_id: str) -> DeliveryAttempt:
-    attempt = session.get(DeliveryAttempt, attempt_id)
+    attempt = _delivery(session).attempt(attempt_id)
     if not attempt or attempt.project_id != project.id:
         raise DeliveryNotFoundError("Delivery attempt not found")
     return attempt
 
 
 def _confirmed_timeline(session: Session, project: Project, timeline_id: str | None = None) -> Timeline:
-    statement = select(Timeline).where(
-        Timeline.project_id == project.id,
-        Timeline.snapshot_id == project.active_snapshot_id,
-        Timeline.status == "confirmed",
+    rows = _delivery(session).confirmed_timelines(
+        project.id,
+        project.active_snapshot_id,
+        timeline_id=timeline_id,
     )
-    if timeline_id:
-        statement = statement.where(Timeline.id == timeline_id)
-    rows = list(session.scalars(statement))
     if len(rows) != 1:
         raise DeliveryConflictError(
             "CONFIRMED_TIMELINE_NOT_EXACT",
@@ -100,16 +107,15 @@ def _confirmed_timeline(session: Session, project: Project, timeline_id: str | N
 
 
 def _delivery_manifest(session: Session, project: Project, timeline: Timeline) -> dict:
-    snapshot = session.get(ProductionSnapshot, timeline.snapshot_id)
+    repository = _delivery(session)
+    snapshot = repository.snapshot(timeline.snapshot_id)
     if not snapshot or snapshot.project_id != project.id or project.active_snapshot_id != snapshot.id:
         raise DeliveryConflictError("DELIVERY_SNAPSHOT_MISMATCH", "交付时间线不属于当前活动快照。")
-    items = list(session.scalars(select(TimelineItem).where(
-        TimelineItem.timeline_id == timeline.id,
-    ).order_by(TimelineItem.track_type, TimelineItem.sequence_number)))
+    items = repository.timeline_items(timeline.id)
     asset_ids = [item.asset_id for item in items if item.asset_id]
     assets = {
         asset.id: asset
-        for asset in session.scalars(select(Asset).where(Asset.id.in_(asset_ids)))
+        for asset in repository.assets_by_ids(asset_ids)
     } if asset_ids else {}
     input_items = []
     for item in items:
@@ -167,6 +173,7 @@ def _delivery_manifest(session: Session, project: Project, timeline: Timeline) -
 
 
 def authorize_delivery(session: Session, project: Project, payload: AuthorizeDelivery) -> dict:
+    repository = _delivery(session)
     receipt = _receipt(session, project.id, payload.command_id, "delivery.authorize")
     if receipt:
         return delivery_attempt_read(session, _require_attempt(session, project, receipt.result_id))
@@ -180,7 +187,7 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
         raise DeliveryConflictError("TIMELINE_CONTRACT_HASH_MISMATCH", "时间线合同哈希不匹配，请刷新后重试。")
     if not payload.confirm_delivery_authorization:
         raise DeliveryConflictError("DELIVERY_AUTHORIZATION_REQUIRED", "必须明确确认本次交付范围。")
-    if session.scalar(select(DeliveryAttempt.id).where(DeliveryAttempt.timeline_id == timeline.id)):
+    if repository.has_attempt_for_timeline(timeline.id):
         raise DeliveryConflictError(
             "DELIVERY_ATTEMPT_EXISTS",
             "当前时间线已有交付尝试；重试语义尚未确认，不能创建第二次尝试。",
@@ -198,10 +205,10 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
         request_fingerprint=fingerprint,
         created_by=payload.actor_id,
     )
-    session.add(attempt)
-    session.flush()
+    repository.add(attempt)
+    repository.flush()
     _save_receipt(session, project.id, payload.command_id, "delivery.authorize", "delivery_attempt", attempt.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="delivery.authorized.v1",
         message="User authorized an exact delivery request without starting a renderer.",
@@ -236,6 +243,7 @@ def register_delivery_output(
     payload: RegisterDeliveryOutput,
     temporary_path: Path,
 ) -> dict:
+    repository = _delivery(session)
     receipt = _receipt(session, project.id, payload.command_id, "delivery.output.register")
     if receipt:
         temporary_path.unlink(missing_ok=True)
@@ -262,7 +270,7 @@ def register_delivery_output(
         raise DeliveryConflictError(exc.code, str(exc)) from exc
     if final_path.exists():
         raise DeliveryConflictError("DELIVERY_OUTPUT_PATH_EXISTS", "目标交付文件已存在，不能覆盖。")
-    if session.scalar(select(Asset.id).where(Asset.storage_backend == "local", Asset.uri == uri)):
+    if repository.asset_by_uri("local", uri):
         raise DeliveryConflictError("DELIVERY_ASSET_ALREADY_REGISTERED", "目标交付 URI 已登记。")
     final_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path.replace(final_path)
@@ -289,14 +297,14 @@ def register_delivery_output(
         mime_type=payload.mime_type,
         state="created",
     )
-    session.add(asset)
-    session.flush()
+    repository.add(asset)
+    repository.flush()
     attempt.final_asset_id = asset.id
     attempt.status = "output_registered"
     attempt.output_registered_at = now
     attempt.row_version += 1
     _save_receipt(session, project.id, payload.command_id, "delivery.output.register", "delivery_attempt", attempt.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="asset.created.v1",
         message="Uploaded final delivery file registered as an unverified asset.",
@@ -319,8 +327,9 @@ def _block_delivery(
     code: str,
     evidence: dict,
 ) -> dict:
+    repository = _delivery(session)
     now = utc_now()
-    number = (session.scalar(select(func.max(QCReport.report_number)).where(QCReport.asset_id == asset.id)) or 0) + 1
+    number = repository.next_report_number(asset.id)
     report = QCReport(
         project_id=project.id,
         snapshot_id=attempt.snapshot_id,
@@ -330,9 +339,9 @@ def _block_delivery(
         status="blocked",
         analyzer="deterministic-delivery-verifier",
     )
-    session.add(report)
-    session.flush()
-    session.add(QCFinding(
+    repository.add(report)
+    repository.flush()
+    repository.add(QCFinding(
         qc_report_id=report.id,
         code=code,
         severity="blocked",
@@ -349,7 +358,7 @@ def _block_delivery(
     attempt.row_version += 1
     project.status = "blocked"
     _save_receipt(session, project.id, payload.command_id, "delivery.verify", "delivery_attempt", attempt.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="delivery.blocked.v1",
         message="Final delivery file failed deterministic verification.",
@@ -365,6 +374,7 @@ def verify_delivery(
     attempt_id: str,
     payload: VerifyDelivery,
 ) -> dict:
+    repository = _delivery(session)
     receipt = _receipt(session, project.id, payload.command_id, "delivery.verify")
     if receipt:
         return delivery_attempt_read(session, _require_attempt(session, project, receipt.result_id))
@@ -373,7 +383,7 @@ def verify_delivery(
         raise DeliveryConflictError("DELIVERY_OUTPUT_NOT_REGISTERED", "交付尝试没有待验证的最终文件。")
     if attempt.row_version != payload.expected_row_version:
         raise DeliveryConflictError("DELIVERY_ROW_VERSION_MISMATCH", "交付尝试已变化，请刷新后重试。")
-    asset = session.get(Asset, attempt.final_asset_id)
+    asset = repository.asset(attempt.final_asset_id)
     if not asset or asset.project_id != project.id or asset.state != "created":
         raise DeliveryConflictError("DELIVERY_ASSET_NOT_CREATED", "最终交付素材不存在或状态无效。")
     if asset.row_version != payload.expected_asset_row_version:
@@ -437,7 +447,7 @@ def verify_delivery(
         status="passed",
         analyzer="deterministic-delivery-verifier",
     )
-    session.add(report)
+    repository.add(report)
     asset.content_hash = content_hash
     asset.byte_size = byte_size
     asset.mime_type = media["mime_type"]
@@ -455,13 +465,13 @@ def verify_delivery(
     project.delivery_asset_id = asset.id
     project.status = "completed"
     _save_receipt(session, project.id, payload.command_id, "delivery.verify", "delivery_attempt", attempt.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="delivery.verified.v1",
         message="Final delivery file passed deterministic verification.",
         data={"delivery_attempt_id": attempt.id, "asset_id": asset.id, "content_hash": content_hash},
     ))
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="project.completed.v1",
         message="Project completed after the final delivery asset passed all completion guards.",
@@ -473,21 +483,16 @@ def verify_delivery(
 
 def delivery_attempt_read(session: Session, attempt: DeliveryAttempt) -> dict:
     result = {column.name: getattr(attempt, column.name) for column in attempt.__table__.columns}
-    asset = session.get(Asset, attempt.final_asset_id) if attempt.final_asset_id else None
+    asset = _delivery(session).asset(attempt.final_asset_id) if attempt.final_asset_id else None
     result["final_asset"] = asset_read(session, asset) if asset else None
     return result
 
 
 def delivery_workspace(session: Session, project: Project) -> dict:
-    timelines = list(session.scalars(select(Timeline).where(
-        Timeline.project_id == project.id,
-        Timeline.snapshot_id == project.active_snapshot_id,
-        Timeline.status.in_(["confirmed", "exported"]),
-    ).order_by(Timeline.version_number.desc()))) if project.active_snapshot_id else []
+    repository = _delivery(session)
+    timelines = repository.delivery_timelines(project.id, project.active_snapshot_id) if project.active_snapshot_id else []
     timeline = timelines[0] if timelines else None
-    attempts = list(session.scalars(select(DeliveryAttempt).where(
-        DeliveryAttempt.project_id == project.id,
-    ).order_by(DeliveryAttempt.attempt_number.desc())))
+    attempts = repository.project_attempts(project.id)
     if project.status == "completed" and project.delivery_asset_id:
         next_action = {"code": "DELIVERY_COMPLETE", "label": "最终交付文件已验证"}
     elif attempts and attempts[0].status == "blocked":

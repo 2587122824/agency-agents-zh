@@ -682,6 +682,7 @@ Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository �
 当前生产服务的影响分析、快照、DAG、费用明细、WorkItem/Attempt 编译和准备/执行投影已统一通过 `ProductionRepository`；费用确认、激活和提交仍是三个独立显式命令。
 当前质量服务的素材登记、文件验证记录、QC findings、人工审核证据和 DAG 下游影响已统一通过 `QualityRepository`；内容分析器未连接时仍进入 `review_required`，不会伪装为通过。
 当前剪辑服务的时间线版本链、轨道条目、素材验证读取、确认版本替代和素材箱投影已统一通过 `EditorRepository`；Repository 不自动补位、重排、裁切或变速。
+当前交付服务的确认时间线、冻结输入素材、DeliveryAttempt、最终 Asset URI 和交付 QC 已统一通过 `DeliveryRepository`；失败仍只记录阻断证据，不创建第二次交付尝试。
 
 ## 23. 首期验收标准
 

@@ -16,6 +16,7 @@ from ..db.models import (
     CreativeBriefCandidate,
     DAGNode,
     Decision,
+    DeliveryAttempt,
     DependencyEdge,
     Entity,
     EntityVersion,
@@ -73,6 +74,7 @@ ProductionRecord = (
 )
 QualityRecord = Asset | AssetReviewDecision | QCFinding | QCReport
 EditorRecord = Timeline | TimelineItem
+DeliveryRecord = Asset | DeliveryAttempt | QCFinding | QCReport
 
 
 class ProjectRepository(Protocol):
@@ -349,3 +351,37 @@ class EditorRepository(Protocol):
     def dag_nodes_by_ids(self, node_ids: list[str]) -> list[DAGNode]: ...
 
     def timeline_history(self, project_id: str) -> list[Timeline]: ...
+
+
+class DeliveryRepository(Protocol):
+    def add(self, record: DeliveryRecord) -> None: ...
+
+    def flush(self) -> None: ...
+
+    def attempt(self, attempt_id: str) -> DeliveryAttempt | None: ...
+
+    def confirmed_timelines(
+        self,
+        project_id: str,
+        snapshot_id: str | None,
+        *,
+        timeline_id: str | None = None,
+    ) -> list[Timeline]: ...
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None: ...
+
+    def timeline_items(self, timeline_id: str) -> list[TimelineItem]: ...
+
+    def assets_by_ids(self, asset_ids: list[str]) -> list[Asset]: ...
+
+    def has_attempt_for_timeline(self, timeline_id: str) -> bool: ...
+
+    def asset_by_uri(self, storage_backend: str, uri: str) -> Asset | None: ...
+
+    def next_report_number(self, asset_id: str) -> int: ...
+
+    def asset(self, asset_id: str) -> Asset | None: ...
+
+    def delivery_timelines(self, project_id: str, snapshot_id: str) -> list[Timeline]: ...
+
+    def project_attempts(self, project_id: str) -> list[DeliveryAttempt]: ...

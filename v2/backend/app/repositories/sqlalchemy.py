@@ -17,6 +17,7 @@ from ..db.models import (
     CreativeBriefCandidate,
     DAGNode,
     Decision,
+    DeliveryAttempt,
     DependencyEdge,
     Entity,
     EntityVersion,
@@ -45,7 +46,15 @@ from ..db.models import (
     WorkAttempt,
     WorkItem,
 )
-from .contracts import CreationRecord, EditorRecord, ModelT, PlanningRecord, ProductionRecord, QualityRecord
+from .contracts import (
+    CreationRecord,
+    DeliveryRecord,
+    EditorRecord,
+    ModelT,
+    PlanningRecord,
+    ProductionRecord,
+    QualityRecord,
+)
 
 
 class SqlAlchemyProjectRepository:
@@ -702,4 +711,87 @@ class SqlAlchemyEditorRepository:
     def timeline_history(self, project_id: str) -> list[Timeline]:
         return list(self.session.scalars(
             select(Timeline).where(Timeline.project_id == project_id).order_by(Timeline.version_number.desc())
+        ))
+
+
+class SqlAlchemyDeliveryRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, record: DeliveryRecord) -> None:
+        self.session.add(record)
+
+    def flush(self) -> None:
+        self.session.flush()
+
+    def attempt(self, attempt_id: str) -> DeliveryAttempt | None:
+        return self.session.get(DeliveryAttempt, attempt_id)
+
+    def confirmed_timelines(
+        self,
+        project_id: str,
+        snapshot_id: str | None,
+        *,
+        timeline_id: str | None = None,
+    ) -> list[Timeline]:
+        statement = select(Timeline).where(
+            Timeline.project_id == project_id,
+            Timeline.snapshot_id == snapshot_id,
+            Timeline.status == "confirmed",
+        )
+        if timeline_id:
+            statement = statement.where(Timeline.id == timeline_id)
+        return list(self.session.scalars(statement))
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None:
+        return self.session.get(ProductionSnapshot, snapshot_id)
+
+    def timeline_items(self, timeline_id: str) -> list[TimelineItem]:
+        return list(self.session.scalars(
+            select(TimelineItem)
+            .where(TimelineItem.timeline_id == timeline_id)
+            .order_by(TimelineItem.track_type, TimelineItem.sequence_number)
+        ))
+
+    def assets_by_ids(self, asset_ids: list[str]) -> list[Asset]:
+        if not asset_ids:
+            return []
+        return list(self.session.scalars(select(Asset).where(Asset.id.in_(asset_ids))))
+
+    def has_attempt_for_timeline(self, timeline_id: str) -> bool:
+        return self.session.scalar(select(DeliveryAttempt.id).where(
+            DeliveryAttempt.timeline_id == timeline_id
+        )) is not None
+
+    def asset_by_uri(self, storage_backend: str, uri: str) -> Asset | None:
+        return self.session.scalar(select(Asset).where(
+            Asset.storage_backend == storage_backend,
+            Asset.uri == uri,
+        ))
+
+    def next_report_number(self, asset_id: str) -> int:
+        current = self.session.scalar(select(func.max(QCReport.report_number)).where(
+            QCReport.asset_id == asset_id
+        ))
+        return (current or 0) + 1
+
+    def asset(self, asset_id: str) -> Asset | None:
+        return self.session.get(Asset, asset_id)
+
+    def delivery_timelines(self, project_id: str, snapshot_id: str) -> list[Timeline]:
+        return list(self.session.scalars(
+            select(Timeline)
+            .where(
+                Timeline.project_id == project_id,
+                Timeline.snapshot_id == snapshot_id,
+                Timeline.status.in_(["confirmed", "exported"]),
+            )
+            .order_by(Timeline.version_number.desc())
+        ))
+
+    def project_attempts(self, project_id: str) -> list[DeliveryAttempt]:
+        return list(self.session.scalars(
+            select(DeliveryAttempt)
+            .where(DeliveryAttempt.project_id == project_id)
+            .order_by(DeliveryAttempt.attempt_number.desc())
         ))

@@ -17,6 +17,7 @@ from v2.backend.app.db.models import (
     CreativeBriefCandidate,
     DAGNode,
     Decision,
+    DeliveryAttempt,
     DependencyEdge,
     Entity,
     EntityVersion,
@@ -44,6 +45,7 @@ from v2.backend.app.repositories import (
     SqlAlchemyCommandRepository,
     SqlAlchemyCreationRepository,
     SqlAlchemyDecisionRepository,
+    SqlAlchemyDeliveryRepository,
     SqlAlchemyEventRepository,
     SqlAlchemyEditorRepository,
     SqlAlchemyPlanningRepository,
@@ -1164,5 +1166,189 @@ def test_editor_repository_contract_preserves_timeline_versions_items_and_asset_
             assert editor.timeline_history(other.id) == []
             assert editor.assets_by_ids([]) == []
             assert editor.dag_nodes_by_ids([]) == []
+    finally:
+        engine.dispose()
+
+
+def test_delivery_repository_contract_preserves_confirmed_scope_attempts_and_uri_lookup() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            delivery = SqlAlchemyDeliveryRepository(session)
+            quality = SqlAlchemyQualityRepository(session)
+            project = Project(
+                title="Delivery",
+                core_topic="Delivery repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+                active_snapshot_id="snapshot-delivery",
+            )
+            other = Project(
+                title="Other",
+                core_topic="Delivery isolation",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+                active_snapshot_id="snapshot-other",
+            )
+            projects.add(project)
+            projects.add(other)
+            projects.flush()
+            input_asset = Asset(
+                project_id=project.id,
+                snapshot_id="snapshot-delivery",
+                output_index=0,
+                asset_type="video",
+                role="clip",
+                uri="runtime://assets/delivery-input.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                content_hash="a" * 64,
+                state="used",
+            )
+            final_asset = Asset(
+                project_id=project.id,
+                snapshot_id="snapshot-delivery",
+                output_index=0,
+                asset_type="final_delivery",
+                role="final_delivery",
+                uri="runtime://assets/delivery-final.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                state="verified",
+            )
+            quality.add(input_asset)
+            quality.add(final_asset)
+            quality.flush()
+            confirmed = Timeline(
+                project_id=project.id,
+                snapshot_id="snapshot-delivery",
+                version_number=1,
+                status="confirmed",
+                source="user",
+                output_spec={},
+                track_config={},
+                contract_hash="b" * 64,
+            )
+            delivery.add(confirmed)
+            delivery.flush()
+            exported = Timeline(
+                project_id=project.id,
+                snapshot_id="snapshot-delivery",
+                version_number=2,
+                status="exported",
+                source="user",
+                output_spec={},
+                track_config={},
+                supersedes_timeline_id=confirmed.id,
+                contract_hash="c" * 64,
+            )
+            delivery.add(exported)
+            delivery.flush()
+            later_item = TimelineItem(
+                timeline_id=confirmed.id,
+                track_type="main_video",
+                sequence_number=2,
+                asset_id=input_asset.id,
+                label="Second",
+                source_in_ms=5000,
+                source_out_ms=10000,
+                timeline_in_ms=5000,
+                timeline_out_ms=10000,
+            )
+            earlier_item = TimelineItem(
+                timeline_id=confirmed.id,
+                track_type="main_video",
+                sequence_number=1,
+                asset_id=input_asset.id,
+                label="First",
+                source_in_ms=0,
+                source_out_ms=5000,
+                timeline_in_ms=0,
+                timeline_out_ms=5000,
+            )
+            delivery.add(later_item)
+            delivery.add(earlier_item)
+            first_attempt = DeliveryAttempt(
+                project_id=project.id,
+                snapshot_id="snapshot-delivery",
+                timeline_id=confirmed.id,
+                attempt_number=1,
+                status="authorized",
+                execution_kind="external_upload",
+                request_manifest={},
+                request_fingerprint="d" * 64,
+            )
+            second_attempt = DeliveryAttempt(
+                project_id=project.id,
+                snapshot_id="snapshot-delivery",
+                timeline_id=exported.id,
+                attempt_number=2,
+                status="verified",
+                execution_kind="external_upload",
+                request_manifest={},
+                request_fingerprint="e" * 64,
+                final_asset_id=final_asset.id,
+            )
+            delivery.add(first_attempt)
+            delivery.add(second_attempt)
+            report_one = QCReport(
+                project_id=project.id,
+                snapshot_id="snapshot-delivery",
+                asset_id=final_asset.id,
+                report_number=1,
+                ruleset_version="delivery.v1",
+                status="blocked",
+                analyzer="contract",
+            )
+            report_two = QCReport(
+                project_id=project.id,
+                snapshot_id="snapshot-delivery",
+                asset_id=final_asset.id,
+                report_number=2,
+                ruleset_version="delivery.v1",
+                status="passed",
+                analyzer="contract",
+            )
+            delivery.add(report_one)
+            delivery.add(report_two)
+            session.commit()
+
+            assert delivery.attempt(first_attempt.id).id == first_attempt.id  # type: ignore[union-attr]
+            assert [row.id for row in delivery.confirmed_timelines(project.id, "snapshot-delivery")] == [
+                confirmed.id
+            ]
+            assert [
+                row.id
+                for row in delivery.confirmed_timelines(
+                    project.id,
+                    "snapshot-delivery",
+                    timeline_id=confirmed.id,
+                )
+            ] == [confirmed.id]
+            assert delivery.confirmed_timelines(project.id, "snapshot-delivery", timeline_id=exported.id) == []
+            assert [row.id for row in delivery.timeline_items(confirmed.id)] == [earlier_item.id, later_item.id]
+            assert {row.id for row in delivery.assets_by_ids([input_asset.id, final_asset.id])} == {
+                input_asset.id,
+                final_asset.id,
+            }
+            assert delivery.has_attempt_for_timeline(confirmed.id) is True
+            assert delivery.asset_by_uri("local", final_asset.uri).id == final_asset.id  # type: ignore[union-attr]
+            assert delivery.next_report_number(final_asset.id) == 3
+            assert delivery.asset(final_asset.id).id == final_asset.id  # type: ignore[union-attr]
+            assert [row.id for row in delivery.delivery_timelines(project.id, "snapshot-delivery")] == [
+                exported.id,
+                confirmed.id,
+            ]
+            assert [row.id for row in delivery.project_attempts(project.id)] == [second_attempt.id, first_attempt.id]
+            assert delivery.project_attempts(other.id) == []
+            assert delivery.assets_by_ids([]) == []
     finally:
         engine.dispose()

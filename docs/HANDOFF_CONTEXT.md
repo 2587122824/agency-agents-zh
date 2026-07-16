@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Delivery Repository Sprint 21
+
+- Added a typed `DeliveryRepository` covering exact confirmed-timeline scope, stable TimelineItem order, frozen input Assets, one DeliveryAttempt per timeline, final Asset URI lookup, delivery QC numbering, and delivery workspace projections.
+- Migrated the full delivery service away from direct SQLAlchemy query and persistence calls while preserving external_upload-only authorization, request fingerprints, file-system compensation on commit failure, deterministic MP4 verification, blocked evidence, and completed-project guards.
+- Delivery events now use the existing EventRepository inside the same application transaction. No Outbox or asynchronous publication was introduced.
+- Added a delivery repository contract test covering project/snapshot isolation, confirmed timeline filtering, item ordering, attempt existence/order, URI lookup, QC numbering, and delivery timeline history.
+- Updated repository, product, data-model, implementation-status, and handoff documentation.
+- No schema migration, renderer, FFmpeg, second delivery attempt, automatic re-upload, provider call, retry, fallback, output repair, or confirmation change was introduced.
+- Verification target: 40 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Editor Repository Sprint 20
 
 - Added a typed `EditorRepository` covering Timeline/TimelineItem version chains, stable track ordering, exact Asset reads, confirmed-timeline superseding, available asset-bin filtering, and DAG-node projection.
