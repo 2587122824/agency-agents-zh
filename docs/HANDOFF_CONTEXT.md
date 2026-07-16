@@ -1,5 +1,12 @@
 # Handoff Context
 
+## 2026-07-16 V2 V1 Configuration Import Sprint 33
+
+- Created V2 production configuration version `production_config_e564690650c1492d8f03b40d0106af58` from the current V1 runtime settings.
+- The configuration is version `v1`, status `ready`, with 7 validated components: DeepSeek V4 Flash model registration, RunningHub service provider, V1 all-in-one image/keyframe slot, verified LTX 2.3 first-frame slot `2069607607387639810`, vertical `480x848/24fps` video spec, audio off, and local storage.
+- V1 secret values were not copied. Provider credentials are represented only by backend references (`env://RUNNINGHUB_API_KEY`); V2 provider adapters and credential resolution remain unconnected.
+- The configuration was validated but deliberately not published. Publishing remains a separate high-risk user confirmation and does not happen automatically during import.
+
 ## 2026-07-16 V2 System-generated Configuration Keys UX Sprint 32
 
 - Removed manual technical-key entry from the system-configuration editor. New configuration, provider, model, workflow, video, audio, storage, and pricing drafts receive stable generated keys; revision drafts preserve all existing keys.
