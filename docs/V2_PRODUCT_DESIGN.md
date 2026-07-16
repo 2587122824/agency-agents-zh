@@ -680,6 +680,7 @@ Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository �
 当前创作中心的对话、需求候选、澄清、附件绑定和创作阶段实体访问已统一通过 `CreationRepository`；该迁移不改变候选或确认语义。
 当前规划中心的 Brief、分镜候选、不可变方案版本、Shot 和实体引用已统一通过 `PlanningRepository`；结构化分镜编辑仍未实现，不能因数据层迁移而标记完成。
 当前生产服务的影响分析、快照、DAG、费用明细、WorkItem/Attempt 编译和准备/执行投影已统一通过 `ProductionRepository`；费用确认、激活和提交仍是三个独立显式命令。
+当前质量服务的素材登记、文件验证记录、QC findings、人工审核证据和 DAG 下游影响已统一通过 `QualityRepository`；内容分析器未连接时仍进入 `review_required`，不会伪装为通过。
 
 ## 23. 首期验收标准
 

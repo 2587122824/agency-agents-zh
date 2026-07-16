@@ -6,26 +6,25 @@ import struct
 import wave
 from pathlib import Path, PurePosixPath
 
-from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..core.config import RUNTIME_ROOT
 from ..db.models import (
     Asset,
     AssetReviewDecision,
-    DAGNode,
-    DependencyEdge,
     Project,
     ProjectEvent,
-    ProductionSnapshot,
     QCFinding,
     QCReport,
     StoragePolicyVersion,
-    WorkAttempt,
-    WorkItem,
     utc_now,
 )
-from ..repositories import SqlAlchemyCommandRepository
+from ..repositories import (
+    QualityRepository,
+    SqlAlchemyCommandRepository,
+    SqlAlchemyEventRepository,
+    SqlAlchemyQualityRepository,
+)
 from .contracts import RegisterAttemptAsset, ReviewAsset, RunAssetQC, VerifyAsset
 
 
@@ -41,6 +40,14 @@ class QualityConflictError(ValueError):
 
 class QualityNotFoundError(ValueError):
     pass
+
+
+def _quality(session: Session) -> QualityRepository:
+    return SqlAlchemyQualityRepository(session)
+
+
+def _event(session: Session, event: ProjectEvent) -> None:
+    SqlAlchemyEventRepository(session).add(event)
 
 
 def _hash_json(payload: dict) -> str:
@@ -189,20 +196,18 @@ def _probe(path: Path, declared_type: str) -> dict:
 
 
 def _require_asset(session: Session, project: Project, asset_id: str) -> Asset:
-    asset = session.get(Asset, asset_id)
+    asset = _quality(session).asset(asset_id)
     if not asset or asset.project_id != project.id:
         raise QualityNotFoundError("Asset not found in project")
     return asset
 
 
 def _storage_policy(session: Session, snapshot_id: str) -> StoragePolicyVersion:
-    snapshot = session.get(ProductionSnapshot, snapshot_id)
+    repository = _quality(session)
+    snapshot = repository.snapshot(snapshot_id)
     if not snapshot:
         raise QualityConflictError("ASSET_SNAPSHOT_MISSING", "Asset snapshot no longer exists.")
-    policies = list(session.scalars(select(StoragePolicyVersion).where(
-        StoragePolicyVersion.production_config_version_id == snapshot.production_config_version_id,
-        StoragePolicyVersion.status == "published",
-    )))
+    policies = repository.published_storage_policies(snapshot.production_config_version_id)
     if len(policies) != 1:
         raise QualityConflictError("STORAGE_POLICY_NOT_EXACT", "Snapshot configuration must resolve exactly one published storage policy.")
     return policies[0]
@@ -225,11 +230,12 @@ def storage_policy_for_snapshot(session: Session, snapshot_id: str) -> StoragePo
 
 
 def register_attempt_asset(session: Session, project: Project, attempt_id: str, payload: RegisterAttemptAsset) -> dict:
+    repository = _quality(session)
     receipt = _receipt(session, project.id, payload.command_id, "asset.register_output")
     if receipt:
         return asset_read(session, _require_asset(session, project, receipt.result_id))
-    attempt = session.get(WorkAttempt, attempt_id)
-    item = session.get(WorkItem, attempt.work_item_id) if attempt else None
+    attempt = repository.work_attempt(attempt_id)
+    item = repository.work_item(attempt.work_item_id) if attempt else None
     if not attempt or not item or item.project_id != project.id:
         raise QualityNotFoundError("Work attempt not found in project")
     if attempt.state != "completed" or not attempt.response_manifest:
@@ -253,15 +259,12 @@ def register_attempt_asset(session: Session, project: Project, attempt_id: str, 
     if policy.backend_kind != "local" or policy.local_root_ref != "v2.runtime.assets":
         raise QualityConflictError("STORAGE_ADAPTER_NOT_CONNECTED", "The snapshot storage policy is not connected to the local V2 asset store.")
     _local_asset_path(str(output["uri"]))
-    node = session.get(DAGNode, item.dag_node_id)
+    node = repository.dag_node(item.dag_node_id)
     expected_media_type = node.output_contract.get("media_type") if node else None
     mapped_type = "project_file" if expected_media_type == "timeline" else expected_media_type
     if output["asset_type"] != mapped_type:
         raise QualityConflictError("ASSET_TYPE_CONTRACT_MISMATCH", "Provider output type does not match the exact DAG output contract.")
-    existing = session.scalar(select(Asset).where(
-        Asset.work_attempt_id == attempt.id,
-        Asset.output_index == payload.output_index,
-    ))
+    existing = repository.asset_for_output(attempt.id, payload.output_index)
     if existing:
         raise QualityConflictError("ATTEMPT_OUTPUT_ALREADY_REGISTERED", "This provider output index is already registered.")
     asset = Asset(
@@ -278,10 +281,10 @@ def register_attempt_asset(session: Session, project: Project, attempt_id: str, 
         mime_type=output["mime_type"],
         state="created",
     )
-    session.add(asset)
-    session.flush()
+    repository.add(asset)
+    repository.flush()
     _save_receipt(session, project.id, payload.command_id, "asset.register_output", "asset", asset.id)
-    session.add(ProjectEvent(project_id=project.id, event_type="asset.created.v1", message="Provider output registered as an unverified asset.", data={"asset_id": asset.id, "work_attempt_id": attempt.id, "output_index": payload.output_index}))
+    _event(session, ProjectEvent(project_id=project.id, event_type="asset.created.v1", message="Provider output registered as an unverified asset.", data={"asset_id": asset.id, "work_attempt_id": attempt.id, "output_index": payload.output_index}))
     session.commit()
     return asset_read(session, asset)
 
@@ -323,7 +326,7 @@ def verify_asset(session: Session, project: Project, asset_id: str, payload: Ver
     asset.verified_at = utc_now()
     asset.row_version += 1
     _save_receipt(session, project.id, payload.command_id, "asset.verify", "asset", asset.id)
-    session.add(ProjectEvent(project_id=project.id, event_type="asset.verified.v1", message="Asset file and content hash verified.", data={"asset_id": asset.id, "content_hash": asset.content_hash, "byte_size": asset.byte_size}))
+    _event(session, ProjectEvent(project_id=project.id, event_type="asset.verified.v1", message="Asset file and content hash verified.", data={"asset_id": asset.id, "content_hash": asset.content_hash, "byte_size": asset.byte_size}))
     session.commit()
     return asset_read(session, asset)
 
@@ -336,6 +339,7 @@ def _record_file_block(
     code: str,
     evidence: dict,
 ) -> dict:
+    repository = _quality(session)
     now = utc_now()
     report = QCReport(
         project_id=project.id,
@@ -346,9 +350,9 @@ def _record_file_block(
         status="blocked",
         analyzer="deterministic-file-verifier",
     )
-    session.add(report)
-    session.flush()
-    session.add(QCFinding(
+    repository.add(report)
+    repository.flush()
+    repository.add(QCFinding(
         qc_report_id=report.id,
         code=code,
         severity="blocked",
@@ -359,17 +363,14 @@ def _record_file_block(
     asset.state = "archived"
     asset.archived_at = now
     asset.row_version += 1
-    item = session.scalar(select(WorkItem).where(
-        WorkItem.snapshot_id == asset.snapshot_id,
-        WorkItem.dag_node_id == asset.dag_node_id,
-    ))
+    item = repository.work_item_for_node(asset.snapshot_id, asset.dag_node_id)
     if item:
         item.status = "blocked"
         item.error = f"{code}: registered output failed file verification"
         item.row_version += 1
     project.status = "blocked"
     _save_receipt(session, project.id, payload.command_id, "asset.verify", "asset", asset.id)
-    session.add(ProjectEvent(
+    _event(session, ProjectEvent(
         project_id=project.id,
         event_type="quality.blocked.v1",
         message="Registered asset failed deterministic file verification.",
@@ -384,9 +385,10 @@ def _add_finding(findings: list[dict], code: str, severity: str, evidence: dict,
 
 
 def run_asset_qc(session: Session, project: Project, asset_id: str, payload: RunAssetQC) -> dict:
+    repository = _quality(session)
     receipt = _receipt(session, project.id, payload.command_id, "quality.run")
     if receipt:
-        report = session.get(QCReport, receipt.result_id)
+        report = repository.qc_report(receipt.result_id)
         if not report:
             raise QualityConflictError("COMMAND_RESULT_MISSING", "QC command result no longer exists.")
         return qc_report_read(session, report)
@@ -395,14 +397,14 @@ def run_asset_qc(session: Session, project: Project, asset_id: str, payload: Run
         raise QualityConflictError("ASSET_NOT_VERIFIED", "Only a verified asset can enter QC.")
     if asset.row_version != payload.expected_row_version:
         raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "Asset changed; refresh before QC.")
-    node = session.get(DAGNode, asset.dag_node_id) if asset.dag_node_id else None
+    node = repository.dag_node(asset.dag_node_id) if asset.dag_node_id else None
     if not node or node.snapshot_id != asset.snapshot_id:
         raise QualityConflictError("ASSET_DAG_REFERENCE_MISSING", "Asset DAG node reference is invalid.")
     findings: list[dict] = []
     if asset.asset_type in VISUAL_TYPES:
         snapshot_spec = node.output_contract
         video_spec_id = snapshot_spec.get("video_spec_version_id")
-        snapshot = session.get(ProductionSnapshot, asset.snapshot_id)
+        snapshot = repository.snapshot(asset.snapshot_id)
         expected_width = snapshot.output_spec.get("width") if snapshot and video_spec_id else None
         expected_height = snapshot.output_spec.get("height") if snapshot and video_spec_id else None
         if expected_width and expected_height and (asset.width != expected_width or asset.height != expected_height):
@@ -428,17 +430,17 @@ def run_asset_qc(session: Session, project: Project, asset_id: str, payload: Run
         status = "review_required"
     else:
         status = "passed"
-    number = (session.scalar(select(func.max(QCReport.report_number)).where(QCReport.asset_id == asset.id)) or 0) + 1
+    number = repository.next_report_number(asset.id)
     report = QCReport(project_id=project.id, snapshot_id=asset.snapshot_id, asset_id=asset.id, report_number=number, ruleset_version=RULESET_VERSION, status=status, analyzer="deterministic-file-contract")
-    session.add(report)
-    session.flush()
+    repository.add(report)
+    repository.flush()
     for finding in findings:
-        session.add(QCFinding(qc_report_id=report.id, **finding))
+        repository.add(QCFinding(qc_report_id=report.id, **finding))
     now = utc_now()
     if status == "blocked":
         asset.state = "archived"
         asset.archived_at = now
-        item = session.scalar(select(WorkItem).where(WorkItem.dag_node_id == asset.dag_node_id, WorkItem.snapshot_id == asset.snapshot_id))
+        item = repository.work_item_for_node(asset.snapshot_id, asset.dag_node_id)
         if item:
             item.status = "blocked"
             item.error = "ASSET_QC_BLOCKED: deterministic file contract failed"
@@ -454,28 +456,29 @@ def run_asset_qc(session: Session, project: Project, asset_id: str, payload: Run
     asset.row_version += 1
     _save_receipt(session, project.id, payload.command_id, "quality.run", "qc_report", report.id)
     event_type = "quality.review_required.v1" if status == "review_required" else "quality.blocked.v1" if status == "blocked" else "asset.approved.v1"
-    session.add(ProjectEvent(project_id=project.id, event_type=event_type, message="Asset quality contract evaluated.", data={"asset_id": asset.id, "qc_report_id": report.id, "status": status}))
+    _event(session, ProjectEvent(project_id=project.id, event_type=event_type, message="Asset quality contract evaluated.", data={"asset_id": asset.id, "qc_report_id": report.id, "status": status}))
     session.commit()
     return qc_report_read(session, report)
 
 
 def review_asset(session: Session, project: Project, asset_id: str, payload: ReviewAsset, decision: str) -> dict:
+    repository = _quality(session)
     command_type = f"asset.review.{decision}"
     receipt = _receipt(session, project.id, payload.command_id, command_type)
     if receipt:
         return asset_read(session, _require_asset(session, project, receipt.result_id))
     asset = _require_asset(session, project, asset_id)
-    report = session.get(QCReport, payload.qc_report_id)
+    report = repository.qc_report(payload.qc_report_id)
     if not report or report.asset_id != asset.id or report.project_id != project.id:
         raise QualityNotFoundError("QC report not found for asset")
     if asset.state != "review_required" or report.status != "review_required":
         raise QualityConflictError("ASSET_NOT_AWAITING_REVIEW", "Only an asset with a review_required QC report can be reviewed.")
     if asset.row_version != payload.expected_row_version:
         raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "Asset changed; refresh before review.")
-    if session.scalar(select(AssetReviewDecision.id).where(AssetReviewDecision.qc_report_id == report.id)):
+    if repository.has_review_decision(report.id):
         raise QualityConflictError("QC_REPORT_ALREADY_REVIEWED", "This QC report already has a human decision.")
     now = utc_now()
-    session.add(AssetReviewDecision(project_id=project.id, asset_id=asset.id, qc_report_id=report.id, decision=decision, rationale=payload.rationale, actor_id=payload.actor_id))
+    repository.add(AssetReviewDecision(project_id=project.id, asset_id=asset.id, qc_report_id=report.id, decision=decision, rationale=payload.rationale, actor_id=payload.actor_id))
     report.reviewed_at = now
     report.reviewed_by = payload.actor_id
     if decision == "approved":
@@ -489,13 +492,13 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
     asset.row_version += 1
     project.status = "quality_review"
     _save_receipt(session, project.id, payload.command_id, command_type, "asset", asset.id)
-    session.add(ProjectEvent(project_id=project.id, event_type=event_type, message="Human asset review decision recorded.", data={"asset_id": asset.id, "qc_report_id": report.id, "decision": decision, "rationale": payload.rationale}))
+    _event(session, ProjectEvent(project_id=project.id, event_type=event_type, message="Human asset review decision recorded.", data={"asset_id": asset.id, "qc_report_id": report.id, "decision": decision, "rationale": payload.rationale}))
     session.commit()
     return asset_read(session, asset)
 
 
 def qc_report_read(session: Session, report: QCReport) -> dict:
-    findings = list(session.scalars(select(QCFinding).where(QCFinding.qc_report_id == report.id).order_by(QCFinding.created_at, QCFinding.id)))
+    findings = _quality(session).findings(report.id)
     result = {column.name: getattr(report, column.name) for column in report.__table__.columns if column.name not in {"asset_id", "project_id", "snapshot_id"}}
     result["findings"] = [{column.name: getattr(finding, column.name) for column in finding.__table__.columns if column.name not in {"qc_report_id"}} for finding in findings]
     return result
@@ -504,7 +507,8 @@ def qc_report_read(session: Session, report: QCReport) -> dict:
 def _downstream_keys(session: Session, asset: Asset) -> list[str]:
     if not asset.dag_node_id:
         return []
-    edges = list(session.scalars(select(DependencyEdge).where(DependencyEdge.snapshot_id == asset.snapshot_id)))
+    repository = _quality(session)
+    edges = repository.dependency_edges(asset.snapshot_id)
     children: dict[str, set[str]] = {}
     for edge in edges:
         children.setdefault(edge.parent_node_id, set()).add(edge.child_node_id)
@@ -516,14 +520,15 @@ def _downstream_keys(session: Session, asset: Asset) -> list[str]:
             continue
         seen.add(node_id)
         pending.extend(children.get(node_id, set()))
-    nodes = {node.id: node.node_key for node in session.scalars(select(DAGNode).where(DAGNode.id.in_(seen)))} if seen else {}
+    nodes = {node.id: node.node_key for node in repository.dag_nodes_by_ids(seen)}
     return sorted(nodes.values())
 
 
 def asset_read(session: Session, asset: Asset) -> dict:
-    node = session.get(DAGNode, asset.dag_node_id) if asset.dag_node_id else None
-    report = session.scalar(select(QCReport).where(QCReport.asset_id == asset.id).order_by(QCReport.report_number.desc()).limit(1))
-    decisions = list(session.scalars(select(AssetReviewDecision).where(AssetReviewDecision.asset_id == asset.id).order_by(AssetReviewDecision.created_at)))
+    repository = _quality(session)
+    node = repository.dag_node(asset.dag_node_id) if asset.dag_node_id else None
+    report = repository.latest_qc_report(asset.id)
+    decisions = repository.review_decisions(asset.id)
     result = {column.name: getattr(asset, column.name) for column in asset.__table__.columns if column.name not in {"provider_output_manifest", "deleted_at"}}
     result["node_key"] = node.node_key if node else None
     result["latest_qc_report"] = qc_report_read(session, report) if report else None
@@ -533,11 +538,12 @@ def asset_read(session: Session, asset: Asset) -> dict:
 
 
 def quality_review_view(session: Session, project: Project) -> dict:
-    assets = list(session.scalars(select(Asset).where(Asset.project_id == project.id).order_by(Asset.created_at.desc())))
+    repository = _quality(session)
+    assets = repository.project_assets(project.id)
     asset_rows = [asset_read(session, asset) for asset in assets]
     nodes = []
     if project.active_snapshot_id:
-        nodes = list(session.scalars(select(DAGNode).where(DAGNode.snapshot_id == project.active_snapshot_id).order_by(DAGNode.node_key)))
+        nodes = repository.snapshot_nodes(project.active_snapshot_id)
     assets_by_node: dict[str, list[Asset]] = {}
     for asset in assets:
         if asset.dag_node_id and asset.state != "deleted":
@@ -554,8 +560,8 @@ def quality_review_view(session: Session, project: Project) -> dict:
             continue
         if node_assets and any(asset.state in {"created", "verified", "review_required"} for asset in node_assets):
             continue
-        item = session.scalar(select(WorkItem).where(WorkItem.snapshot_id == project.active_snapshot_id, WorkItem.dag_node_id == node.id))
-        attempt = session.get(WorkAttempt, item.current_attempt_id) if item and item.current_attempt_id else None
+        item = repository.work_item_for_node(project.active_snapshot_id, node.id)
+        attempt = repository.work_attempt(item.current_attempt_id) if item and item.current_attempt_id else None
         simulated = bool(attempt and attempt.response_manifest and attempt.response_manifest.get("media_created") is False)
         rejected = bool(node_assets)
         output_gaps.append({

@@ -9,6 +9,8 @@ from sqlalchemy.pool import StaticPool
 from v2.backend.app.db.models import (
     AgentInputManifest,
     AgentRun,
+    Asset,
+    AssetReviewDecision,
     Attachment,
     AttachmentBinding,
     ClarificationRequest,
@@ -24,6 +26,8 @@ from v2.backend.app.db.models import (
     ProjectEvent,
     ProductionImpactAnalysis,
     ProductionSnapshot,
+    QCFinding,
+    QCReport,
     RequirementCandidate,
     RequirementVersion,
     Shot,
@@ -41,6 +45,7 @@ from v2.backend.app.repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyPlanningRepository,
     SqlAlchemyProductionRepository,
+    SqlAlchemyQualityRepository,
     SqlAlchemyProjectRepository,
 )
 
@@ -809,5 +814,183 @@ def test_production_repository_contract_preserves_snapshot_dag_and_work_order() 
             assert [row.id for row in production.work_attempts([work.id])] == [first_attempt.id, second_attempt.id]
             assert production.work_attempts([]) == []
             assert production.snapshot_history(other.id) == []
+    finally:
+        engine.dispose()
+
+
+def test_quality_repository_contract_preserves_asset_qc_review_and_dag_queries() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            projects = SqlAlchemyProjectRepository(session)
+            quality = SqlAlchemyQualityRepository(session)
+            production = SqlAlchemyProductionRepository(session)
+            now = utc_now()
+            project = Project(
+                title="Quality",
+                core_topic="Quality repository contract",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            other = Project(
+                title="Other",
+                core_topic="Quality isolation",
+                duration_seconds=10,
+                aspect_ratio="9:16",
+                audio_mode="off",
+            )
+            projects.add(project)
+            projects.add(other)
+            projects.flush()
+            parent_node = DAGNode(
+                snapshot_id="snapshot-quality",
+                node_key="shot.001.keyframe",
+                kind="generate_keyframe",
+                input_contract={},
+                output_contract={"media_type": "image"},
+            )
+            child_node = DAGNode(
+                snapshot_id="snapshot-quality",
+                node_key="shot.001.video",
+                kind="generate_i2v_clip",
+                input_contract={},
+                output_contract={"media_type": "video"},
+            )
+            production.add(parent_node)
+            production.add(child_node)
+            production.flush()
+            edge = DependencyEdge(
+                snapshot_id="snapshot-quality",
+                parent_node_id=parent_node.id,
+                child_node_id=child_node.id,
+                dependency_type="required",
+                input_slot="source_image",
+            )
+            production.add(edge)
+            work = WorkItem(
+                project_id=project.id,
+                snapshot_id="snapshot-quality",
+                dag_node_id=parent_node.id,
+                kind=parent_node.kind,
+                payload={},
+            )
+            production.add(work)
+            production.flush()
+            attempt = WorkAttempt(
+                work_item_id=work.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="mock",
+                request_fingerprint="a" * 64,
+                request_manifest={},
+                state="completed",
+            )
+            production.add(attempt)
+            production.flush()
+            older_asset = Asset(
+                project_id=project.id,
+                snapshot_id="snapshot-quality",
+                work_attempt_id=attempt.id,
+                dag_node_id=parent_node.id,
+                output_index=0,
+                asset_type="image",
+                role="keyframe",
+                uri="runtime://assets/old.png",
+                storage_backend="local",
+                provider_output_manifest={},
+                created_at=now - timedelta(minutes=2),
+            )
+            newer_asset = Asset(
+                project_id=project.id,
+                snapshot_id="snapshot-quality",
+                work_attempt_id=None,
+                dag_node_id=child_node.id,
+                output_index=0,
+                asset_type="video",
+                role="clip",
+                uri="runtime://assets/new.mp4",
+                storage_backend="local",
+                provider_output_manifest={},
+                created_at=now - timedelta(minutes=1),
+            )
+            quality.add(older_asset)
+            quality.add(newer_asset)
+            quality.flush()
+            old_report = QCReport(
+                project_id=project.id,
+                snapshot_id="snapshot-quality",
+                asset_id=older_asset.id,
+                report_number=1,
+                ruleset_version="v1",
+                status="review_required",
+                analyzer="contract",
+            )
+            latest_report = QCReport(
+                project_id=project.id,
+                snapshot_id="snapshot-quality",
+                asset_id=older_asset.id,
+                report_number=2,
+                ruleset_version="v1",
+                status="passed",
+                analyzer="contract",
+            )
+            quality.add(old_report)
+            quality.add(latest_report)
+            quality.flush()
+            later_finding = QCFinding(
+                qc_report_id=latest_report.id,
+                code="SECOND",
+                severity="review_required",
+                disposition="manual_review",
+                created_at=now,
+            )
+            earlier_finding = QCFinding(
+                qc_report_id=latest_report.id,
+                code="FIRST",
+                severity="review_required",
+                disposition="manual_review",
+                created_at=now - timedelta(minutes=1),
+            )
+            decision = AssetReviewDecision(
+                project_id=project.id,
+                asset_id=older_asset.id,
+                qc_report_id=old_report.id,
+                decision="approved",
+                rationale="Contract fixture",
+                actor_id="tester",
+            )
+            quality.add(later_finding)
+            quality.add(earlier_finding)
+            quality.add(decision)
+            session.commit()
+
+            assert quality.asset(older_asset.id).id == older_asset.id  # type: ignore[union-attr]
+            assert quality.work_attempt(attempt.id).id == attempt.id  # type: ignore[union-attr]
+            assert quality.work_item(work.id).id == work.id  # type: ignore[union-attr]
+            assert quality.dag_node(parent_node.id).id == parent_node.id  # type: ignore[union-attr]
+            assert quality.asset_for_output(attempt.id, 0).id == older_asset.id  # type: ignore[union-attr]
+            assert quality.work_item_for_node("snapshot-quality", parent_node.id).id == work.id  # type: ignore[union-attr]
+            assert quality.qc_report(latest_report.id).id == latest_report.id  # type: ignore[union-attr]
+            assert quality.next_report_number(older_asset.id) == 3
+            assert quality.has_review_decision(old_report.id) is True
+            assert quality.has_review_decision(latest_report.id) is False
+            assert [row.id for row in quality.findings(latest_report.id)] == [earlier_finding.id, later_finding.id]
+            assert [row.id for row in quality.dependency_edges("snapshot-quality")] == [edge.id]
+            assert {row.id for row in quality.dag_nodes_by_ids({parent_node.id, child_node.id})} == {
+                parent_node.id,
+                child_node.id,
+            }
+            assert quality.latest_qc_report(older_asset.id).id == latest_report.id  # type: ignore[union-attr]
+            assert [row.id for row in quality.review_decisions(older_asset.id)] == [decision.id]
+            assert [row.id for row in quality.project_assets(project.id)] == [newer_asset.id, older_asset.id]
+            assert [row.id for row in quality.snapshot_nodes("snapshot-quality")] == [parent_node.id, child_node.id]
+            assert quality.project_assets(other.id) == []
+            assert quality.dag_nodes_by_ids(set()) == []
     finally:
         engine.dispose()

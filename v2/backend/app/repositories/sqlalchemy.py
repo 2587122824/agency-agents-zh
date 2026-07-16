@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session, selectinload
 from ..db.models import (
     AgentInputManifest,
     AgentRun,
+    Asset,
+    AssetReviewDecision,
     Attachment,
     AttachmentBinding,
     ClarificationRequest,
@@ -27,18 +29,21 @@ from ..db.models import (
     ProductionImpactAnalysis,
     ProductionSnapshot,
     ProviderConfigVersion,
+    QCFinding,
+    QCReport,
     RequirementCandidate,
     RequirementVersion,
     PlanVersion,
     Shot,
     ShotPlanCandidate,
     SnapshotEntityVersion,
+    StoragePolicyVersion,
     VideoSpecVersion,
     WorkflowSlotVersion,
     WorkAttempt,
     WorkItem,
 )
-from .contracts import CreationRecord, ModelT, PlanningRecord, ProductionRecord
+from .contracts import CreationRecord, ModelT, PlanningRecord, ProductionRecord, QualityRecord
 
 
 class SqlAlchemyProjectRepository:
@@ -516,4 +521,104 @@ class SqlAlchemyProductionRepository:
             select(ProductionSnapshot)
             .where(ProductionSnapshot.project_id == project_id)
             .order_by(ProductionSnapshot.snapshot_number.desc())
+        ))
+
+
+class SqlAlchemyQualityRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, record: QualityRecord) -> None:
+        self.session.add(record)
+
+    def flush(self) -> None:
+        self.session.flush()
+
+    def asset(self, asset_id: str) -> Asset | None:
+        return self.session.get(Asset, asset_id)
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None:
+        return self.session.get(ProductionSnapshot, snapshot_id)
+
+    def published_storage_policies(self, config_id: str) -> list[StoragePolicyVersion]:
+        return list(self.session.scalars(select(StoragePolicyVersion).where(
+            StoragePolicyVersion.production_config_version_id == config_id,
+            StoragePolicyVersion.status == "published",
+        )))
+
+    def work_attempt(self, attempt_id: str) -> WorkAttempt | None:
+        return self.session.get(WorkAttempt, attempt_id)
+
+    def work_item(self, work_item_id: str) -> WorkItem | None:
+        return self.session.get(WorkItem, work_item_id)
+
+    def dag_node(self, node_id: str) -> DAGNode | None:
+        return self.session.get(DAGNode, node_id)
+
+    def asset_for_output(self, work_attempt_id: str, output_index: int) -> Asset | None:
+        return self.session.scalar(select(Asset).where(
+            Asset.work_attempt_id == work_attempt_id,
+            Asset.output_index == output_index,
+        ))
+
+    def work_item_for_node(self, snapshot_id: str, dag_node_id: str) -> WorkItem | None:
+        return self.session.scalar(select(WorkItem).where(
+            WorkItem.snapshot_id == snapshot_id,
+            WorkItem.dag_node_id == dag_node_id,
+        ))
+
+    def qc_report(self, report_id: str) -> QCReport | None:
+        return self.session.get(QCReport, report_id)
+
+    def next_report_number(self, asset_id: str) -> int:
+        current = self.session.scalar(select(func.max(QCReport.report_number)).where(
+            QCReport.asset_id == asset_id
+        ))
+        return (current or 0) + 1
+
+    def has_review_decision(self, report_id: str) -> bool:
+        return self.session.scalar(select(AssetReviewDecision.id).where(
+            AssetReviewDecision.qc_report_id == report_id
+        )) is not None
+
+    def findings(self, report_id: str) -> list[QCFinding]:
+        return list(self.session.scalars(
+            select(QCFinding)
+            .where(QCFinding.qc_report_id == report_id)
+            .order_by(QCFinding.created_at, QCFinding.id)
+        ))
+
+    def dependency_edges(self, snapshot_id: str) -> list[DependencyEdge]:
+        return list(self.session.scalars(select(DependencyEdge).where(
+            DependencyEdge.snapshot_id == snapshot_id
+        )))
+
+    def dag_nodes_by_ids(self, node_ids: set[str]) -> list[DAGNode]:
+        if not node_ids:
+            return []
+        return list(self.session.scalars(select(DAGNode).where(DAGNode.id.in_(node_ids))))
+
+    def latest_qc_report(self, asset_id: str) -> QCReport | None:
+        return self.session.scalar(
+            select(QCReport)
+            .where(QCReport.asset_id == asset_id)
+            .order_by(QCReport.report_number.desc())
+            .limit(1)
+        )
+
+    def review_decisions(self, asset_id: str) -> list[AssetReviewDecision]:
+        return list(self.session.scalars(
+            select(AssetReviewDecision)
+            .where(AssetReviewDecision.asset_id == asset_id)
+            .order_by(AssetReviewDecision.created_at)
+        ))
+
+    def project_assets(self, project_id: str) -> list[Asset]:
+        return list(self.session.scalars(
+            select(Asset).where(Asset.project_id == project_id).order_by(Asset.created_at.desc())
+        ))
+
+    def snapshot_nodes(self, snapshot_id: str) -> list[DAGNode]:
+        return list(self.session.scalars(
+            select(DAGNode).where(DAGNode.snapshot_id == snapshot_id).order_by(DAGNode.node_key)
         ))

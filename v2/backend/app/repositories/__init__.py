@@ -5,6 +5,7 @@ from .contracts import (
     EventRepository,
     PlanningRepository,
     ProductionRepository,
+    QualityRepository,
     ProjectRepository,
 )
 from .sqlalchemy import (
@@ -14,6 +15,7 @@ from .sqlalchemy import (
     SqlAlchemyEventRepository,
     SqlAlchemyPlanningRepository,
     SqlAlchemyProductionRepository,
+    SqlAlchemyQualityRepository,
     SqlAlchemyProjectRepository,
 )
 
@@ -24,6 +26,7 @@ __all__ = [
     "EventRepository",
     "PlanningRepository",
     "ProductionRepository",
+    "QualityRepository",
     "ProjectRepository",
     "SqlAlchemyCommandRepository",
     "SqlAlchemyCreationRepository",
@@ -31,5 +34,6 @@ __all__ = [
     "SqlAlchemyEventRepository",
     "SqlAlchemyPlanningRepository",
     "SqlAlchemyProductionRepository",
+    "SqlAlchemyQualityRepository",
     "SqlAlchemyProjectRepository",
 ]

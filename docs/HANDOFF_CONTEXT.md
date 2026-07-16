@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-16 V2 Quality Repository Sprint 19
+
+- Added a typed `QualityRepository` covering Asset registration, exact provider-output indices, storage-policy resolution, QCReport/QCFinding persistence, human review decisions, DAG downstream impact, and quality workspace projections.
+- Migrated the full quality service away from direct SQLAlchemy query and persistence calls while preserving deterministic file verification, explicit blocked/review_required/passed classification, WorkItem blocking, archive-only rejection, row-version checks, and manual approval evidence.
+- Quality events now use the existing EventRepository inside the same application transaction. No Outbox or asynchronous publication was introduced.
+- Added a quality repository contract test covering project asset ordering, output-index lookup, QC numbering, finding/review ordering, DAG dependencies, downstream node reads, and WorkItem/Attempt lookup.
+- Updated repository, product, data-model, implementation-status, and handoff documentation.
+- No schema migration, content analyzer, automatic pass, provider call, retry, fallback, output repair, route substitution, confirmation change, or cost event was introduced.
+- Verification target: 38 backend tests, Python compileall, Vite build, Alembic head, HTTP health check, push, and restart on `8766`.
+
 ## 2026-07-16 V2 Production Repository Sprint 18
 
 - Added a typed `ProductionRepository` covering impact analyses, immutable snapshots, frozen entity references, DAG nodes/edges, configuration and pricing reads, confirmed CostEvent writes, deterministic WorkItem/Attempt compilation, and preparation/execution projections.

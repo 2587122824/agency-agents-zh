@@ -5,6 +5,8 @@ from typing import Protocol, TypeVar
 from ..db.models import (
     AgentInputManifest,
     AgentRun,
+    Asset,
+    AssetReviewDecision,
     Attachment,
     AttachmentBinding,
     ClarificationRequest,
@@ -26,12 +28,15 @@ from ..db.models import (
     ProductionImpactAnalysis,
     ProductionSnapshot,
     ProviderConfigVersion,
+    QCFinding,
+    QCReport,
     RequirementCandidate,
     RequirementVersion,
     PlanVersion,
     Shot,
     ShotPlanCandidate,
     SnapshotEntityVersion,
+    StoragePolicyVersion,
     VideoSpecVersion,
     WorkflowSlotVersion,
     WorkAttempt,
@@ -64,6 +69,7 @@ ProductionRecord = (
     | WorkAttempt
     | WorkItem
 )
+QualityRecord = Asset | AssetReviewDecision | QCFinding | QCReport
 
 
 class ProjectRepository(Protocol):
@@ -266,3 +272,45 @@ class ProductionRepository(Protocol):
     def impact_history(self, project_id: str) -> list[ProductionImpactAnalysis]: ...
 
     def snapshot_history(self, project_id: str) -> list[ProductionSnapshot]: ...
+
+
+class QualityRepository(Protocol):
+    def add(self, record: QualityRecord) -> None: ...
+
+    def flush(self) -> None: ...
+
+    def asset(self, asset_id: str) -> Asset | None: ...
+
+    def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None: ...
+
+    def published_storage_policies(self, config_id: str) -> list[StoragePolicyVersion]: ...
+
+    def work_attempt(self, attempt_id: str) -> WorkAttempt | None: ...
+
+    def work_item(self, work_item_id: str) -> WorkItem | None: ...
+
+    def dag_node(self, node_id: str) -> DAGNode | None: ...
+
+    def asset_for_output(self, work_attempt_id: str, output_index: int) -> Asset | None: ...
+
+    def work_item_for_node(self, snapshot_id: str, dag_node_id: str) -> WorkItem | None: ...
+
+    def qc_report(self, report_id: str) -> QCReport | None: ...
+
+    def next_report_number(self, asset_id: str) -> int: ...
+
+    def has_review_decision(self, report_id: str) -> bool: ...
+
+    def findings(self, report_id: str) -> list[QCFinding]: ...
+
+    def dependency_edges(self, snapshot_id: str) -> list[DependencyEdge]: ...
+
+    def dag_nodes_by_ids(self, node_ids: set[str]) -> list[DAGNode]: ...
+
+    def latest_qc_report(self, asset_id: str) -> QCReport | None: ...
+
+    def review_decisions(self, asset_id: str) -> list[AssetReviewDecision]: ...
+
+    def project_assets(self, project_id: str) -> list[Asset]: ...
+
+    def snapshot_nodes(self, snapshot_id: str) -> list[DAGNode]: ...
