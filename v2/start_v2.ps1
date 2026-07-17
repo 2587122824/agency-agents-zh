@@ -8,6 +8,22 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $Root
 Set-Location $RepoRoot
 
+# Backend credentials stay outside the database and repository. Local user-scoped
+# values are copied into this service process only for explicitly allowlisted names.
+foreach ($Name in @("V2_CREDENTIAL_ENV_ALLOWLIST", "V2_AGENT_MODEL_EXECUTION_ENABLED")) {
+  if (-not [Environment]::GetEnvironmentVariable($Name, "Process")) {
+    $UserValue = [Environment]::GetEnvironmentVariable($Name, "User")
+    if ($UserValue) { [Environment]::SetEnvironmentVariable($Name, $UserValue, "Process") }
+  }
+}
+$CredentialAllowlist = [Environment]::GetEnvironmentVariable("V2_CREDENTIAL_ENV_ALLOWLIST", "Process")
+foreach ($CredentialName in ($CredentialAllowlist -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
+  if (-not [Environment]::GetEnvironmentVariable($CredentialName, "Process")) {
+    $CredentialValue = [Environment]::GetEnvironmentVariable($CredentialName, "User")
+    if ($CredentialValue) { [Environment]::SetEnvironmentVariable($CredentialName, $CredentialValue, "Process") }
+  }
+}
+
 $FrontendDist = Join-Path $Root "frontend\dist\index.html"
 if (-not (Test-Path $FrontendDist)) {
   throw "V2 frontend is not built. Run npm.cmd install and npm.cmd run build in v2\frontend."

@@ -56,6 +56,7 @@ class MessageRead(BaseModel):
     role: str
     content: str
     reply_to_message_id: str | None
+    agent_run_id: str | None
     created_at: datetime
 
 
@@ -104,11 +105,16 @@ class AgentRunRead(BaseModel):
     input_manifest_id: str
     model_provider: str
     model_name: str
+    production_config_version_id: str | None
+    model_config_version_id: str | None
+    provider_config_version_id: str | None
     prompt_contract_version: str
     output_schema_version: str
     parsed_candidate_id: str | None
     error_code: str | None
     error_detail: str | None
+    provider_request_id: str | None
+    token_usage: dict[str, Any]
     started_at: datetime | None
     finished_at: datetime | None
     input_manifest: AgentInputManifestAuditRead | None

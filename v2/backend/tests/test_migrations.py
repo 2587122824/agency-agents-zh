@@ -36,7 +36,7 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
     engine = create_engine(f"sqlite:///{database.as_posix()}")
     with Session(engine, expire_on_commit=False) as session:
         metadata = MetaData()
-        metadata.reflect(bind=engine, only=["projects"])
+        metadata.reflect(bind=engine, only=["projects", "agent_runs"])
         project_id = "project_migration_planning_authority"
         session.execute(metadata.tables["projects"].insert().values(
             id=project_id,
@@ -71,17 +71,22 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
         )
         session.add(manifest)
         session.flush()
-        run = AgentRun(
+        run_id = "agent_run_migration_planning_authority"
+        session.execute(metadata.tables["agent_runs"].insert().values(
+            id=run_id,
             project_id=project_id,
             input_manifest_id=manifest.id,
             status="succeeded",
-        )
-        session.add(run)
-        session.flush()
+            agent_role="creative",
+            model_provider="mock",
+            model_name="deterministic-creative-v1",
+            prompt_contract_version="creative.v1",
+            output_schema_version="requirement-candidate.v1",
+        ))
         brief = CreativeBriefCandidate(
             project_id=project_id,
             requirement_version_id=requirement.id,
-            agent_run_id=run.id,
+            agent_run_id=run_id,
             status="accepted",
             brief={},
         )
@@ -91,7 +96,7 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
             project_id=project_id,
             requirement_version_id=requirement.id,
             creative_brief_candidate_id=brief.id,
-            agent_run_id=run.id,
+            agent_run_id=run_id,
             status="awaiting_review",
             shots=[],
         ))
@@ -110,6 +115,13 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
     assert {"archived_at", "archived_by"}.issubset({
         column["name"] for column in inspect(upgraded_engine).get_columns("projects")
     })
+    assert "agent_run_id" in {
+        column["name"] for column in inspect(upgraded_engine).get_columns("creation_messages")
+    }
+    assert {
+        "production_config_version_id", "model_config_version_id", "provider_config_version_id",
+        "provider_request_id", "token_usage",
+    }.issubset({column["name"] for column in inspect(upgraded_engine).get_columns("agent_runs")})
     assert {
         "event_id", "project_sequence", "aggregate_type", "aggregate_id",
         "correlation_id", "actor_type", "actor_id", "schema_version",

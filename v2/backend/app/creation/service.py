@@ -22,6 +22,7 @@ from ..db.models import (
     RequirementVersion,
     utc_now,
 )
+from .agent_gateway import AgentGatewayError, CreativeAgentGateway
 from ..core.config import RUNTIME_ROOT
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from ..repositories import (
@@ -247,11 +248,38 @@ def _manifest_payload(session: Session, project: Project, base: RequirementVersi
     }
 
 
-def generate_candidate(session: Session, project: Project, payload: GenerateCandidate) -> RequirementCandidate:
+def _validated_update_value(field_key: str, value):
+    if field_key in {"title", "core_topic", "creative_direction"}:
+        if not isinstance(value, str) or not value.strip():
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", f"字段 {field_key} 必须是非空文本。")
+        return value.strip()
+    if field_key == "duration_seconds":
+        if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 3600:
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", "目标时长必须是 5 到 3600 秒的整数。")
+        return value
+    if field_key == "aspect_ratio":
+        if value not in {"9:16", "16:9", "1:1"}:
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", "画幅必须是 9:16、16:9 或 1:1。")
+        return value
+    if field_key == "audio_mode":
+        if value not in {"off", "voiceover"}:
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", "音频模式必须是 off 或 voiceover。")
+        return value
+    raise AgentGatewayError("AGENT_MODEL_OUTPUT_FIELD_UNSUPPORTED", f"模型返回了不支持的字段 {field_key}。")
+
+
+def generate_candidate(
+    session: Session,
+    project: Project,
+    payload: GenerateCandidate,
+    gateway: CreativeAgentGateway,
+) -> RequirementCandidate:
     repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, RequirementCandidate)
+    if any(item.status == "running" for item in repository.agent_runs(project.id)):
+        raise CreationConflictError("AGENT_RUN_IN_PROGRESS", "当前已有一轮创作智能体正在运行。")
     base = ensure_initial_requirement(session, project)
     if base.id != payload.expected_base_version_id:
         raise CreationConflictError("PROJECT_VERSION_CONFLICT", "活动需求版本已变化，请刷新后重新生成候选。")
@@ -262,6 +290,15 @@ def generate_candidate(session: Session, project: Project, payload: GenerateCand
     manifest_payload = _manifest_payload(session, project, base)
     if not manifest_payload["messages"]:
         raise CreationConflictError("NO_NEW_REQUIREMENT_INPUT", "没有尚未处理的新需求消息。")
+    attempted_message_ids: set[str] = set()
+    for previous_run in repository.agent_runs(project.id):
+        previous_manifest = repository.agent_manifest(previous_run.input_manifest_id)
+        if previous_manifest:
+            attempted_message_ids.update(previous_manifest.message_ids or [])
+    if {item["id"] for item in manifest_payload["messages"]}.issubset(attempted_message_ids):
+        raise CreationConflictError("AGENT_RUN_ALREADY_ATTEMPTED", "当前消息已经运行过创作智能体；失败后不会自动或重复调用模型。")
+    selection = gateway.select(session)
+    manifest_payload["system_config_version"] = selection.production_config_version_id
     serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     manifest = AgentInputManifest(
         project_id=project.id,
@@ -269,6 +306,7 @@ def generate_candidate(session: Session, project: Project, payload: GenerateCand
         message_ids=[item["id"] for item in manifest_payload["messages"]],
         decision_ids=[item["id"] for item in manifest_payload["confirmed_decisions"]],
         attachment_binding_ids=[item["id"] for item in manifest_payload["confirmed_attachment_bindings"]],
+        system_config_version=selection.production_config_version_id,
         input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
         payload=manifest_payload,
     )
@@ -278,27 +316,61 @@ def generate_candidate(session: Session, project: Project, payload: GenerateCand
         project_id=project.id,
         status="running",
         input_manifest_id=manifest.id,
+        model_provider=selection.model_provider,
+        model_name=selection.model_name,
+        production_config_version_id=selection.production_config_version_id,
+        model_config_version_id=selection.model_config_version_id,
+        provider_config_version_id=selection.provider_config_version_id,
+        prompt_contract_version=selection.prompt_contract_version,
+        output_schema_version=selection.output_schema_version,
         started_at=utc_now(),
     )
     repository.add(run)
     repository.flush()
-    _event(session, project.id, "agent.run_created.v1", "Creative Mock Agent 已开始", {"agent_run_id": run.id})
+    _event(session, project.id, "agent.run_created.v1", "创作智能体已开始处理本轮消息", {
+        "agent_run_id": run.id,
+        "model_config_version_id": selection.model_config_version_id,
+        "provider_config_version_id": selection.provider_config_version_id,
+    })
+    session.commit()
 
-    fields = dict(base.fields)
-    sources = dict(base.field_sources)
-    changes: list[dict] = []
-    if manifest_payload["messages"]:
-        latest = manifest_payload["messages"][-1]
-        previous = fields.get("creative_direction")
-        fields["creative_direction"] = latest["content"]
-        sources["creative_direction"] = {"type": "agent_proposal", "reference_id": latest["id"]}
-        changes.append({
-            "field_key": "creative_direction",
-            "before": previous,
-            "after": latest["content"],
-            "source_message_id": latest["id"],
-            "risk_level": "medium",
-        })
+    try:
+        result = gateway.invoke(selection, manifest_payload)
+        fields = dict(base.fields)
+        sources = dict(base.field_sources)
+        changes: list[dict] = []
+        valid_message_ids = {item["id"] for item in manifest_payload["messages"]}
+        seen_fields: set[str] = set()
+        for update in result.output.field_updates:
+            if update.field_key in seen_fields:
+                raise AgentGatewayError("AGENT_MODEL_OUTPUT_FIELD_DUPLICATE", f"模型重复更新字段 {update.field_key}。")
+            if update.source_message_id not in valid_message_ids:
+                raise AgentGatewayError("AGENT_MODEL_OUTPUT_SOURCE_INVALID", "模型返回了输入清单之外的消息引用。")
+            seen_fields.add(update.field_key)
+            value = _validated_update_value(update.field_key, update.value)
+            previous = fields.get(update.field_key)
+            fields[update.field_key] = value
+            sources[update.field_key] = {"type": "agent_proposal", "reference_id": update.source_message_id}
+            changes.append({
+                "field_key": update.field_key,
+                "before": previous,
+                "after": value,
+                "source_message_id": update.source_message_id,
+                "risk_level": update.risk_level,
+            })
+    except AgentGatewayError as exc:
+        failed_run = repository.agent_run(run.id)
+        if failed_run is not None:
+            failed_run.status = "failed"
+            failed_run.error_code = exc.code
+            failed_run.error_detail = str(exc)
+            failed_run.finished_at = utc_now()
+            _event(session, project.id, "agent.run_failed.v1", "创作智能体本轮运行失败", {
+                "agent_run_id": failed_run.id,
+                "error_code": exc.code,
+            })
+            session.commit()
+        raise
     candidate = RequirementCandidate(
         project_id=project.id,
         base_requirement_version_id=base.id,
@@ -306,16 +378,37 @@ def generate_candidate(session: Session, project: Project, payload: GenerateCand
         fields=fields,
         field_sources=sources,
         change_summary=changes,
+        status="awaiting_review" if changes else "no_change",
+        decided_at=None if changes else utc_now(),
     )
     repository.add(candidate)
     repository.flush()
+    latest_message_id = manifest_payload["messages"][-1]["id"]
+    assistant_message = Message(
+        project_id=project.id,
+        role="assistant",
+        content=result.output.assistant_reply,
+        reply_to_message_id=latest_message_id,
+        agent_run_id=run.id,
+    )
+    repository.add(assistant_message)
+    repository.flush()
     run.status = "succeeded"
-    run.raw_output = {"requirement_candidate": fields, "change_summary": changes}
+    run.raw_output = result.raw_output
     run.parsed_candidate_id = candidate.id
+    run.provider_request_id = result.provider_request_id
+    run.token_usage = result.token_usage
     run.finished_at = utc_now()
     _save_receipt(session, project.id, payload.command_id, "candidate.generate", "requirement_candidate", candidate.id)
-    _event(session, project.id, "agent.run_succeeded.v1", "Creative Mock Agent 已返回候选", {"agent_run_id": run.id})
-    _event(session, project.id, "candidate.generated.v1", "需求候选等待用户确认", {"candidate_id": candidate.id})
+    _event(session, project.id, "conversation.assistant_replied.v1", "创作智能体已回复本轮消息", {
+        "agent_run_id": run.id,
+        "message_id": assistant_message.id,
+    })
+    _event(session, project.id, "agent.run_succeeded.v1", "创作智能体已返回严格候选", {"agent_run_id": run.id})
+    if changes:
+        _event(session, project.id, "candidate.generated.v1", "需求候选等待用户确认", {"candidate_id": candidate.id})
+    else:
+        _event(session, project.id, "candidate.no_change.v1", "本轮回复没有提出结构化字段变更", {"candidate_id": candidate.id})
     session.commit()
     return candidate
 
@@ -648,11 +741,16 @@ def creation_center_view(session: Session, project: Project) -> dict:
             "input_manifest_id": run.input_manifest_id,
             "model_provider": run.model_provider,
             "model_name": run.model_name,
+            "production_config_version_id": run.production_config_version_id,
+            "model_config_version_id": run.model_config_version_id,
+            "provider_config_version_id": run.provider_config_version_id,
             "prompt_contract_version": run.prompt_contract_version,
             "output_schema_version": run.output_schema_version,
             "parsed_candidate_id": run.parsed_candidate_id,
             "error_code": run.error_code,
             "error_detail": run.error_detail,
+            "provider_request_id": run.provider_request_id,
+            "token_usage": run.token_usage or {},
             "started_at": run.started_at,
             "finished_at": run.finished_at,
             "input_manifest": manifest,
@@ -669,7 +767,12 @@ def creation_center_view(session: Session, project: Project) -> dict:
     }
     unbound = [item for item in attachments if item.id not in confirmed_attachment_ids]
     consumed = consumed_message_ids(session, active)
-    unconsumed_messages = [item for item in messages if item.id not in consumed]
+    unconsumed_messages = [item for item in messages if item.role == "user" and item.id not in consumed]
+    attempted_message_ids: set[str] = set()
+    for run in runs:
+        manifest = repository.agent_manifest(run.input_manifest_id)
+        if manifest:
+            attempted_message_ids.update(manifest.message_ids or [])
     if clarifications:
         next_action = NextAction(
             code="RESOLVE_REQUIRED_CLARIFICATIONS",
@@ -680,8 +783,14 @@ def creation_center_view(session: Session, project: Project) -> dict:
         next_action = NextAction(code="REVIEW_REQUIREMENT_CANDIDATE", target_ids=[current.id], label="审核需求候选")
     elif unbound:
         next_action = NextAction(code="CLASSIFY_ATTACHMENT", target_ids=[item.id for item in unbound], label="确认附件用途")
-    elif unconsumed_messages:
+    elif unconsumed_messages and not {item.id for item in unconsumed_messages}.issubset(attempted_message_ids):
         next_action = NextAction(code="GENERATE_REQUIREMENT_CANDIDATE", label="生成需求候选")
+    elif unconsumed_messages:
+        latest_attempt = next((item for item in runs if item.status in {"succeeded", "failed"}), None)
+        if latest_attempt and latest_attempt.status == "succeeded":
+            next_action = NextAction(code="CONTINUE_REQUIREMENT_CONVERSATION", label="继续补充创作需求")
+        else:
+            next_action = NextAction(code="AGENT_RUN_FAILED", label="查看本轮智能体失败原因")
     elif messages:
         next_action = NextAction(code="REQUIREMENT_READY_FOR_PLANNING", label="进入创意方案规划")
     else:

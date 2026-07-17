@@ -24,6 +24,7 @@ from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
 from v2.backend.app.providers import ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
 from v2.backend.app.providers.registry import ProviderAdapterRegistry
+from v2.backend.app.creation.agent_gateway import DeterministicCreativeAgentGateway, get_creative_agent_gateway
 
 
 @pytest.fixture()
@@ -32,8 +33,10 @@ def client():
     if TEST_RUNTIME.exists():
         import shutil
         shutil.rmtree(TEST_RUNTIME)
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: DeterministicCreativeAgentGateway()
     with TestClient(app) as test_client:
         yield test_client
+    app.dependency_overrides.pop(get_creative_agent_gateway, None)
     engine.dispose()
     TEST_DATABASE.unlink(missing_ok=True)
     if TEST_RUNTIME.exists():
@@ -96,6 +99,24 @@ def test_project_contract_and_explicit_confirmation(client: TestClient) -> None:
     assert processed.json()["status"] == "review_required"
     assert processed.json()["state_trigger"] == "legacy_validation_completed"
     assert processed.json()["work_items"][0]["status"] == "completed"
+
+
+def test_legacy_validation_with_invalid_project_state_blocks_item_without_stopping_worker(client: TestClient) -> None:
+    project = create_creation_project(client)
+    with SessionLocal() as session:
+        item = WorkItem(project_id=project["id"], kind="contract_validation", payload={}, status="queued")
+        session.add(item)
+        session.commit()
+        item_id = item.id
+
+    assert process_one("legacy-state-test-worker") is True
+
+    with SessionLocal() as session:
+        item = session.get(WorkItem, item_id)
+        current_project = session.get(Project, project["id"])
+        assert item is not None and item.status == "blocked"
+        assert item.error.startswith("LEGACY_PROJECT_STATE_INVALID:")
+        assert current_project is not None and current_project.status == "draft"
 
 
 def test_pending_decision_blocks_planning_until_explicit_resolution(client: TestClient) -> None:
@@ -300,10 +321,17 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
     assert latest_run["input_manifest"]["message_ids"] == [first_message.json()["id"]]
     assert latest_run["input_manifest"]["decision_ids"] == []
     assert latest_run["input_manifest"]["attachment_binding_ids"] == []
-    assert latest_run["input_manifest"]["system_config_version"] == "v2.creation.mock.v1"
+    assert latest_run["input_manifest"]["system_config_version"] == "v2.creation.test.v1"
+    assert latest_run["model_config_version_id"] == "model_config_test_creative"
+    assert latest_run["provider_request_id"] == "test-request"
+    assert latest_run["token_usage"] == {"total_tokens": 1}
     assert len(latest_run["input_manifest"]["input_hash"]) == 64
     assert latest_run == before_accept["agent_runs"][0]
     assert "raw_output" not in latest_run
+    assistant_messages = [item for item in before_accept["messages"] if item["role"] == "assistant"]
+    assert len(assistant_messages) == 1
+    assert assistant_messages[0]["reply_to_message_id"] == first_message.json()["id"]
+    assert assistant_messages[0]["agent_run_id"] == latest_run["id"]
 
     accept_command = {
         "command_id": "accept-command-001",

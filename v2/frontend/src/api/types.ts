@@ -179,6 +179,7 @@ export interface CreationMessage {
   role: string
   content: string
   reply_to_message_id: string | null
+  agent_run_id: string | null
   created_at: string
 }
 
@@ -202,11 +203,16 @@ export interface AgentRun {
   input_manifest_id: string
   model_provider: string
   model_name: string
+  production_config_version_id: string | null
+  model_config_version_id: string | null
+  provider_config_version_id: string | null
   prompt_contract_version: string
   output_schema_version: string
   parsed_candidate_id: string | null
   error_code: string | null
   error_detail: string | null
+  provider_request_id: string | null
+  token_usage: Record<string, unknown>
   started_at: string | null
   finished_at: string | null
   input_manifest: {

@@ -76,8 +76,8 @@ export function ProjectPage() {
   const center = useQuery({ queryKey: ['creation-center', projectId], queryFn: () => api.creationCenter(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   useEffect(() => { setCurrentProjectId(projectId); return () => setCurrentProjectId(null) }, [projectId, setCurrentProjectId])
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['creation-center', projectId] })
-  const addMessage = useMutation({ mutationFn: (content: string) => api.addMessage(projectId, content), onSuccess: async () => { setMessage(''); await refresh() } })
-  const generate = useMutation({ mutationFn: () => api.generateRequirementCandidate(projectId, center.data!.active_requirement.id), onSuccess: refresh })
+  const generate = useMutation({ mutationFn: () => api.generateRequirementCandidate(projectId, center.data!.active_requirement.id), onSettled: refresh })
+  const addMessage = useMutation({ mutationFn: (content: string) => api.addMessage(projectId, content), onSuccess: async () => { setMessage(''); await refresh(); generate.mutate() } })
   const accept = useMutation({ mutationFn: () => api.acceptRequirementCandidate(projectId, center.data!.current_candidate!.id, center.data!.active_requirement.id), onSuccess: refresh })
   const reject = useMutation({ mutationFn: () => api.rejectRequirementCandidate(projectId, center.data!.current_candidate!.id, '用户认为当前候选不符合创作方向'), onSuccess: refresh })
   const resolveClarification = useMutation({ mutationFn: (value: unknown) => {
@@ -124,11 +124,13 @@ export function ProjectPage() {
       <section className={styles.conversation}>
         <div className={styles.panelHeading}><div><MessageSquareText size={18} /><div><span>需求对话</span><h2>创作输入</h2></div></div><b>{creation.messages.length} 条消息</b></div>
         <div className={styles.messages}>
-          {creation.messages.length ? creation.messages.map(item => <article key={item.id}><span>你</span><div><p>{item.content}</p><small>{new Date(item.created_at).toLocaleString('zh-CN')}</small></div></article>) : <div className={styles.emptyMessages}><MessageSquareText size={25} /><strong>从明确的创作需求开始</strong><p>描述内容、受众或风格。未说出的可选信息会保持未指定。</p></div>}
+          {creation.messages.length ? creation.messages.map(item => <article key={item.id} data-role={item.role}><span>{item.role === 'assistant' ? 'AI' : item.role === 'system' ? '系统' : '你'}</span><div><p>{item.content}</p><small>{item.role === 'assistant' ? '创作智能体 · ' : ''}{new Date(item.created_at).toLocaleString('zh-CN')}</small></div></article>) : <div className={styles.emptyMessages}><MessageSquareText size={25} /><strong>从明确的创作需求开始</strong><p>描述内容、受众或风格。未说出的可选信息会保持未指定。</p></div>}
+          {generate.isPending && <article data-role="assistant" data-pending><span>AI</span><div><p>正在理解本轮需求…</p><small>只运行当前配置的创作模型</small></div></article>}
+          {generate.error && <article data-role="system" data-error><span>系统</span><div><p>本轮智能体没有返回回复：{generate.error.message}</p><small>没有自动重试，也没有切换模型</small></div></article>}
         </div>
         <form className={styles.composer} onSubmit={submit}>
           <textarea value={message} onChange={event => setMessage(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="继续补充创作要求…" rows={3} />
-          <div><button type="button" className="secondaryButton" onClick={() => fileInput.current?.click()} disabled={register.isPending}><Paperclip size={15} />{register.isPending ? '上传中…' : '上传附件'}</button><input ref={fileInput} hidden type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,video/mp4" onChange={event => { const file = event.target.files?.[0]; if (file) register.mutate(file); event.target.value = '' }} /><span>本阶段使用本地演示智能体，不产生模型或生产费用</span><button className="primaryButton" disabled={!message.trim() || addMessage.isPending}>发送<Send size={15} /></button></div>
+          <div><button type="button" className="secondaryButton" onClick={() => fileInput.current?.click()} disabled={register.isPending}><Paperclip size={15} />{register.isPending ? '上传中…' : '上传附件'}</button><input ref={fileInput} hidden type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,video/mp4" onChange={event => { const file = event.target.files?.[0]; if (file) register.mutate(file); event.target.value = '' }} /><span>发送后调用当前配置的创作模型；不会启动图片或视频生产</span><button className="primaryButton" disabled={!message.trim() || addMessage.isPending || generate.isPending}>发送<Send size={15} /></button></div>
         </form>
       </section>
 
@@ -177,6 +179,10 @@ export function ProjectPage() {
                   <div><dt>模型供应商</dt><dd>{run.model_provider}</dd></div>
                   <div><dt>提示词合同</dt><dd>{run.prompt_contract_version}</dd></div>
                   <div><dt>输出合同</dt><dd>{run.output_schema_version}</dd></div>
+                  <div><dt>模型配置版本</dt><dd>{run.model_config_version_id ?? '未记录'}</dd></div>
+                  <div><dt>供应商配置版本</dt><dd>{run.provider_config_version_id ?? '未记录'}</dd></div>
+                  <div><dt>供应商请求 ID</dt><dd>{run.provider_request_id ?? '未返回'}</dd></div>
+                  <div><dt>Token 用量</dt><dd>{Object.keys(run.token_usage).length ? JSON.stringify(run.token_usage) : '未返回'}</dd></div>
                   <div><dt>系统配置</dt><dd>{manifest?.system_config_version ?? '清单缺失'}</dd></div>
                   <div><dt>基础需求版本</dt><dd>{manifest?.base_requirement_version_id ?? '清单缺失'}</dd></div>
                   <div><dt>输入哈希</dt><dd>{manifest?.input_hash ?? '清单缺失'}</dd></div>

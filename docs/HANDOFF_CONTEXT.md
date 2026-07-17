@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-17 V2 Conversational Creation Sprint 48
+
+- Replaced the creation inbox behavior with one explicit configured-model call after each successfully saved user message.
+- Assistant replies are persisted as messages linked to exact AgentRuns; model/provider/config versions, provider request ID, input manifest, and token usage remain auditable.
+- Strict JSON output is validated without fence stripping, repair, retry, model switching, Provider substitution, or production execution.
+- Published configuration `production_config_5d3a7e46a72d4704bd8ded3d76dc2ab3` with a separate OpenAI-compatible DeepSeek provider. Existing workflow IDs and media specifications were preserved; legacy NodeInfo sources were normalized to the already-approved strict V2 bindings.
+- A real one-call acceptance on project `project_362dcdee277d4af2af8d3dd9667bbefd` returned and persisted an assistant greeting with exact request ID and token usage. Its empty-change smoke candidate was rejected so it does not block the user.
+- Legacy local validation now blocks its own WorkItem with `LEGACY_PROJECT_STATE_INVALID` when its declared Project transition is illegal; it does not mark success, alter the Project state, or terminate the Worker process.
+- Added `docs/V2_CONVERSATIONAL_CREATION_IMPLEMENTATION.md` and Alembic `20260717_19`.
+
 ## 2026-07-17 V2 Project Archiving Sprint 47
 
 - Added reversible project archiving as list-lifecycle metadata, explicitly separate from Project status, cancellation, and physical deletion.

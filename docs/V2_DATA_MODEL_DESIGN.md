@@ -123,6 +123,8 @@ Message: id, conversation_id, role, content, attachment_refs, created_at
 
 `Message` 是需求证据，不是生产合同。Agent 不能从未被需求版本或决策引用的历史消息补全生产字段。
 
+对话式创作的助手回复同样使用 `Message`，其中 `role=assistant`，并通过 `agent_run_id` 精确关联产生回复的 `AgentRun`。运行冻结 `production_config_version_id`、`model_config_version_id`、`provider_config_version_id`，同时保留供应商请求 ID 与 token 用量；秘密值和原始供应商响应不进入前端投影。
+
 ### 5.3 RequirementVersion
 
 ```text

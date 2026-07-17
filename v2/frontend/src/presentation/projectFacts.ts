@@ -123,6 +123,8 @@ const eventPresentations: Record<string, FactPresentation> = {
   'project.restored.v1': { title: '项目已恢复', description: '项目已重新回到默认工作列表，原制作状态保持不变。' },
   'requirement.confirmed.v1': { title: '需求版本已确认', description: '需求候选已成为正式且可追溯的需求版本。' },
   'conversation.message_added.v1': { title: '创作需求已保存', description: '用户新增的对话内容已写入项目。' },
+  'conversation.assistant_replied.v1': { title: '创作智能体已回复', description: '本轮助手回复已经保存并关联到精确运行记录。' },
+  'candidate.no_change.v1': { title: '本轮没有需求变更', description: '智能体已回复，但没有提出需要审核的结构化字段修改。' },
   'clarification.requested.v1': { title: '需求需要补充确认', description: '系统登记了一项必须由用户回答的需求问题。' },
   'clarification.resolved.v1': { title: '需求补充已确认', description: '用户回答已形成新的需求事实。' },
   'candidate.generated.v1': { title: '需求候选已生成', description: '智能体候选正在等待用户审核。' },

@@ -17,6 +17,7 @@ from ..db.models import (
 )
 from ..db.session import SessionLocal, create_schema
 from ..orchestration.project_transitions import (
+    ProjectStateConflictError,
     ProjectStateTrigger,
     block_project,
     transition_project,
@@ -277,14 +278,30 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
             selected.status = "completed"
             selected.row_version += 1
             if project:
-                transition_project(
-                    session,
-                    project,
-                    ProjectStateTrigger.LEGACY_VALIDATION_COMPLETED,
-                    actor_type="system",
-                    actor_id=owner,
-                    event_data={"work_item_id": selected.id},
-                )
+                try:
+                    transition_project(
+                        session,
+                        project,
+                        ProjectStateTrigger.LEGACY_VALIDATION_COMPLETED,
+                        actor_type="system",
+                        actor_id=owner,
+                        event_data={"work_item_id": selected.id},
+                    )
+                except ProjectStateConflictError as exc:
+                    selected.status = "blocked"
+                    selected.error = f"LEGACY_PROJECT_STATE_INVALID: {exc}"
+                    _event(session, ProjectEvent(
+                        project_id=project.id,
+                        event_type="work.blocked.v1",
+                        aggregate_type="work_item",
+                        aggregate_id=selected.id,
+                        actor_type="worker",
+                        actor_id=owner,
+                        message="Legacy validation could not apply its declared project-state transition.",
+                        data={"work_item_id": selected.id, "error_code": "LEGACY_PROJECT_STATE_INVALID"},
+                    ))
+                    session.commit()
+                    return True
                 _event(session, ProjectEvent(
                     project_id=project.id,
                     event_type="contract.validated.v1",

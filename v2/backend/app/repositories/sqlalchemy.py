@@ -385,7 +385,10 @@ class SqlAlchemyCreationRepository:
 
     def manifest_messages(self, project_id: str) -> list[Message]:
         return list(self.session.scalars(
-            select(Message).where(Message.project_id == project_id).order_by(Message.created_at, Message.id)
+            select(Message).where(
+                Message.project_id == project_id,
+                Message.role == "user",
+            ).order_by(Message.created_at, Message.id)
         ))
 
     def confirmed_bindings(self, project_id: str) -> list[AttachmentBinding]:

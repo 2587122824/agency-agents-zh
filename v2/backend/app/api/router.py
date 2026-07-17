@@ -93,6 +93,7 @@ from ..creation.service import (
     reject_candidate,
     resolve_clarification,
 )
+from ..creation.agent_gateway import AgentGatewayError, CreativeAgentGateway, get_creative_agent_gateway
 from ..db.session import get_session
 from ..decisions.service import DecisionConflictError, add_decision, resolve_decision
 from ..events.service import project_event_stream
@@ -1050,13 +1051,20 @@ def creation_message_add(project_id: str, payload: MessageCreate, session: Sessi
 def requirement_candidate_generate(
     project_id: str,
     payload: GenerateCandidate,
+    gateway: CreativeAgentGateway = Depends(get_creative_agent_gateway),
     session: Session = Depends(get_session),
 ):
     project = require_project(session, project_id)
     try:
-        return generate_candidate(session, project, payload)
+        return generate_candidate(session, project, payload, gateway)
     except CreationConflictError as exc:
         raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
 
 
 @router.post(
