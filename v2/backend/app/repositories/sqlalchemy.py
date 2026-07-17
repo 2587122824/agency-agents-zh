@@ -1246,7 +1246,11 @@ class SqlAlchemyControlRepository:
         ))
 
     def cost_events(self, project_id: str) -> list[CostEvent]:
-        return list(self.session.scalars(select(CostEvent).where(CostEvent.project_id == project_id)))
+        return list(self.session.scalars(
+            select(CostEvent)
+            .where(CostEvent.project_id == project_id)
+            .order_by(CostEvent.occurred_at.desc(), CostEvent.id.desc())
+        ))
 
     def dag_nodes(self, snapshot_id: str) -> list[DAGNode]:
         return list(self.session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot_id)))
@@ -1303,10 +1307,18 @@ class SqlAlchemyControlRepository:
         )
         return bool(brief_id or shot_plan_id)
 
-    def events(self, project_id: str, *, limit: int = 20) -> list[ProjectEvent]:
+    def events(
+        self,
+        project_id: str,
+        *,
+        limit: int = 20,
+        before_sequence: int | None = None,
+    ) -> list[ProjectEvent]:
+        statement = select(ProjectEvent).where(ProjectEvent.project_id == project_id)
+        if before_sequence is not None:
+            statement = statement.where(ProjectEvent.project_sequence < before_sequence)
         return list(self.session.scalars(
-            select(ProjectEvent)
-            .where(ProjectEvent.project_id == project_id)
+            statement
             .order_by(ProjectEvent.project_sequence.desc())
             .limit(limit)
         ))

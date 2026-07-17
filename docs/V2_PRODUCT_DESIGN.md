@@ -483,6 +483,7 @@ DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表
 - 当前阻断原因、责任模块及受影响下游
 - 已发生费用、已退款费用和待确认的预计费用
 - 最近事件和实际供应商路由
+- 可分页查看完整事件信封和逐笔费用事实
 - 唯一明确的下一步操作，例如“确认方案”“审核 3 个素材”或“选择要重做的镜头”
 
 控制台状态来自后端状态评估器和持久事件，不能由员工文本、前端计数或供应商任务状态直接推断。
@@ -493,12 +494,17 @@ DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表
 
 阻断按记录类型收集，包括快照执行阻断、blocked WorkItem、blocked QCReport 和 blocked DeliveryAttempt；不得通过错误文案关键词归类。供应商、适配器、工作流和任务 ID 只读取已冻结的 WorkAttempt 请求清单与执行记录。费用按币种分别汇总，不跨币种折算，也不把预计费用显示为实际扣费。
 
+“当前阻断”和“最近事件”的主要界面使用普通中文名称与说明。翻译只按结构化 `error_code` 或 `event_type` 精确查表，不解析英文消息、不推断状态；未知类型显示中性的“需要处理的项目问题”或“项目新增一条记录”。原始代码、事件类型、历史消息和证据完整保留在默认收起的技术详情中。
+
 首期查询接口：
 
 ```text
 GET /api/v1/project-controls
 GET /api/v1/projects/{project_id}/control-center
+GET /api/v1/projects/{project_id}/audit-ledger?limit=50&before_sequence={sequence}
 ```
+
+审计账本使用项目内 `project_sequence` 倒序读取，下一页只接受明确的 `before_sequence` 并查询更小序号。费用区域展示全部原始 CostEvent；逐节点预计费用不得在明细中合并成一条伪造记录。该查询不创建事件、费用、命令回执或任何执行任务。详细实现见 [V2 费用与事件审计账本实现](./V2_AUDIT_LEDGER_IMPLEMENTATION.md)。
 
 ## 17. 技术架构
 

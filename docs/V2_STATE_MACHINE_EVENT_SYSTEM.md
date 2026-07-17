@@ -715,6 +715,8 @@ requirements
 - 评估器不依赖 Session/Repository，重复输入结果相同且不修改输入事实。
 - 本节实现不代表第 3 节的权威状态转移器已经完成；现有 Project.status 写入点尚未迁移。
 
+完整事件账本是同一事件流的只读分页投影。`GET /projects/{project_id}/audit-ledger` 不消费事件、不更新 Outbox、不推进项目状态；重复读取相同游标得到相同序号范围。前端中文名称只由精确 `event_type` 映射产生，历史 `message` 和完整信封仍保留在技术详情，不能用消息文本判断阻断、恢复或下一步。
+
 ## 22. 实体注册表查询边界
 
 实体资产库没有独立状态机，也不产生事件。`GET /entity-registry` 和来源附件读取只投影已存在的 Entity、EntityVersion、AttachmentBinding、Shot 与 SnapshotEntityVersion 记录。

@@ -1,9 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileCheck2, GitBranch, Network, RefreshCw, Route, Workflow } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileCheck2, GitBranch, Network, ReceiptText, RefreshCw, Route, Workflow } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import { PageHeader } from '../components/PageHeader'
+import { blockerPresentation, eventPresentation } from '../presentation/projectFacts'
 import styles from './ProjectControlPage.module.css'
 
 function timestamp(value: string | null) {
@@ -25,7 +26,7 @@ export function ProjectControlPage() {
   const data = control.data
 
   return <>
-    <PageHeader eyebrow="PROJECT CONTROL" title={data?.title ?? '项目控制台'} description={data?.core_topic ?? '读取项目权威状态与执行证据。'} actions={<><button className="secondaryButton" onClick={refresh}><RefreshCw size={14} />刷新</button>{data && <Link className="secondaryButton" to={`/projects/${projectId}/decision-impact`}><Network size={14} />决策影响</Link>}{data && <Link className="primaryButton" to={data.next_action.path}>{data.next_action.label}<ArrowRight size={14} /></Link>}</>} />
+    <PageHeader eyebrow="PROJECT CONTROL" title={data?.title ?? '项目控制台'} description={data?.core_topic ?? '读取项目权威状态与执行证据。'} actions={<><button className="secondaryButton" onClick={refresh}><RefreshCw size={14} />刷新</button>{data && <Link className="secondaryButton" to={`/projects/${projectId}/audit`}><ReceiptText size={14} />费用与事件</Link>}{data && <Link className="secondaryButton" to={`/projects/${projectId}/decision-impact`}><Network size={14} />决策影响</Link>}{data && <Link className="primaryButton" to={data.next_action.path}>{data.next_action.label}<ArrowRight size={14} /></Link>}</>} />
     <main className={styles.page}>
       {control.isPending && <div className={styles.empty}>正在读取项目状态...</div>}
       {control.error && <div className={styles.error}>{control.error.message}</div>}
@@ -56,9 +57,9 @@ export function ProjectControlPage() {
           <section className={styles.blockers}>
             <header><div><span>BLOCKERS</span><h3>当前阻断</h3></div><b>{data.blockers.length}</b></header>
             {!data.blockers.length && <div className={styles.clear}><CheckCircle2 /><span>没有持久化阻断证据</span></div>}
-            {data.blockers.map((item, index) => <article key={`${item.source_type}-${item.source_id}-${item.code}-${index}`}>
-              <AlertTriangle /><div><strong>{item.code}</strong><small>{item.source_type} · {item.source_id}</small><p>{item.message}</p>{item.affected_node_keys.length > 0 && <em>影响：{item.affected_node_keys.join('、')}</em>}<details><summary>证据</summary><pre>{JSON.stringify(item.evidence, null, 2)}</pre></details></div>
-            </article>)}
+            {data.blockers.map((item, index) => { const presentation = blockerPresentation(item.code); return <article key={`${item.source_type}-${item.source_id}-${item.code}-${index}`}>
+              <AlertTriangle /><div><strong>{presentation.title}</strong><p>{presentation.description}</p>{item.affected_node_keys.length > 0 && <em>影响：{item.affected_node_keys.join('、')}</em>}<details><summary>技术详情</summary><code>{item.code} · {item.source_type} · {item.source_id}</code><p>{item.message}</p><pre>{JSON.stringify(item.evidence, null, 2)}</pre></details></div>
+            </article> })}
           </section>
 
           <section className={styles.costs}>
@@ -76,7 +77,7 @@ export function ProjectControlPage() {
         <section className={styles.events}>
           <header><div><span>RECENT EVENTS</span><h3>最近事件</h3></div><b>{data.recent_events.length}</b></header>
           {!data.recent_events.length && <div className={styles.clear}><Clock3 /><span>尚无项目事件</span></div>}
-          {data.recent_events.map(event => <article key={event.sequence}><i><GitBranch /></i><div><strong>{event.event_type}</strong><p>{event.message}</p><small>#{event.sequence} · {timestamp(event.created_at)}</small></div><details><summary>数据</summary><pre>{JSON.stringify(event.data, null, 2)}</pre></details></article>)}
+          {data.recent_events.map(event => { const presentation = eventPresentation(event.event_type); return <article key={event.sequence}><i><GitBranch /></i><div><strong>{presentation.title}</strong><p>{presentation.description}</p><small>#{event.sequence} · {timestamp(event.created_at)}</small></div><details><summary>技术详情</summary><code>{event.event_type}</code><p>{event.message}</p><pre>{JSON.stringify(event.data, null, 2)}</pre></details></article> })}
         </section>
       </>}
     </main>

@@ -562,7 +562,13 @@ class ControlRepository(Protocol):
 
     def has_planning_candidate(self, project_id: str) -> bool: ...
 
-    def events(self, project_id: str, *, limit: int = 20) -> list[ProjectEvent]: ...
+    def events(
+        self,
+        project_id: str,
+        *,
+        limit: int = 20,
+        before_sequence: int | None = None,
+    ) -> list[ProjectEvent]: ...
 
     def projects(self) -> list[Project]: ...
 

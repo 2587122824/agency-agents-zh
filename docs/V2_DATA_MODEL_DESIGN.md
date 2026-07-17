@@ -921,6 +921,10 @@ ProjectEvent
 
 执行路由来自不可变的 `WorkAttempt.request_manifest`，供应商任务 ID 来自 WorkAttempt；控制台不从 DAG 名称、员工输出或错误文本推断路由。阻断来源使用 `source_type + source_id + code + evidence`，费用按 CostEvent 的原始币种和 kind/status 聚合。查询不创建事件、不提交事务、不修复状态。
 
+`ProjectAuditLedgerView` 继续使用相同 ControlRepository，只读返回完整 ProjectEvent 信封和原始 CostEvent。事件按项目内 `project_sequence DESC` 排序，`before_sequence` 只读取更小序号，并用 `limit + 1` 判断是否存在下一页；不得使用全局数据库主键、创建时间或前端数组位置充当游标。费用事件按 `occurred_at DESC, id DESC` 确定性排序，预计、扣费、调整和退款逐笔保留，不覆盖原记录，也不跨币种换算。
+
+事件信封返回 `event_id / snapshot_id / event_type / aggregate / causation / correlation / actor / schema_version / message / data / created_at`。中文名称属于前端精确类型词典，不写回 ProjectEvent，也不改变事件含义；未知类型不解析 message 猜测语义。
+
 ## 23. 素材联络表只读投影
 
 素材联络表不新增持久化实体。`MaterialContactSheetView` 从项目当前活动快照的既有权威记录构建：

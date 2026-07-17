@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-17 V2 Audit Ledger and Chinese Fact Presentation Sprint 44
+
+- Added a read-only project audit ledger with deterministic project-sequence pagination, complete persisted event envelopes, per-currency summaries, and every original CostEvent.
+- Cost details preserve each priced DAG-node estimate instead of merging records. Pending/disputed amounts remain outside confirmed totals and currencies are never converted.
+- Added one shared frontend presentation dictionary for structured blocker codes and event types. Project control, production queue, recent events, and the full ledger now show ordinary Chinese names/descriptions; raw codes, historical messages, IDs, and evidence remain in collapsed technical details.
+- Unknown codes/types receive neutral Chinese presentation and are never classified by parsing error or event message text.
+- The ledger is GET-only and creates no event, cost, command receipt, WorkItem, attempt, Provider call, retry, route change, state transition, or fallback.
+- Added `docs/V2_AUDIT_LEDGER_IMPLEMENTATION.md` and updated product, data-model, state/event, project-control, and implementation-status documents.
+- Verification completed with 124 backend tests, Python compileall, Vite production build, runtime/head Alembic `20260717_17`, two-page event cursor checks, exact per-node cost facts, desktop and 390px control/ledger checks, Chinese default blocker/event copy, hidden raw technical evidence, no horizontal overflow, no browser console errors, and healthy API/Worker after restart. External execution remains unset.
+
 ## 2026-07-17 V2 Agent Run Audit Sprint 43
 
 - Added a read-only intelligent-agent run audit projection to the creation center. Each run now includes its exact persisted input-manifest summary: base requirement version, message IDs, confirmed decision IDs, attachment binding IDs, system configuration version, input hash, and creation time.

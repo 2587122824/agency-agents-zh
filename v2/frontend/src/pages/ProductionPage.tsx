@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { api } from '../api/client'
 import type { ProductionExecution } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
+import { blockerPresentation } from '../presentation/projectFacts'
 import styles from './StagePage.module.css'
 
 const terminal = new Set(['completed', 'blocked'])
@@ -17,11 +18,6 @@ const statusLabels: Record<string, string> = {
 
 const kindLabels: Record<string, string> = {
   generate_keyframe: '生成分镜图片', generate_i2v_clip: '生成视频片段', generate_tts_audio: '生成配音', assemble_timeline_contract: '整理剪辑时间线', contract_validation: '检查制作合同',
-}
-
-const blockerLabels: Record<string, { title: string; description: string }> = {
-  PROVIDER_ADAPTER_NOT_CONNECTED: { title: '生成服务尚未接通', description: '这一步没有向外部服务发送请求，也没有产生真实制作费用。' },
-  DEPENDENCY_BLOCKED: { title: '前置素材还没有完成', description: '这一步依赖前面的图片或视频，需先解决上游制作问题。' },
 }
 
 const label = (value: string | null | undefined, labels: Record<string, string>, fallback: string) => value ? labels[value] ?? fallback : fallback
@@ -84,15 +80,15 @@ export function ProductionPage() {
           {execution.data && <>
             <header className={styles.executionHeader}><div><span>制作方案 {execution.data.snapshot?.snapshot_number ?? '-'}</span><h2>{label(execution.data.project_status, statusLabels, '制作状态待确认')}</h2></div><div><strong>{execution.data.work_items.filter(item => item.status === 'completed').length}/{execution.data.work_items.length}</strong><small>已完成步骤</small></div></header>
             {groupBlockers(execution.data.blockers).map((group, index) => {
-              const presentation = group.errorCode ? blockerLabels[group.errorCode] : undefined
+              const presentation = blockerPresentation(group.errorCode ?? '')
               const countLabel = group.blockers.length > 1 ? `，影响 ${group.blockers.length} 个步骤` : ''
-              return <div className={styles.blocker} key={group.errorCode ?? group.blockers[0].work_item_id}><AlertTriangle size={16} /><div><strong>{presentation?.title ?? `制作问题 ${index + 1}`}{countLabel}</strong><span>{presentation?.description ?? '请展开技术详情查看系统返回的信息。'}</span><details><summary>技术详情（{group.blockers.length}）</summary><div className={styles.blockerDetails}>{group.blockers.map(blocker => <code key={blocker.work_item_id}>{blocker.error_code ?? 'NO_ERROR_CODE'} · {blocker.node_key} · {blocker.error ?? '没有错误说明'}</code>)}</div></details></div></div>
+              return <div className={styles.blocker} key={group.errorCode ?? group.blockers[0].work_item_id}><AlertTriangle size={16} /><div><strong>{presentation.title}{countLabel || (group.errorCode ? '' : ` ${index + 1}`)}</strong><span>{presentation.description}</span><details><summary>技术详情（{group.blockers.length}）</summary><div className={styles.blockerDetails}>{group.blockers.map(blocker => <code key={blocker.work_item_id}>{blocker.error_code ?? 'NO_ERROR_CODE'} · {blocker.node_key} · {blocker.error ?? '没有错误说明'}</code>)}</div></details></div></div>
             })}
             <div className={styles.workList}>{execution.data.work_items.map((item, index) => {
               const attempt = item.attempts.at(-1)
               return <article key={item.id} data-status={item.status}>
                 <span className={styles.nodeState}>{item.status === 'completed' ? <CheckCircle2 /> : item.status === 'blocked' ? <AlertTriangle /> : <Clock3 />}</span>
-                <div className={styles.nodeMain}><strong>步骤 {index + 1} · {label(item.kind, kindLabels, '制作素材')}</strong><span>{item.status === 'blocked' ? (blockerLabels[attempt?.error_code ?? '']?.title ?? '需要处理') : label(attempt?.state ?? item.status, statusLabels, '等待更新')}</span><details><summary>技术详情</summary><code>{item.node_key} · {item.kind} · {item.request_fingerprint.slice(0, 16)} · {attempt?.provider ?? 'NO_PROVIDER'}</code></details></div>
+                <div className={styles.nodeMain}><strong>步骤 {index + 1} · {label(item.kind, kindLabels, '制作素材')}</strong><span>{item.status === 'blocked' ? blockerPresentation(attempt?.error_code ?? '').title : label(attempt?.state ?? item.status, statusLabels, '等待更新')}</span><details><summary>技术详情</summary><code>{item.node_key} · {item.kind} · {item.request_fingerprint.slice(0, 16)} · {attempt?.provider ?? 'NO_PROVIDER'}</code></details></div>
                 <div className={styles.attempt}><small>第 {attempt?.attempt_number ?? 0} 次执行</small><strong>{label(attempt?.state ?? item.status, statusLabels, '等待更新')}</strong><span>{attempt?.provider ? '已指定生成服务' : '尚未指定服务'}</span></div>
                 <em>{label(item.status, statusLabels, '等待更新')}</em>
               </article>

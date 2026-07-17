@@ -80,10 +80,45 @@ class ControlRoute(BaseModel):
 
 class ControlEvent(BaseModel):
     sequence: int
+    event_id: str
+    snapshot_id: str | None
     event_type: str
+    aggregate_type: str
+    aggregate_id: str
+    causation_id: str | None
+    correlation_id: str
+    actor_type: str
+    actor_id: str
+    schema_version: int
     message: str
     data: dict
     created_at: datetime
+
+
+class ControlCostEvent(BaseModel):
+    id: str
+    snapshot_id: str
+    work_attempt_id: str | None
+    provider: str
+    provider_operation: str
+    kind: str
+    amount: float
+    currency: str
+    provider_reference: str | None
+    status: str
+    occurred_at: datetime
+
+
+class ProjectAuditLedgerView(BaseModel):
+    project_id: str
+    project_title: str
+    event_limit: int
+    before_sequence: int | None
+    has_more_events: bool
+    next_before_sequence: int | None
+    events: list[ControlEvent]
+    cost_summaries: list[ControlCostCurrency]
+    cost_events: list[ControlCostEvent]
 
 
 class ProjectControlView(ProjectControlSummary):

@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -20,6 +20,7 @@ export const api = {
   projects: () => request<Project[]>('/projects'),
   projectControls: () => request<ProjectControlSummary[]>('/project-controls'),
   projectControl: (id: string) => request<ProjectControl>(`/projects/${id}/control-center`),
+  projectAuditLedger: (id: string, beforeSequence: number | null = null) => request<ProjectAuditLedger>(`/projects/${id}/audit-ledger?limit=50${beforeSequence === null ? '' : `&before_sequence=${beforeSequence}`}`),
   contactSheet: (id: string) => request<MaterialContactSheet>(`/projects/${id}/contact-sheet`),
   decisionImpactGraph: (id: string) => request<DecisionImpactGraph>(`/projects/${id}/decision-impact-graph`),
   decisionChangeImpacts: (id: string) => request<DecisionChangeImpactWorkspace>(`/projects/${id}/decision-change-impact-analyses`),

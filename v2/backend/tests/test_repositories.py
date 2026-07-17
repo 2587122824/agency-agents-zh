@@ -2314,6 +2314,11 @@ def test_control_repository_contract_preserves_authority_scope_history_and_order
                 event_three.sequence,
                 event_two.sequence,
             ]
+            assert [row.sequence for row in control.events(
+                project.id,
+                limit=2,
+                before_sequence=event_three.project_sequence,
+            )] == [event_two.sequence, event_one.sequence]
             assert [row.id for row in control.projects()] == [project.id, other.id]
             assert control.attempts_for_items([]) == []
     finally:

@@ -76,6 +76,25 @@ def _costs(repository: ControlRepository, project: Project) -> list[dict]:
     return [{"currency": currency, **values} for currency, values in sorted(totals.items())]
 
 
+def _event_read(event: ProjectEvent) -> dict:
+    return {
+        "sequence": event.project_sequence,
+        "event_id": event.event_id,
+        "snapshot_id": event.snapshot_id,
+        "event_type": event.event_type,
+        "aggregate_type": event.aggregate_type,
+        "aggregate_id": event.aggregate_id,
+        "causation_id": event.causation_id,
+        "correlation_id": event.correlation_id,
+        "actor_type": event.actor_type,
+        "actor_id": event.actor_id,
+        "schema_version": event.schema_version,
+        "message": event.message,
+        "data": event.data,
+        "created_at": event.created_at,
+    }
+
+
 def _blockers(
     repository: ControlRepository,
     session: Session,
@@ -261,16 +280,7 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
         "costs": _costs(repository, project),
         "blockers": blockers,
         "routes": routes,
-        "recent_events": [{
-            "sequence": event.project_sequence,
-            "event_id": event.event_id,
-            "event_type": event.event_type,
-            "aggregate_type": event.aggregate_type,
-            "aggregate_id": event.aggregate_id,
-            "message": event.message,
-            "data": event.data,
-            "created_at": event.created_at,
-        } for event in events],
+        "recent_events": [_event_read(event) for event in events],
     })
     return result
 
@@ -282,3 +292,44 @@ def project_controls(session: Session) -> list[dict]:
 
 def project_control_view(session: Session, project: Project) -> dict:
     return _project_control(session, project, True)
+
+
+def project_audit_ledger(
+    session: Session,
+    project: Project,
+    *,
+    before_sequence: int | None,
+    limit: int,
+) -> dict:
+    repository = SqlAlchemyControlRepository(session)
+    event_rows = repository.events(
+        project.id,
+        limit=limit + 1,
+        before_sequence=before_sequence,
+    )
+    has_more = len(event_rows) > limit
+    page = event_rows[:limit]
+    cost_rows = repository.cost_events(project.id)
+    return {
+        "project_id": project.id,
+        "project_title": project.title,
+        "event_limit": limit,
+        "before_sequence": before_sequence,
+        "has_more_events": has_more,
+        "next_before_sequence": page[-1].project_sequence if has_more and page else None,
+        "events": [_event_read(event) for event in page],
+        "cost_summaries": _costs(repository, project),
+        "cost_events": [{
+            "id": event.id,
+            "snapshot_id": event.snapshot_id,
+            "work_attempt_id": event.work_attempt_id,
+            "provider": event.provider,
+            "provider_operation": event.provider_operation,
+            "kind": event.kind,
+            "amount": event.amount,
+            "currency": event.currency,
+            "provider_reference": event.provider_reference,
+            "status": event.status,
+            "occurred_at": event.occurred_at,
+        } for event in cost_rows],
+    }

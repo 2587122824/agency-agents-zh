@@ -986,7 +986,50 @@ export interface ProjectControl extends ProjectControlSummary {
   costs: Array<{ currency: string; estimated_confirmed: number; charged_confirmed: number; adjusted_confirmed: number; refunded_confirmed: number; pending_event_count: number }>
   blockers: Array<{ source_type: string; source_id: string; code: string; message: string; evidence: Record<string, unknown>; affected_node_keys: string[] }>
   routes: Array<{ work_item_id: string; work_item_status: string; node_key: string | null; attempt_id: string; attempt_number: number; attempt_state: string; provider: string; adapter_kind: string | null; provider_workflow_id: string | null; provider_task_id: string | null; request_fingerprint: string; error_code: string | null }>
-  recent_events: Array<{ sequence: number; event_id: string; event_type: string; aggregate_type: string; aggregate_id: string; message: string; data: Record<string, unknown>; created_at: string }>
+  recent_events: AuditEvent[]
+}
+
+export interface AuditEvent {
+  sequence: number
+  event_id: string
+  snapshot_id: string | null
+  event_type: string
+  aggregate_type: string
+  aggregate_id: string
+  causation_id: string | null
+  correlation_id: string
+  actor_type: string
+  actor_id: string
+  schema_version: number
+  message: string
+  data: Record<string, unknown>
+  created_at: string
+}
+
+export interface AuditCostEvent {
+  id: string
+  snapshot_id: string
+  work_attempt_id: string | null
+  provider: string
+  provider_operation: string
+  kind: 'estimated' | 'charged' | 'adjusted' | 'refunded'
+  amount: number
+  currency: string
+  provider_reference: string | null
+  status: 'pending' | 'confirmed' | 'disputed'
+  occurred_at: string
+}
+
+export interface ProjectAuditLedger {
+  project_id: string
+  project_title: string
+  event_limit: number
+  before_sequence: number | null
+  has_more_events: boolean
+  next_before_sequence: number | null
+  events: AuditEvent[]
+  cost_summaries: ProjectControl['costs']
+  cost_events: AuditCostEvent[]
 }
 
 export interface RegistryAttachment {

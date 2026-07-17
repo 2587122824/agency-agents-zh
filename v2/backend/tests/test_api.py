@@ -2031,6 +2031,53 @@ def test_project_control_exposes_exact_production_route_cost_and_blocker(client:
         "pending_event_count": 0,
     }]
     assert any(event["event_type"] == "production.work_finished.v1" for event in control["recent_events"])
+    recent_event = control["recent_events"][0]
+    assert recent_event["event_id"].startswith("event_")
+    assert recent_event["aggregate_type"]
+    assert recent_event["aggregate_id"]
+    assert recent_event["correlation_id"]
+    assert recent_event["actor_type"]
+    assert recent_event["actor_id"]
+    assert recent_event["schema_version"] == 1
+
+    with SessionLocal() as session:
+        before_ledger_read = (
+            len(list(session.scalars(select(ProjectEvent).where(ProjectEvent.project_id == project["id"])))),
+            len(list(session.scalars(select(CostEvent).where(CostEvent.project_id == project["id"])))),
+        )
+    first_ledger = client.get(f"/api/v1/projects/{project['id']}/audit-ledger?limit=2")
+    assert first_ledger.status_code == 200
+    first_page = first_ledger.json()
+    assert first_page["project_id"] == project["id"]
+    assert first_page["event_limit"] == 2
+    assert first_page["before_sequence"] is None
+    assert len(first_page["events"]) == 2
+    assert first_page["events"][0]["sequence"] > first_page["events"][1]["sequence"]
+    assert first_page["has_more_events"] is True
+    assert first_page["next_before_sequence"] == first_page["events"][-1]["sequence"]
+    assert first_page["cost_summaries"] == control["costs"]
+    priced_nodes = [node for node in activated["nodes"] if node["estimated_cost"] is not None]
+    assert len(first_page["cost_events"]) == len(priced_nodes)
+    assert {event["kind"] for event in first_page["cost_events"]} == {"estimated"}
+    assert {event["status"] for event in first_page["cost_events"]} == {"confirmed"}
+    assert round(sum(event["amount"] for event in first_page["cost_events"]), 6) == 0.9
+
+    second_ledger = client.get(
+        f"/api/v1/projects/{project['id']}/audit-ledger"
+        f"?limit=2&before_sequence={first_page['next_before_sequence']}"
+    ).json()
+    assert all(
+        event["sequence"] < first_page["next_before_sequence"]
+        for event in second_ledger["events"]
+    )
+    assert not ({event["event_id"] for event in first_page["events"]}
+                & {event["event_id"] for event in second_ledger["events"]})
+    with SessionLocal() as session:
+        after_ledger_read = (
+            len(list(session.scalars(select(ProjectEvent).where(ProjectEvent.project_id == project["id"])))),
+            len(list(session.scalars(select(CostEvent).where(CostEvent.project_id == project["id"])))),
+        )
+    assert after_ledger_read == before_ledger_read
 
 
 def test_asset_registration_verification_qc_and_human_approval_are_explicit(client: TestClient) -> None:
