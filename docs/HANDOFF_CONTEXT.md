@@ -8,7 +8,7 @@
 - Reworked the settings workflow input editor to use ordinary Chinese source/type names and a separate fixed-value field that emits strict `literal:<JSON>`. Unsupported historical values remain visible as legacy and are never converted automatically.
 - Added `docs/V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md` and updated the product, implementation-status, RunningHub, Provider-foundation, and handoff documents.
 - No configuration version was mutated or published. No credential was written, no execution flag was enabled, no network request or Provider task occurred, and no fee was incurred.
-- Verification before release: 117 backend tests passed; compileall, frontend production build, Alembic current/head at `20260717_16`, and diff audit passed. Browser checks covered the four readiness facts and legacy-source labels at desktop and 390px widths with no horizontal overflow. Commit/push and the final `8766` restart remain release steps.
+- Verification completed with 117 backend tests, compileall, frontend production build, Alembic current/head at `20260717_16`, and diff audit. Browser checks covered the four readiness facts and legacy-source labels at desktop and 390px widths with no horizontal overflow. Commit `7184b8d9` was pushed to `main`; the final `8766` API/Worker restart, health/readiness check, and error-log check passed.
 
 ## 2026-07-17 V2 RunningHub Adapter Sprint 39
 
