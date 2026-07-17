@@ -1,5 +1,14 @@
 # Handoff Context
 
+## 2026-07-17 V2 Shot Generation Input Contract Proposal Sprint 41
+
+- Audited the current Shot-to-RunningHub authority chain. Shot has only action/composition and entity version IDs; snapshots do not freeze exact reference attachment facts; the image adapter has no explicit entity-reference upload contract.
+- Documented why mapping legacy prompt nodes to `shot.action` or choosing the first entity would create a hidden fallback and would not solve identity consistency.
+- Added `docs/V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md` with the recommended `shot-plan.v2` fields, explicit primary-reference rules, attachment freezing, WorkRequest v3 shape, optional-binding semantics, non-semantic migration, UI, state boundaries, impact scope, and acceptance tests.
+- This is a proposal awaiting user confirmation. No schema, model, API, configuration, snapshot, adapter, Worker, runtime data, or external-execution behavior changed.
+- No historical plan or configuration was mutated; no credential, network call, Provider task, or fee was involved.
+- Documentation review, diff audit, commit, and push remain.
+
 ## 2026-07-17 V2 Provider Connection Preparation Sprint 40
 
 - Extended the read-only Provider readiness projection into four independent checks: adapter registration, strict configuration compatibility, backend credential availability, and external-execution authorization. The endpoint still performs no network probe and returns no secret value or environment variable name.

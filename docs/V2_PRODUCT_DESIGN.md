@@ -890,6 +890,8 @@ RunningHub 的 WorkAttempt 必须使用 `production-work-request.v2` 冻结 Prov
 
 配置发布校验和连接准备检查必须共用同一 RunningHub NodeInfoList 合同校验器。设置页用普通名称选择镜头字段、视频规格、单父关键帧或固定值；固定值由界面编码为严格 `literal:<JSON>`。历史旧来源只显示“不兼容并需创建新版本”，禁止自动转换。完整实现见 [V2 生成服务连接准备实现](./V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md)。
 
+严格关键帧生产仍缺完整视觉描述、可空负向描述和显式主参考实体附件合同。该边界会改变 Shot、快照和 WorkRequest 版本，当前只形成 [V2 分镜生成输入合同提案](./V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md)，等待用户确认；提案不得被视为已实现功能或用于自动迁移历史方案。
+
 ### 30.5 视频与音频规格
 
 视频规格至少定义：
