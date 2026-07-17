@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Bot, Check, CheckCircle2, ChevronDown, CircleAlert, Clock3, FileAudio, FileImage, History, Link2, MessageSquareText, Paperclip, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
-import { FormEvent, useEffect, useRef, useState } from 'react'
+import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { api } from '../api/client'
@@ -87,7 +87,22 @@ export function ProjectPage() {
   const register = useMutation({ mutationFn: (file: File) => api.registerAttachment(projectId, file), onSuccess: refresh })
   const bind = useMutation({ mutationFn: ({ attachmentId, type }: { attachmentId: string; type: 'identity_reference' | 'voice_sample' | 'inspiration_only' }) => api.bindAttachment(projectId, attachmentId, type, type === 'identity_reference' ? 'char_main' : type === 'voice_sample' ? 'voice_main' : undefined), onSuccess: refresh })
 
-  function submit(event: FormEvent) { event.preventDefault(); if (message.trim()) addMessage.mutate(message.trim()) }
+  function sendMessage() {
+    const content = message.trim()
+    if (!content || addMessage.isPending) return
+    addMessage.mutate(content)
+  }
+
+  function submit(event: FormEvent) {
+    event.preventDefault()
+    sendMessage()
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229) return
+    event.preventDefault()
+    sendMessage()
+  }
   if (project.isPending || center.isPending) return <div className={styles.loading}>正在读取创作中心…</div>
   if (project.error || center.error || !project.data || !center.data) return <div className={styles.loading}>创作中心读取失败：{project.error?.message || center.error?.message}</div>
   const data = project.data
@@ -112,7 +127,7 @@ export function ProjectPage() {
           {creation.messages.length ? creation.messages.map(item => <article key={item.id}><span>你</span><div><p>{item.content}</p><small>{new Date(item.created_at).toLocaleString('zh-CN')}</small></div></article>) : <div className={styles.emptyMessages}><MessageSquareText size={25} /><strong>从明确的创作需求开始</strong><p>描述内容、受众或风格。未说出的可选信息会保持未指定。</p></div>}
         </div>
         <form className={styles.composer} onSubmit={submit}>
-          <textarea value={message} onChange={event => setMessage(event.target.value)} placeholder="继续补充创作要求…" rows={3} />
+          <textarea value={message} onChange={event => setMessage(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="继续补充创作要求…" rows={3} />
           <div><button type="button" className="secondaryButton" onClick={() => fileInput.current?.click()} disabled={register.isPending}><Paperclip size={15} />{register.isPending ? '上传中…' : '上传附件'}</button><input ref={fileInput} hidden type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,video/mp4" onChange={event => { const file = event.target.files?.[0]; if (file) register.mutate(file); event.target.value = '' }} /><span>本阶段使用本地演示智能体，不产生模型或生产费用</span><button className="primaryButton" disabled={!message.trim() || addMessage.isPending}>发送<Send size={15} /></button></div>
         </form>
       </section>

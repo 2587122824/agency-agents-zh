@@ -1,5 +1,11 @@
 # Handoff Context
 
+## 2026-07-17 V2 Conversation Enter-to-send Sprint 46
+
+- The creation-center composer now sends a non-empty message with Enter and preserves a newline with Shift+Enter.
+- IME composition and key-code 229 are protected from accidental submission; a pending message command cannot be submitted again by keyboard or button.
+- Keyboard and button submission share the exact existing message command. No candidate generation, Agent run, Provider call, fee, retry, fallback, route, confirmation, or state semantics changed.
+
 ## 2026-07-17 V2 Project Control Plain-language Status Sprint 45
 
 - Extended the shared exact-value presentation layer from blocker/event facts to project, snapshot, WorkItem, WorkAttempt, state-trigger, actor-type, and responsible-aggregate values.
