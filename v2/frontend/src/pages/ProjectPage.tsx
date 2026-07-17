@@ -70,6 +70,7 @@ export function ProjectPage() {
   const [clarificationValue, setClarificationValue] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
+  const messagesRef = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
   const setCurrentProjectId = useWorkspace(state => state.setCurrentProjectId)
   const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.project(projectId), enabled: Boolean(projectId) })
@@ -86,6 +87,11 @@ export function ProjectPage() {
   }, onSuccess: async () => { setClarificationValue(''); await refresh() } })
   const register = useMutation({ mutationFn: (file: File) => api.registerAttachment(projectId, file), onSuccess: refresh })
   const bind = useMutation({ mutationFn: ({ attachmentId, type }: { attachmentId: string; type: 'identity_reference' | 'voice_sample' | 'inspiration_only' }) => api.bindAttachment(projectId, attachmentId, type, type === 'identity_reference' ? 'char_main' : type === 'voice_sample' ? 'voice_main' : undefined), onSuccess: refresh })
+
+  useEffect(() => {
+    const element = messagesRef.current
+    if (element) element.scrollTop = element.scrollHeight
+  }, [center.data?.messages.length, generate.isPending, generate.error])
 
   function sendMessage() {
     const content = message.trim()
@@ -123,7 +129,7 @@ export function ProjectPage() {
     <main className={styles.layout}>
       <section className={styles.conversation}>
         <div className={styles.panelHeading}><div><MessageSquareText size={18} /><div><span>需求对话</span><h2>创作输入</h2></div></div><b>{creation.messages.length} 条消息</b></div>
-        <div className={styles.messages}>
+        <div className={styles.messages} ref={messagesRef}>
           {creation.messages.length ? creation.messages.map(item => <article key={item.id} data-role={item.role}><span>{item.role === 'assistant' ? 'AI' : item.role === 'system' ? '系统' : '你'}</span><div><p>{item.content}</p><small>{item.role === 'assistant' ? '创作智能体 · ' : ''}{new Date(item.created_at).toLocaleString('zh-CN')}</small></div></article>) : <div className={styles.emptyMessages}><MessageSquareText size={25} /><strong>从明确的创作需求开始</strong><p>描述内容、受众或风格。未说出的可选信息会保持未指定。</p></div>}
           {generate.isPending && <article data-role="assistant" data-pending><span>AI</span><div><p>正在理解本轮需求…</p><small>只运行当前配置的创作模型</small></div></article>}
           {generate.error && <article data-role="system" data-error><span>系统</span><div><p>本轮智能体没有返回回复：{generate.error.message}</p><small>没有自动重试，也没有切换模型</small></div></article>}

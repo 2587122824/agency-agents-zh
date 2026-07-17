@@ -1,5 +1,12 @@
 # Handoff Context
 
+## 2026-07-17 V2 Creation Conversation Stable Layout Sprint 49
+
+- Fixed the creation conversation and structured-requirement panels to a shared desktop height; additional messages and fields now scroll inside their own content regions instead of extending the page.
+- Kept the composer anchored at the bottom, disabled textarea resizing that could alter the workspace height, and moved the conversation to the latest message after persisted or pending replies render.
+- Mobile keeps a bounded conversation workspace while the structured-requirement panel returns to natural document flow.
+- This is presentation-only: no message command, Agent call, retry, fallback, Provider, production, cost, candidate, or state behavior changed.
+
 ## 2026-07-17 V2 Conversational Creation Sprint 48
 
 - Replaced the creation inbox behavior with one explicit configured-model call after each successfully saved user message.
