@@ -7,7 +7,7 @@
 - Added `docs/V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md` with the recommended `shot-plan.v2` fields, explicit primary-reference rules, attachment freezing, WorkRequest v3 shape, optional-binding semantics, non-semantic migration, UI, state boundaries, impact scope, and acceptance tests.
 - This is a proposal awaiting user confirmation. No schema, model, API, configuration, snapshot, adapter, Worker, runtime data, or external-execution behavior changed.
 - No historical plan or configuration was mutated; no credential, network call, Provider task, or fee was involved.
-- Documentation review, diff audit, commit, and push remain.
+- Documentation review and diff audit passed. Commit `e7b7c8c8` was pushed to `main`; the running `8766` service remained healthy because no executable artifact changed.
 
 ## 2026-07-17 V2 Provider Connection Preparation Sprint 40
 
