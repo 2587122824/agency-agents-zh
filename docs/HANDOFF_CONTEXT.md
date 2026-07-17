@@ -1,5 +1,14 @@
 # Handoff Context
 
+## 2026-07-17 V2 Agent Run Audit Sprint 43
+
+- Added a read-only intelligent-agent run audit projection to the creation center. Each run now includes its exact persisted input-manifest summary: base requirement version, message IDs, confirmed decision IDs, attachment binding IDs, system configuration version, input hash, and creation time.
+- Replaced the terse technical history row with creator-facing audit cards for intelligent-agent division, status, model, duration, input counts, and candidate registration. Prompt/output contracts, configuration, hashes, IDs, and structured errors remain available in collapsed audit details.
+- The creation-center response explicitly projects allowed fields and does not return `raw_output`. Missing manifests remain visible as missing and are not substituted or reconstructed.
+- No run, retry, cancel, recovery, Provider, routing, state, fee, prompt rewrite, fallback, or historical backfill behavior was introduced.
+- Added `docs/V2_AGENT_RUN_AUDIT_IMPLEMENTATION.md` and updated the product, creation-center, and implementation-status documents.
+- Verification completed with 124 backend tests, Python compileall, Vite production build, Alembic runtime/head at `20260717_17`, desktop and 390px expanded-audit browser checks, no horizontal overflow, no browser console errors, and healthy API/Worker after restart. External Provider execution remains unset.
+
 ## 2026-07-17 V2 Shot Generation Input Contract Sprint 42
 
 - Implemented the user-confirmed seven-part `shot-plan.v2` contract: required `visual_prompt`, nullable `negative_prompt`, explicit nullable primary reference, product entities, frozen attachment facts, no historical semantic backfill, and deterministic blocking for missing required workflow inputs.

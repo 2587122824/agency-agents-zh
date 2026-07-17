@@ -4,7 +4,7 @@ import { FormEvent, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { CreationAttachment } from '../api/types'
+import type { AgentRun, CreationAttachment } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import { useWorkspace } from '../store/workspace'
 import styles from './ProjectPage.module.css'
@@ -19,6 +19,32 @@ const sourceLabels: Record<string, string> = {
 const fieldLabels: Record<string, string> = {
   title: '项目名称', core_topic: '核心主题', duration_seconds: '目标时长',
   aspect_ratio: '画幅', audio_mode: '音频模式', creative_direction: '创作方向',
+}
+
+const agentRoleLabels: Record<string, string> = {
+  creative: '创意策划',
+  director: '分镜导演',
+  qc: '质量审核',
+  editor: '剪辑助理',
+}
+
+const runStatusLabels: Record<string, string> = {
+  created: '等待运行',
+  running: '运行中',
+  completed: '已完成',
+  succeeded: '已完成',
+  validation_failed: '候选校验失败',
+  failed: '运行失败',
+  blocked: '已阻断',
+  cancelled: '已取消',
+  stale: '已过期',
+}
+
+function runDuration(run: AgentRun) {
+  if (!run.started_at) return '尚未开始'
+  if (!run.finished_at) return '进行中'
+  const milliseconds = Math.max(0, new Date(run.finished_at).getTime() - new Date(run.started_at).getTime())
+  return milliseconds < 1000 ? `${milliseconds} 毫秒` : `${(milliseconds / 1000).toFixed(1)} 秒`
 }
 
 function commandError(...mutations: Array<{ error: Error | null }>) {
@@ -115,7 +141,35 @@ export function ProjectPage() {
         </section>
         <section className={styles.history}>
           <button onClick={() => setShowHistory(value => !value)}><div><History size={17} /><span><strong>运行与候选历史</strong><small>{creation.agent_runs.length} 次运行 · {creation.candidate_history.length} 个候选</small></span></div><ChevronDown size={16} data-open={showHistory} /></button>
-          {showHistory && <div className={styles.historyList}>{creation.agent_runs.length ? creation.agent_runs.map(run => <article key={run.id}><span data-status={run.status}><Clock3 size={13} />{run.status}</span><strong>{run.model_name}</strong><small>{run.id.slice(0, 18)}</small></article>) : <div className={styles.sideEmpty}>还没有智能体运行记录。</div>}</div>}
+          {showHistory && <div className={styles.historyList}>{creation.agent_runs.length ? creation.agent_runs.map(run => {
+            const manifest = run.input_manifest
+            return <article key={run.id} className={styles.runCard}>
+              <div className={styles.runHeading}>
+                <div><span>{agentRoleLabels[run.agent_role] ?? run.agent_role}</span><strong>{run.model_name}</strong></div>
+                <b data-status={run.status}><Clock3 size={13} />{runStatusLabels[run.status] ?? run.status}</b>
+              </div>
+              <div className={styles.runFacts}>
+                <span>耗时<strong>{runDuration(run)}</strong></span>
+                <span>消息<strong>{manifest?.message_ids.length ?? 0}</strong></span>
+                <span>决策<strong>{manifest?.decision_ids.length ?? 0}</strong></span>
+                <span>附件绑定<strong>{manifest?.attachment_binding_ids.length ?? 0}</strong></span>
+              </div>
+              <p className={run.parsed_candidate_id ? styles.runResultOk : styles.runResultEmpty}>{run.parsed_candidate_id ? '已登记候选，等待独立审核' : '没有登记候选'}</p>
+              {(run.error_code || run.error_detail) && <div className={styles.runFailure}><CircleAlert size={14} /><div><strong>{run.error_code ?? '未提供错误代码'}</strong><span>{run.error_detail ?? '未提供错误说明'}</span></div></div>}
+              <details className={styles.runDetails}>
+                <summary>查看审计详情</summary>
+                <dl>
+                  <div><dt>模型供应商</dt><dd>{run.model_provider}</dd></div>
+                  <div><dt>提示词合同</dt><dd>{run.prompt_contract_version}</dd></div>
+                  <div><dt>输出合同</dt><dd>{run.output_schema_version}</dd></div>
+                  <div><dt>系统配置</dt><dd>{manifest?.system_config_version ?? '清单缺失'}</dd></div>
+                  <div><dt>基础需求版本</dt><dd>{manifest?.base_requirement_version_id ?? '清单缺失'}</dd></div>
+                  <div><dt>输入哈希</dt><dd>{manifest?.input_hash ?? '清单缺失'}</dd></div>
+                  <div><dt>运行 ID</dt><dd>{run.id}</dd></div>
+                </dl>
+              </details>
+            </article>
+          }) : <div className={styles.sideEmpty}>还没有智能体运行记录。</div>}</div>}
         </section>
         {error && <div className={styles.error}>{error}</div>}
       </aside>

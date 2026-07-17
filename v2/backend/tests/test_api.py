@@ -208,7 +208,17 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
 
     before_accept = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
     assert before_accept["active_requirement"]["version_number"] == 1
-    assert before_accept["latest_agent_run"]["model_provider"] == "mock"
+    latest_run = before_accept["latest_agent_run"]
+    assert latest_run["model_provider"] == "mock"
+    assert latest_run["agent_role"] == "creative"
+    assert latest_run["input_manifest"]["base_requirement_version_id"] == base_id
+    assert latest_run["input_manifest"]["message_ids"] == [first_message.json()["id"]]
+    assert latest_run["input_manifest"]["decision_ids"] == []
+    assert latest_run["input_manifest"]["attachment_binding_ids"] == []
+    assert latest_run["input_manifest"]["system_config_version"] == "v2.creation.mock.v1"
+    assert len(latest_run["input_manifest"]["input_hash"]) == 64
+    assert latest_run == before_accept["agent_runs"][0]
+    assert "raw_output" not in latest_run
 
     accept_command = {
         "command_id": "accept-command-001",

@@ -207,6 +207,16 @@ export interface AgentRun {
   error_detail: string | null
   started_at: string | null
   finished_at: string | null
+  input_manifest: {
+    id: string
+    base_requirement_version_id: string
+    message_ids: string[]
+    decision_ids: string[]
+    attachment_binding_ids: string[]
+    system_config_version: string
+    input_hash: string
+    created_at: string
+  } | null
 }
 
 export interface AttachmentBinding {

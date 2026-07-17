@@ -638,6 +638,25 @@ def creation_center_view(session: Session, project: Project) -> dict:
     messages = repository.view_messages(project.id)
     candidates = repository.candidate_history(project.id)
     runs = repository.agent_runs(project.id)
+    run_views = []
+    for run in runs:
+        manifest = repository.agent_manifest(run.input_manifest_id)
+        run_views.append({
+            "id": run.id,
+            "agent_role": run.agent_role,
+            "status": run.status,
+            "input_manifest_id": run.input_manifest_id,
+            "model_provider": run.model_provider,
+            "model_name": run.model_name,
+            "prompt_contract_version": run.prompt_contract_version,
+            "output_schema_version": run.output_schema_version,
+            "parsed_candidate_id": run.parsed_candidate_id,
+            "error_code": run.error_code,
+            "error_detail": run.error_detail,
+            "started_at": run.started_at,
+            "finished_at": run.finished_at,
+            "input_manifest": manifest,
+        })
     attachments = repository.attachments(project.id)
     binding_rows = repository.bindings(project.id)
     bindings_by_attachment: dict[str, list[AttachmentBinding]] = {}
@@ -674,8 +693,8 @@ def creation_center_view(session: Session, project: Project) -> dict:
         "current_candidate": current,
         "candidate_history": candidates,
         "pending_clarifications": clarifications,
-        "latest_agent_run": runs[0] if runs else None,
-        "agent_runs": runs,
+        "latest_agent_run": run_views[0] if run_views else None,
+        "agent_runs": run_views,
         "attachments": [
             {
                 "id": item.id,

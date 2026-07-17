@@ -402,6 +402,20 @@ started_at / finished_at
 
 AgentRun 成功只表示收到候选输出，不表示候选有效或已确认。
 
+创作中心的运行历史使用普通用户可理解的智能体分工名称，默认展示状态、模型、耗时、输入消息/决策/附件绑定数量和候选登记结果。以下精确事实放在可展开审计详情中：
+
+```text
+prompt_contract_version
+output_schema_version
+system_config_version
+base_requirement_version_id
+input_hash
+agent_run_id
+error_code / error_detail
+```
+
+这些内容必须来自持久化 `AgentRun` 与其精确 `AgentInputManifest`，不得解析原始模型文本补齐。创作中心 API 不返回 `raw_output`，历史区也不提供运行、重试、取消或恢复命令。
+
 ## 10. 附件与实体绑定
 
 ### 10.1 生命周期
@@ -715,6 +729,7 @@ RequirementDiff
 - 当前等待的责任方
 - 唯一明确的下一步操作
 - 是否会触发模型费用或生产费用
+- 智能体运行的输入清单摘要、候选登记结果与可展开审计证据
 
 生产准备区默认使用普通用户术语，不在主要操作路径直接展示 `snapshot`、`preparing`、`DAG`、`WorkItem`、内部错误代码或长技术键。页面将其分别表达为“制作方案、等待确认/等待补充费用、制作步骤、制作任务、需要处理的问题和生成方案名称”；原始 ID、状态、合同哈希、节点与依赖数量保留在默认收起的“技术详情”中。该翻译只影响展示，不改变状态机、费用确认、不可变版本或显式路由选择。
 

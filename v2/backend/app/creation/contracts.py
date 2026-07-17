@@ -84,6 +84,18 @@ class CandidateRead(BaseModel):
     decided_at: datetime | None
 
 
+class AgentInputManifestAuditRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    base_requirement_version_id: str
+    message_ids: list[str]
+    decision_ids: list[str]
+    attachment_binding_ids: list[str]
+    system_config_version: str
+    input_hash: str
+    created_at: datetime
+
+
 class AgentRunRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
@@ -99,6 +111,7 @@ class AgentRunRead(BaseModel):
     error_detail: str | None
     started_at: datetime | None
     finished_at: datetime | None
+    input_manifest: AgentInputManifestAuditRead | None
 
 
 class ClarificationRead(BaseModel):
