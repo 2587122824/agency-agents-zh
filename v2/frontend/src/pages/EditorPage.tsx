@@ -47,7 +47,7 @@ export function EditorPage() {
   const [confirming, setConfirming] = useState<Timeline | null>(null)
   const [authorizingDelivery, setAuthorizingDelivery] = useState(false)
   const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
-  const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects, refetchInterval: 5000 })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const workspace = useQuery({ queryKey: ['editor-workspace', projectId], queryFn: () => api.editorWorkspace(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   const delivery = useQuery({ queryKey: ['delivery-workspace', projectId], queryFn: () => api.deliveryWorkspace(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   const refresh = async () => {

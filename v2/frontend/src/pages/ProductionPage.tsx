@@ -38,7 +38,7 @@ function groupBlockers(blockers: Blocker[]) {
 export function ProductionPage() {
   const client = useQueryClient()
   const [projectId, setProjectId] = useState('')
-  const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects, refetchInterval: 5000 })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const execution = useQuery({
     queryKey: ['production-execution', projectId],
     queryFn: () => api.productionExecution(projectId),

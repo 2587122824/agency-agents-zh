@@ -95,6 +95,8 @@ blocked_responsible_aggregate_type nullable
 blocked_responsible_aggregate_id nullable
 blocked_allowed_commands[]
 blocked_at nullable
+archived_at nullable
+archived_by nullable
 active_requirement_version_id nullable
 active_plan_version_id nullable
 active_snapshot_id nullable
@@ -109,6 +111,8 @@ created_at / updated_at
 - 首次 blocked 必须冻结原状态、原因码和责任聚合；后续诊断不得覆盖首次来源。
 - `delivery_asset_id` 必须指向已验证、未删除的最终交付素材。
 - `active_snapshot_id` 必须属于同一项目和 `active_plan_version_id`。
+- `archived_at` 只控制默认工作列表可见性，不替代 `status`、取消语义或删除语义；恢复时清空 `archived_at/archived_by`。
+- 归档和恢复必须匹配 `row_version` 并追加独立事件；存在排队或执行中的工作项时不得归档。
 
 ### 5.2 Conversation 与 Message
 

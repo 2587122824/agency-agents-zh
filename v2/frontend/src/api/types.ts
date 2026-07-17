@@ -39,6 +39,8 @@ export interface Project extends ProjectCreate {
   blocked_responsible_aggregate_id: string | null
   blocked_allowed_commands: string[]
   blocked_at: string | null
+  archived_at: string | null
+  archived_by: string | null
   status: ProjectStatus
   created_at: string
   updated_at: string
@@ -966,6 +968,8 @@ export interface ProjectControlSummary {
   blocked_responsible_aggregate_id: string | null
   blocked_allowed_commands: string[]
   blocked_at: string | null
+  archived_at: string | null
+  archived_by: string | null
   evaluated_stage: 'requirements' | 'planning' | 'production_preparation' | 'production' | 'quality_review' | 'editing' | 'delivery' | 'completed'
   stage_label: string
   active_plan_version: number | null

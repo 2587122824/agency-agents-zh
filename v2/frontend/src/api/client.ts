@@ -17,8 +17,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<Health>('/health'),
-  projects: () => request<Project[]>('/projects'),
-  projectControls: () => request<ProjectControlSummary[]>('/project-controls'),
+  projects: (includeArchived = false) => request<Project[]>(`/projects?include_archived=${includeArchived}`),
+  projectControls: (includeArchived = false) => request<ProjectControlSummary[]>(`/project-controls?include_archived=${includeArchived}`),
   projectControl: (id: string) => request<ProjectControl>(`/projects/${id}/control-center`),
   projectAuditLedger: (id: string, beforeSequence: number | null = null) => request<ProjectAuditLedger>(`/projects/${id}/audit-ledger?limit=50${beforeSequence === null ? '' : `&before_sequence=${beforeSequence}`}`),
   contactSheet: (id: string) => request<MaterialContactSheet>(`/projects/${id}/contact-sheet`),
@@ -31,6 +31,12 @@ export const api = {
   project: (id: string) => request<ProjectDetail>(`/projects/${id}`),
   createProject: (payload: ProjectCreate) =>
     request<ProjectDetail>('/projects', { method: 'POST', body: JSON.stringify(payload) }),
+  archiveProject: (projectId: string, rowVersion: number) => request<ProjectDetail>(`/projects/${projectId}:archive`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: rowVersion, confirm_archive: true }),
+  }),
+  restoreProject: (projectId: string, rowVersion: number) => request<ProjectDetail>(`/projects/${projectId}:restore`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: rowVersion }),
+  }),
   addDecision: (projectId: string, payload: { key: string; label: string; value?: unknown; status: 'pending' | 'resolved' }) =>
     request<Decision>(`/projects/${projectId}/decisions`, { method: 'POST', body: JSON.stringify(payload) }),
   resolveDecision: (projectId: string, decisionId: string, value: unknown) =>

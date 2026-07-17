@@ -39,6 +39,8 @@ class Project(Base):
     blocked_responsible_aggregate_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
     blocked_allowed_commands: Mapped[list] = mapped_column(JSON, default=list)
     blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    archived_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
     active_snapshot_id: Mapped[str | None] = mapped_column(ForeignKey("production_snapshots.id"), nullable=True, index=True)
     delivery_asset_id: Mapped[str | None] = mapped_column(ForeignKey("assets.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)

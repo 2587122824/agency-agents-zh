@@ -106,7 +106,7 @@ ConfigurationRecord = (
 
 
 class ProjectRepository(Protocol):
-    def list_recent(self) -> list[Project]: ...
+    def list_recent(self, *, include_archived: bool = False) -> list[Project]: ...
 
     def get(self, project_id: str, *, with_workspace: bool = False) -> Project | None: ...
 
@@ -117,6 +117,17 @@ class ProjectRepository(Protocol):
     def flush(self) -> None: ...
 
     def refresh_work_item(self, item: WorkItem) -> None: ...
+
+    def has_active_work(self, project_id: str) -> bool: ...
+
+    def update_archive(
+        self,
+        project: Project,
+        *,
+        expected_row_version: int,
+        archived_at: datetime | None,
+        archived_by: str | None,
+    ) -> bool: ...
 
 
 class ProjectStateRepository(Protocol):
@@ -514,7 +525,7 @@ class ConfigurationRepository(Protocol):
 
 
 class RegistryRepository(Protocol):
-    def projects(self) -> list[Project]: ...
+    def projects(self, *, include_archived: bool = False) -> list[Project]: ...
 
     def entities(self) -> list[Entity]: ...
 

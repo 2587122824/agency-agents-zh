@@ -214,6 +214,8 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
         "blocked_responsible_aggregate_id": project.blocked_responsible_aggregate_id,
         "blocked_allowed_commands": project.blocked_allowed_commands,
         "blocked_at": project.blocked_at,
+        "archived_at": project.archived_at,
+        "archived_by": project.archived_by,
         "evaluated_stage": stage,
         "stage_label": evaluation.stage_label,
         "active_plan_version": plan.version_number if plan else None,
@@ -285,8 +287,8 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
     return result
 
 
-def project_controls(session: Session) -> list[dict]:
-    projects = SqlAlchemyControlRepository(session).projects()
+def project_controls(session: Session, *, include_archived: bool = False) -> list[dict]:
+    projects = SqlAlchemyControlRepository(session).projects(include_archived=include_archived)
     return [_project_control(session, project, False) for project in projects]
 
 

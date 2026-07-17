@@ -107,6 +107,9 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
     assert "event_sequence" in {
         column["name"] for column in inspect(upgraded_engine).get_columns("projects")
     }
+    assert {"archived_at", "archived_by"}.issubset({
+        column["name"] for column in inspect(upgraded_engine).get_columns("projects")
+    })
     assert {
         "event_id", "project_sequence", "aggregate_type", "aggregate_id",
         "correlation_id", "actor_type", "actor_id", "schema_version",
@@ -127,4 +130,6 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
         assert upgraded.state_changed_by == "migration"
         assert upgraded.state_trigger == "migration_planning_authority_backfill"
         assert upgraded.state_reason_code is None
+        assert upgraded.archived_at is None
+        assert upgraded.archived_by is None
     upgraded_engine.dispose()

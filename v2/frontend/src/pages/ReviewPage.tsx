@@ -19,7 +19,7 @@ export function ReviewPage() {
   const [projectId, setProjectId] = useState('')
   const [reviewChoice, setReviewChoice] = useState<ReviewChoice | null>(null)
   const [rationale, setRationale] = useState('')
-  const projects = useQuery({ queryKey: ['projects'], queryFn: api.projects, refetchInterval: 5000 })
+  const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const quality = useQuery({ queryKey: ['quality-review', projectId], queryFn: () => api.qualityReview(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   const refresh = () => client.invalidateQueries({ queryKey: ['quality-review', projectId] })
   const verify = useMutation({ mutationFn: (asset: ProductionAsset) => api.verifyAsset(projectId, asset), onSuccess: refresh })

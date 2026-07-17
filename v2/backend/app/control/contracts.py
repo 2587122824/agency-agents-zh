@@ -32,6 +32,8 @@ class ProjectControlSummary(BaseModel):
     blocked_responsible_aggregate_id: str | None
     blocked_allowed_commands: list[str]
     blocked_at: datetime | None
+    archived_at: datetime | None
+    archived_by: str | None
     evaluated_stage: str
     stage_label: str
     active_plan_version: int | None

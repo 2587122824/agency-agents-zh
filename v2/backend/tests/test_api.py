@@ -160,6 +160,91 @@ def test_project_control_list_uses_persisted_facts_for_new_project(client: TestC
     assert detail.json()["routes"] == []
 
 
+def test_project_archive_hides_from_default_lists_and_restore_preserves_state(client: TestClient) -> None:
+    project = create_creation_project(client)
+    archive_payload = {
+        "command_id": "project-archive-command-001",
+        "actor_id": "test-user",
+        "expected_row_version": project["row_version"],
+        "confirm_archive": True,
+    }
+    archived = client.post(f"/api/v1/projects/{project['id']}:archive", json=archive_payload)
+    assert archived.status_code == 200
+    archived_project = archived.json()
+    assert archived_project["status"] == project["status"]
+    assert archived_project["row_version"] == project["row_version"] + 1
+    assert archived_project["archived_at"] is not None
+    assert archived_project["archived_by"] == "test-user"
+
+    assert all(item["id"] != project["id"] for item in client.get("/api/v1/projects").json())
+    assert all(item["project_id"] != project["id"] for item in client.get("/api/v1/project-controls").json())
+    archived_list = client.get("/api/v1/projects?include_archived=true").json()
+    assert any(item["id"] == project["id"] and item["archived_at"] for item in archived_list)
+    archived_controls = client.get("/api/v1/project-controls?include_archived=true").json()
+    assert any(item["project_id"] == project["id"] and item["archived_at"] for item in archived_controls)
+
+    events_before_replay = client.get(f"/api/v1/projects/{project['id']}/control-center").json()["recent_events"]
+    assert events_before_replay[0]["event_type"] == "project.archived.v1"
+    replay = client.post(f"/api/v1/projects/{project['id']}:archive", json=archive_payload)
+    assert replay.status_code == 200
+    assert replay.json()["row_version"] == archived_project["row_version"]
+    events_after_replay = client.get(f"/api/v1/projects/{project['id']}/control-center").json()["recent_events"]
+    assert len(events_after_replay) == len(events_before_replay)
+
+    restore_payload = {
+        "command_id": "project-restore-command-001",
+        "actor_id": "test-user",
+        "expected_row_version": archived_project["row_version"],
+    }
+    restored = client.post(f"/api/v1/projects/{project['id']}:restore", json=restore_payload)
+    assert restored.status_code == 200
+    restored_project = restored.json()
+    assert restored_project["status"] == project["status"]
+    assert restored_project["row_version"] == archived_project["row_version"] + 1
+    assert restored_project["archived_at"] is None
+    assert restored_project["archived_by"] is None
+    assert any(item["id"] == project["id"] for item in client.get("/api/v1/projects").json())
+    restored_events = client.get(f"/api/v1/projects/{project['id']}/control-center").json()["recent_events"]
+    assert restored_events[0]["event_type"] == "project.restored.v1"
+
+
+def test_project_archive_rejects_active_work_and_stale_version(client: TestClient) -> None:
+    project = create_creation_project(client)
+    stale = client.post(
+        f"/api/v1/projects/{project['id']}:archive",
+        json={
+            "command_id": "project-archive-stale-001",
+            "actor_id": "test-user",
+            "expected_row_version": project["row_version"] + 1,
+            "confirm_archive": True,
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.headers["x-error-code"] == "PROJECT_ROW_VERSION_CONFLICT"
+
+    with SessionLocal() as session:
+        session.add(WorkItem(
+            project_id=project["id"],
+            kind="contract_validation",
+            payload={"project_id": project["id"]},
+            status="queued",
+        ))
+        session.commit()
+    active = client.post(
+        f"/api/v1/projects/{project['id']}:archive",
+        json={
+            "command_id": "project-archive-active-001",
+            "actor_id": "test-user",
+            "expected_row_version": project["row_version"],
+            "confirm_archive": True,
+        },
+    )
+    assert active.status_code == 409
+    assert active.headers["x-error-code"] == "PROJECT_ACTIVE_WORK_EXISTS"
+    current = client.get(f"/api/v1/projects/{project['id']}").json()
+    assert current["archived_at"] is None
+
+
 def create_creation_project(client: TestClient) -> dict:
     response = client.post(
         "/api/v1/projects",

@@ -86,8 +86,11 @@ class SqlAlchemyProjectRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def list_recent(self) -> list[Project]:
-        return list(self.session.scalars(select(Project).order_by(Project.updated_at.desc())))
+    def list_recent(self, *, include_archived: bool = False) -> list[Project]:
+        statement = select(Project)
+        if not include_archived:
+            statement = statement.where(Project.archived_at.is_(None))
+        return list(self.session.scalars(statement.order_by(Project.updated_at.desc())))
 
     def get(self, project_id: str, *, with_workspace: bool = False) -> Project | None:
         statement = select(Project).where(Project.id == project_id)
@@ -106,6 +109,45 @@ class SqlAlchemyProjectRepository:
 
     def refresh_work_item(self, item: WorkItem) -> None:
         self.session.refresh(item)
+
+    def has_active_work(self, project_id: str) -> bool:
+        count = self.session.scalar(
+            select(func.count(WorkItem.id)).where(
+                WorkItem.project_id == project_id,
+                WorkItem.status.in_({"queued", "in_progress"}),
+            )
+        )
+        return bool(count)
+
+    def update_archive(
+        self,
+        project: Project,
+        *,
+        expected_row_version: int,
+        archived_at: datetime | None,
+        archived_by: str | None,
+    ) -> bool:
+        expected_archived = Project.archived_at.is_not(None) if archived_at is None else Project.archived_at.is_(None)
+        changed_at = utc_now()
+        result = self.session.execute(
+            update(Project)
+            .where(
+                Project.id == project.id,
+                Project.row_version == expected_row_version,
+                expected_archived,
+            )
+            .values(
+                archived_at=archived_at,
+                archived_by=archived_by,
+                row_version=expected_row_version + 1,
+                updated_at=changed_at,
+            )
+        )
+        if result.rowcount != 1:
+            return False
+        self.session.expire(project)
+        self.session.refresh(project)
+        return True
 
 
 class SqlAlchemyProjectStateRepository:
@@ -1323,8 +1365,11 @@ class SqlAlchemyControlRepository:
             .limit(limit)
         ))
 
-    def projects(self) -> list[Project]:
-        return list(self.session.scalars(select(Project).order_by(Project.updated_at.desc())))
+    def projects(self, *, include_archived: bool = False) -> list[Project]:
+        statement = select(Project)
+        if not include_archived:
+            statement = statement.where(Project.archived_at.is_(None))
+        return list(self.session.scalars(statement.order_by(Project.updated_at.desc())))
 
 
 class SqlAlchemyContactSheetRepository:

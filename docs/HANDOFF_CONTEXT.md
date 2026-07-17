@@ -1,5 +1,13 @@
 # Handoff Context
 
+## 2026-07-17 V2 Project Archiving Sprint 47
+
+- Added reversible project archiving as list-lifecycle metadata, explicitly separate from Project status, cancellation, and physical deletion.
+- Archive/restore commands use row-version checks, project-scoped command receipts, complete events, and exact active-WorkItem blocking. They preserve all production, asset, cost, and audit records.
+- Default project and control queries exclude archived projects; `include_archived=true` is explicit. The dashboard provides archive confirmation, an archived-project view, and restore controls.
+- Archived project controls remain auditable but do not present a stage-continuation button. No task cancellation, Provider call, retry, fallback, route change, fee, file deletion, or Project status transition was added.
+- Added `docs/V2_PROJECT_ARCHIVING_IMPLEMENTATION.md` and Alembic `20260717_18`.
+
 ## 2026-07-17 V2 Conversation Enter-to-send Sprint 46
 
 - The creation-center composer now sends a non-empty message with Enter and preserves a newline with Shift+Enter.

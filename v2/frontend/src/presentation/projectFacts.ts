@@ -119,6 +119,8 @@ const eventPresentations: Record<string, FactPresentation> = {
   'project.blocked.v1': { title: '项目已进入阻断状态', description: '系统记录了首次阻断原因和责任对象。' },
   'project.block_diagnostic.v1': { title: '项目新增阻断证据', description: '系统追加了诊断证据，没有覆盖首次阻断来源。' },
   'project.completed.v1': { title: '项目已完成', description: '最终交付通过全部完成条件检查。' },
+  'project.archived.v1': { title: '项目已归档', description: '项目已从默认工作列表隐藏，原制作、费用和审计记录均保留。' },
+  'project.restored.v1': { title: '项目已恢复', description: '项目已重新回到默认工作列表，原制作状态保持不变。' },
   'requirement.confirmed.v1': { title: '需求版本已确认', description: '需求候选已成为正式且可追溯的需求版本。' },
   'conversation.message_added.v1': { title: '创作需求已保存', description: '用户新增的对话内容已写入项目。' },
   'clarification.requested.v1': { title: '需求需要补充确认', description: '系统登记了一项必须由用户回答的需求问题。' },

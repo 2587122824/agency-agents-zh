@@ -8,6 +8,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..contracts.project import (
+    ArchiveProject,
     DecisionCreate,
     DecisionRead,
     DecisionResolve,
@@ -15,6 +16,7 @@ from ..contracts.project import (
     ProjectDetail,
     ProjectRead,
     QueueRequest,
+    RestoreProject,
     WorkItemRead,
 )
 from ..control.contracts import ProjectAuditLedgerView, ProjectControlSummary, ProjectControlView
@@ -171,11 +173,13 @@ from ..production.service import (
 )
 from ..projects.service import (
     ProjectConflictError,
+    archive_project,
     confirm_project,
     create_project,
     get_project,
     list_projects,
     queue_contract_validation,
+    restore_project,
 )
 from ..quality.contracts import (
     AssetRead,
@@ -247,8 +251,11 @@ def health() -> dict[str, str]:
 
 
 @router.get("/project-controls", response_model=list[ProjectControlSummary])
-def project_control_list(session: Session = Depends(get_session)):
-    return project_controls(session)
+def project_control_list(
+    include_archived: bool = Query(default=False),
+    session: Session = Depends(get_session),
+):
+    return project_controls(session, include_archived=include_archived)
 
 
 @router.get("/projects/{project_id}/control-center", response_model=ProjectControlView)
@@ -438,8 +445,11 @@ def system_config_workflow_versions(slot_key: str, session: Session = Depends(ge
 
 
 @router.get("/projects", response_model=list[ProjectRead])
-def projects(session: Session = Depends(get_session)):
-    return list_projects(session)
+def projects(
+    include_archived: bool = Query(default=False),
+    session: Session = Depends(get_session),
+):
+    return list_projects(session, include_archived=include_archived)
 
 
 @router.post("/projects", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
@@ -450,6 +460,38 @@ def projects_create(payload: ProjectCreate, session: Session = Depends(get_sessi
 @router.get("/projects/{project_id}", response_model=ProjectDetail)
 def projects_get(project_id: str, session: Session = Depends(get_session)):
     return require_project(session, project_id)
+
+
+@router.post("/projects/{project_id}:archive", response_model=ProjectDetail)
+def projects_archive(
+    project_id: str,
+    payload: ArchiveProject,
+    session: Session = Depends(get_session),
+):
+    try:
+        return archive_project(session, require_project(session, project_id), payload)
+    except ProjectConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
+
+
+@router.post("/projects/{project_id}:restore", response_model=ProjectDetail)
+def projects_restore(
+    project_id: str,
+    payload: RestoreProject,
+    session: Session = Depends(get_session),
+):
+    try:
+        return restore_project(session, require_project(session, project_id), payload)
+    except ProjectConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
 
 
 @router.get("/projects/{project_id}/creation-center", response_model=CreationCenterView)

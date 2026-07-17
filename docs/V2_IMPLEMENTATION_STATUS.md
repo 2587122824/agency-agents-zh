@@ -21,6 +21,7 @@
 | 数据库队列与独立 Worker | 已完成 | `WorkItem`、`WorkAttempt`、`workers/worker.py` |
 | SSE 事件流与游标恢复 | 已完成 | `ProjectEvent`、`events/service.py`、`Last-Event-ID` |
 | 项目状态机与统一评估器 | 部分完成 | 纯事实评估器和当前命令面的权威转移器已实现；应用服务/Worker 无直接状态赋值，具备原子行版本、结构化 blocked 和状态事件。缺口为 ResolveBlock、CancelProject、StartNewPlanVersion 与精确重试转移 |
+| 项目归档与恢复 | 已完成 | 独立归档元数据、行版本与幂等命令、活动工作项门禁、归档/恢复事件、默认列表过滤和归档管理界面；不修改项目状态、不取消任务且不物理删除生产记录 |
 | Repository 接口 | 已完成 | Project/Event/Decision/Command/Creation/Planning/Production/Quality/Editor/Delivery/Work/Configuration/Registry/Control/ContactSheet/Impact 均有协议、SQLAlchemy 实现和合同测试；当前应用服务、Worker 与业务投影已无直接 ORM 查询 |
 | 事件信封与 Outbox | 已完成 | 统一版本化信封、项目内序号、事务内 Outbox、显式批次发布器和 SSE 项目游标已实现；发布失败不自动重试 |
 | Provider 基础层与连接状态 | 已完成 | 精确 Adapter 协议/注册表、`env://` 凭据解析白名单、只读连接状态 API 和设置页已实现；逐供应商展示执行组件、生成配置、后端密钥、执行授权及唯一下一步，查询不探测网络且不返回凭据引用名或值 |

@@ -24,6 +24,19 @@ class ProjectCreate(BaseModel):
     audio_mode: AudioMode
 
 
+class ArchiveProject(BaseModel):
+    command_id: str = Field(min_length=8, max_length=80)
+    actor_id: str = Field(default="local-user", min_length=1, max_length=80)
+    expected_row_version: int = Field(ge=1)
+    confirm_archive: Literal[True]
+
+
+class RestoreProject(BaseModel):
+    command_id: str = Field(min_length=8, max_length=80)
+    actor_id: str = Field(default="local-user", min_length=1, max_length=80)
+    expected_row_version: int = Field(ge=1)
+
+
 class ProjectRead(ProjectCreate):
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +53,8 @@ class ProjectRead(ProjectCreate):
     blocked_responsible_aggregate_id: str | None
     blocked_allowed_commands: list[str]
     blocked_at: datetime | None
+    archived_at: datetime | None
+    archived_by: str | None
     created_at: datetime
     updated_at: datetime
 

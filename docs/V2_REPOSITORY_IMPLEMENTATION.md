@@ -10,7 +10,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 
 | Repository | 已覆盖行为 | 当前调用方 |
 |---|---|---|
-| `ProjectRepository` | 最近项目排序、按 ID 读取、工作区关系加载、项目和 WorkItem 持久化 | 项目应用服务 |
+| `ProjectRepository` | 最近项目排序、归档范围过滤、活动工作项门禁、行版本归档更新、按 ID 读取、工作区关系加载、项目和 WorkItem 持久化 | 项目应用服务 |
 | `ProjectStateRepository` | `project_id + status + row_version` 原子状态更新、状态来源和结构化阻断字段持久化 | 权威项目状态转移器 |
 | `EventRepository` | 追加项目事件、按项目和序号游标读取 | 项目、决策应用服务与 SSE |
 | `DecisionRepository` | 按项目/键查重、按项目/ID 读取、追加和刷新 | 决策账本服务 |
@@ -71,6 +71,7 @@ Repository 协议位于 `v2/backend/app/repositories/contracts.py`，SQLAlchemy 
 Repository 合同测试覆盖：
 
 - 项目更新时间排序和关系加载。
+- 项目默认列表排除归档记录、显式全量列表、活动工作项判断及归档字段行版本条件更新。
 - 项目状态的来源状态与行版本条件更新、并发冲突和结构化阻断证据。
 - 事件按项目隔离、游标递增和数量限制。
 - 决策键及决策 ID 的项目隔离。

@@ -338,6 +338,14 @@ ConfirmTimeline: review -> confirmed; Project -> delivery_ready; referenced Asse
 - 取消不删除已生成素材、成本和事件。
 - 重新开始通过新方案/快照命令完成，不把 `cancelled` 原地改回 `producing`。
 
+### 10.1 项目归档语义
+
+- 归档是工作列表生命周期，不是 Project 状态；`ArchiveProject` 不修改 `Project.status`。
+- 归档要求用户显式确认、当前 `row_version` 和不存在 `queued/in_progress` 工作项。
+- 归档与恢复分别写入 `project.archived.v1`、`project.restored.v1`，同时保留原项目状态。
+- 归档不取消任务、不删除素材、费用或事件；恢复也不重启、重试或重新提交任何工作。
+- 默认项目查询排除归档记录，`include_archived=true` 是显式只读查询范围，不产生状态变化。
+
 ## 11. 事件信封
 
 所有领域事件使用同一结构：
