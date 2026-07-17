@@ -74,6 +74,7 @@ def entity_registry_view(session: Session) -> dict:
                 refs.append((shot.scene_entity_version_id, "scene"))
             refs.extend((item, "character") for item in shot.character_entity_version_ids or [])
             refs.extend((item, "outfit") for item in shot.outfit_entity_version_ids or [])
+            refs.extend((item, "product") for item in shot.product_entity_version_ids or [])
             for entity_version_id, role in refs:
                 if entity_version_id not in version_ids:
                     continue

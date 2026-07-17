@@ -26,6 +26,9 @@ class ContactSheetShot(BaseModel):
     motion_requirement: str
     composition: str
     action: str
+    visual_prompt: str | None
+    negative_prompt: str | None
+    primary_reference_entity_version_id: str | None
 
 
 class ContactSheetRoute(BaseModel):
@@ -60,6 +63,7 @@ class ContactSheetDependency(BaseModel):
 
 class ContactSheetEntityReference(BaseModel):
     role: str
+    is_primary: bool
     entity_id: str
     entity_name: str
     entity_type: str
@@ -80,6 +84,7 @@ class ContactSheetEntry(BaseModel):
     route: ContactSheetRoute | None
     dependencies: list[ContactSheetDependency]
     entity_references: list[ContactSheetEntityReference]
+    frozen_reference_image: dict | None
 
 
 class MaterialContactSheetView(BaseModel):

@@ -47,9 +47,11 @@ def _referenced_entity_versions(payload: dict) -> set[str]:
     for key in (
         "character_entity_version_ids",
         "outfit_entity_version_ids",
+        "product_entity_version_ids",
         "character_refs",
         "outfit_refs",
         "scene_refs",
+        "product_refs",
         "voice_refs",
     ):
         values.update(str(value) for value in (payload.get(key) or []) if value)
@@ -213,6 +215,7 @@ def decision_impact_graph_view(
             "scene_entity_version_id": item.scene_entity_version_id,
             "character_entity_version_ids": item.character_entity_version_ids,
             "outfit_entity_version_ids": item.outfit_entity_version_ids,
+            "product_entity_version_ids": item.product_entity_version_ids,
         }) & entity_version_ids):
             add_edge("shot", item.id, "entity_version", version_id, "references")
 

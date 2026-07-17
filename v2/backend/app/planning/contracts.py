@@ -37,21 +37,25 @@ class ShotContractPatch(BaseModel):
     scene_entity_version_id: str | None = Field(default=None, max_length=48)
     character_entity_version_ids: list[str] | None = None
     outfit_entity_version_ids: list[str] | None = None
+    product_entity_version_ids: list[str] | None = None
+    primary_reference_entity_version_id: str | None = Field(default=None, max_length=48)
     face_visibility: Literal["required", "optional", "not_visible"] | None = None
     text_policy: Literal["forbidden", "allowed", "required"] | None = None
     motion_requirement: Literal["static", "moderate", "significant"] | None = None
     composition: str | None = Field(default=None, min_length=1, max_length=500)
     action: str | None = Field(default=None, min_length=1, max_length=1000)
+    visual_prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+    negative_prompt: str | None = Field(default=None, min_length=1, max_length=2000)
 
     @model_validator(mode="after")
     def validate_patch(self):
         if not self.model_fields_set:
             raise ValueError("at least one structured shot field is required")
-        nullable = {"scene_entity_version_id"}
+        nullable = {"scene_entity_version_id", "primary_reference_entity_version_id", "negative_prompt"}
         invalid_nulls = [field for field in self.model_fields_set if field not in nullable and getattr(self, field) is None]
         if invalid_nulls:
             raise ValueError(f"fields cannot be null: {', '.join(sorted(invalid_nulls))}")
-        for field in ("character_entity_version_ids", "outfit_entity_version_ids"):
+        for field in ("character_entity_version_ids", "outfit_entity_version_ids", "product_entity_version_ids"):
             values = getattr(self, field)
             if values is not None and (len(values) != len(set(values)) or any(not value for value in values)):
                 raise ValueError(f"{field} must contain unique non-empty IDs")
@@ -92,11 +96,15 @@ class ShotContract(BaseModel):
     scene_entity_version_id: str | None
     character_entity_version_ids: list[str]
     outfit_entity_version_ids: list[str]
+    product_entity_version_ids: list[str] = Field(default_factory=list)
+    primary_reference_entity_version_id: str | None = None
     face_visibility: str
     text_policy: str
     motion_requirement: str
     composition: str
     action: str
+    visual_prompt: str | None = None
+    negative_prompt: str | None = None
 
 
 class ShotPlanCandidateRead(BaseModel):
@@ -139,6 +147,9 @@ class EntityVersionSummary(BaseModel):
     entity_type: str
     display_name: str
     version_number: int
+    source_attachment_id: str | None
+    source_mime_type: str | None
+    source_attachment_verified: bool
 
 
 class PlanningNextAction(BaseModel):

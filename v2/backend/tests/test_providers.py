@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import hashlib
 
 from v2.backend.app.providers import EnvironmentCredentialResolver, ProviderAdapterError, ProviderExecutionRequest
 from v2.backend.app.providers.registry import default_provider_registry
@@ -72,11 +73,12 @@ class FakeRunningHubTransport:
 
 def runninghub_manifest(bindings: list[dict], media_type: str = "image") -> dict:
     return {
-        "schema_version": "production-work-request.v2",
+        "schema_version": "production-work-request.v3",
         "adapter_kind": "runninghub",
         "input_contract": {
-            "shot": {"action": "run", "composition": "wide"},
+            "shot": {"action": "run", "composition": "wide", "visual_prompt": "athlete running", "negative_prompt": None},
             "duration_ms": 4000,
+            "reference_image": None,
         },
         "output_contract": {"media_type": media_type},
         "provider": {
@@ -132,7 +134,7 @@ def test_runninghub_resolves_only_declared_node_sources() -> None:
     transport = FakeRunningHubTransport()
     adapter = enabled_adapter(transport)
     bindings = [
-        {"node_id": "1", "field_path": "text", "value_source": "shot.action", "value_type": "string", "required": True},
+        {"node_id": "1", "field_path": "text", "value_source": "shot.visual_prompt", "value_type": "string", "required": True},
         {"node_id": "2", "field_path": "width", "value_source": "video_spec.width", "value_type": "integer", "required": True},
         {"node_id": "3", "field_path": "flag", "value_source": "literal:true", "value_type": "boolean", "required": True},
     ]
@@ -141,12 +143,86 @@ def test_runninghub_resolves_only_declared_node_sources() -> None:
     assert result.provider_task_id == "rh-task-1"
     payload = transport.calls[0][2]
     assert payload["nodeInfoList"] == [
-        {"nodeId": "1", "fieldName": "text", "fieldValue": "run"},
+        {"nodeId": "1", "fieldName": "text", "fieldValue": "athlete running"},
         {"nodeId": "2", "fieldName": "width", "fieldValue": 480},
         {"nodeId": "3", "fieldName": "flag", "fieldValue": True},
     ]
     assert payload["apiKey"] == "test-secret"
     assert "test-secret" not in repr(result)
+
+
+def test_runninghub_uploads_only_frozen_primary_reference_and_omits_optional_null(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    content = b"\x89PNG\r\n\x1a\nreference"
+    path = tmp_path / "uploads" / "project" / "reference.png"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(content)
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    manifest = runninghub_manifest([
+        {"node_id": "1", "field_path": "text", "value_source": "shot.visual_prompt", "value_type": "string", "required": True},
+        {"node_id": "2", "field_path": "negative", "value_source": "shot.negative_prompt", "value_type": "string", "required": False},
+        {"node_id": "3", "field_path": "image", "value_source": "reference_image.primary", "value_type": "image", "required": True},
+        {"node_id": "4", "field_path": "has_image", "value_source": "reference_image.present", "value_type": "boolean", "required": True},
+    ])
+    manifest["input_contract"]["reference_image"] = {
+        "role": "primary",
+        "entity_version_id": "entity-version-1",
+        "attachment_id": "attachment-1",
+        "uri": "runtime://attachments/uploads/project/reference.png",
+        "mime_type": "image/png",
+        "byte_size": len(content),
+        "content_hash": hashlib.sha256(content).hexdigest(),
+    }
+    adapter.submit(ProviderExecutionRequest("generate_keyframe", "1" * 64, manifest))
+    assert [call[0] for call in transport.calls] == ["upload", "post_json"]
+    assert transport.calls[0][3] == path
+    assert transport.calls[1][2]["nodeInfoList"] == [
+        {"nodeId": "1", "fieldName": "text", "fieldValue": "athlete running"},
+        {"nodeId": "3", "fieldName": "image", "fieldValue": "uploaded/input.png"},
+        {"nodeId": "4", "fieldName": "has_image", "fieldValue": True},
+    ]
+
+
+def test_runninghub_optional_reference_is_omitted_without_upload() -> None:
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    manifest = runninghub_manifest([
+        {"node_id": "1", "field_path": "text", "value_source": "shot.visual_prompt", "value_type": "string", "required": True},
+        {"node_id": "2", "field_path": "image", "value_source": "reference_image.primary", "value_type": "image", "required": False},
+        {"node_id": "3", "field_path": "has_image", "value_source": "reference_image.present", "value_type": "boolean", "required": True},
+    ])
+    adapter.submit(ProviderExecutionRequest("generate_keyframe", "2" * 64, manifest))
+    assert [call[0] for call in transport.calls] == ["post_json"]
+    assert transport.calls[0][2]["nodeInfoList"] == [
+        {"nodeId": "1", "fieldName": "text", "fieldValue": "athlete running"},
+        {"nodeId": "3", "fieldName": "has_image", "fieldValue": False},
+    ]
+
+
+def test_runninghub_blocks_changed_reference_before_network(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    path = tmp_path / "uploads" / "project" / "reference.png"
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\x89PNG\r\n\x1a\nchanged")
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    manifest = runninghub_manifest([
+        {"node_id": "1", "field_path": "image", "value_source": "reference_image.primary", "value_type": "image", "required": True},
+    ])
+    manifest["input_contract"]["reference_image"] = {
+        "role": "primary",
+        "entity_version_id": "entity-version-1",
+        "attachment_id": "attachment-1",
+        "uri": "runtime://attachments/uploads/project/reference.png",
+        "mime_type": "image/png",
+        "byte_size": path.stat().st_size,
+        "content_hash": "0" * 64,
+    }
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.submit(ProviderExecutionRequest("generate_keyframe", "3" * 64, manifest))
+    assert caught.value.code == "REFERENCE_IMAGE_HASH_MISMATCH"
+    assert transport.calls == []
 
 
 def test_runninghub_rejects_legacy_prompt_placeholder_before_transport() -> None:
@@ -188,7 +264,7 @@ def test_runninghub_poll_downloads_deterministic_local_output(tmp_path, monkeypa
     transport.query_response = {"taskId": "rh-task-1", "status": "SUCCESS", "results": [{"url": "https://files.invalid/result.png"}]}
     adapter = enabled_adapter(transport)
     request = ProviderExecutionRequest("generate_keyframe", "f" * 64, runninghub_manifest([
-        {"node_id": "1", "field_path": "text", "value_source": "shot.action", "value_type": "string", "required": True}
+        {"node_id": "1", "field_path": "text", "value_source": "shot.visual_prompt", "value_type": "string", "required": True}
     ]))
     result = adapter.poll(request, "rh-task-1")
     assert result.state == "succeeded"

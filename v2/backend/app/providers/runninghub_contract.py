@@ -7,6 +7,8 @@ from typing import Any
 
 RUNNINGHUB_NODE_SOURCES = frozenset({
     "duration_ms",
+    "reference_image.present",
+    "reference_image.primary",
     "source_image",
     "seed",
     "shot.action",
@@ -14,7 +16,9 @@ RUNNINGHUB_NODE_SOURCES = frozenset({
     "shot.duration_ms",
     "shot.face_visibility",
     "shot.motion_requirement",
+    "shot.negative_prompt",
     "shot.text_policy",
+    "shot.visual_prompt",
     "video_spec.width",
     "video_spec.height",
     "video_spec.fps",
@@ -50,6 +54,8 @@ def runninghub_workflow_contract_issues(
 
     seen: set[tuple[str, str]] = set()
     source_image_count = 0
+    reference_image_count = 0
+    visual_prompt_count = 0
     for index, binding in enumerate(rows):
         if not isinstance(binding, dict):
             issues.append({
@@ -74,6 +80,10 @@ def runninghub_workflow_contract_issues(
         source = str(binding.get("value_source") or "")
         if source == "source_image":
             source_image_count += 1
+        if source == "reference_image.primary":
+            reference_image_count += 1
+        if source == "shot.visual_prompt":
+            visual_prompt_count += 1
         if not runninghub_source_is_supported(source):
             issues.append({
                 "code": "RUNNINGHUB_NODE_SOURCE_UNSUPPORTED",
@@ -85,11 +95,42 @@ def runninghub_workflow_contract_issues(
                 "code": "RUNNINGHUB_SOURCE_IMAGE_NOT_APPLICABLE",
                 "path": f"node_info_list.{index}.value_source",
             })
+        if source.startswith("reference_image.") and operation_kind != "image_generation":
+            issues.append({
+                "code": "RUNNINGHUB_REFERENCE_IMAGE_NOT_APPLICABLE",
+                "path": f"node_info_list.{index}.value_source",
+            })
+        expected_type = {
+            "source_image": "image",
+            "reference_image.primary": "image",
+            "reference_image.present": "boolean",
+            "shot.visual_prompt": "string",
+            "shot.negative_prompt": "string",
+        }.get(source)
+        if expected_type and binding.get("value_type") != expected_type:
+            issues.append({
+                "code": "RUNNINGHUB_NODE_SOURCE_TYPE_INVALID",
+                "path": f"node_info_list.{index}.value_type",
+                "value_source": source,
+                "expected": expected_type,
+            })
 
     if operation_kind == "video_generation" and source_image_count != 1:
         issues.append({
             "code": "RUNNINGHUB_I2V_SOURCE_IMAGE_COUNT_INVALID",
             "path": "node_info_list",
             "actual": source_image_count,
+        })
+    if reference_image_count > 1:
+        issues.append({
+            "code": "RUNNINGHUB_REFERENCE_IMAGE_COUNT_INVALID",
+            "path": "node_info_list",
+            "actual": reference_image_count,
+        })
+    if operation_kind == "image_generation" and visual_prompt_count != 1:
+        issues.append({
+            "code": "RUNNINGHUB_VISUAL_PROMPT_BINDING_COUNT_INVALID",
+            "path": "node_info_list",
+            "actual": visual_prompt_count,
         })
     return issues

@@ -1,10 +1,10 @@
 # 片场 V2 分镜生成输入合同提案
 
-> 状态：等待用户确认，不是当前已实现合同
+> 状态：用户已确认，合同已于 2026-07-17 实施
 >
 > 提案日期：2026-07-17
 >
-> 本文解决严格 RunningHub 适配器无法正确替代旧 `prompt / negative_prompt / reference_image` 的问题。确认前不得修改数据模型、现有方案、供应商配置或执行行为。
+> 本文记录严格 RunningHub 适配器正确承接 `prompt / negative_prompt / reference_image` 的设计决策。实现证据见 [V2 分镜生成输入合同实现](./V2_SHOT_GENERATION_INPUT_IMPLEMENTATION.md)。
 
 ## 1. 现状审计
 

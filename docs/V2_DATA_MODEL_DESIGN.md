@@ -936,3 +936,32 @@ Shot -> EntityVersion -> Entity / Attachment
 所有 Shot、EntityVersion、Entity 和 Attachment 查询同时校验 `project_id`；素材同时校验 `project_id + snapshot_id`。路由字段只读取 Asset 绑定的 WorkAttempt 及其冻结请求清单。
 
 `DependencyEdge` 只证明节点级依赖，不能证明执行时采用了父节点的哪个 Asset。投影返回父节点全部已登记输出，不生成推断的 `selected_asset_id`。查询不新增 CommandReceipt、ProjectEvent、WorkAttempt、CostEvent 或其他记录。
+
+## 24. 分镜生成输入与冻结附件事实
+
+`Shot` 为兼容历史数据新增可空列：
+
+```text
+product_entity_version_ids JSON
+primary_reference_entity_version_id FK -> EntityVersion.id, nullable
+visual_prompt TEXT, nullable at storage layer
+negative_prompt TEXT, nullable
+```
+
+存储层允许为空是为了原样保存历史 `shot-plan.v1`；应用合同 `shot-plan.v2` 要求 `visual_prompt` 非空。`negative_prompt` 的 `null` 表示用户没有提供该输入。`primary_reference_entity_version_id` 若存在，必须属于该 Shot 声明的场景、人物、服装或产品实体版本，并通过 `EntityVersion.source_attachment_id` 指向同项目的已验证图片附件。
+
+关键帧 `DAGNode.input_contract` 使用 `production-snapshot.v2`，包含 `shot` 结构和显式 `reference_image`。后者为 `null` 或以下完整事实：
+
+```text
+role = primary
+entity_version_id
+attachment_id
+uri
+mime_type
+byte_size
+content_hash
+```
+
+`WorkAttempt.request_manifest` 对外部任务使用 `production-work-request.v3`，复制快照冻结的分镜、工作流、供应商、视频规格和参考附件事实。Worker 与 Provider 不再查询活动实体版本或其他附件来补全请求。冻结事实变化只会使原请求阻断，不会修改快照。
+
+数据库迁移 `20260717_17` 只增加存储列，不给历史 Shot 回填任何语义值，不创建候选、PlanVersion、快照或工作项。

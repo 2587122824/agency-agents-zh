@@ -151,6 +151,7 @@ def generate_brief(session: Session, project: Project, payload: GenerateBrief) -
         "character_refs": bindings["identity_reference"],
         "outfit_refs": bindings["outfit_reference"],
         "scene_refs": bindings["scene_reference"],
+        "product_refs": bindings["product_reference"],
         "voice_refs": bindings["voice_sample"],
         "assumptions": [],
     }
@@ -164,6 +165,7 @@ def generate_brief(session: Session, project: Project, payload: GenerateBrief) -
         "character_refs": {"type": "confirmed_binding", "reference_id": None},
         "outfit_refs": {"type": "confirmed_binding", "reference_id": None},
         "scene_refs": {"type": "confirmed_binding", "reference_id": None},
+        "product_refs": {"type": "confirmed_binding", "reference_id": None},
         "voice_refs": {"type": "confirmed_binding", "reference_id": None},
     }
     candidate = CreativeBriefCandidate(
@@ -239,6 +241,7 @@ def _build_shots(requirement: RequirementVersion, brief: CreativeBriefCandidate)
     characters = list(brief.brief.get("character_refs") or [])
     outfits = list(brief.brief.get("outfit_refs") or [])
     scenes = list(brief.brief.get("scene_refs") or [])
+    products = list(brief.brief.get("product_refs") or [])
     core = str(brief.brief["core_intent"])
     phases = [
         ("建立镜头", "建立主题", "moderate"),
@@ -254,11 +257,15 @@ def _build_shots(requirement: RequirementVersion, brief: CreativeBriefCandidate)
             "scene_entity_version_id": scenes[0] if scenes else None,
             "character_entity_version_ids": characters,
             "outfit_entity_version_ids": outfits,
+            "product_entity_version_ids": products,
+            "primary_reference_entity_version_id": None,
             "face_visibility": "optional" if characters else "not_visible",
             "text_policy": "forbidden",
             "motion_requirement": phase[2],
             "composition": phase[0],
             "action": f"{core}：{phase[1]}",
+            "visual_prompt": f"{core}。{phase[1]}，{phase[0]}。",
+            "negative_prompt": None,
         }
         for index, phase in enumerate(phases, start=1)
     ]
@@ -278,10 +285,40 @@ def validate_shots(session: Session, project_id: str, requirement: RequirementVe
         errors.append({"code": "SHOT_ID_OR_SEQUENCE_INVALID", "field": "shot_code"})
     referenced = set()
     for item in shots:
+        shot_code = item.get("shot_code")
+        visual_prompt = item.get("visual_prompt")
+        if not isinstance(visual_prompt, str) or not visual_prompt.strip() or len(visual_prompt.strip()) > 4000:
+            errors.append({"code": "VISUAL_PROMPT_INVALID", "shot_code": shot_code})
+        negative_prompt = item.get("negative_prompt")
+        if negative_prompt is not None and (
+            not isinstance(negative_prompt, str)
+            or not negative_prompt.strip()
+            or len(negative_prompt.strip()) > 2000
+        ):
+            errors.append({"code": "NEGATIVE_PROMPT_INVALID", "shot_code": shot_code})
         if item.get("scene_entity_version_id"):
             referenced.add(item["scene_entity_version_id"])
-        referenced.update(item.get("character_entity_version_ids") or [])
-        referenced.update(item.get("outfit_entity_version_ids") or [])
+        shot_references: set[str] = set()
+        if item.get("scene_entity_version_id"):
+            shot_references.add(item["scene_entity_version_id"])
+        for field in (
+            "character_entity_version_ids",
+            "outfit_entity_version_ids",
+            "product_entity_version_ids",
+        ):
+            values = item.get(field) or []
+            if not isinstance(values, list) or any(not isinstance(value, str) or not value for value in values) or len(values) != len(set(values)):
+                errors.append({"code": "ENTITY_VERSION_LIST_INVALID", "shot_code": shot_code, "field": field})
+                continue
+            referenced.update(values)
+            shot_references.update(values)
+        primary_reference = item.get("primary_reference_entity_version_id")
+        if primary_reference is not None and primary_reference not in shot_references:
+            errors.append({
+                "code": "PRIMARY_REFERENCE_NOT_DECLARED",
+                "shot_code": shot_code,
+                "entity_version_id": primary_reference,
+            })
         if item.get("face_visibility") not in {"required", "optional", "not_visible"}:
             errors.append({"code": "FACE_VISIBILITY_INVALID", "shot_code": item.get("shot_code")})
         if item.get("text_policy") not in {"forbidden", "allowed", "required"}:
@@ -292,6 +329,32 @@ def validate_shots(session: Session, project_id: str, requirement: RequirementVe
         version = repository.entity_version(version_id)
         if not version or version.project_id != project_id or version.status != "confirmed":
             errors.append({"code": "ENTITY_VERSION_NOT_FOUND", "entity_version_id": version_id})
+    for item in shots:
+        primary_reference = item.get("primary_reference_entity_version_id")
+        if primary_reference is None:
+            continue
+        version = repository.entity_version(primary_reference)
+        if not version or version.project_id != project_id or version.status != "confirmed":
+            continue
+        if not version.source_attachment_id:
+            errors.append({
+                "code": "PRIMARY_REFERENCE_ATTACHMENT_REQUIRED",
+                "shot_code": item.get("shot_code"),
+                "entity_version_id": primary_reference,
+            })
+            continue
+        attachment = repository.attachment(version.source_attachment_id)
+        if (
+            not attachment
+            or attachment.project_id != project_id
+            or attachment.verification_status != "verified"
+            or not attachment.mime_type.startswith("image/")
+        ):
+            errors.append({
+                "code": "PRIMARY_REFERENCE_ATTACHMENT_INVALID",
+                "shot_code": item.get("shot_code"),
+                "entity_version_id": primary_reference,
+            })
     return errors
 
 
@@ -314,7 +377,7 @@ def generate_shot_plan(session: Session, project: Project, payload: GenerateShot
     manifest = _create_manifest(session, project, requirement, "director", {
         "accepted_creative_brief": {"id": brief.id, "brief": brief.brief},
     })
-    run = _start_run(session, project, manifest, "director", "shot-plan.v1")
+    run = _start_run(session, project, manifest, "director", "shot-plan.v2")
     shots = _build_shots(requirement, brief)
     errors = validate_shots(session, project.id, requirement, shots)
     candidate = ShotPlanCandidate(
@@ -506,6 +569,7 @@ def decide_shot_plan(
         requirement_version_id=requirement.id,
         shot_plan_candidate_id=candidate.id,
         creative_brief=brief.brief,
+        contract_schema_version="shot-plan.v2",
         confirmed_by=payload.actor_id,
     )
     repository.add(plan)
@@ -539,11 +603,15 @@ def _shot_dict(shot: Shot) -> dict:
         "scene_entity_version_id": shot.scene_entity_version_id,
         "character_entity_version_ids": shot.character_entity_version_ids,
         "outfit_entity_version_ids": shot.outfit_entity_version_ids,
+        "product_entity_version_ids": shot.product_entity_version_ids,
+        "primary_reference_entity_version_id": shot.primary_reference_entity_version_id,
         "face_visibility": shot.face_visibility,
         "text_policy": shot.text_policy,
         "motion_requirement": shot.motion_requirement,
         "composition": shot.composition,
         "action": shot.action,
+        "visual_prompt": shot.visual_prompt,
+        "negative_prompt": shot.negative_prompt,
     }
 
 
@@ -614,6 +682,17 @@ def planning_center_view(session: Session, project: Project) -> dict:
                 "entity_type": entity.entity_type,
                 "display_name": entity.display_name,
                 "version_number": version.version_number,
+                "source_attachment_id": version.source_attachment_id,
+                "source_mime_type": (
+                    repository.attachment(version.source_attachment_id).mime_type
+                    if version.source_attachment_id and repository.attachment(version.source_attachment_id)
+                    else None
+                ),
+                "source_attachment_verified": bool(
+                    version.source_attachment_id
+                    and repository.attachment(version.source_attachment_id)
+                    and repository.attachment(version.source_attachment_id).verification_status == "verified"
+                ),
             }
             for version, entity in entity_rows
         ],

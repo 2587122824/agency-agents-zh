@@ -35,6 +35,7 @@ def _entity_reference_rows(
         references.append(("scene", shot.scene_entity_version_id))
     references.extend(("character", item) for item in shot.character_entity_version_ids or [])
     references.extend(("outfit", item) for item in shot.outfit_entity_version_ids or [])
+    references.extend(("product", item) for item in shot.product_entity_version_ids or [])
 
     rows = []
     for role, version_id in references:
@@ -45,6 +46,7 @@ def _entity_reference_rows(
         attachment = attachments.get(version.source_attachment_id) if version.source_attachment_id else None
         rows.append({
             "role": role,
+            "is_primary": version.id == shot.primary_reference_entity_version_id,
             "entity_id": entity.id,
             "entity_name": entity.display_name,
             "entity_type": entity.entity_type,
@@ -101,6 +103,7 @@ def material_contact_sheet_view(session: Session, project: Project) -> dict:
             version_ids.add(shot.scene_entity_version_id)
         version_ids.update(shot.character_entity_version_ids or [])
         version_ids.update(shot.outfit_entity_version_ids or [])
+        version_ids.update(shot.product_entity_version_ids or [])
     versions = {
         item.id: item for item in repository.entity_versions(project.id, version_ids)
     } if version_ids else {}
@@ -176,10 +179,14 @@ def material_contact_sheet_view(session: Session, project: Project) -> dict:
                 "motion_requirement": shot.motion_requirement,
                 "composition": shot.composition,
                 "action": shot.action,
+                "visual_prompt": shot.visual_prompt,
+                "negative_prompt": shot.negative_prompt,
+                "primary_reference_entity_version_id": shot.primary_reference_entity_version_id,
             },
             "route": route,
             "dependencies": dependencies,
             "entity_references": _entity_reference_rows(shot, entities, versions, attachments),
+            "frozen_reference_image": node.input_contract.get("reference_image") if node else None,
         })
 
     quality = quality_review_view(session, project)

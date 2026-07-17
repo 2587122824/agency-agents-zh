@@ -1,5 +1,16 @@
 # Handoff Context
 
+## 2026-07-17 V2 Shot Generation Input Contract Sprint 42
+
+- Implemented the user-confirmed seven-part `shot-plan.v2` contract: required `visual_prompt`, nullable `negative_prompt`, explicit nullable primary reference, product entities, frozen attachment facts, no historical semantic backfill, and deterministic blocking for missing required workflow inputs.
+- Added Alembic `20260717_17` and nullable historical-compatible Shot storage. New Director candidates and confirmed plans use `shot-plan.v2`; historical `shot-plan.v1` remains unchanged and is rejected by strict production with `SHOT_PLAN_SCHEMA_UNSUPPORTED`.
+- Production now freezes exact primary-reference attachment ID, URI, MIME, byte size, and SHA-256 in `production-snapshot.v2`; `production-work-request.v3`, submission, and RunningHub upload recheck those facts. The adapter uploads only the exact frozen reference and keeps I2V `source_image` separate.
+- RunningHub NodeInfoList now supports `shot.visual_prompt`, `shot.negative_prompt`, `reference_image.primary`, and `reference_image.present`. Optional missing inputs are omitted, required missing inputs block, and no prompt composition, first-item selection, alternate attachment lookup, workflow replacement, retry, or downgrade was introduced.
+- Updated the plan editor, production impact, settings source names, and contact sheet for products, visual/negative prompts, explicit reference selection/thumbnail, and frozen file evidence. User-facing Mock Agent/Creative/Director/AgentRun labels were normalized to ordinary Chinese intelligent-agent terminology without changing internal contracts.
+- Added `docs/V2_SHOT_GENERATION_INPUT_IMPLEMENTATION.md` and updated the proposal status, product, data-model, state/event, and implementation-status documents.
+- Verification completed with 124 backend tests, Python compileall, Vite production build, fresh/runtime Alembic `20260717_17 (head)`, diff audit, desktop/390px settings checks, no horizontal overflow, and no browser console errors.
+- No published configuration, credential, external-execution flag, real Provider request, network test, or fee changed. `my_workspace/my_asset_library/library.json` remains an unrelated local change and must not be staged.
+
 ## 2026-07-17 V2 Shot Generation Input Contract Proposal Sprint 41
 
 - Audited the current Shot-to-RunningHub authority chain. Shot has only action/composition and entity version IDs; snapshots do not freeze exact reference attachment facts; the image adapter has no explicit entity-reference upload contract.

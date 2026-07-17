@@ -112,6 +112,12 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
         "correlation_id", "actor_type", "actor_id", "schema_version",
     }.issubset({column["name"] for column in inspect(upgraded_engine).get_columns("project_events")})
     assert "outbox_messages" in inspect(upgraded_engine).get_table_names()
+    assert {
+        "product_entity_version_ids",
+        "primary_reference_entity_version_id",
+        "visual_prompt",
+        "negative_prompt",
+    }.issubset({column["name"] for column in inspect(upgraded_engine).get_columns("shots")})
     with Session(upgraded_engine) as session:
         upgraded = session.scalar(select(Project).where(Project.id == project_id))
         assert upgraded is not None

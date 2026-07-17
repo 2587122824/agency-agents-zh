@@ -280,11 +280,15 @@ export interface ShotContract {
   scene_entity_version_id: string | null
   character_entity_version_ids: string[]
   outfit_entity_version_ids: string[]
+  product_entity_version_ids: string[]
+  primary_reference_entity_version_id: string | null
   face_visibility: string
   text_policy: string
   motion_requirement: string
   composition: string
   action: string
+  visual_prompt: string | null
+  negative_prompt: string | null
 }
 
 export interface ShotPlanCandidate {
@@ -335,6 +339,9 @@ export interface PlanningCenter {
     entity_type: string
     display_name: string
     version_number: number
+    source_attachment_id: string | null
+    source_mime_type: string | null
+    source_attachment_verified: boolean
   }>
   next_action: {
     code: string
@@ -514,7 +521,8 @@ export interface QualityReview {
 }
 
 export interface ContactSheetEntityReference {
-  role: 'character' | 'scene' | 'outfit'
+  role: 'character' | 'scene' | 'outfit' | 'product'
+  is_primary: boolean
   entity_id: string
   entity_name: string
   entity_type: string
@@ -542,6 +550,9 @@ export interface ContactSheetEntry {
     motion_requirement: string
     composition: string
     action: string
+    visual_prompt: string | null
+    negative_prompt: string | null
+    primary_reference_entity_version_id: string | null
   } | null
   route: {
     work_item_id: string
@@ -564,6 +575,15 @@ export interface ContactSheetEntry {
     registered_assets: Array<{ id: string; asset_type: string; role: string; state: string; content_hash: string | null }>
   }>
   entity_references: ContactSheetEntityReference[]
+  frozen_reference_image: {
+    role: 'primary'
+    entity_version_id: string
+    attachment_id: string
+    uri: string
+    mime_type: string
+    byte_size: number
+    content_hash: string
+  } | null
 }
 
 export interface MaterialContactSheet {

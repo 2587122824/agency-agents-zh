@@ -69,7 +69,7 @@ function ContactCard({ projectId, entry }: { projectId: string; entry: ContactSh
 
     <section className={styles.evidence}>
       <h3><Boxes />分镜合同</h3>
-      {entry.shot ? <><p><strong>{entry.shot.shot_code} · {entry.shot.shot_type}</strong><span>{(entry.shot.duration_ms / 1000).toFixed(2)}s</span></p><p><b>人物可见性</b><span>{entry.shot.face_visibility}</span></p><p><b>文字策略</b><span>{entry.shot.text_policy}</span></p><p><b>动态要求</b><span>{entry.shot.motion_requirement}</span></p><p className={styles.longFact}><b>构图</b><span>{entry.shot.composition}</span></p><p className={styles.longFact}><b>动作</b><span>{entry.shot.action}</span></p></> : <p><span>素材未绑定分镜。</span></p>}
+      {entry.shot ? <><p><strong>{entry.shot.shot_code} · {entry.shot.shot_type}</strong><span>{(entry.shot.duration_ms / 1000).toFixed(2)}s</span></p><p><b>人物可见性</b><span>{entry.shot.face_visibility}</span></p><p><b>文字策略</b><span>{entry.shot.text_policy}</span></p><p><b>动态要求</b><span>{entry.shot.motion_requirement}</span></p><p className={styles.longFact}><b>画面生成描述</b><span>{entry.shot.visual_prompt ?? '旧方案未记录'}</span></p><p className={styles.longFact}><b>避免内容</b><span>{entry.shot.negative_prompt ?? '未设置'}</span></p><p className={styles.longFact}><b>构图</b><span>{entry.shot.composition}</span></p><p className={styles.longFact}><b>动作</b><span>{entry.shot.action}</span></p></> : <p><span>素材未绑定分镜。</span></p>}
     </section>
 
     <section className={styles.evidence}>
@@ -84,7 +84,8 @@ function ContactCard({ projectId, entry }: { projectId: string; entry: ContactSh
 
     <section className={styles.references}>
       <h3><Fingerprint />实体版本与来源</h3>
-      {entry.entity_references.length ? entry.entity_references.map(reference => <div key={`${reference.role}-${reference.entity_version_id}`}><figure><ReferencePreview projectId={projectId} reference={reference} /></figure><p><strong>{reference.entity_name}</strong><span>{reference.role} · v{reference.version_number}</span><code>{reference.entity_version_id}</code><small>{reference.source_filename ?? '没有来源附件'}</small></p></div>) : <p>分镜没有声明人物、场景或服装实体版本。</p>}
+      {entry.entity_references.length ? entry.entity_references.map(reference => <div key={`${reference.role}-${reference.entity_version_id}`}><figure><ReferencePreview projectId={projectId} reference={reference} /></figure><p><strong>{reference.entity_name}</strong><span>{reference.role} · v{reference.version_number}{reference.is_primary ? ' · 主参考' : ''}</span><code>{reference.entity_version_id}</code><small>{reference.source_filename ?? '没有来源附件'}</small></p></div>) : <p>分镜没有声明人物、场景、服装或产品实体版本。</p>}
+      <div className={styles.frozenFact}><Fingerprint /><p><strong>{entry.frozen_reference_image ? '快照已冻结主参考图' : '快照明确无主参考图'}</strong><span>{entry.frozen_reference_image ? `${entry.frozen_reference_image.mime_type} · ${(entry.frozen_reference_image.byte_size / 1024).toFixed(1)} KB` : '执行时不会选择其他图片'}</span>{entry.frozen_reference_image && <code>{entry.frozen_reference_image.content_hash}</code>}</p></div>
     </section>
   </article>
 }

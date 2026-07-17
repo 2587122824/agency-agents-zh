@@ -11,7 +11,7 @@ import styles from './DecisionImpactPage.module.css'
 
 const typeLabels: Record<string, string> = {
   entity: '实体', entity_version: '实体版本',
-  manifest: '输入清单', agent_run: 'Agent 运行', requirement_candidate: '需求候选',
+  manifest: '输入清单', agent_run: '智能体运行', requirement_candidate: '需求候选',
   requirement_version: '需求版本', creative_brief: '创意方案', shot_plan: '分镜候选',
   plan: '方案版本', shot: '分镜', snapshot: '生产快照', dag_node: 'DAG 节点',
   work_item: '工作项', asset: '素材', timeline: '时间线', timeline_item: '剪辑条目',

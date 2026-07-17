@@ -11,7 +11,7 @@ import styles from './ProjectPage.module.css'
 
 const sourceLabels: Record<string, string> = {
   user: '用户输入',
-  agent_proposal: 'Agent 建议',
+  agent_proposal: '创作助手建议',
   declared_default: '已声明默认值',
   template: '模板',
 }
@@ -87,7 +87,7 @@ export function ProjectPage() {
         </div>
         <form className={styles.composer} onSubmit={submit}>
           <textarea value={message} onChange={event => setMessage(event.target.value)} placeholder="继续补充创作要求…" rows={3} />
-          <div><button type="button" className="secondaryButton" onClick={() => fileInput.current?.click()} disabled={register.isPending}><Paperclip size={15} />{register.isPending ? '上传中…' : '上传附件'}</button><input ref={fileInput} hidden type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,video/mp4" onChange={event => { const file = event.target.files?.[0]; if (file) register.mutate(file); event.target.value = '' }} /><span>本阶段使用 Mock Agent，不产生模型或生产费用</span><button className="primaryButton" disabled={!message.trim() || addMessage.isPending}>发送<Send size={15} /></button></div>
+          <div><button type="button" className="secondaryButton" onClick={() => fileInput.current?.click()} disabled={register.isPending}><Paperclip size={15} />{register.isPending ? '上传中…' : '上传附件'}</button><input ref={fileInput} hidden type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,video/mp4" onChange={event => { const file = event.target.files?.[0]; if (file) register.mutate(file); event.target.value = '' }} /><span>本阶段使用本地演示智能体，不产生模型或生产费用</span><button className="primaryButton" disabled={!message.trim() || addMessage.isPending}>发送<Send size={15} /></button></div>
         </form>
       </section>
 
@@ -104,7 +104,7 @@ export function ProjectPage() {
             return <div className={styles.field} key={key}><span>{fieldLabels[key] ?? key}</span><p>{key === 'duration_seconds' ? `${String(value)} 秒` : key === 'audio_mode' ? value === 'off' ? '关闭' : '旁白' : String(value)}</p><small data-agent={source?.type === 'agent_proposal'}>{sourceLabels[source?.type ?? 'user'] ?? source?.type ?? '用户输入'}</small></div>
           })}
         </div>
-        {candidate ? <div className={styles.candidateActions}><div><strong>候选不会自动生效</strong><span>确认后将创建 requirement_v{creation.active_requirement.version_number + 1}，旧版本保留。</span></div><button className="secondaryButton" onClick={() => reject.mutate()} disabled={reject.isPending}><X size={15} />拒绝</button><button className="primaryButton" onClick={() => accept.mutate()} disabled={accept.isPending}><Check size={15} />确认并创建新版本</button></div> : creation.next_action.code === 'GENERATE_REQUIREMENT_CANDIDATE' ? <div className={styles.generateBox}><div><Sparkles size={18} /><p><strong>整理最新消息为候选</strong><span>只读取活动版本、未消费消息和已确认附件绑定。</span></p></div><button className="primaryButton" onClick={() => generate.mutate()} disabled={generate.isPending}>{generate.isPending ? '正在生成…' : '运行 Mock Agent'}</button></div> : creation.next_action.code === 'REQUIREMENT_READY_FOR_PLANNING' ? <div className={styles.readyBox}><CheckCircle2 size={19} /><p><strong>需求版本已完整</strong><span>下一阶段将基于当前版本生成创意方案候选。</span></p><Link className="primaryButton" to={`/projects/${projectId}/plan`}>进入方案确认</Link></div> : null}
+        {candidate ? <div className={styles.candidateActions}><div><strong>候选不会自动生效</strong><span>确认后将创建 requirement_v{creation.active_requirement.version_number + 1}，旧版本保留。</span></div><button className="secondaryButton" onClick={() => reject.mutate()} disabled={reject.isPending}><X size={15} />拒绝</button><button className="primaryButton" onClick={() => accept.mutate()} disabled={accept.isPending}><Check size={15} />确认并创建新版本</button></div> : creation.next_action.code === 'GENERATE_REQUIREMENT_CANDIDATE' ? <div className={styles.generateBox}><div><Sparkles size={18} /><p><strong>整理最新消息为候选</strong><span>只读取活动版本、未消费消息和已确认附件绑定。</span></p></div><button className="primaryButton" onClick={() => generate.mutate()} disabled={generate.isPending}>{generate.isPending ? '正在生成…' : '运行需求整理智能体'}</button></div> : creation.next_action.code === 'REQUIREMENT_READY_FOR_PLANNING' ? <div className={styles.readyBox}><CheckCircle2 size={19} /><p><strong>需求版本已完整</strong><span>下一阶段将基于当前版本生成创意方案候选。</span></p><Link className="primaryButton" to={`/projects/${projectId}/plan`}>进入方案确认</Link></div> : null}
       </section>
 
       <aside className={styles.side}>
@@ -115,7 +115,7 @@ export function ProjectPage() {
         </section>
         <section className={styles.history}>
           <button onClick={() => setShowHistory(value => !value)}><div><History size={17} /><span><strong>运行与候选历史</strong><small>{creation.agent_runs.length} 次运行 · {creation.candidate_history.length} 个候选</small></span></div><ChevronDown size={16} data-open={showHistory} /></button>
-          {showHistory && <div className={styles.historyList}>{creation.agent_runs.length ? creation.agent_runs.map(run => <article key={run.id}><span data-status={run.status}><Clock3 size={13} />{run.status}</span><strong>{run.model_name}</strong><small>{run.id.slice(0, 18)}</small></article>) : <div className={styles.sideEmpty}>还没有 AgentRun。</div>}</div>}
+          {showHistory && <div className={styles.historyList}>{creation.agent_runs.length ? creation.agent_runs.map(run => <article key={run.id}><span data-status={run.status}><Clock3 size={13} />{run.status}</span><strong>{run.model_name}</strong><small>{run.id.slice(0, 18)}</small></article>) : <div className={styles.sideEmpty}>还没有智能体运行记录。</div>}</div>}
         </section>
         {error && <div className={styles.error}>{error}</div>}
       </aside>

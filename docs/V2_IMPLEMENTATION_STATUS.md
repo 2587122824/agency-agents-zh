@@ -17,7 +17,7 @@
 |---|---|---|
 | React + TypeScript + Vite | 已完成 | `v2/frontend`，生产构建持续通过 |
 | FastAPI + Pydantic | 已完成 | `v2/backend/app/main.py`、`api/router.py` |
-| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260717_16_*` |
+| SQLAlchemy + SQLite + Alembic | 已完成 | `db/`、`migrations/versions/20260717_17_*` |
 | 数据库队列与独立 Worker | 已完成 | `WorkItem`、`WorkAttempt`、`workers/worker.py` |
 | SSE 事件流与游标恢复 | 已完成 | `ProjectEvent`、`events/service.py`、`Last-Event-ID` |
 | 项目状态机与统一评估器 | 部分完成 | 纯事实评估器和当前命令面的权威转移器已实现；应用服务/Worker 无直接状态赋值，具备原子行版本、结构化 blocked 和状态事件。缺口为 ResolveBlock、CancelProject、StartNewPlanVersion 与精确重试转移 |
@@ -31,8 +31,8 @@
 |---|---|---|
 | 对话、需求版本、方案版本 | 已完成 | `Message`、`RequirementVersion`、`PlanVersion` 与创作/规划 API |
 | 类型化实体与不可变版本 | 已完成 | `Entity`、`EntityVersion`、实体资产库页面 |
-| 方案候选与显式确认 | 已完成 | Creative/Director AgentRun、候选接受命令、方案页 |
-| 结构化分镜编辑 | 已完成 | 类型化逐镜头 patch、候选替代链、行版本冲突、方案页编辑器与版本历史；不开放自由 JSON 或提示词覆盖 |
+| 方案候选与显式确认 | 已完成 | 创意策划/分镜导演智能体运行记录、候选接受命令、方案页 |
+| 结构化分镜编辑 | 已完成 | `shot-plan.v2` 类型化逐镜头 patch、候选替代链、行版本冲突、画面生成描述、可空避免内容、人物/服装/场景/产品与显式主参考图选择；不开放自由 JSON |
 | 决策影响分析 | 已完成 | 已观测传播图、持久化变更提案报告、精确目标、活动快照工作量与冻结价格汇总；按确认边界不提供应用变更、失效、重做或重试命令 |
 | 生产快照、DAG 与依赖验证 | 已完成 | `ProductionSnapshot`、`DAGNode`、`DependencyEdge` 与确定性编译测试 |
 | 工作流槽位注册表 | 已完成 | 版本化系统配置、WorkflowSlot、NodeInfoList 验证和设置页；配置及组件技术键由界面生成并隐藏，关联项按名称选择，支持的视频规格按列表勾选 |
@@ -51,7 +51,7 @@
 | 成本账本 | 已完成 | `CostEvent`、估算与实际费用分离 |
 | 时间线合同与确认 | 已完成 | Timeline/TimelineItem、验证、版本修订、确认和剪辑页 |
 | 最终交付验证 | 已完成 | DeliveryAttempt、外部上传、真实 MP4 验证与完成条件 |
-| RunningHub Provider | 部分完成 | 图片和首帧视频 Adapter、共享严格 NodeInfoList 校验器、单父图片、提交任务号持久化、重启轮询恢复与确定性本地下载已实现并用假传输验证；设置页可识别历史不兼容配置并用普通名称编辑新映射。关键帧的完整视觉描述与显式实体参考附件合同尚待用户确认，见 [分镜生成输入合同提案](./V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md)；真实执行默认关闭且尚未联网验收 |
+| RunningHub Provider | 部分完成 | 图片和首帧视频 Adapter、严格 NodeInfoList、`production-work-request.v3`、单父图片、显式主参考附件上传、提交任务号持久化、重启轮询恢复与确定性本地下载已用假传输验证；历史 v1 不回填，文件篡改在联网前阻断。真实执行默认关闭且尚未联网验收 |
 | CosyVoice Provider | 未开始，需确认 | 尚未接入 V2；真实调用、声音复刻与临时公网音频仍需单独确认 |
 | OSS 临时音频上传 | 未开始，需确认 | 涉及真实存储凭据、生命周期和外部网络调用 |
 | FFmpeg 本地合成 | 未开始，需确认 | 会新增交付执行方式和失败/恢复语义 |

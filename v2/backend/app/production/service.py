@@ -4,9 +4,12 @@ import hashlib
 import json
 from datetime import timezone
 from decimal import Decimal, ROUND_HALF_UP
+from pathlib import PurePath, PurePosixPath
 
 from sqlalchemy.orm import Session
 
+from ..core.config import RUNTIME_ROOT
+from ..creation.service import detect_media_type
 from ..db.models import (
     ConfigurationReference,
     CostEvent,
@@ -133,15 +136,138 @@ def _shot_contract(shot: Shot) -> dict:
         "scene_entity_version_id": shot.scene_entity_version_id,
         "character_entity_version_ids": shot.character_entity_version_ids,
         "outfit_entity_version_ids": shot.outfit_entity_version_ids,
+        "product_entity_version_ids": shot.product_entity_version_ids,
+        "primary_reference_entity_version_id": shot.primary_reference_entity_version_id,
         "face_visibility": shot.face_visibility,
         "text_policy": shot.text_policy,
         "motion_requirement": shot.motion_requirement,
         "composition": shot.composition,
         "action": shot.action,
+        "visual_prompt": shot.visual_prompt,
+        "negative_prompt": shot.negative_prompt,
     }
 
 
-def _compile_manifest(plan: PlanVersion, shots: list[Shot], selection: dict, output_spec: dict, audio_mode: str) -> dict:
+def _attachment_uri(storage_path: str) -> str:
+    relative = PurePath(storage_path)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise ValueError("attachment storage path is not a safe relative path")
+    return f"runtime://attachments/{PurePosixPath(*relative.parts).as_posix()}"
+
+
+def _freeze_reference_image(
+    repository: ProductionRepository,
+    project_id: str,
+    shot: Shot,
+    storage: StoragePolicyVersion | None,
+    errors: list[dict],
+) -> dict | None:
+    reference_id = shot.primary_reference_entity_version_id
+    if reference_id is None:
+        return None
+    path_prefix = f"shots.{shot.shot_code}.primary_reference_entity_version_id"
+    declared = set(
+        ([shot.scene_entity_version_id] if shot.scene_entity_version_id else [])
+        + (shot.character_entity_version_ids or [])
+        + (shot.outfit_entity_version_ids or [])
+        + (shot.product_entity_version_ids or [])
+    )
+    if reference_id not in declared:
+        errors.append({"code": "PRIMARY_REFERENCE_NOT_DECLARED", "path": path_prefix})
+        return None
+    version = repository.entity_version(reference_id)
+    if not version or version.project_id != project_id or version.status != "confirmed":
+        errors.append({"code": "PRIMARY_REFERENCE_ENTITY_INVALID", "path": path_prefix})
+        return None
+    if not version.source_attachment_id:
+        errors.append({"code": "PRIMARY_REFERENCE_ATTACHMENT_REQUIRED", "path": path_prefix})
+        return None
+    attachment = repository.attachment(version.source_attachment_id)
+    if (
+        not attachment
+        or attachment.project_id != project_id
+        or attachment.verification_status != "verified"
+        or not attachment.mime_type.startswith("image/")
+    ):
+        errors.append({"code": "PRIMARY_REFERENCE_ATTACHMENT_INVALID", "path": path_prefix})
+        return None
+    if not storage:
+        errors.append({"code": "STORAGE_POLICY_REQUIRED", "path": path_prefix})
+        return None
+    if attachment.mime_type not in (storage.allowed_mime_types or []):
+        errors.append({"code": "REFERENCE_IMAGE_MIME_NOT_ALLOWED", "path": path_prefix})
+        return None
+    if attachment.byte_size > storage.max_file_size_bytes:
+        errors.append({"code": "REFERENCE_IMAGE_TOO_LARGE", "path": path_prefix})
+        return None
+    root = RUNTIME_ROOT.resolve()
+    file_path = (root / attachment.storage_path).resolve()
+    if not file_path.is_relative_to(root):
+        errors.append({"code": "REFERENCE_IMAGE_PATH_INVALID", "path": path_prefix})
+        return None
+    if not file_path.is_file():
+        errors.append({"code": "REFERENCE_IMAGE_FILE_MISSING", "path": path_prefix})
+        return None
+    if file_path.stat().st_size != attachment.byte_size:
+        errors.append({"code": "REFERENCE_IMAGE_SIZE_MISMATCH", "path": path_prefix})
+        return None
+    content = file_path.read_bytes()
+    if detect_media_type(content) != attachment.mime_type:
+        errors.append({"code": "REFERENCE_IMAGE_MIME_MISMATCH", "path": path_prefix})
+        return None
+    if hashlib.sha256(content).hexdigest() != attachment.content_hash:
+        errors.append({"code": "REFERENCE_IMAGE_HASH_MISMATCH", "path": path_prefix})
+        return None
+    try:
+        uri = _attachment_uri(attachment.storage_path)
+    except ValueError:
+        errors.append({"code": "REFERENCE_IMAGE_PATH_INVALID", "path": path_prefix})
+        return None
+    return {
+        "role": "primary",
+        "entity_version_id": version.id,
+        "attachment_id": attachment.id,
+        "uri": uri,
+        "mime_type": attachment.mime_type,
+        "byte_size": attachment.byte_size,
+        "content_hash": attachment.content_hash,
+    }
+
+
+def _verify_frozen_reference_image(reference: dict | None) -> bool:
+    if reference is None:
+        return True
+    required = {"role", "entity_version_id", "attachment_id", "uri", "mime_type", "byte_size", "content_hash"}
+    if set(reference) != required or reference.get("role") != "primary":
+        return False
+    uri = str(reference.get("uri") or "")
+    prefix = "runtime://attachments/"
+    if not uri.startswith(prefix):
+        return False
+    relative = PurePosixPath(uri[len(prefix):])
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        return False
+    root = RUNTIME_ROOT.resolve()
+    file_path = (root / PurePath(*relative.parts)).resolve()
+    if not file_path.is_relative_to(root) or not file_path.is_file():
+        return False
+    if file_path.stat().st_size != reference.get("byte_size"):
+        return False
+    content = file_path.read_bytes()
+    return (
+        detect_media_type(content) == reference.get("mime_type")
+        and hashlib.sha256(content).hexdigest() == reference.get("content_hash")
+    )
+
+
+def _compile_manifest(
+    plan: PlanVersion,
+    shots: list[Shot],
+    selection: dict,
+    output_spec: dict,
+    audio_mode: str,
+    references_by_shot_id: dict[str, dict | None],
+) -> dict:
     nodes: list[dict] = []
     edges: list[dict] = []
     for shot in shots:
@@ -154,8 +280,8 @@ def _compile_manifest(plan: PlanVersion, shots: list[Shot], selection: dict, out
             "workflow_slot_version_id": selection["keyframe_workflow_slot_version_id"],
             "input_contract": {"shot": _shot_contract(shot), "entity_version_ids": sorted(set(
                 ([shot.scene_entity_version_id] if shot.scene_entity_version_id else [])
-                + shot.character_entity_version_ids + shot.outfit_entity_version_ids
-            ))},
+                + shot.character_entity_version_ids + shot.outfit_entity_version_ids + shot.product_entity_version_ids
+            )), "reference_image": references_by_shot_id.get(shot.id)},
             "output_contract": {"media_type": "image", "video_spec_version_id": selection["video_spec_version_id"]},
         })
         nodes.append({
@@ -247,6 +373,43 @@ def _price_dag(
     return (None if errors else _money(total)), errors
 
 
+def _validate_runninghub_keyframe_bindings(
+    shots: list[Shot],
+    references_by_shot_id: dict[str, dict | None],
+    workflow: WorkflowSlotVersion | None,
+    provider: ProviderConfigVersion | None,
+    errors: list[dict],
+) -> None:
+    if not workflow or not provider or provider.adapter_kind != "runninghub":
+        return
+    bindings = [item for item in (workflow.node_info_list or []) if isinstance(item, dict)]
+    visual_prompt_binding_count = sum(
+        1 for item in bindings if item.get("value_source") == "shot.visual_prompt"
+    )
+    if visual_prompt_binding_count != 1:
+        errors.append({
+            "code": "RUNNINGHUB_VISUAL_PROMPT_BINDING_COUNT_INVALID",
+            "path": "keyframe_workflow_slot_version_id",
+            "message": "RunningHub 图片生成方案必须精确绑定一个画面生成描述。",
+            "actual": visual_prompt_binding_count,
+        })
+    for shot in shots:
+        for binding in bindings:
+            if binding.get("required") is not True:
+                continue
+            source = binding.get("value_source")
+            if source == "shot.negative_prompt" and shot.negative_prompt is None:
+                errors.append({
+                    "code": "REQUIRED_NEGATIVE_PROMPT_MISSING",
+                    "path": f"shots.{shot.shot_code}.negative_prompt",
+                })
+            if source == "reference_image.primary" and references_by_shot_id.get(shot.id) is None:
+                errors.append({
+                    "code": "REQUIRED_PRIMARY_REFERENCE_MISSING",
+                    "path": f"shots.{shot.shot_code}.primary_reference_entity_version_id",
+                })
+
+
 def analyze_impact(session: Session, project: Project, payload: AnalyzeProductionImpact) -> dict:
     repository = _production(session)
     receipt = _receipt(session, project.id, payload.command_id, "production.impact.analyze")
@@ -262,6 +425,12 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         raise ProductionNotFoundError("Plan version not found in project")
     if plan.status != "confirmed" or not plan.is_active:
         errors.append({"code": "PLAN_NOT_ACTIVE", "path": "plan_version_id", "message": "只能分析当前已确认方案。"})
+    if plan.contract_schema_version != "shot-plan.v2":
+        errors.append({
+            "code": "SHOT_PLAN_SCHEMA_UNSUPPORTED",
+            "path": "plan_version_id",
+            "message": "旧版分镜方案不能自动升级，请创建并确认新的分镜方案。",
+        })
     config = repository.configuration(payload.production_config_version_id)
     if not config:
         raise ProductionNotFoundError("Production configuration version not found")
@@ -284,6 +453,16 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
     pricing = None
     if payload.pricing_catalog_version_id:
         pricing = _component(session, PricingCatalogVersion, payload.pricing_catalog_version_id, config.id, "pricing_catalog", errors)
+    storage_policies = repository.storage_policies(config.id)
+    storage = storage_policies[0] if len(storage_policies) == 1 else None
+    if len(storage_policies) != 1:
+        errors.append({
+            "code": "STORAGE_POLICY_COUNT_INVALID",
+            "path": "production_config_version_id",
+            "message": "生产配置必须精确包含一个存储策略。",
+        })
+    elif storage.status != "published":
+        errors.append({"code": "STORAGE_POLICY_NOT_PUBLISHED", "path": "production_config_version_id"})
 
     if video_spec and video_spec.aspect_ratio != aspect_ratio:
         errors.append({"code": "VIDEO_SPEC_ASPECT_RATIO_MISMATCH", "path": "video_spec_version_id", "message": "视频规格画幅与项目已确认画幅不一致。"})
@@ -305,16 +484,40 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
     if not shots:
         errors.append({"code": "PLAN_HAS_NO_SHOTS", "path": "plan_version_id", "message": "方案没有分镜。"})
     entity_ids: set[str] = set()
+    references_by_shot_id: dict[str, dict | None] = {}
     for shot in shots:
-        refs = ([shot.scene_entity_version_id] if shot.scene_entity_version_id else []) + shot.character_entity_version_ids + shot.outfit_entity_version_ids
+        if not isinstance(shot.visual_prompt, str) or not shot.visual_prompt.strip():
+            errors.append({"code": "VISUAL_PROMPT_REQUIRED", "path": f"shots.{shot.shot_code}.visual_prompt"})
+        refs = (
+            ([shot.scene_entity_version_id] if shot.scene_entity_version_id else [])
+            + (shot.character_entity_version_ids or [])
+            + (shot.outfit_entity_version_ids or [])
+            + (shot.product_entity_version_ids or [])
+        )
         for entity_id in refs:
             entity = repository.entity_version(entity_id)
             if not entity or entity.project_id != project.id or entity.status != "confirmed":
                 errors.append({"code": "ENTITY_VERSION_INVALID", "path": f"shots.{shot.shot_code}", "entity_version_id": entity_id})
             else:
                 entity_ids.add(entity_id)
+        references_by_shot_id[shot.id] = _freeze_reference_image(
+            repository,
+            project.id,
+            shot,
+            storage,
+            errors,
+        )
         if video_spec and not (video_spec.duration_min_seconds * 1000 <= shot.duration_ms <= video_spec.duration_max_seconds * 1000):
             errors.append({"code": "SHOT_DURATION_UNSUPPORTED", "path": f"shots.{shot.shot_code}.duration_ms", "message": "镜头时长不在所选视频规格范围内。"})
+
+    keyframe_provider = repository.provider(keyframe_slot.provider_config_version_id) if keyframe_slot else None
+    _validate_runninghub_keyframe_bindings(
+        shots,
+        references_by_shot_id,
+        keyframe_slot,
+        keyframe_provider,
+        errors,
+    )
 
     selection = {
         "video_spec_version_id": payload.video_spec_version_id,
@@ -333,7 +536,14 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         "video_codec": video_spec.video_codec,
         "pixel_format": video_spec.pixel_format,
     }
-    dag = _compile_manifest(plan, shots, selection, output_spec, audio_mode) if keyframe_slot and video_slot else {"nodes": [], "edges": []}
+    dag = _compile_manifest(
+        plan,
+        shots,
+        selection,
+        output_spec,
+        audio_mode,
+        references_by_shot_id,
+    ) if keyframe_slot and video_slot else {"nodes": [], "edges": []}
     estimated_cost = None
     if pricing:
         now = utc_now()
@@ -353,6 +563,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
     manifest = {
         "project_id": project.id,
         "plan_version_id": plan.id,
+        "plan_contract_schema_version": plan.contract_schema_version,
         "production_config_version_id": config.id,
         "production_config_hash": config.config_hash,
         "audio_mode": audio_mode,
@@ -425,8 +636,37 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
     if not config or config.status != "published" or config.config_hash != analysis.manifest.get("production_config_hash"):
         raise ProductionConflictError("CONFIGURATION_CHANGED_AFTER_ANALYSIS", "配置状态或哈希已变化，必须重新分析。")
 
+    storage_policies = repository.storage_policies(config.id)
+    if len(storage_policies) != 1 or storage_policies[0].status != "published":
+        raise ProductionConflictError("STORAGE_POLICY_CHANGED_AFTER_ANALYSIS", "存储策略已变化，必须重新分析。")
+    current_reference_errors: list[dict] = []
+    frozen_nodes = {
+        item["shot_id"]: item
+        for item in analysis.manifest.get("dag", {}).get("nodes", [])
+        if item.get("kind") == "generate_keyframe" and item.get("shot_id")
+    }
+    for shot in repository.plan_shots(plan.id):
+        node = frozen_nodes.get(shot.id)
+        if not node:
+            raise ProductionConflictError("KEYFRAME_NODE_MISSING_AFTER_ANALYSIS", f"镜头 {shot.shot_code} 缺少冻结关键帧节点。")
+        current_reference = _freeze_reference_image(
+            repository,
+            project.id,
+            shot,
+            storage_policies[0],
+            current_reference_errors,
+        )
+        if current_reference != node.get("input_contract", {}).get("reference_image"):
+            current_reference_errors.append({
+                "code": "REFERENCE_IMAGE_CHANGED_AFTER_ANALYSIS",
+                "path": f"shots.{shot.shot_code}.primary_reference_entity_version_id",
+            })
+    if current_reference_errors:
+        codes = ", ".join(sorted({str(item["code"]) for item in current_reference_errors}))
+        raise ProductionConflictError("REFERENCE_IMAGE_CHANGED_AFTER_ANALYSIS", f"参考图事实已变化，必须重新分析：{codes}。")
+
     snapshot_number = repository.next_snapshot_number(project.id)
-    contract = {"schema_version": "production-snapshot.v1", **analysis.manifest}
+    contract = {"schema_version": "production-snapshot.v2", **analysis.manifest}
     snapshot = ProductionSnapshot(
         project_id=project.id,
         plan_version_id=plan.id,
@@ -657,7 +897,7 @@ def _execution_manifest(
         else None
     )
     return {
-        "schema_version": "production-work-request.v2",
+        "schema_version": "production-work-request.v3",
         "snapshot_id": snapshot.id,
         "contract_hash": snapshot.contract_hash,
         "dag_node_id": node.id,
@@ -761,6 +1001,18 @@ def submit_production(
         provider = repository.provider(workflow.provider_config_version_id) if workflow else None
         if node.workflow_slot_version_id and (not workflow or not provider):
             raise ProductionConflictError("EXECUTION_ROUTE_REFERENCE_MISSING", f"Node {node.node_key} has an unresolved execution route.")
+        if provider and provider.adapter_kind == "runninghub" and snapshot.contract.get("schema_version") != "production-snapshot.v2":
+            raise ProductionConflictError(
+                "SNAPSHOT_SCHEMA_UNSUPPORTED",
+                "RunningHub 严格执行只接受明确冻结生成输入的新快照。",
+            )
+        if node.kind == "generate_keyframe" and not _verify_frozen_reference_image(
+            node.input_contract.get("reference_image")
+        ):
+            raise ProductionConflictError(
+                "REFERENCE_IMAGE_CHANGED_AFTER_SNAPSHOT",
+                f"节点 {node.node_key} 的冻结参考图已变化，不能提交生产。",
+            )
         manifest = _execution_manifest(snapshot, node, workflow, provider, video_spec, storage)
         fingerprint = _hash(manifest)
         item = WorkItem(

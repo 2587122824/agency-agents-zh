@@ -4,13 +4,14 @@ import hashlib
 import json
 import mimetypes
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any, Protocol
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
 from ..core.config import RUNTIME_ROOT
+from ..creation.service import detect_media_type
 from .base import (
     ProviderAdapterError,
     ProviderExecutionRequest,
@@ -127,6 +128,20 @@ def _local_output_path(uri: str) -> Path:
     return path
 
 
+def _local_attachment_path(uri: str) -> Path:
+    prefix = "runtime://attachments/"
+    if not uri.startswith(prefix):
+        raise ProviderAdapterError("REFERENCE_IMAGE_URI_UNSUPPORTED", "The frozen reference image is not in the V2 attachment store.")
+    relative = PurePosixPath(uri[len(prefix):])
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise ProviderAdapterError("REFERENCE_IMAGE_URI_INVALID", "The frozen reference image URI is invalid.")
+    root = RUNTIME_ROOT.resolve()
+    path = (root / PurePath(*relative.parts)).resolve()
+    if not path.is_relative_to(root):
+        raise ProviderAdapterError("REFERENCE_IMAGE_URI_INVALID", "The frozen reference image path escapes the V2 runtime root.")
+    return path
+
+
 @dataclass
 class RunningHubAdapter:
     execution_enabled: bool = False
@@ -143,8 +158,8 @@ class RunningHubAdapter:
 
     def _contract(self, request: ProviderExecutionRequest) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], str]:
         manifest = request.request_manifest
-        if manifest.get("schema_version") != "production-work-request.v2":
-            raise ProviderAdapterError("PROVIDER_REQUEST_SCHEMA_UNSUPPORTED", "RunningHub requires production-work-request.v2.")
+        if manifest.get("schema_version") != "production-work-request.v3":
+            raise ProviderAdapterError("PROVIDER_REQUEST_SCHEMA_UNSUPPORTED", "RunningHub requires production-work-request.v3.")
         provider = manifest.get("provider")
         workflow = manifest.get("workflow")
         storage = manifest.get("storage_policy")
@@ -173,12 +188,43 @@ class RunningHubAdapter:
             raise ProviderAdapterError("I2V_PARENT_IMAGE_MISSING", "The exact parent image file does not exist.")
         return path, str(output["mime_type"])
 
-    def _binding_value(self, request: ProviderExecutionRequest, source: str, uploaded_image: str | None) -> Any:
+    def _reference_image(self, request: ProviderExecutionRequest) -> tuple[Path, str] | None:
+        if request.work_kind != "generate_keyframe":
+            raise ProviderAdapterError("NODE_BINDING_SOURCE_INVALID", "reference_image.primary is valid only for keyframe image work.")
+        reference = request.request_manifest.get("input_contract", {}).get("reference_image")
+        if reference is None:
+            return None
+        required = {"role", "entity_version_id", "attachment_id", "uri", "mime_type", "byte_size", "content_hash"}
+        if not isinstance(reference, dict) or set(reference) != required or reference.get("role") != "primary":
+            raise ProviderAdapterError("REFERENCE_IMAGE_CONTRACT_INVALID", "The frozen primary reference contract is invalid.")
+        mime_type = str(reference.get("mime_type") or "")
+        if not mime_type.startswith("image/"):
+            raise ProviderAdapterError("REFERENCE_IMAGE_MIME_INVALID", "The frozen primary reference is not an image.")
+        path = _local_attachment_path(str(reference.get("uri") or ""))
+        if not path.is_file():
+            raise ProviderAdapterError("REFERENCE_IMAGE_FILE_MISSING", "The frozen primary reference file does not exist.")
+        if path.stat().st_size != reference.get("byte_size"):
+            raise ProviderAdapterError("REFERENCE_IMAGE_SIZE_MISMATCH", "The frozen primary reference file size changed.")
+        content = path.read_bytes()
+        if detect_media_type(content) != mime_type:
+            raise ProviderAdapterError("REFERENCE_IMAGE_MIME_MISMATCH", "The frozen primary reference MIME changed.")
+        if hashlib.sha256(content).hexdigest() != reference.get("content_hash"):
+            raise ProviderAdapterError("REFERENCE_IMAGE_HASH_MISMATCH", "The frozen primary reference hash changed.")
+        return path, mime_type
+
+    def _binding_value(self, request: ProviderExecutionRequest, source: str, uploaded_values: dict[str, str]) -> Any:
         manifest = request.request_manifest
         if source == "source_image":
-            if uploaded_image is None:
+            if source not in uploaded_values:
                 raise ProviderAdapterError("NODE_BINDING_SOURCE_INVALID", "source_image was not uploaded for this request.")
-            return uploaded_image
+            return uploaded_values[source]
+        if source == "reference_image.primary":
+            value = uploaded_values.get(source)
+            if value is None:
+                raise ProviderAdapterError("NODE_BINDING_VALUE_MISSING", "The frozen primary reference image is not present.")
+            return value
+        if source == "reference_image.present":
+            return manifest.get("input_contract", {}).get("reference_image") is not None
         if source.startswith("literal:"):
             try:
                 return json.loads(source[len("literal:"):])
@@ -249,13 +295,35 @@ class RunningHubAdapter:
         )
         if request.work_kind == "generate_i2v_clip" and source_image_count != 1:
             raise ProviderAdapterError("I2V_SOURCE_IMAGE_BINDING_INVALID", "Image-to-video requires exactly one source_image NodeInfoList binding.")
-        uploaded_image: str | None = None
+        if request.work_kind != "generate_i2v_clip" and source_image_count:
+            raise ProviderAdapterError("NODE_BINDING_SOURCE_INVALID", "source_image is valid only for image-to-video work.")
+        reference_image_count = sum(
+            item.get("value_source") == "reference_image.primary"
+            for item in bindings
+            if isinstance(item, dict)
+        )
+        if request.work_kind != "generate_keyframe" and reference_image_count:
+            raise ProviderAdapterError("NODE_BINDING_SOURCE_INVALID", "reference_image.primary is valid only for keyframe image work.")
+        if reference_image_count > 1:
+            raise ProviderAdapterError("REFERENCE_IMAGE_BINDING_INVALID", "Keyframe generation accepts at most one primary reference binding.")
+        uploaded_values: dict[str, str] = {}
         if any(item.get("value_source") == "source_image" for item in bindings if isinstance(item, dict)):
             image_path, mime_type = self._source_image(request)
             upload = self.transport.upload(urljoin(base_url, "media/upload/binary"), api_key, image_path, mime_type, timeout)
-            uploaded_image = _first(upload, ("fileName", "file_name", "filename", "path", "filePath", "file_path", "url"))
-            if not uploaded_image:
+            uploaded_values["source_image"] = _first(upload, ("fileName", "file_name", "filename", "path", "filePath", "file_path", "url"))
+            if not uploaded_values["source_image"]:
                 raise ProviderAdapterError("RUNNINGHUB_UPLOAD_VALUE_MISSING", "RunningHub upload did not return a usable file value.")
+        if reference_image_count:
+            reference = self._reference_image(request)
+            if reference is not None:
+                image_path, mime_type = reference
+                upload = self.transport.upload(urljoin(base_url, "media/upload/binary"), api_key, image_path, mime_type, timeout)
+                uploaded_values["reference_image.primary"] = _first(
+                    upload,
+                    ("fileName", "file_name", "filename", "path", "filePath", "file_path", "url"),
+                )
+                if not uploaded_values["reference_image.primary"]:
+                    raise ProviderAdapterError("RUNNINGHUB_UPLOAD_VALUE_MISSING", "RunningHub upload did not return a usable file value.")
         node_info: list[dict[str, Any]] = []
         seen: set[tuple[str, str]] = set()
         for binding in bindings:
@@ -266,7 +334,7 @@ class RunningHubAdapter:
                 raise ProviderAdapterError("NODE_BINDING_INVALID", "A frozen NodeInfoList row is incomplete or duplicated.")
             seen.add(identity)
             try:
-                value = self._binding_value(request, str(binding.get("value_source") or ""), uploaded_image)
+                value = self._binding_value(request, str(binding.get("value_source") or ""), uploaded_values)
             except ProviderAdapterError as exc:
                 if exc.code == "NODE_BINDING_VALUE_MISSING" and binding.get("required") is False:
                     continue

@@ -587,11 +587,17 @@ class Shot(Base):
     scene_entity_version_id: Mapped[str | None] = mapped_column(ForeignKey("entity_versions.id"), nullable=True)
     character_entity_version_ids: Mapped[list] = mapped_column(JSON, default=list)
     outfit_entity_version_ids: Mapped[list] = mapped_column(JSON, default=list)
+    product_entity_version_ids: Mapped[list] = mapped_column(JSON, default=list)
+    primary_reference_entity_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("entity_versions.id"), nullable=True
+    )
     face_visibility: Mapped[str] = mapped_column(String(24))
     text_policy: Mapped[str] = mapped_column(String(24))
     motion_requirement: Mapped[str] = mapped_column(String(24))
     composition: Mapped[str] = mapped_column(String(500))
     action: Mapped[str] = mapped_column(String(1000))
+    visual_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    negative_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 

@@ -18,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -303,6 +303,9 @@ def test_attachment_registration_does_not_create_binding(client: TestClient) -> 
         "entity_type": "character",
         "display_name": "char_main",
         "version_number": 1,
+        "source_attachment_id": attachment["id"],
+        "source_mime_type": "image/png",
+        "source_attachment_verified": True,
     }]
     requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
     brief = client.post(
@@ -616,9 +619,40 @@ def test_invalid_shot_plan_revision_does_not_supersede_source(client: TestClient
     )
     assert invalid.status_code == 409
     assert invalid.headers["x-error-code"] == "SHOT_PLAN_REVISION_INVALID"
+    undeclared_reference = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:revise",
+        json={
+            "command_id": "invalid-primary-reference-command",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": original["row_version"],
+            "patches": [{
+                "target_shot_code": "SH-001",
+                "changes": {"primary_reference_entity_version_id": "entity_version_not_declared"},
+            }],
+        },
+    )
+    assert undeclared_reference.status_code == 409
+    assert undeclared_reference.headers["x-error-code"] == "SHOT_PLAN_REVISION_INVALID"
     planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert planning["current_shot_candidate"]["id"] == original["id"]
     assert len(planning["shot_plan_history"]) == 1
+
+    with SessionLocal() as session:
+        stored = session.get(ShotPlanCandidate, original["id"])
+        shots = [dict(item) for item in stored.shots]
+        shots[0].pop("visual_prompt")
+        stored.shots = shots
+        session.commit()
+    rejected = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:accept",
+        json={
+            "command_id": "missing-visual-prompt-accept",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": original["row_version"],
+        },
+    )
+    assert rejected.status_code == 409
+    assert rejected.headers["x-error-code"] == "SHOT_PLAN_VALIDATION_FAILED"
 
 
 def valid_system_configuration() -> dict:
@@ -648,7 +682,7 @@ def valid_system_configuration() -> dict:
             "node_info_list": [{
                 "node_id": "prompt",
                 "field_path": "text",
-                "value_source": "shot.action",
+                "value_source": "shot.visual_prompt",
                 "value_type": "string",
                 "required": True,
             }],
@@ -925,10 +959,19 @@ def publish_visual_production_configuration(
     with_pricing: bool = False,
     adapter_kind: str = "mock",
     runtime_pricing: bool = False,
+    reference_required: bool = False,
 ) -> dict:
     configuration = valid_system_configuration()
     configuration["providers"][0]["adapter_kind"] = adapter_kind
     configuration["providers"][0]["capabilities"].append("video_generation")
+    if reference_required:
+        configuration["workflow_slots"][0]["node_info_list"].append({
+            "node_id": "reference",
+            "field_path": "image",
+            "value_source": "reference_image.primary",
+            "value_type": "image",
+            "required": True,
+        })
     configuration["workflow_slots"].append({
         "slot_key": "first_frame_video",
         "display_name": "首帧视频",
@@ -976,6 +1019,219 @@ def publish_visual_production_configuration(
     )
     assert response.status_code == 200
     return response.json()
+
+
+def create_plan_with_explicit_primary_reference(client: TestClient) -> tuple[dict, dict, dict]:
+    project = create_creation_project(client)
+    content = b"\x89PNG\r\n\x1a\n" + b"primary-reference"
+    attachment = client.post(
+        f"/api/v1/projects/{project['id']}/attachments",
+        data={"command_id": "primary-reference-upload"},
+        files={"file": ("primary.png", content, "image/png")},
+    ).json()
+    binding = client.post(
+        f"/api/v1/projects/{project['id']}/attachments/{attachment['id']}/bindings",
+        json={
+            "command_id": "primary-reference-bind",
+            "binding_type": "identity_reference",
+            "entity_id": "char_primary",
+        },
+    ).json()
+    requirement_id = client.get(
+        f"/api/v1/projects/{project['id']}/creation-center"
+    ).json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "primary-brief-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "primary-brief-accept", "expected_requirement_version_id": requirement_id},
+    )
+    candidate = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "primary-shots-generate",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    ).json()
+    assert all(item["primary_reference_entity_version_id"] is None for item in candidate["shots"])
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{candidate['id']}:revise",
+        json={
+            "command_id": "primary-shots-revise",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": candidate["row_version"],
+            "patches": [{
+                "target_shot_code": item["shot_code"],
+                "changes": {"primary_reference_entity_version_id": binding["entity_version_id"]},
+            } for item in candidate["shots"]],
+        },
+    ).json()
+    plan = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{revised['id']}:accept",
+        json={
+            "command_id": "primary-shots-accept",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": revised["row_version"],
+        },
+    ).json()
+    return project, plan, attachment
+
+
+def test_required_primary_reference_blocks_without_guessing(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    config = publish_visual_production_configuration(
+        client,
+        with_pricing=True,
+        adapter_kind="runninghub",
+        reference_required=True,
+    )
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "required-reference-impact",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    )
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["status"] == "blocked"
+    assert [item["code"] for item in analysis["validation_errors"]].count("REQUIRED_PRIMARY_REFERENCE_MISSING") == 3
+    assert all(
+        node["input_contract"]["reference_image"] is None
+        for node in analysis["manifest"]["dag"]["nodes"]
+        if node["kind"] == "generate_keyframe"
+    )
+    with SessionLocal() as session:
+        assert session.scalar(select(WorkItem).where(WorkItem.project_id == project["id"])) is None
+
+
+def test_production_impact_requires_exactly_one_visual_prompt_binding(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    config = publish_visual_production_configuration(
+        client,
+        with_pricing=True,
+        adapter_kind="runninghub",
+    )
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    keyframe = components[("workflow_slot", "keyframe_image")]
+    with SessionLocal() as session:
+        workflow = session.get(WorkflowSlotVersion, keyframe["id"])
+        assert workflow is not None
+        workflow.node_info_list = [
+            *workflow.node_info_list,
+            {
+                "node_id": "duplicate-prompt",
+                "field_path": "text",
+                "value_source": "shot.visual_prompt",
+                "value_type": "string",
+                "required": True,
+            },
+        ]
+        session.commit()
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "duplicate-visual-prompt-impact",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": keyframe["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    )
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["status"] == "blocked"
+    issue = next(
+        item for item in analysis["validation_errors"]
+        if item["code"] == "RUNNINGHUB_VISUAL_PROMPT_BINDING_COUNT_INVALID"
+    )
+    assert issue["actual"] == 2
+    with SessionLocal() as session:
+        assert session.scalar(select(WorkItem).where(WorkItem.project_id == project["id"])) is None
+
+
+def test_snapshot_freezes_exact_primary_reference_and_detects_change(client: TestClient) -> None:
+    project, plan, attachment = create_plan_with_explicit_primary_reference(client)
+    config = publish_visual_production_configuration(
+        client,
+        with_pricing=True,
+        adapter_kind="runninghub",
+        reference_required=True,
+    )
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    analysis = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "frozen-reference-impact",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    ).json()
+    assert analysis["status"] == "awaiting_confirmation"
+    references = [
+        node["input_contract"]["reference_image"]
+        for node in analysis["manifest"]["dag"]["nodes"]
+        if node["kind"] == "generate_keyframe"
+    ]
+    assert len(references) == 3
+    assert all(item["attachment_id"] == attachment["id"] for item in references)
+    assert all(item["content_hash"] == attachment["content_hash"] for item in references)
+    with SessionLocal() as session:
+        stored = session.get(Attachment, attachment["id"])
+        (TEST_RUNTIME / stored.storage_path).write_bytes(b"\x89PNG\r\n\x1a\nchanged")
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "frozen-reference-snapshot",
+            "impact_analysis_id": analysis["id"],
+            "analysis_hash": analysis["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "REFERENCE_IMAGE_CHANGED_AFTER_ANALYSIS"
+
+
+def test_historical_shot_plan_is_not_automatically_upgraded(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    with SessionLocal() as session:
+        stored_plan = session.get(PlanVersion, plan["id"])
+        stored_plan.contract_schema_version = "shot-plan.v1"
+        session.commit()
+    config = publish_visual_production_configuration(client, with_pricing=True)
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    analysis = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "historical-plan-impact",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    ).json()
+    assert analysis["status"] == "blocked"
+    assert "SHOT_PLAN_SCHEMA_UNSUPPORTED" in {item["code"] for item in analysis["validation_errors"]}
+    with SessionLocal() as session:
+        assert session.get(PlanVersion, plan["id"]).contract_schema_version == "shot-plan.v1"
 
 
 @pytest.mark.parametrize(
@@ -2837,8 +3093,11 @@ def test_provider_readiness_reports_historical_runninghub_contract_without_mutat
     assert response.status_code == 200
     provider = response.json()["providers"][0]
     assert provider["configuration_ready"] is False
-    assert provider["configuration_issue_count"] == 1
-    assert provider["configuration_issue_codes"] == ["RUNNINGHUB_NODE_SOURCE_UNSUPPORTED"]
+    assert provider["configuration_issue_count"] == 2
+    assert provider["configuration_issue_codes"] == [
+        "RUNNINGHUB_NODE_SOURCE_UNSUPPORTED",
+        "RUNNINGHUB_VISUAL_PROMPT_BINDING_COUNT_INVALID",
+    ]
     assert provider["status"] == "configuration_not_ready"
     assert provider["next_action"] == "revise_configuration"
 

@@ -463,6 +463,9 @@ class SqlAlchemyPlanningRepository:
     def entity_version(self, version_id: str) -> EntityVersion | None:
         return self.session.get(EntityVersion, version_id)
 
+    def attachment(self, attachment_id: str) -> Attachment | None:
+        return self.session.get(Attachment, attachment_id)
+
     def reviewable_shot_plan_for_requirement(
         self,
         project_id: str,
@@ -605,6 +608,9 @@ class SqlAlchemyProductionRepository:
 
     def entity_version(self, version_id: str) -> EntityVersion | None:
         return self.session.get(EntityVersion, version_id)
+
+    def attachment(self, attachment_id: str) -> Attachment | None:
+        return self.session.get(Attachment, attachment_id)
 
     def snapshot_for_impact(self, analysis_id: str) -> ProductionSnapshot | None:
         return self.session.scalar(select(ProductionSnapshot).where(
