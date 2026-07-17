@@ -878,7 +878,7 @@ status
 
 NodeInfoList 必须逐项记录节点 ID、字段路径、值来源和类型。编译器只能使用已登记映射；不得根据节点名称、提示词或历史配置猜测缺失字段。
 
-Provider 的连接状态必须拆成独立事实：配置已发布、凭据可读取、后端适配器已注册、供应商网络可达、本次付费执行已确认。任一事实不得代替其他事实。设置页可以只读展示本地前置状态，但不得把凭据存在误报为供应商已连接，也不得为了展示状态发起供应商请求。
+Provider 的连接状态必须拆成独立事实：配置已发布、适配器合同兼容、凭据可读取、后端适配器已注册、供应商网络可达、本次付费执行已确认。任一事实不得代替其他事实。设置页只读展示执行组件、生成配置、后端密钥和执行授权四项本地前置状态；全部通过仍不代表网络可达。页面不得把凭据存在误报为供应商已连接，也不得为了展示状态发起供应商请求。
 
 首期凭据引用只支持 `env://VARIABLE_NAME`。变量名还必须出现在后端 `V2_CREDENTIAL_ENV_ALLOWLIST` 白名单中；数据库和前端均不保存或返回变量值。连接状态接口也不返回变量名，防止配置读取接口泄露后端秘密布局。完整实现见 [V2 Provider 基础层实现](./V2_PROVIDER_FOUNDATION_IMPLEMENTATION.md)。
 
@@ -887,6 +887,8 @@ Worker 只按 WorkAttempt 冻结清单中的精确 `adapter_kind + work_kind` �
 RunningHub 使用独立的提交与轮询合同。Worker 在外部请求前持久化 `submitting`，返回后立即保存精确 `provider_task_id`；重启只轮询已保存任务号。提交结果未知或可能在任务号落库前中断时进入人工对账阻断，禁止重新提交。真实外部执行还必须由后端 `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 明确开启，默认关闭；注册适配器、凭据可读和允许真实执行是三个独立事实。
 
 RunningHub 的 WorkAttempt 必须使用 `production-work-request.v2` 冻结 Provider、Workflow、完整 NodeInfoList、结构化 Shot、视频规格和存储策略。适配器只解析声明的结构化来源和 `literal:<JSON>`；不支持旧式 `{{prompt}}` 占位符，不生成或重写提示词。I2V 必须恰好绑定并消费一个父图片输出，多个输入不得静默取第一项。完整边界见 [V2 RunningHub 图片/视频适配器实现](./V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md)。
+
+配置发布校验和连接准备检查必须共用同一 RunningHub NodeInfoList 合同校验器。设置页用普通名称选择镜头字段、视频规格、单父关键帧或固定值；固定值由界面编码为严格 `literal:<JSON>`。历史旧来源只显示“不兼容并需创建新版本”，禁止自动转换。完整实现见 [V2 生成服务连接准备实现](./V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md)。
 
 ### 30.5 视频与音频规格
 

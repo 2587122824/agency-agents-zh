@@ -18,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkAttempt, WorkItem
+from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -2777,7 +2777,74 @@ def test_provider_readiness_is_read_only_and_does_not_enable_unregistered_adapte
     assert provider["adapter_registered"] is True
     assert provider["execution_enabled"] is False
     assert provider["credential_state"] == "available"
+    assert provider["configuration_ready"] is True
+    assert provider["configuration_issue_count"] == 0
+    assert provider["configuration_issue_codes"] == []
     assert provider["status"] == "execution_disabled"
+    assert provider["next_action"] == "enable_execution"
     serialized = response.text
     assert "must-never-be-returned" not in serialized
     assert "READINESS_TEST_API_KEY" not in serialized
+
+
+def test_provider_readiness_reports_historical_runninghub_contract_without_mutation(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration = valid_system_configuration()
+    configuration["providers"][0].update({
+        "provider_key": "runninghub_visual",
+        "display_name": "RunningHub",
+        "adapter_kind": "runninghub",
+        "credential_ref": "env://READINESS_HISTORICAL_KEY",
+    })
+    configuration["workflow_slots"][0]["provider_key"] = "runninghub_visual"
+    created = client.post("/api/v1/system-config/versions", json={
+        "command_id": "provider-readiness-historical-create",
+        "configuration": configuration,
+    }).json()
+    ready = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:validate",
+        json={"command_id": "provider-readiness-historical-validate", "expected_row_version": created["row_version"]},
+    ).json()
+    published = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:publish",
+        json={
+            "command_id": "provider-readiness-historical-publish",
+            "expected_row_version": ready["row_version"],
+            "confirm_high_risk_changes": True,
+        },
+    ).json()
+    workflow_id = next(
+        item["id"] for item in published["components"] if item["component_type"] == "workflow_slot"
+    )
+    legacy_bindings = [{
+        "node_id": "prompt",
+        "field_path": "text",
+        "value_source": "{{prompt}}",
+        "value_type": "string",
+        "required": True,
+    }]
+    with SessionLocal() as session:
+        workflow = session.get(WorkflowSlotVersion, workflow_id)
+        assert workflow is not None
+        workflow.node_info_list = legacy_bindings
+        session.commit()
+
+    monkeypatch.setenv("V2_CREDENTIAL_ENV_ALLOWLIST", "READINESS_HISTORICAL_KEY")
+    monkeypatch.setenv("READINESS_HISTORICAL_KEY", "must-never-be-returned")
+    response = client.get("/api/v1/system-config/provider-readiness")
+    assert response.status_code == 200
+    provider = response.json()["providers"][0]
+    assert provider["configuration_ready"] is False
+    assert provider["configuration_issue_count"] == 1
+    assert provider["configuration_issue_codes"] == ["RUNNINGHUB_NODE_SOURCE_UNSUPPORTED"]
+    assert provider["status"] == "configuration_not_ready"
+    assert provider["next_action"] == "revise_configuration"
+
+    with SessionLocal() as session:
+        workflow = session.get(WorkflowSlotVersion, workflow_id)
+        assert workflow is not None
+        assert workflow.node_info_list == legacy_bindings
+    assert "must-never-be-returned" not in response.text
+    assert "READINESS_HISTORICAL_KEY" not in response.text

@@ -1,6 +1,8 @@
 # 片场 V2 Provider 基础层实现
 
 > 实施日期：2026-07-17
+>
+> 当前状态说明：本文件记录 Sprint 38 的基础层边界。Sprint 39 已按用户确认注册独立 RunningHub 适配器；最新连接准备投影见 [V2 生成服务连接准备实现](./V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md)。
 
 ## 1. 目标
 

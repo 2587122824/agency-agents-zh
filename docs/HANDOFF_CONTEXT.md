@@ -1,5 +1,15 @@
 # Handoff Context
 
+## 2026-07-17 V2 Provider Connection Preparation Sprint 40
+
+- Extended the read-only Provider readiness projection into four independent checks: adapter registration, strict configuration compatibility, backend credential availability, and external-execution authorization. The endpoint still performs no network probe and returns no secret value or environment variable name.
+- Extracted one pure RunningHub NodeInfoList contract validator shared by configuration validation and readiness. Historical published placeholders are detected without mutating their rows or stale validation reports.
+- Added deterministic `configuration_not_ready` and `next_action` fields. Status priority is adapter, configuration, credential, execution authorization, then ready; the UI still shows all four checks at once.
+- Reworked the settings workflow input editor to use ordinary Chinese source/type names and a separate fixed-value field that emits strict `literal:<JSON>`. Unsupported historical values remain visible as legacy and are never converted automatically.
+- Added `docs/V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md` and updated the product, implementation-status, RunningHub, Provider-foundation, and handoff documents.
+- No configuration version was mutated or published. No credential was written, no execution flag was enabled, no network request or Provider task occurred, and no fee was incurred.
+- Verification before release: 117 backend tests passed; compileall, frontend production build, Alembic current/head at `20260717_16`, and diff audit passed. Browser checks covered the four readiness facts and legacy-source labels at desktop and 390px widths with no horizontal overflow. Commit/push and the final `8766` restart remain release steps.
+
 ## 2026-07-17 V2 RunningHub Adapter Sprint 39
 
 - User explicitly authorized implementation and registration of RunningHub image/video adapters but prohibited network tests, real task submission, and fees. No network call was made in this sprint.

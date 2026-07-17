@@ -20,7 +20,23 @@ class ProviderReadinessItem(BaseModel):
     execution_enabled: bool | None
     credential_required: bool | None
     credential_state: CredentialState
-    status: Literal["connected", "adapter_not_connected", "execution_disabled", "credential_not_ready"]
+    configuration_ready: bool
+    configuration_issue_count: int
+    configuration_issue_codes: list[str]
+    status: Literal[
+        "connected",
+        "adapter_not_connected",
+        "configuration_not_ready",
+        "execution_disabled",
+        "credential_not_ready",
+    ]
+    next_action: Literal[
+        "connect_adapter",
+        "revise_configuration",
+        "configure_credential",
+        "enable_execution",
+        "ready",
+    ]
 
 
 class ProviderReadinessView(BaseModel):

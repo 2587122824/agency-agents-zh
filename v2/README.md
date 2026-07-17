@@ -37,6 +37,25 @@ API and Worker together with:
 v2\start_v2.bat -NoBrowser
 ```
 
+## RunningHub connection preparation
+
+RunningHub secrets stay in the backend process environment and are never
+entered in the web settings page. Before starting V2, use a newly rotated key:
+
+```powershell
+$env:V2_CREDENTIAL_ENV_ALLOWLIST = "RUNNINGHUB_API_KEY"
+$env:RUNNINGHUB_API_KEY = "<new key>"
+v2\start_v2.bat -NoBrowser
+```
+
+The published Provider configuration must reference
+`env://RUNNINGHUB_API_KEY`. The settings page then checks the adapter,
+configuration contract, credential, and execution authorization without a
+network request. Keep `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` unset until a
+real connectivity test is explicitly approved. See
+`docs/V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md` for the complete
+boundary.
+
 ## Boundaries
 
 - `contracts/`: API and domain contracts. Missing fields fail validation.
@@ -46,7 +65,8 @@ v2\start_v2.bat -NoBrowser
 - `workers/`: explicit work-item execution.
 - `quality/`: verified provider outputs, deterministic QC evidence, and explicit human review.
 - `editor/`: immutable timeline candidates, deterministic reference validation, and explicit confirmation.
-- `providers/`: future provider adapters; currently intentionally empty.
+- `providers/`: strict provider contracts and independent adapters; RunningHub
+  image and first-frame-video execution is registered but disabled by default.
 
 No automatic retry, route substitution, prompt rewriting, output repair, or
 provider downgrade belongs in this foundation.

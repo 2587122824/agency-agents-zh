@@ -3,7 +3,7 @@ import { AlertTriangle, BadgeCheck, Boxes, Check, ChevronRight, CircleDollarSign
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api/client'
-import type { ConfigurationComponent, ModelConfigDraft, ProviderConfigDraft, SystemConfigurationDraft, SystemConfigurationVersion, VideoSpecDraft, WorkflowSlotDraft } from '../api/types'
+import type { ConfigurationComponent, ModelConfigDraft, NodeBindingDraft, ProviderConfigDraft, ProviderReadinessItem, SystemConfigurationDraft, SystemConfigurationVersion, VideoSpecDraft, WorkflowSlotDraft } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import styles from './SettingsPage.module.css'
 
@@ -20,8 +20,74 @@ const emptyDraft = (): SystemConfigurationDraft => ({
 
 const componentLabels: Record<string, string> = { provider: '服务供应商', model: '模型', workflow_slot: '工作流槽位', video_spec: '视频规格', audio: '音频策略', storage: '存储策略', pricing_catalog: '价格目录' }
 const statusLabels: Record<string, string> = { draft: '草稿', validating: '校验中', validation_failed: '校验失败', ready: '可发布', published: '已发布', retired: '已停用' }
-const readinessLabels = { connected: '执行能力已就绪', adapter_not_connected: '执行组件尚未接通', execution_disabled: '真实执行授权未开启', credential_not_ready: '后端凭据尚未就绪' } as const
+const readinessLabels = { connected: '执行能力已就绪', adapter_not_connected: '执行组件尚未接通', configuration_not_ready: '生成配置需要更新', execution_disabled: '真实执行授权未开启', credential_not_ready: '后端密钥尚未就绪' } as const
 const credentialLabels = { not_configured: '未登记后端凭据引用', unsupported_reference: '凭据引用格式暂不支持', not_authorized: '后端尚未授权读取该凭据', missing: '后端环境中没有对应凭据', available: '后端凭据已就绪' } as const
+const nextActionLabels = { connect_adapter: '先接入对应的执行组件', revise_configuration: '复制此版本并更新工作流输入', configure_credential: '在后端配置密钥并加入读取许可', enable_execution: '确认真实测试前再开启执行授权', ready: '可以用于新生产任务' } as const
+const valueTypeLabels: Record<NodeBindingDraft['value_type'], string> = { string: '文本', integer: '整数', number: '数字', boolean: '开关', image: '图片', audio: '音频', json: '结构化数据' }
+const valueSourceOptions = [
+  { value: 'shot.action', label: '镜头动作' },
+  { value: 'shot.composition', label: '镜头构图' },
+  { value: 'shot.duration_ms', label: '镜头时长' },
+  { value: 'shot.face_visibility', label: '人物露脸要求' },
+  { value: 'shot.motion_requirement', label: '画面运动要求' },
+  { value: 'shot.text_policy', label: '画面文字策略' },
+  { value: 'duration_ms', label: '生成时长' },
+  { value: 'video_spec.width', label: '画面宽度' },
+  { value: 'video_spec.height', label: '画面高度' },
+  { value: 'video_spec.fps', label: '帧率' },
+  { value: 'video_spec.long_side', label: '画面长边' },
+  { value: 'video_spec.frame_count', label: '总帧数' },
+  { value: 'seed', label: '随机种子' },
+] as const
+
+function sourceOptions(operationKind: string) {
+  return operationKind === 'video_generation'
+    ? [{ value: 'source_image', label: '上一步生成的关键帧' }, ...valueSourceOptions]
+    : valueSourceOptions
+}
+
+function literalDisplayValue(binding: NodeBindingDraft) {
+  const raw = binding.value_source.slice('literal:'.length)
+  try {
+    const parsed = JSON.parse(raw)
+    return typeof parsed === 'string' ? parsed : JSON.stringify(parsed)
+  } catch {
+    return raw
+  }
+}
+
+function literalSource(value: string, valueType: NodeBindingDraft['value_type']) {
+  if (['string', 'image', 'audio'].includes(valueType)) return `literal:${JSON.stringify(value)}`
+  if (valueType === 'boolean') return `literal:${value === 'true' ? 'true' : 'false'}`
+  return `literal:${value}`
+}
+
+function NodeBindingEditor({ binding, operationKind, onChange, onRemove, removable }: { binding: NodeBindingDraft; operationKind: string; onChange: (binding: NodeBindingDraft) => void; onRemove: () => void; removable: boolean }) {
+  const options = sourceOptions(operationKind)
+  const supported = options.some(option => option.value === binding.value_source)
+  const isLiteral = binding.value_source.startsWith('literal:')
+  const sourceMode = isLiteral ? '__literal__' : binding.value_source
+  const fixedValue = isLiteral ? literalDisplayValue(binding) : ''
+  const updateType = (valueType: NodeBindingDraft['value_type']) => onChange({ ...binding, value_type: valueType, value_source: isLiteral ? literalSource(fixedValue, valueType) : binding.value_source })
+  return <div className={styles.bindingRow}>
+    <label><span>节点 ID</span><input required placeholder="例如 2483" value={binding.node_id} onChange={event => onChange({ ...binding, node_id: event.target.value })} /></label>
+    <label><span>输入字段</span><input required placeholder="例如 text" value={binding.field_path} onChange={event => onChange({ ...binding, field_path: event.target.value })} /></label>
+    <label className={styles.sourceField}><span>输入内容</span><select aria-label="输入内容来源" value={sourceMode} onChange={event => onChange({ ...binding, value_source: event.target.value === '__literal__' ? literalSource('', binding.value_type) : event.target.value })}><option value="">请选择</option>{!supported && !isLiteral && binding.value_source && <option value={binding.value_source}>旧格式（需要更换）</option>}{options.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}<option value="__literal__">固定值</option></select>{isLiteral && (binding.value_type === 'boolean' ? <select aria-label="固定开关值" value={fixedValue || 'false'} onChange={event => onChange({ ...binding, value_source: literalSource(event.target.value, binding.value_type) })}><option value="true">开启</option><option value="false">关闭</option></select> : <input aria-label="固定值" required placeholder={binding.value_type === 'json' ? '填写 JSON' : '填写固定值'} value={fixedValue} onChange={event => onChange({ ...binding, value_source: literalSource(event.target.value, binding.value_type) })} />)}</label>
+    <label><span>内容类型</span><select aria-label="内容类型" value={binding.value_type} onChange={event => updateType(event.target.value as NodeBindingDraft['value_type'])}>{Object.entries(valueTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+    <label className={styles.requiredField}><input type="checkbox" checked={binding.required} onChange={event => onChange({ ...binding, required: event.target.checked })} /><span>必填</span></label>
+    {removable && <button type="button" className="iconButton" title="删除节点映射" onClick={onRemove}><Trash2 size={13} /></button>}
+  </div>
+}
+
+function ReadinessChecks({ provider }: { provider: ProviderReadinessItem }) {
+  const checks = [
+    { label: '执行组件', ready: provider.adapter_registered },
+    { label: '生成配置', ready: provider.configuration_ready },
+    { label: '后端密钥', ready: !provider.credential_required || provider.credential_state === 'available' },
+    { label: '执行授权', ready: !provider.external || provider.execution_enabled === true },
+  ]
+  return <div className={styles.readinessChecks}>{checks.map(item => <span key={item.label} data-ready={item.ready}>{item.ready ? <Check size={12} /> : <X size={12} />}{item.label}</span>)}</div>
+}
 
 function groupComponents(components: ConfigurationComponent[]) {
   return components.reduce<Record<string, ConfigurationComponent[]>>((result, item) => {
@@ -134,13 +200,15 @@ export function SettingsPage() {
 
   return <><PageHeader eyebrow="SYSTEM AUTHORITY" title="系统配置" description="配置先验证、再发布；项目快照只引用已发布的精确版本。" actions={<><button className="secondaryButton" onClick={() => client.invalidateQueries()}><RefreshCw size={14} />刷新</button><button className="primaryButton" onClick={beginCreate}><Plus size={15} />新建配置草稿</button></>} />
     <section className={styles.connectionPanel}>
-      <header><div>{readiness.data?.external_execution_enabled ? <PlugZap /> : <Unplug />}<span><strong>生成服务连接状态</strong><small>只读取后端注册和凭据状态，不会发起网络测试或产生费用。</small></span></div><em data-ready={readiness.data?.external_execution_enabled}>{readiness.data?.external_execution_enabled ? '外部生成已接通' : '外部生成未接通'}</em></header>
+      <header><div>{readiness.data?.external_execution_enabled ? <PlugZap /> : <Unplug />}<span><strong>生成服务连接准备</strong><small>按执行组件、生成配置、后端密钥和执行授权逐项检查；不会联网或产生费用。</small></span></div><em data-ready={readiness.data?.external_execution_enabled}>{readiness.data?.external_execution_enabled ? '可以执行' : '尚未准备完成'}</em></header>
       <div className={styles.connectionList}>
         {readiness.data?.providers.map(provider => <article key={`${provider.configuration_version_id}:${provider.provider_version_id}`} data-status={provider.status}>
           <span className={styles.connectionIcon}>{provider.status === 'connected' ? <BadgeCheck /> : <AlertTriangle />}</span>
           <div><strong>{provider.provider_display_name}</strong><small>{provider.configuration_display_name} · v{provider.configuration_version_number}</small></div>
-          <span><b>{readinessLabels[provider.status]}</b><small>{credentialLabels[provider.credential_state]}</small></span>
-          <details><summary>技术详情</summary><code>{provider.adapter_kind} · {provider.capabilities.join(', ') || 'NO_CAPABILITY'} · adapter={String(provider.adapter_registered)}</code></details>
+          <span><b>{readinessLabels[provider.status]}</b><small>{nextActionLabels[provider.next_action]}</small></span>
+          <ReadinessChecks provider={provider} />
+          <button type="button" className="secondaryButton" onClick={() => { setEditing(false); setSelectedId(provider.configuration_version_id) }}><FileCheck2 size={13} />查看配置</button>
+          <details><summary>技术详情</summary><code>{provider.adapter_kind} · {provider.capabilities.join(', ') || 'NO_CAPABILITY'} · credential={credentialLabels[provider.credential_state]} · contract_issues={provider.configuration_issue_codes.join(', ') || 'none'}</code></details>
         </article>)}
         {readiness.isPending && <p>正在读取后端连接状态…</p>}
         {!readiness.isPending && !readiness.data?.providers.length && <p>还没有已发布配置中的服务供应商。</p>}
@@ -160,7 +228,35 @@ export function SettingsPage() {
 
         <section className={styles.formSection}><header><Boxes /><div><strong>视频规格</strong><span>工作流必须精确声明支持的规格</span></div><button type="button" className="secondaryButton" onClick={() => setDraft({ ...draft, video_specs: [...draft.video_specs, videoDraft()] })}><Plus size={13} />规格</button></header>{draft.video_specs.map((item, index) => <div className={styles.repeatBlock} key={item.spec_key}><div className={styles.repeatTitle}><b>视频规格 {index + 1}</b>{draft.video_specs.length > 1 && <button type="button" className="iconButton" title="删除规格" onClick={() => removeList('video_specs', index)}><Trash2 size={14} /></button>}</div><div className={styles.formGrid}><label>显示名称<input required value={item.display_name} onChange={event => updateList('video_specs', index, { ...item, display_name: event.target.value })} /></label><label>画幅<select value={item.aspect_ratio} onChange={event => updateList('video_specs', index, { ...item, aspect_ratio: event.target.value as VideoSpecDraft['aspect_ratio'] })}><option>9:16</option><option>16:9</option><option>1:1</option></select></label><label>宽度<input required type="number" min="64" value={item.width} onChange={event => updateList('video_specs', index, { ...item, width: Number(event.target.value) })} /></label><label>高度<input required type="number" min="64" value={item.height} onChange={event => updateList('video_specs', index, { ...item, height: Number(event.target.value) })} /></label><label>FPS<input required type="number" min="1" value={item.fps} onChange={event => updateList('video_specs', index, { ...item, fps: Number(event.target.value) })} /></label><label>最短时长<input required type="number" min="1" value={item.duration_min_seconds} onChange={event => updateList('video_specs', index, { ...item, duration_min_seconds: Number(event.target.value) })} /></label><label>最长时长<input required type="number" min="1" value={item.duration_max_seconds} onChange={event => updateList('video_specs', index, { ...item, duration_max_seconds: Number(event.target.value) })} /></label><label>容器<input required value={item.container} onChange={event => updateList('video_specs', index, { ...item, container: event.target.value })} /></label><label>编码器<input required value={item.video_codec} onChange={event => updateList('video_specs', index, { ...item, video_codec: event.target.value })} /></label><label>像素格式<input required value={item.pixel_format} onChange={event => updateList('video_specs', index, { ...item, pixel_format: event.target.value })} /></label></div></div>)}</section>
 
-        <section className={styles.formSection}><header><Workflow /><div><strong>工作流槽位</strong><span>NodeInfoList 缺字段或重复绑定会阻断发布</span></div><button type="button" className="secondaryButton" onClick={() => setDraft({ ...draft, workflow_slots: [...draft.workflow_slots, workflowDraft()] })}><Plus size={13} />槽位</button></header>{draft.workflow_slots.map((item, index) => <div className={styles.repeatBlock} key={item.slot_key}><div className={styles.repeatTitle}><b>工作流槽位 {index + 1}</b>{draft.workflow_slots.length > 1 && <button type="button" className="iconButton" title="删除槽位" onClick={() => removeList('workflow_slots', index)}><Trash2 size={14} /></button>}</div><div className={styles.formGrid}><label>显示名称<input required value={item.display_name} onChange={event => updateList('workflow_slots', index, { ...item, display_name: event.target.value })} /></label><label>操作类型<input required value={item.operation_kind} onChange={event => updateList('workflow_slots', index, { ...item, operation_kind: event.target.value })} placeholder="image_generation / video_generation / tts" /></label><label>所属服务供应商<select required value={item.provider_key} onChange={event => updateList('workflow_slots', index, { ...item, provider_key: event.target.value })}><option value="">请选择</option>{draft.providers.map((provider, providerIndex) => <option key={provider.provider_key} value={provider.provider_key}>{provider.display_name || `服务供应商 ${providerIndex + 1}`}</option>)}</select></label><label>工作流 ID<input required value={item.provider_workflow_id} onChange={event => updateList('workflow_slots', index, { ...item, provider_workflow_id: event.target.value })} /></label><label>工作流版本<input value={item.provider_workflow_version ?? ''} onChange={event => updateList('workflow_slots', index, { ...item, provider_workflow_version: event.target.value || null })} /></label><label>模型配置<select value={item.model_config_key ?? ''} onChange={event => updateList('workflow_slots', index, { ...item, model_config_key: event.target.value || null })}><option value="">不绑定模型</option>{draft.models.map((model, modelIndex) => <option key={model.config_key} value={model.config_key}>{model.display_name || `模型 ${modelIndex + 1}`}</option>)}</select></label><label>输入 Schema<input required value={item.input_schema_version} onChange={event => updateList('workflow_slots', index, { ...item, input_schema_version: event.target.value })} /></label><label>输出 Schema<input required value={item.output_schema_version} onChange={event => updateList('workflow_slots', index, { ...item, output_schema_version: event.target.value })} /></label><fieldset className={`${styles.wide} ${styles.choiceField}`}><legend>支持的视频规格</legend><div className={styles.choiceList}>{draft.video_specs.map((video, videoIndex) => <label key={video.spec_key}><input type="checkbox" checked={item.supported_video_spec_keys.includes(video.spec_key)} onChange={event => updateList('workflow_slots', index, { ...item, supported_video_spec_keys: event.target.checked ? [...item.supported_video_spec_keys, video.spec_key] : item.supported_video_spec_keys.filter(key => key !== video.spec_key) })} /><span>{video.display_name || `视频规格 ${videoIndex + 1}`}</span><small>{video.width}×{video.height} · {video.fps}fps</small></label>)}</div></fieldset></div><div className={styles.nodeBindings}><strong>NodeInfoList</strong>{item.node_info_list.map((binding, bindingIndex) => <div key={bindingIndex}><input required aria-label="节点 ID" placeholder="节点 ID" value={binding.node_id} onChange={event => updateList('workflow_slots', index, { ...item, node_info_list: item.node_info_list.map((row, rowIndex) => rowIndex === bindingIndex ? { ...row, node_id: event.target.value } : row) })} /><input required aria-label="字段路径" placeholder="字段路径" value={binding.field_path} onChange={event => updateList('workflow_slots', index, { ...item, node_info_list: item.node_info_list.map((row, rowIndex) => rowIndex === bindingIndex ? { ...row, field_path: event.target.value } : row) })} /><input required aria-label="值来源" placeholder="值来源" value={binding.value_source} onChange={event => updateList('workflow_slots', index, { ...item, node_info_list: item.node_info_list.map((row, rowIndex) => rowIndex === bindingIndex ? { ...row, value_source: event.target.value } : row) })} /><select aria-label="值类型" value={binding.value_type} onChange={event => updateList('workflow_slots', index, { ...item, node_info_list: item.node_info_list.map((row, rowIndex) => rowIndex === bindingIndex ? { ...row, value_type: event.target.value as typeof binding.value_type } : row) })}><option>string</option><option>integer</option><option>number</option><option>boolean</option><option>image</option><option>audio</option><option>json</option></select><label className={styles.check}><input type="checkbox" checked={binding.required} onChange={event => updateList('workflow_slots', index, { ...item, node_info_list: item.node_info_list.map((row, rowIndex) => rowIndex === bindingIndex ? { ...row, required: event.target.checked } : row) })} />必填</label>{item.node_info_list.length > 1 && <button type="button" className="iconButton" title="删除节点映射" onClick={() => updateList('workflow_slots', index, { ...item, node_info_list: item.node_info_list.filter((_, rowIndex) => rowIndex !== bindingIndex) })}><Trash2 size={13} /></button>}</div>)}<button type="button" className="secondaryButton" onClick={() => updateList('workflow_slots', index, { ...item, node_info_list: [...item.node_info_list, { node_id: '', field_path: '', value_source: '', value_type: 'string', required: true }] })}><Plus size={13} />节点映射</button></div></div>)}</section>
+        <section className={styles.formSection}>
+          <header><Workflow /><div><strong>工作流槽位</strong><span>每个工作流精确绑定 RunningHub 节点输入，不接受旧占位符</span></div><button type="button" className="secondaryButton" onClick={() => setDraft({ ...draft, workflow_slots: [...draft.workflow_slots, workflowDraft()] })}><Plus size={13} />槽位</button></header>
+          {draft.workflow_slots.map((item, index) => <div className={styles.repeatBlock} key={item.slot_key}>
+            <div className={styles.repeatTitle}><b>工作流槽位 {index + 1}</b>{draft.workflow_slots.length > 1 && <button type="button" className="iconButton" title="删除槽位" onClick={() => removeList('workflow_slots', index)}><Trash2 size={14} /></button>}</div>
+            <div className={styles.formGrid}>
+              <label>显示名称<input required value={item.display_name} onChange={event => updateList('workflow_slots', index, { ...item, display_name: event.target.value })} /></label>
+              <label>生成类型<select required value={item.operation_kind} onChange={event => updateList('workflow_slots', index, { ...item, operation_kind: event.target.value })}><option value="">请选择</option><option value="image_generation">生成图片</option><option value="video_generation">首帧生成视频</option><option value="tts">文字生成语音</option>{!['', 'image_generation', 'video_generation', 'tts'].includes(item.operation_kind) && <option value={item.operation_kind}>其他：{item.operation_kind}</option>}</select></label>
+              <label>所属服务供应商<select required value={item.provider_key} onChange={event => updateList('workflow_slots', index, { ...item, provider_key: event.target.value })}><option value="">请选择</option>{draft.providers.map((provider, providerIndex) => <option key={provider.provider_key} value={provider.provider_key}>{provider.display_name || `服务供应商 ${providerIndex + 1}`}</option>)}</select></label>
+              <label>工作流 ID<input required value={item.provider_workflow_id} onChange={event => updateList('workflow_slots', index, { ...item, provider_workflow_id: event.target.value })} /></label>
+              <label>工作流版本<input value={item.provider_workflow_version ?? ''} onChange={event => updateList('workflow_slots', index, { ...item, provider_workflow_version: event.target.value || null })} /></label>
+              <label>模型配置<select value={item.model_config_key ?? ''} onChange={event => updateList('workflow_slots', index, { ...item, model_config_key: event.target.value || null })}><option value="">不绑定模型</option>{draft.models.map((model, modelIndex) => <option key={model.config_key} value={model.config_key}>{model.display_name || `模型 ${modelIndex + 1}`}</option>)}</select></label>
+              <label>输入合同版本<input required value={item.input_schema_version} onChange={event => updateList('workflow_slots', index, { ...item, input_schema_version: event.target.value })} /></label>
+              <label>输出合同版本<input required value={item.output_schema_version} onChange={event => updateList('workflow_slots', index, { ...item, output_schema_version: event.target.value })} /></label>
+              <fieldset className={`${styles.wide} ${styles.choiceField}`}><legend>支持的视频规格</legend><div className={styles.choiceList}>{draft.video_specs.map((video, videoIndex) => <label key={video.spec_key}><input type="checkbox" checked={item.supported_video_spec_keys.includes(video.spec_key)} onChange={event => updateList('workflow_slots', index, { ...item, supported_video_spec_keys: event.target.checked ? [...item.supported_video_spec_keys, video.spec_key] : item.supported_video_spec_keys.filter(key => key !== video.spec_key) })} /><span>{video.display_name || `视频规格 ${videoIndex + 1}`}</span><small>{video.width}×{video.height} · {video.fps}fps</small></label>)}</div></fieldset>
+            </div>
+            <div className={styles.nodeBindings}>
+              <div className={styles.bindingHeader}><strong>工作流输入映射</strong><span>节点 ID 和输入字段来自 RunningHub 工作流；输入内容从已确认的镜头合同读取。</span></div>
+              {item.node_info_list.map((binding, bindingIndex) => <NodeBindingEditor
+                key={bindingIndex}
+                binding={binding}
+                operationKind={item.operation_kind}
+                removable={item.node_info_list.length > 1}
+                onChange={nextBinding => updateList('workflow_slots', index, { ...item, node_info_list: item.node_info_list.map((row, rowIndex) => rowIndex === bindingIndex ? nextBinding : row) })}
+                onRemove={() => updateList('workflow_slots', index, { ...item, node_info_list: item.node_info_list.filter((_, rowIndex) => rowIndex !== bindingIndex) })}
+              />)}
+              <button type="button" className="secondaryButton" onClick={() => updateList('workflow_slots', index, { ...item, node_info_list: [...item.node_info_list, { node_id: '', field_path: '', value_source: '', value_type: 'string', required: true }] })}><Plus size={13} />添加输入</button>
+            </div>
+          </div>)}
+        </section>
 
         <section className={styles.formSection}><header><ShieldCheck /><div><strong>音频与存储策略</strong><span>音频关闭时不能绑定 TTS；OSS 只记录凭据引用</span></div></header><div className={styles.policyColumns}><div><h3>音频配置</h3><div className={styles.formGrid}><label>显示名称<input required value={draft.audio.display_name} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, display_name: event.target.value } })} /></label><label>支持模式<select multiple value={draft.audio.supported_modes} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, supported_modes: Array.from(event.target.selectedOptions).map(option => option.value) as Array<'off' | 'voiceover'> } })}><option value="off">关闭</option><option value="voiceover">旁白</option></select></label><label>TTS 槽位<select value={draft.audio.tts_workflow_slot_key ?? ''} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, tts_workflow_slot_key: event.target.value || null } })}><option value="">不绑定</option>{draft.workflow_slots.filter(workflow => workflow.operation_kind === 'tts').map((workflow, workflowIndex) => <option key={workflow.slot_key} value={workflow.slot_key}>{workflow.display_name || `TTS 工作流 ${workflowIndex + 1}`}</option>)}</select></label><label>采样率<input required type="number" value={draft.audio.sample_rate} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, sample_rate: Number(event.target.value) } })} /></label><label>声道<select value={draft.audio.channels} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, channels: Number(event.target.value) as 1 | 2 } })}><option value="1">单声道</option><option value="2">双声道</option></select></label><label>格式<input required value={draft.audio.format} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, format: event.target.value } })} /></label><label>语速下限<input required type="number" step="0.1" value={draft.audio.speaking_rate_min} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, speaking_rate_min: Number(event.target.value) } })} /></label><label>语速上限<input required type="number" step="0.1" value={draft.audio.speaking_rate_max} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, speaking_rate_max: Number(event.target.value) } })} /></label></div></div><div><h3>存储策略</h3><div className={styles.formGrid}><label>显示名称<input required value={draft.storage.display_name} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, display_name: event.target.value } })} /></label><label>后端<select value={draft.storage.backend_kind} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, backend_kind: event.target.value as 'local' | 'oss' } })}><option value="local">本地</option><option value="oss">阿里云 OSS</option></select></label><label>公网 URL 策略<select value={draft.storage.public_url_policy} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, public_url_policy: event.target.value as typeof draft.storage.public_url_policy } })}><option value="none">不提供</option><option value="signed">签名 URL</option><option value="public">公共 URL</option><option value="temporary_public">临时公共 URL</option></select></label><label className={styles.wide}>允许 MIME（逗号分隔）<input required value={draft.storage.allowed_mime_types.join(', ')} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, allowed_mime_types: event.target.value.split(',').map(value => value.trim()).filter(Boolean) } })} /></label><label>文件上限（字节）<input required type="number" value={draft.storage.max_file_size_bytes} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, max_file_size_bytes: Number(event.target.value) } })} /></label>{draft.storage.backend_kind === 'local' ? <label>本地目录引用<input required value={draft.storage.local_root_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, local_root_ref: event.target.value || null } })} /></label> : <><label>区域引用<input required value={draft.storage.region_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, region_ref: event.target.value || null } })} /></label><label>Bucket 引用<input required value={draft.storage.bucket_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, bucket_ref: event.target.value || null } })} /></label><label>凭据引用<input required value={draft.storage.credential_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, credential_ref: event.target.value || null } })} /></label><label>生命周期（天）<input required type="number" min="1" value={draft.storage.lifecycle_days ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, lifecycle_days: Number(event.target.value) || null } })} /></label></>}</div></div></div></section>
         <section className={styles.formSection}>

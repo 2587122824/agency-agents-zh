@@ -23,6 +23,7 @@ from ..db.models import (
     utc_now,
 )
 from ..repositories import ConfigurationRepository, SqlAlchemyConfigurationRepository
+from ..providers.runninghub_contract import runninghub_workflow_contract_issues
 from .contracts import (
     CloneConfiguration,
     ConfigurationDraftBody,
@@ -38,36 +39,6 @@ class ConfigurationConflictError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
-
-
-_RUNNINGHUB_NODE_SOURCES = {
-    "duration_ms",
-    "source_image",
-    "seed",
-    "shot.action",
-    "shot.composition",
-    "shot.duration_ms",
-    "shot.face_visibility",
-    "shot.motion_requirement",
-    "shot.text_policy",
-    "video_spec.width",
-    "video_spec.height",
-    "video_spec.fps",
-    "video_spec.long_side",
-    "video_spec.frame_count",
-}
-
-
-def _runninghub_source_is_supported(source: str) -> bool:
-    if source in _RUNNINGHUB_NODE_SOURCES:
-        return True
-    if not source.startswith("literal:"):
-        return False
-    try:
-        json.loads(source[len("literal:"):])
-    except json.JSONDecodeError:
-        return False
-    return True
 
 
 class ConfigurationNotFoundError(ValueError):
@@ -574,44 +545,22 @@ def _validate(repository: ConfigurationRepository, config: ProductionConfigVersi
             slot_errors.append({"code": "WORKFLOW_VIDEO_SPEC_MISSING", "path": "supported_video_spec_ids", "ids": missing_specs})
         bindings = workflow.node_info_list or []
         seen: set[tuple[str, str]] = set()
-        for index, binding in enumerate(bindings):
-            required = ("node_id", "field_path", "value_source", "value_type", "required")
-            missing = [key for key in required if key not in binding or binding[key] in (None, "")]
-            if missing:
-                slot_errors.append({
-                    "code": "NODE_BINDING_INCOMPLETE",
-                    "path": f"node_info_list.{index}",
-                    "missing": missing,
-                })
-            identity = (str(binding.get("node_id", "")), str(binding.get("field_path", "")))
-            if identity in seen:
-                slot_errors.append({"code": "NODE_BINDING_DUPLICATE", "path": f"node_info_list.{index}"})
-            seen.add(identity)
-            source = str(binding.get("value_source") or "")
-            if provider and provider.adapter_kind == "runninghub" and not _runninghub_source_is_supported(source):
-                slot_errors.append({
-                    "code": "RUNNINGHUB_NODE_SOURCE_UNSUPPORTED",
-                    "path": f"node_info_list.{index}.value_source",
-                    "value_source": source,
-                })
-            if (
-                provider
-                and provider.adapter_kind == "runninghub"
-                and source == "source_image"
-                and workflow.operation_kind != "video_generation"
-            ):
-                slot_errors.append({
-                    "code": "RUNNINGHUB_SOURCE_IMAGE_NOT_APPLICABLE",
-                    "path": f"node_info_list.{index}.value_source",
-                })
-        if provider and provider.adapter_kind == "runninghub" and workflow.operation_kind == "video_generation":
-            source_image_count = sum(binding.get("value_source") == "source_image" for binding in bindings)
-            if source_image_count != 1:
-                slot_errors.append({
-                    "code": "RUNNINGHUB_I2V_SOURCE_IMAGE_COUNT_INVALID",
-                    "path": "node_info_list",
-                    "actual": source_image_count,
-                })
+        if provider and provider.adapter_kind == "runninghub":
+            slot_errors.extend(runninghub_workflow_contract_issues(workflow.operation_kind, bindings))
+        else:
+            for index, binding in enumerate(bindings):
+                required = ("node_id", "field_path", "value_source", "value_type", "required")
+                missing = [key for key in required if key not in binding or binding[key] in (None, "")]
+                if missing:
+                    slot_errors.append({
+                        "code": "NODE_BINDING_INCOMPLETE",
+                        "path": f"node_info_list.{index}",
+                        "missing": missing,
+                    })
+                identity = (str(binding.get("node_id", "")), str(binding.get("field_path", "")))
+                if identity in seen:
+                    slot_errors.append({"code": "NODE_BINDING_DUPLICATE", "path": f"node_info_list.{index}"})
+                seen.add(identity)
         workflow.validation_report = slot_errors
         workflow.validation_status = "invalid" if slot_errors else "valid"
         errors.extend({**error, "slot_key": workflow.slot_key} for error in slot_errors)

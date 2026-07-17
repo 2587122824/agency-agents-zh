@@ -23,7 +23,7 @@
 | 项目状态机与统一评估器 | 部分完成 | 纯事实评估器和当前命令面的权威转移器已实现；应用服务/Worker 无直接状态赋值，具备原子行版本、结构化 blocked 和状态事件。缺口为 ResolveBlock、CancelProject、StartNewPlanVersion 与精确重试转移 |
 | Repository 接口 | 已完成 | Project/Event/Decision/Command/Creation/Planning/Production/Quality/Editor/Delivery/Work/Configuration/Registry/Control/ContactSheet/Impact 均有协议、SQLAlchemy 实现和合同测试；当前应用服务、Worker 与业务投影已无直接 ORM 查询 |
 | 事件信封与 Outbox | 已完成 | 统一版本化信封、项目内序号、事务内 Outbox、显式批次发布器和 SSE 项目游标已实现；发布失败不自动重试 |
-| Provider 基础层与连接状态 | 已完成 | 精确 Adapter 协议/注册表、`env://` 凭据解析白名单、只读连接状态 API 和设置页已实现；查询不探测网络且不返回凭据引用名或值 |
+| Provider 基础层与连接状态 | 已完成 | 精确 Adapter 协议/注册表、`env://` 凭据解析白名单、只读连接状态 API 和设置页已实现；逐供应商展示执行组件、生成配置、后端密钥、执行授权及唯一下一步，查询不探测网络且不返回凭据引用名或值 |
 
 ## 创作、合同与编排
 
@@ -51,7 +51,7 @@
 | 成本账本 | 已完成 | `CostEvent`、估算与实际费用分离 |
 | 时间线合同与确认 | 已完成 | Timeline/TimelineItem、验证、版本修订、确认和剪辑页 |
 | 最终交付验证 | 已完成 | DeliveryAttempt、外部上传、真实 MP4 验证与完成条件 |
-| RunningHub Provider | 部分完成 | 图片和首帧视频 Adapter、严格 NodeInfoList、单父图片、提交任务号持久化、重启轮询恢复与确定性本地下载已实现并用假传输验证；真实执行默认关闭且尚未联网验收 |
+| RunningHub Provider | 部分完成 | 图片和首帧视频 Adapter、共享严格 NodeInfoList 校验器、单父图片、提交任务号持久化、重启轮询恢复与确定性本地下载已实现并用假传输验证；设置页可识别历史不兼容配置并用普通名称编辑新映射；真实执行默认关闭且尚未联网验收 |
 | CosyVoice Provider | 未开始，需确认 | 尚未接入 V2；真实调用、声音复刻与临时公网音频仍需单独确认 |
 | OSS 临时音频上传 | 未开始，需确认 | 涉及真实存储凭据、生命周期和外部网络调用 |
 | FFmpeg 本地合成 | 未开始，需确认 | 会新增交付执行方式和失败/恢复语义 |

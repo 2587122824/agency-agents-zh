@@ -777,7 +777,11 @@ export interface ProviderReadinessItem {
   execution_enabled: boolean | null
   credential_required: boolean | null
   credential_state: 'not_configured' | 'unsupported_reference' | 'not_authorized' | 'missing' | 'available'
-  status: 'connected' | 'adapter_not_connected' | 'execution_disabled' | 'credential_not_ready'
+  configuration_ready: boolean
+  configuration_issue_count: number
+  configuration_issue_codes: string[]
+  status: 'connected' | 'adapter_not_connected' | 'configuration_not_ready' | 'execution_disabled' | 'credential_not_ready'
+  next_action: 'connect_adapter' | 'revise_configuration' | 'configure_credential' | 'enable_execution' | 'ready'
 }
 
 export interface ProviderReadiness {
