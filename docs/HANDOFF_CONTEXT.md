@@ -1,5 +1,12 @@
 # Handoff Context
 
+## 2026-07-17 V2 Project Control Plain-language Status Sprint 45
+
+- Extended the shared exact-value presentation layer from blocker/event facts to project, snapshot, WorkItem, WorkAttempt, state-trigger, actor-type, and responsible-aggregate values.
+- Project Control now shows ordinary Chinese status and source names by default. Raw statuses, trigger/action/error codes, actor IDs, aggregate IDs, workflow/task IDs, and request fingerprints remain in collapsed technical details.
+- Replaced the remaining English section eyebrows on Project Control with Chinese product language and simplified the execution-route table for creators.
+- Unknown structured values use neutral Chinese labels; no error/message text parsing, semantic inference, state write, retry, fallback, route change, Provider call, or fee behavior was added.
+
 ## 2026-07-17 V2 Audit Ledger and Chinese Fact Presentation Sprint 44
 
 - Added a read-only project audit ledger with deterministic project-sequence pagination, complete persisted event envelopes, per-currency summaries, and every original CostEvent.

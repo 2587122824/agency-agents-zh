@@ -3,6 +3,100 @@ export interface FactPresentation {
   description: string
 }
 
+const projectStatusLabels: Record<string, string> = {
+  draft: '项目草稿',
+  collecting_requirements: '正在整理需求',
+  decision_required: '等待确认关键选择',
+  planning: '正在制定创作方案',
+  plan_review: '等待审核创作方案',
+  contract_ready: '创作方案已确认',
+  production_ready: '等待开始制作',
+  producing: '正在制作素材',
+  quality_review: '等待审核素材',
+  editing: '正在剪辑',
+  delivery_ready: '等待生成最终文件',
+  blocked: '制作已暂停',
+  completed: '项目已完成',
+  cancelled: '项目已取消',
+  confirmed: '已确认',
+  queued: '等待处理',
+  in_progress: '正在处理',
+  review_required: '等待人工审核',
+}
+
+const snapshotStatusLabels: Record<string, string> = {
+  preparing: '等待核对制作方案',
+  locked: '制作方案已锁定',
+  active: '制作方案已启用',
+  submitted: '制作任务已提交',
+  execution_completed: '制作执行已完成',
+  execution_blocked: '制作执行已阻断',
+}
+
+const workStatusLabels: Record<string, string> = {
+  queued: '等待制作',
+  in_progress: '正在制作',
+  completed: '已完成',
+  review_required: '等待审核',
+  blocked: '已阻断',
+  cancelled: '已取消',
+  skipped: '已跳过',
+}
+
+const attemptStateLabels: Record<string, string> = {
+  created: '已创建',
+  claimed: '准备执行',
+  submitting: '正在提交',
+  submitted: '已提交',
+  polling: '生成中',
+  succeeded: '已完成',
+  failed: '执行失败',
+  blocked: '已阻断',
+  reconciliation_required: '等待人工核对',
+}
+
+const stateTriggerLabels: Record<string, string> = {
+  project_created: '创建项目',
+  legacy_contract_confirmed: '确认旧版项目合同',
+  legacy_validation_completed: '完成旧版合同检查',
+  brief_candidate_created: '创建创意方案候选',
+  explicit_submission: '用户确认开始制作',
+  block_project: '记录项目阻断',
+  migration_backfill: '历史数据登记',
+  migration_authority_backfill: '历史权威状态登记',
+  migration_planning_authority_backfill: '历史方案状态登记',
+}
+
+const actorTypeLabels: Record<string, string> = {
+  system: '系统',
+  user: '用户',
+  worker: '制作服务',
+  agent: '智能体',
+}
+
+const aggregateTypeLabels: Record<string, string> = {
+  project: '项目',
+  production_snapshot: '制作方案',
+  work_item: '制作步骤',
+  work_attempt: '执行记录',
+  asset: '素材',
+  qc_report: '质量检查',
+  timeline: '剪辑方案',
+  delivery_attempt: '交付记录',
+}
+
+function exactLabel(value: string | null | undefined, labels: Record<string, string>, fallback: string) {
+  return value ? labels[value] ?? fallback : '--'
+}
+
+export const projectStatusLabel = (value: string | null | undefined) => exactLabel(value, projectStatusLabels, '项目状态待确认')
+export const snapshotStatusLabel = (value: string | null | undefined) => exactLabel(value, snapshotStatusLabels, '制作方案状态待确认')
+export const workStatusLabel = (value: string | null | undefined) => exactLabel(value, workStatusLabels, '制作步骤状态待确认')
+export const attemptStateLabel = (value: string | null | undefined) => exactLabel(value, attemptStateLabels, '执行状态待确认')
+export const stateTriggerLabel = (value: string | null | undefined) => exactLabel(value, stateTriggerLabels, '状态来源待确认')
+export const actorTypeLabel = (value: string | null | undefined) => exactLabel(value, actorTypeLabels, '操作来源待确认')
+export const aggregateTypeLabel = (value: string | null | undefined) => exactLabel(value, aggregateTypeLabels, '责任对象待确认')
+
 const blockerPresentations: Record<string, FactPresentation> = {
   PROVIDER_ADAPTER_NOT_CONNECTED: { title: '生成服务尚未接通', description: '对应制作步骤没有可用的执行组件，系统已停止继续执行。' },
   EXTERNAL_PROVIDER_EXECUTION_DISABLED: { title: '外部生成尚未授权', description: '外部服务执行开关未启用，本次没有发送真实生成请求。' },
