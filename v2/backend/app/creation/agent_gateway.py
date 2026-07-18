@@ -164,9 +164,9 @@ class HttpxAgentChatTransport:
         return data
 
 
-CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v3"
+CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v4"
 CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v3"
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v5"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v6"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
@@ -180,21 +180,22 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 合法建议示例：
 {"category":"content_direction","title":"你希望采用哪种内容结构？","options":[{"label":"训练日记","summary":"按准备、训练、完成推进","proposed_updates":[{"field_key":"content_structure","value":"training_diary","source_message_ids":["最新用户消息ID"]}]},{"label":"挑战记录","summary":"突出目标和结果对比","proposed_updates":[{"field_key":"content_structure","value":"challenge_record","source_message_ids":["最新用户消息ID"]}]}]}
 规则：
-1. 读取 conversation 中按顺序提供的用户和助手消息；previous_proposals 精确给出助手曾展示的结构化选项，助手消息和未选择建议都不是用户事实。
+1. 读取 conversation 中按顺序提供的用户和助手消息；proposal_history 是不含系统 ID 的只读历史，助手消息和未选择建议都不是用户事实，history.selections 才表示用户曾经作出的选择。
 2. 只有用户明确表达的值才能进入 explicit_updates，且 source_message_ids 只能引用 role=user 的消息。
 3. 用户要求建议时直接给 2 到 3 个互斥且有明显差异的选项，推荐项放第一；建议不能进入 explicit_updates。
 4. suggestion_sets 每组只能有 2 到 3 个选项；后端会生成选项 ID，你不得生成系统主键。
 4.1 每个可点击选项的 proposed_updates 必须至少包含一项，并使用上面的允许字段；不能返回空数组。
-4.2 当用户用自然语言选择 previous_proposals 中的选项时，只能在 proposal_selections 返回其中真实存在的 proposal_id、suggestion_set_id 和 option_id；不得改写冻结选项值，也不得把选择复制进 explicit_updates。无法唯一确定时提出 clarifying_question，不猜测。
-4.3 用户消息的 reply_to 精确限定它所回复的助手消息；该助手消息附带的 structured_proposals 是首要选择范围。范围内只有一个建议组且用户表达可唯一对应某个选项时，必须直接返回精确 ID，不得再次询问是哪一组。
+4.2 只有 selection_scope 非空且最新用户消息正在选择其中选项时，才能返回 proposal_selections；只能引用 selection_scope 中真实存在的 proposal_id、suggestion_set_id 和 option_id。selection_scope 为空时 proposal_selections 必须为空。不得改写冻结选项值，也不得把选择复制进 explicit_updates。无法唯一确定时提出 clarifying_question，不猜测。
+4.3 用户消息的 reply_to 精确决定 selection_scope。范围内只有一个建议组且用户表达可唯一对应某个选项时，必须直接返回精确 ID，不得再次询问是哪一组。proposal_history 只用于理解上下文，绝不能作为选择 ID 来源或重复提交已有选择。
 5. 已能直接回答或给选项时不得用问题代替答案；每轮最多一个 clarifying_question。
 6. 不得编造项目、附件、费用或生产状态，不得选择供应商、模型、工作流或预算，不得承诺已生成素材。
 7. 不得输出风险等级、Markdown 代码块、解释文字或 JSON 之外的内容。
 8. 当最新用户消息的语义是在请求比较、推荐或多个可选创作方向时，必须返回 suggestion_sets；不要依赖固定关键词匹配，也不能用 clarifying_question 代替可直接给出的选项。
 9. 用户询问“内容方向”时应围绕叙事、结构、钩子、表达重点和观看感受提供选择；不要设计具体镜头、慢动作、分屏、剪辑、计时器、模型、工作流或生产参数，这些属于后续智能体。
 10. 除 duration_seconds、aspect_ratio、audio_mode 等合同枚举外，建议值必须使用普通用户可读的简洁中文描述，不返回 snake_case、内部代码或英文机器键。
-11. 必须遵守 active_requirement 和 confirmed_decisions；audio_mode=off 时，自然回复、选项说明和字段更新都不得建议音乐、旁白、对白、TTS 或对口型。画面文字属于独立创作选择，用户未明确要求时不得自行加入字幕、标题或文字动画。
+11. active_requirement 和 confirmed_decisions 是当前已生效基线；用户可以明确提出修改，并由 explicit_updates 形成待确认候选。若用户没有明确修改，audio_mode=off 时自然回复、选项说明和字段更新都不得建议音乐、旁白、对白、TTS 或对口型。画面文字属于独立创作选择，用户未明确要求时不得自行加入字幕、标题或文字动画。
 12. confirmed_attachment_bindings 中 content_access=metadata_only 的附件只提供文件事实，不代表你看过画面、听过声音或理解过媒体内容；需要内容信息时应明确请用户描述，不得编造。
+13. explicit_updates 或 proposal_selections 只会生成待用户确认的候选，不会直接修改 active_requirement。assistant_reply 必须明确表达“已整理为待确认修改”或同等含义，不得声称配置已经更新、确认或生效；没有结构化变更时也不得声称已记录为正式需求。
 """
 
 
@@ -280,10 +281,11 @@ class ConfiguredCreativeAgentGateway:
         context_payload = {
             key: value for key, value in manifest_payload.items() if key != "conversation"
         }
-        previous_proposals = manifest_payload["conversation"].get("previous_proposals", [])
-        proposals_by_assistant_message: dict[str, list[dict[str, Any]]] = {}
-        for proposal in previous_proposals:
-            proposals_by_assistant_message.setdefault(proposal["assistant_message_id"], []).append(proposal)
+        proposal_history = manifest_payload["conversation"].get("proposal_history", [])
+        history_by_assistant_message = {
+            item["assistant_message_id"]: item for item in proposal_history
+        }
+        selection_scope = manifest_payload["conversation"].get("selection_scope")
         chat_messages: list[dict[str, str]] = [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {
@@ -294,10 +296,20 @@ class ConfiguredCreativeAgentGateway:
         ]
         for message in manifest_payload["conversation"]["messages"]:
             content = f"[message_id={message['id']}]\n{message['content']}"
-            attached_proposals = proposals_by_assistant_message.get(message["id"], [])
-            if message["role"] == "assistant" and attached_proposals:
-                content += "\n[structured_proposals=" + json.dumps(
-                    attached_proposals,
+            history = history_by_assistant_message.get(message["id"])
+            if message["role"] == "assistant" and history:
+                content += "\n[proposal_history=" + json.dumps(
+                    history,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ) + "]"
+            if (
+                message["role"] == "assistant"
+                and selection_scope
+                and selection_scope.get("assistant_message_id") == message["id"]
+            ):
+                content += "\n[selection_scope=" + json.dumps(
+                    selection_scope,
                     ensure_ascii=False,
                     separators=(",", ":"),
                 ) + "]"

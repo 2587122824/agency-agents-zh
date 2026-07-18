@@ -549,14 +549,14 @@ def test_typed_suggestion_selection_uses_frozen_option_ids(client: TestClient) -
         def invoke(self, selection, manifest_payload):
             self.manifest_payload = manifest_payload
             latest = manifest_payload["conversation"]["messages"][-1]
-            proposal = manifest_payload["conversation"]["previous_proposals"][-1]
+            proposal = manifest_payload["conversation"]["selection_scope"]
             suggestion_set = proposal["suggestion_sets"][0]
             option = suggestion_set["options"][1]
             output = CreativeAgentOutput.model_validate({
                 "assistant_reply": f"你选择了{option['label']}。",
                 "suggestion_sets": [],
                 "proposal_selections": [{
-                    "proposal_id": proposal["id"],
+                    "proposal_id": proposal["proposal_id"],
                     "suggestion_set_id": suggestion_set["id"],
                     "option_id": option["id"],
                     "source_message_ids": [latest["id"]],
@@ -600,22 +600,99 @@ def test_typed_suggestion_selection_uses_frozen_option_ids(client: TestClient) -
         "type": "user_selection",
         "reference_id": typed_message.json()["id"],
     }
-    proposal_context = gateway.manifest_payload["conversation"]["previous_proposals"]
-    assert proposal_context[0]["id"] == first_proposal["id"]
-    assert proposal_context[0]["assistant_message_id"] == assistant_message_id
-    assert proposal_context[0]["suggestion_sets"] == first_proposal["suggestion_sets"]
+    selection_scope = gateway.manifest_payload["conversation"]["selection_scope"]
+    assert selection_scope["proposal_id"] == first_proposal["id"]
+    assert selection_scope["assistant_message_id"] == assistant_message_id
+    assert selection_scope["suggestion_sets"] == first_proposal["suggestion_sets"]
+    proposal_history = gateway.manifest_payload["conversation"]["proposal_history"]
+    assert proposal_history[0]["assistant_message_id"] == assistant_message_id
+    assert "id" not in proposal_history[0]
+    assert "id" not in proposal_history[0]["suggestion_sets"][0]
+    assert "id" not in proposal_history[0]["suggestion_sets"][0]["options"][0]
+
+
+def test_selected_history_cannot_be_resubmitted_during_unrelated_update(client: TestClient) -> None:
+    class ExplicitUpdateGateway(DeterministicCreativeAgentGateway):
+        manifest_payload = None
+
+        def invoke(self, selection, manifest_payload):
+            self.manifest_payload = manifest_payload
+            latest = manifest_payload["conversation"]["messages"][-1]
+            assert manifest_payload["conversation"]["selection_scope"] is None
+            history = manifest_payload["conversation"]["proposal_history"]
+            assert history[0]["selections"][0]["option_label"] == "训练日记"
+            output = CreativeAgentOutput.model_validate({
+                "assistant_reply": "已将音频模式修改整理为待确认候选。",
+                "suggestion_sets": [],
+                "proposal_selections": [],
+                "explicit_updates": [{
+                    "field_key": "audio_mode",
+                    "value": "voiceover",
+                    "source_message_ids": [latest["id"]],
+                }],
+                "clarifying_question": None,
+            })
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "explicit-update", {"total_tokens": 1})
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    base_id = initial["active_requirement"]["id"]
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "history-scope-message-001",
+        "content": "给我三个可选方向。",
+    })
+    client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "history-scope-generate-001", "expected_base_version_id": base_id},
+    )
+    first_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    proposal = first_view["active_creative_proposal"]
+    suggestion_set = proposal["suggestion_sets"][0]
+    option = suggestion_set["options"][0]
+    selected = client.post(
+        f"/api/v1/projects/{project['id']}/creative-proposals/{proposal['id']}:select",
+        json={
+            "command_id": "history-scope-select-001",
+            "actor_id": "test-user",
+            "expected_base_version_id": base_id,
+            "suggestion_set_id": suggestion_set["id"],
+            "option_id": option["id"],
+        },
+    )
+    assert selected.status_code == 201
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "history-scope-message-002",
+        "content": "把音频模式改成旁白。",
+    })
+    gateway = ExplicitUpdateGateway()
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: gateway
+
+    updated = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "history-scope-generate-002", "expected_base_version_id": base_id},
+    )
+
+    assert updated.status_code == 201
+    assert updated.json()["fields"]["audio_mode"] == "voiceover"
+    assert updated.json()["change_summary"] == [{
+        "field_key": "audio_mode",
+        "before": "off",
+        "after": "voiceover",
+        "source_message_ids": [gateway.manifest_payload["conversation"]["messages"][-1]["id"]],
+        "risk_level": "high",
+    }]
 
 
 def test_typed_suggestion_selection_rejects_unknown_option_id(client: TestClient) -> None:
     class InvalidSelectionGateway(DeterministicCreativeAgentGateway):
         def invoke(self, selection, manifest_payload):
             latest = manifest_payload["conversation"]["messages"][-1]
-            proposal = manifest_payload["conversation"]["previous_proposals"][-1]
+            proposal = manifest_payload["conversation"]["selection_scope"]
             suggestion_set = proposal["suggestion_sets"][0]
             output = CreativeAgentOutput.model_validate({
                 "assistant_reply": "已选择。",
                 "proposal_selections": [{
-                    "proposal_id": proposal["id"],
+                    "proposal_id": proposal["proposal_id"],
                     "suggestion_set_id": suggestion_set["id"],
                     "option_id": "sgopt_not_in_manifest",
                     "source_message_ids": [latest["id"]],

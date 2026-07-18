@@ -363,17 +363,18 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.2 创作制片人
 
-创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v3`、`creative-dialogue-output.v3` 和 `creative-dialogue-prompt.v5`：
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v4`、`creative-dialogue-output.v3` 和 `creative-dialogue-prompt.v6`：
 
 ```text
-输入：runtime_context + project_context + 当前 ConversationSession 的用户/助手消息 + previous_proposals[]
+输入：runtime_context + project_context + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
 输出：assistant_reply + suggestion_sets[] + proposal_selections[] + explicit_updates[] + clarifying_question?
 ```
 
 - `assistant_reply` 先回答当前问题，不重复询问已有事实。
 - `suggestion_sets` 是有差异的创意选项，不是项目事实。
-- `previous_proposals` 按助手消息冻结历史建议组、选项 ID、说明和字段更新，并在模型消息中紧贴对应助手回复；用户消息的精确 `reply_to` 定义首要选择范围，解决跨轮指代缺少真实目标的问题。
-- `proposal_selections` 只能引用输入清单中真实存在的提案、建议组和选项 ID；后端从原选项读取冻结更新，模型不得重写选项值。
+- `proposal_history` 按助手消息保留不含系统 ID 的选项摘要和已经发生的选择，仅用于理解上下文，不能再次提交。
+- `selection_scope` 只在最新用户消息通过 `reply_to` 精确回复一个仍有未选择建议组的助手提案时存在；它是该轮唯一包含可提交提案、建议组和选项 ID 的作用域。
+- `proposal_selections` 只能引用 `selection_scope` 中真实存在的 ID；后端从原提案读取冻结更新，模型不得重写选项值。`selection_scope` 为空时必须返回空选择。
 - `explicit_updates` 只允许引用用户消息作为来源，并由后端字段目录校验。
 - 每轮最多提出一个真正阻断的澄清问题；可提供选项时直接提供选项。
 - 用户选择建议后，由独立命令创建 `RequirementCandidate`；仍需确认才能形成 `RequirementVersion`。
@@ -383,7 +384,9 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 点击选项提交精确 `proposal_id + suggestion_set_id + option_id`，保存 `CreativeSuggestionSelection` 并创建待审核 `RequirementCandidate`。点击本身不修改正式需求；人物身份、音频、费用等高风险字段仍按字段目录进入独立确认。每组建议只能选择一次，过期提案、旧需求版本、改名或不存在的 ID 明确失败。
 
-用户也可以在对话中自然表达选择。前端把该消息精确关联到当前助手消息，模型只负责从 `previous_proposals` 返回选项 ID；应用服务校验项目、需求版本、会话消息、建议组、选项和来源消息，再用冻结值生成候选及选择记录。任何不存在、重复、已选择或无法唯一确定的引用都明确失败或要求澄清，不使用序号关键词规则、名称相似度、模型改写值或后端猜测。
+用户也可以在对话中自然表达选择。前端把该消息精确关联到当前助手消息，模型只负责从本轮 `selection_scope` 返回选项 ID；应用服务校验项目、需求版本、会话消息、建议组、选项和来源消息，再用冻结值生成候选及选择记录。历史提案即使仍在会话中，也不再向模型授予可重复提交的 ID。任何不存在、重复、已选择或无法唯一确定的引用都明确失败或要求澄清，不使用序号关键词规则、名称相似度、模型改写值或后端猜测。
+
+`explicit_updates` 和 `proposal_selections` 都只生成待确认候选，不直接修改活动需求。自然回复必须明确表达候选仍待确认，不能把“已整理修改”描述成“配置已更新或已生效”。活动需求是已生效基线，但用户可以明确提出修改；这类修改进入候选确认链路，而不是被旧值阻止。
 
 创作制片人的建议范围限于内容方向、创作目标、观看感受、受众和风格，不设计具体镜头、慢动作、分屏、剪辑、计时器或生产参数。`audio_mode=off` 只允许无声方案；画面文字是独立创作选择，用户未明确要求时不得自动加入字幕、标题或文字动画。
 

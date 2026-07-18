@@ -74,10 +74,21 @@ def manifest() -> dict:
                 {"id": "message_2", "role": "assistant", "content": "可以选择训练日记、挑战记录或技巧教学。", "reply_to": "message_1"},
                 {"id": "message_3", "role": "user", "content": "第一个", "reply_to": "message_2"},
             ],
-            "previous_proposals": [{
-                "id": "cproposal_1",
+            "proposal_history": [{
                 "assistant_message_id": "message_2",
-                "base_requirement_version_id": "requirement_1",
+                "suggestion_sets": [{
+                    "category": "content_direction",
+                    "title": "选择结构",
+                    "options": [
+                        {"label": "训练日记", "summary": "按过程推进", "recommended": True},
+                        {"label": "挑战记录", "summary": "突出对比", "recommended": False},
+                    ],
+                }],
+                "selections": [],
+            }],
+            "selection_scope": {
+                "proposal_id": "cproposal_1",
+                "assistant_message_id": "message_2",
                 "suggestion_sets": [{
                     "id": "sgset_1",
                     "title": "选择结构",
@@ -86,8 +97,7 @@ def manifest() -> dict:
                         {"id": "sgopt_2", "label": "挑战记录", "summary": "突出对比", "proposed_updates": []},
                     ],
                 }],
-                "selections": [],
-            }],
+            },
         },
         "system_config_version": "production_config_1",
     }
@@ -183,7 +193,8 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
     sent_messages = request["payload"]["messages"]
     assert sent_messages[-2]["role"] == "assistant"
     assert sent_messages[-1]["role"] == "user"
-    assert "[structured_proposals=" in sent_messages[-2]["content"]
+    assert "[proposal_history=" in sent_messages[-2]["content"]
+    assert "[selection_scope=" in sent_messages[-2]["content"]
     assert "sgopt_2" in sent_messages[-2]["content"]
     assert "[message_id=message_3]" in sent_messages[-1]["content"]
     assert "第一个" in sent_messages[-1]["content"]

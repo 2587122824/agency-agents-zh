@@ -315,19 +315,73 @@ def _manifest_payload(
             "suggestion_set_id": selection.suggestion_set_id,
             "option_id": selection.option_id,
         })
-    previous_proposals = [
-        {
-            "id": proposal.id,
-            "assistant_message_id": proposal.assistant_message_id,
-            "base_requirement_version_id": proposal.base_requirement_version_id,
-            "suggestion_sets": proposal.suggestion_sets,
-            "selections": selections_by_proposal.get(proposal.id, []),
-        }
+    proposals = [
+        proposal
         for proposal in sorted(repository.creative_proposals(project.id), key=lambda item: (item.created_at, item.id))
         if proposal.assistant_message_id in message_ids
         and proposal.base_requirement_version_id == base.id
         and proposal.suggestion_sets
     ]
+    proposal_history = []
+    for proposal in proposals:
+        selection_summaries = []
+        for selection in selections_by_proposal.get(proposal.id, []):
+            suggestion_set = next(
+                (item for item in proposal.suggestion_sets if item.get("id") == selection["suggestion_set_id"]),
+                None,
+            )
+            option = next(
+                (
+                    item
+                    for item in (suggestion_set or {}).get("options", [])
+                    if item.get("id") == selection["option_id"]
+                ),
+                None,
+            )
+            if suggestion_set and option:
+                selection_summaries.append({
+                    "suggestion_set_title": suggestion_set.get("title"),
+                    "option_label": option.get("label"),
+                    "option_summary": option.get("summary"),
+                })
+        proposal_history.append({
+            "assistant_message_id": proposal.assistant_message_id,
+            "suggestion_sets": [
+                {
+                    "category": suggestion_set.get("category"),
+                    "title": suggestion_set.get("title"),
+                    "options": [
+                        {
+                            "label": option.get("label"),
+                            "summary": option.get("summary"),
+                            "recommended": bool(option.get("recommended")),
+                        }
+                        for option in suggestion_set.get("options", [])
+                    ],
+                }
+                for suggestion_set in proposal.suggestion_sets
+            ],
+            "selections": selection_summaries,
+        })
+    latest_reply_to = messages[-1].reply_to_message_id if messages and messages[-1].role == "user" else None
+    scoped_proposal = next(
+        (proposal for proposal in proposals if proposal.assistant_message_id == latest_reply_to),
+        None,
+    )
+    selection_scope = None
+    if scoped_proposal:
+        selected_set_ids = {
+            item["suggestion_set_id"] for item in selections_by_proposal.get(scoped_proposal.id, [])
+        }
+        selectable_sets = [
+            item for item in scoped_proposal.suggestion_sets if item.get("id") not in selected_set_ids
+        ]
+        if selectable_sets:
+            selection_scope = {
+                "proposal_id": scoped_proposal.id,
+                "assistant_message_id": scoped_proposal.assistant_message_id,
+                "suggestion_sets": selectable_sets,
+            }
     bindings = repository.confirmed_bindings(project.id)
     decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
     attachment_bindings = []
@@ -374,7 +428,8 @@ def _manifest_payload(
                 }
                 for item in messages
             ],
-            "previous_proposals": previous_proposals,
+            "proposal_history": proposal_history,
+            "selection_scope": selection_scope,
         },
         "system_config_version": "v2.creation.mock.v1",
         "requirement_schema_version": "creative-requirement.v2",
