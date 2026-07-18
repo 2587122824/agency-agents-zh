@@ -53,7 +53,7 @@ class ProviderDraft(StrictContract):
 class ModelDraft(StrictContract):
     config_key: Key = Field(pattern=r"^[a-z][a-z0-9_.-]{1,119}$")
     display_name: str = Field(min_length=1, max_length=160)
-    agent_role: Literal["creative", "director", "qc", "editor"]
+    agent_role: Literal["creative", "planner", "director", "qc", "editor"]
     provider_key: Key
     provider_model_id: str = Field(min_length=1, max_length=200)
     input_contract_version: str = Field(min_length=1, max_length=80)

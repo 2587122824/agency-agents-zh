@@ -857,7 +857,7 @@ v2\start_v2.bat -NoBrowser
 
 ```text
 config_key / display_name
-agent_role: creative | director | qc | editor
+agent_role: creative | planner | director | qc | editor
 provider_config_version_id
 provider_model_id
 input_contract_version / output_schema_version
@@ -1152,4 +1152,10 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 长对话不做隐藏摘要、相关性筛选或静默截断；达到明确上限后阻断并要求用户显式开启新会话。该方案不增加自动重试、模型切换、输出修复、供应商替换、路由选择或生产动作。
 
-创作制片人 V2 的完整会话、结构化建议、点击选择、待确认候选、新会话边界和失败审计已经实现。智能体体系其余部分由内容策划、分镜导演、质量审核智能体和剪辑助理组成；确定性生产编译器独立于智能体。角色边界、合同和交接条件详见 [创作中心设计](./V2_CREATION_CENTER_DESIGN.md#9-智能体编制与合同)，逐项完成度见 [实现状态](./V2_IMPLEMENTATION_STATUS.md)。
+创作制片人 V2 的完整会话、结构化建议、点击选择、待确认候选、新会话边界和失败审计已经实现。内容策划也已按独立 `planner` 模型分工完成：它只读取已确认需求、决策、实体和交付约束，生成内容承诺、开场、叙事节拍和脚本段候选；方案页按普通用户可读结构展示并保留人工接受门禁。智能体体系其余部分为分镜导演、质量审核智能体和剪辑助理；确定性生产编译器独立于智能体。角色边界、合同和交接条件详见 [创作中心设计](./V2_CREATION_CENTER_DESIGN.md#9-智能体编制与合同)，逐项完成度见 [实现状态](./V2_IMPLEMENTATION_STATUS.md)。
+
+## 40. 内容策划智能体实现
+
+内容策划使用 `content-planner-input.v1 / creative-brief-candidate.v1 / content-planner-prompt.v1`。输入清单不包含会话消息，只冻结活动需求版本、已解决 Decision、活动实体版本、时长/画幅交付约束、音频策略、可空平台和可空模板版本。模型配置使用独立 `planner` 分工，不能复用 `creative` 分工作为隐式路由。
+
+输出必须提供方案名称、内容承诺、观众收获、开场设计、连续编号的内容节拍与脚本段、语气、节奏、可空平台适配、精确实体版本、继承约束和待确认问题。后端严格验证总时长、代码连续性、节拍引用、实体白名单、音频关闭和平台未指定边界；失败只记录本次 AgentRun，不修复 JSON、不重复调用、不切换模型。成功输出只形成待审核 `CreativeBriefCandidate`，存在 `open_questions` 时不能接受。失败、拒绝或待确认问题都要求用户先补充并确认新的需求版本，页面不对同一版本重复展示生成动作。

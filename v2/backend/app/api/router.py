@@ -145,6 +145,7 @@ from ..planning.contracts import (
     ReviseShotPlan,
     ShotPlanCandidateRead,
 )
+from ..planning.agent_gateway import ContentPlannerGateway, get_content_planner_gateway
 from ..planning.service import (
     decide_brief,
     decide_shot_plan,
@@ -922,14 +923,25 @@ def project_attachment_content(project_id: str, attachment_id: str, session: Ses
     response_model=CreativeBriefCandidateRead,
     status_code=status.HTTP_201_CREATED,
 )
-def creative_brief_generate(project_id: str, payload: GenerateBrief, session: Session = Depends(get_session)):
+def creative_brief_generate(
+    project_id: str,
+    payload: GenerateBrief,
+    gateway: ContentPlannerGateway = Depends(get_content_planner_gateway),
+    session: Session = Depends(get_session),
+):
     project = require_project(session, project_id)
     try:
-        return generate_brief(session, project, payload)
+        return generate_brief(session, project, payload, gateway)
     except CreationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CreationConflictError as exc:
         raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
 
 
 @router.post(

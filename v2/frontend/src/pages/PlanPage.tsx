@@ -4,15 +4,10 @@ import { Link, useParams } from 'react-router-dom'
 import { useState } from 'react'
 
 import { api } from '../api/client'
-import type { ShotContract } from '../api/types'
+import type { CreativeBriefCandidate, ShotContract } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import { ShotPlanRevisionEditor } from '../components/ShotPlanRevisionEditor'
 import styles from './PlanPage.module.css'
-
-const briefLabels: Record<string, string> = {
-  core_intent: '核心意图', duration_seconds: '目标时长', aspect_ratio: '画幅', audio_mode: '音频模式',
-  narrative_structure: '叙事结构', visual_style: '视觉风格', character_refs: '人物版本', outfit_refs: '服装版本', scene_refs: '场景版本', product_refs: '产品版本', voice_refs: '声音版本',
-}
 
 const snapshotStatusLabels: Record<string, string> = {
   preparing: '等待确认', locked: '费用已确认', active: '可以开始制作', submitted: '已提交制作',
@@ -67,12 +62,32 @@ function userIssue(code: string) {
   return issueMessages[code] ?? '当前制作设置需要调整，请展开技术详情查看具体原因。'
 }
 
-function displayValue(key: string, value: unknown) {
-  if (value === null || value === undefined || value === '') return '未指定'
-  if (Array.isArray(value)) return value.length ? value.join(' / ') : '未绑定'
-  if (key === 'duration_seconds') return `${String(value)} 秒`
-  if (key === 'audio_mode') return value === 'off' ? '关闭' : String(value)
-  return String(value)
+function scriptKindLabel(kind: string) {
+  return ({ visual_only: '纯画面', voiceover: '旁白', dialogue: '对白', on_screen_text: '画面文字' } as Record<string, string>)[kind] ?? kind
+}
+
+function BriefView({ candidate }: { candidate: CreativeBriefCandidate }) {
+  const brief = candidate.brief
+  return <div className={styles.briefContent}>
+    <section className={styles.briefSummary}>
+      <div><span>方案名称</span><strong>{brief.title}</strong></div>
+      <div><span>内容承诺</span><strong>{brief.content_promise}</strong></div>
+      <div><span>观众收获</span><strong>{brief.audience_takeaway}</strong></div>
+    </section>
+    <section className={styles.hookBand}><span>开场设计</span><strong>{brief.hook.content}</strong><small>{brief.hook.kind} · 内容策划建议</small></section>
+    <section className={styles.briefSection}>
+      <header><div><span>内容节拍</span><strong>{brief.narrative_beats.length} 个段落</strong></div><small>总时长 {brief.duration_seconds} 秒</small></header>
+      <div className={styles.beatList}>{brief.narrative_beats.map(beat => <article key={beat.beat_code}><b>{beat.beat_code.replace('BEAT_', '')}</b><div><strong>{beat.purpose}</strong><span>{beat.summary}</span></div><time>{(beat.target_duration_ms / 1000).toFixed(1)}s</time></article>)}</div>
+    </section>
+    <section className={styles.briefSection}>
+      <header><div><span>脚本结构</span><strong>{brief.audio_mode === 'off' ? '无音频方案' : '包含声音内容'}</strong></div><small>{brief.script_segments.length} 个脚本段</small></header>
+      <div className={styles.scriptList}>{brief.script_segments.map(segment => <article key={segment.segment_code}><div><b>{segment.segment_code.replace('SEG_', '')}</b><em>{scriptKindLabel(segment.kind)}</em></div><strong>{segment.spoken_text ?? segment.on_screen_text ?? '通过画面完成这一段内容'}</strong><small>对应 {segment.beat_code}</small></article>)}</div>
+    </section>
+    <footer className={styles.briefFacts}>
+      <span>语气 <b>{brief.tone}</b></span><span>节奏 <b>{brief.pacing}</b></span><span>平台 <b>{brief.platform_adaptation ?? '未指定，不做平台适配'}</b></span><span>实体 <b>{brief.entity_version_ids.length ? `${brief.entity_version_ids.length} 个已确认版本` : '未绑定'}</b></span>
+    </footer>
+    {brief.open_questions.length > 0 && <section className={styles.briefQuestions}><strong>仍需你确认</strong>{brief.open_questions.map(question => <span key={question}>{question}</span>)}</section>}
+  </div>
 }
 
 function ShotTable({ shots, locked }: { shots: ShotContract[]; locked: boolean }) {
@@ -126,16 +141,16 @@ export function PlanPage() {
   const nextActionLabel = productionActionLabels[nextAction.code] ?? nextAction.label
   function chooseConfig(value: string) { setConfigId(value); setVideoSpecId(''); setKeyframeSlotId(''); setVideoSlotId(''); setTtsSlotId(''); setPricingCatalogId(''); analyzeImpact.reset() }
   return <>
-    <PageHeader eyebrow="PLAN REVIEW" title={`${project.data.title} · 方案确认`} description="创意策划智能体与分镜导演智能体只提交候选，用户确认后才创建不可变方案版本。" actions={<Link className="secondaryButton" to={`/projects/${projectId}`}><ArrowLeft size={15} />返回创作中心</Link>} />
-    <div className={styles.versionBar}><span><GitBranch size={15} />需求 v{data.active_requirement.version_number}</span><i></i><span data-active={Boolean(brief)}><Sparkles size={15} />{brief ? '创意方案' : '创意方案待生成'}</span><i></i><span data-active={Boolean(data.active_plan)}><LockKeyhole size={15} />{data.active_plan ? `创作方案 v${data.active_plan.version_number}` : '创作方案尚未创建'}</span><b>{nextActionLabel}</b></div>
+    <PageHeader eyebrow="PLAN REVIEW" title={`${project.data.title} · 方案确认`} description="内容策划智能体与分镜导演智能体只提交候选，用户确认后才创建不可变方案版本。" actions={<Link className="secondaryButton" to={`/projects/${projectId}`}><ArrowLeft size={15} />返回创作中心</Link>} />
+    <div className={styles.versionBar}><span><GitBranch size={15} />需求 v{data.active_requirement.version_number}</span><i></i><span data-active={Boolean(brief)}><Sparkles size={15} />{brief ? '内容方案' : '内容方案待生成'}</span><i></i><span data-active={Boolean(data.active_plan)}><LockKeyhole size={15} />{data.active_plan ? `创作方案 v${data.active_plan.version_number}` : '创作方案尚未创建'}</span><b>{nextActionLabel}</b></div>
     <main className={styles.layout}>
       <section className={styles.main}>
         <div className={styles.briefPanel}>
-          <div className={styles.panelHeading}><div><Layers3 size={18} /><span><small>CREATIVE BRIEF</small><h2>{brief ? '创意方案候选' : '基于已确认需求生成方案'}</h2></span></div>{brief && <em data-accepted={brief.status === 'accepted'}>{brief.status === 'accepted' ? '已接受' : '尚未生效'}</em>}</div>
-          {brief ? <div className={styles.briefGrid}>{Object.entries(brief.brief).filter(([key]) => key !== 'assumptions').map(([key, value]) => <div key={key}><span>{briefLabels[key] ?? key}</span><strong>{displayValue(key, value)}</strong><small>{brief.field_sources[key]?.type === 'agent_proposal' ? '智能体建议' : brief.field_sources[key]?.type === 'unspecified' ? '未指定' : '已确认来源'}</small></div>)}</div> : <div className={styles.empty}><Sparkles size={24} /><strong>当前需求可以进入方案规划</strong><span>当前创意策划智能体是本地演示实现，不产生模型或生产费用。</span><button className="primaryButton" disabled={generateBrief.isPending} onClick={() => generateBrief.mutate()}>{generateBrief.isPending ? '正在生成…' : '生成创意方案候选'}</button></div>}
-          {data.current_brief_candidate && <div className={styles.reviewBar}><p><strong>候选尚未生效</strong><span>接受后分镜导演智能体才能读取这份创意方案。</span></p><button className="secondaryButton" onClick={() => decideBrief.mutate(false)} disabled={decideBrief.isPending}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideBrief.mutate(true)} disabled={decideBrief.isPending}><Check size={14} />接受方案</button></div>}
+          <div className={styles.panelHeading}><div><Layers3 size={18} /><span><small>CREATIVE BRIEF</small><h2>{brief ? '内容方案候选' : '基于已确认需求生成方案'}</h2></span></div>{brief && <em data-accepted={brief.status === 'accepted'}>{brief.status === 'accepted' ? '已接受' : '尚未生效'}</em>}</div>
+          {brief ? <BriefView candidate={brief} /> : data.next_action.code === 'REVISE_REQUIREMENT_FOR_NEW_BRIEF' ? <div className={styles.empty}><CircleAlert size={24} /><strong>当前需求版本已经完成过一次内容策划</strong><span>系统不会重复调用模型。请回到创作中心调整并确认新的需求版本，再生成下一份内容方案。</span><Link className="primaryButton" to={`/projects/${projectId}`}>调整创作需求</Link></div> : <div className={styles.empty}><Sparkles size={24} /><strong>当前需求可以进入内容策划</strong><span>内容策划智能体将读取已确认需求并生成一份待审核方案，本次操作会调用已配置模型。</span><button className="primaryButton" disabled={generateBrief.isPending} onClick={() => generateBrief.mutate()}>{generateBrief.isPending ? '正在策划…' : '生成内容方案候选'}</button></div>}
+          {data.current_brief_candidate && <div className={styles.reviewBar}><p><strong>候选尚未生效</strong><span>接受后分镜导演智能体才能读取这份内容方案。</span></p><button className="secondaryButton" onClick={() => decideBrief.mutate(false)} disabled={decideBrief.isPending}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideBrief.mutate(true)} disabled={decideBrief.isPending}><Check size={14} />接受方案</button></div>}
         </div>
-        {shots.length ? <><ShotTable shots={shots} locked={Boolean(data.active_plan)} />{data.current_shot_candidate && editingShots && <ShotPlanRevisionEditor projectId={projectId} candidate={data.current_shot_candidate} entities={data.entity_versions} saving={reviseShots.isPending} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} />}{data.current_shot_candidate && <div className={styles.reviewBar}><p><strong>分镜候选 v{data.current_shot_candidate.revision_number} 尚未生效</strong><span>确认后创建不可变 plan_v{data.plan_history.length + 1}。</span></p><button className="secondaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起编辑' : '结构化修订'}</button><button className="secondaryButton" onClick={() => decideShots.mutate(false)} disabled={decideShots.isPending || editingShots}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideShots.mutate(true)} disabled={decideShots.isPending || editingShots}><Check size={14} />确认分镜合同</button></div>}</> : data.accepted_brief_candidate && <div className={styles.generateShots}><Clapperboard size={22} /><div><strong>创意方案已接受</strong><span>分镜导演将生成结构化分镜候选，不选择服务供应商或工作流。</span></div><button className="primaryButton" onClick={() => generateShots.mutate()} disabled={generateShots.isPending}>{generateShots.isPending ? '正在生成…' : '生成分镜候选'}</button></div>}
+        {shots.length ? <><ShotTable shots={shots} locked={Boolean(data.active_plan)} />{data.current_shot_candidate && editingShots && <ShotPlanRevisionEditor projectId={projectId} candidate={data.current_shot_candidate} entities={data.entity_versions} saving={reviseShots.isPending} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} />}{data.current_shot_candidate && <div className={styles.reviewBar}><p><strong>分镜候选 v{data.current_shot_candidate.revision_number} 尚未生效</strong><span>确认后创建不可变 plan_v{data.plan_history.length + 1}。</span></p><button className="secondaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起编辑' : '结构化修订'}</button><button className="secondaryButton" onClick={() => decideShots.mutate(false)} disabled={decideShots.isPending || editingShots}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideShots.mutate(true)} disabled={decideShots.isPending || editingShots}><Check size={14} />确认分镜合同</button></div>}</> : data.accepted_brief_candidate && <div className={styles.generateShots}><Clapperboard size={22} /><div><strong>内容方案已接受</strong><span>分镜导演将生成结构化分镜候选，不选择服务供应商或工作流。</span></div><button className="primaryButton" onClick={() => generateShots.mutate()} disabled={generateShots.isPending}>{generateShots.isPending ? '正在生成…' : '生成分镜候选'}</button></div>}
         {data.active_plan && <section className={styles.productionPrep}>
           <div className={styles.panelHeading}><div><Network size={18} /><span><small>制作准备</small><h2>制作设置与费用预估</h2></span></div><em data-accepted={Boolean(preparation.data?.snapshots.length)}>{preparation.data?.snapshots.length ? `制作方案 ${preparation.data.snapshots[0].snapshot_number}` : '尚未保存'}</em></div>
           {preparation.data?.published_configurations.length ? <>
@@ -165,7 +180,7 @@ export function PlanPage() {
         </section>}
       </section>
       <aside className={styles.aside}>
-        <section className={styles.next}><span>下一步</span><h3>{nextActionLabel}</h3><p>模型费用：否 · 制作费用：{nextAction.incurs_production_cost ? '是' : '否'}</p></section>
+        <section className={styles.next}><span>下一步</span><h3>{nextActionLabel}</h3><p>模型调用：{'incurs_model_cost' in nextAction && nextAction.incurs_model_cost ? '是' : '否'} · 制作费用：{nextAction.incurs_production_cost ? '是' : '否'}</p></section>
         <section className={styles.entities}><div className={styles.asideTitle}><div><Users size={17} /><h3>已确认实体版本</h3></div><b>{data.entity_versions.length}</b></div>{data.entity_versions.length ? data.entity_versions.map(entity => <article key={entity.id}><BadgeCheck size={16} /><div><strong>{entity.display_name}</strong><span>{entity.entity_type} · v{entity.version_number}</span><small>{entity.id}</small></div></article>) : <div className={styles.asideEmpty}>当前没有实体绑定；分镜会明确显示未绑定，不创建隐式人物或场景。</div>}</section>
         {data.shot_plan_history.length > 0 && <section className={styles.candidateHistory}><div className={styles.asideTitle}><div><GitBranch size={17} /><h3>分镜候选版本</h3></div><b>{data.shot_plan_history.length}</b></div>{data.shot_plan_history.map(candidate => <article key={candidate.id} data-current={candidate.id === data.current_shot_candidate?.id}><div><strong>候选 v{candidate.revision_number}</strong><span>{candidate.source === 'user_revision' ? '用户修订' : '分镜导演智能体生成'} · {candidate.status}</span></div><small>{candidate.id.slice(-10)}</small></article>)}</section>}
         <section className={styles.boundary}><CircleAlert size={17} /><div><strong>确认边界</strong><p>{data.active_plan ? '当前创作方案已确认。后续修改需要创建新的需求和方案版本。' : '当前操作只确认创作方案，不会创建制作任务。'}</p></div></section>

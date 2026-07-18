@@ -317,12 +317,30 @@ export interface CreationCenter {
   }
 }
 
+export interface CreativeBrief {
+  title: string
+  content_promise: string
+  audience_takeaway: string
+  hook: { kind: string; content: string }
+  narrative_beats: Array<{ beat_code: string; purpose: string; summary: string; target_duration_ms: number }>
+  script_segments: Array<{ segment_code: string; beat_code: string; kind: string; spoken_text: string | null; on_screen_text: string | null }>
+  tone: string
+  pacing: string
+  platform_adaptation: string | null
+  entity_version_ids: string[]
+  constraints_carried_forward: string[]
+  open_questions: string[]
+  duration_seconds: number
+  aspect_ratio: string
+  audio_mode: 'off' | 'voiceover'
+}
+
 export interface CreativeBriefCandidate {
   id: string
   requirement_version_id: string
   agent_run_id: string
   status: string
-  brief: Record<string, unknown>
+  brief: CreativeBrief
   field_sources: Record<string, { type?: string; reference_id?: string | null }>
   validation_errors: Array<Record<string, unknown>>
   created_at: string
@@ -371,7 +389,7 @@ export interface PlanVersion {
   requirement_version_id: string
   shot_plan_candidate_id: string
   status: string
-  creative_brief: Record<string, unknown>
+  creative_brief: CreativeBrief
   contract_schema_version: string
   is_active: boolean
   confirmed_at: string
@@ -697,7 +715,7 @@ export interface ProviderConfigDraft {
 export interface ModelConfigDraft {
   config_key: string
   display_name: string
-  agent_role: 'creative' | 'director' | 'qc' | 'editor'
+  agent_role: 'creative' | 'planner' | 'director' | 'qc' | 'editor'
   provider_key: string
   provider_model_id: string
   input_contract_version: string

@@ -428,6 +428,8 @@ template_version_id nullable
 - 可一次提供最多三个完整 Brief 备选，但每个备选分别形成候选并说明结构差异，不把多个方案拼成一个。
 - 内容策划不生成镜头 ID、画面提示词、工作流参数和素材就绪声明。
 
+当前实现已经按上述合同接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。每个活动需求版本只能尝试一次；失败会保存结构化错误、受控原始输出和 Provider 请求审计，不自动或重复调用。失败或拒绝后，方案页明确要求用户回到创作中心调整并确认新的需求版本，不继续展示一个必然冲突的生成按钮。模型输出经 Pydantic Schema 后还要通过确定性跨字段验证：节拍总时长必须精确匹配交付时长，节拍与脚本代码连续且引用存在，实体 ID 必须来自输入白名单，音频关闭和平台未指定约束必须原样保持。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。
+
 ### 9.4 分镜导演
 
 分镜导演输入合同 `director-input.v1` 只接受已确认 `RequirementVersion`、已确认 Creative Brief、精确实体版本、交付约束和已确认决策。输出 `shot-plan.v2`，每个镜头至少包含：
@@ -1035,8 +1037,8 @@ RequirementDiff
 
 ### Creation Sprint 4：创作模型接入
 
-- 创作制片人 `creative-dialogue-input/output.v2`
-- 内容策划 `content-planner-input.v1 / creative-brief-candidate.v1`
+- 创作制片人 `creative-dialogue-input/output.v2`（已完成）
+- 内容策划 `content-planner-input.v1 / creative-brief-candidate.v1`（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成

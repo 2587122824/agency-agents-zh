@@ -32,7 +32,7 @@
 |---|---|---|
 | 对话、需求版本、方案版本 | 已完成 | 用户/助手 `Message`、`RequirementVersion`、`PlanVersion` 与创作/规划 API；发送后仅调用一次精确配置的创作模型，回复和候选独立持久化，失败不重试或换模型；对话和需求面板桌面等高并内部滚动，输入区固定在底部 |
 | 创作制片人 V2 合同 | 已完成 | `creative-dialogue-input/output/prompt.v2`、完整活动会话用户/助手上下文、`CreativeTurnProposal`、2–3 个可点击建议、精确选择记录、待确认候选、后端字段风险目录、明确上下文上限和显式新会话均已实现，并通过真实 DeepSeek 三选项与音频关闭约束验收；失败不修复、不重试、不换模型 |
-| 内容策划智能体 | 部分完成 | `CreativeBriefCandidate`、运行审计和确定性 Mock 已有；脚本节拍、平台适配、音频边界和真实模型尚未按 `content-planner-input.v1` 实现 |
+| 内容策划智能体 | 已完成 | `content-planner-input.v1 / creative-brief-candidate.v1 / content-planner-prompt.v1`、独立 `planner` 模型分工、真实模型网关、不可变输入清单、内容承诺/开场/节拍/脚本合同、精确时长/实体/音频/平台验证、失败审计和方案页人工接受门禁均已实现；不读取自由聊天，不修复输出、不重试、不换模型，并通过真实 DeepSeek 音频关闭验收 |
 | 分镜导演智能体 | 部分完成 | `shot-plan.v2`、结构化修订和确定性 Mock 已有；真实模型与已确认的复合动作、连续性验收合同尚未实现 |
 | 质量审核智能体 | 未开始 | 当前只有确定性文件/媒体合同检查和人工审核；`qc-report-candidate.v1` 内容分析、证据与置信度合同尚未实现 |
 | 剪辑助理智能体 | 未开始 | Timeline 候选、验证、修订和人工确认已有；尚无执行 `editor-assistant-input.v1` 的模型服务 |

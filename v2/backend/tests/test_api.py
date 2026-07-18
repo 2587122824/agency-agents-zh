@@ -18,13 +18,14 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import AgentRun, Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
 from v2.backend.app.providers import ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
 from v2.backend.app.providers.registry import ProviderAdapterRegistry
-from v2.backend.app.creation.agent_gateway import DeterministicCreativeAgentGateway, get_creative_agent_gateway
+from v2.backend.app.creation.agent_gateway import AgentGatewayError, DeterministicCreativeAgentGateway, get_creative_agent_gateway
+from v2.backend.app.planning.agent_gateway import ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
 
 
 @pytest.fixture()
@@ -34,9 +35,11 @@ def client():
         import shutil
         shutil.rmtree(TEST_RUNTIME)
     app.dependency_overrides[get_creative_agent_gateway] = lambda: DeterministicCreativeAgentGateway()
+    app.dependency_overrides[get_content_planner_gateway] = lambda: DeterministicContentPlannerGateway()
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_creative_agent_gateway, None)
+    app.dependency_overrides.pop(get_content_planner_gateway, None)
     engine.dispose()
     TEST_DATABASE.unlink(missing_ok=True)
     if TEST_RUNTIME.exists():
@@ -630,6 +633,7 @@ def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> 
     requirement_id = creation["active_requirement"]["id"]
     planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert planning["next_action"]["code"] == "GENERATE_CREATIVE_BRIEF"
+    assert planning["next_action"]["incurs_model_cost"] is True
 
     brief_command = {
         "command_id": "brief-generate-command-001",
@@ -647,8 +651,11 @@ def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> 
     brief = generated_brief.json()
     assert replayed_brief.json()["id"] == brief["id"]
     assert brief["status"] == "awaiting_review"
-    assert brief["brief"]["visual_style"] is None
-    assert brief["brief"]["assumptions"] == []
+    assert brief["brief"]["title"].endswith("内容方案")
+    assert [item["beat_code"] for item in brief["brief"]["narrative_beats"]] == ["BEAT_01", "BEAT_02", "BEAT_03"]
+    assert sum(item["target_duration_ms"] for item in brief["brief"]["narrative_beats"]) == 30_000
+    assert brief["brief"]["audio_mode"] == "off"
+    assert all(item["spoken_text"] is None for item in brief["brief"]["script_segments"])
     before_accept = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert before_accept["active_plan"] is None
     assert before_accept["next_action"]["code"] == "REVIEW_CREATIVE_BRIEF"
@@ -708,6 +715,67 @@ def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> 
     final = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert final["next_action"]["code"] == "PLAN_CONFIRMED"
     assert final["active_plan"]["id"] == plan["id"]
+
+
+def test_content_planner_failure_is_audited_and_same_requirement_is_not_retried(client: TestClient) -> None:
+    class FailingPlannerGateway(DeterministicContentPlannerGateway):
+        calls = 0
+
+        def invoke(self, selection, manifest_payload):
+            self.calls += 1
+            raise AgentGatewayError(
+                "CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID",
+                "invalid planner output",
+                raw_output={"unexpected": True},
+            )
+
+    gateway = FailingPlannerGateway()
+    app.dependency_overrides[get_content_planner_gateway] = lambda: gateway
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    first = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "planner-failure-command-001", "expected_requirement_version_id": requirement_id},
+    )
+    assert first.status_code == 502
+    assert first.headers["x-error-code"] == "CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID"
+    second = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "planner-failure-command-002", "expected_requirement_version_id": requirement_id},
+    )
+    assert second.status_code == 409
+    assert second.headers["x-error-code"] == "CONTENT_PLANNER_ALREADY_ATTEMPTED"
+    assert gateway.calls == 1
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["next_action"]["code"] == "REVISE_REQUIREMENT_FOR_NEW_BRIEF"
+    assert planning["next_action"]["incurs_model_cost"] is False
+    with SessionLocal() as session:
+        run = session.scalar(select(AgentRun).where(AgentRun.project_id == project["id"], AgentRun.agent_role == "planner"))
+        assert run is not None
+        assert run.status == "failed"
+        assert run.raw_output == {"unexpected": True}
+
+
+def test_content_planner_open_questions_block_candidate_acceptance(client: TestClient) -> None:
+    class QuestioningPlannerGateway(DeterministicContentPlannerGateway):
+        def invoke(self, selection, manifest_payload):
+            result = super().invoke(selection, manifest_payload)
+            output = result.output.model_copy(update={"open_questions": ["需要先确认训练场地"]})
+            return ContentPlannerResult(output, output.model_dump(mode="json"), result.provider_request_id, result.token_usage)
+
+    app.dependency_overrides[get_content_planner_gateway] = lambda: QuestioningPlannerGateway()
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "planner-question-command-001", "expected_requirement_version_id": requirement_id},
+    ).json()
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "planner-question-accept-001", "expected_requirement_version_id": requirement_id},
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "BRIEF_OPEN_QUESTIONS_UNRESOLVED"
 
 
 def test_shot_plan_revision_creates_a_new_reviewable_candidate(client: TestClient) -> None:

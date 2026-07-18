@@ -27,6 +27,7 @@ const fieldLabels: Record<string, string> = {
 
 const agentRoleLabels: Record<string, string> = {
   creative: '创作制片人',
+  planner: '内容策划',
   director: '分镜导演',
   qc: '质量审核',
   editor: '剪辑助理',

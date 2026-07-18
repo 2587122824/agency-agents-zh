@@ -327,7 +327,7 @@ created_at
 ```text
 id
 config_key / version_number / display_name
-agent_role: creative | director | qc | editor
+agent_role: creative | planner | director | qc | editor
 provider_config_version_id / provider_model_id
 input_contract_version / output_schema_version / prompt_contract_version
 context_window nullable / max_output_tokens nullable

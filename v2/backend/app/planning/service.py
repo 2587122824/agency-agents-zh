@@ -3,9 +3,11 @@ from __future__ import annotations
 import hashlib
 import json
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..creation.completeness import evaluate_requirement
+from ..creation.agent_gateway import AgentGatewayError
 from ..creation.service import (
     CreationConflictError,
     CreationNotFoundError,
@@ -20,6 +22,8 @@ from ..db.models import (
     AgentInputManifest,
     AgentRun,
     CreativeBriefCandidate,
+    Entity,
+    EntityVersion,
     PlanVersion,
     Project,
     RequirementVersion,
@@ -29,6 +33,7 @@ from ..db.models import (
 )
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
+from .agent_gateway import ContentPlannerGateway
 from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, ReviseShotPlan
 
 
@@ -87,6 +92,45 @@ def _create_manifest(
     return manifest
 
 
+def _content_planner_manifest_payload(
+    session: Session,
+    project: Project,
+    requirement: RequirementVersion,
+) -> dict:
+    repository = _planning(session)
+    decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
+    entity_rows = repository.active_entity_versions(project.id)
+    fields = dict(requirement.fields)
+    return {
+        "contract_version": "content-planner-input.v1",
+        "project_id": project.id,
+        "requirement_version": {"id": requirement.id, "fields": fields},
+        "confirmed_decisions": [
+            {"id": item.id, "key": item.key, "value": item.value}
+            for item in decisions
+        ],
+        "confirmed_entity_versions": [
+            {
+                "id": version.id,
+                "entity_id": entity.id,
+                "entity_type": entity.entity_type,
+                "display_name": entity.display_name,
+                "version_number": version.version_number,
+                "attributes": version.attributes,
+            }
+            for version, entity in entity_rows
+            if version.status == "confirmed" and entity.status == "active"
+        ],
+        "delivery_constraints": {
+            "duration_ms": int(fields["duration_seconds"]) * 1000,
+            "aspect_ratio": fields["aspect_ratio"],
+        },
+        "audio_policy": fields["audio_mode"],
+        "platform": fields.get("platform"),
+        "template_version_id": fields.get("template_version_id"),
+    }
+
+
 def _start_run(session: Session, project: Project, manifest: AgentInputManifest, role: str, schema: str) -> AgentRun:
     repository = _planning(session)
     run = AgentRun(
@@ -117,7 +161,12 @@ def _finish_run(session: Session, project: Project, run: AgentRun, candidate_id:
     })
 
 
-def generate_brief(session: Session, project: Project, payload: GenerateBrief) -> CreativeBriefCandidate:
+def generate_brief(
+    session: Session,
+    project: Project,
+    payload: GenerateBrief,
+    gateway: ContentPlannerGateway,
+) -> CreativeBriefCandidate:
     repository = _planning(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
@@ -138,36 +187,89 @@ def generate_brief(session: Session, project: Project, payload: GenerateBrief) -
     existing = repository.active_brief_for_requirement(project.id, requirement.id)
     if existing:
         raise CreationConflictError("BRIEF_ALREADY_EXISTS", "当前需求版本已有待审或已接受的创意方案。")
-    manifest = _create_manifest(session, project, requirement, "creative")
-    run = _start_run(session, project, manifest, "creative", "creative-brief.v1")
-    bindings = manifest.payload["confirmed_entity_versions"]
-    brief = {
-        "core_intent": requirement.fields["core_topic"],
+    previous_attempt = session.scalar(
+        select(AgentRun)
+        .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+        .where(
+            AgentRun.project_id == project.id,
+            AgentRun.agent_role == "planner",
+            AgentInputManifest.base_requirement_version_id == requirement.id,
+        )
+        .limit(1)
+    )
+    if previous_attempt:
+        raise CreationConflictError(
+            "CONTENT_PLANNER_ALREADY_ATTEMPTED",
+            "当前需求版本已经运行过内容策划；系统不会自动或重复调用模型。",
+        )
+    selection = gateway.select(session)
+    manifest_payload = _content_planner_manifest_payload(session, project, requirement)
+    manifest_payload["system_config_version"] = selection.production_config_version_id
+    serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    manifest = AgentInputManifest(
+        project_id=project.id,
+        base_requirement_version_id=requirement.id,
+        decision_ids=[item["id"] for item in manifest_payload["confirmed_decisions"]],
+        attachment_binding_ids=repository.confirmed_binding_ids(project.id),
+        system_config_version=selection.production_config_version_id,
+        input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        payload=manifest_payload,
+    )
+    repository.add(manifest)
+    repository.flush()
+    run = AgentRun(
+        project_id=project.id,
+        agent_role="planner",
+        status="running",
+        input_manifest_id=manifest.id,
+        model_provider=selection.model_provider,
+        model_name=selection.model_name,
+        production_config_version_id=selection.production_config_version_id,
+        model_config_version_id=selection.model_config_version_id,
+        provider_config_version_id=selection.provider_config_version_id,
+        prompt_contract_version=selection.prompt_contract_version,
+        output_schema_version=selection.output_schema_version,
+        started_at=utc_now(),
+    )
+    repository.add(run)
+    repository.flush()
+    _event(session, project.id, "agent.run_created.v1", "内容策划智能体已开始生成候选方案", {
+        "agent_run_id": run.id,
+        "model_config_version_id": selection.model_config_version_id,
+        "provider_config_version_id": selection.provider_config_version_id,
+    })
+    session.commit()
+    try:
+        result = gateway.invoke(selection, manifest_payload)
+    except AgentGatewayError as exc:
+        failed_run = session.get(AgentRun, run.id)
+        if failed_run is not None:
+            failed_run.status = "failed"
+            failed_run.error_code = exc.code
+            failed_run.error_detail = (
+                f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'))}"
+                if exc.diagnostics else str(exc)
+            )
+            failed_run.raw_output = exc.raw_output
+            failed_run.finished_at = utc_now()
+            _event(session, project.id, "agent.run_failed.v1", "内容策划智能体本轮运行失败", {
+                "agent_run_id": failed_run.id,
+                "error_code": exc.code,
+            })
+            session.commit()
+        raise
+    brief = result.output.model_dump(mode="json")
+    brief.update({
         "duration_seconds": requirement.fields["duration_seconds"],
         "aspect_ratio": requirement.fields["aspect_ratio"],
         "audio_mode": requirement.fields["audio_mode"],
-        "narrative_structure": ["建立主题", "展开主题", "收束主题"],
-        "visual_style": None,
-        "character_refs": bindings["identity_reference"],
-        "outfit_refs": bindings["outfit_reference"],
-        "scene_refs": bindings["scene_reference"],
-        "product_refs": bindings["product_reference"],
-        "voice_refs": bindings["voice_sample"],
-        "assumptions": [],
-    }
+    })
     sources = {
-        "core_intent": {"type": "requirement", "reference_id": requirement.id},
-        "duration_seconds": {"type": "requirement", "reference_id": requirement.id},
-        "aspect_ratio": {"type": "requirement", "reference_id": requirement.id},
-        "audio_mode": {"type": "requirement", "reference_id": requirement.id},
-        "narrative_structure": {"type": "agent_proposal", "reference_id": run.id},
-        "visual_style": {"type": "unspecified", "reference_id": None},
-        "character_refs": {"type": "confirmed_binding", "reference_id": None},
-        "outfit_refs": {"type": "confirmed_binding", "reference_id": None},
-        "scene_refs": {"type": "confirmed_binding", "reference_id": None},
-        "product_refs": {"type": "confirmed_binding", "reference_id": None},
-        "voice_refs": {"type": "confirmed_binding", "reference_id": None},
+        key: {"type": "agent_proposal", "reference_id": run.id}
+        for key in type(result.output).model_fields
     }
+    for key in ("duration_seconds", "aspect_ratio", "audio_mode"):
+        sources[key] = {"type": "requirement", "reference_id": requirement.id}
     candidate = CreativeBriefCandidate(
         project_id=project.id,
         requirement_version_id=requirement.id,
@@ -177,9 +279,18 @@ def generate_brief(session: Session, project: Project, payload: GenerateBrief) -
     )
     repository.add(candidate)
     repository.flush()
-    _finish_run(session, project, run, candidate.id, {"creative_brief_candidate": brief})
+    run.status = "succeeded"
+    run.parsed_candidate_id = candidate.id
+    run.raw_output = result.raw_output
+    run.provider_request_id = result.provider_request_id
+    run.token_usage = result.token_usage
+    run.finished_at = utc_now()
     _save_receipt(session, project.id, payload.command_id, "brief.generate", "creative_brief_candidate", candidate.id)
-    _event(session, project.id, "plan.brief_candidate_created.v1", "创意方案候选等待用户审核", {"candidate_id": candidate.id})
+    _event(session, project.id, "agent.run_succeeded.v1", "内容策划智能体已返回严格候选", {
+        "agent_run_id": run.id,
+        "candidate_id": candidate.id,
+    })
+    _event(session, project.id, "plan.brief_candidate_created.v1", "内容方案候选等待用户审核", {"candidate_id": candidate.id})
     transition_project(
         session,
         project,
@@ -211,6 +322,11 @@ def decide_brief(
         raise CreationConflictError("BRIEF_BASE_VERSION_STALE", "创意方案基于旧需求版本，不能处理。")
     if candidate.status != "awaiting_review":
         raise CreationConflictError("BRIEF_NOT_REVIEWABLE", f"创意方案状态为 {candidate.status}。")
+    if accept and candidate.brief.get("open_questions"):
+        raise CreationConflictError(
+            "BRIEF_OPEN_QUESTIONS_UNRESOLVED",
+            "内容方案仍有未确认问题，请先补充需求并重新生成候选。",
+        )
     candidate.status = "accepted" if accept else "rejected"
     candidate.decided_at = utc_now()
     if not accept:
@@ -233,26 +349,28 @@ def decide_brief(
     return candidate
 
 
-def _build_shots(requirement: RequirementVersion, brief: CreativeBriefCandidate) -> list[dict]:
-    total_ms = int(requirement.fields["duration_seconds"]) * 1000
-    first = total_ms * 30 // 100
-    second = total_ms * 40 // 100
-    durations = [first, second, total_ms - first - second]
-    characters = list(brief.brief.get("character_refs") or [])
-    outfits = list(brief.brief.get("outfit_refs") or [])
-    scenes = list(brief.brief.get("scene_refs") or [])
-    products = list(brief.brief.get("product_refs") or [])
-    core = str(brief.brief["core_intent"])
-    phases = [
-        ("建立镜头", "建立主题", "moderate"),
-        ("主体镜头", "展开主题", "significant"),
-        ("收束镜头", "收束主题", "moderate"),
-    ]
+def _build_shots(session: Session, project: Project, requirement: RequirementVersion, brief: CreativeBriefCandidate) -> list[dict]:
+    beats = brief.brief.get("narrative_beats")
+    if not isinstance(beats, list) or not beats:
+        raise CreationConflictError("BRIEF_SCHEMA_UNSUPPORTED", "当前内容方案不是 creative-brief-candidate.v1，不能交给分镜导演。")
+    categorized: dict[str, list[str]] = {"character": [], "outfit": [], "scene": [], "product": []}
+    for version_id in brief.brief.get("entity_version_ids") or []:
+        version = session.get(EntityVersion, version_id)
+        entity = session.get(Entity, version.entity_id) if version else None
+        if not version or not entity or version.project_id != project.id or version.status != "confirmed":
+            raise CreationConflictError("BRIEF_ENTITY_VERSION_INVALID", f"内容方案引用了不可用的实体版本：{version_id}。")
+        if entity.entity_type in categorized:
+            categorized[entity.entity_type].append(version_id)
+    characters = categorized["character"]
+    outfits = categorized["outfit"]
+    scenes = categorized["scene"]
+    products = categorized["product"]
+    motion_levels = ["moderate", "significant", "moderate"]
     return [
         {
             "shot_code": f"SH-{index:03d}",
             "sequence_number": index,
-            "duration_ms": durations[index - 1],
+            "duration_ms": int(beat["target_duration_ms"]),
             "shot_type": "character_action" if characters else "concept",
             "scene_entity_version_id": scenes[0] if scenes else None,
             "character_entity_version_ids": characters,
@@ -261,13 +379,13 @@ def _build_shots(requirement: RequirementVersion, brief: CreativeBriefCandidate)
             "primary_reference_entity_version_id": None,
             "face_visibility": "optional" if characters else "not_visible",
             "text_policy": "forbidden",
-            "motion_requirement": phase[2],
-            "composition": phase[0],
-            "action": f"{core}：{phase[1]}",
-            "visual_prompt": f"{core}。{phase[1]}，{phase[0]}。",
+            "motion_requirement": motion_levels[min(index - 1, len(motion_levels) - 1)],
+            "composition": str(beat["purpose"]),
+            "action": str(beat["summary"]),
+            "visual_prompt": f"{brief.brief['content_promise']}。{beat['summary']}。",
             "negative_prompt": None,
         }
-        for index, phase in enumerate(phases, start=1)
+        for index, beat in enumerate(beats, start=1)
     ]
 
 
@@ -378,7 +496,7 @@ def generate_shot_plan(session: Session, project: Project, payload: GenerateShot
         "accepted_creative_brief": {"id": brief.id, "brief": brief.brief},
     })
     run = _start_run(session, project, manifest, "director", "shot-plan.v2")
-    shots = _build_shots(requirement, brief)
+    shots = _build_shots(session, project, requirement, brief)
     errors = validate_shots(session, project.id, requirement, shots)
     candidate = ShotPlanCandidate(
         project_id=project.id,
@@ -654,6 +772,17 @@ def planning_center_view(session: Session, project: Project) -> dict:
     accepted_brief = next((item for item in briefs if item.requirement_version_id == requirement.id and item.status == "accepted"), None)
     current_shot = next((item for item in shot_candidates if item.requirement_version_id == requirement.id and item.status == "awaiting_review"), None)
     active_plan = next((item for item in plans if item.requirement_version_id == requirement.id and item.is_active), None)
+    planner_attempt = session.scalar(
+        select(AgentRun)
+        .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+        .where(
+            AgentRun.project_id == project.id,
+            AgentRun.agent_role == "planner",
+            AgentInputManifest.base_requirement_version_id == requirement.id,
+        )
+        .order_by(AgentRun.started_at.desc())
+        .limit(1)
+    )
     if active_plan:
         next_action = PlanningNextAction(code="PLAN_CONFIRMED", label="方案已确认，等待创建生产快照", target_ids=[active_plan.id])
     elif current_shot:
@@ -661,9 +790,19 @@ def planning_center_view(session: Session, project: Project) -> dict:
     elif accepted_brief:
         next_action = PlanningNextAction(code="GENERATE_SHOT_PLAN", label="生成分镜候选", target_ids=[accepted_brief.id])
     elif current_brief:
-        next_action = PlanningNextAction(code="REVIEW_CREATIVE_BRIEF", label="审核创意方案", target_ids=[current_brief.id])
+        next_action = PlanningNextAction(code="REVIEW_CREATIVE_BRIEF", label="审核内容方案", target_ids=[current_brief.id])
+    elif planner_attempt:
+        next_action = PlanningNextAction(
+            code="REVISE_REQUIREMENT_FOR_NEW_BRIEF",
+            label="调整并确认需求后重新策划",
+            target_ids=[planner_attempt.id],
+        )
     else:
-        next_action = PlanningNextAction(code="GENERATE_CREATIVE_BRIEF", label="生成创意方案候选")
+        next_action = PlanningNextAction(
+            code="GENERATE_CREATIVE_BRIEF",
+            label="生成内容方案候选",
+            incurs_model_cost=True,
+        )
     entity_rows = repository.active_entity_versions(project.id)
     return {
         "project_id": project.id,
