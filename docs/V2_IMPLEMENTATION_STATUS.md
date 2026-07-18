@@ -31,7 +31,7 @@
 | 能力 | 状态 | 权威证据与缺口 |
 |---|---|---|
 | 对话、需求版本、方案版本 | 已完成 | 用户/助手 `Message`、`RequirementVersion`、`PlanVersion` 与创作/规划 API；发送后仅调用一次精确配置的创作模型，回复和候选独立持久化，失败不重试或换模型；对话和需求面板桌面等高并内部滚动，输入区固定在底部 |
-| 创作制片人 V2 合同 | 已完成 | `creative-dialogue-input/output.v2` 与 `creative-dialogue-prompt.v3`、完整活动会话用户/助手上下文、`CreativeTurnProposal`、2–3 个可点击建议、澄清问题展示、精确选择记录、待确认候选、附件 metadata-only 边界、后端字段风险目录、明确上下文上限和显式新会话均已实现；失败不修复、不自动重试、不换模型，用户可确认费用后对精确失败轮次显式重跑 |
+| 创作制片人 V3 合同 | 已完成 | `creative-dialogue-input/output.v3` 与 `creative-dialogue-prompt.v5`、完整活动会话、紧贴助手消息的冻结 `previous_proposals`、精确 `reply_to` 作用域、点击与自然语言 ID 选择、后端冻结值应用、2–3 个建议、澄清展示、待确认候选、附件 metadata-only、职责边界和上下文上限均已实现；不存在或伪造 ID 明确失败，不解析序号关键词、不修复、不自动重试、不换模型 |
 | 媒体附件理解 | 未开始，已暂缓 | 已确认未来按图片、音频、视频顺序设计独立多模态服务与 `MediaAnalysisCandidate`；用户确认后才形成媒体事实。当前创作模型仍为 `metadata_only`，不读取媒体内容，不隐式调用多模态模型 |
 | 内容策划智能体 | 已完成 | `content-planner-input.v1 / creative-brief-candidate.v1 / content-planner-prompt.v1`、独立 `planner` 模型分工、真实模型网关、不可变输入清单、内容承诺/开场/节拍/脚本合同、精确时长/实体/音频/平台验证、失败审计和方案页人工接受门禁均已实现；不读取自由聊天，不修复输出、不重试、不换模型，并通过真实 DeepSeek 音频关闭验收 |
 | 分镜导演智能体 | 部分完成 | `shot-plan.v2`、结构化修订和确定性 Mock 已有；真实模型与已确认的复合动作、连续性验收合同尚未实现 |

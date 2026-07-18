@@ -73,11 +73,21 @@ class CreativeSuggestionSet(BaseModel):
     options: list[CreativeSuggestionOption] = Field(min_length=2, max_length=3)
 
 
+class CreativeProposalSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    proposal_id: str = Field(min_length=1, max_length=48)
+    suggestion_set_id: str = Field(min_length=1, max_length=48)
+    option_id: str = Field(min_length=1, max_length=48)
+    source_message_ids: list[str] = Field(min_length=1, max_length=8)
+
+
 class CreativeAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assistant_reply: str = Field(min_length=1, max_length=8000)
     suggestion_sets: list[CreativeSuggestionSet] = Field(default_factory=list, max_length=3)
+    proposal_selections: list[CreativeProposalSelection] = Field(default_factory=list, max_length=3)
     explicit_updates: list[ProposedFieldUpdate] = Field(default_factory=list, max_length=16)
     clarifying_question: str | None = Field(default=None, max_length=300)
 
@@ -93,6 +103,7 @@ class CreativeAgentSelection:
     base_url: str
     credential_ref: str | None
     timeout_seconds: int
+    input_contract_version: str
     prompt_contract_version: str
     output_schema_version: str
     max_output_tokens: int | None
@@ -153,12 +164,14 @@ class HttpxAgentChatTransport:
         return data
 
 
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v3"
+CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v3"
+CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v3"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v5"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
 必须只返回一个 JSON 对象，严格符合：
-{"assistant_reply":"中文回复","suggestion_sets":[{"category":"类别","title":"问题","options":[{"label":"选项名","summary":"差异说明","proposed_updates":[{"field_key":"允许字段","value":"建议值","source_message_ids":["用户消息ID"]}]}]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
+{"assistant_reply":"中文回复","suggestion_sets":[{"category":"类别","title":"问题","options":[{"label":"选项名","summary":"差异说明","proposed_updates":[{"field_key":"允许字段","value":"建议值","source_message_ids":["用户消息ID"]}]}]}],"proposal_selections":[{"proposal_id":"已有提案ID","suggestion_set_id":"已有建议组ID","option_id":"已有选项ID","source_message_ids":["用户选择消息ID"]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
 允许字段及用途：
 - title 项目名称；core_topic 核心主题；content_goal 内容目标；platform 发布平台；target_audience 目标受众。
 - duration_seconds 目标秒数；aspect_ratio 画幅；audio_mode 仅 off 或 voiceover。
@@ -167,18 +180,20 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 合法建议示例：
 {"category":"content_direction","title":"你希望采用哪种内容结构？","options":[{"label":"训练日记","summary":"按准备、训练、完成推进","proposed_updates":[{"field_key":"content_structure","value":"training_diary","source_message_ids":["最新用户消息ID"]}]},{"label":"挑战记录","summary":"突出目标和结果对比","proposed_updates":[{"field_key":"content_structure","value":"challenge_record","source_message_ids":["最新用户消息ID"]}]}]}
 规则：
-1. 读取 conversation 中按顺序提供的用户和助手消息，理解“第一个”“刚才那个”等上下文指代；助手消息不是用户事实。
+1. 读取 conversation 中按顺序提供的用户和助手消息；previous_proposals 精确给出助手曾展示的结构化选项，助手消息和未选择建议都不是用户事实。
 2. 只有用户明确表达的值才能进入 explicit_updates，且 source_message_ids 只能引用 role=user 的消息。
 3. 用户要求建议时直接给 2 到 3 个互斥且有明显差异的选项，推荐项放第一；建议不能进入 explicit_updates。
 4. suggestion_sets 每组只能有 2 到 3 个选项；后端会生成选项 ID，你不得生成系统主键。
 4.1 每个可点击选项的 proposed_updates 必须至少包含一项，并使用上面的允许字段；不能返回空数组。
+4.2 当用户用自然语言选择 previous_proposals 中的选项时，只能在 proposal_selections 返回其中真实存在的 proposal_id、suggestion_set_id 和 option_id；不得改写冻结选项值，也不得把选择复制进 explicit_updates。无法唯一确定时提出 clarifying_question，不猜测。
+4.3 用户消息的 reply_to 精确限定它所回复的助手消息；该助手消息附带的 structured_proposals 是首要选择范围。范围内只有一个建议组且用户表达可唯一对应某个选项时，必须直接返回精确 ID，不得再次询问是哪一组。
 5. 已能直接回答或给选项时不得用问题代替答案；每轮最多一个 clarifying_question。
 6. 不得编造项目、附件、费用或生产状态，不得选择供应商、模型、工作流或预算，不得承诺已生成素材。
 7. 不得输出风险等级、Markdown 代码块、解释文字或 JSON 之外的内容。
 8. 当最新用户消息的语义是在请求比较、推荐或多个可选创作方向时，必须返回 suggestion_sets；不要依赖固定关键词匹配，也不能用 clarifying_question 代替可直接给出的选项。
-9. 用户询问“内容方向”时应围绕叙事、结构、钩子或表达重点提供选择；除非用户提到人物出镜，否则不要把是否出镜当作内容方向。
+9. 用户询问“内容方向”时应围绕叙事、结构、钩子、表达重点和观看感受提供选择；不要设计具体镜头、慢动作、分屏、剪辑、计时器、模型、工作流或生产参数，这些属于后续智能体。
 10. 除 duration_seconds、aspect_ratio、audio_mode 等合同枚举外，建议值必须使用普通用户可读的简洁中文描述，不返回 snake_case、内部代码或英文机器键。
-11. 必须遵守 active_requirement 和 confirmed_decisions；audio_mode=off 时，自然回复、选项说明和字段更新都不得建议音乐、旁白、对白、TTS 或对口型，也不得自行用字幕替代音频。
+11. 必须遵守 active_requirement 和 confirmed_decisions；audio_mode=off 时，自然回复、选项说明和字段更新都不得建议音乐、旁白、对白、TTS 或对口型。画面文字属于独立创作选择，用户未明确要求时不得自行加入字幕、标题或文字动画。
 12. confirmed_attachment_bindings 中 content_access=metadata_only 的附件只提供文件事实，不代表你看过画面、听过声音或理解过媒体内容；需要内容信息时应明确请用户描述，不得编造。
 """
 
@@ -216,10 +231,20 @@ class ConfiguredCreativeAgentGateway:
         if len(latest_by_key) != 1:
             raise AgentGatewayError("CREATIVE_MODEL_SELECTION_AMBIGUOUS", "当前存在多个创作模型系列，必须先在系统配置中保留一个明确选择。")
         model, provider, config = next(iter(latest_by_key.values()))
-        if model.prompt_contract_version != CREATIVE_PROMPT_CONTRACT_VERSION:
+        configured_contracts = (
+            model.input_contract_version,
+            model.output_schema_version,
+            model.prompt_contract_version,
+        )
+        expected_contracts = (
+            CREATIVE_INPUT_CONTRACT_VERSION,
+            CREATIVE_OUTPUT_SCHEMA_VERSION,
+            CREATIVE_PROMPT_CONTRACT_VERSION,
+        )
+        if configured_contracts != expected_contracts:
             raise AgentGatewayError(
-                "CREATIVE_PROMPT_CONTRACT_MISMATCH",
-                "已发布创作模型配置的 Prompt 合同版本与当前运行代码不一致，请先发布匹配的系统配置版本。",
+                "CREATIVE_MODEL_CONTRACT_MISMATCH",
+                "已发布创作模型配置的输入、输出或 Prompt 合同版本与当前运行代码不一致，请先发布匹配的系统配置版本。",
             )
         if provider.adapter_kind != "openai_compatible":
             raise AgentGatewayError("CREATIVE_MODEL_ADAPTER_UNSUPPORTED", "当前创作模型没有绑定 OpenAI-compatible 服务供应商。")
@@ -235,6 +260,7 @@ class ConfiguredCreativeAgentGateway:
             base_url=provider.base_url,
             credential_ref=provider.credential_ref,
             timeout_seconds=provider.request_timeout_seconds,
+            input_contract_version=model.input_contract_version,
             prompt_contract_version=model.prompt_contract_version,
             output_schema_version=model.output_schema_version,
             max_output_tokens=model.max_output_tokens,
@@ -254,6 +280,10 @@ class ConfiguredCreativeAgentGateway:
         context_payload = {
             key: value for key, value in manifest_payload.items() if key != "conversation"
         }
+        previous_proposals = manifest_payload["conversation"].get("previous_proposals", [])
+        proposals_by_assistant_message: dict[str, list[dict[str, Any]]] = {}
+        for proposal in previous_proposals:
+            proposals_by_assistant_message.setdefault(proposal["assistant_message_id"], []).append(proposal)
         chat_messages: list[dict[str, str]] = [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {
@@ -263,9 +293,17 @@ class ConfiguredCreativeAgentGateway:
             },
         ]
         for message in manifest_payload["conversation"]["messages"]:
+            content = f"[message_id={message['id']}]\n{message['content']}"
+            attached_proposals = proposals_by_assistant_message.get(message["id"], [])
+            if message["role"] == "assistant" and attached_proposals:
+                content += "\n[structured_proposals=" + json.dumps(
+                    attached_proposals,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ) + "]"
             chat_messages.append({
                 "role": message["role"],
-                "content": f"[message_id={message['id']}]\n{message['content']}",
+                "content": content,
             })
         payload: dict[str, Any] = {
             "model": selection.provider_model_id,
@@ -316,8 +354,9 @@ class DeterministicCreativeAgentGateway:
             base_url="https://example.invalid/v1",
             credential_ref=None,
             timeout_seconds=1,
+            input_contract_version=CREATIVE_INPUT_CONTRACT_VERSION,
             prompt_contract_version=CREATIVE_PROMPT_CONTRACT_VERSION,
-            output_schema_version="creative-turn.v2",
+            output_schema_version=CREATIVE_OUTPUT_SCHEMA_VERSION,
             max_output_tokens=None,
             sampling={},
         )

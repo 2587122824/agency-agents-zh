@@ -89,7 +89,10 @@ export function ProjectPage() {
     mutationFn: () => api.retryCreativeTurn(projectId, center.data!.latest_agent_run!.id, center.data!.active_requirement.id),
     onSettled: refresh,
   })
-  const addMessage = useMutation({ mutationFn: (content: string) => api.addMessage(projectId, content), onSuccess: async () => { setMessage(''); await refresh(); generate.mutate() } })
+  const addMessage = useMutation({
+    mutationFn: (content: string) => api.addMessage(projectId, content, center.data?.active_creative_proposal?.assistant_message_id ?? null),
+    onSuccess: async () => { setMessage(''); await refresh(); generate.mutate() },
+  })
   const startConversation = useMutation({ mutationFn: () => api.startConversationSession(projectId), onSuccess: async () => { setMessage(''); setCustomSuggestion(''); setCustomSuggestionSetId(null); await refresh() } })
   const selectSuggestion = useMutation({
     mutationFn: ({ proposalId, suggestionSetId, optionId }: { proposalId: string; suggestionSetId: string; optionId: string }) => api.selectCreativeSuggestion(

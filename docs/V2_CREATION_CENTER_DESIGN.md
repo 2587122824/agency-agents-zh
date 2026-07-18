@@ -363,15 +363,17 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.2 创作制片人
 
-创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。已确认设计采用 `creative-dialogue-input.v2` 和 `creative-dialogue-output.v2`：
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v3`、`creative-dialogue-output.v3` 和 `creative-dialogue-prompt.v5`：
 
 ```text
-输入：runtime_context + project_context + 当前 ConversationSession 的用户/助手消息
-输出：assistant_reply + suggestion_sets[] + explicit_updates[] + clarifying_question?
+输入：runtime_context + project_context + 当前 ConversationSession 的用户/助手消息 + previous_proposals[]
+输出：assistant_reply + suggestion_sets[] + proposal_selections[] + explicit_updates[] + clarifying_question?
 ```
 
 - `assistant_reply` 先回答当前问题，不重复询问已有事实。
 - `suggestion_sets` 是有差异的创意选项，不是项目事实。
+- `previous_proposals` 按助手消息冻结历史建议组、选项 ID、说明和字段更新，并在模型消息中紧贴对应助手回复；用户消息的精确 `reply_to` 定义首要选择范围，解决跨轮指代缺少真实目标的问题。
+- `proposal_selections` 只能引用输入清单中真实存在的提案、建议组和选项 ID；后端从原选项读取冻结更新，模型不得重写选项值。
 - `explicit_updates` 只允许引用用户消息作为来源，并由后端字段目录校验。
 - 每轮最多提出一个真正阻断的澄清问题；可提供选项时直接提供选项。
 - 用户选择建议后，由独立命令创建 `RequirementCandidate`；仍需确认才能形成 `RequirementVersion`。
@@ -380,6 +382,10 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 建议交互采用 2–3 个可点击选项：推荐项固定排第一并显示“推荐”，每项包含短名称和一句差异说明，模型不得生成选项 ID。后端验证输出后生成稳定的建议组 ID 与选项 ID；页面另外提供“其他想法”自由输入入口，它发送一条新的用户消息，不伪装成模型给出的第四个选项。
 
 点击选项提交精确 `proposal_id + suggestion_set_id + option_id`，保存 `CreativeSuggestionSelection` 并创建待审核 `RequirementCandidate`。点击本身不修改正式需求；人物身份、音频、费用等高风险字段仍按字段目录进入独立确认。每组建议只能选择一次，过期提案、旧需求版本、改名或不存在的 ID 明确失败。
+
+用户也可以在对话中自然表达选择。前端把该消息精确关联到当前助手消息，模型只负责从 `previous_proposals` 返回选项 ID；应用服务校验项目、需求版本、会话消息、建议组、选项和来源消息，再用冻结值生成候选及选择记录。任何不存在、重复、已选择或无法唯一确定的引用都明确失败或要求澄清，不使用序号关键词规则、名称相似度、模型改写值或后端猜测。
+
+创作制片人的建议范围限于内容方向、创作目标、观看感受、受众和风格，不设计具体镜头、慢动作、分屏、剪辑、计时器或生产参数。`audio_mode=off` 只允许无声方案；画面文字是独立创作选择，用户未明确要求时不得自动加入字幕、标题或文字动画。
 
 已归档提案中的上下文、字段目录、交互和评测细节已由本节吸收；代码实现状态仍以 [实现状态](./V2_IMPLEMENTATION_STATUS.md) 为准。
 
@@ -1045,7 +1051,7 @@ RequirementDiff
 
 ### Creation Sprint 4：创作模型接入
 
-- 创作制片人 `creative-dialogue-input/output.v2`（已完成）
+- 创作制片人 `creative-dialogue-input/output.v3`（已完成）
 - 内容策划 `content-planner-input.v1 / creative-brief-candidate.v1`（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计

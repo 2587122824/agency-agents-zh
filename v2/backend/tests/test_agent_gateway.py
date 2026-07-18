@@ -14,6 +14,8 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 
 from v2.backend.app.creation.agent_gateway import (
     AgentGatewayError,
+    CREATIVE_INPUT_CONTRACT_VERSION,
+    CREATIVE_OUTPUT_SCHEMA_VERSION,
     CREATIVE_PROMPT_CONTRACT_VERSION,
     ConfiguredCreativeAgentGateway,
     CreativeAgentSelection,
@@ -50,8 +52,9 @@ def selection() -> CreativeAgentSelection:
         base_url="https://api.example.test/v1",
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
+        input_contract_version=CREATIVE_INPUT_CONTRACT_VERSION,
         prompt_contract_version=CREATIVE_PROMPT_CONTRACT_VERSION,
-        output_schema_version="creative-turn.v2",
+        output_schema_version=CREATIVE_OUTPUT_SCHEMA_VERSION,
         max_output_tokens=1000,
         sampling={"temperature": 0.2, "unsupported": "ignored"},
     )
@@ -65,24 +68,45 @@ def manifest() -> dict:
             "confirmed_attachment_bindings": [],
             "confirmed_decisions": [],
         },
-        "conversation": {"messages": [
-            {"id": "message_1", "role": "user", "content": "给我三个训练短片方向", "reply_to": None},
-            {"id": "message_2", "role": "assistant", "content": "可以选择训练日记、挑战记录或技巧教学。", "reply_to": "message_1"},
-            {"id": "message_3", "role": "user", "content": "第一个", "reply_to": "message_2"},
-        ]},
+        "conversation": {
+            "messages": [
+                {"id": "message_1", "role": "user", "content": "给我三个训练短片方向", "reply_to": None},
+                {"id": "message_2", "role": "assistant", "content": "可以选择训练日记、挑战记录或技巧教学。", "reply_to": "message_1"},
+                {"id": "message_3", "role": "user", "content": "第一个", "reply_to": "message_2"},
+            ],
+            "previous_proposals": [{
+                "id": "cproposal_1",
+                "assistant_message_id": "message_2",
+                "base_requirement_version_id": "requirement_1",
+                "suggestion_sets": [{
+                    "id": "sgset_1",
+                    "title": "选择结构",
+                    "options": [
+                        {"id": "sgopt_1", "label": "训练日记", "summary": "按过程推进", "proposed_updates": []},
+                        {"id": "sgopt_2", "label": "挑战记录", "summary": "突出对比", "proposed_updates": []},
+                    ],
+                }],
+                "selections": [],
+            }],
+        },
         "system_config_version": "production_config_1",
     }
 
 
-def configured_rows(prompt_contract_version: str) -> list[tuple]:
+def configured_rows(
+    prompt_contract_version: str = CREATIVE_PROMPT_CONTRACT_VERSION,
+    input_contract_version: str = CREATIVE_INPUT_CONTRACT_VERSION,
+    output_schema_version: str = CREATIVE_OUTPUT_SCHEMA_VERSION,
+) -> list[tuple]:
     model = SimpleNamespace(
         id="model_config_1",
         config_key="creative-model",
         version_number=1,
         display_name="Creative model",
         provider_model_id="configured-model",
+        input_contract_version=input_contract_version,
         prompt_contract_version=prompt_contract_version,
-        output_schema_version="creative-turn.v2",
+        output_schema_version=output_schema_version,
         max_output_tokens=1000,
         sampling={"temperature": 0.2},
     )
@@ -102,18 +126,20 @@ def configured_rows(prompt_contract_version: str) -> list[tuple]:
 def test_configured_gateway_selects_matching_prompt_contract() -> None:
     gateway = ConfiguredCreativeAgentGateway()
 
-    selected = gateway.select(FakeSelectionSession(configured_rows(CREATIVE_PROMPT_CONTRACT_VERSION)))
+    selected = gateway.select(FakeSelectionSession(configured_rows()))
 
+    assert selected.input_contract_version == CREATIVE_INPUT_CONTRACT_VERSION
     assert selected.prompt_contract_version == CREATIVE_PROMPT_CONTRACT_VERSION
+    assert selected.output_schema_version == CREATIVE_OUTPUT_SCHEMA_VERSION
 
 
 def test_configured_gateway_rejects_stale_prompt_contract() -> None:
     gateway = ConfiguredCreativeAgentGateway()
 
     with pytest.raises(AgentGatewayError) as raised:
-        gateway.select(FakeSelectionSession(configured_rows("v2.creative-dialogue-prompt.v2")))
+        gateway.select(FakeSelectionSession(configured_rows(prompt_contract_version="v2.creative-dialogue-prompt.v3")))
 
-    assert raised.value.code == "CREATIVE_PROMPT_CONTRACT_MISMATCH"
+    assert raised.value.code == "CREATIVE_MODEL_CONTRACT_MISMATCH"
 
 
 def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> None:
@@ -157,6 +183,8 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
     sent_messages = request["payload"]["messages"]
     assert sent_messages[-2]["role"] == "assistant"
     assert sent_messages[-1]["role"] == "user"
+    assert "[structured_proposals=" in sent_messages[-2]["content"]
+    assert "sgopt_2" in sent_messages[-2]["content"]
     assert "[message_id=message_3]" in sent_messages[-1]["content"]
     assert "第一个" in sent_messages[-1]["content"]
 

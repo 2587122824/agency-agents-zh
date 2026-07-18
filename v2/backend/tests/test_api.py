@@ -24,7 +24,7 @@ from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
 from v2.backend.app.providers import ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
 from v2.backend.app.providers.registry import ProviderAdapterRegistry
-from v2.backend.app.creation.agent_gateway import AgentGatewayError, DeterministicCreativeAgentGateway, get_creative_agent_gateway
+from v2.backend.app.creation.agent_gateway import AgentGatewayError, CreativeAgentOutput, CreativeAgentResult, DeterministicCreativeAgentGateway, get_creative_agent_gateway
 from v2.backend.app.planning.agent_gateway import ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
 
 
@@ -540,6 +540,117 @@ def test_creative_suggestion_selection_creates_candidate_without_confirming_requ
     assert new_view["messages"] == []
     assert new_view["active_requirement"]["id"] == base_id
     assert new_view["active_creative_proposal"] is None
+
+
+def test_typed_suggestion_selection_uses_frozen_option_ids(client: TestClient) -> None:
+    class TypedSelectionGateway(DeterministicCreativeAgentGateway):
+        manifest_payload = None
+
+        def invoke(self, selection, manifest_payload):
+            self.manifest_payload = manifest_payload
+            latest = manifest_payload["conversation"]["messages"][-1]
+            proposal = manifest_payload["conversation"]["previous_proposals"][-1]
+            suggestion_set = proposal["suggestion_sets"][0]
+            option = suggestion_set["options"][1]
+            output = CreativeAgentOutput.model_validate({
+                "assistant_reply": f"你选择了{option['label']}。",
+                "suggestion_sets": [],
+                "proposal_selections": [{
+                    "proposal_id": proposal["id"],
+                    "suggestion_set_id": suggestion_set["id"],
+                    "option_id": option["id"],
+                    "source_message_ids": [latest["id"]],
+                }],
+                "explicit_updates": [],
+                "clarifying_question": None,
+            })
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "typed-selection", {"total_tokens": 1})
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    base_id = initial["active_requirement"]["id"]
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "typed-selection-message-001",
+        "content": "给我三个可选方向。",
+    })
+    client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "typed-selection-generate-001", "expected_base_version_id": base_id},
+    )
+    first_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    first_proposal = first_view["active_creative_proposal"]
+    assistant_message_id = first_proposal["assistant_message_id"]
+    expected_option = first_proposal["suggestion_sets"][0]["options"][1]
+    typed_message = client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "typed-selection-message-002",
+        "content": "我选第二个。",
+        "reply_to_message_id": assistant_message_id,
+    })
+    gateway = TypedSelectionGateway()
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: gateway
+    selected = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "typed-selection-generate-002", "expected_base_version_id": base_id},
+    )
+
+    assert selected.status_code == 201
+    candidate = selected.json()
+    assert candidate["fields"]["content_structure"] == expected_option["proposed_updates"][0]["value"]
+    assert candidate["field_sources"]["content_structure"] == {
+        "type": "user_selection",
+        "reference_id": typed_message.json()["id"],
+    }
+    proposal_context = gateway.manifest_payload["conversation"]["previous_proposals"]
+    assert proposal_context[0]["id"] == first_proposal["id"]
+    assert proposal_context[0]["assistant_message_id"] == assistant_message_id
+    assert proposal_context[0]["suggestion_sets"] == first_proposal["suggestion_sets"]
+
+
+def test_typed_suggestion_selection_rejects_unknown_option_id(client: TestClient) -> None:
+    class InvalidSelectionGateway(DeterministicCreativeAgentGateway):
+        def invoke(self, selection, manifest_payload):
+            latest = manifest_payload["conversation"]["messages"][-1]
+            proposal = manifest_payload["conversation"]["previous_proposals"][-1]
+            suggestion_set = proposal["suggestion_sets"][0]
+            output = CreativeAgentOutput.model_validate({
+                "assistant_reply": "已选择。",
+                "proposal_selections": [{
+                    "proposal_id": proposal["id"],
+                    "suggestion_set_id": suggestion_set["id"],
+                    "option_id": "sgopt_not_in_manifest",
+                    "source_message_ids": [latest["id"]],
+                }],
+            })
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "invalid-selection", {"total_tokens": 1})
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    base_id = initial["active_requirement"]["id"]
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "invalid-selection-message-001",
+        "content": "给我三个方向。",
+    })
+    client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "invalid-selection-generate-001", "expected_base_version_id": base_id},
+    )
+    first_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "invalid-selection-message-002",
+        "content": "我选其中一个。",
+        "reply_to_message_id": first_view["active_creative_proposal"]["assistant_message_id"],
+    })
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: InvalidSelectionGateway()
+    invalid = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "invalid-selection-generate-002", "expected_base_version_id": base_id},
+    )
+
+    assert invalid.status_code == 502
+    assert invalid.headers["x-error-code"] == "AGENT_MODEL_SELECTION_OPTION_INVALID"
+    failed_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert failed_view["latest_agent_run"]["status"] == "failed"
+    assert failed_view["current_candidate"] is None
 
 
 def test_new_message_makes_pending_candidate_stale(client: TestClient) -> None:

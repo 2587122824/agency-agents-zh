@@ -45,8 +45,8 @@ export const api = {
   queueValidation: (projectId: string) =>
     request<WorkItem>(`/projects/${projectId}/queue`, { method: 'POST', body: JSON.stringify({ kind: 'contract_validation' }) }),
   creationCenter: (projectId: string) => request<CreationCenter>(`/projects/${projectId}/creation-center`),
-  addMessage: (projectId: string, content: string) => request<CreationMessage>(`/projects/${projectId}/messages`, {
-    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', content }),
+  addMessage: (projectId: string, content: string, replyToMessageId: string | null = null) => request<CreationMessage>(`/projects/${projectId}/messages`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', content, reply_to_message_id: replyToMessageId }),
   }),
   startConversationSession: (projectId: string) => request<{ id: string; status: string }>(`/projects/${projectId}/conversation-sessions`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user' }),

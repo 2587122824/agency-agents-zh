@@ -306,6 +306,28 @@ def _manifest_payload(
 ) -> dict:
     repository = _creation(session)
     messages = repository.manifest_messages(project.id, conversation_session.id)
+    message_ids = {item.id for item in messages}
+    proposal_selections = repository.suggestion_selections(project.id)
+    selections_by_proposal: dict[str, list[dict]] = {}
+    for selection in proposal_selections:
+        selections_by_proposal.setdefault(selection.proposal_id, []).append({
+            "id": selection.id,
+            "suggestion_set_id": selection.suggestion_set_id,
+            "option_id": selection.option_id,
+        })
+    previous_proposals = [
+        {
+            "id": proposal.id,
+            "assistant_message_id": proposal.assistant_message_id,
+            "base_requirement_version_id": proposal.base_requirement_version_id,
+            "suggestion_sets": proposal.suggestion_sets,
+            "selections": selections_by_proposal.get(proposal.id, []),
+        }
+        for proposal in sorted(repository.creative_proposals(project.id), key=lambda item: (item.created_at, item.id))
+        if proposal.assistant_message_id in message_ids
+        and proposal.base_requirement_version_id == base.id
+        and proposal.suggestion_sets
+    ]
     bindings = repository.confirmed_bindings(project.id)
     decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
     attachment_bindings = []
@@ -352,6 +374,7 @@ def _manifest_payload(
                 }
                 for item in messages
             ],
+            "previous_proposals": previous_proposals,
         },
         "system_config_version": "v2.creation.mock.v1",
         "requirement_schema_version": "creative-requirement.v2",
@@ -433,6 +456,79 @@ def _apply_updates(
     return fields, sources, changes
 
 
+def _resolve_proposal_selections(
+    repository: CreationRepository,
+    project: Project,
+    base: RequirementVersion,
+    selections,
+    *,
+    conversation_message_ids: set[str],
+    current_message_id: str,
+    current_reply_to_message_id: str | None,
+) -> list[dict]:
+    resolved: list[dict] = []
+    selected_sets: set[tuple[str, str]] = set()
+    selected_fields: set[str] = set()
+    for selection in selections:
+        if selection.source_message_ids != [current_message_id]:
+            raise AgentGatewayError(
+                "AGENT_MODEL_SELECTION_SOURCE_INVALID",
+                "自然语言选项选择只能引用当前用户消息。",
+            )
+        key = (selection.proposal_id, selection.suggestion_set_id)
+        if key in selected_sets:
+            raise AgentGatewayError("AGENT_MODEL_SELECTION_DUPLICATE", "模型重复选择了同一个建议组。")
+        selected_sets.add(key)
+        proposal = repository.creative_proposal(selection.proposal_id)
+        if (
+            not proposal
+            or proposal.project_id != project.id
+            or proposal.base_requirement_version_id != base.id
+            or proposal.assistant_message_id not in conversation_message_ids
+        ):
+            raise AgentGatewayError("AGENT_MODEL_SELECTION_PROPOSAL_INVALID", "模型引用的历史创作提案不在当前输入清单中。")
+        if not current_reply_to_message_id or proposal.assistant_message_id != current_reply_to_message_id:
+            raise AgentGatewayError(
+                "AGENT_MODEL_SELECTION_REPLY_SCOPE_INVALID",
+                "模型引用的创作提案不属于当前用户消息精确回复的助手消息。",
+            )
+        suggestion_set = next(
+            (item for item in proposal.suggestion_sets if item.get("id") == selection.suggestion_set_id),
+            None,
+        )
+        if suggestion_set is None:
+            raise AgentGatewayError("AGENT_MODEL_SELECTION_SET_INVALID", "模型引用的建议组不存在。")
+        option = next(
+            (item for item in suggestion_set.get("options", []) if item.get("id") == selection.option_id),
+            None,
+        )
+        if option is None:
+            raise AgentGatewayError("AGENT_MODEL_SELECTION_OPTION_INVALID", "模型引用的建议选项不存在。")
+        if repository.suggestion_selection(proposal.id, selection.suggestion_set_id):
+            raise AgentGatewayError("AGENT_MODEL_SELECTION_ALREADY_RECORDED", "该建议组已经有精确选择记录。")
+        updates: list[ProposedFieldUpdate] = []
+        for frozen in option.get("proposed_updates", []):
+            update = ProposedFieldUpdate(
+                field_key=frozen.get("field_key"),
+                value=frozen.get("value"),
+                source_message_ids=[current_message_id],
+            )
+            _validated_update_value(update.field_key, update.value)
+            if update.field_key in selected_fields:
+                raise AgentGatewayError("AGENT_MODEL_SELECTION_FIELD_DUPLICATE", "多个选择重复更新同一需求字段。")
+            selected_fields.add(update.field_key)
+            updates.append(update)
+        if not updates:
+            raise AgentGatewayError("AGENT_MODEL_SELECTION_OPTION_EMPTY", "模型引用的建议选项没有冻结字段更新。")
+        resolved.append({
+            "proposal": proposal,
+            "suggestion_set_id": selection.suggestion_set_id,
+            "option_id": selection.option_id,
+            "updates": updates,
+        })
+    return resolved
+
+
 def generate_candidate(
     session: Session,
     project: Project,
@@ -496,6 +592,11 @@ def generate_candidate(
         raise CreationConflictError("AGENT_RUN_ALREADY_ATTEMPTED", "当前消息已经运行过创作智能体；失败后不会自动或重复调用模型。")
     selection = gateway.select(session)
     manifest_payload["system_config_version"] = selection.production_config_version_id
+    manifest_payload["contract_versions"] = {
+        "input": selection.input_contract_version,
+        "output": selection.output_schema_version,
+        "prompt": selection.prompt_contract_version,
+    }
     manifest_payload["runtime_context"]["model_display_name"] = selection.model_name
     context_bytes = len(json.dumps(manifest_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
     if context_bytes > 120_000:
@@ -538,13 +639,43 @@ def generate_candidate(
     try:
         result = gateway.invoke(selection, manifest_payload)
         valid_user_message_ids = {item["id"] for item in user_messages}
-        fields, sources, changes = _apply_updates(
+        resolved_selections = _resolve_proposal_selections(
+            repository,
+            project,
+            base,
+            result.output.proposal_selections,
+            conversation_message_ids={item["id"] for item in conversation_messages},
+            current_message_id=current_message_id,
+            current_reply_to_message_id=user_messages[-1].get("reply_to"),
+        )
+        selection_updates = [
+            update
+            for resolved in resolved_selections
+            for update in resolved["updates"]
+        ]
+        selected_field_keys = {item.field_key for item in selection_updates}
+        explicit_field_keys = {item.field_key for item in result.output.explicit_updates}
+        if selected_field_keys & explicit_field_keys:
+            raise AgentGatewayError(
+                "AGENT_MODEL_SELECTION_UPDATE_CONFLICT",
+                "自然语言选项选择与用户明确更新重复修改同一字段。",
+            )
+        fields, sources, selection_changes = _apply_updates(
             base.fields,
             base.field_sources,
+            selection_updates,
+            valid_user_message_ids=valid_user_message_ids,
+            source_type="user_selection",
+            source_reference_id=current_message_id,
+        )
+        fields, sources, explicit_changes = _apply_updates(
+            fields,
+            sources,
             result.output.explicit_updates,
             valid_user_message_ids=valid_user_message_ids,
             source_type="agent_proposal",
         )
+        changes = selection_changes + explicit_changes
         suggestion_sets: list[dict] = []
         for suggestion_set in result.output.suggestion_sets:
             normalized_set = {
@@ -598,6 +729,24 @@ def generate_candidate(
     )
     repository.add(candidate)
     repository.flush()
+    for resolved in resolved_selections:
+        selection_record = CreativeSuggestionSelection(
+            project_id=project.id,
+            proposal_id=resolved["proposal"].id,
+            suggestion_set_id=resolved["suggestion_set_id"],
+            option_id=resolved["option_id"],
+            candidate_id=candidate.id,
+            selected_by=current_message_id,
+        )
+        repository.add(selection_record)
+        repository.flush()
+        _event(session, project.id, "creative.suggestion_selected.v1", "用户通过对话选择了创作建议", {
+            "proposal_id": resolved["proposal"].id,
+            "suggestion_set_id": resolved["suggestion_set_id"],
+            "option_id": resolved["option_id"],
+            "candidate_id": candidate.id,
+            "source_message_id": current_message_id,
+        })
     latest_message_id = current_message_id
     assistant_message = Message(
         project_id=project.id,
