@@ -350,6 +350,7 @@ def _manifest_payload(
                 {
                     "category": suggestion_set.get("category"),
                     "title": suggestion_set.get("title"),
+                    "field_key": suggestion_set.get("field_key"),
                     "options": [
                         {
                             "label": option.get("label"),
@@ -496,6 +497,11 @@ def _apply_updates(
         seen_fields.add(update.field_key)
         value = _validated_update_value(update.field_key, update.value)
         previous = fields.get(update.field_key)
+        if previous == value:
+            raise AgentGatewayError(
+                "AGENT_MODEL_OUTPUT_NO_CHANGE",
+                f"字段 {update.field_key} 的候选值与当前值相同，不能登记为变更。",
+            )
         fields[update.field_key] = value
         sources[update.field_key] = {
             "type": source_type,
@@ -732,27 +738,55 @@ def generate_candidate(
         )
         changes = selection_changes + explicit_changes
         suggestion_sets: list[dict] = []
+        suggested_field_keys: set[str] = set()
         for suggestion_set in result.output.suggestion_sets:
+            if suggestion_set.field_key in suggested_field_keys:
+                raise AgentGatewayError(
+                    "AGENT_MODEL_SUGGESTION_FIELD_DUPLICATE",
+                    f"多个建议组重复修改字段 {suggestion_set.field_key}。",
+                )
+            suggested_field_keys.add(suggestion_set.field_key)
+            if not set(suggestion_set.source_message_ids).issubset(valid_user_message_ids):
+                raise AgentGatewayError(
+                    "AGENT_MODEL_OUTPUT_SOURCE_INVALID",
+                    "建议组返回了非用户消息或输入清单之外的消息引用。",
+                )
             normalized_set = {
                 "id": new_id("sgset"),
                 "category": suggestion_set.category,
                 "title": suggestion_set.title,
+                "field_key": suggestion_set.field_key,
                 "options": [],
             }
+            option_values: list = []
             for index, option in enumerate(suggestion_set.options):
-                option_fields: set[str] = set()
-                for update in option.proposed_updates:
-                    _validate_update_sources(update, valid_user_message_ids)
-                    _validated_update_value(update.field_key, update.value)
-                    if update.field_key in option_fields:
-                        raise AgentGatewayError("AGENT_MODEL_OUTPUT_FIELD_DUPLICATE", f"建议选项重复更新字段 {update.field_key}。")
-                    option_fields.add(update.field_key)
+                update = ProposedFieldUpdate(
+                    field_key=suggestion_set.field_key,
+                    value=option.value,
+                    source_message_ids=suggestion_set.source_message_ids,
+                )
+                value = _validated_update_value(update.field_key, update.value)
+                if base.fields.get(update.field_key) == value:
+                    raise AgentGatewayError(
+                        "AGENT_MODEL_OUTPUT_NO_CHANGE",
+                        f"字段 {update.field_key} 的建议值与当前值相同。",
+                    )
+                if any(existing == value for existing in option_values):
+                    raise AgentGatewayError(
+                        "AGENT_MODEL_SUGGESTION_VALUE_DUPLICATE",
+                        f"建议组 {suggestion_set.title} 包含重复候选值。",
+                    )
+                option_values.append(value)
                 normalized_set["options"].append({
                     "id": new_id("sgopt"),
                     "label": option.label,
                     "summary": option.summary,
                     "recommended": index == 0,
-                    "proposed_updates": [item.model_dump(mode="json") for item in option.proposed_updates],
+                    "proposed_updates": [{
+                        "field_key": update.field_key,
+                        "value": value,
+                        "source_message_ids": update.source_message_ids,
+                    }],
                 })
             suggestion_sets.append(normalized_set)
     except AgentGatewayError as exc:

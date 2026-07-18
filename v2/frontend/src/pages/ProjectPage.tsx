@@ -56,6 +56,13 @@ function commandError(...mutations: Array<{ error: Error | null }>) {
   return mutations.find(item => item.error)?.error?.message
 }
 
+function displaySuggestionValue(fieldKey: string, value: unknown) {
+  if (fieldKey === 'audio_mode') return value === 'off' ? '关闭' : '旁白'
+  if (fieldKey === 'duration_seconds') return `${String(value)} 秒`
+  if (Array.isArray(value)) return value.map(String).join('、')
+  return String(value)
+}
+
 function AttachmentRow({ item, onBind, busy }: { item: CreationAttachment; onBind: (type: 'identity_reference' | 'voice_sample' | 'inspiration_only') => void; busy: boolean }) {
   const binding = [...item.bindings].reverse().find(value => value.status === 'confirmed')
   const isAudio = item.mime_type.startsWith('audio/')
@@ -166,6 +173,7 @@ export function ProjectPage() {
               >
                 <span>{option.label}{index === 0 && <b>推荐</b>}{selected?.option_id === option.id && <Check size={14} />}</span>
                 <small>{option.summary}</small>
+                <div className={styles.suggestionChanges}>{option.proposed_updates.map(update => <em key={update.field_key}>选择后设置：{fieldLabels[update.field_key] ?? update.field_key} · {displaySuggestionValue(update.field_key, update.value)}</em>)}</div>
               </button>)}</div>
               {!selected && (customSuggestionSetId === suggestionSet.id ? <form className={styles.customSuggestion} onSubmit={event => { event.preventDefault(); const content = customSuggestion.trim(); if (!content) return; addMessage.mutate(content); setCustomSuggestion(''); setCustomSuggestionSetId(null) }}>
                 <input autoFocus value={customSuggestion} onChange={event => setCustomSuggestion(event.target.value)} placeholder="输入你的想法" />

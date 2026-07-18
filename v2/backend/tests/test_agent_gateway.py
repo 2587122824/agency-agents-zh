@@ -159,9 +159,11 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
         "suggestion_sets": [{
             "category": "content_direction",
             "title": "选择内容结构",
+            "field_key": "content_structure",
+            "source_message_ids": ["message_3"],
             "options": [
-                {"label": "训练日记", "summary": "按训练过程推进", "proposed_updates": [{"field_key": "content_structure", "value": "training_diary", "source_message_ids": ["message_3"]}]},
-                {"label": "挑战记录", "summary": "突出前后对比", "proposed_updates": [{"field_key": "content_structure", "value": "challenge_record", "source_message_ids": ["message_3"]}]},
+                {"label": "训练日记", "summary": "按训练过程推进", "value": "训练日记"},
+                {"label": "挑战记录", "summary": "突出前后对比", "value": "挑战记录"},
             ],
         }],
         "explicit_updates": [],
@@ -203,6 +205,40 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
 def test_configured_gateway_rejects_non_json_without_repair_or_retry(monkeypatch) -> None:
     monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
     transport = FakeTransport({"choices": [{"message": {"content": "```json\n{}\n```"}}]})
+    gateway = ConfiguredCreativeAgentGateway(
+        transport=transport,
+        credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),
+    )
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest())
+
+    assert raised.value.code == "AGENT_MODEL_OUTPUT_SCHEMA_INVALID"
+    assert len(transport.calls) == 1
+
+
+def test_configured_gateway_rejects_legacy_multi_update_suggestion_shape(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    content = {
+        "assistant_reply": "请选择方向。",
+        "suggestion_sets": [{
+            "category": "content_direction",
+            "title": "选择方向",
+            "options": [
+                {"label": "日记", "summary": "记录过程", "proposed_updates": [
+                    {"field_key": "content_structure", "value": "训练日记", "source_message_ids": ["message_3"]},
+                    {"field_key": "tone", "value": "自然", "source_message_ids": ["message_3"]},
+                ]},
+                {"label": "挑战", "summary": "强调目标", "proposed_updates": [
+                    {"field_key": "content_structure", "value": "挑战记录", "source_message_ids": ["message_3"]},
+                ]},
+            ],
+        }],
+        "proposal_selections": [],
+        "explicit_updates": [],
+        "clarifying_question": None,
+    }
+    transport = FakeTransport({"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]})
     gateway = ConfiguredCreativeAgentGateway(
         transport=transport,
         credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),

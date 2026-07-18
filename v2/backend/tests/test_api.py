@@ -338,8 +338,14 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
     proposal = before_accept["active_creative_proposal"]
     assert proposal["agent_run_id"] == latest_run["id"]
     assert proposal["assistant_message_id"] == assistant_messages[0]["id"]
+    assert proposal["suggestion_sets"][0]["field_key"] == "content_structure"
     assert len(proposal["suggestion_sets"][0]["options"]) == 3
     assert proposal["suggestion_sets"][0]["options"][0]["recommended"] is True
+    assert all(
+        len(option["proposed_updates"]) == 1
+        and option["proposed_updates"][0]["field_key"] == "content_structure"
+        for option in proposal["suggestion_sets"][0]["options"]
+    )
 
     accept_command = {
         "command_id": "accept-command-001",
@@ -369,6 +375,45 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
     )
     assert no_new_input.status_code == 409
     assert no_new_input.headers["x-error-code"] == "NO_NEW_REQUIREMENT_INPUT"
+
+
+def test_creative_agent_rejects_explicit_update_equal_to_active_value(client: TestClient) -> None:
+    class NoChangeGateway(DeterministicCreativeAgentGateway):
+        def invoke(self, selection, manifest_payload):
+            latest = manifest_payload["conversation"]["messages"][-1]
+            output = CreativeAgentOutput.model_validate({
+                "assistant_reply": "保持当前静音设置。",
+                "suggestion_sets": [],
+                "proposal_selections": [],
+                "explicit_updates": [{
+                    "field_key": "audio_mode",
+                    "value": "off",
+                    "source_message_ids": [latest["id"]],
+                }],
+                "clarifying_question": None,
+            })
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "no-change", {"total_tokens": 1})
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "no-change-message-001",
+        "content": "保持静音。",
+    })
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: NoChangeGateway()
+
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "no-change-generate-001", "expected_base_version_id": initial["active_requirement"]["id"]},
+    )
+
+    assert generated.status_code == 502
+    assert generated.headers["x-error-code"] == "AGENT_MODEL_OUTPUT_NO_CHANGE"
+    view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert view["latest_agent_run"]["status"] == "failed"
+    assert view["current_candidate"] is None
+    assert view["active_requirement"]["fields"]["audio_mode"] == "off"
+    assert view["active_requirement"]["field_sources"]["audio_mode"]["type"] == "user"
 
 
 def test_failed_creative_turn_requires_explicit_confirmed_retry(client: TestClient) -> None:

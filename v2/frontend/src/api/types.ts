@@ -270,6 +270,7 @@ export interface CreativeTurnProposal {
     id: string
     category: string
     title: string
+    field_key: string
     options: Array<{
       id: string
       label: string

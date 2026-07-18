@@ -62,7 +62,7 @@ class CreativeSuggestionOption(BaseModel):
 
     label: str = Field(min_length=1, max_length=60)
     summary: str = Field(min_length=1, max_length=240)
-    proposed_updates: list[ProposedFieldUpdate] = Field(min_length=1, max_length=8)
+    value: Any
 
 
 class CreativeSuggestionSet(BaseModel):
@@ -70,6 +70,8 @@ class CreativeSuggestionSet(BaseModel):
 
     category: str = Field(min_length=1, max_length=60)
     title: str = Field(min_length=1, max_length=120)
+    field_key: CREATIVE_FIELD_KEYS
+    source_message_ids: list[str] = Field(min_length=1, max_length=8)
     options: list[CreativeSuggestionOption] = Field(min_length=2, max_length=3)
 
 
@@ -165,33 +167,35 @@ class HttpxAgentChatTransport:
 
 
 CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v4"
-CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v3"
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v6"
+CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v4"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v7"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
 必须只返回一个 JSON 对象，严格符合：
-{"assistant_reply":"中文回复","suggestion_sets":[{"category":"类别","title":"问题","options":[{"label":"选项名","summary":"差异说明","proposed_updates":[{"field_key":"允许字段","value":"建议值","source_message_ids":["用户消息ID"]}]}]}],"proposal_selections":[{"proposal_id":"已有提案ID","suggestion_set_id":"已有建议组ID","option_id":"已有选项ID","source_message_ids":["用户选择消息ID"]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
+{"assistant_reply":"中文回复","suggestion_sets":[{"category":"类别","title":"问题","field_key":"本组唯一修改字段","source_message_ids":["用户消息ID"],"options":[{"label":"选项名","summary":"差异说明","value":"该字段的建议值"}]}],"proposal_selections":[{"proposal_id":"已有提案ID","suggestion_set_id":"已有建议组ID","option_id":"已有选项ID","source_message_ids":["用户选择消息ID"]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
 允许字段及用途：
 - title 项目名称；core_topic 核心主题；content_goal 内容目标；platform 发布平台；target_audience 目标受众。
 - duration_seconds 目标秒数；aspect_ratio 画幅；audio_mode 仅 off 或 voiceover。
 - visual_style 视觉风格；tone 情绪语气；content_structure 内容结构；call_to_action 结尾行动号召。
 - creative_direction 整体创作方向；creative_constraints 用户明确限制的字符串列表。
 合法建议示例：
-{"category":"content_direction","title":"你希望采用哪种内容结构？","options":[{"label":"训练日记","summary":"按准备、训练、完成推进","proposed_updates":[{"field_key":"content_structure","value":"training_diary","source_message_ids":["最新用户消息ID"]}]},{"label":"挑战记录","summary":"突出目标和结果对比","proposed_updates":[{"field_key":"content_structure","value":"challenge_record","source_message_ids":["最新用户消息ID"]}]}]}
+{"category":"content_direction","title":"你希望采用哪种内容结构？","field_key":"content_structure","source_message_ids":["最新用户消息ID"],"options":[{"label":"训练日记","summary":"按准备、训练、完成推进","value":"训练日记"},{"label":"挑战记录","summary":"突出目标和结果对比","value":"挑战记录"}]}
 规则：
 1. 读取 conversation 中按顺序提供的用户和助手消息；proposal_history 是不含系统 ID 的只读历史，助手消息和未选择建议都不是用户事实，history.selections 才表示用户曾经作出的选择。
 2. 只有用户明确表达的值才能进入 explicit_updates，且 source_message_ids 只能引用 role=user 的消息。
+2.1 最新用户消息同时包含明确事实或限制与建议请求时，两部分必须独立处理：明确内容进入 explicit_updates，建议进入 suggestion_sets；不得因为已经给出建议而漏掉用户明确表达。
+2.2 explicit_updates 不得重复 active_requirement 中已经相同的字段值；保持现状可以在自然回复中确认，但不能伪装成字段变更。
 3. 用户要求建议时直接给 2 到 3 个互斥且有明显差异的选项，推荐项放第一；建议不能进入 explicit_updates。
-4. suggestion_sets 每组只能有 2 到 3 个选项；后端会生成选项 ID，你不得生成系统主键。
-4.1 每个可点击选项的 proposed_updates 必须至少包含一项，并使用上面的允许字段；不能返回空数组。
+4. suggestion_sets 每组只能有 2 到 3 个选项；每组必须声明唯一 field_key 和来源消息，每个选项只提供该字段的一个 value。一个选项不得捆绑修改多个字段；后端会生成选项 ID 和冻结更新，你不得生成系统主键。
+4.1 同一建议组内的 value 必须互不相同，且不得等于 active_requirement 中该字段的当前值。
 4.2 只有 selection_scope 非空且最新用户消息正在选择其中选项时，才能返回 proposal_selections；只能引用 selection_scope 中真实存在的 proposal_id、suggestion_set_id 和 option_id。selection_scope 为空时 proposal_selections 必须为空。不得改写冻结选项值，也不得把选择复制进 explicit_updates。无法唯一确定时提出 clarifying_question，不猜测。
 4.3 用户消息的 reply_to 精确决定 selection_scope。范围内只有一个建议组且用户表达可唯一对应某个选项时，必须直接返回精确 ID，不得再次询问是哪一组。proposal_history 只用于理解上下文，绝不能作为选择 ID 来源或重复提交已有选择。
 5. 已能直接回答或给选项时不得用问题代替答案；每轮最多一个 clarifying_question。
 6. 不得编造项目、附件、费用或生产状态，不得选择供应商、模型、工作流或预算，不得承诺已生成素材。
 7. 不得输出风险等级、Markdown 代码块、解释文字或 JSON 之外的内容。
 8. 当最新用户消息的语义是在请求比较、推荐或多个可选创作方向时，必须返回 suggestion_sets；不要依赖固定关键词匹配，也不能用 clarifying_question 代替可直接给出的选项。
-9. 用户询问“内容方向”时应围绕叙事、结构、钩子、表达重点和观看感受提供选择；不要设计具体镜头、慢动作、分屏、剪辑、计时器、模型、工作流或生产参数，这些属于后续智能体。
+9. 用户询问“内容方向”时，选项标题、说明和值都只能描述叙事、结构、内容目标、表达重点和观看感受；不得出现具体景别、机位、镜头运动、镜头切换、转场、剪辑手法、特效、计时器、模型、工作流或生产参数，这些属于后续智能体。即使用户提到这些执行方式，创作制片人也只登记为明确限制，不替后续智能体展开方案。
 10. 除 duration_seconds、aspect_ratio、audio_mode 等合同枚举外，建议值必须使用普通用户可读的简洁中文描述，不返回 snake_case、内部代码或英文机器键。
 11. active_requirement 和 confirmed_decisions 是当前已生效基线；用户可以明确提出修改，并由 explicit_updates 形成待确认候选。若用户没有明确修改，audio_mode=off 时自然回复、选项说明和字段更新都不得建议音乐、旁白、对白、TTS 或对口型。画面文字属于独立创作选择，用户未明确要求时不得自行加入字幕、标题或文字动画。
 12. confirmed_attachment_bindings 中 content_access=metadata_only 的附件只提供文件事实，不代表你看过画面、听过声音或理解过媒体内容；需要内容信息时应明确请用户描述，不得编造。
@@ -383,33 +387,23 @@ class DeterministicCreativeAgentGateway:
             suggestion_sets=[CreativeSuggestionSet(
                 category="content_direction",
                 title="你希望采用哪种内容结构？",
+                field_key="content_structure",
+                source_message_ids=[latest["id"]],
                 options=[
                     CreativeSuggestionOption(
                         label="训练日记",
                         summary="按准备、训练和完成三个阶段自然推进。",
-                        proposed_updates=[ProposedFieldUpdate(
-                            field_key="content_structure",
-                            value="训练日记",
-                            source_message_ids=[latest["id"]],
-                        )],
+                        value="训练日记",
                     ),
                     CreativeSuggestionOption(
                         label="挑战记录",
                         summary="用明确目标和训练结果形成前后对比。",
-                        proposed_updates=[ProposedFieldUpdate(
-                            field_key="content_structure",
-                            value="挑战记录",
-                            source_message_ids=[latest["id"]],
-                        )],
+                        value="挑战记录",
                     ),
                     CreativeSuggestionOption(
                         label="技巧教学",
                         summary="围绕动作讲解和训练要点组织内容。",
-                        proposed_updates=[ProposedFieldUpdate(
-                            field_key="content_structure",
-                            value="技巧教学",
-                            source_message_ids=[latest["id"]],
-                        )],
+                        value="技巧教学",
                     ),
                 ],
             )],
