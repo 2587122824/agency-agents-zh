@@ -146,6 +146,7 @@ from ..planning.contracts import (
     GenerateShotPlan,
     PlanningCenterView,
     PlanVersionRead,
+    RetryBrief,
     ReviseShotPlan,
     ShotPlanCandidateRead,
 )
@@ -156,6 +157,7 @@ from ..planning.service import (
     generate_brief,
     generate_shot_plan,
     planning_center_view,
+    retry_failed_brief,
     revise_shot_plan,
 )
 from ..providers.contracts import ProviderReadinessView
@@ -936,6 +938,35 @@ def creative_brief_generate(
     project = require_project(session, project_id)
     try:
         return generate_brief(session, project, payload, gateway)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
+
+
+@router.post(
+    "/projects/{project_id}/content-planner-runs/{run_id}:retry",
+    response_model=CreativeBriefCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def content_planner_run_retry(
+    project_id: str,
+    run_id: str,
+    payload: RetryBrief,
+    gateway: ContentPlannerGateway = Depends(get_content_planner_gateway),
+    session: Session = Depends(get_session),
+):
+    if payload.failed_agent_run_id != run_id:
+        raise HTTPException(status_code=409, detail="失败运行编号与路径不一致。")
+    project = require_project(session, project_id)
+    try:
+        return retry_failed_brief(session, project, payload, gateway)
     except CreationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CreationConflictError as exc:

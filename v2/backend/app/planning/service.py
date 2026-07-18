@@ -33,12 +33,40 @@ from ..db.models import (
 )
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
-from .agent_gateway import ContentPlannerGateway
-from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, ReviseShotPlan
+from .agent_gateway import ContentPlannerGateway, ContentPlannerSelection
+from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, ReviseShotPlan
 
 
 def _planning(session: Session) -> PlanningRepository:
     return SqlAlchemyPlanningRepository(session)
+
+
+def _agent_run_view(session: Session, run: AgentRun | None) -> dict | None:
+    if run is None:
+        return None
+    manifest = session.get(AgentInputManifest, run.input_manifest_id)
+    return {
+        "id": run.id,
+        "agent_role": run.agent_role,
+        "status": run.status,
+        "input_manifest_id": run.input_manifest_id,
+        "model_provider": run.model_provider,
+        "model_name": run.model_name,
+        "production_config_version_id": run.production_config_version_id,
+        "model_config_version_id": run.model_config_version_id,
+        "provider_config_version_id": run.provider_config_version_id,
+        "prompt_contract_version": run.prompt_contract_version,
+        "output_schema_version": run.output_schema_version,
+        "parsed_candidate_id": run.parsed_candidate_id,
+        "parsed_proposal_id": run.parsed_proposal_id,
+        "error_code": run.error_code,
+        "error_detail": run.error_detail,
+        "provider_request_id": run.provider_request_id,
+        "token_usage": run.token_usage or {},
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+        "input_manifest": manifest,
+    }
 
 
 def _confirmed_binding_versions(session: Session, project_id: str) -> dict[str, list[str]]:
@@ -131,6 +159,107 @@ def _content_planner_manifest_payload(
     }
 
 
+def _execute_content_planner(
+    session: Session,
+    project: Project,
+    requirement: RequirementVersion,
+    manifest: AgentInputManifest,
+    payload: GenerateBrief | RetryBrief,
+    gateway: ContentPlannerGateway,
+    selection: ContentPlannerSelection,
+    *,
+    retry_of_agent_run_id: str | None = None,
+) -> CreativeBriefCandidate:
+    repository = _planning(session)
+    run = AgentRun(
+        project_id=project.id,
+        agent_role="planner",
+        status="running",
+        input_manifest_id=manifest.id,
+        model_provider=selection.model_provider,
+        model_name=selection.model_name,
+        production_config_version_id=selection.production_config_version_id,
+        model_config_version_id=selection.model_config_version_id,
+        provider_config_version_id=selection.provider_config_version_id,
+        prompt_contract_version=selection.prompt_contract_version,
+        output_schema_version=selection.output_schema_version,
+        started_at=utc_now(),
+    )
+    repository.add(run)
+    repository.flush()
+    _event(session, project.id, "agent.run_created.v1", "内容策划智能体已开始生成候选方案", {
+        "agent_run_id": run.id,
+        "model_config_version_id": selection.model_config_version_id,
+        "provider_config_version_id": selection.provider_config_version_id,
+        "retry_of_agent_run_id": retry_of_agent_run_id,
+    })
+    session.commit()
+    try:
+        result = gateway.invoke(selection, manifest.payload)
+    except AgentGatewayError as exc:
+        failed_run = session.get(AgentRun, run.id)
+        if failed_run is not None:
+            failed_run.status = "failed"
+            failed_run.error_code = exc.code
+            failed_run.error_detail = (
+                f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'))}"
+                if exc.diagnostics else str(exc)
+            )
+            failed_run.raw_output = exc.raw_output
+            failed_run.finished_at = utc_now()
+            _event(session, project.id, "agent.run_failed.v1", "内容策划智能体本轮运行失败", {
+                "agent_run_id": failed_run.id,
+                "error_code": exc.code,
+                "retry_of_agent_run_id": retry_of_agent_run_id,
+            })
+            session.commit()
+        raise
+    brief = result.output.model_dump(mode="json")
+    brief.update({
+        "duration_seconds": requirement.fields["duration_seconds"],
+        "aspect_ratio": requirement.fields["aspect_ratio"],
+        "audio_mode": requirement.fields["audio_mode"],
+    })
+    sources = {
+        key: {"type": "agent_proposal", "reference_id": run.id}
+        for key in type(result.output).model_fields
+    }
+    for key in ("duration_seconds", "aspect_ratio", "audio_mode"):
+        sources[key] = {"type": "requirement", "reference_id": requirement.id}
+    candidate = CreativeBriefCandidate(
+        project_id=project.id,
+        requirement_version_id=requirement.id,
+        agent_run_id=run.id,
+        brief=brief,
+        field_sources=sources,
+    )
+    repository.add(candidate)
+    repository.flush()
+    run.status = "succeeded"
+    run.parsed_candidate_id = candidate.id
+    run.raw_output = result.raw_output
+    run.provider_request_id = result.provider_request_id
+    run.token_usage = result.token_usage
+    run.finished_at = utc_now()
+    _save_receipt(session, project.id, payload.command_id, "brief.retry" if retry_of_agent_run_id else "brief.generate", "creative_brief_candidate", candidate.id)
+    _event(session, project.id, "agent.run_succeeded.v1", "内容策划智能体已返回严格候选", {
+        "agent_run_id": run.id,
+        "candidate_id": candidate.id,
+        "retry_of_agent_run_id": retry_of_agent_run_id,
+    })
+    _event(session, project.id, "plan.brief_candidate_created.v1", "内容方案候选等待用户审核", {"candidate_id": candidate.id})
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.BRIEF_CANDIDATE_CREATED,
+        actor_type="system",
+        actor_id="creative-agent",
+        event_data={"candidate_id": candidate.id},
+    )
+    session.commit()
+    return candidate
+
+
 def _start_run(session: Session, project: Project, manifest: AgentInputManifest, role: str, schema: str) -> AgentRun:
     repository = _planning(session)
     run = AgentRun(
@@ -217,90 +346,71 @@ def generate_brief(
     )
     repository.add(manifest)
     repository.flush()
-    run = AgentRun(
-        project_id=project.id,
-        agent_role="planner",
-        status="running",
-        input_manifest_id=manifest.id,
-        model_provider=selection.model_provider,
-        model_name=selection.model_name,
-        production_config_version_id=selection.production_config_version_id,
-        model_config_version_id=selection.model_config_version_id,
-        provider_config_version_id=selection.provider_config_version_id,
-        prompt_contract_version=selection.prompt_contract_version,
-        output_schema_version=selection.output_schema_version,
-        started_at=utc_now(),
+    return _execute_content_planner(session, project, requirement, manifest, payload, gateway, selection)
+
+
+def retry_failed_brief(
+    session: Session,
+    project: Project,
+    payload: RetryBrief,
+    gateway: ContentPlannerGateway,
+) -> CreativeBriefCandidate:
+    repository = _planning(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, CreativeBriefCandidate)
+    if not payload.confirm_model_cost:
+        raise CreationConflictError("MODEL_COST_CONFIRMATION_REQUIRED", "请明确确认本次重跑会再次调用当前内容策划模型。")
+    requirement = active_requirement(session, project.id)
+    if not requirement or requirement.id != payload.expected_requirement_version_id:
+        raise CreationConflictError("REQUIREMENT_VERSION_CONFLICT", "活动需求版本已变化，不能重跑旧策划。")
+    if repository.active_brief_for_requirement(project.id, requirement.id):
+        raise CreationConflictError("BRIEF_ALREADY_EXISTS", "当前需求版本已有待审或已接受的内容方案。")
+    latest_run = session.scalar(
+        select(AgentRun)
+        .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+        .where(
+            AgentRun.project_id == project.id,
+            AgentRun.agent_role == "planner",
+            AgentInputManifest.base_requirement_version_id == requirement.id,
+        )
+        .order_by(AgentRun.started_at.desc())
+        .limit(1)
     )
-    repository.add(run)
-    repository.flush()
-    _event(session, project.id, "agent.run_created.v1", "内容策划智能体已开始生成候选方案", {
-        "agent_run_id": run.id,
-        "model_config_version_id": selection.model_config_version_id,
-        "provider_config_version_id": selection.provider_config_version_id,
-    })
-    session.commit()
-    try:
-        result = gateway.invoke(selection, manifest_payload)
-    except AgentGatewayError as exc:
-        failed_run = session.get(AgentRun, run.id)
-        if failed_run is not None:
-            failed_run.status = "failed"
-            failed_run.error_code = exc.code
-            failed_run.error_detail = (
-                f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'))}"
-                if exc.diagnostics else str(exc)
-            )
-            failed_run.raw_output = exc.raw_output
-            failed_run.finished_at = utc_now()
-            _event(session, project.id, "agent.run_failed.v1", "内容策划智能体本轮运行失败", {
-                "agent_run_id": failed_run.id,
-                "error_code": exc.code,
-            })
-            session.commit()
-        raise
-    brief = result.output.model_dump(mode="json")
-    brief.update({
-        "duration_seconds": requirement.fields["duration_seconds"],
-        "aspect_ratio": requirement.fields["aspect_ratio"],
-        "audio_mode": requirement.fields["audio_mode"],
-    })
-    sources = {
-        key: {"type": "agent_proposal", "reference_id": run.id}
-        for key in type(result.output).model_fields
-    }
-    for key in ("duration_seconds", "aspect_ratio", "audio_mode"):
-        sources[key] = {"type": "requirement", "reference_id": requirement.id}
-    candidate = CreativeBriefCandidate(
-        project_id=project.id,
-        requirement_version_id=requirement.id,
-        agent_run_id=run.id,
-        brief=brief,
-        field_sources=sources,
+    if not latest_run or latest_run.id != payload.failed_agent_run_id:
+        raise CreationConflictError("CONTENT_PLANNER_FAILED_RUN_NOT_LATEST", "只能重跑当前需求版本最近一次失败的内容策划。")
+    if latest_run.status != "failed":
+        raise CreationConflictError("CONTENT_PLANNER_RUN_NOT_FAILED", "指定的内容策划运行不是失败状态。")
+    manifest = session.get(AgentInputManifest, latest_run.input_manifest_id)
+    if not manifest or manifest.base_requirement_version_id != requirement.id:
+        raise CreationConflictError("CONTENT_PLANNER_MANIFEST_MISSING", "失败运行的输入清单不存在或需求版本不一致。")
+    selection = gateway.select(session)
+    expected_config = (
+        latest_run.production_config_version_id,
+        latest_run.model_config_version_id,
+        latest_run.provider_config_version_id,
+        latest_run.prompt_contract_version,
+        latest_run.output_schema_version,
     )
-    repository.add(candidate)
-    repository.flush()
-    run.status = "succeeded"
-    run.parsed_candidate_id = candidate.id
-    run.raw_output = result.raw_output
-    run.provider_request_id = result.provider_request_id
-    run.token_usage = result.token_usage
-    run.finished_at = utc_now()
-    _save_receipt(session, project.id, payload.command_id, "brief.generate", "creative_brief_candidate", candidate.id)
-    _event(session, project.id, "agent.run_succeeded.v1", "内容策划智能体已返回严格候选", {
-        "agent_run_id": run.id,
-        "candidate_id": candidate.id,
-    })
-    _event(session, project.id, "plan.brief_candidate_created.v1", "内容方案候选等待用户审核", {"candidate_id": candidate.id})
-    transition_project(
+    actual_config = (
+        selection.production_config_version_id,
+        selection.model_config_version_id,
+        selection.provider_config_version_id,
+        selection.prompt_contract_version,
+        selection.output_schema_version,
+    )
+    if actual_config != expected_config:
+        raise CreationConflictError("CONTENT_PLANNER_RETRY_CONFIG_CHANGED", "当前内容策划配置与失败运行不一致，不能静默更换模型或合同后重跑。")
+    return _execute_content_planner(
         session,
         project,
-        ProjectStateTrigger.BRIEF_CANDIDATE_CREATED,
-        actor_type="system",
-        actor_id="creative-agent",
-        event_data={"candidate_id": candidate.id},
+        requirement,
+        manifest,
+        payload,
+        gateway,
+        selection,
+        retry_of_agent_run_id=latest_run.id,
     )
-    session.commit()
-    return candidate
 
 
 def decide_brief(
@@ -791,6 +901,19 @@ def planning_center_view(session: Session, project: Project) -> dict:
         next_action = PlanningNextAction(code="GENERATE_SHOT_PLAN", label="生成分镜候选", target_ids=[accepted_brief.id])
     elif current_brief:
         next_action = PlanningNextAction(code="REVIEW_CREATIVE_BRIEF", label="审核内容方案", target_ids=[current_brief.id])
+    elif planner_attempt and planner_attempt.status == "failed":
+        next_action = PlanningNextAction(
+            code="RETRY_FAILED_CREATIVE_BRIEF",
+            label="确认模型调用并重跑失败的内容策划",
+            target_ids=[planner_attempt.id],
+            incurs_model_cost=True,
+        )
+    elif planner_attempt and planner_attempt.status == "running":
+        next_action = PlanningNextAction(
+            code="WAIT_FOR_CREATIVE_BRIEF",
+            label="内容策划正在生成方案",
+            target_ids=[planner_attempt.id],
+        )
     elif planner_attempt:
         next_action = PlanningNextAction(
             code="REVISE_REQUIREMENT_FOR_NEW_BRIEF",
@@ -814,6 +937,7 @@ def planning_center_view(session: Session, project: Project) -> dict:
         "brief_history": briefs,
         "shot_plan_history": shot_candidates,
         "plan_history": [_plan_dict(session, item) for item in plans],
+        "latest_planner_run": _agent_run_view(session, planner_attempt),
         "entity_versions": [
             {
                 "id": version.id,

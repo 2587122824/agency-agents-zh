@@ -5,11 +5,17 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from ..creation.contracts import CommandContext, RequirementVersionRead
+from ..creation.contracts import AgentRunRead, CommandContext, RequirementVersionRead
 
 
 class GenerateBrief(CommandContext):
     expected_requirement_version_id: str
+
+
+class RetryBrief(CommandContext):
+    expected_requirement_version_id: str
+    failed_agent_run_id: str = Field(min_length=1, max_length=48)
+    confirm_model_cost: bool
 
 
 class DecideBrief(CommandContext):
@@ -170,5 +176,6 @@ class PlanningCenterView(BaseModel):
     brief_history: list[CreativeBriefCandidateRead]
     shot_plan_history: list[ShotPlanCandidateRead]
     plan_history: list[PlanVersionRead]
+    latest_planner_run: AgentRunRead | None
     entity_versions: list[EntityVersionSummary]
     next_action: PlanningNextAction

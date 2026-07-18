@@ -412,6 +412,7 @@ export interface PlanningCenter {
   brief_history: CreativeBriefCandidate[]
   shot_plan_history: ShotPlanCandidate[]
   plan_history: PlanVersion[]
+  latest_planner_run: AgentRun | null
   entity_versions: Array<{
     id: string
     entity_id: string

@@ -1104,19 +1104,21 @@ def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> 
     assert final["active_plan"]["id"] == plan["id"]
 
 
-def test_content_planner_failure_is_audited_and_same_requirement_is_not_retried(client: TestClient) -> None:
-    class FailingPlannerGateway(DeterministicContentPlannerGateway):
+def test_content_planner_failure_requires_explicit_exact_retry(client: TestClient) -> None:
+    class FailOncePlannerGateway(DeterministicContentPlannerGateway):
         calls = 0
 
         def invoke(self, selection, manifest_payload):
             self.calls += 1
-            raise AgentGatewayError(
-                "CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID",
-                "invalid planner output",
-                raw_output={"unexpected": True},
-            )
+            if self.calls == 1:
+                raise AgentGatewayError(
+                    "CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID",
+                    "invalid planner output",
+                    raw_output={"unexpected": True},
+                )
+            return super().invoke(selection, manifest_payload)
 
-    gateway = FailingPlannerGateway()
+    gateway = FailOncePlannerGateway()
     app.dependency_overrides[get_content_planner_gateway] = lambda: gateway
     project = create_creation_project(client)
     requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
@@ -1134,13 +1136,48 @@ def test_content_planner_failure_is_audited_and_same_requirement_is_not_retried(
     assert second.headers["x-error-code"] == "CONTENT_PLANNER_ALREADY_ATTEMPTED"
     assert gateway.calls == 1
     planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
-    assert planning["next_action"]["code"] == "REVISE_REQUIREMENT_FOR_NEW_BRIEF"
-    assert planning["next_action"]["incurs_model_cost"] is False
+    assert planning["next_action"]["code"] == "RETRY_FAILED_CREATIVE_BRIEF"
+    assert planning["next_action"]["incurs_model_cost"] is True
+    assert planning["latest_planner_run"]["status"] == "failed"
+    failed_run_id = planning["latest_planner_run"]["id"]
+    failed_manifest_id = planning["latest_planner_run"]["input_manifest_id"]
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/content-planner-runs/{failed_run_id}:retry",
+        json={
+            "command_id": "planner-retry-unconfirmed-001",
+            "expected_requirement_version_id": requirement_id,
+            "failed_agent_run_id": failed_run_id,
+            "confirm_model_cost": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "MODEL_COST_CONFIRMATION_REQUIRED"
+    assert gateway.calls == 1
+    retried = client.post(
+        f"/api/v1/projects/{project['id']}/content-planner-runs/{failed_run_id}:retry",
+        json={
+            "command_id": "planner-retry-confirmed-001",
+            "expected_requirement_version_id": requirement_id,
+            "failed_agent_run_id": failed_run_id,
+            "confirm_model_cost": True,
+        },
+    )
+    assert retried.status_code == 201
+    assert retried.json()["status"] == "awaiting_review"
+    assert gateway.calls == 2
+    recovered = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert recovered["next_action"]["code"] == "REVIEW_CREATIVE_BRIEF"
+    assert recovered["latest_planner_run"]["status"] == "succeeded"
+    assert recovered["latest_planner_run"]["input_manifest_id"] == failed_manifest_id
     with SessionLocal() as session:
-        run = session.scalar(select(AgentRun).where(AgentRun.project_id == project["id"], AgentRun.agent_role == "planner"))
-        assert run is not None
-        assert run.status == "failed"
-        assert run.raw_output == {"unexpected": True}
+        runs = list(session.scalars(
+            select(AgentRun)
+            .where(AgentRun.project_id == project["id"], AgentRun.agent_role == "planner")
+            .order_by(AgentRun.started_at)
+        ))
+        assert [run.status for run in runs] == ["failed", "succeeded"]
+        assert runs[0].raw_output == {"unexpected": True}
+        assert runs[0].input_manifest_id == runs[1].input_manifest_id
 
 
 def test_content_planner_open_questions_block_candidate_acceptance(client: TestClient) -> None:

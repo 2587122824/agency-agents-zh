@@ -92,6 +92,9 @@ export const api = {
   generateCreativeBrief: (projectId: string, requirementVersionId: string) => request<CreativeBriefCandidate>(`/projects/${projectId}/creative-brief-candidates:generate`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId }),
   }),
+  retryCreativeBrief: (projectId: string, runId: string, requirementVersionId: string) => request<CreativeBriefCandidate>(`/projects/${projectId}/content-planner-runs/${runId}:retry`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, failed_agent_run_id: runId, confirm_model_cost: true }),
+  }),
   decideCreativeBrief: (projectId: string, candidateId: string, requirementVersionId: string, accept: boolean) => request<CreativeBriefCandidate>(`/projects/${projectId}/creative-brief-candidates/${candidateId}:${accept ? 'accept' : 'reject'}`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, reason: accept ? undefined : '用户拒绝当前创意方案' }),
   }),
