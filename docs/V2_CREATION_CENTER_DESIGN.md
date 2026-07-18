@@ -1,7 +1,7 @@
 # 片场 V2 创作中心设计
 
 > 状态：设计基线
-> 版本：0.2
+> 版本：0.3
 > 更新日期：2026-07-18
 > 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
 > 系统架构：[V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)
@@ -30,8 +30,8 @@
 - 结构化需求候选与需求版本
 - 字段完整性检查和澄清问题
 - 风险分级决策账本
-- Creative Agent 候选简报
-- Director Agent 候选分镜方案
+- 内容策划候选简报
+- 分镜导演候选分镜方案
 - 方案差异、影响和费用预估
 - 用户确认与不可变 `PlanVersion`
 - Agent 运行审计、并发守卫和持久事件
@@ -54,7 +54,7 @@ flowchart LR
     UI["Creation UI"] --> CMD["Creation Application Service"]
     CMD --> MSG["Conversation Repository"]
     CMD --> CTX["Context Assembler"]
-    CTX --> AGENT["Creative / Director Agent"]
+    CTX --> AGENT["创作制片人 / 内容策划 / 分镜导演"]
     AGENT --> CAND["Candidate Store"]
     CAND --> VALID["Contract Validator"]
     VALID --> CLARIFY["Clarification Evaluator"]
@@ -93,7 +93,7 @@ sequenceDiagram
     participant API as Creation API
     participant DB as Database
     participant C as ContextAssembler
-    participant A as Creative Agent
+    participant A as 创作制片人
     participant V as Validator
 
     U->>API: AddMessage(command_id, content, attachments)
@@ -118,9 +118,9 @@ sequenceDiagram
 
 ```text
 RequirementVersion confirmed
-→ CreativeBriefCandidate
+→ 内容策划生成 CreativeBriefCandidate
 → 用户检查创意摘要和决策
-→ Director Agent 生成 ShotPlanCandidate
+→ 分镜导演生成 ShotPlanCandidate
 → Schema、实体引用、时长和一致性验证
 → 用户查看 plan diff、影响范围和预计调用
 → ConfirmPlan
@@ -337,49 +337,240 @@ stateDiagram-v2
 - 分镜 patch 只接受合同定义的逐镜头字段；未知字段、重复目标和不存在的 `shot_code` 明确失败。
 - 修订验证失败不改变来源候选；成功后只有新候选保持 `awaiting_review`。
 
-## 9. Agent 角色与合同
+## 9. 智能体编制与合同
 
-### 9.1 Creative Agent
+### 9.1 编制原则
 
-输入：`CreativeAgentInput`。
+V2 使用五个有明确分工的智能体和一个确定性生产编译器。智能体负责理解、分析和产生候选；编译器负责把已确认事实转换为可执行合同。编译器不是智能体，不调用大模型，也不自由解释自然语言。
 
-输出：
+| 分工 | 产品职责 | 权威输入 | 候选输出 | 不负责 |
+|---|---|---|---|---|
+| 创作制片人 | 对话、理解需求、提供选择并登记用户明确表达 | 当前会话、活动需求、已确认决策和附件绑定 | `CreativeTurnProposal`、`RequirementCandidate` | 写脚本、拆分镜、选择生产路由 |
+| 内容策划 | 把已确认需求组织成可拍摄的内容策略与脚本结构 | `RequirementVersion`、实体版本、已确认决策 | `CreativeBriefCandidate` | 与用户闲聊、生成镜头、创建任务 |
+| 分镜导演 | 将已确认创意简报拆为结构化镜头 | 已确认 Brief、实体版本、交付约束 | `ShotPlanCandidate` | 选择 Provider、工作流或费用方案 |
+| 质量审核智能体 | 基于素材和冻结合同给出可解释的内容质量发现 | Asset、镜头合同、实体参考、确定性检测证据 | `QCReportCandidate` | 修改素材、判定文件损坏、自动批准或重试 |
+| 剪辑助理 | 基于已审核素材提出时间线方案 | 已批准素材、镜头方案、交付与音频合同 | `TimelineCandidate` | 使用未批准素材、渲染交付、擅自补素材 |
+| 确定性生产编译器 | 精确解析已确认方案和已发布配置，生成 DAG | `PlanVersion`、配置版本、费用确认和快照输入 | `ProductionSnapshot`、DAG、WorkItem 合同 | 调用模型、猜测 ID、改写提示词或选择替代路线 |
+
+所有智能体共同遵守：
+
+- 每次运行只读取不可变 `AgentInputManifest`，不共享隐式记忆。
+- 输出必须是版本化候选合同；模型生成的 ID 不作为系统主键。
+- 运行成功不等于候选有效，候选有效不等于用户确认。
+- 不直接修改 `RequirementVersion`、`PlanVersion`、项目状态、Asset、QC 权威结论或 Timeline 活动版本。
+- 不调用生产 Provider，不创建 WorkItem，不发起付费重试。
+- 合同缺失或输出无效时明确失败，不补默认值、不修复 JSON、不切换模型。
+
+### 9.2 创作制片人
+
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。已确认设计采用 `creative-dialogue-input.v2` 和 `creative-dialogue-output.v2`：
+
+```text
+输入：runtime_context + project_context + 当前 ConversationSession 的用户/助手消息
+输出：assistant_reply + suggestion_sets[] + explicit_updates[] + clarifying_question?
+```
+
+- `assistant_reply` 先回答当前问题，不重复询问已有事实。
+- `suggestion_sets` 是有差异的创意选项，不是项目事实。
+- `explicit_updates` 只允许引用用户消息作为来源，并由后端字段目录校验。
+- 每轮最多提出一个真正阻断的澄清问题；可提供选项时直接提供选项。
+- 用户选择建议后，由独立命令创建 `RequirementCandidate`；仍需确认才能形成 `RequirementVersion`。
+- 对话达到明确配置上限时返回 `CONVERSATION_CONTEXT_LIMIT_EXCEEDED`，不隐藏摘要、筛选或截断。
+
+已归档提案中的上下文、字段目录、交互和评测细节已由本节吸收；代码实现状态仍以 [实现状态](./V2_IMPLEMENTATION_STATUS.md) 为准。
+
+### 9.3 内容策划
+
+内容策划在需求版本确认后运行，不读取自由聊天记录。输入合同 `content-planner-input.v1` 至少冻结：
+
+```text
+requirement_version_id
+confirmed_decision_ids[]
+entity_version_ids[]
+delivery_constraints
+audio_policy
+platform nullable
+template_version_id nullable
+```
+
+输出 `creative-brief-candidate.v1`：
 
 ```json
 {
-  "requirement_candidate": {},
-  "creative_brief_candidate": {},
-  "decision_proposals": [],
-  "clarification_wording_candidates": [],
-  "change_summary": []
+  "title": "清晨训练日记",
+  "content_promise": "用一次完整训练展示坚持带来的变化",
+  "audience_takeaway": "看到可执行的训练节奏",
+  "hook": {"kind": "visual_action", "content": "从系紧鞋带开始"},
+  "narrative_beats": [
+    {"beat_code": "BEAT_01", "purpose": "建立目标", "summary": "清晨到达跑道", "target_duration_ms": 5000}
+  ],
+  "script_segments": [
+    {"segment_code": "SEG_01", "beat_code": "BEAT_01", "kind": "visual_only", "spoken_text": null, "on_screen_text": null}
+  ],
+  "tone": "克制、真实",
+  "pacing": "前快后稳",
+  "platform_adaptation": null,
+  "entity_version_ids": ["entity_version_char_main_v1"],
+  "constraints_carried_forward": ["audio_policy=off"],
+  "open_questions": []
 }
 ```
 
-不得输出生产 WorkItem、供应商、工作流 ID 或“素材已就绪”。
+规则：
 
-### 9.2 Director Agent
+- `hook`、叙事节拍和脚本段必须能追溯到需求目标，不能引入未确认人物、品牌、地点或产品事实。
+- `audio_policy=off` 时，`spoken_text` 必须为 `null`，不得建立旁白、对白或 TTS 依赖；可以描述无声的说话动作。
+- 平台未指定时 `platform_adaptation` 保持 `null`，不得默认按抖音、小红书等平台改写。
+- 可一次提供最多三个完整 Brief 备选，但每个备选分别形成候选并说明结构差异，不把多个方案拼成一个。
+- 内容策划不生成镜头 ID、画面提示词、工作流参数和素材就绪声明。
 
-输入：已确认 RequirementVersion、CreativeBrief、实体版本和显式决策。
+### 9.4 分镜导演
 
-输出：`ShotPlanCandidate`，至少包含：
+分镜导演输入合同 `director-input.v1` 只接受已确认 `RequirementVersion`、已确认 Creative Brief、精确实体版本、交付约束和已确认决策。输出 `shot-plan.v2`，每个镜头至少包含：
 
 ```text
-shot_code
-sequence_number
-duration_ms
-scene_entity_version_id
-character_entity_version_ids[]
-outfit_entity_version_ids[]
-face_visibility
-text_policy
-motion_requirement
-composition
-action
+shot_code / sequence_number / duration_ms / narrative_beat_code
+scene_entity_version_id nullable
+character_entity_version_ids[] / outfit_entity_version_ids[]
+product_entity_version_ids[] / primary_reference_attachment_id nullable
+face_visibility / text_policy / motion_requirement
+composition / action / generation_description / negative_prompt nullable
+audio_requirement: off | lip_motion_only | configured
 ```
 
-所有实体引用必须精确存在。缺少场景或人物版本时返回候选验证错误，不从文字描述创建隐式实体。
+- 所有实体、节拍和附件引用必须精确存在；缺失时验证失败，不从描述创建隐式实体。
+- 同一连续场景必须引用同一场景版本；换装必须引用明确的 OutfitState 变化。
+- 每个镜头只有一个主要动作目标。需要多个训练动作时拆成多个镜头，不假设普通首帧视频会消费多图。
+- `face_visibility`、`text_policy` 和 `motion_requirement` 是后续 QC 的权威检查条件，不从提示词反推。
+- 分镜导演不得选择 Provider、模型、工作流槽位、NodeInfoList 或价格规则。
 
-### 9.3 AgentRun
+### 9.5 质量审核智能体
+
+质量审核分为确定性检查和智能内容分析，两者不可互相替代：
+
+1. `FileContractAnalyzer` 先验证文件存在、MIME、哈希、可解码性、尺寸、时长和快照引用。确定性失败直接形成权威 `blocked`，不调用质量审核智能体。
+2. 确定性检查通过后，用户或阶段命令可调用质量审核智能体，产生 `qc-report-candidate.v1`。
+3. 候选经 Schema 与证据引用校验后进入人工审核；智能体不能自行写入 `passed`、`approved` 或 `rejected`。
+
+输入至少冻结：
+
+```text
+asset_id / asset_hash / media_probe_id
+snapshot_id / dag_node_id / shot_code
+shot_contract_version / entity_reference_asset_ids[]
+deterministic_check_ids[] / qc_policy_version
+model_config_version / prompt_contract_version
+```
+
+输出结构：
+
+```json
+{
+  "overall_recommendation": "review_required",
+  "findings": [
+    {
+      "finding_code": "IDENTITY_SIMILARITY_UNCERTAIN",
+      "category": "identity",
+      "severity": "medium",
+      "confidence": 0.78,
+      "summary": "主角面部与参考存在明显差异",
+      "evidence": [{"kind": "video_frame", "asset_id": "asset_01", "timestamp_ms": 1260}],
+      "contract_refs": ["shot_004.character_entity_version_ids[0]"],
+      "suggested_review_action": "compare_reference"
+    }
+  ],
+  "analyzer_version": "visual-qc.v1"
+}
+```
+
+规则：
+
+- Finding 类别首期限定为 `identity`、`continuity`、`semantic_match`、`composition`、`visible_text`、`motion`、`audio_content`。
+- 每条 Finding 必须同时有结构化证据和合同引用；只有主观描述的结果验证失败。
+- `confidence` 只表示分析置信度，不能改变严重级别、项目状态或人工确认要求。
+- 仅当镜头合同 `face_visibility=required` 时检查正脸；`not_visible` 的背影、脚部和远景不报正脸缺失。
+- 动态检查读取 `motion_requirement`；氛围静态镜头与运动镜头使用不同已版本化规则。
+- OCR、身份相似度和语义判断默认进入 `review_required`，不作为确定性硬失败。
+- 不满意或不通过时只列出问题与受影响下游，不生成重试、替代素材或提示词修改。
+
+### 9.6 剪辑助理
+
+剪辑助理只能在质量阶段允许进入剪辑后运行。输入合同 `editor-assistant-input.v1` 至少冻结：
+
+```text
+plan_version_id / snapshot_id
+approved_asset_ids[] / qc_report_ids[]
+shot_plan_version / creative_brief_version
+delivery_contract / audio_policy / subtitle_policy
+timeline_policy_version
+```
+
+输出 `timeline-candidate.v1`：
+
+```json
+{
+  "duration_ms": 30000,
+  "tracks": [
+    {
+      "track_code": "V1",
+      "kind": "video",
+      "items": [
+        {
+          "timeline_item_code": "ITEM_001",
+          "source_asset_id": "asset_01",
+          "shot_code": "SHOT_001",
+          "source_in_ms": 0,
+          "source_out_ms": 4200,
+          "timeline_in_ms": 0,
+          "timeline_out_ms": 4200,
+          "selection_reason": "动作完整且人物审核已通过",
+          "qc_report_ids": ["qc_01"]
+        }
+      ]
+    }
+  ],
+  "gaps": [],
+  "rhythm_notes": ["开场四秒内完成目标建立"],
+  "subtitle_cues": [],
+  "audio_cues": []
+}
+```
+
+规则：
+
+- `source_asset_id` 必须属于活动快照且状态允许使用；不按文件名、镜头简称或创建顺序猜测。
+- 每个时间线条目必须保留选择理由、对应镜头和 QC 证据，便于用户取舍。
+- 缺少可用素材时写入 `gaps[]` 并保持候选不可确认；不得复用相邻素材、插黑帧或自行生成替代素材。
+- 不自动裁切、变速、循环、补帧或重排来掩盖时长不足；允许的编辑操作必须在 `timeline_policy_version` 中显式声明。
+- 音频关闭时不得创建音轨、旁白、对白、TTS 或对口型依赖；字幕策略关闭时 `subtitle_cues` 必须为空。
+- 输出只形成候选。用户可逐项取舍或修订，确认后才创建不可变 TimelineVersion。
+
+### 9.7 确定性生产编译器
+
+生产编译器位于创作智能体之后、素材生产之前，详细实现边界以 [V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md) 为准。它必须：
+
+- 只读取已确认 `PlanVersion`、精确实体/附件版本、已发布系统配置和已确认费用。
+- 对每个 `source_intent_id`、实体 ID、工作流槽位和 NodeInfoList 做精确解析；任一缺失即阻断。
+- 普通首帧视频恰好绑定一张父图片，多图输入明确失败。
+- 音频关闭时不生成 TTS、音频上传、对口型或音轨依赖。
+- 不调用大模型，不分析员工文字，不改写提示词，不选择替代工作流，不自动重试。
+
+### 9.8 智能体交接矩阵
+
+智能体之间不互相直接调用，也不把自然语言输出传给下一个智能体。每一步由应用服务读取已持久化、已验证且满足确认级别的版本：
+
+| 上游 | 可交接条件 | 下游读取内容 | 禁止传递 |
+|---|---|---|---|
+| 创作制片人 | `RequirementVersion` 已确认 | 内容策划读取需求、决策、实体与约束 | 助手聊天文案、未选择建议 |
+| 内容策划 | Creative Brief 已确认 | 分镜导演读取 Brief 版本和精确节拍 | 原始模型输出、未确认备选 |
+| 分镜导演 | `PlanVersion` 已确认 | 编译器读取结构化镜头与实体引用 | 提示解释、猜测的生产参数 |
+| 生产编译器 | 快照锁定且生产完成 | 质量审核读取 Asset 与冻结合同 | 临时 Provider 响应文本 |
+| 质量审核 | 必需素材已人工批准 | 剪辑助理读取批准素材与 QC 报告 | 未验证素材、模型的批准结论 |
+| 剪辑助理 | TimelineCandidate 已验证并由用户确认 | 交付服务读取 TimelineVersion | 建议文本、缺口候选 |
+
+任一交接条件不满足时，应用服务返回精确缺口；不能跳过上游、调用另一个智能体补写或把旧版本当作当前版本。
+
+### 9.9 AgentRun
 
 ```text
 id
@@ -770,7 +961,7 @@ RequirementDiff
 - 连续消息产生的旧 Agent 迟到结果不能覆盖新需求。
 - 同一 `command_id` 重放不重复调用模型。
 - API 重启后候选、运行状态和下一步操作一致。
-- 创建、Creative 与 Director Agent 的输入清单冻结同项目全部已解决 Decision 的精确 ID、键和值；Pending Decision 不进入清单，历史清单不补写。
+- 创作制片人、内容策划与分镜导演的输入清单冻结同项目全部已解决 Decision 的精确 ID、键和值；Pending Decision 不进入清单，历史清单不补写。
 - SSE 重连不重复应用事件。
 - Agent 失败不触发自动重试。
 
@@ -792,6 +983,21 @@ RequirementDiff
 
 测试期间不调用 RunningHub、CosyVoice 或其他生产供应商。
 
+### 20.6 智能体合同验收
+
+- 创作制片人可以理解上一轮助手给出的选项，但未被用户选择的建议不进入需求事实。
+- 内容策划在 `audio_policy=off` 时不输出口播文本；平台未指定时不做平台适配。
+- 内容策划引入未确认人物、品牌、场景或产品时，候选验证失败。
+- 分镜导演引用不存在的实体、节拍、附件或缩写 ID 时明确失败，不自动改名。
+- 分镜中的复合动作必须拆成多个镜头；普通首帧视频不会因文字描述而获得多个输入图。
+- 质量审核的每条 Finding 均含证据和合同引用；无证据发现不能进入人工审核。
+- `face_visibility=not_visible` 时不产生正脸缺失，运动镜头与静态氛围镜头使用不同动态规则。
+- 质量审核建议不能把素材自动批准、拒绝或加入重试队列。
+- 剪辑助理只引用活动快照内已批准素材，任一不存在、未批准或改名的素材 ID 均验证失败。
+- 素材不足时 TimelineCandidate 显示精确 `gaps`，不自动复用、补帧、插黑帧或生成替代素材。
+- 音频关闭时，内容策划、分镜、生产 DAG 和时间线均不存在音频依赖。
+- 任一智能体输出无效时只记录本次失败，不自动调用第二个模型或下游智能体补写。
+
 ## 21. 实施顺序
 
 ### Creation Sprint 1：权威数据
@@ -807,25 +1013,40 @@ RequirementDiff
 - RequirementCompletenessEvaluator
 - ClarificationRequest
 - 风险分级 Decision
-- Creative Agent 端口与 Mock Agent
+- 创作制片人端口与 Mock Agent
 - CreationCenterView 和 SSE
 
 ### Creation Sprint 3：方案闭环
 
 - CreativeBriefCandidate
-- Director Agent 端口与 Mock Agent
+- 内容策划、分镜导演端口与 Mock Agent
 - ShotPlanCandidate 验证
 - RequirementDiff / ChangeImpact
 - PlanVersion 确认
 
-### Creation Sprint 4：真实模型接入
+### Creation Sprint 4：创作模型接入
 
-- 显式模型配置
-- PromptContract 版本
-- Token、延迟和成本审计
-- 用户触发的重新生成
+- 创作制片人 `creative-dialogue-input/output.v2`
+- 内容策划 `content-planner-input.v1 / creative-brief-candidate.v1`
+- 分镜导演 `director-input.v1 / shot-plan.v2`
+- 显式模型、PromptContract、Token、延迟和成本审计
+- 固定验收集和用户触发的重新生成
 
-真实模型接入必须晚于 Mock Agent 合同测试。创作中心完整通过后，再进入 ProductionSnapshot 和 DAG 实现。
+### Creation Sprint 5：质量审核智能体
+
+- 保持 `FileContractAnalyzer` 的确定性检查优先级
+- `qc-report-candidate.v1`、证据引用与 Finding Schema
+- 身份、连续性、语义、文字和动态的固定验收集
+- 人工批准/拒绝门禁和受影响下游只读视图
+
+### Creation Sprint 6：剪辑助理
+
+- `editor-assistant-input.v1 / timeline-candidate.v1`
+- 已批准素材白名单、选择依据和 QC 证据
+- 素材缺口、音频关闭和字幕关闭验收
+- 用户修订与不可变 TimelineVersion 确认
+
+真实模型接入必须晚于对应 Mock Agent 和合同测试。质量审核智能体不得替代确定性文件检查，剪辑助理不得绕过人工素材批准；任何阶段都不增加自动重试或隐藏替代逻辑。
 
 ## 22. 当前实现迁移说明
 
@@ -839,10 +1060,10 @@ RequirementDiff
 
 迁移完成前，V2 页面必须明确显示“骨架状态”，不能把简化确认流程展示为完整生产合同。
 
-## 23. 创作智能体 V2 待确认提案
+## 23. 创作智能体 V2 已确认设计
 
-现有真实创作模型输入只包含用户消息，不能理解依赖助手回复的上下文指代；自然回复与字段提取共用同一个狭窄合同，也限制了主动提供方案的能力。待确认方案引入 `ConversationSession` 与不可变 `CreativeTurnProposal`，按持久化顺序向模型传递当前会话的用户和助手消息，并把自然回复、建议选项、显式用户更新和澄清问题分开验证。
+现有真实创作模型输入只包含用户消息，不能理解依赖助手回复的上下文指代；自然回复与字段提取共用同一个狭窄合同，也限制了主动提供方案的能力。已确认的下一版引入 `ConversationSession` 与不可变 `CreativeTurnProposal`，按持久化顺序向模型传递当前会话的用户和助手消息，并把自然回复、建议选项、显式用户更新和澄清问题分开验证。
 
 创意建议只作为建议事实保存，不能直接写入 `RequirementVersion`、`Decision` 或项目状态。用户选择精确提案选项后才创建待确认需求候选；字段风险和确认等级由后端版本化目录决定。上下文达到配置上限时明确阻断，不自动摘要或截断，也不增加重试、模型切换、输出修复和生产兜底。
 
-完整合同、数据结构、交互、验收集和分阶段实施顺序见 [V2 创作智能体设计提案](./archive/proposals/V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md)。本节当前不代表已实现能力。
+创作制片人及其与其他智能体的权威合同以本文第 9 节为准。原始评审过程保留在 [V2 创作智能体设计提案](./archive/proposals/V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md)；设计已经确认，但本节仍不代表运行代码已实现。

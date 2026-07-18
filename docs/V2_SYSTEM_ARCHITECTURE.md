@@ -93,6 +93,8 @@ AgentRun
 RequirementCandidate
 CreativeBriefCandidate
 ShotPlanCandidate
+QCReportCandidate
+TimelineCandidate
 ```
 
 - 每次智能体运行绑定不可变输入清单和配置版本。
@@ -159,11 +161,13 @@ draft
 → PlanVersion
 ```
 
-自然语言不能直接创建 WorkItem。当前创作智能体 V2 优化仍是待确认提案，详见 [创作中心设计](./V2_CREATION_CENTER_DESIGN.md) 和 [归档提案](./archive/proposals/V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md)。
+自然语言不能直接创建 WorkItem。创作制片人、内容策划、分镜导演、质量审核智能体和剪辑助理的合同已经确认，详见 [创作中心设计](./V2_CREATION_CENTER_DESIGN.md#9-智能体编制与合同)；运行代码是否完成以 [实现状态](./V2_IMPLEMENTATION_STATUS.md) 为准。
 
 ## 8. 生产合同与 DAG
 
 确认方案后，系统根据精确已发布配置生成生产影响分析。用户确认配置、工作量和费用后创建并锁定 `ProductionSnapshot`，再由单独命令激活和提交。
+
+生产编译器是确定性应用服务，不是 Agent。它不能调用模型、读取对话补字段、解释 Agent 文案或选择替代工作流；所有输入必须来自已确认版本与已发布配置。
 
 普通首帧视频必须恰好消费一个父图片输出。多个图片输入必须由分镜或明确多帧工作流表达，不能静默取第一张。音频关闭时，快照和 DAG 不创建 TTS 依赖。
 
@@ -183,6 +187,8 @@ draft
 - QC 不通过不会自动发起付费重试。
 - 时间线只能引用活动快照内已批准素材和精确素材 ID。
 - 最终交付必须验证 MP4 文件、尺寸、时长、哈希、时间线和快照一致性。
+- 内容质量模型只产生 `QCReportCandidate`；确定性文件阻断和人工批准仍由质量服务负责。
+- 剪辑模型只产生 `TimelineCandidate`；素材缺口必须显式列出，不能自动复用、补帧或插入替代素材。
 
 ## 11. 当前技术栈
 
