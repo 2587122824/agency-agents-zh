@@ -80,6 +80,7 @@ from ..creation.contracts import (
     MessageRead,
     RejectCandidate,
     ResolveClarification,
+    RetryCreativeTurn,
     SelectCreativeSuggestion,
     StartConversationSession,
     RequirementVersionRead,
@@ -95,6 +96,7 @@ from ..creation.service import (
     register_attachment,
     reject_candidate,
     resolve_clarification,
+    retry_creative_turn,
     select_creative_suggestion,
     start_conversation_session,
 )
@@ -1091,6 +1093,33 @@ def requirement_candidate_generate(
     project = require_project(session, project_id)
     try:
         return generate_candidate(session, project, payload, gateway)
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
+
+
+@router.post(
+    "/projects/{project_id}/creative-agent-runs/{run_id}:retry",
+    response_model=CandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def creative_agent_run_retry(
+    project_id: str,
+    run_id: str,
+    payload: RetryCreativeTurn,
+    gateway: CreativeAgentGateway = Depends(get_creative_agent_gateway),
+    session: Session = Depends(get_session),
+):
+    if payload.failed_agent_run_id != run_id:
+        raise HTTPException(status_code=409, detail="失败运行编号与路径不一致。")
+    project = require_project(session, project_id)
+    try:
+        return retry_creative_turn(session, project, payload, gateway)
     except CreationConflictError as exc:
         raise creation_error(exc) from exc
     except AgentGatewayError as exc:

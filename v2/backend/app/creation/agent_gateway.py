@@ -153,6 +153,9 @@ class HttpxAgentChatTransport:
         return data
 
 
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v3"
+
+
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
 必须只返回一个 JSON 对象，严格符合：
 {"assistant_reply":"中文回复","suggestion_sets":[{"category":"类别","title":"问题","options":[{"label":"选项名","summary":"差异说明","proposed_updates":[{"field_key":"允许字段","value":"建议值","source_message_ids":["用户消息ID"]}]}]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
@@ -172,10 +175,11 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 5. 已能直接回答或给选项时不得用问题代替答案；每轮最多一个 clarifying_question。
 6. 不得编造项目、附件、费用或生产状态，不得选择供应商、模型、工作流或预算，不得承诺已生成素材。
 7. 不得输出风险等级、Markdown 代码块、解释文字或 JSON 之外的内容。
-8. 最新用户消息出现“给我选项、几个方向、推荐、怎么选、方案”等明确请求时，必须返回 suggestion_sets，不能回复没理解，也不能用 clarifying_question 反问。
+8. 当最新用户消息的语义是在请求比较、推荐或多个可选创作方向时，必须返回 suggestion_sets；不要依赖固定关键词匹配，也不能用 clarifying_question 代替可直接给出的选项。
 9. 用户询问“内容方向”时应围绕叙事、结构、钩子或表达重点提供选择；除非用户提到人物出镜，否则不要把是否出镜当作内容方向。
 10. 除 duration_seconds、aspect_ratio、audio_mode 等合同枚举外，建议值必须使用普通用户可读的简洁中文描述，不返回 snake_case、内部代码或英文机器键。
 11. 必须遵守 active_requirement 和 confirmed_decisions；audio_mode=off 时，自然回复、选项说明和字段更新都不得建议音乐、旁白、对白、TTS 或对口型，也不得自行用字幕替代音频。
+12. confirmed_attachment_bindings 中 content_access=metadata_only 的附件只提供文件事实，不代表你看过画面、听过声音或理解过媒体内容；需要内容信息时应明确请用户描述，不得编造。
 """
 
 
@@ -212,6 +216,11 @@ class ConfiguredCreativeAgentGateway:
         if len(latest_by_key) != 1:
             raise AgentGatewayError("CREATIVE_MODEL_SELECTION_AMBIGUOUS", "当前存在多个创作模型系列，必须先在系统配置中保留一个明确选择。")
         model, provider, config = next(iter(latest_by_key.values()))
+        if model.prompt_contract_version != CREATIVE_PROMPT_CONTRACT_VERSION:
+            raise AgentGatewayError(
+                "CREATIVE_PROMPT_CONTRACT_MISMATCH",
+                "已发布创作模型配置的 Prompt 合同版本与当前运行代码不一致，请先发布匹配的系统配置版本。",
+            )
         if provider.adapter_kind != "openai_compatible":
             raise AgentGatewayError("CREATIVE_MODEL_ADAPTER_UNSUPPORTED", "当前创作模型没有绑定 OpenAI-compatible 服务供应商。")
         if "text_generation" not in provider.capabilities:
@@ -307,7 +316,7 @@ class DeterministicCreativeAgentGateway:
             base_url="https://example.invalid/v1",
             credential_ref=None,
             timeout_seconds=1,
-            prompt_contract_version="creative-dialogue.v2",
+            prompt_contract_version=CREATIVE_PROMPT_CONTRACT_VERSION,
             output_schema_version="creative-turn.v2",
             max_output_tokens=None,
             sampling={},

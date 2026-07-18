@@ -371,6 +371,112 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
     assert no_new_input.headers["x-error-code"] == "NO_NEW_REQUIREMENT_INPUT"
 
 
+def test_failed_creative_turn_requires_explicit_confirmed_retry(client: TestClient) -> None:
+    class FailingCreativeGateway(DeterministicCreativeAgentGateway):
+        def invoke(self, selection, manifest_payload):
+            raise AgentGatewayError("AGENT_MODEL_HTTP_FAILED", "测试中的创作模型调用失败。")
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    base_id = initial["active_requirement"]["id"]
+    message = client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "retry-message-001",
+        "content": "给我三个真实感训练方向。",
+    })
+    assert message.status_code == 201
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: FailingCreativeGateway()
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "retry-generate-001", "expected_base_version_id": base_id},
+    )
+    assert failed.status_code == 502
+    failed_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    failed_run = failed_view["latest_agent_run"]
+    assert failed_run["status"] == "failed"
+    assert failed_view["next_action"] == {
+        "code": "RETRY_FAILED_CREATIVE_TURN",
+        "target_ids": [failed_run["id"]],
+        "label": "确认后重跑失败轮次",
+        "incurs_model_cost": True,
+        "incurs_production_cost": False,
+    }
+
+    not_confirmed = client.post(
+        f"/api/v1/projects/{project['id']}/creative-agent-runs/{failed_run['id']}:retry",
+        json={
+            "command_id": "retry-command-001",
+            "expected_base_version_id": base_id,
+            "failed_agent_run_id": failed_run["id"],
+            "confirm_model_cost": False,
+        },
+    )
+    assert not_confirmed.status_code == 409
+    assert not_confirmed.headers["x-error-code"] == "MODEL_COST_CONFIRMATION_REQUIRED"
+
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: DeterministicCreativeAgentGateway()
+    retried = client.post(
+        f"/api/v1/projects/{project['id']}/creative-agent-runs/{failed_run['id']}:retry",
+        json={
+            "command_id": "retry-command-002",
+            "expected_base_version_id": base_id,
+            "failed_agent_run_id": failed_run["id"],
+            "confirm_model_cost": True,
+        },
+    )
+    assert retried.status_code == 201
+    assert retried.json()["status"] == "awaiting_review"
+    retried_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert retried_view["latest_agent_run"]["status"] == "succeeded"
+    assert retried_view["current_candidate"]["id"] == retried.json()["id"]
+
+
+def test_creative_manifest_exposes_attachment_metadata_without_media_content(client: TestClient) -> None:
+    class CapturingCreativeGateway(DeterministicCreativeAgentGateway):
+        manifest_payload = None
+
+        def invoke(self, selection, manifest_payload):
+            self.manifest_payload = manifest_payload
+            return super().invoke(selection, manifest_payload)
+
+    gateway = CapturingCreativeGateway()
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: gateway
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    attachment = client.post(
+        f"/api/v1/projects/{project['id']}/attachments",
+        data={"command_id": "metadata-attachment-001"},
+        files={"file": ("reference.png", b"\x89PNG\r\n\x1a\nmetadata", "image/png")},
+    ).json()
+    binding = client.post(
+        f"/api/v1/projects/{project['id']}/attachments/{attachment['id']}/bindings",
+        json={"command_id": "metadata-binding-001", "binding_type": "inspiration_only"},
+    )
+    assert binding.status_code == 201
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "metadata-message-001",
+        "content": "参考我上传的文件给出方向。",
+    })
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "metadata-generate-001", "expected_base_version_id": initial["active_requirement"]["id"]},
+    )
+    assert generated.status_code == 201
+    facts = gateway.manifest_payload["project_context"]["confirmed_attachment_bindings"]
+    assert facts == [{
+        "id": binding.json()["id"],
+        "type": "inspiration_only",
+        "entity_id": None,
+        "attachment": {
+            "id": attachment["id"],
+            "original_filename": "reference.png",
+            "mime_type": "image/png",
+            "byte_size": len(b"\x89PNG\r\n\x1a\nmetadata"),
+            "verification_status": "verified",
+            "content_access": "metadata_only",
+        },
+    }]
+
+
 def test_creative_suggestion_selection_creates_candidate_without_confirming_requirement(client: TestClient) -> None:
     project = create_creation_project(client)
     initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()

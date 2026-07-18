@@ -85,6 +85,10 @@ export function ProjectPage() {
   useEffect(() => { setCurrentProjectId(projectId); return () => setCurrentProjectId(null) }, [projectId, setCurrentProjectId])
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['creation-center', projectId] })
   const generate = useMutation({ mutationFn: () => api.generateRequirementCandidate(projectId, center.data!.active_requirement.id), onSettled: refresh })
+  const retryCreativeTurn = useMutation({
+    mutationFn: () => api.retryCreativeTurn(projectId, center.data!.latest_agent_run!.id, center.data!.active_requirement.id),
+    onSettled: refresh,
+  })
   const addMessage = useMutation({ mutationFn: (content: string) => api.addMessage(projectId, content), onSuccess: async () => { setMessage(''); await refresh(); generate.mutate() } })
   const startConversation = useMutation({ mutationFn: () => api.startConversationSession(projectId), onSuccess: async () => { setMessage(''); setCustomSuggestion(''); setCustomSuggestionSetId(null); await refresh() } })
   const selectSuggestion = useMutation({
@@ -129,7 +133,7 @@ export function ProjectPage() {
   const creation = center.data
   const candidate = creation.current_candidate
   const clarification = creation.pending_clarifications[0]
-  const error = commandError(addMessage, generate, startConversation, selectSuggestion, accept, reject, resolveClarification, register, bind)
+  const error = commandError(addMessage, generate, retryCreativeTurn, startConversation, selectSuggestion, accept, reject, resolveClarification, register, bind)
   const activeProposal = creation.active_creative_proposal
 
   return <>
@@ -143,7 +147,7 @@ export function ProjectPage() {
 
     <main className={styles.layout}>
       <section className={styles.conversation}>
-        <div className={styles.panelHeading}><div><MessageSquareText size={18} /><div><span>需求对话</span><h2>创作输入</h2></div></div><div className={styles.conversationTools}><b>{creation.messages.length} 条消息</b><button type="button" title="开启新对话，保留已确认项目需求" disabled={startConversation.isPending || generate.isPending} onClick={() => startConversation.mutate()}><MessageSquarePlus size={15} /></button></div></div>
+        <div className={styles.panelHeading}><div><MessageSquareText size={18} /><div><span>需求对话</span><h2>创作输入</h2></div></div><div className={styles.conversationTools}><b>{creation.messages.length} 条消息</b><button type="button" title="开启新对话，保留已确认项目需求" disabled={startConversation.isPending || generate.isPending || retryCreativeTurn.isPending} onClick={() => startConversation.mutate()}><MessageSquarePlus size={15} /></button></div></div>
         <div className={styles.messages} ref={messagesRef}>
           {creation.messages.length ? creation.messages.map(item => <article key={item.id} data-role={item.role}><span>{item.role === 'assistant' ? 'AI' : item.role === 'system' ? '系统' : '你'}</span><div><p>{item.content}</p><small>{item.role === 'assistant' ? '创作制片人 · ' : ''}{new Date(item.created_at).toLocaleString('zh-CN')}</small></div></article>) : <div className={styles.emptyMessages}><MessageSquareText size={25} /><strong>从明确的创作需求开始</strong><p>描述内容、受众或风格。未说出的可选信息会保持未指定。</p></div>}
           {activeProposal?.suggestion_sets.map(suggestionSet => {
@@ -166,12 +170,16 @@ export function ProjectPage() {
               </form> : <button type="button" className={styles.otherSuggestion} onClick={() => setCustomSuggestionSetId(suggestionSet.id)}>其他想法</button>)}
             </section>
           })}
-          {generate.isPending && <article data-role="assistant" data-pending><span>AI</span><div><p>正在理解本轮需求…</p><small>只运行当前配置的创作模型</small></div></article>}
-          {generate.error && <article data-role="system" data-error><span>系统</span><div><p>本轮智能体没有返回回复：{generate.error.message}</p><small>没有自动重试，也没有切换模型</small></div></article>}
+          {activeProposal?.clarifying_question?.prompt && <section className={styles.agentQuestion}>
+            <CircleAlert size={17} />
+            <div><span>创作制片人需要你补充</span><strong>{activeProposal.clarifying_question.prompt}</strong><small>直接在下方输入回答，本轮问题不会自动修改正式需求。</small></div>
+          </section>}
+          {(generate.isPending || retryCreativeTurn.isPending) && <article data-role="assistant" data-pending><span>AI</span><div><p>{retryCreativeTurn.isPending ? '正在按你的确认重跑本轮…' : '正在理解本轮需求…'}</p><small>只运行当前配置的创作模型</small></div></article>}
+          {(generate.error || retryCreativeTurn.error) && <article data-role="system" data-error><span>系统</span><div><p>本轮智能体没有返回回复：{(generate.error || retryCreativeTurn.error)?.message}</p><small>没有自动重试，也没有切换模型</small></div></article>}
         </div>
         <form className={styles.composer} onSubmit={submit}>
           <textarea value={message} onChange={event => setMessage(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder="继续补充创作要求…" rows={3} />
-          <div><button type="button" className="secondaryButton" onClick={() => fileInput.current?.click()} disabled={register.isPending}><Paperclip size={15} />{register.isPending ? '上传中…' : '上传附件'}</button><input ref={fileInput} hidden type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,video/mp4" onChange={event => { const file = event.target.files?.[0]; if (file) register.mutate(file); event.target.value = '' }} /><span>发送后调用当前配置的创作模型；不会启动图片或视频生产</span><button className="primaryButton" disabled={!message.trim() || addMessage.isPending || generate.isPending}>发送<Send size={15} /></button></div>
+          <div><button type="button" className="secondaryButton" onClick={() => fileInput.current?.click()} disabled={register.isPending}><Paperclip size={15} />{register.isPending ? '上传中…' : '上传附件'}</button><input ref={fileInput} hidden type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,video/mp4" onChange={event => { const file = event.target.files?.[0]; if (file) register.mutate(file); event.target.value = '' }} /><span>发送后调用当前配置的创作模型；不会启动图片或视频生产</span><button className="primaryButton" disabled={!message.trim() || addMessage.isPending || generate.isPending || retryCreativeTurn.isPending}>发送<Send size={15} /></button></div>
         </form>
       </section>
 
@@ -188,13 +196,14 @@ export function ProjectPage() {
             return <div className={styles.field} key={key}><span>{fieldLabels[key] ?? key}</span><p>{key === 'duration_seconds' ? `${String(value)} 秒` : key === 'audio_mode' ? value === 'off' ? '关闭' : '旁白' : String(value)}</p><small data-agent={source?.type === 'agent_proposal'}>{sourceLabels[source?.type ?? 'user'] ?? source?.type ?? '用户输入'}</small></div>
           })}
         </div>
-        {candidate ? <div className={styles.candidateActions}><div><strong>候选不会自动生效</strong><span>确认后将创建 requirement_v{creation.active_requirement.version_number + 1}，旧版本保留。</span></div><button className="secondaryButton" onClick={() => reject.mutate()} disabled={reject.isPending}><X size={15} />拒绝</button><button className="primaryButton" onClick={() => accept.mutate()} disabled={accept.isPending}><Check size={15} />确认并创建新版本</button></div> : creation.next_action.code === 'GENERATE_REQUIREMENT_CANDIDATE' ? <div className={styles.generateBox}><div><Sparkles size={18} /><p><strong>整理最新消息为候选</strong><span>只读取活动版本、未消费消息和已确认附件绑定。</span></p></div><button className="primaryButton" onClick={() => generate.mutate()} disabled={generate.isPending}>{generate.isPending ? '正在生成…' : '运行需求整理智能体'}</button></div> : creation.next_action.code === 'REQUIREMENT_READY_FOR_PLANNING' ? <div className={styles.readyBox}><CheckCircle2 size={19} /><p><strong>需求版本已完整</strong><span>下一阶段将基于当前版本生成创意方案候选。</span></p><Link className="primaryButton" to={`/projects/${projectId}/plan`}>进入方案确认</Link></div> : null}
+        {candidate ? <div className={styles.candidateActions}><div><strong>候选不会自动生效</strong><span>确认后将创建 requirement_v{creation.active_requirement.version_number + 1}，旧版本保留。</span></div><button className="secondaryButton" onClick={() => reject.mutate()} disabled={reject.isPending}><X size={15} />拒绝</button><button className="primaryButton" onClick={() => accept.mutate()} disabled={accept.isPending}><Check size={15} />确认并创建新版本</button></div> : creation.next_action.code === 'GENERATE_REQUIREMENT_CANDIDATE' ? <div className={styles.generateBox}><div><Sparkles size={18} /><p><strong>整理最新消息为候选</strong><span>只读取活动版本、未消费消息和已确认附件绑定。</span></p></div><button className="primaryButton" onClick={() => generate.mutate()} disabled={generate.isPending}>{generate.isPending ? '正在生成…' : '运行需求整理智能体'}</button></div> : creation.next_action.code === 'RETRY_FAILED_CREATIVE_TURN' && creation.latest_agent_run ? <div className={styles.retryBox}><div><CircleAlert size={18} /><p><strong>本轮创作智能体运行失败</strong><span>{creation.latest_agent_run.error_detail || '模型没有返回有效候选。'} 系统不会自动重试。</span></p></div><button className="primaryButton" onClick={() => retryCreativeTurn.mutate()} disabled={retryCreativeTurn.isPending}>{retryCreativeTurn.isPending ? '正在重跑…' : '确认模型调用并重跑本轮'}</button></div> : creation.next_action.code === 'REQUIREMENT_READY_FOR_PLANNING' ? <div className={styles.readyBox}><CheckCircle2 size={19} /><p><strong>已具备最低策划条件</strong><span>未填写的可选信息保持未指定，下一阶段将基于当前正式版本生成方案候选。</span></p><Link className="primaryButton" to={`/projects/${projectId}/plan`}>进入方案确认</Link></div> : null}
       </section>
 
       <aside className={styles.side}>
-        <section className={styles.nextAction}><span>唯一下一步</span><h3>{creation.next_action.label}</h3><p>模型费用：否 · 生产费用：否</p></section>
+        <section className={styles.nextAction}><span>唯一下一步</span><h3>{creation.next_action.label}</h3><p>模型调用：{creation.next_action.incurs_model_cost ? '是' : '否'} · 生产费用：{creation.next_action.incurs_production_cost ? '是' : '否'}</p></section>
         <section className={styles.attachments}>
           <div className={styles.sideHeading}><div><Paperclip size={17} /><h3>附件与绑定</h3></div><b>{creation.attachments.length}</b></div>
+          <p className={styles.attachmentNotice}>当前创作模型只读取文件名、类型和用途绑定，不读取图片、音频或视频内容。</p>
           {creation.attachments.length ? creation.attachments.map(item => <AttachmentRow key={item.id} item={item} busy={bind.isPending} onBind={type => bind.mutate({ attachmentId: item.id, type })} />) : <div className={styles.sideEmpty}>附件上传和用途绑定是两个独立状态。</div>}
         </section>
         <section className={styles.history}>

@@ -45,6 +45,7 @@ from .contracts import (
     NextAction,
     RejectCandidate,
     ResolveClarification,
+    RetryCreativeTurn,
     SelectCreativeSuggestion,
     StartConversationSession,
 )
@@ -307,6 +308,22 @@ def _manifest_payload(
     messages = repository.manifest_messages(project.id, conversation_session.id)
     bindings = repository.confirmed_bindings(project.id)
     decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
+    attachment_bindings = []
+    for binding in bindings:
+        attachment = repository.attachment(binding.attachment_id)
+        attachment_bindings.append({
+            "id": binding.id,
+            "type": binding.binding_type,
+            "entity_id": binding.entity_id,
+            "attachment": None if not attachment else {
+                "id": attachment.id,
+                "original_filename": attachment.original_filename,
+                "mime_type": attachment.mime_type,
+                "byte_size": attachment.byte_size,
+                "verification_status": attachment.verification_status,
+                "content_access": "metadata_only",
+            },
+        })
     return {
         "runtime_context": {
             "assistant_name": "片场创作制片人",
@@ -318,10 +335,7 @@ def _manifest_payload(
             "project_id": project.id,
             "project_stage": project.status,
             "active_requirement": {"id": base.id, "fields": base.fields},
-            "confirmed_attachment_bindings": [
-                {"id": item.id, "type": item.binding_type, "entity_id": item.entity_id}
-                for item in bindings
-            ],
+            "confirmed_attachment_bindings": attachment_bindings,
             "confirmed_decisions": [
                 {"id": item.id, "key": item.key, "label": item.label, "value": item.value, "source": item.source}
                 for item in decisions
@@ -424,6 +438,8 @@ def generate_candidate(
     project: Project,
     payload: GenerateCandidate,
     gateway: CreativeAgentGateway,
+    *,
+    retry_failed_agent_run_id: str | None = None,
 ) -> RequirementCandidate:
     repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
@@ -454,7 +470,29 @@ def generate_candidate(
     current_message_id = user_messages[-1]["id"]
     if current_message_id in consumed_message_ids(session, base):
         raise CreationConflictError("NO_NEW_REQUIREMENT_INPUT", "没有尚未处理的新需求消息。")
-    if current_message_id in attempted_message_ids:
+    if retry_failed_agent_run_id is not None:
+        failed_run = repository.agent_run(retry_failed_agent_run_id)
+        failed_manifest = (
+            repository.agent_manifest(failed_run.input_manifest_id)
+            if failed_run and failed_run.project_id == project.id else None
+        )
+        current_message_ids = [item["id"] for item in conversation_messages]
+        if (
+            not failed_run
+            or failed_run.agent_role != "creative"
+            or failed_run.status != "failed"
+            or not failed_manifest
+            or failed_manifest.base_requirement_version_id != base.id
+            or failed_manifest.message_ids != current_message_ids
+        ):
+            raise CreationConflictError(
+                "FAILED_AGENT_RUN_NOT_RETRYABLE",
+                "只能重跑当前需求版本和当前会话中最近一次失败的创作智能体运行。",
+            )
+        if repository.reviewable_candidates(project.id):
+            raise CreationConflictError("CANDIDATE_ALREADY_EXISTS", "当前已有待审核需求候选，不能重跑失败轮次。")
+        manifest_payload["runtime_context"]["retry_of_agent_run_id"] = failed_run.id
+    elif current_message_id in attempted_message_ids:
         raise CreationConflictError("AGENT_RUN_ALREADY_ATTEMPTED", "当前消息已经运行过创作智能体；失败后不会自动或重复调用模型。")
     selection = gateway.select(session)
     manifest_payload["system_config_version"] = selection.production_config_version_id
@@ -607,6 +645,27 @@ def generate_candidate(
         _event(session, project.id, "candidate.no_change.v1", "本轮回复没有提出结构化字段变更", {"candidate_id": candidate.id})
     session.commit()
     return candidate
+
+
+def retry_creative_turn(
+    session: Session,
+    project: Project,
+    payload: RetryCreativeTurn,
+    gateway: CreativeAgentGateway,
+) -> RequirementCandidate:
+    if not payload.confirm_model_cost:
+        raise CreationConflictError("MODEL_COST_CONFIRMATION_REQUIRED", "请明确确认本次重跑会再次调用当前创作模型。")
+    return generate_candidate(
+        session,
+        project,
+        GenerateCandidate(
+            command_id=payload.command_id,
+            actor_id=payload.actor_id,
+            expected_base_version_id=payload.expected_base_version_id,
+        ),
+        gateway,
+        retry_failed_agent_run_id=payload.failed_agent_run_id,
+    )
 
 
 def accept_candidate(
@@ -1086,17 +1145,22 @@ def creation_center_view(session: Session, project: Project) -> dict:
     elif unbound:
         next_action = NextAction(code="CLASSIFY_ATTACHMENT", target_ids=[item.id for item in unbound], label="确认附件用途")
     elif unconsumed_messages and not {item.id for item in unconsumed_messages}.issubset(attempted_message_ids):
-        next_action = NextAction(code="GENERATE_REQUIREMENT_CANDIDATE", label="生成需求候选")
+        next_action = NextAction(code="GENERATE_REQUIREMENT_CANDIDATE", label="生成需求候选", incurs_model_cost=True)
     elif unconsumed_messages:
         latest_attempt = next((item for item in runs if item.status in {"succeeded", "failed"}), None)
         if latest_attempt and latest_attempt.status == "succeeded":
-            next_action = NextAction(code="CONTINUE_REQUIREMENT_CONVERSATION", label="继续补充创作需求")
+            next_action = NextAction(code="CONTINUE_REQUIREMENT_CONVERSATION", label="继续补充创作需求", incurs_model_cost=True)
         else:
-            next_action = NextAction(code="AGENT_RUN_FAILED", label="查看本轮智能体失败原因")
+            next_action = NextAction(
+                code="RETRY_FAILED_CREATIVE_TURN",
+                target_ids=[latest_attempt.id] if latest_attempt else [],
+                label="确认后重跑失败轮次",
+                incurs_model_cost=True,
+            )
     elif messages:
         next_action = NextAction(code="REQUIREMENT_READY_FOR_PLANNING", label="进入创意方案规划")
     else:
-        next_action = NextAction(code="ADD_REQUIREMENT_MESSAGE", label="补充创作需求")
+        next_action = NextAction(code="ADD_REQUIREMENT_MESSAGE", label="补充创作需求", incurs_model_cost=True)
     return {
         "project_id": project.id,
         "conversation_session_id": conversation.id,

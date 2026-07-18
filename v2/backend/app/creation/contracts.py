@@ -24,6 +24,12 @@ class GenerateCandidate(CommandContext):
     expected_base_version_id: str
 
 
+class RetryCreativeTurn(CommandContext):
+    expected_base_version_id: str
+    failed_agent_run_id: str = Field(min_length=1, max_length=48)
+    confirm_model_cost: bool
+
+
 class SelectCreativeSuggestion(CommandContext):
     expected_base_version_id: str
     suggestion_set_id: str = Field(min_length=1, max_length=48)

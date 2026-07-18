@@ -54,6 +54,12 @@ export const api = {
   generateRequirementCandidate: (projectId: string, baseVersionId: string) => request<RequirementCandidate>(`/projects/${projectId}/requirement-candidates:generate`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId }),
   }),
+  retryCreativeTurn: (projectId: string, runId: string, baseVersionId: string) => request<RequirementCandidate>(`/projects/${projectId}/creative-agent-runs/${runId}:retry`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId,
+      failed_agent_run_id: runId, confirm_model_cost: true,
+    }),
+  }),
   selectCreativeSuggestion: (projectId: string, proposalId: string, baseVersionId: string, suggestionSetId: string, optionId: string) => request<RequirementCandidate>(`/projects/${projectId}/creative-proposals/${proposalId}:select`, {
     method: 'POST', body: JSON.stringify({
       command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId,

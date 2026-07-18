@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260718_20 (head)` |
-| 已发布配置 | `production_config_4b73a69055c842d087ee98da549fa13f`，版本 9 |
+| 已发布配置 | `production_config_878ea9f930eb4bc09c207409aecfb8e6`，版本 10 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -64,7 +64,7 @@ v2/runtime/worker.err.log
 
 ## 4. 当前创作智能体事实
 
-当前运行代码使用 `creative-dialogue-input.v2 / output.v2 / prompt.v2`：
+当前运行代码使用 `creative-dialogue-input.v2 / output.v2 / prompt.v3`：
 
 - 每条成功保存的用户消息触发一次明确模型调用。
 - 严格返回自然回复、建议集合、用户明确更新和最多一个澄清问题。
@@ -72,8 +72,10 @@ v2/runtime/worker.err.log
 - 建议以 2–3 个可点击选项展示，后端生成稳定 ID；点击只创建选择记录和待确认需求候选。
 - 支持版本化需求字段目录，风险等级由后端决定，不接受模型自报。
 - 达到消息数或字节上限时明确阻断；用户可以显式开启新会话，正式需求继续保留。
-- 模型调用失败不自动重试，同一批消息不重复调用。
+- 模型调用失败不自动重试；用户可以在主流程中确认模型费用后显式重跑精确失败轮次，新运行必须保持同一需求版本和完全一致的消息 ID 清单，不换模型、不修复输出。
 - 助手消息关联精确 AgentRun，Provider 请求 ID 和 token 用量可审计。
+- 澄清问题必须直接展示；模型调用提示读取真实下一步费用事实，需求面板使用“已具备最低策划条件”而非虚假的“完整”。
+- 附件只传递文件事实和已确认用途绑定，并标记 `content_access=metadata_only`；当前模型不读取图片、音频或视频内容。
 
 内容策划运行代码使用 `content-planner-input.v1 / creative-brief-candidate.v1 / content-planner-prompt.v1`：
 
@@ -113,6 +115,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-18 | 创作制片人补充澄清展示、附件 metadata-only 边界、真实费用提示和用户确认的精确失败轮次重跑；保持无自动重试、无模型切换、无输出修复 |
 | 2026-07-18 | 创作制片人 V2 完整会话、可点击建议、精确选择、新会话边界和真实 DeepSeek 验收完成 |
 | 2026-07-18 | 内容策划独立模型分工、严格 Brief 合同、真实 DeepSeek、方案页审核和配置 v9 完成 |
 | 2026-07-18 | 五个智能体、确定性生产编译器、交接矩阵与验收合同完成设计确认，尚未完整实施 |
@@ -129,7 +132,7 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`340 passed`
+- 后端测试：`141 passed`
 - Python compileall：通过
 - Vite production build：通过
 - Alembic runtime/head：`20260718_20`

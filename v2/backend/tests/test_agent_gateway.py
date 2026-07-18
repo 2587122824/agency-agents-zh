@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -13,6 +14,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 
 from v2.backend.app.creation.agent_gateway import (
     AgentGatewayError,
+    CREATIVE_PROMPT_CONTRACT_VERSION,
     ConfiguredCreativeAgentGateway,
     CreativeAgentSelection,
 )
@@ -29,6 +31,14 @@ class FakeTransport:
         return self.response
 
 
+class FakeSelectionSession:
+    def __init__(self, rows: list[tuple]) -> None:
+        self.rows = rows
+
+    def execute(self, _statement):
+        return self.rows
+
+
 def selection() -> CreativeAgentSelection:
     return CreativeAgentSelection(
         production_config_version_id="production_config_1",
@@ -40,7 +50,7 @@ def selection() -> CreativeAgentSelection:
         base_url="https://api.example.test/v1",
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
-        prompt_contract_version="creative-dialogue.v2",
+        prompt_contract_version=CREATIVE_PROMPT_CONTRACT_VERSION,
         output_schema_version="creative-turn.v2",
         max_output_tokens=1000,
         sampling={"temperature": 0.2, "unsupported": "ignored"},
@@ -62,6 +72,48 @@ def manifest() -> dict:
         ]},
         "system_config_version": "production_config_1",
     }
+
+
+def configured_rows(prompt_contract_version: str) -> list[tuple]:
+    model = SimpleNamespace(
+        id="model_config_1",
+        config_key="creative-model",
+        version_number=1,
+        display_name="Creative model",
+        provider_model_id="configured-model",
+        prompt_contract_version=prompt_contract_version,
+        output_schema_version="creative-turn.v2",
+        max_output_tokens=1000,
+        sampling={"temperature": 0.2},
+    )
+    provider = SimpleNamespace(
+        id="provider_config_1",
+        display_name="DeepSeek",
+        adapter_kind="openai_compatible",
+        capabilities=["text_generation"],
+        base_url="https://api.example.test/v1",
+        credential_ref="env://TEST_AGENT_KEY",
+        request_timeout_seconds=30,
+    )
+    config = SimpleNamespace(id="production_config_1")
+    return [(model, provider, config)]
+
+
+def test_configured_gateway_selects_matching_prompt_contract() -> None:
+    gateway = ConfiguredCreativeAgentGateway()
+
+    selected = gateway.select(FakeSelectionSession(configured_rows(CREATIVE_PROMPT_CONTRACT_VERSION)))
+
+    assert selected.prompt_contract_version == CREATIVE_PROMPT_CONTRACT_VERSION
+
+
+def test_configured_gateway_rejects_stale_prompt_contract() -> None:
+    gateway = ConfiguredCreativeAgentGateway()
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.select(FakeSelectionSession(configured_rows("v2.creative-dialogue-prompt.v2")))
+
+    assert raised.value.code == "CREATIVE_PROMPT_CONTRACT_MISMATCH"
 
 
 def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> None:
