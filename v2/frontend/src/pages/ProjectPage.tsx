@@ -80,11 +80,10 @@ export function ProjectPage() {
   const { projectId = '' } = useParams()
   const [message, setMessage] = useState('')
   const [clarificationValue, setClarificationValue] = useState('')
-  const [customSuggestionSetId, setCustomSuggestionSetId] = useState<string | null>(null)
-  const [customSuggestion, setCustomSuggestion] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
   const initializationRequested = useRef<string | null>(null)
   const queryClient = useQueryClient()
   const setCurrentProjectId = useWorkspace(state => state.setCurrentProjectId)
@@ -105,12 +104,12 @@ export function ProjectPage() {
     mutationFn: (content: string) => api.addMessage(projectId, content, center.data?.active_creative_proposal?.assistant_message_id ?? null),
     onSuccess: async () => { setMessage(''); await refresh(); generate.mutate() },
   })
-  const startConversation = useMutation({ mutationFn: () => api.startConversationSession(projectId), onSuccess: async () => { setMessage(''); setCustomSuggestion(''); setCustomSuggestionSetId(null); await refresh() } })
+  const startConversation = useMutation({ mutationFn: () => api.startConversationSession(projectId), onSuccess: async () => { setMessage(''); await refresh() } })
   const selectSuggestion = useMutation({
     mutationFn: ({ proposalId, suggestionSetId, optionId }: { proposalId: string; suggestionSetId: string; optionId: string }) => api.selectCreativeSuggestion(
       projectId, proposalId, center.data!.active_requirement.id, suggestionSetId, optionId,
     ),
-    onSuccess: async () => { setCustomSuggestionSetId(null); setCustomSuggestion(''); await refresh() },
+    onSuccess: refresh,
   })
   const accept = useMutation({ mutationFn: () => api.acceptRequirementCandidate(projectId, center.data!.current_candidate!.id, center.data!.active_requirement.id), onSuccess: refresh })
   const reject = useMutation({ mutationFn: () => api.rejectRequirementCandidate(projectId, center.data!.current_candidate!.id, '用户认为当前候选不符合创作方向'), onSuccess: refresh })
@@ -191,10 +190,7 @@ export function ProjectPage() {
                 <small>{option.summary}</small>
                 <div className={styles.suggestionChanges}>{option.proposed_updates.map(update => <em key={update.field_key}>选择后设置：{fieldLabels[update.field_key] ?? update.field_key} · {displaySuggestionValue(update.field_key, update.value)}</em>)}</div>
               </button>)}</div>
-              {!selected && (customSuggestionSetId === suggestionSet.id ? <form className={styles.customSuggestion} onSubmit={event => { event.preventDefault(); const content = customSuggestion.trim(); if (!content) return; addMessage.mutate(content); setCustomSuggestion(''); setCustomSuggestionSetId(null) }}>
-                <input autoFocus value={customSuggestion} onChange={event => setCustomSuggestion(event.target.value)} placeholder="输入你的想法" />
-                <button className="primaryButton" disabled={!customSuggestion.trim() || addMessage.isPending}>发送</button>
-              </form> : <button type="button" className={styles.otherSuggestion} onClick={() => setCustomSuggestionSetId(suggestionSet.id)}>其他想法</button>)}
+              {!selected && <button type="button" className={styles.otherSuggestion} onClick={() => composerRef.current?.focus()}>其他想法</button>}
             </section>
           })}
           {activeProposal?.clarifying_question?.prompt && <section className={styles.agentQuestion}>
@@ -205,7 +201,7 @@ export function ProjectPage() {
           {(initializeConversation.error || generate.error || retryCreativeTurn.error) && <article data-role="system" data-error><span>系统</span><div><p>本轮智能体没有返回回复：{(initializeConversation.error || generate.error || retryCreativeTurn.error)?.message}</p><small>没有自动重试，也没有切换模型</small></div></article>}
         </div>
         <form className={styles.composer} onSubmit={submit}>
-          <textarea value={message} onChange={event => setMessage(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={creationOpen ? '继续补充、修改或组合你的想法…' : '需求已确认；修改时需要显式开启下一版草稿'} rows={3} disabled={!creationOpen || initializeConversation.isPending} />
+          <textarea ref={composerRef} value={message} onChange={event => setMessage(event.target.value)} onKeyDown={handleComposerKeyDown} placeholder={creationOpen ? '继续补充、修改或组合你的想法…' : '需求已确认；修改时需要显式开启下一版草稿'} rows={3} disabled={!creationOpen || initializeConversation.isPending} />
           <div><button type="button" className="secondaryButton" onClick={() => fileInput.current?.click()} disabled={!creationOpen || initializeConversation.isPending || register.isPending}><Paperclip size={15} />{register.isPending ? '上传中…' : '上传附件'}</button><input ref={fileInput} hidden type="file" accept="image/png,image/jpeg,image/webp,audio/wav,audio/mpeg,video/mp4" onChange={event => { const file = event.target.files?.[0]; if (file) register.mutate(file); event.target.value = '' }} /><span>{creationOpen ? '每轮都会继承当前草稿，不会覆盖前面已选内容' : '当前需求版本已进入策划阶段'}</span><button className="primaryButton" disabled={!creationOpen || initializeConversation.isPending || !message.trim() || addMessage.isPending || generate.isPending || retryCreativeTurn.isPending}>发送<Send size={15} /></button></div>
         </form>
       </section>
