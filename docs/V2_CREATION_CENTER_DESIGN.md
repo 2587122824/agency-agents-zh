@@ -459,7 +459,8 @@ template_version_id nullable
 shot_code / sequence_number / duration_ms / narrative_beat_code
 scene_entity_version_id nullable
 character_entity_version_ids[] / outfit_entity_version_ids[]
-product_entity_version_ids[] / primary_reference_attachment_id nullable
+product_entity_version_ids[] / primary_reference_entity_version_id nullable
+continuity_group_id nullable / action_count = 1
 face_visibility / text_policy / motion_requirement
 composition / action / generation_description / negative_prompt nullable
 audio_requirement: off | lip_motion_only | configured
@@ -470,6 +471,10 @@ audio_requirement: off | lip_motion_only | configured
 - 每个镜头只有一个主要动作目标。需要多个训练动作时拆成多个镜头，不假设普通首帧视频会消费多图。
 - `face_visibility`、`text_policy` 和 `motion_requirement` 是后续 QC 的权威检查条件，不从提示词反推。
 - 分镜导演不得选择 Provider、模型、工作流槽位、NodeInfoList 或价格规则。
+
+当前实现使用独立 `director` 模型配置和 `director-input.v1 / shot-plan.v2 / director-prompt.v1`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天，也不读取生产工作流配置。输出经严格 Pydantic Schema 后继续执行确定性跨字段验证：镜头与顺序连续、每个节拍至少一个镜头且时长精确相等、实体与主参考来自白名单、同一连续组的场景/人物/服装签名完全一致、`action_count` 恒为 1、关闭音频时只允许 `off` 或 `lip_motion_only`。后端不通过动作描述关键词猜测复合动作。
+
+每个活动需求版本只自动尝试一次。模型调用、Schema 或跨字段验证失败时只记录失败 `AgentRun`、原始输出和 Provider 审计，不创建候选，不修复输出、不自动重试、不切换配置。方案页可由用户明确确认再次调用模型后，精确重跑最近一次失败的分镜导演；重跑必须复用原 `AgentInputManifest`，且生产配置、模型、Provider、Prompt 与输出 Schema 全部相同。成功只创建待审核 `ShotPlanCandidate`，用户接受后才创建不可变 `PlanVersion`。
 
 ### 9.5 质量审核智能体
 

@@ -101,6 +101,9 @@ export const api = {
   generateShotPlan: (projectId: string, requirementVersionId: string, briefCandidateId: string) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates:generate`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, creative_brief_candidate_id: briefCandidateId }),
   }),
+  retryShotPlan: (projectId: string, runId: string, requirementVersionId: string) => request<ShotPlanCandidate>(`/projects/${projectId}/director-runs/${runId}:retry`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, failed_agent_run_id: runId, confirm_model_cost: true }),
+  }),
   reviseShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, rowVersion: number, patches: Array<{ target_shot_code: string; changes: Partial<ShotContract> }>) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:revise`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, expected_candidate_row_version: rowVersion, patches }),
   }),

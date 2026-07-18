@@ -365,6 +365,9 @@ export interface ShotContract {
   shot_code: string
   sequence_number: number
   duration_ms: number
+  narrative_beat_code: string | null
+  continuity_group_id: string | null
+  action_count: 1
   shot_type: string
   scene_entity_version_id: string | null
   character_entity_version_ids: string[]
@@ -374,6 +377,7 @@ export interface ShotContract {
   face_visibility: string
   text_policy: string
   motion_requirement: string
+  audio_requirement: 'off' | 'lip_motion_only' | 'configured'
   composition: string
   action: string
   visual_prompt: string | null
@@ -423,6 +427,7 @@ export interface PlanningCenter {
   shot_plan_history: ShotPlanCandidate[]
   plan_history: PlanVersion[]
   latest_planner_run: AgentRun | null
+  latest_director_run: AgentRun | null
   entity_versions: Array<{
     id: string
     entity_id: string

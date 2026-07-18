@@ -28,6 +28,12 @@ class GenerateShotPlan(CommandContext):
     creative_brief_candidate_id: str
 
 
+class RetryShotPlan(CommandContext):
+    expected_requirement_version_id: str
+    failed_agent_run_id: str = Field(min_length=1, max_length=48)
+    confirm_model_cost: bool
+
+
 class DecideShotPlan(CommandContext):
     expected_requirement_version_id: str
     expected_candidate_row_version: int = Field(ge=1)
@@ -39,6 +45,9 @@ class ShotContractPatch(BaseModel):
     shot_code: str | None = Field(default=None, min_length=1, max_length=32)
     sequence_number: int | None = Field(default=None, ge=1)
     duration_ms: int | None = Field(default=None, gt=0)
+    narrative_beat_code: str | None = Field(default=None, pattern=r"^BEAT_[0-9]{2,3}$")
+    continuity_group_id: str | None = Field(default=None, pattern=r"^CONT-[0-9]{3}$")
+    action_count: Literal[1] | None = None
     shot_type: str | None = Field(default=None, min_length=1, max_length=40)
     scene_entity_version_id: str | None = Field(default=None, max_length=48)
     character_entity_version_ids: list[str] | None = None
@@ -48,6 +57,7 @@ class ShotContractPatch(BaseModel):
     face_visibility: Literal["required", "optional", "not_visible"] | None = None
     text_policy: Literal["forbidden", "allowed", "required"] | None = None
     motion_requirement: Literal["static", "moderate", "significant"] | None = None
+    audio_requirement: Literal["off", "lip_motion_only", "configured"] | None = None
     composition: str | None = Field(default=None, min_length=1, max_length=500)
     action: str | None = Field(default=None, min_length=1, max_length=1000)
     visual_prompt: str | None = Field(default=None, min_length=1, max_length=4000)
@@ -57,7 +67,7 @@ class ShotContractPatch(BaseModel):
     def validate_patch(self):
         if not self.model_fields_set:
             raise ValueError("at least one structured shot field is required")
-        nullable = {"scene_entity_version_id", "primary_reference_entity_version_id", "negative_prompt"}
+        nullable = {"scene_entity_version_id", "primary_reference_entity_version_id", "negative_prompt", "continuity_group_id"}
         invalid_nulls = [field for field in self.model_fields_set if field not in nullable and getattr(self, field) is None]
         if invalid_nulls:
             raise ValueError(f"fields cannot be null: {', '.join(sorted(invalid_nulls))}")
@@ -98,6 +108,9 @@ class ShotContract(BaseModel):
     shot_code: str
     sequence_number: int
     duration_ms: int
+    narrative_beat_code: str | None = None
+    continuity_group_id: str | None = None
+    action_count: int = 1
     shot_type: str
     scene_entity_version_id: str | None
     character_entity_version_ids: list[str]
@@ -107,6 +120,7 @@ class ShotContract(BaseModel):
     face_visibility: str
     text_policy: str
     motion_requirement: str
+    audio_requirement: str = "off"
     composition: str
     action: str
     visual_prompt: str | None = None
@@ -177,5 +191,6 @@ class PlanningCenterView(BaseModel):
     shot_plan_history: list[ShotPlanCandidateRead]
     plan_history: list[PlanVersionRead]
     latest_planner_run: AgentRunRead | None
+    latest_director_run: AgentRunRead | None
     entity_versions: list[EntityVersionSummary]
     next_action: PlanningNextAction

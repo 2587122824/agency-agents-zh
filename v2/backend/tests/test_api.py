@@ -26,6 +26,7 @@ from v2.backend.app.providers import ProviderExecutionRequest, ProviderPollResul
 from v2.backend.app.providers.registry import ProviderAdapterRegistry
 from v2.backend.app.creation.agent_gateway import AgentGatewayError, CreativeAgentOutput, CreativeAgentResult, DeterministicCreativeAgentGateway, get_creative_agent_gateway
 from v2.backend.app.planning.agent_gateway import ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
+from v2.backend.app.planning.director_gateway import DeterministicDirectorGateway, get_director_gateway
 
 
 @pytest.fixture()
@@ -36,10 +37,12 @@ def client():
         shutil.rmtree(TEST_RUNTIME)
     app.dependency_overrides[get_creative_agent_gateway] = lambda: DeterministicCreativeAgentGateway()
     app.dependency_overrides[get_content_planner_gateway] = lambda: DeterministicContentPlannerGateway()
+    app.dependency_overrides[get_director_gateway] = lambda: DeterministicDirectorGateway()
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_creative_agent_gateway, None)
     app.dependency_overrides.pop(get_content_planner_gateway, None)
+    app.dependency_overrides.pop(get_director_gateway, None)
     engine.dispose()
     TEST_DATABASE.unlink(missing_ok=True)
     if TEST_RUNTIME.exists():
@@ -1186,6 +1189,7 @@ def test_content_planner_failure_requires_explicit_exact_retry(client: TestClien
                     "CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID",
                     "invalid planner output",
                     raw_output={"unexpected": True},
+                    diagnostics=[{"type": "value_error", "ctx": {"error": ValueError("invalid segment")}}],
                 )
             return super().invoke(selection, manifest_payload)
 
@@ -1249,6 +1253,80 @@ def test_content_planner_failure_requires_explicit_exact_retry(client: TestClien
         assert [run.status for run in runs] == ["failed", "succeeded"]
         assert runs[0].raw_output == {"unexpected": True}
         assert runs[0].input_manifest_id == runs[1].input_manifest_id
+
+
+def test_director_failure_requires_explicit_exact_retry(client: TestClient) -> None:
+    class FailOnceDirectorGateway(DeterministicDirectorGateway):
+        calls = 0
+
+        def invoke(self, selection, manifest_payload):
+            self.calls += 1
+            if self.calls == 1:
+                raise AgentGatewayError("DIRECTOR_OUTPUT_SCHEMA_INVALID", "invalid director output", raw_output={"unexpected": True})
+            return super().invoke(selection, manifest_payload)
+
+    gateway = FailOnceDirectorGateway()
+    app.dependency_overrides[get_director_gateway] = lambda: gateway
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "director-failure-brief-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "director-failure-brief-accept", "expected_requirement_version_id": requirement_id},
+    )
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "director-failure-generate-001",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    )
+    assert failed.status_code == 502
+    assert failed.headers["x-error-code"] == "DIRECTOR_OUTPUT_SCHEMA_INVALID"
+    repeated = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "director-failure-generate-002",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    )
+    assert repeated.status_code == 409
+    assert repeated.headers["x-error-code"] == "DIRECTOR_ALREADY_ATTEMPTED"
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["next_action"]["code"] == "RETRY_FAILED_SHOT_PLAN"
+    run = planning["latest_director_run"]
+    assert run["status"] == "failed"
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/director-runs/{run['id']}:retry",
+        json={
+            "command_id": "director-failure-retry-unconfirmed",
+            "expected_requirement_version_id": requirement_id,
+            "failed_agent_run_id": run["id"],
+            "confirm_model_cost": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "MODEL_COST_CONFIRMATION_REQUIRED"
+    recovered = client.post(
+        f"/api/v1/projects/{project['id']}/director-runs/{run['id']}:retry",
+        json={
+            "command_id": "director-failure-retry-confirmed",
+            "expected_requirement_version_id": requirement_id,
+            "failed_agent_run_id": run["id"],
+            "confirm_model_cost": True,
+        },
+    )
+    assert recovered.status_code == 201
+    assert recovered.json()["status"] == "awaiting_review"
+    assert gateway.calls == 2
+    after = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert after["next_action"]["code"] == "REVIEW_SHOT_PLAN"
+    assert after["latest_director_run"]["input_manifest_id"] == run["input_manifest_id"]
 
 
 def test_content_planner_open_questions_block_candidate_acceptance(client: TestClient) -> None:

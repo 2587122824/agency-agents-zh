@@ -17,9 +17,9 @@ type EntityOption = {
 type ShotPatch = { target_shot_code: string; changes: Partial<ShotContract> }
 
 const fields: Array<keyof ShotContract> = [
-  'shot_code', 'sequence_number', 'duration_ms', 'shot_type', 'scene_entity_version_id',
+  'shot_code', 'sequence_number', 'duration_ms', 'narrative_beat_code', 'continuity_group_id', 'shot_type', 'scene_entity_version_id',
   'character_entity_version_ids', 'outfit_entity_version_ids', 'product_entity_version_ids',
-  'primary_reference_entity_version_id', 'face_visibility', 'text_policy', 'motion_requirement',
+  'primary_reference_entity_version_id', 'face_visibility', 'text_policy', 'motion_requirement', 'audio_requirement',
   'composition', 'action', 'visual_prompt', 'negative_prompt',
 ]
 
@@ -92,6 +92,8 @@ export function ShotPlanRevisionEditor({
         <label>镜头编号<input value={shot.shot_code} maxLength={32} onChange={event => update(index, 'shot_code', event.target.value)} /></label>
         <label>顺序<input type="number" min={1} value={shot.sequence_number} onChange={event => update(index, 'sequence_number', Number(event.target.value))} /></label>
         <label>时长（毫秒）<input type="number" min={1} value={shot.duration_ms} onChange={event => update(index, 'duration_ms', Number(event.target.value))} /></label>
+        <label>内容节拍<input value={shot.narrative_beat_code ?? ''} maxLength={32} onChange={event => update(index, 'narrative_beat_code', event.target.value)} /></label>
+        <label>连续组<input value={shot.continuity_group_id ?? ''} maxLength={32} placeholder="不连续则留空" onChange={event => update(index, 'continuity_group_id', event.target.value || null)} /></label>
         <label>镜头类型<input value={shot.shot_type} maxLength={40} onChange={event => update(index, 'shot_type', event.target.value)} /></label>
       </div>
       <div className={styles.textGrid}>
@@ -106,6 +108,7 @@ export function ShotPlanRevisionEditor({
         <label>人脸可见性<select value={shot.face_visibility} onChange={event => update(index, 'face_visibility', event.target.value)}><option value="required">必须可见</option><option value="optional">可选</option><option value="not_visible">不可见</option></select></label>
         <label>画面文字<select value={shot.text_policy} onChange={event => update(index, 'text_policy', event.target.value)}><option value="forbidden">禁止</option><option value="allowed">允许</option><option value="required">必须出现</option></select></label>
         <label>动态要求<select value={shot.motion_requirement} onChange={event => update(index, 'motion_requirement', event.target.value)}><option value="static">静态</option><option value="moderate">中等</option><option value="significant">明显运动</option></select></label>
+        <label>声音要求<select value={shot.audio_requirement} onChange={event => update(index, 'audio_requirement', event.target.value as ShotContract['audio_requirement'])}><option value="off">无声音依赖</option><option value="lip_motion_only">仅说话动作</option><option value="configured">使用项目声音配置</option></select></label>
         <label>场景版本<select value={shot.scene_entity_version_id ?? ''} onChange={event => { const next = event.target.value || null; setDrafts(items => items.map((item, shotIndex) => shotIndex !== index ? item : { ...item, scene_entity_version_id: next, primary_reference_entity_version_id: item.primary_reference_entity_version_id === item.scene_entity_version_id ? null : item.primary_reference_entity_version_id })) }}><option value="">未绑定</option>{scenes.map(entity => <option key={entity.id} value={entity.id}>{entity.display_name} · v{entity.version_number}</option>)}</select></label>
       </div>
       <div className={styles.entityGrid}>

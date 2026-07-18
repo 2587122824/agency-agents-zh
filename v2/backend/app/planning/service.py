@@ -22,8 +22,6 @@ from ..db.models import (
     AgentInputManifest,
     AgentRun,
     CreativeBriefCandidate,
-    Entity,
-    EntityVersion,
     PlanVersion,
     Project,
     RequirementVersion,
@@ -34,7 +32,8 @@ from ..db.models import (
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from .agent_gateway import ContentPlannerGateway, ContentPlannerSelection
-from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, ReviseShotPlan
+from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, RetryShotPlan, ReviseShotPlan
+from .director_gateway import DirectorGateway, DirectorSelection
 
 
 def _planning(session: Session) -> PlanningRepository:
@@ -67,57 +66,6 @@ def _agent_run_view(session: Session, run: AgentRun | None) -> dict | None:
         "finished_at": run.finished_at,
         "input_manifest": manifest,
     }
-
-
-def _confirmed_binding_versions(session: Session, project_id: str) -> dict[str, list[str]]:
-    result: dict[str, list[str]] = {
-        "identity_reference": [],
-        "outfit_reference": [],
-        "scene_reference": [],
-        "product_reference": [],
-        "voice_sample": [],
-    }
-    rows = _planning(session).confirmed_binding_versions(project_id)
-    for row in rows:
-        if row.binding_type in result and row.entity_version_id not in result[row.binding_type]:
-            result[row.binding_type].append(row.entity_version_id)
-    return result
-
-
-def _create_manifest(
-    session: Session,
-    project: Project,
-    requirement: RequirementVersion,
-    role: str,
-    extra: dict | None = None,
-) -> AgentInputManifest:
-    repository = _planning(session)
-    bindings = _confirmed_binding_versions(session, project.id)
-    decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
-    payload = {
-        "active_requirement": {"id": requirement.id, "fields": requirement.fields},
-        "confirmed_entity_versions": bindings,
-        "confirmed_decisions": [
-            {"id": item.id, "key": item.key, "label": item.label, "value": item.value, "source": item.source}
-            for item in decisions
-        ],
-        "system_config_version": "v2.creation.mock.v1",
-        **(extra or {}),
-    }
-    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    binding_ids = repository.confirmed_binding_ids(project.id)
-    manifest = AgentInputManifest(
-        project_id=project.id,
-        base_requirement_version_id=requirement.id,
-        decision_ids=[item.id for item in decisions],
-        attachment_binding_ids=binding_ids,
-        input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
-        payload=payload,
-        system_config_version=f"v2.{role}.mock.v1",
-    )
-    repository.add(manifest)
-    repository.flush()
-    return manifest
 
 
 def _content_planner_manifest_payload(
@@ -157,6 +105,168 @@ def _content_planner_manifest_payload(
         "platform": fields.get("platform"),
         "template_version_id": fields.get("template_version_id"),
     }
+
+
+def _director_manifest_payload(
+    session: Session,
+    project: Project,
+    requirement: RequirementVersion,
+    brief: CreativeBriefCandidate,
+) -> dict:
+    repository = _planning(session)
+    decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
+    entity_rows = repository.active_entity_versions(project.id)
+    fields = dict(requirement.fields)
+    entities = []
+    for version, entity in entity_rows:
+        if version.status != "confirmed" or entity.status != "active":
+            continue
+        attachment = repository.attachment(version.source_attachment_id) if version.source_attachment_id else None
+        entities.append({
+            "id": version.id,
+            "entity_id": entity.id,
+            "entity_type": entity.entity_type,
+            "display_name": entity.display_name,
+            "version_number": version.version_number,
+            "attributes": version.attributes,
+            "source_attachment": ({
+                "id": attachment.id,
+                "mime_type": attachment.mime_type,
+                "verified": attachment.verification_status == "verified",
+            } if attachment else None),
+        })
+    return {
+        "contract_version": "director-input.v1",
+        "project_id": project.id,
+        "requirement_version": {"id": requirement.id, "fields": fields},
+        "accepted_creative_brief": {"id": brief.id, "brief": brief.brief},
+        "confirmed_decisions": [{"id": item.id, "key": item.key, "value": item.value} for item in decisions],
+        "confirmed_entity_versions": entities,
+        "delivery_constraints": {
+            "duration_ms": int(fields["duration_seconds"]) * 1000,
+            "aspect_ratio": fields["aspect_ratio"],
+        },
+        "audio_policy": fields["audio_mode"],
+    }
+
+
+def _execute_director(
+    session: Session,
+    project: Project,
+    requirement: RequirementVersion,
+    brief: CreativeBriefCandidate,
+    manifest: AgentInputManifest,
+    payload: GenerateShotPlan | RetryShotPlan,
+    gateway: DirectorGateway,
+    selection: DirectorSelection,
+    *,
+    retry_of_agent_run_id: str | None = None,
+) -> ShotPlanCandidate:
+    repository = _planning(session)
+    run = AgentRun(
+        project_id=project.id,
+        agent_role="director",
+        status="running",
+        input_manifest_id=manifest.id,
+        model_provider=selection.model_provider,
+        model_name=selection.model_name,
+        production_config_version_id=selection.production_config_version_id,
+        model_config_version_id=selection.model_config_version_id,
+        provider_config_version_id=selection.provider_config_version_id,
+        prompt_contract_version=selection.prompt_contract_version,
+        output_schema_version=selection.output_schema_version,
+        started_at=utc_now(),
+    )
+    repository.add(run)
+    repository.flush()
+    _event(session, project.id, "agent.run_created.v1", "分镜导演智能体已开始生成候选", {
+        "agent_run_id": run.id,
+        "model_config_version_id": selection.model_config_version_id,
+        "provider_config_version_id": selection.provider_config_version_id,
+        "retry_of_agent_run_id": retry_of_agent_run_id,
+    })
+    session.commit()
+    try:
+        result = gateway.invoke(selection, manifest.payload)
+    except AgentGatewayError as exc:
+        failed_run = session.get(AgentRun, run.id)
+        if failed_run is not None:
+            failed_run.status = "failed"
+            failed_run.error_code = exc.code
+            failed_run.error_detail = (
+                f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'), default=str)}"
+                if exc.diagnostics else str(exc)
+            )
+            failed_run.raw_output = exc.raw_output
+            failed_run.finished_at = utc_now()
+            _event(session, project.id, "agent.run_failed.v1", "分镜导演智能体本轮运行失败", {
+                "agent_run_id": failed_run.id,
+                "error_code": exc.code,
+                "retry_of_agent_run_id": retry_of_agent_run_id,
+            })
+            session.commit()
+        raise
+    shots = [item.model_dump(mode="json") for item in result.output.shots]
+    errors = validate_shots(session, project.id, requirement, shots, brief)
+    if errors:
+        failed_run = session.get(AgentRun, run.id)
+        if failed_run is not None:
+            failed_run.status = "failed"
+            failed_run.error_code = "DIRECTOR_OUTPUT_CONTRACT_INVALID"
+            failed_run.error_detail = "分镜导演输出未通过项目分镜合同验证。"
+            failed_run.raw_output = result.raw_output
+            failed_run.provider_request_id = result.provider_request_id
+            failed_run.token_usage = result.token_usage
+            failed_run.finished_at = utc_now()
+            _event(session, project.id, "agent.run_failed.v1", "分镜导演智能体本轮运行失败", {
+                "agent_run_id": failed_run.id,
+                "error_code": failed_run.error_code,
+                "retry_of_agent_run_id": retry_of_agent_run_id,
+            })
+            session.commit()
+        raise AgentGatewayError(
+            "DIRECTOR_OUTPUT_CONTRACT_INVALID",
+            "分镜导演输出未通过项目分镜合同验证。",
+            raw_output=result.raw_output,
+            diagnostics=errors,
+        )
+    candidate = ShotPlanCandidate(
+        project_id=project.id,
+        requirement_version_id=requirement.id,
+        creative_brief_candidate_id=brief.id,
+        agent_run_id=run.id,
+        revision_number=1,
+        source="director_agent",
+        status="awaiting_review",
+        shots=shots,
+        validation_errors=[],
+        created_by=payload.actor_id,
+    )
+    repository.add(candidate)
+    repository.flush()
+    run.status = "succeeded"
+    run.parsed_candidate_id = candidate.id
+    run.raw_output = result.raw_output
+    run.provider_request_id = result.provider_request_id
+    run.token_usage = result.token_usage
+    run.finished_at = utc_now()
+    _save_receipt(session, project.id, payload.command_id, "shot_plan.retry" if retry_of_agent_run_id else "shot_plan.generate", "shot_plan_candidate", candidate.id)
+    _event(session, project.id, "agent.run_succeeded.v1", "分镜导演智能体已返回严格候选", {
+        "agent_run_id": run.id,
+        "candidate_id": candidate.id,
+        "retry_of_agent_run_id": retry_of_agent_run_id,
+    })
+    _event(session, project.id, "plan.shot_candidate_created.v1", "分镜候选等待用户审核", {"candidate_id": candidate.id})
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.SHOT_CANDIDATE_CREATED,
+        actor_type="system",
+        actor_id="director-agent",
+        event_data={"candidate_id": candidate.id},
+    )
+    session.commit()
+    return candidate
 
 
 def _execute_content_planner(
@@ -202,7 +312,7 @@ def _execute_content_planner(
             failed_run.status = "failed"
             failed_run.error_code = exc.code
             failed_run.error_detail = (
-                f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'))}"
+                f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'), default=str)}"
                 if exc.diagnostics else str(exc)
             )
             failed_run.raw_output = exc.raw_output
@@ -258,36 +368,6 @@ def _execute_content_planner(
     )
     session.commit()
     return candidate
-
-
-def _start_run(session: Session, project: Project, manifest: AgentInputManifest, role: str, schema: str) -> AgentRun:
-    repository = _planning(session)
-    run = AgentRun(
-        project_id=project.id,
-        agent_role=role,
-        status="running",
-        input_manifest_id=manifest.id,
-        model_provider="mock",
-        model_name=f"deterministic-{role}-v1",
-        prompt_contract_version=f"{role}.v1",
-        output_schema_version=schema,
-        started_at=utc_now(),
-    )
-    repository.add(run)
-    repository.flush()
-    _event(session, project.id, "agent.run_created.v1", f"{role.title()} Mock Agent 已开始", {"agent_run_id": run.id})
-    return run
-
-
-def _finish_run(session: Session, project: Project, run: AgentRun, candidate_id: str, raw_output: dict) -> None:
-    run.status = "succeeded"
-    run.parsed_candidate_id = candidate_id
-    run.raw_output = raw_output
-    run.finished_at = utc_now()
-    _event(session, project.id, "agent.run_succeeded.v1", f"{run.agent_role.title()} Mock Agent 已返回候选", {
-        "agent_run_id": run.id,
-        "candidate_id": candidate_id,
-    })
 
 
 def generate_brief(
@@ -459,47 +539,13 @@ def decide_brief(
     return candidate
 
 
-def _build_shots(session: Session, project: Project, requirement: RequirementVersion, brief: CreativeBriefCandidate) -> list[dict]:
-    beats = brief.brief.get("narrative_beats")
-    if not isinstance(beats, list) or not beats:
-        raise CreationConflictError("BRIEF_SCHEMA_UNSUPPORTED", "当前内容方案不是 creative-brief-candidate.v1，不能交给分镜导演。")
-    categorized: dict[str, list[str]] = {"character": [], "outfit": [], "scene": [], "product": []}
-    for version_id in brief.brief.get("entity_version_ids") or []:
-        version = session.get(EntityVersion, version_id)
-        entity = session.get(Entity, version.entity_id) if version else None
-        if not version or not entity or version.project_id != project.id or version.status != "confirmed":
-            raise CreationConflictError("BRIEF_ENTITY_VERSION_INVALID", f"内容方案引用了不可用的实体版本：{version_id}。")
-        if entity.entity_type in categorized:
-            categorized[entity.entity_type].append(version_id)
-    characters = categorized["character"]
-    outfits = categorized["outfit"]
-    scenes = categorized["scene"]
-    products = categorized["product"]
-    motion_levels = ["moderate", "significant", "moderate"]
-    return [
-        {
-            "shot_code": f"SH-{index:03d}",
-            "sequence_number": index,
-            "duration_ms": int(beat["target_duration_ms"]),
-            "shot_type": "character_action" if characters else "concept",
-            "scene_entity_version_id": scenes[0] if scenes else None,
-            "character_entity_version_ids": characters,
-            "outfit_entity_version_ids": outfits,
-            "product_entity_version_ids": products,
-            "primary_reference_entity_version_id": None,
-            "face_visibility": "optional" if characters else "not_visible",
-            "text_policy": "forbidden",
-            "motion_requirement": motion_levels[min(index - 1, len(motion_levels) - 1)],
-            "composition": str(beat["purpose"]),
-            "action": str(beat["summary"]),
-            "visual_prompt": f"{brief.brief['content_promise']}。{beat['summary']}。",
-            "negative_prompt": None,
-        }
-        for index, beat in enumerate(beats, start=1)
-    ]
-
-
-def validate_shots(session: Session, project_id: str, requirement: RequirementVersion, shots: list[dict]) -> list[dict]:
+def validate_shots(
+    session: Session,
+    project_id: str,
+    requirement: RequirementVersion,
+    shots: list[dict],
+    brief: CreativeBriefCandidate | None = None,
+) -> list[dict]:
     repository = _planning(session)
     errors: list[dict] = []
     if not shots:
@@ -509,11 +555,29 @@ def validate_shots(session: Session, project_id: str, requirement: RequirementVe
         errors.append({"code": "SHOT_DURATION_MISMATCH", "field": "duration_ms"})
     codes = [item.get("shot_code") for item in shots]
     sequences = [item.get("sequence_number") for item in shots]
-    if len(codes) != len(set(codes)) or len(sequences) != len(set(sequences)) or sequences != list(range(1, len(shots) + 1)):
+    expected_codes = [f"SH-{index:03d}" for index in range(1, len(shots) + 1)]
+    if codes != expected_codes or len(sequences) != len(set(sequences)) or sequences != list(range(1, len(shots) + 1)):
         errors.append({"code": "SHOT_ID_OR_SEQUENCE_INVALID", "field": "shot_code"})
+    beat_durations = {
+        item.get("beat_code"): int(item.get("target_duration_ms", 0))
+        for item in ((brief.brief.get("narrative_beats") if brief else None) or [])
+    }
+    actual_by_beat = {code: 0 for code in beat_durations}
+    continuity: dict[str, tuple] = {}
     referenced = set()
     for item in shots:
         shot_code = item.get("shot_code")
+        beat_code = item.get("narrative_beat_code")
+        if beat_code not in beat_durations:
+            errors.append({"code": "NARRATIVE_BEAT_REFERENCE_INVALID", "shot_code": shot_code})
+        else:
+            actual_by_beat[beat_code] += int(item.get("duration_ms", 0))
+        if item.get("action_count") != 1:
+            errors.append({"code": "SHOT_PRIMARY_ACTION_COUNT_INVALID", "shot_code": shot_code})
+        audio_requirement = item.get("audio_requirement")
+        allowed_audio = {"off", "lip_motion_only"} if requirement.fields.get("audio_mode") == "off" else {"off", "lip_motion_only", "configured"}
+        if audio_requirement not in allowed_audio:
+            errors.append({"code": "SHOT_AUDIO_REQUIREMENT_INVALID", "shot_code": shot_code})
         visual_prompt = item.get("visual_prompt")
         if not isinstance(visual_prompt, str) or not visual_prompt.strip() or len(visual_prompt.strip()) > 4000:
             errors.append({"code": "VISUAL_PROMPT_INVALID", "shot_code": shot_code})
@@ -553,6 +617,19 @@ def validate_shots(session: Session, project_id: str, requirement: RequirementVe
             errors.append({"code": "TEXT_POLICY_INVALID", "shot_code": item.get("shot_code")})
         if item.get("motion_requirement") not in {"static", "moderate", "significant"}:
             errors.append({"code": "MOTION_REQUIREMENT_INVALID", "shot_code": item.get("shot_code")})
+        continuity_group_id = item.get("continuity_group_id")
+        if continuity_group_id is not None:
+            signature = (
+                item.get("scene_entity_version_id"),
+                tuple(item.get("character_entity_version_ids") or []),
+                tuple(item.get("outfit_entity_version_ids") or []),
+            )
+            previous = continuity.setdefault(continuity_group_id, signature)
+            if previous != signature:
+                errors.append({"code": "CONTINUITY_GROUP_ENTITY_MISMATCH", "shot_code": shot_code, "continuity_group_id": continuity_group_id})
+    for beat_code, target_duration in beat_durations.items():
+        if actual_by_beat[beat_code] != target_duration:
+            errors.append({"code": "NARRATIVE_BEAT_DURATION_MISMATCH", "narrative_beat_code": beat_code})
     for version_id in referenced:
         version = repository.entity_version(version_id)
         if not version or version.project_id != project_id or version.status != "confirmed":
@@ -586,7 +663,12 @@ def validate_shots(session: Session, project_id: str, requirement: RequirementVe
     return errors
 
 
-def generate_shot_plan(session: Session, project: Project, payload: GenerateShotPlan) -> ShotPlanCandidate:
+def generate_shot_plan(
+    session: Session,
+    project: Project,
+    payload: GenerateShotPlan,
+    gateway: DirectorGateway,
+) -> ShotPlanCandidate:
     repository = _planning(session)
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
@@ -602,46 +684,96 @@ def generate_shot_plan(session: Session, project: Project, payload: GenerateShot
     existing = repository.reviewable_shot_plan_for_requirement(project.id, requirement.id)
     if existing:
         raise CreationConflictError("SHOT_PLAN_ALREADY_EXISTS", "当前需求版本已有待审分镜候选。")
-    manifest = _create_manifest(session, project, requirement, "director", {
-        "accepted_creative_brief": {"id": brief.id, "brief": brief.brief},
-    })
-    run = _start_run(session, project, manifest, "director", "shot-plan.v2")
-    shots = _build_shots(session, project, requirement, brief)
-    errors = validate_shots(session, project.id, requirement, shots)
-    candidate = ShotPlanCandidate(
-        project_id=project.id,
-        requirement_version_id=requirement.id,
-        creative_brief_candidate_id=brief.id,
-        agent_run_id=run.id,
-        revision_number=1,
-        source="director_agent",
-        status="validation_failed" if errors else "awaiting_review",
-        shots=shots,
-        validation_errors=errors,
-        created_by=payload.actor_id,
-    )
-    repository.add(candidate)
-    repository.flush()
-    _finish_run(session, project, run, candidate.id, {"shot_plan_candidate": shots})
-    if errors:
-        run.status = "validation_failed"
-        _event(session, project.id, "plan.shot_candidate_validation_failed.v1", "分镜候选合同验证失败", {
-            "candidate_id": candidate.id,
-            "errors": errors,
-        })
-    else:
-        _event(session, project.id, "plan.shot_candidate_created.v1", "分镜候选等待用户审核", {"candidate_id": candidate.id})
-        transition_project(
-            session,
-            project,
-            ProjectStateTrigger.SHOT_CANDIDATE_CREATED,
-            actor_type="system",
-            actor_id="director-agent",
-            event_data={"candidate_id": candidate.id},
+    previous_attempt = session.scalar(
+        select(AgentRun)
+        .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+        .where(
+            AgentRun.project_id == project.id,
+            AgentRun.agent_role == "director",
+            AgentInputManifest.base_requirement_version_id == requirement.id,
         )
-    _save_receipt(session, project.id, payload.command_id, "shot_plan.generate", "shot_plan_candidate", candidate.id)
-    session.commit()
-    return candidate
+        .limit(1)
+    )
+    if previous_attempt:
+        raise CreationConflictError("DIRECTOR_ALREADY_ATTEMPTED", "当前需求版本已经运行过分镜导演；系统不会自动或重复调用模型。")
+    selection = gateway.select(session)
+    manifest_payload = _director_manifest_payload(session, project, requirement, brief)
+    manifest_payload["system_config_version"] = selection.production_config_version_id
+    serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    manifest = AgentInputManifest(
+        project_id=project.id,
+        base_requirement_version_id=requirement.id,
+        decision_ids=[item["id"] for item in manifest_payload["confirmed_decisions"]],
+        attachment_binding_ids=repository.confirmed_binding_ids(project.id),
+        system_config_version=selection.production_config_version_id,
+        input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        payload=manifest_payload,
+    )
+    repository.add(manifest)
+    repository.flush()
+    return _execute_director(session, project, requirement, brief, manifest, payload, gateway, selection)
+
+
+def retry_failed_shot_plan(
+    session: Session,
+    project: Project,
+    payload: RetryShotPlan,
+    gateway: DirectorGateway,
+) -> ShotPlanCandidate:
+    repository = _planning(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, ShotPlanCandidate)
+    if not payload.confirm_model_cost:
+        raise CreationConflictError("MODEL_COST_CONFIRMATION_REQUIRED", "请明确确认本次重跑会再次调用当前分镜导演模型。")
+    requirement = active_requirement(session, project.id)
+    if not requirement or requirement.id != payload.expected_requirement_version_id:
+        raise CreationConflictError("REQUIREMENT_VERSION_CONFLICT", "活动需求版本已变化，不能重跑旧分镜。")
+    if repository.reviewable_shot_plan_for_requirement(project.id, requirement.id):
+        raise CreationConflictError("SHOT_PLAN_ALREADY_EXISTS", "当前需求版本已有待审分镜候选。")
+    latest_run = session.scalar(
+        select(AgentRun)
+        .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+        .where(
+            AgentRun.project_id == project.id,
+            AgentRun.agent_role == "director",
+            AgentInputManifest.base_requirement_version_id == requirement.id,
+        )
+        .order_by(AgentRun.started_at.desc())
+        .limit(1)
+    )
+    if not latest_run or latest_run.id != payload.failed_agent_run_id:
+        raise CreationConflictError("DIRECTOR_FAILED_RUN_NOT_LATEST", "只能重跑当前需求版本最近一次失败的分镜导演。")
+    if latest_run.status != "failed":
+        raise CreationConflictError("DIRECTOR_RUN_NOT_FAILED", "指定的分镜导演运行不是失败状态。")
+    manifest = session.get(AgentInputManifest, latest_run.input_manifest_id)
+    if not manifest or manifest.base_requirement_version_id != requirement.id:
+        raise CreationConflictError("DIRECTOR_MANIFEST_MISSING", "失败运行的输入清单不存在或需求版本不一致。")
+    brief_id = manifest.payload.get("accepted_creative_brief", {}).get("id")
+    brief = repository.creative_brief(brief_id) if isinstance(brief_id, str) else None
+    if not brief or brief.project_id != project.id or brief.requirement_version_id != requirement.id or brief.status != "accepted":
+        raise CreationConflictError("DIRECTOR_BRIEF_CHANGED", "失败运行绑定的已接受内容方案不再可用。")
+    selection = gateway.select(session)
+    expected_config = (
+        latest_run.production_config_version_id,
+        latest_run.model_config_version_id,
+        latest_run.provider_config_version_id,
+        latest_run.prompt_contract_version,
+        latest_run.output_schema_version,
+    )
+    actual_config = (
+        selection.production_config_version_id,
+        selection.model_config_version_id,
+        selection.provider_config_version_id,
+        selection.prompt_contract_version,
+        selection.output_schema_version,
+    )
+    if actual_config != expected_config:
+        raise CreationConflictError("DIRECTOR_RETRY_CONFIG_CHANGED", "当前分镜导演配置与失败运行不一致，不能静默更换模型或合同后重跑。")
+    return _execute_director(
+        session, project, requirement, brief, manifest, payload, gateway, selection,
+        retry_of_agent_run_id=latest_run.id,
+    )
 
 
 def revise_shot_plan(
@@ -675,7 +807,8 @@ def revise_shot_plan(
         changes = patch.changes.model_dump(exclude_unset=True)
         indexed[patch.target_shot_code].update(changes)
     revised_shots = sorted(indexed.values(), key=lambda item: int(item["sequence_number"]))
-    errors = validate_shots(session, project.id, requirement, revised_shots)
+    brief = repository.creative_brief(candidate.creative_brief_candidate_id)
+    errors = validate_shots(session, project.id, requirement, revised_shots, brief)
     if errors:
         codes = ", ".join(sorted({str(item.get("code")) for item in errors}))
         raise CreationConflictError("SHOT_PLAN_REVISION_INVALID", f"修订后的分镜合同验证失败：{codes}。")
@@ -765,7 +898,8 @@ def decide_shot_plan(
         )
         session.commit()
         return candidate
-    errors = validate_shots(session, project.id, requirement, candidate.shots)
+    brief = repository.creative_brief(candidate.creative_brief_candidate_id)
+    errors = validate_shots(session, project.id, requirement, candidate.shots, brief)
     if errors:
         if not repository.transition_reviewable_shot_plan(
             candidate.id,
@@ -777,7 +911,6 @@ def decide_shot_plan(
             raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重试。")
         session.commit()
         raise CreationConflictError("SHOT_PLAN_VALIDATION_FAILED", "分镜候选合同验证失败。")
-    brief = repository.creative_brief(candidate.creative_brief_candidate_id)
     if not brief or brief.status != "accepted":
         raise CreationConflictError("BRIEF_NOT_ACCEPTED", "关联的创意方案不再可用。")
     if not repository.transition_reviewable_shot_plan(
@@ -827,6 +960,9 @@ def _shot_dict(shot: Shot) -> dict:
         "shot_code": shot.shot_code,
         "sequence_number": shot.sequence_number,
         "duration_ms": shot.duration_ms,
+        "narrative_beat_code": shot.narrative_beat_code,
+        "continuity_group_id": shot.continuity_group_id,
+        "action_count": shot.action_count,
         "shot_type": shot.shot_type,
         "scene_entity_version_id": shot.scene_entity_version_id,
         "character_entity_version_ids": shot.character_entity_version_ids,
@@ -836,6 +972,7 @@ def _shot_dict(shot: Shot) -> dict:
         "face_visibility": shot.face_visibility,
         "text_policy": shot.text_policy,
         "motion_requirement": shot.motion_requirement,
+        "audio_requirement": shot.audio_requirement,
         "composition": shot.composition,
         "action": shot.action,
         "visual_prompt": shot.visual_prompt,
@@ -893,12 +1030,34 @@ def planning_center_view(session: Session, project: Project) -> dict:
         .order_by(AgentRun.started_at.desc())
         .limit(1)
     )
+    director_attempt = session.scalar(
+        select(AgentRun)
+        .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+        .where(
+            AgentRun.project_id == project.id,
+            AgentRun.agent_role == "director",
+            AgentInputManifest.base_requirement_version_id == requirement.id,
+        )
+        .order_by(AgentRun.started_at.desc())
+        .limit(1)
+    )
     if active_plan:
         next_action = PlanningNextAction(code="PLAN_CONFIRMED", label="方案已确认，等待创建生产快照", target_ids=[active_plan.id])
     elif current_shot:
         next_action = PlanningNextAction(code="REVIEW_SHOT_PLAN", label="审核分镜候选", target_ids=[current_shot.id])
+    elif accepted_brief and director_attempt and director_attempt.status == "failed":
+        next_action = PlanningNextAction(
+            code="RETRY_FAILED_SHOT_PLAN",
+            label="确认模型调用并重跑失败的分镜导演",
+            target_ids=[director_attempt.id],
+            incurs_model_cost=True,
+        )
+    elif accepted_brief and director_attempt and director_attempt.status == "running":
+        next_action = PlanningNextAction(code="WAIT_FOR_SHOT_PLAN", label="分镜导演正在生成候选", target_ids=[director_attempt.id])
+    elif accepted_brief and director_attempt:
+        next_action = PlanningNextAction(code="REVISE_REQUIREMENT_FOR_NEW_SHOT_PLAN", label="调整并确认需求后重新生成分镜", target_ids=[director_attempt.id])
     elif accepted_brief:
-        next_action = PlanningNextAction(code="GENERATE_SHOT_PLAN", label="生成分镜候选", target_ids=[accepted_brief.id])
+        next_action = PlanningNextAction(code="GENERATE_SHOT_PLAN", label="生成分镜候选", target_ids=[accepted_brief.id], incurs_model_cost=True)
     elif current_brief:
         next_action = PlanningNextAction(code="REVIEW_CREATIVE_BRIEF", label="审核内容方案", target_ids=[current_brief.id])
     elif planner_attempt and planner_attempt.status == "failed":
@@ -938,6 +1097,7 @@ def planning_center_view(session: Session, project: Project) -> dict:
         "shot_plan_history": shot_candidates,
         "plan_history": [_plan_dict(session, item) for item in plans],
         "latest_planner_run": _agent_run_view(session, planner_attempt),
+        "latest_director_run": _agent_run_view(session, director_attempt),
         "entity_versions": [
             {
                 "id": version.id,
