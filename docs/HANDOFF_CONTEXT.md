@@ -88,7 +88,7 @@ v2/runtime/worker.err.log
 - 每个需求版本只自动尝试一次；失败不修复、不重试、不换模型。
 - 成功只创建待审核 Creative Brief；用户接受后才能交给分镜导演。
 
-真实验收项目 `project_362dcdee277d4af2af8d3dd9667bbefd` 已证明调用和持久化链路可用，但也暴露了重复追问与助手历史缺失的问题。
+真实验收项目 `project_e4097989baf743cd88d291fe1a76c8b8` 已证明 input.v4 / prompt.v6 下“三个方向 -> 自然语言选择第二个 -> 修改音频模式”连续三轮成功：历史选择没有污染第三轮，音频只形成 `voiceover` 待确认候选，活动需求仍为 `off`。复测同时发现下一轮应单独设计的问题：一个内容方向选项可能捆绑 `content_structure + visual_style + tone` 多个未单独展示的字段，且个别方向会提前提出图形化进度等视觉执行方式；不得用隐藏字段过滤或关键词规则临时修复，应先设计建议组字段透明度与角色边界合同。
 
 ## 5. 必须保持的边界
 
@@ -139,7 +139,7 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`143 passed`
+- 后端测试：`144 passed`
 - Python compileall：通过
 - Vite production build：通过
 - Alembic runtime/head：`20260718_20`
