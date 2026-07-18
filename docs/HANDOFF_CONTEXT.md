@@ -1,5 +1,12 @@
 # Handoff Context
 
+## 2026-07-18 V2 Creative Agent Design Proposal Sprint 50
+
+- Added `docs/V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md` as a review-only proposal; no runtime behavior changed.
+- Proposed redefining the creation agent as a creative producer with full persisted user/assistant session context, direct answers, typed suggestion sets, and separately sourced explicit updates.
+- Suggestions remain non-authoritative; only explicit user selection can create a requirement candidate, and only the existing confirmation command can create a formal requirement version.
+- Risk classification moves to a backend-owned versioned field catalog. Context overflow blocks explicitly; no hidden summary, truncation, retry, model switch, output repair, Provider substitution, route choice, or production action is proposed.
+
 ## 2026-07-17 V2 Creation Conversation Stable Layout Sprint 49
 
 - Fixed the creation conversation and structured-requirement panels to a shared desktop height; additional messages and fields now scroll inside their own content regions instead of extending the page.
