@@ -135,7 +135,9 @@ RequirementVersion confirmed
 {
   "schema_version": 1,
   "project_id": "project_01",
+  "conversation_session_id": "conversation_01",
   "base_requirement_version_id": null,
+  "supersedes_candidate_id": "candidate_00",
   "core_intent": "制作一条田径训练日记",
   "duration_seconds": 45,
   "aspect_ratio": "9:16",
@@ -160,6 +162,8 @@ RequirementVersion confirmed
 ```
 
 `assumptions` 首期必须为空。缺失字段使用 `null` 或不提供，并进入确定性完整性检查；Agent 不得生成默认平台、受众、人物属性、品牌、风格、预算或生产路由。
+
+`RequirementCandidate` 在创作阶段表达不可变的“需求草稿修订”，不是每轮必须立即审核的孤立候选。`conversation_session_id` 确定草稿所属会话，`supersedes_candidate_id` 构成修订链。新修订必须完整继承上一修订后再应用本轮更新；运行失败不得使上一修订失效。只有最终确认最新可审核修订时才创建 `RequirementVersion`。
 
 ### 5.2 字段策略
 
@@ -363,10 +367,10 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.2 创作制片人
 
-创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v4`、`creative-dialogue-output.v4` 和 `creative-dialogue-prompt.v7`：
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v4` 和 `creative-dialogue-prompt.v11`：
 
 ```text
-输入：runtime_context + project_context + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
+输入：runtime_context.turn_intent + project_context.active_requirement + project_context.current_requirement_draft? + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
 输出：assistant_reply + suggestion_sets[] + proposal_selections[] + explicit_updates[] + clarifying_question?
 ```
 
@@ -377,16 +381,17 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 - `proposal_selections` 只能引用 `selection_scope` 中真实存在的 ID；后端从原提案读取冻结更新，模型不得重写选项值。`selection_scope` 为空时必须返回空选择。
 - `explicit_updates` 只允许引用用户消息作为来源，并由后端字段目录校验。
 - 每轮最多提出一个真正阻断的澄清问题；可提供选项时直接提供选项。
-- 用户选择建议后，由独立命令创建 `RequirementCandidate`；仍需确认才能形成 `RequirementVersion`。
+- 首次进入时执行一次持久化 `initial_guidance`，只给一组 2–3 个整体创作方向、不形成字段更新；刷新不重复调用，失败不自动重试。每个冻结方向值必须等于用户看到的短标签，详细说明不得夹带进草稿；方向不得越界描述声音、字幕、镜头、剪辑、转场、特效或生产方式。
+- 用户选择建议或继续对话后创建继承上一修订的 `RequirementCandidate`；用户可继续丰富，最终确认一次才形成 `RequirementVersion` 并进入策划。
 - 对话达到明确配置上限时返回 `CONVERSATION_CONTEXT_LIMIT_EXCEEDED`，不隐藏摘要、筛选或截断。
 
 建议交互采用 2–3 个可点击选项：推荐项固定排第一并显示“推荐”，每项包含短名称、差异说明以及“选择后设置：字段 · 值”的精确预览，模型不得生成选项 ID。后端验证每组选项只修改同一个字段且候选值互不相同，再生成稳定的建议组 ID、选项 ID 与单字段冻结更新；页面另外提供“其他想法”自由输入入口，它发送一条新的用户消息，不伪装成模型给出的第四个选项。历史多字段提案也逐项显示全部影响，不再隐藏。
 
-点击选项提交精确 `proposal_id + suggestion_set_id + option_id`，保存 `CreativeSuggestionSelection` 并创建待审核 `RequirementCandidate`。点击本身不修改正式需求；人物身份、音频、费用等高风险字段仍按字段目录进入独立确认。每组建议只能选择一次，过期提案、旧需求版本、改名或不存在的 ID 明确失败。
+点击选项提交精确 `proposal_id + suggestion_set_id + option_id`，保存 `CreativeSuggestionSelection`，并从该提案对应的草稿修订继承后创建下一修订。点击本身不修改正式需求，也不关闭输入区；人物身份、音频、费用等高风险字段仍按字段目录进入独立确认。每组建议只能选择一次，过期提案、旧需求版本、改名或不存在的 ID 明确失败。
 
 用户也可以在对话中自然表达选择。前端把该消息精确关联到当前助手消息，模型只负责从本轮 `selection_scope` 返回选项 ID；应用服务校验项目、需求版本、会话消息、建议组、选项和来源消息，再用冻结值生成候选及选择记录。历史提案即使仍在会话中，也不再向模型授予可重复提交的 ID。任何不存在、重复、已选择或无法唯一确定的引用都明确失败或要求澄清，不使用序号关键词规则、名称相似度、模型改写值或后端猜测。
 
-`explicit_updates` 和 `proposal_selections` 都只生成待确认候选，不直接修改活动需求。自然回复必须明确表达候选仍待确认，不能把“已整理修改”描述成“配置已更新或已生效”。活动需求是已生效基线，但用户可以明确提出修改；这类修改进入候选确认链路，而不是被旧值阻止。
+`explicit_updates` 和 `proposal_selections` 都只生成草稿修订，不直接修改活动需求。当前会话最新草稿是下一轮唯一继承基线，活动需求只作为草稿链起点。自然回复不能把草稿描述成“配置已更新或已生效”。最终确认最新草稿后才创建正式版本；进入策划后普通消息被阶段边界拒绝，修改必须显式开启下一版草稿。
 
 用户在同一条消息中同时提出明确事实、限制和创意建议请求时，模型必须分别返回 `explicit_updates` 与 `suggestion_sets`，不能用自然回复中的口头遵守代替结构化登记。与活动需求当前值完全相同的显式更新或建议值属于无效模型输出，系统明确失败并保留原字段来源，不静默忽略、不伪造变更。内容方向的标题、说明和值只描述内容意义和叙事选择，不得展开景别、机位、镜头切换、剪辑、转场或特效方案。
 
@@ -1015,7 +1020,7 @@ RequirementDiff
 
 - 创作制片人可以理解上一轮助手给出的选项，但未被用户选择的建议不进入需求事实。
 - 建议组只允许 2–3 个选项，推荐项排第一；“其他想法”创建用户消息而不是建议选择记录。
-- 点击建议只创建 `CreativeSuggestionSelection` 和待确认需求候选，活动 `RequirementVersion` 保持不变。
+- 点击建议只创建 `CreativeSuggestionSelection` 和继承当前内容的下一版草稿修订，活动 `RequirementVersion` 保持不变，用户仍可继续对话。
 - 内容策划在 `audio_policy=off` 时不输出口播文本；平台未指定时不做平台适配。
 - 内容策划引入未确认人物、品牌、场景或产品时，候选验证失败。
 - 分镜导演引用不存在的实体、节拍、附件或缩写 ID 时明确失败，不自动改名。
@@ -1056,7 +1061,7 @@ RequirementDiff
 
 ### Creation Sprint 4：创作模型接入
 
-- 创作制片人 `creative-dialogue-input.v4 / output.v4 / prompt.v7`（已完成）
+- 创作制片人 `creative-dialogue-input.v5 / output.v4 / prompt.v11`（已完成）
 - 内容策划 `content-planner-input.v1 / creative-brief-candidate.v1`（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计

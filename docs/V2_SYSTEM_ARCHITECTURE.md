@@ -101,7 +101,9 @@ TimelineCandidate
 
 - 每次智能体运行绑定不可变输入清单和配置版本。
 - 创作制片人只读取当前活动 ConversationSession；开启新会话不修改已确认 RequirementVersion。
-- 建议与用户选择分别持久化，点击建议只能形成待确认候选。
+- RequirementCandidate 通过 `conversation_session_id` 和 `supersedes_candidate_id` 形成不可变草稿修订链；下一轮以最新草稿而非活动正式版本为基线。
+- 建议与用户选择分别持久化，点击建议只形成下一版草稿修订，不触发项目状态迁移。
+- 首次引导由持久化 system 初始化消息和 `turn_intent=initial_guidance` 标识，一次执行；失败保留证据且不自动重试。
 - 模型成功只表示调用结束，不代表候选已确认。
 - 助手回复、结构化候选、Provider 请求 ID 和 token 用量分别审计。
 
@@ -138,6 +140,8 @@ draft
 ```
 
 异常状态使用 `blocked`，并保留 `blocked_from_status`、结构化原因、责任聚合和原始证据。归档是独立列表元数据，不等于取消、失败或删除。
+
+创作会话中的消息、建议选择和草稿修订均保持在 `collecting_requirements`；只有用户最终确认最新草稿并生成新的 `RequirementVersion` 时，`REQUIREMENT_CONFIRMED` 才允许项目进入 `planning`。项目已进入策划后，普通 `MESSAGE_ADDED` 不允许隐式回退。
 
 项目状态只能通过权威状态转移器修改。只读阶段评估器可以计算当前页面和下一步，但不能写入状态。
 

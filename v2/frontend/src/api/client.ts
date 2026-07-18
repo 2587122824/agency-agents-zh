@@ -51,6 +51,9 @@ export const api = {
   startConversationSession: (projectId: string) => request<{ id: string; status: string }>(`/projects/${projectId}/conversation-sessions`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user' }),
   }),
+  initializeCreativeConversation: (projectId: string, baseVersionId: string) => request<RequirementCandidate>(`/projects/${projectId}/creative-conversation:initialize`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId }),
+  }),
   generateRequirementCandidate: (projectId: string, baseVersionId: string) => request<RequirementCandidate>(`/projects/${projectId}/requirement-candidates:generate`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId }),
   }),

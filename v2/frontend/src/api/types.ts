@@ -185,7 +185,9 @@ export interface CreationMessage {
 
 export interface RequirementCandidate {
   id: string
+  conversation_session_id: string
   base_requirement_version_id: string
+  supersedes_candidate_id: string | null
   agent_run_id: string
   status: string
   fields: Record<string, unknown>
@@ -290,6 +292,7 @@ export interface CreativeTurnProposal {
 export interface CreationCenter {
   project_id: string
   conversation_session_id: string
+  initialization_status: 'not_started' | 'running' | 'succeeded' | 'failed'
   active_requirement: RequirementVersion
   messages: CreationMessage[]
   current_candidate: RequirementCandidate | null

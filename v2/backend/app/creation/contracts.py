@@ -24,6 +24,10 @@ class GenerateCandidate(CommandContext):
     expected_base_version_id: str
 
 
+class InitializeCreativeConversation(CommandContext):
+    expected_base_version_id: str
+
+
 class RetryCreativeTurn(CommandContext):
     expected_base_version_id: str
     failed_agent_run_id: str = Field(min_length=1, max_length=48)
@@ -101,7 +105,9 @@ class RequirementVersionRead(BaseModel):
 class CandidateRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    conversation_session_id: str
     base_requirement_version_id: str
+    supersedes_candidate_id: str | None
     agent_run_id: str
     status: str
     fields: dict[str, Any]
@@ -226,6 +232,7 @@ class NextAction(BaseModel):
 class CreationCenterView(BaseModel):
     project_id: str
     conversation_session_id: str
+    initialization_status: Literal["not_started", "running", "succeeded", "failed"]
     active_requirement: RequirementVersionRead
     messages: list[MessageRead]
     current_candidate: CandidateRead | None

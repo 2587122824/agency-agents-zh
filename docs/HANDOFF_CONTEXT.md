@@ -25,8 +25,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 分支 | `main` |
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
-| 数据库迁移 | `20260718_20 (head)` |
-| 已发布配置 | `production_config_0b6e180d0e31461a85be00994fcda3cc`，版本 14 |
+| 数据库迁移 | `20260718_21 (head)` |
+| 已发布配置 | `production_config_833c022de852440bb5c5e69d34941e17`，版本 18 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -64,12 +64,16 @@ v2/runtime/worker.err.log
 
 ## 4. 当前创作智能体事实
 
-当前运行代码使用 `creative-dialogue-input.v4 / output.v4 / prompt.v7`：
+当前运行代码使用 `creative-dialogue-input.v5 / output.v4 / prompt.v11`：
+
+- 首次进入空白创作会话时，前端调用一次 `creative-conversation:initialize`；系统消息、AgentRun 和助手引导均持久化，刷新不重复调用，失败不自动重试。
+- `RequirementCandidate` 是会话级不可变草稿修订，通过 `conversation_session_id` 和 `supersedes_candidate_id` 继承；每轮从最新草稿继续，不再从活动正式需求重置。
+- 选择建议后输入区继续开放；只有“确认需求并进入策划”才创建 `RequirementVersion` 并触发 `planning`。
 
 - 每条成功保存的用户消息触发一次明确模型调用。
 - 严格返回自然回复、建议集合、用户明确更新和最多一个澄清问题。
 - 输入包含当前活动会话的用户与助手消息，保留真实角色、ID 和回复关系。
-- 建议以 2–3 个可点击选项展示，后端生成稳定 ID；点击只创建选择记录和待确认需求候选。
+- 建议以 2–3 个可点击选项展示，后端生成稳定 ID；点击创建选择记录和下一版草稿修订，不强迫立即确认。
 - 每个建议组只授权一个字段，每个选项只提供一个候选值；后端生成单字段冻结更新，页面显示精确字段和值，历史多字段提案也完整展示影响。
 - 同一条消息中的明确事实/限制与建议请求必须分别进入 `explicit_updates` 和 `suggestion_sets`；候选值与活动需求相同会明确失败，不静默过滤或改写字段来源。
 - 历史提案以不含系统 ID 的 `proposal_history` 紧贴对应助手消息，只保留可读选项摘要和已选结果；最新用户消息的 `reply_to` 单独生成唯一 `selection_scope`，自然语言选择只能返回该作用域中的真实提案、建议组和选项 ID。后端使用冻结值，不解析序号特殊字样或猜测名称。
@@ -91,6 +95,8 @@ v2/runtime/worker.err.log
 - 成功只创建待审核 Creative Brief；用户接受后才能交给分镜导演。
 
 真实验收项目 `project_e4097989baf743cd88d291fe1a76c8b8` 已证明 input.v4 下“三个方向 -> 自然语言选择第二个 -> 修改音频模式”连续三轮成功：历史选择没有污染第三轮，音频只形成 `voiceover` 待确认候选，活动需求仍为 `off`。后续项目 `project_e2478627b3a44157a79536c4b4ec1c66` 暴露了混合请求漏记限制、`off -> off` 假变更和创作制片人越界描述镜头/剪辑；output.v4 / prompt.v7 据此改为单字段透明建议、相同值严格失败及明确事实与建议并行输出。重启后项目 `project_977be3e1042149059b04660bd5c29e05` 使用同一混合请求复验通过：明确文字限制形成候选，静音当前值未生成假变更，三个方向分别只修改一个 `creative_direction`，说明未展开镜头、剪辑或特效。桌面页面与 375px 移动宽度均显示精确字段和值且无横向溢出。
+
+累积草稿真实验收项目 `project_f6981f15f0d24de28c658ecc206d1fe1` 完成“首次引导 -> 点击方向 -> 连续两轮补充 -> 最终确认”：`supersedes_candidate_id` 连续继承，方向、受众、目标、风格和语气均未丢失，最终确认前项目保持 `collecting_requirements`，确认后才进入 `planning`。首次引导严格合同项目 `project_f1c0a8e167284b7ebecc55184cb01bd8` 的首轮缺失来源 ID 被明确拒绝，未自动修复；prompt.v11 发布后对同一失败 Run 显式重跑成功，结果为一组 3 个 `creative_direction`，全部冻结值等于短标签。375px 页面宽度 `scrollWidth == clientWidth`。
 
 ## 5. 必须保持的边界
 
@@ -121,6 +127,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-18 | 创作中心升级为首次主动引导和会话级累积草稿：input.v5 / prompt.v11、首次引导单组整体方向、短标签冻结值与精确来源合同、草稿修订链、失败保留上一修订、最终确认后才进入策划 |
 | 2026-07-18 | 创作制片人升级 output.v4 / prompt.v7：建议组单字段授权与可见变更预览、混合请求并行输出、相同值更新严格失败、内容建议职责边界收紧 |
 | 2026-07-18 | 创作制片人升级 input.v4 / prompt.v6：只读历史与当前选择权限分离，修复历史选择污染后续无关更新，并明确待确认候选状态表述 |
 | 2026-07-18 | 创作制片人升级 v3 输入输出与 v5 Prompt：跨轮冻结提案紧贴助手消息、reply_to 作用域、自然语言精确 ID 选择、后端冻结值应用和职责收紧 |
@@ -145,7 +152,7 @@ v2/runtime/worker.err.log
 - 后端测试：`146 passed`
 - Python compileall：通过
 - Vite production build：通过
-- Alembic runtime/head：`20260718_20`
+- Alembic runtime/head：`20260718_21`
 - 真实 DeepSeek 单次调用：通过
 - 桌面与 390px 浏览器验收：通过，无横向溢出和控制台错误
 - API 与 Worker 重启健康检查：通过

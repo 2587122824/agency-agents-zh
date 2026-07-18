@@ -466,7 +466,11 @@ class RequirementCandidate(Base):
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("candidate"))
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    conversation_session_id: Mapped[str] = mapped_column(ForeignKey("conversation_sessions.id"), index=True)
     base_requirement_version_id: Mapped[str] = mapped_column(ForeignKey("requirement_versions.id"), index=True)
+    supersedes_candidate_id: Mapped[str | None] = mapped_column(
+        ForeignKey("requirement_candidates.id"), nullable=True, index=True
+    )
     agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"))
     status: Mapped[str] = mapped_column(String(32), default="awaiting_review", index=True)
     fields: Mapped[dict] = mapped_column(JSON)

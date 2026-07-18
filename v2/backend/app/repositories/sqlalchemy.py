@@ -367,6 +367,23 @@ class SqlAlchemyCreationRepository:
     def requirement_candidate(self, candidate_id: str) -> RequirementCandidate | None:
         return self.session.get(RequirementCandidate, candidate_id)
 
+    def latest_conversation_candidate(
+        self,
+        project_id: str,
+        conversation_session_id: str,
+        base_requirement_version_id: str,
+    ) -> RequirementCandidate | None:
+        return self.session.scalar(
+            select(RequirementCandidate)
+            .where(
+                RequirementCandidate.project_id == project_id,
+                RequirementCandidate.conversation_session_id == conversation_session_id,
+                RequirementCandidate.base_requirement_version_id == base_requirement_version_id,
+                RequirementCandidate.status.in_(("awaiting_review", "no_change")),
+            )
+            .order_by(RequirementCandidate.created_at.desc(), RequirementCandidate.id.desc())
+        )
+
     def agent_run(self, run_id: str) -> AgentRun | None:
         return self.session.get(AgentRun, run_id)
 
@@ -431,7 +448,9 @@ class SqlAlchemyCreationRepository:
         )
         if exclude_id is not None:
             statement = statement.where(RequirementCandidate.id != exclude_id)
-        return list(self.session.scalars(statement))
+        return list(self.session.scalars(
+            statement.order_by(RequirementCandidate.created_at.desc(), RequirementCandidate.id.desc())
+        ))
 
     def manifest_messages(self, project_id: str, conversation_session_id: str) -> list[Message]:
         return list(self.session.scalars(

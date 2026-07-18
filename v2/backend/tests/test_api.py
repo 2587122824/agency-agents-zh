@@ -289,7 +289,7 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
     view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
     base_id = view["active_requirement"]["id"]
     assert view["active_requirement"]["version_number"] == 1
-    assert view["next_action"]["code"] == "ADD_REQUIREMENT_MESSAGE"
+    assert view["next_action"]["code"] == "INITIALIZE_CREATIVE_CONVERSATION"
 
     message_command = {
         "command_id": "message-command-001",
@@ -719,6 +719,8 @@ def test_selected_history_cannot_be_resubmitted_during_unrelated_update(client: 
 
     assert updated.status_code == 201
     assert updated.json()["fields"]["audio_mode"] == "voiceover"
+    assert updated.json()["fields"]["content_structure"] == selected.json()["fields"]["content_structure"]
+    assert updated.json()["supersedes_candidate_id"] == selected.json()["id"]
     assert updated.json()["change_summary"] == [{
         "field_key": "audio_mode",
         "before": "off",
@@ -772,10 +774,11 @@ def test_typed_suggestion_selection_rejects_unknown_option_id(client: TestClient
     assert invalid.headers["x-error-code"] == "AGENT_MODEL_SELECTION_OPTION_INVALID"
     failed_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
     assert failed_view["latest_agent_run"]["status"] == "failed"
-    assert failed_view["current_candidate"] is None
+    assert failed_view["current_candidate"] is not None
+    assert failed_view["current_candidate"]["status"] == "awaiting_review"
 
 
-def test_new_message_makes_pending_candidate_stale(client: TestClient) -> None:
+def test_new_message_keeps_draft_until_inherited_revision_succeeds(client: TestClient) -> None:
     project = create_creation_project(client)
     view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
     base_id = view["active_requirement"]["id"]
@@ -789,14 +792,59 @@ def test_new_message_makes_pending_candidate_stale(client: TestClient) -> None:
     client.post(f"/api/v1/projects/{project['id']}/messages", json={
         "command_id": "message-command-102", "content": "新的明确方向",
     })
-    stale_accept = client.post(
-        f"/api/v1/projects/{project['id']}/requirement-candidates/{candidate['id']}:accept",
-        json={"command_id": "accept-command-101", "expected_base_version_id": base_id},
+    before_generation = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert before_generation["current_candidate"]["id"] == candidate["id"]
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "generate-command-102", "expected_base_version_id": base_id},
     )
-    assert stale_accept.status_code == 409
-    assert stale_accept.headers["x-error-code"] == "CANDIDATE_NOT_REVIEWABLE"
+    assert revised.status_code == 201
+    assert revised.json()["supersedes_candidate_id"] == candidate["id"]
+    assert revised.json()["fields"]["creative_direction"] == "新的明确方向"
     current = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
-    assert current["candidate_history"][0]["status"] == "stale"
+    history = {item["id"]: item for item in current["candidate_history"]}
+    assert history[candidate["id"]]["status"] == "stale"
+    assert current["current_candidate"]["id"] == revised.json()["id"]
+
+
+def test_initial_guidance_is_persisted_once_and_does_not_mutate_draft(client: TestClient) -> None:
+    project = create_creation_project(client)
+    view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    initialized = client.post(
+        f"/api/v1/projects/{project['id']}/creative-conversation:initialize",
+        json={"command_id": "initialize-creative-001", "expected_base_version_id": view["active_requirement"]["id"]},
+    )
+    assert initialized.status_code == 201
+    assert initialized.json()["status"] == "no_change"
+    after = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert after["initialization_status"] == "succeeded"
+    assert after["current_candidate"] is None
+    assert len(after["messages"]) == 1
+    assert after["messages"][0]["role"] == "assistant"
+    assert len(after["active_creative_proposal"]["suggestion_sets"][0]["options"]) == 3
+    assert all(
+        option["proposed_updates"][0]["value"] == option["label"]
+        for option in after["active_creative_proposal"]["suggestion_sets"][0]["options"]
+    )
+    repeated = client.post(
+        f"/api/v1/projects/{project['id']}/creative-conversation:initialize",
+        json={"command_id": "initialize-creative-002", "expected_base_version_id": view["active_requirement"]["id"]},
+    )
+    assert repeated.status_code == 409
+    assert repeated.headers["x-error-code"] == "CREATIVE_CONVERSATION_ALREADY_INITIALIZED"
+    proposal = after["active_creative_proposal"]
+    suggestion_set = proposal["suggestion_sets"][0]
+    selected = client.post(
+        f"/api/v1/projects/{project['id']}/creative-proposals/{proposal['id']}:select",
+        json={
+            "command_id": "initialize-select-001",
+            "expected_base_version_id": view["active_requirement"]["id"],
+            "suggestion_set_id": suggestion_set["id"],
+            "option_id": suggestion_set["options"][0]["id"],
+        },
+    )
+    assert selected.status_code == 201
+    assert selected.json()["fields"]["creative_direction"] == "真实记录"
 
 
 def test_attachment_registration_does_not_create_binding(client: TestClient) -> None:

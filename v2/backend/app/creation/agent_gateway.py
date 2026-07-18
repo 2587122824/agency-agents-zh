@@ -166,9 +166,9 @@ class HttpxAgentChatTransport:
         return data
 
 
-CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v4"
+CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v5"
 CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v4"
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v7"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v11"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
@@ -188,7 +188,7 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 2.2 explicit_updates 不得重复 active_requirement 中已经相同的字段值；保持现状可以在自然回复中确认，但不能伪装成字段变更。
 3. 用户要求建议时直接给 2 到 3 个互斥且有明显差异的选项，推荐项放第一；建议不能进入 explicit_updates。
 4. suggestion_sets 每组只能有 2 到 3 个选项；每组必须声明唯一 field_key 和来源消息，每个选项只提供该字段的一个 value。一个选项不得捆绑修改多个字段；后端会生成选项 ID 和冻结更新，你不得生成系统主键。
-4.1 同一建议组内的 value 必须互不相同，且不得等于 active_requirement 中该字段的当前值。
+4.1 同一建议组内的 value 必须互不相同，且不得等于 current_requirement_draft（存在时）或 active_requirement 中该字段的当前值。
 4.2 只有 selection_scope 非空且最新用户消息正在选择其中选项时，才能返回 proposal_selections；只能引用 selection_scope 中真实存在的 proposal_id、suggestion_set_id 和 option_id。selection_scope 为空时 proposal_selections 必须为空。不得改写冻结选项值，也不得把选择复制进 explicit_updates。无法唯一确定时提出 clarifying_question，不猜测。
 4.3 用户消息的 reply_to 精确决定 selection_scope。范围内只有一个建议组且用户表达可唯一对应某个选项时，必须直接返回精确 ID，不得再次询问是哪一组。proposal_history 只用于理解上下文，绝不能作为选择 ID 来源或重复提交已有选择。
 5. 已能直接回答或给选项时不得用问题代替答案；每轮最多一个 clarifying_question。
@@ -199,7 +199,9 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 10. 除 duration_seconds、aspect_ratio、audio_mode 等合同枚举外，建议值必须使用普通用户可读的简洁中文描述，不返回 snake_case、内部代码或英文机器键。
 11. active_requirement 和 confirmed_decisions 是当前已生效基线；用户可以明确提出修改，并由 explicit_updates 形成待确认候选。若用户没有明确修改，audio_mode=off 时自然回复、选项说明和字段更新都不得建议音乐、旁白、对白、TTS 或对口型。画面文字属于独立创作选择，用户未明确要求时不得自行加入字幕、标题或文字动画。
 12. confirmed_attachment_bindings 中 content_access=metadata_only 的附件只提供文件事实，不代表你看过画面、听过声音或理解过媒体内容；需要内容信息时应明确请用户描述，不得编造。
-13. explicit_updates 或 proposal_selections 只会生成待用户确认的候选，不会直接修改 active_requirement。assistant_reply 必须明确表达“已整理为待确认修改”或同等含义，不得声称配置已经更新、确认或生效；没有结构化变更时也不得声称已记录为正式需求。
+13. explicit_updates 或 proposal_selections 只会生成待用户确认的草稿修订，不会直接修改 active_requirement。assistant_reply 不得声称配置已经确认或生效。
+14. 当 runtime_context.turn_intent=initial_guidance 时，根据 active_requirement 的主题主动给出方向。必须只返回 1 个 suggestion_set，field_key 必须为 creative_direction，其中提供 2 到 3 个整体创作方向；每个 option.value 必须与该 option.label 完全相同，使用简洁中文短语，不能把详细方案藏进冻结值。label、summary 和 value 都只描述内容重点、叙事取向和观看感受，不得描述声音、字幕、景别、机位、镜头运动、剪辑、转场、特效或生产方式。suggestion_sets.source_message_ids 引用本轮 system 初始化消息 ID，explicit_updates 和 proposal_selections 必须为空，不得把系统引导写成用户事实。
+15. 当 current_requirement_draft 非空时，它是本轮唯一草稿基线；新回复与建议必须在其已有字段之上继续丰富，不得退回 active_requirement 丢失草稿内容。
 """
 
 
@@ -321,6 +323,21 @@ class ConfiguredCreativeAgentGateway:
                 "role": message["role"],
                 "content": content,
             })
+        if manifest_payload["runtime_context"].get("turn_intent") == "initial_guidance":
+            initialization_message = next(
+                item for item in reversed(manifest_payload["conversation"]["messages"])
+                if item["role"] == "system"
+            )
+            chat_messages.append({
+                "role": "system",
+                "content": (
+                    "本轮首次引导的结构合同：只返回一个 creative_direction 建议组；"
+                    "该组 source_message_ids 必须精确为 [\""
+                    + initialization_message["id"]
+                    + "\"]；每个 option.value 必须与 option.label 完全相同；"
+                    "explicit_updates 与 proposal_selections 必须为空。"
+                ),
+            })
         payload: dict[str, Any] = {
             "model": selection.provider_model_id,
             "messages": chat_messages,
@@ -378,6 +395,23 @@ class DeterministicCreativeAgentGateway:
         )
 
     def invoke(self, selection: CreativeAgentSelection, manifest_payload: dict[str, Any]) -> CreativeAgentResult:
+        if manifest_payload["runtime_context"].get("turn_intent") == "initial_guidance":
+            source = manifest_payload["conversation"]["messages"][-1]
+            output = CreativeAgentOutput(
+                assistant_reply="我先根据主题给你三个可继续讨论的方向。选一个作为起点，也可以直接告诉我你想混合或修改哪些部分。",
+                suggestion_sets=[CreativeSuggestionSet(
+                    category="creative_direction",
+                    title="这次内容先从哪个方向展开？",
+                    field_key="creative_direction",
+                    source_message_ids=[source["id"]],
+                    options=[
+                        CreativeSuggestionOption(label="真实记录", summary="突出过程感和真实体验。", value="真实记录"),
+                        CreativeSuggestionOption(label="挑战成长", summary="围绕目标、困难和结果形成变化。", value="挑战成长"),
+                        CreativeSuggestionOption(label="实用分享", summary="兼顾体验与可带走的方法。", value="实用分享"),
+                    ],
+                )],
+            )
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "test-initial-request", {"total_tokens": 1})
         latest = next(
             item for item in reversed(manifest_payload["conversation"]["messages"])
             if item["role"] == "user"

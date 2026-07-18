@@ -41,6 +41,7 @@ from .contracts import (
     AttachmentCreate,
     BindingCreate,
     GenerateCandidate,
+    InitializeCreativeConversation,
     MessageCreate,
     NextAction,
     RejectCandidate,
@@ -239,11 +240,6 @@ def add_message(session: Session, project: Project, payload: MessageCreate) -> M
     )
     repository.add(message)
     repository.flush()
-    stale_candidates = repository.reviewable_candidates(project.id)
-    for candidate in stale_candidates:
-        candidate.status = "stale"
-        candidate.decided_at = utc_now()
-        _event(session, project.id, "candidate.stale.v1", "新消息使旧候选过期", {"candidate_id": candidate.id})
     for proposal in repository.creative_proposals(project.id):
         if proposal.status == "active":
             proposal.status = "stale"
@@ -279,6 +275,9 @@ def start_conversation_session(
     for proposal in repository.creative_proposals(project.id):
         if proposal.status == "active":
             proposal.status = "stale"
+    for candidate in repository.reviewable_candidates(project.id):
+        candidate.status = "stale"
+        candidate.decided_at = utc_now()
     conversation = ConversationSession(project_id=project.id, started_by=payload.actor_id)
     repository.add(conversation)
     repository.flush()
@@ -303,6 +302,7 @@ def _manifest_payload(
     project: Project,
     base: RequirementVersion,
     conversation_session: ConversationSession,
+    draft: RequirementCandidate | None = None,
 ) -> dict:
     repository = _creation(session)
     messages = repository.manifest_messages(project.id, conversation_session.id)
@@ -412,6 +412,15 @@ def _manifest_payload(
             "project_id": project.id,
             "project_stage": project.status,
             "active_requirement": {"id": base.id, "fields": base.fields},
+            "current_requirement_draft": (
+                {
+                    "id": draft.id,
+                    "supersedes_candidate_id": draft.supersedes_candidate_id,
+                    "fields": draft.fields,
+                    "field_sources": draft.field_sources,
+                }
+                if draft else None
+            ),
             "confirmed_attachment_bindings": attachment_bindings,
             "confirmed_decisions": [
                 {"id": item.id, "key": item.key, "label": item.label, "value": item.value, "source": item.source}
@@ -597,6 +606,7 @@ def generate_candidate(
     gateway: CreativeAgentGateway,
     *,
     retry_failed_agent_run_id: str | None = None,
+    turn_intent: str = "conversation_turn",
 ) -> RequirementCandidate:
     repository = _creation(session)
     receipt = _receipt(session, project.id, payload.command_id)
@@ -612,10 +622,14 @@ def generate_candidate(
         session.commit()
         raise CreationConflictError("REQUIREMENT_INCOMPLETE", "请先解决阻断性的需求澄清。")
     conversation_session = ensure_conversation_session(session, project, started_by=payload.actor_id)
-    manifest_payload = _manifest_payload(session, project, base, conversation_session)
+    draft = repository.latest_conversation_candidate(
+        project.id, conversation_session.id, base.id
+    )
+    manifest_payload = _manifest_payload(session, project, base, conversation_session, draft)
+    manifest_payload["runtime_context"]["turn_intent"] = turn_intent
     conversation_messages = manifest_payload["conversation"]["messages"]
     user_messages = [item for item in conversation_messages if item["role"] == "user"]
-    if not user_messages:
+    if turn_intent == "conversation_turn" and not user_messages:
         raise CreationConflictError("NO_NEW_REQUIREMENT_INPUT", "没有尚未处理的新需求消息。")
     if len(conversation_messages) > 100:
         raise CreationConflictError("CONVERSATION_CONTEXT_LIMIT_EXCEEDED", "当前会话超过 100 条消息，请先开启新的创作会话。")
@@ -624,8 +638,13 @@ def generate_candidate(
         previous_manifest = repository.agent_manifest(previous_run.input_manifest_id)
         if previous_manifest:
             attempted_message_ids.update(previous_manifest.message_ids or [])
-    current_message_id = user_messages[-1]["id"]
-    if current_message_id in consumed_message_ids(session, base):
+    source_messages = user_messages if turn_intent == "conversation_turn" else [
+        item for item in conversation_messages if item["role"] == "system"
+    ]
+    if not source_messages:
+        raise CreationConflictError("CREATIVE_TURN_SOURCE_MISSING", "本轮创作智能体缺少持久化输入消息。")
+    current_message_id = source_messages[-1]["id"]
+    if turn_intent == "conversation_turn" and current_message_id in consumed_message_ids(session, base):
         raise CreationConflictError("NO_NEW_REQUIREMENT_INPUT", "没有尚未处理的新需求消息。")
     if retry_failed_agent_run_id is not None:
         failed_run = repository.agent_run(retry_failed_agent_run_id)
@@ -649,6 +668,10 @@ def generate_candidate(
         if repository.reviewable_candidates(project.id):
             raise CreationConflictError("CANDIDATE_ALREADY_EXISTS", "当前已有待审核需求候选，不能重跑失败轮次。")
         manifest_payload["runtime_context"]["retry_of_agent_run_id"] = failed_run.id
+        turn_intent = failed_manifest.payload.get("runtime_context", {}).get(
+            "turn_intent", "conversation_turn"
+        )
+        manifest_payload["runtime_context"]["turn_intent"] = turn_intent
     elif current_message_id in attempted_message_ids:
         raise CreationConflictError("AGENT_RUN_ALREADY_ATTEMPTED", "当前消息已经运行过创作智能体；失败后不会自动或重复调用模型。")
     selection = gateway.select(session)
@@ -700,6 +723,32 @@ def generate_candidate(
     try:
         result = gateway.invoke(selection, manifest_payload)
         valid_user_message_ids = {item["id"] for item in user_messages}
+        valid_suggestion_source_ids = valid_user_message_ids | (
+            {current_message_id} if turn_intent == "initial_guidance" else set()
+        )
+        if turn_intent == "initial_guidance" and (
+            result.output.explicit_updates or result.output.proposal_selections
+        ):
+            raise AgentGatewayError(
+                "AGENT_INITIAL_GUIDANCE_MUTATION_FORBIDDEN",
+                "首次引导只能提出方向，不能修改需求草稿或选择历史提案。",
+            )
+        if turn_intent == "initial_guidance" and (
+            len(result.output.suggestion_sets) != 1
+            or result.output.suggestion_sets[0].field_key != "creative_direction"
+        ):
+            raise AgentGatewayError(
+                "AGENT_INITIAL_GUIDANCE_STRUCTURE_INVALID",
+                "首次引导必须只提供一组整体创作方向。",
+            )
+        if turn_intent == "initial_guidance" and any(
+            option.value != option.label
+            for option in result.output.suggestion_sets[0].options
+        ):
+            raise AgentGatewayError(
+                "AGENT_INITIAL_GUIDANCE_VALUE_INVALID",
+                "首次引导的方向值必须与用户看到的短标签一致。",
+            )
         resolved_selections = _resolve_proposal_selections(
             repository,
             project,
@@ -707,7 +756,7 @@ def generate_candidate(
             result.output.proposal_selections,
             conversation_message_ids={item["id"] for item in conversation_messages},
             current_message_id=current_message_id,
-            current_reply_to_message_id=user_messages[-1].get("reply_to"),
+            current_reply_to_message_id=(user_messages[-1].get("reply_to") if user_messages else None),
         )
         selection_updates = [
             update
@@ -721,9 +770,11 @@ def generate_candidate(
                 "AGENT_MODEL_SELECTION_UPDATE_CONFLICT",
                 "自然语言选项选择与用户明确更新重复修改同一字段。",
             )
+        draft_fields = draft.fields if draft else base.fields
+        draft_sources = draft.field_sources if draft else base.field_sources
         fields, sources, selection_changes = _apply_updates(
-            base.fields,
-            base.field_sources,
+            draft_fields,
+            draft_sources,
             selection_updates,
             valid_user_message_ids=valid_user_message_ids,
             source_type="user_selection",
@@ -746,7 +797,7 @@ def generate_candidate(
                     f"多个建议组重复修改字段 {suggestion_set.field_key}。",
                 )
             suggested_field_keys.add(suggestion_set.field_key)
-            if not set(suggestion_set.source_message_ids).issubset(valid_user_message_ids):
+            if not set(suggestion_set.source_message_ids).issubset(valid_suggestion_source_ids):
                 raise AgentGatewayError(
                     "AGENT_MODEL_OUTPUT_SOURCE_INVALID",
                     "建议组返回了非用户消息或输入清单之外的消息引用。",
@@ -766,7 +817,7 @@ def generate_candidate(
                     source_message_ids=suggestion_set.source_message_ids,
                 )
                 value = _validated_update_value(update.field_key, update.value)
-                if base.fields.get(update.field_key) == value:
+                if draft_fields.get(update.field_key) == value:
                     raise AgentGatewayError(
                         "AGENT_MODEL_OUTPUT_NO_CHANGE",
                         f"字段 {update.field_key} 的建议值与当前值相同。",
@@ -808,7 +859,9 @@ def generate_candidate(
         raise
     candidate = RequirementCandidate(
         project_id=project.id,
+        conversation_session_id=conversation_session.id,
         base_requirement_version_id=base.id,
+        supersedes_candidate_id=draft.id if draft else None,
         agent_run_id=run.id,
         fields=fields,
         field_sources=sources,
@@ -818,6 +871,13 @@ def generate_candidate(
     )
     repository.add(candidate)
     repository.flush()
+    if changes and draft and draft.status == "awaiting_review":
+        draft.status = "stale"
+        draft.decided_at = utc_now()
+        _event(session, project.id, "candidate.superseded.v1", "新草稿修订已继承并替代上一修订", {
+            "candidate_id": draft.id,
+            "superseded_by_candidate_id": candidate.id,
+        })
     for resolved in resolved_selections:
         selection_record = CreativeSuggestionSelection(
             project_id=project.id,
@@ -885,6 +945,52 @@ def generate_candidate(
     return candidate
 
 
+def initialize_creative_conversation(
+    session: Session,
+    project: Project,
+    payload: InitializeCreativeConversation,
+    gateway: CreativeAgentGateway,
+) -> RequirementCandidate:
+    repository = _creation(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, RequirementCandidate)
+    base = ensure_initial_requirement(session, project)
+    if base.id != payload.expected_base_version_id:
+        raise CreationConflictError("PROJECT_VERSION_CONFLICT", "活动需求版本已变化，请刷新后重试。")
+    conversation = ensure_conversation_session(session, project, started_by=payload.actor_id)
+    messages = repository.manifest_messages(project.id, conversation.id)
+    if messages:
+        raise CreationConflictError("CREATIVE_CONVERSATION_ALREADY_INITIALIZED", "当前创作会话已经开始。")
+    initialization_message = Message(
+        project_id=project.id,
+        conversation_session_id=conversation.id,
+        role="system",
+        content=(
+            "首次进入创作中心。请基于当前项目主题主动给出 2 到 3 个可继续讨论的创作方向，"
+            "帮助用户开始丰富需求；本轮只能提供建议，不得修改正式需求或需求草稿。"
+        ),
+    )
+    repository.add(initialization_message)
+    repository.flush()
+    _event(session, project.id, "conversation.initialization_requested.v1", "创作中心首次引导已持久化", {
+        "conversation_session_id": conversation.id,
+        "message_id": initialization_message.id,
+    })
+    session.commit()
+    return generate_candidate(
+        session,
+        project,
+        GenerateCandidate(
+            command_id=payload.command_id,
+            actor_id=payload.actor_id,
+            expected_base_version_id=payload.expected_base_version_id,
+        ),
+        gateway,
+        turn_intent="initial_guidance",
+    )
+
+
 def retry_creative_turn(
     session: Session,
     project: Project,
@@ -893,6 +999,12 @@ def retry_creative_turn(
 ) -> RequirementCandidate:
     if not payload.confirm_model_cost:
         raise CreationConflictError("MODEL_COST_CONFIRMATION_REQUIRED", "请明确确认本次重跑会再次调用当前创作模型。")
+    failed_run = _creation(session).agent_run(payload.failed_agent_run_id)
+    failed_manifest = _creation(session).agent_manifest(failed_run.input_manifest_id) if failed_run else None
+    turn_intent = (
+        failed_manifest.payload.get("runtime_context", {}).get("turn_intent", "conversation_turn")
+        if failed_manifest else "conversation_turn"
+    )
     return generate_candidate(
         session,
         project,
@@ -903,6 +1015,7 @@ def retry_creative_turn(
         ),
         gateway,
         retry_failed_agent_run_id=payload.failed_agent_run_id,
+        turn_intent=turn_intent,
     )
 
 
@@ -1015,10 +1128,10 @@ def select_creative_suggestion(
     if not manifest:
         raise CreationConflictError("CREATIVE_PROPOSAL_MANIFEST_MISSING", "建议的输入清单不存在。")
     conversation = manifest.payload.get("conversation", {}).get("messages", [])
-    valid_user_message_ids = {item["id"] for item in conversation if item.get("role") == "user"}
+    valid_user_message_ids = {item["id"] for item in conversation}
     updates = [
         ProposedFieldUpdate.model_validate(item)
-        for item in [*proposal.explicit_updates, *option.get("proposed_updates", [])]
+        for item in option.get("proposed_updates", [])
     ]
     selection = CreativeSuggestionSelection(
         project_id=project.id,
@@ -1029,9 +1142,12 @@ def select_creative_suggestion(
     )
     repository.add(selection)
     repository.flush()
+    proposal_candidate = repository.requirement_candidate(run.parsed_candidate_id) if run and run.parsed_candidate_id else None
+    if not proposal_candidate or proposal_candidate.conversation_session_id != manifest.payload.get("conversation", {}).get("session_id"):
+        raise CreationConflictError("CREATIVE_PROPOSAL_DRAFT_MISSING", "建议对应的需求草稿修订不存在。")
     fields, sources, changes = _apply_updates(
-        active.fields,
-        active.field_sources,
+        proposal_candidate.fields,
+        proposal_candidate.field_sources,
         updates,
         valid_user_message_ids=valid_user_message_ids,
         source_type="user_selection",
@@ -1042,7 +1158,9 @@ def select_creative_suggestion(
         candidate.decided_at = utc_now()
     candidate = RequirementCandidate(
         project_id=project.id,
+        conversation_session_id=proposal_candidate.conversation_session_id,
         base_requirement_version_id=active.id,
+        supersedes_candidate_id=proposal_candidate.id,
         agent_run_id=proposal.agent_run_id,
         fields=fields,
         field_sources=sources,
@@ -1324,7 +1442,8 @@ def creation_center_view(session: Session, project: Project) -> dict:
     conversation = ensure_conversation_session(session, project)
     sync_clarifications(session, project, active)
     session.commit()
-    messages = repository.view_messages(project.id, conversation.id)
+    all_messages = repository.view_messages(project.id, conversation.id)
+    messages = [item for item in all_messages if item.role in {"user", "assistant"}]
     candidates = repository.candidate_history(project.id)
     runs = repository.agent_runs(project.id)
     run_views = []
@@ -1361,6 +1480,23 @@ def creation_center_view(session: Session, project: Project) -> dict:
     active_proposal = repository.active_creative_proposal(project.id)
     proposal_selections = repository.suggestion_selections(project.id)
     current = next((item for item in candidates if item.status == "awaiting_review"), None)
+    initialization_message = next((item for item in all_messages if item.role == "system"), None)
+    initialization_run = None
+    if initialization_message:
+        initialization_run = next((
+            run for run in runs
+            if (
+                (manifest := repository.agent_manifest(run.input_manifest_id)) is not None
+                and initialization_message.id in (manifest.message_ids or [])
+                and manifest.payload.get("runtime_context", {}).get("turn_intent") == "initial_guidance"
+            )
+        ), None)
+    initialization_status = (
+        "succeeded" if initialization_message is None and any(item.role == "user" for item in all_messages)
+        else "not_started" if initialization_message is None
+        else initialization_run.status if initialization_run and initialization_run.status in {"running", "succeeded", "failed"}
+        else "running"
+    )
     confirmed_attachment_ids = {
         binding.attachment_id for binding in binding_rows if binding.status == "confirmed"
     }
@@ -1372,7 +1508,9 @@ def creation_center_view(session: Session, project: Project) -> dict:
         manifest = repository.agent_manifest(run.input_manifest_id)
         if manifest:
             attempted_message_ids.update(manifest.message_ids or [])
-    if clarifications:
+    if project.status in {"planning", "plan_review", "contract_ready"} and current is None:
+        next_action = NextAction(code="REQUIREMENT_READY_FOR_PLANNING", label="继续方案策划")
+    elif clarifications:
         next_action = NextAction(
             code="RESOLVE_REQUIRED_CLARIFICATIONS",
             target_ids=[item.id for item in clarifications],
@@ -1382,6 +1520,15 @@ def creation_center_view(session: Session, project: Project) -> dict:
         next_action = NextAction(code="REVIEW_REQUIREMENT_CANDIDATE", target_ids=[current.id], label="审核需求候选")
     elif unbound:
         next_action = NextAction(code="CLASSIFY_ATTACHMENT", target_ids=[item.id for item in unbound], label="确认附件用途")
+    elif initialization_status == "not_started":
+        next_action = NextAction(code="INITIALIZE_CREATIVE_CONVERSATION", label="获取创作方向", incurs_model_cost=True)
+    elif initialization_status == "failed" and initialization_run:
+        next_action = NextAction(
+            code="RETRY_FAILED_CREATIVE_TURN",
+            target_ids=[initialization_run.id],
+            label="确认后重跑首次引导",
+            incurs_model_cost=True,
+        )
     elif unconsumed_messages and not {item.id for item in unconsumed_messages}.issubset(attempted_message_ids):
         next_action = NextAction(code="GENERATE_REQUIREMENT_CANDIDATE", label="生成需求候选", incurs_model_cost=True)
     elif unconsumed_messages:
@@ -1395,13 +1542,14 @@ def creation_center_view(session: Session, project: Project) -> dict:
                 label="确认后重跑失败轮次",
                 incurs_model_cost=True,
             )
-    elif messages:
-        next_action = NextAction(code="REQUIREMENT_READY_FOR_PLANNING", label="进入创意方案规划")
+    elif any(item.role == "user" for item in messages):
+        next_action = NextAction(code="CONTINUE_REQUIREMENT_CONVERSATION", label="继续丰富创作需求", incurs_model_cost=True)
     else:
-        next_action = NextAction(code="ADD_REQUIREMENT_MESSAGE", label="补充创作需求", incurs_model_cost=True)
+        next_action = NextAction(code="CONTINUE_REQUIREMENT_CONVERSATION", label="选择方向或继续描述", incurs_model_cost=True)
     return {
         "project_id": project.id,
         "conversation_session_id": conversation.id,
+        "initialization_status": initialization_status,
         "active_requirement": active,
         "messages": messages,
         "current_candidate": current,

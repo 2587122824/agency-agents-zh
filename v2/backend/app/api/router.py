@@ -76,6 +76,7 @@ from ..creation.contracts import (
     CreationCenterView,
     ConversationSessionRead,
     GenerateCandidate,
+    InitializeCreativeConversation,
     MessageCreate,
     MessageRead,
     RejectCandidate,
@@ -93,6 +94,7 @@ from ..creation.service import (
     bind_attachment,
     creation_center_view,
     generate_candidate,
+    initialize_creative_conversation,
     register_attachment,
     reject_candidate,
     resolve_clarification,
@@ -1077,6 +1079,30 @@ def conversation_session_start(
         return start_conversation_session(session, project, payload)
     except CreationConflictError as exc:
         raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/creative-conversation:initialize",
+    response_model=CandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def creative_conversation_initialize(
+    project_id: str,
+    payload: InitializeCreativeConversation,
+    gateway: CreativeAgentGateway = Depends(get_creative_agent_gateway),
+    session: Session = Depends(get_session),
+):
+    project = require_project(session, project_id)
+    try:
+        return initialize_creative_conversation(session, project, payload, gateway)
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
 
 
 @router.post(

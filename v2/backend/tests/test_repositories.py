@@ -356,6 +356,7 @@ def test_creation_repository_contract_preserves_filters_order_and_project_scope(
             creation.flush()
             candidate = RequirementCandidate(
                 project_id=project.id,
+                conversation_session_id=conversation.id,
                 base_requirement_version_id=active_requirement.id,
                 agent_run_id=run.id,
                 fields={},
@@ -363,6 +364,7 @@ def test_creation_repository_contract_preserves_filters_order_and_project_scope(
             )
             stale_candidate = RequirementCandidate(
                 project_id=project.id,
+                conversation_session_id=conversation.id,
                 base_requirement_version_id=active_requirement.id,
                 agent_run_id=run.id,
                 fields={},
@@ -2685,6 +2687,11 @@ def test_impact_repository_contract_preserves_project_lineage_and_exact_scope() 
                 value="cinematic",
                 status="resolved",
             )
+            conversation = ConversationSession(
+                id="conversation-impact",
+                project_id=project.id,
+                started_by="test",
+            )
             requirement = RequirementVersion(
                 id="requirement-impact",
                 project_id=project.id,
@@ -2710,6 +2717,7 @@ def test_impact_repository_contract_preserves_project_lineage_and_exact_scope() 
             candidate = RequirementCandidate(
                 id="candidate-impact",
                 project_id=project.id,
+                conversation_session_id=conversation.id,
                 base_requirement_version_id=requirement.id,
                 agent_run_id=run.id,
                 status="accepted",
@@ -2868,6 +2876,7 @@ def test_impact_repository_contract_preserves_project_lineage_and_exact_scope() 
                 evidence={"node_id": f"shot:{shot.id}"},
             )
             session.add_all([
+                conversation,
                 decision,
                 other_decision,
                 requirement,

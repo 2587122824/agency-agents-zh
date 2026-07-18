@@ -211,6 +211,13 @@ class CreationRepository(Protocol):
 
     def requirement_candidate(self, candidate_id: str) -> RequirementCandidate | None: ...
 
+    def latest_conversation_candidate(
+        self,
+        project_id: str,
+        conversation_session_id: str,
+        base_requirement_version_id: str,
+    ) -> RequirementCandidate | None: ...
+
     def agent_run(self, run_id: str) -> AgentRun | None: ...
 
     def agent_manifest(self, manifest_id: str) -> AgentInputManifest | None: ...
