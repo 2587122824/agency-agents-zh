@@ -282,6 +282,16 @@ export interface CreativeTurnProposal {
     }>
   }>
   explicit_updates: Array<{ field_key: string; value: unknown; source_message_ids: string[] }>
+  creative_diagnosis: {
+    project_type: 'personal_record' | 'promotion' | 'knowledge' | 'narrative' | 'brand_story' | 'emotional_expression' | 'other'
+    stage: 'exploring' | 'shaping' | 'refining' | 'ready_to_confirm'
+    summary: string
+    established_fields: string[]
+    open_gaps: Array<{ field_key: string; reason: string }>
+    focus_field: string | null
+    focus_reason: string
+    source_message_ids: string[]
+  } | null
   clarifying_question: { prompt: string } | null
   prompt_contract_version: string
   output_schema_version: string

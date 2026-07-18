@@ -383,6 +383,13 @@ def test_creative_agent_rejects_explicit_update_equal_to_active_value(client: Te
             latest = manifest_payload["conversation"]["messages"][-1]
             output = CreativeAgentOutput.model_validate({
                 "assistant_reply": "保持当前静音设置。",
+                "creative_diagnosis": {
+                    "project_type": "personal_record", "stage": "shaping",
+                    "summary": "音频策略已经明确。", "established_fields": ["audio_mode"],
+                    "open_gaps": [{"field_key": "content_structure", "reason": "仍需明确内容如何展开。"}],
+                    "focus_field": "content_structure", "focus_reason": "内容结构是当前最重要的未决信息。",
+                    "source_message_ids": [latest["id"]],
+                },
                 "suggestion_sets": [],
                 "proposal_selections": [],
                 "explicit_updates": [{
@@ -599,6 +606,13 @@ def test_typed_suggestion_selection_uses_frozen_option_ids(client: TestClient) -
             option = suggestion_set["options"][1]
             output = CreativeAgentOutput.model_validate({
                 "assistant_reply": f"你选择了{option['label']}。",
+                "creative_diagnosis": {
+                    "project_type": "personal_record", "stage": "shaping",
+                    "summary": "内容结构已经选定，可以继续明确目标受众。", "established_fields": ["content_structure"],
+                    "open_gaps": [{"field_key": "target_audience", "reason": "受众会影响表达重点。"}],
+                    "focus_field": "target_audience", "focus_reason": "这是选择结构后的下一个关键创作变量。",
+                    "source_message_ids": [latest["id"]],
+                },
                 "suggestion_sets": [],
                 "proposal_selections": [{
                     "proposal_id": proposal["proposal_id"],
@@ -668,6 +682,13 @@ def test_selected_history_cannot_be_resubmitted_during_unrelated_update(client: 
             assert history[0]["selections"][0]["option_label"] == "训练日记"
             output = CreativeAgentOutput.model_validate({
                 "assistant_reply": "已将音频模式修改整理为待确认候选。",
+                "creative_diagnosis": {
+                    "project_type": "personal_record", "stage": "refining",
+                    "summary": "音频偏好已表达，创作框架仍需补充目标受众。", "established_fields": ["audio_mode", "content_structure"],
+                    "open_gaps": [{"field_key": "target_audience", "reason": "受众会影响信息取舍。"}],
+                    "focus_field": "target_audience", "focus_reason": "当前应先确认内容主要服务谁。",
+                    "source_message_ids": [latest["id"]],
+                },
                 "suggestion_sets": [],
                 "proposal_selections": [],
                 "explicit_updates": [{
@@ -738,6 +759,13 @@ def test_typed_suggestion_selection_rejects_unknown_option_id(client: TestClient
             suggestion_set = proposal["suggestion_sets"][0]
             output = CreativeAgentOutput.model_validate({
                 "assistant_reply": "已选择。",
+                "creative_diagnosis": {
+                    "project_type": "personal_record", "stage": "shaping",
+                    "summary": "正在处理用户对现有方向的选择。", "established_fields": ["core_topic"],
+                    "open_gaps": [{"field_key": "content_structure", "reason": "需要确认内容组织方式。"}],
+                    "focus_field": "content_structure", "focus_reason": "本轮正在确认该创作变量。",
+                    "source_message_ids": [latest["id"]],
+                },
                 "proposal_selections": [{
                     "proposal_id": proposal["proposal_id"],
                     "suggestion_set_id": suggestion_set["id"],
@@ -822,6 +850,8 @@ def test_initial_guidance_is_persisted_once_and_does_not_mutate_draft(client: Te
     assert len(after["messages"]) == 1
     assert after["messages"][0]["role"] == "assistant"
     assert len(after["active_creative_proposal"]["suggestion_sets"][0]["options"]) == 3
+    assert after["active_creative_proposal"]["creative_diagnosis"]["focus_field"] == "creative_direction"
+    assert after["active_creative_proposal"]["creative_diagnosis"]["stage"] == "exploring"
     assert all(
         option["proposed_updates"][0]["value"] == option["label"]
         for option in after["active_creative_proposal"]["suggestion_sets"][0]["options"]
@@ -845,6 +875,47 @@ def test_initial_guidance_is_persisted_once_and_does_not_mutate_draft(client: Te
     )
     assert selected.status_code == 201
     assert selected.json()["fields"]["creative_direction"] == "真实记录"
+
+
+def test_creative_diagnosis_focus_must_match_suggestion(client: TestClient) -> None:
+    class MismatchedDiagnosisGateway(DeterministicCreativeAgentGateway):
+        def invoke(self, selection, manifest_payload):
+            latest = manifest_payload["conversation"]["messages"][-1]
+            output = CreativeAgentOutput.model_validate({
+                "assistant_reply": "我建议先确定内容结构。",
+                "creative_diagnosis": {
+                    "project_type": "personal_record", "stage": "shaping",
+                    "summary": "当前需要继续形成内容框架。", "established_fields": ["core_topic"],
+                    "open_gaps": [{"field_key": "target_audience", "reason": "受众会影响表达重点。"}],
+                    "focus_field": "target_audience", "focus_reason": "需要先知道内容主要给谁看。",
+                    "source_message_ids": [latest["id"]],
+                },
+                "suggestion_sets": [{
+                    "category": "content_direction", "title": "选择内容结构",
+                    "field_key": "content_structure", "source_message_ids": [latest["id"]],
+                    "options": [
+                        {"label": "过程记录", "summary": "按过程推进。", "value": "过程记录"},
+                        {"label": "结果对比", "summary": "突出前后变化。", "value": "结果对比"},
+                    ],
+                }],
+                "proposal_selections": [], "explicit_updates": [], "clarifying_question": None,
+            })
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "mismatch", {"total_tokens": 1})
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "diagnosis-message-001", "content": "帮我继续完善这个主题。",
+    })
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: MismatchedDiagnosisGateway()
+
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "diagnosis-generate-001", "expected_base_version_id": initial["active_requirement"]["id"]},
+    )
+
+    assert generated.status_code == 502
+    assert generated.headers["x-error-code"] == "AGENT_MODEL_DIAGNOSIS_SUGGESTION_MISMATCH"
 
 
 def test_attachment_registration_does_not_create_binding(client: TestClient) -> None:

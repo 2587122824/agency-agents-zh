@@ -160,6 +160,9 @@ export function ProjectPage() {
   const error = commandError(initializeConversation, addMessage, generate, retryCreativeTurn, startConversation, selectSuggestion, accept, reject, resolveClarification, register, bind)
   const activeProposal = creation.active_creative_proposal
   const creationOpen = !['planning', 'plan_review', 'contract_ready'].includes(data.status)
+  const diagnosis = activeProposal?.creative_diagnosis
+  const projectTypeLabels: Record<string, string> = { personal_record: '真实记录', promotion: '推广内容', knowledge: '知识表达', narrative: '故事叙事', brand_story: '品牌故事', emotional_expression: '情绪表达', other: '其他类型' }
+  const creativeStageLabels: Record<string, string> = { exploring: '探索方向', shaping: '形成框架', refining: '完善细节', ready_to_confirm: '可以收口' }
 
   return <>
     <PageHeader eyebrow="CREATION CENTER" title={data.title} description="和创作制片人持续聊出完整需求，最后确认一次再进入策划。" actions={<Link className="secondaryButton" to="/"><ArrowLeft size={15} />项目列表</Link>} />
@@ -175,6 +178,12 @@ export function ProjectPage() {
         <div className={styles.panelHeading}><div><MessageSquareText size={18} /><div><span>需求对话</span><h2>创作输入</h2></div></div><div className={styles.conversationTools}><b>{creation.messages.length} 条消息</b><button type="button" title="开启新对话，保留已确认项目需求" disabled={!creationOpen || initializeConversation.isPending || startConversation.isPending || generate.isPending || retryCreativeTurn.isPending} onClick={() => startConversation.mutate()}><MessageSquarePlus size={15} /></button></div></div>
         <div className={styles.messages} ref={messagesRef}>
           {creation.messages.length ? creation.messages.map(item => <article key={item.id} data-role={item.role}><span>{item.role === 'assistant' ? 'AI' : '你'}</span><div><p>{item.content}</p><small>{item.role === 'assistant' ? '创作制片人 · ' : ''}{new Date(item.created_at).toLocaleString('zh-CN')}</small></div></article>) : <div className={styles.emptyMessages}><MessageSquareText size={25} /><strong>{initializeConversation.isPending ? '创作制片人正在准备方向…' : '正在进入创作对话'}</strong><p>智能体会先根据项目主题给出几个方向，你可以选择、混合或直接补充。</p></div>}
+          {diagnosis && <section className={styles.creativeDiagnosis}>
+            <header><span>本轮创作判断</span><div><b>{projectTypeLabels[diagnosis.project_type] ?? diagnosis.project_type}</b><b>{creativeStageLabels[diagnosis.stage] ?? diagnosis.stage}</b></div></header>
+            <p>{diagnosis.summary}</p>
+            {diagnosis.focus_field && <div className={styles.diagnosisFocus}><span>建议先讨论</span><strong>{fieldLabels[diagnosis.focus_field] ?? diagnosis.focus_field}</strong><small>{diagnosis.focus_reason}</small></div>}
+            <footer><span>已明确 {diagnosis.established_fields.length} 项</span><span>待讨论 {diagnosis.open_gaps.length} 项</span></footer>
+          </section>}
           {activeProposal?.suggestion_sets.map(suggestionSet => {
             const selected = activeProposal.selections.find(item => item.suggestion_set_id === suggestionSet.id)
             return <section className={styles.suggestionSet} key={suggestionSet.id}>

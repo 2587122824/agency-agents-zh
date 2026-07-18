@@ -726,6 +726,44 @@ def generate_candidate(
         valid_suggestion_source_ids = valid_user_message_ids | (
             {current_message_id} if turn_intent == "initial_guidance" else set()
         )
+        diagnosis = result.output.creative_diagnosis
+        if not set(diagnosis.source_message_ids).issubset(valid_suggestion_source_ids):
+            raise AgentGatewayError(
+                "AGENT_MODEL_DIAGNOSIS_SOURCE_INVALID",
+                "创作诊断引用了非本轮有效消息。",
+            )
+        established_fields = set(diagnosis.established_fields)
+        gap_fields = {item.field_key for item in diagnosis.open_gaps}
+        if len(established_fields) != len(diagnosis.established_fields):
+            raise AgentGatewayError(
+                "AGENT_MODEL_DIAGNOSIS_ESTABLISHED_DUPLICATE",
+                "创作诊断包含重复的已明确字段。",
+            )
+        if len(gap_fields) != len(diagnosis.open_gaps):
+            raise AgentGatewayError(
+                "AGENT_MODEL_DIAGNOSIS_GAP_DUPLICATE",
+                "创作诊断包含重复的待讨论字段。",
+            )
+        if established_fields & gap_fields:
+            raise AgentGatewayError(
+                "AGENT_MODEL_DIAGNOSIS_FIELD_CONFLICT",
+                "创作诊断不能把同一字段同时标记为已明确和待讨论。",
+            )
+        if diagnosis.focus_field is not None and diagnosis.focus_field not in gap_fields:
+            raise AgentGatewayError(
+                "AGENT_MODEL_DIAGNOSIS_FOCUS_INVALID",
+                "创作诊断的本轮焦点必须来自待讨论字段。",
+            )
+        if diagnosis.stage == "ready_to_confirm" and diagnosis.focus_field is not None:
+            raise AgentGatewayError(
+                "AGENT_MODEL_DIAGNOSIS_READY_FOCUS_INVALID",
+                "建议确认阶段不能继续声明一个未解决的本轮焦点。",
+            )
+        if diagnosis.stage != "ready_to_confirm" and diagnosis.focus_field is None:
+            raise AgentGatewayError(
+                "AGENT_MODEL_DIAGNOSIS_FOCUS_MISSING",
+                "尚未建议确认时必须明确本轮最值得讨论的字段。",
+            )
         if turn_intent == "initial_guidance" and (
             result.output.explicit_updates or result.output.proposal_selections
         ):
@@ -740,6 +778,18 @@ def generate_candidate(
             raise AgentGatewayError(
                 "AGENT_INITIAL_GUIDANCE_STRUCTURE_INVALID",
                 "首次引导必须只提供一组整体创作方向。",
+            )
+        if turn_intent == "initial_guidance" and diagnosis.focus_field != "creative_direction":
+            raise AgentGatewayError(
+                "AGENT_INITIAL_GUIDANCE_DIAGNOSIS_INVALID",
+                "首次引导的创作诊断必须聚焦整体创作方向。",
+            )
+        if result.output.suggestion_sets and diagnosis.focus_field not in {
+            item.field_key for item in result.output.suggestion_sets
+        }:
+            raise AgentGatewayError(
+                "AGENT_MODEL_DIAGNOSIS_SUGGESTION_MISMATCH",
+                "创作建议没有回应诊断声明的本轮焦点。",
             )
         if turn_intent == "initial_guidance" and any(
             option.value != option.label
@@ -914,6 +964,7 @@ def generate_candidate(
         assistant_message_id=assistant_message.id,
         suggestion_sets=suggestion_sets,
         explicit_updates=[item.model_dump(mode="json") for item in result.output.explicit_updates],
+        creative_diagnosis=diagnosis.model_dump(mode="json"),
         clarifying_question=(
             {"prompt": result.output.clarifying_question}
             if result.output.clarifying_question else None
@@ -1564,6 +1615,7 @@ def creation_center_view(session: Session, project: Project) -> dict:
                 "status": active_proposal.status,
                 "suggestion_sets": active_proposal.suggestion_sets,
                 "explicit_updates": active_proposal.explicit_updates,
+                "creative_diagnosis": active_proposal.creative_diagnosis,
                 "clarifying_question": active_proposal.clarifying_question,
                 "prompt_contract_version": active_proposal.prompt_contract_version,
                 "output_schema_version": active_proposal.output_schema_version,

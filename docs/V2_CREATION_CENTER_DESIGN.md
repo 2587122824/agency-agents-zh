@@ -367,14 +367,15 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.2 创作制片人
 
-创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v4` 和 `creative-dialogue-prompt.v11`：
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v5` 和 `creative-dialogue-prompt.v12`：
 
 ```text
 输入：runtime_context.turn_intent + project_context.active_requirement + project_context.current_requirement_draft? + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
-输出：assistant_reply + suggestion_sets[] + proposal_selections[] + explicit_updates[] + clarifying_question?
+输出：assistant_reply + creative_diagnosis + suggestion_sets[] + proposal_selections[] + explicit_updates[] + clarifying_question?
 ```
 
 - `assistant_reply` 先回答当前问题，不重复询问已有事实。
+- `creative_diagnosis` 每轮提供项目类型、创作阶段、已明确字段、关键缺口、本轮唯一聚焦字段、聚焦原因和消息证据。它是可审计的引导解释，不是正式需求、系统状态或生产路由。
 - `suggestion_sets` 是有差异的创意选项，不是项目事实。每个建议组必须声明一个唯一 `field_key`，组内每个选项只能提供该字段的一个候选值，不能捆绑修改其他字段。
 - `proposal_history` 按助手消息保留不含系统 ID 的选项摘要和已经发生的选择，仅用于理解上下文，不能再次提交。
 - `selection_scope` 只在最新用户消息通过 `reply_to` 精确回复一个仍有未选择建议组的助手提案时存在；它是该轮唯一包含可提交提案、建议组和选项 ID 的作用域。
@@ -384,6 +385,10 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 - 首次进入时执行一次持久化 `initial_guidance`，只给一组 2–3 个整体创作方向、不形成字段更新；刷新不重复调用，失败不自动重试。每个冻结方向值必须等于用户看到的短标签，详细说明不得夹带进草稿；方向不得越界描述声音、字幕、镜头、剪辑、转场、特效或生产方式。
 - 用户选择建议或继续对话后创建继承上一修订的 `RequirementCandidate`；用户可继续丰富，最终确认一次才形成 `RequirementVersion` 并进入策划。
 - 对话达到明确配置上限时返回 `CONVERSATION_CONTEXT_LIMIT_EXCEEDED`，不隐藏摘要、筛选或截断。
+
+动态引导不采用固定问卷或主题关键词分支。模型结合活动需求、当前草稿和完整会话判断 `project_type` 与 `stage`，再从尚未明确且会显著影响创作方向的字段中选择一个 `focus_field`。后端要求已明确字段与缺口互斥、焦点必须来自缺口、诊断消息来源存在，且本轮建议必须回应焦点；首次引导的焦点固定为合同字段 `creative_direction`，这是阶段合同而不是内容兜底。除精确选项选择、用户只要求解释问题或建议收口外，创作制片人应围绕焦点主动给出 2–3 个有差异的选择，不再只回复“已记录”。
+
+`stage=ready_to_confirm` 只表示创作制片人建议用户考虑收口。正式需求是否具备最低策划条件继续由后端字段目录和 `evaluate_requirement` 确定，是否确认只由用户命令决定。项目类型不会选择模板、模型、Provider、工作流或生产路线；诊断内容不会进入 `explicit_updates`，也不会成为 Decision。
 
 建议交互采用 2–3 个可点击选项：推荐项固定排第一并显示“推荐”，每项包含短名称、差异说明以及“选择后设置：字段 · 值”的精确预览，模型不得生成选项 ID。后端验证每组选项只修改同一个字段且候选值互不相同，再生成稳定的建议组 ID、选项 ID 与单字段冻结更新；页面另外提供“其他想法”入口，它只聚焦底部唯一的消息输入框，最终仍发送一条普通用户消息，不伪装成模型给出的第四个选项。历史多字段提案也逐项显示全部影响，不再隐藏。
 
@@ -1061,7 +1066,7 @@ RequirementDiff
 
 ### Creation Sprint 4：创作模型接入
 
-- 创作制片人 `creative-dialogue-input.v5 / output.v4 / prompt.v11`（已完成）
+- 创作制片人 `creative-dialogue-input.v5 / output.v5 / prompt.v12`（已完成）
 - 内容策划 `content-planner-input.v1 / creative-brief-candidate.v1`（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计

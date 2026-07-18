@@ -48,6 +48,18 @@ CREATIVE_FIELD_KEYS = Literal[
     "creative_constraints",
 ]
 
+CREATIVE_PROJECT_TYPES = Literal[
+    "personal_record",
+    "promotion",
+    "knowledge",
+    "narrative",
+    "brand_story",
+    "emotional_expression",
+    "other",
+]
+
+CREATIVE_STAGES = Literal["exploring", "shaping", "refining", "ready_to_confirm"]
+
 
 class ProposedFieldUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -84,10 +96,31 @@ class CreativeProposalSelection(BaseModel):
     source_message_ids: list[str] = Field(min_length=1, max_length=8)
 
 
+class CreativeGap(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field_key: CREATIVE_FIELD_KEYS
+    reason: str = Field(min_length=1, max_length=160)
+
+
+class CreativeDiagnosis(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_type: CREATIVE_PROJECT_TYPES
+    stage: CREATIVE_STAGES
+    summary: str = Field(min_length=1, max_length=240)
+    established_fields: list[CREATIVE_FIELD_KEYS] = Field(default_factory=list, max_length=14)
+    open_gaps: list[CreativeGap] = Field(default_factory=list, max_length=6)
+    focus_field: CREATIVE_FIELD_KEYS | None = None
+    focus_reason: str = Field(min_length=1, max_length=200)
+    source_message_ids: list[str] = Field(min_length=1, max_length=8)
+
+
 class CreativeAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assistant_reply: str = Field(min_length=1, max_length=8000)
+    creative_diagnosis: CreativeDiagnosis
     suggestion_sets: list[CreativeSuggestionSet] = Field(default_factory=list, max_length=3)
     proposal_selections: list[CreativeProposalSelection] = Field(default_factory=list, max_length=3)
     explicit_updates: list[ProposedFieldUpdate] = Field(default_factory=list, max_length=16)
@@ -167,13 +200,13 @@ class HttpxAgentChatTransport:
 
 
 CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v5"
-CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v4"
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v11"
+CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v5"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v12"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
 必须只返回一个 JSON 对象，严格符合：
-{"assistant_reply":"中文回复","suggestion_sets":[{"category":"类别","title":"问题","field_key":"本组唯一修改字段","source_message_ids":["用户消息ID"],"options":[{"label":"选项名","summary":"差异说明","value":"该字段的建议值"}]}],"proposal_selections":[{"proposal_id":"已有提案ID","suggestion_set_id":"已有建议组ID","option_id":"已有选项ID","source_message_ids":["用户选择消息ID"]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
+{"assistant_reply":"中文回复","creative_diagnosis":{"project_type":"personal_record|promotion|knowledge|narrative|brand_story|emotional_expression|other","stage":"exploring|shaping|refining|ready_to_confirm","summary":"当前创作判断","established_fields":["已明确字段"],"open_gaps":[{"field_key":"待讨论字段","reason":"为什么重要"}],"focus_field":"本轮最值得讨论的字段或null","focus_reason":"本轮聚焦原因","source_message_ids":["依据消息ID"]},"suggestion_sets":[{"category":"类别","title":"问题","field_key":"本组唯一修改字段","source_message_ids":["用户消息ID"],"options":[{"label":"选项名","summary":"差异说明","value":"该字段的建议值"}]}],"proposal_selections":[{"proposal_id":"已有提案ID","suggestion_set_id":"已有建议组ID","option_id":"已有选项ID","source_message_ids":["用户选择消息ID"]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
 允许字段及用途：
 - title 项目名称；core_topic 核心主题；content_goal 内容目标；platform 发布平台；target_audience 目标受众。
 - duration_seconds 目标秒数；aspect_ratio 画幅；audio_mode 仅 off 或 voiceover。
@@ -202,6 +235,9 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 13. explicit_updates 或 proposal_selections 只会生成待用户确认的草稿修订，不会直接修改 active_requirement。assistant_reply 不得声称配置已经确认或生效。
 14. 当 runtime_context.turn_intent=initial_guidance 时，根据 active_requirement 的主题主动给出方向。必须只返回 1 个 suggestion_set，field_key 必须为 creative_direction，其中提供 2 到 3 个整体创作方向；每个 option.value 必须与该 option.label 完全相同，使用简洁中文短语，不能把详细方案藏进冻结值。label、summary 和 value 都只描述内容重点、叙事取向和观看感受，不得描述声音、字幕、景别、机位、镜头运动、剪辑、转场、特效或生产方式。suggestion_sets.source_message_ids 引用本轮 system 初始化消息 ID，explicit_updates 和 proposal_selections 必须为空，不得把系统引导写成用户事实。
 15. 当 current_requirement_draft 非空时，它是本轮唯一草稿基线；新回复与建议必须在其已有字段之上继续丰富，不得退回 active_requirement 丢失草稿内容。
+16. 每轮必须先形成 creative_diagnosis。project_type 是内容用途判断，不是模板或生产路由；stage 只是本轮创作判断，不代表系统状态或正式需求已就绪。established_fields 只列出当前输入中已有明确依据的字段；open_gaps 只列出仍会显著影响创作方向的字段，二者不得重复。
+17. focus_field 是本轮唯一优先讨论维度，必须出现在 open_gaps 中；stage=ready_to_confirm 时可以为 null。focus_reason 要解释该维度为何比其他缺口更值得先讨论，不能只写“信息不足”。存在建议组时，至少一组的 field_key 必须等于 focus_field；使用 clarifying_question 时也必须围绕 focus_field。不得依靠主题关键词、固定问卷顺序或项目类型硬编码决定焦点，应结合已确认字段、草稿和整段会话判断。
+18. 除精确选择、用户只要求解释一个问题或 stage=ready_to_confirm 外，每轮应围绕 focus_field 主动给出 2 到 3 个明显不同的可选方向，让用户可以继续讨论而不是只收到“已记录”。诊断只用于解释引导，不能进入 explicit_updates，也不能声称已经修改或确认需求。
 """
 
 
@@ -399,6 +435,16 @@ class DeterministicCreativeAgentGateway:
             source = manifest_payload["conversation"]["messages"][-1]
             output = CreativeAgentOutput(
                 assistant_reply="我先根据主题给你三个可继续讨论的方向。选一个作为起点，也可以直接告诉我你想混合或修改哪些部分。",
+                creative_diagnosis=CreativeDiagnosis(
+                    project_type="personal_record",
+                    stage="exploring",
+                    summary="目前只有主题和基础交付信息，需要先确定整体内容取向。",
+                    established_fields=["title", "core_topic", "duration_seconds", "aspect_ratio", "audio_mode"],
+                    open_gaps=[CreativeGap(field_key="creative_direction", reason="整体取向会决定后续讨论受众、目标和表达方式。")],
+                    focus_field="creative_direction",
+                    focus_reason="先选定整体方向，后续补充才不会变成互不关联的字段清单。",
+                    source_message_ids=[source["id"]],
+                ),
                 suggestion_sets=[CreativeSuggestionSet(
                     category="creative_direction",
                     title="这次内容先从哪个方向展开？",
@@ -418,6 +464,16 @@ class DeterministicCreativeAgentGateway:
         )
         output = CreativeAgentOutput(
             assistant_reply=f"已收到：{latest['content']}",
+            creative_diagnosis=CreativeDiagnosis(
+                project_type="personal_record",
+                stage="shaping",
+                summary="创作方向已经开始形成，下一步需要明确内容如何展开。",
+                established_fields=["title", "core_topic", "creative_direction"],
+                open_gaps=[CreativeGap(field_key="content_structure", reason="结构决定有限时长内如何组织内容重点。")],
+                focus_field="content_structure",
+                focus_reason="先确定内容结构，才能继续判断受众和语气是否匹配。",
+                source_message_ids=[latest["id"]],
+            ),
             suggestion_sets=[CreativeSuggestionSet(
                 category="content_direction",
                 title="你希望采用哪种内容结构？",

@@ -187,6 +187,7 @@ class CreativeTurnProposalRead(BaseModel):
     status: str
     suggestion_sets: list[dict[str, Any]]
     explicit_updates: list[dict[str, Any]]
+    creative_diagnosis: dict[str, Any] | None
     clarifying_question: dict[str, Any] | None
     prompt_contract_version: str
     output_schema_version: str

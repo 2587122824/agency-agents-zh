@@ -441,6 +441,7 @@ class CreativeTurnProposal(Base):
     status: Mapped[str] = mapped_column(String(24), default="active", index=True)
     suggestion_sets: Mapped[list] = mapped_column(JSON, default=list)
     explicit_updates: Mapped[list] = mapped_column(JSON, default=list)
+    creative_diagnosis: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     clarifying_question: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     prompt_contract_version: Mapped[str] = mapped_column(String(48))
     output_schema_version: Mapped[str] = mapped_column(String(48))

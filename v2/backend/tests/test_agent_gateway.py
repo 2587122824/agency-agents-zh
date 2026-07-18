@@ -133,6 +133,19 @@ def configured_rows(
     return [(model, provider, config)]
 
 
+def diagnosis(source_message_id: str, focus_field: str = "content_structure") -> dict:
+    return {
+        "project_type": "personal_record",
+        "stage": "shaping",
+        "summary": "主题已经明确，正在形成内容框架。",
+        "established_fields": ["core_topic"],
+        "open_gaps": [{"field_key": focus_field, "reason": "这个维度会影响后续创作选择。"}],
+        "focus_field": focus_field,
+        "focus_reason": "这是当前最影响内容方向的未决信息。",
+        "source_message_ids": [source_message_id],
+    }
+
+
 def test_configured_gateway_selects_matching_prompt_contract() -> None:
     gateway = ConfiguredCreativeAgentGateway()
 
@@ -156,6 +169,7 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
     monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
     content = {
         "assistant_reply": "我已记录训练短片方向。",
+        "creative_diagnosis": diagnosis("message_3"),
         "suggestion_sets": [{
             "category": "content_direction",
             "title": "选择内容结构",
@@ -182,6 +196,7 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
     result = gateway.invoke(selection(), manifest())
 
     assert result.output.assistant_reply == "我已记录训练短片方向。"
+    assert result.output.creative_diagnosis.focus_field == "content_structure"
     assert result.output.suggestion_sets[0].options[0].label == "训练日记"
     assert result.provider_request_id == "provider-request-1"
     assert result.token_usage["total_tokens"] == 18
@@ -217,10 +232,33 @@ def test_configured_gateway_rejects_non_json_without_repair_or_retry(monkeypatch
     assert len(transport.calls) == 1
 
 
+def test_configured_gateway_requires_creative_diagnosis(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    content = {
+        "assistant_reply": "我先给你一些方向。",
+        "suggestion_sets": [],
+        "proposal_selections": [],
+        "explicit_updates": [],
+        "clarifying_question": None,
+    }
+    transport = FakeTransport({"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]})
+    gateway = ConfiguredCreativeAgentGateway(
+        transport=transport,
+        credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),
+    )
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest())
+
+    assert raised.value.code == "AGENT_MODEL_OUTPUT_SCHEMA_INVALID"
+    assert len(transport.calls) == 1
+
+
 def test_configured_gateway_rejects_legacy_multi_update_suggestion_shape(monkeypatch) -> None:
     monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
     content = {
         "assistant_reply": "请选择方向。",
+        "creative_diagnosis": diagnosis("message_3"),
         "suggestion_sets": [{
             "category": "content_direction",
             "title": "选择方向",
