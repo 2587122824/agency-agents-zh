@@ -367,7 +367,7 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.2 创作制片人
 
-创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v5` 和 `creative-dialogue-prompt.v12`：
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v5` 和 `creative-dialogue-prompt.v13`：
 
 ```text
 输入：runtime_context.turn_intent + project_context.active_requirement + project_context.current_requirement_draft? + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
@@ -395,6 +395,10 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 点击选项提交精确 `proposal_id + suggestion_set_id + option_id`，保存 `CreativeSuggestionSelection`，并从该提案对应的草稿修订继承后创建下一修订。点击本身不修改正式需求，也不关闭输入区；人物身份、音频、费用等高风险字段仍按字段目录进入独立确认。每组建议只能选择一次，过期提案、旧需求版本、改名或不存在的 ID 明确失败。
 
 用户也可以在对话中自然表达选择。前端把该消息精确关联到当前助手消息，模型只负责从本轮 `selection_scope` 返回选项 ID；应用服务校验项目、需求版本、会话消息、建议组、选项和来源消息，再用冻结值生成候选及选择记录。历史提案即使仍在会话中，也不再向模型授予可重复提交的 ID。任何不存在、重复、已选择或无法唯一确定的引用都明确失败或要求澄清，不使用序号关键词规则、名称相似度、模型改写值或后端猜测。
+
+用户点击建议时执行一次明确的“保存选择并继续引导”命令。应用服务先按冻结 Option 保存选择、草稿修订和一条可读的结构化用户消息，再以 `turn_intent=selection_followup` 冻结新的输入清单并调用创作模型一次。模型不得重新解释或改写已点击选项，也不得把该选项再次登记为 `explicit_updates` 或 `proposal_selections`；它应先自然确认选择，再根据更新后的草稿诊断下一个最有价值的缺口，并提供 2–3 个可点击方向。后端不规定固定问卷顺序，只验证新建议没有重复刚选定的字段。
+
+一次点击只授权一次模型调用，不后台循环、不自动重试。若诊断达到 `ready_to_confirm`，助手总结当前需求并停止强制给出下一组选项，但输入框继续开放。若模型调用失败，已保存的选择和草稿不回滚，页面明确显示“选择已保存，本轮引导失败”；用户确认模型费用后只能精确重跑该失败 Run，继续使用相同输入清单、模型、Provider 和合同版本。
 
 `explicit_updates` 和 `proposal_selections` 都只生成草稿修订，不直接修改活动需求。当前会话最新草稿是下一轮唯一继承基线，活动需求只作为草稿链起点。自然回复不能把草稿描述成“配置已更新或已生效”。最终确认最新草稿后才创建正式版本；进入策划后普通消息被阶段边界拒绝，修改必须显式开启下一版草稿。
 
@@ -1072,7 +1076,7 @@ RequirementDiff
 
 ### Creation Sprint 4：创作模型接入
 
-- 创作制片人 `creative-dialogue-input.v5 / output.v5 / prompt.v12`（已完成）
+- 创作制片人 `creative-dialogue-input.v5 / output.v5 / prompt.v13`（已完成）
 - 内容策划 `content-planner-input.v1 / creative-brief-candidate.v1`（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计

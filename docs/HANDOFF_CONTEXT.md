@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260718_23 (head)` |
-| 已发布配置 | `production_config_2fc59d4d7bdf4326881faccd86ec2132`，版本 20 |
+| 已发布配置 | `production_config_6ad9eee20aa54e56b4c77257562a4109`，版本 21 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -65,7 +65,7 @@ v2/runtime/worker.err.log
 
 ## 4. 当前创作智能体事实
 
-当前运行代码使用 `creative-dialogue-input.v5 / output.v5 / prompt.v12`：
+当前运行代码使用 `creative-dialogue-input.v5 / output.v5 / prompt.v13`：
 
 - 首次进入空白创作会话时，前端调用一次 `creative-conversation:initialize`；系统消息、AgentRun 和助手引导均持久化，刷新不重复调用，失败不自动重试。
 - `RequirementCandidate` 是会话级不可变草稿修订，通过 `conversation_session_id` 和 `supersedes_candidate_id` 继承；每轮从最新草稿继续，不再从活动正式需求重置。
@@ -77,6 +77,8 @@ v2/runtime/worker.err.log
 - 动态引导结合当前草稿和完整会话选择最值得讨论的创作维度，不采用主题关键词特判或固定问卷顺序；诊断不修改需求、不决定系统就绪、不选择模板或生产路由。
 - 输入包含当前活动会话的用户与助手消息，保留真实角色、ID 和回复关系。
 - 建议以 2–3 个可点击选项展示，后端生成稳定 ID；点击创建选择记录和下一版草稿修订，不强迫立即确认。
+- 点击建议会执行一次明确的“保存选择并继续引导”：结构化选择先写入草稿，再由 `selection_followup` 基于新草稿主动讨论下一个高价值缺口；一次点击只调用一次当前模型，不后台循环，达到 `ready_to_confirm` 后总结收口但仍允许继续输入。
+- 后续引导失败时已保存选择不回滚、不自动重试；页面明确显示选择已保存，用户确认费用后精确重跑原 Run，模型、Provider、消息清单与合同版本保持一致。
 - 创作页面只保留底部一个消息输入框；建议卡片的“其他想法”只聚焦该输入框，不展开第二套输入控件，也不改变消息合同。
 - 每个建议组只授权一个字段，每个选项只提供一个候选值；后端生成单字段冻结更新，页面显示精确字段和值，历史多字段提案也完整展示影响。
 - 同一条消息中的明确事实/限制与建议请求必须分别进入 `explicit_updates` 和 `suggestion_sets`；候选值与活动需求相同会明确失败，不静默过滤或改写字段来源。
@@ -116,6 +118,8 @@ v2/runtime/worker.err.log
 
 动态引导真实验收项目 `project_e99219f3991b4b5b979addf7f79da3b1` 使用配置 v19 与 `output.v5 / prompt.v12` 完成首次引导：识别为真实记录、阶段为探索方向，列出 5 个已明确字段与 4 个关键缺口，并选择 `creative_direction` 作为唯一焦点；三个建议均只冻结该字段，活动需求保持 requirement_v1。桌面与 375px 页面无横向溢出，控制台无错误。
 
+选择后持续引导真实验收项目 `project_55529c047fba4e19b12b6b911c75115a` 使用配置 v21 与 `prompt.v13` 完成“首次引导 -> 点击进步日记 -> 下一轮内容结构引导”：结构化用户选择消息、草稿 `creative_direction=进步日记`、助手确认和新的 `content_structure` 三选项均已持久化，最新 Run 为 `succeeded`。页面显示 3 条连续消息和 3 个新选项，`scrollWidth == clientWidth` 且控制台无错误。
+
 ## 5. 必须保持的边界
 
 - 不得自行增加兜底、自动重试、模型切换、Provider 替换、工作流替换、输出修复或降级。
@@ -145,6 +149,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-19 | 修复点击创作方向后智能体沉默：新增 `selection_followup` 明确回合，点击一次保存冻结选择并调用一次创作模型，基于累积草稿继续引导下一个关键缺口；禁止重复刚选字段、重新登记选择或后台循环。失败保留选择并提供用户确认费用后的精确重跑，前端补充运行、费用与失败状态 |
 | 2026-07-19 | 修正内容策划的过度回执约束：`constraints_carried_forward` 仅保留为可选说明，后端直接验收实际音频、平台、实体、时长和引用，不再因模型未复述 `audio_policy` 而失败；方案页补齐运行中只读等待态并清除旧命令错误，不允许等待期间重复提交 |
 | 2026-07-18 | 分镜导演升级为独立真实模型网关：新增 `director-input.v1 / shot-plan.v2 / director-prompt.v1`、节拍时长、单动作、连续组、实体附件与音频策略严格验收、失败审计和用户确认费用后的精确重跑；发布配置 v20，其他生产路由保持不变 |
 | 2026-07-18 | 创作制片人升级 output.v5 / prompt.v12：新增可审计创作诊断和动态引导，按当前草稿选择唯一讨论焦点并解释原因；页面展示类型、阶段、焦点与缺口计数，正式完整度和确认权限仍由后端与用户掌握 |
@@ -172,11 +177,11 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`158 passed`
+- 后端测试：`159 passed`
 - Python compileall：通过
 - Vite production build：通过
 - Alembic runtime/head：`20260718_23`
-- 真实 DeepSeek 单次调用：通过
+- 真实 DeepSeek 首次引导与点击后持续引导：通过
 - 桌面与 390px 浏览器验收：通过，无横向溢出和控制台错误
 - API 与 Worker 重启健康检查：通过
 

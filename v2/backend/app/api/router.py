@@ -1231,14 +1231,21 @@ def creative_suggestion_select(
     proposal_id: str,
     payload: SelectCreativeSuggestion,
     session: Session = Depends(get_session),
+    gateway: CreativeAgentGateway = Depends(get_creative_agent_gateway),
 ):
     project = require_project(session, project_id)
     try:
-        return select_creative_suggestion(session, project, proposal_id, payload)
+        return select_creative_suggestion(session, project, proposal_id, payload, gateway)
     except CreationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CreationConflictError as exc:
         raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
 
 
 @router.post(

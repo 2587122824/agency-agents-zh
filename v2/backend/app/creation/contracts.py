@@ -38,6 +38,7 @@ class SelectCreativeSuggestion(CommandContext):
     expected_base_version_id: str
     suggestion_set_id: str = Field(min_length=1, max_length=48)
     option_id: str = Field(min_length=1, max_length=48)
+    confirm_model_cost: bool
 
 
 class AcceptCandidate(CommandContext):

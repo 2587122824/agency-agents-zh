@@ -551,6 +551,20 @@ def test_creative_suggestion_selection_creates_candidate_without_confirming_requ
     suggestion_set = proposal["suggestion_sets"][0]
     option = suggestion_set["options"][0]
 
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/creative-proposals/{proposal['id']}:select",
+        json={
+            "command_id": "suggestion-select-unconfirmed-001",
+            "actor_id": "test-user",
+            "expected_base_version_id": base_id,
+            "suggestion_set_id": suggestion_set["id"],
+            "option_id": option["id"],
+            "confirm_model_cost": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "MODEL_COST_CONFIRMATION_REQUIRED"
+
     selected = client.post(
         f"/api/v1/projects/{project['id']}/creative-proposals/{proposal['id']}:select",
         json={
@@ -559,9 +573,10 @@ def test_creative_suggestion_selection_creates_candidate_without_confirming_requ
             "expected_base_version_id": base_id,
             "suggestion_set_id": suggestion_set["id"],
             "option_id": option["id"],
+            "confirm_model_cost": True,
         },
     )
-    assert selected.status_code == 201
+    assert selected.status_code == 201, selected.text
     candidate = selected.json()
     assert candidate["status"] == "awaiting_review"
     assert candidate["fields"]["content_structure"] == "训练日记"
@@ -571,7 +586,11 @@ def test_creative_suggestion_selection_creates_candidate_without_confirming_requ
     assert after_selection["active_requirement"]["id"] == base_id
     assert after_selection["active_requirement"]["version_number"] == 1
     assert after_selection["current_candidate"]["id"] == candidate["id"]
-    assert after_selection["active_creative_proposal"]["selections"][0]["option_id"] == option["id"]
+    assert after_selection["active_creative_proposal"]["id"] != proposal["id"]
+    assert after_selection["active_creative_proposal"]["suggestion_sets"][0]["field_key"] == "target_audience"
+    assert after_selection["messages"][-2]["role"] == "user"
+    assert "我选择了" in after_selection["messages"][-2]["content"]
+    assert after_selection["messages"][-1]["role"] == "assistant"
 
     duplicate = client.post(
         f"/api/v1/projects/{project['id']}/creative-proposals/{proposal['id']}:select",
@@ -580,6 +599,7 @@ def test_creative_suggestion_selection_creates_candidate_without_confirming_requ
             "expected_base_version_id": base_id,
             "suggestion_set_id": suggestion_set["id"],
             "option_id": suggestion_set["options"][1]["id"],
+            "confirm_model_cost": True,
         },
     )
     assert duplicate.status_code == 409
@@ -595,6 +615,63 @@ def test_creative_suggestion_selection_creates_candidate_without_confirming_requ
     assert new_view["messages"] == []
     assert new_view["active_requirement"]["id"] == base_id
     assert new_view["active_creative_proposal"] is None
+
+
+def test_selection_followup_failure_keeps_choice_and_allows_exact_retry(client: TestClient) -> None:
+    class FailingFollowupGateway(DeterministicCreativeAgentGateway):
+        def invoke(self, selection, manifest_payload):
+            if manifest_payload["runtime_context"].get("turn_intent") == "selection_followup":
+                raise AgentGatewayError("TEST_SELECTION_FOLLOWUP_FAILED", "测试后续引导失败。")
+            return super().invoke(selection, manifest_payload)
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    base_id = initial["active_requirement"]["id"]
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "followup-failure-message-001",
+        "content": "请给我几个内容结构方向。",
+    })
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "followup-failure-generate-001", "expected_base_version_id": base_id},
+    )
+    assert generated.status_code == 201
+    proposal = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_creative_proposal"]
+    suggestion_set = proposal["suggestion_sets"][0]
+    option = suggestion_set["options"][0]
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: FailingFollowupGateway()
+
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/creative-proposals/{proposal['id']}:select",
+        json={
+            "command_id": "followup-failure-select-001",
+            "expected_base_version_id": base_id,
+            "suggestion_set_id": suggestion_set["id"],
+            "option_id": option["id"],
+            "confirm_model_cost": True,
+        },
+    )
+    assert failed.status_code == 502
+    failed_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert failed_view["current_candidate"]["fields"]["content_structure"] == option["proposed_updates"][0]["value"]
+    assert failed_view["latest_agent_run"]["status"] == "failed"
+    assert failed_view["next_action"]["code"] == "RETRY_FAILED_CREATIVE_TURN"
+    assert failed_view["messages"][-1]["role"] == "user"
+
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: DeterministicCreativeAgentGateway()
+    retried = client.post(
+        f"/api/v1/projects/{project['id']}/creative-agent-runs/{failed_view['latest_agent_run']['id']}:retry",
+        json={
+            "command_id": "followup-failure-retry-001",
+            "expected_base_version_id": base_id,
+            "failed_agent_run_id": failed_view["latest_agent_run"]["id"],
+            "confirm_model_cost": True,
+        },
+    )
+    assert retried.status_code == 201, retried.text
+    retried_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert retried_view["messages"][-1]["role"] == "assistant"
+    assert retried_view["active_creative_proposal"]["suggestion_sets"][0]["field_key"] != "content_structure"
 
 
 def test_typed_suggestion_selection_uses_frozen_option_ids(client: TestClient) -> None:
@@ -726,6 +803,7 @@ def test_selected_history_cannot_be_resubmitted_during_unrelated_update(client: 
             "expected_base_version_id": base_id,
             "suggestion_set_id": suggestion_set["id"],
             "option_id": option["id"],
+            "confirm_model_cost": True,
         },
     )
     assert selected.status_code == 201
@@ -744,7 +822,12 @@ def test_selected_history_cannot_be_resubmitted_during_unrelated_update(client: 
     assert updated.status_code == 201
     assert updated.json()["fields"]["audio_mode"] == "voiceover"
     assert updated.json()["fields"]["content_structure"] == selected.json()["fields"]["content_structure"]
-    assert updated.json()["supersedes_candidate_id"] == selected.json()["id"]
+    inherited = next(
+        item for item in client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["candidate_history"]
+        if item["id"] == updated.json()["supersedes_candidate_id"]
+    )
+    assert inherited["fields"]["content_structure"] == selected.json()["fields"]["content_structure"]
+    assert inherited["supersedes_candidate_id"] == selected.json()["id"]
     assert updated.json()["change_summary"] == [{
         "field_key": "audio_mode",
         "before": "off",
@@ -874,6 +957,7 @@ def test_initial_guidance_is_persisted_once_and_does_not_mutate_draft(client: Te
             "expected_base_version_id": view["active_requirement"]["id"],
             "suggestion_set_id": suggestion_set["id"],
             "option_id": suggestion_set["options"][0]["id"],
+            "confirm_model_cost": True,
         },
     )
     assert selected.status_code == 201

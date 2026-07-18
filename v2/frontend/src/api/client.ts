@@ -66,7 +66,7 @@ export const api = {
   selectCreativeSuggestion: (projectId: string, proposalId: string, baseVersionId: string, suggestionSetId: string, optionId: string) => request<RequirementCandidate>(`/projects/${projectId}/creative-proposals/${proposalId}:select`, {
     method: 'POST', body: JSON.stringify({
       command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId,
-      suggestion_set_id: suggestionSetId, option_id: optionId,
+      suggestion_set_id: suggestionSetId, option_id: optionId, confirm_model_cost: true,
     }),
   }),
   acceptRequirementCandidate: (projectId: string, candidateId: string, baseVersionId: string) => request<RequirementVersion>(`/projects/${projectId}/requirement-candidates/${candidateId}:accept`, {

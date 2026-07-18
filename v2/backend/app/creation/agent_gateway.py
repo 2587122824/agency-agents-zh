@@ -201,7 +201,7 @@ class HttpxAgentChatTransport:
 
 CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v5"
 CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v5"
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v12"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v13"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
@@ -238,6 +238,7 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 16. 每轮必须先形成 creative_diagnosis。project_type 是内容用途判断，不是模板或生产路由；stage 只是本轮创作判断，不代表系统状态或正式需求已就绪。established_fields 只列出当前输入中已有明确依据的字段；open_gaps 只列出仍会显著影响创作方向的字段，二者不得重复。
 17. focus_field 是本轮唯一优先讨论维度，必须出现在 open_gaps 中；stage=ready_to_confirm 时可以为 null。focus_reason 要解释该维度为何比其他缺口更值得先讨论，不能只写“信息不足”。存在建议组时，至少一组的 field_key 必须等于 focus_field；使用 clarifying_question 时也必须围绕 focus_field。不得依靠主题关键词、固定问卷顺序或项目类型硬编码决定焦点，应结合已确认字段、草稿和整段会话判断。
 18. 除精确选择、用户只要求解释一个问题或 stage=ready_to_confirm 外，每轮应围绕 focus_field 主动给出 2 到 3 个明显不同的可选方向，让用户可以继续讨论而不是只收到“已记录”。诊断只用于解释引导，不能进入 explicit_updates，也不能声称已经修改或确认需求。
+19. 当 runtime_context.turn_intent=selection_followup 时，结构化点击已经由系统按冻结 Option 保存。你不得重新选择、解释或登记该值，proposal_selections 和 explicit_updates 必须为空。先自然确认用户刚才的选择，再读取 current_requirement_draft 重新诊断；stage 不是 ready_to_confirm 时必须聚焦另一个仍重要的缺口并给出 2 到 3 个选项，不得重复 runtime_context.selection_followup.selected_field_keys。stage=ready_to_confirm 时应总结现有需求，不强制生成建议组。
 """
 
 
@@ -458,6 +459,49 @@ class DeterministicCreativeAgentGateway:
                 )],
             )
             return CreativeAgentResult(output, output.model_dump(mode="json"), "test-initial-request", {"total_tokens": 1})
+        if manifest_payload["runtime_context"].get("turn_intent") == "selection_followup":
+            latest = next(
+                item for item in reversed(manifest_payload["conversation"]["messages"])
+                if item["role"] == "user"
+            )
+            selected_fields = set(
+                manifest_payload["runtime_context"].get("selection_followup", {}).get("selected_field_keys", [])
+            )
+            focus_field = "target_audience" if "content_structure" in selected_fields else "content_structure"
+            focus_title = "这次内容主要希望给谁看？" if focus_field == "target_audience" else "你希望内容怎样展开？"
+            focus_options = (
+                [
+                    CreativeSuggestionOption(label="同好人群", summary="面向已经关注这一主题的人。", value="同好人群"),
+                    CreativeSuggestionOption(label="普通观众", summary="让不了解背景的人也容易进入。", value="普通观众"),
+                    CreativeSuggestionOption(label="潜在参与者", summary="重点回应想要尝试这件事的人。", value="潜在参与者"),
+                ]
+                if focus_field == "target_audience" else [
+                    CreativeSuggestionOption(label="过程记录", summary="按事情发生的过程自然推进。", value="过程记录"),
+                    CreativeSuggestionOption(label="挑战成长", summary="突出目标、困难和最终变化。", value="挑战成长"),
+                    CreativeSuggestionOption(label="经验分享", summary="围绕体验提炼可带走的方法。", value="经验分享"),
+                ]
+            )
+            output = CreativeAgentOutput(
+                assistant_reply="这个方向已经记入当前草稿。接下来我们把内容如何展开定下来。",
+                creative_diagnosis=CreativeDiagnosis(
+                    project_type="personal_record",
+                    stage="shaping",
+                    summary="整体创作方向已经明确，下一步需要确定内容的组织方式。",
+                    established_fields=["title", "core_topic", "creative_direction"],
+                    open_gaps=[CreativeGap(field_key=focus_field, reason="这个维度会显著影响后续内容表达。")],
+                    focus_field=focus_field,
+                    focus_reason="方向确定后，先明确内容结构最能帮助后续继续补充受众和表达语气。",
+                    source_message_ids=[latest["id"]],
+                ),
+                suggestion_sets=[CreativeSuggestionSet(
+                    category="content_direction",
+                    title=focus_title,
+                    field_key=focus_field,
+                    source_message_ids=[latest["id"]],
+                    options=focus_options,
+                )],
+            )
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "test-selection-followup", {"total_tokens": 1})
         latest = next(
             item for item in reversed(manifest_payload["conversation"]["messages"])
             if item["role"] == "user"
