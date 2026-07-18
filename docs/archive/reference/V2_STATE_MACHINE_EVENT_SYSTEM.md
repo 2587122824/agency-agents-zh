@@ -3,7 +3,7 @@
 > 状态：设计基线
 > 版本：0.4
 > 更新日期：2026-07-16
-> 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
+> 上位文档：[V2 产品设计文档](../../V2_PRODUCT_DESIGN.md)
 > 配套文档：[V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md)
 
 ## 1. 目标
@@ -320,7 +320,7 @@ ConfirmTimeline: review -> confirmed; Project -> delivery_ready; referenced Asse
 
 已有版本后禁止创建无父版本的平行候选。确认新版本时，旧 `confirmed` 版本进入 `superseded`；创建修订本身不会提前废弃仍在交付使用的确认版本。
 
-完整守卫见 [V2 时间线剪辑合同实现](./V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
+完整守卫见 [V2 时间线剪辑合同实现](../implementation-notes/V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
 
 项目完成守卫：
 
@@ -431,7 +431,7 @@ SSE 只读取已提交事件。状态更新成功但事件缺失、或事件存�
 
 ### 13.4 当前实现
 
-Alembic `20260717_16` 与 Event/Outbox Repository 已实现统一信封、项目内序号、事务内待发布记录和显式批次发布器。发布器失败直接返回并保留 `pending`，不自动再次调用。SSE 和 Outbox 共用同一信封序列化；当前永久保留事件，所以尚不存在需要返回 `resync_required` 的保留窗口。详见 [V2 事件信封与 Outbox 实现](./V2_EVENT_OUTBOX_IMPLEMENTATION.md)。
+Alembic `20260717_16` 与 Event/Outbox Repository 已实现统一信封、项目内序号、事务内待发布记录和显式批次发布器。发布器失败直接返回并保留 `pending`，不自动再次调用。SSE 和 Outbox 共用同一信封序列化；当前永久保留事件，所以尚不存在需要返回 `resync_required` 的保留窗口。详见 [V2 事件信封与 Outbox 实现](../implementation-notes/V2_EVENT_OUTBOX_IMPLEMENTATION.md)。
 
 ## 14. 状态评估器
 

@@ -1,11 +1,10 @@
 # 片场 V2 创作中心设计
 
 > 状态：设计基线
-> 版本：0.1
-> 更新日期：2026-07-15
+> 版本：0.2
+> 更新日期：2026-07-18
 > 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
-> 数据模型：[V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md)
-> 状态与事件：[V2 状态机与事件系统设计](./V2_STATE_MACHINE_EVENT_SYSTEM.md)
+> 系统架构：[V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)
 
 ## 1. 目标
 
@@ -690,7 +689,7 @@ plan.confirmed.v1
 
 ## 18. 数据模型增量
 
-在 [V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md) 基础上，创作中心实现需要增加：
+在 [V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md) 基础上，创作中心实现需要增加：
 
 ```text
 Attachment
@@ -846,4 +845,4 @@ RequirementDiff
 
 创意建议只作为建议事实保存，不能直接写入 `RequirementVersion`、`Decision` 或项目状态。用户选择精确提案选项后才创建待确认需求候选；字段风险和确认等级由后端版本化目录决定。上下文达到配置上限时明确阻断，不自动摘要或截断，也不增加重试、模型切换、输出修复和生产兜底。
 
-完整合同、数据结构、交互、验收集和分阶段实施顺序见 [V2 创作智能体设计提案](./V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md)。本节当前不代表已实现能力。
+完整合同、数据结构、交互、验收集和分阶段实施顺序见 [V2 创作智能体设计提案](./archive/proposals/V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md)。本节当前不代表已实现能力。

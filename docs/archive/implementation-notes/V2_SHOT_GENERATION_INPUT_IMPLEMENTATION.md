@@ -2,7 +2,7 @@
 
 > 实施日期：2026-07-17
 >
-> 对应确认提案：[V2 分镜生成输入合同提案](./V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md)
+> 对应确认提案：[V2 分镜生成输入合同提案](../proposals/V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md)
 
 ## 1. 已实现范围
 

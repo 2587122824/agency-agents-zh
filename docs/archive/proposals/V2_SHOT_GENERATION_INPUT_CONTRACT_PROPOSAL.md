@@ -4,7 +4,7 @@
 >
 > 提案日期：2026-07-17
 >
-> 本文记录严格 RunningHub 适配器正确承接 `prompt / negative_prompt / reference_image` 的设计决策。实现证据见 [V2 分镜生成输入合同实现](./V2_SHOT_GENERATION_INPUT_IMPLEMENTATION.md)。
+> 本文记录严格 RunningHub 适配器正确承接 `prompt / negative_prompt / reference_image` 的设计决策。实现证据见 [V2 分镜生成输入合同实现](../implementation-notes/V2_SHOT_GENERATION_INPUT_IMPLEMENTATION.md)。
 
 ## 1. 现状审计
 

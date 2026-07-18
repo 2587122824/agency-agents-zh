@@ -2,10 +2,10 @@
 
 > 状态：框架阶段
 > 版本：0.3
-> 更新日期：2026-07-15
+> 更新日期：2026-07-18
 > 产品原型：<http://127.0.0.1:8765/prototype-v2/>
 > V2 应用骨架：<http://127.0.0.1:8766/>
-> 详细设计：[V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md) · [V2 状态机与事件系统设计](./V2_STATE_MACHINE_EVENT_SYSTEM.md)
+> 系统架构：[V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)
 
 ## 1. 产品定义
 
@@ -183,7 +183,7 @@ flowchart LR
 - 可选建议及影响
 - 当前方案变更摘要
 
-助手回复必须作为 `Message(role=assistant)` 持久化并精确关联 `AgentRun`。模型失败时显示结构化失败证据，同一批消息不自动或重复调用；完整边界见 [V2 对话式创作实现](./V2_CONVERSATIONAL_CREATION_IMPLEMENTATION.md)。
+助手回复必须作为 `Message(role=assistant)` 持久化并精确关联 `AgentRun`。模型失败时显示结构化失败证据，同一批消息不自动或重复调用；完整边界见 [V2 对话式创作实现](./archive/implementation-notes/V2_CONVERSATIONAL_CREATION_IMPLEMENTATION.md)。
 
 ### 8.2 决策清单
 
@@ -237,9 +237,9 @@ flowchart LR
 - 候选受影响的素材、工作项和时间线
 - 当前活动快照中潜在工作单元和已冻结价格证据
 
-报告只提供审核证据，不会确认或应用决策变更，不修改旧快照，也不自动使素材失效、重做或重试。未来应用变更必须使用另行设计并确认的版本命令。详细关系见 [V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md)。
+报告只提供审核证据，不会确认或应用决策变更，不修改旧快照，也不自动使素材失效、重做或重试。未来应用变更必须使用另行设计并确认的版本命令。详细关系见 [V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)。
 
-当前已实现两层能力：只读“已观测决策传播图”证明历史传播；持久化 `DecisionChangeImpactAnalysis` 冻结提议值、精确候选目标、活动快照潜在工作量和已有价格证据。未观测表示证据不足，不表示无影响。完整边界见 [V2 决策影响证据图实现](./V2_DECISION_IMPACT_IMPLEMENTATION.md) 和 [V2 前瞻决策变更影响分析实现](./V2_PROSPECTIVE_DECISION_IMPACT_IMPLEMENTATION.md)。
+当前已实现两层能力：只读“已观测决策传播图”证明历史传播；持久化 `DecisionChangeImpactAnalysis` 冻结提议值、精确候选目标、活动快照潜在工作量和已有价格证据。未观测表示证据不足，不表示无影响。完整边界见 [V2 决策影响证据图实现](./archive/implementation-notes/V2_DECISION_IMPACT_IMPLEMENTATION.md) 和 [V2 前瞻决策变更影响分析实现](./archive/implementation-notes/V2_PROSPECTIVE_DECISION_IMPACT_IMPLEMENTATION.md)。
 
 ## 9. 方案确认设计
 
@@ -259,7 +259,7 @@ flowchart LR
 
 用户确认后生成不可变方案版本，例如 `plan_v1`。后续修改创建 `plan_v2`，不能直接覆盖已进入生产的版本。
 
-确认前的分镜候选同样不允许原地覆盖。用户通过逐镜头结构化字段创建新的 `ShotPlanCandidate` 修订，新候选记录 `supersedes_candidate_id`，旧候选进入 `superseded`；只有最新待审候选可以确认并生成 `PlanVersion`。修订接口不接受自由 JSON、供应商字段、工作流 ID 或提示词覆盖，完整实现见 [V2 结构化分镜候选修订实现](./V2_SHOT_PLAN_REVISION_IMPLEMENTATION.md)。
+确认前的分镜候选同样不允许原地覆盖。用户通过逐镜头结构化字段创建新的 `ShotPlanCandidate` 修订，新候选记录 `supersedes_candidate_id`，旧候选进入 `superseded`；只有最新待审候选可以确认并生成 `PlanVersion`。修订接口不接受自由 JSON、供应商字段、工作流 ID 或提示词覆盖，完整实现见 [V2 结构化分镜候选修订实现](./archive/implementation-notes/V2_SHOT_PLAN_REVISION_IMPLEMENTATION.md)。
 
 每次实际生产还必须创建不可变的 `ProductionSnapshot`，冻结方案版本、决策版本、实体版本、系统规格和显式选择的供应商配置。所有工作项和素材必须绑定该快照。旧快照仍可审计，但其迟到结果不能推进当前活动方案的项目状态。
 
@@ -404,7 +404,7 @@ skipped
 - 开始与结束时间
 - 是否由用户重试
 
-DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表示缺失不会阻断该节点，不代表系统可以寻找替代输入；任何替换都必须建模为新的用户决策和新快照。完整约束见 [V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md)。
+DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表示缺失不会阻断该节点，不代表系统可以寻找替代输入；任何替换都必须建模为新的用户决策和新快照。完整约束见 [V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)。
 
 ## 13. 分阶段生产
 
@@ -502,7 +502,7 @@ DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表
 
 项目控制台主界面统一使用普通中文名称与说明，覆盖当前阻断、最近事件、项目状态、制作方案状态、制作步骤状态、执行状态、状态来源、操作者类型和责任对象。翻译只按结构化状态、`error_code` 或 `event_type` 精确查表，不解析英文消息、不推断状态；未知类型使用中性中文。原始代码、事件类型、触发器、动作代码、历史消息、ID、指纹和证据完整保留在默认收起的技术详情中。
 
-项目列表支持显式归档和恢复。归档只从默认工作列表隐藏项目，保留原项目状态、方案、快照、素材、费用和事件；它不等于取消或删除。存在排队或执行中的工作项时必须先由用户另行取消，系统不得以归档替代取消。归档和恢复使用行版本、幂等命令与独立审计事件；生产项目首期不提供物理删除。完整边界见 [V2 项目归档与恢复实现](./V2_PROJECT_ARCHIVING_IMPLEMENTATION.md)。
+项目列表支持显式归档和恢复。归档只从默认工作列表隐藏项目，保留原项目状态、方案、快照、素材、费用和事件；它不等于取消或删除。存在排队或执行中的工作项时必须先由用户另行取消，系统不得以归档替代取消。归档和恢复使用行版本、幂等命令与独立审计事件；生产项目首期不提供物理删除。完整边界见 [V2 项目归档与恢复实现](./archive/implementation-notes/V2_PROJECT_ARCHIVING_IMPLEMENTATION.md)。
 
 首期查询接口：
 
@@ -512,7 +512,7 @@ GET /api/v1/projects/{project_id}/control-center
 GET /api/v1/projects/{project_id}/audit-ledger?limit=50&before_sequence={sequence}
 ```
 
-审计账本使用项目内 `project_sequence` 倒序读取，下一页只接受明确的 `before_sequence` 并查询更小序号。费用区域展示全部原始 CostEvent；逐节点预计费用不得在明细中合并成一条伪造记录。该查询不创建事件、费用、命令回执或任何执行任务。详细实现见 [V2 费用与事件审计账本实现](./V2_AUDIT_LEDGER_IMPLEMENTATION.md)。
+审计账本使用项目内 `project_sequence` 倒序读取，下一页只接受明确的 `before_sequence` 并查询更小序号。费用区域展示全部原始 CostEvent；逐节点预计费用不得在明细中合并成一条伪造记录。该查询不创建事件、费用、命令回执或任何执行任务。详细实现见 [V2 费用与事件审计账本实现](./archive/implementation-notes/V2_AUDIT_LEDGER_IMPLEMENTATION.md)。
 
 ## 17. 技术架构
 
@@ -663,7 +663,7 @@ GET  /api/v1/projects/{project_id}/events
 - [x] 事件信封、Outbox 和 SSE 项目游标
 - [x] 方案版本与生产快照
 
-其中只读阶段评估器和当前命令面的权威状态转移器均已实现；该复合条目仍未勾选，因为 `ResolveBlock`、取消和重新开版命令尚未实现。边界见 [V2 项目状态评估器实现](./V2_PROJECT_STATE_EVALUATOR_IMPLEMENTATION.md) 与 [V2 权威项目状态转移器实现](./V2_PROJECT_STATE_TRANSITION_IMPLEMENTATION.md)。
+其中只读阶段评估器和当前命令面的权威状态转移器均已实现；该复合条目仍未勾选，因为 `ResolveBlock`、取消和重新开版命令尚未实现。边界见 [V2 项目状态评估器实现](./archive/implementation-notes/V2_PROJECT_STATE_EVALUATOR_IMPLEMENTATION.md) 与 [V2 权威项目状态转移器实现](./archive/implementation-notes/V2_PROJECT_STATE_TRANSITION_IMPLEMENTATION.md)。
 
 ### Sprint 2：决策、合同与编排
 
@@ -703,7 +703,7 @@ GET  /api/v1/projects/{project_id}/events
 
 逐项完成度、证据和仍需确认的边界见 [V2 实现状态](./V2_IMPLEMENTATION_STATUS.md)。复合条目只有全部实现后才勾选；部分完成不会以勾选代替缺口说明。
 
-Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。
+Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository 边界实现](./archive/implementation-notes/V2_REPOSITORY_IMPLEMENTATION.md)。
 当前创作中心的对话、需求候选、澄清、附件绑定和创作阶段实体访问已统一通过 `CreationRepository`；该迁移不改变候选或确认语义。
 当前规划中心的 Brief、分镜候选版本链、不可变方案版本、Shot 和实体引用已统一通过 `PlanningRepository`；方案页支持逐镜头结构化修订，旧候选不可覆盖且只有最新候选可以确认。
 当前生产服务的影响分析、快照、DAG、费用明细、WorkItem/Attempt 编译和准备/执行投影已统一通过 `ProductionRepository`；费用确认、激活和提交仍是三个独立显式命令。
@@ -808,16 +808,15 @@ v2\start_v2.bat -NoBrowser
 11. Editor Assistant 只用已审核素材生成时间线候选；用户取舍并确认剪辑合同。
 12. FFmpeg 生成并验证最终视频后，状态评估器才允许项目进入 `completed`。
 
-该 Demo 的数据链、状态转移和事件轨迹分别见 [V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md) 与 [V2 状态机与事件系统设计](./V2_STATE_MACHINE_EVENT_SYSTEM.md)。
+该 Demo 的数据链、状态转移和事件轨迹见 [V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)。
 
 ## 29. 文档职责与权威顺序
 
 - 本文档定义产品目标、用户边界、产品流程和验收口径。
-- [V2 数据模型设计](./V2_DATA_MODEL_DESIGN.md) 定义实体、字段、关系、约束、版本和持久化边界。
-- [V2 状态机与事件系统设计](./V2_STATE_MACHINE_EVENT_SYSTEM.md) 定义状态、命令、守卫、事件和恢复语义。
+- [V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md) 定义模块、实体、版本、状态、命令、事件、Provider 和持久化边界。
 - Pydantic Schema、数据库迁移和自动化测试是实现证据；实现与文档冲突时先停止开发并更新设计，不静默兼容。
 
-项目状态以状态机文档为准，实体字段以数据模型文档为准。本文中的简化示例不得覆盖专项文档中的完整约束。
+项目状态与实体边界以系统架构和当前代码合同为准。本文中的简化示例不得覆盖架构文档中的完整约束。
 
 ## 30. 系统配置设计
 
@@ -894,17 +893,17 @@ NodeInfoList 必须逐项记录节点 ID、字段路径、值来源和类型。�
 
 Provider 的连接状态必须拆成独立事实：配置已发布、适配器合同兼容、凭据可读取、后端适配器已注册、供应商网络可达、本次付费执行已确认。任一事实不得代替其他事实。设置页只读展示执行组件、生成配置、后端密钥和执行授权四项本地前置状态；全部通过仍不代表网络可达。页面不得把凭据存在误报为供应商已连接，也不得为了展示状态发起供应商请求。
 
-首期凭据引用只支持 `env://VARIABLE_NAME`。变量名还必须出现在后端 `V2_CREDENTIAL_ENV_ALLOWLIST` 白名单中；数据库和前端均不保存或返回变量值。连接状态接口也不返回变量名，防止配置读取接口泄露后端秘密布局。完整实现见 [V2 Provider 基础层实现](./V2_PROVIDER_FOUNDATION_IMPLEMENTATION.md)。
+首期凭据引用只支持 `env://VARIABLE_NAME`。变量名还必须出现在后端 `V2_CREDENTIAL_ENV_ALLOWLIST` 白名单中；数据库和前端均不保存或返回变量值。连接状态接口也不返回变量名，防止配置读取接口泄露后端秘密布局。完整实现见 [V2 Provider 基础层实现](./archive/implementation-notes/V2_PROVIDER_FOUNDATION_IMPLEMENTATION.md)。
 
 Worker 只按 WorkAttempt 冻结清单中的精确 `adapter_kind + work_kind` 解析注册表。未注册或能力不匹配时明确阻断，不借用 V1 适配器，不按名称猜测，也不选择另一个 Provider。
 
 RunningHub 使用独立的提交与轮询合同。Worker 在外部请求前持久化 `submitting`，返回后立即保存精确 `provider_task_id`；重启只轮询已保存任务号。提交结果未知或可能在任务号落库前中断时进入人工对账阻断，禁止重新提交。真实外部执行还必须由后端 `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 明确开启，默认关闭；注册适配器、凭据可读和允许真实执行是三个独立事实。
 
-RunningHub 的 WorkAttempt 必须使用 `production-work-request.v2` 冻结 Provider、Workflow、完整 NodeInfoList、结构化 Shot、视频规格和存储策略。适配器只解析声明的结构化来源和 `literal:<JSON>`；不支持旧式 `{{prompt}}` 占位符，不生成或重写提示词。I2V 必须恰好绑定并消费一个父图片输出，多个输入不得静默取第一项。完整边界见 [V2 RunningHub 图片/视频适配器实现](./V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md)。
+RunningHub 的 WorkAttempt 必须使用 `production-work-request.v2` 冻结 Provider、Workflow、完整 NodeInfoList、结构化 Shot、视频规格和存储策略。适配器只解析声明的结构化来源和 `literal:<JSON>`；不支持旧式 `{{prompt}}` 占位符，不生成或重写提示词。I2V 必须恰好绑定并消费一个父图片输出，多个输入不得静默取第一项。完整边界见 [V2 RunningHub 图片/视频适配器实现](./archive/implementation-notes/V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md)。
 
-配置发布校验和连接准备检查必须共用同一 RunningHub NodeInfoList 合同校验器。设置页用普通名称选择镜头字段、视频规格、单父关键帧或固定值；固定值由界面编码为严格 `literal:<JSON>`。历史旧来源只显示“不兼容并需创建新版本”，禁止自动转换。完整实现见 [V2 生成服务连接准备实现](./V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md)。
+配置发布校验和连接准备检查必须共用同一 RunningHub NodeInfoList 合同校验器。设置页用普通名称选择镜头字段、视频规格、单父关键帧或固定值；固定值由界面编码为严格 `literal:<JSON>`。历史旧来源只显示“不兼容并需创建新版本”，禁止自动转换。完整实现见 [V2 生成服务连接准备实现](./archive/implementation-notes/V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md)。
 
-严格关键帧生产仍缺完整视觉描述、可空负向描述和显式主参考实体附件合同。该边界会改变 Shot、快照和 WorkRequest 版本，当前只形成 [V2 分镜生成输入合同提案](./V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md)，等待用户确认；提案不得被视为已实现功能或用于自动迁移历史方案。
+严格关键帧生产已经按用户确认实现完整视觉描述、可空负向描述和显式主参考实体附件合同。历史提案保留在 [V2 分镜生成输入合同提案](./archive/proposals/V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md)，实际能力与边界以第 37 节和实现状态为准；历史方案不会自动迁移。
 
 ### 30.5 视频与音频规格
 
@@ -1071,7 +1070,7 @@ GET  /api/v1/projects/{project_id}/production-execution
 
 时间线仅引用当前活动快照、同一项目且状态为 `approved` 或 `used` 的素材。显式空位可以留在候选中用于取舍，但不能确认；系统不自动补素材、裁切、变速或重排。已有时间线后必须从指定版本创建修订，确认版本不可原地修改。
 
-具体表结构、命令、错误码、API 和验收矩阵见 [V2 时间线剪辑合同实现](./V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
+具体表结构、命令、错误码、API 和验收矩阵见 [V2 时间线剪辑合同实现](./archive/implementation-notes/V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
 
 ## 34. 最终交付实现边界
 
@@ -1096,7 +1095,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}/output
 POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 ```
 
-完整合同见 [V2 最终交付合同实现](./V2_DELIVERY_IMPLEMENTATION.md)。
+完整合同见 [V2 最终交付合同实现](./archive/implementation-notes/V2_DELIVERY_IMPLEMENTATION.md)。
 
 ## 35. 系统配置持久化边界
 
@@ -1119,7 +1118,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 后端通过只读 `ContactSheetRepository` 获取活动快照、DAG/依赖、素材、WorkItem/WorkAttempt、分镜和实体来源事实。Repository 不生成卡片编号、不选择上游素材、不推断路由或实体引用；应用服务只组合精确持久化记录，并继续复用质量模块的确定性 QC 投影。
 
-该页面没有批准、拒绝、重试、替换或生产按钮。预览失败只显示错误并保留证据，不触发转码、文件修复、路由切换或重新生成。详细合同见 [V2 素材联络表实现](./V2_CONTACT_SHEET_IMPLEMENTATION.md)。
+该页面没有批准、拒绝、重试、替换或生产按钮。预览失败只显示错误并保留证据，不触发转码、文件修复、路由切换或重新生成。详细合同见 [V2 素材联络表实现](./archive/implementation-notes/V2_CONTACT_SHEET_IMPLEMENTATION.md)。
 
 ## 37. 分镜生成输入与主参考图
 
@@ -1131,7 +1130,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 系统配置将新来源显示为“画面生成描述、避免内容、分镜主参考图、是否选择了主参考图”。关键帧参考图与首帧视频的“上一步生成的关键帧”是两类独立输入，不得互换。素材联络表展示分镜的产品实体、主参考标记、画面生成描述、避免内容和快照冻结的文件事实，便于用户在剪辑前核对实际生产依据。
 
-本能力不启用真实 Provider 执行，不修改已发布配置，不回填历史方案，也不引入提示词拼接、主参考猜测、供应商替换、工作流替换、自动重试或无参考图降级。详细实现见 [V2 分镜生成输入合同实现](./V2_SHOT_GENERATION_INPUT_IMPLEMENTATION.md)。
+本能力不启用真实 Provider 执行，不修改已发布配置，不回填历史方案，也不引入提示词拼接、主参考猜测、供应商替换、工作流替换、自动重试或无参考图降级。详细实现见 [V2 分镜生成输入合同实现](./archive/implementation-notes/V2_SHOT_GENERATION_INPUT_IMPLEMENTATION.md)。
 
 ## 38. 智能体运行审计视图
 
@@ -1139,7 +1138,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 审计视图只读取持久化事实。`raw_output` 不通过创作中心接口返回；结构化错误代码和错误说明可以展示，但不能从错误文本推断状态、自动生成修复动作或改写输入。运行成功只代表一次智能体调用结束，登记候选不代表候选已确认。
 
-当前审计视图没有运行、重试、取消或恢复按钮，不改变状态、路由、费用和确认边界。未来接入真实模型、Token 或实际费用事实时，必须由对应不可变合同和账本提供，不从现有字段估算。详细实现见 [V2 智能体运行审计实现](./V2_AGENT_RUN_AUDIT_IMPLEMENTATION.md)。
+当前审计视图没有运行、重试、取消或恢复按钮，不改变状态、路由、费用和确认边界。未来接入真实模型、Token 或实际费用事实时，必须由对应不可变合同和账本提供，不从现有字段估算。详细实现见 [V2 智能体运行审计实现](./archive/implementation-notes/V2_AGENT_RUN_AUDIT_IMPLEMENTATION.md)。
 
 ## 39. 创作智能体 V2 提案
 
@@ -1147,4 +1146,4 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 模型输出拆分为助手回复、建议集合、用户显式更新和最多一个澄清问题。只有用户消息可以成为显式更新来源；建议选项必须经独立用户选择命令后才能形成需求候选，正式需求仍由现有确认命令创建。风险等级由后端版本化字段目录决定，不接受模型判断。
 
-长对话不做隐藏摘要、相关性筛选或静默截断；达到明确上限后阻断并要求用户显式开启新会话。该方案不增加自动重试、模型切换、输出修复、供应商替换、路由选择或生产动作。完整方案见 [V2 创作智能体设计提案](./V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md)，当前状态为待确认、尚未实施。
+长对话不做隐藏摘要、相关性筛选或静默截断；达到明确上限后阻断并要求用户显式开启新会话。该方案不增加自动重试、模型切换、输出修复、供应商替换、路由选择或生产动作。完整方案见 [V2 创作智能体设计提案](./archive/proposals/V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md)，当前状态为待确认、尚未实施。

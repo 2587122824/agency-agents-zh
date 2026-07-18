@@ -3,7 +3,7 @@
 > 状态：设计基线
 > 版本：0.2
 > 更新日期：2026-07-15
-> 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
+> 上位文档：[V2 产品设计文档](../../V2_PRODUCT_DESIGN.md)
 > 配套文档：[V2 状态机与事件系统设计](./V2_STATE_MACHINE_EVENT_SYSTEM.md)
 
 ## 1. 目标
@@ -706,7 +706,7 @@ TimelineItem
 
 事件仅记录事实和必要快照，不保存密钥、大段二进制或完整供应商凭据。
 
-每个新事件在同一事务创建唯一 `OutboxMessage`。历史迁移事件标记为已发布，新事件初始为待发布；显式发布器成功后写入发布时间，失败保持待发布且不自动重试。实现细节见 [V2 事件信封与 Outbox 实现](./V2_EVENT_OUTBOX_IMPLEMENTATION.md)。
+每个新事件在同一事务创建唯一 `OutboxMessage`。历史迁移事件标记为已发布，新事件初始为待发布；显式发布器成功后写入发布时间，失败保持待发布且不自动重试。实现细节见 [V2 事件信封与 Outbox 实现](../implementation-notes/V2_EVENT_OUTBOX_IMPLEMENTATION.md)。
 
 ### 13.2 CostEvent
 
@@ -729,7 +729,7 @@ occurred_at
 
 ## 14. Repository 边界
 
-当前实施状态和逐步迁移边界见 [V2 Repository 边界实现](./V2_REPOSITORY_IMPLEMENTATION.md)。Project、Event、Outbox、Decision、项目级 Command Receipt、Creation、Planning、Production、Quality、Editor、Delivery、Work、Configuration、Registry、Control 和 ContactSheet 均已有协议、SQLAlchemy 实现与合同测试。当前应用服务、Worker 与业务只读投影不再直接访问 ORM；该结论不包含尚未实现的通用 Unit of Work 或 PostgreSQL 适配。
+当前实施状态和逐步迁移边界见 [V2 Repository 边界实现](../implementation-notes/V2_REPOSITORY_IMPLEMENTATION.md)。Project、Event、Outbox、Decision、项目级 Command Receipt、Creation、Planning、Production、Quality、Editor、Delivery、Work、Configuration、Registry、Control 和 ContactSheet 均已有协议、SQLAlchemy 实现与合同测试。当前应用服务、Worker 与业务只读投影不再直接访问 ORM；该结论不包含尚未实现的通用 Unit of Work 或 PostgreSQL 适配。
 
 建议接口：
 
