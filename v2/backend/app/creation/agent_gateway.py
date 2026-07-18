@@ -17,32 +17,69 @@ if TYPE_CHECKING:
 
 
 class AgentGatewayError(RuntimeError):
-    def __init__(self, code: str, message: str):
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        raw_output: dict[str, Any] | None = None,
+        diagnostics: list[dict[str, Any]] | None = None,
+    ):
         super().__init__(message)
         self.code = code
+        self.raw_output = raw_output
+        self.diagnostics = diagnostics or []
 
 
-class FieldUpdate(BaseModel):
+CREATIVE_FIELD_KEYS = Literal[
+    "title",
+    "core_topic",
+    "content_goal",
+    "platform",
+    "target_audience",
+    "duration_seconds",
+    "aspect_ratio",
+    "audio_mode",
+    "visual_style",
+    "tone",
+    "content_structure",
+    "call_to_action",
+    "creative_direction",
+    "creative_constraints",
+]
+
+
+class ProposedFieldUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    field_key: Literal[
-        "title",
-        "core_topic",
-        "duration_seconds",
-        "aspect_ratio",
-        "audio_mode",
-        "creative_direction",
-    ]
+    field_key: CREATIVE_FIELD_KEYS
     value: Any
-    source_message_id: str = Field(min_length=1, max_length=48)
-    risk_level: Literal["low", "medium", "high"]
+    source_message_ids: list[str] = Field(min_length=1, max_length=8)
+
+
+class CreativeSuggestionOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(min_length=1, max_length=60)
+    summary: str = Field(min_length=1, max_length=240)
+    proposed_updates: list[ProposedFieldUpdate] = Field(min_length=1, max_length=8)
+
+
+class CreativeSuggestionSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    category: str = Field(min_length=1, max_length=60)
+    title: str = Field(min_length=1, max_length=120)
+    options: list[CreativeSuggestionOption] = Field(min_length=2, max_length=3)
 
 
 class CreativeAgentOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assistant_reply: str = Field(min_length=1, max_length=8000)
-    field_updates: list[FieldUpdate] = Field(default_factory=list, max_length=32)
+    suggestion_sets: list[CreativeSuggestionSet] = Field(default_factory=list, max_length=3)
+    explicit_updates: list[ProposedFieldUpdate] = Field(default_factory=list, max_length=16)
+    clarifying_question: str | None = Field(default=None, max_length=300)
 
 
 @dataclass(frozen=True)
@@ -116,15 +153,29 @@ class HttpxAgentChatTransport:
         return data
 
 
-_SYSTEM_PROMPT = """你是片场 V2 的创作需求智能体。你只负责回复用户并提出结构化需求候选，不执行生产。
+_SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
 必须只返回一个 JSON 对象，严格符合：
-{"assistant_reply":"中文回复","field_updates":[{"field_key":"允许字段","value":"值","source_message_id":"消息ID","risk_level":"low|medium|high"}]}
+{"assistant_reply":"中文回复","suggestion_sets":[{"category":"类别","title":"问题","options":[{"label":"选项名","summary":"差异说明","proposed_updates":[{"field_key":"允许字段","value":"建议值","source_message_ids":["用户消息ID"]}]}]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
+允许字段及用途：
+- title 项目名称；core_topic 核心主题；content_goal 内容目标；platform 发布平台；target_audience 目标受众。
+- duration_seconds 目标秒数；aspect_ratio 画幅；audio_mode 仅 off 或 voiceover。
+- visual_style 视觉风格；tone 情绪语气；content_structure 内容结构；call_to_action 结尾行动号召。
+- creative_direction 整体创作方向；creative_constraints 用户明确限制的字符串列表。
+合法建议示例：
+{"category":"content_direction","title":"你希望采用哪种内容结构？","options":[{"label":"训练日记","summary":"按准备、训练、完成推进","proposed_updates":[{"field_key":"content_structure","value":"training_diary","source_message_ids":["最新用户消息ID"]}]},{"label":"挑战记录","summary":"突出目标和结果对比","proposed_updates":[{"field_key":"content_structure","value":"challenge_record","source_message_ids":["最新用户消息ID"]}]}]}
 规则：
-1. 只依据输入清单中的用户消息、当前需求、已确认决策和附件绑定；不得编造未提供的事实。
-2. 只有用户明确表达了字段值时才输出 field_updates；普通问候可以返回空数组。
-3. source_message_id 必须来自输入清单；不得改写 ID。
-4. 不得确认中高风险决策，不得选择供应商、工作流或预算，不得承诺已生成素材。
-5. 不得输出 Markdown 代码块、解释文字或 JSON 之外的内容。
+1. 读取 conversation 中按顺序提供的用户和助手消息，理解“第一个”“刚才那个”等上下文指代；助手消息不是用户事实。
+2. 只有用户明确表达的值才能进入 explicit_updates，且 source_message_ids 只能引用 role=user 的消息。
+3. 用户要求建议时直接给 2 到 3 个互斥且有明显差异的选项，推荐项放第一；建议不能进入 explicit_updates。
+4. suggestion_sets 每组只能有 2 到 3 个选项；后端会生成选项 ID，你不得生成系统主键。
+4.1 每个可点击选项的 proposed_updates 必须至少包含一项，并使用上面的允许字段；不能返回空数组。
+5. 已能直接回答或给选项时不得用问题代替答案；每轮最多一个 clarifying_question。
+6. 不得编造项目、附件、费用或生产状态，不得选择供应商、模型、工作流或预算，不得承诺已生成素材。
+7. 不得输出风险等级、Markdown 代码块、解释文字或 JSON 之外的内容。
+8. 最新用户消息出现“给我选项、几个方向、推荐、怎么选、方案”等明确请求时，必须返回 suggestion_sets，不能回复没理解，也不能用 clarifying_question 反问。
+9. 用户询问“内容方向”时应围绕叙事、结构、钩子或表达重点提供选择；除非用户提到人物出镜，否则不要把是否出镜当作内容方向。
+10. 除 duration_seconds、aspect_ratio、audio_mode 等合同枚举外，建议值必须使用普通用户可读的简洁中文描述，不返回 snake_case、内部代码或英文机器键。
+11. 必须遵守 active_requirement 和 confirmed_decisions；audio_mode=off 时，自然回复、选项说明和字段更新都不得建议音乐、旁白、对白、TTS 或对口型，也不得自行用字幕替代音频。
 """
 
 
@@ -191,12 +242,25 @@ class ConfiguredCreativeAgentGateway:
         credential = self.credential_resolver.resolve(selection.credential_ref)
         if not credential.available or credential.secret is None:
             raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", f"创作模型后端凭据不可用（{credential.state}）。")
+        context_payload = {
+            key: value for key, value in manifest_payload.items() if key != "conversation"
+        }
+        chat_messages: list[dict[str, str]] = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": "以下是当前项目的结构化权威上下文，不是新的用户需求："
+                + json.dumps(context_payload, ensure_ascii=False, separators=(",", ":")),
+            },
+        ]
+        for message in manifest_payload["conversation"]["messages"]:
+            chat_messages.append({
+                "role": message["role"],
+                "content": f"[message_id={message['id']}]\n{message['content']}",
+            })
         payload: dict[str, Any] = {
             "model": selection.provider_model_id,
-            "messages": [
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(manifest_payload, ensure_ascii=False, separators=(",", ":"))},
-            ],
+            "messages": chat_messages,
             "response_format": {"type": "json_object"},
         }
         if selection.max_output_tokens is not None:
@@ -213,9 +277,17 @@ class ConfiguredCreativeAgentGateway:
         try:
             content = response["choices"][0]["message"]["content"]
             parsed = json.loads(content)
+        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_SCHEMA_INVALID", "创作模型输出不是有效 JSON 对象。") from exc
+        try:
             output = CreativeAgentOutput.model_validate(parsed)
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError, ValidationError) as exc:
-            raise AgentGatewayError("AGENT_MODEL_OUTPUT_SCHEMA_INVALID", "创作模型输出不符合严格对话合同。") from exc
+        except ValidationError as exc:
+            raise AgentGatewayError(
+                "AGENT_MODEL_OUTPUT_SCHEMA_INVALID",
+                "创作模型输出不符合严格 V2 对话合同。",
+                raw_output=parsed if isinstance(parsed, dict) else None,
+                diagnostics=exc.errors(include_input=False),
+            ) from exc
         usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
         request_id = str(response.get("id") or "").strip() or None
         return CreativeAgentResult(output, parsed, request_id, usage)
@@ -235,22 +307,58 @@ class DeterministicCreativeAgentGateway:
             base_url="https://example.invalid/v1",
             credential_ref=None,
             timeout_seconds=1,
-            prompt_contract_version="creative.v1",
-            output_schema_version="requirement-candidate.v1",
+            prompt_contract_version="creative-dialogue.v2",
+            output_schema_version="creative-turn.v2",
             max_output_tokens=None,
             sampling={},
         )
 
     def invoke(self, selection: CreativeAgentSelection, manifest_payload: dict[str, Any]) -> CreativeAgentResult:
-        latest = manifest_payload["messages"][-1]
+        latest = next(
+            item for item in reversed(manifest_payload["conversation"]["messages"])
+            if item["role"] == "user"
+        )
         output = CreativeAgentOutput(
             assistant_reply=f"已收到：{latest['content']}",
-            field_updates=[FieldUpdate(
+            suggestion_sets=[CreativeSuggestionSet(
+                category="content_direction",
+                title="你希望采用哪种内容结构？",
+                options=[
+                    CreativeSuggestionOption(
+                        label="训练日记",
+                        summary="按准备、训练和完成三个阶段自然推进。",
+                        proposed_updates=[ProposedFieldUpdate(
+                            field_key="content_structure",
+                            value="训练日记",
+                            source_message_ids=[latest["id"]],
+                        )],
+                    ),
+                    CreativeSuggestionOption(
+                        label="挑战记录",
+                        summary="用明确目标和训练结果形成前后对比。",
+                        proposed_updates=[ProposedFieldUpdate(
+                            field_key="content_structure",
+                            value="挑战记录",
+                            source_message_ids=[latest["id"]],
+                        )],
+                    ),
+                    CreativeSuggestionOption(
+                        label="技巧教学",
+                        summary="围绕动作讲解和训练要点组织内容。",
+                        proposed_updates=[ProposedFieldUpdate(
+                            field_key="content_structure",
+                            value="技巧教学",
+                            source_message_ids=[latest["id"]],
+                        )],
+                    ),
+                ],
+            )],
+            explicit_updates=[ProposedFieldUpdate(
                 field_key="creative_direction",
                 value=latest["content"],
-                source_message_id=latest["id"],
-                risk_level="medium",
+                source_message_ids=[latest["id"]],
             )],
+            clarifying_question=None,
         )
         return CreativeAgentResult(output, output.model_dump(mode="json"), "test-request", {"total_tokens": 1})
 

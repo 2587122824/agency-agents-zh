@@ -12,7 +12,10 @@ from ..db.models import (
     Attachment,
     AttachmentBinding,
     CommandReceipt,
+    ConversationSession,
     ClarificationRequest,
+    CreativeSuggestionSelection,
+    CreativeTurnProposal,
     Entity,
     EntityVersion,
     Message,
@@ -20,9 +23,10 @@ from ..db.models import (
     ProjectEvent,
     RequirementCandidate,
     RequirementVersion,
+    new_id,
     utc_now,
 )
-from .agent_gateway import AgentGatewayError, CreativeAgentGateway
+from .agent_gateway import AgentGatewayError, CreativeAgentGateway, ProposedFieldUpdate
 from ..core.config import RUNTIME_ROOT
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from ..repositories import (
@@ -41,6 +45,8 @@ from .contracts import (
     NextAction,
     RejectCandidate,
     ResolveClarification,
+    SelectCreativeSuggestion,
+    StartConversationSession,
 )
 from .completeness import evaluate_requirement, validate_clarification_value
 
@@ -132,6 +138,25 @@ def active_requirement(session: Session, project_id: str) -> RequirementVersion 
     return _creation(session).active_requirement(project_id)
 
 
+def ensure_conversation_session(
+    session: Session,
+    project: Project,
+    *,
+    started_by: str = "system",
+) -> ConversationSession:
+    repository = _creation(session)
+    active = repository.active_conversation_session(project.id)
+    if active:
+        return active
+    conversation = ConversationSession(project_id=project.id, started_by=started_by)
+    repository.add(conversation)
+    repository.flush()
+    _event(session, project.id, "conversation.session_started.v1", "新的创作会话已开启", {
+        "conversation_session_id": conversation.id,
+    })
+    return conversation
+
+
 def consumed_message_ids(session: Session, version: RequirementVersion) -> set[str]:
     if not version.candidate_id:
         return set()
@@ -195,12 +220,18 @@ def add_message(session: Session, project: Project, payload: MessageCreate) -> M
     receipt = _receipt(session, project.id, payload.command_id)
     if receipt:
         return _receipt_result(session, receipt, Message)
+    conversation = ensure_conversation_session(session, project, started_by=payload.actor_id)
     if payload.reply_to_message_id:
         reply = repository.message(payload.reply_to_message_id)
-        if not reply or reply.project_id != project.id:
+        if (
+            not reply
+            or reply.project_id != project.id
+            or reply.conversation_session_id != conversation.id
+        ):
             raise CreationNotFoundError("Reply message not found")
     message = Message(
         project_id=project.id,
+        conversation_session_id=conversation.id,
         role="user",
         content=payload.content.strip(),
         reply_to_message_id=payload.reply_to_message_id,
@@ -212,6 +243,9 @@ def add_message(session: Session, project: Project, payload: MessageCreate) -> M
         candidate.status = "stale"
         candidate.decided_at = utc_now()
         _event(session, project.id, "candidate.stale.v1", "新消息使旧候选过期", {"candidate_id": candidate.id})
+    for proposal in repository.creative_proposals(project.id):
+        if proposal.status == "active":
+            proposal.status = "stale"
     _save_receipt(session, project.id, payload.command_id, "message.add", "message", message.id)
     _event(session, project.id, "conversation.message_added.v1", "用户需求消息已保存", {"message_id": message.id})
     transition_project(
@@ -226,33 +260,102 @@ def add_message(session: Session, project: Project, payload: MessageCreate) -> M
     return message
 
 
-def _manifest_payload(session: Session, project: Project, base: RequirementVersion) -> dict:
+def start_conversation_session(
+    session: Session,
+    project: Project,
+    payload: StartConversationSession,
+) -> ConversationSession:
     repository = _creation(session)
-    consumed = consumed_message_ids(session, base)
-    messages = repository.manifest_messages(project.id)
-    messages = [item for item in messages if item.id not in consumed]
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, ConversationSession)
+    if any(item.status == "running" for item in repository.agent_runs(project.id)):
+        raise CreationConflictError("AGENT_RUN_IN_PROGRESS", "创作制片人运行中，不能开启新会话。")
+    current = repository.active_conversation_session(project.id)
+    if current:
+        current.status = "closed"
+        current.ended_at = utc_now()
+    for proposal in repository.creative_proposals(project.id):
+        if proposal.status == "active":
+            proposal.status = "stale"
+    conversation = ConversationSession(project_id=project.id, started_by=payload.actor_id)
+    repository.add(conversation)
+    repository.flush()
+    _save_receipt(
+        session,
+        project.id,
+        payload.command_id,
+        "conversation.session.start",
+        "conversation_session",
+        conversation.id,
+    )
+    _event(session, project.id, "conversation.session_started.v1", "用户已开启新的创作会话", {
+        "conversation_session_id": conversation.id,
+        "previous_conversation_session_id": current.id if current else None,
+    })
+    session.commit()
+    return conversation
+
+
+def _manifest_payload(
+    session: Session,
+    project: Project,
+    base: RequirementVersion,
+    conversation_session: ConversationSession,
+) -> dict:
+    repository = _creation(session)
+    messages = repository.manifest_messages(project.id, conversation_session.id)
     bindings = repository.confirmed_bindings(project.id)
     decisions = SqlAlchemyDecisionRepository(session).resolved_for_project(project.id)
     return {
-        "active_requirement": {"id": base.id, "fields": base.fields},
-        "messages": [{"id": item.id, "content": item.content, "reply_to": item.reply_to_message_id} for item in messages],
-        "confirmed_attachment_bindings": [
-            {"id": item.id, "type": item.binding_type, "entity_id": item.entity_id}
-            for item in bindings
-        ],
-        "confirmed_decisions": [
-            {"id": item.id, "key": item.key, "label": item.label, "value": item.value, "source": item.source}
-            for item in decisions
-        ],
+        "runtime_context": {
+            "assistant_name": "片场创作制片人",
+            "current_time": utc_now().isoformat(),
+            "locale": "zh-CN",
+            "timezone": "Asia/Shanghai",
+        },
+        "project_context": {
+            "project_id": project.id,
+            "project_stage": project.status,
+            "active_requirement": {"id": base.id, "fields": base.fields},
+            "confirmed_attachment_bindings": [
+                {"id": item.id, "type": item.binding_type, "entity_id": item.entity_id}
+                for item in bindings
+            ],
+            "confirmed_decisions": [
+                {"id": item.id, "key": item.key, "label": item.label, "value": item.value, "source": item.source}
+                for item in decisions
+            ],
+        },
+        "conversation": {
+            "session_id": conversation_session.id,
+            "messages": [
+                {
+                    "id": item.id,
+                    "role": item.role,
+                    "content": item.content,
+                    "reply_to": item.reply_to_message_id,
+                }
+                for item in messages
+            ],
+        },
         "system_config_version": "v2.creation.mock.v1",
+        "requirement_schema_version": "creative-requirement.v2",
     }
 
 
 def _validated_update_value(field_key: str, value):
-    if field_key in {"title", "core_topic", "creative_direction"}:
+    if field_key in {
+        "title", "core_topic", "content_goal", "platform", "target_audience",
+        "visual_style", "tone", "content_structure", "call_to_action", "creative_direction",
+    }:
         if not isinstance(value, str) or not value.strip():
             raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", f"字段 {field_key} 必须是非空文本。")
         return value.strip()
+    if field_key == "creative_constraints":
+        if not isinstance(value, list) or len(value) > 20 or any(not isinstance(item, str) or not item.strip() for item in value):
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", "创作限制必须是不超过 20 项的非空文本列表。")
+        return [item.strip() for item in value]
     if field_key == "duration_seconds":
         if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 3600:
             raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", "目标时长必须是 5 到 3600 秒的整数。")
@@ -266,6 +369,54 @@ def _validated_update_value(field_key: str, value):
             raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", "音频模式必须是 off 或 voiceover。")
         return value
     raise AgentGatewayError("AGENT_MODEL_OUTPUT_FIELD_UNSUPPORTED", f"模型返回了不支持的字段 {field_key}。")
+
+
+def _field_risk(field_key: str) -> str:
+    if field_key == "audio_mode":
+        return "high"
+    if field_key in {"duration_seconds", "aspect_ratio", "platform", "target_audience", "visual_style"}:
+        return "medium"
+    return "low"
+
+
+def _validate_update_sources(update, valid_user_message_ids: set[str]) -> None:
+    if not set(update.source_message_ids).issubset(valid_user_message_ids):
+        raise AgentGatewayError("AGENT_MODEL_OUTPUT_SOURCE_INVALID", "模型返回了非用户消息或输入清单之外的消息引用。")
+
+
+def _apply_updates(
+    base_fields: dict,
+    base_sources: dict,
+    updates,
+    *,
+    valid_user_message_ids: set[str],
+    source_type: str,
+    source_reference_id: str | None = None,
+) -> tuple[dict, dict, list[dict]]:
+    fields = dict(base_fields)
+    sources = dict(base_sources)
+    changes: list[dict] = []
+    seen_fields: set[str] = set()
+    for update in updates:
+        if update.field_key in seen_fields:
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_FIELD_DUPLICATE", f"模型重复更新字段 {update.field_key}。")
+        _validate_update_sources(update, valid_user_message_ids)
+        seen_fields.add(update.field_key)
+        value = _validated_update_value(update.field_key, update.value)
+        previous = fields.get(update.field_key)
+        fields[update.field_key] = value
+        sources[update.field_key] = {
+            "type": source_type,
+            "reference_id": source_reference_id or update.source_message_ids[-1],
+        }
+        changes.append({
+            "field_key": update.field_key,
+            "before": previous,
+            "after": value,
+            "source_message_ids": update.source_message_ids,
+            "risk_level": _field_risk(update.field_key),
+        })
+    return fields, sources, changes
 
 
 def generate_candidate(
@@ -287,25 +438,37 @@ def generate_candidate(
     if pending_clarifications:
         session.commit()
         raise CreationConflictError("REQUIREMENT_INCOMPLETE", "请先解决阻断性的需求澄清。")
-    manifest_payload = _manifest_payload(session, project, base)
-    if not manifest_payload["messages"]:
+    conversation_session = ensure_conversation_session(session, project, started_by=payload.actor_id)
+    manifest_payload = _manifest_payload(session, project, base, conversation_session)
+    conversation_messages = manifest_payload["conversation"]["messages"]
+    user_messages = [item for item in conversation_messages if item["role"] == "user"]
+    if not user_messages:
         raise CreationConflictError("NO_NEW_REQUIREMENT_INPUT", "没有尚未处理的新需求消息。")
+    if len(conversation_messages) > 100:
+        raise CreationConflictError("CONVERSATION_CONTEXT_LIMIT_EXCEEDED", "当前会话超过 100 条消息，请先开启新的创作会话。")
     attempted_message_ids: set[str] = set()
     for previous_run in repository.agent_runs(project.id):
         previous_manifest = repository.agent_manifest(previous_run.input_manifest_id)
         if previous_manifest:
             attempted_message_ids.update(previous_manifest.message_ids or [])
-    if {item["id"] for item in manifest_payload["messages"]}.issubset(attempted_message_ids):
+    current_message_id = user_messages[-1]["id"]
+    if current_message_id in consumed_message_ids(session, base):
+        raise CreationConflictError("NO_NEW_REQUIREMENT_INPUT", "没有尚未处理的新需求消息。")
+    if current_message_id in attempted_message_ids:
         raise CreationConflictError("AGENT_RUN_ALREADY_ATTEMPTED", "当前消息已经运行过创作智能体；失败后不会自动或重复调用模型。")
     selection = gateway.select(session)
     manifest_payload["system_config_version"] = selection.production_config_version_id
+    manifest_payload["runtime_context"]["model_display_name"] = selection.model_name
+    context_bytes = len(json.dumps(manifest_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+    if context_bytes > 120_000:
+        raise CreationConflictError("CONVERSATION_CONTEXT_LIMIT_EXCEEDED", "当前会话上下文超过 120000 字节，请先开启新的创作会话。")
     serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     manifest = AgentInputManifest(
         project_id=project.id,
         base_requirement_version_id=base.id,
-        message_ids=[item["id"] for item in manifest_payload["messages"]],
-        decision_ids=[item["id"] for item in manifest_payload["confirmed_decisions"]],
-        attachment_binding_ids=[item["id"] for item in manifest_payload["confirmed_attachment_bindings"]],
+        message_ids=[item["id"] for item in conversation_messages],
+        decision_ids=[item["id"] for item in manifest_payload["project_context"]["confirmed_decisions"]],
+        attachment_binding_ids=[item["id"] for item in manifest_payload["project_context"]["confirmed_attachment_bindings"]],
         system_config_version=selection.production_config_version_id,
         input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
         payload=manifest_payload,
@@ -336,34 +499,48 @@ def generate_candidate(
 
     try:
         result = gateway.invoke(selection, manifest_payload)
-        fields = dict(base.fields)
-        sources = dict(base.field_sources)
-        changes: list[dict] = []
-        valid_message_ids = {item["id"] for item in manifest_payload["messages"]}
-        seen_fields: set[str] = set()
-        for update in result.output.field_updates:
-            if update.field_key in seen_fields:
-                raise AgentGatewayError("AGENT_MODEL_OUTPUT_FIELD_DUPLICATE", f"模型重复更新字段 {update.field_key}。")
-            if update.source_message_id not in valid_message_ids:
-                raise AgentGatewayError("AGENT_MODEL_OUTPUT_SOURCE_INVALID", "模型返回了输入清单之外的消息引用。")
-            seen_fields.add(update.field_key)
-            value = _validated_update_value(update.field_key, update.value)
-            previous = fields.get(update.field_key)
-            fields[update.field_key] = value
-            sources[update.field_key] = {"type": "agent_proposal", "reference_id": update.source_message_id}
-            changes.append({
-                "field_key": update.field_key,
-                "before": previous,
-                "after": value,
-                "source_message_id": update.source_message_id,
-                "risk_level": update.risk_level,
-            })
+        valid_user_message_ids = {item["id"] for item in user_messages}
+        fields, sources, changes = _apply_updates(
+            base.fields,
+            base.field_sources,
+            result.output.explicit_updates,
+            valid_user_message_ids=valid_user_message_ids,
+            source_type="agent_proposal",
+        )
+        suggestion_sets: list[dict] = []
+        for suggestion_set in result.output.suggestion_sets:
+            normalized_set = {
+                "id": new_id("sgset"),
+                "category": suggestion_set.category,
+                "title": suggestion_set.title,
+                "options": [],
+            }
+            for index, option in enumerate(suggestion_set.options):
+                option_fields: set[str] = set()
+                for update in option.proposed_updates:
+                    _validate_update_sources(update, valid_user_message_ids)
+                    _validated_update_value(update.field_key, update.value)
+                    if update.field_key in option_fields:
+                        raise AgentGatewayError("AGENT_MODEL_OUTPUT_FIELD_DUPLICATE", f"建议选项重复更新字段 {update.field_key}。")
+                    option_fields.add(update.field_key)
+                normalized_set["options"].append({
+                    "id": new_id("sgopt"),
+                    "label": option.label,
+                    "summary": option.summary,
+                    "recommended": index == 0,
+                    "proposed_updates": [item.model_dump(mode="json") for item in option.proposed_updates],
+                })
+            suggestion_sets.append(normalized_set)
     except AgentGatewayError as exc:
         failed_run = repository.agent_run(run.id)
         if failed_run is not None:
             failed_run.status = "failed"
             failed_run.error_code = exc.code
-            failed_run.error_detail = str(exc)
+            failed_run.error_detail = (
+                f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'))}"
+                if exc.diagnostics else str(exc)
+            )
+            failed_run.raw_output = exc.raw_output
             failed_run.finished_at = utc_now()
             _event(session, project.id, "agent.run_failed.v1", "创作智能体本轮运行失败", {
                 "agent_run_id": failed_run.id,
@@ -383,9 +560,10 @@ def generate_candidate(
     )
     repository.add(candidate)
     repository.flush()
-    latest_message_id = manifest_payload["messages"][-1]["id"]
+    latest_message_id = current_message_id
     assistant_message = Message(
         project_id=project.id,
+        conversation_session_id=conversation_session.id,
         role="assistant",
         content=result.output.assistant_reply,
         reply_to_message_id=latest_message_id,
@@ -393,9 +571,26 @@ def generate_candidate(
     )
     repository.add(assistant_message)
     repository.flush()
+    proposal = CreativeTurnProposal(
+        project_id=project.id,
+        base_requirement_version_id=base.id,
+        agent_run_id=run.id,
+        assistant_message_id=assistant_message.id,
+        suggestion_sets=suggestion_sets,
+        explicit_updates=[item.model_dump(mode="json") for item in result.output.explicit_updates],
+        clarifying_question=(
+            {"prompt": result.output.clarifying_question}
+            if result.output.clarifying_question else None
+        ),
+        prompt_contract_version=selection.prompt_contract_version,
+        output_schema_version=selection.output_schema_version,
+    )
+    repository.add(proposal)
+    repository.flush()
     run.status = "succeeded"
     run.raw_output = result.raw_output
     run.parsed_candidate_id = candidate.id
+    run.parsed_proposal_id = proposal.id
     run.provider_request_id = result.provider_request_id
     run.token_usage = result.token_usage
     run.finished_at = utc_now()
@@ -403,6 +598,7 @@ def generate_candidate(
     _event(session, project.id, "conversation.assistant_replied.v1", "创作智能体已回复本轮消息", {
         "agent_run_id": run.id,
         "message_id": assistant_message.id,
+        "creative_proposal_id": proposal.id,
     })
     _event(session, project.id, "agent.run_succeeded.v1", "创作智能体已返回严格候选", {"agent_run_id": run.id})
     if changes:
@@ -461,6 +657,9 @@ def accept_candidate(
     for pending in repository.reviewable_candidates(project.id, exclude_id=candidate.id):
         pending.status = "stale"
         pending.decided_at = utc_now()
+    for proposal in repository.creative_proposals(project.id):
+        if proposal.status == "active" and proposal.base_requirement_version_id == active.id:
+            proposal.status = "stale"
     _save_receipt(session, project.id, payload.command_id, "candidate.accept", "requirement_version", version.id)
     _event(session, project.id, "requirement.confirmed.v1", "需求候选已提升为正式版本", {
         "candidate_id": candidate.id, "requirement_version_id": version.id,
@@ -476,6 +675,102 @@ def accept_candidate(
         )
     session.commit()
     return version
+
+
+def select_creative_suggestion(
+    session: Session,
+    project: Project,
+    proposal_id: str,
+    payload: SelectCreativeSuggestion,
+) -> RequirementCandidate:
+    repository = _creation(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, RequirementCandidate)
+    proposal = repository.creative_proposal(proposal_id)
+    if not proposal or proposal.project_id != project.id:
+        raise CreationNotFoundError("Creative proposal not found")
+    active = active_requirement(session, project.id)
+    if (
+        not active
+        or active.id != payload.expected_base_version_id
+        or proposal.base_requirement_version_id != active.id
+    ):
+        raise CreationConflictError("CREATIVE_PROPOSAL_BASE_VERSION_STALE", "这组选项基于旧需求版本，不能选择。")
+    if proposal.status != "active":
+        raise CreationConflictError("CREATIVE_PROPOSAL_NOT_ACTIVE", "这组选项已经过期。")
+    if repository.suggestion_selection(proposal.id, payload.suggestion_set_id):
+        raise CreationConflictError("CREATIVE_SUGGESTION_ALREADY_SELECTED", "这组建议已经选择过。")
+    suggestion_set = next(
+        (item for item in proposal.suggestion_sets if item.get("id") == payload.suggestion_set_id),
+        None,
+    )
+    if suggestion_set is None:
+        raise CreationConflictError("CREATIVE_SUGGESTION_SET_NOT_FOUND", "建议组不存在。")
+    option = next(
+        (item for item in suggestion_set.get("options", []) if item.get("id") == payload.option_id),
+        None,
+    )
+    if option is None:
+        raise CreationConflictError("CREATIVE_SUGGESTION_OPTION_NOT_FOUND", "建议选项不存在。")
+    run = repository.agent_run(proposal.agent_run_id)
+    manifest = repository.agent_manifest(run.input_manifest_id) if run else None
+    if not manifest:
+        raise CreationConflictError("CREATIVE_PROPOSAL_MANIFEST_MISSING", "建议的输入清单不存在。")
+    conversation = manifest.payload.get("conversation", {}).get("messages", [])
+    valid_user_message_ids = {item["id"] for item in conversation if item.get("role") == "user"}
+    updates = [
+        ProposedFieldUpdate.model_validate(item)
+        for item in [*proposal.explicit_updates, *option.get("proposed_updates", [])]
+    ]
+    selection = CreativeSuggestionSelection(
+        project_id=project.id,
+        proposal_id=proposal.id,
+        suggestion_set_id=payload.suggestion_set_id,
+        option_id=payload.option_id,
+        selected_by=payload.actor_id,
+    )
+    repository.add(selection)
+    repository.flush()
+    fields, sources, changes = _apply_updates(
+        active.fields,
+        active.field_sources,
+        updates,
+        valid_user_message_ids=valid_user_message_ids,
+        source_type="user_selection",
+        source_reference_id=selection.id,
+    )
+    for candidate in repository.reviewable_candidates(project.id):
+        candidate.status = "stale"
+        candidate.decided_at = utc_now()
+    candidate = RequirementCandidate(
+        project_id=project.id,
+        base_requirement_version_id=active.id,
+        agent_run_id=proposal.agent_run_id,
+        fields=fields,
+        field_sources=sources,
+        change_summary=changes,
+        status="awaiting_review",
+    )
+    repository.add(candidate)
+    repository.flush()
+    selection.candidate_id = candidate.id
+    _save_receipt(
+        session,
+        project.id,
+        payload.command_id,
+        "creative_suggestion.select",
+        "requirement_candidate",
+        candidate.id,
+    )
+    _event(session, project.id, "creative.suggestion_selected.v1", "用户已选择创作建议，需求候选等待确认", {
+        "creative_proposal_id": proposal.id,
+        "suggestion_set_id": payload.suggestion_set_id,
+        "option_id": payload.option_id,
+        "candidate_id": candidate.id,
+    })
+    session.commit()
+    return candidate
 
 
 def resolve_clarification(
@@ -528,6 +823,9 @@ def resolve_clarification(
     for candidate in repository.reviewable_candidates(project.id):
         candidate.status = "stale"
         candidate.decided_at = utc_now()
+    for proposal in repository.creative_proposals(project.id):
+        if proposal.status == "active" and proposal.base_requirement_version_id == active.id:
+            proposal.status = "stale"
     _save_receipt(session, project.id, payload.command_id, "clarification.resolve", "requirement_version", version.id)
     _event(session, project.id, "clarification.resolved.v1", "用户已解决需求澄清", {
         "clarification_id": clarification.id,
@@ -726,9 +1024,10 @@ def bind_attachment(
 def creation_center_view(session: Session, project: Project) -> dict:
     repository = _creation(session)
     active = ensure_initial_requirement(session, project)
+    conversation = ensure_conversation_session(session, project)
     sync_clarifications(session, project, active)
     session.commit()
-    messages = repository.view_messages(project.id)
+    messages = repository.view_messages(project.id, conversation.id)
     candidates = repository.candidate_history(project.id)
     runs = repository.agent_runs(project.id)
     run_views = []
@@ -747,6 +1046,7 @@ def creation_center_view(session: Session, project: Project) -> dict:
             "prompt_contract_version": run.prompt_contract_version,
             "output_schema_version": run.output_schema_version,
             "parsed_candidate_id": run.parsed_candidate_id,
+            "parsed_proposal_id": run.parsed_proposal_id,
             "error_code": run.error_code,
             "error_detail": run.error_detail,
             "provider_request_id": run.provider_request_id,
@@ -761,6 +1061,8 @@ def creation_center_view(session: Session, project: Project) -> dict:
     for binding in binding_rows:
         bindings_by_attachment.setdefault(binding.attachment_id, []).append(binding)
     clarifications = repository.active_pending_clarifications(project.id, active.id)
+    active_proposal = repository.active_creative_proposal(project.id)
+    proposal_selections = repository.suggestion_selections(project.id)
     current = next((item for item in candidates if item.status == "awaiting_review"), None)
     confirmed_attachment_ids = {
         binding.attachment_id for binding in binding_rows if binding.status == "confirmed"
@@ -797,11 +1099,31 @@ def creation_center_view(session: Session, project: Project) -> dict:
         next_action = NextAction(code="ADD_REQUIREMENT_MESSAGE", label="补充创作需求")
     return {
         "project_id": project.id,
+        "conversation_session_id": conversation.id,
         "active_requirement": active,
         "messages": messages,
         "current_candidate": current,
         "candidate_history": candidates,
         "pending_clarifications": clarifications,
+        "active_creative_proposal": (
+            {
+                "id": active_proposal.id,
+                "base_requirement_version_id": active_proposal.base_requirement_version_id,
+                "agent_run_id": active_proposal.agent_run_id,
+                "assistant_message_id": active_proposal.assistant_message_id,
+                "status": active_proposal.status,
+                "suggestion_sets": active_proposal.suggestion_sets,
+                "explicit_updates": active_proposal.explicit_updates,
+                "clarifying_question": active_proposal.clarifying_question,
+                "prompt_contract_version": active_proposal.prompt_contract_version,
+                "output_schema_version": active_proposal.output_schema_version,
+                "created_at": active_proposal.created_at,
+                "selections": [
+                    item for item in proposal_selections if item.proposal_id == active_proposal.id
+                ],
+            }
+            if active_proposal else None
+        ),
         "latest_agent_run": run_views[0] if run_views else None,
         "agent_runs": run_views,
         "attachments": [

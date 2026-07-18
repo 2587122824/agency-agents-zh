@@ -16,8 +16,18 @@ class MessageCreate(CommandContext):
     reply_to_message_id: str | None = None
 
 
+class StartConversationSession(CommandContext):
+    pass
+
+
 class GenerateCandidate(CommandContext):
     expected_base_version_id: str
+
+
+class SelectCreativeSuggestion(CommandContext):
+    expected_base_version_id: str
+    suggestion_set_id: str = Field(min_length=1, max_length=48)
+    option_id: str = Field(min_length=1, max_length=48)
 
 
 class AcceptCandidate(CommandContext):
@@ -53,11 +63,22 @@ class BindingCreate(CommandContext):
 class MessageRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: str
+    conversation_session_id: str
     role: str
     content: str
     reply_to_message_id: str | None
     agent_run_id: str | None
     created_at: datetime
+
+
+class ConversationSessionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    project_id: str
+    status: str
+    started_by: str
+    started_at: datetime
+    ended_at: datetime | None
 
 
 class RequirementVersionRead(BaseModel):
@@ -111,6 +132,7 @@ class AgentRunRead(BaseModel):
     prompt_contract_version: str
     output_schema_version: str
     parsed_candidate_id: str | None
+    parsed_proposal_id: str | None
     error_code: str | None
     error_detail: str | None
     provider_request_id: str | None
@@ -131,6 +153,33 @@ class ClarificationRead(BaseModel):
     risk_level: str
     status: str
     resolution: Any | None
+
+
+class CreativeSuggestionSelectionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    proposal_id: str
+    suggestion_set_id: str
+    option_id: str
+    candidate_id: str | None
+    selected_by: str
+    selected_at: datetime
+
+
+class CreativeTurnProposalRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: str
+    base_requirement_version_id: str
+    agent_run_id: str
+    assistant_message_id: str
+    status: str
+    suggestion_sets: list[dict[str, Any]]
+    explicit_updates: list[dict[str, Any]]
+    clarifying_question: dict[str, Any] | None
+    prompt_contract_version: str
+    output_schema_version: str
+    created_at: datetime
+    selections: list[CreativeSuggestionSelectionRead] = Field(default_factory=list)
 
 
 class AttachmentRead(BaseModel):
@@ -170,11 +219,13 @@ class NextAction(BaseModel):
 
 class CreationCenterView(BaseModel):
     project_id: str
+    conversation_session_id: str
     active_requirement: RequirementVersionRead
     messages: list[MessageRead]
     current_candidate: CandidateRead | None
     candidate_history: list[CandidateRead]
     pending_clarifications: list[ClarificationRead]
+    active_creative_proposal: CreativeTurnProposalRead | None
     latest_agent_run: AgentRunRead | None
     agent_runs: list[AgentRunRead]
     attachments: list[AttachmentView]

@@ -190,7 +190,7 @@ export interface RequirementCandidate {
   status: string
   fields: Record<string, unknown>
   field_sources: Record<string, { type?: string; reference_id?: string }>
-  change_summary: Array<{ field_key: string; before: unknown; after: unknown; source_message_id?: string; risk_level: string }>
+  change_summary: Array<{ field_key: string; before: unknown; after: unknown; source_message_id?: string; source_message_ids?: string[]; risk_level: string }>
   validation_errors: Array<{ code?: string; message?: string }>
   created_at: string
   decided_at: string | null
@@ -209,6 +209,7 @@ export interface AgentRun {
   prompt_contract_version: string
   output_schema_version: string
   parsed_candidate_id: string | null
+  parsed_proposal_id: string | null
   error_code: string | null
   error_detail: string | null
   provider_request_id: string | null
@@ -249,8 +250,45 @@ export interface CreationAttachment {
   bindings: AttachmentBinding[]
 }
 
+export interface CreativeSuggestionSelection {
+  id: string
+  proposal_id: string
+  suggestion_set_id: string
+  option_id: string
+  candidate_id: string | null
+  selected_by: string
+  selected_at: string
+}
+
+export interface CreativeTurnProposal {
+  id: string
+  base_requirement_version_id: string
+  agent_run_id: string
+  assistant_message_id: string
+  status: string
+  suggestion_sets: Array<{
+    id: string
+    category: string
+    title: string
+    options: Array<{
+      id: string
+      label: string
+      summary: string
+      recommended: boolean
+      proposed_updates: Array<{ field_key: string; value: unknown; source_message_ids: string[] }>
+    }>
+  }>
+  explicit_updates: Array<{ field_key: string; value: unknown; source_message_ids: string[] }>
+  clarifying_question: { prompt: string } | null
+  prompt_contract_version: string
+  output_schema_version: string
+  created_at: string
+  selections: CreativeSuggestionSelection[]
+}
+
 export interface CreationCenter {
   project_id: string
+  conversation_session_id: string
   active_requirement: RequirementVersion
   messages: CreationMessage[]
   current_candidate: RequirementCandidate | null
@@ -266,6 +304,7 @@ export interface CreationCenter {
     status: string
     resolution: unknown
   }>
+  active_creative_proposal: CreativeTurnProposal | null
   latest_agent_run: AgentRun | null
   agent_runs: AgentRun[]
   attachments: CreationAttachment[]

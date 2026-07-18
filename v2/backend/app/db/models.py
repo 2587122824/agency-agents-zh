@@ -346,11 +346,23 @@ class OutboxMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class ConversationSession(Base):
+    __tablename__ = "conversation_sessions"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("conversation"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    started_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Message(Base):
     __tablename__ = "creation_messages"
 
     id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("message"))
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    conversation_session_id: Mapped[str] = mapped_column(ForeignKey("conversation_sessions.id"), index=True)
     role: Mapped[str] = mapped_column(String(16), default="user")
     content: Mapped[str] = mapped_column(Text)
     reply_to_message_id: Mapped[str | None] = mapped_column(ForeignKey("creation_messages.id"), nullable=True)
@@ -408,6 +420,7 @@ class AgentRun(Base):
     prompt_contract_version: Mapped[str] = mapped_column(String(48), default="creative.v1")
     output_schema_version: Mapped[str] = mapped_column(String(48), default="requirement-candidate.v1")
     parsed_candidate_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    parsed_proposal_id: Mapped[str | None] = mapped_column(String(48), nullable=True)
     raw_output: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     provider_request_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
     token_usage: Mapped[dict] = mapped_column(JSON, default=dict)
@@ -415,6 +428,37 @@ class AgentRun(Base):
     error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class CreativeTurnProposal(Base):
+    __tablename__ = "creative_turn_proposals"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("cproposal"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    base_requirement_version_id: Mapped[str] = mapped_column(ForeignKey("requirement_versions.id"), index=True)
+    agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"), unique=True, index=True)
+    assistant_message_id: Mapped[str] = mapped_column(ForeignKey("creation_messages.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    suggestion_sets: Mapped[list] = mapped_column(JSON, default=list)
+    explicit_updates: Mapped[list] = mapped_column(JSON, default=list)
+    clarifying_question: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    prompt_contract_version: Mapped[str] = mapped_column(String(48))
+    output_schema_version: Mapped[str] = mapped_column(String(48))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class CreativeSuggestionSelection(Base):
+    __tablename__ = "creative_suggestion_selections"
+    __table_args__ = (UniqueConstraint("proposal_id", "suggestion_set_id"),)
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("cselection"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    proposal_id: Mapped[str] = mapped_column(ForeignKey("creative_turn_proposals.id"), index=True)
+    suggestion_set_id: Mapped[str] = mapped_column(String(48))
+    option_id: Mapped[str] = mapped_column(String(48))
+    candidate_id: Mapped[str | None] = mapped_column(ForeignKey("requirement_candidates.id"), nullable=True)
+    selected_by: Mapped[str] = mapped_column(String(48))
+    selected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class RequirementCandidate(Base):

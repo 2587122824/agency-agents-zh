@@ -48,8 +48,17 @@ export const api = {
   addMessage: (projectId: string, content: string) => request<CreationMessage>(`/projects/${projectId}/messages`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', content }),
   }),
+  startConversationSession: (projectId: string) => request<{ id: string; status: string }>(`/projects/${projectId}/conversation-sessions`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user' }),
+  }),
   generateRequirementCandidate: (projectId: string, baseVersionId: string) => request<RequirementCandidate>(`/projects/${projectId}/requirement-candidates:generate`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId }),
+  }),
+  selectCreativeSuggestion: (projectId: string, proposalId: string, baseVersionId: string, suggestionSetId: string, optionId: string) => request<RequirementCandidate>(`/projects/${projectId}/creative-proposals/${proposalId}:select`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId,
+      suggestion_set_id: suggestionSetId, option_id: optionId,
+    }),
   }),
   acceptRequirementCandidate: (projectId: string, candidateId: string, baseVersionId: string) => request<RequirementVersion>(`/projects/${projectId}/requirement-candidates/${candidateId}:accept`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_base_version_id: baseVersionId }),

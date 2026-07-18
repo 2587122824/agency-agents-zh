@@ -15,8 +15,11 @@ from ..db.models import (
     ConfigurationCommandReceipt,
     ConfigurationEvent,
     ConfigurationReference,
+    ConversationSession,
     CostEvent,
     CreativeBriefCandidate,
+    CreativeSuggestionSelection,
+    CreativeTurnProposal,
     DAGNode,
     Decision,
     DecisionChangeImpactAnalysis,
@@ -63,6 +66,9 @@ CreationRecord = (
     | Attachment
     | AttachmentBinding
     | ClarificationRequest
+    | ConversationSession
+    | CreativeSuggestionSelection
+    | CreativeTurnProposal
     | Entity
     | EntityVersion
     | Message
@@ -201,11 +207,27 @@ class CreationRepository(Protocol):
 
     def active_requirement(self, project_id: str) -> RequirementVersion | None: ...
 
+    def active_conversation_session(self, project_id: str) -> ConversationSession | None: ...
+
     def requirement_candidate(self, candidate_id: str) -> RequirementCandidate | None: ...
 
     def agent_run(self, run_id: str) -> AgentRun | None: ...
 
     def agent_manifest(self, manifest_id: str) -> AgentInputManifest | None: ...
+
+    def creative_proposal(self, proposal_id: str) -> CreativeTurnProposal | None: ...
+
+    def active_creative_proposal(self, project_id: str) -> CreativeTurnProposal | None: ...
+
+    def creative_proposals(self, project_id: str) -> list[CreativeTurnProposal]: ...
+
+    def suggestion_selection(
+        self,
+        proposal_id: str,
+        suggestion_set_id: str,
+    ) -> CreativeSuggestionSelection | None: ...
+
+    def suggestion_selections(self, project_id: str) -> list[CreativeSuggestionSelection]: ...
 
     def pending_clarifications(self, project_id: str) -> list[ClarificationRequest]: ...
 
@@ -218,7 +240,7 @@ class CreationRepository(Protocol):
         exclude_id: str | None = None,
     ) -> list[RequirementCandidate]: ...
 
-    def manifest_messages(self, project_id: str) -> list[Message]: ...
+    def manifest_messages(self, project_id: str, conversation_session_id: str) -> list[Message]: ...
 
     def confirmed_bindings(self, project_id: str) -> list[AttachmentBinding]: ...
 
@@ -232,7 +254,7 @@ class CreationRepository(Protocol):
 
     def active_entity_version(self, entity_id: str) -> EntityVersion | None: ...
 
-    def view_messages(self, project_id: str) -> list[Message]: ...
+    def view_messages(self, project_id: str, conversation_session_id: str) -> list[Message]: ...
 
     def candidate_history(self, project_id: str) -> list[RequirementCandidate]: ...
 

@@ -74,11 +74,14 @@ from ..creation.contracts import (
     BindingRead,
     CandidateRead,
     CreationCenterView,
+    ConversationSessionRead,
     GenerateCandidate,
     MessageCreate,
     MessageRead,
     RejectCandidate,
     ResolveClarification,
+    SelectCreativeSuggestion,
+    StartConversationSession,
     RequirementVersionRead,
 )
 from ..creation.service import (
@@ -92,6 +95,8 @@ from ..creation.service import (
     register_attachment,
     reject_candidate,
     resolve_clarification,
+    select_creative_suggestion,
+    start_conversation_session,
 )
 from ..creation.agent_gateway import AgentGatewayError, CreativeAgentGateway, get_creative_agent_gateway
 from ..db.session import get_session
@@ -1044,6 +1049,23 @@ def creation_message_add(project_id: str, payload: MessageCreate, session: Sessi
 
 
 @router.post(
+    "/projects/{project_id}/conversation-sessions",
+    response_model=ConversationSessionRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def conversation_session_start(
+    project_id: str,
+    payload: StartConversationSession,
+    session: Session = Depends(get_session),
+):
+    project = require_project(session, project_id)
+    try:
+        return start_conversation_session(session, project, payload)
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
     "/projects/{project_id}/requirement-candidates:generate",
     response_model=CandidateRead,
     status_code=status.HTTP_201_CREATED,
@@ -1065,6 +1087,26 @@ def requirement_candidate_generate(
             detail=str(exc),
             headers={"X-Error-Code": exc.code},
         ) from exc
+
+
+@router.post(
+    "/projects/{project_id}/creative-proposals/{proposal_id}:select",
+    response_model=CandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def creative_suggestion_select(
+    project_id: str,
+    proposal_id: str,
+    payload: SelectCreativeSuggestion,
+    session: Session = Depends(get_session),
+):
+    project = require_project(session, project_id)
+    try:
+        return select_creative_suggestion(session, project, proposal_id, payload)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
 
 
 @router.post(

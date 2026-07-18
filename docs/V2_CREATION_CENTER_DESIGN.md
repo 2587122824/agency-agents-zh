@@ -377,6 +377,10 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 - 用户选择建议后，由独立命令创建 `RequirementCandidate`；仍需确认才能形成 `RequirementVersion`。
 - 对话达到明确配置上限时返回 `CONVERSATION_CONTEXT_LIMIT_EXCEEDED`，不隐藏摘要、筛选或截断。
 
+建议交互采用 2–3 个可点击选项：推荐项固定排第一并显示“推荐”，每项包含短名称和一句差异说明，模型不得生成选项 ID。后端验证输出后生成稳定的建议组 ID 与选项 ID；页面另外提供“其他想法”自由输入入口，它发送一条新的用户消息，不伪装成模型给出的第四个选项。
+
+点击选项提交精确 `proposal_id + suggestion_set_id + option_id`，保存 `CreativeSuggestionSelection` 并创建待审核 `RequirementCandidate`。点击本身不修改正式需求；人物身份、音频、费用等高风险字段仍按字段目录进入独立确认。每组建议只能选择一次，过期提案、旧需求版本、改名或不存在的 ID 明确失败。
+
 已归档提案中的上下文、字段目录、交互和评测细节已由本节吸收；代码实现状态仍以 [实现状态](./V2_IMPLEMENTATION_STATUS.md) 为准。
 
 ### 9.3 内容策划
@@ -885,8 +889,11 @@ plan.confirmed.v1
 ```text
 Attachment
 AttachmentBinding
+ConversationSession
 AgentInputManifest
 AgentRun
+CreativeTurnProposal
+CreativeSuggestionSelection
 RequirementCandidate
 CreativeBriefCandidate
 ShotPlanCandidate
@@ -986,6 +993,8 @@ RequirementDiff
 ### 20.6 智能体合同验收
 
 - 创作制片人可以理解上一轮助手给出的选项，但未被用户选择的建议不进入需求事实。
+- 建议组只允许 2–3 个选项，推荐项排第一；“其他想法”创建用户消息而不是建议选择记录。
+- 点击建议只创建 `CreativeSuggestionSelection` 和待确认需求候选，活动 `RequirementVersion` 保持不变。
 - 内容策划在 `audio_policy=off` 时不输出口播文本；平台未指定时不做平台适配。
 - 内容策划引入未确认人物、品牌、场景或产品时，候选验证失败。
 - 分镜导演引用不存在的实体、节拍、附件或缩写 ID 时明确失败，不自动改名。

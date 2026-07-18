@@ -40,8 +40,8 @@ def selection() -> CreativeAgentSelection:
         base_url="https://api.example.test/v1",
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
-        prompt_contract_version="creative-dialogue.v1",
-        output_schema_version="creative-turn.v1",
+        prompt_contract_version="creative-dialogue.v2",
+        output_schema_version="creative-turn.v2",
         max_output_tokens=1000,
         sampling={"temperature": 0.2, "unsupported": "ignored"},
     )
@@ -49,10 +49,17 @@ def selection() -> CreativeAgentSelection:
 
 def manifest() -> dict:
     return {
-        "active_requirement": {"id": "requirement_1", "fields": {}},
-        "messages": [{"id": "message_1", "content": "做一个训练短片", "reply_to": None}],
-        "confirmed_attachment_bindings": [],
-        "confirmed_decisions": [],
+        "runtime_context": {"assistant_name": "片场创作制片人", "locale": "zh-CN"},
+        "project_context": {
+            "active_requirement": {"id": "requirement_1", "fields": {}},
+            "confirmed_attachment_bindings": [],
+            "confirmed_decisions": [],
+        },
+        "conversation": {"messages": [
+            {"id": "message_1", "role": "user", "content": "给我三个训练短片方向", "reply_to": None},
+            {"id": "message_2", "role": "assistant", "content": "可以选择训练日记、挑战记录或技巧教学。", "reply_to": "message_1"},
+            {"id": "message_3", "role": "user", "content": "第一个", "reply_to": "message_2"},
+        ]},
         "system_config_version": "production_config_1",
     }
 
@@ -61,12 +68,16 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
     monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
     content = {
         "assistant_reply": "我已记录训练短片方向。",
-        "field_updates": [{
-            "field_key": "creative_direction",
-            "value": "训练短片",
-            "source_message_id": "message_1",
-            "risk_level": "medium",
+        "suggestion_sets": [{
+            "category": "content_direction",
+            "title": "选择内容结构",
+            "options": [
+                {"label": "训练日记", "summary": "按训练过程推进", "proposed_updates": [{"field_key": "content_structure", "value": "training_diary", "source_message_ids": ["message_3"]}]},
+                {"label": "挑战记录", "summary": "突出前后对比", "proposed_updates": [{"field_key": "content_structure", "value": "challenge_record", "source_message_ids": ["message_3"]}]},
+            ],
         }],
+        "explicit_updates": [],
+        "clarifying_question": None,
     }
     transport = FakeTransport({
         "id": "provider-request-1",
@@ -81,6 +92,7 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
     result = gateway.invoke(selection(), manifest())
 
     assert result.output.assistant_reply == "我已记录训练短片方向。"
+    assert result.output.suggestion_sets[0].options[0].label == "训练日记"
     assert result.provider_request_id == "provider-request-1"
     assert result.token_usage["total_tokens"] == 18
     assert len(transport.calls) == 1
@@ -90,6 +102,11 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
     assert request["payload"]["response_format"] == {"type": "json_object"}
     assert request["payload"]["temperature"] == 0.2
     assert "unsupported" not in request["payload"]
+    sent_messages = request["payload"]["messages"]
+    assert sent_messages[-2]["role"] == "assistant"
+    assert sent_messages[-1]["role"] == "user"
+    assert "[message_id=message_3]" in sent_messages[-1]["content"]
+    assert "第一个" in sent_messages[-1]["content"]
 
 
 def test_configured_gateway_rejects_non_json_without_repair_or_retry(monkeypatch) -> None:

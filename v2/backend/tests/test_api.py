@@ -332,6 +332,11 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
     assert len(assistant_messages) == 1
     assert assistant_messages[0]["reply_to_message_id"] == first_message.json()["id"]
     assert assistant_messages[0]["agent_run_id"] == latest_run["id"]
+    proposal = before_accept["active_creative_proposal"]
+    assert proposal["agent_run_id"] == latest_run["id"]
+    assert proposal["assistant_message_id"] == assistant_messages[0]["id"]
+    assert len(proposal["suggestion_sets"][0]["options"]) == 3
+    assert proposal["suggestion_sets"][0]["options"][0]["recommended"] is True
 
     accept_command = {
         "command_id": "accept-command-001",
@@ -361,6 +366,71 @@ def test_candidate_is_audited_and_requires_explicit_acceptance(client: TestClien
     )
     assert no_new_input.status_code == 409
     assert no_new_input.headers["x-error-code"] == "NO_NEW_REQUIREMENT_INPUT"
+
+
+def test_creative_suggestion_selection_creates_candidate_without_confirming_requirement(client: TestClient) -> None:
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    base_id = initial["active_requirement"]["id"]
+    first = client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "suggestion-message-001",
+        "content": "给我三个可选的内容方向。",
+    })
+    assert first.status_code == 201
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "suggestion-generate-001", "expected_base_version_id": base_id},
+    )
+    assert generated.status_code == 201
+    view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    proposal = view["active_creative_proposal"]
+    suggestion_set = proposal["suggestion_sets"][0]
+    option = suggestion_set["options"][0]
+
+    selected = client.post(
+        f"/api/v1/projects/{project['id']}/creative-proposals/{proposal['id']}:select",
+        json={
+            "command_id": "suggestion-select-001",
+            "actor_id": "test-user",
+            "expected_base_version_id": base_id,
+            "suggestion_set_id": suggestion_set["id"],
+            "option_id": option["id"],
+        },
+    )
+    assert selected.status_code == 201
+    candidate = selected.json()
+    assert candidate["status"] == "awaiting_review"
+    assert candidate["fields"]["content_structure"] == "训练日记"
+    assert candidate["field_sources"]["content_structure"]["type"] == "user_selection"
+
+    after_selection = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert after_selection["active_requirement"]["id"] == base_id
+    assert after_selection["active_requirement"]["version_number"] == 1
+    assert after_selection["current_candidate"]["id"] == candidate["id"]
+    assert after_selection["active_creative_proposal"]["selections"][0]["option_id"] == option["id"]
+
+    duplicate = client.post(
+        f"/api/v1/projects/{project['id']}/creative-proposals/{proposal['id']}:select",
+        json={
+            "command_id": "suggestion-select-002",
+            "expected_base_version_id": base_id,
+            "suggestion_set_id": suggestion_set["id"],
+            "option_id": suggestion_set["options"][1]["id"],
+        },
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.headers["x-error-code"] == "CREATIVE_SUGGESTION_ALREADY_SELECTED"
+
+    new_session = client.post(
+        f"/api/v1/projects/{project['id']}/conversation-sessions",
+        json={"command_id": "conversation-session-002", "actor_id": "test-user"},
+    )
+    assert new_session.status_code == 201
+    new_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert new_view["conversation_session_id"] == new_session.json()["id"]
+    assert new_view["messages"] == []
+    assert new_view["active_requirement"]["id"] == base_id
+    assert new_view["active_creative_proposal"] is None
 
 
 def test_new_message_makes_pending_candidate_stale(client: TestClient) -> None:

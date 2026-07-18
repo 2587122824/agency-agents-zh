@@ -88,8 +88,10 @@ Project
 
 ```text
 Message
+ConversationSession
 AgentInputManifest
 AgentRun
+CreativeTurnProposal / CreativeSuggestionSelection
 RequirementCandidate
 CreativeBriefCandidate
 ShotPlanCandidate
@@ -98,6 +100,8 @@ TimelineCandidate
 ```
 
 - 每次智能体运行绑定不可变输入清单和配置版本。
+- 创作制片人只读取当前活动 ConversationSession；开启新会话不修改已确认 RequirementVersion。
+- 建议与用户选择分别持久化，点击建议只能形成待确认候选。
 - 模型成功只表示调用结束，不代表候选已确认。
 - 助手回复、结构化候选、Provider 请求 ID 和 token 用量分别审计。
 

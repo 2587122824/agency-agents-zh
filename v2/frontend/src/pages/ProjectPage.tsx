@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Bot, Check, CheckCircle2, ChevronDown, CircleAlert, Clock3, FileAudio, FileImage, History, Link2, MessageSquareText, Paperclip, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
+import { ArrowLeft, Bot, Check, CheckCircle2, ChevronDown, CircleAlert, Clock3, FileAudio, FileImage, History, Link2, MessageSquarePlus, MessageSquareText, Paperclip, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 
@@ -12,6 +12,7 @@ import styles from './ProjectPage.module.css'
 const sourceLabels: Record<string, string> = {
   user: '用户输入',
   agent_proposal: '创作助手建议',
+  user_selection: '你选择的建议',
   declared_default: '已声明默认值',
   template: '模板',
 }
@@ -19,10 +20,13 @@ const sourceLabels: Record<string, string> = {
 const fieldLabels: Record<string, string> = {
   title: '项目名称', core_topic: '核心主题', duration_seconds: '目标时长',
   aspect_ratio: '画幅', audio_mode: '音频模式', creative_direction: '创作方向',
+  content_goal: '内容目标', platform: '发布平台', target_audience: '目标受众',
+  visual_style: '视觉风格', tone: '情绪基调', content_structure: '内容结构',
+  call_to_action: '结尾行动', creative_constraints: '创作限制',
 }
 
 const agentRoleLabels: Record<string, string> = {
-  creative: '创意策划',
+  creative: '创作制片人',
   director: '分镜导演',
   qc: '质量审核',
   editor: '剪辑助理',
@@ -68,6 +72,8 @@ export function ProjectPage() {
   const { projectId = '' } = useParams()
   const [message, setMessage] = useState('')
   const [clarificationValue, setClarificationValue] = useState('')
+  const [customSuggestionSetId, setCustomSuggestionSetId] = useState<string | null>(null)
+  const [customSuggestion, setCustomSuggestion] = useState('')
   const [showHistory, setShowHistory] = useState(false)
   const fileInput = useRef<HTMLInputElement>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
@@ -79,6 +85,13 @@ export function ProjectPage() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['creation-center', projectId] })
   const generate = useMutation({ mutationFn: () => api.generateRequirementCandidate(projectId, center.data!.active_requirement.id), onSettled: refresh })
   const addMessage = useMutation({ mutationFn: (content: string) => api.addMessage(projectId, content), onSuccess: async () => { setMessage(''); await refresh(); generate.mutate() } })
+  const startConversation = useMutation({ mutationFn: () => api.startConversationSession(projectId), onSuccess: async () => { setMessage(''); setCustomSuggestion(''); setCustomSuggestionSetId(null); await refresh() } })
+  const selectSuggestion = useMutation({
+    mutationFn: ({ proposalId, suggestionSetId, optionId }: { proposalId: string; suggestionSetId: string; optionId: string }) => api.selectCreativeSuggestion(
+      projectId, proposalId, center.data!.active_requirement.id, suggestionSetId, optionId,
+    ),
+    onSuccess: async () => { setCustomSuggestionSetId(null); setCustomSuggestion(''); await refresh() },
+  })
   const accept = useMutation({ mutationFn: () => api.acceptRequirementCandidate(projectId, center.data!.current_candidate!.id, center.data!.active_requirement.id), onSuccess: refresh })
   const reject = useMutation({ mutationFn: () => api.rejectRequirementCandidate(projectId, center.data!.current_candidate!.id, '用户认为当前候选不符合创作方向'), onSuccess: refresh })
   const resolveClarification = useMutation({ mutationFn: (value: unknown) => {
@@ -115,7 +128,8 @@ export function ProjectPage() {
   const creation = center.data
   const candidate = creation.current_candidate
   const clarification = creation.pending_clarifications[0]
-  const error = commandError(addMessage, generate, accept, reject, resolveClarification, register, bind)
+  const error = commandError(addMessage, generate, startConversation, selectSuggestion, accept, reject, resolveClarification, register, bind)
+  const activeProposal = creation.active_creative_proposal
 
   return <>
     <PageHeader eyebrow="CREATION CENTER" title={data.title} description="对话负责提出需求，候选经过明确确认后才成为正式版本。" actions={<Link className="secondaryButton" to="/"><ArrowLeft size={15} />项目列表</Link>} />
@@ -128,9 +142,29 @@ export function ProjectPage() {
 
     <main className={styles.layout}>
       <section className={styles.conversation}>
-        <div className={styles.panelHeading}><div><MessageSquareText size={18} /><div><span>需求对话</span><h2>创作输入</h2></div></div><b>{creation.messages.length} 条消息</b></div>
+        <div className={styles.panelHeading}><div><MessageSquareText size={18} /><div><span>需求对话</span><h2>创作输入</h2></div></div><div className={styles.conversationTools}><b>{creation.messages.length} 条消息</b><button type="button" title="开启新对话，保留已确认项目需求" disabled={startConversation.isPending || generate.isPending} onClick={() => startConversation.mutate()}><MessageSquarePlus size={15} /></button></div></div>
         <div className={styles.messages} ref={messagesRef}>
-          {creation.messages.length ? creation.messages.map(item => <article key={item.id} data-role={item.role}><span>{item.role === 'assistant' ? 'AI' : item.role === 'system' ? '系统' : '你'}</span><div><p>{item.content}</p><small>{item.role === 'assistant' ? '创作智能体 · ' : ''}{new Date(item.created_at).toLocaleString('zh-CN')}</small></div></article>) : <div className={styles.emptyMessages}><MessageSquareText size={25} /><strong>从明确的创作需求开始</strong><p>描述内容、受众或风格。未说出的可选信息会保持未指定。</p></div>}
+          {creation.messages.length ? creation.messages.map(item => <article key={item.id} data-role={item.role}><span>{item.role === 'assistant' ? 'AI' : item.role === 'system' ? '系统' : '你'}</span><div><p>{item.content}</p><small>{item.role === 'assistant' ? '创作制片人 · ' : ''}{new Date(item.created_at).toLocaleString('zh-CN')}</small></div></article>) : <div className={styles.emptyMessages}><MessageSquareText size={25} /><strong>从明确的创作需求开始</strong><p>描述内容、受众或风格。未说出的可选信息会保持未指定。</p></div>}
+          {activeProposal?.suggestion_sets.map(suggestionSet => {
+            const selected = activeProposal.selections.find(item => item.suggestion_set_id === suggestionSet.id)
+            return <section className={styles.suggestionSet} key={suggestionSet.id}>
+              <header><span>创作建议</span><strong>{suggestionSet.title}</strong></header>
+              <div className={styles.suggestionOptions}>{suggestionSet.options.map((option, index) => <button
+                type="button"
+                key={option.id}
+                data-selected={selected?.option_id === option.id}
+                disabled={Boolean(selected) || selectSuggestion.isPending}
+                onClick={() => selectSuggestion.mutate({ proposalId: activeProposal.id, suggestionSetId: suggestionSet.id, optionId: option.id })}
+              >
+                <span>{option.label}{index === 0 && <b>推荐</b>}{selected?.option_id === option.id && <Check size={14} />}</span>
+                <small>{option.summary}</small>
+              </button>)}</div>
+              {!selected && (customSuggestionSetId === suggestionSet.id ? <form className={styles.customSuggestion} onSubmit={event => { event.preventDefault(); const content = customSuggestion.trim(); if (!content) return; addMessage.mutate(content); setCustomSuggestion(''); setCustomSuggestionSetId(null) }}>
+                <input autoFocus value={customSuggestion} onChange={event => setCustomSuggestion(event.target.value)} placeholder="输入你的想法" />
+                <button className="primaryButton" disabled={!customSuggestion.trim() || addMessage.isPending}>发送</button>
+              </form> : <button type="button" className={styles.otherSuggestion} onClick={() => setCustomSuggestionSetId(suggestionSet.id)}>其他想法</button>)}
+            </section>
+          })}
           {generate.isPending && <article data-role="assistant" data-pending><span>AI</span><div><p>正在理解本轮需求…</p><small>只运行当前配置的创作模型</small></div></article>}
           {generate.error && <article data-role="system" data-error><span>系统</span><div><p>本轮智能体没有返回回复：{generate.error.message}</p><small>没有自动重试，也没有切换模型</small></div></article>}
         </div>

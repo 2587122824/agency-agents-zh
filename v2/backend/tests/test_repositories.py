@@ -16,6 +16,7 @@ from v2.backend.app.db.models import (
     ClarificationRequest,
     ConfigurationCommandReceipt,
     ConfigurationReference,
+    ConversationSession,
     CostEvent,
     CreativeBriefCandidate,
     DAGNode,
@@ -317,13 +318,18 @@ def test_creation_repository_contract_preserves_filters_order_and_project_scope(
                 creation.add(record)
             creation.flush()
 
+            conversation = ConversationSession(project_id=project.id, started_by="test")
+            creation.add(conversation)
+            creation.flush()
             older_message = Message(
                 project_id=project.id,
+                conversation_session_id=conversation.id,
                 content="older",
                 created_at=now - timedelta(minutes=2),
             )
             newer_message = Message(
                 project_id=project.id,
+                conversation_session_id=conversation.id,
                 content="newer",
                 created_at=now - timedelta(minutes=1),
             )
@@ -460,8 +466,9 @@ def test_creation_repository_contract_preserves_filters_order_and_project_scope(
             assert creation.agent_run(run.id).id == run.id  # type: ignore[union-attr]
             assert creation.agent_manifest(manifest.id).id == manifest.id  # type: ignore[union-attr]
             assert creation.message(newer_message.id).project_id == project.id  # type: ignore[union-attr]
-            assert [row.id for row in creation.manifest_messages(project.id)] == [older_message.id, newer_message.id]
-            assert [row.id for row in creation.view_messages(project.id)] == [older_message.id, newer_message.id]
+            assert creation.active_conversation_session(project.id).id == conversation.id  # type: ignore[union-attr]
+            assert [row.id for row in creation.manifest_messages(project.id, conversation.id)] == [older_message.id, newer_message.id]
+            assert [row.id for row in creation.view_messages(project.id, conversation.id)] == [older_message.id, newer_message.id]
             assert [row.id for row in creation.reviewable_candidates(project.id)] == [candidate.id]
             assert creation.reviewable_candidates(project.id, exclude_id=candidate.id) == []
             assert [row.id for row in creation.candidate_history(project.id)] == [candidate.id, stale_candidate.id]
@@ -481,7 +488,7 @@ def test_creation_repository_contract_preserves_filters_order_and_project_scope(
             assert [row.id for row in creation.confirmed_bindings(project.id)] == [confirmed_binding.id]
             assert [row.id for row in creation.bindings(project.id)] == [confirmed_binding.id, pending_binding.id]
             assert [row.id for row in creation.agent_runs(project.id)] == [run.id]
-            assert creation.view_messages(other.id) == []
+            assert creation.view_messages(other.id, conversation.id) == []
     finally:
         engine.dispose()
 

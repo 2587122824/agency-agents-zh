@@ -17,8 +17,11 @@ from ..db.models import (
     ConfigurationCommandReceipt,
     ConfigurationEvent,
     ConfigurationReference,
+    ConversationSession,
     CostEvent,
     CreativeBriefCandidate,
+    CreativeSuggestionSelection,
+    CreativeTurnProposal,
     DAGNode,
     Decision,
     DecisionChangeImpactAnalysis,
@@ -351,6 +354,16 @@ class SqlAlchemyCreationRepository:
             .order_by(RequirementVersion.version_number.desc())
         )
 
+    def active_conversation_session(self, project_id: str) -> ConversationSession | None:
+        return self.session.scalar(
+            select(ConversationSession)
+            .where(
+                ConversationSession.project_id == project_id,
+                ConversationSession.status == "active",
+            )
+            .order_by(ConversationSession.started_at.desc())
+        )
+
     def requirement_candidate(self, candidate_id: str) -> RequirementCandidate | None:
         return self.session.get(RequirementCandidate, candidate_id)
 
@@ -359,6 +372,43 @@ class SqlAlchemyCreationRepository:
 
     def agent_manifest(self, manifest_id: str) -> AgentInputManifest | None:
         return self.session.get(AgentInputManifest, manifest_id)
+
+    def creative_proposal(self, proposal_id: str) -> CreativeTurnProposal | None:
+        return self.session.get(CreativeTurnProposal, proposal_id)
+
+    def active_creative_proposal(self, project_id: str) -> CreativeTurnProposal | None:
+        return self.session.scalar(
+            select(CreativeTurnProposal)
+            .where(
+                CreativeTurnProposal.project_id == project_id,
+                CreativeTurnProposal.status == "active",
+            )
+            .order_by(CreativeTurnProposal.created_at.desc())
+        )
+
+    def creative_proposals(self, project_id: str) -> list[CreativeTurnProposal]:
+        return list(self.session.scalars(
+            select(CreativeTurnProposal)
+            .where(CreativeTurnProposal.project_id == project_id)
+            .order_by(CreativeTurnProposal.created_at.desc())
+        ))
+
+    def suggestion_selection(
+        self,
+        proposal_id: str,
+        suggestion_set_id: str,
+    ) -> CreativeSuggestionSelection | None:
+        return self.session.scalar(select(CreativeSuggestionSelection).where(
+            CreativeSuggestionSelection.proposal_id == proposal_id,
+            CreativeSuggestionSelection.suggestion_set_id == suggestion_set_id,
+        ))
+
+    def suggestion_selections(self, project_id: str) -> list[CreativeSuggestionSelection]:
+        return list(self.session.scalars(
+            select(CreativeSuggestionSelection)
+            .where(CreativeSuggestionSelection.project_id == project_id)
+            .order_by(CreativeSuggestionSelection.selected_at)
+        ))
 
     def pending_clarifications(self, project_id: str) -> list[ClarificationRequest]:
         return list(self.session.scalars(select(ClarificationRequest).where(
@@ -383,11 +433,11 @@ class SqlAlchemyCreationRepository:
             statement = statement.where(RequirementCandidate.id != exclude_id)
         return list(self.session.scalars(statement))
 
-    def manifest_messages(self, project_id: str) -> list[Message]:
+    def manifest_messages(self, project_id: str, conversation_session_id: str) -> list[Message]:
         return list(self.session.scalars(
             select(Message).where(
                 Message.project_id == project_id,
-                Message.role == "user",
+                Message.conversation_session_id == conversation_session_id,
             ).order_by(Message.created_at, Message.id)
         ))
 
@@ -417,9 +467,12 @@ class SqlAlchemyCreationRepository:
             EntityVersion.is_active.is_(True),
         ))
 
-    def view_messages(self, project_id: str) -> list[Message]:
+    def view_messages(self, project_id: str, conversation_session_id: str) -> list[Message]:
         return list(self.session.scalars(
-            select(Message).where(Message.project_id == project_id).order_by(Message.created_at)
+            select(Message).where(
+                Message.project_id == project_id,
+                Message.conversation_session_id == conversation_session_id,
+            ).order_by(Message.created_at)
         ))
 
     def candidate_history(self, project_id: str) -> list[RequirementCandidate]:
