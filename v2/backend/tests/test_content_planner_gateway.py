@@ -139,6 +139,19 @@ def test_content_planner_rejects_audio_when_audio_policy_is_off_without_retry(mo
     assert len(transport.calls) == 1
 
 
+def test_content_planner_accepts_empty_constraint_summary_when_output_obeys_manifest(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    output["constraints_carried_forward"] = []
+    gateway, transport = gateway_for({"choices": [{"message": {"content": json.dumps(output, ensure_ascii=False)}}]})
+
+    result = gateway.invoke(selection(), manifest(audio_policy="off"))
+
+    assert result.output.constraints_carried_forward == []
+    assert all(item.spoken_text is None for item in result.output.script_segments)
+    assert len(transport.calls) == 1
+
+
 def test_content_planner_rejects_unknown_entity_and_default_platform_adaptation(monkeypatch) -> None:
     monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
     unknown = valid_output()

@@ -138,7 +138,7 @@ _SYSTEM_PROMPT = """你是片场 V2 的内容策划智能体。你只把已确�
 6. platform 为 null 时 platform_adaptation 必须为 null，不得默认适配任何平台。
 7. 不得输出镜头 ID、画面提示词、Provider、模型、工作流、NodeInfoList、价格、素材状态或生产任务。
 8. 不得引入输入合同中没有确认的人物、品牌、地点或产品事实。信息不足时写入 open_questions，不得自行补写事实。
-9. constraints_carried_forward 只登记输入合同中真实存在的约束，不得创造默认规则。
+9. constraints_carried_forward 是可选的可读说明，只能登记输入合同中真实存在的约束，不得创造默认规则；该字段为空不代表约束失效，后端按不可变输入合同直接验收实际输出。
 10. 不得输出 Markdown 代码块、解释文字或 JSON 之外的内容。
 """
 
@@ -281,9 +281,6 @@ def _validate_output_against_manifest(output: ContentPlannerOutput, manifest: di
         invalid_audio = [item.segment_code for item in output.script_segments if item.spoken_text is not None or item.kind in {"voiceover", "dialogue"}]
         if invalid_audio:
             raise ValueError(f"音频关闭时脚本段不得包含口播或对白：{invalid_audio}。")
-    audio_constraint = f"audio_policy={manifest['audio_policy']}"
-    if audio_constraint not in output.constraints_carried_forward:
-        raise ValueError(f"内容策划没有明确继承约束 {audio_constraint}。")
     if manifest.get("platform") is None and output.platform_adaptation is not None:
         raise ValueError("平台未指定时不得生成平台适配。")
 

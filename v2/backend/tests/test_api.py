@@ -1191,7 +1191,9 @@ def test_content_planner_failure_requires_explicit_exact_retry(client: TestClien
                     raw_output={"unexpected": True},
                     diagnostics=[{"type": "value_error", "ctx": {"error": ValueError("invalid segment")}}],
                 )
-            return super().invoke(selection, manifest_payload)
+            result = super().invoke(selection, manifest_payload)
+            output = result.output.model_copy(update={"constraints_carried_forward": []})
+            return ContentPlannerResult(output, output.model_dump(mode="json"), result.provider_request_id, result.token_usage)
 
     gateway = FailOncePlannerGateway()
     app.dependency_overrides[get_content_planner_gateway] = lambda: gateway
