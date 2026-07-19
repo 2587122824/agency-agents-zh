@@ -1084,6 +1084,11 @@ export interface ProjectControlSummary {
 
 export interface ProjectControl extends ProjectControlSummary {
   active_plan: { id: string; version_number: number; status: string; requirement_version_id: string; contract_schema_version: string; confirmed_at: string } | null
+  production_basis: {
+    requirement: { id: string; version_number: number; fields: Record<string, unknown>; created_at: string }
+    creative_brief: CreativeBrief
+    plan: { id: string; version_number: number; contract_schema_version: string; shot_count: number; confirmed_at: string; confirmed_by: string }
+  } | null
   active_snapshot: { id: string; snapshot_number: number; status: string; contract_hash: string; cost_status: string; estimated_cost: number | null; currency: string | null; estimated_call_count: number } | null
   delivery: { id: string; status: string; timeline_id: string; request_fingerprint: string; final_asset_id: string | null; error_code: string | null } | null
   costs: Array<{ currency: string; estimated_confirmed: number; charged_confirmed: number; adjusted_confirmed: number; refunded_confirmed: number; pending_event_count: number }>

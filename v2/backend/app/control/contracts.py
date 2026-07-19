@@ -125,6 +125,7 @@ class ProjectAuditLedgerView(BaseModel):
 
 class ProjectControlView(ProjectControlSummary):
     active_plan: dict | None
+    production_basis: dict | None
     active_snapshot: dict | None
     delivery: dict | None
     costs: list[ControlCostCurrency]

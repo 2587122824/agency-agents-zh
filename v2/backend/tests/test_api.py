@@ -3109,6 +3109,17 @@ def test_project_control_exposes_exact_production_route_cost_and_blocker(client:
     assert control["evaluated_stage"] == "production"
     assert control["active_plan_version"] == 1
     assert control["active_snapshot_status"] == "execution_blocked"
+    active_plan = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()["active_plan"]
+    assert control["production_basis"]["requirement"]["id"] == active_plan["requirement_version_id"]
+    assert control["production_basis"]["creative_brief"] == active_plan["creative_brief"]
+    assert control["production_basis"]["plan"] == {
+        "id": active_plan["id"],
+        "version_number": active_plan["version_number"],
+        "contract_schema_version": active_plan["contract_schema_version"],
+        "shot_count": len(active_plan["shots"]),
+        "confirmed_at": active_plan["confirmed_at"],
+        "confirmed_by": active_plan["confirmed_by"],
+    }
     assert control["work_counts"]["blocked"] == 1
     assert control["blocker_count"] >= 1
     work_blocker = next(item for item in control["blockers"] if item["source_type"] == "work_item")

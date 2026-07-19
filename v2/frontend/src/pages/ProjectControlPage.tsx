@@ -1,8 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, CheckCircle2, CircleDollarSign, Clock3, FileCheck2, GitBranch, Network, ReceiptText, RefreshCw, Route, Workflow } from 'lucide-react'
+import { useState } from 'react'
+import { AlertTriangle, ArrowRight, BookOpen, CheckCircle2, CircleDollarSign, Clapperboard, Clock3, FileCheck2, GitBranch, MessageSquareText, Network, ReceiptText, RefreshCw, Route, Workflow } from 'lucide-react'
 import { Link, useParams } from 'react-router-dom'
 
 import { api } from '../api/client'
+import type { ProjectControl } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import { actorTypeLabel, aggregateTypeLabel, attemptStateLabel, blockerPresentation, eventPresentation, projectStatusLabel, snapshotStatusLabel, stateTriggerLabel, workStatusLabel } from '../presentation/projectFacts'
 import styles from './ProjectControlPage.module.css'
@@ -13,6 +15,41 @@ function timestamp(value: string | null) {
 
 function count(rows: Record<string, number>, key: string) {
   return rows[key] ?? 0
+}
+
+const requirementFieldLabels: Record<string, string> = {
+  title: '项目名称', core_topic: '核心主题', duration_seconds: '目标时长', aspect_ratio: '画幅', audio_mode: '音频模式',
+  creative_direction: '创作方向', content_goal: '内容目标', platform: '发布平台', target_audience: '目标受众',
+  visual_style: '视觉风格', tone: '情绪基调', content_structure: '内容结构', call_to_action: '结尾行动', creative_constraints: '创作限制',
+}
+
+function requirementValue(key: string, value: unknown) {
+  if (key === 'duration_seconds') return `${String(value)} 秒`
+  if (key === 'audio_mode') return value === 'off' ? '关闭音频' : value === 'voiceover' ? '使用旁白' : String(value)
+  if (Array.isArray(value)) return value.map(String).join('、')
+  if (value && typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function ProductionBasis({ basis, projectId }: { basis: NonNullable<ProjectControl['production_basis']>; projectId: string }) {
+  const [tab, setTab] = useState<'requirement' | 'brief' | 'shots'>('requirement')
+  const requirementFields = Object.entries(basis.requirement.fields).filter(([, value]) => value !== null && value !== '')
+  return <section className={styles.basis}>
+    <header><div><BookOpen /><span><small>本次生产依据</small><h3>已确认创作内容</h3></span></div><p>需求 v{basis.requirement.version_number} · 创作方案 v{basis.plan.version_number} · {basis.plan.shot_count} 个镜头</p><Link className="secondaryButton" to={`/projects/${projectId}/plan`}>查看完整创作方案<ArrowRight size={13} /></Link></header>
+    <nav aria-label="生产依据视图">
+      <button type="button" data-active={tab === 'requirement'} onClick={() => setTab('requirement')}><MessageSquareText size={14} />创作需求</button>
+      <button type="button" data-active={tab === 'brief'} onClick={() => setTab('brief')}><BookOpen size={14} />内容策划</button>
+      <button type="button" data-active={tab === 'shots'} onClick={() => setTab('shots')}><Clapperboard size={14} />分镜方案</button>
+    </nav>
+    {tab === 'requirement' && <div className={styles.requirementBasis}>{requirementFields.map(([key, value]) => <div key={key}><span>{requirementFieldLabels[key] ?? key}</span><strong>{requirementValue(key, value)}</strong></div>)}</div>}
+    {tab === 'brief' && <div className={styles.briefBasis}>
+      <div className={styles.briefLead}><span>方案名称</span><h4>{basis.creative_brief.title}</h4><p>{basis.creative_brief.content_promise}</p></div>
+      <dl><div><dt>观众收获</dt><dd>{basis.creative_brief.audience_takeaway}</dd></div><div><dt>开场设计</dt><dd>{basis.creative_brief.hook.content}</dd></div><div><dt>语气与节奏</dt><dd>{basis.creative_brief.tone} · {basis.creative_brief.pacing}</dd></div></dl>
+      <div className={styles.beatBasis}>{basis.creative_brief.narrative_beats.map(beat => <article key={beat.beat_code}><b>{beat.beat_code.replace('BEAT_', '')}</b><div><strong>{beat.purpose}</strong><span>{beat.summary}</span></div><time>{(beat.target_duration_ms / 1000).toFixed(1)}s</time></article>)}</div>
+    </div>}
+    {tab === 'shots' && <div className={styles.shotBasis}><Clapperboard /><div><span>已确认分镜合同</span><strong>{basis.plan.shot_count} 个镜头 · {basis.plan.contract_schema_version}</strong><small>确认于 {timestamp(basis.plan.confirmed_at)}，生产快照只使用这一版方案。</small></div><Link className="secondaryButton" to={`/projects/${projectId}/plan`}>查看分镜详情</Link></div>}
+    <footer><span>以上内容来自当前创作方案的精确版本，不读取后续聊天或未确认候选。</span><Link to={`/projects/${projectId}`}>查看创作记录</Link></footer>
+  </section>
 }
 
 export function ProjectControlPage() {
@@ -45,6 +82,8 @@ export function ProjectControlPage() {
           </dl>
           <aside><strong>{data.archived_at ? '项目已归档' : data.next_action.label}</strong><small>{data.archived_at ? `归档于 ${timestamp(data.archived_at)}，恢复后可继续操作` : `${data.next_action.confirmation_level === 'high' ? '需要重点确认' : data.next_action.confirmation_level === 'normal' ? '需要确认' : '无需确认'} · ${data.next_action.incurs_production_cost ? '会产生制作费用' : '不会产生制作费用'}`}</small>{data.state_reason_code && <div className={styles.stateBlock}><b>{blockerPresentation(data.state_reason_code).title}</b><span>{projectStatusLabel(data.blocked_from_state)} → {projectStatusLabel(data.persisted_status)}</span><small>责任对象：{aggregateTypeLabel(data.blocked_responsible_aggregate_type)}</small></div>}<details className={styles.stageTechnical}><summary>技术详情</summary><code>{data.persisted_status} · {data.active_snapshot_status ?? 'NO_SNAPSHOT'} · {data.next_action.code}</code><p>{data.state_trigger} · {data.state_actor_type}:{data.state_changed_by}</p>{data.archived_at && <p>{data.archived_at} · {data.archived_by}</p>}{data.state_reason_code && <code>{data.state_reason_code} · {data.blocked_from_state ?? 'NO_PREVIOUS_STATE'} → {data.persisted_status} · {data.blocked_responsible_aggregate_type}:{data.blocked_responsible_aggregate_id}</code>}</details></aside>
         </section>
+
+        {data.production_basis && <ProductionBasis basis={data.production_basis} projectId={projectId} />}
 
         <section className={styles.metrics}>
           <article><Workflow /><span>工作项</span><strong>{Object.values(data.work_counts).reduce((sum, value) => sum + value, 0)}</strong><small>{count(data.work_counts, 'completed')} 完成 · {count(data.work_counts, 'in_progress')} 执行 · {count(data.work_counts, 'queued')} 排队</small></article>

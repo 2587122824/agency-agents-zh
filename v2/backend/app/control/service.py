@@ -162,6 +162,8 @@ def _blockers(
 def _project_control(session: Session, project: Project, include_detail: bool) -> dict:
     repository = SqlAlchemyControlRepository(session)
     plan = _active_plan(repository, project)
+    requirement = repository.requirement_version(project.id, plan.requirement_version_id) if plan else None
+    plan_shots = repository.shots_for_plan(project.id, plan.id) if plan else []
     active_snapshot, latest_snapshot = _snapshots(repository, project)
     authority_snapshot = active_snapshot or latest_snapshot
     snapshot_id = authority_snapshot.id if authority_snapshot else None
@@ -260,6 +262,23 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
             "requirement_version_id": plan.requirement_version_id,
             "contract_schema_version": plan.contract_schema_version,
             "confirmed_at": plan.confirmed_at,
+        },
+        "production_basis": None if not plan or not requirement else {
+            "requirement": {
+                "id": requirement.id,
+                "version_number": requirement.version_number,
+                "fields": requirement.fields,
+                "created_at": requirement.created_at,
+            },
+            "creative_brief": plan.creative_brief,
+            "plan": {
+                "id": plan.id,
+                "version_number": plan.version_number,
+                "contract_schema_version": plan.contract_schema_version,
+                "shot_count": len(plan_shots),
+                "confirmed_at": plan.confirmed_at,
+                "confirmed_by": plan.confirmed_by,
+            },
         },
         "active_snapshot": None if not authority_snapshot else {
             "id": authority_snapshot.id,

@@ -1343,6 +1343,21 @@ class SqlAlchemyControlRepository:
             .limit(1)
         )
 
+    def requirement_version(self, project_id: str, requirement_version_id: str) -> RequirementVersion | None:
+        return self.session.scalar(
+            select(RequirementVersion).where(
+                RequirementVersion.id == requirement_version_id,
+                RequirementVersion.project_id == project_id,
+            )
+        )
+
+    def shots_for_plan(self, project_id: str, plan_version_id: str) -> list[Shot]:
+        return list(self.session.scalars(
+            select(Shot)
+            .where(Shot.project_id == project_id, Shot.plan_version_id == plan_version_id)
+            .order_by(Shot.sequence_number)
+        ))
+
     def snapshots(self, project_id: str) -> list[ProductionSnapshot]:
         return list(self.session.scalars(
             select(ProductionSnapshot)
