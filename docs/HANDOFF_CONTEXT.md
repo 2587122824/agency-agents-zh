@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260719_24 (head)` |
-| 已发布配置 | `production_config_be4776b34fe64be8886d11598b59a39c`，版本 24 |
+| 已发布配置 | `production_config_fbba9eeab31943f29ccae3090eeca52c`，版本 25 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -157,6 +157,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-19 | 修复关键帧配置与 `shot-plan.v2` 可空输入合同矛盾：配置 v25 保持 RunningHub 工作流、Provider、模型、价格和其他路由不变，仅将避免内容与主参考图 NodeInfoList 绑定改为可选，参考图存在开关仍必填；同一 11 镜头项目复验 `validation_errors=[]`、费用估算正常。制作计划页面按错误码聚合同类校验、精确列出镜头编号，并将逐镜头参考图状态默认收起 |
 | 2026-07-19 | 分镜候选修订改为点击具体镜头后单独编辑：新增镜头搜索、全部/已修改筛选、修改计数、前后切换和单镜头重置；桌面左右布局、移动端上下布局，工作区固定高度并独立滚动。仍只提交原有逐镜头 Patch，不修改后端合同、候选版本链或确认逻辑 |
 | 2026-07-19 | 修正创作诊断收口合同：`creative-dialogue-output.v6 / prompt.v14` 要求非收口阶段焦点和原因同时非空，`ready_to_confirm` 阶段同时返回 JSON `null`；不补写空字符串、不自动重试或降级。发布配置 v24，差异仅为创作模型输出合同 v6 与 Prompt v14 |
 | 2026-07-19 | 内容方案待确认项升级为结构化选择：每题提供 2–3 个明确选项和自定义回答，全部回答后生成同需求版本的新 Brief 候选；历史字符串问题需用户确认调用模型后转换。发布配置 v23，差异仅为 content planner 输出合同 v2 与 Prompt v3 |
@@ -198,6 +199,8 @@ v2/runtime/worker.err.log
 - 真实 DeepSeek 首次引导与点击后持续引导：通过
 - 分镜单镜头编辑器桌面验收：11 个镜头只渲染当前镜头 4 个文本域，工作区高 560px，页面无横向溢出
 - 分镜单镜头编辑器 390x844 移动端验收：上方镜头导航、下方编辑器，工作区高 760px，页面无横向溢出
+- 配置 v25 真实生产影响复验：11 个镜头、22 个制作调用、`validation_errors=[]`、`execution_blockers=[]`、预计费用 `TEST 3.96`
+- 制作计划阻断聚合浏览器验收：v24 的 22 条逐镜头错误显示为 2 项原因并保留 11 个精确镜头编号；主参考明细默认收起，375px 页面 `scrollWidth == clientWidth`
 - 其他桌面与 390px 浏览器验收：通过，无横向溢出和控制台错误
 - API 与 Worker 重启健康检查：通过
 

@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useState } from 'react'
 
 import { api } from '../api/client'
-import type { BriefOpenQuestion, CreativeBriefCandidate, ShotContract } from '../api/types'
+import type { BriefOpenQuestion, CreativeBriefCandidate, ProductionImpactAnalysis, ShotContract } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import { ShotPlanRevisionEditor } from '../components/ShotPlanRevisionEditor'
 import styles from './PlanPage.module.css'
@@ -60,6 +60,20 @@ function costLabel(cost: number | null, currency: string | null) {
 
 function userIssue(code: string) {
   return issueMessages[code] ?? '当前制作设置需要调整，请展开技术详情查看具体原因。'
+}
+
+type ValidationIssue = ProductionImpactAnalysis['validation_errors'][number]
+
+function groupValidationIssues(items: ValidationIssue[], shotCodes: string[]) {
+  const groups = new Map<string, { code: string; items: ValidationIssue[]; shotCodes: string[] }>()
+  items.forEach(item => {
+    const group = groups.get(item.code) ?? { code: item.code, items: [], shotCodes: [] }
+    group.items.push(item)
+    const shotCode = shotCodes.find(code => item.path?.startsWith(`shots.${code}.`))
+    if (shotCode && !group.shotCodes.includes(shotCode)) group.shotCodes.push(shotCode)
+    groups.set(item.code, group)
+  })
+  return Array.from(groups.values())
 }
 
 function scriptKindLabel(kind: string) {
@@ -185,6 +199,8 @@ export function PlanPage() {
   const selectedVideoSlot = videoSlots.find(item => item.id === videoSlotId)
   const selectedTtsSlot = ttsSlots.find(item => item.id === ttsSlotId)
   const impact = analyzeImpact.data
+  const impactShotCodes = impact?.manifest.shots.map(shot => shot.shot_code) ?? []
+  const groupedValidationIssues = impact ? groupValidationIssues(impact.validation_errors, impactShotCodes) : []
   const canAnalyze = Boolean(data.active_plan && configId && videoSpecId && keyframeSlotId && videoSlotId && (preparation.data?.audio_mode !== 'voiceover' || ttsSlotId))
   const nextAction = data.active_plan && preparation.data ? preparation.data.next_action : data.next_action
   const nextActionLabel = productionActionLabels[nextAction.code] ?? nextAction.label
@@ -209,7 +225,7 @@ export function PlanPage() {
             <div className={styles.routeGrid}>
               <label>制作配置<select value={configId} onChange={event => chooseConfig(event.target.value)}><option value="">请选择配置</option>{preparation.data.published_configurations.map(item => <option key={item.id} value={item.id}>{item.display_name} · v{item.version_number}</option>)}</select></label>
               <label>画面规格<select disabled={!selectedConfig} value={videoSpecId} onChange={event => { setVideoSpecId(event.target.value); analyzeImpact.reset() }}><option value="">请选择画面规格</option>{selectedConfig?.video_specs.map(item => <option key={item.id} value={item.id}>{item.display_name} · {item.width}×{item.height} · {item.fps}fps</option>)}</select></label>
-              <label>图片生成方案<select disabled={!selectedConfig} value={keyframeSlotId} onChange={event => { setKeyframeSlotId(event.target.value); analyzeImpact.reset() }}><option value="">请选择图片生成方案</option>{keyframeSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
+              <label>图片生成方案<select id="keyframe-workflow-select" disabled={!selectedConfig} value={keyframeSlotId} onChange={event => { setKeyframeSlotId(event.target.value); analyzeImpact.reset() }}><option value="">请选择图片生成方案</option>{keyframeSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
               <label>视频生成方案<select disabled={!selectedConfig} value={videoSlotId} onChange={event => { setVideoSlotId(event.target.value); analyzeImpact.reset() }}><option value="">请选择视频生成方案</option>{videoSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
               {preparation.data.audio_mode === 'voiceover' && <label>配音生成方案<select disabled={!selectedConfig} value={ttsSlotId} onChange={event => { setTtsSlotId(event.target.value); analyzeImpact.reset() }}><option value="">请选择配音生成方案</option>{ttsSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>}
               <label>计费方案<select disabled={!selectedConfig} value={pricingCatalogId} onChange={event => { setPricingCatalogId(event.target.value); analyzeImpact.reset() }}><option value="">暂不选择（只能预览，不能开始制作）</option>{selectedConfig?.pricing_catalogs.map(item => <option key={item.id} value={item.id}>{item.display_name} · {item.currency}</option>)}</select></label>
@@ -219,11 +235,21 @@ export function PlanPage() {
           </> : <div className={styles.noConfig}><CircleAlert size={20} /><div><strong>没有已发布生产配置</strong><span>请先到系统配置创建、校验并发布精确版本。</span></div><Link className="secondaryButton" to="/settings">前往系统配置</Link></div>}
           {impact && <div className={styles.impactResult} data-blocked={impact.status === 'blocked'}>
             <header><Calculator size={17} /><div><strong>{impact.status === 'blocked' ? '制作计划需要调整' : '制作计划已生成，等待确认'}</strong><span>{impact.manifest.shots.length} 个镜头 · 预计调用生成服务 {impact.estimated_call_count} 次 · {costLabel(impact.estimated_cost, impact.currency)}</span></div></header>
-            <div className={styles.referenceFacts}>{impact.manifest.dag.nodes.filter(node => node.kind === 'generate_keyframe').map(node => {
-              const input = node.input_contract as { shot?: { shot_code?: string }; reference_image?: { attachment_id: string; content_hash: string; mime_type: string } | null }
-              return <div key={node.node_key}><span>{input.shot?.shot_code ?? node.node_key}</span><strong>{input.reference_image ? '使用主参考图' : '无主参考图'}</strong><small>{input.reference_image ? `${input.reference_image.mime_type} · ${input.reference_image.content_hash.slice(0, 12)}` : '不会由系统选择其他图片'}</small></div>
-            })}</div>
-            {impact.validation_errors.map(item => <article key={`${item.code}:${item.path}`}><b>制作设置需要调整</b><span>{userIssue(item.code)}</span></article>)}
+            {(() => {
+              const referenceNodes = impact.manifest.dag.nodes.filter(node => node.kind === 'generate_keyframe').map(node => {
+                const input = node.input_contract as { shot?: { shot_code?: string }; reference_image?: { attachment_id: string; content_hash: string; mime_type: string } | null }
+                return { key: node.node_key, shotCode: input.shot?.shot_code ?? node.node_key, reference: input.reference_image }
+              })
+              const selectedCount = referenceNodes.filter(item => item.reference).length
+              return <details className={styles.referenceSummary}>
+                <summary><div><span>主参考图</span><strong>{selectedCount} / {referenceNodes.length} 个镜头已选择</strong></div><small>查看逐镜头状态</small></summary>
+                <div className={styles.referenceFacts}>{referenceNodes.map(item => <div key={item.key}><span>{item.shotCode}</span><strong>{item.reference ? '使用主参考图' : '未选择主参考图'}</strong><small>{item.reference ? `${item.reference.mime_type} · ${item.reference.content_hash.slice(0, 12)}` : '系统不会自行选择图片'}</small></div>)}</div>
+              </details>
+            })()}
+            {groupedValidationIssues.length > 0 && <section className={styles.issueSummary}>
+              <div className={styles.issueSummaryHeading}><div><CircleAlert size={16} /><p><strong>{groupedValidationIssues.length} 项制作要求尚未满足</strong><span>相同原因已合并；受影响镜头仍按后端校验结果精确列出。</span></p></div><button type="button" className="secondaryButton" onClick={() => document.getElementById('keyframe-workflow-select')?.focus()}>重新选择图片生成方案</button></div>
+              {groupedValidationIssues.map(group => <article key={group.code}><div><b>{userIssue(group.code)}</b><span>{group.shotCodes.length ? `影响 ${group.shotCodes.length} 个镜头` : `共 ${group.items.length} 条校验结果`}</span></div>{group.shotCodes.length > 0 && <p>{group.shotCodes.map(code => <em key={code}>{code}</em>)}</p>}</article>)}
+            </section>}
             {impact.execution_blockers.map(item => <article className={styles.costBlocker} key={item.code}><b>还不能开始制作</b><span>{userIssue(item.code)}</span></article>)}
             <details className={styles.technicalDetails}><summary>查看本次计算的技术详情</summary><dl><div><dt>分析编号</dt><dd><code>{impact.analysis_hash}</code></dd></div><div><dt>内部状态</dt><dd><code>{impact.status}</code></dd></div>{[...impact.validation_errors, ...impact.execution_blockers].map(item => <div key={`technical:${item.code}:${'path' in item ? item.path : ''}`}><dt>{item.code}</dt><dd>{item.message ?? ('path' in item ? item.path : '')}</dd></div>)}</dl></details>
             {impact.status === 'awaiting_confirmation' && <footer><p><strong>确认后保存一份不可修改的制作方案</strong><span>这里只保存本次选择，不会开始生成，也不会产生费用。</span></p><button className="primaryButton" disabled={createSnapshot.isPending} onClick={() => createSnapshot.mutate()}><LockKeyhole size={14} />保存本次制作方案</button></footer>}
