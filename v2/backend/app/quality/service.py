@@ -6,16 +6,22 @@ import struct
 import wave
 from pathlib import Path, PurePosixPath
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..creation.agent_gateway import AgentGatewayError
 from ..core.config import RUNTIME_ROOT
 from ..db.models import (
+    AgentInputManifest,
+    AgentRun,
     Asset,
     AssetReviewDecision,
+    PlanVersion,
     Project,
     ProjectEvent,
     QCFinding,
     QCReport,
+    QCReportCandidate,
     StoragePolicyVersion,
     utc_now,
 )
@@ -30,7 +36,8 @@ from ..orchestration.project_transitions import (
     block_project,
     transition_project,
 )
-from .contracts import RegisterAttemptAsset, ReviewAsset, RunAssetQC, VerifyAsset
+from .agent_gateway import QCGateway, QCSelection
+from .contracts import RegisterAttemptAsset, RetryAssetQC, ReviewAsset, RunAssetQC, VerifyAsset
 
 
 RULESET_VERSION = "v2.file-contract.v1"
@@ -404,26 +411,11 @@ def _add_finding(findings: list[dict], code: str, severity: str, evidence: dict,
     findings.append({"code": code, "severity": severity, "evidence": evidence, "contract_field": contract_field, "disposition": disposition})
 
 
-def run_asset_qc(session: Session, project: Project, asset_id: str, payload: RunAssetQC) -> dict:
+def _deterministic_contract_findings(session: Session, asset: Asset, node) -> list[dict]:
     repository = _quality(session)
-    receipt = _receipt(session, project.id, payload.command_id, "quality.run")
-    if receipt:
-        report = repository.qc_report(receipt.result_id)
-        if not report:
-            raise QualityConflictError("COMMAND_RESULT_MISSING", "QC command result no longer exists.")
-        return qc_report_read(session, report)
-    asset = _require_asset(session, project, asset_id)
-    if asset.state != "verified":
-        raise QualityConflictError("ASSET_NOT_VERIFIED", "Only a verified asset can enter QC.")
-    if asset.row_version != payload.expected_row_version:
-        raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "Asset changed; refresh before QC.")
-    node = repository.dag_node(asset.dag_node_id) if asset.dag_node_id else None
-    if not node or node.snapshot_id != asset.snapshot_id:
-        raise QualityConflictError("ASSET_DAG_REFERENCE_MISSING", "Asset DAG node reference is invalid.")
     findings: list[dict] = []
     if asset.asset_type in VISUAL_TYPES:
-        snapshot_spec = node.output_contract
-        video_spec_id = snapshot_spec.get("video_spec_version_id")
+        video_spec_id = node.output_contract.get("video_spec_version_id")
         snapshot = repository.snapshot(asset.snapshot_id)
         expected_width = snapshot.output_spec.get("width") if snapshot and video_spec_id else None
         expected_height = snapshot.output_spec.get("height") if snapshot and video_spec_id else None
@@ -433,75 +425,296 @@ def run_asset_qc(session: Session, project: Project, asset_id: str, payload: Run
         expected_duration = node.input_contract.get("duration_ms")
         if expected_duration is not None and (asset.duration_ms is None or abs(asset.duration_ms - expected_duration) > 100):
             _add_finding(findings, "MEDIA_DURATION_INVALID", "blocked", {"actual_ms": asset.duration_ms, "expected_ms": expected_duration, "tolerance_ms": 100}, "input_contract.duration_ms", "block")
-    if not any(finding["severity"] == "blocked" for finding in findings):
-        shot = node.input_contract.get("shot", {})
-        if asset.asset_type in VISUAL_TYPES:
-            _add_finding(findings, "VISUAL_CONTENT_REVIEW_REQUIRED", "review_required", {
-                "face_visibility": shot.get("face_visibility"),
-                "text_policy": shot.get("text_policy"),
-                "motion_requirement": shot.get("motion_requirement"),
-                "automated_visual_analyzer_connected": False,
-            }, "input_contract.shot", "manual_review")
-        elif asset.asset_type == "audio":
-            _add_finding(findings, "AUDIO_CONTENT_REVIEW_REQUIRED", "review_required", {"automated_audio_analyzer_connected": False}, None, "manual_review")
-    if any(finding["severity"] == "blocked" for finding in findings):
-        status = "blocked"
-    elif any(finding["severity"] == "review_required" for finding in findings):
-        status = "review_required"
-    else:
-        status = "passed"
-    number = repository.next_report_number(asset.id)
-    report = QCReport(project_id=project.id, snapshot_id=asset.snapshot_id, asset_id=asset.id, report_number=number, ruleset_version=RULESET_VERSION, status=status, analyzer="deterministic-file-contract")
+    return findings
+
+
+def _record_contract_block(session: Session, project: Project, asset: Asset, payload: RunAssetQC, findings: list[dict]) -> QCReport:
+    repository = _quality(session)
+    report = QCReport(
+        project_id=project.id, snapshot_id=asset.snapshot_id, asset_id=asset.id,
+        report_number=repository.next_report_number(asset.id), ruleset_version=RULESET_VERSION,
+        status="blocked", analyzer="deterministic-file-contract",
+    )
     repository.add(report)
     repository.flush()
     for finding in findings:
         repository.add(QCFinding(qc_report_id=report.id, **finding))
-    now = utc_now()
-    if status == "blocked":
-        asset.state = "archived"
-        asset.archived_at = now
-        item = repository.work_item_for_node(asset.snapshot_id, asset.dag_node_id)
-        if item:
-            item.status = "blocked"
-            item.error = "ASSET_QC_BLOCKED: deterministic file contract failed"
-            item.row_version += 1
-        block_project(
-            session,
-            project,
-            reason_code="ASSET_QC_BLOCKED",
-            responsible_aggregate_type="asset",
-            responsible_aggregate_id=asset.id,
-            actor_type="system",
-            actor_id=payload.actor_id,
-            event_data={"qc_report_id": report.id},
-        )
-    elif status == "review_required":
-        asset.state = "review_required"
-        transition_project(
-            session,
-            project,
-            ProjectStateTrigger.QUALITY_RECORDED,
-            actor_type="system",
-            actor_id=payload.actor_id,
-            event_data={"asset_id": asset.id, "qc_report_id": report.id},
-        )
-    else:
-        asset.state = "approved"
-        asset.approved_at = now
-        transition_project(
-            session,
-            project,
-            ProjectStateTrigger.QUALITY_RECORDED,
-            actor_type="system",
-            actor_id=payload.actor_id,
-            event_data={"asset_id": asset.id, "qc_report_id": report.id},
-        )
+    asset.state = "archived"
+    asset.archived_at = utc_now()
     asset.row_version += 1
+    item = repository.work_item_for_node(asset.snapshot_id, asset.dag_node_id)
+    if item:
+        item.status = "blocked"
+        item.error = "ASSET_QC_BLOCKED: deterministic file contract failed"
+        item.row_version += 1
+    block_project(
+        session, project, reason_code="ASSET_QC_BLOCKED", responsible_aggregate_type="asset",
+        responsible_aggregate_id=asset.id, actor_type="system", actor_id=payload.actor_id,
+        event_data={"qc_report_id": report.id},
+    )
     _save_receipt(session, project.id, payload.command_id, "quality.run", "qc_report", report.id)
-    event_type = "quality.review_required.v1" if status == "review_required" else "quality.blocked.v1" if status == "blocked" else "asset.approved.v1"
-    _event(session, ProjectEvent(project_id=project.id, snapshot_id=asset.snapshot_id, event_type=event_type, aggregate_type="qc_report", aggregate_id=report.id, actor_type="system", actor_id=payload.actor_id, causation_id=payload.command_id, message="Asset quality contract evaluated.", data={"asset_id": asset.id, "qc_report_id": report.id, "status": status}))
+    _event(session, ProjectEvent(
+        project_id=project.id, snapshot_id=asset.snapshot_id, event_type="quality.blocked.v1",
+        aggregate_type="qc_report", aggregate_id=report.id, actor_type="system", actor_id=payload.actor_id,
+        causation_id=payload.command_id, message="Asset failed deterministic quality contract checks.",
+        data={"asset_id": asset.id, "qc_report_id": report.id, "status": "blocked"},
+    ))
     session.commit()
-    return qc_report_read(session, report)
+    return report
+
+
+def _record_manual_content_review(session: Session, project: Project, asset: Asset, payload: RunAssetQC) -> QCReport:
+    repository = _quality(session)
+    code = "VIDEO_CONTENT_REVIEW_REQUIRED" if asset.asset_type == "video" else "AUDIO_CONTENT_REVIEW_REQUIRED"
+    report = QCReport(
+        project_id=project.id, snapshot_id=asset.snapshot_id, asset_id=asset.id,
+        report_number=repository.next_report_number(asset.id), ruleset_version="qc-policy.v1",
+        status="review_required", analyzer="human-review-required",
+    )
+    repository.add(report)
+    repository.flush()
+    repository.add(QCFinding(
+        qc_report_id=report.id, code=code, severity="review_required",
+        evidence={"asset_id": asset.id, "reason": "configured_qc_contract_does_not_claim_this_media_capability"},
+        contract_field="input_contract.shot", disposition="manual_review",
+    ))
+    asset.state = "review_required"
+    asset.row_version += 1
+    transition_project(
+        session, project, ProjectStateTrigger.QUALITY_RECORDED, actor_type="system", actor_id="quality-contract",
+        event_data={"asset_id": asset.id, "qc_report_id": report.id},
+    )
+    _save_receipt(session, project.id, payload.command_id, "quality.run", "qc_report", report.id)
+    _event(session, ProjectEvent(
+        project_id=project.id, snapshot_id=asset.snapshot_id, event_type="quality.review_required.v1",
+        aggregate_type="qc_report", aggregate_id=report.id, actor_type="system", actor_id="quality-contract",
+        causation_id=payload.command_id, message="Media requires explicit human content review.",
+        data={"asset_id": asset.id, "qc_report_id": report.id, "analyzer": "human-review-required"},
+    ))
+    session.commit()
+    return report
+
+
+def _qc_manifest(session: Session, project: Project, asset: Asset, node, selection: QCSelection) -> AgentInputManifest:
+    repository = _quality(session)
+    snapshot = repository.snapshot(asset.snapshot_id)
+    plan = session.get(PlanVersion, snapshot.plan_version_id) if snapshot else None
+    if not snapshot or not plan:
+        raise QualityConflictError("QC_PLAN_REFERENCE_MISSING", "素材绑定的生产快照或方案版本不存在。")
+    if selection.production_config_version_id != snapshot.production_config_version_id:
+        raise QualityConflictError("QC_MODEL_CONFIG_SNAPSHOT_MISMATCH", "质量审核模型不属于该素材冻结的生产配置版本。")
+    shot = dict(node.input_contract.get("shot") or {})
+    reference = node.input_contract.get("reference_image")
+    reference_ids = []
+    if isinstance(reference, dict) and isinstance(reference.get("attachment_id"), str):
+        reference_ids.append(reference["attachment_id"])
+        prefix = "runtime://attachments/"
+        uri = str(reference.get("uri") or "")
+        if not uri.startswith(prefix):
+            raise QualityConflictError("QC_REFERENCE_URI_INVALID", "镜头主参考图片地址不属于附件存储。")
+        relative = PurePosixPath(uri[len(prefix):])
+        root = RUNTIME_ROOT.resolve()
+        reference_path = root.joinpath(*relative.parts).resolve()
+        if relative.is_absolute() or ".." in relative.parts or not reference_path.is_relative_to(root) or not reference_path.is_file():
+            raise QualityConflictError("QC_REFERENCE_FILE_MISSING", "镜头主参考图片文件不存在或路径无效。")
+        reference_hash, _ = _sha256_file(reference_path)
+        if reference_hash != reference.get("content_hash"):
+            raise QualityConflictError("QC_REFERENCE_HASH_MISMATCH", "镜头主参考图片内容与冻结哈希不一致。")
+    reference_catalog = [
+        f"dag_node.{node.id}.input_contract.shot.{field}"
+        for field in ("face_visibility", "text_policy", "motion_requirement", "composition", "action", "visual_prompt")
+        if field in shot
+    ]
+    payload = {
+        "contract_version": "qc-agent-input.v1",
+        "project_id": project.id,
+        "asset": {
+            "id": asset.id, "content_hash": asset.content_hash, "asset_type": asset.asset_type,
+            "mime_type": asset.mime_type, "width": asset.width, "height": asset.height, "duration_ms": asset.duration_ms,
+        },
+        "media_probe_id": f"media-probe:{asset.content_hash}",
+        "snapshot_id": asset.snapshot_id,
+        "dag_node_id": node.id,
+        "shot_code": shot.get("shot_code"),
+        "shot_contract": shot,
+        "entity_reference_asset_ids": reference_ids,
+        "entity_reference_images": [reference] if reference_ids else [],
+        "deterministic_checks": [{"id": f"file-contract:{asset.id}", "status": "passed", "ruleset_version": RULESET_VERSION}],
+        "qc_policy_version": "qc-policy.v1",
+        "contract_reference_catalog": reference_catalog,
+        "system_config_version": selection.production_config_version_id,
+    }
+    manifest = AgentInputManifest(
+        project_id=project.id,
+        base_requirement_version_id=plan.requirement_version_id,
+        message_ids=[], decision_ids=[], attachment_binding_ids=reference_ids,
+        system_config_version=selection.production_config_version_id,
+        input_hash=_hash_json(payload), payload=payload,
+    )
+    repository.add(manifest)
+    repository.flush()
+    return manifest
+
+
+def _agent_run_read(session: Session, run: AgentRun | None) -> dict | None:
+    if run is None:
+        return None
+    return {
+        "id": run.id, "agent_role": run.agent_role, "status": run.status,
+        "model_provider": run.model_provider, "model_name": run.model_name,
+        "prompt_contract_version": run.prompt_contract_version, "output_schema_version": run.output_schema_version,
+        "error_code": run.error_code, "error_detail": run.error_detail,
+        "provider_request_id": run.provider_request_id, "token_usage": run.token_usage or {},
+        "started_at": run.started_at, "finished_at": run.finished_at,
+    }
+
+
+def qc_candidate_read(candidate: QCReportCandidate) -> dict:
+    return {
+        "id": candidate.id, "asset_id": candidate.asset_id, "agent_run_id": candidate.agent_run_id,
+        "status": candidate.status, "overall_recommendation": candidate.overall_recommendation,
+        "findings": candidate.findings, "analyzer_version": candidate.analyzer_version,
+        "created_at": candidate.created_at, "decided_at": candidate.decided_at,
+    }
+
+
+def _execute_qc_agent(
+    session: Session, project: Project, asset: Asset, manifest: AgentInputManifest,
+    payload: RunAssetQC | RetryAssetQC, gateway: QCGateway, selection: QCSelection,
+    *, retry_of_agent_run_id: str | None = None,
+) -> QCReportCandidate:
+    repository = _quality(session)
+    run = AgentRun(
+        project_id=project.id, agent_role="qc", status="running", input_manifest_id=manifest.id,
+        model_provider=selection.model_provider, model_name=selection.model_name,
+        production_config_version_id=selection.production_config_version_id,
+        model_config_version_id=selection.model_config_version_id,
+        provider_config_version_id=selection.provider_config_version_id,
+        prompt_contract_version=selection.prompt_contract_version,
+        output_schema_version=selection.output_schema_version, started_at=utc_now(),
+    )
+    repository.add(run)
+    repository.flush()
+    _event(session, ProjectEvent(
+        project_id=project.id, snapshot_id=asset.snapshot_id, event_type="agent.run_created.v1",
+        aggregate_type="agent_run", aggregate_id=run.id, actor_type="user", actor_id=payload.actor_id,
+        causation_id=payload.command_id, message="Quality review agent started.",
+        data={"asset_id": asset.id, "agent_role": "qc", "retry_of_agent_run_id": retry_of_agent_run_id},
+    ))
+    session.commit()
+    try:
+        result = gateway.invoke(selection, manifest.payload, _local_asset_path(asset.uri))
+    except AgentGatewayError as exc:
+        failed = session.get(AgentRun, run.id)
+        if failed:
+            failed.status = "failed"
+            failed.error_code = exc.code
+            failed.error_detail = f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'), default=str)}" if exc.diagnostics else str(exc)
+            failed.raw_output = exc.raw_output
+            failed.finished_at = utc_now()
+            _event(session, ProjectEvent(
+                project_id=project.id, snapshot_id=asset.snapshot_id, event_type="agent.run_failed.v1",
+                aggregate_type="agent_run", aggregate_id=failed.id, actor_type="system", actor_id="qc-agent",
+                causation_id=payload.command_id, message="Quality review agent failed.",
+                data={"asset_id": asset.id, "error_code": exc.code, "retry_of_agent_run_id": retry_of_agent_run_id},
+            ))
+            session.commit()
+        raise
+    candidate = QCReportCandidate(
+        project_id=project.id, snapshot_id=asset.snapshot_id, asset_id=asset.id, agent_run_id=run.id,
+        status="awaiting_review", overall_recommendation=result.output.overall_recommendation,
+        findings=[item.model_dump(mode="json") for item in result.output.findings],
+        analyzer_version=result.output.analyzer_version,
+    )
+    repository.add(candidate)
+    repository.flush()
+    run.status = "succeeded"
+    run.parsed_candidate_id = candidate.id
+    run.raw_output = result.raw_output
+    run.provider_request_id = result.provider_request_id
+    run.token_usage = result.token_usage
+    run.finished_at = utc_now()
+    asset.state = "review_required"
+    asset.row_version += 1
+    transition_project(
+        session, project, ProjectStateTrigger.QUALITY_RECORDED, actor_type="system", actor_id="qc-agent",
+        event_data={"asset_id": asset.id, "qc_report_candidate_id": candidate.id},
+    )
+    command_type = "quality.retry" if retry_of_agent_run_id else "quality.run"
+    _save_receipt(session, project.id, payload.command_id, command_type, "qc_report_candidate", candidate.id)
+    _event(session, ProjectEvent(
+        project_id=project.id, snapshot_id=asset.snapshot_id, event_type="quality.candidate_created.v1",
+        aggregate_type="qc_report_candidate", aggregate_id=candidate.id, actor_type="system", actor_id="qc-agent",
+        causation_id=payload.command_id, message="Quality review candidate created for human review.",
+        data={"asset_id": asset.id, "agent_run_id": run.id, "retry_of_agent_run_id": retry_of_agent_run_id},
+    ))
+    session.commit()
+    return candidate
+
+
+def run_asset_qc(session: Session, project: Project, asset_id: str, payload: RunAssetQC, gateway: QCGateway) -> dict:
+    repository = _quality(session)
+    receipt = _receipt(session, project.id, payload.command_id, "quality.run")
+    if receipt:
+        candidate = repository.qc_candidate(receipt.result_id)
+        if candidate:
+            return qc_candidate_read(candidate)
+        report = repository.qc_report(receipt.result_id)
+        if report:
+            return qc_report_read(session, report)
+        raise QualityConflictError("COMMAND_RESULT_MISSING", "质量审核命令结果已不存在。")
+    asset = _require_asset(session, project, asset_id)
+    if asset.state != "verified":
+        raise QualityConflictError("ASSET_NOT_VERIFIED", "只有已验证素材可以进入质量审核。")
+    if asset.row_version != payload.expected_row_version:
+        raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "素材已变化，请刷新后再审核。")
+    node = repository.dag_node(asset.dag_node_id) if asset.dag_node_id else None
+    if not node or node.snapshot_id != asset.snapshot_id:
+        raise QualityConflictError("ASSET_DAG_REFERENCE_MISSING", "素材绑定的制作步骤不存在。")
+    findings = _deterministic_contract_findings(session, asset, node)
+    if findings:
+        return qc_report_read(session, _record_contract_block(session, project, asset, payload, findings))
+    if asset.asset_type != "image":
+        return qc_report_read(session, _record_manual_content_review(session, project, asset, payload))
+    latest_candidate = repository.latest_qc_candidate(asset.id)
+    if latest_candidate and latest_candidate.status == "awaiting_review":
+        raise QualityConflictError("QC_CANDIDATE_ALREADY_EXISTS", "该素材已有待确认的质量审核结果。")
+    latest_run = repository.latest_qc_agent_run(asset.id)
+    if latest_run and latest_run.status == "failed":
+        raise QualityConflictError("QC_FAILED_RUN_REQUIRES_RETRY", "上次质量审核失败，请从失败记录精确重跑。")
+    selection = gateway.select(session)
+    manifest = _qc_manifest(session, project, asset, node, selection)
+    return qc_candidate_read(_execute_qc_agent(session, project, asset, manifest, payload, gateway, selection))
+
+
+def retry_failed_asset_qc(session: Session, project: Project, asset_id: str, payload: RetryAssetQC, gateway: QCGateway) -> dict:
+    repository = _quality(session)
+    receipt = _receipt(session, project.id, payload.command_id, "quality.retry")
+    if receipt:
+        candidate = repository.qc_candidate(receipt.result_id)
+        if not candidate:
+            raise QualityConflictError("COMMAND_RESULT_MISSING", "质量审核重跑结果已不存在。")
+        return qc_candidate_read(candidate)
+    if not payload.confirm_model_cost:
+        raise QualityConflictError("MODEL_COST_CONFIRMATION_REQUIRED", "请明确确认本次重跑会再次调用当前质量审核模型。")
+    asset = _require_asset(session, project, asset_id)
+    if payload.expected_asset_id != asset.id or asset.state != "verified":
+        raise QualityConflictError("QC_RETRY_ASSET_CHANGED", "失败运行绑定的素材已变化，不能重跑。")
+    if asset.row_version != payload.expected_row_version:
+        raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "素材已变化，请刷新后再重跑。")
+    failed = session.get(AgentRun, payload.failed_agent_run_id)
+    latest = repository.latest_qc_agent_run(asset.id)
+    if not failed or failed.id != (latest.id if latest else None) or failed.status != "failed" or failed.agent_role != "qc":
+        raise QualityConflictError("QC_FAILED_RUN_NOT_LATEST", "只能重跑该素材最近一次失败的质量审核。")
+    manifest = session.get(AgentInputManifest, failed.input_manifest_id)
+    if not manifest or manifest.payload.get("asset", {}).get("id") != asset.id:
+        raise QualityConflictError("QC_MANIFEST_MISSING", "失败运行的冻结输入不存在或已不匹配。")
+    selection = gateway.select(session)
+    expected = (failed.production_config_version_id, failed.model_config_version_id, failed.provider_config_version_id, failed.prompt_contract_version, failed.output_schema_version)
+    actual = (selection.production_config_version_id, selection.model_config_version_id, selection.provider_config_version_id, selection.prompt_contract_version, selection.output_schema_version)
+    if actual != expected:
+        raise QualityConflictError("QC_RETRY_CONFIG_CHANGED", "当前质量审核配置与失败运行不一致，不能静默更换模型或合同。")
+    return qc_candidate_read(_execute_qc_agent(session, project, asset, manifest, payload, gateway, selection, retry_of_agent_run_id=failed.id))
 
 
 def review_asset(session: Session, project: Project, asset_id: str, payload: ReviewAsset, decision: str) -> dict:
@@ -511,19 +724,43 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
     if receipt:
         return asset_read(session, _require_asset(session, project, receipt.result_id))
     asset = _require_asset(session, project, asset_id)
-    report = repository.qc_report(payload.qc_report_id)
-    if not report or report.asset_id != asset.id or report.project_id != project.id:
+    candidate = repository.qc_candidate(payload.qc_report_candidate_id) if payload.qc_report_candidate_id else None
+    source_report = repository.qc_report(payload.qc_report_id) if payload.qc_report_id else None
+    if candidate and (candidate.asset_id != asset.id or candidate.project_id != project.id):
+        raise QualityNotFoundError("Quality review candidate not found for asset")
+    if source_report and (source_report.asset_id != asset.id or source_report.project_id != project.id):
         raise QualityNotFoundError("QC report not found for asset")
-    if asset.state != "review_required" or report.status != "review_required":
-        raise QualityConflictError("ASSET_NOT_AWAITING_REVIEW", "Only an asset with a review_required QC report can be reviewed.")
+    if not candidate and not source_report:
+        raise QualityNotFoundError("Quality review source not found for asset")
+    if asset.state != "review_required" or (candidate and candidate.status != "awaiting_review") or (source_report and source_report.status != "review_required"):
+        raise QualityConflictError("ASSET_NOT_AWAITING_REVIEW", "该素材当前没有可确认的质量审核结果。")
     if asset.row_version != payload.expected_row_version:
-        raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "Asset changed; refresh before review.")
-    if repository.has_review_decision(report.id):
-        raise QualityConflictError("QC_REPORT_ALREADY_REVIEWED", "This QC report already has a human decision.")
+        raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "素材已变化，请刷新后再审核。")
     now = utc_now()
+    if candidate:
+        report = QCReport(
+            project_id=project.id, snapshot_id=asset.snapshot_id, asset_id=asset.id,
+            report_number=repository.next_report_number(asset.id), ruleset_version="qc-policy.v1",
+            status="review_required", analyzer=candidate.analyzer_version,
+        )
+        repository.add(report)
+        repository.flush()
+        for finding in candidate.findings:
+            repository.add(QCFinding(
+                qc_report_id=report.id, code=finding["finding_code"], severity=finding["severity"],
+                evidence={"confidence": finding["confidence"], "summary": finding["summary"], "items": finding["evidence"], "contract_refs": finding["contract_refs"], "suggested_review_action": finding["suggested_review_action"]},
+                contract_field=finding["contract_refs"][0], disposition="manual_review",
+            ))
+    else:
+        report = source_report
+        if repository.has_review_decision(report.id):
+            raise QualityConflictError("QC_REPORT_ALREADY_REVIEWED", "该人工审核项已经处理。")
     repository.add(AssetReviewDecision(project_id=project.id, asset_id=asset.id, qc_report_id=report.id, decision=decision, rationale=payload.rationale, actor_id=payload.actor_id))
     report.reviewed_at = now
     report.reviewed_by = payload.actor_id
+    if candidate:
+        candidate.status = "reviewed"
+        candidate.decided_at = now
     if decision == "approved":
         asset.state = "approved"
         asset.approved_at = now
@@ -542,7 +779,7 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
         event_data={"asset_id": asset.id, "qc_report_id": report.id},
     )
     _save_receipt(session, project.id, payload.command_id, command_type, "asset", asset.id)
-    _event(session, ProjectEvent(project_id=project.id, snapshot_id=asset.snapshot_id, event_type=event_type, aggregate_type="qc_report", aggregate_id=report.id, actor_type="user", actor_id=payload.actor_id, causation_id=payload.command_id, message="Human asset review decision recorded.", data={"asset_id": asset.id, "qc_report_id": report.id, "decision": decision, "rationale": payload.rationale}))
+    _event(session, ProjectEvent(project_id=project.id, snapshot_id=asset.snapshot_id, event_type=event_type, aggregate_type="qc_report", aggregate_id=report.id, actor_type="user", actor_id=payload.actor_id, causation_id=payload.command_id, message="Human asset review decision recorded.", data={"asset_id": asset.id, "qc_report_id": report.id, "qc_report_candidate_id": candidate.id if candidate else None, "decision": decision, "rationale": payload.rationale}))
     session.commit()
     return asset_read(session, asset)
 
@@ -578,10 +815,14 @@ def asset_read(session: Session, asset: Asset) -> dict:
     repository = _quality(session)
     node = repository.dag_node(asset.dag_node_id) if asset.dag_node_id else None
     report = repository.latest_qc_report(asset.id)
+    candidate = repository.latest_qc_candidate(asset.id)
+    agent_run = repository.latest_qc_agent_run(asset.id)
     decisions = repository.review_decisions(asset.id)
     result = {column.name: getattr(asset, column.name) for column in asset.__table__.columns if column.name not in {"provider_output_manifest", "deleted_at"}}
     result["node_key"] = node.node_key if node else None
     result["latest_qc_report"] = qc_report_read(session, report) if report else None
+    result["latest_qc_candidate"] = qc_candidate_read(candidate) if candidate else None
+    result["latest_qc_agent_run"] = _agent_run_read(session, agent_run)
     result["review_decisions"] = [{column.name: getattr(decision, column.name) for column in decision.__table__.columns if column.name not in {"project_id", "asset_id", "qc_report_id"}} for decision in decisions]
     result["affected_downstream_node_keys"] = _downstream_keys(session, asset)
     return result
@@ -627,17 +868,17 @@ def quality_review_view(session: Session, project: Project) -> dict:
         for node_id in required_node_ids
     )
     if counts["created"]:
-        next_action = {"code": "VERIFY_ASSETS", "label": f"Verify {counts['created']} registered assets"}
+        next_action = {"code": "VERIFY_ASSETS", "label": f"验证 {counts['created']} 个新素材"}
     elif counts["verified"]:
-        next_action = {"code": "RUN_QC", "label": f"Run QC for {counts['verified']} verified assets"}
+        next_action = {"code": "RUN_QC", "label": f"审核 {counts['verified']} 个已验证素材"}
     elif counts["review_required"]:
-        next_action = {"code": "REVIEW_ASSETS", "label": f"Review {counts['review_required']} assets"}
+        next_action = {"code": "REVIEW_ASSETS", "label": f"确认 {counts['review_required']} 个审核结果"}
     elif output_gaps:
-        next_action = {"code": "WAIT_FOR_OUTPUT_REGISTRATION", "label": "Resolve missing production outputs"}
+        next_action = {"code": "WAIT_FOR_OUTPUT_REGISTRATION", "label": "处理尚未登记的生产结果"}
     elif stage_ready:
-        next_action = {"code": "START_EDITING", "label": "All required assets are approved"}
+        next_action = {"code": "START_EDITING", "label": "所需素材均已批准，可以进入剪辑"}
     else:
-        next_action = {"code": "NO_ACTIVE_SNAPSHOT", "label": "No active production snapshot"}
+        next_action = {"code": "NO_ACTIVE_SNAPSHOT", "label": "当前没有活动生产快照"}
     return {
         "project_id": project.id,
         "project_status": project.status,

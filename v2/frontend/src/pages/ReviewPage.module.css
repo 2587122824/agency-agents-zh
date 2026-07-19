@@ -265,6 +265,79 @@
   font-size: 10px;
   color: #353a3c;
 }
+.agentReport {
+  margin: 0 13px 10px;
+  padding: 11px;
+  border: 1px solid #d8ded7;
+  border-radius: 5px;
+  background: #f7f8f5;
+}
+.agentReport > header,
+.agentReport > header > div,
+.agentReport article > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+}
+.agentReport > header svg {
+  width: 14px;
+  color: #c74624;
+}
+.agentReport > header strong {
+  font-size: 11px;
+}
+.agentReport > header small,
+.agentReport article small {
+  color: #777d80;
+  font-size: 9px;
+}
+.agentReport article {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid #e1e4df;
+}
+.agentReport article b {
+  font-size: 10px;
+}
+.agentReport article em {
+  color: #9a4a31;
+  font-size: 9px;
+  font-style: normal;
+}
+.agentReport article p,
+.noFinding {
+  margin: 6px 0 4px;
+  color: #505658;
+  font-size: 10px;
+  line-height: 1.55;
+}
+.agentError {
+  margin: 0 13px 10px;
+  padding: 9px 10px;
+  display: flex;
+  gap: 8px;
+  border: 1px solid #e7c3b9;
+  border-radius: 5px;
+  background: #fff3ef;
+  color: #8e321a;
+}
+.agentError svg {
+  width: 15px;
+  flex: none;
+}
+.agentError div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.agentError strong {
+  font-size: 10px;
+}
+.agentError span {
+  font-size: 9px;
+  overflow-wrap: anywhere;
+}
 .impact {
   margin: 0 13px 10px;
   font-size: 9px;

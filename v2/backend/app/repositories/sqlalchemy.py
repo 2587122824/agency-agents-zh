@@ -44,6 +44,7 @@ from ..db.models import (
     ProviderConfigVersion,
     QCFinding,
     QCReport,
+    QCReportCandidate,
     RequirementCandidate,
     RequirementVersion,
     PlanVersion,
@@ -869,6 +870,30 @@ class SqlAlchemyQualityRepository:
 
     def qc_report(self, report_id: str) -> QCReport | None:
         return self.session.get(QCReport, report_id)
+
+    def qc_candidate(self, candidate_id: str) -> QCReportCandidate | None:
+        return self.session.get(QCReportCandidate, candidate_id)
+
+    def latest_qc_candidate(self, asset_id: str) -> QCReportCandidate | None:
+        return self.session.scalar(
+            select(QCReportCandidate)
+            .where(QCReportCandidate.asset_id == asset_id)
+            .order_by(QCReportCandidate.created_at.desc())
+            .limit(1)
+        )
+
+    def latest_qc_agent_run(self, asset_id: str) -> AgentRun | None:
+        return self.session.scalar(
+            select(AgentRun)
+            .join(QCReportCandidate, QCReportCandidate.agent_run_id == AgentRun.id, isouter=True)
+            .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+            .where(
+                AgentRun.agent_role == "qc",
+                AgentInputManifest.payload["asset"]["id"].as_string() == asset_id,
+            )
+            .order_by(AgentRun.started_at.desc())
+            .limit(1)
+        )
 
     def next_report_number(self, asset_id: str) -> int:
         current = self.session.scalar(select(func.max(QCReport.report_number)).where(

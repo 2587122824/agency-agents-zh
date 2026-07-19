@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class QualityCommand(BaseModel):
@@ -24,10 +24,24 @@ class RunAssetQC(QualityCommand):
     expected_row_version: int = Field(ge=1)
 
 
+class RetryAssetQC(QualityCommand):
+    failed_agent_run_id: str
+    expected_asset_id: str
+    expected_row_version: int = Field(ge=1)
+    confirm_model_cost: bool
+
+
 class ReviewAsset(QualityCommand):
     expected_row_version: int = Field(ge=1)
-    qc_report_id: str
+    qc_report_candidate_id: str | None = None
+    qc_report_id: str | None = None
     rationale: str = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def exactly_one_review_source(self):
+        if (self.qc_report_candidate_id is None) == (self.qc_report_id is None):
+            raise ValueError("exactly one quality review source is required")
+        return self
 
 
 class QCFindingRead(BaseModel):
@@ -50,6 +64,29 @@ class QCReportRead(BaseModel):
     reviewed_at: datetime | None
     reviewed_by: str | None
     findings: list[QCFindingRead]
+
+
+class QCReportCandidateFindingRead(BaseModel):
+    finding_code: str
+    category: str
+    severity: str
+    confidence: float
+    summary: str
+    evidence: list[dict]
+    contract_refs: list[str]
+    suggested_review_action: str
+
+
+class QCReportCandidateRead(BaseModel):
+    id: str
+    asset_id: str
+    agent_run_id: str
+    status: str
+    overall_recommendation: str
+    findings: list[QCReportCandidateFindingRead]
+    analyzer_version: str
+    created_at: datetime
+    decided_at: datetime | None
 
 
 class AssetReviewDecisionRead(BaseModel):
@@ -85,6 +122,8 @@ class AssetRead(BaseModel):
     approved_at: datetime | None
     archived_at: datetime | None
     latest_qc_report: QCReportRead | None
+    latest_qc_candidate: QCReportCandidateRead | None
+    latest_qc_agent_run: dict | None
     review_decisions: list[AssetReviewDecisionRead]
     affected_downstream_node_keys: list[str]
 

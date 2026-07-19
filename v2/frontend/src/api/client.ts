@@ -1,4 +1,4 @@
-import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
+import type { AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -149,13 +149,22 @@ export const api = {
   verifyAsset: (projectId: string, asset: ProductionAsset) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:verify`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version }),
   }),
-  runAssetQC: (projectId: string, asset: ProductionAsset) => request<QCReport>(`/projects/${projectId}/assets/${asset.id}:run-qc`, {
+  runAssetQC: (projectId: string, asset: ProductionAsset) => request<QCReport | QCReportCandidate>(`/projects/${projectId}/assets/${asset.id}:run-qc`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version }),
+  }),
+  retryAssetQC: (projectId: string, asset: ProductionAsset) => request(`/projects/${projectId}/assets/${asset.id}/qc-runs/${asset.latest_qc_agent_run?.id}:retry`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', failed_agent_run_id: asset.latest_qc_agent_run?.id,
+      expected_asset_id: asset.id, expected_row_version: asset.row_version, confirm_model_cost: true,
+    }),
   }),
   reviewAsset: (projectId: string, asset: ProductionAsset, decision: 'approve' | 'reject', rationale: string) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:${decision}`, {
     method: 'POST', body: JSON.stringify({
       command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version,
-      qc_report_id: asset.latest_qc_report?.id, rationale,
+      ...(asset.latest_qc_candidate?.status === 'awaiting_review'
+        ? { qc_report_candidate_id: asset.latest_qc_candidate.id }
+        : { qc_report_id: asset.latest_qc_report?.id }),
+      rationale,
     }),
   }),
   editorWorkspace: (projectId: string) => request<EditorWorkspace>(`/projects/${projectId}/editor-workspace`),

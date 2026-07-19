@@ -230,6 +230,22 @@ class QCFinding(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class QCReportCandidate(Base):
+    __tablename__ = "qc_report_candidates"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("qc_candidate"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id"), index=True)
+    agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"), unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="awaiting_review", index=True)
+    overall_recommendation: Mapped[str] = mapped_column(String(32))
+    findings: Mapped[list] = mapped_column(JSON, default=list)
+    analyzer_version: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class AssetReviewDecision(Base):
     __tablename__ = "asset_review_decisions"
 

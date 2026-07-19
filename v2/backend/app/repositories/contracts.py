@@ -42,6 +42,7 @@ from ..db.models import (
     ProviderConfigVersion,
     QCFinding,
     QCReport,
+    QCReportCandidate,
     RequirementCandidate,
     RequirementVersion,
     PlanVersion,
@@ -88,7 +89,7 @@ ProductionRecord = (
     | WorkAttempt
     | WorkItem
 )
-QualityRecord = Asset | AssetReviewDecision | QCFinding | QCReport
+QualityRecord = Asset | AssetReviewDecision | QCFinding | QCReport | QCReportCandidate | AgentInputManifest | AgentRun
 EditorRecord = Timeline | TimelineItem
 DeliveryRecord = Asset | DeliveryAttempt | QCFinding | QCReport
 ConfigurationComponentRecord = (
@@ -415,6 +416,12 @@ class QualityRepository(Protocol):
     def work_item_for_node(self, snapshot_id: str, dag_node_id: str) -> WorkItem | None: ...
 
     def qc_report(self, report_id: str) -> QCReport | None: ...
+
+    def qc_candidate(self, candidate_id: str) -> QCReportCandidate | None: ...
+
+    def latest_qc_candidate(self, asset_id: str) -> QCReportCandidate | None: ...
+
+    def latest_qc_agent_run(self, asset_id: str) -> AgentRun | None: ...
 
     def next_report_number(self, asset_id: str) -> int: ...
 

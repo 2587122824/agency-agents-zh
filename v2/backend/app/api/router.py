@@ -201,19 +201,23 @@ from ..projects.service import (
 )
 from ..quality.contracts import (
     AssetRead,
+    QCReportCandidateRead,
     QCReportRead,
     QualityReviewView,
     RegisterAttemptAsset,
+    RetryAssetQC,
     ReviewAsset,
     RunAssetQC,
     VerifyAsset,
 )
+from ..quality.agent_gateway import QCGateway, get_qc_gateway
 from ..quality.service import (
     QualityConflictError,
     QualityNotFoundError,
     asset_content_path,
     quality_review_view,
     register_attempt_asset,
+    retry_failed_asset_qc,
     review_asset,
     run_asset_qc,
     verify_asset,
@@ -871,20 +875,45 @@ def project_asset_verify(
         raise quality_error(exc) from exc
 
 
-@router.post("/projects/{project_id}/assets/{asset_id}:run-qc", response_model=QCReportRead)
+@router.post("/projects/{project_id}/assets/{asset_id}:run-qc", response_model=QCReportCandidateRead | QCReportRead)
 def project_asset_run_qc(
     project_id: str,
     asset_id: str,
     payload: RunAssetQC,
+    gateway: QCGateway = Depends(get_qc_gateway),
     session: Session = Depends(get_session),
 ):
     try:
-        return run_asset_qc(session, require_project(session, project_id), asset_id, payload)
+        return run_asset_qc(session, require_project(session, project_id), asset_id, payload, gateway)
     except QualityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except QualityConflictError as exc:
         session.rollback()
         raise quality_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
+
+
+@router.post("/projects/{project_id}/assets/{asset_id}/qc-runs/{run_id}:retry", response_model=QCReportCandidateRead)
+def project_asset_qc_retry(
+    project_id: str,
+    asset_id: str,
+    run_id: str,
+    payload: RetryAssetQC,
+    gateway: QCGateway = Depends(get_qc_gateway),
+    session: Session = Depends(get_session),
+):
+    if payload.failed_agent_run_id != run_id:
+        raise HTTPException(status_code=409, detail="失败运行编号与路径不一致。")
+    try:
+        return retry_failed_asset_qc(session, require_project(session, project_id), asset_id, payload, gateway)
+    except QualityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except QualityConflictError as exc:
+        session.rollback()
+        raise quality_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
 
 
 def _review_asset_command(project_id: str, asset_id: str, payload: ReviewAsset, decision: str, session: Session):

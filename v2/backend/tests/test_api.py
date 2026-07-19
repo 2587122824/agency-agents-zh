@@ -18,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -27,6 +27,18 @@ from v2.backend.app.providers.registry import ProviderAdapterRegistry
 from v2.backend.app.creation.agent_gateway import AgentGatewayError, CreativeAgentOutput, CreativeAgentResult, DeterministicCreativeAgentGateway, get_creative_agent_gateway
 from v2.backend.app.planning.agent_gateway import ContentPlannerOutput, ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
 from v2.backend.app.planning.director_gateway import DeterministicDirectorGateway, get_director_gateway
+from v2.backend.app.quality.agent_gateway import DeterministicQCGateway, get_qc_gateway
+
+
+class FailOnceQCGateway(DeterministicQCGateway):
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def invoke(self, selection, manifest_payload, media_path):
+        self.calls += 1
+        if self.calls == 1:
+            raise AgentGatewayError("QC_TEST_FAILURE", "模拟质量审核模型失败。")
+        return super().invoke(selection, manifest_payload, media_path)
 
 
 @pytest.fixture()
@@ -38,11 +50,13 @@ def client():
     app.dependency_overrides[get_creative_agent_gateway] = lambda: DeterministicCreativeAgentGateway()
     app.dependency_overrides[get_content_planner_gateway] = lambda: DeterministicContentPlannerGateway()
     app.dependency_overrides[get_director_gateway] = lambda: DeterministicDirectorGateway()
+    app.dependency_overrides[get_qc_gateway] = lambda: DeterministicQCGateway()
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_creative_agent_gateway, None)
     app.dependency_overrides.pop(get_content_planner_gateway, None)
     app.dependency_overrides.pop(get_director_gateway, None)
+    app.dependency_overrides.pop(get_qc_gateway, None)
     engine.dispose()
     TEST_DATABASE.unlink(missing_ok=True)
     if TEST_RUNTIME.exists():
@@ -3243,9 +3257,9 @@ def test_asset_registration_verification_qc_and_human_approval_are_explicit(clie
         json={"command_id": "quality-qc-command-001", "expected_row_version": asset["row_version"]},
     )
     assert qc.status_code == 200
-    report = qc.json()
-    assert report["status"] == "review_required"
-    assert [finding["code"] for finding in report["findings"]] == ["VISUAL_CONTENT_REVIEW_REQUIRED"]
+    candidate = qc.json()
+    assert candidate["status"] == "awaiting_review"
+    assert candidate["findings"] == []
     review_view = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()
     pending_asset = next(row for row in review_view["assets"] if row["id"] == asset["id"])
     assert pending_asset["state"] == "review_required"
@@ -3256,19 +3270,87 @@ def test_asset_registration_verification_qc_and_human_approval_are_explicit(clie
         json={
             "command_id": "quality-approve-command-001",
             "expected_row_version": pending_asset["row_version"],
-            "qc_report_id": report["id"],
+            "qc_report_candidate_id": candidate["id"],
             "rationale": "Composition and subject continuity are acceptable.",
         },
     )
     assert approved.status_code == 200
     assert approved.json()["state"] == "approved"
     assert approved.json()["review_decisions"][0]["decision"] == "approved"
+    assert approved.json()["latest_qc_report"]["analyzer"] == "visual-qc.v1"
     content = client.get(f"/api/v1/projects/{project['id']}/assets/{asset['id']}/content")
     assert content.status_code == 200
     assert content.headers["content-type"].startswith("image/png")
     with SessionLocal() as session:
         assert len(list(session.scalars(select(WorkAttempt).where(WorkAttempt.work_item_id == item["id"])))) == 1
         assert session.scalar(select(AssetReviewDecision).where(AssetReviewDecision.asset_id == asset["id"])) is not None
+
+
+def test_failed_qc_agent_requires_exact_user_confirmed_retry(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "qc-retry-activate-0001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "qc-retry-submit-000001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    item, response_manifest, _ = attach_local_provider_output(project, snapshot, 480, 848)
+    response_hash = hashlib.sha256(json.dumps(response_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    asset = client.post(
+        f"/api/v1/projects/{project['id']}/work-attempts/{item['attempt_id']}/assets",
+        json={"command_id": "qc-retry-register-0001", "output_index": 0, "expected_response_manifest_hash": response_hash},
+    ).json()
+    asset = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:verify",
+        json={"command_id": "qc-retry-verify-00001", "expected_row_version": asset["row_version"]},
+    ).json()
+    gateway = FailOnceQCGateway()
+    app.dependency_overrides[get_qc_gateway] = lambda: gateway
+
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:run-qc",
+        json={"command_id": "qc-retry-run-failed001", "expected_row_version": asset["row_version"]},
+    )
+    assert failed.status_code == 502
+    view = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()
+    pending = next(row for row in view["assets"] if row["id"] == asset["id"])
+    assert pending["state"] == "verified"
+    assert pending["latest_qc_agent_run"]["status"] == "failed"
+    failed_run_id = pending["latest_qc_agent_run"]["id"]
+
+    duplicate = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:run-qc",
+        json={"command_id": "qc-retry-run-new-00001", "expected_row_version": pending["row_version"]},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.headers["x-error-code"] == "QC_FAILED_RUN_REQUIRES_RETRY"
+
+    retried = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}/qc-runs/{failed_run_id}:retry",
+        json={
+            "command_id": "qc-retry-confirmed-0001",
+            "failed_agent_run_id": failed_run_id,
+            "expected_asset_id": asset["id"],
+            "expected_row_version": pending["row_version"],
+            "confirm_model_cost": True,
+        },
+    )
+    assert retried.status_code == 200
+    assert retried.json()["status"] == "awaiting_review"
+    assert gateway.calls == 2
+    with SessionLocal() as session:
+        runs = list(session.scalars(select(AgentRun).where(AgentRun.project_id == project["id"], AgentRun.agent_role == "qc")))
+        assert [run.status for run in runs] == ["failed", "succeeded"]
+        assert len(list(session.scalars(select(QCReportCandidate).where(QCReportCandidate.asset_id == asset["id"])))) == 1
 
 
 def test_contact_sheet_does_not_substitute_a_snapshot_or_create_records(client: TestClient) -> None:
@@ -3336,10 +3418,21 @@ def test_contact_sheet_projects_exact_route_dependencies_entities_and_qc(client:
         f"/api/v1/projects/{project['id']}/assets/{image_asset['id']}:verify",
         json={"command_id": "contact-verify-command-001", "expected_row_version": image_asset["row_version"]},
     ).json()
-    report = client.post(
+    candidate = client.post(
         f"/api/v1/projects/{project['id']}/assets/{image_asset['id']}:run-qc",
         json={"command_id": "contact-qc-command-001", "expected_row_version": image_asset["row_version"]},
     ).json()
+    image_asset = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()["assets"][0]
+    image_asset = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{image_asset['id']}:approve",
+        json={
+            "command_id": "contact-approve-command-001",
+            "expected_row_version": image_asset["row_version"],
+            "qc_report_candidate_id": candidate["id"],
+            "rationale": "素材符合当前镜头合同。",
+        },
+    ).json()
+    report = image_asset["latest_qc_report"]
 
     with SessionLocal() as session:
         image = session.get(Asset, image_asset["id"])

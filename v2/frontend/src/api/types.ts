@@ -591,6 +591,45 @@ export interface QCReport {
   findings: QCFinding[]
 }
 
+export interface QCReportCandidateFinding {
+  finding_code: string
+  category: string
+  severity: string
+  confidence: number
+  summary: string
+  evidence: Array<Record<string, unknown>>
+  contract_refs: string[]
+  suggested_review_action: string
+}
+
+export interface QCReportCandidate {
+  id: string
+  asset_id: string
+  agent_run_id: string
+  status: string
+  overall_recommendation: string
+  findings: QCReportCandidateFinding[]
+  analyzer_version: string
+  created_at: string
+  decided_at: string | null
+}
+
+export interface QCAgentRun {
+  id: string
+  agent_role: 'qc'
+  status: string
+  model_provider: string
+  model_name: string
+  prompt_contract_version: string
+  output_schema_version: string
+  error_code: string | null
+  error_detail: string | null
+  provider_request_id: string | null
+  token_usage: Record<string, unknown>
+  started_at: string | null
+  finished_at: string | null
+}
+
 export interface ProductionAsset {
   id: string
   project_id: string
@@ -616,6 +655,8 @@ export interface ProductionAsset {
   approved_at: string | null
   archived_at: string | null
   latest_qc_report: QCReport | null
+  latest_qc_candidate: QCReportCandidate | null
+  latest_qc_agent_run: QCAgentRun | null
   review_decisions: Array<{ id: string; decision: string; rationale: string; actor_id: string; created_at: string }>
   affected_downstream_node_keys: string[]
 }

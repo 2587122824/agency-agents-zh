@@ -556,6 +556,12 @@ model_config_version / prompt_contract_version
 - OCR、身份相似度和语义判断默认进入 `review_required`，不作为确定性硬失败。
 - 不满意或不通过时只列出问题与受影响下游，不生成重试、替代素材或提示词修改。
 
+当前首期实现采用 `qc-agent-input.v1 / qc-report-candidate.v1 / qc-agent-prompt.v1`。确定性文件、尺寸和时长检查先运行；只有单张图片通过这些检查后，才允许调用声明了 `vision_analysis` 能力的已发布 QC 模型。模型接收冻结素材哈希、镜头合同、证据白名单、待审图片和存在时的冻结主参考图片，只能创建 `QCReportCandidate`；参考文件会再次校验路径与哈希。候选不等于权威报告，用户批准或拒绝素材时才把候选发现写入正式 `QCReport` 和 `AssetReviewDecision`。
+
+当前 OpenAI-compatible 合同不声称能够读取视频文件或音频内容。视频与音频在确定性检查后进入明确标记的人工审核路径，不创建虚假的智能体结论。后续接入视频抽帧或音频理解必须新增版本化媒体分析合同、证据时间戳和对应 Provider 能力，不得复用图片合同隐式降级。
+
+质量智能体失败时素材保持 `verified`，失败 `AgentRun`、原始输出和 Provider 请求证据被保留。页面只允许用户确认模型费用后精确重跑同一 Manifest；生产配置、模型、Provider、Prompt 和输出 Schema 任一变化都拒绝重跑，不自动重试、不换模型、不修复输出。
+
 ### 9.6 剪辑助理
 
 剪辑助理只能在质量阶段允许进入剪辑后运行。输入合同 `editor-assistant-input.v1` 至少冻结：
@@ -1117,6 +1123,8 @@ RequirementDiff
 - `qc-report-candidate.v1`、证据引用与 Finding Schema
 - 身份、连续性、语义、文字和动态的固定验收集
 - 人工批准/拒绝门禁和受影响下游只读视图
+
+实施状态：图片质量审核合同、候选持久化、运行审计、失败精确重跑和人工门禁已完成；视频与音频保持明确人工审核。真实图片理解验收仍需发布唯一 `qc` 模型配置，且 Provider 必须声明 `vision_analysis`。
 
 ### Creation Sprint 6：剪辑助理
 
