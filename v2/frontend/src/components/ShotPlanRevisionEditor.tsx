@@ -137,7 +137,7 @@ export function ShotPlanRevisionEditor({
       <strong>{patches.length} 个镜头已修改</strong>
     </header>
     <div className={styles.workspace}>
-      <aside className={styles.navigator}>
+      <aside className={styles.navigator} style={{ minHeight: 0 }}>
         <div className={styles.navigatorTitle}><div><strong>镜头列表</strong><span>{candidate.shots.length} 个镜头</span></div></div>
         <label className={styles.searchBox}><Search size={14} /><input value={query} placeholder="搜索编号、类型或内容" onChange={event => setQuery(event.target.value)} /></label>
         <div className={styles.filters} aria-label="镜头筛选">
