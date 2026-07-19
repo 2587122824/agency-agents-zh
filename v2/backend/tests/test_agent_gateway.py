@@ -18,6 +18,7 @@ from v2.backend.app.creation.agent_gateway import (
     CREATIVE_OUTPUT_SCHEMA_VERSION,
     CREATIVE_PROMPT_CONTRACT_VERSION,
     ConfiguredCreativeAgentGateway,
+    CreativeDiagnosis,
     CreativeAgentSelection,
 )
 from v2.backend.app.providers.credentials import EnvironmentCredentialResolver
@@ -144,6 +145,52 @@ def diagnosis(source_message_id: str, focus_field: str = "content_structure") ->
         "focus_reason": "这是当前最影响内容方向的未决信息。",
         "source_message_ids": [source_message_id],
     }
+
+
+def test_ready_diagnosis_requires_null_focus_pair() -> None:
+    parsed = CreativeDiagnosis.model_validate({
+        "project_type": "personal_record",
+        "stage": "ready_to_confirm",
+        "summary": "当前信息已经具备收口条件。",
+        "established_fields": ["core_topic", "creative_direction"],
+        "open_gaps": [],
+        "focus_field": None,
+        "focus_reason": None,
+        "source_message_ids": ["message_3"],
+    })
+
+    assert parsed.focus_field is None
+    assert parsed.focus_reason is None
+
+
+@pytest.mark.parametrize(
+    ("stage", "focus_field", "focus_reason"),
+    [
+        ("ready_to_confirm", None, "需求已经可以收口。"),
+        ("ready_to_confirm", "content_structure", "仍需讨论内容结构。"),
+        ("shaping", None, None),
+        ("shaping", "content_structure", ""),
+    ],
+)
+def test_diagnosis_rejects_focus_pair_that_conflicts_with_stage(
+    stage: str,
+    focus_field: str | None,
+    focus_reason: str | None,
+) -> None:
+    with pytest.raises(ValueError):
+        CreativeDiagnosis.model_validate({
+            "project_type": "personal_record",
+            "stage": stage,
+            "summary": "当前创作判断。",
+            "established_fields": ["core_topic"],
+            "open_gaps": [] if focus_field is None else [{
+                "field_key": focus_field,
+                "reason": "这个维度仍会影响内容方向。",
+            }],
+            "focus_field": focus_field,
+            "focus_reason": focus_reason,
+            "source_message_ids": ["message_3"],
+        })
 
 
 def test_configured_gateway_selects_matching_prompt_contract() -> None:

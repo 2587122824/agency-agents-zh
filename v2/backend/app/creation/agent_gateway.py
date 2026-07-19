@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from urllib.parse import urljoin
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -112,8 +112,17 @@ class CreativeDiagnosis(BaseModel):
     established_fields: list[CREATIVE_FIELD_KEYS] = Field(default_factory=list, max_length=14)
     open_gaps: list[CreativeGap] = Field(default_factory=list, max_length=6)
     focus_field: CREATIVE_FIELD_KEYS | None = None
-    focus_reason: str = Field(min_length=1, max_length=200)
+    focus_reason: str | None = Field(default=None, min_length=1, max_length=200)
     source_message_ids: list[str] = Field(min_length=1, max_length=8)
+
+    @model_validator(mode="after")
+    def focus_matches_stage(self):
+        if self.stage == "ready_to_confirm":
+            if self.focus_field is not None or self.focus_reason is not None:
+                raise ValueError("ready_to_confirm requires null focus_field and focus_reason")
+        elif self.focus_field is None or self.focus_reason is None:
+            raise ValueError("non-ready stages require focus_field and focus_reason")
+        return self
 
 
 class CreativeAgentOutput(BaseModel):
@@ -200,13 +209,13 @@ class HttpxAgentChatTransport:
 
 
 CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v5"
-CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v5"
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v13"
+CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v6"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v14"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
 必须只返回一个 JSON 对象，严格符合：
-{"assistant_reply":"中文回复","creative_diagnosis":{"project_type":"personal_record|promotion|knowledge|narrative|brand_story|emotional_expression|other","stage":"exploring|shaping|refining|ready_to_confirm","summary":"当前创作判断","established_fields":["已明确字段"],"open_gaps":[{"field_key":"待讨论字段","reason":"为什么重要"}],"focus_field":"本轮最值得讨论的字段或null","focus_reason":"本轮聚焦原因","source_message_ids":["依据消息ID"]},"suggestion_sets":[{"category":"类别","title":"问题","field_key":"本组唯一修改字段","source_message_ids":["用户消息ID"],"options":[{"label":"选项名","summary":"差异说明","value":"该字段的建议值"}]}],"proposal_selections":[{"proposal_id":"已有提案ID","suggestion_set_id":"已有建议组ID","option_id":"已有选项ID","source_message_ids":["用户选择消息ID"]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
+{"assistant_reply":"中文回复","creative_diagnosis":{"project_type":"personal_record|promotion|knowledge|narrative|brand_story|emotional_expression|other","stage":"exploring|shaping|refining|ready_to_confirm","summary":"当前创作判断","established_fields":["已明确字段"],"open_gaps":[{"field_key":"待讨论字段","reason":"为什么重要"}],"focus_field":"本轮最值得讨论的字段或null","focus_reason":"非收口阶段的聚焦原因或null","source_message_ids":["依据消息ID"]},"suggestion_sets":[{"category":"类别","title":"问题","field_key":"本组唯一修改字段","source_message_ids":["用户消息ID"],"options":[{"label":"选项名","summary":"差异说明","value":"该字段的建议值"}]}],"proposal_selections":[{"proposal_id":"已有提案ID","suggestion_set_id":"已有建议组ID","option_id":"已有选项ID","source_message_ids":["用户选择消息ID"]}],"explicit_updates":[{"field_key":"允许字段","value":"用户明确值","source_message_ids":["用户消息ID"]}],"clarifying_question":null}
 允许字段及用途：
 - title 项目名称；core_topic 核心主题；content_goal 内容目标；platform 发布平台；target_audience 目标受众。
 - duration_seconds 目标秒数；aspect_ratio 画幅；audio_mode 仅 off 或 voiceover。
@@ -236,7 +245,7 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 14. 当 runtime_context.turn_intent=initial_guidance 时，根据 active_requirement 的主题主动给出方向。必须只返回 1 个 suggestion_set，field_key 必须为 creative_direction，其中提供 2 到 3 个整体创作方向；每个 option.value 必须与该 option.label 完全相同，使用简洁中文短语，不能把详细方案藏进冻结值。label、summary 和 value 都只描述内容重点、叙事取向和观看感受，不得描述声音、字幕、景别、机位、镜头运动、剪辑、转场、特效或生产方式。suggestion_sets.source_message_ids 引用本轮 system 初始化消息 ID，explicit_updates 和 proposal_selections 必须为空，不得把系统引导写成用户事实。
 15. 当 current_requirement_draft 非空时，它是本轮唯一草稿基线；新回复与建议必须在其已有字段之上继续丰富，不得退回 active_requirement 丢失草稿内容。
 16. 每轮必须先形成 creative_diagnosis。project_type 是内容用途判断，不是模板或生产路由；stage 只是本轮创作判断，不代表系统状态或正式需求已就绪。established_fields 只列出当前输入中已有明确依据的字段；open_gaps 只列出仍会显著影响创作方向的字段，二者不得重复。
-17. focus_field 是本轮唯一优先讨论维度，必须出现在 open_gaps 中；stage=ready_to_confirm 时可以为 null。focus_reason 要解释该维度为何比其他缺口更值得先讨论，不能只写“信息不足”。存在建议组时，至少一组的 field_key 必须等于 focus_field；使用 clarifying_question 时也必须围绕 focus_field。不得依靠主题关键词、固定问卷顺序或项目类型硬编码决定焦点，应结合已确认字段、草稿和整段会话判断。
+17. focus_field 是本轮唯一优先讨论维度，必须出现在 open_gaps 中。stage 不是 ready_to_confirm 时，focus_field 与 focus_reason 都必须是非空字符串，focus_reason 要解释该维度为何比其他缺口更值得先讨论，不能只写“信息不足”；stage=ready_to_confirm 时，focus_field 与 focus_reason 必须同时为 JSON null，不能使用空字符串或收口说明代替 null。存在建议组时，至少一组的 field_key 必须等于 focus_field；使用 clarifying_question 时也必须围绕 focus_field。不得依靠主题关键词、固定问卷顺序或项目类型硬编码决定焦点，应结合已确认字段、草稿和整段会话判断。
 18. 除精确选择、用户只要求解释一个问题或 stage=ready_to_confirm 外，每轮应围绕 focus_field 主动给出 2 到 3 个明显不同的可选方向，让用户可以继续讨论而不是只收到“已记录”。诊断只用于解释引导，不能进入 explicit_updates，也不能声称已经修改或确认需求。
 19. 当 runtime_context.turn_intent=selection_followup 时，结构化点击已经由系统按冻结 Option 保存。你不得重新选择、解释或登记该值，proposal_selections 和 explicit_updates 必须为空。先自然确认用户刚才的选择，再读取 current_requirement_draft 重新诊断；stage 不是 ready_to_confirm 时必须聚焦另一个仍重要的缺口并给出 2 到 3 个选项，不得重复 runtime_context.selection_followup.selected_field_keys。stage=ready_to_confirm 时应总结现有需求，不强制生成建议组。
 """

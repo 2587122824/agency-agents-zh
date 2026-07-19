@@ -289,7 +289,7 @@ export interface CreativeTurnProposal {
     established_fields: string[]
     open_gaps: Array<{ field_key: string; reason: string }>
     focus_field: string | null
-    focus_reason: string
+    focus_reason: string | null
     source_message_ids: string[]
   } | null
   clarifying_question: { prompt: string } | null

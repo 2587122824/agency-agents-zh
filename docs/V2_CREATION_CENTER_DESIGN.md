@@ -367,7 +367,7 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.2 创作制片人
 
-创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v5` 和 `creative-dialogue-prompt.v13`：
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v6` 和 `creative-dialogue-prompt.v14`：
 
 ```text
 输入：runtime_context.turn_intent + project_context.active_requirement + project_context.current_requirement_draft? + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
@@ -389,6 +389,8 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 动态引导不采用固定问卷或主题关键词分支。模型结合活动需求、当前草稿和完整会话判断 `project_type` 与 `stage`，再从尚未明确且会显著影响创作方向的字段中选择一个 `focus_field`。后端要求已明确字段与缺口互斥、焦点必须来自缺口、诊断消息来源存在，且本轮建议必须回应焦点；首次引导的焦点固定为合同字段 `creative_direction`，这是阶段合同而不是内容兜底。除精确选项选择、用户只要求解释问题或建议收口外，创作制片人应围绕焦点主动给出 2–3 个有差异的选择，不再只回复“已记录”。
 
 `stage=ready_to_confirm` 只表示创作制片人建议用户考虑收口。正式需求是否具备最低策划条件继续由后端字段目录和 `evaluate_requirement` 确定，是否确认只由用户命令决定。项目类型不会选择模板、模型、Provider、工作流或生产路线；诊断内容不会进入 `explicit_updates`，也不会成为 Decision。
+
+诊断焦点采用严格的成对合同：非收口阶段的 `focus_field` 与 `focus_reason` 必须同时为非空值，且焦点必须属于 `open_gaps`；`ready_to_confirm` 阶段两者必须同时为 JSON `null`。空字符串不是合法的“无焦点”表达，后端也不会补写原因、修复输出或自动重试。
 
 建议交互采用 2–3 个可点击选项：推荐项固定排第一并显示“推荐”，每项包含短名称、差异说明以及“选择后设置：字段 · 值”的精确预览，模型不得生成选项 ID。后端验证每组选项只修改同一个字段且候选值互不相同，再生成稳定的建议组 ID、选项 ID 与单字段冻结更新；页面另外提供“其他想法”入口，它只聚焦底部唯一的消息输入框，最终仍发送一条普通用户消息，不伪装成模型给出的第四个选项。历史多字段提案也逐项显示全部影响，不再隐藏。
 
@@ -1098,7 +1100,7 @@ RequirementDiff
 
 ### Creation Sprint 4：创作模型接入
 
-- 创作制片人 `creative-dialogue-input.v5 / output.v5 / prompt.v13`（已完成）
+- 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v14`（已完成）
 - 内容策划 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3`，含 Brief 不可变修订链与结构化确认项（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计

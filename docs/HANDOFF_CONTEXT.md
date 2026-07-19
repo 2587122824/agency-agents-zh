@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260719_24 (head)` |
-| 已发布配置 | `production_config_d444e62263b84a66b4ce250dae230467`，版本 23 |
+| 已发布配置 | `production_config_be4776b34fe64be8886d11598b59a39c`，版本 24 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -65,7 +65,7 @@ v2/runtime/worker.err.log
 
 ## 4. 当前创作智能体事实
 
-当前运行代码使用 `creative-dialogue-input.v5 / output.v5 / prompt.v13`：
+当前运行代码使用 `creative-dialogue-input.v5 / output.v6 / prompt.v14`：
 
 - 首次进入空白创作会话时，前端调用一次 `creative-conversation:initialize`；系统消息、AgentRun 和助手引导均持久化，刷新不重复调用，失败不自动重试。
 - `RequirementCandidate` 是会话级不可变草稿修订，通过 `conversation_session_id` 和 `supersedes_candidate_id` 继承；每轮从最新草稿继续，不再从活动正式需求重置。
@@ -73,7 +73,7 @@ v2/runtime/worker.err.log
 
 - 每条成功保存的用户消息触发一次明确模型调用。
 - 严格返回自然回复、结构化创作诊断、建议集合、用户明确更新和最多一个澄清问题。
-- 创作诊断记录项目类型、创作阶段、已明确字段、关键缺口、本轮唯一焦点、聚焦原因和消息证据；后端验证字段互斥、来源存在及焦点与建议一致。
+- 创作诊断记录项目类型、创作阶段、已明确字段、关键缺口、本轮唯一焦点、聚焦原因和消息证据；后端验证字段互斥、来源存在及焦点与建议一致。非收口阶段要求焦点与原因同时非空，`ready_to_confirm` 要求两者同时为 JSON `null`，不修复空字符串。
 - 动态引导结合当前草稿和完整会话选择最值得讨论的创作维度，不采用主题关键词特判或固定问卷顺序；诊断不修改需求、不决定系统就绪、不选择模板或生产路由。
 - 输入包含当前活动会话的用户与助手消息，保留真实角色、ID 和回复关系。
 - 建议以 2–3 个可点击选项展示，后端生成稳定 ID；点击创建选择记录和下一版草稿修订，不强迫立即确认。
@@ -157,6 +157,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-19 | 修正创作诊断收口合同：`creative-dialogue-output.v6 / prompt.v14` 要求非收口阶段焦点和原因同时非空，`ready_to_confirm` 阶段同时返回 JSON `null`；不补写空字符串、不自动重试或降级。发布配置 v24，差异仅为创作模型输出合同 v6 与 Prompt v14 |
 | 2026-07-19 | 内容方案待确认项升级为结构化选择：每题提供 2–3 个明确选项和自定义回答，全部回答后生成同需求版本的新 Brief 候选；历史字符串问题需用户确认调用模型后转换。发布配置 v23，差异仅为 content planner 输出合同 v2 与 Prompt v3 |
 | 2026-07-19 | 修复创作智能体成功重跑后旧错误不消失：当前投影排除已被成功精确重跑解决的失败链，前端使用 `NextAction.target_ids` 提交重跑，并在最新运行成功后清理原选择/生成命令的临时错误；历史失败记录不删除 |
 | 2026-07-19 | 内容方案支持不可变修订链：方案页区分调整方案、修改创作需求和放弃方案；小改保持 RequirementVersion 不变并调用一次当前 planner，基础需求变化返回创作中心再次确认。修订失败保留原方案，只允许费用确认后的精确重跑；发布配置 v22 并完成真实 DeepSeek 与 375px 页面验收 |
@@ -188,7 +189,7 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`165 passed`
+- 后端测试：`170 passed`
 - Python compileall：通过
 - Vite production build：通过
 - Alembic runtime/head：`20260719_24`
