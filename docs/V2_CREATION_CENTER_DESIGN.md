@@ -367,7 +367,7 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.2 创作制片人
 
-创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v6` 和 `creative-dialogue-prompt.v14`：
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v6` 和 `creative-dialogue-prompt.v15`：
 
 ```text
 输入：runtime_context.turn_intent + project_context.active_requirement + project_context.current_requirement_draft? + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
@@ -381,6 +381,7 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 - `selection_scope` 只在最新用户消息通过 `reply_to` 精确回复一个仍有未选择建议组的助手提案时存在；它是该轮唯一包含可提交提案、建议组和选项 ID 的作用域。
 - `proposal_selections` 只能引用 `selection_scope` 中真实存在的 ID；后端从原提案读取冻结更新，模型不得重写选项值。`selection_scope` 为空时必须返回空选择。
 - `explicit_updates` 只允许引用用户消息作为来源，并由后端字段目录校验。
+- `creative_constraints` 是可选的用户事实，只能在用户明确表达限制时作为字符串列表登记；它不得成为待补齐缺口、诊断焦点或建议组选项，缺失不影响需求收口。
 - 每轮最多提出一个真正阻断的澄清问题；可提供选项时直接提供选项。
 - 首次进入时执行一次持久化 `initial_guidance`，只给一组 2–3 个整体创作方向、不形成字段更新；刷新不重复调用，失败不自动重试。每个冻结方向值必须等于用户看到的短标签，详细说明不得夹带进草稿；方向不得越界描述声音、字幕、镜头、剪辑、转场、特效或生产方式。
 - 用户选择建议或继续对话后创建继承上一修订的 `RequirementCandidate`；用户可继续丰富，最终确认一次才形成 `RequirementVersion` 并进入策划。
@@ -404,7 +405,7 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 `explicit_updates` 和 `proposal_selections` 都只生成草稿修订，不直接修改活动需求。当前会话最新草稿是下一轮唯一继承基线，活动需求只作为草稿链起点。自然回复不能把草稿描述成“配置已更新或已生效”。最终确认最新草稿后才创建正式版本；进入策划后普通消息被阶段边界拒绝，修改必须显式开启下一版草稿。
 
-用户在同一条消息中同时提出明确事实、限制和创意建议请求时，模型必须分别返回 `explicit_updates` 与 `suggestion_sets`，不能用自然回复中的口头遵守代替结构化登记。与活动需求当前值完全相同的显式更新或建议值属于无效模型输出，系统明确失败并保留原字段来源，不静默忽略、不伪造变更。内容方向的标题、说明和值只描述内容意义和叙事选择，不得展开景别、机位、镜头切换、剪辑、转场或特效方案。
+用户在同一条消息中同时提出明确事实、限制和创意建议请求时，模型必须分别返回 `explicit_updates` 与 `suggestion_sets`，不能用自然回复中的口头遵守代替结构化登记。用户明确限制必须作为不超过 20 项的非空文本列表登记；类型错误、空项和确实超过上限分别返回准确错误，系统不把单个文本包装成列表，也不截断超限内容。与活动需求当前值完全相同的显式更新或建议值属于无效模型输出，系统明确失败并保留原字段来源，不静默忽略、不伪造变更。内容方向的标题、说明和值只描述内容意义和叙事选择，不得展开景别、机位、镜头切换、剪辑、转场或特效方案。
 
 创作制片人的建议范围限于内容方向、创作目标、观看感受、受众和风格，不设计具体镜头、慢动作、分屏、剪辑、计时器或生产参数。`audio_mode=off` 只允许无声方案；画面文字是独立创作选择，用户未明确要求时不得自动加入字幕、标题或文字动画。
 
@@ -1111,7 +1112,7 @@ RequirementDiff
 
 ### Creation Sprint 4：创作模型接入
 
-- 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v14`（已完成）
+- 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v15`（已完成）
 - 内容策划 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3`，含 Brief 不可变修订链与结构化确认项（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计

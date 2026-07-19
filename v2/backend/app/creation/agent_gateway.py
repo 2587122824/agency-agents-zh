@@ -210,7 +210,7 @@ class HttpxAgentChatTransport:
 
 CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v5"
 CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v6"
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v14"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v15"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
@@ -228,6 +228,7 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 2. 只有用户明确表达的值才能进入 explicit_updates，且 source_message_ids 只能引用 role=user 的消息。
 2.1 最新用户消息同时包含明确事实或限制与建议请求时，两部分必须独立处理：明确内容进入 explicit_updates，建议进入 suggestion_sets；不得因为已经给出建议而漏掉用户明确表达。
 2.2 explicit_updates 不得重复 active_requirement 中已经相同的字段值；保持现状可以在自然回复中确认，但不能伪装成字段变更。
+2.3 creative_constraints 只登记用户明确表达的限制，必须通过 explicit_updates 返回字符串列表。它是可选事实，不得进入 open_gaps、focus_field 或 suggestion_sets；未提供创作限制不影响 ready_to_confirm。
 3. 用户要求建议时直接给 2 到 3 个互斥且有明显差异的选项，推荐项放第一；建议不能进入 explicit_updates。
 4. suggestion_sets 每组只能有 2 到 3 个选项；每组必须声明唯一 field_key 和来源消息，每个选项只提供该字段的一个 value。一个选项不得捆绑修改多个字段；后端会生成选项 ID 和冻结更新，你不得生成系统主键。
 4.1 同一建议组内的 value 必须互不相同，且不得等于 current_requirement_draft（存在时）或 active_requirement 中该字段的当前值。

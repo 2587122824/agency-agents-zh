@@ -455,8 +455,13 @@ def _validated_update_value(field_key: str, value):
             raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", f"字段 {field_key} 必须是非空文本。")
         return value.strip()
     if field_key == "creative_constraints":
-        if not isinstance(value, list) or len(value) > 20 or any(not isinstance(item, str) or not item.strip() for item in value):
-            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", "创作限制必须是不超过 20 项的非空文本列表。")
+        if not isinstance(value, list):
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", "创作限制必须是文本列表，不能是单个文本或其他类型。")
+        if len(value) > 20:
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", f"创作限制共有 {len(value)} 项，最多允许 20 项。")
+        invalid_index = next((index for index, item in enumerate(value) if not isinstance(item, str) or not item.strip()), None)
+        if invalid_index is not None:
+            raise AgentGatewayError("AGENT_MODEL_OUTPUT_VALUE_INVALID", f"创作限制第 {invalid_index + 1} 项必须是非空文本。")
         return [item.strip() for item in value]
     if field_key == "duration_seconds":
         if isinstance(value, bool) or not isinstance(value, int) or not 5 <= value <= 3600:
@@ -758,6 +763,11 @@ def generate_candidate(
                 "AGENT_MODEL_DIAGNOSIS_FIELD_CONFLICT",
                 "创作诊断不能把同一字段同时标记为已明确和待讨论。",
             )
+        if "creative_constraints" in gap_fields or diagnosis.focus_field == "creative_constraints":
+            raise AgentGatewayError(
+                "AGENT_MODEL_CONSTRAINT_GAP_FORBIDDEN",
+                "创作限制是可选的用户事实，不能被智能体当作必须补齐的创作缺口。",
+            )
         if diagnosis.focus_field is not None and diagnosis.focus_field not in gap_fields:
             raise AgentGatewayError(
                 "AGENT_MODEL_DIAGNOSIS_FOCUS_INVALID",
@@ -806,6 +816,11 @@ def generate_candidate(
             raise AgentGatewayError(
                 "AGENT_MODEL_DIAGNOSIS_SUGGESTION_MISMATCH",
                 "创作建议没有回应诊断声明的本轮焦点。",
+            )
+        if any(item.field_key == "creative_constraints" for item in result.output.suggestion_sets):
+            raise AgentGatewayError(
+                "AGENT_MODEL_CONSTRAINT_SUGGESTION_FORBIDDEN",
+                "创作限制只能登记用户明确表达，智能体不能主动生成限制选项。",
             )
         selected_field_keys = set(
             manifest_payload["runtime_context"].get("selection_followup", {}).get("selected_field_keys", [])
@@ -925,7 +940,9 @@ def generate_candidate(
                 f"{exc} {json.dumps(exc.diagnostics, ensure_ascii=False, separators=(',', ':'))}"
                 if exc.diagnostics else str(exc)
             )
-            failed_run.raw_output = exc.raw_output
+            failed_run.raw_output = exc.raw_output if exc.raw_output is not None else (
+                result.raw_output if "result" in locals() else None
+            )
             failed_run.finished_at = utc_now()
             _event(session, project.id, "agent.run_failed.v1", "创作智能体本轮运行失败", {
                 "agent_run_id": failed_run.id,

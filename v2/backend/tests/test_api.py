@@ -20,6 +20,7 @@ from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
 from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
+from v2.backend.app.creation.service import _validated_update_value
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
 from v2.backend.app.providers import ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
@@ -1019,6 +1020,111 @@ def test_creative_diagnosis_focus_must_match_suggestion(client: TestClient) -> N
 
     assert generated.status_code == 502
     assert generated.headers["x-error-code"] == "AGENT_MODEL_DIAGNOSIS_SUGGESTION_MISMATCH"
+
+
+def test_creative_constraints_validation_reports_exact_shape_error() -> None:
+    with pytest.raises(AgentGatewayError, match="必须是文本列表"):
+        _validated_update_value("creative_constraints", "不要出现字幕")
+    with pytest.raises(AgentGatewayError, match="共有 21 项"):
+        _validated_update_value("creative_constraints", [f"限制 {index}" for index in range(21)])
+    with pytest.raises(AgentGatewayError, match="第 2 项"):
+        _validated_update_value("creative_constraints", ["不要字幕", " "])
+
+
+def test_creative_constraints_are_not_a_required_gap_or_suggestion(client: TestClient) -> None:
+    class ConstraintGapGateway(DeterministicCreativeAgentGateway):
+        def invoke(self, selection, manifest_payload):
+            latest = manifest_payload["conversation"]["messages"][-1]
+            output = CreativeAgentOutput.model_validate({
+                "assistant_reply": "接下来选择创作限制。",
+                "creative_diagnosis": {
+                    "project_type": "personal_record", "stage": "refining",
+                    "summary": "其他需求已经明确。", "established_fields": ["core_topic"],
+                    "open_gaps": [{"field_key": "creative_constraints", "reason": "继续补充限制。"}],
+                    "focus_field": "creative_constraints", "focus_reason": "需要补充限制。",
+                    "source_message_ids": [latest["id"]],
+                },
+                "suggestion_sets": [{
+                    "category": "constraints", "title": "选择限制",
+                    "field_key": "creative_constraints", "source_message_ids": [latest["id"]],
+                    "options": [
+                        {"label": "不要字幕", "summary": "画面不出现字幕。", "value": ["不要字幕"]},
+                        {"label": "不要品牌", "summary": "画面不出现品牌。", "value": ["不要品牌"]},
+                    ],
+                }],
+                "proposal_selections": [], "explicit_updates": [], "clarifying_question": None,
+            })
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "constraint-gap", {"total_tokens": 1})
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "constraint-gap-message-001", "content": "其他内容已经可以了。",
+    })
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: ConstraintGapGateway()
+
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "constraint-gap-generate-001", "expected_base_version_id": initial["active_requirement"]["id"]},
+    )
+
+    assert generated.status_code == 502
+    assert generated.headers["x-error-code"] == "AGENT_MODEL_CONSTRAINT_GAP_FORBIDDEN"
+    with SessionLocal() as session:
+        run = session.scalar(select(AgentRun).where(AgentRun.project_id == project["id"]))
+        assert run is not None
+        assert run.raw_output["creative_diagnosis"]["focus_field"] == "creative_constraints"
+
+
+def test_creative_constraints_cannot_be_suggested_by_the_agent(client: TestClient) -> None:
+    class ConstraintSuggestionGateway(DeterministicCreativeAgentGateway):
+        def invoke(self, selection, manifest_payload):
+            latest = manifest_payload["conversation"]["messages"][-1]
+            output = CreativeAgentOutput.model_validate({
+                "assistant_reply": "先选择内容方向。",
+                "creative_diagnosis": {
+                    "project_type": "personal_record", "stage": "exploring",
+                    "summary": "需要明确内容方向。", "established_fields": ["core_topic"],
+                    "open_gaps": [{"field_key": "creative_direction", "reason": "尚未选择内容方向。"}],
+                    "focus_field": "creative_direction", "focus_reason": "先确定内容方向。",
+                    "source_message_ids": [latest["id"]],
+                },
+                "suggestion_sets": [
+                    {
+                        "category": "direction", "title": "选择内容方向",
+                        "field_key": "creative_direction", "source_message_ids": [latest["id"]],
+                        "options": [
+                            {"label": "过程记录", "summary": "记录真实过程。", "value": "过程记录"},
+                            {"label": "经验分享", "summary": "分享可复用经验。", "value": "经验分享"},
+                        ],
+                    },
+                    {
+                        "category": "constraints", "title": "选择创作限制",
+                        "field_key": "creative_constraints", "source_message_ids": [latest["id"]],
+                        "options": [
+                            {"label": "不要字幕", "summary": "画面不出现字幕。", "value": ["不要字幕"]},
+                            {"label": "不要品牌", "summary": "画面不出现品牌。", "value": ["不要品牌"]},
+                        ],
+                    },
+                ],
+                "proposal_selections": [], "explicit_updates": [], "clarifying_question": None,
+            })
+            return CreativeAgentResult(output, output.model_dump(mode="json"), "constraint-suggestion", {"total_tokens": 1})
+
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    client.post(f"/api/v1/projects/{project['id']}/messages", json={
+        "command_id": "constraint-suggestion-message-001", "content": "帮我继续完善这个主题。",
+    })
+    app.dependency_overrides[get_creative_agent_gateway] = lambda: ConstraintSuggestionGateway()
+
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "constraint-suggestion-generate-001", "expected_base_version_id": initial["active_requirement"]["id"]},
+    )
+
+    assert generated.status_code == 502
+    assert generated.headers["x-error-code"] == "AGENT_MODEL_CONSTRAINT_SUGGESTION_FORBIDDEN"
 
 
 def test_attachment_registration_does_not_create_binding(client: TestClient) -> None:
