@@ -1150,7 +1150,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 审计视图只读取持久化事实。`raw_output` 不通过创作中心接口返回；结构化错误代码和错误说明可以展示，但不能从错误文本推断状态、自动生成修复动作或改写输入。运行成功只代表一次智能体调用结束，登记候选不代表候选已确认。
 
-运行历史本身保持只读，不提供取消、恢复或覆盖历史运行的按钮。创作制片人运行失败时，主流程区域可以提供独立的“确认模型调用并重跑本轮”命令；命令必须精确绑定失败 AgentRun、活动需求版本和完整消息 ID 清单，并由用户明确确认模型调用。它创建新的 AgentRun，不覆盖旧运行、不自动触发、不换模型、不修复输出，也不属于生产 WorkItem 的依赖重试。Token 与实际费用事实必须来自对应不可变合同和账本，不从现有字段估算。详细实现见 [V2 智能体运行审计实现](./archive/implementation-notes/V2_AGENT_RUN_AUDIT_IMPLEMENTATION.md)。
+运行历史本身保持只读，不提供取消、恢复或覆盖历史运行的按钮。创作制片人运行失败时，主流程区域可以提供独立的“确认模型调用并重跑本轮”命令；命令必须精确绑定 `NextAction.target_ids` 指向的失败 AgentRun、活动需求版本和完整消息 ID 清单，并由用户明确确认模型调用。它创建新的 AgentRun，不覆盖旧运行、不自动触发、不换模型、不修复输出，也不属于生产 WorkItem 的依赖重试。成功重跑通过新运行输入清单中的 `retry_of_agent_run_id` 解决其失败链；已解决失败仍保留在历史中，但不得继续成为当前阻断或重跑入口。Token 与实际费用事实必须来自对应不可变合同和账本，不从现有字段估算。详细实现见 [V2 智能体运行审计实现](./archive/implementation-notes/V2_AGENT_RUN_AUDIT_IMPLEMENTATION.md)。
 
 ## 39. 创作智能体体系确认
 

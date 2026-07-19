@@ -97,7 +97,13 @@ export function ProjectPage() {
     onSettled: refresh,
   })
   const retryCreativeTurn = useMutation({
-    mutationFn: () => api.retryCreativeTurn(projectId, center.data!.latest_agent_run!.id, center.data!.active_requirement.id),
+    mutationFn: () => {
+      const failedRunId = center.data?.next_action.code === 'RETRY_FAILED_CREATIVE_TURN'
+        ? center.data.next_action.target_ids[0]
+        : undefined
+      if (!failedRunId) return Promise.reject(new Error('当前没有可重跑的失败轮次。'))
+      return api.retryCreativeTurn(projectId, failedRunId, center.data!.active_requirement.id)
+    },
     onSettled: refresh,
   })
   const addMessage = useMutation({
@@ -124,6 +130,14 @@ export function ProjectPage() {
     const element = messagesRef.current
     if (element) element.scrollTop = element.scrollHeight
   }, [center.data?.messages.length, initializeConversation.isPending, generate.isPending, selectSuggestion.isPending, generate.error, selectSuggestion.error])
+
+  useEffect(() => {
+    if (center.data?.latest_agent_run?.status !== 'succeeded') return
+    initializeConversation.reset()
+    generate.reset()
+    selectSuggestion.reset()
+    retryCreativeTurn.reset()
+  }, [center.data?.latest_agent_run?.id, center.data?.latest_agent_run?.status])
 
   useEffect(() => {
     const creation = center.data

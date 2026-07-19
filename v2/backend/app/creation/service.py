@@ -1630,14 +1630,29 @@ def creation_center_view(session: Session, project: Project) -> dict:
     consumed = consumed_message_ids(session, active)
     unconsumed_messages = [item for item in messages if item.role == "user" and item.id not in consumed]
     attempted_message_ids: set[str] = set()
+    retry_parents: dict[str, str] = {}
     for run in runs:
         manifest = repository.agent_manifest(run.input_manifest_id)
         if manifest:
             attempted_message_ids.update(manifest.message_ids or [])
+            retry_of = manifest.payload.get("runtime_context", {}).get("retry_of_agent_run_id")
+            if retry_of:
+                retry_parents[run.id] = retry_of
+    resolved_failed_run_ids: set[str] = set()
+    for run in runs:
+        if run.status != "succeeded":
+            continue
+        retry_of = retry_parents.get(run.id)
+        visited: set[str] = set()
+        while retry_of and retry_of not in visited:
+            visited.add(retry_of)
+            resolved_failed_run_ids.add(retry_of)
+            retry_of = retry_parents.get(retry_of)
     unconsumed_message_ids = {item.id for item in unconsumed_messages}
     failed_unconsumed_run = next((
         run for run in runs
         if run.status == "failed"
+        and run.id not in resolved_failed_run_ids
         and (manifest := repository.agent_manifest(run.input_manifest_id)) is not None
         and unconsumed_message_ids.intersection(manifest.message_ids or [])
     ), None)

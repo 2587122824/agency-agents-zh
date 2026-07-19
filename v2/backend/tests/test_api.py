@@ -672,6 +672,8 @@ def test_selection_followup_failure_keeps_choice_and_allows_exact_retry(client: 
     retried_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
     assert retried_view["messages"][-1]["role"] == "assistant"
     assert retried_view["active_creative_proposal"]["suggestion_sets"][0]["field_key"] != "content_structure"
+    assert retried_view["latest_agent_run"]["status"] == "succeeded"
+    assert retried_view["next_action"]["code"] == "REVIEW_REQUIREMENT_CANDIDATE"
 
 
 def test_typed_suggestion_selection_uses_frozen_option_ids(client: TestClient) -> None:
