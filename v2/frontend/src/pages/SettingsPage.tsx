@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, BadgeCheck, Boxes, Check, ChevronRight, CircleDollarSign, Copy, Database, FileCheck2, KeyRound, LockKeyhole, PlugZap, Plus, RefreshCw, Save, Server, Settings2, ShieldCheck, Trash2, Unplug, Workflow, X } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, Boxes, Check, ChevronDown, ChevronRight, CircleDollarSign, Copy, Database, FileCheck2, History, KeyRound, LockKeyhole, PlugZap, Plus, RefreshCw, Save, Server, Settings2, ShieldCheck, Trash2, Unplug, Workflow, X } from 'lucide-react'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api/client'
@@ -180,22 +180,42 @@ export function SettingsPage() {
   const [draft, setDraft] = useState<SystemConfigurationDraft>(emptyDraft)
   const [confirmPublish, setConfirmPublish] = useState(false)
   const [confirmRetire, setConfirmRetire] = useState(false)
+  const currentVersion = useMemo(() => versions.data?.find(item => item.status === 'published') ?? versions.data?.[0] ?? null, [versions.data])
+  const activeDraft = useMemo(() => {
+    if (!currentVersion) return null
+    return versions.data?.find(item => item.config_key === currentVersion.config_key && item.version_number > currentVersion.version_number && !['published', 'retired'].includes(item.status)) ?? null
+  }, [currentVersion, versions.data])
+  const historyVersions = useMemo(() => versions.data?.filter(item => item.id !== currentVersion?.id && item.id !== activeDraft?.id) ?? [], [activeDraft?.id, currentVersion?.id, versions.data])
+  const currentReadiness = useMemo(() => readiness.data?.providers.filter(item => item.configuration_version_id === currentVersion?.id) ?? [], [currentVersion?.id, readiness.data?.providers])
   const selected = useQuery({ queryKey: ['system-configuration', selectedId], queryFn: () => api.systemConfiguration(selectedId!), enabled: Boolean(selectedId) })
   const diff = useQuery({
     queryKey: ['system-configuration-diff', selected.data?.id, selected.data?.supersedes_version_id],
     queryFn: () => api.systemConfigurationDiff(selected.data!.id, selected.data!.supersedes_version_id!),
     enabled: Boolean(selected.data?.supersedes_version_id),
   })
-  useEffect(() => { if (!selectedId && versions.data?.length) setSelectedId(versions.data[0].id) }, [selectedId, versions.data])
+  useEffect(() => { if (!selectedId && currentVersion) setSelectedId(currentVersion.id) }, [currentVersion, selectedId])
   const refresh = async (version?: SystemConfigurationVersion) => { await client.invalidateQueries({ queryKey: ['system-configurations'] }); if (version) { setSelectedId(version.id); client.setQueryData(['system-configuration', version.id], version) } else await client.invalidateQueries({ queryKey: ['system-configuration', selectedId] }) }
   const create = useMutation({ mutationFn: () => api.createSystemConfiguration(draft), onSuccess: async data => { setEditing(false); await refresh(data) } })
   const revise = useMutation({ mutationFn: () => api.reviseSystemConfiguration(selected.data!.id, selected.data!.row_version, draft), onSuccess: async data => { setEditing(false); await refresh(data) } })
   const validate = useMutation({ mutationFn: () => api.validateSystemConfiguration(selected.data!.id, selected.data!.row_version), onSuccess: refresh })
   const publish = useMutation({ mutationFn: () => api.publishSystemConfiguration(selected.data!.id, selected.data!.row_version), onSuccess: async data => { setConfirmPublish(false); await refresh(data) } })
   const retire = useMutation({ mutationFn: () => api.retireSystemConfiguration(selected.data!.id, selected.data!.row_version), onSuccess: async data => { setConfirmRetire(false); await refresh(data) } })
-  const clone = useMutation({ mutationFn: () => api.cloneSystemConfiguration(selected.data!.id, `${selected.data!.display_name} 新草稿`), onSuccess: refresh })
-  const mutationError = create.error || revise.error || validate.error || publish.error || retire.error || clone.error
-  const busy = create.isPending || revise.isPending || validate.isPending || publish.isPending || retire.isPending || clone.isPending
+  const prepareEdit = useMutation({
+    mutationFn: async () => {
+      if (activeDraft) return api.systemConfiguration(activeDraft.id)
+      if (!currentVersion) throw new Error('当前没有可编辑的生产配置。')
+      return api.cloneSystemConfiguration(currentVersion.id, currentVersion.display_name)
+    },
+    onSuccess: async data => {
+      client.setQueryData(['system-configuration', data.id], data)
+      setSelectedId(data.id)
+      setDraft(draftFromVersion(data))
+      setEditing(true)
+      await client.invalidateQueries({ queryKey: ['system-configurations'] })
+    },
+  })
+  const mutationError = create.error || revise.error || validate.error || publish.error || retire.error || prepareEdit.error
+  const busy = create.isPending || revise.isPending || validate.isPending || publish.isPending || retire.isPending || prepareEdit.isPending
   const componentCount = useMemo(() => selected.data?.components.length ?? 0, [selected.data])
 
   function beginCreate() { setDraft(emptyDraft()); setSelectedId(null); setEditing(true) }
@@ -204,11 +224,11 @@ export function SettingsPage() {
   function removeList(key: 'providers' | 'models' | 'workflow_slots' | 'video_specs', index: number) { setDraft(current => ({ ...current, [key]: current[key].filter((_, itemIndex) => itemIndex !== index) })) }
   function submit(event: FormEvent) { event.preventDefault(); selected.data ? revise.mutate() : create.mutate() }
 
-  return <><PageHeader eyebrow="SYSTEM AUTHORITY" title="系统配置" description="配置先验证、再发布；项目快照只引用已发布的精确版本。" actions={<><button className="secondaryButton" onClick={() => client.invalidateQueries()}><RefreshCw size={14} />刷新</button><button className="primaryButton" onClick={beginCreate}><Plus size={15} />新建配置草稿</button></>} />
+  return <><PageHeader eyebrow="SYSTEM AUTHORITY" title="系统配置" description="日常只维护当前生产配置；历史版本由系统保留，用于项目追溯。" actions={<><button className="secondaryButton" onClick={() => client.invalidateQueries()}><RefreshCw size={14} />刷新</button>{currentVersion ? <button className="primaryButton" disabled={busy} onClick={() => prepareEdit.mutate()}><Settings2 size={15} />{activeDraft ? '继续编辑' : '编辑配置'}</button> : <button className="primaryButton" onClick={beginCreate}><Plus size={15} />创建生产配置</button>}</>} />
     <section className={styles.connectionPanel}>
       <header><div>{readiness.data?.external_execution_enabled ? <PlugZap /> : <Unplug />}<span><strong>生成服务连接准备</strong><small>按执行组件、生成配置、后端密钥和执行授权逐项检查；不会联网或产生费用。</small></span></div><em data-ready={readiness.data?.external_execution_enabled}>{readiness.data?.external_execution_enabled ? '可以执行' : '尚未准备完成'}</em></header>
       <div className={styles.connectionList}>
-        {readiness.data?.providers.map(provider => <article key={`${provider.configuration_version_id}:${provider.provider_version_id}`} data-status={provider.status}>
+        {currentReadiness.map(provider => <article key={`${provider.configuration_version_id}:${provider.provider_version_id}`} data-status={provider.status}>
           <span className={styles.connectionIcon}>{provider.status === 'connected' ? <BadgeCheck /> : <AlertTriangle />}</span>
           <div><strong>{provider.provider_display_name}</strong><small>{provider.configuration_display_name} · v{provider.configuration_version_number}</small></div>
           <span><b>{readinessLabels[provider.status]}</b><small>{nextActionLabels[provider.next_action]}</small></span>
@@ -217,12 +237,18 @@ export function SettingsPage() {
           <details><summary>技术详情</summary><code>{provider.adapter_kind} · {provider.capabilities.join(', ') || 'NO_CAPABILITY'} · credential={credentialLabels[provider.credential_state]} · contract_issues={provider.configuration_issue_codes.join(', ') || 'none'}</code></details>
         </article>)}
         {readiness.isPending && <p>正在读取后端连接状态…</p>}
-        {!readiness.isPending && !readiness.data?.providers.length && <p>还没有已发布配置中的服务供应商。</p>}
+        {!readiness.isPending && !currentReadiness.length && <p>当前生产配置还没有可检查的服务供应商。</p>}
         {readiness.error && <p>连接状态读取失败：{readiness.error.message}</p>}
       </div>
     </section>
     <div className={styles.page}>
-      <aside className={styles.versionList}><header><div><span>CONFIG VERSIONS</span><h2>配置版本</h2></div><b>{versions.data?.length ?? 0}</b></header>{versions.data?.map(item => <button key={item.id} data-selected={item.id === selectedId} onClick={() => { setEditing(false); setSelectedId(item.id) }}><i data-status={item.status}></i><div><strong>{item.display_name}</strong><small>{item.config_key} · v{item.version_number}</small></div><em>{statusLabels[item.status] ?? item.status}</em><ChevronRight size={14} /></button>)}{!versions.isPending && !versions.data?.length && <div className={styles.emptyList}><Settings2 size={22} /><strong>暂无系统配置</strong><span>创建的是草稿，不会调用供应商。</span></div>}</aside>
+      <aside className={styles.versionList}>
+        <header><div><span>PRODUCTION CONFIG</span><h2>当前配置</h2></div>{currentVersion && <b>v{currentVersion.version_number}</b>}</header>
+        {currentVersion && <button data-selected={currentVersion.id === selectedId} onClick={() => { setEditing(false); setSelectedId(currentVersion.id) }}><i data-status={currentVersion.status}></i><div><strong>{currentVersion.display_name}</strong><small>当前生产版本 · v{currentVersion.version_number}</small></div><em>{statusLabels[currentVersion.status] ?? currentVersion.status}</em><ChevronRight size={14} /></button>}
+        {activeDraft && <section className={styles.draftNotice}><div><i data-status={activeDraft.status}></i><span><strong>有未发布修改</strong><small>草稿 v{activeDraft.version_number} · {statusLabels[activeDraft.status] ?? activeDraft.status}</small></span></div><button type="button" className="secondaryButton" onClick={() => prepareEdit.mutate()} disabled={busy}>继续编辑</button></section>}
+        {!versions.isPending && !currentVersion && <div className={styles.emptyList}><Settings2 size={22} /><strong>暂无系统配置</strong><span>创建配置不会调用供应商。</span></div>}
+        {historyVersions.length > 0 && <details className={styles.historyList}><summary><History size={14} /><span>历史版本</span><b>{historyVersions.length}</b><ChevronDown size={14} /></summary><div>{historyVersions.map(item => <button key={item.id} data-selected={item.id === selectedId} onClick={() => { setEditing(false); setSelectedId(item.id) }}><i data-status={item.status}></i><span><strong>{item.display_name}</strong><small>v{item.version_number} · {statusLabels[item.status] ?? item.status}</small></span><ChevronRight size={13} /></button>)}</div></details>}
+      </aside>
 
       <main className={styles.workspace}>{editing ? <form className={styles.editor} onSubmit={submit}>
         <div className={styles.editorHead}><div><span>{selected.data ? `REVISE v${selected.data.version_number}` : 'NEW DRAFT'}</span><h2>{selected.data ? '修订配置草稿' : '创建配置草稿'}</h2><p>技术标识由系统生成并在修订中保持不变。凭据只填写后端引用 ID，不填写密钥原文。</p></div><button type="button" className="iconButton" title="关闭编辑" onClick={() => setEditing(false)}><X size={16} /></button></div>
@@ -283,13 +309,13 @@ export function SettingsPage() {
       </form> : selected.data ? <div className={styles.detail}>
         <section className={styles.detailHead}><div><span>CONFIGURATION AUTHORITY</span><h2>{selected.data.display_name}</h2><p>{selected.data.description || '未填写说明'}</p></div><em data-status={selected.data.status}>{statusLabels[selected.data.status] ?? selected.data.status}</em></section>
         <div className={styles.factStrip}><div><span>配置版本</span><strong>{selected.data.config_key} · v{selected.data.version_number}</strong></div><div><span>行版本</span><strong>{selected.data.row_version}</strong></div><div><span>组件</span><strong>{componentCount}</strong></div><div><span>引用</span><strong>{selected.data.references.length}</strong></div></div>
-        <section className={styles.boundary}><LockKeyhole size={18} /><div><strong>{selected.data.status === 'published' ? '已发布版本只读' : '发布不等于生产'}</strong><p>{selected.data.status === 'published' ? '修改供应商、模型、工作流或媒体规格必须复制为新草稿版本。' : '校验和发布不会创建项目快照、工作项或供应商调用。'}</p></div></section>
+        <section className={styles.boundary}><LockKeyhole size={18} /><div><strong>{selected.data.status === 'published' ? '当前配置已发布' : '发布不等于生产'}</strong><p>{selected.data.status === 'published' ? '点击“编辑配置”即可修改；系统会在后台保留当前版本并创建修订草稿。' : '校验和发布不会创建项目快照、工作项或供应商调用。'}</p></div></section>
         {selected.data.validation_report.length > 0 && <section className={styles.validation}><header><AlertTriangle size={17} /><div><strong>确定性校验未通过</strong><span>{selected.data.validation_report.length} 项错误，系统不会补值或替换路由。</span></div></header>{selected.data.validation_report.map((item, index) => <article key={index}><b>{item.code ?? 'VALIDATION_ERROR'}</b><span>{item.path ?? item.slot_key ?? 'configuration'}</span><p>{item.message ?? (item.missing ? `缺少：${item.missing.join(', ')}` : '请检查该字段的精确引用。')}</p></article>)}</section>}
         {selected.data.config_hash && <section className={styles.hashBox}><FileCheck2 size={17} /><div><strong>配置哈希</strong><code>{selected.data.config_hash}</code></div></section>}
         {selected.data.supersedes_version_id && <section className={styles.diffBox}><header><Copy size={16} /><div><strong>相对上一版本的差异</strong><span>基线：{selected.data.supersedes_version_id}</span></div><b>{diff.data?.changed_components.length ?? '…'}</b></header>{diff.data?.changed_components.map(item => <article key={`${item.component_type}:${item.key}`}><span>{componentLabels[item.component_type] ?? item.component_type}</span><strong>{item.key}</strong><em>高风险版本变化</em></article>)}<footer>发布差异本身不产生费用；项目采用新版本时仍需单独创建快照并确认影响。</footer></section>}
         <ComponentList components={selected.data.components} />
         <section className={styles.referenceBox}><header><Database size={16} /><div><strong>引用关系</strong><span>历史引用阻止物理删除，但不阻止审计。</span></div><b>{selected.data.references.length}</b></header>{selected.data.references.length ? selected.data.references.map(item => <article key={`${item.ref_type}:${item.ref_id}`}><span>{item.ref_type}</span><strong>{item.ref_id}</strong></article>) : <p>当前没有项目、快照或工作尝试引用该配置版本。</p>}</section>
-        <section className={styles.actions}><div><strong>下一步</strong><span>{selected.data.status === 'draft' || selected.data.status === 'validation_failed' ? '修订或执行确定性校验' : selected.data.status === 'ready' ? '强确认后发布为不可变版本' : selected.data.status === 'published' ? '可供新生产快照显式选择' : '历史版本仅供审计'}</span></div>{['draft', 'validation_failed', 'ready'].includes(selected.data.status) && <button className="secondaryButton" onClick={beginEdit} disabled={busy}><Settings2 size={14} />编辑草稿</button>}{['draft', 'validation_failed'].includes(selected.data.status) && <button className="primaryButton" onClick={() => validate.mutate()} disabled={busy}><Check size={14} />执行校验</button>}{selected.data.status === 'ready' && <button className="primaryButton" onClick={() => setConfirmPublish(true)} disabled={busy}><BadgeCheck size={14} />发布配置</button>}{['published', 'retired'].includes(selected.data.status) && <button className="secondaryButton" onClick={() => clone.mutate()} disabled={busy}><Copy size={14} />复制新草稿</button>}{selected.data.status === 'published' && <button className="secondaryButton" onClick={() => setConfirmRetire(true)} disabled={busy}><Trash2 size={14} />停用</button>}</section>
+        <section className={styles.actions}><div><strong>下一步</strong><span>{selected.data.status === 'draft' || selected.data.status === 'validation_failed' ? '修订或执行确定性校验' : selected.data.status === 'ready' ? '强确认后发布为当前生产配置' : selected.data.id === currentVersion?.id ? '可供新生产快照显式选择' : '历史版本仅供追溯，不影响当前配置'}</span></div>{['draft', 'validation_failed', 'ready'].includes(selected.data.status) && <button className="secondaryButton" onClick={beginEdit} disabled={busy}><Settings2 size={14} />编辑草稿</button>}{['draft', 'validation_failed'].includes(selected.data.status) && <button className="primaryButton" onClick={() => validate.mutate()} disabled={busy}><Check size={14} />执行校验</button>}{selected.data.status === 'ready' && <button className="primaryButton" onClick={() => setConfirmPublish(true)} disabled={busy}><BadgeCheck size={14} />发布配置</button>}{selected.data.id === currentVersion?.id && selected.data.status === 'published' && <button className="secondaryButton" onClick={() => prepareEdit.mutate()} disabled={busy}><Settings2 size={14} />编辑配置</button>}{selected.data.id === currentVersion?.id && selected.data.status === 'published' && <button className="secondaryButton" onClick={() => setConfirmRetire(true)} disabled={busy}><Trash2 size={14} />停用</button>}</section>
         {mutationError && <div className={styles.mutationError}>{mutationError.message}</div>}
       </div> : selectedId && selected.isPending ? <div className={styles.loading}>正在读取配置版本…</div> : <div className={styles.workspaceEmpty}><Settings2 size={28} /><strong>等待创建第一个配置草稿</strong><span>草稿不会成为生产权威；必须先通过校验并由你明确发布。</span><button className="primaryButton" onClick={beginCreate}><Plus size={14} />新建配置草稿</button></div>}</main>
     </div>
