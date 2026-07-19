@@ -38,8 +38,8 @@ def selection() -> ContentPlannerSelection:
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
         input_contract_version="content-planner-input.v2",
-        prompt_contract_version="content-planner-prompt.v2",
-        output_schema_version="creative-brief-candidate.v1",
+        prompt_contract_version="content-planner-prompt.v3",
+        output_schema_version="creative-brief-candidate.v2",
         max_output_tokens=2000,
         sampling={"temperature": 0.2, "unsupported": "ignored"},
     )
@@ -126,6 +126,41 @@ def test_content_planner_returns_strict_brief_without_conversation_or_retry(monk
     sent = request["payload"]["messages"]
     assert [item["role"] for item in sent] == ["system", "user"]
     assert "conversation" not in sent[1]["content"]
+
+
+def test_content_planner_accepts_structured_open_question_options(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    output["open_questions"] = [{
+        "question_code": "QUESTION_01",
+        "prompt": "是否需要展示具体研究数据？",
+        "reason": "数据精度会影响脚本文案和画面信息密度。",
+        "options": [
+            {
+                "option_code": "OPTION_01",
+                "label": "展示核心数据",
+                "description": "保留少量关键数字并标明来源。",
+                "answer": "展示少量核心研究数据并标明来源。",
+            },
+            {
+                "option_code": "OPTION_02",
+                "label": "保持通俗",
+                "description": "不展示具体数字，只解释结论。",
+                "answer": "不展示具体研究数字，使用通俗结论表达。",
+            },
+        ],
+    }]
+    gateway, _ = gateway_for({
+        "id": "planner-request-question-options",
+        "choices": [{"message": {"content": json.dumps(output, ensure_ascii=False)}}],
+        "usage": {"total_tokens": 92},
+    })
+
+    result = gateway.invoke(selection(), manifest())
+
+    question = result.output.open_questions[0]
+    assert question.question_code == "QUESTION_01"
+    assert [item.option_code for item in question.options] == ["OPTION_01", "OPTION_02"]
 
 
 def test_content_planner_passes_frozen_revision_request_once(monkeypatch) -> None:

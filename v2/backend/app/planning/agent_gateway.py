@@ -51,6 +51,36 @@ class ScriptSegment(BaseModel):
         return self
 
 
+class BriefQuestionOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    option_code: str = Field(pattern=r"^OPTION_[0-9]{2}$")
+    label: str = Field(min_length=1, max_length=100)
+    description: str = Field(min_length=1, max_length=500)
+    answer: str = Field(min_length=1, max_length=1000)
+
+
+class BriefOpenQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question_code: str = Field(pattern=r"^QUESTION_[0-9]{2}$")
+    prompt: str = Field(min_length=1, max_length=500)
+    reason: str = Field(min_length=1, max_length=500)
+    options: list[BriefQuestionOption] = Field(min_length=2, max_length=3)
+
+    @model_validator(mode="after")
+    def options_are_consistent(self):
+        option_codes = [item.option_code for item in self.options]
+        if len(option_codes) != len(set(option_codes)):
+            raise ValueError("open question option codes must be unique")
+        expected_codes = [f"OPTION_{index:02d}" for index in range(1, len(self.options) + 1)]
+        if option_codes != expected_codes:
+            raise ValueError("open question option codes must be consecutive")
+        if len({item.answer for item in self.options}) != len(self.options):
+            raise ValueError("open question option answers must be distinct")
+        return self
+
+
 class ContentPlannerOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -65,7 +95,7 @@ class ContentPlannerOutput(BaseModel):
     platform_adaptation: str | None = Field(default=None, min_length=1, max_length=1000)
     entity_version_ids: list[str] = Field(default_factory=list, max_length=100)
     constraints_carried_forward: list[str] = Field(default_factory=list, max_length=50)
-    open_questions: list[str] = Field(default_factory=list, max_length=20)
+    open_questions: list[BriefOpenQuestion] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
     def references_are_consistent(self):
@@ -85,8 +115,12 @@ class ContentPlannerOutput(BaseModel):
             raise ValueError("entity_version_ids must be unique")
         if len(self.constraints_carried_forward) != len(set(self.constraints_carried_forward)):
             raise ValueError("constraints_carried_forward must be unique")
-        if len(self.open_questions) != len(set(self.open_questions)):
-            raise ValueError("open_questions must be unique")
+        question_codes = [item.question_code for item in self.open_questions]
+        if len(question_codes) != len(set(question_codes)):
+            raise ValueError("open question codes must be unique")
+        expected_question_codes = [f"QUESTION_{index:02d}" for index in range(1, len(self.open_questions) + 1)]
+        if question_codes != expected_question_codes:
+            raise ValueError("open question codes must be consecutive")
         return self
 
 
@@ -128,7 +162,7 @@ class ContentPlannerGateway(Protocol):
 
 _SYSTEM_PROMPT = """你是片场 V2 的内容策划智能体。你只把已确认需求组织成可拍摄的内容策略和脚本结构，不与用户闲聊，不生成镜头，不选择生产参数。
 必须只返回一个 JSON 对象，严格符合：
-{"title":"方案标题","content_promise":"内容承诺","audience_takeaway":"观众收获","hook":{"kind":"visual_action|question|contrast|result|statement","content":"开场钩子"},"narrative_beats":[{"beat_code":"BEAT_01","purpose":"节拍目的","summary":"内容摘要","target_duration_ms":5000}],"script_segments":[{"segment_code":"SEG_01","beat_code":"BEAT_01","kind":"visual_only|voiceover|dialogue|on_screen_text","spoken_text":null,"on_screen_text":null}],"tone":"语气","pacing":"节奏","platform_adaptation":null,"entity_version_ids":[],"constraints_carried_forward":[],"open_questions":[]}
+{"title":"方案标题","content_promise":"内容承诺","audience_takeaway":"观众收获","hook":{"kind":"visual_action|question|contrast|result|statement","content":"开场钩子"},"narrative_beats":[{"beat_code":"BEAT_01","purpose":"节拍目的","summary":"内容摘要","target_duration_ms":5000}],"script_segments":[{"segment_code":"SEG_01","beat_code":"BEAT_01","kind":"visual_only|voiceover|dialogue|on_screen_text","spoken_text":null,"on_screen_text":null}],"tone":"语气","pacing":"节奏","platform_adaptation":null,"entity_version_ids":[],"constraints_carried_forward":[],"open_questions":[{"question_code":"QUESTION_01","prompt":"需要用户确认的问题","reason":"为什么此项会影响方案","options":[{"option_code":"OPTION_01","label":"短选项","description":"选择后的具体影响","answer":"作为方案修订依据的完整回答"},{"option_code":"OPTION_02","label":"另一选项","description":"选择后的具体影响","answer":"另一条完整回答"}]}]}
 规则：
 1. 只读取输入合同中的已确认需求、已解决决策、精确实体版本与交付约束；不得读取或假设自由聊天内容。
 2. narrative_beats 的 target_duration_ms 总和必须精确等于 delivery_constraints.duration_ms；代码必须从 BEAT_01 连续编号。
@@ -137,10 +171,10 @@ _SYSTEM_PROMPT = """你是片场 V2 的内容策划智能体。你只把已确�
 5. audio_policy=off 时所有 spoken_text 必须为 null，kind 不得为 voiceover 或 dialogue；不得建立旁白、对白、音乐、TTS 或对口型依赖。
 6. platform 为 null 时 platform_adaptation 必须为 null，不得默认适配任何平台。
 7. 不得输出镜头 ID、画面提示词、Provider、模型、工作流、NodeInfoList、价格、素材状态或生产任务。
-8. 不得引入输入合同中没有确认的人物、品牌、地点或产品事实。信息不足时写入 open_questions，不得自行补写事实。
+8. 不得引入输入合同中没有确认的人物、品牌、地点或产品事实。只有确实需要用户决定且会改变内容方案时才写入 open_questions，不得自行补写事实。每个问题必须提供 2 到 3 个互斥、可直接执行的答案选项；问题、选项和答案代码必须从 01 连续编号。不得提供“其他”选项，页面会独立提供自定义回答。
 9. constraints_carried_forward 是可选的可读说明，只能登记输入合同中真实存在的约束，不得创造默认规则；该字段为空不代表约束失效，后端按不可变输入合同直接验收实际输出。
 10. 不得输出 Markdown 代码块、解释文字或 JSON 之外的内容。
-11. 输入存在 revision_request 时，source_brief 是待调整的冻结原方案，instruction 是用户本轮唯一修改意见。你必须在继续满足已确认需求与全部确定性合同的前提下修改原方案，不得把 instruction 当作新的项目事实，不得改动需求版本、音频策略、时长、画幅、实体白名单或生产路由。输入不存在 revision_request 时按首次策划处理。
+11. 输入存在 revision_request 时，source_brief 是待调整的冻结原方案，instruction 是用户本轮唯一修改意见。你必须在继续满足已确认需求与全部确定性合同的前提下修改原方案；instruction 中逐项确认的答案可用于解决对应 open_questions，但不得改动需求版本、音频策略、时长、画幅、实体白名单或生产路由。输入不存在 revision_request 时按首次策划处理。
 """
 
 
@@ -181,8 +215,8 @@ class ConfiguredContentPlannerGateway:
             raise AgentGatewayError("CONTENT_PLANNER_CAPABILITY_MISSING", "内容策划模型供应商未声明文本生成能力。")
         expected = {
             "input_contract_version": "content-planner-input.v2",
-            "output_schema_version": "creative-brief-candidate.v1",
-            "prompt_contract_version": "content-planner-prompt.v2",
+            "output_schema_version": "creative-brief-candidate.v2",
+            "prompt_contract_version": "content-planner-prompt.v3",
         }
         actual = {key: getattr(model, key) for key in expected}
         if actual != expected:
@@ -301,8 +335,8 @@ class DeterministicContentPlannerGateway:
             credential_ref=None,
             timeout_seconds=1,
             input_contract_version="content-planner-input.v2",
-            prompt_contract_version="content-planner-prompt.v2",
-            output_schema_version="creative-brief-candidate.v1",
+            prompt_contract_version="content-planner-prompt.v3",
+            output_schema_version="creative-brief-candidate.v2",
             max_output_tokens=None,
             sampling={},
         )

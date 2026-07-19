@@ -1166,9 +1166,9 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 ## 40. 内容策划智能体实现
 
-内容策划使用 `content-planner-input.v2 / creative-brief-candidate.v1 / content-planner-prompt.v2`。输入清单不包含会话消息，只冻结活动需求版本、已解决 Decision、活动实体版本、时长/画幅交付约束、音频策略、可空平台和可空模板版本。模型配置使用独立 `planner` 分工，不能复用 `creative` 分工作为隐式路由。
+内容策划使用 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3`。输入清单不包含会话消息，只冻结活动需求版本、已解决 Decision、活动实体版本、时长/画幅交付约束、音频策略、可空平台和可空模板版本。模型配置使用独立 `planner` 分工，不能复用 `creative` 分工作为隐式路由。
 
-输出必须提供方案名称、内容承诺、观众收获、开场设计、连续编号的内容节拍与脚本段、语气、节奏、可空平台适配、精确实体版本、可选约束说明和待确认问题。后端严格验证总时长、代码连续性、节拍引用、实体白名单、音频关闭和平台未指定边界；`constraints_carried_forward` 只用于说明，不要求模型复述输入，也不参与放行判断。失败只记录本次 AgentRun，不修复 JSON、不自动重试、不切换模型。每个需求版本只自动尝试一次；用户可以明确确认模型费用后，重跑当前需求版本最近一次失败运行。重跑必须复用原输入清单并保持生产配置、模型、Provider、Prompt 合同和输出 Schema 完全一致，且创建新的 AgentRun 保留原失败证据。成功输出只形成待审核 `CreativeBriefCandidate`，存在 `open_questions` 时不能接受。
+输出必须提供方案名称、内容承诺、观众收获、开场设计、连续编号的内容节拍与脚本段、语气、节奏、可空平台适配、精确实体版本、可选约束说明和结构化待确认问题。每个问题包含连续 `question_code`、问题、影响原因以及 2–3 个互斥且可直接执行的答案选项；每个选项包含连续 `option_code`、短标签、影响说明和完整答案。页面另行提供自定义回答，不要求模型生成“其他”选项。用户逐项选择后显式调用一次当前 planner 生成新的 Brief 修订版；选择不会直接修改 `RequirementVersion`，也不会绕过新候选审核。后端严格验证总时长、代码连续性、节拍引用、实体白名单、音频关闭和平台未指定边界；`constraints_carried_forward` 只用于说明，不要求模型复述输入，也不参与放行判断。失败只记录本次 AgentRun，不修复 JSON、不自动重试、不切换模型。每个需求版本只自动尝试一次；用户可以明确确认模型费用后，重跑当前需求版本最近一次失败运行。重跑必须复用原输入清单并保持生产配置、模型、Provider、Prompt 合同和输出 Schema 完全一致，且创建新的 AgentRun 保留原失败证据。成功输出只形成待审核 `CreativeBriefCandidate`，存在 `open_questions` 时不能接受。
 
 方案审核提供三个互不混用的修改入口：`调整方案` 在当前 `RequirementVersion` 不变的前提下提交一条明确修改意见，创建新的 `CreativeBriefCandidate` 修订；`修改创作需求` 放弃当前方案并返回创作中心，用户继续对话后再次确认才创建新的需求版本；`放弃方案` 只拒绝当前候选并返回需求收集状态。Brief 修订通过 `supersedes_candidate_id` 与 `revision_number` 形成不可变版本链，原方案、修改意见、输入清单和 AgentRun 均保留。修订失败时原方案保持可审核，不自动重试；用户只能在确认费用后精确重跑该次失败修订。
 

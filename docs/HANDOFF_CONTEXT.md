@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260719_24 (head)` |
-| 已发布配置 | `production_config_3d876559eeda4196be0fc08484962134`，版本 22 |
+| 已发布配置 | `production_config_d444e62263b84a66b4ce250dae230467`，版本 23 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -93,7 +93,7 @@ v2/runtime/worker.err.log
 - 澄清问题必须直接展示；模型调用提示读取真实下一步费用事实，需求面板使用“已具备最低策划条件”而非虚假的“完整”。
 - 附件只传递文件事实和已确认用途绑定，并标记 `content_access=metadata_only`；当前模型不读取图片、音频或视频内容。
 
-内容策划运行代码使用 `content-planner-input.v2 / creative-brief-candidate.v1 / content-planner-prompt.v2`：
+内容策划运行代码使用 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3`：
 
 - 使用独立 `planner` 模型分工，只读取已确认需求、Decision、实体版本和交付约束，不读取自由聊天。
 - 输出内容承诺、开场、连续内容节拍、脚本段、语气、节奏、平台适配和精确实体引用。
@@ -103,6 +103,8 @@ v2/runtime/worker.err.log
 - `调整方案` 保持活动需求版本不变，以冻结原 Brief 和明确修改意见生成下一版候选；候选通过 `supersedes_candidate_id` 和 `revision_number` 形成不可变链。
 - `修改创作需求` 与 `放弃方案` 都会拒绝当前 Brief 并将项目从 `plan_review` 返回 `collecting_requirements`；前者随后导航回创作中心，只有用户再次确认才创建新的需求版本。
 - 修订失败不改变原方案，不自动重试；用户确认费用后的精确重跑复用失败修订的原 Manifest。
+- `open_questions` 是结构化确认项：每题含原因、2–3 个互斥答案选项和自定义回答入口；用户全部回答后明确调用一次 planner 生成新 Brief 候选，不直接修改正式需求。
+- 历史 v1 字符串问题不由前端猜测选项；页面提供需要用户点击确认的“生成可选项”模型调用。
 - 成功方案不能使用失败重跑命令；已拒绝方案可在同一需求版本下明确微调，基础需求变化时才需要再次确认新的需求版本。
 - 成功只创建待审核 Creative Brief；用户接受后才能交给分镜导演。
 
@@ -155,6 +157,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-19 | 内容方案待确认项升级为结构化选择：每题提供 2–3 个明确选项和自定义回答，全部回答后生成同需求版本的新 Brief 候选；历史字符串问题需用户确认调用模型后转换。发布配置 v23，差异仅为 content planner 输出合同 v2 与 Prompt v3 |
 | 2026-07-19 | 修复创作智能体成功重跑后旧错误不消失：当前投影排除已被成功精确重跑解决的失败链，前端使用 `NextAction.target_ids` 提交重跑，并在最新运行成功后清理原选择/生成命令的临时错误；历史失败记录不删除 |
 | 2026-07-19 | 内容方案支持不可变修订链：方案页区分调整方案、修改创作需求和放弃方案；小改保持 RequirementVersion 不变并调用一次当前 planner，基础需求变化返回创作中心再次确认。修订失败保留原方案，只允许费用确认后的精确重跑；发布配置 v22 并完成真实 DeepSeek 与 375px 页面验收 |
 | 2026-07-19 | 修复点击创作方向后智能体沉默：新增 `selection_followup` 明确回合，点击一次保存冻结选择并调用一次创作模型，基于累积草稿继续引导下一个关键缺口；禁止重复刚选字段、重新登记选择或后台循环。失败保留选择并提供用户确认费用后的精确重跑，前端补充运行、费用与失败状态 |
@@ -185,7 +188,7 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`164 passed`
+- 后端测试：`165 passed`
 - Python compileall：通过
 - Vite production build：通过
 - Alembic runtime/head：`20260719_24`

@@ -422,7 +422,7 @@ platform nullable
 template_version_id nullable
 ```
 
-输出 `creative-brief-candidate.v1`：
+输出 `creative-brief-candidate.v2`：
 
 ```json
 {
@@ -441,7 +441,17 @@ template_version_id nullable
   "platform_adaptation": null,
   "entity_version_ids": ["entity_version_char_main_v1"],
   "constraints_carried_forward": ["audio_policy=off"],
-  "open_questions": []
+  "open_questions": [
+    {
+      "question_code": "QUESTION_01",
+      "prompt": "是否需要展示具体研究数据？",
+      "reason": "数据精度会影响脚本文案和画面信息密度。",
+      "options": [
+        {"option_code": "OPTION_01", "label": "展示核心数据", "description": "保留少量关键数字并标明来源。", "answer": "展示少量核心研究数据并标明来源。"},
+        {"option_code": "OPTION_02", "label": "保持通俗", "description": "不展示具体数字，只解释结论。", "answer": "不展示具体研究数字，使用通俗结论表达。"}
+      ]
+    }
+  ]
 }
 ```
 
@@ -453,8 +463,10 @@ template_version_id nullable
 - 可一次提供最多三个完整 Brief 备选，但每个备选分别形成候选并说明结构差异，不把多个方案拼成一个。
 - 内容策划不生成镜头 ID、画面提示词、工作流参数和素材就绪声明。
 - `constraints_carried_forward` 仅是可选的可读说明，不具有放行权。为空时不判失败；后端直接依据不可变输入合同验收脚本、平台适配、实体引用、时长和代码关系，不依赖模型复述约束。
+- 待确认问题必须从 `QUESTION_01` 连续编号，每个问题提供 2–3 个从 `OPTION_01` 连续编号、互斥且答案不同的选项。用户可以点击选项或填写自定义答案；全部回答后明确调用一次 planner 形成新的 Brief 修订版，不能直接把答案写入正式需求或接受旧方案。
+- 历史 `creative-brief-candidate.v1` 的字符串问题保持原样，不为其猜测选项。页面提供独立的“确认模型调用并生成可选项”命令，由用户授权后在同一需求版本下生成 v2 修订候选。
 
-当前实现已经按 `content-planner-input.v2 / creative-brief-candidate.v1 / content-planner-prompt.v2` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。每个活动需求版本只自动尝试一次；失败会保存结构化错误、受控原始输出和 Provider 请求审计，不自动重试。用户可以在方案页明确确认模型费用后，重跑当前需求版本最近一次失败运行；重跑必须复用同一 `AgentInputManifest`，并校验生产配置、模型、Provider、Prompt 合同和输出 Schema 与原失败运行完全一致。新命令创建新的 `AgentRun`，不覆盖失败记录、不修复模型输出、不切换配置。模型输出经 Pydantic Schema 后还要通过确定性跨字段验证：节拍总时长必须精确匹配交付时长，节拍与脚本代码连续且引用存在，实体 ID 必须来自输入白名单，音频关闭和平台未指定约束必须由实际输出遵守。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。
+当前实现已经按 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。每个活动需求版本只自动尝试一次；失败会保存结构化错误、受控原始输出和 Provider 请求审计，不自动重试。用户可以在方案页明确确认模型费用后，重跑当前需求版本最近一次失败运行；重跑必须复用同一 `AgentInputManifest`，并校验生产配置、模型、Provider、Prompt 合同和输出 Schema 与原失败运行完全一致。新命令创建新的 `AgentRun`，不覆盖失败记录、不修复模型输出、不切换配置。模型输出经 Pydantic Schema 后还要通过确定性跨字段验证：节拍总时长必须精确匹配交付时长，节拍与脚本代码连续且引用存在，实体 ID 必须来自输入白名单，音频关闭和平台未指定约束必须由实际输出遵守。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。
 
 方案页将修改分成三个明确命令：
 
@@ -1087,7 +1099,7 @@ RequirementDiff
 ### Creation Sprint 4：创作模型接入
 
 - 创作制片人 `creative-dialogue-input.v5 / output.v5 / prompt.v13`（已完成）
-- 内容策划 `content-planner-input.v2 / creative-brief-candidate.v1`，含 Brief 不可变修订链（已完成）
+- 内容策划 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3`，含 Brief 不可变修订链与结构化确认项（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成

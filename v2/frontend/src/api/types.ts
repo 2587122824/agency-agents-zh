@@ -343,10 +343,22 @@ export interface CreativeBrief {
   platform_adaptation: string | null
   entity_version_ids: string[]
   constraints_carried_forward: string[]
-  open_questions: string[]
+  open_questions: Array<string | BriefOpenQuestion>
   duration_seconds: number
   aspect_ratio: string
   audio_mode: 'off' | 'voiceover'
+}
+
+export interface BriefOpenQuestion {
+  question_code: string
+  prompt: string
+  reason: string
+  options: Array<{
+    option_code: string
+    label: string
+    description: string
+    answer: string
+  }>
 }
 
 export interface CreativeBriefCandidate {

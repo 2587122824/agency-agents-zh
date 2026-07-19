@@ -25,7 +25,7 @@ from v2.backend.app.workers.worker import process_one
 from v2.backend.app.providers import ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
 from v2.backend.app.providers.registry import ProviderAdapterRegistry
 from v2.backend.app.creation.agent_gateway import AgentGatewayError, CreativeAgentOutput, CreativeAgentResult, DeterministicCreativeAgentGateway, get_creative_agent_gateway
-from v2.backend.app.planning.agent_gateway import ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
+from v2.backend.app.planning.agent_gateway import ContentPlannerOutput, ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
 from v2.backend.app.planning.director_gateway import DeterministicDirectorGateway, get_director_gateway
 
 
@@ -1586,7 +1586,28 @@ def test_content_planner_open_questions_block_candidate_acceptance(client: TestC
     class QuestioningPlannerGateway(DeterministicContentPlannerGateway):
         def invoke(self, selection, manifest_payload):
             result = super().invoke(selection, manifest_payload)
-            output = result.output.model_copy(update={"open_questions": ["需要先确认训练场地"]})
+            output = ContentPlannerOutput.model_validate({
+                **result.output.model_dump(mode="json"),
+                "open_questions": [{
+                    "question_code": "QUESTION_01",
+                    "prompt": "是否需要明确训练场地？",
+                    "reason": "场地会影响可执行动作和画面内容。",
+                    "options": [
+                        {
+                            "option_code": "OPTION_01",
+                            "label": "居家训练",
+                            "description": "只使用普通室内空间和轻量器材。",
+                            "answer": "训练场地使用普通居家空间。",
+                        },
+                        {
+                            "option_code": "OPTION_02",
+                            "label": "专业场馆",
+                            "description": "使用健身房环境和专业器械。",
+                            "answer": "训练场地使用专业健身房。",
+                        },
+                    ],
+                }],
+            })
             return ContentPlannerResult(output, output.model_dump(mode="json"), result.provider_request_id, result.token_usage)
 
     app.dependency_overrides[get_content_planner_gateway] = lambda: QuestioningPlannerGateway()
@@ -1602,6 +1623,7 @@ def test_content_planner_open_questions_block_candidate_acceptance(client: TestC
     )
     assert blocked.status_code == 409
     assert blocked.headers["x-error-code"] == "BRIEF_OPEN_QUESTIONS_UNRESOLVED"
+    assert brief["brief"]["open_questions"][0]["options"][0]["label"] == "居家训练"
 
 
 def test_shot_plan_revision_creates_a_new_reviewable_candidate(client: TestClient) -> None:
