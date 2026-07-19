@@ -353,10 +353,14 @@ export interface CreativeBriefCandidate {
   id: string
   requirement_version_id: string
   agent_run_id: string
+  supersedes_candidate_id: string | null
+  revision_number: number
+  source: 'planner_agent' | 'planner_revision'
   status: string
   brief: CreativeBrief
   field_sources: Record<string, { type?: string; reference_id?: string | null }>
   validation_errors: Array<Record<string, unknown>>
+  created_by: string
   created_at: string
   decided_at: string | null
 }

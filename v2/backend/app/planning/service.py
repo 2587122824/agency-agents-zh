@@ -32,7 +32,7 @@ from ..db.models import (
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from .agent_gateway import ContentPlannerGateway, ContentPlannerSelection
-from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, RetryShotPlan, ReviseShotPlan
+from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, RetryShotPlan, ReviseBrief, ReviseShotPlan
 from .director_gateway import DirectorGateway, DirectorSelection
 
 
@@ -78,7 +78,7 @@ def _content_planner_manifest_payload(
     entity_rows = repository.active_entity_versions(project.id)
     fields = dict(requirement.fields)
     return {
-        "contract_version": "content-planner-input.v1",
+        "contract_version": "content-planner-input.v2",
         "project_id": project.id,
         "requirement_version": {"id": requirement.id, "fields": fields},
         "confirmed_decisions": [
@@ -274,7 +274,7 @@ def _execute_content_planner(
     project: Project,
     requirement: RequirementVersion,
     manifest: AgentInputManifest,
-    payload: GenerateBrief | RetryBrief,
+    payload: GenerateBrief | RetryBrief | ReviseBrief,
     gateway: ContentPlannerGateway,
     selection: ContentPlannerSelection,
     *,
@@ -336,28 +336,45 @@ def _execute_content_planner(
     }
     for key in ("duration_seconds", "aspect_ratio", "audio_mode"):
         sources[key] = {"type": "requirement", "reference_id": requirement.id}
+    revision_request = manifest.payload.get("revision_request")
+    source_candidate = (
+        repository.creative_brief(revision_request["source_candidate_id"])
+        if revision_request else None
+    )
     candidate = CreativeBriefCandidate(
         project_id=project.id,
         requirement_version_id=requirement.id,
         agent_run_id=run.id,
+        supersedes_candidate_id=source_candidate.id if source_candidate else None,
+        revision_number=(source_candidate.revision_number + 1 if source_candidate else 1),
+        source="planner_revision" if source_candidate else "planner_agent",
         brief=brief,
         field_sources=sources,
+        created_by=payload.actor_id,
     )
     repository.add(candidate)
     repository.flush()
+    if source_candidate and source_candidate.status in {"awaiting_review", "rejected"}:
+        source_candidate.status = "superseded"
+        source_candidate.decided_at = utc_now()
     run.status = "succeeded"
     run.parsed_candidate_id = candidate.id
     run.raw_output = result.raw_output
     run.provider_request_id = result.provider_request_id
     run.token_usage = result.token_usage
     run.finished_at = utc_now()
-    _save_receipt(session, project.id, payload.command_id, "brief.retry" if retry_of_agent_run_id else "brief.generate", "creative_brief_candidate", candidate.id)
+    command_type = "brief.retry" if retry_of_agent_run_id else "brief.revise" if revision_request else "brief.generate"
+    _save_receipt(session, project.id, payload.command_id, command_type, "creative_brief_candidate", candidate.id)
     _event(session, project.id, "agent.run_succeeded.v1", "内容策划智能体已返回严格候选", {
         "agent_run_id": run.id,
         "candidate_id": candidate.id,
         "retry_of_agent_run_id": retry_of_agent_run_id,
     })
-    _event(session, project.id, "plan.brief_candidate_created.v1", "内容方案候选等待用户审核", {"candidate_id": candidate.id})
+    _event(session, project.id, "plan.brief_candidate_created.v1", "内容方案候选等待用户审核", {
+        "candidate_id": candidate.id,
+        "supersedes_candidate_id": source_candidate.id if source_candidate else None,
+        "revision_number": candidate.revision_number,
+    })
     transition_project(
         session,
         project,
@@ -429,6 +446,64 @@ def generate_brief(
     return _execute_content_planner(session, project, requirement, manifest, payload, gateway, selection)
 
 
+def revise_brief(
+    session: Session,
+    project: Project,
+    source_candidate_id: str,
+    payload: ReviseBrief,
+    gateway: ContentPlannerGateway,
+) -> CreativeBriefCandidate:
+    repository = _planning(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, CreativeBriefCandidate)
+    if not payload.confirm_model_cost:
+        raise CreationConflictError("MODEL_COST_CONFIRMATION_REQUIRED", "请明确确认本次调整会调用一次当前内容策划模型。")
+    requirement = active_requirement(session, project.id)
+    source_candidate = repository.creative_brief(source_candidate_id)
+    if not requirement or requirement.id != payload.expected_requirement_version_id:
+        raise CreationConflictError("REQUIREMENT_VERSION_CONFLICT", "活动需求版本已变化，不能调整旧方案。")
+    if (
+        not source_candidate
+        or source_candidate.project_id != project.id
+        or source_candidate.requirement_version_id != requirement.id
+    ):
+        raise CreationNotFoundError("Creative brief candidate not found")
+    if source_candidate.status not in {"awaiting_review", "rejected"}:
+        raise CreationConflictError("BRIEF_NOT_REVISABLE", f"内容方案状态为 {source_candidate.status}，不能调整。")
+    active_brief = repository.active_brief_for_requirement(project.id, requirement.id)
+    if active_brief and active_brief.id != source_candidate.id:
+        raise CreationConflictError("BRIEF_REVISION_SOURCE_NOT_CURRENT", "只能调整当前待审核或最近被拒绝的内容方案。")
+    if session.scalar(select(AgentRun).where(
+        AgentRun.project_id == project.id,
+        AgentRun.agent_role == "planner",
+        AgentRun.status == "running",
+    ).limit(1)):
+        raise CreationConflictError("CONTENT_PLANNER_RUN_IN_PROGRESS", "当前已有内容策划运行，不能重复提交调整。")
+    selection = gateway.select(session)
+    manifest_payload = _content_planner_manifest_payload(session, project, requirement)
+    manifest_payload["revision_request"] = {
+        "source_candidate_id": source_candidate.id,
+        "source_revision_number": source_candidate.revision_number,
+        "source_brief": source_candidate.brief,
+        "instruction": payload.revision_instruction.strip(),
+    }
+    manifest_payload["system_config_version"] = selection.production_config_version_id
+    serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    manifest = AgentInputManifest(
+        project_id=project.id,
+        base_requirement_version_id=requirement.id,
+        decision_ids=[item["id"] for item in manifest_payload["confirmed_decisions"]],
+        attachment_binding_ids=repository.confirmed_binding_ids(project.id),
+        system_config_version=selection.production_config_version_id,
+        input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        payload=manifest_payload,
+    )
+    repository.add(manifest)
+    repository.flush()
+    return _execute_content_planner(session, project, requirement, manifest, payload, gateway, selection)
+
+
 def retry_failed_brief(
     session: Session,
     project: Project,
@@ -444,8 +519,6 @@ def retry_failed_brief(
     requirement = active_requirement(session, project.id)
     if not requirement or requirement.id != payload.expected_requirement_version_id:
         raise CreationConflictError("REQUIREMENT_VERSION_CONFLICT", "活动需求版本已变化，不能重跑旧策划。")
-    if repository.active_brief_for_requirement(project.id, requirement.id):
-        raise CreationConflictError("BRIEF_ALREADY_EXISTS", "当前需求版本已有待审或已接受的内容方案。")
     latest_run = session.scalar(
         select(AgentRun)
         .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
@@ -464,6 +537,10 @@ def retry_failed_brief(
     manifest = session.get(AgentInputManifest, latest_run.input_manifest_id)
     if not manifest or manifest.base_requirement_version_id != requirement.id:
         raise CreationConflictError("CONTENT_PLANNER_MANIFEST_MISSING", "失败运行的输入清单不存在或需求版本不一致。")
+    active_brief = repository.active_brief_for_requirement(project.id, requirement.id)
+    revision_source_id = manifest.payload.get("revision_request", {}).get("source_candidate_id")
+    if active_brief and active_brief.id != revision_source_id:
+        raise CreationConflictError("BRIEF_ALREADY_EXISTS", "当前需求版本已有其他待审或已接受的内容方案。")
     selection = gateway.select(session)
     expected_config = (
         latest_run.production_config_version_id,
@@ -1041,6 +1118,13 @@ def planning_center_view(session: Session, project: Project) -> dict:
         .order_by(AgentRun.started_at.desc())
         .limit(1)
     )
+    planner_manifest = session.get(AgentInputManifest, planner_attempt.input_manifest_id) if planner_attempt else None
+    failed_revision = bool(
+        planner_attempt
+        and planner_attempt.status == "failed"
+        and planner_manifest
+        and planner_manifest.payload.get("revision_request")
+    )
     if active_plan:
         next_action = PlanningNextAction(code="PLAN_CONFIRMED", label="方案已确认，等待创建生产快照", target_ids=[active_plan.id])
     elif current_shot:
@@ -1058,6 +1142,13 @@ def planning_center_view(session: Session, project: Project) -> dict:
         next_action = PlanningNextAction(code="REVISE_REQUIREMENT_FOR_NEW_SHOT_PLAN", label="调整并确认需求后重新生成分镜", target_ids=[director_attempt.id])
     elif accepted_brief:
         next_action = PlanningNextAction(code="GENERATE_SHOT_PLAN", label="生成分镜候选", target_ids=[accepted_brief.id], incurs_model_cost=True)
+    elif failed_revision:
+        next_action = PlanningNextAction(
+            code="RETRY_FAILED_CREATIVE_BRIEF",
+            label="确认模型调用并重跑失败的方案调整",
+            target_ids=[planner_attempt.id],
+            incurs_model_cost=True,
+        )
     elif current_brief:
         next_action = PlanningNextAction(code="REVIEW_CREATIVE_BRIEF", label="审核内容方案", target_ids=[current_brief.id])
     elif planner_attempt and planner_attempt.status == "failed":

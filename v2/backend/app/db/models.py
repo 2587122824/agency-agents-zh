@@ -579,10 +579,16 @@ class CreativeBriefCandidate(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
     requirement_version_id: Mapped[str] = mapped_column(ForeignKey("requirement_versions.id"), index=True)
     agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"))
+    supersedes_candidate_id: Mapped[str | None] = mapped_column(
+        ForeignKey("creative_brief_candidates.id"), nullable=True, index=True
+    )
+    revision_number: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(32), default="planner_agent")
     status: Mapped[str] = mapped_column(String(32), default="awaiting_review", index=True)
     brief: Mapped[dict] = mapped_column(JSON)
     field_sources: Mapped[dict] = mapped_column(JSON, default=dict)
     validation_errors: Mapped[list] = mapped_column(JSON, default=list)
+    created_by: Mapped[str] = mapped_column(String(48), default="system")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

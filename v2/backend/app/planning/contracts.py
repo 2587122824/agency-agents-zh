@@ -18,6 +18,12 @@ class RetryBrief(CommandContext):
     confirm_model_cost: bool
 
 
+class ReviseBrief(CommandContext):
+    expected_requirement_version_id: str
+    revision_instruction: str = Field(min_length=1, max_length=4000)
+    confirm_model_cost: bool
+
+
 class DecideBrief(CommandContext):
     expected_requirement_version_id: str
     reason: str | None = Field(default=None, max_length=500)
@@ -96,10 +102,14 @@ class CreativeBriefCandidateRead(BaseModel):
     id: str
     requirement_version_id: str
     agent_run_id: str
+    supersedes_candidate_id: str | None
+    revision_number: int
+    source: str
     status: str
     brief: dict[str, Any]
     field_sources: dict[str, Any]
     validation_errors: list[dict[str, Any]]
+    created_by: str
     created_at: datetime
     decided_at: datetime | None
 

@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 from v2.backend.app.db.models import (
     AgentInputManifest,
     AgentRun,
-    CreativeBriefCandidate,
     Project,
     RequirementVersion,
     ShotPlanCandidate,
@@ -36,7 +35,7 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
     engine = create_engine(f"sqlite:///{database.as_posix()}")
     with Session(engine, expire_on_commit=False) as session:
         metadata = MetaData()
-        metadata.reflect(bind=engine, only=["projects", "agent_runs"])
+        metadata.reflect(bind=engine, only=["projects", "agent_runs", "creative_brief_candidates"])
         project_id = "project_migration_planning_authority"
         session.execute(metadata.tables["projects"].insert().values(
             id=project_id,
@@ -83,19 +82,22 @@ def test_planning_authority_backfill_uses_persisted_candidate_status(tmp_path: P
             prompt_contract_version="creative.v1",
             output_schema_version="requirement-candidate.v1",
         ))
-        brief = CreativeBriefCandidate(
+        brief_id = "brief_candidate_migration_planning_authority"
+        session.execute(metadata.tables["creative_brief_candidates"].insert().values(
+            id=brief_id,
             project_id=project_id,
             requirement_version_id=requirement.id,
             agent_run_id=run_id,
             status="accepted",
             brief={},
-        )
-        session.add(brief)
-        session.flush()
+            field_sources={},
+            validation_errors=[],
+            created_at=utc_now(),
+        ))
         session.add(ShotPlanCandidate(
             project_id=project_id,
             requirement_version_id=requirement.id,
-            creative_brief_candidate_id=brief.id,
+            creative_brief_candidate_id=brief_id,
             agent_run_id=run_id,
             status="awaiting_review",
             shots=[],

@@ -18,7 +18,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import AgentRun, Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
@@ -1339,6 +1339,171 @@ def test_content_planner_failure_requires_explicit_exact_retry(client: TestClien
         assert [run.status for run in runs] == ["failed", "succeeded"]
         assert runs[0].raw_output == {"unexpected": True}
         assert runs[0].input_manifest_id == runs[1].input_manifest_id
+
+
+def test_creative_brief_revision_preserves_requirement_and_supersedes_only_after_success(client: TestClient) -> None:
+    class RecordingPlannerGateway(DeterministicContentPlannerGateway):
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def invoke(self, selection, manifest_payload):
+            self.calls.append(manifest_payload)
+            return super().invoke(selection, manifest_payload)
+
+    gateway = RecordingPlannerGateway()
+    app.dependency_overrides[get_content_planner_gateway] = lambda: gateway
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    original = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "brief-revision-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{original['id']}:revise",
+        json={
+            "command_id": "brief-revision-unconfirmed",
+            "actor_id": "test-editor",
+            "expected_requirement_version_id": requirement_id,
+            "revision_instruction": "开头更快进入结果",
+            "confirm_model_cost": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "MODEL_COST_CONFIRMATION_REQUIRED"
+    assert len(gateway.calls) == 1
+
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{original['id']}:revise",
+        json={
+            "command_id": "brief-revision-confirmed",
+            "actor_id": "test-editor",
+            "expected_requirement_version_id": requirement_id,
+            "revision_instruction": "开头更快进入结果",
+            "confirm_model_cost": True,
+        },
+    )
+    assert revised.status_code == 201
+    candidate = revised.json()
+    assert candidate["requirement_version_id"] == requirement_id
+    assert candidate["supersedes_candidate_id"] == original["id"]
+    assert candidate["revision_number"] == 2
+    assert candidate["source"] == "planner_revision"
+    assert candidate["created_by"] == "test-editor"
+    assert len(gateway.calls) == 2
+    request = gateway.calls[-1]["revision_request"]
+    assert request["source_candidate_id"] == original["id"]
+    assert request["source_revision_number"] == 1
+    assert request["source_brief"] == original["brief"]
+    assert request["instruction"] == "开头更快进入结果"
+
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["active_requirement"]["id"] == requirement_id
+    assert planning["current_brief_candidate"]["id"] == candidate["id"]
+    history = {item["id"]: item for item in planning["brief_history"]}
+    assert history[original["id"]]["status"] == "superseded"
+    assert history[candidate["id"]]["status"] == "awaiting_review"
+
+
+def test_failed_brief_revision_keeps_original_and_retries_exact_manifest(client: TestClient) -> None:
+    class FailRevisionOnceGateway(DeterministicContentPlannerGateway):
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+            self.failed = False
+
+        def invoke(self, selection, manifest_payload):
+            self.calls.append(manifest_payload)
+            if manifest_payload.get("revision_request") and not self.failed:
+                self.failed = True
+                raise AgentGatewayError("CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID", "invalid revision")
+            return super().invoke(selection, manifest_payload)
+
+    gateway = FailRevisionOnceGateway()
+    app.dependency_overrides[get_content_planner_gateway] = lambda: gateway
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    original = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "failed-revision-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{original['id']}:revise",
+        json={
+            "command_id": "failed-revision-attempt",
+            "expected_requirement_version_id": requirement_id,
+            "revision_instruction": "减少过程说明",
+            "confirm_model_cost": True,
+        },
+    )
+    assert failed.status_code == 502
+    assert len(gateway.calls) == 2
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["current_brief_candidate"]["id"] == original["id"]
+    assert planning["current_brief_candidate"]["status"] == "awaiting_review"
+    assert planning["next_action"]["code"] == "RETRY_FAILED_CREATIVE_BRIEF"
+    failed_run = planning["latest_planner_run"]
+
+    retried = client.post(
+        f"/api/v1/projects/{project['id']}/content-planner-runs/{failed_run['id']}:retry",
+        json={
+            "command_id": "failed-revision-retry",
+            "expected_requirement_version_id": requirement_id,
+            "failed_agent_run_id": failed_run["id"],
+            "confirm_model_cost": True,
+        },
+    )
+    assert retried.status_code == 201
+    assert retried.json()["supersedes_candidate_id"] == original["id"]
+    assert len(gateway.calls) == 3
+    assert gateway.calls[1] == gateway.calls[2]
+
+    with SessionLocal() as session:
+        failed_manifest = session.get(AgentInputManifest, failed_run["input_manifest_id"])
+        runs = list(session.scalars(
+            select(AgentRun)
+            .where(AgentRun.project_id == project["id"], AgentRun.agent_role == "planner")
+            .order_by(AgentRun.started_at)
+        ))
+        assert failed_manifest.payload["revision_request"]["source_brief"] == original["brief"]
+        assert [run.status for run in runs] == ["succeeded", "failed", "succeeded"]
+        assert runs[1].input_manifest_id == runs[2].input_manifest_id
+
+
+def test_rejecting_brief_reopens_requirements_and_new_confirmation_creates_version(client: TestClient) -> None:
+    project = create_creation_project(client)
+    initial = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "brief-reject-generate", "expected_requirement_version_id": initial["id"]},
+    ).json()
+    rejected = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:reject",
+        json={
+            "command_id": "brief-reject-for-requirement-change",
+            "expected_requirement_version_id": initial["id"],
+            "reason": "修改基础创作需求",
+        },
+    )
+    assert rejected.status_code == 200
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "collecting_requirements"
+    reopened = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
+    assert reopened["active_requirement"]["id"] == initial["id"]
+
+    client.post(
+        f"/api/v1/projects/{project['id']}/messages",
+        json={"command_id": "brief-change-message", "content": "整体方向改为轻松的训练日记。"},
+    )
+    candidate = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates:generate",
+        json={"command_id": "brief-change-candidate", "expected_base_version_id": initial["id"]},
+    ).json()
+    confirmed = client.post(
+        f"/api/v1/projects/{project['id']}/requirement-candidates/{candidate['id']}:accept",
+        json={"command_id": "brief-change-confirm", "expected_base_version_id": initial["id"]},
+    )
+    assert confirmed.status_code == 200
+    assert confirmed.json()["id"] != initial["id"]
+    assert confirmed.json()["version_number"] == initial["version_number"] + 1
 
 
 def test_director_failure_requires_explicit_exact_retry(client: TestClient) -> None:

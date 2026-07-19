@@ -87,7 +87,7 @@ export function ProjectPage() {
   const initializationRequested = useRef<string | null>(null)
   const queryClient = useQueryClient()
   const setCurrentProjectId = useWorkspace(state => state.setCurrentProjectId)
-  const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.project(projectId), enabled: Boolean(projectId) })
+  const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.project(projectId), enabled: Boolean(projectId), refetchOnMount: 'always' })
   const center = useQuery({ queryKey: ['creation-center', projectId], queryFn: () => api.creationCenter(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   useEffect(() => { setCurrentProjectId(projectId); return () => setCurrentProjectId(null) }, [projectId, setCurrentProjectId])
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['creation-center', projectId] })

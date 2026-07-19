@@ -37,8 +37,8 @@ def selection() -> ContentPlannerSelection:
         base_url="https://api.example.test/v1",
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
-        input_contract_version="content-planner-input.v1",
-        prompt_contract_version="content-planner-prompt.v1",
+        input_contract_version="content-planner-input.v2",
+        prompt_contract_version="content-planner-prompt.v2",
         output_schema_version="creative-brief-candidate.v1",
         max_output_tokens=2000,
         sampling={"temperature": 0.2, "unsupported": "ignored"},
@@ -47,7 +47,7 @@ def selection() -> ContentPlannerSelection:
 
 def manifest(*, audio_policy: str = "off", platform: str | None = None) -> dict:
     return {
-        "contract_version": "content-planner-input.v1",
+        "contract_version": "content-planner-input.v2",
         "project_id": "project_1",
         "requirement_version": {
             "id": "requirement_1",
@@ -126,6 +126,28 @@ def test_content_planner_returns_strict_brief_without_conversation_or_retry(monk
     sent = request["payload"]["messages"]
     assert [item["role"] for item in sent] == ["system", "user"]
     assert "conversation" not in sent[1]["content"]
+
+
+def test_content_planner_passes_frozen_revision_request_once(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    gateway, transport = gateway_for({
+        "id": "planner-revision-request-1",
+        "choices": [{"message": {"content": json.dumps(valid_output(), ensure_ascii=False)}}],
+    })
+    payload = manifest()
+    payload["revision_request"] = {
+        "source_candidate_id": "brief_candidate_1",
+        "source_revision_number": 1,
+        "source_brief": valid_output(),
+        "instruction": "缩短开场，突出最终结果",
+    }
+
+    gateway.invoke(selection(), payload)
+
+    assert len(transport.calls) == 1
+    sent_payload = transport.calls[0]["payload"]["messages"][1]["content"]
+    assert '"source_candidate_id":"brief_candidate_1"' in sent_payload
+    assert '"instruction":"缩短开场，突出最终结果"' in sent_payload
 
 
 def test_content_planner_rejects_audio_when_audio_policy_is_off_without_retry(monkeypatch) -> None:

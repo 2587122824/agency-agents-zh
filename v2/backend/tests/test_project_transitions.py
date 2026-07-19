@@ -115,6 +115,24 @@ def test_invalid_transition_writes_neither_state_nor_event(session: Session) -> 
     assert list(session.scalars(select(ProjectEvent))) == []
 
 
+def test_rejected_brief_returns_project_to_requirement_conversation(session: Session) -> None:
+    project = project_row(status="plan_review")
+    session.add(project)
+    session.flush()
+
+    result = transition_project(
+        session,
+        project,
+        ProjectStateTrigger.BRIEF_REJECTED,
+        actor_type="user",
+        actor_id="state-tester",
+    )
+
+    assert result.changed is True
+    assert result.to_state == "collecting_requirements"
+    assert project.status == "collecting_requirements"
+
+
 def test_stale_project_version_cannot_win_atomic_transition(session: Session) -> None:
     project = project_row()
     session.add(project)

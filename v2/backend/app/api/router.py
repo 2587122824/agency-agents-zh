@@ -148,6 +148,7 @@ from ..planning.contracts import (
     PlanVersionRead,
     RetryBrief,
     RetryShotPlan,
+    ReviseBrief,
     ReviseShotPlan,
     ShotPlanCandidateRead,
 )
@@ -161,6 +162,7 @@ from ..planning.service import (
     planning_center_view,
     retry_failed_brief,
     retry_failed_shot_plan,
+    revise_brief,
     revise_shot_plan,
 )
 from ..providers.contracts import ProviderReadinessView
@@ -941,6 +943,33 @@ def creative_brief_generate(
     project = require_project(session, project_id)
     try:
         return generate_brief(session, project, payload, gateway)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
+
+
+@router.post(
+    "/projects/{project_id}/creative-brief-candidates/{candidate_id}:revise",
+    response_model=CreativeBriefCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def creative_brief_revise(
+    project_id: str,
+    candidate_id: str,
+    payload: ReviseBrief,
+    gateway: ContentPlannerGateway = Depends(get_content_planner_gateway),
+    session: Session = Depends(get_session),
+):
+    project = require_project(session, project_id)
+    try:
+        return revise_brief(session, project, candidate_id, payload, gateway)
     except CreationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CreationConflictError as exc:

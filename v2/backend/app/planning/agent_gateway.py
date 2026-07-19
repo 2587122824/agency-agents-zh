@@ -140,6 +140,7 @@ _SYSTEM_PROMPT = """你是片场 V2 的内容策划智能体。你只把已确�
 8. 不得引入输入合同中没有确认的人物、品牌、地点或产品事实。信息不足时写入 open_questions，不得自行补写事实。
 9. constraints_carried_forward 是可选的可读说明，只能登记输入合同中真实存在的约束，不得创造默认规则；该字段为空不代表约束失效，后端按不可变输入合同直接验收实际输出。
 10. 不得输出 Markdown 代码块、解释文字或 JSON 之外的内容。
+11. 输入存在 revision_request 时，source_brief 是待调整的冻结原方案，instruction 是用户本轮唯一修改意见。你必须在继续满足已确认需求与全部确定性合同的前提下修改原方案，不得把 instruction 当作新的项目事实，不得改动需求版本、音频策略、时长、画幅、实体白名单或生产路由。输入不存在 revision_request 时按首次策划处理。
 """
 
 
@@ -179,9 +180,9 @@ class ConfiguredContentPlannerGateway:
         if "text_generation" not in provider.capabilities:
             raise AgentGatewayError("CONTENT_PLANNER_CAPABILITY_MISSING", "内容策划模型供应商未声明文本生成能力。")
         expected = {
-            "input_contract_version": "content-planner-input.v1",
+            "input_contract_version": "content-planner-input.v2",
             "output_schema_version": "creative-brief-candidate.v1",
-            "prompt_contract_version": "content-planner-prompt.v1",
+            "prompt_contract_version": "content-planner-prompt.v2",
         }
         actual = {key: getattr(model, key) for key in expected}
         if actual != expected:
@@ -299,8 +300,8 @@ class DeterministicContentPlannerGateway:
             base_url="https://example.invalid/v1",
             credential_ref=None,
             timeout_seconds=1,
-            input_contract_version="content-planner-input.v1",
-            prompt_contract_version="content-planner-prompt.v1",
+            input_contract_version="content-planner-input.v2",
+            prompt_contract_version="content-planner-prompt.v2",
             output_schema_version="creative-brief-candidate.v1",
             max_output_tokens=None,
             sampling={},
@@ -332,8 +333,11 @@ class DeterministicContentPlannerGateway:
             for index, beat in enumerate(beats, start=1)
         ]
         output = ContentPlannerOutput(
-            title=f"{requirement['core_topic']}内容方案",
-            content_promise=f"围绕{requirement['core_topic']}形成完整、清晰的内容推进。",
+            title=f"{requirement['core_topic']}内容方案" + ("（调整版）" if manifest_payload.get("revision_request") else ""),
+            content_promise=(
+                f"围绕{requirement['core_topic']}形成完整、清晰的内容推进。"
+                + (f" 调整重点：{manifest_payload['revision_request']['instruction']}" if manifest_payload.get("revision_request") else "")
+            ),
             audience_takeaway="观众能够理解主题、过程与最终结果。",
             hook=BriefHook(kind="visual_action", content="用一个直接动作快速建立主题。"),
             narrative_beats=beats,

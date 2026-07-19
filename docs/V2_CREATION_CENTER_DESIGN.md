@@ -410,7 +410,7 @@ V2 使用五个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.3 内容策划
 
-内容策划在需求版本确认后运行，不读取自由聊天记录。输入合同 `content-planner-input.v1` 至少冻结：
+内容策划在需求版本确认后运行，不读取自由聊天记录。输入合同 `content-planner-input.v2` 至少冻结：
 
 ```text
 requirement_version_id
@@ -454,7 +454,15 @@ template_version_id nullable
 - 内容策划不生成镜头 ID、画面提示词、工作流参数和素材就绪声明。
 - `constraints_carried_forward` 仅是可选的可读说明，不具有放行权。为空时不判失败；后端直接依据不可变输入合同验收脚本、平台适配、实体引用、时长和代码关系，不依赖模型复述约束。
 
-当前实现已经按上述合同接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。每个活动需求版本只自动尝试一次；失败会保存结构化错误、受控原始输出和 Provider 请求审计，不自动重试。用户可以在方案页明确确认模型费用后，重跑当前需求版本最近一次失败运行；重跑必须复用同一 `AgentInputManifest`，并校验生产配置、模型、Provider、Prompt 合同和输出 Schema 与原失败运行完全一致。新命令创建新的 `AgentRun`，不覆盖失败记录、不修复模型输出、不切换配置。成功运行或用户已拒绝的方案不能通过该命令再次调用；方案被拒绝后仍需回到创作中心调整并确认新的需求版本。模型输出经 Pydantic Schema 后还要通过确定性跨字段验证：节拍总时长必须精确匹配交付时长，节拍与脚本代码连续且引用存在，实体 ID 必须来自输入白名单，音频关闭和平台未指定约束必须由实际输出遵守。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。
+当前实现已经按 `content-planner-input.v2 / creative-brief-candidate.v1 / content-planner-prompt.v2` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。每个活动需求版本只自动尝试一次；失败会保存结构化错误、受控原始输出和 Provider 请求审计，不自动重试。用户可以在方案页明确确认模型费用后，重跑当前需求版本最近一次失败运行；重跑必须复用同一 `AgentInputManifest`，并校验生产配置、模型、Provider、Prompt 合同和输出 Schema 与原失败运行完全一致。新命令创建新的 `AgentRun`，不覆盖失败记录、不修复模型输出、不切换配置。模型输出经 Pydantic Schema 后还要通过确定性跨字段验证：节拍总时长必须精确匹配交付时长，节拍与脚本代码连续且引用存在，实体 ID 必须来自输入白名单，音频关闭和平台未指定约束必须由实际输出遵守。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。
+
+方案页将修改分成三个明确命令：
+
+- `调整方案`：适用于节奏、开场、内容顺序、表达方式等不改变已确认基础需求的修改。系统冻结原 Brief 和本次修改意见，在同一需求版本下调用一次当前内容策划模型，生成下一版 Brief 候选。
+- `修改创作需求`：适用于主题、受众、目标、时长、画幅、音频策略或已确认实体等基础事实变化。系统拒绝当前 Brief 并返回 `collecting_requirements`；用户继续对话并再次确认后，才创建新的 `RequirementVersion`。
+- `放弃方案`：只拒绝当前 Brief，不猜测用户要改什么，也不自动创建新需求或新方案。
+
+`CreativeBriefCandidate` 使用 `supersedes_candidate_id`、`revision_number`、`source` 和 `created_by` 保存不可变修订链。成功修订将原待审核或已拒绝候选标记为 `superseded`；失败时不改变原候选和项目状态。失败修订的显式重跑复用其原 `AgentInputManifest`，不重新解释修改意见，不切换模型、Provider、Prompt、输出合同或配置。Brief 被拒绝后的项目状态必须由 `plan_review` 转回 `collecting_requirements`，前端同时刷新项目、策划中心和创作中心权威查询，不能用旧缓存继续禁用输入框。
 
 ### 9.4 分镜导演
 
@@ -1038,6 +1046,8 @@ RequirementDiff
 - 点击建议只创建 `CreativeSuggestionSelection` 和继承当前内容的下一版草稿修订，活动 `RequirementVersion` 保持不变，用户仍可继续对话。
 - 内容策划在 `audio_policy=off` 时不输出口播文本；平台未指定时不做平台适配。
 - 内容策划引入未确认人物、品牌、场景或产品时，候选验证失败。
+- 内容方案微调后 `RequirementVersion` ID 保持不变，新候选精确引用上一候选；基础需求修改后只有再次确认才创建新需求版本。
+- 内容方案修订失败时原候选仍可审核，且不会自动重试；精确重跑复用失败修订的原输入清单。
 - 分镜导演引用不存在的实体、节拍、附件或缩写 ID 时明确失败，不自动改名。
 - 分镜中的复合动作必须拆成多个镜头；普通首帧视频不会因文字描述而获得多个输入图。
 - 质量审核的每条 Finding 均含证据和合同引用；无证据发现不能进入人工审核。
@@ -1077,7 +1087,7 @@ RequirementDiff
 ### Creation Sprint 4：创作模型接入
 
 - 创作制片人 `creative-dialogue-input.v5 / output.v5 / prompt.v13`（已完成）
-- 内容策划 `content-planner-input.v1 / creative-brief-candidate.v1`（已完成）
+- 内容策划 `content-planner-input.v2 / creative-brief-candidate.v1`，含 Brief 不可变修订链（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成

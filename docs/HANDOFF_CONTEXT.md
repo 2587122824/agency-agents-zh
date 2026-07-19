@@ -25,8 +25,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 分支 | `main` |
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
-| 数据库迁移 | `20260718_23 (head)` |
-| 已发布配置 | `production_config_6ad9eee20aa54e56b4c77257562a4109`，版本 21 |
+| 数据库迁移 | `20260719_24 (head)` |
+| 已发布配置 | `production_config_3d876559eeda4196be0fc08484962134`，版本 22 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -92,14 +92,17 @@ v2/runtime/worker.err.log
 - 澄清问题必须直接展示；模型调用提示读取真实下一步费用事实，需求面板使用“已具备最低策划条件”而非虚假的“完整”。
 - 附件只传递文件事实和已确认用途绑定，并标记 `content_access=metadata_only`；当前模型不读取图片、音频或视频内容。
 
-内容策划运行代码使用 `content-planner-input.v1 / creative-brief-candidate.v1 / content-planner-prompt.v1`：
+内容策划运行代码使用 `content-planner-input.v2 / creative-brief-candidate.v1 / content-planner-prompt.v2`：
 
 - 使用独立 `planner` 模型分工，只读取已确认需求、Decision、实体版本和交付约束，不读取自由聊天。
 - 输出内容承诺、开场、连续内容节拍、脚本段、语气、节奏、平台适配和精确实体引用。
 - 后端严格校验总时长、代码与引用、实体白名单、音频关闭和平台未指定约束。
 - 每个需求版本只自动尝试一次；失败不修复、不自动重试、不换模型。
 - 用户可确认模型费用后显式重跑当前需求版本最近一次失败 Run；必须复用原输入清单并保持生产配置、模型、Provider、Prompt 合同和输出 Schema 完全一致，新运行保留原失败记录。
-- 成功或已拒绝的策划不能使用失败重跑命令；方案被拒绝后需调整并确认新的需求版本。
+- `调整方案` 保持活动需求版本不变，以冻结原 Brief 和明确修改意见生成下一版候选；候选通过 `supersedes_candidate_id` 和 `revision_number` 形成不可变链。
+- `修改创作需求` 与 `放弃方案` 都会拒绝当前 Brief 并将项目从 `plan_review` 返回 `collecting_requirements`；前者随后导航回创作中心，只有用户再次确认才创建新的需求版本。
+- 修订失败不改变原方案，不自动重试；用户确认费用后的精确重跑复用失败修订的原 Manifest。
+- 成功方案不能使用失败重跑命令；已拒绝方案可在同一需求版本下明确微调，基础需求变化时才需要再次确认新的需求版本。
 - 成功只创建待审核 Creative Brief；用户接受后才能交给分镜导演。
 
 分镜导演运行代码使用 `director-input.v1 / shot-plan.v2 / director-prompt.v1`：
@@ -119,6 +122,8 @@ v2/runtime/worker.err.log
 动态引导真实验收项目 `project_e99219f3991b4b5b979addf7f79da3b1` 使用配置 v19 与 `output.v5 / prompt.v12` 完成首次引导：识别为真实记录、阶段为探索方向，列出 5 个已明确字段与 4 个关键缺口，并选择 `creative_direction` 作为唯一焦点；三个建议均只冻结该字段，活动需求保持 requirement_v1。桌面与 375px 页面无横向溢出，控制台无错误。
 
 选择后持续引导真实验收项目 `project_55529c047fba4e19b12b6b911c75115a` 使用配置 v21 与 `prompt.v13` 完成“首次引导 -> 点击进步日记 -> 下一轮内容结构引导”：结构化用户选择消息、草稿 `creative_direction=进步日记`、助手确认和新的 `content_structure` 三选项均已持久化，最新 Run 为 `succeeded`。页面显示 3 条连续消息和 3 个新选项，`scrollWidth == clientWidth` 且控制台无错误。
+
+内容方案修订真实验收项目 `project_bcba80893b6d487b87586272eba20958` 使用配置 v22 完成首次 Brief 与一次真实 DeepSeek 微调。原候选 `brief_candidate_77e5469d1ad347f2894879d9bd8a4bea` 为 revision 1，新候选 `brief_candidate_25be1d8f15954df397552b414590f6c5` 为 revision 2，精确引用上一候选且 Requirement ID 保持 `requirement_41b6b75c97214e3e91183fa16e045c0e` 不变。随后拒绝 revision 2 后项目回到 `collecting_requirements`，375x844 页面输入框恢复可编辑且无横向溢出。
 
 ## 5. 必须保持的边界
 
@@ -149,6 +154,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-19 | 内容方案支持不可变修订链：方案页区分调整方案、修改创作需求和放弃方案；小改保持 RequirementVersion 不变并调用一次当前 planner，基础需求变化返回创作中心再次确认。修订失败保留原方案，只允许费用确认后的精确重跑；发布配置 v22 并完成真实 DeepSeek 与 375px 页面验收 |
 | 2026-07-19 | 修复点击创作方向后智能体沉默：新增 `selection_followup` 明确回合，点击一次保存冻结选择并调用一次创作模型，基于累积草稿继续引导下一个关键缺口；禁止重复刚选字段、重新登记选择或后台循环。失败保留选择并提供用户确认费用后的精确重跑，前端补充运行、费用与失败状态 |
 | 2026-07-19 | 修正内容策划的过度回执约束：`constraints_carried_forward` 仅保留为可选说明，后端直接验收实际音频、平台、实体、时长和引用，不再因模型未复述 `audio_policy` 而失败；方案页补齐运行中只读等待态并清除旧命令错误，不允许等待期间重复提交 |
 | 2026-07-18 | 分镜导演升级为独立真实模型网关：新增 `director-input.v1 / shot-plan.v2 / director-prompt.v1`、节拍时长、单动作、连续组、实体附件与音频策略严格验收、失败审计和用户确认费用后的精确重跑；发布配置 v20，其他生产路由保持不变 |
@@ -177,10 +183,11 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`159 passed`
+- 后端测试：`164 passed`
 - Python compileall：通过
 - Vite production build：通过
-- Alembic runtime/head：`20260718_23`
+- Alembic runtime/head：`20260719_24`
+- 真实 DeepSeek 内容方案首次生成、同需求版本微调与拒绝后返回创作中心：通过
 - 真实 DeepSeek 首次引导与点击后持续引导：通过
 - 桌面与 390px 浏览器验收：通过，无横向溢出和控制台错误
 - API 与 Worker 重启健康检查：通过
