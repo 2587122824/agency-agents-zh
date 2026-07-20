@@ -499,30 +499,36 @@ template_version_id nullable
 
 ### 9.4 分镜导演
 
-分镜导演输入合同 `director-input.v1` 只接受已确认 `RequirementVersion`、已确认 Creative Brief、精确实体版本、交付约束和已确认决策。输出 `shot-plan.v2`，每个镜头至少包含：
+分镜导演输入合同 `director-input.v2` 只接受已确认 `RequirementVersion`、已确认 Creative Brief、精确实体版本、交付约束和已确认决策。输出 `shot-plan.v3`，每个镜头至少包含：
 
 ```text
-shot_code / sequence_number / duration_ms / narrative_beat_code
+shot_code / sequence_number / duration_ms / narrative_beat_code / brief_segment_codes[]
 scene_entity_version_id nullable
 character_entity_version_ids[] / outfit_entity_version_ids[]
 product_entity_version_ids[] / primary_reference_entity_version_id nullable
-continuity_group_id nullable / action_count = 1
-face_visibility / text_policy / motion_requirement
+continuity_group_id nullable / continuity_relation / action_count = 1
+shot_purpose / framing / camera_angle / camera_motion / subject_motion
+face_visibility / face_subject_entity_version_ids[] / text_policy / required_on_screen_text nullable
 composition / action / generation_description / negative_prompt nullable
 audio_requirement: off | lip_motion_only | configured
+new_information / generation_requirements
 ```
 
 - 所有实体、节拍和附件引用必须精确存在；缺失时验证失败，不从描述创建隐式实体。
 - 同一连续场景必须引用同一场景版本；换装必须引用明确的 OutfitState 变化。
 - 每个镜头只有一个主要动作目标。需要多个训练动作时拆成多个镜头，不假设普通首帧视频会消费多图。
-- `face_visibility`、`text_policy` 和 `motion_requirement` 是后续 QC 的权威检查条件，不从提示词反推。
+- `face_visibility`、精确人脸主体、`text_policy`、精确文字和主体运动是后续 QC 的权威条件，不从提示词反推。
 - 分镜导演不得选择 Provider、模型、工作流槽位、NodeInfoList 或价格规则。
 
-当前实现使用独立 `director` 模型配置和 `director-input.v1 / shot-plan.v2 / director-prompt.v2`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天，也不读取生产工作流配置。Prompt 明确定义 `required / optional / not_visible` 的画面语义，禁止将“未绑定人物”或“不确定”直接归为人脸不可见，并要求返回前逐镜头核对动作、构图、画面描述、实体引用和生成约束。输出经严格 Pydantic Schema 后继续执行确定性跨字段验证：镜头与顺序连续、每个节拍至少一个镜头且时长精确相等、实体与主参考来自白名单、同一连续组的场景/人物/服装签名完全一致、`action_count` 恒为 1、关闭音频时只允许 `off` 或 `lip_motion_only`。后端不通过动作描述关键词猜测复合动作或自动修改人脸约束。
+当前实现使用独立 `director` 模型配置和 `director-input.v2 / shot-plan.v3 / director-prompt.v3`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天或生产工作流配置。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。后端不解析动作或提示词关键词，不自动修改任何字段。
+
+导演只声明 `reference_image_required / multi_frame_required / identity_consistency_required / precise_text_required`，不选择路由。用户在制作准备中选定工作流后，确定性校验再对照能力标签和 NodeInfoList；不满足时按镜头返回阻断，不换工作流。人工 Patch 与“AI 调整选中镜头”是两个独立命令：后者冻结完整来源方案、选中编号和修改意见，只调用一次模型，未选镜头必须结构完全一致；失败保留来源候选，用户确认费用后才能精确重跑。
+
+方案页显示“节拍 → 脚本段 → 镜头”覆盖关系、缺口、镜头编号和 `new_information`。结构化编辑器使用选择框、复选框和精确文本输入编辑 v3 字段；进入修订模式后占满方案工作区并临时隐藏只读侧栏，退出后恢复。桌面保持固定高度双栏，移动端使用横向镜头导航。
 
 每个活动需求版本只自动尝试一次。模型调用、Schema 或跨字段验证失败时只记录失败 `AgentRun`、原始输出和 Provider 审计，不创建候选，不修复输出、不自动重试、不切换配置。方案页可由用户明确确认再次调用模型后，精确重跑最近一次失败的分镜导演；重跑必须复用原 `AgentInputManifest`，且生产配置、模型、Provider、Prompt 与输出 Schema 全部相同。成功只创建待审核 `ShotPlanCandidate`，用户接受后才创建不可变 `PlanVersion`。
 
-分镜候选的人工修订界面采用单镜头工作区：镜头导航显示编号、动作摘要、镜头类型、时长和修改状态，支持搜索以及“全部 / 已修改”筛选；编辑区只渲染当前镜头，提供上一个、下一个和重置当前镜头。桌面端左右两栏保持同一固定高度，镜头列表与右侧表单分别独立滚动，镜头数量不得撑高工作区或被底部操作栏截断。切换、搜索、筛选和重置只作用于前端内存草稿，提交时仍由原合同计算逐镜头 Patch 并一次创建下一版候选。页面不自动保存、不调用分镜导演，也不改变旧候选。
+分镜候选的人工修订界面采用单镜头工作区：镜头导航显示编号、动作摘要、镜头类型、时长和修改状态，支持搜索以及“全部 / 已修改”筛选；编辑区只渲染当前镜头，提供上一个、下一个和重置当前镜头。桌面端左右两栏保持同一固定高度，镜头列表与右侧表单分别独立滚动，镜头数量不得撑高工作区或被底部操作栏截断。镜头导航按钮与“选择用于 AI 调整”的复选框是并列的独立交互控件，点击选择框不切换当前编辑镜头。切换、搜索、筛选和重置只作用于前端内存草稿，提交时仍由原合同计算逐镜头 Patch 并一次创建下一版候选。页面不自动保存、不调用分镜导演，也不改变旧候选。
 
 用户拒绝分镜后，页面必须继续显示被拒绝版本及其拒绝状态，不能退化为一个实际不可执行的“再次生成”按钮。最近被拒绝且未被替代的候选是合法修订源；用户点击具体镜头并提交结构化 Patch 后，系统创建新候选、将旧版本标记为 `superseded`，并通过正式状态转移回到 `plan_review`。拒绝后的修订不调用模型、不自动修改镜头，也不把分镜拒绝解释为内容方案或需求被拒绝。
 
@@ -1142,7 +1148,7 @@ RequirementDiff
 
 - 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v15`（已完成）
 - 内容策划 `content-planner-input.v2 / creative-brief-candidate.v3 / content-planner-prompt.v5`，含可追溯策划拓展、待确认事实、Brief 不可变修订链与结构化确认项（已完成）
-- 分镜导演 `director-input.v1 / shot-plan.v2`
+- 分镜导演 `director-input.v2 / shot-plan.v3 / director-prompt.v3`（已完成）
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成
 

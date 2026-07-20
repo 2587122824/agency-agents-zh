@@ -110,6 +110,9 @@ export const api = {
   reviseShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, rowVersion: number, patches: Array<{ target_shot_code: string; changes: Partial<ShotContract> }>) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:revise`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, expected_candidate_row_version: rowVersion, patches }),
   }),
+  reviseShotPlanWithDirector: (projectId: string, candidateId: string, requirementVersionId: string, rowVersion: number, selectedShotCodes: string[], instruction: string) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:revise-with-director`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, expected_candidate_row_version: rowVersion, selected_shot_codes: selectedShotCodes, revision_instruction: instruction, confirm_model_cost: true }),
+  }),
   decideShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, rowVersion: number, accept: boolean) => request<PlanVersion | ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:${accept ? 'accept' : 'reject'}`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, expected_candidate_row_version: rowVersion, reason: accept ? undefined : '用户拒绝当前分镜方案' }),
   }),

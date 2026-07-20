@@ -25,8 +25,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 分支 | `main` |
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
-| 数据库迁移 | `20260719_25 (head)` |
-| 已发布配置 | `production_config_617ee91b8d2c4270b58c20d4ad2a1501`，版本 32 |
+| 数据库迁移 | `20260720_26 (head)` |
+| 已发布配置 | `production_config_471198eec6bf4181a535a409cc4d4137`，版本 33 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -51,7 +51,7 @@ v2/runtime/worker.err.log
 - React + TypeScript + Vite 管理台，FastAPI 后端，SQLAlchemy/SQLite/Alembic。
 - Repository 边界、项目状态转移器、持久化事件、SSE 和 Transactional Outbox。
 - 对话、助手回复、需求候选、需求版本、Decision、附件绑定和智能体运行审计。
-- Creative Brief、`shot-plan.v2`、结构化分镜修订、人物/服装/场景/产品和主参考图合同。
+- Creative Brief、`shot-plan.v3`、脚本覆盖、结构化分镜修订、人物/服装/场景/产品、主参考图与生产能力要求合同。
 - 系统配置版本、Provider/模型/工作流/视频/音频/存储/价格组件。
 - ProductionSnapshot、DAG、费用影响、锁定、激活、提交和持久化 WorkItem。
 - RunningHub 图片与首帧视频 Adapter 的严格合同和假传输测试。
@@ -111,15 +111,18 @@ v2/runtime/worker.err.log
 - 成功方案不能使用失败重跑命令；已拒绝方案可在同一需求版本下明确微调，基础需求变化时才需要再次确认新的需求版本。
 - 成功只创建待审核 Creative Brief；用户接受后才能交给分镜导演。
 
-分镜导演运行代码使用 `director-input.v1 / shot-plan.v2 / director-prompt.v2`：
+分镜导演运行代码使用 `director-input.v2 / shot-plan.v3 / director-prompt.v3`：
 
 - 使用独立 `director` 模型分工，只读取已确认需求、已接受 Brief、决策、实体与附件事实、交付约束和音频策略。
-- 镜头必须精确引用内容节拍，`action_count=1`；连续组的场景、人物和服装 ID 必须完全一致。
-- 人脸可见性按画面事实明确区分：面部、表情、身份、年龄状态或面貌对比是叙事必需时为 `required`，人物存在但人脸非必要时为 `optional`，只有构图明确排除全部人脸时才为 `not_visible`；未绑定人物或不确定不能作为 `not_visible` 的默认理由。模型返回前逐镜头核对动作、构图、画面描述、实体引用和生成约束，后端不按关键词自动修正。
+- 镜头必须精确引用内容节拍与脚本段，全部脚本段必须被覆盖；`action_count=1`。
+- 景别、机位、镜头运动、主体运动、镜头目的和连续关系均为结构化枚举；场景或服装变化必须显式声明。
+- `face_visibility=required` 必须列出确切人物实体；必需画面文字必须给出精确文本；每镜头记录 `new_information`。
+- 导演只声明参考图、多帧、身份一致性和精确文字能力要求；生产准备按用户选中的工作流确定性比对，不自动换路由。
 - 音频关闭时只允许 `off` 或 `lip_motion_only`，不建立任何音频生产依赖。
 - 每个需求版本只自动尝试一次；失败不修复、不自动重试、不换模型，用户确认费用后可精确重跑原输入清单。
 - 成功只创建待审核分镜候选；用户确认后才创建不可变方案版本。
 - 拒绝分镜后保留最近被拒绝且未被替代的候选供查看，下一步为逐镜头结构化调整；提交 Patch 后创建新待审候选并由 `planning` 返回 `plan_review`。该路径不调用模型、不产生费用，也不自动修改镜头。
+- 选中镜头 AI 修订是独立命令，冻结来源候选、选中编号和意见；未选镜头必须完全一致，失败保留来源候选并支持原清单精确重跑。
 
 真实网关验收使用配置 v20 的 `DeepSeek V4 Flash Shot Director` 和冻结合法 Manifest 完成：Provider 请求 `7f03dd11-a9b5-4cad-b0a1-e9ab38a2f217` 返回 5 个镜头，总时长 `30000ms`，精确覆盖 `BEAT_01` 至 `BEAT_03`，全部 `action_count=1` 且静音要求为 `off`。第一次验收因模型使用自定义枚举描述被严格拒绝；Prompt 随后补充完整 JSON 形状与允许枚举，再次调用通过。系统没有映射或修复第一次输出。
 
@@ -164,6 +167,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-20 | 分镜导演升级 `director-input.v2 / shot-plan.v3 / director-prompt.v3`：增加脚本段全覆盖、结构化镜头语言、精确人脸/文字、显式连续变化、`new_information` 和生产能力声明；方案页增加覆盖视图、v3 编辑器和用户授权的选中镜头 AI 修订。修订模式占满方案工作区，镜头导航与 AI 选择框保持独立控件，桌面和移动端均保持有界滚动。生产准备只对照用户选择的工作流能力并按镜头阻断，不自动替换。迁移 `20260720_26`、配置 v33 已发布；无关键词特判、输出修复、自动重试或路由切换 |
 | 2026-07-20 | 修复相同制作计划可重复保存：影响分析新增候选快照合同哈希，后端按项目 ID 与完整 `production-snapshot.v2` 合同哈希拒绝重复快照并返回 `PRODUCTION_SNAPSHOT_DUPLICATE`；方案页匹配历史快照后显示已有制作方案编号并移除重复保存按钮。制作计划仍可重复计算，不自动复用、覆盖、合并或删除历史快照 |
 | 2026-07-20 | 修复制作准备页仍平铺全部历史发布配置：后端 `production-preparation` 投影只返回按发布时间与稳定 ID 次序确定的当前发布配置，前端下拉框因此只显示 v30；历史配置不删除，旧快照、影响分析和审计仍按冻结 ID 精确读取 |
 | 2026-07-20 | 修复拒绝分镜后的流程死路：规划投影明确返回 `REVISE_REJECTED_SHOT_PLAN`，页面保留被拒绝分镜并提供“调整具体分镜”；被拒绝且未替代的候选可通过原逐镜头 Patch 合同创建新待审版本，项目显式从 `planning` 返回 `plan_review`，不重跑模型、不产生费用、不自动改写镜头 |
@@ -206,11 +210,11 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`187 passed`
+- 后端测试：`196 passed`
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
-- Alembic runtime/head：`20260719_25`
+- Alembic runtime/head：`20260720_26`
 - 素材审核页桌面与 375px 浏览器验收：通过，无横向溢出；空状态和普通用户可读步骤文案正常
 - 真实 DeepSeek 内容方案首次生成、同需求版本微调与拒绝后返回创作中心：通过
 - 真实 DeepSeek 首次引导与点击后持续引导：通过

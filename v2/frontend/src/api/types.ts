@@ -402,22 +402,36 @@ export interface ShotContract {
   sequence_number: number
   duration_ms: number
   narrative_beat_code: string | null
+  brief_segment_codes: string[]
   continuity_group_id: string | null
+  continuity_relation: 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
   action_count: 1
-  shot_type: string
+  shot_purpose: 'establish' | 'develop' | 'demonstrate' | 'contrast' | 'transition' | 'resolve'
+  framing: 'extreme_close_up' | 'close_up' | 'medium' | 'full' | 'wide'
+  camera_angle: 'eye_level' | 'high' | 'low' | 'top_down' | 'over_shoulder'
+  camera_motion: 'locked' | 'pan' | 'tilt' | 'dolly' | 'tracking' | 'handheld'
+  subject_motion: 'none' | 'subtle' | 'moderate' | 'significant'
   scene_entity_version_id: string | null
   character_entity_version_ids: string[]
   outfit_entity_version_ids: string[]
   product_entity_version_ids: string[]
   primary_reference_entity_version_id: string | null
   face_visibility: string
+  face_subject_entity_version_ids: string[]
   text_policy: string
-  motion_requirement: string
+  required_on_screen_text: string | null
   audio_requirement: 'off' | 'lip_motion_only' | 'configured'
   composition: string
   action: string
   visual_prompt: string | null
   negative_prompt: string | null
+  new_information: string
+  generation_requirements: {
+    reference_image_required: boolean
+    multi_frame_required: boolean
+    identity_consistency_required: boolean
+    precise_text_required: boolean
+  }
 }
 
 export interface ShotPlanCandidate {
@@ -427,7 +441,7 @@ export interface ShotPlanCandidate {
   agent_run_id: string | null
   supersedes_candidate_id: string | null
   revision_number: number
-  source: 'director_agent' | 'user_revision'
+  source: 'director_agent' | 'director_revision' | 'user_revision'
   status: string
   shots: ShotContract[]
   validation_errors: Array<Record<string, unknown>>
@@ -717,10 +731,10 @@ export interface ContactSheetEntry {
     shot_code: string
     sequence_number: number
     duration_ms: number
-    shot_type: string
+    shot_purpose: string
     face_visibility: string
     text_policy: string
-    motion_requirement: string
+    subject_motion: string
     composition: string
     action: string
     visual_prompt: string | null

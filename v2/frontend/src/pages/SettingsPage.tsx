@@ -31,7 +31,7 @@ const valueSourceOptions = [
   { value: 'shot.composition', label: '镜头构图' },
   { value: 'shot.duration_ms', label: '镜头时长' },
   { value: 'shot.face_visibility', label: '人物露脸要求' },
-  { value: 'shot.motion_requirement', label: '画面运动要求' },
+  { value: 'shot.subject_motion', label: '主体运动幅度' },
   { value: 'shot.text_policy', label: '画面文字策略' },
   { value: 'duration_ms', label: '生成时长' },
   { value: 'video_spec.width', label: '画面宽度' },

@@ -31,6 +31,11 @@ const issueMessages: Record<string, string> = {
   RUNNINGHUB_VISUAL_PROMPT_BINDING_REQUIRED: '图片生成方案没有绑定“画面生成描述”，请修订系统配置。',
   REQUIRED_NEGATIVE_PROMPT_MISSING: '图片生成方案要求填写避免内容，但有镜头尚未设置。',
   REQUIRED_PRIMARY_REFERENCE_MISSING: '图片生成方案要求主参考图，但有镜头尚未明确选择。',
+  REFERENCE_IMAGE_CAPABILITY_MISSING: '所选图片生成方案不支持明确传入参考图。',
+  REQUIRED_REFERENCE_IMAGE_MISSING: '有镜头声明必须使用参考图，但尚未绑定可用主参考图。',
+  MULTI_FRAME_CAPABILITY_MISSING: '有镜头需要多帧输入，但所选视频生成方案未声明该能力。',
+  IDENTITY_CONSISTENCY_CAPABILITY_MISSING: '有镜头需要人物身份一致性，但当前参考图或图片生成方案不满足要求。',
+  PRECISE_TEXT_CAPABILITY_MISSING: '有镜头要求精确画面文字，但所选图片生成方案未声明该能力。',
   PRIMARY_REFERENCE_ATTACHMENT_INVALID: '所选主参考图不可用，请检查实体来源附件。',
   REFERENCE_IMAGE_HASH_MISMATCH: '主参考图文件与登记内容不一致，请重新上传并确认。',
   PRICING_NOT_EFFECTIVE: '所选计费方案尚未生效。',
@@ -149,7 +154,11 @@ function BriefQuestionResolver({
 }
 
 function ShotTable({ shots, locked }: { shots: ShotContract[]; locked: boolean }) {
-  return <div className={styles.shotTableWrap}><div className={styles.tableTitle}><div><Clapperboard size={17} /><h3>分镜合同</h3></div><span>{shots.length} 个镜头 · {(shots.reduce((sum, shot) => sum + shot.duration_ms, 0) / 1000).toFixed(1)} 秒</span></div><div className={styles.tableScroll}><table><thead><tr><th>镜头</th><th>画面生成描述</th><th>实体与主参考</th><th>约束</th><th>时长</th><th>状态</th></tr></thead><tbody>{shots.map(shot => <tr key={shot.shot_code}><td><strong>{shot.shot_code}</strong><small>{shot.narrative_beat_code ?? '历史镜头'} · {shot.shot_type}</small></td><td><strong>{shot.visual_prompt ?? '缺少画面生成描述'}</strong><small>{shot.negative_prompt ? `避免：${shot.negative_prompt}` : '避免内容未设置'} · {shot.composition}</small></td><td><span>{shot.character_entity_version_ids.length ? shot.character_entity_version_ids.join(', ') : '人物未绑定'}</span><small>{shot.primary_reference_entity_version_id ? `主参考 ${shot.primary_reference_entity_version_id}` : '无主参考图'} · {shot.continuity_group_id ?? '非连续组'}</small></td><td><span>人脸 {shot.face_visibility}</span><small>文字 {shot.text_policy} · 动态 {shot.motion_requirement} · 声音 {shot.audio_requirement}</small></td><td>{(shot.duration_ms / 1000).toFixed(1)}s</td><td><em data-locked={locked}>{locked ? '已锁定' : '待确认'}</em></td></tr>)}</tbody></table></div></div>
+  return <div className={styles.shotTableWrap}><div className={styles.tableTitle}><div><Clapperboard size={17} /><h3>分镜合同</h3></div><span>{shots.length} 个镜头 · {(shots.reduce((sum, shot) => sum + shot.duration_ms, 0) / 1000).toFixed(1)} 秒</span></div><div className={styles.tableScroll}><table><thead><tr><th>镜头</th><th>画面生成描述</th><th>实体与主参考</th><th>约束</th><th>时长</th><th>状态</th></tr></thead><tbody>{shots.map(shot => <tr key={shot.shot_code}><td><strong>{shot.shot_code}</strong><small>{shot.narrative_beat_code ?? '未绑定节拍'} · {shot.shot_purpose} · {shot.framing}</small></td><td><strong>{shot.visual_prompt ?? '缺少画面生成描述'}</strong><small>{shot.new_information} · {shot.composition}</small></td><td><span>{shot.character_entity_version_ids.length ? shot.character_entity_version_ids.join(', ') : '人物未绑定'}</span><small>{shot.primary_reference_entity_version_id ? `主参考 ${shot.primary_reference_entity_version_id}` : '无主参考图'} · {shot.continuity_relation}</small></td><td><span>人脸 {shot.face_visibility}</span><small>文字 {shot.text_policy} · 主体运动 {shot.subject_motion} · 声音 {shot.audio_requirement}</small></td><td>{(shot.duration_ms / 1000).toFixed(1)}s</td><td><em data-locked={locked}>{locked ? '已锁定' : '待确认'}</em></td></tr>)}</tbody></table></div></div>
+}
+
+function CoverageView({ brief, shots }: { brief: CreativeBriefCandidate['brief']; shots: ShotContract[] }) {
+  return <section className={styles.coverage}><header><div><span>内容覆盖</span><h3>节拍 → 脚本段 → 镜头</h3></div><b>{brief.script_segments.filter(segment => !shots.some(shot => shot.brief_segment_codes.includes(segment.segment_code))).length} 个缺口</b></header>{brief.narrative_beats.map(beat => { const segments = brief.script_segments.filter(segment => segment.beat_code === beat.beat_code); const beatShots = shots.filter(shot => shot.narrative_beat_code === beat.beat_code); return <article key={beat.beat_code}><div className={styles.coverageBeat}><strong>{beat.beat_code} · {beat.purpose}</strong><span>{beat.summary}</span><time>{(beat.target_duration_ms / 1000).toFixed(1)} 秒</time></div><div className={styles.coverageSegments}>{segments.map(segment => { const linked = beatShots.filter(shot => shot.brief_segment_codes.includes(segment.segment_code)); return <div key={segment.segment_code} data-gap={!linked.length}><p><b>{segment.segment_code}</b><span>{segment.spoken_text || segment.on_screen_text || scriptKindLabel(segment.kind)}</span></p><p>{linked.length ? linked.map(shot => <em key={shot.shot_code}>{shot.shot_code} · {shot.new_information}</em>) : <strong>尚无镜头覆盖</strong>}</p></div> })}</div></article>})}</section>
 }
 
 export function PlanPage() {
@@ -188,6 +197,11 @@ export function PlanPage() {
     if (!candidate) throw new Error('没有可调整的分镜方案，请刷新页面后重试。')
     return api.reviseShotPlan(projectId, candidate.id, planning.data!.active_requirement.id, candidate.row_version, patches)
   }, onSuccess: async () => { setEditingShots(false); await refresh() } })
+  const reviseShotsWithDirector = useMutation({ mutationFn: ({ selected, instruction }: { selected: string[]; instruction: string }) => {
+    const candidate = revisableShotCandidate()
+    if (!candidate) throw new Error('没有可调整的分镜方案，请刷新页面后重试。')
+    return api.reviseShotPlanWithDirector(projectId, candidate.id, planning.data!.active_requirement.id, candidate.row_version, selected, instruction)
+  }, onSuccess: async () => { setEditingShots(false); await refresh() } })
   const decideShots = useMutation({ mutationFn: (accept: boolean) => api.decideShotPlan(projectId, planning.data!.current_shot_candidate!.id, planning.data!.active_requirement.id, planning.data!.current_shot_candidate!.row_version, accept), onSuccess: refresh })
   const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, { plan_version_id: planning.data!.active_plan!.id, production_config_version_id: configId, video_spec_version_id: videoSpecId, keyframe_workflow_slot_version_id: keyframeSlotId, video_workflow_slot_version_id: videoSlotId, tts_workflow_slot_version_id: ttsSlotId || null, pricing_catalog_version_id: pricingCatalogId || null }) })
   const createSnapshot = useMutation({ mutationFn: () => api.createProductionSnapshot(projectId, analyzeImpact.data!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
@@ -208,7 +222,7 @@ export function PlanPage() {
   const rejectedShot = data.shot_plan_history.find(item => item.requirement_version_id === data.active_requirement.id && item.status === 'rejected') ?? null
   const editableShot = data.current_shot_candidate ?? rejectedShot
   const shots = data.active_plan?.shots ?? editableShot?.shots ?? []
-  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || reviseShots.error || decideShots.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
+  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
   const selectedConfig = preparation.data?.published_configurations.find(item => item.id === configId)
   const keyframeSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'image_generation') ?? []
   const videoSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'video_generation') ?? []
@@ -230,7 +244,7 @@ export function PlanPage() {
   return <>
     <PageHeader eyebrow="PLAN REVIEW" title={`${project.data.title} · 方案确认`} description="内容策划智能体与分镜导演智能体只提交候选，用户确认后才创建不可变方案版本。" actions={<Link className="secondaryButton" to={`/projects/${projectId}`}><ArrowLeft size={15} />返回创作中心</Link>} />
     <div className={styles.versionBar}><span><GitBranch size={15} />需求 v{data.active_requirement.version_number}</span><i></i><span data-active={Boolean(brief)}><Sparkles size={15} />{brief ? '内容方案' : '内容方案待生成'}</span><i></i><span data-active={Boolean(data.active_plan)}><LockKeyhole size={15} />{data.active_plan ? `创作方案 v${data.active_plan.version_number}` : '创作方案尚未创建'}</span><b>{nextActionLabel}</b></div>
-    <main className={styles.layout}>
+    <main className={styles.layout} data-editing-shots={editingShots}>
       <section className={styles.main}>
         <div className={styles.briefPanel}>
           <div className={styles.panelHeading}><div><Layers3 size={18} /><span><small>CREATIVE BRIEF</small><h2>{brief ? '内容方案候选' : '基于已确认需求生成方案'}</h2></span></div>{brief && <em data-accepted={brief.status === 'accepted'}>{brief.status === 'accepted' ? '已接受' : '尚未生效'}</em>}</div>
@@ -241,8 +255,9 @@ export function PlanPage() {
           {data.current_brief_candidate && <div className={styles.reviewBar}><p><strong>内容方案 v{data.current_brief_candidate.revision_number} 尚未生效</strong><span>{hasOpenBriefQuestions ? '请先完成上方待确认项，再接受方案。' : '可以微调方案；接受后分镜导演才能读取。修改基础需求会放弃当前方案。'}</span></p><button className="secondaryButton" onClick={() => setEditingBrief(value => !value)} disabled={reviseBrief.isPending}><Pencil size={14} />{editingBrief ? '收起调整' : '调整方案'}</button><button className="secondaryButton" onClick={() => reviseRequirement.mutate(data.current_brief_candidate!.id)} disabled={reviseRequirement.isPending}>修改创作需求</button><button className="secondaryButton" onClick={() => decideBrief.mutate(false)} disabled={decideBrief.isPending}><X size={14} />放弃方案</button><button className="primaryButton" onClick={() => decideBrief.mutate(true)} disabled={decideBrief.isPending || hasOpenBriefQuestions}><Check size={14} />接受方案</button></div>}
         </div>
         {shots.length ? <>
+          {brief && <CoverageView brief={brief.brief} shots={shots} />}
           <ShotTable shots={shots} locked={Boolean(data.active_plan)} />
-          {editableShot && editingShots && <ShotPlanRevisionEditor projectId={projectId} candidate={editableShot} entities={data.entity_versions} saving={reviseShots.isPending} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} />}
+          {editableShot && editingShots && <ShotPlanRevisionEditor projectId={projectId} candidate={editableShot} entities={data.entity_versions} scriptSegments={brief?.brief.script_segments ?? []} saving={reviseShots.isPending} aiSaving={reviseShotsWithDirector.isPending} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} onAIRevision={(selected, instruction) => reviseShotsWithDirector.mutate({ selected, instruction })} />}
           {data.current_shot_candidate && <div className={styles.reviewBar}><p><strong>分镜候选 v{data.current_shot_candidate.revision_number} 尚未生效</strong><span>确认后创建不可变 plan_v{data.plan_history.length + 1}。</span></p><button className="secondaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起编辑' : '结构化修订'}</button><button className="secondaryButton" onClick={() => decideShots.mutate(false)} disabled={decideShots.isPending || editingShots}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideShots.mutate(true)} disabled={decideShots.isPending || editingShots}><Check size={14} />确认分镜合同</button></div>}
           {rejectedShot && <div className={styles.reviewBar}><p><strong>分镜方案已拒绝</strong><span>原方案仍保留供查看。选择具体镜头调整后会创建新的待确认版本，不会再次调用模型。</span></p><button className="primaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起调整' : '调整具体分镜'}</button></div>}
         </> : data.accepted_brief_candidate && <div className={styles.generateShots}><Clapperboard size={22} /><div><strong>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? '本次分镜生成失败' : '内容方案已接受'}</strong><span>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? `${data.latest_director_run?.error_detail || '模型没有返回符合分镜合同的结果。'} 系统没有自动重试，也没有更换模型。` : '分镜导演将生成结构化分镜候选，不选择服务供应商或工作流。'}</span></div>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? <button className="primaryButton" onClick={() => retryShots.mutate()} disabled={retryShots.isPending}>{retryShots.isPending ? '正在重跑…' : '确认模型调用并重跑'}</button> : data.next_action.code === 'WAIT_FOR_SHOT_PLAN' ? <button className="primaryButton" disabled>正在生成…</button> : <button className="primaryButton" onClick={() => generateShots.mutate()} disabled={generateShots.isPending}>{generateShots.isPending ? '正在生成…' : '生成分镜候选'}</button>}</div>}

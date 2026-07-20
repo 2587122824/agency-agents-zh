@@ -52,32 +52,41 @@ class ShotContractPatch(BaseModel):
     sequence_number: int | None = Field(default=None, ge=1)
     duration_ms: int | None = Field(default=None, gt=0)
     narrative_beat_code: str | None = Field(default=None, pattern=r"^BEAT_[0-9]{2,3}$")
+    brief_segment_codes: list[str] | None = None
     continuity_group_id: str | None = Field(default=None, pattern=r"^CONT-[0-9]{3}$")
+    continuity_relation: Literal["same_moment", "time_jump", "location_change", "outfit_change"] | None = None
     action_count: Literal[1] | None = None
-    shot_type: str | None = Field(default=None, min_length=1, max_length=40)
+    shot_purpose: Literal["establish", "develop", "demonstrate", "contrast", "transition", "resolve"] | None = None
+    framing: Literal["extreme_close_up", "close_up", "medium", "full", "wide"] | None = None
+    camera_angle: Literal["eye_level", "high", "low", "top_down", "over_shoulder"] | None = None
+    camera_motion: Literal["locked", "pan", "tilt", "dolly", "tracking", "handheld"] | None = None
+    subject_motion: Literal["none", "subtle", "moderate", "significant"] | None = None
     scene_entity_version_id: str | None = Field(default=None, max_length=48)
     character_entity_version_ids: list[str] | None = None
     outfit_entity_version_ids: list[str] | None = None
     product_entity_version_ids: list[str] | None = None
     primary_reference_entity_version_id: str | None = Field(default=None, max_length=48)
     face_visibility: Literal["required", "optional", "not_visible"] | None = None
+    face_subject_entity_version_ids: list[str] | None = None
     text_policy: Literal["forbidden", "allowed", "required"] | None = None
-    motion_requirement: Literal["static", "moderate", "significant"] | None = None
+    required_on_screen_text: str | None = Field(default=None, min_length=1, max_length=1000)
     audio_requirement: Literal["off", "lip_motion_only", "configured"] | None = None
     composition: str | None = Field(default=None, min_length=1, max_length=500)
     action: str | None = Field(default=None, min_length=1, max_length=1000)
     visual_prompt: str | None = Field(default=None, min_length=1, max_length=4000)
     negative_prompt: str | None = Field(default=None, min_length=1, max_length=2000)
+    new_information: str | None = Field(default=None, min_length=1, max_length=1000)
+    generation_requirements: dict[str, bool] | None = None
 
     @model_validator(mode="after")
     def validate_patch(self):
         if not self.model_fields_set:
             raise ValueError("at least one structured shot field is required")
-        nullable = {"scene_entity_version_id", "primary_reference_entity_version_id", "negative_prompt", "continuity_group_id"}
+        nullable = {"scene_entity_version_id", "primary_reference_entity_version_id", "negative_prompt", "continuity_group_id", "required_on_screen_text"}
         invalid_nulls = [field for field in self.model_fields_set if field not in nullable and getattr(self, field) is None]
         if invalid_nulls:
             raise ValueError(f"fields cannot be null: {', '.join(sorted(invalid_nulls))}")
-        for field in ("character_entity_version_ids", "outfit_entity_version_ids", "product_entity_version_ids"):
+        for field in ("brief_segment_codes", "character_entity_version_ids", "outfit_entity_version_ids", "product_entity_version_ids", "face_subject_entity_version_ids"):
             values = getattr(self, field)
             if values is not None and (len(values) != len(set(values)) or any(not value for value in values)):
                 raise ValueError(f"{field} must contain unique non-empty IDs")
@@ -95,6 +104,21 @@ class ReviseShotPlan(CommandContext):
     expected_requirement_version_id: str
     expected_candidate_row_version: int = Field(ge=1)
     patches: list[ShotRevision] = Field(min_length=1, max_length=200)
+
+
+class ReviseShotPlanWithDirector(CommandContext):
+    model_config = ConfigDict(extra="forbid")
+    expected_requirement_version_id: str
+    expected_candidate_row_version: int = Field(ge=1)
+    selected_shot_codes: list[str] = Field(min_length=1, max_length=200)
+    revision_instruction: str = Field(min_length=1, max_length=4000)
+    confirm_model_cost: bool
+
+    @model_validator(mode="after")
+    def selected_shots_are_unique(self):
+        if len(self.selected_shot_codes) != len(set(self.selected_shot_codes)):
+            raise ValueError("selected shot codes must be unique")
+        return self
 
 
 class CreativeBriefCandidateRead(BaseModel):
@@ -119,22 +143,31 @@ class ShotContract(BaseModel):
     sequence_number: int
     duration_ms: int
     narrative_beat_code: str | None = None
+    brief_segment_codes: list[str]
     continuity_group_id: str | None = None
+    continuity_relation: str
     action_count: int = 1
-    shot_type: str
+    shot_purpose: str
+    framing: str
+    camera_angle: str
+    camera_motion: str
+    subject_motion: str
     scene_entity_version_id: str | None
     character_entity_version_ids: list[str]
     outfit_entity_version_ids: list[str]
     product_entity_version_ids: list[str] = Field(default_factory=list)
     primary_reference_entity_version_id: str | None = None
     face_visibility: str
+    face_subject_entity_version_ids: list[str]
     text_policy: str
-    motion_requirement: str
+    required_on_screen_text: str | None
     audio_requirement: str = "off"
     composition: str
     action: str
     visual_prompt: str | None = None
     negative_prompt: str | None = None
+    new_information: str
+    generation_requirements: dict[str, bool]
 
 
 class ShotPlanCandidateRead(BaseModel):

@@ -493,7 +493,7 @@ def test_failed_creative_turn_requires_explicit_confirmed_retry(client: TestClie
             "confirm_model_cost": True,
         },
     )
-    assert retried.status_code == 201
+    assert retried.status_code == 201, retried.text
     assert retried.json()["status"] == "awaiting_review"
     retried_view = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()
     assert retried_view["latest_agent_run"]["status"] == "succeeded"
@@ -1527,6 +1527,50 @@ def test_creative_brief_revision_preserves_requirement_and_supersedes_only_after
     assert history[candidate["id"]]["status"] == "awaiting_review"
 
 
+def test_selected_shot_director_revision_is_explicit_and_preserves_source_on_failure(client: TestClient) -> None:
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "ai-revision-brief-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "ai-revision-brief-accept", "expected_requirement_version_id": requirement_id},
+    )
+    original = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={"command_id": "ai-revision-shots-generate", "expected_requirement_version_id": requirement_id, "creative_brief_candidate_id": brief["id"]},
+    ).json()
+
+    class FailingRevisionGateway(DeterministicDirectorGateway):
+        def invoke(self, selection, manifest_payload):
+            if "revision_request" in manifest_payload:
+                raise AgentGatewayError("DIRECTOR_REVISION_TEST_FAILURE", "模拟选中镜头调整失败。")
+            return super().invoke(selection, manifest_payload)
+
+    app.dependency_overrides[get_director_gateway] = lambda: FailingRevisionGateway()
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:revise-with-director",
+        json={"command_id": "ai-revision-fail", "expected_requirement_version_id": requirement_id, "expected_candidate_row_version": original["row_version"], "selected_shot_codes": ["SH-001"], "revision_instruction": "只调整开场构图", "confirm_model_cost": True},
+    )
+    assert failed.status_code == 502
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["current_shot_candidate"]["id"] == original["id"]
+    failed_run_id = planning["latest_director_run"]["id"]
+
+    app.dependency_overrides[get_director_gateway] = lambda: DeterministicDirectorGateway()
+    retried = client.post(
+        f"/api/v1/projects/{project['id']}/director-runs/{failed_run_id}:retry",
+        json={"command_id": "ai-revision-retry", "expected_requirement_version_id": requirement_id, "failed_agent_run_id": failed_run_id, "confirm_model_cost": True},
+    )
+    assert retried.status_code == 201, retried.text
+    revised = retried.json()
+    assert revised["source"] == "director_revision"
+    assert revised["supersedes_candidate_id"] == original["id"]
+    assert revised["shots"] == original["shots"]
+
+
 def test_failed_brief_revision_keeps_original_and_retries_exact_manifest(client: TestClient) -> None:
     class FailRevisionOnceGateway(DeterministicContentPlannerGateway):
         def __init__(self) -> None:
@@ -1842,7 +1886,7 @@ def test_shot_plan_revision_creates_a_new_reviewable_candidate(client: TestClien
         "expected_candidate_row_version": original["row_version"],
         "patches": [{
             "target_shot_code": "SH-002",
-            "changes": {"action": "展示训练动作细节", "motion_requirement": "moderate"},
+            "changes": {"action": "展示训练动作细节", "subject_motion": "moderate"},
         }],
     }
     response = client.post(
@@ -1938,7 +1982,7 @@ def test_rejected_shot_plan_can_be_revised_without_rerunning_director(client: Te
             "expected_candidate_row_version": rejected.json()["row_version"],
             "patches": [{
                 "target_shot_code": "SH-001",
-                "changes": {"face_visibility": "required"},
+                "changes": {"action": "调整后的开场动作"},
             }],
         },
     )

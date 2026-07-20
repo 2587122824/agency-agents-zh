@@ -138,19 +138,29 @@ def _shot_contract(shot: Shot) -> dict:
         "shot_code": shot.shot_code,
         "sequence_number": shot.sequence_number,
         "duration_ms": shot.duration_ms,
-        "shot_type": shot.shot_type,
+        "narrative_beat_code": shot.narrative_beat_code,
+        "brief_segment_codes": shot.brief_segment_codes,
+        "shot_purpose": shot.shot_purpose,
+        "framing": shot.framing,
+        "camera_angle": shot.camera_angle,
+        "camera_motion": shot.camera_motion,
+        "subject_motion": shot.subject_motion,
+        "continuity_relation": shot.continuity_relation,
         "scene_entity_version_id": shot.scene_entity_version_id,
         "character_entity_version_ids": shot.character_entity_version_ids,
         "outfit_entity_version_ids": shot.outfit_entity_version_ids,
         "product_entity_version_ids": shot.product_entity_version_ids,
         "primary_reference_entity_version_id": shot.primary_reference_entity_version_id,
         "face_visibility": shot.face_visibility,
+        "face_subject_entity_version_ids": shot.face_subject_entity_version_ids,
         "text_policy": shot.text_policy,
-        "motion_requirement": shot.motion_requirement,
+        "required_on_screen_text": shot.required_on_screen_text,
         "composition": shot.composition,
         "action": shot.action,
         "visual_prompt": shot.visual_prompt,
         "negative_prompt": shot.negative_prompt,
+        "new_information": shot.new_information,
+        "generation_requirements": shot.generation_requirements,
     }
 
 
@@ -416,6 +426,35 @@ def _validate_runninghub_keyframe_bindings(
                 })
 
 
+def _validate_generation_capabilities(
+    shots: list[Shot],
+    references_by_shot_id: dict[str, dict | None],
+    keyframe_workflow: WorkflowSlotVersion | None,
+    video_workflow: WorkflowSlotVersion | None,
+    errors: list[dict],
+) -> None:
+    keyframe_bindings = list(keyframe_workflow.node_info_list or []) if keyframe_workflow else []
+    keyframe_tags = set(keyframe_workflow.capability_tags or []) if keyframe_workflow else set()
+    video_tags = set(video_workflow.capability_tags or []) if video_workflow else set()
+    supports_reference = any(
+        isinstance(item, dict) and item.get("value_source") == "reference_image.primary"
+        for item in keyframe_bindings
+    )
+    for shot in shots:
+        requirements = shot.generation_requirements or {}
+        path = f"shots.{shot.shot_code}.generation_requirements"
+        if requirements.get("reference_image_required") and not supports_reference:
+            errors.append({"code": "REFERENCE_IMAGE_CAPABILITY_MISSING", "path": path, "shot_code": shot.shot_code, "message": "所选图片生成方案没有显式参考图输入。"})
+        if requirements.get("reference_image_required") and references_by_shot_id.get(shot.id) is None:
+            errors.append({"code": "REQUIRED_REFERENCE_IMAGE_MISSING", "path": path, "shot_code": shot.shot_code, "message": "镜头要求参考图，但没有冻结可用的主参考图。"})
+        if requirements.get("multi_frame_required") and "multi_frame" not in video_tags:
+            errors.append({"code": "MULTI_FRAME_CAPABILITY_MISSING", "path": path, "shot_code": shot.shot_code, "message": "所选视频生成方案未声明多帧输入能力。"})
+        if requirements.get("identity_consistency_required") and (not supports_reference or references_by_shot_id.get(shot.id) is None):
+            errors.append({"code": "IDENTITY_CONSISTENCY_CAPABILITY_MISSING", "path": path, "shot_code": shot.shot_code, "message": "身份一致性要求需要主参考图和支持参考图的图片生成方案。"})
+        if requirements.get("precise_text_required") and "precise_text" not in keyframe_tags:
+            errors.append({"code": "PRECISE_TEXT_CAPABILITY_MISSING", "path": path, "shot_code": shot.shot_code, "message": "所选图片生成方案未声明精确文字能力。"})
+
+
 def analyze_impact(session: Session, project: Project, payload: AnalyzeProductionImpact) -> dict:
     repository = _production(session)
     receipt = _receipt(session, project.id, payload.command_id, "production.impact.analyze")
@@ -431,7 +470,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         raise ProductionNotFoundError("Plan version not found in project")
     if plan.status != "confirmed" or not plan.is_active:
         errors.append({"code": "PLAN_NOT_ACTIVE", "path": "plan_version_id", "message": "只能分析当前已确认方案。"})
-    if plan.contract_schema_version != "shot-plan.v2":
+    if plan.contract_schema_version != "shot-plan.v3":
         errors.append({
             "code": "SHOT_PLAN_SCHEMA_UNSUPPORTED",
             "path": "plan_version_id",
@@ -524,6 +563,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         keyframe_provider,
         errors,
     )
+    _validate_generation_capabilities(shots, references_by_shot_id, keyframe_slot, video_slot, errors)
 
     selection = {
         "video_spec_version_id": payload.video_spec_version_id,

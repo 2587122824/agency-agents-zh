@@ -32,7 +32,7 @@ from ..db.models import (
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from .agent_gateway import ContentPlannerGateway, ContentPlannerSelection
-from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, RetryShotPlan, ReviseBrief, ReviseShotPlan
+from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, RetryShotPlan, ReviseBrief, ReviseShotPlan, ReviseShotPlanWithDirector
 from .director_gateway import DirectorGateway, DirectorSelection
 
 
@@ -136,7 +136,7 @@ def _director_manifest_payload(
             } if attachment else None),
         })
     return {
-        "contract_version": "director-input.v1",
+        "contract_version": "director-input.v2",
         "project_id": project.id,
         "requirement_version": {"id": requirement.id, "fields": fields},
         "accepted_creative_brief": {"id": brief.id, "brief": brief.brief},
@@ -156,11 +156,12 @@ def _execute_director(
     requirement: RequirementVersion,
     brief: CreativeBriefCandidate,
     manifest: AgentInputManifest,
-    payload: GenerateShotPlan | RetryShotPlan,
+    payload: GenerateShotPlan | RetryShotPlan | ReviseShotPlanWithDirector,
     gateway: DirectorGateway,
     selection: DirectorSelection,
     *,
     retry_of_agent_run_id: str | None = None,
+    source_candidate: ShotPlanCandidate | None = None,
 ) -> ShotPlanCandidate:
     repository = _planning(session)
     run = AgentRun(
@@ -235,8 +236,9 @@ def _execute_director(
         requirement_version_id=requirement.id,
         creative_brief_candidate_id=brief.id,
         agent_run_id=run.id,
-        revision_number=1,
-        source="director_agent",
+        supersedes_candidate_id=source_candidate.id if source_candidate else None,
+        revision_number=(source_candidate.revision_number + 1) if source_candidate else 1,
+        source="director_revision" if source_candidate else "director_agent",
         status="awaiting_review",
         shots=shots,
         validation_errors=[],
@@ -244,13 +246,21 @@ def _execute_director(
     )
     repository.add(candidate)
     repository.flush()
+    if source_candidate and not repository.transition_reviewable_shot_plan(
+        source_candidate.id,
+        getattr(payload, "expected_candidate_row_version", source_candidate.row_version),
+        "superseded",
+        utc_now(),
+    ):
+        raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，AI 修订结果没有替换原候选。")
     run.status = "succeeded"
     run.parsed_candidate_id = candidate.id
     run.raw_output = result.raw_output
     run.provider_request_id = result.provider_request_id
     run.token_usage = result.token_usage
     run.finished_at = utc_now()
-    _save_receipt(session, project.id, payload.command_id, "shot_plan.retry" if retry_of_agent_run_id else "shot_plan.generate", "shot_plan_candidate", candidate.id)
+    command_type = "shot_plan.director_revision" if source_candidate else ("shot_plan.retry" if retry_of_agent_run_id else "shot_plan.generate")
+    _save_receipt(session, project.id, payload.command_id, command_type, "shot_plan_candidate", candidate.id)
     _event(session, project.id, "agent.run_succeeded.v1", "分镜导演智能体已返回严格候选", {
         "agent_run_id": run.id,
         "candidate_id": candidate.id,
@@ -260,7 +270,7 @@ def _execute_director(
     transition_project(
         session,
         project,
-        ProjectStateTrigger.SHOT_CANDIDATE_CREATED,
+        ProjectStateTrigger.SHOT_CANDIDATE_REVISED if source_candidate else ProjectStateTrigger.SHOT_CANDIDATE_CREATED,
         actor_type="system",
         actor_id="director-agent",
         event_data={"candidate_id": candidate.id},
@@ -644,6 +654,11 @@ def validate_shots(
         item.get("beat_code"): int(item.get("target_duration_ms", 0))
         for item in ((brief.brief.get("narrative_beats") if brief else None) or [])
     }
+    script_segments = {
+        item.get("segment_code"): item.get("beat_code")
+        for item in ((brief.brief.get("script_segments") if brief else None) or [])
+    }
+    covered_segments: set[str] = set()
     actual_by_beat = {code: 0 for code in beat_durations}
     continuity: dict[str, tuple] = {}
     referenced = set()
@@ -656,6 +671,28 @@ def validate_shots(
             actual_by_beat[beat_code] += int(item.get("duration_ms", 0))
         if item.get("action_count") != 1:
             errors.append({"code": "SHOT_PRIMARY_ACTION_COUNT_INVALID", "shot_code": shot_code})
+        segment_codes = item.get("brief_segment_codes")
+        if not isinstance(segment_codes, list) or not segment_codes or len(segment_codes) != len(set(segment_codes)):
+            errors.append({"code": "SHOT_SEGMENT_REFERENCES_INVALID", "shot_code": shot_code})
+        else:
+            unknown_segments = [code for code in segment_codes if code not in script_segments]
+            wrong_beat_segments = [code for code in segment_codes if code in script_segments and script_segments[code] != beat_code]
+            if unknown_segments:
+                errors.append({"code": "SCRIPT_SEGMENT_REFERENCE_INVALID", "shot_code": shot_code, "segment_codes": unknown_segments})
+            if wrong_beat_segments:
+                errors.append({"code": "SCRIPT_SEGMENT_BEAT_MISMATCH", "shot_code": shot_code, "segment_codes": wrong_beat_segments})
+            covered_segments.update(code for code in segment_codes if code in script_segments)
+        enum_fields = {
+            "shot_purpose": {"establish", "develop", "demonstrate", "contrast", "transition", "resolve"},
+            "framing": {"extreme_close_up", "close_up", "medium", "full", "wide"},
+            "camera_angle": {"eye_level", "high", "low", "top_down", "over_shoulder"},
+            "camera_motion": {"locked", "pan", "tilt", "dolly", "tracking", "handheld"},
+            "subject_motion": {"none", "subtle", "moderate", "significant"},
+            "continuity_relation": {"same_moment", "time_jump", "location_change", "outfit_change"},
+        }
+        for field, allowed in enum_fields.items():
+            if item.get(field) not in allowed:
+                errors.append({"code": "SHOT_STRUCTURED_FIELD_INVALID", "shot_code": shot_code, "field": field})
         audio_requirement = item.get("audio_requirement")
         allowed_audio = {"off", "lip_motion_only"} if requirement.fields.get("audio_mode") == "off" else {"off", "lip_motion_only", "configured"}
         if audio_requirement not in allowed_audio:
@@ -695,10 +732,33 @@ def validate_shots(
             })
         if item.get("face_visibility") not in {"required", "optional", "not_visible"}:
             errors.append({"code": "FACE_VISIBILITY_INVALID", "shot_code": item.get("shot_code")})
+        face_subjects = item.get("face_subject_entity_version_ids")
+        characters = item.get("character_entity_version_ids") or []
+        if not isinstance(face_subjects, list) or len(face_subjects) != len(set(face_subjects)):
+            errors.append({"code": "FACE_SUBJECTS_INVALID", "shot_code": shot_code})
+        elif item.get("face_visibility") == "required" and not face_subjects:
+            errors.append({"code": "FACE_SUBJECT_REQUIRED", "shot_code": shot_code})
+        elif item.get("face_visibility") != "required" and face_subjects:
+            errors.append({"code": "FACE_SUBJECT_NOT_ALLOWED", "shot_code": shot_code})
+        elif set(face_subjects) - set(characters):
+            errors.append({"code": "FACE_SUBJECT_NOT_CHARACTER", "shot_code": shot_code})
         if item.get("text_policy") not in {"forbidden", "allowed", "required"}:
             errors.append({"code": "TEXT_POLICY_INVALID", "shot_code": item.get("shot_code")})
-        if item.get("motion_requirement") not in {"static", "moderate", "significant"}:
-            errors.append({"code": "MOTION_REQUIREMENT_INVALID", "shot_code": item.get("shot_code")})
+        required_text = item.get("required_on_screen_text")
+        if item.get("text_policy") == "required" and (not isinstance(required_text, str) or not required_text.strip()):
+            errors.append({"code": "REQUIRED_ON_SCREEN_TEXT_MISSING", "shot_code": shot_code})
+        if item.get("text_policy") == "forbidden" and required_text is not None:
+            errors.append({"code": "FORBIDDEN_ON_SCREEN_TEXT_PRESENT", "shot_code": shot_code})
+        if not isinstance(item.get("new_information"), str) or not item["new_information"].strip():
+            errors.append({"code": "SHOT_NEW_INFORMATION_REQUIRED", "shot_code": shot_code})
+        requirements = item.get("generation_requirements")
+        requirement_keys = {"reference_image_required", "multi_frame_required", "identity_consistency_required", "precise_text_required"}
+        if not isinstance(requirements, dict) or set(requirements) != requirement_keys or any(type(value) is not bool for value in requirements.values()):
+            errors.append({"code": "GENERATION_REQUIREMENTS_INVALID", "shot_code": shot_code})
+        elif requirements["identity_consistency_required"] and not requirements["reference_image_required"]:
+            errors.append({"code": "IDENTITY_REFERENCE_REQUIREMENT_INVALID", "shot_code": shot_code})
+        elif requirements["precise_text_required"] and item.get("text_policy") != "required":
+            errors.append({"code": "PRECISE_TEXT_REQUIREMENT_INVALID", "shot_code": shot_code})
         continuity_group_id = item.get("continuity_group_id")
         if continuity_group_id is not None:
             signature = (
@@ -712,10 +772,29 @@ def validate_shots(
     for beat_code, target_duration in beat_durations.items():
         if actual_by_beat[beat_code] != target_duration:
             errors.append({"code": "NARRATIVE_BEAT_DURATION_MISMATCH", "narrative_beat_code": beat_code})
+    missing_segments = sorted(set(script_segments) - covered_segments)
+    if missing_segments:
+        errors.append({"code": "SCRIPT_SEGMENT_COVERAGE_MISSING", "segment_codes": missing_segments})
+    previous = None
+    for item in shots:
+        if previous is not None:
+            scene_changed = previous.get("scene_entity_version_id") != item.get("scene_entity_version_id")
+            outfit_changed = (previous.get("outfit_entity_version_ids") or []) != (item.get("outfit_entity_version_ids") or [])
+            if scene_changed and item.get("continuity_relation") != "location_change":
+                errors.append({"code": "SCENE_CHANGE_RELATION_REQUIRED", "shot_code": item.get("shot_code")})
+            elif not scene_changed and outfit_changed and item.get("continuity_relation") != "outfit_change":
+                errors.append({"code": "OUTFIT_CHANGE_RELATION_REQUIRED", "shot_code": item.get("shot_code")})
+        previous = item
     for version_id in referenced:
         version = repository.entity_version(version_id)
         if not version or version.project_id != project_id or version.status != "confirmed":
             errors.append({"code": "ENTITY_VERSION_NOT_FOUND", "entity_version_id": version_id})
+    for item in shots:
+        for version_id in item.get("face_subject_entity_version_ids") or []:
+            version = repository.entity_version(version_id)
+            entity = repository.entity(version.entity_id) if version else None
+            if not entity or entity.entity_type != "character":
+                errors.append({"code": "FACE_SUBJECT_NOT_CHARACTER", "shot_code": item.get("shot_code"), "entity_version_id": version_id})
     for item in shots:
         primary_reference = item.get("primary_reference_entity_version_id")
         if primary_reference is None:
@@ -811,8 +890,6 @@ def retry_failed_shot_plan(
     requirement = active_requirement(session, project.id)
     if not requirement or requirement.id != payload.expected_requirement_version_id:
         raise CreationConflictError("REQUIREMENT_VERSION_CONFLICT", "活动需求版本已变化，不能重跑旧分镜。")
-    if repository.reviewable_shot_plan_for_requirement(project.id, requirement.id):
-        raise CreationConflictError("SHOT_PLAN_ALREADY_EXISTS", "当前需求版本已有待审分镜候选。")
     latest_run = session.scalar(
         select(AgentRun)
         .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
@@ -831,6 +908,15 @@ def retry_failed_shot_plan(
     manifest = session.get(AgentInputManifest, latest_run.input_manifest_id)
     if not manifest or manifest.base_requirement_version_id != requirement.id:
         raise CreationConflictError("DIRECTOR_MANIFEST_MISSING", "失败运行的输入清单不存在或需求版本不一致。")
+    revision_request = manifest.payload.get("revision_request")
+    source_candidate = None
+    if isinstance(revision_request, dict):
+        source_id = revision_request.get("source_candidate_id")
+        source_candidate = repository.shot_plan(source_id) if isinstance(source_id, str) else None
+        if not source_candidate or source_candidate.project_id != project.id or source_candidate.status not in {"awaiting_review", "rejected"}:
+            raise CreationConflictError("DIRECTOR_REVISION_SOURCE_CHANGED", "失败修订绑定的原分镜候选不再可用。")
+    elif repository.reviewable_shot_plan_for_requirement(project.id, requirement.id):
+        raise CreationConflictError("SHOT_PLAN_ALREADY_EXISTS", "当前需求版本已有待审分镜候选。")
     brief_id = manifest.payload.get("accepted_creative_brief", {}).get("id")
     brief = repository.creative_brief(brief_id) if isinstance(brief_id, str) else None
     if not brief or brief.project_id != project.id or brief.requirement_version_id != requirement.id or brief.status != "accepted":
@@ -855,6 +941,7 @@ def retry_failed_shot_plan(
     return _execute_director(
         session, project, requirement, brief, manifest, payload, gateway, selection,
         retry_of_agent_run_id=latest_run.id,
+        source_candidate=source_candidate,
     )
 
 
@@ -936,6 +1023,70 @@ def revise_shot_plan(
     return revised
 
 
+def revise_shot_plan_with_director(
+    session: Session,
+    project: Project,
+    candidate_id: str,
+    payload: ReviseShotPlanWithDirector,
+    gateway: DirectorGateway,
+) -> ShotPlanCandidate:
+    repository = _planning(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, ShotPlanCandidate)
+    if not payload.confirm_model_cost:
+        raise CreationConflictError("MODEL_COST_CONFIRMATION_REQUIRED", "请明确确认本次 AI 调整会调用当前分镜导演模型。")
+    candidate = repository.shot_plan(candidate_id)
+    requirement = active_requirement(session, project.id)
+    if not candidate or candidate.project_id != project.id:
+        raise CreationNotFoundError("Shot plan candidate not found")
+    if not requirement or requirement.id != payload.expected_requirement_version_id or candidate.requirement_version_id != requirement.id:
+        raise CreationConflictError("SHOT_PLAN_BASE_VERSION_STALE", "分镜候选基于旧需求版本，不能由导演调整。")
+    if candidate.status not in {"awaiting_review", "rejected"}:
+        raise CreationConflictError("SHOT_PLAN_NOT_REVISABLE", f"分镜候选状态为 {candidate.status}，不能由导演调整。")
+    if candidate.row_version != payload.expected_candidate_row_version:
+        raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重新提交。")
+    available_codes = {str(item["shot_code"]) for item in candidate.shots}
+    missing = sorted(set(payload.selected_shot_codes) - available_codes)
+    if missing:
+        raise CreationConflictError("SHOT_REVISION_TARGET_NOT_FOUND", f"找不到待调整镜头：{', '.join(missing)}。")
+    brief = repository.creative_brief(candidate.creative_brief_candidate_id)
+    if not brief or brief.status != "accepted":
+        raise CreationConflictError("BRIEF_NOT_ACCEPTED", "关联的内容方案不再是已接受状态。")
+    selection = gateway.select(session)
+    manifest_payload = _director_manifest_payload(session, project, requirement, brief)
+    manifest_payload["system_config_version"] = selection.production_config_version_id
+    manifest_payload["revision_request"] = {
+        "source_candidate_id": candidate.id,
+        "source_shots": candidate.shots,
+        "selected_shot_codes": payload.selected_shot_codes,
+        "revision_instruction": payload.revision_instruction,
+    }
+    serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    manifest = AgentInputManifest(
+        project_id=project.id,
+        base_requirement_version_id=requirement.id,
+        decision_ids=[item["id"] for item in manifest_payload["confirmed_decisions"]],
+        attachment_binding_ids=repository.confirmed_binding_ids(project.id),
+        system_config_version=selection.production_config_version_id,
+        input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        payload=manifest_payload,
+    )
+    repository.add(manifest)
+    repository.flush()
+    return _execute_director(
+        session,
+        project,
+        requirement,
+        brief,
+        manifest,
+        payload,
+        gateway,
+        selection,
+        source_candidate=candidate,
+    )
+
+
 def decide_shot_plan(
     session: Session,
     project: Project,
@@ -1012,7 +1163,7 @@ def decide_shot_plan(
         requirement_version_id=requirement.id,
         shot_plan_candidate_id=candidate.id,
         creative_brief=brief.brief,
-        contract_schema_version="shot-plan.v2",
+        contract_schema_version="shot-plan.v3",
         confirmed_by=payload.actor_id,
     )
     repository.add(plan)
@@ -1043,22 +1194,31 @@ def _shot_dict(shot: Shot) -> dict:
         "sequence_number": shot.sequence_number,
         "duration_ms": shot.duration_ms,
         "narrative_beat_code": shot.narrative_beat_code,
+        "brief_segment_codes": shot.brief_segment_codes,
         "continuity_group_id": shot.continuity_group_id,
+        "continuity_relation": shot.continuity_relation,
         "action_count": shot.action_count,
-        "shot_type": shot.shot_type,
+        "shot_purpose": shot.shot_purpose,
+        "framing": shot.framing,
+        "camera_angle": shot.camera_angle,
+        "camera_motion": shot.camera_motion,
+        "subject_motion": shot.subject_motion,
         "scene_entity_version_id": shot.scene_entity_version_id,
         "character_entity_version_ids": shot.character_entity_version_ids,
         "outfit_entity_version_ids": shot.outfit_entity_version_ids,
         "product_entity_version_ids": shot.product_entity_version_ids,
         "primary_reference_entity_version_id": shot.primary_reference_entity_version_id,
         "face_visibility": shot.face_visibility,
+        "face_subject_entity_version_ids": shot.face_subject_entity_version_ids,
         "text_policy": shot.text_policy,
-        "motion_requirement": shot.motion_requirement,
+        "required_on_screen_text": shot.required_on_screen_text,
         "audio_requirement": shot.audio_requirement,
         "composition": shot.composition,
         "action": shot.action,
         "visual_prompt": shot.visual_prompt,
         "negative_prompt": shot.negative_prompt,
+        "new_information": shot.new_information,
+        "generation_requirements": shot.generation_requirements,
     }
 
 

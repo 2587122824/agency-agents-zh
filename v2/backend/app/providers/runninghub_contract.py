@@ -15,7 +15,7 @@ RUNNINGHUB_NODE_SOURCES = frozenset({
     "shot.composition",
     "shot.duration_ms",
     "shot.face_visibility",
-    "shot.motion_requirement",
+    "shot.subject_motion",
     "shot.negative_prompt",
     "shot.text_policy",
     "shot.visual_prompt",

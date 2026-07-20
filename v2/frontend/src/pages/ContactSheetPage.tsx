@@ -69,7 +69,7 @@ function ContactCard({ projectId, entry }: { projectId: string; entry: ContactSh
 
     <section className={styles.evidence}>
       <h3><Boxes />分镜合同</h3>
-      {entry.shot ? <><p><strong>{entry.shot.shot_code} · {entry.shot.shot_type}</strong><span>{(entry.shot.duration_ms / 1000).toFixed(2)}s</span></p><p><b>人物可见性</b><span>{entry.shot.face_visibility}</span></p><p><b>文字策略</b><span>{entry.shot.text_policy}</span></p><p><b>动态要求</b><span>{entry.shot.motion_requirement}</span></p><p className={styles.longFact}><b>画面生成描述</b><span>{entry.shot.visual_prompt ?? '旧方案未记录'}</span></p><p className={styles.longFact}><b>避免内容</b><span>{entry.shot.negative_prompt ?? '未设置'}</span></p><p className={styles.longFact}><b>构图</b><span>{entry.shot.composition}</span></p><p className={styles.longFact}><b>动作</b><span>{entry.shot.action}</span></p></> : <p><span>素材未绑定分镜。</span></p>}
+      {entry.shot ? <><p><strong>{entry.shot.shot_code} · {entry.shot.shot_purpose}</strong><span>{(entry.shot.duration_ms / 1000).toFixed(2)}s</span></p><p><b>人物可见性</b><span>{entry.shot.face_visibility}</span></p><p><b>文字策略</b><span>{entry.shot.text_policy}</span></p><p><b>主体运动</b><span>{entry.shot.subject_motion}</span></p><p className={styles.longFact}><b>画面生成描述</b><span>{entry.shot.visual_prompt ?? '未记录'}</span></p><p className={styles.longFact}><b>避免内容</b><span>{entry.shot.negative_prompt ?? '未设置'}</span></p><p className={styles.longFact}><b>构图</b><span>{entry.shot.composition}</span></p><p className={styles.longFact}><b>动作</b><span>{entry.shot.action}</span></p></> : <p><span>素材未绑定分镜。</span></p>}
     </section>
 
     <section className={styles.evidence}>

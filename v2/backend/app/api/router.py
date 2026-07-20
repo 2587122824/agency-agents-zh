@@ -150,6 +150,7 @@ from ..planning.contracts import (
     RetryShotPlan,
     ReviseBrief,
     ReviseShotPlan,
+    ReviseShotPlanWithDirector,
     ShotPlanCandidateRead,
 )
 from ..planning.agent_gateway import ContentPlannerGateway, get_content_planner_gateway
@@ -164,6 +165,7 @@ from ..planning.service import (
     retry_failed_shot_plan,
     revise_brief,
     revise_shot_plan,
+    revise_shot_plan_with_director,
 )
 from ..providers.contracts import ProviderReadinessView
 from ..providers.readiness import provider_readiness
@@ -1138,6 +1140,30 @@ def shot_plan_revise(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CreationConflictError as exc:
         raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/shot-plan-candidates/{candidate_id}:revise-with-director",
+    response_model=ShotPlanCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def shot_plan_revise_with_director(
+    project_id: str,
+    candidate_id: str,
+    payload: ReviseShotPlanWithDirector,
+    gateway: DirectorGateway = Depends(get_director_gateway),
+    session: Session = Depends(get_session),
+):
+    try:
+        return revise_shot_plan_with_director(
+            session, require_project(session, project_id), candidate_id, payload, gateway
+        )
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
 
 
 @router.post(

@@ -37,9 +37,9 @@ def selection() -> DirectorSelection:
         base_url="https://api.example.test/v1",
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
-        input_contract_version="director-input.v1",
-        prompt_contract_version="director-prompt.v2",
-        output_schema_version="shot-plan.v2",
+        input_contract_version="director-input.v2",
+        prompt_contract_version="director-prompt.v3",
+        output_schema_version="shot-plan.v3",
         max_output_tokens=4000,
         sampling={"temperature": 0.2},
     )
@@ -47,7 +47,7 @@ def selection() -> DirectorSelection:
 
 def manifest(*, audio_policy: str = "off") -> dict:
     return {
-        "contract_version": "director-input.v1",
+        "contract_version": "director-input.v2",
         "project_id": "project_1",
         "requirement_version": {"id": "requirement_1", "fields": {"audio_mode": audio_policy}},
         "accepted_creative_brief": {"id": "brief_1", "brief": {
@@ -55,6 +55,10 @@ def manifest(*, audio_policy: str = "off") -> dict:
             "narrative_beats": [
                 {"beat_code": "BEAT_01", "purpose": "开始", "summary": "准备", "target_duration_ms": 5000},
                 {"beat_code": "BEAT_02", "purpose": "过程", "summary": "训练", "target_duration_ms": 5000},
+            ],
+            "script_segments": [
+                {"segment_code": "SEG_01", "beat_code": "BEAT_01", "kind": "visual_only", "spoken_text": None, "on_screen_text": None},
+                {"segment_code": "SEG_02", "beat_code": "BEAT_02", "kind": "visual_only", "spoken_text": None, "on_screen_text": None},
             ],
         }},
         "confirmed_decisions": [],
@@ -79,22 +83,36 @@ def shot(code: str, sequence: int, beat: str, duration: int, *, continuity: str 
         "sequence_number": sequence,
         "duration_ms": duration,
         "narrative_beat_code": beat,
+        "brief_segment_codes": ["SEG_01" if beat == "BEAT_01" else "SEG_02"],
         "continuity_group_id": continuity,
+        "continuity_relation": "same_moment",
         "action_count": 1,
-        "shot_type": "character_action",
+        "shot_purpose": "develop",
+        "framing": "medium",
+        "camera_angle": "eye_level",
+        "camera_motion": "tracking",
+        "subject_motion": "significant",
         "scene_entity_version_id": None,
         "character_entity_version_ids": ["entity_version_1"],
         "outfit_entity_version_ids": [],
         "product_entity_version_ids": [],
         "primary_reference_entity_version_id": "entity_version_1",
         "face_visibility": "required",
+        "face_subject_entity_version_ids": ["entity_version_1"],
         "text_policy": "forbidden",
-        "motion_requirement": "significant",
+        "required_on_screen_text": None,
         "audio_requirement": "off",
         "composition": "中景",
         "action": "向前跑",
         "visual_prompt": "主角在跑道向前跑",
         "negative_prompt": None,
+        "new_information": f"展示 {beat} 的新训练信息",
+        "generation_requirements": {
+            "reference_image_required": True,
+            "multi_frame_required": False,
+            "identity_consistency_required": True,
+            "precise_text_required": False,
+        },
     }
 
 
@@ -124,9 +142,9 @@ def test_director_returns_strict_shot_plan_once(monkeypatch) -> None:
     sent = transport.calls[0]["payload"]["messages"]
     assert [item["role"] for item in sent] == ["system", "user"]
     assert "NodeInfoList" in sent[0]["content"]
-    assert '"face_visibility":"required|optional|not_visible"' in sent[0]["content"]
-    assert "它不是“未绑定人物”或“不确定”的默认值" in sent[0]["content"]
-    assert "输出前逐镜头检查" in sent[0]["content"]
+    assert '"brief_segment_codes":["SEG_01"]' in sent[0]["content"]
+    assert "每个脚本段必须至少被一个镜头覆盖" in sent[0]["content"]
+    assert "其他镜头必须与 source_shots 结构完全一致" in sent[0]["content"]
 
 
 @pytest.mark.parametrize("mutate", [
@@ -156,4 +174,40 @@ def test_director_rejects_non_json_without_repair(monkeypatch) -> None:
         gateway.invoke(selection(), manifest())
 
     assert raised.value.code == "DIRECTOR_OUTPUT_SCHEMA_INVALID"
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize("mutate", [
+    lambda value: value["shots"][0].update({"brief_segment_codes": ["SEG_99"]}),
+    lambda value: value["shots"][0].update({"brief_segment_codes": ["SEG_02"]}),
+    lambda value: value["shots"][0].update({"face_subject_entity_version_ids": []}),
+    lambda value: value["shots"][0].update({"text_policy": "required", "required_on_screen_text": None}),
+    lambda value: value["shots"][0].update({"generation_requirements": {"reference_image_required": False, "multi_frame_required": False, "identity_consistency_required": True, "precise_text_required": False}}),
+])
+def test_director_rejects_v3_semantic_contract_violations(monkeypatch, mutate) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    mutate(output)
+    gateway, transport = gateway_for(output)
+    with pytest.raises(AgentGatewayError):
+        gateway.invoke(selection(), manifest())
+    assert len(transport.calls) == 1
+
+
+def test_director_revision_cannot_change_unselected_shot(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    source = valid_output()["shots"]
+    output = {"shots": json.loads(json.dumps(source, ensure_ascii=False))}
+    output["shots"][1]["action"] = "未授权变更"
+    revision_manifest = manifest()
+    revision_manifest["revision_request"] = {
+        "source_candidate_id": "candidate_1",
+        "source_shots": source,
+        "selected_shot_codes": ["SH-001"],
+        "revision_instruction": "只调整第一个镜头",
+    }
+    gateway, transport = gateway_for(output)
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), revision_manifest)
+    assert raised.value.code == "DIRECTOR_OUTPUT_CONTRACT_INVALID"
     assert len(transport.calls) == 1

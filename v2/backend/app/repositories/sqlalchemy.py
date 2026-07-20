@@ -481,6 +481,9 @@ class SqlAlchemyCreationRepository:
     def entity_version(self, version_id: str) -> EntityVersion | None:
         return self.session.get(EntityVersion, version_id)
 
+    def entity(self, entity_id: str) -> Entity | None:
+        return self.session.get(Entity, entity_id)
+
     def active_entity_version(self, entity_id: str) -> EntityVersion | None:
         return self.session.scalar(select(EntityVersion).where(
             EntityVersion.entity_id == entity_id,

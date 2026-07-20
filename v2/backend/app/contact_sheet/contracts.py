@@ -20,10 +20,10 @@ class ContactSheetShot(BaseModel):
     shot_code: str
     sequence_number: int
     duration_ms: int
-    shot_type: str
+    shot_purpose: str
     face_visibility: str
     text_policy: str
-    motion_requirement: str
+    subject_motion: str
     composition: str
     action: str
     visual_prompt: str | None

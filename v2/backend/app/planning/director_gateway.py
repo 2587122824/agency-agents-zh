@@ -15,9 +15,24 @@ from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderCon
 from ..providers.credentials import EnvironmentCredentialResolver
 
 
-DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v1"
-DIRECTOR_OUTPUT_SCHEMA_VERSION = "shot-plan.v2"
-DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v2"
+DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v2"
+DIRECTOR_OUTPUT_SCHEMA_VERSION = "shot-plan.v3"
+DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v3"
+
+
+class GenerationRequirements(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reference_image_required: bool
+    multi_frame_required: bool
+    identity_consistency_required: bool
+    precise_text_required: bool
+
+    @model_validator(mode="after")
+    def requirements_are_coherent(self):
+        if self.identity_consistency_required and not self.reference_image_required:
+            raise ValueError("identity consistency requires a reference image")
+        return self
 
 
 class DirectorShotOutput(BaseModel):
@@ -27,22 +42,31 @@ class DirectorShotOutput(BaseModel):
     sequence_number: int = Field(ge=1, le=999)
     duration_ms: int = Field(ge=100, le=3_600_000)
     narrative_beat_code: str = Field(pattern=r"^BEAT_[0-9]{2,3}$")
+    brief_segment_codes: list[str] = Field(min_length=1, max_length=80)
     continuity_group_id: str | None = Field(default=None, pattern=r"^CONT-[0-9]{3}$")
+    continuity_relation: Literal["same_moment", "time_jump", "location_change", "outfit_change"]
     action_count: Literal[1]
-    shot_type: str = Field(min_length=1, max_length=40)
+    shot_purpose: Literal["establish", "develop", "demonstrate", "contrast", "transition", "resolve"]
+    framing: Literal["extreme_close_up", "close_up", "medium", "full", "wide"]
+    camera_angle: Literal["eye_level", "high", "low", "top_down", "over_shoulder"]
+    camera_motion: Literal["locked", "pan", "tilt", "dolly", "tracking", "handheld"]
+    subject_motion: Literal["none", "subtle", "moderate", "significant"]
     scene_entity_version_id: str | None = Field(default=None, max_length=48)
     character_entity_version_ids: list[str] = Field(default_factory=list, max_length=20)
     outfit_entity_version_ids: list[str] = Field(default_factory=list, max_length=20)
     product_entity_version_ids: list[str] = Field(default_factory=list, max_length=20)
     primary_reference_entity_version_id: str | None = Field(default=None, max_length=48)
     face_visibility: Literal["required", "optional", "not_visible"]
+    face_subject_entity_version_ids: list[str] = Field(default_factory=list, max_length=20)
     text_policy: Literal["forbidden", "allowed", "required"]
-    motion_requirement: Literal["static", "moderate", "significant"]
+    required_on_screen_text: str | None = Field(default=None, min_length=1, max_length=1000)
     audio_requirement: Literal["off", "lip_motion_only", "configured"]
     composition: str = Field(min_length=1, max_length=500)
     action: str = Field(min_length=1, max_length=1000)
     visual_prompt: str = Field(min_length=1, max_length=4000)
     negative_prompt: str | None = Field(default=None, min_length=1, max_length=2000)
+    new_information: str = Field(min_length=1, max_length=1000)
+    generation_requirements: GenerationRequirements
 
     @model_validator(mode="after")
     def references_are_unique(self):
@@ -50,6 +74,8 @@ class DirectorShotOutput(BaseModel):
             "character_entity_version_ids",
             "outfit_entity_version_ids",
             "product_entity_version_ids",
+            "brief_segment_codes",
+            "face_subject_entity_version_ids",
         ):
             values = getattr(self, field)
             if len(values) != len(set(values)):
@@ -63,6 +89,18 @@ class DirectorShotOutput(BaseModel):
             declared.add(self.scene_entity_version_id)
         if self.primary_reference_entity_version_id and self.primary_reference_entity_version_id not in declared:
             raise ValueError("primary reference entity must be declared by the shot")
+        if self.face_visibility == "required" and not self.face_subject_entity_version_ids:
+            raise ValueError("required face visibility requires exact face subject IDs")
+        if self.face_visibility != "required" and self.face_subject_entity_version_ids:
+            raise ValueError("face subject IDs are only allowed when face visibility is required")
+        if set(self.face_subject_entity_version_ids) - set(self.character_entity_version_ids):
+            raise ValueError("face subjects must be declared character entities")
+        if self.text_policy == "required" and self.required_on_screen_text is None:
+            raise ValueError("required text policy requires exact on-screen text")
+        if self.text_policy == "forbidden" and self.required_on_screen_text is not None:
+            raise ValueError("forbidden text policy requires null on-screen text")
+        if self.generation_requirements.precise_text_required and self.text_policy != "required":
+            raise ValueError("precise text capability requires required text policy")
         return self
 
 
@@ -128,6 +166,23 @@ _DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只�
 11. 输出前逐镜头检查 shot_type、action、composition、visual_prompt、实体引用和四项生成约束是否描述同一画面；发现矛盾必须在返回 JSON 前重新选择正确枚举或修改镜头描述，不能把矛盾结果交给后端猜测或修复。
 12. 不得输出 Markdown、解释文字或 JSON 之外的内容。
 """
+
+
+_DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只把已接受的内容方案拆成结构化镜头候选，或按用户明确授权修订指定镜头；不与用户闲聊，不选择供应商、模型或工作流。
+只返回严格 JSON：{"shots":[{"shot_code":"SH-001","sequence_number":1,"duration_ms":3000,"narrative_beat_code":"BEAT_01","brief_segment_codes":["SEG_01"],"continuity_group_id":null,"continuity_relation":"same_moment","action_count":1,"shot_purpose":"establish","framing":"medium","camera_angle":"eye_level","camera_motion":"locked","subject_motion":"moderate","scene_entity_version_id":null,"character_entity_version_ids":[],"outfit_entity_version_ids":[],"product_entity_version_ids":[],"primary_reference_entity_version_id":null,"face_visibility":"not_visible","face_subject_entity_version_ids":[],"text_policy":"forbidden","required_on_screen_text":null,"audio_requirement":"off","composition":"构图描述","action":"唯一动作","visual_prompt":"画面生成描述","negative_prompt":null,"new_information":"相对前一镜头新增的信息","generation_requirements":{"reference_image_required":false,"multi_frame_required":false,"identity_consistency_required":false,"precise_text_required":false}}]}。
+规则：
+1. SH 编号和 sequence_number 必须从 1 连续；每个镜头 action_count=1。
+2. 每个脚本段必须至少被一个镜头覆盖。brief_segment_codes 只能逐字引用输入脚本段，且每个段必须属于该镜头引用的叙事节拍。
+3. 每个节拍的镜头时长总和必须精确等于该节拍时长。
+4. shot_purpose、framing、camera_angle、camera_motion、subject_motion、continuity_relation 必须使用合同枚举，不得自造值。
+5. 实体 ID 只能逐字引用 confirmed_entity_versions。face_visibility=required 时必须列出确切 face_subject_entity_version_ids，且只能引用该镜头已声明的 character 实体。
+6. text_policy=required 时 required_on_screen_text 必须是需要出现在画面中的精确文字；forbidden 时必须为 null。
+7. continuity_relation 明确本镜头与前一镜头的关系。场景或服装发生变化时必须分别使用 location_change 或 outfit_change；同一 continuity_group 内实体必须完全一致。
+8. new_information 必须说明本镜头相对前一镜头新增的叙事信息，供用户人工检查重复，不得留空。
+9. generation_requirements 只声明生产能力需求，不得写路由。身份一致性要求必须同时要求参考图；精确文字能力只能用于 required 文字。
+10. audio_policy=off 时 audio_requirement 只能为 off 或 lip_motion_only，不得建立音频生产依赖。
+11. revision_request 存在时，只能修改 selected_shot_codes；其他镜头必须与 source_shots 结构完全一致。仍需返回完整方案并满足全部合同。
+12. 不得输出 Provider、模型、工作流、NodeInfoList、价格或任务 ID；不得修复输入、猜测 ID、添加默认尾缀或返回 Markdown。"""
 
 
 class ConfiguredDirectorGateway:
@@ -236,17 +291,31 @@ def validate_director_output_against_manifest(output: DirectorOutput, manifest: 
     if [shot.shot_code for shot in shots] != expected_codes or [shot.sequence_number for shot in shots] != list(range(1, len(shots) + 1)):
         raise ValueError("镜头代码与顺序必须从 SH-001 和 1 连续编号。")
     beats = manifest["accepted_creative_brief"]["brief"]["narrative_beats"]
+    segments = manifest["accepted_creative_brief"]["brief"]["script_segments"]
     beat_durations = {item["beat_code"]: int(item["target_duration_ms"]) for item in beats}
+    segment_beats = {item["segment_code"]: item["beat_code"] for item in segments}
     actual_by_beat = {code: 0 for code in beat_durations}
+    covered_segments: set[str] = set()
     for shot in shots:
         if shot.narrative_beat_code not in beat_durations:
             raise ValueError(f"镜头 {shot.shot_code} 引用了不存在的内容节拍。")
+        unknown_segments = sorted(set(shot.brief_segment_codes) - set(segment_beats))
+        if unknown_segments:
+            raise ValueError(f"镜头 {shot.shot_code} 引用了不存在的脚本段：{unknown_segments}。")
+        wrong_beat = sorted(code for code in shot.brief_segment_codes if segment_beats[code] != shot.narrative_beat_code)
+        if wrong_beat:
+            raise ValueError(f"镜头 {shot.shot_code} 的脚本段不属于所引用节拍：{wrong_beat}。")
+        covered_segments.update(shot.brief_segment_codes)
         actual_by_beat[shot.narrative_beat_code] += shot.duration_ms
+    missing_segments = sorted(set(segment_beats) - covered_segments)
+    if missing_segments:
+        raise ValueError(f"以下脚本段没有任何镜头覆盖：{missing_segments}。")
     mismatches = [code for code, duration in beat_durations.items() if actual_by_beat[code] != duration]
     if mismatches:
         raise ValueError(f"以下内容节拍的镜头时长不匹配：{mismatches}。")
     available_entities = {item["id"]: item for item in manifest["confirmed_entity_versions"]}
     continuity: dict[str, tuple[Any, ...]] = {}
+    previous_shot: DirectorShotOutput | None = None
     for shot in shots:
         entity_ids = {
             *(shot.character_entity_version_ids or []),
@@ -258,6 +327,12 @@ def validate_director_output_against_manifest(output: DirectorOutput, manifest: 
         unknown = sorted(entity_ids - set(available_entities))
         if unknown:
             raise ValueError(f"镜头 {shot.shot_code} 引用了未确认的实体版本：{unknown}。")
+        invalid_face_subjects = sorted(
+            entity_id for entity_id in shot.face_subject_entity_version_ids
+            if available_entities.get(entity_id, {}).get("entity_type") != "character"
+        )
+        if invalid_face_subjects:
+            raise ValueError(f"镜头 {shot.shot_code} 的人脸主体不是已确认人物实体：{invalid_face_subjects}。")
         if shot.primary_reference_entity_version_id:
             entity = available_entities[shot.primary_reference_entity_version_id]
             attachment = entity.get("source_attachment")
@@ -272,10 +347,30 @@ def validate_director_output_against_manifest(output: DirectorOutput, manifest: 
             previous = continuity.setdefault(shot.continuity_group_id, signature)
             if previous != signature:
                 raise ValueError(f"连续组 {shot.continuity_group_id} 的场景、人物或服装版本不一致。")
+        if previous_shot is not None:
+            scene_changed = previous_shot.scene_entity_version_id != shot.scene_entity_version_id
+            outfit_changed = previous_shot.outfit_entity_version_ids != shot.outfit_entity_version_ids
+            if scene_changed and shot.continuity_relation != "location_change":
+                raise ValueError(f"镜头 {shot.shot_code} 的场景变化必须显式声明 location_change。")
+            if not scene_changed and outfit_changed and shot.continuity_relation != "outfit_change":
+                raise ValueError(f"镜头 {shot.shot_code} 的服装变化必须显式声明 outfit_change。")
+        previous_shot = shot
     if manifest["audio_policy"] == "off":
         invalid = [shot.shot_code for shot in shots if shot.audio_requirement not in {"off", "lip_motion_only"}]
         if invalid:
             raise ValueError(f"音频关闭时镜头不得建立音频依赖：{invalid}。")
+    revision = manifest.get("revision_request")
+    if revision:
+        selected = set(revision["selected_shot_codes"])
+        source = {item["shot_code"]: item for item in revision["source_shots"]}
+        if set(source) != {shot.shot_code for shot in shots}:
+            raise ValueError("AI 修订必须返回与原候选相同的完整镜头集合。")
+        changed_unselected = [
+            shot.shot_code for shot in shots
+            if shot.shot_code not in selected and shot.model_dump(mode="json") != source[shot.shot_code]
+        ]
+        if changed_unselected:
+            raise ValueError(f"AI 修订改变了未授权镜头：{changed_unselected}。")
 
 
 class DeterministicDirectorGateway:
@@ -313,22 +408,39 @@ class DeterministicDirectorGateway:
                 sequence_number=index,
                 duration_ms=int(beat["target_duration_ms"]),
                 narrative_beat_code=beat["beat_code"],
+                brief_segment_codes=[
+                    item["segment_code"] for item in brief["script_segments"]
+                    if item["beat_code"] == beat["beat_code"]
+                ],
                 continuity_group_id=None,
+                continuity_relation="same_moment",
                 action_count=1,
-                shot_type="character_action" if characters else "concept",
+                shot_purpose="develop",
+                framing="medium",
+                camera_angle="eye_level",
+                camera_motion="locked",
+                subject_motion="moderate",
                 scene_entity_version_id=scenes[0] if scenes else None,
                 character_entity_version_ids=characters,
                 outfit_entity_version_ids=outfits,
                 product_entity_version_ids=products,
                 primary_reference_entity_version_id=None,
                 face_visibility="optional" if characters else "not_visible",
+                face_subject_entity_version_ids=[],
                 text_policy="forbidden",
-                motion_requirement="moderate",
+                required_on_screen_text=None,
                 audio_requirement="off" if manifest_payload["audio_policy"] == "off" else "configured",
                 composition=str(beat["purpose"]),
                 action=str(beat["summary"]),
                 visual_prompt=f"{brief['content_promise']}。{beat['summary']}。",
                 negative_prompt=None,
+                new_information=str(beat["summary"]),
+                generation_requirements=GenerationRequirements(
+                    reference_image_required=False,
+                    multi_frame_required=False,
+                    identity_consistency_required=False,
+                    precise_text_required=False,
+                ),
             )
             for index, beat in enumerate(brief["narrative_beats"], start=1)
         ]

@@ -208,7 +208,7 @@ def decision_impact_graph_view(
             "contract",
             "recorded",
             sequence_number=item.sequence_number,
-            shot_type=item.shot_type,
+            shot_purpose=item.shot_purpose,
         )
         add_edge("plan", item.plan_version_id, "shot", item.id, "contains")
         for version_id in sorted(_referenced_entity_versions({

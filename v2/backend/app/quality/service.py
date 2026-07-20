@@ -522,7 +522,7 @@ def _qc_manifest(session: Session, project: Project, asset: Asset, node, selecti
             raise QualityConflictError("QC_REFERENCE_HASH_MISMATCH", "镜头主参考图片内容与冻结哈希不一致。")
     reference_catalog = [
         f"dag_node.{node.id}.input_contract.shot.{field}"
-        for field in ("face_visibility", "text_policy", "motion_requirement", "composition", "action", "visual_prompt")
+        for field in ("face_visibility", "face_subject_entity_version_ids", "text_policy", "required_on_screen_text", "subject_motion", "composition", "action", "visual_prompt")
         if field in shot
     ]
     payload = {
