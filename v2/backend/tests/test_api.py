@@ -1746,6 +1746,76 @@ def test_content_planner_open_questions_block_candidate_acceptance(client: TestC
     assert brief["brief"]["open_questions"][0]["options"][0]["label"] == "居家训练"
 
 
+def test_content_planner_pending_fact_requires_answered_revision_before_acceptance(client: TestClient) -> None:
+    class PendingFactPlannerGateway(DeterministicContentPlannerGateway):
+        def invoke(self, selection, manifest_payload):
+            result = super().invoke(selection, manifest_payload)
+            if manifest_payload.get("revision_request"):
+                return result
+            output = ContentPlannerOutput.model_validate({
+                **result.output.model_dump(mode="json"),
+                "facts_requiring_confirmation": [{
+                    "fact_code": "FACT_01",
+                    "statement": "挑战结束后体重下降五公斤",
+                    "reason": "已确认需求没有提供真实结果数据。",
+                    "resolution_question_code": "QUESTION_01",
+                }],
+                "open_questions": [{
+                    "question_code": "QUESTION_01",
+                    "prompt": "结果数据应如何表达？",
+                    "reason": "具体数字需要用户提供或明确放弃。",
+                    "options": [
+                        {
+                            "option_code": "OPTION_01",
+                            "label": "使用真实数据",
+                            "description": "由用户提供可确认的真实结果。",
+                            "answer": "使用用户确认的真实结果数据。",
+                        },
+                        {
+                            "option_code": "OPTION_02",
+                            "label": "不写具体数字",
+                            "description": "只表达过程变化，不声称具体结果。",
+                            "answer": "删除未经确认的具体结果数字。",
+                        },
+                    ],
+                }],
+            })
+            return ContentPlannerResult(output, output.model_dump(mode="json"), result.provider_request_id, result.token_usage)
+
+    app.dependency_overrides[get_content_planner_gateway] = lambda: PendingFactPlannerGateway()
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    original = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "planner-fact-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{original['id']}:accept",
+        json={"command_id": "planner-fact-accept-blocked", "expected_requirement_version_id": requirement_id},
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "BRIEF_FACTS_UNCONFIRMED"
+
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{original['id']}:revise",
+        json={
+            "command_id": "planner-fact-resolve",
+            "expected_requirement_version_id": requirement_id,
+            "revision_instruction": "QUESTION_01 用户选择：删除未经确认的具体结果数字。",
+            "confirm_model_cost": True,
+        },
+    )
+    assert revised.status_code == 201
+    assert revised.json()["brief"]["facts_requiring_confirmation"] == []
+    accepted = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{revised.json()['id']}:accept",
+        json={"command_id": "planner-fact-accept-revised", "expected_requirement_version_id": requirement_id},
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["status"] == "accepted"
+
+
 def test_shot_plan_revision_creates_a_new_reviewable_candidate(client: TestClient) -> None:
     project = create_creation_project(client)
     requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]

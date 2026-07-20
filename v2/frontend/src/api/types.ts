@@ -343,10 +343,30 @@ export interface CreativeBrief {
   platform_adaptation: string | null
   entity_version_ids: string[]
   constraints_carried_forward: string[]
-  open_questions: Array<string | BriefOpenQuestion>
+  creative_additions: CreativeAddition[]
+  facts_requiring_confirmation: BriefPendingFact[]
+  open_questions: BriefOpenQuestion[]
   duration_seconds: number
   aspect_ratio: string
   audio_mode: 'off' | 'voiceover'
+}
+
+export interface CreativeAddition {
+  addition_code: string
+  category: 'narrative_structure' | 'hook' | 'expression' | 'example' | 'visual_strategy' | 'call_to_action'
+  content: string
+  purpose: string
+  basis_refs: Array<{
+    type: 'requirement_field' | 'decision' | 'entity_version'
+    reference_id: string
+  }>
+}
+
+export interface BriefPendingFact {
+  fact_code: string
+  statement: string
+  reason: string
+  resolution_question_code: string
 }
 
 export interface BriefOpenQuestion {

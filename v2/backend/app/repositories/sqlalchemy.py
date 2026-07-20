@@ -740,6 +740,11 @@ class SqlAlchemyProductionRepository:
             .order_by(ProductionSnapshot.snapshot_number)
         )
 
+    def snapshot_for_impact(self, analysis_id: str) -> ProductionSnapshot | None:
+        return self.session.scalar(select(ProductionSnapshot).where(
+            ProductionSnapshot.impact_analysis_id == analysis_id
+        ))
+
     def next_snapshot_number(self, project_id: str) -> int:
         current = self.session.scalar(select(func.max(ProductionSnapshot.snapshot_number)).where(
             ProductionSnapshot.project_id == project_id

@@ -425,7 +425,7 @@ platform nullable
 template_version_id nullable
 ```
 
-输出 `creative-brief-candidate.v2`：
+输出 `creative-brief-candidate.v3`：
 
 ```json
 {
@@ -444,6 +444,23 @@ template_version_id nullable
   "platform_adaptation": null,
   "entity_version_ids": ["entity_version_char_main_v1"],
   "constraints_carried_forward": ["audio_policy=off"],
+  "creative_additions": [
+    {
+      "addition_code": "ADDITION_01",
+      "category": "narrative_structure",
+      "content": "按准备、训练和结果组织完整过程",
+      "purpose": "让内容推进清晰",
+      "basis_refs": [{"type": "requirement_field", "reference_id": "core_topic"}]
+    }
+  ],
+  "facts_requiring_confirmation": [
+    {
+      "fact_code": "FACT_01",
+      "statement": "训练后体重下降五公斤",
+      "reason": "需求没有提供真实结果数据",
+      "resolution_question_code": "QUESTION_01"
+    }
+  ],
   "open_questions": [
     {
       "question_code": "QUESTION_01",
@@ -460,16 +477,17 @@ template_version_id nullable
 
 规则：
 
-- `hook`、叙事节拍和脚本段必须能追溯到需求目标，不能引入未确认人物、品牌、地点或产品事实。
+- 内容策划主动拓展叙事结构、钩子、表达、示例、视觉策略和行动引导；每项 `creative_additions` 必须通过 `basis_refs` 引用真实需求字段、Decision ID 或实体版本 ID，不能把创意拓展描述成已确认事实。
+- 输入未确认但方案希望采用的事实必须进入 `facts_requiring_confirmation`，并一对一关联真实结构化问题。待确认事实与问题都会阻断方案接受，用户回答后由一次明确授权的 planner 修订生成新候选。
 - `audio_policy=off` 时，`spoken_text` 必须为 `null`，不得建立旁白、对白或 TTS 依赖；可以描述无声的说话动作。
-- 平台未指定时 `platform_adaptation` 保持 `null`，不得默认按抖音、小红书等平台改写。
+- 平台未指定时 `platform_adaptation` 保持 `null`；平台已明确指定时必须提供对应适配说明。
 - 可一次提供最多三个完整 Brief 备选，但每个备选分别形成候选并说明结构差异，不把多个方案拼成一个。
 - 内容策划不生成镜头 ID、画面提示词、工作流参数和素材就绪声明。
 - `constraints_carried_forward` 仅是可选的可读说明，不具有放行权。为空时不判失败；后端直接依据不可变输入合同验收脚本、平台适配、实体引用、时长和代码关系，不依赖模型复述约束。
 - 待确认问题必须从 `QUESTION_01` 连续编号，每个问题提供 2–3 个从 `OPTION_01` 连续编号、互斥且答案不同的选项。用户可以点击选项或填写自定义答案；全部回答后明确调用一次 planner 形成新的 Brief 修订版，不能直接把答案写入正式需求或接受旧方案。
-- 历史 `creative-brief-candidate.v1` 的字符串问题保持原样，不为其猜测选项。页面提供独立的“确认模型调用并生成可选项”命令，由用户授权后在同一需求版本下生成 v2 修订候选。
+- 后端不扫描关键词判断隐藏事实，不自动重写、修复或补齐模型输出，也不增加第二次模型评审。开发环境只支持当前 v3 输出合同，不保留旧版运行时兼容入口。
 
-当前实现已经按 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。每个活动需求版本只自动尝试一次；失败会保存结构化错误、受控原始输出和 Provider 请求审计，不自动重试。用户可以在方案页明确确认模型费用后，重跑当前需求版本最近一次失败运行；重跑必须复用同一 `AgentInputManifest`，并校验生产配置、模型、Provider、Prompt 合同和输出 Schema 与原失败运行完全一致。新命令创建新的 `AgentRun`，不覆盖失败记录、不修复模型输出、不切换配置。模型输出经 Pydantic Schema 后还要通过确定性跨字段验证：节拍总时长必须精确匹配交付时长，节拍与脚本代码连续且引用存在，实体 ID 必须来自输入白名单，音频关闭和平台未指定约束必须由实际输出遵守。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。
+当前实现已经按 `content-planner-input.v2 / creative-brief-candidate.v3 / content-planner-prompt.v5` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。每个活动需求版本只自动尝试一次；失败会保存结构化错误、受控原始输出和 Provider 请求审计，不自动重试。用户可以在方案页明确确认模型费用后，重跑当前需求版本最近一次失败运行；重跑必须复用同一 `AgentInputManifest`，并校验生产配置、模型、Provider、Prompt 合同和输出 Schema 与原失败运行完全一致。新命令创建新的 `AgentRun`，不覆盖失败记录、不修复模型输出、不切换配置。模型输出经 Pydantic Schema 后还要通过确定性跨字段验证：节拍总时长必须精确匹配交付时长，节拍与脚本代码连续且引用存在，创意依据与实体 ID 必须来自输入白名单，待确认事实必须绑定真实问题，音频关闭与双向平台约束必须由实际输出遵守。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。内容策划不选择 Provider、工作流、价格或生产路由。
 
 方案页将修改分成三个明确命令：
 
@@ -1123,7 +1141,7 @@ RequirementDiff
 ### Creation Sprint 4：创作模型接入
 
 - 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v15`（已完成）
-- 内容策划 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3`，含 Brief 不可变修订链与结构化确认项（已完成）
+- 内容策划 `content-planner-input.v2 / creative-brief-candidate.v3 / content-planner-prompt.v5`，含可追溯策划拓展、待确认事实、Brief 不可变修订链与结构化确认项（已完成）
 - 分镜导演 `director-input.v1 / shot-plan.v2`
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成

@@ -80,6 +80,10 @@ function scriptKindLabel(kind: string) {
   return ({ visual_only: '纯画面', voiceover: '旁白', dialogue: '对白', on_screen_text: '画面文字' } as Record<string, string>)[kind] ?? kind
 }
 
+function additionCategoryLabel(category: string) {
+  return ({ narrative_structure: '叙事结构', hook: '开场设计', expression: '表达方式', example: '内容示例', visual_strategy: '视觉策略', call_to_action: '行动引导' } as Record<string, string>)[category] ?? category
+}
+
 function BriefView({ candidate }: { candidate: CreativeBriefCandidate }) {
   const brief = candidate.brief
   return <div className={styles.briefContent}>
@@ -97,6 +101,14 @@ function BriefView({ candidate }: { candidate: CreativeBriefCandidate }) {
       <header><div><span>脚本结构</span><strong>{brief.audio_mode === 'off' ? '无音频方案' : '包含声音内容'}</strong></div><small>{brief.script_segments.length} 个脚本段</small></header>
       <div className={styles.scriptList}>{brief.script_segments.map(segment => <article key={segment.segment_code}><div><b>{segment.segment_code.replace('SEG_', '')}</b><em>{scriptKindLabel(segment.kind)}</em></div><strong>{segment.spoken_text ?? segment.on_screen_text ?? '通过画面完成这一段内容'}</strong><small>对应 {segment.beat_code}</small></article>)}</div>
     </section>
+    {brief.creative_additions.length > 0 && <section className={`${styles.briefSection} ${styles.additionsSection}`}>
+      <header><div><span>策划拓展</span><strong>智能体主动补充的创意</strong></div><small>{brief.creative_additions.length} 项</small></header>
+      <div className={styles.additionList}>{brief.creative_additions.map(addition => <article key={addition.addition_code}><em>{additionCategoryLabel(addition.category)}</em><div><strong>{addition.content}</strong><span>{addition.purpose}</span></div></article>)}</div>
+    </section>}
+    {brief.facts_requiring_confirmation.length > 0 && <section className={styles.pendingFacts}>
+      <header><CircleAlert size={17} /><div><strong>这些事实还没有得到确认</strong><span>它们不会被当作正式创作依据，请在下方逐项选择。</span></div></header>
+      <div>{brief.facts_requiring_confirmation.map(fact => <article key={fact.fact_code}><strong>{fact.statement}</strong><span>{fact.reason}</span></article>)}</div>
+    </section>}
     <footer className={styles.briefFacts}>
       <span>语气 <b>{brief.tone}</b></span><span>节奏 <b>{brief.pacing}</b></span><span>平台 <b>{brief.platform_adaptation ?? '未指定，不做平台适配'}</b></span><span>实体 <b>{brief.entity_version_ids.length ? `${brief.entity_version_ids.length} 个已确认版本` : '未绑定'}</b></span>
     </footer>
@@ -109,22 +121,14 @@ function BriefQuestionResolver({
   busy,
   onAnswer,
   onResolve,
-  onUpgradeLegacy,
 }: {
   candidate: CreativeBriefCandidate
   answers: Record<string, string>
   busy: boolean
   onAnswer: (questionCode: string, answer: string) => void
   onResolve: (questions: BriefOpenQuestion[]) => void
-  onUpgradeLegacy: () => void
 }) {
-  const legacyQuestions = candidate.brief.open_questions.filter((item): item is string => typeof item === 'string')
-  const questions = candidate.brief.open_questions.filter((item): item is BriefOpenQuestion => typeof item !== 'string')
-  if (legacyQuestions.length > 0) return <section className={styles.legacyQuestions}>
-    <div><CircleAlert size={18} /><p><strong>这份方案的确认项还没有选项</strong><span>它由旧版合同生成。确认后调用一次当前内容策划模型，只把这些问题整理成可选择的答案，不会改变基础需求。</span></p></div>
-    <ul>{legacyQuestions.map(question => <li key={question}>{question}</li>)}</ul>
-    <button className="primaryButton" disabled={busy} onClick={onUpgradeLegacy}>{busy ? '正在生成可选项…' : '确认模型调用并生成可选项'}</button>
-  </section>
+  const questions = candidate.brief.open_questions
   const complete = questions.length > 0 && questions.every(question => Boolean(answers[question.question_code]?.trim()))
   return <section className={styles.questionResolver}>
     <header><div><span>需要你的选择</span><h3>逐项确认内容方案</h3></div><b>{Object.values(answers).filter(Boolean).length}/{questions.length} 已选择</b></header>
@@ -132,8 +136,10 @@ function BriefQuestionResolver({
       const predefinedAnswers = new Set(question.options.map(option => option.answer))
       const currentAnswer = answers[question.question_code] ?? ''
       const customAnswer = predefinedAnswers.has(currentAnswer) ? '' : currentAnswer
+      const pendingFact = candidate.brief.facts_requiring_confirmation.find(fact => fact.resolution_question_code === question.question_code)
       return <article key={question.question_code}>
         <div className={styles.questionTitle}><b>{question.question_code.replace('QUESTION_', '')}</b><p><strong>{question.prompt}</strong><span>{question.reason}</span></p></div>
+        {pendingFact && <div className={styles.questionFact}><span>本题将确认</span><strong>{pendingFact.statement}</strong></div>}
         <div className={styles.questionOptions}>{question.options.map(option => <button type="button" key={option.option_code} data-selected={answers[question.question_code] === option.answer} onClick={() => onAnswer(question.question_code, option.answer)}><strong>{option.label}</strong><span>{option.description}</span></button>)}</div>
         <label><span>或者自行回答</span><input value={customAnswer} onChange={event => onAnswer(question.question_code, event.target.value)} placeholder="输入你的具体要求" /></label>
       </article>
@@ -194,7 +200,11 @@ export function PlanPage() {
   const brief = data.current_brief_candidate ?? data.accepted_brief_candidate
   const rejectedBrief = data.brief_history.find(item => item.requirement_version_id === data.active_requirement.id && item.status === 'rejected') ?? null
   const revisableBrief = data.current_brief_candidate ?? rejectedBrief
-  const hasOpenBriefQuestions = Boolean(data.current_brief_candidate?.brief.open_questions.length)
+  const hasOpenBriefQuestions = Boolean(
+    data.current_brief_candidate
+    && (data.current_brief_candidate.brief.open_questions.length > 0
+      || data.current_brief_candidate.brief.facts_requiring_confirmation.length > 0),
+  )
   const rejectedShot = data.shot_plan_history.find(item => item.requirement_version_id === data.active_requirement.id && item.status === 'rejected') ?? null
   const editableShot = data.current_shot_candidate ?? rejectedShot
   const shots = data.active_plan?.shots ?? editableShot?.shots ?? []
@@ -225,7 +235,7 @@ export function PlanPage() {
         <div className={styles.briefPanel}>
           <div className={styles.panelHeading}><div><Layers3 size={18} /><span><small>CREATIVE BRIEF</small><h2>{brief ? '内容方案候选' : '基于已确认需求生成方案'}</h2></span></div>{brief && <em data-accepted={brief.status === 'accepted'}>{brief.status === 'accepted' ? '已接受' : '尚未生效'}</em>}</div>
           {brief ? <BriefView candidate={brief} /> : data.next_action.code === 'RETRY_FAILED_CREATIVE_BRIEF' && data.latest_planner_run ? <div className={styles.empty}><CircleAlert size={24} /><strong>本次内容策划失败</strong><span>{data.latest_planner_run.error_detail || '模型没有返回符合内容方案合同的结果。'} 系统没有自动重试，也没有更换模型。</span><button className="primaryButton" disabled={retryBrief.isPending} onClick={() => retryBrief.mutate()}>{retryBrief.isPending ? '正在重跑…' : '确认模型调用并重跑'}</button></div> : data.next_action.code === 'WAIT_FOR_CREATIVE_BRIEF' ? <div className={styles.empty}><Sparkles size={24} /><strong>内容策划正在生成方案</strong><span>正在等待当前模型调用返回，期间不会再次提交相同需求。</span><button className="primaryButton" disabled>正在生成…</button></div> : data.next_action.code === 'REVISE_REQUIREMENT_FOR_NEW_BRIEF' ? <div className={styles.empty}><CircleAlert size={24} /><strong>当前内容方案已被拒绝</strong><span>小改内容结构可以直接生成方案修订版；受众、时长、音频或整体方向变化再修改创作需求。</span><div className={styles.emptyActions}><button className="primaryButton" onClick={() => setEditingBrief(true)} disabled={!rejectedBrief}><Pencil size={14} />微调当前方案</button><Link className="secondaryButton" to={`/projects/${projectId}`}>修改创作需求</Link></div></div> : <div className={styles.empty}><Sparkles size={24} /><strong>当前需求可以进入内容策划</strong><span>内容策划智能体将读取已确认需求并生成一份待审核方案，本次操作会调用已配置模型。</span><button className="primaryButton" disabled={generateBrief.isPending} onClick={() => { retryBrief.reset(); generateBrief.mutate() }}>{generateBrief.isPending ? '正在策划…' : '生成内容方案候选'}</button></div>}
-          {data.current_brief_candidate?.brief.open_questions.length ? <BriefQuestionResolver candidate={data.current_brief_candidate} answers={briefQuestionAnswers} busy={reviseBrief.isPending} onAnswer={(questionCode, answer) => setBriefQuestionAnswers(current => ({ ...current, [questionCode]: answer }))} onUpgradeLegacy={() => reviseBrief.mutate({ candidateId: data.current_brief_candidate!.id, instruction: '保持当前内容方案和全部已确认基础需求不变。请将当前所有待确认问题整理为结构化问题，并为每个问题提供 2 到 3 个互斥、可直接执行的答案选项，供用户逐项选择。' })} onResolve={questions => reviseBrief.mutate({ candidateId: data.current_brief_candidate!.id, instruction: ['请根据以下用户对待确认项的逐项回答修订当前内容方案。已回答的问题不再保留为未确认项；如果回答仍不足，只保留确实无法执行的剩余问题。不要改变已确认的基础需求。', ...questions.map(question => `${question.question_code} ${question.prompt}\n用户回答：${briefQuestionAnswers[question.question_code].trim()}`)].join('\n\n') })} /> : null}
+          {data.current_brief_candidate?.brief.open_questions.length ? <BriefQuestionResolver candidate={data.current_brief_candidate} answers={briefQuestionAnswers} busy={reviseBrief.isPending} onAnswer={(questionCode, answer) => setBriefQuestionAnswers(current => ({ ...current, [questionCode]: answer }))} onResolve={questions => reviseBrief.mutate({ candidateId: data.current_brief_candidate!.id, instruction: ['请根据以下用户对待确认项的逐项回答修订当前内容方案。已回答的问题及其关联的待确认事实不再保留；如果回答仍不足，只保留确实无法执行的剩余问题和事实。不要改变已确认的基础需求。', ...questions.map(question => `${question.question_code} ${question.prompt}\n用户回答：${briefQuestionAnswers[question.question_code].trim()}`)].join('\n\n') })} /> : null}
           {editingBrief && revisableBrief && <form className={styles.briefRevision} onSubmit={event => { event.preventDefault(); reviseBrief.mutate({ candidateId: revisableBrief.id, instruction: briefRevisionInstruction.trim() }) }}><div><strong>调整内容方案 v{revisableBrief.revision_number}</strong><span>只描述希望改变的内容结构、开场、节奏或文案重点。基础需求不会改变，本次会调用一次当前内容策划模型。</span></div><textarea autoFocus rows={4} value={briefRevisionInstruction} onChange={event => setBriefRevisionInstruction(event.target.value)} placeholder="例如：开头更快进入结果，减少过程说明，重点突出第一天和第七天的变化。" /><footer><button type="button" className="secondaryButton" onClick={() => { setEditingBrief(false); setBriefRevisionInstruction('') }}>取消</button><button className="primaryButton" disabled={!briefRevisionInstruction.trim() || reviseBrief.isPending}>{reviseBrief.isPending ? '正在生成修订版…' : '确认模型调用并生成修订版'}</button></footer></form>}
           {brief && data.next_action.code === 'RETRY_FAILED_CREATIVE_BRIEF' && data.latest_planner_run && <div className={styles.revisionFailure}><CircleAlert size={17} /><div><strong>方案调整没有成功</strong><span>{data.latest_planner_run.error_detail || '模型没有返回符合合同的修订版。'} 原方案仍然保留。</span></div><button className="primaryButton" disabled={retryBrief.isPending} onClick={() => retryBrief.mutate()}>{retryBrief.isPending ? '正在重跑…' : '确认费用并精确重跑'}</button></div>}
           {data.current_brief_candidate && <div className={styles.reviewBar}><p><strong>内容方案 v{data.current_brief_candidate.revision_number} 尚未生效</strong><span>{hasOpenBriefQuestions ? '请先完成上方待确认项，再接受方案。' : '可以微调方案；接受后分镜导演才能读取。修改基础需求会放弃当前方案。'}</span></p><button className="secondaryButton" onClick={() => setEditingBrief(value => !value)} disabled={reviseBrief.isPending}><Pencil size={14} />{editingBrief ? '收起调整' : '调整方案'}</button><button className="secondaryButton" onClick={() => reviseRequirement.mutate(data.current_brief_candidate!.id)} disabled={reviseRequirement.isPending}>修改创作需求</button><button className="secondaryButton" onClick={() => decideBrief.mutate(false)} disabled={decideBrief.isPending}><X size={14} />放弃方案</button><button className="primaryButton" onClick={() => decideBrief.mutate(true)} disabled={decideBrief.isPending || hasOpenBriefQuestions}><Check size={14} />接受方案</button></div>}

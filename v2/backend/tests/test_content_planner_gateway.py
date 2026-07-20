@@ -38,8 +38,8 @@ def selection() -> ContentPlannerSelection:
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
         input_contract_version="content-planner-input.v2",
-        prompt_contract_version="content-planner-prompt.v3",
-        output_schema_version="creative-brief-candidate.v2",
+        prompt_contract_version="content-planner-prompt.v5",
+        output_schema_version="creative-brief-candidate.v3",
         max_output_tokens=2000,
         sampling={"temperature": 0.2, "unsupported": "ignored"},
     )
@@ -91,6 +91,14 @@ def valid_output(*, spoken_text: str | None = None, platform_adaptation: str | N
         "platform_adaptation": platform_adaptation,
         "entity_version_ids": ["entity_version_1"],
         "constraints_carried_forward": ["audio_policy=off"],
+        "creative_additions": [{
+            "addition_code": "ADDITION_01",
+            "category": "narrative_structure",
+            "content": "按准备、训练和结果组织完整过程。",
+            "purpose": "让训练主题形成清晰推进。",
+            "basis_refs": [{"type": "requirement_field", "reference_id": "core_topic"}],
+        }],
+        "facts_requiring_confirmation": [],
         "open_questions": [],
     }
 
@@ -126,6 +134,7 @@ def test_content_planner_returns_strict_brief_without_conversation_or_retry(monk
     sent = request["payload"]["messages"]
     assert [item["role"] for item in sent] == ["system", "user"]
     assert "conversation" not in sent[1]["content"]
+    assert "绝不能写 requirement ID、完整 JSON 路径" in sent[0]["content"]
 
 
 def test_content_planner_accepts_structured_open_question_options(monkeypatch) -> None:
@@ -161,6 +170,58 @@ def test_content_planner_accepts_structured_open_question_options(monkeypatch) -
     question = result.output.open_questions[0]
     assert question.question_code == "QUESTION_01"
     assert [item.option_code for item in question.options] == ["OPTION_01", "OPTION_02"]
+
+
+def test_content_planner_accepts_creative_addition_with_real_manifest_basis(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    gateway, transport = gateway_for({"choices": [{"message": {"content": json.dumps(output, ensure_ascii=False)}}]})
+
+    result = gateway.invoke(selection(), manifest())
+
+    assert result.output.creative_additions[0].basis_refs[0].reference_id == "core_topic"
+    assert len(transport.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("reference_type", "reference_id"),
+    [
+        ("requirement_field", "unknown_field"),
+        ("decision", "decision_unknown"),
+        ("entity_version", "entity_version_unknown"),
+    ],
+)
+def test_content_planner_rejects_creative_addition_with_unknown_basis_without_retry(
+    monkeypatch, reference_type: str, reference_id: str,
+) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    output["creative_additions"][0]["basis_refs"] = [{"type": reference_type, "reference_id": reference_id}]
+    gateway, transport = gateway_for({"choices": [{"message": {"content": json.dumps(output, ensure_ascii=False)}}]})
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest())
+
+    assert raised.value.code == "CONTENT_PLANNER_OUTPUT_CONTRACT_INVALID"
+    assert len(transport.calls) == 1
+
+
+def test_content_planner_rejects_pending_fact_without_matching_question(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    output["facts_requiring_confirmation"] = [{
+        "fact_code": "FACT_01",
+        "statement": "训练后体重下降五公斤",
+        "reason": "输入合同没有提供结果数据。",
+        "resolution_question_code": "QUESTION_01",
+    }]
+    gateway, transport = gateway_for({"choices": [{"message": {"content": json.dumps(output, ensure_ascii=False)}}]})
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest())
+
+    assert raised.value.code == "CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID"
+    assert len(transport.calls) == 1
 
 
 def test_content_planner_passes_frozen_revision_request_once(monkeypatch) -> None:
@@ -222,6 +283,12 @@ def test_content_planner_rejects_unknown_entity_and_default_platform_adaptation(
     gateway, _ = gateway_for({"choices": [{"message": {"content": json.dumps(adapted, ensure_ascii=False)}}]})
     with pytest.raises(AgentGatewayError) as raised:
         gateway.invoke(selection(), manifest(platform=None))
+    assert raised.value.code == "CONTENT_PLANNER_OUTPUT_CONTRACT_INVALID"
+
+    missing_adaptation = valid_output(platform_adaptation=None)
+    gateway, _ = gateway_for({"choices": [{"message": {"content": json.dumps(missing_adaptation, ensure_ascii=False)}}]})
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest(platform="抖音"))
     assert raised.value.code == "CONTENT_PLANNER_OUTPUT_CONTRACT_INVALID"
 
 

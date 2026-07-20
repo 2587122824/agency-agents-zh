@@ -81,6 +81,32 @@ class BriefOpenQuestion(BaseModel):
         return self
 
 
+class CreativeBasisReference(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["requirement_field", "decision", "entity_version"]
+    reference_id: str = Field(min_length=1, max_length=200)
+
+
+class CreativeAddition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    addition_code: str = Field(pattern=r"^ADDITION_[0-9]{2}$")
+    category: Literal["narrative_structure", "hook", "expression", "example", "visual_strategy", "call_to_action"]
+    content: str = Field(min_length=1, max_length=1000)
+    purpose: str = Field(min_length=1, max_length=500)
+    basis_refs: list[CreativeBasisReference] = Field(min_length=1, max_length=20)
+
+
+class BriefPendingFact(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    fact_code: str = Field(pattern=r"^FACT_[0-9]{2}$")
+    statement: str = Field(min_length=1, max_length=1000)
+    reason: str = Field(min_length=1, max_length=500)
+    resolution_question_code: str = Field(pattern=r"^QUESTION_[0-9]{2}$")
+
+
 class ContentPlannerOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -95,6 +121,8 @@ class ContentPlannerOutput(BaseModel):
     platform_adaptation: str | None = Field(default=None, min_length=1, max_length=1000)
     entity_version_ids: list[str] = Field(default_factory=list, max_length=100)
     constraints_carried_forward: list[str] = Field(default_factory=list, max_length=50)
+    creative_additions: list[CreativeAddition] = Field(max_length=30)
+    facts_requiring_confirmation: list[BriefPendingFact] = Field(max_length=20)
     open_questions: list[BriefOpenQuestion] = Field(default_factory=list, max_length=20)
 
     @model_validator(mode="after")
@@ -121,6 +149,20 @@ class ContentPlannerOutput(BaseModel):
         expected_question_codes = [f"QUESTION_{index:02d}" for index in range(1, len(self.open_questions) + 1)]
         if question_codes != expected_question_codes:
             raise ValueError("open question codes must be consecutive")
+        addition_codes = [item.addition_code for item in self.creative_additions]
+        expected_addition_codes = [f"ADDITION_{index:02d}" for index in range(1, len(self.creative_additions) + 1)]
+        if addition_codes != expected_addition_codes:
+            raise ValueError("creative addition codes must be unique and consecutive")
+        fact_codes = [item.fact_code for item in self.facts_requiring_confirmation]
+        expected_fact_codes = [f"FACT_{index:02d}" for index in range(1, len(self.facts_requiring_confirmation) + 1)]
+        if fact_codes != expected_fact_codes:
+            raise ValueError("pending fact codes must be unique and consecutive")
+        resolution_codes = [item.resolution_question_code for item in self.facts_requiring_confirmation]
+        if len(resolution_codes) != len(set(resolution_codes)):
+            raise ValueError("each pending fact must use a distinct resolution question")
+        unknown_questions = sorted(set(resolution_codes) - set(question_codes))
+        if unknown_questions:
+            raise ValueError(f"pending facts reference unknown questions: {unknown_questions}")
         return self
 
 
@@ -160,21 +202,23 @@ class ContentPlannerGateway(Protocol):
     ) -> ContentPlannerResult: ...
 
 
-_SYSTEM_PROMPT = """你是片场 V2 的内容策划智能体。你只把已确认需求组织成可拍摄的内容策略和脚本结构，不与用户闲聊，不生成镜头，不选择生产参数。
+_SYSTEM_PROMPT = """你是片场 V2 的内容策划智能体。你根据已确认需求主动拓展叙事结构、开场、表达方式、内容示例、视觉策略和行动引导，形成可拍摄的内容策略与脚本结构；不与用户闲聊，不生成镜头，不选择生产参数。
 必须只返回一个 JSON 对象，严格符合：
-{"title":"方案标题","content_promise":"内容承诺","audience_takeaway":"观众收获","hook":{"kind":"visual_action|question|contrast|result|statement","content":"开场钩子"},"narrative_beats":[{"beat_code":"BEAT_01","purpose":"节拍目的","summary":"内容摘要","target_duration_ms":5000}],"script_segments":[{"segment_code":"SEG_01","beat_code":"BEAT_01","kind":"visual_only|voiceover|dialogue|on_screen_text","spoken_text":null,"on_screen_text":null}],"tone":"语气","pacing":"节奏","platform_adaptation":null,"entity_version_ids":[],"constraints_carried_forward":[],"open_questions":[{"question_code":"QUESTION_01","prompt":"需要用户确认的问题","reason":"为什么此项会影响方案","options":[{"option_code":"OPTION_01","label":"短选项","description":"选择后的具体影响","answer":"作为方案修订依据的完整回答"},{"option_code":"OPTION_02","label":"另一选项","description":"选择后的具体影响","answer":"另一条完整回答"}]}]}
+{"title":"方案标题","content_promise":"内容承诺","audience_takeaway":"观众收获","hook":{"kind":"visual_action|question|contrast|result|statement","content":"开场钩子"},"narrative_beats":[{"beat_code":"BEAT_01","purpose":"节拍目的","summary":"内容摘要","target_duration_ms":5000}],"script_segments":[{"segment_code":"SEG_01","beat_code":"BEAT_01","kind":"visual_only|voiceover|dialogue|on_screen_text","spoken_text":null,"on_screen_text":null}],"tone":"语气","pacing":"节奏","platform_adaptation":null,"entity_version_ids":[],"constraints_carried_forward":[],"creative_additions":[{"addition_code":"ADDITION_01","category":"narrative_structure|hook|expression|example|visual_strategy|call_to_action","content":"策划主动补充的内容","purpose":"该拓展服务于什么创作目标","basis_refs":[{"type":"requirement_field|decision|entity_version","reference_id":"输入合同中对应的真实字段键或 ID"}]}],"facts_requiring_confirmation":[{"fact_code":"FACT_01","statement":"尚未被输入合同确认的事实陈述","reason":"为什么不能把它直接视为事实","resolution_question_code":"QUESTION_01"}],"open_questions":[{"question_code":"QUESTION_01","prompt":"需要用户确认的问题","reason":"为什么此项会影响方案","options":[{"option_code":"OPTION_01","label":"短选项","description":"选择后的具体影响","answer":"作为方案修订依据的完整回答"},{"option_code":"OPTION_02","label":"另一选项","description":"选择后的具体影响","answer":"另一条完整回答"}]}]}
 规则：
 1. 只读取输入合同中的已确认需求、已解决决策、精确实体版本与交付约束；不得读取或假设自由聊天内容。
 2. narrative_beats 的 target_duration_ms 总和必须精确等于 delivery_constraints.duration_ms；代码必须从 BEAT_01 连续编号。
 3. script_segments 只能引用已存在的 beat_code，代码必须从 SEG_01 连续编号。
 4. entity_version_ids 只能从 confirmed_entity_versions 中逐字复制，不得创建、缩写、改名或猜测实体 ID。
 5. audio_policy=off 时所有 spoken_text 必须为 null，kind 不得为 voiceover 或 dialogue；不得建立旁白、对白、音乐、TTS 或对口型依赖。
-6. platform 为 null 时 platform_adaptation 必须为 null，不得默认适配任何平台。
+6. platform 为 null 时 platform_adaptation 必须为 null；platform 有明确值时 platform_adaptation 必须明确说明如何适配该平台，不得遗漏。
 7. 不得输出镜头 ID、画面提示词、Provider、模型、工作流、NodeInfoList、价格、素材状态或生产任务。
-8. 不得引入输入合同中没有确认的人物、品牌、地点或产品事实。只有确实需要用户决定且会改变内容方案时才写入 open_questions，不得自行补写事实。每个问题必须提供 2 到 3 个互斥、可直接执行的答案选项；问题、选项和答案代码必须从 01 连续编号。不得提供“其他”选项，页面会独立提供自定义回答。
-9. constraints_carried_forward 是可选的可读说明，只能登记输入合同中真实存在的约束，不得创造默认规则；该字段为空不代表约束失效，后端按不可变输入合同直接验收实际输出。
-10. 不得输出 Markdown 代码块、解释文字或 JSON 之外的内容。
-11. 输入存在 revision_request 时，source_brief 是待调整的冻结原方案，instruction 是用户本轮唯一修改意见。你必须在继续满足已确认需求与全部确定性合同的前提下修改原方案；instruction 中逐项确认的答案可用于解决对应 open_questions，但不得改动需求版本、音频策略、时长、画幅、实体白名单或生产路由。输入不存在 revision_request 时按首次策划处理。
+8. 你应主动进行创意拓展，但每项拓展必须写入 creative_additions，并通过 basis_refs 明确引用输入合同中的真实来源。type=requirement_field 时 reference_id 只能逐字复制 requirement_version.fields 的直接字段键，例如 core_topic、duration_seconds、creative_direction，绝不能写 requirement ID、完整 JSON 路径或 requirement_xxx.fields.duration_seconds；type=decision 时只能逐字复制 confirmed_decisions[].id；type=entity_version 时只能逐字复制 confirmed_entity_versions[].id。创意拓展可以提出叙事组织、表达方式和视觉策略，不得把创意设想伪装成已经确认的事实。
+9. 输入合同未确认的数字、结果、身份、经历、时间、地点、品牌或产品信息，如方案确实需要采用，必须同时写入 facts_requiring_confirmation 和 open_questions。每条待确认事实精确关联一个独立问题；用户修订确认后，该事实不得继续留在 facts_requiring_confirmation。不得隐藏、改写或默认确认事实。
+10. 只有确实需要用户决定且会改变内容方案时才写入 open_questions。每个问题必须提供 2 到 3 个互斥、可直接执行的答案选项；问题、选项和答案代码必须从 01 连续编号。不得提供“其他”选项，页面会独立提供自定义回答。
+11. constraints_carried_forward 是可选的可读说明，只能登记输入合同中真实存在的约束，不得创造默认规则；该字段为空不代表约束失效，后端按不可变输入合同直接验收实际输出。
+12. 不得输出 Markdown 代码块、解释文字或 JSON 之外的内容。
+13. 输入存在 revision_request 时，source_brief 是待调整的冻结原方案，instruction 是用户本轮唯一修改意见。你必须在继续满足已确认需求与全部确定性合同的前提下修改原方案；instruction 中逐项确认的答案可用于解决对应 open_questions，但不得改动需求版本、音频策略、时长、画幅、实体白名单或生产路由。输入不存在 revision_request 时按首次策划处理。
 """
 
 
@@ -215,8 +259,8 @@ class ConfiguredContentPlannerGateway:
             raise AgentGatewayError("CONTENT_PLANNER_CAPABILITY_MISSING", "内容策划模型供应商未声明文本生成能力。")
         expected = {
             "input_contract_version": "content-planner-input.v2",
-            "output_schema_version": "creative-brief-candidate.v2",
-            "prompt_contract_version": "content-planner-prompt.v3",
+            "output_schema_version": "creative-brief-candidate.v3",
+            "prompt_contract_version": "content-planner-prompt.v5",
         }
         actual = {key: getattr(model, key) for key in expected}
         if actual != expected:
@@ -318,6 +362,19 @@ def _validate_output_against_manifest(output: ContentPlannerOutput, manifest: di
             raise ValueError(f"音频关闭时脚本段不得包含口播或对白：{invalid_audio}。")
     if manifest.get("platform") is None and output.platform_adaptation is not None:
         raise ValueError("平台未指定时不得生成平台适配。")
+    if manifest.get("platform") is not None and output.platform_adaptation is None:
+        raise ValueError("平台已明确指定时必须生成对应的平台适配。")
+    reference_sets = {
+        "requirement_field": set(manifest["requirement_version"]["fields"]),
+        "decision": {item["id"] for item in manifest["confirmed_decisions"]},
+        "entity_version": {item["id"] for item in manifest["confirmed_entity_versions"]},
+    }
+    for addition in output.creative_additions:
+        for reference in addition.basis_refs:
+            if reference.reference_id not in reference_sets[reference.type]:
+                raise ValueError(
+                    f"策划拓展 {addition.addition_code} 引用了不存在的 {reference.type}：{reference.reference_id}。"
+                )
 
 
 class DeterministicContentPlannerGateway:
@@ -335,8 +392,8 @@ class DeterministicContentPlannerGateway:
             credential_ref=None,
             timeout_seconds=1,
             input_contract_version="content-planner-input.v2",
-            prompt_contract_version="content-planner-prompt.v3",
-            output_schema_version="creative-brief-candidate.v2",
+            prompt_contract_version="content-planner-prompt.v5",
+            output_schema_version="creative-brief-candidate.v3",
             max_output_tokens=None,
             sampling={},
         )
@@ -381,6 +438,14 @@ class DeterministicContentPlannerGateway:
             platform_adaptation=None if manifest_payload.get("platform") is None else f"适配 {manifest_payload['platform']}",
             entity_version_ids=[item["id"] for item in manifest_payload["confirmed_entity_versions"]],
             constraints_carried_forward=[f"audio_policy={manifest_payload['audio_policy']}"],
+            creative_additions=[CreativeAddition(
+                addition_code="ADDITION_01",
+                category="narrative_structure",
+                content="按目标建立、过程展开和结果收束组织完整内容。",
+                purpose="让内容推进清晰并覆盖完整目标时长。",
+                basis_refs=[CreativeBasisReference(type="requirement_field", reference_id="core_topic")],
+            )],
+            facts_requiring_confirmation=[],
             open_questions=[],
         )
         return ContentPlannerResult(output, output.model_dump(mode="json"), "test-planner-request", {"total_tokens": 1})

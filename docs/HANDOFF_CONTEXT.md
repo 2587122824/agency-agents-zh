@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260719_25 (head)` |
-| 已发布配置 | `production_config_e8e5f2aea7f04f22a10bd52d84c6faa1`，版本 30 |
+| 已发布配置 | `production_config_617ee91b8d2c4270b58c20d4ad2a1501`，版本 32 |
 | 创作模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider |
 | 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -95,18 +95,19 @@ v2/runtime/worker.err.log
 - 澄清问题必须直接展示；模型调用提示读取真实下一步费用事实，需求面板使用“已具备最低策划条件”而非虚假的“完整”。
 - 附件只传递文件事实和已确认用途绑定，并标记 `content_access=metadata_only`；当前模型不读取图片、音频或视频内容。
 
-内容策划运行代码使用 `content-planner-input.v2 / creative-brief-candidate.v2 / content-planner-prompt.v3`：
+内容策划运行代码使用 `content-planner-input.v2 / creative-brief-candidate.v3 / content-planner-prompt.v5`：
 
 - 使用独立 `planner` 模型分工，只读取已确认需求、Decision、实体版本和交付约束，不读取自由聊天。
-- 输出内容承诺、开场、连续内容节拍、脚本段、语气、节奏、平台适配和精确实体引用。
-- 后端严格校验总时长、代码与引用、实体白名单、音频关闭和平台未指定约束。
+- 输出内容承诺、开场、连续内容节拍、脚本段、语气、节奏、平台适配、精确实体引用、策划拓展和待确认事实。
+- 策划拓展必须引用真实需求字段、Decision 或实体版本；待确认事实必须一对一关联结构化问题并阻断接受。页面将两者分区展示。
+- 后端严格校验总时长、代码与引用、实体白名单、音频关闭和平台双向约束；不扫描关键词、不改写事实、不增加第二个模型调用。
 - 每个需求版本只自动尝试一次；失败不修复、不自动重试、不换模型。
 - 用户可确认模型费用后显式重跑当前需求版本最近一次失败 Run；必须复用原输入清单并保持生产配置、模型、Provider、Prompt 合同和输出 Schema 完全一致，新运行保留原失败记录。
 - `调整方案` 保持活动需求版本不变，以冻结原 Brief 和明确修改意见生成下一版候选；候选通过 `supersedes_candidate_id` 和 `revision_number` 形成不可变链。
 - `修改创作需求` 与 `放弃方案` 都会拒绝当前 Brief 并将项目从 `plan_review` 返回 `collecting_requirements`；前者随后导航回创作中心，只有用户再次确认才创建新的需求版本。
 - 修订失败不改变原方案，不自动重试；用户确认费用后的精确重跑复用失败修订的原 Manifest。
 - `open_questions` 是结构化确认项：每题含原因、2–3 个互斥答案选项和自定义回答入口；用户全部回答后明确调用一次 planner 生成新 Brief 候选，不直接修改正式需求。
-- 历史 v1 字符串问题不由前端猜测选项；页面提供需要用户点击确认的“生成可选项”模型调用。
+- 开发环境直接升级当前合同，不保留旧策划输出的运行时兼容入口；需要时显式重建测试数据。
 - 成功方案不能使用失败重跑命令；已拒绝方案可在同一需求版本下明确微调，基础需求变化时才需要再次确认新的需求版本。
 - 成功只创建待审核 Creative Brief；用户接受后才能交给分镜导演。
 
@@ -131,6 +132,8 @@ v2/runtime/worker.err.log
 选择后持续引导真实验收项目 `project_55529c047fba4e19b12b6b911c75115a` 使用配置 v21 与 `prompt.v13` 完成“首次引导 -> 点击进步日记 -> 下一轮内容结构引导”：结构化用户选择消息、草稿 `creative_direction=进步日记`、助手确认和新的 `content_structure` 三选项均已持久化，最新 Run 为 `succeeded`。页面显示 3 条连续消息和 3 个新选项，`scrollWidth == clientWidth` 且控制台无错误。
 
 内容方案修订真实验收项目 `project_bcba80893b6d487b87586272eba20958` 使用配置 v22 完成首次 Brief 与一次真实 DeepSeek 微调。原候选 `brief_candidate_77e5469d1ad347f2894879d9bd8a4bea` 为 revision 1，新候选 `brief_candidate_25be1d8f15954df397552b414590f6c5` 为 revision 2，精确引用上一候选且 Requirement ID 保持 `requirement_41b6b75c97214e3e91183fa16e045c0e` 不变。随后拒绝 revision 2 后项目回到 `collecting_requirements`，375x844 页面输入框恢复可编辑且无横向溢出。
+
+内容策划拓展真实验收使用配置 v32 与 `creative-brief-candidate.v3 / content-planner-prompt.v5`。项目 `project_e2e8052aebe6484b812e9049e47c8064` 成功创建候选 `brief_candidate_bede8ff4f0f44782b5b86ab7c74901db`，返回一项引用 `duration_seconds / audio_mode / aspect_ratio` 的结构化策划拓展，并将输入主题乱码作为待确认事实一对一关联 `QUESTION_01`；后端未猜测或改写引用。此前 v4 样本使用完整 JSON 路径作为字段引用，被白名单明确拒绝；v5 只强化 Prompt 的精确字段键格式，没有增加路径截取兼容。另一个独立 v5 样本返回无效 JSON，被 `CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID` 明确拒绝且没有自动重试，保留为真实模型格式稳定性风险。方案页桌面与 390x844 移动端已显示策划拓展、待确认事实及其关联问题；移动端 `scrollWidth == clientWidth == 375`，接受按钮在事实未解决时保持禁用。
 
 ## 5. 必须保持的边界
 
@@ -203,7 +206,7 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`181 passed`
+- 后端测试：`187 passed`
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过

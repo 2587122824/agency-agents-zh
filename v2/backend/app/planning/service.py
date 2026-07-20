@@ -589,6 +589,11 @@ def decide_brief(
         raise CreationConflictError("BRIEF_BASE_VERSION_STALE", "创意方案基于旧需求版本，不能处理。")
     if candidate.status != "awaiting_review":
         raise CreationConflictError("BRIEF_NOT_REVIEWABLE", f"创意方案状态为 {candidate.status}。")
+    if accept and candidate.brief.get("facts_requiring_confirmation"):
+        raise CreationConflictError(
+            "BRIEF_FACTS_UNCONFIRMED",
+            "内容方案仍包含未经确认的事实，请先逐项确认并生成修订版。",
+        )
     if accept and candidate.brief.get("open_questions"):
         raise CreationConflictError(
             "BRIEF_OPEN_QUESTIONS_UNRESOLVED",
