@@ -482,6 +482,7 @@ export interface ProductionImpactAnalysis {
     }
   }
   analysis_hash: string
+  snapshot_contract_hash: string
   validation_errors: Array<{ code: string; path?: string; message?: string }>
   execution_blockers: Array<{ code: string; message: string }>
   estimated_call_count: number

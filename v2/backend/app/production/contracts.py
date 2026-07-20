@@ -57,6 +57,7 @@ class ImpactAnalysisRead(BaseModel):
     selection: dict
     manifest: dict
     analysis_hash: str
+    snapshot_contract_hash: str
     validation_errors: list[dict]
     execution_blockers: list[dict]
     estimated_call_count: int

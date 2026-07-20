@@ -2935,6 +2935,31 @@ def test_production_impact_and_snapshot_compile_exact_dag_without_work_items(cli
     references = client.get(f"/api/v1/system-config/versions/{config['id']}/references").json()
     assert references == [{"ref_type": "snapshot", "ref_id": snapshot["id"], "created_at": references[0]["created_at"]}]
 
+    duplicate_impact_response = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={"command_id": "production-impact-command-duplicate", **selection},
+    )
+    assert duplicate_impact_response.status_code == 201
+    duplicate_impact = duplicate_impact_response.json()
+    assert duplicate_impact["id"] != impact["id"]
+    assert duplicate_impact["snapshot_contract_hash"] == impact["snapshot_contract_hash"]
+    assert duplicate_impact["snapshot_contract_hash"] == snapshot["contract_hash"]
+
+    duplicate_snapshot = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "production-snapshot-command-duplicate",
+            "impact_analysis_id": duplicate_impact["id"],
+            "analysis_hash": duplicate_impact["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    )
+    assert duplicate_snapshot.status_code == 409
+    assert duplicate_snapshot.headers["x-error-code"] == "PRODUCTION_SNAPSHOT_DUPLICATE"
+    assert duplicate_snapshot.json()["detail"] == "相同制作方案已保存为制作方案 1，不能重复创建。"
+    preparation = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    assert [item["id"] for item in preparation["snapshots"]] == [snapshot["id"]]
+
 
 def test_production_impact_blocks_wrong_explicit_workflow_kind(client: TestClient) -> None:
     project, plan = create_confirmed_plan(client)

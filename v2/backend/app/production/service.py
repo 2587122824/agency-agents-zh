@@ -100,8 +100,14 @@ def _save_receipt(session: Session, project_id: str, command_id: str, command_ty
     )
 
 
+def _snapshot_contract(manifest: dict) -> dict:
+    return {"schema_version": "production-snapshot.v2", **manifest}
+
+
 def _impact_dict(row: ProductionImpactAnalysis) -> dict:
-    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    result = {column.name: getattr(row, column.name) for column in row.__table__.columns}
+    result["snapshot_contract_hash"] = _hash(_snapshot_contract(row.manifest))
+    return result
 
 
 def _snapshot_dict(session: Session, row: ProductionSnapshot) -> dict:
@@ -627,8 +633,6 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
         raise ProductionConflictError("IMPACT_ANALYSIS_HASH_MISMATCH", "影响分析内容已变化，请重新确认。")
     if not payload.confirm_contract_scope:
         raise ProductionConflictError("CONTRACT_SCOPE_CONFIRMATION_REQUIRED", "创建不可变快照前必须确认精确生产范围。")
-    if repository.snapshot_for_impact(analysis.id):
-        raise ProductionConflictError("IMPACT_ANALYSIS_ALREADY_USED", "该影响分析已经创建过快照。")
     plan = repository.plan(analysis.plan_version_id)
     config = repository.configuration(analysis.production_config_version_id)
     if not plan or plan.project_id != project.id or not plan.is_active or plan.status != "confirmed":
@@ -665,8 +669,16 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
         codes = ", ".join(sorted({str(item["code"]) for item in current_reference_errors}))
         raise ProductionConflictError("REFERENCE_IMAGE_CHANGED_AFTER_ANALYSIS", f"参考图事实已变化，必须重新分析：{codes}。")
 
+    contract = _snapshot_contract(analysis.manifest)
+    contract_hash = _hash(contract)
+    existing_snapshot = repository.snapshot_for_contract(project.id, contract_hash)
+    if existing_snapshot:
+        raise ProductionConflictError(
+            "PRODUCTION_SNAPSHOT_DUPLICATE",
+            f"相同制作方案已保存为制作方案 {existing_snapshot.snapshot_number}，不能重复创建。",
+        )
+
     snapshot_number = repository.next_snapshot_number(project.id)
-    contract = {"schema_version": "production-snapshot.v2", **analysis.manifest}
     snapshot = ProductionSnapshot(
         project_id=project.id,
         plan_version_id=plan.id,
@@ -679,7 +691,7 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
         output_spec=analysis.manifest["output_spec"],
         selection=analysis.selection,
         contract=contract,
-        contract_hash=_hash(contract),
+        contract_hash=contract_hash,
         estimated_call_count=analysis.estimated_call_count,
         cost_status=analysis.cost_status,
         estimated_cost=analysis.estimated_cost,

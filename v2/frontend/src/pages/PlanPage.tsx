@@ -208,6 +208,9 @@ export function PlanPage() {
   const selectedVideoSlot = videoSlots.find(item => item.id === videoSlotId)
   const selectedTtsSlot = ttsSlots.find(item => item.id === ttsSlotId)
   const impact = analyzeImpact.data
+  const savedMatchingSnapshot = impact
+    ? preparation.data?.snapshots.find(snapshot => snapshot.contract_hash === impact.snapshot_contract_hash)
+    : undefined
   const impactShotCodes = impact?.manifest.shots.map(shot => shot.shot_code) ?? []
   const groupedValidationIssues = impact ? groupValidationIssues(impact.validation_errors, impactShotCodes) : []
   const canAnalyze = Boolean(data.active_plan && configId && videoSpecId && keyframeSlotId && videoSlotId && (preparation.data?.audio_mode !== 'voiceover' || ttsSlotId))
@@ -266,7 +269,7 @@ export function PlanPage() {
             </section>}
             {impact.execution_blockers.map(item => <article className={styles.costBlocker} key={item.code}><b>还不能开始制作</b><span>{userIssue(item.code)}</span></article>)}
             <details className={styles.technicalDetails}><summary>查看本次计算的技术详情</summary><dl><div><dt>分析编号</dt><dd><code>{impact.analysis_hash}</code></dd></div><div><dt>内部状态</dt><dd><code>{impact.status}</code></dd></div>{[...impact.validation_errors, ...impact.execution_blockers].map(item => <div key={`technical:${item.code}:${'path' in item ? item.path : ''}`}><dt>{item.code}</dt><dd>{item.message ?? ('path' in item ? item.path : '')}</dd></div>)}</dl></details>
-            {impact.status === 'awaiting_confirmation' && <footer><p><strong>确认后保存一份不可修改的制作方案</strong><span>这里只保存本次选择，不会开始生成，也不会产生费用。</span></p><button className="primaryButton" disabled={createSnapshot.isPending} onClick={() => createSnapshot.mutate()}><LockKeyhole size={14} />保存本次制作方案</button></footer>}
+            {impact.status === 'awaiting_confirmation' && <footer>{savedMatchingSnapshot ? <p><strong>相同制作方案已保存</strong><span>当前计划与制作方案 {savedMatchingSnapshot.snapshot_number} 完全相同，无需重复保存。</span></p> : <><p><strong>确认后保存一份不可修改的制作方案</strong><span>这里只保存本次选择，不会开始生成，也不会产生费用。</span></p><button className="primaryButton" disabled={createSnapshot.isPending} onClick={() => createSnapshot.mutate()}><LockKeyhole size={14} />保存本次制作方案</button></>}</footer>}
           </div>}
           {preparation.data?.snapshots.map(snapshot => <div className={styles.snapshotRow} key={snapshot.id}><LockKeyhole size={17} /><div><strong>制作方案 {snapshot.snapshot_number} · {snapshotStatusLabel(snapshot.status, snapshot.cost_status)}</strong><span>{snapshot.nodes.length} 个制作步骤 · 预计调用生成服务 {snapshot.estimated_call_count} 次 · {costLabel(snapshot.estimated_cost, snapshot.currency)}</span><details className={styles.technicalDetails}><summary>技术详情</summary><dl><div><dt>内部状态</dt><dd><code>{snapshot.status}</code></dd></div><div><dt>步骤与依赖</dt><dd>{snapshot.nodes.length} 个节点 · {snapshot.edges.length} 条依赖</dd></div><div><dt>合同校验码</dt><dd><code>{snapshot.contract_hash}</code></dd></div></dl></details></div>{snapshot.status === 'preparing' && snapshot.cost_status === 'estimated' ? <button className="primaryButton" onClick={() => setConfirmCost(true)}>确认费用并锁定方案</button> : snapshot.status === 'locked' ? <button className="primaryButton" disabled={activateSnapshot.isPending} onClick={() => activateSnapshot.mutate()}>设为当前制作方案</button> : snapshot.status === 'active' ? <button className="primaryButton" onClick={() => setConfirmSubmit(true)}>开始制作</button> : snapshot.status === 'submitted' || snapshot.status.startsWith('execution_') ? <Link className="secondaryButton" to="/production">查看制作进度</Link> : <em>{snapshotStatusLabel(snapshot.status, snapshot.cost_status)}</em>}</div>)}
         </section>}
