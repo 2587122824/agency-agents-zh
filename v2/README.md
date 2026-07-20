@@ -49,7 +49,7 @@ v2\start_v2.bat -NoBrowser
 ```
 
 For a persistent local installation, store the same three values in the
-Windows user environment. `start_v2.ps1` copies the credential allowlist,
+Windows user environment. `start_v2.ps1` merges the process and user credential allowlists,
 allowlisted credentials, agent execution switch, and external provider
 execution switch into the API and Worker processes on every restart. Secrets
 must not be committed to the repository or stored in the production
