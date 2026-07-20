@@ -121,8 +121,11 @@ export const api = {
     plan_version_id: string
     production_config_version_id: string
     video_spec_version_id: string
-    keyframe_workflow_slot_version_id: string
-    video_workflow_slot_version_id: string
+    shot_workflow_assignments: Array<{
+      shot_code: string
+      keyframe_workflow_slot_version_id: string | null
+      video_workflow_slot_version_id: string
+    }>
     tts_workflow_slot_version_id?: string | null
     pricing_catalog_version_id?: string | null
   }) => request<ProductionImpactAnalysis>(`/projects/${projectId}/production-impact-analyses`, {

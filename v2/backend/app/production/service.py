@@ -44,6 +44,7 @@ from .contracts import (
     AnalyzeProductionImpact,
     CreateProductionSnapshot,
     LockProductionSnapshot,
+    ShotWorkflowAssignment,
     SubmitProduction,
 )
 
@@ -69,6 +70,10 @@ def _event(session: Session, event: ProjectEvent) -> None:
 def _hash(payload: dict) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _node_seed(plan_id: str, node_key: str) -> int:
+    return int(hashlib.sha256(f"{plan_id}:{node_key}".encode("utf-8")).hexdigest()[:12], 16)
 
 
 def _money(value: Decimal) -> Decimal:
@@ -283,36 +288,43 @@ def _compile_manifest(
     output_spec: dict,
     audio_mode: str,
     references_by_shot_id: dict[str, dict | None],
+    workflow_routes_by_shot_id: dict[str, tuple[WorkflowSlotVersion | None, WorkflowSlotVersion]],
 ) -> dict:
     nodes: list[dict] = []
     edges: list[dict] = []
     for shot in shots:
         image_key = f"{shot.shot_code}.keyframe"
         video_key = f"{shot.shot_code}.video"
-        nodes.append({
-            "node_key": image_key,
-            "kind": "generate_keyframe",
-            "shot_id": shot.id,
-            "workflow_slot_version_id": selection["keyframe_workflow_slot_version_id"],
-            "input_contract": {"shot": _shot_contract(shot), "entity_version_ids": sorted(set(
-                ([shot.scene_entity_version_id] if shot.scene_entity_version_id else [])
-                + shot.character_entity_version_ids + shot.outfit_entity_version_ids + shot.product_entity_version_ids
-            )), "reference_image": references_by_shot_id.get(shot.id)},
-            "output_contract": {"media_type": "image", "video_spec_version_id": selection["video_spec_version_id"]},
-        })
+        keyframe_workflow, video_workflow = workflow_routes_by_shot_id[shot.id]
+        if keyframe_workflow:
+            nodes.append({
+                "node_key": image_key,
+                "kind": "generate_keyframe",
+                "shot_id": shot.id,
+                "workflow_slot_version_id": keyframe_workflow.id,
+                "input_contract": {"shot": _shot_contract(shot), "seed": _node_seed(plan.id, image_key), "entity_version_ids": sorted(set(
+                    ([shot.scene_entity_version_id] if shot.scene_entity_version_id else [])
+                    + shot.character_entity_version_ids + shot.outfit_entity_version_ids + shot.product_entity_version_ids
+                )), "reference_image": references_by_shot_id.get(shot.id)},
+                "output_contract": {"media_type": "image", "video_spec_version_id": selection["video_spec_version_id"]},
+            })
+        video_kind = "generate_t2v_clip" if video_workflow.operation_kind == "text_to_video_generation" else "generate_i2v_clip"
         nodes.append({
             "node_key": video_key,
-            "kind": "generate_i2v_clip",
+            "kind": video_kind,
             "shot_id": shot.id,
-            "workflow_slot_version_id": selection["video_workflow_slot_version_id"],
+            "workflow_slot_version_id": video_workflow.id,
             "input_contract": {
                 "shot": _shot_contract(shot),
-                "source_image_node_keys": [image_key],
+                "source_image_node_keys": [image_key] if keyframe_workflow else [],
                 "duration_ms": shot.duration_ms,
+                "duration_seconds": shot.duration_ms / 1000,
+                "seed": _node_seed(plan.id, video_key),
             },
             "output_contract": {"media_type": "video", "video_spec_version_id": selection["video_spec_version_id"]},
         })
-        edges.append({"parent_node_key": image_key, "child_node_key": video_key, "dependency_type": "required", "input_slot": "source_image"})
+        if keyframe_workflow:
+            edges.append({"parent_node_key": image_key, "child_node_key": video_key, "dependency_type": "required", "input_slot": "source_image"})
     timeline_inputs = [f"{shot.shot_code}.video" for shot in shots]
     if audio_mode == "voiceover":
         nodes.append({
@@ -365,7 +377,7 @@ def _price_dag(
             quantity = Decimal("1")
         elif rule.unit == "runtime_second" and rule.estimated_runtime_seconds is not None:
             quantity = Decimal(str(rule.estimated_runtime_seconds))
-        elif rule.unit == "output_second" and node["kind"] == "generate_i2v_clip":
+        elif rule.unit == "output_second" and node["kind"] in {"generate_i2v_clip", "generate_t2v_clip"}:
             quantity = Decimal(str(node["input_contract"]["duration_ms"])) / Decimal("1000")
         elif rule.unit == "output_second" and node["kind"] == "generate_tts":
             quantity = total_duration_seconds
@@ -490,8 +502,16 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         errors.append({"code": "PLAN_ASPECT_RATIO_INVALID", "path": "plan_version_id", "message": "已确认方案缺少有效画幅。"})
 
     video_spec = _component(session, VideoSpecVersion, payload.video_spec_version_id, config.id, "video_spec", errors)
-    keyframe_slot = _component(session, WorkflowSlotVersion, payload.keyframe_workflow_slot_version_id, config.id, "keyframe_workflow_slot", errors)
-    video_slot = _component(session, WorkflowSlotVersion, payload.video_workflow_slot_version_id, config.id, "video_workflow_slot", errors)
+    assignment_by_shot_code: dict[str, ShotWorkflowAssignment] = {}
+    for index, assignment in enumerate(payload.shot_workflow_assignments):
+        if assignment.shot_code in assignment_by_shot_code:
+            errors.append({
+                "code": "SHOT_WORKFLOW_ASSIGNMENT_DUPLICATE",
+                "path": f"shot_workflow_assignments.{index}.shot_code",
+                "shot_code": assignment.shot_code,
+                "message": "同一镜头只能提交一组制作方案。",
+            })
+        assignment_by_shot_code[assignment.shot_code] = assignment
     tts_slot = None
     if payload.tts_workflow_slot_version_id:
         tts_slot = _component(session, WorkflowSlotVersion, payload.tts_workflow_slot_version_id, config.id, "tts_workflow_slot", errors)
@@ -511,13 +531,6 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
 
     if video_spec and video_spec.aspect_ratio != aspect_ratio:
         errors.append({"code": "VIDEO_SPEC_ASPECT_RATIO_MISMATCH", "path": "video_spec_version_id", "message": "视频规格画幅与项目已确认画幅不一致。"})
-    if keyframe_slot and keyframe_slot.operation_kind != "image_generation":
-        errors.append({"code": "KEYFRAME_SLOT_KIND_INVALID", "path": "keyframe_workflow_slot_version_id", "message": "关键帧槽位必须是 image_generation。"})
-    if video_slot and video_slot.operation_kind != "video_generation":
-        errors.append({"code": "VIDEO_SLOT_KIND_INVALID", "path": "video_workflow_slot_version_id", "message": "视频槽位必须是 video_generation。"})
-    for label, slot in (("keyframe", keyframe_slot), ("video", video_slot)):
-        if slot and video_spec and video_spec.id not in (slot.supported_video_spec_ids or []):
-            errors.append({"code": "WORKFLOW_VIDEO_SPEC_UNSUPPORTED", "path": f"{label}_workflow_slot_version_id", "message": f"{label} 槽位未显式声明支持所选视频规格。"})
     if audio_mode == "off" and tts_slot:
         errors.append({"code": "AUDIO_OFF_HAS_TTS", "path": "tts_workflow_slot_version_id", "message": "项目关闭音频时不得选择 TTS 槽位。"})
     if audio_mode == "voiceover" and not tts_slot:
@@ -530,6 +543,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         errors.append({"code": "PLAN_HAS_NO_SHOTS", "path": "plan_version_id", "message": "方案没有分镜。"})
     entity_ids: set[str] = set()
     references_by_shot_id: dict[str, dict | None] = {}
+    workflow_routes_by_shot_id: dict[str, tuple[WorkflowSlotVersion | None, WorkflowSlotVersion]] = {}
     for shot in shots:
         if not isinstance(shot.visual_prompt, str) or not shot.visual_prompt.strip():
             errors.append({"code": "VISUAL_PROMPT_REQUIRED", "path": f"shots.{shot.shot_code}.visual_prompt"})
@@ -555,20 +569,65 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         if video_spec and not (video_spec.duration_min_seconds * 1000 <= shot.duration_ms <= video_spec.duration_max_seconds * 1000):
             errors.append({"code": "SHOT_DURATION_UNSUPPORTED", "path": f"shots.{shot.shot_code}.duration_ms", "message": "镜头时长不在所选视频规格范围内。"})
 
-    keyframe_provider = repository.provider(keyframe_slot.provider_config_version_id) if keyframe_slot else None
-    _validate_runninghub_keyframe_bindings(
-        shots,
-        references_by_shot_id,
-        keyframe_slot,
-        keyframe_provider,
-        errors,
-    )
-    _validate_generation_capabilities(shots, references_by_shot_id, keyframe_slot, video_slot, errors)
+        assignment = assignment_by_shot_code.get(shot.shot_code)
+        if assignment is None:
+            errors.append({
+                "code": "SHOT_WORKFLOW_ASSIGNMENT_MISSING",
+                "path": f"shots.{shot.shot_code}",
+                "shot_code": shot.shot_code,
+                "message": "该镜头尚未明确选择图片和视频制作方案。",
+            })
+            continue
+        keyframe_slot = None
+        if assignment.keyframe_workflow_slot_version_id:
+            keyframe_slot = _component(
+                session,
+                WorkflowSlotVersion,
+                assignment.keyframe_workflow_slot_version_id,
+                config.id,
+                f"shots.{shot.shot_code}.keyframe_workflow_slot",
+                errors,
+            )
+        video_slot = _component(
+            session,
+            WorkflowSlotVersion,
+            assignment.video_workflow_slot_version_id,
+            config.id,
+            f"shots.{shot.shot_code}.video_workflow_slot",
+            errors,
+        )
+        if keyframe_slot and keyframe_slot.operation_kind != "image_generation":
+            errors.append({"code": "KEYFRAME_SLOT_KIND_INVALID", "path": f"shots.{shot.shot_code}.keyframe_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "图片制作方案类型无效。"})
+        if video_slot and video_slot.operation_kind not in {"video_generation", "text_to_video_generation"}:
+            errors.append({"code": "VIDEO_SLOT_KIND_INVALID", "path": f"shots.{shot.shot_code}.video_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "视频制作方案类型无效。"})
+        for label, slot in (("keyframe", keyframe_slot), ("video", video_slot)):
+            if slot and video_spec and video_spec.id not in (slot.supported_video_spec_ids or []):
+                errors.append({"code": "WORKFLOW_VIDEO_SPEC_UNSUPPORTED", "path": f"shots.{shot.shot_code}.{label}_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "所选制作方案未显式声明支持当前画面规格。"})
+        if video_slot and video_slot.operation_kind == "video_generation" and keyframe_slot is None:
+            errors.append({"code": "I2V_KEYFRAME_WORKFLOW_REQUIRED", "path": f"shots.{shot.shot_code}.keyframe_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "首帧生视频必须明确选择图片制作方案。"})
+        if video_slot and video_slot.operation_kind == "text_to_video_generation" and keyframe_slot is not None:
+            errors.append({"code": "T2V_KEYFRAME_WORKFLOW_NOT_ALLOWED", "path": f"shots.{shot.shot_code}.keyframe_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "纯文本视频不会使用关键帧，请清空该镜头的图片制作方案。"})
+        if keyframe_slot:
+            keyframe_provider = repository.provider(keyframe_slot.provider_config_version_id)
+            _validate_runninghub_keyframe_bindings([shot], references_by_shot_id, keyframe_slot, keyframe_provider, errors)
+        _validate_generation_capabilities([shot], references_by_shot_id, keyframe_slot, video_slot, errors)
+        if keyframe_slot and video_slot:
+            workflow_routes_by_shot_id[shot.id] = (keyframe_slot, video_slot)
+        elif video_slot and video_slot.operation_kind == "text_to_video_generation":
+            workflow_routes_by_shot_id[shot.id] = (None, video_slot)
+
+    unknown_shot_codes = sorted(set(assignment_by_shot_code) - {shot.shot_code for shot in shots})
+    for shot_code in unknown_shot_codes:
+        errors.append({
+            "code": "SHOT_WORKFLOW_ASSIGNMENT_UNKNOWN",
+            "path": "shot_workflow_assignments",
+            "shot_code": shot_code,
+            "message": "制作方案引用了当前分镜中不存在的镜头编号。",
+        })
 
     selection = {
         "video_spec_version_id": payload.video_spec_version_id,
-        "keyframe_workflow_slot_version_id": payload.keyframe_workflow_slot_version_id,
-        "video_workflow_slot_version_id": payload.video_workflow_slot_version_id,
+        "shot_workflow_assignments": [assignment.model_dump(mode="json") for assignment in payload.shot_workflow_assignments],
         "tts_workflow_slot_version_id": payload.tts_workflow_slot_version_id,
         "pricing_catalog_version_id": payload.pricing_catalog_version_id,
     }
@@ -589,7 +648,8 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         output_spec,
         audio_mode,
         references_by_shot_id,
-    ) if keyframe_slot and video_slot else {"nodes": [], "edges": []}
+        workflow_routes_by_shot_id,
+    ) if len(workflow_routes_by_shot_id) == len(shots) else {"nodes": [], "edges": []}
     estimated_cost = None
     if pricing:
         now = utc_now()
@@ -987,6 +1047,7 @@ def _execution_manifest(
             "frame_count_rule": video_spec.frame_count_rule,
             "frame_count": frame_count,
             "long_side": max(video_spec.width, video_spec.height),
+            "short_side": min(video_spec.width, video_spec.height),
             "container": video_spec.container,
             "video_codec": video_spec.video_codec,
             "pixel_format": video_spec.pixel_format,
@@ -1221,7 +1282,14 @@ def preparation_view(session: Session, project: Project) -> dict:
             "version_number": config.version_number,
             "display_name": config.display_name,
             "video_specs": [{"id": row.id, "key": row.spec_key, "display_name": row.display_name, "aspect_ratio": row.aspect_ratio, "width": row.width, "height": row.height, "fps": row.fps} for row in videos],
-            "workflow_slots": [{"id": row.id, "key": row.slot_key, "display_name": row.display_name, "operation_kind": row.operation_kind, "supported_video_spec_ids": row.supported_video_spec_ids} for row in workflows],
+            "workflow_slots": [{
+                "id": row.id,
+                "key": row.slot_key,
+                "display_name": row.display_name,
+                "operation_kind": row.operation_kind,
+                "supported_video_spec_ids": row.supported_video_spec_ids,
+                "capability_tags": row.capability_tags or [],
+            } for row in workflows],
             "pricing_catalogs": [{
                 "id": row.id,
                 "key": row.catalog_key,

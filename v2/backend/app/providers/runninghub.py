@@ -151,7 +151,7 @@ class RunningHubAdapter:
     display_name: str = "RunningHub"
     external: bool = True
     requires_credential: bool = True
-    supported_work_kinds: frozenset[str] = frozenset({"generate_keyframe", "generate_i2v_clip"})
+    supported_work_kinds: frozenset[str] = frozenset({"generate_keyframe", "generate_i2v_clip", "generate_t2v_clip"})
 
     def execute(self, request: ProviderExecutionRequest) -> dict[str, Any]:
         raise ProviderAdapterError("EXTERNAL_PROVIDER_LIFECYCLE_REQUIRED", "External work must use persisted submit and poll phases.")
@@ -233,10 +233,11 @@ class RunningHubAdapter:
         roots = {
             "shot": manifest.get("input_contract", {}).get("shot"),
             "duration_ms": manifest.get("input_contract", {}).get("duration_ms"),
+            "duration_seconds": manifest.get("input_contract", {}).get("duration_seconds"),
             "video_spec": manifest.get("video_spec"),
             "seed": manifest.get("input_contract", {}).get("seed"),
         }
-        if source in {"duration_ms", "seed"}:
+        if source in {"duration_ms", "duration_seconds", "seed"}:
             value = roots[source]
         elif source.startswith("shot."):
             try:

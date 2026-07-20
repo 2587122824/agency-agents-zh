@@ -2156,6 +2156,14 @@ def create_confirmed_plan(client: TestClient) -> tuple[dict, dict]:
     return project, plan
 
 
+def production_workflow_assignments(plan: dict, keyframe_slot_id: str, video_slot_id: str) -> list[dict]:
+    return [{
+        "shot_code": shot["shot_code"],
+        "keyframe_workflow_slot_version_id": keyframe_slot_id,
+        "video_workflow_slot_version_id": video_slot_id,
+    } for shot in plan["shots"]]
+
+
 def test_decision_impact_graph_uses_frozen_manifest_lineage_without_key_inference(client: TestClient) -> None:
     project = create_creation_project(client)
     resolved = client.post(
@@ -2528,8 +2536,7 @@ def test_required_primary_reference_blocks_without_guessing(client: TestClient) 
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "first_frame_video")]["id"]),
             "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
         },
     )
@@ -2544,6 +2551,76 @@ def test_required_primary_reference_blocks_without_guessing(client: TestClient) 
     )
     with SessionLocal() as session:
         assert session.scalar(select(WorkItem).where(WorkItem.project_id == project["id"])) is None
+
+
+def test_production_impact_requires_explicit_assignment_for_every_shot(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    config = publish_visual_production_configuration(client, with_pricing=True, adapter_kind="runninghub")
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    assignments = production_workflow_assignments(
+        plan,
+        components[("workflow_slot", "keyframe_image")]["id"],
+        components[("workflow_slot", "first_frame_video")]["id"],
+    )[:-1]
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "missing-shot-workflow-assignment",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "shot_workflow_assignments": assignments,
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    )
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["status"] == "blocked"
+    assert [item["code"] for item in analysis["validation_errors"]].count("SHOT_WORKFLOW_ASSIGNMENT_MISSING") == 1
+    assert analysis["manifest"]["dag"]["nodes"] == []
+
+
+def test_text_to_video_assignment_compiles_without_keyframe_or_parent_edge(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    config = publish_visual_production_configuration(client, with_pricing=True, adapter_kind="runninghub")
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    video = components[("workflow_slot", "first_frame_video")]
+    with SessionLocal() as session:
+        workflow = session.get(WorkflowSlotVersion, video["id"])
+        assert workflow is not None
+        workflow.operation_kind = "text_to_video_generation"
+        workflow.capability_tags = ["text_to_video", "broll"]
+        workflow.node_info_list = [{
+            "node_id": "1",
+            "field_path": "text",
+            "value_source": "shot.visual_prompt",
+            "value_type": "string",
+            "required": True,
+        }]
+        session.commit()
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "text-to-video-shot-assignments",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+            "shot_workflow_assignments": [{
+                "shot_code": shot["shot_code"],
+                "keyframe_workflow_slot_version_id": None,
+                "video_workflow_slot_version_id": video["id"],
+            } for shot in plan["shots"]],
+            "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
+        },
+    )
+    assert response.status_code == 201
+    analysis = response.json()
+    assert analysis["status"] == "awaiting_confirmation"
+    assert {node["kind"] for node in analysis["manifest"]["dag"]["nodes"]} == {
+        "generate_t2v_clip",
+        "assemble_timeline_contract",
+    }
+    assert all(edge["input_slot"] == "timeline_input" for edge in analysis["manifest"]["dag"]["edges"])
 
 
 def test_production_impact_requires_exactly_one_visual_prompt_binding(client: TestClient) -> None:
@@ -2577,8 +2654,7 @@ def test_production_impact_requires_exactly_one_visual_prompt_binding(client: Te
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": keyframe["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, keyframe["id"], components[("workflow_slot", "first_frame_video")]["id"]),
             "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
         },
     )
@@ -2610,8 +2686,7 @@ def test_snapshot_freezes_exact_primary_reference_and_detects_change(client: Tes
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "first_frame_video")]["id"]),
             "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
         },
     ).json()
@@ -2655,8 +2730,7 @@ def test_historical_shot_plan_is_not_automatically_upgraded(client: TestClient) 
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "first_frame_video")]["id"]),
             "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
         },
     ).json()
@@ -2700,8 +2774,7 @@ def test_runtime_second_pricing_uses_explicit_workflow_runtime_per_dag_node(clie
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "first_frame_video")]["id"]),
             "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
         },
     )
@@ -2729,8 +2802,7 @@ def create_locked_snapshot(client: TestClient, adapter_kind: str = "mock") -> tu
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "first_frame_video")]["id"]),
             "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
         },
     ).json()
@@ -2803,8 +2875,7 @@ def create_observed_active_snapshot(client: TestClient) -> tuple[dict, dict, dic
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "first_frame_video")]["id"]),
             "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
         },
     ).json()
@@ -2993,8 +3064,7 @@ def test_production_impact_and_snapshot_compile_exact_dag_without_work_items(cli
         "plan_version_id": plan["id"],
         "production_config_version_id": config["id"],
         "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-        "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-        "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+        "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "first_frame_video")]["id"]),
     }
     analysis_command = {"command_id": "production-impact-command-001", **selection}
     analyzed = client.post(
@@ -3087,8 +3157,7 @@ def test_production_impact_blocks_wrong_explicit_workflow_kind(client: TestClien
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "keyframe_image")]["id"]),
         },
     )
     assert analyzed.status_code == 201
@@ -3128,8 +3197,7 @@ def test_priced_snapshot_requires_exact_high_risk_cost_confirmation(client: Test
             "plan_version_id": plan["id"],
             "production_config_version_id": config["id"],
             "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
-            "keyframe_workflow_slot_version_id": components[("workflow_slot", "keyframe_image")]["id"],
-            "video_workflow_slot_version_id": components[("workflow_slot", "first_frame_video")]["id"],
+            "shot_workflow_assignments": production_workflow_assignments(plan, components[("workflow_slot", "keyframe_image")]["id"], components[("workflow_slot", "first_frame_video")]["id"]),
             "pricing_catalog_version_id": components[("pricing_catalog", "visual_pricing_cny")]["id"],
         },
     ).json()

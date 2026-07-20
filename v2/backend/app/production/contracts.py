@@ -12,12 +12,18 @@ class ProductionCommand(BaseModel):
     actor_id: str = Field(default="local-user", min_length=1, max_length=48)
 
 
+class ShotWorkflowAssignment(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    shot_code: str = Field(min_length=1, max_length=80)
+    keyframe_workflow_slot_version_id: str | None = None
+    video_workflow_slot_version_id: str
+
+
 class AnalyzeProductionImpact(ProductionCommand):
     plan_version_id: str
     production_config_version_id: str
     video_spec_version_id: str
-    keyframe_workflow_slot_version_id: str
-    video_workflow_slot_version_id: str
+    shot_workflow_assignments: list[ShotWorkflowAssignment] = Field(min_length=1)
     tts_workflow_slot_version_id: str | None = None
     pricing_catalog_version_id: str | None = None
 

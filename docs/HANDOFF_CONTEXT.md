@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260720_27 (head)` |
-| 已发布配置 | `production_config_3b6fc6643d044d0595fb3962913b43ad`，版本 35 |
+| 已发布配置 | `production_config_66667a0d51ae49beb92b6c2200a87a00`，版本 39 |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 密钥通过 Windows 用户环境与白名单注入，不写数据库或仓库 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -54,7 +54,7 @@ v2/runtime/worker.err.log
 - Creative Brief、`shot-plan.v3`、脚本覆盖、结构化分镜修订、人物/服装/场景/产品、主参考图与生产能力要求合同。
 - 系统配置版本、Provider/模型/工作流/视频/音频/存储/价格组件。
 - ProductionSnapshot、DAG、费用影响、锁定、激活、提交和持久化 WorkItem。
-- RunningHub 图片与首帧视频 Adapter 的严格合同和假传输测试。
+- RunningHub 图片、首帧视频与纯文本视频 Adapter 的严格合同和假传输测试；制作准备按每个镜头显式冻结工作流选择。
 - 质量审核智能体首期图片合同、`QCReportCandidate`、证据引用校验、失败精确重跑与人工落账；视频和音频保持显式人工审核。
 - Asset 文件验证、QC、人工审核、素材联络表、时间线和最终交付合同。
 - 成品素材可由用户明确归类为分镜、生成或剪辑问题；`AssetRevisionRequest` 冻结来源证据，分镜回改使用不可直接确认的草稿并保留旧方案、快照和素材。历史方案素材不能直接覆盖当前分镜，开放回改可由用户显式放弃且保留完整证据。
@@ -169,6 +169,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-20 | 制作准备升级为逐镜头显式工作流合同：每个 `shot_code` 必须唯一选择图片/视频槽位，批量应用也会写入每个镜头；缺选、重复、未知镜头、I2V 缺关键帧或 T2V 携带关键帧均阻断，不猜测、不继承、不自动替换。RunningHub 新增无父图 `generate_t2v_clip`，节点冻结确定性 seed。发布配置 v39，现有 2 个槽位扩为 6 个：参考图/纯文本/人物一致性/风格参考关键帧、首帧视频、纯文本 B-roll；每项覆盖测试价格，配置和槽位统一为中文名称。首帧视频避免内容改为可选。V1 空 ID、冲突 ID、提示词污染和缺多参考合同的槽位未迁入 |
 | 2026-07-20 | 按 DeepSeek 官方文档复核并发布配置 v35：官方模型列表包含 `deepseek-v4-flash / deepseek-v4-pro`，但 Chat API 将用户消息 `content` 定义为字符串，官方目录没有视觉、图片或多模态端点。系统因此恢复三个文本智能体为 `deepseek-v4-flash`，移除 QC 模型与 `vision_analysis` 声明，并退役未被引用的错误 v34。运行时已确认创作模型选择 v35 Flash，QC 在联网前返回 `QC_MODEL_NOT_CONFIGURED`；未发起图片调用、未产生费用，其他工作流和价格未改变 |
 | 2026-07-20 | 完成成品反馈回改闭环：素材审核新增“需要调整”，用户显式选择分镜、生成或剪辑问题并填写依据；迁移 `20260720_27` 新增 `AssetRevisionRequest`。分镜问题从素材绑定的 `DAGNode.shot_id` 精确定位，创建不可直接确认的 `revision_draft`，人工 Patch 或显式导演修订后才生成待审候选；确认新方案时旧方案和旧快照转历史、活动快照解绑并回到制作准备。历史方案素材不能直接新建分镜回改，开放请求可由用户显式取消且不会修改活动方案或自动重做。生成与剪辑问题只导航到对应页面并持续展示依据，不自动重做、改提示词、换工作流、替换时间线或产生费用。应用启动不再运行 `metadata.create_all`，Alembic 成为运行库唯一结构权威 |
 | 2026-07-20 | 分镜导演升级 `director-input.v2 / shot-plan.v3 / director-prompt.v3`：增加脚本段全覆盖、结构化镜头语言、精确人脸/文字、显式连续变化、`new_information` 和生产能力声明；方案页增加覆盖视图、v3 编辑器和用户授权的选中镜头 AI 修订。修订模式占满方案工作区，镜头导航与 AI 选择框保持独立控件，桌面和移动端均保持有界滚动。生产准备只对照用户选择的工作流能力并按镜头阻断，不自动替换。迁移 `20260720_26`、配置 v33 已发布；无关键词特判、输出修复、自动重试或路由切换 |
@@ -214,7 +215,9 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`199 passed`
+- 后端测试：`202 passed`
+- 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
+- 当前生产配置：v39，6 个镜头工作流槽位，旧 v35/v36/v38 已停用；首帧视频避免内容为可选绑定
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过

@@ -16,6 +16,7 @@ class MockProviderAdapter:
     supported_work_kinds: frozenset[str] = frozenset({
         "generate_keyframe",
         "generate_i2v_clip",
+        "generate_t2v_clip",
         "generate_tts",
         "assemble_timeline_contract",
     })

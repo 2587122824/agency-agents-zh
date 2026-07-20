@@ -7,6 +7,7 @@ from typing import Any
 
 RUNNINGHUB_NODE_SOURCES = frozenset({
     "duration_ms",
+    "duration_seconds",
     "reference_image.present",
     "reference_image.primary",
     "source_image",
@@ -23,6 +24,7 @@ RUNNINGHUB_NODE_SOURCES = frozenset({
     "video_spec.height",
     "video_spec.fps",
     "video_spec.long_side",
+    "video_spec.short_side",
     "video_spec.frame_count",
 })
 
@@ -121,13 +123,19 @@ def runninghub_workflow_contract_issues(
             "path": "node_info_list",
             "actual": source_image_count,
         })
+    if operation_kind == "text_to_video_generation" and source_image_count:
+        issues.append({
+            "code": "RUNNINGHUB_T2V_SOURCE_IMAGE_NOT_ALLOWED",
+            "path": "node_info_list",
+            "actual": source_image_count,
+        })
     if reference_image_count > 1:
         issues.append({
             "code": "RUNNINGHUB_REFERENCE_IMAGE_COUNT_INVALID",
             "path": "node_info_list",
             "actual": reference_image_count,
         })
-    if operation_kind == "image_generation" and visual_prompt_count != 1:
+    if operation_kind in {"image_generation", "text_to_video_generation"} and visual_prompt_count != 1:
         issues.append({
             "code": "RUNNINGHUB_VISUAL_PROMPT_BINDING_COUNT_INVALID",
             "path": "node_info_list",

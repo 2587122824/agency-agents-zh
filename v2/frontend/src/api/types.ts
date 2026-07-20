@@ -824,7 +824,7 @@ export interface ProductionPreparation {
     version_number: number
     display_name: string
     video_specs: Array<{ id: string; key: string; display_name: string; aspect_ratio: string; width: number; height: number; fps: number }>
-    workflow_slots: Array<{ id: string; key: string; display_name: string; operation_kind: string; supported_video_spec_ids: string[] }>
+    workflow_slots: Array<{ id: string; key: string; display_name: string; operation_kind: string; supported_video_spec_ids: string[]; capability_tags: string[] }>
     pricing_catalogs: Array<{ id: string; key: string; display_name: string; currency: string; confirmation_threshold: number; effective_from: string | null; effective_to: string | null }>
   }>
   analyses: ProductionImpactAnalysis[]

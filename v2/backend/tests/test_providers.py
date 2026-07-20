@@ -17,6 +17,7 @@ def test_provider_registry_resolves_only_exact_registered_work_kind() -> None:
     assert runninghub is not None
     assert runninghub.execution_enabled is False
     assert registry.resolve("runninghub", "generate_keyframe") is runninghub
+    assert registry.resolve("runninghub", "generate_t2v_clip") is runninghub
     assert registry.resolve("local", "generate_keyframe") is None
     local = registry.resolve("local", "assemble_timeline_contract")
     assert local is not None
@@ -78,6 +79,7 @@ def runninghub_manifest(bindings: list[dict], media_type: str = "image") -> dict
         "input_contract": {
             "shot": {"action": "run", "composition": "wide", "visual_prompt": "athlete running", "negative_prompt": None},
             "duration_ms": 4000,
+            "duration_seconds": 4.0,
             "reference_image": None,
         },
         "output_contract": {"media_type": media_type},
@@ -256,6 +258,22 @@ def test_runninghub_i2v_requires_exactly_one_local_parent_image(tmp_path, monkey
     adapter.submit(request)
     assert transport.calls[0][0] == "upload"
     assert transport.calls[1][2]["nodeInfoList"][0]["fieldValue"] == "uploaded/input.png"
+
+
+def test_runninghub_text_to_video_uses_no_parent_image_or_upload() -> None:
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    manifest = runninghub_manifest([
+        {"node_id": "1", "field_path": "text", "value_source": "shot.visual_prompt", "value_type": "string", "required": True},
+        {"node_id": "2", "field_path": "duration", "value_source": "duration_seconds", "value_type": "number", "required": True},
+    ], "video")
+    request = ProviderExecutionRequest("generate_t2v_clip", "9" * 64, manifest, parent_outputs=())
+    adapter.submit(request)
+    assert [call[0] for call in transport.calls] == ["post_json"]
+    assert transport.calls[0][2]["nodeInfoList"] == [
+        {"nodeId": "1", "fieldName": "text", "fieldValue": "athlete running"},
+        {"nodeId": "2", "fieldName": "duration", "fieldValue": 4.0},
+    ]
 
 
 def test_runninghub_poll_downloads_deterministic_local_output(tmp_path, monkeypatch) -> None:
