@@ -89,6 +89,8 @@ TRANSITION_RULES: Mapping[ProjectStateTrigger, Mapping[str, str]] = {
     ProjectStateTrigger.SHOT_CANDIDATE_REVISED: {
         "planning": "plan_review",
         "plan_review": "plan_review",
+        "contract_ready": "plan_review",
+        "production_ready": "plan_review",
         "producing": "producing",
         "quality_review": "quality_review",
         "editing": "editing",

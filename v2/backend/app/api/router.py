@@ -142,6 +142,7 @@ from ..planning.contracts import (
     CreativeBriefCandidateRead,
     DecideBrief,
     DecideShotPlan,
+    CancelShotPlanRevision,
     GenerateBrief,
     GenerateShotPlan,
     PlanningCenterView,
@@ -151,6 +152,7 @@ from ..planning.contracts import (
     ReviseBrief,
     ReviseShotPlan,
     ReviseShotPlanWithDirector,
+    StartShotPlanRevision,
     ShotPlanCandidateRead,
 )
 from ..planning.agent_gateway import ContentPlannerGateway, get_content_planner_gateway
@@ -158,6 +160,7 @@ from ..planning.director_gateway import DirectorGateway, get_director_gateway
 from ..planning.service import (
     decide_brief,
     decide_shot_plan,
+    cancel_shot_plan_revision,
     generate_brief,
     generate_shot_plan,
     planning_center_view,
@@ -166,6 +169,7 @@ from ..planning.service import (
     revise_brief,
     revise_shot_plan,
     revise_shot_plan_with_director,
+    start_shot_plan_revision,
 )
 from ..providers.contracts import ProviderReadinessView
 from ..providers.readiness import provider_readiness
@@ -1190,6 +1194,42 @@ def director_run_retry(
         raise creation_error(exc) from exc
     except AgentGatewayError as exc:
         raise HTTPException(status_code=502, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
+
+
+@router.post(
+    "/projects/{project_id}/shot-plan-revisions",
+    response_model=ShotPlanCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def shot_plan_revision_start(
+    project_id: str,
+    payload: StartShotPlanRevision,
+    session: Session = Depends(get_session),
+):
+    try:
+        return start_shot_plan_revision(session, require_project(session, project_id), payload)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/shot-plan-candidates/{candidate_id}:cancel-revision",
+    response_model=ShotPlanCandidateRead,
+)
+def shot_plan_revision_cancel(
+    project_id: str,
+    candidate_id: str,
+    payload: CancelShotPlanRevision,
+    session: Session = Depends(get_session),
+):
+    try:
+        return cancel_shot_plan_revision(session, require_project(session, project_id), candidate_id, payload)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
 
 
 @router.post(

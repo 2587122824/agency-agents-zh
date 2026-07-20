@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, BadgeCheck, Calculator, Check, CircleAlert, Clapperboard, GitBranch, Layers3, LockKeyhole, Network, Pencil, ShieldCheck, Sparkles, Users, X } from 'lucide-react'
+import { ArrowLeft, BadgeCheck, Calculator, Check, CircleAlert, Clapperboard, FileImage, GitBranch, Layers3, LockKeyhole, Network, Pencil, ShieldCheck, Sparkles, Users, X } from 'lucide-react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { api } from '../api/client'
 import type { BriefOpenQuestion, CreativeBriefCandidate, ProductionImpactAnalysis, ShotContract, ShotPlanCandidate } from '../api/types'
@@ -183,6 +183,7 @@ export function PlanPage() {
   const [editingBrief, setEditingBrief] = useState(false)
   const [briefRevisionInstruction, setBriefRevisionInstruction] = useState('')
   const [briefQuestionAnswers, setBriefQuestionAnswers] = useState<Record<string, string>>({})
+  const characterFileInput = useRef<HTMLInputElement>(null)
   const latestSnapshot = preparation.data?.snapshots[0]
   const refresh = () => client.invalidateQueries({ queryKey: ['planning-center', projectId] })
   const generateBrief = useMutation({ mutationFn: () => api.generateCreativeBrief(projectId, planning.data!.active_requirement.id), onSuccess: refresh })
@@ -192,6 +193,14 @@ export function PlanPage() {
   const reviseRequirement = useMutation({ mutationFn: (candidateId: string) => api.decideCreativeBrief(projectId, candidateId, planning.data!.active_requirement.id, false, '用户选择修改基础创作需求'), onSuccess: async () => { await Promise.all([refresh(), client.invalidateQueries({ queryKey: ['project', projectId] }), client.invalidateQueries({ queryKey: ['creation-center', projectId] })]); navigate(`/projects/${projectId}`) } })
   const generateShots = useMutation({ mutationFn: () => api.generateShotPlan(projectId, planning.data!.active_requirement.id, planning.data!.accepted_brief_candidate!.id), onSuccess: refresh })
   const retryShots = useMutation({ mutationFn: () => api.retryShotPlan(projectId, planning.data!.latest_director_run!.id, planning.data!.active_requirement.id), onSuccess: refresh })
+  const uploadCharacter = useMutation({
+    mutationFn: async (file: File) => {
+      const attachment = await api.registerAttachment(projectId, file)
+      return api.bindAttachment(projectId, attachment.id, 'identity_reference', 'char_main')
+    },
+    onSuccess: async () => { await Promise.all([refresh(), client.invalidateQueries({ queryKey: ['creation-center', projectId] })]) },
+  })
+  const startShotRevision = useMutation({ mutationFn: () => api.startShotPlanRevision(projectId, planning.data!.active_plan!.id), onSuccess: async () => { setEditingShots(true); await refresh() } })
   const revisableShotCandidate = (): ShotPlanCandidate | null => planning.data?.current_shot_candidate
     ?? planning.data?.revision_draft
     ?? planning.data?.shot_plan_history.find(item => item.requirement_version_id === planning.data?.active_requirement.id && item.status === 'rejected')
@@ -208,6 +217,7 @@ export function PlanPage() {
   }, onSuccess: async () => { setEditingShots(false); await refresh() } })
   const decideShots = useMutation({ mutationFn: (accept: boolean) => api.decideShotPlan(projectId, planning.data!.current_shot_candidate!.id, planning.data!.active_requirement.id, planning.data!.current_shot_candidate!.row_version, accept), onSuccess: refresh })
   const cancelRevision = useMutation({ mutationFn: () => api.cancelAssetRevisionRequest(projectId, planning.data!.revision_context!.id, '用户明确放弃本次成品回改'), onSuccess: async () => { setConfirmCancelRevision(false); setEditingShots(false); await refresh() } })
+  const cancelManualRevision = useMutation({ mutationFn: () => api.cancelShotPlanRevision(projectId, planning.data!.revision_draft!.id, planning.data!.revision_draft!.row_version), onSuccess: async () => { setEditingShots(false); await refresh() } })
   const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, { plan_version_id: planning.data!.active_plan!.id, production_config_version_id: configId, video_spec_version_id: videoSpecId, shot_workflow_assignments: planning.data!.active_plan!.shots.map(shot => ({ shot_code: shot.shot_code, keyframe_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.keyframe || null, video_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.video || '' })), tts_workflow_slot_version_id: ttsSlotId || null, pricing_catalog_version_id: pricingCatalogId || null }) })
   const createSnapshot = useMutation({ mutationFn: () => api.createProductionSnapshot(projectId, analyzeImpact.data!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
   const lockSnapshot = useMutation({ mutationFn: () => api.lockProductionSnapshot(projectId, latestSnapshot!), onSuccess: async () => { setConfirmCost(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
@@ -234,7 +244,8 @@ export function PlanPage() {
   const rejectedShot = data.shot_plan_history.find(item => item.requirement_version_id === data.active_requirement.id && item.status === 'rejected') ?? null
   const editableShot = data.current_shot_candidate ?? data.revision_draft ?? rejectedShot
   const shots = editableShot?.shots ?? data.active_plan?.shots ?? []
-  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
+  const characterVersions = data.entity_versions.filter(item => item.entity_type === 'character')
+  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
   const selectedConfig = preparation.data?.published_configurations.find(item => item.id === configId)
   const keyframeSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'image_generation') ?? []
   const videoSlots = selectedConfig?.workflow_slots.filter(item => ['video_generation', 'text_to_video_generation'].includes(item.operation_kind)) ?? []
@@ -290,13 +301,21 @@ export function PlanPage() {
         {shots.length ? <>
           {brief && <CoverageView brief={brief.brief} shots={shots} />}
           <ShotTable shots={shots} locked={Boolean(data.active_plan)} />
+          {data.active_plan && !data.current_shot_candidate && !data.revision_draft && <section className={styles.characterBinding}>
+            <div className={styles.characterBindingIntro}><Users size={19} /><div><span>人物与镜头是两步确认</span><strong>{characterVersions.length ? `已有 ${characterVersions.length} 个人物版本可用` : '先上传一张清晰的人物参考图'}</strong><p>上传只会登记人物版本；进入调整后，再由你逐个镜头选择人物、主参考图和人脸要求。系统不会自动套用到全部镜头。</p></div></div>
+            <div className={styles.characterBindingActions}>
+              <button type="button" className="secondaryButton" disabled={uploadCharacter.isPending || startShotRevision.isPending} onClick={() => characterFileInput.current?.click()}><FileImage size={15} />{uploadCharacter.isPending ? '正在上传并登记…' : characterVersions.length ? '上传新的人物参考图' : '上传人物参考图'}</button>
+              <input ref={characterFileInput} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (file) uploadCharacter.mutate(file); event.target.value = '' }} />
+              <button type="button" className="primaryButton" disabled={!characterVersions.length || startShotRevision.isPending || uploadCharacter.isPending} onClick={() => startShotRevision.mutate()}><Pencil size={15} />{startShotRevision.isPending ? '正在创建调整草稿…' : '绑定人物到具体镜头'}</button>
+            </div>
+          </section>}
           {data.revision_context && <section className={styles.assetRevisionContext}><CircleAlert size={18} /><div><span>成品反馈返回分镜</span><h3>{data.revision_context.shot_code} 需要调整</h3><p>{data.revision_context.rationale}</p><small>来源素材 {data.revision_context.asset_id.slice(-10)} · 原方案 v{data.plan_history.find(plan => plan.id === data.revision_context?.plan_version_id)?.version_number ?? ''} · 下游影响 {data.revision_context.affected_downstream_node_keys.length} 项</small></div></section>}
           {editableShot && editingShots && <ShotPlanRevisionEditor projectId={projectId} candidate={editableShot} entities={data.entity_versions} scriptSegments={brief?.brief.script_segments ?? []} saving={reviseShots.isPending} aiSaving={reviseShotsWithDirector.isPending} initialShotCode={data.revision_context?.shot_code} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} onAIRevision={(selected, instruction) => reviseShotsWithDirector.mutate({ selected, instruction })} />}
-          {data.revision_draft && <div className={styles.reviewBar}><p><strong>这是分镜调整草稿，尚不能确认</strong><span>请至少修改一个字段，或明确调用分镜导演调整选中镜头。旧方案和已有素材不会被改动。</span></p><button className="secondaryButton" onClick={() => setConfirmCancelRevision(true)}>放弃本次回改</button><button className="primaryButton" onClick={() => setEditingShots(true)} disabled={editingShots}><Pencil size={14} />调整对应分镜</button></div>}
+          {data.revision_draft && <div className={styles.reviewBar}><p><strong>这是分镜调整草稿，尚不能确认</strong><span>{data.revision_context ? '请调整反馈对应的镜头。' : '逐镜头选择人物、主参考图和人脸要求；旧方案不会被改动。'}</span></p><button className="secondaryButton" disabled={cancelManualRevision.isPending} onClick={() => data.revision_context ? setConfirmCancelRevision(true) : cancelManualRevision.mutate()}>{data.revision_context ? '放弃本次回改' : '放弃调整草稿'}</button><button className="primaryButton" onClick={() => setEditingShots(true)} disabled={editingShots}><Pencil size={14} />{data.revision_context ? '调整对应分镜' : '继续绑定人物'}</button></div>}
           {data.current_shot_candidate && <div className={styles.reviewBar}><p><strong>分镜候选 v{data.current_shot_candidate.revision_number} 尚未生效</strong><span>确认后创建不可变 plan_v{data.plan_history.length + 1}。</span></p><button className="secondaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起编辑' : '结构化修订'}</button><button className="secondaryButton" onClick={() => decideShots.mutate(false)} disabled={decideShots.isPending || editingShots}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideShots.mutate(true)} disabled={decideShots.isPending || editingShots}><Check size={14} />确认分镜合同</button></div>}
           {rejectedShot && <div className={styles.reviewBar}><p><strong>分镜方案已拒绝</strong><span>原方案仍保留供查看。选择具体镜头调整后会创建新的待确认版本，不会再次调用模型。</span></p><button className="primaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起调整' : '调整具体分镜'}</button></div>}
         </> : data.accepted_brief_candidate && <div className={styles.generateShots}><Clapperboard size={22} /><div><strong>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? '本次分镜生成失败' : '内容方案已接受'}</strong><span>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? `${data.latest_director_run?.error_detail || '模型没有返回符合分镜合同的结果。'} 系统没有自动重试，也没有更换模型。` : '分镜导演将生成结构化分镜候选，不选择服务供应商或工作流。'}</span></div>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? <button className="primaryButton" onClick={() => retryShots.mutate()} disabled={retryShots.isPending}>{retryShots.isPending ? '正在重跑…' : '确认模型调用并重跑'}</button> : data.next_action.code === 'WAIT_FOR_SHOT_PLAN' ? <button className="primaryButton" disabled>正在生成…</button> : <button className="primaryButton" onClick={() => generateShots.mutate()} disabled={generateShots.isPending}>{generateShots.isPending ? '正在生成…' : '生成分镜候选'}</button>}</div>}
-        {data.active_plan && !data.revision_context && <section className={styles.productionPrep}>
+        {data.active_plan && !data.revision_context && !data.revision_draft && !data.current_shot_candidate && <section className={styles.productionPrep}>
           <div className={styles.panelHeading}><div><Network size={18} /><span><small>制作准备</small><h2>制作设置与费用预估</h2></span></div><em data-accepted={Boolean(preparation.data?.snapshots.length)}>{preparation.data?.snapshots.length ? `制作方案 ${preparation.data.snapshots[0].snapshot_number}` : '尚未保存'}</em></div>
           {preparation.data?.published_configurations.length ? <>
             <div className={styles.routeGrid}>
@@ -354,7 +373,7 @@ export function PlanPage() {
         <section className={styles.next}><span>下一步</span><h3>{nextActionLabel}</h3><p>模型调用：{'incurs_model_cost' in nextAction && nextAction.incurs_model_cost ? '是' : '否'} · 制作费用：{nextAction.incurs_production_cost ? '是' : '否'}</p></section>
         <section className={styles.entities}><div className={styles.asideTitle}><div><Users size={17} /><h3>已确认实体版本</h3></div><b>{data.entity_versions.length}</b></div>{data.entity_versions.length ? data.entity_versions.map(entity => <article key={entity.id}><BadgeCheck size={16} /><div><strong>{entity.display_name}</strong><span>{entity.entity_type} · v{entity.version_number}</span><small>{entity.id}</small></div></article>) : <div className={styles.asideEmpty}>当前没有实体绑定；分镜会明确显示未绑定，不创建隐式人物或场景。</div>}</section>
         {data.brief_history.length > 0 && <section className={styles.candidateHistory}><div className={styles.asideTitle}><div><GitBranch size={17} /><h3>内容方案版本</h3></div><b>{data.brief_history.length}</b></div>{data.brief_history.map(candidate => <article key={candidate.id} data-current={candidate.id === data.current_brief_candidate?.id}><div><strong>方案 v{candidate.revision_number}</strong><span>{candidate.source === 'planner_revision' ? '按意见调整' : '首次策划'} · {candidate.status}</span></div><small>{candidate.id.slice(-10)}</small></article>)}</section>}
-        {data.shot_plan_history.length > 0 && <section className={styles.candidateHistory}><div className={styles.asideTitle}><div><GitBranch size={17} /><h3>分镜候选版本</h3></div><b>{data.shot_plan_history.length}</b></div>{data.shot_plan_history.map(candidate => <article key={candidate.id} data-current={candidate.id === data.current_shot_candidate?.id}><div><strong>候选 v{candidate.revision_number}</strong><span>{candidate.source === 'user_revision' ? '用户修订' : '分镜导演智能体生成'} · {candidate.status}</span></div><small>{candidate.id.slice(-10)}</small></article>)}</section>}
+        {data.shot_plan_history.length > 0 && <section className={styles.candidateHistory}><div className={styles.asideTitle}><div><GitBranch size={17} /><h3>分镜候选版本</h3></div><b>{data.shot_plan_history.length}</b></div>{data.shot_plan_history.map(candidate => <article key={candidate.id} data-current={candidate.id === data.current_shot_candidate?.id || candidate.id === data.revision_draft?.id}><div><strong>候选 v{candidate.revision_number}</strong><span>{candidate.source === 'manual_revision_draft' ? '手动调整草稿' : candidate.source === 'asset_feedback_draft' ? '成品反馈草稿' : candidate.source === 'user_revision' ? '用户修订' : '分镜导演智能体生成'} · {candidate.status}</span></div><small>{candidate.id.slice(-10)}</small></article>)}</section>}
         <section className={styles.boundary}><CircleAlert size={17} /><div><strong>确认边界</strong><p>{data.active_plan ? '当前创作方案已确认。后续修改需要创建新的需求和方案版本。' : '当前操作只确认创作方案，不会创建制作任务。'}</p></div></section>
         {data.active_plan && <section className={styles.planState}><LockKeyhole size={18} /><div><strong>{latestSnapshot ? `制作方案 ${latestSnapshot.snapshot_number} · ${snapshotStatusLabel(latestSnapshot.status, latestSnapshot.cost_status)}` : `创作方案 v${data.active_plan.version_number}`}</strong><span>{latestSnapshot ? `${latestSnapshot.nodes.length} 个制作步骤 · ${costLabel(latestSnapshot.estimated_cost, latestSnapshot.currency)}` : `${data.active_plan.shots.length} 个镜头 · 尚未保存制作方案`}</span></div></section>}
         {error && <div className={styles.error}>{error.message}</div>}

@@ -2156,6 +2156,68 @@ def create_confirmed_plan(client: TestClient) -> tuple[dict, dict]:
     return project, plan
 
 
+def test_confirmed_plan_can_open_cancel_and_confirm_explicit_revision(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    requirement_id = plan["requirement_version_id"]
+    started = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-revisions",
+        json={"command_id": "manual-revision-start-001", "actor_id": "local-user", "expected_plan_version_id": plan["id"]},
+    )
+    assert started.status_code == 201
+    draft = started.json()
+    assert draft["status"] == "revision_draft"
+    assert draft["source"] == "manual_revision_draft"
+    assert draft["shots"] == plan["shots"]
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "contract_ready"
+
+    duplicate = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-revisions",
+        json={"command_id": "manual-revision-start-002", "actor_id": "local-user", "expected_plan_version_id": plan["id"]},
+    )
+    assert duplicate.status_code == 409
+    assert duplicate.headers["x-error-code"] == "SHOT_PLAN_REVISION_ALREADY_OPEN"
+
+    cancelled = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{draft['id']}:cancel-revision",
+        json={"command_id": "manual-revision-cancel-001", "actor_id": "local-user", "expected_candidate_row_version": draft["row_version"]},
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+
+    draft = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-revisions",
+        json={"command_id": "manual-revision-start-003", "actor_id": "local-user", "expected_plan_version_id": plan["id"]},
+    ).json()
+    target = draft["shots"][0]
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{draft['id']}:revise",
+        json={
+            "command_id": "manual-revision-save-001",
+            "actor_id": "local-user",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": draft["row_version"],
+            "patches": [{"target_shot_code": target["shot_code"], "changes": {"action": f"{target['action']}，保持人物身份一致"}}],
+        },
+    )
+    assert revised.status_code == 201
+    candidate = revised.json()
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "plan_review"
+    accepted = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{candidate['id']}:accept",
+        json={
+            "command_id": "manual-revision-accept-001",
+            "actor_id": "local-user",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": candidate["row_version"],
+        },
+    )
+    assert accepted.status_code == 200
+    assert accepted.json()["version_number"] == plan["version_number"] + 1
+    with SessionLocal() as session:
+        old_plan = session.get(PlanVersion, plan["id"])
+        assert old_plan is not None and old_plan.status == "superseded" and old_plan.is_active is False
+
+
 def production_workflow_assignments(plan: dict, keyframe_slot_id: str, video_slot_id: str) -> list[dict]:
     return [{
         "shot_code": shot["shot_code"],
@@ -2826,6 +2888,44 @@ def create_locked_snapshot(client: TestClient, adapter_kind: str = "mock") -> tu
         },
     ).json()
     return project, locked
+
+
+def test_manual_plan_revision_supersedes_old_locked_snapshot_on_confirmation(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    plan = planning["active_plan"]
+    draft = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-revisions",
+        json={"command_id": "locked-manual-start", "actor_id": "local-user", "expected_plan_version_id": plan["id"]},
+    ).json()
+    target = draft["shots"][0]
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{draft['id']}:revise",
+        json={
+            "command_id": "locked-manual-save",
+            "actor_id": "local-user",
+            "expected_requirement_version_id": plan["requirement_version_id"],
+            "expected_candidate_row_version": draft["row_version"],
+            "patches": [{"target_shot_code": target["shot_code"], "changes": {"action": f"{target['action']}，使用新人物参考"}}],
+        },
+    )
+    assert revised.status_code == 201
+    candidate = revised.json()
+    accepted = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{candidate['id']}:accept",
+        json={
+            "command_id": "locked-manual-accept",
+            "actor_id": "local-user",
+            "expected_requirement_version_id": plan["requirement_version_id"],
+            "expected_candidate_row_version": candidate["row_version"],
+        },
+    )
+    assert accepted.status_code == 200
+    with SessionLocal() as session:
+        old_snapshot = session.get(ProductionSnapshot, snapshot["id"])
+        stored_project = session.get(Project, project["id"])
+        assert old_snapshot is not None and old_snapshot.status == "superseded"
+        assert stored_project is not None and stored_project.active_snapshot_id is None
 
 
 def create_observed_active_snapshot(client: TestClient) -> tuple[dict, dict, dict]:

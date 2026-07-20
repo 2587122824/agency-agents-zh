@@ -47,6 +47,16 @@ class DecideShotPlan(CommandContext):
     reason: str | None = Field(default=None, max_length=500)
 
 
+class StartShotPlanRevision(CommandContext):
+    model_config = ConfigDict(extra="forbid")
+    expected_plan_version_id: str = Field(min_length=1, max_length=48)
+
+
+class CancelShotPlanRevision(CommandContext):
+    model_config = ConfigDict(extra="forbid")
+    expected_candidate_row_version: int = Field(ge=1)
+
+
 class ShotContractPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
     shot_code: str | None = Field(default=None, min_length=1, max_length=32)

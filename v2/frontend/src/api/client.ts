@@ -107,6 +107,12 @@ export const api = {
   retryShotPlan: (projectId: string, runId: string, requirementVersionId: string) => request<ShotPlanCandidate>(`/projects/${projectId}/director-runs/${runId}:retry`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, failed_agent_run_id: runId, confirm_model_cost: true }),
   }),
+  startShotPlanRevision: (projectId: string, planVersionId: string) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-revisions`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_plan_version_id: planVersionId }),
+  }),
+  cancelShotPlanRevision: (projectId: string, candidateId: string, rowVersion: number) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:cancel-revision`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_candidate_row_version: rowVersion }),
+  }),
   reviseShotPlan: (projectId: string, candidateId: string, requirementVersionId: string, rowVersion: number, patches: Array<{ target_shot_code: string; changes: Partial<ShotContract> }>) => request<ShotPlanCandidate>(`/projects/${projectId}/shot-plan-candidates/${candidateId}:revise`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, expected_candidate_row_version: rowVersion, patches }),
   }),

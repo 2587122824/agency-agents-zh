@@ -441,7 +441,7 @@ export interface ShotPlanCandidate {
   agent_run_id: string | null
   supersedes_candidate_id: string | null
   revision_number: number
-  source: 'director_agent' | 'director_revision' | 'user_revision' | 'asset_feedback_draft'
+  source: 'director_agent' | 'director_revision' | 'user_revision' | 'asset_feedback_draft' | 'manual_revision_draft'
   status: string
   shots: ShotContract[]
   validation_errors: Array<Record<string, unknown>>

@@ -34,7 +34,7 @@ from ..db.models import (
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from .agent_gateway import ContentPlannerGateway, ContentPlannerSelection
-from .contracts import DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, RetryShotPlan, ReviseBrief, ReviseShotPlan, ReviseShotPlanWithDirector
+from .contracts import CancelShotPlanRevision, DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, RetryShotPlan, ReviseBrief, ReviseShotPlan, ReviseShotPlanWithDirector, StartShotPlanRevision
 from .director_gateway import DirectorGateway, DirectorSelection
 
 
@@ -959,6 +959,82 @@ def retry_failed_shot_plan(
     )
 
 
+def start_shot_plan_revision(
+    session: Session,
+    project: Project,
+    payload: StartShotPlanRevision,
+) -> ShotPlanCandidate:
+    repository = _planning(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, ShotPlanCandidate)
+    requirement = active_requirement(session, project.id)
+    active_plans = repository.active_plans(project.id)
+    plan = next((item for item in active_plans if item.id == payload.expected_plan_version_id), None)
+    if not plan or not requirement or plan.requirement_version_id != requirement.id:
+        raise CreationConflictError("ACTIVE_PLAN_VERSION_CHANGED", "当前正式分镜方案已变化，请刷新后再调整。")
+    open_candidate = next((item for item in repository.shot_plan_history(project.id) if item.status in {"awaiting_review", "revision_draft"}), None)
+    if open_candidate:
+        raise CreationConflictError("SHOT_PLAN_REVISION_ALREADY_OPEN", "已有未完成的分镜调整，请先继续或放弃该草稿。")
+    source_candidate = repository.shot_plan(plan.shot_plan_candidate_id)
+    if not source_candidate:
+        raise CreationConflictError("SOURCE_SHOT_PLAN_MISSING", "当前正式方案缺少可追溯的分镜来源。")
+    shots = repository.shots(plan.id)
+    if not shots:
+        raise CreationConflictError("SOURCE_SHOTS_MISSING", "当前正式方案没有可调整的镜头。")
+    draft = ShotPlanCandidate(
+        project_id=project.id,
+        requirement_version_id=requirement.id,
+        creative_brief_candidate_id=source_candidate.creative_brief_candidate_id,
+        agent_run_id=None,
+        supersedes_candidate_id=source_candidate.id,
+        revision_number=source_candidate.revision_number + 1,
+        source="manual_revision_draft",
+        status="revision_draft",
+        shots=[_shot_dict(item) for item in shots],
+        validation_errors=[],
+        created_by=payload.actor_id,
+    )
+    repository.add(draft)
+    repository.flush()
+    _save_receipt(session, project.id, payload.command_id, "shot_plan.start_revision", "shot_plan_candidate", draft.id)
+    _event(session, project.id, "plan.shot_revision_started.v1", "用户从当前正式方案开启分镜调整", {
+        "plan_version_id": plan.id,
+        "draft_candidate_id": draft.id,
+        "actor_id": payload.actor_id,
+    })
+    session.commit()
+    return draft
+
+
+def cancel_shot_plan_revision(
+    session: Session,
+    project: Project,
+    candidate_id: str,
+    payload: CancelShotPlanRevision,
+) -> ShotPlanCandidate:
+    repository = _planning(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, ShotPlanCandidate)
+    candidate = repository.shot_plan(candidate_id)
+    if not candidate or candidate.project_id != project.id:
+        raise CreationNotFoundError("Shot plan candidate not found")
+    if candidate.source != "manual_revision_draft" or candidate.status != "revision_draft":
+        raise CreationConflictError("SHOT_PLAN_REVISION_NOT_CANCELLABLE", "只能放弃尚未提交的手动分镜调整草稿。")
+    if candidate.row_version != payload.expected_candidate_row_version:
+        raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜调整草稿已变化，请刷新后重试。")
+    if not repository.transition_reviewable_shot_plan(candidate.id, candidate.row_version, "cancelled", utc_now()):
+        raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜调整草稿已变化，请刷新后重试。")
+    _save_receipt(session, project.id, payload.command_id, "shot_plan.cancel_revision", "shot_plan_candidate", candidate.id)
+    _event(session, project.id, "plan.shot_revision_cancelled.v1", "用户放弃了未提交的分镜调整草稿", {
+        "candidate_id": candidate.id,
+        "actor_id": payload.actor_id,
+    })
+    session.commit()
+    return candidate
+
+
 def revise_shot_plan(
     session: Session,
     project: Project,
@@ -1178,6 +1254,16 @@ def decide_shot_plan(
         utc_now(),
     ):
         raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重试。")
+    replaces_manual_plan_revision = False
+    lineage_candidate: ShotPlanCandidate | None = candidate
+    visited_candidate_ids: set[str] = set()
+    while lineage_candidate and lineage_candidate.id not in visited_candidate_ids:
+        visited_candidate_ids.add(lineage_candidate.id)
+        if lineage_candidate.source == "manual_revision_draft":
+            replaces_manual_plan_revision = True
+            break
+        lineage_candidate = repository.shot_plan(lineage_candidate.supersedes_candidate_id) if lineage_candidate.supersedes_candidate_id else None
+    replaced_plan_ids = [plan.id for plan in repository.active_plans(project.id)]
     for plan in repository.active_plans(project.id):
         plan.is_active = False
         plan.status = "superseded"
@@ -1186,11 +1272,19 @@ def decide_shot_plan(
         AssetRevisionRequest.resulting_candidate_id == candidate.id,
         AssetRevisionRequest.status == "candidate_created",
     ))
-    if revision_request and project.active_snapshot_id:
+    if (revision_request or replaces_manual_plan_revision) and project.active_snapshot_id:
         old_snapshot = session.get(ProductionSnapshot, project.active_snapshot_id)
         if old_snapshot:
             old_snapshot.status = "superseded"
         project.active_snapshot_id = None
+    if replaces_manual_plan_revision and replaced_plan_ids:
+        old_snapshots = list(session.scalars(select(ProductionSnapshot).where(
+            ProductionSnapshot.project_id == project.id,
+            ProductionSnapshot.plan_version_id.in_(replaced_plan_ids),
+            ProductionSnapshot.status.notin_(("superseded", "execution_completed")),
+        )))
+        for old_snapshot in old_snapshots:
+            old_snapshot.status = "superseded"
     version_number = repository.next_plan_version_number(project.id)
     plan = PlanVersion(
         project_id=project.id,
@@ -1334,7 +1428,10 @@ def planning_center_view(session: Session, project: Project) -> dict:
     if current_shot:
         next_action = PlanningNextAction(code="REVIEW_SHOT_PLAN", label="审核分镜候选", target_ids=[current_shot.id])
     elif revision_draft:
-        next_action = PlanningNextAction(code="EDIT_ASSET_REVISION_DRAFT", label="根据成品反馈调整对应分镜", target_ids=[revision_draft.id])
+        if revision_draft.source == "manual_revision_draft":
+            next_action = PlanningNextAction(code="EDIT_SHOT_PLAN_REVISION_DRAFT", label="继续逐镜头绑定或调整", target_ids=[revision_draft.id])
+        else:
+            next_action = PlanningNextAction(code="EDIT_ASSET_REVISION_DRAFT", label="根据成品反馈调整对应分镜", target_ids=[revision_draft.id])
     elif active_plan:
         next_action = PlanningNextAction(code="PLAN_CONFIRMED", label="方案已确认，等待创建生产快照", target_ids=[active_plan.id])
     elif rejected_shot:
