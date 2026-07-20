@@ -20,3 +20,25 @@ details summary { color:#686e71; font-size:9px; cursor:pointer; }details pre { m
 .empty,.error { min-height:240px; display:grid; place-items:center; color:#777d80; font-size:11px; }.error { color:#9b351d; background:#fff0ec; min-height:auto; padding:12px; }
 @media(max-width:1000px){.stage{grid-template-columns:180px minmax(0,1fr)}.stage aside{grid-column:1/-1;border-left:0;border-top:1px solid #e2e4e0}.briefBasis{grid-template-columns:1fr 1fr}.beatBasis{grid-column:1/-1}.requirementBasis{grid-template-columns:repeat(2,minmax(0,1fr))}.metrics{grid-template-columns:1fr 1fr}.metrics article:nth-child(2){border-right:0}.metrics article:nth-child(-n+2){border-bottom:1px solid #e4e6e2}.columns{grid-template-columns:1fr}}
 @media(max-width:720px){.page{padding:16px}.stage{grid-template-columns:1fr;gap:14px}.stage dl{grid-template-columns:1fr 1fr}.stage aside{grid-column:auto}.basis>header{align-items:flex-start;flex-wrap:wrap}.basis>header>div,.basis>header p{width:100%}.basis>header p{order:3}.basis>header>a{margin-left:auto}.basis>nav{overflow-x:auto}.basis>nav button{flex:none}.requirementBasis,.briefBasis{grid-template-columns:1fr}.beatBasis{grid-column:auto}.shotBasis{align-items:flex-start;flex-wrap:wrap}.shotBasis>div{width:calc(100% - 40px);margin-right:0}.shotBasis>a{margin-left:36px}.basis>footer{align-items:flex-start;flex-wrap:wrap}.basis>footer span{width:100%}.metrics{grid-template-columns:1fr}.metrics article{border-right:0;border-bottom:1px solid #e4e6e2}.metrics article:nth-child(2){border-bottom:1px solid #e4e6e2}.events > article{grid-template-columns:28px minmax(0,1fr)}.events > article details{grid-column:2}.columns{min-width:0}}
+
+/* Project facts stay dense, but business-facing text must remain readable without browser zoom. */
+.stage span,.blockers header span,.costs header span,.routes header span,.events header span { font-size:11px; }
+.stage h2 { font-size:22px; }.stage small { font-size:11px; line-height:1.45; }
+.stage dt { font-size:11px; }.stage dd { font-size:13px; line-height:1.45; }
+.stage aside strong { font-size:14px; }.stage aside span { font-size:11px; line-height:1.5; }
+.stateBlock b { font-size:12px; }.stateBlock span,.stateBlock small { font-size:10px; line-height:1.45; }
+.stageTechnical p,.stageTechnical code { font-size:10px; line-height:1.45; }
+.basis>header small { font-size:10px; }.basis>header h3 { font-size:15px; }.basis>header p { font-size:11px; line-height:1.45; }
+.basis>nav button { height:34px; font-size:12px; }
+.requirementBasis span,.briefLead span,.shotBasis span { font-size:11px; }.requirementBasis strong { font-size:13px; }
+.briefLead h4 { font-size:17px; }.briefLead p { font-size:12px; }.briefBasis dt { font-size:11px; }.briefBasis dd { font-size:12px; line-height:1.55; }
+.beatBasis article>b { font-size:10px; }.beatBasis strong { font-size:12px; }.beatBasis span,.beatBasis time { font-size:11px; line-height:1.5; }
+.shotBasis strong { font-size:15px; }.shotBasis small,.basis>footer span,.basis>footer a { font-size:11px; line-height:1.45; }
+.metrics span,.metrics small { font-size:11px; line-height:1.45; }.metrics strong { font-size:22px; }
+.blockers h3,.costs h3,.routes h3,.events h3 { font-size:15px; }.blockers header b,.costs header b,.routes header b,.events header b { font-size:11px; }
+.clear { font-size:12px; }.blockers strong { font-size:13px; }.blockers small,.blockers p,.blockers em { font-size:11px; line-height:1.5; }
+details summary { font-size:11px; }details pre { font-size:10px; line-height:1.45; }
+.costs > article > strong { font-size:14px; }.costs dt,.costs article small { font-size:10px; }.costs dd { font-size:12px; }
+.routes table { min-width:820px; }.routes th,.routes td { padding:11px 12px; font-size:11px; line-height:1.45; }.routes th,.routes td code,.routes td:last-child p,.routes em,.routes td small { font-size:10px; }
+.events > article { min-height:76px; }.events article strong { font-size:12px; }.events article p { font-size:11px; line-height:1.45; }.events article small { font-size:10px; }
+.empty,.error { font-size:13px; }
