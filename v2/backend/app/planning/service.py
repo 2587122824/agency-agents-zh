@@ -869,7 +869,7 @@ def revise_shot_plan(
         raise CreationNotFoundError("Shot plan candidate not found")
     if not requirement or requirement.id != payload.expected_requirement_version_id or candidate.requirement_version_id != requirement.id:
         raise CreationConflictError("SHOT_PLAN_BASE_VERSION_STALE", "分镜候选基于旧需求版本，不能修订。")
-    if candidate.status != "awaiting_review":
+    if candidate.status not in {"awaiting_review", "rejected"}:
         raise CreationConflictError("SHOT_PLAN_NOT_REVISABLE", f"分镜候选状态为 {candidate.status}，不能修订。")
     if candidate.row_version != payload.expected_candidate_row_version:
         raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重新编辑。")
@@ -1095,6 +1095,7 @@ def planning_center_view(session: Session, project: Project) -> dict:
     current_brief = next((item for item in briefs if item.requirement_version_id == requirement.id and item.status == "awaiting_review"), None)
     accepted_brief = next((item for item in briefs if item.requirement_version_id == requirement.id and item.status == "accepted"), None)
     current_shot = next((item for item in shot_candidates if item.requirement_version_id == requirement.id and item.status == "awaiting_review"), None)
+    rejected_shot = next((item for item in shot_candidates if item.requirement_version_id == requirement.id and item.status == "rejected"), None)
     active_plan = next((item for item in plans if item.requirement_version_id == requirement.id and item.is_active), None)
     planner_attempt = session.scalar(
         select(AgentRun)
@@ -1129,6 +1130,8 @@ def planning_center_view(session: Session, project: Project) -> dict:
         next_action = PlanningNextAction(code="PLAN_CONFIRMED", label="方案已确认，等待创建生产快照", target_ids=[active_plan.id])
     elif current_shot:
         next_action = PlanningNextAction(code="REVIEW_SHOT_PLAN", label="审核分镜候选", target_ids=[current_shot.id])
+    elif rejected_shot:
+        next_action = PlanningNextAction(code="REVISE_REJECTED_SHOT_PLAN", label="调整被拒绝的分镜方案", target_ids=[rejected_shot.id])
     elif accepted_brief and director_attempt and director_attempt.status == "failed":
         next_action = PlanningNextAction(
             code="RETRY_FAILED_SHOT_PLAN",

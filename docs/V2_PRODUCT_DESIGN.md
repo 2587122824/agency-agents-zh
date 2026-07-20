@@ -2,7 +2,7 @@
 
 > 状态：设计基线
 > 版本：0.4
-> 更新日期：2026-07-18
+> 更新日期：2026-07-20
 > 产品原型：<http://127.0.0.1:8765/prototype-v2/>
 > V2 应用骨架：<http://127.0.0.1:8766/>
 > 系统架构：[V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)
@@ -270,6 +270,8 @@ flowchart LR
 用户确认后生成不可变方案版本，例如 `plan_v1`。后续修改创建 `plan_v2`，不能直接覆盖已进入生产的版本。
 
 确认前的分镜候选同样不允许原地覆盖。用户通过逐镜头结构化字段创建新的 `ShotPlanCandidate` 修订，新候选记录 `supersedes_candidate_id`，旧候选进入 `superseded`；只有最新待审候选可以确认并生成 `PlanVersion`。修订接口不接受自由 JSON、供应商字段、工作流 ID 或提示词覆盖，完整实现见 [V2 结构化分镜候选修订实现](./archive/implementation-notes/V2_SHOT_PLAN_REVISION_IMPLEMENTATION.md)。
+
+拒绝分镜只表示当前候选不能直接成为正式方案，不等于放弃已接受的内容方案或强制修改基础需求。系统保留最近被拒绝且尚未被替代的分镜供查看，并把唯一下一步切换为逐镜头结构化调整；用户提交至少一处明确 Patch 后创建新的待审候选，原拒绝版本进入 `superseded`，项目由 `planning` 显式返回 `plan_review`。该路径不再次调用分镜导演、不产生模型费用，也不自动猜测、重写或修复镜头。若用户要改变内容结构或基础需求，必须通过对应的内容方案或需求修订命令另行处理。
 
 分镜修订采用“镜头导航 + 单镜头编辑器”，不把全部镜头表单同时展开。用户从列表点击具体镜头后，只编辑该镜头的结构化字段；列表支持按编号、类型、动作和内容节拍搜索，以及查看全部或仅已修改镜头。页面明确显示修改镜头数量、当前镜头未保存状态，并允许只重置当前镜头。所有修改仍保存在本地草稿中，只有用户点击创建修订候选时才一次性提交原有逐镜头 Patch；切换镜头、搜索和筛选均不写入后端。
 
@@ -726,7 +728,7 @@ GET  /api/v1/projects/{project_id}/events
 
 Repository 的已迁移聚合、事务责任和剩余范围见 [V2 Repository 边界实现](./archive/implementation-notes/V2_REPOSITORY_IMPLEMENTATION.md)。
 当前创作中心的对话、需求候选、澄清、附件绑定和创作阶段实体访问已统一通过 `CreationRepository`；该迁移不改变候选或确认语义。
-当前规划中心的 Brief、分镜候选版本链、不可变方案版本、Shot 和实体引用已统一通过 `PlanningRepository`；方案页支持逐镜头结构化修订，旧候选不可覆盖且只有最新候选可以确认。
+当前规划中心的 Brief、分镜候选版本链、不可变方案版本、Shot 和实体引用已统一通过 `PlanningRepository`；方案页支持待审及最近被拒绝分镜的逐镜头结构化修订，旧候选不可覆盖且只有最新待审候选可以确认。
 当前生产服务的影响分析、快照、DAG、费用明细、WorkItem/Attempt 编译和准备/执行投影已统一通过 `ProductionRepository`；费用确认、激活和提交仍是三个独立显式命令。
 当前质量服务的素材登记、文件验证记录、QC findings、人工审核证据和 DAG 下游影响已统一通过 `QualityRepository`；内容分析器未连接时仍进入 `review_required`，不会伪装为通过。
 当前剪辑服务的时间线版本链、轨道条目、素材验证读取、确认版本替代和素材箱投影已统一通过 `EditorRepository`；Repository 不自动补位、重排、裁切或变速。
@@ -1195,7 +1197,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 ## 41. 分镜导演智能体实现
 
-分镜导演使用 `director-input.v1 / shot-plan.v2 / director-prompt.v1` 和独立 `director` 模型分工。输入只冻结已确认需求、唯一已接受内容方案、精确实体版本与来源附件事实、已解决决策、交付约束和音频策略；不读取自由会话，不读取 Provider、工作流、NodeInfoList、价格或生产任务。
+分镜导演使用 `director-input.v1 / shot-plan.v2 / director-prompt.v2` 和独立 `director` 模型分工。输入只冻结已确认需求、唯一已接受内容方案、精确实体版本与来源附件事实、已解决决策、交付约束和音频策略；不读取自由会话，不读取 Provider、工作流、NodeInfoList、价格或生产任务。人脸可见性由模型按画面事实显式声明：面部、表情、身份、年龄状态或面貌对比是叙事必需时为 `required`，人物存在但人脸非必要时为 `optional`，只有构图明确排除全部人脸时才为 `not_visible`；未绑定人物不是选择 `not_visible` 的依据。
 
 每个镜头必须精确声明内容节拍、唯一主动作、可空连续组、人物/服装/场景/产品版本、可空主参考实体、人脸/文字/动态/声音策略、构图、动作与画面生成描述。后端按结构字段验证，不通过提示词或动作文本做关键词特判：镜头代码与顺序连续；每个 Brief 节拍至少有一个镜头且镜头时长之和精确等于节拍时长；`action_count` 必须为 1；连续组的场景、人物和服装 ID 必须完全一致；主参考实体必须属于镜头且有已验证图片；音频关闭时只允许无音频依赖或无声说话动作。
 

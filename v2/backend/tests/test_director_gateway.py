@@ -38,7 +38,7 @@ def selection() -> DirectorSelection:
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
         input_contract_version="director-input.v1",
-        prompt_contract_version="director-prompt.v1",
+        prompt_contract_version="director-prompt.v2",
         output_schema_version="shot-plan.v2",
         max_output_tokens=4000,
         sampling={"temperature": 0.2},
@@ -125,6 +125,8 @@ def test_director_returns_strict_shot_plan_once(monkeypatch) -> None:
     assert [item["role"] for item in sent] == ["system", "user"]
     assert "NodeInfoList" in sent[0]["content"]
     assert '"face_visibility":"required|optional|not_visible"' in sent[0]["content"]
+    assert "它不是“未绑定人物”或“不确定”的默认值" in sent[0]["content"]
+    assert "输出前逐镜头检查" in sent[0]["content"]
 
 
 @pytest.mark.parametrize("mutate", [

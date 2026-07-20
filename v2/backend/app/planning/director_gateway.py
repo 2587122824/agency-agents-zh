@@ -15,6 +15,11 @@ from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderCon
 from ..providers.credentials import EnvironmentCredentialResolver
 
 
+DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v1"
+DIRECTOR_OUTPUT_SCHEMA_VERSION = "shot-plan.v2"
+DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v2"
+
+
 class DirectorShotOutput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -111,10 +116,17 @@ _DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只�
 5. continuity_group_id 只用于声明需要保持连续的镜头。同一组必须使用完全相同的场景、人物和服装版本 ID；不连续的镜头填 null。
 6. primary_reference_entity_version_id 必须属于该镜头已声明实体，且输入事实明确提供已验证图片；没有明确主参考时填 null，不得自动采用第一个实体。
 7. face_visibility、text_policy、motion_requirement 和 audio_requirement 必须显式给出，后续系统不会从描述反推。
+7.1 face_visibility 必须按画面事实选择：
+- required：人物面部、表情、身份、年龄状态或前后面貌对比是画面叙事与验收所必需，生成结果缺少可辨认人脸即不合格。
+- optional：画面有人物，但人脸不是叙事必要条件，侧脸、遮挡或未清晰露脸仍可接受。
+- not_visible：构图明确不展示任何人脸，例如纯文字、物体、环境、手脚、背影或完全避开头部；它不是“未绑定人物”或“不确定”的默认值。
+7.2 人物实体是否已绑定不能单独决定 face_visibility。即使 character_entity_version_ids 为空，只要动作、构图或 visual_prompt 要求展示人物面部、表情、身份、年龄状态或面貌对比，就必须选择 required；无法确定是否需要人脸时选择 optional，不得选择 not_visible。
+7.3 text_policy 必须与画面文字是否为叙事必需保持一致；motion_requirement 必须与唯一主动作需要的可见运动幅度一致；audio_requirement 必须与音频策略一致。
 8. audio_policy=off 时 audio_requirement 只能为 off 或 lip_motion_only，不得建立配音、对白、音乐、TTS 或音频注入依赖。
 9. 不得输出 Provider、模型、工作流、NodeInfoList、价格、素材状态、任务 ID 或生产路由。
 10. 不得添加提示词默认尾缀、自动负面词或输入合同中没有确认的人物、品牌、地点与产品事实。
-11. 不得输出 Markdown、解释文字或 JSON 之外的内容。
+11. 输出前逐镜头检查 shot_type、action、composition、visual_prompt、实体引用和四项生成约束是否描述同一画面；发现矛盾必须在返回 JSON 前重新选择正确枚举或修改镜头描述，不能把矛盾结果交给后端猜测或修复。
+12. 不得输出 Markdown、解释文字或 JSON 之外的内容。
 """
 
 
@@ -149,9 +161,9 @@ class ConfiguredDirectorGateway:
         if "text_generation" not in provider.capabilities:
             raise AgentGatewayError("DIRECTOR_CAPABILITY_MISSING", "分镜导演模型供应商未声明文本生成能力。")
         expected = {
-            "input_contract_version": "director-input.v1",
-            "output_schema_version": "shot-plan.v2",
-            "prompt_contract_version": "director-prompt.v1",
+            "input_contract_version": DIRECTOR_INPUT_CONTRACT_VERSION,
+            "output_schema_version": DIRECTOR_OUTPUT_SCHEMA_VERSION,
+            "prompt_contract_version": DIRECTOR_PROMPT_CONTRACT_VERSION,
         }
         if {key: getattr(model, key) for key in expected} != expected:
             raise AgentGatewayError("DIRECTOR_CONTRACT_VERSION_UNSUPPORTED", "分镜导演模型配置的合同版本与当前运行代码不一致。")
@@ -280,9 +292,9 @@ class DeterministicDirectorGateway:
             base_url="https://example.invalid/v1",
             credential_ref=None,
             timeout_seconds=1,
-            input_contract_version="director-input.v1",
-            prompt_contract_version="director-prompt.v1",
-            output_schema_version="shot-plan.v2",
+            input_contract_version=DIRECTOR_INPUT_CONTRACT_VERSION,
+            prompt_contract_version=DIRECTOR_PROMPT_CONTRACT_VERSION,
+            output_schema_version=DIRECTOR_OUTPUT_SCHEMA_VERSION,
             max_output_tokens=None,
             sampling={},
         )

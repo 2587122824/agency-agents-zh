@@ -1818,6 +1818,72 @@ def test_shot_plan_revision_creates_a_new_reviewable_candidate(client: TestClien
     assert accepted.json()["shot_plan_candidate_id"] == revised["id"]
 
 
+def test_rejected_shot_plan_can_be_revised_without_rerunning_director(client: TestClient) -> None:
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+    brief = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "rejected-revision-brief-generate", "expected_requirement_version_id": requirement_id},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates/{brief['id']}:accept",
+        json={"command_id": "rejected-revision-brief-accept", "expected_requirement_version_id": requirement_id},
+    )
+    original = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates:generate",
+        json={
+            "command_id": "rejected-revision-shots-generate",
+            "expected_requirement_version_id": requirement_id,
+            "creative_brief_candidate_id": brief["id"],
+        },
+    ).json()
+    original_run_id = original["agent_run_id"]
+    rejected = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:reject",
+        json={
+            "command_id": "rejected-revision-shots-reject",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": original["row_version"],
+            "reason": "调整具体镜头后再确认",
+        },
+    )
+    assert rejected.status_code == 200
+
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["current_shot_candidate"] is None
+    assert planning["next_action"] == {
+        "code": "REVISE_REJECTED_SHOT_PLAN",
+        "label": "调整被拒绝的分镜方案",
+        "target_ids": [original["id"]],
+        "incurs_model_cost": False,
+        "incurs_production_cost": False,
+    }
+
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{original['id']}:revise",
+        json={
+            "command_id": "rejected-revision-shots-revise",
+            "actor_id": "test-editor",
+            "expected_requirement_version_id": requirement_id,
+            "expected_candidate_row_version": rejected.json()["row_version"],
+            "patches": [{
+                "target_shot_code": "SH-001",
+                "changes": {"face_visibility": "required"},
+            }],
+        },
+    )
+    assert revised.status_code == 201
+    assert revised.json()["status"] == "awaiting_review"
+    assert revised.json()["supersedes_candidate_id"] == original["id"]
+
+    after = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert after["current_shot_candidate"]["id"] == revised.json()["id"]
+    assert after["latest_director_run"]["id"] == original_run_id
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "plan_review"
+    history = {item["id"]: item for item in after["shot_plan_history"]}
+    assert history[original["id"]]["status"] == "superseded"
+
+
 def test_invalid_shot_plan_revision_does_not_supersede_source(client: TestClient) -> None:
     project = create_creation_project(client)
     requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
