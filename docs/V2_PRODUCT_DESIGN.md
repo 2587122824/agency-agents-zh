@@ -1173,7 +1173,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 系统配置将新来源显示为“画面生成描述、避免内容、分镜主参考图、是否选择了主参考图”。关键帧参考图与首帧视频的“上一步生成的关键帧”是两类独立输入，不得互换。素材联络表展示分镜的产品实体、主参考标记、画面生成描述、避免内容和快照冻结的文件事实，便于用户在剪辑前核对实际生产依据。
 
-历史发布配置 v25 保持关键帧工作流 `2072296894507872257`、Provider、模型、视频工作流和价格不变，仅将 `shot.negative_prompt` 与 `reference_image.primary` 两个关键帧绑定声明为可选，`reference_image.present` 仍为必填布尔开关。当前配置 v33 继续保持这些路由，只升级导演合同为 v3；这不属于无参考图降级、默认负面词补写或工作流替换。
+历史发布配置 v25 保持关键帧工作流 `2072296894507872257`、Provider、模型、视频工作流和价格不变，仅将 `shot.negative_prompt` 与 `reference_image.primary` 两个关键帧绑定声明为可选，`reference_image.present` 仍为必填布尔开关。配置 v33 继续保持这些路由并升级导演合同为 v3；当前配置 v35 保持三个文本智能体使用 `deepseek-v4-flash`。DeepSeek 官方 [Chat API](https://api-docs.deepseek.com/api/create-chat-completion) 当前将用户消息 `content` 定义为字符串，官方文档目录也没有视觉输入端点，因此系统不为该 Provider 声明 `vision_analysis`，也不注册 DeepSeek QC 模型。RunningHub 工作流、NodeInfoList、视频规格、音频、存储和价格均不变。
 
 本能力不启用真实 Provider 执行，不修改已发布配置，不回填历史方案，也不引入提示词拼接、主参考猜测、供应商替换、工作流替换、自动重试或无参考图降级。详细实现见 [V2 分镜生成输入合同实现](./archive/implementation-notes/V2_SHOT_GENERATION_INPUT_IMPLEMENTATION.md)。
 
