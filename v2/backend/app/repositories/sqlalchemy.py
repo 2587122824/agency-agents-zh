@@ -787,7 +787,7 @@ class SqlAlchemyProductionRepository:
         return list(self.session.scalars(
             select(ProductionConfigVersion)
             .where(ProductionConfigVersion.status == "published")
-            .order_by(ProductionConfigVersion.published_at.desc())
+            .order_by(ProductionConfigVersion.published_at.desc(), ProductionConfigVersion.id.desc())
         ))
 
     def video_specs(self, config_id: str) -> list[VideoSpecVersion]:

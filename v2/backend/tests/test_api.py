@@ -2255,6 +2255,7 @@ def publish_visual_production_configuration(
     adapter_kind: str = "mock",
     runtime_pricing: bool = False,
     reference_required: bool = False,
+    command_prefix: str = "snapshot-config",
 ) -> dict:
     configuration = valid_system_configuration()
     configuration["providers"][0]["adapter_kind"] = adapter_kind
@@ -2301,19 +2302,40 @@ def publish_visual_production_configuration(
             ],
         }
     draft = client.post("/api/v1/system-config/versions", json={
-        "command_id": "snapshot-config-create-001",
+        "command_id": f"{command_prefix}-create-001",
         "configuration": configuration,
     }).json()
     ready = client.post(
         f"/api/v1/system-config/versions/{draft['id']}:validate",
-        json={"command_id": "snapshot-config-validate-001", "expected_row_version": draft["row_version"]},
+        json={"command_id": f"{command_prefix}-validate-001", "expected_row_version": draft["row_version"]},
     ).json()
     response = client.post(
         f"/api/v1/system-config/versions/{draft['id']}:publish",
-        json={"command_id": "snapshot-config-publish-001", "expected_row_version": ready["row_version"], "confirm_high_risk_changes": True},
+        json={"command_id": f"{command_prefix}-publish-001", "expected_row_version": ready["row_version"], "confirm_high_risk_changes": True},
     )
     assert response.status_code == 200
     return response.json()
+
+
+def test_production_preparation_lists_only_current_published_configuration(client: TestClient) -> None:
+    project = create_creation_project(client)
+    previous = publish_visual_production_configuration(
+        client,
+        command_prefix="preparation-previous-config",
+    )
+    current = publish_visual_production_configuration(
+        client,
+        command_prefix="preparation-current-config",
+    )
+
+    preparation = client.get(
+        f"/api/v1/projects/{project['id']}/production-preparation"
+    )
+    assert preparation.status_code == 200
+    choices = preparation.json()["published_configurations"]
+    assert [item["id"] for item in choices] == [current["id"]]
+    assert previous["status"] == "published"
+    assert current["version_number"] > previous["version_number"]
 
 
 def create_plan_with_explicit_primary_reference(client: TestClient) -> tuple[dict, dict, dict]:

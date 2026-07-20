@@ -1156,7 +1156,8 @@ def execution_view(session: Session, project: Project) -> dict:
 def preparation_view(session: Session, project: Project) -> dict:
     repository = _production(session)
     active_plan = repository.active_plan(project.id)
-    configs = repository.published_configurations()
+    published_configs = repository.published_configurations()
+    configs = published_configs[:1]
     choices = []
     for config in configs:
         videos = repository.video_specs(config.id)
