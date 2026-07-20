@@ -6,6 +6,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..creation.contracts import AgentRunRead, CommandContext, RequirementVersionRead
+from ..revision.contracts import AssetRevisionRequestRead
 
 
 class GenerateBrief(CommandContext):
@@ -229,6 +230,8 @@ class PlanningCenterView(BaseModel):
     current_brief_candidate: CreativeBriefCandidateRead | None
     accepted_brief_candidate: CreativeBriefCandidateRead | None
     current_shot_candidate: ShotPlanCandidateRead | None
+    revision_draft: ShotPlanCandidateRead | None
+    revision_context: AssetRevisionRequestRead | None
     active_plan: PlanVersionRead | None
     brief_history: list[CreativeBriefCandidateRead]
     shot_plan_history: list[ShotPlanCandidateRead]

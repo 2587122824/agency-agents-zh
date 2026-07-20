@@ -259,6 +259,36 @@ class AssetReviewDecision(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class AssetRevisionRequest(Base):
+    __tablename__ = "asset_revision_requests"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("asset_revision"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id"), index=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    plan_version_id: Mapped[str] = mapped_column(ForeignKey("plan_versions.id"), index=True)
+    shot_id: Mapped[str | None] = mapped_column(ForeignKey("shots.id"), nullable=True, index=True)
+    shot_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    issue_scope: Mapped[str] = mapped_column(String(24), index=True)
+    rationale: Mapped[str] = mapped_column(String(2000))
+    status: Mapped[str] = mapped_column(String(32), default="recorded", index=True)
+    source_asset_state: Mapped[str] = mapped_column(String(32))
+    source_asset_row_version: Mapped[int] = mapped_column(Integer)
+    affected_downstream_node_keys: Mapped[list] = mapped_column(JSON, default=list)
+    draft_candidate_id: Mapped[str | None] = mapped_column(
+        ForeignKey("shot_plan_candidates.id"), nullable=True, index=True
+    )
+    resulting_candidate_id: Mapped[str | None] = mapped_column(
+        ForeignKey("shot_plan_candidates.id"), nullable=True, index=True
+    )
+    resulting_plan_version_id: Mapped[str | None] = mapped_column(
+        ForeignKey("plan_versions.id"), nullable=True, index=True
+    )
+    created_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Timeline(Base):
     __tablename__ = "timelines"
     __table_args__ = (UniqueConstraint("project_id", "version_number"),)

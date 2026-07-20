@@ -346,6 +346,14 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.revisionRecorded {
+  margin: 0 13px 10px;
+  padding: 7px 9px;
+  border-left: 3px solid #397357;
+  background: #f1f7f3;
+  color: #41614e;
+  font-size: 9px;
+}
 .assetCard > footer {
   min-height: 50px;
   padding: 9px 12px;
@@ -440,6 +448,29 @@
   padding: 10px;
   font: inherit;
 }
+.scopeChoices {
+  margin: 14px 0;
+  display: grid;
+  gap: 7px;
+}
+.scopeChoices button {
+  min-height: 62px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+  border: 1px solid #d8ddd7;
+  border-radius: 5px;
+  background: #fafbf9;
+  cursor: pointer;
+}
+.scopeChoices button[data-selected="true"] {
+  border-color: #397357;
+  background: #eef6f1;
+  box-shadow: inset 0 0 0 1px #397357;
+}
+.scopeChoices strong { font-size: 11px; }
+.scopeChoices span { color: #69716d; font-size: 9px; }
 .modal > section > small {
   display: block;
   margin-top: 9px;

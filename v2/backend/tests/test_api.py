@@ -16,9 +16,9 @@ os.environ["V2_DATABASE_URL"] = f"sqlite:///{TEST_DATABASE.as_posix()}"
 os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 
 from v2.backend.app.main import app
-from v2.backend.app.db.session import engine
+from v2.backend.app.db.session import Base, engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from v2.backend.app.creation.service import _validated_update_value
 from sqlalchemy import select
@@ -52,6 +52,7 @@ def client():
     app.dependency_overrides[get_content_planner_gateway] = lambda: DeterministicContentPlannerGateway()
     app.dependency_overrides[get_director_gateway] = lambda: DeterministicDirectorGateway()
     app.dependency_overrides[get_qc_gateway] = lambda: DeterministicQCGateway()
+    Base.metadata.create_all(bind=engine)
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.pop(get_creative_agent_gateway, None)
@@ -3617,6 +3618,219 @@ def test_asset_registration_verification_qc_and_human_approval_are_explicit(clie
     with SessionLocal() as session:
         assert len(list(session.scalars(select(WorkAttempt).where(WorkAttempt.work_item_id == item["id"])))) == 1
         assert session.scalar(select(AssetReviewDecision).where(AssetReviewDecision.asset_id == asset["id"])) is not None
+
+
+def test_storyboard_asset_revision_creates_explicit_draft_and_new_plan(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "revision-activate-0001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    submitted = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "revision-submit-00001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert submitted.status_code == 202
+    with SessionLocal() as session:
+        node = session.scalar(select(DAGNode).where(
+            DAGNode.snapshot_id == snapshot["id"], DAGNode.shot_id.is_not(None)
+        ).order_by(DAGNode.node_key))
+        assert node is not None
+        asset = Asset(
+            project_id=project["id"], snapshot_id=snapshot["id"], dag_node_id=node.id,
+            output_index=0, asset_type="image", role="keyframe", uri=f"runtime://assets/{project['id']}/revision.png",
+            storage_backend="local", provider_output_manifest={}, state="review_required",
+        )
+        session.add(asset)
+        session.commit()
+        asset_id = asset.id
+
+    command = {
+        "command_id": "asset-revision-command-001",
+        "actor_id": "local-user",
+        "expected_asset_row_version": 1,
+        "issue_scope": "storyboard",
+        "rationale": "人物动作与已经确认的分镜目标不一致，需要调整这个镜头。",
+    }
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision", json=command
+    )
+    replayed = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision", json=command
+    )
+    assert created.status_code == 201
+    result = created.json()
+    assert replayed.json()["request"]["id"] == result["request"]["id"]
+    assert result["request"]["status"] == "draft_created"
+    assert result["request"]["shot_code"]
+    assert result["next_action"]["draft_candidate_id"]
+    request_read = client.get(
+        f"/api/v1/projects/{project['id']}/asset-revision-requests/{result['request']['id']}"
+    )
+    assert request_read.status_code == 200
+    assert request_read.json()["rationale"] == command["rationale"]
+    duplicate_open = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
+        json={**command, "command_id": "asset-revision-command-002"},
+    )
+    assert duplicate_open.status_code == 409
+    assert duplicate_open.headers["x-error-code"] == "STORYBOARD_REVISION_ALREADY_OPEN"
+    quality = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()
+    stored_asset = next(item for item in quality["assets"] if item["id"] == asset_id)
+    assert stored_asset["revision_requests"][0]["id"] == result["request"]["id"]
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "producing"
+
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    draft = planning["revision_draft"]
+    assert draft["status"] == "revision_draft"
+    assert planning["revision_context"]["id"] == result["request"]["id"]
+    assert planning["active_plan"] is not None
+    direct_accept = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{draft['id']}:accept",
+        json={
+            "command_id": "revision-draft-accept-001",
+            "expected_requirement_version_id": planning["active_requirement"]["id"],
+            "expected_candidate_row_version": draft["row_version"],
+        },
+    )
+    assert direct_accept.status_code == 409
+    assert direct_accept.headers["x-error-code"] == "SHOT_PLAN_NOT_REVIEWABLE"
+
+    target = next(shot for shot in draft["shots"] if shot["shot_code"] == result["request"]["shot_code"])
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{draft['id']}:revise",
+        json={
+            "command_id": "revision-draft-patch-001",
+            "expected_requirement_version_id": planning["active_requirement"]["id"],
+            "expected_candidate_row_version": draft["row_version"],
+            "patches": [{
+                "target_shot_code": target["shot_code"],
+                "changes": {"action": f"{target['action']}，并修正动作节奏"},
+            }],
+        },
+    )
+    assert revised.status_code == 201
+    candidate = revised.json()
+    assert candidate["status"] == "awaiting_review"
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "producing"
+
+    accepted = client.post(
+        f"/api/v1/projects/{project['id']}/shot-plan-candidates/{candidate['id']}:accept",
+        json={
+            "command_id": "revision-candidate-accept-001",
+            "expected_requirement_version_id": planning["active_requirement"]["id"],
+            "expected_candidate_row_version": candidate["row_version"],
+        },
+    )
+    assert accepted.status_code == 200
+    new_plan = accepted.json()
+    assert new_plan["version_number"] == planning["active_plan"]["version_number"] + 1
+    current_project = client.get(f"/api/v1/projects/{project['id']}").json()
+    assert current_project["status"] == "contract_ready"
+    with SessionLocal() as session:
+        stored_project = session.get(Project, project["id"])
+        old_snapshot = session.get(ProductionSnapshot, snapshot["id"])
+        request = session.get(AssetRevisionRequest, result["request"]["id"])
+        assert stored_project is not None and stored_project.active_snapshot_id is None
+        assert old_snapshot is not None and old_snapshot.status == "superseded"
+        assert request is not None and request.status == "plan_confirmed"
+        assert request.resulting_plan_version_id == new_plan["id"]
+    stale_branch = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
+        json={**command, "command_id": "asset-revision-stale-plan-001"},
+    )
+    assert stale_branch.status_code == 409
+    assert stale_branch.headers["x-error-code"] == "STORYBOARD_REVISION_PLAN_NOT_ACTIVE"
+
+
+def test_open_storyboard_revision_can_be_explicitly_cancelled(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    with SessionLocal() as session:
+        node = session.scalar(select(DAGNode).where(
+            DAGNode.snapshot_id == snapshot["id"], DAGNode.shot_id.is_not(None)
+        ).order_by(DAGNode.node_key))
+        assert node is not None
+        asset = Asset(
+            project_id=project["id"], snapshot_id=snapshot["id"], dag_node_id=node.id,
+            output_index=0, asset_type="image", role="keyframe", uri=f"runtime://assets/{project['id']}/cancel.png",
+            storage_backend="local", provider_output_manifest={}, state="review_required",
+        )
+        session.add(asset)
+        session.commit()
+        asset_id = asset.id
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
+        json={
+            "command_id": "cancel-revision-create-001", "actor_id": "local-user",
+            "expected_asset_row_version": 1, "issue_scope": "storyboard",
+            "rationale": "误选了分镜问题。",
+        },
+    ).json()
+    cancel_command = {
+        "command_id": "cancel-revision-command-001", "actor_id": "local-user",
+        "reason": "用户确认这不是分镜问题。",
+    }
+    cancelled = client.post(
+        f"/api/v1/projects/{project['id']}/asset-revision-requests/{created['request']['id']}:cancel",
+        json=cancel_command,
+    )
+    replayed = client.post(
+        f"/api/v1/projects/{project['id']}/asset-revision-requests/{created['request']['id']}:cancel",
+        json=cancel_command,
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert replayed.json()["status"] == "cancelled"
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert planning["revision_draft"] is None
+    assert planning["revision_context"] is None
+    assert planning["active_plan"] is not None
+    with SessionLocal() as session:
+        draft = session.get(ShotPlanCandidate, created["request"]["draft_candidate_id"])
+        assert draft is not None and draft.status == "cancelled"
+
+
+def test_non_shot_asset_requires_explicit_non_storyboard_scope(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    with SessionLocal() as session:
+        node = DAGNode(
+            snapshot_id=snapshot["id"], node_key="project.manual_output", kind="manual_output",
+            shot_id=None, input_contract={}, output_contract={"media_type": "image"},
+        )
+        session.add(node)
+        session.flush()
+        asset = Asset(
+            project_id=project["id"], snapshot_id=snapshot["id"], dag_node_id=node.id,
+            output_index=0, asset_type="image", role="manual", uri=f"runtime://assets/{project['id']}/manual.png",
+            storage_backend="local", provider_output_manifest={}, state="review_required",
+        )
+        session.add(asset)
+        session.commit()
+        asset_id = asset.id
+    base = {
+        "actor_id": "local-user", "expected_asset_row_version": 1,
+        "rationale": "生成效果不符合预期。",
+    }
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
+        json={**base, "command_id": "non-shot-storyboard-001", "issue_scope": "storyboard"},
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "STORYBOARD_REVISION_SHOT_REQUIRED"
+    recorded = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
+        json={**base, "command_id": "non-shot-production-001", "issue_scope": "production"},
+    )
+    assert recorded.status_code == 201
+    assert recorded.json()["request"]["status"] == "recorded"
+    assert recorded.json()["next_action"]["path"].startswith("/production?")
 
 
 def test_failed_qc_agent_requires_exact_user_confirmed_retry(client: TestClient) -> None:

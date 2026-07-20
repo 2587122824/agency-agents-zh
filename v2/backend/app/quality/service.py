@@ -15,6 +15,7 @@ from ..db.models import (
     AgentInputManifest,
     AgentRun,
     Asset,
+    AssetRevisionRequest,
     AssetReviewDecision,
     PlanVersion,
     Project,
@@ -825,6 +826,15 @@ def asset_read(session: Session, asset: Asset) -> dict:
     result["latest_qc_agent_run"] = _agent_run_read(session, agent_run)
     result["review_decisions"] = [{column.name: getattr(decision, column.name) for column in decision.__table__.columns if column.name not in {"project_id", "asset_id", "qc_report_id"}} for decision in decisions]
     result["affected_downstream_node_keys"] = _downstream_keys(session, asset)
+    revision_requests = list(session.scalars(
+        select(AssetRevisionRequest)
+        .where(AssetRevisionRequest.asset_id == asset.id)
+        .order_by(AssetRevisionRequest.created_at.desc())
+    ))
+    result["revision_requests"] = [
+        {column.name: getattr(item, column.name) for column in item.__table__.columns if column.name != "project_id"}
+        for item in revision_requests
+    ]
     return result
 
 

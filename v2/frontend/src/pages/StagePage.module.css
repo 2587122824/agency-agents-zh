@@ -44,6 +44,12 @@
 .blocker span { font-size:11px;word-break:break-word; }
 .blocker details code { color:#8e321a;font-size:10px; }
 .blockerDetails { display:grid;gap:5px; }
+.revisionContext { margin:12px 14px 0;padding:11px 12px;display:flex;gap:9px;border:1px solid #e2c5b4;border-radius:5px;background:#fff8f3; }
+.revisionContext > svg { flex:none;color:#a94c2e; }
+.revisionContext > div { display:grid;gap:3px; }
+.revisionContext strong { font-size:11px; }
+.revisionContext span { color:#555d60;font-size:10px;line-height:1.5; }
+.revisionContext small { color:#7a8184;font-size:9px; }
 .executionEmpty,.empty { min-height:190px;padding:32px;display:grid;place-items:center;align-content:center;gap:8px;text-align:center;color:#777d80;font-size:12px; }
 .executionEmpty strong { color:#272b2e;font-size:14px; }
 .notice { margin-top:14px;border-left:3px solid #d84e29;padding:12px 15px;background:#fff; }

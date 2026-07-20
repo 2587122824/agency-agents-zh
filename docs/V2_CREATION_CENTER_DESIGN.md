@@ -579,11 +579,21 @@ model_config_version / prompt_contract_version
 - 每条 Finding 必须同时有结构化证据和合同引用；只有主观描述的结果验证失败。
 - `confidence` 只表示分析置信度，不能改变严重级别、项目状态或人工确认要求。
 - 仅当镜头合同 `face_visibility=required` 时检查正脸；`not_visible` 的背影、脚部和远景不报正脸缺失。
-- 动态检查读取 `motion_requirement`；氛围静态镜头与运动镜头使用不同已版本化规则。
+- 动态检查读取 `subject_motion`；氛围静态镜头与运动镜头使用不同已版本化规则。
 - OCR、身份相似度和语义判断默认进入 `review_required`，不作为确定性硬失败。
 - 不满意或不通过时只列出问题与受影响下游，不生成重试、替代素材或提示词修改。
 
 当前首期实现采用 `qc-agent-input.v1 / qc-report-candidate.v1 / qc-agent-prompt.v1`。确定性文件、尺寸和时长检查先运行；只有单张图片通过这些检查后，才允许调用声明了 `vision_analysis` 能力的已发布 QC 模型。模型接收冻结素材哈希、镜头合同、证据白名单、待审图片和存在时的冻结主参考图片，只能创建 `QCReportCandidate`；参考文件会再次校验路径与哈希。候选不等于权威报告，用户批准或拒绝素材时才把候选发现写入正式 `QCReport` 和 `AssetReviewDecision`。
+
+素材审核还提供独立的“需要调整”命令，但它不等于拒绝素材或重试任务。命令创建 `AssetRevisionRequest`，字段至少包括 `asset_id / snapshot_id / plan_version_id / shot_id nullable / shot_code nullable / issue_scope / rationale / affected_downstream_node_keys[] / status`。问题类型只能由用户显式选择：
+
+- 分镜问题：必须绑定真实镜头，创建来源方案的修订草稿并导航到结构化分镜编辑器；草稿本身不可确认，至少提交一处人工 Patch 或完成一次显式 AI 修订后才成为候选。
+- 生成问题：保留当前素材和生产证据，只导航到对应制作记录；后续重做必须是独立高风险命令。
+- 剪辑问题：保留当前素材，只导航到剪辑台；后续 Timeline 修订继续遵守不可变版本与人工确认。
+
+同一项目一次只允许一个未完成的分镜回改草稿，避免并发分支覆盖。回改来源、目标镜头和用户依据在页面中持续显示；后端不从节点名称、文件名、提示词或理由文本猜测镜头。属于历史 `PlanVersion` 的素材不能直接创建新的分镜回改分支，系统也不尝试把历史镜头映射为当前镜头。新 `PlanVersion` 确认后，旧快照只转为历史，不删除旧素材，不自动提交新生产。
+
+用户可以在方案页显式选择“放弃本次回改”。取消命令只适用于 `draft_created / candidate_created`，会把本次 `revision_draft` 和尚未确认的候选标记为 `cancelled`，并保留 `AssetRevisionRequest`、理由、来源证据和取消事件。取消不修改当前活动方案或快照，不删除素材，不调用模型，不自动恢复生产，也不产生新的候选或费用。
 
 当前 OpenAI-compatible 合同不声称能够读取视频文件或音频内容。视频与音频在确定性检查后进入明确标记的人工审核路径，不创建虚假的智能体结论。后续接入视频抽帧或音频理解必须新增版本化媒体分析合同、证据时间戳和对应 Provider 能力，不得复用图片合同隐式降级。
 

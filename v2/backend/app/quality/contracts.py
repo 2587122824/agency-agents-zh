@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -126,6 +127,7 @@ class AssetRead(BaseModel):
     latest_qc_agent_run: dict | None
     review_decisions: list[AssetReviewDecisionRead]
     affected_downstream_node_keys: list[str]
+    revision_requests: list[dict[str, Any]]
 
 
 class QualityReviewView(BaseModel):

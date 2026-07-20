@@ -65,6 +65,7 @@ export function ShotPlanRevisionEditor({
   onCancel,
   onSubmit,
   onAIRevision,
+  initialShotCode,
 }: {
   candidate: ShotPlanCandidate
   projectId: string
@@ -75,9 +76,13 @@ export function ShotPlanRevisionEditor({
   onCancel: () => void
   onSubmit: (patches: ShotPatch[]) => void
   onAIRevision: (selectedShotCodes: string[], instruction: string) => void
+  initialShotCode?: string | null
 }) {
   const [drafts, setDrafts] = useState(() => cloneShots(candidate.shots))
-  const [selectedIndex, setSelectedIndex] = useState(0)
+  const [selectedIndex, setSelectedIndex] = useState(() => {
+    const index = candidate.shots.findIndex(shot => shot.shot_code === initialShotCode)
+    return index >= 0 ? index : 0
+  })
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ShotFilter>('all')
   const [aiSelected, setAiSelected] = useState<string[]>([])

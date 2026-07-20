@@ -9,13 +9,11 @@ from fastapi.staticfiles import StaticFiles
 
 from .api.router import router
 from .core.config import FRONTEND_DIST, settings
-from .db.session import create_schema
 from .orchestration.project_transitions import ProjectStateConflictError
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    create_schema()
     yield
 
 

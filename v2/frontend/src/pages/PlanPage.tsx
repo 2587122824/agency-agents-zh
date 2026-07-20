@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, BadgeCheck, Calculator, Check, CircleAlert, Clapperboard, GitBranch, Layers3, LockKeyhole, Network, Pencil, ShieldCheck, Sparkles, Users, X } from 'lucide-react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
-import { useState } from 'react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 
 import { api } from '../api/client'
 import type { BriefOpenQuestion, CreativeBriefCandidate, ProductionImpactAnalysis, ShotContract, ShotPlanCandidate } from '../api/types'
@@ -164,6 +164,7 @@ function CoverageView({ brief, shots }: { brief: CreativeBriefCandidate['brief']
 export function PlanPage() {
   const { projectId = '' } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const client = useQueryClient()
   const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.project(projectId), enabled: Boolean(projectId), refetchOnMount: 'always' })
   const planning = useQuery({ queryKey: ['planning-center', projectId], queryFn: () => api.planningCenter(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
@@ -176,6 +177,7 @@ export function PlanPage() {
   const [pricingCatalogId, setPricingCatalogId] = useState('')
   const [confirmCost, setConfirmCost] = useState(false)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
+  const [confirmCancelRevision, setConfirmCancelRevision] = useState(false)
   const [editingShots, setEditingShots] = useState(false)
   const [editingBrief, setEditingBrief] = useState(false)
   const [briefRevisionInstruction, setBriefRevisionInstruction] = useState('')
@@ -190,6 +192,7 @@ export function PlanPage() {
   const generateShots = useMutation({ mutationFn: () => api.generateShotPlan(projectId, planning.data!.active_requirement.id, planning.data!.accepted_brief_candidate!.id), onSuccess: refresh })
   const retryShots = useMutation({ mutationFn: () => api.retryShotPlan(projectId, planning.data!.latest_director_run!.id, planning.data!.active_requirement.id), onSuccess: refresh })
   const revisableShotCandidate = (): ShotPlanCandidate | null => planning.data?.current_shot_candidate
+    ?? planning.data?.revision_draft
     ?? planning.data?.shot_plan_history.find(item => item.requirement_version_id === planning.data?.active_requirement.id && item.status === 'rejected')
     ?? null
   const reviseShots = useMutation({ mutationFn: (patches: Array<{ target_shot_code: string; changes: Partial<ShotContract> }>) => {
@@ -203,11 +206,15 @@ export function PlanPage() {
     return api.reviseShotPlanWithDirector(projectId, candidate.id, planning.data!.active_requirement.id, candidate.row_version, selected, instruction)
   }, onSuccess: async () => { setEditingShots(false); await refresh() } })
   const decideShots = useMutation({ mutationFn: (accept: boolean) => api.decideShotPlan(projectId, planning.data!.current_shot_candidate!.id, planning.data!.active_requirement.id, planning.data!.current_shot_candidate!.row_version, accept), onSuccess: refresh })
+  const cancelRevision = useMutation({ mutationFn: () => api.cancelAssetRevisionRequest(projectId, planning.data!.revision_context!.id, '用户明确放弃本次成品回改'), onSuccess: async () => { setConfirmCancelRevision(false); setEditingShots(false); await refresh() } })
   const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, { plan_version_id: planning.data!.active_plan!.id, production_config_version_id: configId, video_spec_version_id: videoSpecId, keyframe_workflow_slot_version_id: keyframeSlotId, video_workflow_slot_version_id: videoSlotId, tts_workflow_slot_version_id: ttsSlotId || null, pricing_catalog_version_id: pricingCatalogId || null }) })
   const createSnapshot = useMutation({ mutationFn: () => api.createProductionSnapshot(projectId, analyzeImpact.data!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
   const lockSnapshot = useMutation({ mutationFn: () => api.lockProductionSnapshot(projectId, latestSnapshot!), onSuccess: async () => { setConfirmCost(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
   const activateSnapshot = useMutation({ mutationFn: () => api.activateProductionSnapshot(projectId, latestSnapshot!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
   const submitProduction = useMutation({ mutationFn: () => api.submitProduction(projectId, latestSnapshot!), onSuccess: async () => { setConfirmSubmit(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
+  useEffect(() => {
+    if (searchParams.get('revisionRequest') && planning.data?.revision_draft) setEditingShots(true)
+  }, [planning.data?.revision_draft, searchParams])
   if (project.isPending || planning.isPending) return <div className={styles.loading}>正在读取方案合同…</div>
   if (!project.data || !planning.data || project.error || planning.error) return <div className={styles.loading}>方案读取失败：{project.error?.message || planning.error?.message}</div>
   const data = planning.data
@@ -220,9 +227,9 @@ export function PlanPage() {
       || data.current_brief_candidate.brief.facts_requiring_confirmation.length > 0),
   )
   const rejectedShot = data.shot_plan_history.find(item => item.requirement_version_id === data.active_requirement.id && item.status === 'rejected') ?? null
-  const editableShot = data.current_shot_candidate ?? rejectedShot
-  const shots = data.active_plan?.shots ?? editableShot?.shots ?? []
-  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
+  const editableShot = data.current_shot_candidate ?? data.revision_draft ?? rejectedShot
+  const shots = editableShot?.shots ?? data.active_plan?.shots ?? []
+  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
   const selectedConfig = preparation.data?.published_configurations.find(item => item.id === configId)
   const keyframeSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'image_generation') ?? []
   const videoSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'video_generation') ?? []
@@ -257,11 +264,13 @@ export function PlanPage() {
         {shots.length ? <>
           {brief && <CoverageView brief={brief.brief} shots={shots} />}
           <ShotTable shots={shots} locked={Boolean(data.active_plan)} />
-          {editableShot && editingShots && <ShotPlanRevisionEditor projectId={projectId} candidate={editableShot} entities={data.entity_versions} scriptSegments={brief?.brief.script_segments ?? []} saving={reviseShots.isPending} aiSaving={reviseShotsWithDirector.isPending} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} onAIRevision={(selected, instruction) => reviseShotsWithDirector.mutate({ selected, instruction })} />}
+          {data.revision_context && <section className={styles.assetRevisionContext}><CircleAlert size={18} /><div><span>成品反馈返回分镜</span><h3>{data.revision_context.shot_code} 需要调整</h3><p>{data.revision_context.rationale}</p><small>来源素材 {data.revision_context.asset_id.slice(-10)} · 原方案 v{data.plan_history.find(plan => plan.id === data.revision_context?.plan_version_id)?.version_number ?? ''} · 下游影响 {data.revision_context.affected_downstream_node_keys.length} 项</small></div></section>}
+          {editableShot && editingShots && <ShotPlanRevisionEditor projectId={projectId} candidate={editableShot} entities={data.entity_versions} scriptSegments={brief?.brief.script_segments ?? []} saving={reviseShots.isPending} aiSaving={reviseShotsWithDirector.isPending} initialShotCode={data.revision_context?.shot_code} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} onAIRevision={(selected, instruction) => reviseShotsWithDirector.mutate({ selected, instruction })} />}
+          {data.revision_draft && <div className={styles.reviewBar}><p><strong>这是分镜调整草稿，尚不能确认</strong><span>请至少修改一个字段，或明确调用分镜导演调整选中镜头。旧方案和已有素材不会被改动。</span></p><button className="secondaryButton" onClick={() => setConfirmCancelRevision(true)}>放弃本次回改</button><button className="primaryButton" onClick={() => setEditingShots(true)} disabled={editingShots}><Pencil size={14} />调整对应分镜</button></div>}
           {data.current_shot_candidate && <div className={styles.reviewBar}><p><strong>分镜候选 v{data.current_shot_candidate.revision_number} 尚未生效</strong><span>确认后创建不可变 plan_v{data.plan_history.length + 1}。</span></p><button className="secondaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起编辑' : '结构化修订'}</button><button className="secondaryButton" onClick={() => decideShots.mutate(false)} disabled={decideShots.isPending || editingShots}><X size={14} />拒绝</button><button className="primaryButton" onClick={() => decideShots.mutate(true)} disabled={decideShots.isPending || editingShots}><Check size={14} />确认分镜合同</button></div>}
           {rejectedShot && <div className={styles.reviewBar}><p><strong>分镜方案已拒绝</strong><span>原方案仍保留供查看。选择具体镜头调整后会创建新的待确认版本，不会再次调用模型。</span></p><button className="primaryButton" onClick={() => setEditingShots(value => !value)} disabled={reviseShots.isPending}><Pencil size={14} />{editingShots ? '收起调整' : '调整具体分镜'}</button></div>}
         </> : data.accepted_brief_candidate && <div className={styles.generateShots}><Clapperboard size={22} /><div><strong>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? '本次分镜生成失败' : '内容方案已接受'}</strong><span>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? `${data.latest_director_run?.error_detail || '模型没有返回符合分镜合同的结果。'} 系统没有自动重试，也没有更换模型。` : '分镜导演将生成结构化分镜候选，不选择服务供应商或工作流。'}</span></div>{data.next_action.code === 'RETRY_FAILED_SHOT_PLAN' ? <button className="primaryButton" onClick={() => retryShots.mutate()} disabled={retryShots.isPending}>{retryShots.isPending ? '正在重跑…' : '确认模型调用并重跑'}</button> : data.next_action.code === 'WAIT_FOR_SHOT_PLAN' ? <button className="primaryButton" disabled>正在生成…</button> : <button className="primaryButton" onClick={() => generateShots.mutate()} disabled={generateShots.isPending}>{generateShots.isPending ? '正在生成…' : '生成分镜候选'}</button>}</div>}
-        {data.active_plan && <section className={styles.productionPrep}>
+        {data.active_plan && !data.revision_context && <section className={styles.productionPrep}>
           <div className={styles.panelHeading}><div><Network size={18} /><span><small>制作准备</small><h2>制作设置与费用预估</h2></span></div><em data-accepted={Boolean(preparation.data?.snapshots.length)}>{preparation.data?.snapshots.length ? `制作方案 ${preparation.data.snapshots[0].snapshot_number}` : '尚未保存'}</em></div>
           {preparation.data?.published_configurations.length ? <>
             <div className={styles.routeGrid}>
@@ -311,5 +320,6 @@ export function PlanPage() {
     </main>
     {confirmCost && latestSnapshot && <div className={styles.costModal}><section><header><Calculator size={20} /><div><span>费用确认</span><h2>确认制作方案 {latestSnapshot.snapshot_number} 的预计费用</h2></div></header><div className={styles.costAmount}><small>预计制作费用</small><strong>{latestSnapshot.currency} {latestSnapshot.estimated_cost?.toFixed(6)}</strong><span>预计调用生成服务 {latestSnapshot.estimated_call_count} 次</span></div><p>确认后将锁定本次制作内容、计费方案和各步骤费用。本操作不会开始生成，也不会实际扣费。</p><details className={styles.technicalDetails}><summary>查看技术详情</summary><code>{latestSnapshot.contract_hash}</code></details><footer><button className="secondaryButton" onClick={() => setConfirmCost(false)}>取消</button><button className="primaryButton" disabled={lockSnapshot.isPending} onClick={() => lockSnapshot.mutate()}><LockKeyhole size={14} />确认费用并锁定方案</button></footer></section></div>}
     {confirmSubmit && latestSnapshot && <div className={styles.costModal}><section><header><Network size={20} /><div><span>开始制作确认</span><h2>开始制作方案 {latestSnapshot.snapshot_number}</h2></div></header><div className={styles.costAmount}><small>已确认预计费用</small><strong>{latestSnapshot.currency} {latestSnapshot.estimated_cost?.toFixed(6)}</strong><span>{latestSnapshot.nodes.length} 个制作步骤 · 预计调用生成服务 {latestSnapshot.estimated_call_count} 次</span></div><p>确认后系统将按当前方案创建制作任务并进入队列。系统不会补步骤、更换生成方案或自动重试。</p><details className={styles.technicalDetails}><summary>查看技术详情</summary><code>{latestSnapshot.contract_hash}</code></details><footer><button className="secondaryButton" onClick={() => setConfirmSubmit(false)}>取消</button><button className="primaryButton" disabled={submitProduction.isPending} onClick={() => submitProduction.mutate()}><ShieldCheck size={14} />确认并开始制作</button></footer></section></div>}
+    {confirmCancelRevision && data.revision_context && <div className={styles.costModal}><section><header><CircleAlert size={20} /><div><span>放弃回改确认</span><h2>放弃 {data.revision_context.shot_code} 的本次调整</h2></div></header><p>本次回改草稿或待审候选将标记为已取消。当前正式方案、制作快照和已有素材都不会改变。</p><footer><button className="secondaryButton" onClick={() => setConfirmCancelRevision(false)}>继续调整</button><button className="primaryButton" disabled={cancelRevision.isPending} onClick={() => cancelRevision.mutate()}>确认放弃</button></footer></section></div>}
   </>
 }

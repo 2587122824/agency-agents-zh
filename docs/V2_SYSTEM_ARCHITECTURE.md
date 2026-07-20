@@ -76,6 +76,7 @@ Project
 ├── Decision / DecisionVersion
 ├── PlanVersion / Shot
 ├── ProductionSnapshot
+├── AssetRevisionRequest
 ├── Timeline
 └── DeliveryAttempt
 ```
@@ -121,6 +122,8 @@ ProductionSnapshot
 - WorkAttempt 冻结实际 Provider、工作流、参数、输入和请求指纹。
 - Asset 必须经过真实文件验证和质量审核后才能进入剪辑。
 - 质量审核的确定性检查、智能体候选与人工决定分别持久化。`QCReportCandidate` 不能改变素材批准状态；人工决定落账时才形成权威 `QCReport`。当前多模态合同只授权图片理解，视频与音频保持显式人工审核。
+- `AssetRevisionRequest` 冻结成品反馈的素材、快照、方案、镜头和下游证据。它只记录用户明确选择的问题归属；分镜草稿、生产重做和时间线修订分别由各自服务处理，不共享隐式重试逻辑。分镜回改只接受活动方案的精确 `DAGNode.shot_id`，历史方案不做运行时映射；开放请求可由用户显式取消，候选链和请求转为 `cancelled`，证据继续保留。
+- 应用启动不执行 `metadata.create_all`；数据库结构只由 Alembic 迁移推进。测试 fixture 可以显式创建一次性测试库，但不能影响运行库的迁移版本。
 
 ## 5. 项目状态
 

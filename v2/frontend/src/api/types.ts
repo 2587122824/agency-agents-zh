@@ -441,7 +441,7 @@ export interface ShotPlanCandidate {
   agent_run_id: string | null
   supersedes_candidate_id: string | null
   revision_number: number
-  source: 'director_agent' | 'director_revision' | 'user_revision'
+  source: 'director_agent' | 'director_revision' | 'user_revision' | 'asset_feedback_draft'
   status: string
   shots: ShotContract[]
   validation_errors: Array<Record<string, unknown>>
@@ -472,6 +472,8 @@ export interface PlanningCenter {
   current_brief_candidate: CreativeBriefCandidate | null
   accepted_brief_candidate: CreativeBriefCandidate | null
   current_shot_candidate: ShotPlanCandidate | null
+  revision_draft: ShotPlanCandidate | null
+  revision_context: AssetRevisionRequest | null
   active_plan: PlanVersion | null
   brief_history: CreativeBriefCandidate[]
   shot_plan_history: ShotPlanCandidate[]
@@ -694,6 +696,33 @@ export interface ProductionAsset {
   latest_qc_agent_run: QCAgentRun | null
   review_decisions: Array<{ id: string; decision: string; rationale: string; actor_id: string; created_at: string }>
   affected_downstream_node_keys: string[]
+  revision_requests: AssetRevisionRequest[]
+}
+
+export interface AssetRevisionRequest {
+  id: string
+  asset_id: string
+  snapshot_id: string
+  plan_version_id: string
+  shot_id: string | null
+  shot_code: string | null
+  issue_scope: 'storyboard' | 'production' | 'editing'
+  rationale: string
+  status: string
+  source_asset_state: string
+  source_asset_row_version: number
+  affected_downstream_node_keys: string[]
+  draft_candidate_id: string | null
+  resulting_candidate_id: string | null
+  resulting_plan_version_id: string | null
+  created_by: string
+  created_at: string
+  resolved_at: string | null
+}
+
+export interface AssetRevisionResult {
+  request: AssetRevisionRequest
+  next_action: { path: string; label: string; draft_candidate_id: string | null }
 }
 
 export interface QualityReview {

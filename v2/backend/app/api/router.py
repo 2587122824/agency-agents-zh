@@ -231,6 +231,17 @@ from ..registry.service import (
     attachment_content_path,
     entity_registry_view,
 )
+from ..revision import (
+    AssetRevisionRequestRead,
+    CancelAssetRevisionRequest,
+    CreateAssetRevisionRequest,
+    RevisionConflictError,
+    RevisionNotFoundError,
+    RevisionRequestResult,
+    create_asset_revision_request,
+    cancel_asset_revision_request,
+    get_asset_revision_request,
+)
 from ..contact_sheet.contracts import MaterialContactSheetView
 from ..contact_sheet.service import material_contact_sheet_view
 
@@ -251,6 +262,10 @@ def production_error(exc: ProductionConflictError) -> HTTPException:
 
 
 def quality_error(exc: QualityConflictError) -> HTTPException:
+    return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
+
+
+def revision_error(exc: RevisionConflictError) -> HTTPException:
     return HTTPException(status_code=409, detail=str(exc), headers={"X-Error-Code": exc.code})
 
 
@@ -875,6 +890,60 @@ def project_asset_verify(
     except QualityConflictError as exc:
         session.rollback()
         raise quality_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/assets/{asset_id}:request-revision",
+    response_model=RevisionRequestResult,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_asset_revision_request(
+    project_id: str,
+    asset_id: str,
+    payload: CreateAssetRevisionRequest,
+    session: Session = Depends(get_session),
+):
+    try:
+        return create_asset_revision_request(session, require_project(session, project_id), asset_id, payload)
+    except RevisionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RevisionConflictError as exc:
+        session.rollback()
+        raise revision_error(exc) from exc
+
+
+@router.get(
+    "/projects/{project_id}/asset-revision-requests/{request_id}",
+    response_model=AssetRevisionRequestRead,
+)
+def project_asset_revision_request_read(
+    project_id: str,
+    request_id: str,
+    session: Session = Depends(get_session),
+):
+    try:
+        return get_asset_revision_request(session, require_project(session, project_id), request_id)
+    except RevisionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post(
+    "/projects/{project_id}/asset-revision-requests/{request_id}:cancel",
+    response_model=AssetRevisionRequestRead,
+)
+def project_asset_revision_request_cancel(
+    project_id: str,
+    request_id: str,
+    payload: CancelAssetRevisionRequest,
+    session: Session = Depends(get_session),
+):
+    try:
+        return cancel_asset_revision_request(session, require_project(session, project_id), request_id, payload)
+    except RevisionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RevisionConflictError as exc:
+        session.rollback()
+        raise revision_error(exc) from exc
 
 
 @router.post("/projects/{project_id}/assets/{asset_id}:run-qc", response_model=QCReportCandidateRead | QCReportRead)

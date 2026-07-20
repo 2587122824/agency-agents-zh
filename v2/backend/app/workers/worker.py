@@ -15,7 +15,7 @@ from ..db.models import (
     WorkItem,
     utc_now,
 )
-from ..db.session import SessionLocal, create_schema
+from ..db.session import SessionLocal
 from ..orchestration.project_transitions import (
     ProjectStateConflictError,
     ProjectStateTrigger,
@@ -382,7 +382,6 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
 
 
 def run(poll_seconds: float) -> None:
-    create_schema()
     while True:
         if not process_one():
             time.sleep(poll_seconds)
@@ -393,7 +392,6 @@ def main() -> None:
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
-    create_schema()
     if args.once:
         process_one()
         return

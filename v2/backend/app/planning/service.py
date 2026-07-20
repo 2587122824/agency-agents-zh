@@ -21,8 +21,10 @@ from ..creation.service import (
 from ..db.models import (
     AgentInputManifest,
     AgentRun,
+    AssetRevisionRequest,
     CreativeBriefCandidate,
     PlanVersion,
+    ProductionSnapshot,
     Project,
     RequirementVersion,
     Shot,
@@ -259,6 +261,18 @@ def _execute_director(
     run.provider_request_id = result.provider_request_id
     run.token_usage = result.token_usage
     run.finished_at = utc_now()
+    if source_candidate:
+        revision_request = session.scalar(select(AssetRevisionRequest).where(
+            AssetRevisionRequest.project_id == project.id,
+            (
+                (AssetRevisionRequest.draft_candidate_id == source_candidate.id)
+                | (AssetRevisionRequest.resulting_candidate_id == source_candidate.id)
+            ),
+            AssetRevisionRequest.status.in_(("draft_created", "candidate_created")),
+        ))
+        if revision_request:
+            revision_request.status = "candidate_created"
+            revision_request.resulting_candidate_id = candidate.id
     command_type = "shot_plan.director_revision" if source_candidate else ("shot_plan.retry" if retry_of_agent_run_id else "shot_plan.generate")
     _save_receipt(session, project.id, payload.command_id, command_type, "shot_plan_candidate", candidate.id)
     _event(session, project.id, "agent.run_succeeded.v1", "分镜导演智能体已返回严格候选", {
@@ -961,7 +975,7 @@ def revise_shot_plan(
         raise CreationNotFoundError("Shot plan candidate not found")
     if not requirement or requirement.id != payload.expected_requirement_version_id or candidate.requirement_version_id != requirement.id:
         raise CreationConflictError("SHOT_PLAN_BASE_VERSION_STALE", "分镜候选基于旧需求版本，不能修订。")
-    if candidate.status not in {"awaiting_review", "rejected"}:
+    if candidate.status not in {"awaiting_review", "rejected", "revision_draft"}:
         raise CreationConflictError("SHOT_PLAN_NOT_REVISABLE", f"分镜候选状态为 {candidate.status}，不能修订。")
     if candidate.row_version != payload.expected_candidate_row_version:
         raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重新编辑。")
@@ -996,6 +1010,17 @@ def revise_shot_plan(
     )
     repository.add(revised)
     repository.flush()
+    revision_request = session.scalar(select(AssetRevisionRequest).where(
+        AssetRevisionRequest.project_id == project.id,
+        (
+            (AssetRevisionRequest.draft_candidate_id == candidate.id)
+            | (AssetRevisionRequest.resulting_candidate_id == candidate.id)
+        ),
+        AssetRevisionRequest.status.in_(("draft_created", "candidate_created")),
+    ))
+    if revision_request:
+        revision_request.status = "candidate_created"
+        revision_request.resulting_candidate_id = revised.id
     if not repository.transition_reviewable_shot_plan(
         candidate.id,
         payload.expected_candidate_row_version,
@@ -1042,7 +1067,7 @@ def revise_shot_plan_with_director(
         raise CreationNotFoundError("Shot plan candidate not found")
     if not requirement or requirement.id != payload.expected_requirement_version_id or candidate.requirement_version_id != requirement.id:
         raise CreationConflictError("SHOT_PLAN_BASE_VERSION_STALE", "分镜候选基于旧需求版本，不能由导演调整。")
-    if candidate.status not in {"awaiting_review", "rejected"}:
+    if candidate.status not in {"awaiting_review", "rejected", "revision_draft"}:
         raise CreationConflictError("SHOT_PLAN_NOT_REVISABLE", f"分镜候选状态为 {candidate.status}，不能由导演调整。")
     if candidate.row_version != payload.expected_candidate_row_version:
         raise CreationConflictError("SHOT_PLAN_ROW_VERSION_MISMATCH", "分镜候选已变化，请刷新后重新提交。")
@@ -1156,6 +1181,16 @@ def decide_shot_plan(
     for plan in repository.active_plans(project.id):
         plan.is_active = False
         plan.status = "superseded"
+    revision_request = session.scalar(select(AssetRevisionRequest).where(
+        AssetRevisionRequest.project_id == project.id,
+        AssetRevisionRequest.resulting_candidate_id == candidate.id,
+        AssetRevisionRequest.status == "candidate_created",
+    ))
+    if revision_request and project.active_snapshot_id:
+        old_snapshot = session.get(ProductionSnapshot, project.active_snapshot_id)
+        if old_snapshot:
+            old_snapshot.status = "superseded"
+        project.active_snapshot_id = None
     version_number = repository.next_plan_version_number(project.id)
     plan = PlanVersion(
         project_id=project.id,
@@ -1170,6 +1205,10 @@ def decide_shot_plan(
     repository.flush()
     for item in candidate.shots:
         repository.add(Shot(project_id=project.id, plan_version_id=plan.id, **item))
+    if revision_request:
+        revision_request.status = "plan_confirmed"
+        revision_request.resulting_plan_version_id = plan.id
+        revision_request.resolved_at = utc_now()
     _save_receipt(session, project.id, payload.command_id, "shot_plan.accept", "plan_version", plan.id)
     _event(session, project.id, "plan.confirmed.v1", "分镜候选已提升为不可变方案版本", {
         "candidate_id": candidate.id,
@@ -1260,6 +1299,7 @@ def planning_center_view(session: Session, project: Project) -> dict:
     current_brief = next((item for item in briefs if item.requirement_version_id == requirement.id and item.status == "awaiting_review"), None)
     accepted_brief = next((item for item in briefs if item.requirement_version_id == requirement.id and item.status == "accepted"), None)
     current_shot = next((item for item in shot_candidates if item.requirement_version_id == requirement.id and item.status == "awaiting_review"), None)
+    revision_draft = next((item for item in shot_candidates if item.requirement_version_id == requirement.id and item.status == "revision_draft"), None)
     rejected_shot = next((item for item in shot_candidates if item.requirement_version_id == requirement.id and item.status == "rejected"), None)
     active_plan = next((item for item in plans if item.requirement_version_id == requirement.id and item.is_active), None)
     planner_attempt = session.scalar(
@@ -1291,10 +1331,12 @@ def planning_center_view(session: Session, project: Project) -> dict:
         and planner_manifest
         and planner_manifest.payload.get("revision_request")
     )
-    if active_plan:
-        next_action = PlanningNextAction(code="PLAN_CONFIRMED", label="方案已确认，等待创建生产快照", target_ids=[active_plan.id])
-    elif current_shot:
+    if current_shot:
         next_action = PlanningNextAction(code="REVIEW_SHOT_PLAN", label="审核分镜候选", target_ids=[current_shot.id])
+    elif revision_draft:
+        next_action = PlanningNextAction(code="EDIT_ASSET_REVISION_DRAFT", label="根据成品反馈调整对应分镜", target_ids=[revision_draft.id])
+    elif active_plan:
+        next_action = PlanningNextAction(code="PLAN_CONFIRMED", label="方案已确认，等待创建生产快照", target_ids=[active_plan.id])
     elif rejected_shot:
         next_action = PlanningNextAction(code="REVISE_REJECTED_SHOT_PLAN", label="调整被拒绝的分镜方案", target_ids=[rejected_shot.id])
     elif accepted_brief and director_attempt and director_attempt.status == "failed":
@@ -1345,12 +1387,24 @@ def planning_center_view(session: Session, project: Project) -> dict:
             incurs_model_cost=True,
         )
     entity_rows = repository.active_entity_versions(project.id)
+    revision_context = None
+    revision_candidate = current_shot or revision_draft or rejected_shot
+    if revision_candidate:
+        revision_context = session.scalar(select(AssetRevisionRequest).where(
+            AssetRevisionRequest.project_id == project.id,
+            (
+                (AssetRevisionRequest.resulting_candidate_id == revision_candidate.id)
+                | (AssetRevisionRequest.draft_candidate_id == revision_candidate.id)
+            ),
+        ))
     return {
         "project_id": project.id,
         "active_requirement": requirement,
         "current_brief_candidate": current_brief,
         "accepted_brief_candidate": accepted_brief,
         "current_shot_candidate": current_shot,
+        "revision_draft": revision_draft,
+        "revision_context": revision_context,
         "active_plan": _plan_dict(session, active_plan) if active_plan else None,
         "brief_history": briefs,
         "shot_plan_history": shot_candidates,

@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Clock3, Download, FileVideo2, Film, ListVideo, Music2, Plus, RefreshCw, Save, Scissors, ShieldCheck, Subtitles, Trash2, Upload, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import type { EditorAsset, Timeline, TimelineItemDraft } from '../api/types'
@@ -34,8 +35,10 @@ function normalizeSequences(items: TimelineItemDraft[]) {
 }
 
 export function EditorPage() {
+  const [searchParams] = useSearchParams()
   const client = useQueryClient()
-  const [projectId, setProjectId] = useState('')
+  const [projectId, setProjectId] = useState(() => searchParams.get('project') ?? '')
+  const revisionRequestId = searchParams.get('revisionRequest') ?? ''
   const [selectedTimelineId, setSelectedTimelineId] = useState('')
   const [draftItems, setDraftItems] = useState<TimelineItemDraft[]>([])
   const [revisionBase, setRevisionBase] = useState<Timeline | null>(null)
@@ -50,6 +53,7 @@ export function EditorPage() {
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const workspace = useQuery({ queryKey: ['editor-workspace', projectId], queryFn: () => api.editorWorkspace(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   const delivery = useQuery({ queryKey: ['delivery-workspace', projectId], queryFn: () => api.deliveryWorkspace(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
+  const revision = useQuery({ queryKey: ['asset-revision-request', projectId, revisionRequestId], queryFn: () => api.assetRevisionRequest(projectId, revisionRequestId), enabled: Boolean(projectId && revisionRequestId) })
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['editor-workspace', projectId] })
     await client.invalidateQueries({ queryKey: ['delivery-workspace', projectId] })
@@ -179,6 +183,7 @@ export function EditorPage() {
             <div><span>NEXT ACTION</span><h2>{workspace.data.next_action.label}</h2></div>
             <dl><div><dt>输出</dt><dd>{seconds(workspace.data.duration_ms)} · {workspace.data.aspect_ratio}</dd></div><div><dt>素材</dt><dd>{workspace.data.available_assets.length}</dd></div><div><dt>版本</dt><dd>{workspace.data.timelines.length}</dd></div></dl>
           </header>
+          {revision.data && <div className={styles.revisionContext}><AlertTriangle size={17} /><div><strong>已登记剪辑取舍问题</strong><span>{revision.data.rationale}</span><small>{revision.data.shot_code ? `对应分镜 ${revision.data.shot_code} · ` : ''}原素材仍保留，请在时间线候选中明确调整。</small></div></div>}
 
           {workspace.data.project_status === 'quality_review' && <div className={styles.gate} data-ready={workspace.data.quality_stage_ready}>
             <div>{workspace.data.quality_stage_ready ? <Check /> : <AlertTriangle />}<span><strong>{workspace.data.quality_stage_ready ? '必需素材已批准' : '质量阶段尚未完成'}</strong><small>{workspace.data.quality_stage_ready ? '当前批准素材集可以进入剪辑' : `${workspace.data.quality_output_gaps.length} 个必需输出仍未满足`}</small></span></div>

@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Clock3, GitBranch, Layers3, RefreshCw, ShieldCheck } from 'lucide-react'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import type { ProductionExecution } from '../api/types'
@@ -36,8 +37,10 @@ function groupBlockers(blockers: Blocker[]) {
 }
 
 export function ProductionPage() {
+  const [searchParams] = useSearchParams()
   const client = useQueryClient()
-  const [projectId, setProjectId] = useState('')
+  const [projectId, setProjectId] = useState(() => searchParams.get('project') ?? '')
+  const revisionRequestId = searchParams.get('revisionRequest') ?? ''
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const execution = useQuery({
     queryKey: ['production-execution', projectId],
@@ -45,6 +48,7 @@ export function ProductionPage() {
     enabled: Boolean(projectId),
     refetchInterval: query => query.state.data?.work_items.some(item => !terminal.has(item.status)) ? 2000 : false,
   })
+  const revision = useQuery({ queryKey: ['asset-revision-request', projectId, revisionRequestId], queryFn: () => api.assetRevisionRequest(projectId, revisionRequestId), enabled: Boolean(projectId && revisionRequestId) })
   const refresh = () => {
     client.invalidateQueries({ queryKey: ['projects'] })
     if (projectId) client.invalidateQueries({ queryKey: ['production-execution', projectId] })
@@ -74,6 +78,7 @@ export function ProductionPage() {
         </section>
 
         <section className={styles.executionPanel}>
+          {revision.data && <div className={styles.revisionContext}><AlertTriangle size={17} /><div><strong>已登记生成效果问题</strong><span>{revision.data.rationale}</span><small>{revision.data.shot_code ? `对应分镜 ${revision.data.shot_code} · ` : ''}系统没有自动重做素材，请由你决定后续生产操作。</small></div></div>}
           {!projectId && <div className={styles.executionEmpty}><Layers3 size={24} /><strong>选择一个制作任务</strong><span>这里会显示每项素材的制作进度和需要处理的问题。</span></div>}
           {projectId && execution.isPending && <div className={styles.executionEmpty}>正在读取执行状态…</div>}
           {execution.error && <div className={styles.executionEmpty}><AlertTriangle size={22} /><strong>读取失败</strong><span>{execution.error.message}</span></div>}

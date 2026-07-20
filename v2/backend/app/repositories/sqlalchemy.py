@@ -620,7 +620,7 @@ class SqlAlchemyPlanningRepository:
             update(ShotPlanCandidate)
             .where(
                 ShotPlanCandidate.id == candidate_id,
-                ShotPlanCandidate.status.in_(("awaiting_review", "rejected")),
+                ShotPlanCandidate.status.in_(("awaiting_review", "rejected", "revision_draft")),
                 ShotPlanCandidate.row_version == expected_row_version,
             )
             .values(**values)

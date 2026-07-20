@@ -89,12 +89,27 @@ TRANSITION_RULES: Mapping[ProjectStateTrigger, Mapping[str, str]] = {
     ProjectStateTrigger.SHOT_CANDIDATE_REVISED: {
         "planning": "plan_review",
         "plan_review": "plan_review",
+        "producing": "producing",
+        "quality_review": "quality_review",
+        "editing": "editing",
+        "delivery_ready": "delivery_ready",
+        "blocked": "blocked",
     },
     ProjectStateTrigger.SHOT_PLAN_ACCEPTED: {
         "plan_review": "contract_ready",
+        "producing": "contract_ready",
+        "quality_review": "contract_ready",
+        "editing": "contract_ready",
+        "delivery_ready": "contract_ready",
+        "blocked": "contract_ready",
     },
     ProjectStateTrigger.SHOT_PLAN_REJECTED: {
         "plan_review": "planning",
+        "producing": "producing",
+        "quality_review": "quality_review",
+        "editing": "editing",
+        "delivery_ready": "delivery_ready",
+        "blocked": "blocked",
     },
     ProjectStateTrigger.SNAPSHOT_PREPARED: {
         "contract_ready": "contract_ready",
