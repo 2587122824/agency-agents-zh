@@ -28,6 +28,7 @@ from v2.backend.app.providers.registry import ProviderAdapterRegistry
 from v2.backend.app.creation.agent_gateway import AgentGatewayError, CreativeAgentOutput, CreativeAgentResult, DeterministicCreativeAgentGateway, get_creative_agent_gateway
 from v2.backend.app.planning.agent_gateway import ContentPlannerOutput, ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
 from v2.backend.app.planning.director_gateway import DeterministicDirectorGateway, get_director_gateway
+from v2.backend.app.production.agent_gateway import DeterministicProductionPlannerGateway, ProductionPlannerOutput, ProductionPlannerResult, get_production_planner_gateway
 from v2.backend.app.quality.agent_gateway import DeterministicQCGateway, get_qc_gateway
 
 
@@ -51,6 +52,7 @@ def client():
     app.dependency_overrides[get_creative_agent_gateway] = lambda: DeterministicCreativeAgentGateway()
     app.dependency_overrides[get_content_planner_gateway] = lambda: DeterministicContentPlannerGateway()
     app.dependency_overrides[get_director_gateway] = lambda: DeterministicDirectorGateway()
+    app.dependency_overrides[get_production_planner_gateway] = lambda: DeterministicProductionPlannerGateway()
     app.dependency_overrides[get_qc_gateway] = lambda: DeterministicQCGateway()
     Base.metadata.create_all(bind=engine)
     with TestClient(app) as test_client:
@@ -58,6 +60,7 @@ def client():
     app.dependency_overrides.pop(get_creative_agent_gateway, None)
     app.dependency_overrides.pop(get_content_planner_gateway, None)
     app.dependency_overrides.pop(get_director_gateway, None)
+    app.dependency_overrides.pop(get_production_planner_gateway, None)
     app.dependency_overrides.pop(get_qc_gateway, None)
     engine.dispose()
     TEST_DATABASE.unlink(missing_ok=True)
@@ -2500,6 +2503,156 @@ def publish_visual_production_configuration(
     )
     assert response.status_code == 200
     return response.json()
+
+
+def test_production_planner_proposes_routes_and_requires_explicit_acceptance(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    publish_visual_production_configuration(client, with_pricing=True, command_prefix="production-planner-config")
+    preparation = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    config = preparation["published_configurations"][0]
+    video_spec_id = config["video_specs"][0]["id"]
+
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/production-plan-candidates:generate",
+        json={
+            "command_id": "production-planner-generate-001",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": video_spec_id,
+        },
+    )
+    assert generated.status_code == 201, generated.text
+    candidate = generated.json()
+    assert candidate["status"] == "awaiting_review"
+    assert [item["shot_code"] for item in candidate["proposed_assignments"]] == [
+        shot["shot_code"] for shot in plan["shots"]
+    ]
+    assert all(item["required_input_sources"] for item in candidate["proposed_assignments"])
+    assert client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()["snapshots"] == []
+
+    assignments = [{
+        "shot_code": item["shot_code"],
+        "keyframe_workflow_slot_version_id": item["keyframe_workflow_slot_version_id"],
+        "video_workflow_slot_version_id": item["video_workflow_slot_version_id"],
+    } for item in candidate["proposed_assignments"]]
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/production-plan-candidates/{candidate['id']}:decide",
+        json={
+            "command_id": "production-planner-decide-unconfirmed",
+            "expected_row_version": candidate["row_version"],
+            "accept": True,
+            "confirmed_assignments": assignments,
+            "confirm_candidate_scope": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "PRODUCTION_PLAN_CONFIRMATION_REQUIRED"
+
+    accepted = client.post(
+        f"/api/v1/projects/{project['id']}/production-plan-candidates/{candidate['id']}:decide",
+        json={
+            "command_id": "production-planner-decide-accepted",
+            "expected_row_version": candidate["row_version"],
+            "accept": True,
+            "confirmed_assignments": assignments,
+            "confirm_candidate_scope": True,
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["status"] == "accepted"
+    assert accepted.json()["confirmed_assignments"] == assignments
+    after = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    assert after["snapshots"] == []
+    assert after["analyses"] == []
+    assert after["latest_production_planner_run"]["status"] == "succeeded"
+
+
+def test_production_planner_rejects_unknown_route_and_only_retries_exact_failure(client: TestClient) -> None:
+    class UnknownRouteGateway(DeterministicProductionPlannerGateway):
+        calls = 0
+
+        def invoke(self, selection, manifest_payload):
+            self.calls += 1
+            result = super().invoke(selection, manifest_payload)
+            raw = result.output.model_dump(mode="json")
+            raw["assignments"][0]["keyframe_workflow_slot_version_id"] = "workflow_slot_unknown"
+            output = ProductionPlannerOutput.model_validate(raw)
+            return ProductionPlannerResult(output, raw, result.provider_request_id, result.token_usage)
+
+    gateway = UnknownRouteGateway()
+    app.dependency_overrides[get_production_planner_gateway] = lambda: gateway
+    project, plan = create_confirmed_plan(client)
+    publish_visual_production_configuration(client, command_prefix="production-planner-failure-config")
+    preparation = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    config = preparation["published_configurations"][0]
+    payload = {
+        "command_id": "production-planner-invalid-route-001",
+        "plan_version_id": plan["id"],
+        "production_config_version_id": config["id"],
+        "video_spec_version_id": config["video_specs"][0]["id"],
+    }
+    failed = client.post(f"/api/v1/projects/{project['id']}/production-plan-candidates:generate", json=payload)
+    assert failed.status_code == 502
+    assert failed.headers["x-error-code"] == "PRODUCTION_PLANNER_OUTPUT_CONTRACT_INVALID"
+    assert gateway.calls == 1
+    view = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    assert view["production_plan_candidates"] == []
+    failed_run = view["latest_production_planner_run"]
+    assert failed_run["status"] == "failed"
+
+    repeated = client.post(
+        f"/api/v1/projects/{project['id']}/production-plan-candidates:generate",
+        json={**payload, "command_id": "production-planner-invalid-route-002"},
+    )
+    assert repeated.status_code == 409
+    assert repeated.headers["x-error-code"] == "PRODUCTION_PLANNER_ALREADY_ATTEMPTED"
+    assert gateway.calls == 1
+
+    app.dependency_overrides[get_production_planner_gateway] = lambda: DeterministicProductionPlannerGateway()
+    retried = client.post(
+        f"/api/v1/projects/{project['id']}/production-planner-runs/{failed_run['id']}:retry",
+        json={
+            "command_id": "production-planner-retry-001",
+            "failed_agent_run_id": failed_run["id"],
+            "confirm_model_cost": True,
+        },
+    )
+    assert retried.status_code == 201, retried.text
+    assert retried.json()["status"] == "awaiting_review"
+
+
+def test_production_planner_rejects_missing_required_input_sources(client: TestClient) -> None:
+    class MissingInputsGateway(DeterministicProductionPlannerGateway):
+        def invoke(self, selection, manifest_payload):
+            result = super().invoke(selection, manifest_payload)
+            raw = result.output.model_dump(mode="json")
+            raw["assignments"][0]["required_input_sources"] = ["shot.visual_prompt"]
+            output = ProductionPlannerOutput.model_validate(raw)
+            return ProductionPlannerResult(output, raw, result.provider_request_id, result.token_usage)
+
+    app.dependency_overrides[get_production_planner_gateway] = lambda: MissingInputsGateway()
+    project, plan = create_confirmed_plan(client)
+    publish_visual_production_configuration(client, command_prefix="production-planner-input-config")
+    preparation = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    config = preparation["published_configurations"][0]
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/production-plan-candidates:generate",
+        json={
+            "command_id": "production-planner-missing-input-001",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": config["video_specs"][0]["id"],
+        },
+    )
+    assert failed.status_code == 502
+    assert failed.headers["x-error-code"] == "PRODUCTION_PLANNER_OUTPUT_CONTRACT_INVALID"
+    with SessionLocal() as session:
+        run = session.scalar(select(AgentRun).where(
+            AgentRun.project_id == project["id"], AgentRun.agent_role == "production_planner"
+        ))
+        assert run is not None
+        assert run.status == "failed"
+        assert run.raw_output["assignments"][0]["required_input_sources"] == ["shot.visual_prompt"]
 
 
 def test_production_preparation_lists_only_current_published_configuration(client: TestClient) -> None:

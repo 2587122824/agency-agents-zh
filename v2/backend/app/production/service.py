@@ -1302,6 +1302,12 @@ def preparation_view(session: Session, project: Project) -> dict:
         })
     analyses = repository.impact_history(project.id)
     snapshots = repository.snapshot_history(project.id)
+    production_plan_candidates = repository.production_plan_candidates(
+        project.id, active_plan.id if active_plan else None
+    ) if active_plan else []
+    latest_production_planner_run = repository.latest_production_planner_run(
+        project.id, active_plan.id
+    ) if active_plan else None
     if not active_plan:
         next_action = {"code": "CONFIRM_PLAN", "label": "先确认方案", "incurs_production_cost": False}
     elif not choices:
@@ -1325,5 +1331,28 @@ def preparation_view(session: Session, project: Project) -> dict:
         "published_configurations": choices,
         "analyses": [_impact_dict(item) for item in analyses],
         "snapshots": [_snapshot_dict(session, item) for item in snapshots],
+        "production_plan_candidates": [
+            {column.name: getattr(item, column.name) for column in item.__table__.columns}
+            for item in production_plan_candidates
+        ],
+        "latest_production_planner_run": None if not latest_production_planner_run else {
+            "id": latest_production_planner_run.id,
+            "agent_role": latest_production_planner_run.agent_role,
+            "status": latest_production_planner_run.status,
+            "input_manifest_id": latest_production_planner_run.input_manifest_id,
+            "model_provider": latest_production_planner_run.model_provider,
+            "model_name": latest_production_planner_run.model_name,
+            "production_config_version_id": latest_production_planner_run.production_config_version_id,
+            "model_config_version_id": latest_production_planner_run.model_config_version_id,
+            "provider_config_version_id": latest_production_planner_run.provider_config_version_id,
+            "prompt_contract_version": latest_production_planner_run.prompt_contract_version,
+            "output_schema_version": latest_production_planner_run.output_schema_version,
+            "provider_request_id": latest_production_planner_run.provider_request_id,
+            "token_usage": latest_production_planner_run.token_usage or {},
+            "error_code": latest_production_planner_run.error_code,
+            "error_detail": latest_production_planner_run.error_detail,
+            "started_at": latest_production_planner_run.started_at,
+            "finished_at": latest_production_planner_run.finished_at,
+        },
         "next_action": next_action,
     }

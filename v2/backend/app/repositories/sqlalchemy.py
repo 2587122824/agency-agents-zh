@@ -40,6 +40,7 @@ from ..db.models import (
     ProductionConfigComponent,
     ProductionConfigVersion,
     ProductionImpactAnalysis,
+    ProductionPlanCandidate,
     ProductionSnapshot,
     ProviderConfigVersion,
     QCFinding,
@@ -684,6 +685,37 @@ class SqlAlchemyProductionRepository:
 
     def flush(self) -> None:
         self.session.flush()
+
+    def production_plan_candidate(self, candidate_id: str) -> ProductionPlanCandidate | None:
+        return self.session.get(ProductionPlanCandidate, candidate_id)
+
+    def production_plan_candidates(self, project_id: str, plan_version_id: str | None = None) -> list[ProductionPlanCandidate]:
+        statement = select(ProductionPlanCandidate).where(ProductionPlanCandidate.project_id == project_id)
+        if plan_version_id is not None:
+            statement = statement.where(ProductionPlanCandidate.plan_version_id == plan_version_id)
+        return list(self.session.scalars(statement.order_by(ProductionPlanCandidate.created_at.desc())))
+
+    def latest_production_planner_run(self, project_id: str, plan_version_id: str) -> AgentRun | None:
+        runs = self.production_planner_runs(project_id, plan_version_id)
+        return runs[0] if runs else None
+
+    def production_planner_runs(self, project_id: str, plan_version_id: str) -> list[AgentRun]:
+        return list(self.session.scalars(
+            select(AgentRun)
+            .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+            .where(
+                AgentRun.project_id == project_id,
+                AgentRun.agent_role == "production_planner",
+                AgentInputManifest.payload["plan"]["id"].as_string() == plan_version_id,
+            )
+            .order_by(AgentRun.started_at.desc())
+        ))
+
+    def agent_run(self, run_id: str) -> AgentRun | None:
+        return self.session.get(AgentRun, run_id)
+
+    def agent_manifest(self, manifest_id: str) -> AgentInputManifest | None:
+        return self.session.get(AgentInputManifest, manifest_id)
 
     def component(self, model_type: type[ModelT], component_id: str) -> ModelT | None:
         return self.session.get(model_type, component_id)

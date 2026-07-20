@@ -19,6 +19,41 @@ class ShotWorkflowAssignment(BaseModel):
     video_workflow_slot_version_id: str
 
 
+class GenerateProductionPlanCandidate(ProductionCommand):
+    plan_version_id: str
+    production_config_version_id: str
+    video_spec_version_id: str
+
+
+class RetryProductionPlanner(ProductionCommand):
+    failed_agent_run_id: str
+    confirm_model_cost: bool
+
+
+class DecideProductionPlanCandidate(ProductionCommand):
+    expected_row_version: int = Field(ge=1)
+    accept: bool
+    confirmed_assignments: list[ShotWorkflowAssignment] | None = None
+    confirm_candidate_scope: bool = False
+
+
+class ProductionPlanCandidateRead(BaseModel):
+    id: str
+    project_id: str
+    plan_version_id: str
+    production_config_version_id: str
+    video_spec_version_id: str
+    agent_run_id: str
+    status: str
+    proposed_assignments: list[dict]
+    confirmed_assignments: list[dict] | None
+    validation_errors: list[dict]
+    row_version: int
+    created_by: str
+    created_at: datetime
+    decided_at: datetime | None
+
+
 class AnalyzeProductionImpact(ProductionCommand):
     plan_version_id: str
     production_config_version_id: str
@@ -191,4 +226,6 @@ class ProductionPreparationView(BaseModel):
     published_configurations: list[PublishedConfigChoice]
     analyses: list[ImpactAnalysisRead]
     snapshots: list[ProductionSnapshotRead]
+    production_plan_candidates: list[ProductionPlanCandidateRead]
+    latest_production_planner_run: dict | None
     next_action: dict

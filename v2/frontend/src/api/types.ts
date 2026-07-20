@@ -829,7 +829,36 @@ export interface ProductionPreparation {
   }>
   analyses: ProductionImpactAnalysis[]
   snapshots: ProductionSnapshot[]
+  production_plan_candidates: ProductionPlanCandidate[]
+  latest_production_planner_run: AgentRun | null
   next_action: { code: string; label: string; incurs_production_cost: boolean }
+}
+
+export interface ProductionPlanCandidate {
+  id: string
+  project_id: string
+  plan_version_id: string
+  production_config_version_id: string
+  video_spec_version_id: string
+  agent_run_id: string
+  status: 'awaiting_review' | 'accepted' | 'rejected'
+  proposed_assignments: Array<{
+    shot_code: string
+    keyframe_workflow_slot_version_id: string | null
+    video_workflow_slot_version_id: string
+    required_input_sources: string[]
+    reason: string
+  }>
+  confirmed_assignments: Array<{
+    shot_code: string
+    keyframe_workflow_slot_version_id: string | null
+    video_workflow_slot_version_id: string
+  }> | null
+  validation_errors: Array<{ code: string; path?: string; shot_code?: string }>
+  row_version: number
+  created_by: string
+  created_at: string
+  decided_at: string | null
 }
 
 export interface NodeBindingDraft {
@@ -856,7 +885,7 @@ export interface ProviderConfigDraft {
 export interface ModelConfigDraft {
   config_key: string
   display_name: string
-  agent_role: 'creative' | 'planner' | 'director' | 'qc' | 'editor'
+  agent_role: 'creative' | 'planner' | 'director' | 'production_planner' | 'qc' | 'editor'
   provider_key: string
   provider_model_id: string
   input_contract_version: string

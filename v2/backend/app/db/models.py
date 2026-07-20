@@ -661,6 +661,25 @@ class ShotPlanCandidate(Base):
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class ProductionPlanCandidate(Base):
+    __tablename__ = "production_plan_candidates"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("production_plan_candidate"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    plan_version_id: Mapped[str] = mapped_column(ForeignKey("plan_versions.id"), index=True)
+    production_config_version_id: Mapped[str] = mapped_column(ForeignKey("production_config_versions.id"), index=True)
+    video_spec_version_id: Mapped[str] = mapped_column(ForeignKey("video_spec_versions.id"), index=True)
+    agent_run_id: Mapped[str] = mapped_column(ForeignKey("agent_runs.id"), unique=True)
+    status: Mapped[str] = mapped_column(String(32), default="awaiting_review", index=True)
+    proposed_assignments: Mapped[list] = mapped_column(JSON)
+    confirmed_assignments: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    validation_errors: Mapped[list] = mapped_column(JSON, default=list)
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
+    created_by: Mapped[str] = mapped_column(String(48), default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class PlanVersion(Base):
     __tablename__ = "plan_versions"
     __table_args__ = (UniqueConstraint("project_id", "version_number"),)

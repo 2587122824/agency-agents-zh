@@ -1,4 +1,4 @@
-import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPreparation, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
+import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -123,6 +123,15 @@ export const api = {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, expected_candidate_row_version: rowVersion, reason: accept ? undefined : '用户拒绝当前分镜方案' }),
   }),
   productionPreparation: (projectId: string) => request<ProductionPreparation>(`/projects/${projectId}/production-preparation`),
+  generateProductionPlan: (projectId: string, planVersionId: string, productionConfigVersionId: string, videoSpecVersionId: string) => request<ProductionPlanCandidate>(`/projects/${projectId}/production-plan-candidates:generate`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', plan_version_id: planVersionId, production_config_version_id: productionConfigVersionId, video_spec_version_id: videoSpecVersionId }),
+  }),
+  retryProductionPlan: (projectId: string, runId: string) => request<ProductionPlanCandidate>(`/projects/${projectId}/production-planner-runs/${runId}:retry`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', failed_agent_run_id: runId, confirm_model_cost: true }),
+  }),
+  decideProductionPlan: (projectId: string, candidate: ProductionPlanCandidate, accept: boolean, assignments?: Array<{ shot_code: string; keyframe_workflow_slot_version_id: string | null; video_workflow_slot_version_id: string }>) => request<ProductionPlanCandidate>(`/projects/${projectId}/production-plan-candidates/${candidate.id}:decide`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: candidate.row_version, accept, confirmed_assignments: accept ? assignments : null, confirm_candidate_scope: accept }),
+  }),
   analyzeProductionImpact: (projectId: string, payload: {
     plan_version_id: string
     production_config_version_id: string

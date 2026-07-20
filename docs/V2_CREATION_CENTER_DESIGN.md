@@ -345,13 +345,14 @@ stateDiagram-v2
 
 ### 9.1 编制原则
 
-V2 使用五个有明确分工的智能体和一个确定性生产编译器。智能体负责理解、分析和产生候选；编译器负责把已确认事实转换为可执行合同。编译器不是智能体，不调用大模型，也不自由解释自然语言。
+V2 使用六个有明确分工的智能体和一个确定性生产编译器。智能体负责理解、分析和产生候选；编译器负责把已确认事实转换为可执行合同。编译器不是智能体，不调用大模型，也不自由解释自然语言。
 
 | 分工 | 产品职责 | 权威输入 | 候选输出 | 不负责 |
 |---|---|---|---|---|
 | 创作制片人 | 对话、理解需求、提供选择并登记用户明确表达 | 当前会话、活动需求、已确认决策和附件绑定 | `CreativeTurnProposal`、`RequirementCandidate` | 写脚本、拆分镜、选择生产路由 |
 | 内容策划 | 把已确认需求组织成可拍摄的内容策略与脚本结构 | `RequirementVersion`、实体版本、已确认决策 | `CreativeBriefCandidate` | 与用户闲聊、生成镜头、创建任务 |
 | 分镜导演 | 将已确认创意简报拆为结构化镜头 | 已确认 Brief、实体版本、交付约束 | `ShotPlanCandidate` | 选择 Provider、工作流或费用方案 |
+| 制作规划智能体 | 在用户选定配置与画面规格后提出逐镜头图片/视频路线 | `PlanVersion`、工作流能力合同、用户选定配置与规格 | `ProductionPlanCandidate` | 创建快照、确认路线、调用 Provider、选择配置或计费方案 |
 | 质量审核智能体 | 基于素材和冻结合同给出可解释的内容质量发现 | Asset、镜头合同、实体参考、确定性检测证据 | `QCReportCandidate` | 修改素材、判定文件损坏、自动批准或重试 |
 | 剪辑助理 | 基于已审核素材提出时间线方案 | 已批准素材、镜头方案、交付与音频合同 | `TimelineCandidate` | 使用未批准素材、渲染交付、擅自补素材 |
 | 确定性生产编译器 | 精确解析已确认方案和已发布配置，生成 DAG | `PlanVersion`、配置版本、费用确认和快照输入 | `ProductionSnapshot`、DAG、WorkItem 合同 | 调用模型、猜测 ID、改写提示词或选择替代路线 |
@@ -599,7 +600,29 @@ model_config_version / prompt_contract_version
 
 质量智能体失败时素材保持 `verified`，失败 `AgentRun`、原始输出和 Provider 请求证据被保留。页面只允许用户确认模型费用后精确重跑同一 Manifest；生产配置、模型、Provider、Prompt 和输出 Schema 任一变化都拒绝重跑，不自动重试、不换模型、不修复输出。
 
-### 9.6 剪辑助理
+### 9.6 制作规划智能体
+
+制作规划智能体位于已确认 `PlanVersion` 与确定性生产编译器之间。用户必须先明确选择一个已发布制作配置和画面规格；智能体不能替用户选择配置、Provider、模型、价格目录或音频路线。当前合同采用 `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v1`。
+
+输入清单冻结当前方案、逐镜头结构化能力要求、选定视频规格，以及该配置中每个图片/视频槽位的精确版本 ID、操作类型、支持规格、能力标签和必需输入来源。Node ID、Provider 密钥、价格和执行状态不进入模型输入。输出为逐镜头候选：
+
+```json
+{
+  "assignments": [{
+    "shot_code": "SH-001",
+    "keyframe_workflow_slot_version_id": "workflow_slot_version_id_or_null",
+    "video_workflow_slot_version_id": "workflow_slot_version_id",
+    "required_input_sources": ["shot.visual_prompt", "source_image"],
+    "reason": "该镜头需要先生成关键帧，再使用首帧生成视频。"
+  }]
+}
+```
+
+后端必须逐项验证镜头集合与顺序、槽位归属与发布状态、操作类型、规格支持、必需输入集合，以及参考图、身份一致性、多帧和精确文字能力。任一未知 ID、输入遗漏或能力冲突都使本次 AgentRun 明确失败；系统不采用部分结果、不猜测替代槽位、不改写 ID。失败只能由用户确认同一次模型费用后，复用原 Manifest 与完全一致的模型配置精确重跑。
+
+`ProductionPlanCandidate` 同时保存 `proposed_assignments` 与用户审核后的 `confirmed_assignments`。页面把候选填入逐镜头控件，允许用户逐项修改；只有“采用当前逐镜头路线”命令才把审核结果记为 `accepted`。接受候选仍不创建 `ProductionImpactAnalysis`、`ProductionSnapshot`、DAG 或 WorkItem；费用分析、保存快照、确认费用、激活和提交继续是独立命令。
+
+### 9.7 剪辑助理
 
 剪辑助理只能在质量阶段允许进入剪辑后运行。输入合同 `editor-assistant-input.v1` 至少冻结：
 
@@ -651,7 +674,7 @@ timeline_policy_version
 - 音频关闭时不得创建音轨、旁白、对白、TTS 或对口型依赖；字幕策略关闭时 `subtitle_cues` 必须为空。
 - 输出只形成候选。用户可逐项取舍或修订，确认后才创建不可变 TimelineVersion。
 
-### 9.7 确定性生产编译器
+### 9.8 确定性生产编译器
 
 生产编译器位于创作智能体之后、素材生产之前，详细实现边界以 [V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md) 为准。它必须：
 
@@ -663,7 +686,7 @@ timeline_policy_version
 - 音频关闭时不生成 TTS、音频上传、对口型或音轨依赖。
 - 不调用大模型，不分析员工文字，不改写提示词，不选择替代工作流，不自动重试。
 
-### 9.8 智能体交接矩阵
+### 9.9 智能体交接矩阵
 
 智能体之间不互相直接调用，也不把自然语言输出传给下一个智能体。每一步由应用服务读取已持久化、已验证且满足确认级别的版本：
 
@@ -671,14 +694,15 @@ timeline_policy_version
 |---|---|---|---|
 | 创作制片人 | `RequirementVersion` 已确认 | 内容策划读取需求、决策、实体与约束 | 助手聊天文案、未选择建议 |
 | 内容策划 | Creative Brief 已确认 | 分镜导演读取 Brief 版本和精确节拍 | 原始模型输出、未确认备选 |
-| 分镜导演 | `PlanVersion` 已确认 | 编译器读取结构化镜头与实体引用 | 提示解释、猜测的生产参数 |
+| 分镜导演 | `PlanVersion` 已确认 | 制作规划读取结构化镜头、能力要求和用户选定配置 | 提示解释、猜测的生产参数 |
+| 制作规划 | `ProductionPlanCandidate` 已由用户确认 | 编译器读取用户最终逐镜头路线 | 模型理由、未确认路线、替代槽位猜测 |
 | 生产编译器 | 快照锁定且生产完成 | 质量审核读取 Asset 与冻结合同 | 临时 Provider 响应文本 |
 | 质量审核 | 必需素材已人工批准 | 剪辑助理读取批准素材与 QC 报告 | 未验证素材、模型的批准结论 |
 | 剪辑助理 | TimelineCandidate 已验证并由用户确认 | 交付服务读取 TimelineVersion | 建议文本、缺口候选 |
 
 任一交接条件不满足时，应用服务返回精确缺口；不能跳过上游、调用另一个智能体补写或把旧版本当作当前版本。
 
-### 9.9 AgentRun
+### 9.10 AgentRun
 
 ```text
 id

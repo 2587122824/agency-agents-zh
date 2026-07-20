@@ -218,6 +218,26 @@ export function PlanPage() {
   const decideShots = useMutation({ mutationFn: (accept: boolean) => api.decideShotPlan(projectId, planning.data!.current_shot_candidate!.id, planning.data!.active_requirement.id, planning.data!.current_shot_candidate!.row_version, accept), onSuccess: refresh })
   const cancelRevision = useMutation({ mutationFn: () => api.cancelAssetRevisionRequest(projectId, planning.data!.revision_context!.id, '用户明确放弃本次成品回改'), onSuccess: async () => { setConfirmCancelRevision(false); setEditingShots(false); await refresh() } })
   const cancelManualRevision = useMutation({ mutationFn: () => api.cancelShotPlanRevision(projectId, planning.data!.revision_draft!.id, planning.data!.revision_draft!.row_version), onSuccess: async () => { setEditingShots(false); await refresh() } })
+  const generateProductionPlan = useMutation({
+    mutationFn: () => api.generateProductionPlan(projectId, planning.data!.active_plan!.id, configId, videoSpecId),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }),
+  })
+  const retryProductionPlan = useMutation({
+    mutationFn: () => api.retryProductionPlan(projectId, preparation.data!.latest_production_planner_run!.id),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }),
+  })
+  const decideProductionPlan = useMutation({
+    mutationFn: ({ candidateId, accept }: { candidateId: string; accept: boolean }) => {
+      const candidate = preparation.data!.production_plan_candidates.find(item => item.id === candidateId)!
+      const assignments = planning.data!.active_plan!.shots.map(shot => ({
+        shot_code: shot.shot_code,
+        keyframe_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.keyframe || null,
+        video_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.video || '',
+      }))
+      return api.decideProductionPlan(projectId, candidate, accept, assignments)
+    },
+    onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }),
+  })
   const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, { plan_version_id: planning.data!.active_plan!.id, production_config_version_id: configId, video_spec_version_id: videoSpecId, shot_workflow_assignments: planning.data!.active_plan!.shots.map(shot => ({ shot_code: shot.shot_code, keyframe_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.keyframe || null, video_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.video || '' })), tts_workflow_slot_version_id: ttsSlotId || null, pricing_catalog_version_id: pricingCatalogId || null }) })
   const createSnapshot = useMutation({ mutationFn: () => api.createProductionSnapshot(projectId, analyzeImpact.data!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
   const lockSnapshot = useMutation({ mutationFn: () => api.lockProductionSnapshot(projectId, latestSnapshot!), onSuccess: async () => { setConfirmCost(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
@@ -230,6 +250,21 @@ export function PlanPage() {
     setShotWorkflowAssignments({})
     analyzeImpact.reset()
   }, [planning.data?.active_plan?.id])
+  useEffect(() => {
+    if (!configId || !videoSpecId) return
+    const candidate = preparation.data?.production_plan_candidates.find(item =>
+      item.production_config_version_id === configId
+      && item.video_spec_version_id === videoSpecId
+      && ['awaiting_review', 'accepted'].includes(item.status),
+    )
+    const assignments = candidate?.confirmed_assignments ?? candidate?.proposed_assignments
+    if (!assignments) return
+    setShotWorkflowAssignments(Object.fromEntries(assignments.map(item => [item.shot_code, {
+      keyframe: item.keyframe_workflow_slot_version_id ?? '',
+      video: item.video_workflow_slot_version_id,
+    }])))
+    analyzeImpact.reset()
+  }, [configId, videoSpecId, preparation.data?.production_plan_candidates])
   if (project.isPending || planning.isPending) return <div className={styles.loading}>正在读取方案合同…</div>
   if (!project.data || !planning.data || project.error || planning.error) return <div className={styles.loading}>方案读取失败：{project.error?.message || planning.error?.message}</div>
   const data = planning.data
@@ -245,13 +280,20 @@ export function PlanPage() {
   const editableShot = data.current_shot_candidate ?? data.revision_draft ?? rejectedShot
   const shots = editableShot?.shots ?? data.active_plan?.shots ?? []
   const characterVersions = data.entity_versions.filter(item => item.entity_type === 'character')
-  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
+  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
   const selectedConfig = preparation.data?.published_configurations.find(item => item.id === configId)
   const keyframeSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'image_generation') ?? []
   const videoSlots = selectedConfig?.workflow_slots.filter(item => ['video_generation', 'text_to_video_generation'].includes(item.operation_kind)) ?? []
   const ttsSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'tts') ?? []
   const selectedVideoSpec = selectedConfig?.video_specs.find(item => item.id === videoSpecId)
   const selectedTtsSlot = ttsSlots.find(item => item.id === ttsSlotId)
+  const productionPlanCandidate = preparation.data?.production_plan_candidates.find(item =>
+    item.production_config_version_id === configId
+    && item.video_spec_version_id === videoSpecId
+    && ['awaiting_review', 'accepted'].includes(item.status),
+  )
+  const productionPlannerFailed = preparation.data?.latest_production_planner_run?.status === 'failed'
+    && preparation.data.latest_production_planner_run.production_config_version_id === configId
   const impact = analyzeImpact.data
   const savedMatchingSnapshot = impact
     ? preparation.data?.snapshots.find(snapshot => snapshot.contract_hash === impact.snapshot_contract_hash)
@@ -266,7 +308,7 @@ export function PlanPage() {
   const canAnalyze = Boolean(data.active_plan && configId && videoSpecId && allShotsAssigned && (preparation.data?.audio_mode !== 'voiceover' || ttsSlotId))
   const nextAction = data.active_plan && preparation.data ? preparation.data.next_action : data.next_action
   const nextActionLabel = productionActionLabels[nextAction.code] ?? nextAction.label
-  function chooseConfig(value: string) { setConfigId(value); setVideoSpecId(''); setKeyframeSlotId(''); setVideoSlotId(''); setShotWorkflowAssignments({}); setTtsSlotId(''); setPricingCatalogId(''); analyzeImpact.reset() }
+  function chooseConfig(value: string) { setConfigId(value); setVideoSpecId(''); setKeyframeSlotId(''); setVideoSlotId(''); setShotWorkflowAssignments({}); setTtsSlotId(''); setPricingCatalogId(''); generateProductionPlan.reset(); retryProductionPlan.reset(); analyzeImpact.reset() }
   function assignShot(shotCode: string, field: 'keyframe' | 'video', value: string) {
     setShotWorkflowAssignments(current => {
       const next = { ...(current[shotCode] ?? { keyframe: '', video: '' }), [field]: value }
@@ -320,10 +362,17 @@ export function PlanPage() {
           {preparation.data?.published_configurations.length ? <>
             <div className={styles.routeGrid}>
               <label>制作配置<select value={configId} onChange={event => chooseConfig(event.target.value)}><option value="">请选择配置</option>{preparation.data.published_configurations.map(item => <option key={item.id} value={item.id}>{item.display_name} · v{item.version_number}</option>)}</select></label>
-              <label>画面规格<select disabled={!selectedConfig} value={videoSpecId} onChange={event => { setVideoSpecId(event.target.value); analyzeImpact.reset() }}><option value="">请选择画面规格</option>{selectedConfig?.video_specs.map(item => <option key={item.id} value={item.id}>{item.display_name} · {item.width}×{item.height} · {item.fps}fps</option>)}</select></label>
+              <label>画面规格<select disabled={!selectedConfig} value={videoSpecId} onChange={event => { setVideoSpecId(event.target.value); setShotWorkflowAssignments({}); generateProductionPlan.reset(); retryProductionPlan.reset(); analyzeImpact.reset() }}><option value="">请选择画面规格</option>{selectedConfig?.video_specs.map(item => <option key={item.id} value={item.id}>{item.display_name} · {item.width}×{item.height} · {item.fps}fps</option>)}</select></label>
               {preparation.data.audio_mode === 'voiceover' && <label>配音生成方案<select disabled={!selectedConfig} value={ttsSlotId} onChange={event => { setTtsSlotId(event.target.value); analyzeImpact.reset() }}><option value="">请选择配音生成方案</option>{ttsSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>}
               <label>计费方案<select disabled={!selectedConfig} value={pricingCatalogId} onChange={event => { setPricingCatalogId(event.target.value); analyzeImpact.reset() }}><option value="">暂不选择（只能预览，不能开始制作）</option>{selectedConfig?.pricing_catalogs.map(item => <option key={item.id} value={item.id}>{item.display_name} · {item.currency}</option>)}</select></label>
             </div>
+            <section className={styles.productionPlanner}>
+              <header><div><Sparkles size={18} /><span><small>制作规划智能体</small><strong>{productionPlanCandidate?.status === 'accepted' ? '当前路线已采用' : productionPlanCandidate ? '逐镜头路线等待确认' : productionPlannerFailed ? '本次制作规划失败' : '让智能体匹配现有工作流'}</strong></span></div>{productionPlanCandidate && <em data-accepted={productionPlanCandidate.status === 'accepted'}>{productionPlanCandidate.status === 'accepted' ? '已采用' : '待确认'}</em>}</header>
+              {productionPlanCandidate ? <>
+                <p>{productionPlanCandidate.status === 'accepted' ? '已采用的选择已填入下方。你仍可手动调整；最终以费用预估时提交的路线为准。' : '智能体只提出候选。请检查理由并按需要修改下方选择，再明确采用。'}</p>
+                {productionPlanCandidate.status === 'awaiting_review' && <footer><button className="secondaryButton" disabled={decideProductionPlan.isPending} onClick={() => decideProductionPlan.mutate({ candidateId: productionPlanCandidate.id, accept: false })}><X size={14} />拒绝候选</button><button className="primaryButton" disabled={!allShotsAssigned || decideProductionPlan.isPending} onClick={() => decideProductionPlan.mutate({ candidateId: productionPlanCandidate.id, accept: true })}><Check size={14} />采用当前逐镜头路线</button></footer>}
+              </> : productionPlannerFailed ? <><p>{preparation.data?.latest_production_planner_run?.error_detail || '模型没有返回符合制作路线合同的结果。'} 系统没有自动重试，也没有更换模型或工作流。</p><footer><button className="primaryButton" disabled={retryProductionPlan.isPending} onClick={() => retryProductionPlan.mutate()}>{retryProductionPlan.isPending ? '正在重跑…' : '确认模型调用并精确重跑'}</button></footer></> : <><p>先选择制作配置和画面规格。智能体会读取每个镜头的参考图、一致性、文字与运动要求，在当前工作流库中提出路线。</p><footer><button className="primaryButton" disabled={!configId || !videoSpecId || generateProductionPlan.isPending} onClick={() => generateProductionPlan.mutate()}><Sparkles size={14} />{generateProductionPlan.isPending ? '正在规划…' : '智能规划制作路线'}</button></footer></>}
+            </section>
             <section className={styles.workflowAssignment} id="shot-workflow-assignment">
               <header><div><strong>逐镜头制作方案</strong><span>每个镜头都必须明确选择。系统不会根据文字猜测、自动替换或沿用其他镜头。</span></div><b>{Object.values(shotWorkflowAssignments).filter(item => item.video).length} / {data.active_plan.shots.length}</b></header>
               <div className={styles.batchAssignment}>
@@ -335,8 +384,9 @@ export function PlanPage() {
                 const assignment = shotWorkflowAssignments[shot.shot_code] ?? { keyframe: '', video: '' }
                 const selectedVideo = videoSlots.find(item => item.id === assignment.video)
                 const textToVideo = selectedVideo?.operation_kind === 'text_to_video_generation'
+                const proposal = productionPlanCandidate?.proposed_assignments.find(item => item.shot_code === shot.shot_code)
                 return <article key={shot.shot_code}>
-                  <div><b>{shot.shot_code}</b><span>{shot.action}</span><small>{shot.duration_ms / 1000} 秒 · {shot.generation_requirements.identity_consistency_required ? '需要人物一致性' : '普通镜头'}{shot.generation_requirements.reference_image_required ? ' · 需要参考图' : ''}</small></div>
+                  <div><b>{shot.shot_code}</b><span>{shot.action}</span><small>{proposal?.reason ?? `${shot.duration_ms / 1000} 秒 · ${shot.generation_requirements.identity_consistency_required ? '需要人物一致性' : '普通镜头'}${shot.generation_requirements.reference_image_required ? ' · 需要参考图' : ''}`}</small></div>
                   <label>图片方案<select value={assignment.keyframe} disabled={!selectedConfig || textToVideo} onChange={event => assignShot(shot.shot_code, 'keyframe', event.target.value)}><option value="">{textToVideo ? '纯文本视频不使用关键帧' : '请选择图片方案'}</option>{keyframeSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
                   <label>视频方案<select value={assignment.video} disabled={!selectedConfig} onChange={event => assignShot(shot.shot_code, 'video', event.target.value)}><option value="">请选择视频方案</option>{videoSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
                 </article>

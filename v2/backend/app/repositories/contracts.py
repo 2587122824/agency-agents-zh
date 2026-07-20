@@ -38,6 +38,7 @@ from ..db.models import (
     ProductionConfigComponent,
     ProductionConfigVersion,
     ProductionImpactAnalysis,
+    ProductionPlanCandidate,
     ProductionSnapshot,
     ProviderConfigVersion,
     QCFinding,
@@ -79,11 +80,14 @@ CreationRecord = (
 PlanningRecord = AgentInputManifest | AgentRun | CreativeBriefCandidate | PlanVersion | Shot | ShotPlanCandidate
 ImpactRecord = DecisionChangeImpactAnalysis | DecisionChangeImpactTarget
 ProductionRecord = (
-    ConfigurationReference
+    AgentInputManifest
+    | AgentRun
+    | ConfigurationReference
     | CostEvent
     | DAGNode
     | DependencyEdge
     | ProductionImpactAnalysis
+    | ProductionPlanCandidate
     | ProductionSnapshot
     | SnapshotEntityVersion
     | WorkAttempt
@@ -338,6 +342,18 @@ class ProductionRepository(Protocol):
     def add(self, record: ProductionRecord) -> None: ...
 
     def flush(self) -> None: ...
+
+    def production_plan_candidate(self, candidate_id: str) -> ProductionPlanCandidate | None: ...
+
+    def production_plan_candidates(self, project_id: str, plan_version_id: str | None = None) -> list[ProductionPlanCandidate]: ...
+
+    def latest_production_planner_run(self, project_id: str, plan_version_id: str) -> AgentRun | None: ...
+
+    def production_planner_runs(self, project_id: str, plan_version_id: str) -> list[AgentRun]: ...
+
+    def agent_run(self, run_id: str) -> AgentRun | None: ...
+
+    def agent_manifest(self, manifest_id: str) -> AgentInputManifest | None: ...
 
     def component(self, model_type: type[ModelT], component_id: str) -> ModelT | None: ...
 

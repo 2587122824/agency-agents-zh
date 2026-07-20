@@ -177,12 +177,22 @@ from ..production.contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
     CreateProductionSnapshot,
+    DecideProductionPlanCandidate,
+    GenerateProductionPlanCandidate,
     ImpactAnalysisRead,
     LockProductionSnapshot,
     ProductionExecutionView,
     ProductionPreparationView,
+    ProductionPlanCandidateRead,
     ProductionSnapshotRead,
     SubmitProduction,
+    RetryProductionPlanner,
+)
+from ..production.agent_gateway import ProductionPlannerGateway, get_production_planner_gateway
+from ..production.planning_service import (
+    decide_production_plan_candidate,
+    generate_production_plan_candidate,
+    retry_production_planner,
 )
 from ..production.service import (
     ProductionConflictError,
@@ -554,6 +564,72 @@ def planning_center(project_id: str, session: Session = Depends(get_session)):
 @router.get("/projects/{project_id}/production-preparation", response_model=ProductionPreparationView)
 def production_preparation(project_id: str, session: Session = Depends(get_session)):
     return preparation_view(session, require_project(session, project_id))
+
+
+@router.post(
+    "/projects/{project_id}/production-plan-candidates:generate",
+    response_model=ProductionPlanCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def production_plan_candidate_generate(
+    project_id: str,
+    payload: GenerateProductionPlanCandidate,
+    gateway: ProductionPlannerGateway = Depends(get_production_planner_gateway),
+    session: Session = Depends(get_session),
+):
+    try:
+        return generate_production_plan_candidate(session, require_project(session, project_id), payload, gateway)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-planner-runs/{run_id}:retry",
+    response_model=ProductionPlanCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def production_planner_run_retry(
+    project_id: str,
+    run_id: str,
+    payload: RetryProductionPlanner,
+    gateway: ProductionPlannerGateway = Depends(get_production_planner_gateway),
+    session: Session = Depends(get_session),
+):
+    if payload.failed_agent_run_id != run_id:
+        raise HTTPException(status_code=409, detail="失败运行编号与路径不一致。")
+    try:
+        return retry_production_planner(session, require_project(session, project_id), payload, gateway)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-plan-candidates/{candidate_id}:decide",
+    response_model=ProductionPlanCandidateRead,
+)
+def production_plan_candidate_decide(
+    project_id: str,
+    candidate_id: str,
+    payload: DecideProductionPlanCandidate,
+    session: Session = Depends(get_session),
+):
+    try:
+        return decide_production_plan_candidate(session, require_project(session, project_id), candidate_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
 
 
 @router.post(
