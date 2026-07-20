@@ -28,7 +28,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 数据库迁移 | `20260720_27 (head)` |
 | 已发布配置 | `production_config_3b6fc6643d044d0595fb3962913b43ad`，版本 35 |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
-| 外部生产执行 | `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 未设置，保持关闭 |
+| 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 密钥通过 Windows 用户环境与白名单注入，不写数据库或仓库 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
 
 启动或重启：

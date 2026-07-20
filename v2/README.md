@@ -48,11 +48,19 @@ $env:RUNNINGHUB_API_KEY = "<new key>"
 v2\start_v2.bat -NoBrowser
 ```
 
+For a persistent local installation, store the same three values in the
+Windows user environment. `start_v2.ps1` copies the credential allowlist,
+allowlisted credentials, agent execution switch, and external provider
+execution switch into the API and Worker processes on every restart. Secrets
+must not be committed to the repository or stored in the production
+configuration database.
+
 The published Provider configuration must reference
 `env://RUNNINGHUB_API_KEY`. The settings page then checks the adapter,
 configuration contract, credential, and execution authorization without a
-network request. Keep `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` unset until a
-real connectivity test is explicitly approved. See
+network request. Set `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true` only after
+the user explicitly authorizes real external production. Enabling it does not
+retry historical work items or submit a provider request by itself. See
 `docs/V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md` for the complete
 boundary.
 
