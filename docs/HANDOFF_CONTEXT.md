@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260720_28 (head)` |
-| 已发布配置 | `production_config_e47533727ec247e4a583f773f850f153`，版本 42 |
+| 已发布配置 | `production_config_ff4b11499f2742d8a2dde3459de98355`，版本 43 |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 密钥通过 Windows 用户环境与白名单注入，不写数据库或仓库 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -113,7 +113,7 @@ v2/runtime/worker.err.log
 - 成功方案不能使用失败重跑命令；已拒绝方案可在同一需求版本下明确微调，基础需求变化时才需要再次确认新的需求版本。
 - 成功只创建待审核 Creative Brief；用户接受后才能交给分镜导演。
 
-分镜导演运行代码使用 `director-input.v2 / shot-plan.v3 / director-prompt.v3`：
+分镜导演运行代码使用 `director-input.v2 / shot-plan.v3 / director-prompt.v4`：
 
 - 使用独立 `director` 模型分工，只读取已确认需求、已接受 Brief、决策、实体与附件事实、交付约束和音频策略。
 - 镜头必须精确引用内容节拍与脚本段，全部脚本段必须被覆盖；`action_count=1`。
@@ -169,6 +169,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-22 | 修复分镜导演 Prompt 被重复定义且活动定义缺少完整枚举的问题：删除被覆盖的旧 Prompt，将 `continuity_group_id` 的 `CONT-001` 格式以及连续关系、镜头目的、景别、机位、镜头运动、主体运动、人脸、文字和音频的全部允许枚举集中写入唯一 `director-prompt.v4`，并增加 Prompt/Schema 同步回归测试。发布配置 v43，仅更新 director Prompt 合同；不映射或修复模型输出，不自动重跑失败任务 |
 | 2026-07-20 | 补齐已确认分镜的人物绑定闭环：方案页可上传并登记主角参考图，再显式从当前活动 PlanVersion 开启 `manual_revision_draft`；用户在现有逐镜头编辑器中选择人物、主参考图、人脸要求和身份一致性，提交 Patch 并再次确认后才创建新方案版本。后端禁止重复开启草稿并支持显式放弃；旧方案保持只读。上传不自动套用镜头，整个手动路径不调用模型、不产生制作费用、不猜测人物或参考图 |
 | 2026-07-20 | 制作准备升级为逐镜头显式工作流合同：每个 `shot_code` 必须唯一选择图片/视频槽位，批量应用也会写入每个镜头；缺选、重复、未知镜头、I2V 缺关键帧或 T2V 携带关键帧均阻断，不猜测、不继承、不自动替换。RunningHub 新增无父图 `generate_t2v_clip`，节点冻结确定性 seed。发布配置 v39，现有 2 个槽位扩为 6 个：参考图/纯文本/人物一致性/风格参考关键帧、首帧视频、纯文本 B-roll；每项覆盖测试价格，配置和槽位统一为中文名称。首帧视频避免内容改为可选。V1 空 ID、冲突 ID、提示词污染和缺多参考合同的槽位未迁入 |
 | 2026-07-20 | 按 DeepSeek 官方文档复核并发布配置 v35：官方模型列表包含 `deepseek-v4-flash / deepseek-v4-pro`，但 Chat API 将用户消息 `content` 定义为字符串，官方目录没有视觉、图片或多模态端点。系统因此恢复三个文本智能体为 `deepseek-v4-flash`，移除 QC 模型与 `vision_analysis` 声明，并退役未被引用的错误 v34。运行时已确认创作模型选择 v35 Flash，QC 在联网前返回 `QC_MODEL_NOT_CONFIGURED`；未发起图片调用、未产生费用，其他工作流和价格未改变 |
@@ -216,9 +217,9 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`207 passed`
+- 后端测试：`208 passed`
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v42，4 个文本智能体模型分工与 6 个镜头工作流槽位；v41 修正 v40 继承的 6 个工作流中文显示名编码，v42 修正配置标题编码，槽位主键、RunningHub 工作流 ID、NodeInfoList、能力、模型、价格与规格不变；首帧视频避免内容为可选绑定
+- 当前生产配置：v43，4 个文本智能体模型分工与 6 个镜头工作流槽位；v43 仅将分镜导演升级为 `director-prompt.v4`，其他模型、槽位主键、RunningHub 工作流 ID、NodeInfoList、能力、价格与规格不变；首帧视频避免内容为可选绑定
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过

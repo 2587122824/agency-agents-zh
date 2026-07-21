@@ -38,7 +38,7 @@ def selection() -> DirectorSelection:
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
         input_contract_version="director-input.v2",
-        prompt_contract_version="director-prompt.v3",
+        prompt_contract_version="director-prompt.v4",
         output_schema_version="shot-plan.v3",
         max_output_tokens=4000,
         sampling={"temperature": 0.2},
@@ -145,6 +145,30 @@ def test_director_returns_strict_shot_plan_once(monkeypatch) -> None:
     assert '"brief_segment_codes":["SEG_01"]' in sent[0]["content"]
     assert "每个脚本段必须至少被一个镜头覆盖" in sent[0]["content"]
     assert "其他镜头必须与 source_shots 结构完全一致" in sent[0]["content"]
+
+
+def test_director_prompt_freezes_every_enum_and_continuity_id_format(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    gateway, transport = gateway_for(valid_output())
+
+    gateway.invoke(selection(), manifest())
+
+    prompt = transport.calls[0]["payload"]["messages"][0]["content"]
+    expected_contracts = (
+        "^CONT-[0-9]{3}$",
+        "same_moment | time_jump | location_change | outfit_change",
+        "establish | develop | demonstrate | contrast | transition | resolve",
+        "extreme_close_up | close_up | medium | full | wide",
+        "eye_level | high | low | top_down | over_shoulder",
+        "locked | pan | tilt | dolly | tracking | handheld",
+        "none | subtle | moderate | significant",
+        "required | optional | not_visible",
+        "forbidden | allowed | required",
+        "off | lip_motion_only | configured",
+    )
+    assert all(value in prompt for value in expected_contracts)
+    assert "禁止 CG_01、group_01" in prompt
+    assert prompt.count("你是片场 V2 的分镜导演智能体") == 1
 
 
 @pytest.mark.parametrize("mutate", [

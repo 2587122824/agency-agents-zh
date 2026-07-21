@@ -17,7 +17,7 @@ from ..providers.credentials import EnvironmentCredentialResolver
 
 DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v2"
 DIRECTOR_OUTPUT_SCHEMA_VERSION = "shot-plan.v3"
-DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v3"
+DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v4"
 
 
 class GenerationRequirements(BaseModel):
@@ -142,42 +142,27 @@ class DirectorGateway(Protocol):
     def invoke(self, selection: DirectorSelection, manifest_payload: dict[str, Any]) -> DirectorResult: ...
 
 
-_DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只把已接受的内容方案拆成结构化镜头候选，不与用户闲聊，不选择任何生产路由。
-必须只返回一个 JSON 对象，严格符合：
-{"shots":[{"shot_code":"SH-001","sequence_number":1,"duration_ms":3000,"narrative_beat_code":"BEAT_01","continuity_group_id":null,"action_count":1,"shot_type":"镜头类型","scene_entity_version_id":null,"character_entity_version_ids":[],"outfit_entity_version_ids":[],"product_entity_version_ids":[],"primary_reference_entity_version_id":null,"face_visibility":"required|optional|not_visible","text_policy":"forbidden|allowed|required","motion_requirement":"static|moderate|significant","audio_requirement":"off|lip_motion_only|configured","composition":"构图描述","action":"唯一主动作","visual_prompt":"画面生成描述","negative_prompt":null}]}
-竖线分隔的是允许的枚举值，实际输出必须只选择其中一个，不得输出竖线组合或自定义描述词。
-规则：
-1. shot_code 必须从 SH-001 连续编号，sequence_number 从 1 连续编号。
-2. narrative_beat_code 必须逐字复制输入内容节拍；每个节拍至少一个镜头，所属镜头时长之和必须精确等于该节拍时长。
-3. 每个镜头只描述一个结构化主动作，action_count 必须为 1；多个动作必须拆成多个镜头。
-4. 实体 ID 只能从 confirmed_entity_versions 逐字复制。不得创建、缩写、改名或猜测 ID。
-5. continuity_group_id 只用于声明需要保持连续的镜头。同一组必须使用完全相同的场景、人物和服装版本 ID；不连续的镜头填 null。
-6. primary_reference_entity_version_id 必须属于该镜头已声明实体，且输入事实明确提供已验证图片；没有明确主参考时填 null，不得自动采用第一个实体。
-7. face_visibility、text_policy、motion_requirement 和 audio_requirement 必须显式给出，后续系统不会从描述反推。
-7.1 face_visibility 必须按画面事实选择：
-- required：人物面部、表情、身份、年龄状态或前后面貌对比是画面叙事与验收所必需，生成结果缺少可辨认人脸即不合格。
-- optional：画面有人物，但人脸不是叙事必要条件，侧脸、遮挡或未清晰露脸仍可接受。
-- not_visible：构图明确不展示任何人脸，例如纯文字、物体、环境、手脚、背影或完全避开头部；它不是“未绑定人物”或“不确定”的默认值。
-7.2 人物实体是否已绑定不能单独决定 face_visibility。即使 character_entity_version_ids 为空，只要动作、构图或 visual_prompt 要求展示人物面部、表情、身份、年龄状态或面貌对比，就必须选择 required；无法确定是否需要人脸时选择 optional，不得选择 not_visible。
-7.3 text_policy 必须与画面文字是否为叙事必需保持一致；motion_requirement 必须与唯一主动作需要的可见运动幅度一致；audio_requirement 必须与音频策略一致。
-8. audio_policy=off 时 audio_requirement 只能为 off 或 lip_motion_only，不得建立配音、对白、音乐、TTS 或音频注入依赖。
-9. 不得输出 Provider、模型、工作流、NodeInfoList、价格、素材状态、任务 ID 或生产路由。
-10. 不得添加提示词默认尾缀、自动负面词或输入合同中没有确认的人物、品牌、地点与产品事实。
-11. 输出前逐镜头检查 shot_type、action、composition、visual_prompt、实体引用和四项生成约束是否描述同一画面；发现矛盾必须在返回 JSON 前重新选择正确枚举或修改镜头描述，不能把矛盾结果交给后端猜测或修复。
-12. 不得输出 Markdown、解释文字或 JSON 之外的内容。
-"""
-
-
 _DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只把已接受的内容方案拆成结构化镜头候选，或按用户明确授权修订指定镜头；不与用户闲聊，不选择供应商、模型或工作流。
 只返回严格 JSON：{"shots":[{"shot_code":"SH-001","sequence_number":1,"duration_ms":3000,"narrative_beat_code":"BEAT_01","brief_segment_codes":["SEG_01"],"continuity_group_id":null,"continuity_relation":"same_moment","action_count":1,"shot_purpose":"establish","framing":"medium","camera_angle":"eye_level","camera_motion":"locked","subject_motion":"moderate","scene_entity_version_id":null,"character_entity_version_ids":[],"outfit_entity_version_ids":[],"product_entity_version_ids":[],"primary_reference_entity_version_id":null,"face_visibility":"not_visible","face_subject_entity_version_ids":[],"text_policy":"forbidden","required_on_screen_text":null,"audio_requirement":"off","composition":"构图描述","action":"唯一动作","visual_prompt":"画面生成描述","negative_prompt":null,"new_information":"相对前一镜头新增的信息","generation_requirements":{"reference_image_required":false,"multi_frame_required":false,"identity_consistency_required":false,"precise_text_required":false}}]}。
+以下格式与枚举区分大小写，必须逐字使用，不得翻译、缩写或创造近义值：
+- continuity_group_id：只能是 JSON null 或匹配 ^CONT-[0-9]{3}$ 的字符串，例如 CONT-001；禁止 CG_01、group_01 等其他格式。
+- continuity_relation：same_moment | time_jump | location_change | outfit_change
+- shot_purpose：establish | develop | demonstrate | contrast | transition | resolve
+- framing：extreme_close_up | close_up | medium | full | wide
+- camera_angle：eye_level | high | low | top_down | over_shoulder
+- camera_motion：locked | pan | tilt | dolly | tracking | handheld
+- subject_motion：none | subtle | moderate | significant
+- face_visibility：required | optional | not_visible
+- text_policy：forbidden | allowed | required
+- audio_requirement：off | lip_motion_only | configured
 规则：
 1. SH 编号和 sequence_number 必须从 1 连续；每个镜头 action_count=1。
 2. 每个脚本段必须至少被一个镜头覆盖。brief_segment_codes 只能逐字引用输入脚本段，且每个段必须属于该镜头引用的叙事节拍。
 3. 每个节拍的镜头时长总和必须精确等于该节拍时长。
-4. shot_purpose、framing、camera_angle、camera_motion、subject_motion、continuity_relation 必须使用合同枚举，不得自造值。
+4. 所有枚举字段只能从上方对应列表选择一个精确值。输出前逐字段核对；后端不会映射、翻译或修复非法值。
 5. 实体 ID 只能逐字引用 confirmed_entity_versions。face_visibility=required 时必须列出确切 face_subject_entity_version_ids，且只能引用该镜头已声明的 character 实体。
 6. text_policy=required 时 required_on_screen_text 必须是需要出现在画面中的精确文字；forbidden 时必须为 null。
-7. continuity_relation 明确本镜头与前一镜头的关系。场景或服装发生变化时必须分别使用 location_change 或 outfit_change；同一 continuity_group 内实体必须完全一致。
+7. continuity_relation 明确本镜头与前一镜头的关系。场景或服装发生变化时必须分别使用 location_change 或 outfit_change；同一 continuity_group_id 内实体必须完全一致。不需要连续组时填 null，不得自行创建其他前缀。
 8. new_information 必须说明本镜头相对前一镜头新增的叙事信息，供用户人工检查重复，不得留空。
 9. generation_requirements 只声明生产能力需求，不得写路由。身份一致性要求必须同时要求参考图；精确文字能力只能用于 required 文字。
 10. audio_policy=off 时 audio_requirement 只能为 off 或 lip_motion_only，不得建立音频生产依赖。

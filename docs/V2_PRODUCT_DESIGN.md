@@ -1218,7 +1218,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 ## 41. 分镜导演智能体实现
 
-分镜导演使用 `director-input.v2 / shot-plan.v3 / director-prompt.v3` 和独立 `director` 模型分工。输入只冻结已确认需求、唯一已接受内容方案、精确实体版本与来源附件事实、已解决决策、交付约束和音频策略；不读取自由会话，不读取 Provider、工作流、NodeInfoList、价格或生产任务。每个镜头必须精确引用所属叙事节拍与至少一个脚本段，最终方案必须覆盖 Brief 的全部脚本段。
+分镜导演使用 `director-input.v2 / shot-plan.v3 / director-prompt.v4` 和独立 `director` 模型分工。输入只冻结已确认需求、唯一已接受内容方案、精确实体版本与来源附件事实、已解决决策、交付约束和音频策略；不读取自由会话，不读取 Provider、工作流、NodeInfoList、价格或生产任务。唯一 Prompt 必须完整列出与输出 Schema 相同的连续组格式和全部枚举，不能依赖模型猜测“合同枚举”。每个镜头必须精确引用所属叙事节拍与至少一个脚本段，最终方案必须覆盖 Brief 的全部脚本段。
 
 每个镜头必须结构化声明 `shot_purpose`、`framing`、`camera_angle`、`camera_motion`、`subject_motion`、`continuity_relation`、唯一主动作、实体版本、精确人脸主体、精确画面文字、`new_information` 和 `generation_requirements`。`face_visibility=required` 必须列出已声明人物实体；`text_policy=required` 必须给出准确文字，`forbidden` 时必须为 `null`；场景与服装变化必须显式声明对应关系。后端只验证结构字段，不解析提示词语义或关键词，不猜测和修正枚举。
 

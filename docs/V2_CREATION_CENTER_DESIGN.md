@@ -521,7 +521,7 @@ new_information / generation_requirements
 - `face_visibility`、精确人脸主体、`text_policy`、精确文字和主体运动是后续 QC 的权威条件，不从提示词反推。
 - 分镜导演不得选择 Provider、模型、工作流槽位、NodeInfoList 或价格规则。
 
-当前实现使用独立 `director` 模型配置和 `director-input.v2 / shot-plan.v3 / director-prompt.v3`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天或生产工作流配置。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。后端不解析动作或提示词关键词，不自动修改任何字段。
+当前实现使用独立 `director` 模型配置和 `director-input.v2 / shot-plan.v3 / director-prompt.v4`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天或生产工作流配置。Prompt 必须由唯一常量完整列出 `continuity_group_id` 格式及全部结构化枚举，不得以“使用合同枚举”代替实际允许值。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。后端不解析动作或提示词关键词，不自动修改任何字段。
 
 导演只声明 `reference_image_required / multi_frame_required / identity_consistency_required / precise_text_required`，不选择路由。用户在制作准备中选定工作流后，确定性校验再对照能力标签和 NodeInfoList；不满足时按镜头返回阻断，不换工作流。人工 Patch 与“AI 调整选中镜头”是两个独立命令：后者冻结完整来源方案、选中编号和修改意见，只调用一次模型，未选镜头必须结构完全一致；失败保留来源候选，用户确认费用后才能精确重跑。
 
@@ -1190,7 +1190,7 @@ RequirementDiff
 
 - 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v15`（已完成）
 - 内容策划 `content-planner-input.v2 / creative-brief-candidate.v3 / content-planner-prompt.v5`，含可追溯策划拓展、待确认事实、Brief 不可变修订链与结构化确认项（已完成）
-- 分镜导演 `director-input.v2 / shot-plan.v3 / director-prompt.v3`（已完成）
+- 分镜导演 `director-input.v2 / shot-plan.v3 / director-prompt.v4`（已完成）
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成
 
