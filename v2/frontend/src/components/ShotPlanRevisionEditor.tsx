@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, RotateCcw, Save, Search, Sparkles, Undo2 } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, ImageOff, RotateCcw, Save, Search, Sparkles, Undo2 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import type { ShotContract, ShotPlanCandidate } from '../api/types'
@@ -16,6 +16,28 @@ type EntityOption = {
 
 type ShotPatch = { target_shot_code: string; changes: Partial<ShotContract> }
 type ShotFilter = 'all' | 'modified'
+
+function EntityThumbnail({ entity, projectId }: { entity: EntityOption; projectId: string }) {
+  const [failed, setFailed] = useState(false)
+  const canPreview = entity.source_attachment_verified && entity.source_attachment_id && entity.source_mime_type?.startsWith('image/')
+  if (!canPreview || failed) return <span className={styles.entityThumbnailFallback}><ImageOff size={15} /><small>无预览</small></span>
+  return <img
+    className={styles.entityThumbnail}
+    src={`/api/v1/projects/${projectId}/attachments/${entity.source_attachment_id}/content`}
+    alt={`${entity.display_name} 参考图`}
+    loading="lazy"
+    onError={() => setFailed(true)}
+  />
+}
+
+function EntityChoice({ entity, projectId, checked, onChange }: { entity: EntityOption; projectId: string; checked: boolean; onChange: () => void }) {
+  return <label className={styles.entityOption}>
+    <input type="checkbox" checked={checked} onChange={onChange} />
+    <EntityThumbnail entity={entity} projectId={projectId} />
+    <span className={styles.entityOptionText}><strong>{entity.display_name}</strong><small>版本 v{entity.version_number}</small></span>
+    <Check size={14} />
+  </label>
+}
 
 const fields: Array<keyof ShotContract> = [
   'shot_code', 'sequence_number', 'duration_ms', 'narrative_beat_code', 'brief_segment_codes', 'continuity_group_id', 'continuity_relation',
@@ -235,9 +257,9 @@ export function ShotPlanRevisionEditor({
           <section className={styles.formSection}>
             <div className={styles.sectionTitle}><strong>实体与参考</strong><span>只选择该镜头实际使用的版本</span></div>
             <div className={styles.entityGrid}>
-              <fieldset><legend>人物版本</legend>{characters.length ? characters.map(entity => <label key={entity.id}><input type="checkbox" checked={shot.character_entity_version_ids.includes(entity.id)} onChange={() => toggleEntity(selectedIndex, 'character_entity_version_ids', entity.id)} /><span>{entity.display_name} · v{entity.version_number}</span><Check size={13} /></label>) : <em>无可用人物版本</em>}</fieldset>
-              <fieldset><legend>服装版本</legend>{outfits.length ? outfits.map(entity => <label key={entity.id}><input type="checkbox" checked={shot.outfit_entity_version_ids.includes(entity.id)} onChange={() => toggleEntity(selectedIndex, 'outfit_entity_version_ids', entity.id)} /><span>{entity.display_name} · v{entity.version_number}</span><Check size={13} /></label>) : <em>无可用服装版本</em>}</fieldset>
-              <fieldset><legend>产品版本</legend>{products.length ? products.map(entity => <label key={entity.id}><input type="checkbox" checked={shot.product_entity_version_ids.includes(entity.id)} onChange={() => toggleEntity(selectedIndex, 'product_entity_version_ids', entity.id)} /><span>{entity.display_name} · v{entity.version_number}</span><Check size={13} /></label>) : <em>无可用产品版本</em>}</fieldset>
+              <fieldset><legend>人物版本</legend>{characters.length ? characters.map(entity => <EntityChoice key={entity.id} entity={entity} projectId={projectId} checked={shot.character_entity_version_ids.includes(entity.id)} onChange={() => toggleEntity(selectedIndex, 'character_entity_version_ids', entity.id)} />) : <em>无可用人物版本</em>}</fieldset>
+              <fieldset><legend>服装版本</legend>{outfits.length ? outfits.map(entity => <EntityChoice key={entity.id} entity={entity} projectId={projectId} checked={shot.outfit_entity_version_ids.includes(entity.id)} onChange={() => toggleEntity(selectedIndex, 'outfit_entity_version_ids', entity.id)} />) : <em>无可用服装版本</em>}</fieldset>
+              <fieldset><legend>产品版本</legend>{products.length ? products.map(entity => <EntityChoice key={entity.id} entity={entity} projectId={projectId} checked={shot.product_entity_version_ids.includes(entity.id)} onChange={() => toggleEntity(selectedIndex, 'product_entity_version_ids', entity.id)} />) : <em>无可用产品版本</em>}</fieldset>
             </div>
             <div className={styles.contractChecks}>
               <fieldset><legend>必须看清人脸的主体</legend>{characters.filter(entity => shot.character_entity_version_ids.includes(entity.id)).map(entity => <label key={entity.id}><input type="checkbox" disabled={shot.face_visibility !== 'required'} checked={shot.face_subject_entity_version_ids.includes(entity.id)} onChange={() => update(selectedIndex, 'face_subject_entity_version_ids', shot.face_subject_entity_version_ids.includes(entity.id) ? shot.face_subject_entity_version_ids.filter(id => id !== entity.id) : [...shot.face_subject_entity_version_ids, entity.id])} />{entity.display_name} · v{entity.version_number}</label>)}</fieldset>
