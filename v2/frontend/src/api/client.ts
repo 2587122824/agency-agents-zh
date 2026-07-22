@@ -172,6 +172,17 @@ export const api = {
     }),
   }),
   productionExecution: (projectId: string) => request<ProductionExecution>(`/projects/${projectId}/production-execution`),
+  approveImagePhase: (projectId: string, execution: ProductionExecution) => {
+    const snapshot = execution.snapshot!
+    const phase = execution.phases.find(item => item.phase === 'images')!
+    return request<ProductionExecution>(`/projects/${projectId}/production-snapshots/${snapshot.id}:approve-image-phase`, {
+      method: 'POST', body: JSON.stringify({
+        command_id: crypto.randomUUID(), actor_id: 'local-user', expected_contract_hash: snapshot.contract_hash,
+        expected_image_node_ids: phase.expected_node_ids, approved_asset_ids: phase.approved_asset_ids,
+        confirm_release_video_phase: true,
+      }),
+    })
+  },
   qualityReview: (projectId: string) => request<QualityReview>(`/projects/${projectId}/quality-review`),
   verifyAsset: (projectId: string, asset: ProductionAsset) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:verify`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version }),

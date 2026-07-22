@@ -178,6 +178,7 @@ from ..providers.readiness import provider_readiness
 from ..production.contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
+    ApproveImagePhase,
     CreateProductionSnapshot,
     DecideProductionPlanCandidate,
     GenerateProductionPlanCandidate,
@@ -201,6 +202,7 @@ from ..production.service import (
     ProductionNotFoundError,
     activate_snapshot,
     analyze_impact,
+    approve_image_phase,
     create_snapshot,
     execution_view,
     lock_snapshot,
@@ -723,6 +725,25 @@ def production_snapshot_submit(
 ):
     try:
         return submit_production(session, require_project(session, project_id), snapshot_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots/{snapshot_id}:approve-image-phase",
+    response_model=ProductionExecutionView,
+)
+def production_snapshot_approve_image_phase(
+    project_id: str,
+    snapshot_id: str,
+    payload: ApproveImagePhase,
+    session: Session = Depends(get_session),
+):
+    try:
+        return approve_image_phase(session, require_project(session, project_id), snapshot_id, payload)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProductionConflictError as exc:

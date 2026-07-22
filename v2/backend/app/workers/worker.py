@@ -134,7 +134,37 @@ def _provider_request(
     outputs: list[dict] = []
     repository = _work(session)
     input_slots = repository.required_parent_input_slots(item)
+    snapshot = repository.snapshot(item.snapshot_id)
+    approval_assets = {
+        record["dag_node_id"]: record
+        for record in (snapshot.image_phase_approval_manifest or {}).get("assets", [])
+        if isinstance(record, dict) and record.get("dag_node_id")
+    } if snapshot else {}
     for parent in parents:
+        approved_record = approval_assets.get(parent.dag_node_id)
+        if parent.kind == "generate_keyframe":
+            if not approved_record:
+                raise ProviderAdapterError(
+                    "IMAGE_PHASE_APPROVAL_MISSING",
+                    "视频步骤的关键帧父节点尚未包含在已确认图片清单中。",
+                )
+            asset = repository.asset(str(approved_record.get("asset_id")))
+            if (
+                not asset
+                or asset.snapshot_id != item.snapshot_id
+                or asset.dag_node_id != parent.dag_node_id
+                or asset.state not in {"approved", "used"}
+                or asset.content_hash != approved_record.get("content_hash")
+            ):
+                raise ProviderAdapterError(
+                    "IMAGE_PHASE_APPROVED_ASSET_INVALID",
+                    "已确认关键帧素材的状态、归属或内容哈希发生变化。",
+                )
+            outputs.append({
+                **asset.provider_output_manifest,
+                "input_slot": input_slots.get(parent.dag_node_id),
+            })
+            continue
         parent_attempt = repository.attempt(parent.current_attempt_id)
         parent_outputs = (parent_attempt.response_manifest or {}).get("outputs") if parent_attempt else None
         if isinstance(parent_outputs, list):
@@ -222,32 +252,36 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
                     )
                 else:
                     parents = _required_parent_items(session, item)
-                    request = _provider_request(session, item, attempt, parents)
-                    # Keep provider I/O outside a database transaction. The
-                    # persisted lease remains the execution authority.
-                    session.commit()
                     try:
-                        result = adapter.poll(request, str(attempt.provider_task_id))
+                        request = _provider_request(session, item, attempt, parents)
                     except ProviderAdapterError as exc:
                         _finish_blocked(session, item, attempt, exc.code, exc.detail)
                     else:
-                        attempt.response_manifest = result.response_manifest
-                        attempt.execution_lock_owner = None
-                        attempt.execution_lock_expires_at = None
-                        if result.state == "running":
-                            attempt.state = "submitted"
-                            poll_seconds = int(attempt.request_manifest.get("provider", {}).get("poll_interval_seconds") or 10)
-                            item.available_at = utc_now() + timedelta(seconds=poll_seconds)
-                        elif result.state == "failed":
-                            _finish_blocked(
-                                session,
-                                item,
-                                attempt,
-                                result.error_code or "PROVIDER_TASK_FAILED",
-                                result.error_detail or "The provider task failed.",
-                            )
+                        # Keep provider I/O outside a database transaction. The
+                        # persisted lease remains the execution authority.
+                        session.commit()
+                        try:
+                            result = adapter.poll(request, str(attempt.provider_task_id))
+                        except ProviderAdapterError as exc:
+                            _finish_blocked(session, item, attempt, exc.code, exc.detail)
                         else:
-                            _finish_completed(session, item, attempt, result.response_manifest)
+                            attempt.response_manifest = result.response_manifest
+                            attempt.execution_lock_owner = None
+                            attempt.execution_lock_expires_at = None
+                            if result.state == "running":
+                                attempt.state = "submitted"
+                                poll_seconds = int(attempt.request_manifest.get("provider", {}).get("poll_interval_seconds") or 10)
+                                item.available_at = utc_now() + timedelta(seconds=poll_seconds)
+                            elif result.state == "failed":
+                                _finish_blocked(
+                                    session,
+                                    item,
+                                    attempt,
+                                    result.error_code or "PROVIDER_TASK_FAILED",
+                                    result.error_detail or "The provider task failed.",
+                                )
+                            else:
+                                _finish_completed(session, item, attempt, result.response_manifest)
             if item.status in {"completed", "blocked"}:
                 _record_terminal_event(session, owner, project, snapshot, item, attempt)
             session.commit()
@@ -256,6 +290,14 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
         candidates = repository.lease_candidates(now, limit=50)
         selected: WorkItem | None = None
         for item in candidates:
+            candidate_snapshot = repository.snapshot(item.snapshot_id) if item.snapshot_id else None
+            if (
+                candidate_snapshot
+                and candidate_snapshot.image_phase_required
+                and not candidate_snapshot.image_phase_approved_at
+                and item.kind != "generate_keyframe"
+            ):
+                continue
             parents = _required_parent_items(session, item)
             if any(parent.status == "blocked" for parent in parents):
                 attempt = repository.attempt(item.current_attempt_id)
@@ -355,30 +397,34 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
             )
         else:
             parents = _required_parent_items(session, item)
-            request = _provider_request(session, item, attempt, parents)
-            if isinstance(adapter, ExternalProviderAdapter):
-                attempt.state = "submitting"
-                session.commit()
-                try:
-                    submission = adapter.submit(request)
-                except ProviderAdapterError as exc:
-                    _finish_blocked(session, item, attempt, exc.code, exc.detail)
-                else:
-                    attempt.provider_task_id = submission.provider_task_id
-                    attempt.response_manifest = submission.response_manifest
-                    attempt.state = "submitted"
-                    attempt.submitted_at = utc_now()
-                    attempt.execution_lock_owner = None
-                    attempt.execution_lock_expires_at = None
-                    poll_seconds = int(manifest.get("provider", {}).get("poll_interval_seconds") or 10)
-                    item.available_at = utc_now() + timedelta(seconds=poll_seconds)
+            try:
+                request = _provider_request(session, item, attempt, parents)
+            except ProviderAdapterError as exc:
+                _finish_blocked(session, item, attempt, exc.code, exc.detail)
             else:
-                try:
-                    response = adapter.execute(request)
-                except ProviderAdapterError as exc:
-                    _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                if isinstance(adapter, ExternalProviderAdapter):
+                    attempt.state = "submitting"
+                    session.commit()
+                    try:
+                        submission = adapter.submit(request)
+                    except ProviderAdapterError as exc:
+                        _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                    else:
+                        attempt.provider_task_id = submission.provider_task_id
+                        attempt.response_manifest = submission.response_manifest
+                        attempt.state = "submitted"
+                        attempt.submitted_at = utc_now()
+                        attempt.execution_lock_owner = None
+                        attempt.execution_lock_expires_at = None
+                        poll_seconds = int(manifest.get("provider", {}).get("poll_interval_seconds") or 10)
+                        item.available_at = utc_now() + timedelta(seconds=poll_seconds)
                 else:
-                    _finish_completed(session, item, attempt, response)
+                    try:
+                        response = adapter.execute(request)
+                    except ProviderAdapterError as exc:
+                        _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                    else:
+                        _finish_completed(session, item, attempt, response)
         repository.flush()
         if item.status in {"completed", "blocked"}:
             _record_terminal_event(session, owner, project, snapshot, item, attempt)

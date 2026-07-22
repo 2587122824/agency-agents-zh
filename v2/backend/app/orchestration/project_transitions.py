@@ -132,7 +132,7 @@ TRANSITION_RULES: Mapping[ProjectStateTrigger, Mapping[str, str]] = {
         "producing": "quality_review",
     },
     ProjectStateTrigger.QUALITY_RECORDED: {
-        "producing": "quality_review",
+        "producing": "producing",
         "quality_review": "quality_review",
         "blocked": "blocked",
     },

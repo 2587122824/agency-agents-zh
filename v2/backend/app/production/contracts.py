@@ -88,6 +88,13 @@ class SubmitProduction(ProductionCommand):
     confirm_high_risk_submission: bool
 
 
+class ApproveImagePhase(ProductionCommand):
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    expected_image_node_ids: list[str] = Field(min_length=1)
+    approved_asset_ids: list[str] = Field(min_length=1)
+    confirm_release_video_phase: bool
+
+
 class ImpactAnalysisRead(BaseModel):
     id: str
     project_id: str
@@ -155,6 +162,10 @@ class ProductionSnapshotRead(BaseModel):
     created_at: datetime
     locked_at: datetime | None
     activated_at: datetime | None
+    image_phase_required: bool
+    image_phase_approval_manifest: dict | None
+    image_phase_approved_at: datetime | None
+    image_phase_approved_by: str | None
     entity_versions: list[dict]
     nodes: list[DAGNodeRead]
     edges: list[DependencyEdgeRead]
@@ -207,6 +218,7 @@ class ProductionExecutionView(BaseModel):
     snapshot: ProductionSnapshotRead | None
     work_items: list[ExecutionWorkItemRead]
     blockers: list[dict]
+    phases: list[dict]
 
 
 class PublishedConfigChoice(BaseModel):

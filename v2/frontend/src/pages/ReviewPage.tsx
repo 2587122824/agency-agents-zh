@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Check, CheckCircle2, Clock3, FileCheck2, Images, Image, Pencil, RefreshCw, RotateCcw, ShieldAlert, Sparkles, X } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import type { ProductionAsset } from '../api/types'
@@ -20,8 +20,9 @@ function mediaUrl(asset: ProductionAsset) {
 
 export function ReviewPage() {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const client = useQueryClient()
-  const [projectId, setProjectId] = useState('')
+  const [projectId, setProjectId] = useState(() => searchParams.get('project') ?? '')
   const [reviewChoice, setReviewChoice] = useState<ReviewChoice | null>(null)
   const [retryChoice, setRetryChoice] = useState<ProductionAsset | null>(null)
   const [revisionChoice, setRevisionChoice] = useState<RevisionChoice | null>(null)

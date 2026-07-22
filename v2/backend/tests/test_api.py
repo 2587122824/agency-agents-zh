@@ -3096,6 +3096,55 @@ def test_text_to_video_assignment_compiles_without_keyframe_or_parent_edge(clien
     }
     assert all(edge["input_slot"] == "timeline_input" for edge in analysis["manifest"]["dag"]["edges"])
 
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "text-to-video-snapshot-command",
+            "impact_analysis_id": analysis["id"],
+            "analysis_hash": analysis["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    )
+    assert created.status_code == 201, created.text
+    snapshot = created.json()
+    assert snapshot["image_phase_required"] is False
+    locked = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:lock",
+        json={
+            "command_id": "text-to-video-lock-command",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "confirm_high_risk_cost": True,
+        },
+    )
+    assert locked.status_code == 200
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={
+            "command_id": "text-to-video-activate-command",
+            "expected_contract_hash": snapshot["contract_hash"],
+        },
+    )
+    assert activated.status_code == 200
+    activated_snapshot = activated.json()
+    submitted = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "text-to-video-submit-command",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated_snapshot["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert submitted.status_code == 202
+    execution = submitted.json()
+    assert execution["phases"][0]["status"] == "not_required"
+    assert execution["phases"][1]["status"] == "producing"
+    assert all(item["status"] == "queued" for item in execution["work_items"])
+
 
 def test_production_impact_requires_exactly_one_visual_prompt_binding(client: TestClient) -> None:
     project, plan = create_confirmed_plan(client)
@@ -3868,22 +3917,151 @@ def test_mock_worker_obeys_dag_order_and_makes_no_provider_submission(client: Te
             "confirm_high_risk_submission": True,
         },
     )
-    assert process_one("test-worker") is True
-    first = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
-    completed = [item for item in first["work_items"] if item["status"] == "completed"]
-    assert len(completed) == 1
-    assert completed[0]["kind"] == "generate_keyframe"
-    for _ in range(len(activated["nodes"]) - 1):
+    image_node_count = sum(node["kind"] == "generate_keyframe" for node in activated["nodes"])
+    for _ in range(image_node_count):
         assert process_one("test-worker") is True
     execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
-    assert all(item["status"] == "completed" for item in execution["work_items"])
-    assert execution["project_status"] == "quality_review"
-    assert execution["snapshot"]["status"] == "execution_completed"
-    assert all(item["attempts"][0]["provider_task_id"] is None for item in execution["work_items"])
-    assert all(item["attempts"][0]["response_manifest"]["media_created"] is False for item in execution["work_items"])
+    image_items = [item for item in execution["work_items"] if item["kind"] == "generate_keyframe"]
+    later_items = [item for item in execution["work_items"] if item["kind"] != "generate_keyframe"]
+    assert all(item["status"] == "completed" for item in image_items)
+    assert all(item["status"] == "waiting_phase" for item in later_items)
+    assert execution["phases"][0]["status"] == "review_required"
+    assert execution["phases"][1]["status"] == "waiting_image_approval"
+    assert execution["project_status"] == "producing"
+    assert execution["snapshot"]["status"] == "submitted"
+    assert process_one("test-worker") is False
+    assert all(item["attempts"][0]["provider_task_id"] is None for item in image_items)
+    assert all(item["attempts"][0]["response_manifest"]["media_created"] is False for item in image_items)
     with SessionLocal() as session:
         cost_events = list(session.scalars(select(CostEvent).where(CostEvent.snapshot_id == snapshot["id"])))
         assert all(item.kind == "estimated" and item.status == "confirmed" for item in cost_events)
+
+
+def test_image_phase_requires_exact_approved_assets_before_releasing_video(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "phase-activate-command-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    submitted = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "phase-submit-command-0001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    ).json()
+    image_phase = submitted["phases"][0]
+    assert image_phase["total_count"] == 3
+    assert all(
+        item["status"] == "waiting_phase"
+        for item in submitted["work_items"]
+        if item["kind"] != "generate_keyframe"
+    )
+
+    premature = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:approve-image-phase",
+        json={
+            "command_id": "phase-premature-command-1",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_image_node_ids": image_phase["expected_node_ids"],
+            "approved_asset_ids": ["asset_missing"],
+            "confirm_release_video_phase": True,
+        },
+    )
+    assert premature.status_code == 409
+    assert premature.headers["x-error-code"] == "IMAGE_PHASE_WORK_INCOMPLETE"
+
+    approved_asset_ids = []
+    for index in range(image_phase["total_count"]):
+        item, response_manifest, _ = attach_local_provider_output(project, snapshot, 480, 848, node_index=index)
+        response_hash = hashlib.sha256(json.dumps(
+            response_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+        asset = client.post(
+            f"/api/v1/projects/{project['id']}/work-attempts/{item['attempt_id']}/assets",
+            json={
+                "command_id": f"phase-register-command-{index:03d}",
+                "output_index": 0,
+                "expected_response_manifest_hash": response_hash,
+            },
+        ).json()
+        asset = client.post(
+            f"/api/v1/projects/{project['id']}/assets/{asset['id']}:verify",
+            json={"command_id": f"phase-verify-command-{index:04d}", "expected_row_version": asset["row_version"]},
+        ).json()
+        candidate = client.post(
+            f"/api/v1/projects/{project['id']}/assets/{asset['id']}:run-qc",
+            json={"command_id": f"phase-qc-command-{index:08d}", "expected_row_version": asset["row_version"]},
+        ).json()
+        pending = next(
+            row for row in client.get(f"/api/v1/projects/{project['id']}/quality-review").json()["assets"]
+            if row["id"] == asset["id"]
+        )
+        approved = client.post(
+            f"/api/v1/projects/{project['id']}/assets/{asset['id']}:approve",
+            json={
+                "command_id": f"phase-approve-command-{index:03d}",
+                "expected_row_version": pending["row_version"],
+                "qc_report_candidate_id": candidate["id"],
+                "rationale": "该关键帧符合当前分镜合同。",
+            },
+        ).json()
+        approved_asset_ids.append(approved["id"])
+
+    ready = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    image_phase = ready["phases"][0]
+    assert image_phase["status"] == "ready_to_release"
+    assert image_phase["approved_count"] == image_phase["total_count"]
+    mismatch = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:approve-image-phase",
+        json={
+            "command_id": "phase-mismatch-command-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_image_node_ids": image_phase["expected_node_ids"],
+            "approved_asset_ids": approved_asset_ids[:-1],
+            "confirm_release_video_phase": True,
+        },
+    )
+    assert mismatch.status_code == 409
+    assert mismatch.headers["x-error-code"] == "IMAGE_PHASE_ASSET_LIST_MISMATCH"
+
+    command = {
+        "command_id": "phase-release-command-0001",
+        "expected_contract_hash": snapshot["contract_hash"],
+        "expected_image_node_ids": image_phase["expected_node_ids"],
+        "approved_asset_ids": approved_asset_ids,
+        "confirm_release_video_phase": True,
+    }
+    released = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:approve-image-phase",
+        json=command,
+    )
+    replayed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:approve-image-phase",
+        json=command,
+    )
+    assert released.status_code == 200
+    execution = released.json()
+    assert replayed.status_code == 200
+    assert execution["snapshot"]["image_phase_approved_at"]
+    assert execution["snapshot"]["image_phase_approval_manifest"]["schema_version"] == "image-phase-approval.v1"
+    assert execution["phases"][0]["status"] == "approved"
+    assert all(
+        item["status"] == "queued"
+        for item in execution["work_items"]
+        if item["kind"] != "generate_keyframe"
+    )
+    assert process_one("test-worker") is True
+    after_first_video = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    completed_videos = [
+        item for item in after_first_video["work_items"]
+        if item["kind"] == "generate_i2v_clip" and item["status"] == "completed"
+    ]
+    assert len(completed_videos) == 1
 
 
 class FakePersistedExternalAdapter:

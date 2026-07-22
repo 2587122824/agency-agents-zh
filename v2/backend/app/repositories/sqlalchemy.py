@@ -817,6 +817,13 @@ class SqlAlchemyProductionRepository:
             .order_by(WorkAttempt.work_item_id, WorkAttempt.attempt_number)
         ))
 
+    def snapshot_assets(self, snapshot_id: str) -> list[Asset]:
+        return list(self.session.scalars(
+            select(Asset)
+            .where(Asset.snapshot_id == snapshot_id, Asset.state != "deleted")
+            .order_by(Asset.dag_node_id, Asset.created_at, Asset.id)
+        ))
+
     def active_plan(self, project_id: str) -> PlanVersion | None:
         return self.session.scalar(
             select(PlanVersion)
@@ -1159,6 +1166,9 @@ class SqlAlchemyDeliveryRepository:
 class SqlAlchemyWorkRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
+
+    def asset(self, asset_id: str) -> Asset | None:
+        return self.session.get(Asset, asset_id)
 
     def required_parent_items(self, item: WorkItem) -> list[WorkItem]:
         parent_node_ids = list(self.session.scalars(select(DependencyEdge.parent_node_id).where(

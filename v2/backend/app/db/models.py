@@ -791,6 +791,10 @@ class ProductionSnapshot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    image_phase_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    image_phase_approval_manifest: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    image_phase_approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    image_phase_approved_by: Mapped[str | None] = mapped_column(String(48), nullable=True)
 
 
 class SnapshotEntityVersion(Base):

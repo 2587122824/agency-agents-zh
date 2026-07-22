@@ -42,6 +42,7 @@ from ..orchestration.project_transitions import ProjectStateTrigger, transition_
 from .contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
+    ApproveImagePhase,
     CreateProductionSnapshot,
     LockProductionSnapshot,
     ShotWorkflowAssignment,
@@ -774,7 +775,7 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
     for shot in repository.plan_shots(plan.id):
         node = frozen_nodes.get(shot.id)
         if not node:
-            raise ProductionConflictError("KEYFRAME_NODE_MISSING_AFTER_ANALYSIS", f"镜头 {shot.shot_code} 缺少冻结关键帧节点。")
+            continue
         current_reference = _freeze_reference_image(
             repository,
             project.id,
@@ -820,6 +821,10 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
         currency=analysis.currency,
         execution_blockers=analysis.execution_blockers,
         created_by=payload.actor_id,
+        image_phase_required=any(
+            item.get("kind") == "generate_keyframe"
+            for item in analysis.manifest["dag"]["nodes"]
+        ),
     )
     repository.add(snapshot)
     repository.flush()
@@ -1152,14 +1157,15 @@ def submit_production(
             )
         manifest = _execution_manifest(snapshot, node, workflow, provider, video_spec, storage)
         fingerprint = _hash(manifest)
+        waits_for_image_approval = snapshot.image_phase_required and node.kind != "generate_keyframe"
         item = WorkItem(
             project_id=project.id,
             snapshot_id=snapshot.id,
             dag_node_id=node.id,
             kind=node.kind,
             payload=manifest,
-            status="queued",
-            priority=100,
+            status="waiting_phase" if waits_for_image_approval else "queued",
+            priority=100 if node.kind == "generate_keyframe" else 200,
             request_fingerprint=fingerprint,
             available_at=now,
         )
@@ -1204,6 +1210,106 @@ def submit_production(
     return execution_view(session, project)
 
 
+def approve_image_phase(
+    session: Session,
+    project: Project,
+    snapshot_id: str,
+    payload: ApproveImagePhase,
+) -> dict:
+    command_type = "production.image_phase.approve"
+    receipt = _receipt(session, project.id, payload.command_id, command_type)
+    if receipt:
+        return execution_view(session, project)
+    repository = _production(session)
+    snapshot = repository.snapshot(snapshot_id)
+    if not snapshot or snapshot.project_id != project.id:
+        raise ProductionNotFoundError("Production snapshot not found")
+    if project.active_snapshot_id != snapshot.id or snapshot.status != "submitted":
+        raise ProductionConflictError("IMAGE_PHASE_SNAPSHOT_NOT_ACTIVE", "只能确认当前已提交制作方案的图片阶段。")
+    if snapshot.contract_hash != payload.expected_contract_hash:
+        raise ProductionConflictError("IMAGE_PHASE_CONTRACT_CHANGED", "制作方案合同已经变化，请刷新后重新确认。")
+    if not snapshot.image_phase_required:
+        raise ProductionConflictError("IMAGE_PHASE_NOT_REQUIRED", "当前制作方案没有图片生产阶段。")
+    if snapshot.image_phase_approved_at or snapshot.image_phase_approval_manifest:
+        raise ProductionConflictError("IMAGE_PHASE_ALREADY_APPROVED", "当前图片阶段已经确认并放行。")
+    if not payload.confirm_release_video_phase:
+        raise ProductionConflictError("IMAGE_PHASE_CONFIRMATION_REQUIRED", "需要明确确认放行视频生产阶段。")
+
+    nodes = repository.snapshot_nodes(snapshot.id, ordered=True)
+    image_nodes = [node for node in nodes if node.kind == "generate_keyframe"]
+    image_node_ids = [node.id for node in image_nodes]
+    if len(payload.expected_image_node_ids) != len(set(payload.expected_image_node_ids)):
+        raise ProductionConflictError("IMAGE_PHASE_NODE_LIST_HAS_DUPLICATES", "图片节点清单包含重复项。")
+    if set(payload.expected_image_node_ids) != set(image_node_ids) or len(payload.expected_image_node_ids) != len(image_node_ids):
+        raise ProductionConflictError("IMAGE_PHASE_NODE_LIST_MISMATCH", "图片节点清单与当前制作方案不一致。")
+
+    items_by_node = {item.dag_node_id: item for item in repository.work_items(snapshot.id)}
+    incomplete = [node.node_key for node in image_nodes if not items_by_node.get(node.id) or items_by_node[node.id].status != "completed"]
+    if incomplete:
+        raise ProductionConflictError("IMAGE_PHASE_WORK_INCOMPLETE", f"仍有 {len(incomplete)} 个图片步骤尚未成功完成。")
+
+    approved_by_node: dict[str, list] = {node.id: [] for node in image_nodes}
+    for asset in repository.snapshot_assets(snapshot.id):
+        if asset.dag_node_id in approved_by_node and asset.state in {"approved", "used"}:
+            approved_by_node[asset.dag_node_id].append(asset)
+    ambiguous = [node.node_key for node in image_nodes if len(approved_by_node[node.id]) != 1]
+    if ambiguous:
+        raise ProductionConflictError(
+            "IMAGE_PHASE_APPROVED_ASSET_COUNT_INVALID",
+            f"每个图片步骤必须恰好有一份已批准素材；当前有 {len(ambiguous)} 个步骤不满足。",
+        )
+    approved_assets = [approved_by_node[node.id][0] for node in image_nodes]
+    if any(not asset.content_hash for asset in approved_assets):
+        raise ProductionConflictError("IMAGE_PHASE_ASSET_HASH_MISSING", "已批准图片缺少可核对的内容哈希。")
+    approved_asset_ids = [asset.id for asset in approved_assets]
+    if len(payload.approved_asset_ids) != len(set(payload.approved_asset_ids)):
+        raise ProductionConflictError("IMAGE_PHASE_ASSET_LIST_HAS_DUPLICATES", "已批准素材清单包含重复项。")
+    if set(payload.approved_asset_ids) != set(approved_asset_ids) or len(payload.approved_asset_ids) != len(approved_asset_ids):
+        raise ProductionConflictError("IMAGE_PHASE_ASSET_LIST_MISMATCH", "已批准素材清单与当前审核结果不一致。")
+
+    now = utc_now()
+    snapshot.image_phase_approval_manifest = {
+        "schema_version": "image-phase-approval.v1",
+        "assets": [
+            {
+                "dag_node_id": node.id,
+                "node_key": node.node_key,
+                "asset_id": asset.id,
+                "content_hash": asset.content_hash,
+            }
+            for node, asset in zip(image_nodes, approved_assets, strict=True)
+        ],
+    }
+    snapshot.image_phase_approved_at = now
+    snapshot.image_phase_approved_by = payload.actor_id
+    released_ids = []
+    for item in repository.work_items(snapshot.id):
+        if item.status == "waiting_phase":
+            item.status = "queued"
+            item.available_at = now
+            item.row_version += 1
+            released_ids.append(item.id)
+    _save_receipt(session, project.id, payload.command_id, command_type, "production_snapshot", snapshot.id)
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=snapshot.id,
+        event_type="production.image_phase_approved.v1",
+        aggregate_type="production_snapshot",
+        aggregate_id=snapshot.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
+        message="图片阶段经用户明确确认，视频及后续制作步骤已放行。",
+        data={
+            "snapshot_id": snapshot.id,
+            "approved_asset_ids": approved_asset_ids,
+            "released_work_item_ids": released_ids,
+        },
+    ))
+    session.commit()
+    return execution_view(session, project)
+
+
 def execution_view(session: Session, project: Project) -> dict:
     repository = _production(session)
     snapshot = repository.snapshot(project.active_snapshot_id) if project.active_snapshot_id else None
@@ -1238,7 +1344,12 @@ def execution_view(session: Session, project: Project) -> dict:
                     ready.sort(key=lambda value: (node_by_id[value].node_key, value))
         if len(ordered_node_ids) != len(nodes):
             raise ProductionConflictError("DAG_CYCLE_DETECTED", "The active snapshot dependency graph contains a cycle.")
+        topological_position = {node_id: index for index, node_id in enumerate(ordered_node_ids)}
         items = [item_by_node_id[node_id] for node_id in ordered_node_ids if node_id in item_by_node_id]
+        items.sort(key=lambda item: (
+            0 if node_by_id[item.dag_node_id].kind == "generate_keyframe" else 1,
+            topological_position[item.dag_node_id],
+        ))
     else:
         node_by_id = {}
     attempts = repository.work_attempts([item.id for item in items])
@@ -1280,6 +1391,54 @@ def execution_view(session: Session, project: Project) -> dict:
             "error_code": latest_attempt["error_code"] if latest_attempt else None,
             "error": item.error,
         })
+    phases = []
+    if snapshot:
+        image_items = [item for item in items if node_by_id[item.dag_node_id].kind == "generate_keyframe"]
+        later_items = [item for item in items if node_by_id[item.dag_node_id].kind != "generate_keyframe"]
+        approved_assets_by_node: dict[str, list] = {}
+        for asset in repository.snapshot_assets(snapshot.id):
+            if asset.state in {"approved", "used"} and asset.dag_node_id:
+                approved_assets_by_node.setdefault(asset.dag_node_id, []).append(asset)
+        image_node_ids = [item.dag_node_id for item in image_items]
+        approved_assets = [assets[0] for node_id in image_node_ids if len(assets := approved_assets_by_node.get(node_id, [])) == 1]
+        if not snapshot.image_phase_required:
+            image_status = "not_required"
+        elif snapshot.image_phase_approved_at:
+            image_status = "approved"
+        elif any(item.status == "blocked" for item in image_items):
+            image_status = "blocked"
+        elif image_items and all(item.status == "completed" for item in image_items):
+            image_status = "ready_to_release" if len(approved_assets) == len(image_items) else "review_required"
+        else:
+            image_status = "producing"
+        if any(item.status == "waiting_phase" for item in later_items):
+            later_status = "waiting_image_approval"
+        elif later_items and all(item.status == "completed" for item in later_items):
+            later_status = "completed"
+        elif any(item.status == "blocked" for item in later_items):
+            later_status = "blocked"
+        else:
+            later_status = "producing"
+        phases = [
+            {
+                "phase": "images",
+                "status": image_status,
+                "total_count": len(image_items),
+                "completed_count": sum(item.status == "completed" for item in image_items),
+                "approved_count": len(approved_assets),
+                "expected_node_ids": image_node_ids,
+                "approved_asset_ids": [asset.id for asset in approved_assets],
+            },
+            {
+                "phase": "videos_and_later",
+                "status": later_status,
+                "total_count": len(later_items),
+                "completed_count": sum(item.status == "completed" for item in later_items),
+                "approved_count": 0,
+                "expected_node_ids": [],
+                "approved_asset_ids": [],
+            },
+        ]
     return {
         "project_id": project.id,
         "project_status": project.status,
@@ -1287,6 +1446,7 @@ def execution_view(session: Session, project: Project) -> dict:
         "snapshot": _snapshot_dict(session, snapshot) if snapshot else None,
         "work_items": work_rows,
         "blockers": blockers,
+        "phases": phases,
     }
 
 

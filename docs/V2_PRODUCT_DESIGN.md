@@ -410,6 +410,7 @@ GET /api/v1/projects/{project_id}/attachments/{attachment_id}/content
 ### 12.2 节点状态
 
 ```text
+waiting_phase
 queued
 running
 completed
@@ -419,7 +420,7 @@ cancelled
 skipped
 ```
 
-`pending` 或 `queued` 只代表等待，不显示成运行中。
+`waiting_phase` 表示该工作项已经按冻结 DAG 创建，但尚未通过上一生产阶段的用户确认门禁；它不能被 Worker 租约。`pending`、`queued` 或 `waiting_phase` 都只代表等待，不显示成运行中。
 
 ### 12.3 工作项
 
@@ -441,15 +442,14 @@ DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表
 
 ## 13. 分阶段生产
 
-建议默认阶段：
+首期视觉生产采用两个真实执行阶段：
 
-1. 一致性基准：人物、产品、服装和场景基准。
-2. 镜头关键帧：所有视觉镜头的静态验证。
-3. 动态视频：只使用已确认关键帧。
-4. 音频与字幕：仅在系统配置明确开启时执行。
-5. 剪辑装配：只使用审核通过的素材。
+1. 分镜图片：按已确认制作方案生成全部镜头关键帧。单画面镜头生成 1 张；首中尾镜头生成 3 张独立关键帧。
+2. 视频与后续制作：视频只使用图片阶段冻结并批准的素材；音频与字幕仅在系统配置明确开启时执行，之后再进入剪辑装配。
 
-每个阶段完成后进入人工确认，不自动开始下一批付费任务。
+只要快照包含关键帧节点，提交生产时只有图片节点进入 `queued`，视频、音频与后续节点进入 `waiting_phase`。图片节点全部成功完成后，用户必须逐项审核；每个图片 DAG 节点必须恰好存在一份 `approved` 或 `used` 素材。用户显式确认图片阶段时，命令同时提交合同哈希、完整图片节点清单和完整已批准素材清单；后端冻结节点 ID、素材 ID 与内容哈希后，才把后续工作项放行为 `queued`。
+
+Worker 生成视频前必须再次核对冻结素材的节点归属、审核状态和内容哈希，只能消费图片阶段确认清单中的素材。清单缺失、增加、重复、状态变化或哈希不一致均明确阻断，不猜测素材、不自动批准、不替换工作流、不自动重试。若快照全部使用纯文本生视频且没有关键帧节点，则 `image_phase_required=false`，视频任务提交后直接进入队列，不创建空的图片确认门禁。
 
 ## 14. 质量检查
 
@@ -1067,6 +1067,7 @@ preparing -> locked -> active -> submitted -> execution_completed | execution_bl
 - `locked` 只表示合同和预计费用已确认，不创建 WorkItem。
 - `active` 只表示该快照成为项目唯一活动快照，仍不创建 WorkItem。
 - `submitted` 必须再次提交精确合同哈希、金额、币种和完整 DAG 节点 ID；随后一对一创建 WorkItem 与首个 WorkAttempt。
+- 包含关键帧节点时，`submitted` 只放行图片 WorkItem；其余 WorkItem 使用 `waiting_phase` 等待图片阶段显式确认。图片阶段确认清单冻结节点、素材和内容哈希，且每个图片节点必须恰好对应一份已批准素材。
 - 节点 ID 缺失、重复或额外添加均阻断，不做名称猜测或部分提交。
 - 首期 Worker 只执行明确配置为 `mock` 的适配器和本地时间线合同节点。其他适配器返回 `PROVIDER_ADAPTER_NOT_CONNECTED`，不发送网络请求。
 - Mock 响应只证明编排路径可执行，不伪造图片、视频、音频、供应商任务 ID 或实际扣费。
@@ -1079,6 +1080,7 @@ preparing -> locked -> active -> submitted -> execution_completed | execution_bl
 ```text
 POST /api/v1/projects/{project_id}/production-snapshots/{snapshot_id}:activate
 POST /api/v1/projects/{project_id}/production-snapshots/{snapshot_id}:submit
+POST /api/v1/projects/{project_id}/production-snapshots/{snapshot_id}:approve-image-phase
 GET  /api/v1/projects/{project_id}/production-execution
 ```
 

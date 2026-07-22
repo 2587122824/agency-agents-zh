@@ -553,6 +553,10 @@ export interface ProductionSnapshot {
   created_at: string
   locked_at: string | null
   activated_at: string | null
+  image_phase_required: boolean
+  image_phase_approval_manifest: Record<string, unknown> | null
+  image_phase_approved_at: string | null
+  image_phase_approved_by: string | null
   entity_versions: Array<{ entity_version_id: string; role: string }>
   nodes: Array<{ id: string; node_key: string; kind: string; shot_id: string | null; workflow_slot_version_id: string | null; pricing_rule_id: string | null; pricing_quantity: number | null; pricing_unit: string | null; estimated_cost: number | null; currency: string | null; input_contract: Record<string, unknown>; output_contract: Record<string, unknown> }>
   edges: Array<{ id: string; parent_node_id: string; child_node_id: string; dependency_type: string; input_slot: string | null }>
@@ -605,6 +609,15 @@ export interface ProductionExecution {
   snapshot: ProductionSnapshot | null
   work_items: ExecutionWorkItem[]
   blockers: Array<{ work_item_id: string; node_key: string; error_code: string | null; error: string | null }>
+  phases: Array<{
+    phase: 'images' | 'videos_and_later'
+    status: string
+    total_count: number
+    completed_count: number
+    approved_count: number
+    expected_node_ids: string[]
+    approved_asset_ids: string[]
+  }>
 }
 
 export interface QCFinding {
