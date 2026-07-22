@@ -77,6 +77,29 @@ function userIssue(code: string) {
   return issueMessages[code] ?? '当前制作设置需要调整，请展开技术详情查看具体原因。'
 }
 
+function DismissibleErrorAlert({ stage, message }: { stage: string; message: string }) {
+  const [closing, setClosing] = useState(false)
+  const [dismissed, setDismissed] = useState(false)
+
+  useEffect(() => {
+    setClosing(false)
+    setDismissed(false)
+  }, [stage, message])
+
+  useEffect(() => {
+    if (!closing) return
+    const timer = window.setTimeout(() => setDismissed(true), 280)
+    return () => window.clearTimeout(timer)
+  }, [closing])
+
+  if (dismissed) return null
+  return <div className={styles.stickyAlert} data-closing={closing} role="alert">
+    <CircleAlert size={17} />
+    <div><strong>{stage}</strong><span>{message}</span></div>
+    <button type="button" title="关闭错误提示" aria-label="关闭错误提示" onClick={() => setClosing(true)}><X size={15} /></button>
+  </div>
+}
+
 function attachmentDisplayName(filename: string) {
   return filename.replace(/\.[^.]+$/, '').trim() || '未命名人物参考'
 }
@@ -396,7 +419,7 @@ export function PlanPage() {
   return <>
     <PageHeader eyebrow="PLAN REVIEW" title={`${project.data.title} · 方案确认`} description="内容策划智能体与分镜导演智能体只提交候选，用户确认后才创建不可变方案版本。" actions={<Link className="secondaryButton" to={`/projects/${projectId}`}><ArrowLeft size={15} />返回创作中心</Link>} />
     <div className={styles.versionBar}><span><GitBranch size={15} />需求 v{data.active_requirement.version_number}</span><i></i><span data-active={Boolean(brief)}><Sparkles size={15} />{brief ? '内容方案' : '内容方案待生成'}</span><i></i><span data-active={Boolean(data.active_plan)}><LockKeyhole size={15} />{data.active_plan ? `创作方案 v${data.active_plan.version_number}` : '创作方案尚未创建'}</span><b>{nextActionLabel}</b></div>
-    {error && <div className={styles.stickyAlert} role="alert"><CircleAlert size={17} /><div><strong>{errorStage}</strong><span>{error.message}</span></div></div>}
+    {error && <DismissibleErrorAlert stage={errorStage} message={error.message} />}
     <main className={styles.layout} data-editing-shots={editingShots}>
       <section className={styles.main}>
         <div className={styles.briefPanel}>
