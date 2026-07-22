@@ -1507,9 +1507,22 @@ def bind_attachment(
         raise CreationNotFoundError("Attachment not found")
     if attachment.verification_status != "verified":
         raise CreationConflictError("ATTACHMENT_NOT_VERIFIED", "附件尚未通过验证，不能绑定。")
-    if payload.binding_type != "inspiration_only" and not payload.entity_id:
-        raise CreationConflictError("ENTITY_ID_REQUIRED", "该绑定类型必须明确选择实体 ID。")
+    if payload.binding_type == "inspiration_only":
+        if payload.entity_id or payload.entity_version_id or payload.create_new_entity or payload.entity_display_name:
+            raise CreationConflictError("INSPIRATION_BINDING_HAS_ENTITY", "仅作灵感不能同时选择或创建实体。")
+    else:
+        has_existing_entity = bool(payload.entity_id)
+        if has_existing_entity == payload.create_new_entity:
+            raise CreationConflictError(
+                "ENTITY_BINDING_MODE_REQUIRED",
+                "请选择一个已有实体，或明确登记为新实体。",
+            )
+        if payload.create_new_entity and not payload.entity_display_name:
+            raise CreationConflictError("ENTITY_DISPLAY_NAME_REQUIRED", "登记新实体时必须填写显示名称。")
+        if payload.create_new_entity and payload.entity_version_id:
+            raise CreationConflictError("NEW_ENTITY_VERSION_FORBIDDEN", "登记新实体时不能选择已有实体版本。")
     entity_version_id = None
+    binding_entity_id = None
     if payload.binding_type != "inspiration_only":
         entity_type = {
             "identity_reference": "character",
@@ -1518,18 +1531,20 @@ def bind_attachment(
             "product_reference": "product",
             "voice_sample": "voice",
         }[payload.binding_type]
-        entity = repository.entity(payload.entity_id)
-        if entity and (entity.project_id != project.id or entity.entity_type != entity_type):
-            raise CreationConflictError("ENTITY_TYPE_CONFLICT", "实体 ID 已存在，但项目或实体类型不匹配。")
-        if not entity:
+        if payload.create_new_entity:
             entity = Entity(
-                id=payload.entity_id,
+                id=new_id("entity"),
                 project_id=project.id,
                 entity_type=entity_type,
-                display_name=payload.entity_id,
+                display_name=payload.entity_display_name,
             )
             repository.add(entity)
             repository.flush()
+        else:
+            entity = repository.entity(payload.entity_id)
+            if not entity or entity.project_id != project.id or entity.entity_type != entity_type:
+                raise CreationConflictError("ENTITY_NOT_AVAILABLE", "所选实体不存在，或不属于当前项目和绑定类型。")
+        binding_entity_id = entity.id
         if payload.entity_version_id:
             selected_version = repository.entity_version(payload.entity_version_id)
             if (
@@ -1565,7 +1580,7 @@ def bind_attachment(
         project_id=project.id,
         attachment_id=attachment.id,
         binding_type=payload.binding_type,
-        entity_id=payload.entity_id,
+        entity_id=binding_entity_id,
         entity_version_id=entity_version_id,
         confirmed_by=payload.actor_id,
     )

@@ -69,6 +69,8 @@ class BindingCreate(CommandContext):
     ]
     entity_id: str | None = Field(default=None, max_length=80)
     entity_version_id: str | None = Field(default=None, max_length=80)
+    create_new_entity: bool = False
+    entity_display_name: str | None = Field(default=None, min_length=1, max_length=120)
 
 
 class MessageRead(BaseModel):

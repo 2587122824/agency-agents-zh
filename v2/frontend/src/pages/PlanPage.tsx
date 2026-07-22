@@ -77,6 +77,17 @@ function userIssue(code: string) {
   return issueMessages[code] ?? '当前制作设置需要调整，请展开技术详情查看具体原因。'
 }
 
+function attachmentDisplayName(filename: string) {
+  return filename.replace(/\.[^.]+$/, '').trim() || '未命名人物参考'
+}
+
+type CharacterUploadStatus = {
+  phase: 'uploading' | 'uploaded' | 'binding' | 'succeeded' | 'failed_after_upload'
+  filename: string
+  attachmentId?: string
+  message?: string
+}
+
 type ValidationIssue = ProductionImpactAnalysis['validation_errors'][number]
 
 function groupValidationIssues(items: ValidationIssue[], shotCodes: string[]) {
@@ -178,6 +189,7 @@ export function PlanPage() {
   const client = useQueryClient()
   const project = useQuery({ queryKey: ['project', projectId], queryFn: () => api.project(projectId), enabled: Boolean(projectId), refetchOnMount: 'always' })
   const planning = useQuery({ queryKey: ['planning-center', projectId], queryFn: () => api.planningCenter(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
+  const creation = useQuery({ queryKey: ['creation-center', projectId], queryFn: () => api.creationCenter(projectId), enabled: Boolean(projectId) })
   const preparation = useQuery({ queryKey: ['production-preparation', projectId], queryFn: () => api.productionPreparation(projectId), enabled: Boolean(projectId) })
   const [configId, setConfigId] = useState('')
   const [videoSpecId, setVideoSpecId] = useState('')
@@ -193,6 +205,7 @@ export function PlanPage() {
   const [editingBrief, setEditingBrief] = useState(false)
   const [briefRevisionInstruction, setBriefRevisionInstruction] = useState('')
   const [briefQuestionAnswers, setBriefQuestionAnswers] = useState<Record<string, string>>({})
+  const [characterUploadStatus, setCharacterUploadStatus] = useState<CharacterUploadStatus | null>(null)
   const characterFileInput = useRef<HTMLInputElement>(null)
   const latestSnapshot = preparation.data?.snapshots[0]
   const refresh = () => client.invalidateQueries({ queryKey: ['planning-center', projectId] })
@@ -206,10 +219,43 @@ export function PlanPage() {
   const retryShots = useMutation({ mutationFn: () => api.retryShotPlan(projectId, planning.data!.latest_director_run!.id, planning.data!.active_requirement.id), onSuccess: refresh })
   const uploadCharacter = useMutation({
     mutationFn: async (file: File) => {
+      setCharacterUploadStatus({ phase: 'uploading', filename: file.name })
       const attachment = await api.registerAttachment(projectId, file)
-      return api.bindAttachment(projectId, attachment.id, 'identity_reference', 'char_main')
+      setCharacterUploadStatus({ phase: 'uploaded', filename: file.name, attachmentId: attachment.id })
+      setCharacterUploadStatus({ phase: 'binding', filename: file.name, attachmentId: attachment.id })
+      try {
+        const binding = await api.bindAttachment(projectId, attachment.id, 'identity_reference', { createNew: true, displayName: attachmentDisplayName(file.name) })
+        return { attachment, binding }
+      } catch (error) {
+        setCharacterUploadStatus({
+          phase: 'failed_after_upload', filename: file.name, attachmentId: attachment.id,
+          message: error instanceof Error ? error.message : '人物登记失败',
+        })
+        throw error
+      }
     },
-    onSuccess: async () => { await Promise.all([refresh(), client.invalidateQueries({ queryKey: ['creation-center', projectId] })]) },
+    onSuccess: async ({ attachment }) => {
+      setCharacterUploadStatus({ phase: 'succeeded', filename: attachment.original_filename, attachmentId: attachment.id })
+      await Promise.all([refresh(), client.invalidateQueries({ queryKey: ['creation-center', projectId] })])
+    },
+    onSettled: () => client.invalidateQueries({ queryKey: ['creation-center', projectId] }),
+  })
+  const registerExistingCharacter = useMutation({
+    mutationFn: (attachment: { id: string; original_filename: string }) => api.bindAttachment(
+      projectId,
+      attachment.id,
+      'identity_reference',
+      { createNew: true, displayName: attachmentDisplayName(attachment.original_filename) },
+    ),
+    onMutate: attachment => setCharacterUploadStatus({ phase: 'binding', filename: attachment.original_filename, attachmentId: attachment.id }),
+    onSuccess: async (_binding, attachment) => {
+      setCharacterUploadStatus({ phase: 'succeeded', filename: attachment.original_filename, attachmentId: attachment.id })
+      await Promise.all([refresh(), client.invalidateQueries({ queryKey: ['creation-center', projectId] })])
+    },
+    onError: (error, attachment) => setCharacterUploadStatus({
+      phase: 'failed_after_upload', filename: attachment.original_filename, attachmentId: attachment.id,
+      message: error instanceof Error ? error.message : '人物登记失败',
+    }),
   })
   const startShotRevision = useMutation({ mutationFn: () => api.startShotPlanRevision(projectId, planning.data!.active_plan!.id), onSuccess: async () => { setEditingShots(true); await refresh() } })
   const revisableShotCandidate = (): ShotPlanCandidate | null => planning.data?.current_shot_candidate
@@ -357,10 +403,18 @@ export function PlanPage() {
           {data.active_plan && !data.current_shot_candidate && !data.revision_draft && <section className={styles.characterBinding}>
             <div className={styles.characterBindingIntro}><Users size={19} /><div><span>人物与镜头是两步确认</span><strong>{characterVersions.length ? `已有 ${characterVersions.length} 个人物版本可用` : '先上传一张清晰的人物参考图'}</strong><p>上传只会登记人物版本；进入调整后，再由你逐个镜头选择人物、主参考图和人脸要求。系统不会自动套用到全部镜头。</p></div></div>
             <div className={styles.characterBindingActions}>
-              <button type="button" className="secondaryButton" disabled={uploadCharacter.isPending || startShotRevision.isPending} onClick={() => characterFileInput.current?.click()}><FileImage size={15} />{uploadCharacter.isPending ? '正在上传并登记…' : characterVersions.length ? '上传新的人物参考图' : '上传人物参考图'}</button>
+              <button type="button" className="secondaryButton" disabled={uploadCharacter.isPending || registerExistingCharacter.isPending || startShotRevision.isPending} onClick={() => characterFileInput.current?.click()}><FileImage size={15} />{uploadCharacter.isPending ? (characterUploadStatus?.phase === 'uploading' ? '正在上传…' : '正在登记人物…') : characterVersions.length ? '上传新的人物参考图' : '上传人物参考图'}</button>
               <input ref={characterFileInput} hidden type="file" accept="image/png,image/jpeg,image/webp" onChange={event => { const file = event.target.files?.[0]; if (file) uploadCharacter.mutate(file); event.target.value = '' }} />
-              <button type="button" className="primaryButton" disabled={!characterVersions.length || startShotRevision.isPending || uploadCharacter.isPending} onClick={() => startShotRevision.mutate()}><Pencil size={15} />{startShotRevision.isPending ? '正在创建调整草稿…' : '绑定人物到具体镜头'}</button>
+              <button type="button" className="primaryButton" disabled={!characterVersions.length || startShotRevision.isPending || uploadCharacter.isPending || registerExistingCharacter.isPending} onClick={() => startShotRevision.mutate()}><Pencil size={15} />{startShotRevision.isPending ? '正在创建调整草稿…' : '绑定人物到具体镜头'}</button>
             </div>
+            {characterUploadStatus && <div className={styles.characterBindingStatus} data-error={characterUploadStatus.phase === 'failed_after_upload'}>
+              <strong>{characterUploadStatus.phase === 'uploading' ? `正在上传：${characterUploadStatus.filename}` : characterUploadStatus.phase === 'uploaded' ? `文件已上传：${characterUploadStatus.filename}` : characterUploadStatus.phase === 'binding' ? `正在登记人物：${characterUploadStatus.filename}` : characterUploadStatus.phase === 'succeeded' ? `已上传并登记人物参考：${characterUploadStatus.filename}` : `文件已上传，但人物登记失败：${characterUploadStatus.filename}`}</strong>
+              {characterUploadStatus.message && <span>{characterUploadStatus.message}</span>}
+            </div>}
+            {creation.data?.attachments.filter(attachment => attachment.verification_status === 'verified' && attachment.mime_type.startsWith('image/') && !attachment.bindings.some(binding => binding.status === 'confirmed')).map(attachment => <div className={styles.unboundCharacter} key={attachment.id}>
+              <div><span>已上传，尚未登记</span><strong>{attachment.original_filename}</strong></div>
+              <button type="button" className="secondaryButton" disabled={uploadCharacter.isPending || registerExistingCharacter.isPending} onClick={() => registerExistingCharacter.mutate(attachment)}>{registerExistingCharacter.isPending && characterUploadStatus?.attachmentId === attachment.id ? '正在登记…' : '登记为新人物'}</button>
+            </div>)}
           </section>}
           {data.revision_context && <section className={styles.assetRevisionContext}><CircleAlert size={18} /><div><span>成品反馈返回分镜</span><h3>{data.revision_context.shot_code} 需要调整</h3><p>{data.revision_context.rationale}</p><small>来源素材 {data.revision_context.asset_id.slice(-10)} · 原方案 v{data.plan_history.find(plan => plan.id === data.revision_context?.plan_version_id)?.version_number ?? ''} · 下游影响 {data.revision_context.affected_downstream_node_keys.length} 项</small></div></section>}
           {editableShot && editingShots && <ShotPlanRevisionEditor projectId={projectId} candidate={editableShot} entities={data.entity_versions} scriptSegments={brief?.brief.script_segments ?? []} saving={reviseShots.isPending} aiSaving={reviseShotsWithDirector.isPending} initialShotCode={data.revision_context?.shot_code} onCancel={() => setEditingShots(false)} onSubmit={patches => reviseShots.mutate(patches)} onAIRevision={(selected, instruction) => reviseShotsWithDirector.mutate({ selected, instruction })} />}

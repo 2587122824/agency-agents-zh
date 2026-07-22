@@ -85,8 +85,11 @@ export const api = {
     form.set('file', file)
     return request<CreationAttachment>(`/projects/${projectId}/attachments`, { method: 'POST', body: form })
   },
-  bindAttachment: (projectId: string, attachmentId: string, bindingType: 'identity_reference' | 'voice_sample' | 'inspiration_only', entityId?: string) => request<AttachmentBinding>(`/projects/${projectId}/attachments/${attachmentId}/bindings`, {
-    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', binding_type: bindingType, entity_id: entityId }),
+  bindAttachment: (projectId: string, attachmentId: string, bindingType: 'identity_reference' | 'voice_sample' | 'inspiration_only', entity?: { entityId?: string; createNew?: boolean; displayName?: string }) => request<AttachmentBinding>(`/projects/${projectId}/attachments/${attachmentId}/bindings`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', binding_type: bindingType,
+      entity_id: entity?.entityId, create_new_entity: entity?.createNew ?? false, entity_display_name: entity?.displayName,
+    }),
   }),
   planningCenter: (projectId: string) => request<PlanningCenter>(`/projects/${projectId}/planning-center`),
   generateCreativeBrief: (projectId: string, requirementVersionId: string) => request<CreativeBriefCandidate>(`/projects/${projectId}/creative-brief-candidates:generate`, {

@@ -780,8 +780,8 @@ created_at
   "id": "attachment_binding_01",
   "attachment_id": "attachment_01",
   "binding_type": "identity_reference",
-  "entity_id": "char_main",
-  "entity_version_id": "entity_version_char_main_v1",
+  "entity_id": "entity_系统生成值",
+  "entity_version_id": "entity_version_系统生成值",
   "status": "confirmed",
   "confirmed_by": "user",
   "confirmed_at": "2026-07-15T10:00:00Z"
@@ -799,6 +799,10 @@ created_at
 - `unclassified`
 
 Agent 可以生成分类候选，但人物身份、声音样本和版权敏感绑定必须由用户确认。
+
+实体主键只能由后端生成，前端和用户都不得提交固定人物或声音主键。非 `inspiration_only` 绑定必须明确选择且只能选择一种方式：绑定当前项目已有实体，或登记为新实体；登记新实体时只提交普通用户可读的显示名称。两种方式同时提交或均未提交都会明确失败，不猜测、不改名、不自动重试。
+
+上传与用途登记是两个连续但独立持久化步骤。页面必须分别显示上传中、文件已上传、实体登记中、全部完成，以及“文件已上传但实体登记失败”；后一步失败不能删除附件，也不能自动重复上传。已验证但尚未绑定的附件必须在当前项目中提供显式再次登记入口。
 
 ### 10.4 人物绑定到分镜
 

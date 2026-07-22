@@ -1151,14 +1151,16 @@ def test_attachment_registration_does_not_create_binding(client: TestClient) -> 
         json={"command_id": "binding-command-001", "binding_type": "identity_reference"},
     )
     assert missing_entity.status_code == 409
-    assert missing_entity.headers["x-error-code"] == "ENTITY_ID_REQUIRED"
+    assert missing_entity.headers["x-error-code"] == "ENTITY_BINDING_MODE_REQUIRED"
+    assert client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["attachments"][0]["id"] == attachment["id"]
 
     bound = client.post(
         f"/api/v1/projects/{project['id']}/attachments/{attachment['id']}/bindings",
         json={
             "command_id": "binding-command-002",
             "binding_type": "identity_reference",
-            "entity_id": "char_main",
+            "create_new_entity": True,
+            "entity_display_name": "运动员参考",
         },
     )
     assert bound.status_code == 201
@@ -1167,9 +1169,9 @@ def test_attachment_registration_does_not_create_binding(client: TestClient) -> 
     planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert planning["entity_versions"] == [{
         "id": bound.json()["entity_version_id"],
-        "entity_id": "char_main",
+        "entity_id": bound.json()["entity_id"],
         "entity_type": "character",
-        "display_name": "char_main",
+        "display_name": "运动员参考",
         "version_number": 1,
         "source_attachment_id": attachment["id"],
         "source_mime_type": "image/png",
@@ -1201,7 +1203,8 @@ def test_attachment_registration_does_not_create_binding(client: TestClient) -> 
     view = registry.json()
     assert view["counts"] == {"character": 1, "outfit": 0, "scene": 0, "product": 0, "voice": 0}
     entity = view["entities"][0]
-    assert entity["id"] == "char_main"
+    assert entity["id"] == bound.json()["entity_id"]
+    assert entity["id"].startswith("entity_")
     assert entity["project_id"] == project["id"]
     assert entity["active_version_id"] == bound.json()["entity_version_id"]
     version = entity["versions"][0]
@@ -1218,6 +1221,71 @@ def test_attachment_registration_does_not_create_binding(client: TestClient) -> 
     other_project = create_creation_project(client)
     cross_project = client.get(f"/api/v1/projects/{other_project['id']}/attachments/{attachment['id']}/content")
     assert cross_project.status_code == 404
+
+
+def test_attachment_binding_uses_generated_entity_ids_across_projects(client: TestClient) -> None:
+    def upload(project_id: str, command_id: str, filename: str) -> dict:
+        response = client.post(
+            f"/api/v1/projects/{project_id}/attachments",
+            data={"command_id": command_id},
+            files={"file": (filename, b"\x89PNG\r\n\x1a\n" + command_id.encode(), "image/png")},
+        )
+        assert response.status_code == 201
+        return response.json()
+
+    first_project = create_creation_project(client)
+    second_project = create_creation_project(client)
+    first_attachment = upload(first_project["id"], "generated-entity-upload-001", "first.png")
+    second_attachment = upload(second_project["id"], "generated-entity-upload-002", "second.png")
+
+    first_binding = client.post(
+        f"/api/v1/projects/{first_project['id']}/attachments/{first_attachment['id']}/bindings",
+        json={
+            "command_id": "generated-entity-bind-001",
+            "binding_type": "identity_reference",
+            "create_new_entity": True,
+            "entity_display_name": "第一位人物",
+        },
+    )
+    second_binding = client.post(
+        f"/api/v1/projects/{second_project['id']}/attachments/{second_attachment['id']}/bindings",
+        json={
+            "command_id": "generated-entity-bind-002",
+            "binding_type": "identity_reference",
+            "create_new_entity": True,
+            "entity_display_name": "第二位人物",
+        },
+    )
+    assert first_binding.status_code == second_binding.status_code == 201
+    assert first_binding.json()["entity_id"].startswith("entity_")
+    assert second_binding.json()["entity_id"].startswith("entity_")
+    assert first_binding.json()["entity_id"] != second_binding.json()["entity_id"]
+
+    followup_attachment = upload(first_project["id"], "existing-entity-upload-001", "first-new.png")
+    existing_binding = client.post(
+        f"/api/v1/projects/{first_project['id']}/attachments/{followup_attachment['id']}/bindings",
+        json={
+            "command_id": "existing-entity-bind-001",
+            "binding_type": "identity_reference",
+            "entity_id": first_binding.json()["entity_id"],
+        },
+    )
+    assert existing_binding.status_code == 201
+    assert existing_binding.json()["entity_id"] == first_binding.json()["entity_id"]
+    assert existing_binding.json()["entity_version_id"] != first_binding.json()["entity_version_id"]
+
+    ambiguous = client.post(
+        f"/api/v1/projects/{second_project['id']}/attachments/{second_attachment['id']}/bindings",
+        json={
+            "command_id": "ambiguous-entity-bind-001",
+            "binding_type": "identity_reference",
+            "entity_id": second_binding.json()["entity_id"],
+            "create_new_entity": True,
+            "entity_display_name": "重复选择",
+        },
+    )
+    assert ambiguous.status_code == 409
+    assert ambiguous.headers["x-error-code"] == "ENTITY_BINDING_MODE_REQUIRED"
 
 
 def test_attachment_content_type_mismatch_is_blocked(client: TestClient) -> None:
@@ -2773,7 +2841,8 @@ def create_plan_with_explicit_primary_reference(client: TestClient) -> tuple[dic
         json={
             "command_id": "primary-reference-bind",
             "binding_type": "identity_reference",
-            "entity_id": "char_primary",
+            "create_new_entity": True,
+            "entity_display_name": "主参考人物",
         },
     ).json()
     requirement_id = client.get(

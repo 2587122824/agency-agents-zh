@@ -63,6 +63,10 @@ function displaySuggestionValue(fieldKey: string, value: unknown) {
   return String(value)
 }
 
+function attachmentDisplayName(filename: string) {
+  return filename.replace(/\.[^.]+$/, '').trim() || '未命名参考'
+}
+
 function AttachmentRow({ item, onBind, busy }: { item: CreationAttachment; onBind: (type: 'identity_reference' | 'voice_sample' | 'inspiration_only') => void; busy: boolean }) {
   const binding = [...item.bindings].reverse().find(value => value.status === 'confirmed')
   const isAudio = item.mime_type.startsWith('audio/')
@@ -124,7 +128,12 @@ export function ProjectPage() {
     return api.resolveClarification(projectId, clarification.id, center.data!.active_requirement.id, value)
   }, onSuccess: async () => { setClarificationValue(''); await refresh() } })
   const register = useMutation({ mutationFn: (file: File) => api.registerAttachment(projectId, file), onSuccess: refresh })
-  const bind = useMutation({ mutationFn: ({ attachmentId, type }: { attachmentId: string; type: 'identity_reference' | 'voice_sample' | 'inspiration_only' }) => api.bindAttachment(projectId, attachmentId, type, type === 'identity_reference' ? 'char_main' : type === 'voice_sample' ? 'voice_main' : undefined), onSuccess: refresh })
+  const bind = useMutation({ mutationFn: ({ attachmentId, type, displayName }: { attachmentId: string; type: 'identity_reference' | 'voice_sample' | 'inspiration_only'; displayName: string }) => api.bindAttachment(
+    projectId,
+    attachmentId,
+    type,
+    type === 'inspiration_only' ? undefined : { createNew: true, displayName },
+  ), onSuccess: refresh })
 
   useEffect(() => {
     const element = messagesRef.current
@@ -251,7 +260,7 @@ export function ProjectPage() {
         <section className={styles.attachments}>
           <div className={styles.sideHeading}><div><Paperclip size={17} /><h3>附件与绑定</h3></div><b>{creation.attachments.length}</b></div>
           <p className={styles.attachmentNotice}>当前创作模型只读取文件名、类型和用途绑定，不读取图片、音频或视频内容。</p>
-          {creation.attachments.length ? creation.attachments.map(item => <AttachmentRow key={item.id} item={item} busy={bind.isPending} onBind={type => bind.mutate({ attachmentId: item.id, type })} />) : <div className={styles.sideEmpty}>附件上传和用途绑定是两个独立状态。</div>}
+          {creation.attachments.length ? creation.attachments.map(item => <AttachmentRow key={item.id} item={item} busy={bind.isPending} onBind={type => bind.mutate({ attachmentId: item.id, type, displayName: attachmentDisplayName(item.original_filename) })} />) : <div className={styles.sideEmpty}>附件上传和用途绑定是两个独立状态。</div>}
         </section>
         <section className={styles.history}>
           <button onClick={() => setShowHistory(value => !value)}><div><History size={17} /><span><strong>运行与候选历史</strong><small>{creation.agent_runs.length} 次运行 · {creation.candidate_history.length} 个候选</small></span></div><ChevronDown size={16} data-open={showHistory} /></button>
