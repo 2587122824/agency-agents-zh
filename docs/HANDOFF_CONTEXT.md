@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260720_28 (head)` |
-| 已发布配置 | `production_config_cab8bd39eea244c889af3413d4f98096`，版本 46；仅升级 director Prompt 至 `director-prompt.v5` |
+| 已发布配置 | `production_config_4fca7f24bbe54aa29a35f7fd0e4e9076`，版本 47；director Prompt 为 `director-prompt.v5` |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 密钥通过 Windows 用户环境与白名单注入，不写数据库或仓库 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -230,7 +230,7 @@ v2/runtime/worker.err.log
 
 - 后端测试：`215 passed`
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v46，4 个文本智能体模型分工与 6 个镜头工作流槽位；在 v45 基础上仅将导演 Prompt 升级为 `director-prompt.v5`，其他模型合同、槽位主键、RunningHub 工作流 ID、NodeInfoList、能力、价格与规格不变
+- 当前生产配置：v47，4 个文本智能体模型分工与 6 个镜头工作流槽位；生产内容在 v45 基础上仅将导演 Prompt 升级为 `director-prompt.v5`，v47 另修正配置中文显示名；其他模型合同、槽位主键、RunningHub 工作流 ID、NodeInfoList、能力、价格与规格不变
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
