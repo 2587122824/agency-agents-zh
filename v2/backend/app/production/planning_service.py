@@ -227,6 +227,73 @@ def _validate_route_assignments(
     return errors
 
 
+def _route_feasibility_errors(
+    shots,
+    workflows: list[WorkflowSlotVersion],
+    video_spec: VideoSpecVersion,
+) -> list[dict[str, Any]]:
+    """Prove that every shot has at least one valid configured route before invoking a model."""
+    keyframes = [item for item in workflows if item.operation_kind == "image_generation"]
+    videos = [
+        item for item in workflows
+        if item.operation_kind in {"video_generation", "text_to_video_generation"}
+    ]
+    errors: list[dict[str, Any]] = []
+    for shot in shots:
+        feasible = False
+        for video in videos:
+            keyframe_options = [None] if video.operation_kind == "text_to_video_generation" else keyframes
+            for keyframe in keyframe_options:
+                assignment = {
+                    "shot_code": shot.shot_code,
+                    "keyframe_workflow_slot_version_id": keyframe.id if keyframe else None,
+                    "video_workflow_slot_version_id": video.id,
+                }
+                if not _validate_route_assignments(
+                    [assignment], [shot], workflows, video_spec, validate_reported_inputs=False,
+                ):
+                    feasible = True
+                    break
+            if feasible:
+                break
+        if feasible:
+            continue
+
+        requirements = shot.generation_requirements or {}
+        causes: list[str] = []
+        supported_keyframes = [
+            item for item in keyframes
+            if item.status == "published" and video_spec.id in (item.supported_video_spec_ids or [])
+        ]
+        supported_videos = [
+            item for item in videos
+            if item.status == "published" and video_spec.id in (item.supported_video_spec_ids or [])
+        ]
+        if not supported_videos:
+            causes.append("PRODUCTION_PLAN_VIDEO_SPEC_UNSUPPORTED")
+        if requirements.get("precise_text_required") and not any(
+            "precise_text" in (item.capability_tags or []) for item in supported_keyframes
+        ):
+            causes.append("PRODUCTION_PLAN_PRECISE_TEXT_CAPABILITY_MISSING")
+        if requirements.get("multi_frame_required") and not any(
+            "multi_frame" in (item.capability_tags or []) for item in supported_videos
+        ):
+            causes.append("PRODUCTION_PLAN_MULTI_FRAME_CAPABILITY_MISSING")
+        if requirements.get("reference_image_required") or requirements.get("identity_consistency_required"):
+            if not shot.primary_reference_entity_version_id:
+                causes.append("PRODUCTION_PLAN_PRIMARY_REFERENCE_MISSING")
+            if not any(
+                "reference_image.primary" in _input_sources(item) for item in supported_keyframes
+            ):
+                causes.append("PRODUCTION_PLAN_REFERENCE_CAPABILITY_MISSING")
+        errors.append({
+            "code": "PRODUCTION_PLAN_NO_FEASIBLE_ROUTE",
+            "shot_code": shot.shot_code,
+            "causes": sorted(set(causes)) or ["PRODUCTION_PLAN_WORKFLOW_COMBINATION_INVALID"],
+        })
+    return errors
+
+
 def _execute(
     session: Session,
     project: Project,
@@ -342,6 +409,18 @@ def generate_production_plan_candidate(session: Session, project: Project, paylo
     if selection.production_config_version_id != config.id:
         raise ProductionConflictError("PRODUCTION_PLANNER_CONFIGURATION_CHANGED", "制作规划模型不属于用户选择的制作配置。")
     workflows = repository.workflows(config.id)
+    feasibility_errors = _route_feasibility_errors(
+        repository.plan_shots(plan.id), workflows, video_spec,
+    )
+    if feasibility_errors:
+        shot_codes = ", ".join(item["shot_code"] for item in feasibility_errors)
+        cause_codes = ", ".join(sorted({
+            cause for item in feasibility_errors for cause in item["causes"]
+        }))
+        raise ProductionConflictError(
+            "PRODUCTION_PLAN_NO_FEASIBLE_ROUTE",
+            f"当前制作配置无法满足这些镜头的能力要求：{shot_codes}。冲突：{cause_codes}。请先调整分镜能力要求或发布具备对应能力的工作流。",
+        )
     manifest_payload = _manifest_payload(repository, project, plan, video_spec, workflows)
     serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     manifest = AgentInputManifest(

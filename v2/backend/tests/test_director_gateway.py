@@ -38,7 +38,7 @@ def selection() -> DirectorSelection:
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
         input_contract_version="director-input.v2",
-        prompt_contract_version="director-prompt.v4",
+        prompt_contract_version="director-prompt.v5",
         output_schema_version="shot-plan.v3",
         max_output_tokens=4000,
         sampling={"temperature": 0.2},
@@ -168,6 +168,8 @@ def test_director_prompt_freezes_every_enum_and_continuity_id_format(monkeypatch
     )
     assert all(value in prompt for value in expected_contracts)
     assert "禁止 CG_01、group_01" in prompt
+    assert "普通标题、字幕和教学标注由后期文字轨完成" in prompt
+    assert "precise_text_required=true" in prompt
     assert prompt.count("你是片场 V2 的分镜导演智能体") == 1
 
 

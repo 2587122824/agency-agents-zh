@@ -520,10 +520,10 @@ new_information / generation_requirements
 - 所有实体、节拍和附件引用必须精确存在；缺失时验证失败，不从描述创建隐式实体。
 - 同一连续场景必须引用同一场景版本；换装必须引用明确的 OutfitState 变化。
 - 每个镜头只有一个主要动作目标。需要多个训练动作时拆成多个镜头，不假设普通首帧视频会消费多图。
-- `face_visibility`、精确人脸主体、`text_policy`、精确文字和主体运动是后续 QC 的权威条件，不从提示词反推。
+- `face_visibility`、精确人脸主体、`text_policy`、`required_on_screen_text` 和主体运动是后续 QC 的权威条件，不从提示词反推。`precise_text_required` 仅表示文字必须由生成模型直接绘制进素材像素；普通成品标题、字幕和教学标注由剪辑文字轨承担。
 - 分镜导演不得选择 Provider、模型、工作流槽位、NodeInfoList 或价格规则。
 
-当前实现使用独立 `director` 模型配置和 `director-input.v2 / shot-plan.v3 / director-prompt.v4`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天或生产工作流配置。Prompt 必须由唯一常量完整列出 `continuity_group_id` 格式及全部结构化枚举，不得以“使用合同枚举”代替实际允许值。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。后端不解析动作或提示词关键词，不自动修改任何字段。
+当前实现使用独立 `director` 模型配置和 `director-input.v2 / shot-plan.v3 / director-prompt.v5`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天或生产工作流配置。Prompt 必须由唯一常量完整列出 `continuity_group_id` 格式及全部结构化枚举，不得以“使用合同枚举”代替实际允许值。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。后端不解析动作或提示词关键词，不自动修改任何字段。
 
 导演只声明 `reference_image_required / multi_frame_required / identity_consistency_required / precise_text_required`，不选择路由。用户在制作准备中选定工作流后，确定性校验再对照能力标签和 NodeInfoList；不满足时按镜头返回阻断，不换工作流。人工 Patch 与“AI 调整选中镜头”是两个独立命令：后者冻结完整来源方案、选中编号和修改意见，只调用一次模型，未选镜头必须结构完全一致；失败保留来源候选，用户确认费用后才能精确重跑。
 
@@ -620,7 +620,7 @@ model_config_version / prompt_contract_version
 }
 ```
 
-后端必须逐项验证镜头集合与顺序、槽位归属与发布状态、操作类型、规格支持、必需输入集合，以及参考图、身份一致性、多帧和精确文字能力。任一未知 ID、输入遗漏或能力冲突都使本次 AgentRun 明确失败；系统不采用部分结果、不猜测替代槽位、不改写 ID。失败只能由用户确认同一次模型费用后，复用原 Manifest 与完全一致的模型配置精确重跑。
+后端在模型调用前必须先证明每个镜头至少存在一个满足参考图、身份一致性、多帧和素材像素内精确文字要求的已发布工作流组合。无解时返回逐镜头冲突，不创建 Manifest、AgentRun 或模型费用。通过预检后，再逐项验证模型返回的镜头集合与顺序、槽位归属与发布状态、操作类型、规格支持、必需输入集合和能力要求。任一未知 ID、输入遗漏或能力冲突都使本次 AgentRun 明确失败；系统不采用部分结果、不猜测替代槽位、不改写 ID。模型已调用后的失败只能由用户确认同一次模型费用后，复用原 Manifest 与完全一致的模型配置精确重跑。
 
 `ProductionPlanCandidate` 同时保存 `proposed_assignments` 与用户审核后的 `confirmed_assignments`。页面把候选填入逐镜头控件，允许用户逐项修改；只有“采用当前逐镜头路线”命令才把审核结果记为 `accepted`。接受候选仍不创建 `ProductionImpactAnalysis`、`ProductionSnapshot`、DAG 或 WorkItem；费用分析、保存快照、确认费用、激活和提交继续是独立命令。
 
@@ -1196,7 +1196,7 @@ RequirementDiff
 
 - 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v15`（已完成）
 - 内容策划 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6`，含互斥脚本段、Schema 单一权威来源、完整失败证据、可追溯策划拓展、待确认事实、Brief 不可变修订链与结构化确认项（已完成）
-- 分镜导演 `director-input.v2 / shot-plan.v3 / director-prompt.v4`（已完成）
+- 分镜导演 `director-input.v2 / shot-plan.v3 / director-prompt.v5`（已完成）
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成
 

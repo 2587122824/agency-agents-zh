@@ -17,7 +17,7 @@ from ..providers.credentials import EnvironmentCredentialResolver
 
 DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v2"
 DIRECTOR_OUTPUT_SCHEMA_VERSION = "shot-plan.v3"
-DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v4"
+DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v5"
 
 
 class GenerationRequirements(BaseModel):
@@ -161,10 +161,10 @@ _DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只�
 3. 每个节拍的镜头时长总和必须精确等于该节拍时长。
 4. 所有枚举字段只能从上方对应列表选择一个精确值。输出前逐字段核对；后端不会映射、翻译或修复非法值。
 5. 实体 ID 只能逐字引用 confirmed_entity_versions。face_visibility=required 时必须列出确切 face_subject_entity_version_ids，且只能引用该镜头已声明的 character 实体。
-6. text_policy=required 时 required_on_screen_text 必须是需要出现在画面中的精确文字；forbidden 时必须为 null。
+6. text_policy=required 时 required_on_screen_text 必须是最终成品需要出现的精确文字；forbidden 时必须为 null。普通标题、字幕和教学标注由后期文字轨完成，不要求生成素材直接包含文字。
 7. continuity_relation 明确本镜头与前一镜头的关系。场景或服装发生变化时必须分别使用 location_change 或 outfit_change；同一 continuity_group_id 内实体必须完全一致。不需要连续组时填 null，不得自行创建其他前缀。
 8. new_information 必须说明本镜头相对前一镜头新增的叙事信息，供用户人工检查重复，不得留空。
-9. generation_requirements 只声明生产能力需求，不得写路由。身份一致性要求必须同时要求参考图；精确文字能力只能用于 required 文字。
+9. generation_requirements 只声明生成素材本身所需的生产能力，不得写路由。身份一致性要求必须同时要求参考图。只有用户明确要求文字必须由图像生成模型直接绘制进原始素材像素时，才设置 precise_text_required=true；普通标题、字幕、箭头说明和教学标注必须为 false，并保留 text_policy=required 与 required_on_screen_text 交给后期文字轨。
 10. audio_policy=off 时 audio_requirement 只能为 off 或 lip_motion_only，不得建立音频生产依赖。
 11. revision_request 存在时，只能修改 selected_shot_codes；其他镜头必须与 source_shots 结构完全一致。仍需返回完整方案并满足全部合同。
 12. 不得输出 Provider、模型、工作流、NodeInfoList、价格或任务 ID；不得修复输入、猜测 ID、添加默认尾缀或返回 Markdown。"""

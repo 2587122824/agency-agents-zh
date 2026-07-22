@@ -2773,6 +2773,52 @@ def test_production_planner_rejects_unknown_route_and_only_retries_exact_failure
     assert retried.json()["status"] == "awaiting_review"
 
 
+def test_production_planner_preflight_rejects_impossible_routes_without_model_run(client: TestClient) -> None:
+    class CountingGateway(DeterministicProductionPlannerGateway):
+        calls = 0
+
+        def invoke(self, selection, manifest_payload):
+            self.calls += 1
+            return super().invoke(selection, manifest_payload)
+
+    gateway = CountingGateway()
+    project, plan = create_confirmed_plan(client)
+    with SessionLocal() as session:
+        shots = list(session.scalars(select(Shot).where(Shot.plan_version_id == plan["id"])))
+        for current in shots:
+            current.generation_requirements = {
+                **(current.generation_requirements or {}),
+                "precise_text_required": True,
+            }
+        manifest_count_before = len(list(session.scalars(select(AgentInputManifest))))
+        session.commit()
+
+    app.dependency_overrides[get_production_planner_gateway] = lambda: gateway
+    publish_visual_production_configuration(client, command_prefix="production-planner-preflight-config")
+    preparation = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    config = preparation["published_configurations"][0]
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/production-plan-candidates:generate",
+        json={
+            "command_id": "production-planner-preflight-001",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": config["video_specs"][0]["id"],
+        },
+    )
+
+    assert failed.status_code == 409
+    assert failed.headers["x-error-code"] == "PRODUCTION_PLAN_NO_FEASIBLE_ROUTE"
+    assert "PRODUCTION_PLAN_PRECISE_TEXT_CAPABILITY_MISSING" in failed.json()["detail"]
+    assert gateway.calls == 0
+    with SessionLocal() as session:
+        assert len(list(session.scalars(select(AgentInputManifest)))) == manifest_count_before
+        assert session.scalar(select(AgentRun).where(
+            AgentRun.project_id == project["id"],
+            AgentRun.agent_role == "production_planner",
+        )) is None
+
+
 def test_production_planner_rejects_missing_required_input_sources(client: TestClient) -> None:
     class MissingInputsGateway(DeterministicProductionPlannerGateway):
         def invoke(self, selection, manifest_payload):

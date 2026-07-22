@@ -403,6 +403,7 @@ GET /api/v1/projects/{project_id}/attachments/{attachment_id}/content
 - 多帧工作流必须由合同显式选择。
 - 音频关闭时不创建 TTS、音频注入或字幕依赖。
 - 未配置工作流时阻断，不替换为其他工作流。
+- `text_policy=required` 表示最终成品必须出现 `required_on_screen_text`，默认可由剪辑文字轨完成；只有用户明确要求文字必须由生成模型直接绘制进原始素材像素时，才声明 `precise_text_required=true`。
 
 ### 12.2 节点状态
 
@@ -1226,11 +1227,11 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 ## 41. 分镜导演智能体实现
 
-分镜导演使用 `director-input.v2 / shot-plan.v3 / director-prompt.v4` 和独立 `director` 模型分工。输入只冻结已确认需求、唯一已接受内容方案、精确实体版本与来源附件事实、已解决决策、交付约束和音频策略；不读取自由会话，不读取 Provider、工作流、NodeInfoList、价格或生产任务。唯一 Prompt 必须完整列出与输出 Schema 相同的连续组格式和全部枚举，不能依赖模型猜测“合同枚举”。每个镜头必须精确引用所属叙事节拍与至少一个脚本段，最终方案必须覆盖 Brief 的全部脚本段。
+分镜导演使用 `director-input.v2 / shot-plan.v3 / director-prompt.v5` 和独立 `director` 模型分工。输入只冻结已确认需求、唯一已接受内容方案、精确实体版本与来源附件事实、已解决决策、交付约束和音频策略；不读取自由会话，不读取 Provider、工作流、NodeInfoList、价格或生产任务。唯一 Prompt 必须完整列出与输出 Schema 相同的连续组格式和全部枚举，不能依赖模型猜测“合同枚举”。每个镜头必须精确引用所属叙事节拍与至少一个脚本段，最终方案必须覆盖 Brief 的全部脚本段。
 
 每个镜头必须结构化声明 `shot_purpose`、`framing`、`camera_angle`、`camera_motion`、`subject_motion`、`continuity_relation`、唯一主动作、实体版本、精确人脸主体、精确画面文字、`new_information` 和 `generation_requirements`。`face_visibility=required` 必须列出已声明人物实体；`text_policy=required` 必须给出准确文字，`forbidden` 时必须为 `null`；场景与服装变化必须显式声明对应关系。后端只验证结构字段，不解析提示词语义或关键词，不猜测和修正枚举。
 
-导演只声明参考图、多帧、身份一致性和精确文字能力要求，不选择工作流。制作准备阶段由确定性校验将这些要求与用户选择的槽位标签及 NodeInfoList 比对；不满足时按镜头阻断，不自动替换工作流。模型只调用一次，失败不创建候选；系统不补字段、不修复 JSON、不改写 ID、不自动重试、不切换模型或生产路由。
+导演只声明参考图、多帧、身份一致性和生成素材像素内精确文字能力要求，不选择工作流。`text_policy=required` 与 `required_on_screen_text` 约束最终成品；普通标题、字幕、箭头说明和教学标注保留给剪辑文字轨，不因此要求图片工作流具备 `precise_text`。制作准备阶段由确定性校验将生成能力要求与用户选择的槽位标签及 NodeInfoList 比对；不满足时按镜头阻断，不自动替换工作流。模型只调用一次，失败不创建候选；系统不补字段、不修复 JSON、不改写 ID、不自动重试、不切换模型或生产路由。
 
 方案页增加“节拍 → 脚本段 → 镜头”覆盖视图，并并列提供两条明确修订路径：人工 Patch 不调用模型；“AI 调整选中镜头”冻结完整来源候选、选中编号和修改意见，用户确认模型费用后只调用一次导演。AI 必须返回完整 v3 方案，未选镜头必须结构完全一致；失败保留来源候选，精确重跑复用原清单，不扩展授权范围。
 
@@ -1248,6 +1249,6 @@ V1 中缺少工作流 ID 或 NodeInfoList 的多人物、首尾帧、多帧、�
 
 制作规划智能体使用独立 `production_planner` 模型分工及 `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v1`。它只在用户选定已发布制作配置和画面规格后运行，读取当前已确认 `shot-plan.v3` 分镜及该配置中已发布图片/视频工作流的精确能力合同。它不选择配置、Provider、计费方案、TTS 路线，不读取价格，也不创建生产任务。
 
-模型逐镜头返回精确关键帧槽位、视频槽位、必需输入来源和普通用户可读理由。后端要求镜头集合与顺序完全一致，并确定性验证槽位 ID、操作类型、规格支持、NodeInfoList 必需输入和 `generation_requirements`。未知、停用、不支持规格、缺少参考图、缺少多帧或精确文字能力均使整次运行失败；不接受部分候选，不自动替换或退化。
+模型逐镜头返回精确关键帧槽位、视频槽位、必需输入来源和普通用户可读理由。调用模型前，后端先确定性证明每个镜头在当前已发布配置中至少存在一个合法图片/视频工作流组合；任一镜头无解时直接列出镜头和能力冲突，不创建 Manifest、AgentRun 或模型费用。通过预检后，模型结果仍必须满足镜头集合与顺序、槽位 ID、操作类型、规格支持、NodeInfoList 必需输入和 `generation_requirements`。未知、停用、不支持规格、缺少参考图、缺少多帧或生成素材像素内精确文字能力均使整次运行失败；不接受部分候选，不自动替换或退化。
 
 页面展示候选理由并允许逐镜头人工修改。用户明确采用后保存独立 `confirmed_assignments`，原始 `proposed_assignments` 保持可审计。采用动作不生成费用分析、快照、DAG 或 WorkItem；后续仍必须独立查看制作计划、保存不可变制作方案、确认费用、激活并开始制作。失败不自动重试；精确重跑必须绑定原失败 Run、原 Manifest 和完全一致的配置、模型、Provider、Prompt 与输出 Schema。

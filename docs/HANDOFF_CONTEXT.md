@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260720_28 (head)` |
-| 已发布配置 | `production_config_33cd1c2d540043439d208831e63a8400`，版本 45 |
+| 已发布配置 | `production_config_cab8bd39eea244c889af3413d4f98096`，版本 46；仅升级 director Prompt 至 `director-prompt.v5` |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 密钥通过 Windows 用户环境与白名单注入，不写数据库或仓库 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -118,13 +118,14 @@ v2/runtime/worker.err.log
 - 相同模型与合同失败时只能由用户确认费用后精确复用原 Manifest；Prompt 或输出 Schema 已升级时，页面改为“使用当前合同重新生成”，重新冻结当前权威输入并创建新 Manifest。两条路径都保留旧失败记录，均不自动调用模型。
 - v45 将内容策划最大输出从 4096 调整为 8192 Token，并由 Schema 将节拍、脚本段、拓展和确认项限制在短视频合理规模；账本仍记录真实 Token，不按上限虚构费用。
 
-分镜导演运行代码使用 `director-input.v2 / shot-plan.v3 / director-prompt.v4`：
+分镜导演运行代码使用 `director-input.v2 / shot-plan.v3 / director-prompt.v5`：
 
 - 使用独立 `director` 模型分工，只读取已确认需求、已接受 Brief、决策、实体与附件事实、交付约束和音频策略。
 - 镜头必须精确引用内容节拍与脚本段，全部脚本段必须被覆盖；`action_count=1`。
 - 景别、机位、镜头运动、主体运动、镜头目的和连续关系均为结构化枚举；场景或服装变化必须显式声明。
 - `face_visibility=required` 必须列出确切人物实体；必需画面文字必须给出精确文本；每镜头记录 `new_information`。
-- 导演只声明参考图、多帧、身份一致性和精确文字能力要求；生产准备按用户选中的工作流确定性比对，不自动换路由。
+- 导演明确区分最终成品文字与生成素材像素内文字：普通标题、字幕和教学标注保留精确成品文字，但 `precise_text_required=false` 并交给剪辑文字轨；只有用户明确要求生成素材自身包含文字时才声明精准文字生成能力。
+- 制作规划调用模型前逐镜头证明至少存在一个合法工作流组合；无解时直接列出冲突，不创建 Manifest、AgentRun 或费用，不自动换路由。
 - 音频关闭时只允许 `off` 或 `lip_motion_only`，不建立任何音频生产依赖。
 - 每个需求版本只自动尝试一次；失败不修复、不自动重试、不换模型，用户确认费用后可精确重跑原输入清单。
 - 成功只创建待审核分镜候选；用户确认后才创建不可变方案版本。
@@ -174,6 +175,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-22 | 修复普通成品文字被误写为生成素材精准文字能力，导致制作规划 8 个镜头全部无可行路线：director Prompt v5 明确普通标题、字幕和教学标注交给剪辑文字轨；制作规划新增调用前逐镜头可行性预检，无解时不创建 Manifest、AgentRun 或模型费用。无工作流能力伪声明、无自动换路由、无输出修复 |
 | 2026-07-22 | 方案页当前命令错误从侧栏底部移到内容区顶部粘性状态条，滚动后仍可见并标明失败阶段；移动端允许换行，不增加自动重试、自动消失或错误状态改写 |
 | 2026-07-22 | 分镜修订器的人物、服装和产品版本选择项增加已验证来源图缩略图、选中高亮和无预览失败占位；预览失败不自动转码、替换或修改实体绑定 |
 | 2026-07-22 | 修复人物参考上传后无反馈与跨项目实体主键冲突：附件绑定合同严格区分“登记新实体”和“选择已有实体”，新人物/声音主键由后端统一生成；方案页分阶段显示上传与登记状态，登记失败保留附件并提供再次登记入口，不自动重传或重试 |
@@ -226,9 +228,9 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`211 passed`
+- 后端测试：`215 passed`
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v45，4 个文本智能体模型分工与 6 个镜头工作流槽位；在 v43 基础上仅将内容策划升级为 `creative-brief-candidate.v4 / content-planner-prompt.v6` 并把 planner 最大输出设为 8192 Token，其他模型、槽位主键、RunningHub 工作流 ID、NodeInfoList、能力、价格与规格不变
+- 当前生产配置：v46，4 个文本智能体模型分工与 6 个镜头工作流槽位；在 v45 基础上仅将导演 Prompt 升级为 `director-prompt.v5`，其他模型合同、槽位主键、RunningHub 工作流 ID、NodeInfoList、能力、价格与规格不变
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
