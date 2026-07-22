@@ -199,14 +199,23 @@ def _validate_route_assignments(
         if video.operation_kind == "text_to_video_generation" and keyframe is not None:
             errors.append({"code": "PRODUCTION_PLAN_T2V_KEYFRAME_NOT_ALLOWED", "path": path, "shot_code": shot.shot_code})
         required_sources = sorted(set(_required_sources(keyframe) + _required_sources(video)))
-        if validate_reported_inputs and assignment.get("required_input_sources") != required_sources:
-            errors.append({
-                "code": "PRODUCTION_PLAN_REQUIRED_INPUTS_MISMATCH",
-                "path": path,
-                "shot_code": shot.shot_code,
-                "expected": required_sources,
-                "actual": assignment.get("required_input_sources"),
-            })
+        if validate_reported_inputs:
+            reported_sources = assignment.get("required_input_sources") or []
+            if len(reported_sources) != len(set(reported_sources)):
+                errors.append({
+                    "code": "PRODUCTION_PLAN_REQUIRED_INPUTS_DUPLICATE",
+                    "path": path,
+                    "shot_code": shot.shot_code,
+                    "actual": reported_sources,
+                })
+            elif set(reported_sources) != set(required_sources):
+                errors.append({
+                    "code": "PRODUCTION_PLAN_REQUIRED_INPUTS_MISMATCH",
+                    "path": path,
+                    "shot_code": shot.shot_code,
+                    "expected": required_sources,
+                    "actual": reported_sources,
+                })
         requirements = shot.generation_requirements or {}
         keyframe_sources = set(_input_sources(keyframe))
         keyframe_tags = set(keyframe.capability_tags or []) if keyframe else set()

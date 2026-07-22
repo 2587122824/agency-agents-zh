@@ -4,7 +4,7 @@
 >
 > 本文只记录可以由代码、迁移、测试或可运行页面证明的状态。设计目标不等于已实现。
 
-当前自动化基线：`215 passed`；前端生产构建通过。
+当前自动化基线：`217 passed`；前端生产构建通过。
 
 ## 状态定义
 
@@ -37,7 +37,7 @@
 | 媒体附件理解 | 未开始，已暂缓 | 已确认未来按图片、音频、视频顺序设计独立多模态服务与 `MediaAnalysisCandidate`；用户确认后才形成媒体事实。当前创作模型仍为 `metadata_only`，不读取媒体内容，不隐式调用多模态模型 |
 | 内容策划智能体 | 已完成 | `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6`、独立 `planner` 模型分工、真实模型网关和不可变输入清单已实现。脚本段使用互斥联合类型，Prompt 直接附带输出模型生成的权威 Schema；响应缺失、JSON、Schema 与项目合同错误分型并保存完整可用证据。同配置精确重跑与用户确认的当前合同重新生成严格分离，后者创建新 Manifest。智能体主动拓展叙事、钩子、表达、示例、视觉策略与行动引导，每项拓展必须引用真实需求字段、Decision 或实体版本；未经确认事实独立显示、一对一关联结构化问题并阻断接受。开发环境不保留旧输出兼容入口；不读取自由聊天、不扫描关键词、不修复输出、不增加评审模型、不自动重试、不换模型或生产路由 |
 | 分镜导演智能体 | 已完成 | `director-input.v2 / shot-plan.v3 / director-prompt.v5`；唯一 Prompt 完整冻结连续组格式及全部结构化枚举，并明确区分最终成品文字与生成素材像素内文字：普通标题、字幕和教学标注保留 `text_policy=required`，但不设置 `precise_text_required`。完整脚本段覆盖、精确人脸主体与画面文字、显式场景/服装变化、`new_information` 和生产能力要求均有确定性校验。支持人工 Patch 与用户确认费用后的选中镜头 AI 修订；未选镜头不可变化，失败保留来源候选并可精确重跑。模型不选工作流，后端不解析关键词或自动改值 |
-| 制作规划智能体 | 已完成 | `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v1`、独立 `production_planner` 模型分工、不可变输入清单、逐镜头工作流候选、理由展示、人工修改与显式采用已实现。模型调用前按逐镜头全部合法工作流组合做确定性可行性预检；无解时返回镜头和能力冲突，不创建 Manifest、AgentRun 或费用。调用后继续精确验证镜头集合、槽位 ID、类型、规格、必需输入和能力要求；候选不创建影响分析、快照、DAG 或任务。未知路线或缺输入整次失败，用户确认后只能按原配置精确重跑，不自动替换、降级或执行 |
+| 制作规划智能体 | 已完成 | `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v2`、独立 `production_planner` 模型分工、不可变输入清单、逐镜头工作流候选、理由展示、人工修改与显式采用已实现。模型调用前按逐镜头全部合法工作流组合做确定性可行性预检；无解时返回镜头和能力冲突，不创建 Manifest、AgentRun 或费用。调用后继续精确验证镜头集合、槽位 ID、类型、规格、必需输入和能力要求；必需输入按成员完全一致且无重复的无序集合验收，不把数组顺序误当执行语义。候选不创建影响分析、快照、DAG 或任务。未知路线或缺输入整次失败，用户确认后只能按原配置精确重跑，不自动替换、降级或执行 |
 | 质量审核智能体 | 部分完成 | `qc-agent-input.v1 / qc-report-candidate.v1 / qc-agent-prompt.v1`、待审图片与冻结主参考图片输入、参考路径/哈希复验、证据/合同引用/置信度严格校验、`QCReportCandidate`、AgentRun 审计、失败精确重跑和人工批准/拒绝落账已实现。DeepSeek 官方 Chat API 当前只声明字符串用户内容且没有视觉端点，配置 v35 因此不发布 QC 模型或 `vision_analysis`；网关在联网前明确返回 `QC_MODEL_NOT_CONFIGURED`。确定性文件/规格检查始终先行；视频与音频明确进入人工审核，不伪装成模型分析 |
 | 剪辑助理智能体 | 未开始 | Timeline 候选、验证、修订和人工确认已有；尚无执行 `editor-assistant-input.v1` 的模型服务 |
 | 类型化实体与不可变版本 | 已完成 | `Entity`、`EntityVersion`、实体资产库页面；新实体主键由后端生成，附件绑定严格区分新建实体和选择已有实体。方案页分阶段展示上传与登记结果，登记失败保留已验证附件并允许用户显式再次登记 |

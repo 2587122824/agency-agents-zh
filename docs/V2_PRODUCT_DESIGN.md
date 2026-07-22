@@ -1247,8 +1247,10 @@ V1 中缺少工作流 ID 或 NodeInfoList 的多人物、首尾帧、多帧、�
 
 ## 43. 制作规划智能体实现
 
-制作规划智能体使用独立 `production_planner` 模型分工及 `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v1`。它只在用户选定已发布制作配置和画面规格后运行，读取当前已确认 `shot-plan.v3` 分镜及该配置中已发布图片/视频工作流的精确能力合同。它不选择配置、Provider、计费方案、TTS 路线，不读取价格，也不创建生产任务。
+制作规划智能体使用独立 `production_planner` 模型分工及 `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v2`。它只在用户选定已发布制作配置和画面规格后运行，读取当前已确认 `shot-plan.v3` 分镜及该配置中已发布图片/视频工作流的精确能力合同。它不选择配置、Provider、计费方案、TTS 路线，不读取价格，也不创建生产任务。
 
 模型逐镜头返回精确关键帧槽位、视频槽位、必需输入来源和普通用户可读理由。调用模型前，后端先确定性证明每个镜头在当前已发布配置中至少存在一个合法图片/视频工作流组合；任一镜头无解时直接列出镜头和能力冲突，不创建 Manifest、AgentRun 或模型费用。通过预检后，模型结果仍必须满足镜头集合与顺序、槽位 ID、操作类型、规格支持、NodeInfoList 必需输入和 `generation_requirements`。未知、停用、不支持规格、缺少参考图、缺少多帧或生成素材像素内精确文字能力均使整次运行失败；不接受部分候选，不自动替换或退化。
+
+`required_input_sources` 按无序集合校验：成员必须与所选槽位的必需输入完全一致且不得重复，但数组排列位置不承载执行语义。缺少、增加、改名或重复仍整次失败；后端不重排或修复模型输出。
 
 页面展示候选理由并允许逐镜头人工修改。用户明确采用后保存独立 `confirmed_assignments`，原始 `proposed_assignments` 保持可审计。采用动作不生成费用分析、快照、DAG 或 WorkItem；后续仍必须独立查看制作计划、保存不可变制作方案、确认费用、激活并开始制作。失败不自动重试；精确重跑必须绑定原失败 Run、原 Manifest 和完全一致的配置、模型、Provider、Prompt 与输出 Schema。

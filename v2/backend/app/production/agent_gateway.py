@@ -17,7 +17,7 @@ from ..providers.credentials import EnvironmentCredentialResolver
 
 PRODUCTION_PLANNER_INPUT_CONTRACT_VERSION = "production-planner-input.v1"
 PRODUCTION_PLANNER_OUTPUT_SCHEMA_VERSION = "production-plan-candidate.v1"
-PRODUCTION_PLANNER_PROMPT_CONTRACT_VERSION = "production-planner-prompt.v1"
+PRODUCTION_PLANNER_PROMPT_CONTRACT_VERSION = "production-planner-prompt.v2"
 
 
 class ProductionRouteAssignmentOutput(BaseModel):
@@ -76,7 +76,7 @@ _SYSTEM_PROMPT = """你是片场 V2 的制作规划智能体。你只根据已�
 3. operation_kind=image_generation 的槽位只能作为关键帧方案；video_generation 或 text_to_video_generation 只能作为视频方案。
 4. video_generation 必须同时选择一个关键帧方案；text_to_video_generation 必须把关键帧方案设为 null。
 5. 所选槽位必须显式支持 selected_video_spec.id。
-6. required_input_sources 必须等于两个所选槽位中 required=true 的 required_input_sources 去重排序结果；不得遗漏、增加或改名。
+6. required_input_sources 必须逐字包含两个所选槽位中 required=true 的全部输入来源；不得遗漏、增加、改名或重复。数组排列顺序没有业务含义。
 7. generation_requirements.reference_image_required 或 identity_consistency_required 为 true 时，关键帧槽位的 input_sources 必须包含 reference_image.primary，并且镜头必须已有 primary_reference_entity_version_id。
 8. multi_frame_required 为 true 时，视频槽位必须声明 multi_frame；precise_text_required 为 true 时，关键帧槽位必须声明 precise_text。
 9. reason 只解释已声明的镜头要求和工作流能力如何匹配，不得声称已经生成、通过审核或开始扣费。

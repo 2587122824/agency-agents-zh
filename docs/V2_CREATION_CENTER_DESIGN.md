@@ -604,7 +604,7 @@ model_config_version / prompt_contract_version
 
 ### 9.6 制作规划智能体
 
-制作规划智能体位于已确认 `PlanVersion` 与确定性生产编译器之间。用户必须先明确选择一个已发布制作配置和画面规格；智能体不能替用户选择配置、Provider、模型、价格目录或音频路线。当前合同采用 `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v1`。
+制作规划智能体位于已确认 `PlanVersion` 与确定性生产编译器之间。用户必须先明确选择一个已发布制作配置和画面规格；智能体不能替用户选择配置、Provider、模型、价格目录或音频路线。当前合同采用 `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v2`。
 
 输入清单冻结当前方案、逐镜头结构化能力要求、选定视频规格，以及该配置中每个图片/视频槽位的精确版本 ID、操作类型、支持规格、能力标签和必需输入来源。Node ID、Provider 密钥、价格和执行状态不进入模型输入。输出为逐镜头候选：
 
@@ -621,6 +621,8 @@ model_config_version / prompt_contract_version
 ```
 
 后端在模型调用前必须先证明每个镜头至少存在一个满足参考图、身份一致性、多帧和素材像素内精确文字要求的已发布工作流组合。无解时返回逐镜头冲突，不创建 Manifest、AgentRun 或模型费用。通过预检后，再逐项验证模型返回的镜头集合与顺序、槽位归属与发布状态、操作类型、规格支持、必需输入集合和能力要求。任一未知 ID、输入遗漏或能力冲突都使本次 AgentRun 明确失败；系统不采用部分结果、不猜测替代槽位、不改写 ID。模型已调用后的失败只能由用户确认同一次模型费用后，复用原 Manifest 与完全一致的模型配置精确重跑。
+
+必需输入来源是无序集合，不是执行步骤列表。模型返回成员必须与两个选中槽位的 `required=true` 输入完全相同且不可重复；成员顺序不同不构成失败，缺少、增加、改名或重复仍明确拒绝。后端不通过重排来修改候选。
 
 `ProductionPlanCandidate` 同时保存 `proposed_assignments` 与用户审核后的 `confirmed_assignments`。页面把候选填入逐镜头控件，允许用户逐项修改；只有“采用当前逐镜头路线”命令才把审核结果记为 `accepted`。接受候选仍不创建 `ProductionImpactAnalysis`、`ProductionSnapshot`、DAG 或 WorkItem；费用分析、保存快照、确认费用、激活和提交继续是独立命令。
 

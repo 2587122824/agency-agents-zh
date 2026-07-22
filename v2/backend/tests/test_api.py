@@ -2853,6 +2853,66 @@ def test_production_planner_rejects_missing_required_input_sources(client: TestC
         assert run.raw_output["assignments"][0]["required_input_sources"] == ["shot.visual_prompt"]
 
 
+def test_production_planner_accepts_required_inputs_in_any_order(client: TestClient) -> None:
+    class ReorderedInputsGateway(DeterministicProductionPlannerGateway):
+        def invoke(self, selection, manifest_payload):
+            result = super().invoke(selection, manifest_payload)
+            raw = result.output.model_dump(mode="json")
+            raw["assignments"][0]["required_input_sources"].reverse()
+            output = ProductionPlannerOutput.model_validate(raw)
+            return ProductionPlannerResult(output, raw, result.provider_request_id, result.token_usage)
+
+    app.dependency_overrides[get_production_planner_gateway] = lambda: ReorderedInputsGateway()
+    project, plan = create_confirmed_plan(client)
+    publish_visual_production_configuration(client, command_prefix="production-planner-reordered-input-config")
+    preparation = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    config = preparation["published_configurations"][0]
+
+    generated = client.post(
+        f"/api/v1/projects/{project['id']}/production-plan-candidates:generate",
+        json={
+            "command_id": "production-planner-reordered-input-001",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": config["video_specs"][0]["id"],
+        },
+    )
+
+    assert generated.status_code == 201, generated.text
+    assert generated.json()["status"] == "awaiting_review"
+
+
+def test_production_planner_rejects_duplicate_required_inputs(client: TestClient) -> None:
+    class DuplicateInputsGateway(DeterministicProductionPlannerGateway):
+        def invoke(self, selection, manifest_payload):
+            result = super().invoke(selection, manifest_payload)
+            raw = result.output.model_dump(mode="json")
+            raw["assignments"][0]["required_input_sources"].append(
+                raw["assignments"][0]["required_input_sources"][0]
+            )
+            output = ProductionPlannerOutput.model_validate(raw)
+            return ProductionPlannerResult(output, raw, result.provider_request_id, result.token_usage)
+
+    app.dependency_overrides[get_production_planner_gateway] = lambda: DuplicateInputsGateway()
+    project, plan = create_confirmed_plan(client)
+    publish_visual_production_configuration(client, command_prefix="production-planner-duplicate-input-config")
+    preparation = client.get(f"/api/v1/projects/{project['id']}/production-preparation").json()
+    config = preparation["published_configurations"][0]
+
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/production-plan-candidates:generate",
+        json={
+            "command_id": "production-planner-duplicate-input-001",
+            "plan_version_id": plan["id"],
+            "production_config_version_id": config["id"],
+            "video_spec_version_id": config["video_specs"][0]["id"],
+        },
+    )
+
+    assert failed.status_code == 502
+    assert failed.headers["x-error-code"] == "PRODUCTION_PLANNER_OUTPUT_CONTRACT_INVALID"
+
+
 def test_production_preparation_lists_only_current_published_configuration(client: TestClient) -> None:
     project = create_creation_project(client)
     previous = publish_visual_production_configuration(
