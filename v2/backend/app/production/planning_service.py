@@ -149,7 +149,7 @@ def _manifest_payload(
             "capability_tags": workflow.capability_tags or [],
             "input_sources": _input_sources(workflow),
             "required_input_sources": _required_sources(workflow),
-        } for workflow in workflows if workflow.operation_kind in {"image_generation", "video_generation", "text_to_video_generation"}],
+        } for workflow in workflows if workflow.operation_kind in {"image_generation", "video_generation", "multi_frame_video_generation", "text_to_video_generation"}],
     }
 
 
@@ -189,12 +189,12 @@ def _validate_route_assignments(
             continue
         if keyframe and keyframe.operation_kind != "image_generation":
             errors.append({"code": "PRODUCTION_PLAN_KEYFRAME_KIND_INVALID", "path": path, "shot_code": shot.shot_code})
-        if video.operation_kind not in {"video_generation", "text_to_video_generation"}:
+        if video.operation_kind not in {"video_generation", "multi_frame_video_generation", "text_to_video_generation"}:
             errors.append({"code": "PRODUCTION_PLAN_VIDEO_KIND_INVALID", "path": path, "shot_code": shot.shot_code})
         for workflow in (keyframe, video):
             if workflow and (workflow.status != "published" or video_spec.id not in (workflow.supported_video_spec_ids or [])):
                 errors.append({"code": "PRODUCTION_PLAN_VIDEO_SPEC_UNSUPPORTED", "path": path, "shot_code": shot.shot_code, "workflow_slot_version_id": workflow.id})
-        if video.operation_kind == "video_generation" and keyframe is None:
+        if video.operation_kind in {"video_generation", "multi_frame_video_generation"} and keyframe is None:
             errors.append({"code": "PRODUCTION_PLAN_I2V_KEYFRAME_REQUIRED", "path": path, "shot_code": shot.shot_code})
         if video.operation_kind == "text_to_video_generation" and keyframe is not None:
             errors.append({"code": "PRODUCTION_PLAN_T2V_KEYFRAME_NOT_ALLOWED", "path": path, "shot_code": shot.shot_code})
@@ -228,6 +228,13 @@ def _validate_route_assignments(
             errors.append({"code": "PRODUCTION_PLAN_IDENTITY_ROUTE_INVALID", "path": path, "shot_code": shot.shot_code})
         if requirements.get("multi_frame_required") and "multi_frame" not in video_tags:
             errors.append({"code": "PRODUCTION_PLAN_MULTI_FRAME_CAPABILITY_MISSING", "path": path, "shot_code": shot.shot_code})
+        if video.operation_kind == "multi_frame_video_generation" and not requirements.get("multi_frame_required"):
+            errors.append({"code": "PRODUCTION_PLAN_MULTI_FRAME_NOT_REQUESTED", "path": path, "shot_code": shot.shot_code})
+        if requirements.get("multi_frame_required") and (
+            not isinstance(getattr(shot, "guide_frame_prompts", None), dict)
+            or set(shot.guide_frame_prompts) != {"start", "middle", "end"}
+        ):
+            errors.append({"code": "PRODUCTION_PLAN_MULTI_FRAME_PROMPTS_MISSING", "path": path, "shot_code": shot.shot_code})
         if requirements.get("precise_text_required") and "precise_text" not in keyframe_tags:
             errors.append({"code": "PRODUCTION_PLAN_PRECISE_TEXT_CAPABILITY_MISSING", "path": path, "shot_code": shot.shot_code})
     unknown_codes = sorted(set(assignment_by_code) - set(expected_codes))
@@ -245,7 +252,7 @@ def _route_feasibility_errors(
     keyframes = [item for item in workflows if item.operation_kind == "image_generation"]
     videos = [
         item for item in workflows
-        if item.operation_kind in {"video_generation", "text_to_video_generation"}
+        if item.operation_kind in {"video_generation", "multi_frame_video_generation", "text_to_video_generation"}
     ]
     errors: list[dict[str, Any]] = []
     for shot in shots:
@@ -397,7 +404,7 @@ def generate_production_plan_candidate(session: Session, project: Project, paylo
     plan = repository.plan(payload.plan_version_id)
     if not plan or plan.project_id != project.id:
         raise ProductionNotFoundError("Plan version not found in project")
-    if not plan.is_active or plan.status != "confirmed" or plan.contract_schema_version != "shot-plan.v3":
+    if not plan.is_active or plan.status != "confirmed" or plan.contract_schema_version != "shot-plan.v4":
         raise ProductionConflictError("PRODUCTION_PLANNER_PLAN_INVALID", "制作规划只能读取当前已确认的新版分镜方案。")
     config = repository.configuration(payload.production_config_version_id)
     if not config or config.status != "published":

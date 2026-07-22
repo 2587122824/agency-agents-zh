@@ -133,11 +133,16 @@ def _provider_request(
 ) -> ProviderExecutionRequest:
     outputs: list[dict] = []
     repository = _work(session)
+    input_slots = repository.required_parent_input_slots(item)
     for parent in parents:
         parent_attempt = repository.attempt(parent.current_attempt_id)
         parent_outputs = (parent_attempt.response_manifest or {}).get("outputs") if parent_attempt else None
         if isinstance(parent_outputs, list):
-            outputs.extend(output for output in parent_outputs if isinstance(output, dict))
+            outputs.extend(
+                {**output, "input_slot": input_slots.get(parent.dag_node_id)}
+                for output in parent_outputs
+                if isinstance(output, dict)
+            )
     return ProviderExecutionRequest(
         work_kind=item.kind,
         request_fingerprint=attempt.request_fingerprint,

@@ -11,6 +11,9 @@ RUNNINGHUB_NODE_SOURCES = frozenset({
     "reference_image.present",
     "reference_image.primary",
     "source_image",
+    "source_image.start",
+    "source_image.middle",
+    "source_image.end",
     "seed",
     "shot.action",
     "shot.composition",
@@ -26,6 +29,8 @@ RUNNINGHUB_NODE_SOURCES = frozenset({
     "video_spec.long_side",
     "video_spec.short_side",
     "video_spec.frame_count",
+    "video_spec.middle_frame_index",
+    "video_spec.last_frame_index",
 })
 
 
@@ -80,7 +85,7 @@ def runninghub_workflow_contract_issues(
         seen.add(identity)
 
         source = str(binding.get("value_source") or "")
-        if source == "source_image":
+        if source.startswith("source_image"):
             source_image_count += 1
         if source == "reference_image.primary":
             reference_image_count += 1
@@ -92,7 +97,7 @@ def runninghub_workflow_contract_issues(
                 "path": f"node_info_list.{index}.value_source",
                 "value_source": source,
             })
-        if source == "source_image" and operation_kind != "video_generation":
+        if source.startswith("source_image") and operation_kind not in {"video_generation", "multi_frame_video_generation"}:
             issues.append({
                 "code": "RUNNINGHUB_SOURCE_IMAGE_NOT_APPLICABLE",
                 "path": f"node_info_list.{index}.value_source",
@@ -104,6 +109,9 @@ def runninghub_workflow_contract_issues(
             })
         expected_type = {
             "source_image": "image",
+            "source_image.start": "image",
+            "source_image.middle": "image",
+            "source_image.end": "image",
             "reference_image.primary": "image",
             "reference_image.present": "boolean",
             "shot.visual_prompt": "string",
@@ -120,6 +128,12 @@ def runninghub_workflow_contract_issues(
     if operation_kind == "video_generation" and source_image_count != 1:
         issues.append({
             "code": "RUNNINGHUB_I2V_SOURCE_IMAGE_COUNT_INVALID",
+            "path": "node_info_list",
+            "actual": source_image_count,
+        })
+    if operation_kind == "multi_frame_video_generation" and source_image_count != 3:
+        issues.append({
+            "code": "RUNNINGHUB_MULTI_FRAME_SOURCE_IMAGE_COUNT_INVALID",
             "path": "node_info_list",
             "actual": source_image_count,
         })

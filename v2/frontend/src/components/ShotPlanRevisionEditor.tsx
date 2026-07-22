@@ -44,7 +44,7 @@ const fields: Array<keyof ShotContract> = [
   'shot_purpose', 'framing', 'camera_angle', 'camera_motion', 'subject_motion', 'scene_entity_version_id',
   'character_entity_version_ids', 'outfit_entity_version_ids', 'product_entity_version_ids',
   'primary_reference_entity_version_id', 'face_visibility', 'face_subject_entity_version_ids', 'text_policy', 'required_on_screen_text', 'audio_requirement',
-  'composition', 'action', 'visual_prompt', 'negative_prompt', 'new_information', 'generation_requirements',
+  'composition', 'action', 'visual_prompt', 'guide_frame_prompts', 'negative_prompt', 'new_information', 'generation_requirements',
 ]
 
 function cloneShot(shot: ShotContract): ShotContract {
@@ -56,6 +56,7 @@ function cloneShot(shot: ShotContract): ShotContract {
     product_entity_version_ids: [...shot.product_entity_version_ids],
     face_subject_entity_version_ids: [...shot.face_subject_entity_version_ids],
     generation_requirements: { ...shot.generation_requirements },
+    guide_frame_prompts: shot.guide_frame_prompts ? { ...shot.guide_frame_prompts } : null,
   }
 }
 
@@ -241,6 +242,9 @@ export function ShotPlanRevisionEditor({
               <label>画面生成描述<textarea required value={shot.visual_prompt ?? ''} maxLength={4000} onChange={event => update(selectedIndex, 'visual_prompt', event.target.value)} /></label>
               <label>避免内容（可不设置）<textarea value={shot.negative_prompt ?? ''} maxLength={2000} placeholder="未设置" onChange={event => update(selectedIndex, 'negative_prompt', event.target.value || null)} /></label>
             </div>
+            {shot.generation_requirements.multi_frame_required && <div className={styles.generationGrid}>
+              {(['start', 'middle', 'end'] as const).map((role, index) => <label key={role}>{['首帧画面', '中帧画面', '尾帧画面'][index]}<textarea required value={shot.guide_frame_prompts?.[role] ?? ''} maxLength={4000} onChange={event => update(selectedIndex, 'guide_frame_prompts', { start: shot.guide_frame_prompts?.start ?? '', middle: shot.guide_frame_prompts?.middle ?? '', end: shot.guide_frame_prompts?.end ?? '', [role]: event.target.value })} /></label>)}
+            </div>}
             <label className={styles.fullText}>相对前一镜头新增的信息<textarea value={shot.new_information} maxLength={1000} onChange={event => update(selectedIndex, 'new_information', event.target.value)} /></label>
           </section>
           <section className={styles.formSection}>
@@ -263,7 +267,7 @@ export function ShotPlanRevisionEditor({
             </div>
             <div className={styles.contractChecks}>
               <fieldset><legend>必须看清人脸的主体</legend>{characters.filter(entity => shot.character_entity_version_ids.includes(entity.id)).map(entity => <label key={entity.id}><input type="checkbox" disabled={shot.face_visibility !== 'required'} checked={shot.face_subject_entity_version_ids.includes(entity.id)} onChange={() => update(selectedIndex, 'face_subject_entity_version_ids', shot.face_subject_entity_version_ids.includes(entity.id) ? shot.face_subject_entity_version_ids.filter(id => id !== entity.id) : [...shot.face_subject_entity_version_ids, entity.id])} />{entity.display_name} · v{entity.version_number}</label>)}</fieldset>
-              <fieldset><legend>制作能力要求</legend>{([['reference_image_required', '需要参考图'], ['multi_frame_required', '需要多帧输入'], ['identity_consistency_required', '需要身份一致性'], ['precise_text_required', '必须由生成模型直接绘制文字']] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={shot.generation_requirements[key]} onChange={() => update(selectedIndex, 'generation_requirements', { ...shot.generation_requirements, [key]: !shot.generation_requirements[key] })} />{label}</label>)}</fieldset>
+              <fieldset><legend>制作能力要求</legend>{([['reference_image_required', '需要参考图'], ['multi_frame_required', '需要多帧输入'], ['identity_consistency_required', '需要身份一致性'], ['precise_text_required', '必须由生成模型直接绘制文字']] as const).map(([key, label]) => <label key={key}><input type="checkbox" checked={shot.generation_requirements[key]} onChange={() => { const enabled = !shot.generation_requirements[key]; update(selectedIndex, 'generation_requirements', { ...shot.generation_requirements, [key]: enabled }); if (key === 'multi_frame_required') update(selectedIndex, 'guide_frame_prompts', enabled ? { start: shot.visual_prompt ?? '', middle: '', end: '' } : null) }} />{label}</label>)}</fieldset>
             </div>
             <div className={styles.referencePicker}>
               <label>主参考图<select value={shot.primary_reference_entity_version_id ?? ''} onChange={event => update(selectedIndex, 'primary_reference_entity_version_id', event.target.value || null)}><option value="">无主参考图</option>{referenceOptions.map(entity => <option key={entity.id} value={entity.id}>{entity.display_name} · v{entity.version_number}</option>)}</select></label>

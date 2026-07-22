@@ -811,6 +811,7 @@ def validate_shots(
         visual_prompt = item.get("visual_prompt")
         if not isinstance(visual_prompt, str) or not visual_prompt.strip() or len(visual_prompt.strip()) > 4000:
             errors.append({"code": "VISUAL_PROMPT_INVALID", "shot_code": shot_code})
+        guide_frame_prompts = item.get("guide_frame_prompts")
         negative_prompt = item.get("negative_prompt")
         if negative_prompt is not None and (
             not isinstance(negative_prompt, str)
@@ -870,6 +871,15 @@ def validate_shots(
             errors.append({"code": "IDENTITY_REFERENCE_REQUIREMENT_INVALID", "shot_code": shot_code})
         elif requirements["precise_text_required"] and item.get("text_policy") != "required":
             errors.append({"code": "PRECISE_TEXT_REQUIREMENT_INVALID", "shot_code": shot_code})
+        elif requirements["multi_frame_required"]:
+            if (
+                not isinstance(guide_frame_prompts, dict)
+                or set(guide_frame_prompts) != {"start", "middle", "end"}
+                or any(not isinstance(value, str) or not value.strip() or len(value.strip()) > 4000 for value in guide_frame_prompts.values())
+            ):
+                errors.append({"code": "MULTI_FRAME_PROMPTS_INVALID", "shot_code": shot_code})
+        elif guide_frame_prompts is not None:
+            errors.append({"code": "MULTI_FRAME_PROMPTS_NOT_ALLOWED", "shot_code": shot_code})
         continuity_group_id = item.get("continuity_group_id")
         if continuity_group_id is not None:
             signature = (
@@ -1389,7 +1399,7 @@ def decide_shot_plan(
         requirement_version_id=requirement.id,
         shot_plan_candidate_id=candidate.id,
         creative_brief=brief.brief,
-        contract_schema_version="shot-plan.v3",
+        contract_schema_version="shot-plan.v4",
         confirmed_by=payload.actor_id,
     )
     repository.add(plan)
@@ -1446,6 +1456,7 @@ def _shot_dict(shot: Shot) -> dict:
         "composition": shot.composition,
         "action": shot.action,
         "visual_prompt": shot.visual_prompt,
+        "guide_frame_prompts": shot.guide_frame_prompts,
         "negative_prompt": shot.negative_prompt,
         "new_information": shot.new_information,
         "generation_requirements": shot.generation_requirements,

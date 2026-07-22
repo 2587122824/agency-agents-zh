@@ -1518,6 +1518,8 @@ def test_work_repository_contract_preserves_candidate_order_dependencies_and_ato
             assert [row.id for row in work_repository.lease_candidates(now)] == [child.id]
             assert [row.id for row in work_repository.required_parent_items(child)] == [parent.id]
             assert work_repository.required_parent_items(parent) == []
+            assert work_repository.required_parent_input_slots(child) == {parent_node.id: "source_image"}
+            assert work_repository.required_parent_input_slots(parent) == {}
             assert set(work_repository.snapshot_work_states("snapshot-worker")) == {"completed", "queued"}
             assert work_repository.attempt(attempt.id).id == attempt.id  # type: ignore[union-attr]
             assert work_repository.project(project.id).id == project.id  # type: ignore[union-attr]

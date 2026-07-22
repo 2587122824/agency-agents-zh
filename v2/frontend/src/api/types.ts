@@ -424,6 +424,7 @@ export interface ShotContract {
   composition: string
   action: string
   visual_prompt: string | null
+  guide_frame_prompts: { start: string; middle: string; end: string } | null
   negative_prompt: string | null
   new_information: string
   generation_requirements: {

@@ -736,6 +736,7 @@ class Shot(Base):
     composition: Mapped[str] = mapped_column(String(500))
     action: Mapped[str] = mapped_column(String(1000))
     visual_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    guide_frame_prompts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     negative_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     new_information: Mapped[str] = mapped_column(String(1000))
     generation_requirements: Mapped[dict] = mapped_column(JSON)

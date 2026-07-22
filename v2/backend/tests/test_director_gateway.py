@@ -38,8 +38,8 @@ def selection() -> DirectorSelection:
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
         input_contract_version="director-input.v2",
-        prompt_contract_version="director-prompt.v5",
-        output_schema_version="shot-plan.v3",
+        prompt_contract_version="director-prompt.v6",
+        output_schema_version="shot-plan.v4",
         max_output_tokens=4000,
         sampling={"temperature": 0.2},
     )
@@ -105,6 +105,7 @@ def shot(code: str, sequence: int, beat: str, duration: int, *, continuity: str 
         "composition": "中景",
         "action": "向前跑",
         "visual_prompt": "主角在跑道向前跑",
+        "guide_frame_prompts": None,
         "negative_prompt": None,
         "new_information": f"展示 {beat} 的新训练信息",
         "generation_requirements": {
@@ -195,6 +196,40 @@ def test_director_rejects_invalid_contract_without_retry(monkeypatch, mutate) ->
 def test_director_rejects_non_json_without_repair(monkeypatch) -> None:
     monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
     gateway, transport = gateway_for("```json\n{}\n```")
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest())
+
+    assert raised.value.code == "DIRECTOR_OUTPUT_SCHEMA_INVALID"
+    assert len(transport.calls) == 1
+
+
+def test_director_requires_all_three_guide_prompts_for_multi_frame_shot(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    output["shots"][0]["generation_requirements"]["multi_frame_required"] = True
+    output["shots"][0]["guide_frame_prompts"] = {
+        "start": "起跑前准备",
+        "middle": "加速途中",
+    }
+    gateway, transport = gateway_for(output)
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest())
+
+    assert raised.value.code == "DIRECTOR_OUTPUT_SCHEMA_INVALID"
+    assert len(transport.calls) == 1
+
+
+def test_director_rejects_guide_prompts_for_single_frame_shot(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    output["shots"][0]["guide_frame_prompts"] = {
+        "start": "起跑前准备",
+        "middle": "加速途中",
+        "end": "冲过终点",
+    }
+    gateway, transport = gateway_for(output)
 
     with pytest.raises(AgentGatewayError) as raised:
         gateway.invoke(selection(), manifest())

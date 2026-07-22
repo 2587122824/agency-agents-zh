@@ -51,7 +51,7 @@ v2/runtime/worker.err.log
 - React + TypeScript + Vite 管理台，FastAPI 后端，SQLAlchemy/SQLite/Alembic。
 - Repository 边界、项目状态转移器、持久化事件、SSE 和 Transactional Outbox。
 - 对话、助手回复、需求候选、需求版本、Decision、附件绑定和智能体运行审计。
-- Creative Brief、`shot-plan.v3`、脚本覆盖、结构化分镜修订、人物/服装/场景/产品、主参考图与生产能力要求合同。
+- Creative Brief、`shot-plan.v4`、脚本覆盖、结构化分镜修订、人物/服装/场景/产品、主参考图、首中尾画面状态与生产能力要求合同。
 - 系统配置版本、Provider/模型/工作流/视频/音频/存储/价格组件。
 - ProductionSnapshot、DAG、费用影响、锁定、激活、提交和持久化 WorkItem。
 - RunningHub 图片、首帧视频与纯文本视频 Adapter 的严格合同和假传输测试；制作准备按每个镜头显式冻结工作流选择。
@@ -118,7 +118,7 @@ v2/runtime/worker.err.log
 - 相同模型与合同失败时只能由用户确认费用后精确复用原 Manifest；Prompt 或输出 Schema 已升级时，页面改为“使用当前合同重新生成”，重新冻结当前权威输入并创建新 Manifest。两条路径都保留旧失败记录，均不自动调用模型。
 - v45 将内容策划最大输出从 4096 调整为 8192 Token，并由 Schema 将节拍、脚本段、拓展和确认项限制在短视频合理规模；账本仍记录真实 Token，不按上限虚构费用。
 
-分镜导演运行代码使用 `director-input.v2 / shot-plan.v3 / director-prompt.v5`：
+分镜导演运行代码使用 `director-input.v2 / shot-plan.v4 / director-prompt.v6`：
 
 - 使用独立 `director` 模型分工，只读取已确认需求、已接受 Brief、决策、实体与附件事实、交付约束和音频策略。
 - 镜头必须精确引用内容节拍与脚本段，全部脚本段必须被覆盖；`action_count=1`。
@@ -175,6 +175,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-22 | 更正 RunningHub 工作流 `2072296894507872257` 的权威语义：它是首中尾帧生视频，不是生图。配置 v49 移除错误的“通用参考图关键帧”槽位并新增 `multi_frame_video_generation`；分镜升级 `shot-plan.v4 / director-prompt.v6`，多帧镜头必须给出三段独立画面状态。DAG 生成三个关键帧父节点，通过 `source_image.start / middle / end` 精确传给视频节点；缺帧、普通镜头误选三帧路线均阻断，不重复图片、不自动换工作流、不执行付费调用 |
 | 2026-07-22 | 修复制作规划把 `required_input_sources` 数组顺序误当合同差异：成员改为无序集合校验，仍严格拒绝缺少、增加、改名和重复；制作规划 Prompt 升级 v2，不重排或修复模型输出，不自动重跑。本次真实失败的 8 个镜头工作流与输入成员实际完全正确，仅排列不同 |
 | 2026-07-22 | 修复项目 `project_7b11ea9acdf04bb393dca2fce188b24c` 分镜 v2 的维护脚本终端编码损坏：通过正式分镜修订链以 ASCII Unicode 转义重写 8 个 `visual_prompt` 和 `composition`，确认分镜 v3 `plan_8cb9db0c2c074c10a6f44c17468d4a82`；页面中文正常、无连续问号，旧 v2 保留审计 |
 | 2026-07-22 | 方案页顶部错误状态条增加图标关闭按钮和 0.28 秒淡出上移效果；关闭只收起当前页面提示，不清除后端失败记录，不自动重试或修改失败状态，新错误仍会重新显示 |
@@ -231,13 +232,13 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`217 passed`
+- 后端测试：`224 passed`
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v48，4 个文本智能体模型分工与 6 个镜头工作流槽位；在 v47 基础上仅将制作规划 Prompt 升级为 `production-planner-prompt.v2`；其他模型合同、槽位主键、RunningHub 工作流 ID、NodeInfoList、能力、价格与规格不变
+- 当前生产配置：v49，4 个文本智能体模型分工与 6 个镜头工作流槽位；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；导演合同为 `shot-plan.v4 / director-prompt.v6`
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
-- Alembic runtime/head：`20260720_27`
+- Alembic runtime/head：`20260722_29`
 - 素材审核页桌面与 375px 浏览器验收：通过，无横向溢出；空状态和普通用户可读步骤文案正常
 - 真实 DeepSeek 内容方案首次生成、同需求版本微调与拒绝后返回创作中心：通过
 - 真实 DeepSeek 首次引导与点击后持续引导：通过

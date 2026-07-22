@@ -29,11 +29,12 @@ REQUIRED_SLOT_KEYS = {
     "runninghub-keyframe-identity-v2",
     "runninghub-keyframe-style-reference-v2",
     "runninghub-broll-text-video-v2",
+    "runninghub-three-frame-video-v2",
 }
-TARGET_CONFIG_NAME = "V2 主生产配置 · 多工作流"
+TARGET_CONFIG_NAME = "片场 V2 当前制作配置 v49"
 TARGET_SLOT_NAMES = {
     "2069607607387639810": "首帧生视频",
-    "2072296894507872257": "通用参考图关键帧",
+    "2072296894507872257": "首中尾帧生视频",
 }
 
 
@@ -122,6 +123,39 @@ def workflow_slots(provider_key: str, video_spec_key: str) -> list[WorkflowSlotD
         }),
         WorkflowSlotDraft.model_validate({
             **common,
+            "slot_key": "runninghub-three-frame-video-v2",
+            "display_name": "首中尾帧生视频",
+            "operation_kind": "multi_frame_video_generation",
+            "provider_workflow_id": "2072296894507872257",
+            "input_schema_version": "v2.three-frame-video-input.v1",
+            "output_schema_version": "v2.video-output.v1",
+            "capability_tags": ["image_to_video", "multi_frame", "three_frame"],
+            "node_info_list": [
+                binding("447", "image", "source_image.start", "image"),
+                binding("448", "image", "source_image.middle", "image"),
+                binding("449", "image", "source_image.end", "image"),
+                binding("422", "value", "shot.visual_prompt", "string"),
+                binding("417", "text", "shot.negative_prompt", "string", False),
+                binding("418", "value", "literal:false", "boolean"),
+                binding("410", "value", "video_spec.long_side", "integer"),
+                binding("436", "value", "duration_seconds", "number"),
+                binding("412", "value", "video_spec.fps", "integer"),
+                binding("424", "width", "video_spec.width", "integer"),
+                binding("424", "height", "video_spec.height", "integer"),
+                binding("424", "length", "video_spec.frame_count", "integer"),
+                binding("373", "frames_number", "video_spec.frame_count", "integer"),
+                binding("373", "frame_rate", "video_spec.fps", "integer"),
+                binding("413", "frame_rate", "video_spec.fps", "integer"),
+                binding("446", "frame_idx_1", "literal:0", "integer"),
+                binding("446", "frame_idx_2", "video_spec.middle_frame_index", "integer"),
+                binding("446", "frame_idx_3", "video_spec.last_frame_index", "integer"),
+                binding("362", "noise_seed", "seed", "integer"),
+                binding("363", "noise_seed", "seed", "integer"),
+                binding("413", "filename_prefix", 'literal:"v2/three-frame-video"', "string"),
+            ],
+        }),
+        WorkflowSlotDraft.model_validate({
+            **common,
             "slot_key": "runninghub-broll-text-video-v2",
             "display_name": "纯文本 B-roll 视频",
             "operation_kind": "text_to_video_generation",
@@ -180,7 +214,14 @@ def main() -> None:
         draft.description = "DeepSeek V4 Flash 文本智能体与 RunningHub 多工作流生产配置；工作流由用户逐镜头显式选择。"
         runninghub = next(item for item in draft.providers if item.adapter_kind == "runninghub")
         video_spec = draft.video_specs[0]
-        runninghub.capabilities = sorted(set(runninghub.capabilities + ["text_to_video_generation"]))
+        runninghub.capabilities = sorted(set(runninghub.capabilities + ["text_to_video_generation", "multi_frame_video_generation"]))
+        removed_slot_keys = {
+            slot.slot_key for slot in draft.workflow_slots
+            if slot.provider_workflow_id == "2072296894507872257" and slot.operation_kind == "image_generation"
+        }
+        draft.workflow_slots = [slot for slot in draft.workflow_slots if slot.slot_key not in removed_slot_keys]
+        if draft.pricing is not None:
+            draft.pricing.rules = [rule for rule in draft.pricing.rules if rule.workflow_slot_key not in removed_slot_keys]
         existing_slot_keys = {slot.slot_key for slot in draft.workflow_slots}
         draft.workflow_slots.extend(
             slot for slot in workflow_slots(runninghub.provider_key, video_spec.spec_key)
@@ -193,6 +234,10 @@ def main() -> None:
         for slot in draft.workflow_slots:
             if slot.provider_workflow_id in TARGET_SLOT_NAMES:
                 slot.display_name = TARGET_SLOT_NAMES[slot.provider_workflow_id]
+        for model in draft.models:
+            if model.agent_role == "director":
+                model.output_schema_version = "shot-plan.v4"
+                model.prompt_contract_version = "director-prompt.v6"
         if draft.pricing is None:
             raise RuntimeError("The current configuration has no test pricing catalog.")
         for slot in draft.workflow_slots:

@@ -151,7 +151,7 @@ class RunningHubAdapter:
     display_name: str = "RunningHub"
     external: bool = True
     requires_credential: bool = True
-    supported_work_kinds: frozenset[str] = frozenset({"generate_keyframe", "generate_i2v_clip", "generate_t2v_clip"})
+    supported_work_kinds: frozenset[str] = frozenset({"generate_keyframe", "generate_i2v_clip", "generate_three_frame_i2v_clip", "generate_t2v_clip"})
 
     def execute(self, request: ProviderExecutionRequest) -> dict[str, Any]:
         raise ProviderAdapterError("EXTERNAL_PROVIDER_LIFECYCLE_REQUIRED", "External work must use persisted submit and poll phases.")
@@ -174,12 +174,18 @@ class RunningHubAdapter:
             raise ProviderAdapterError("PROVIDER_CREDENTIAL_NOT_READY", "The frozen RunningHub credential reference is not available to V2.")
         return provider, workflow, storage, credential.secret
 
-    def _source_image(self, request: ProviderExecutionRequest) -> tuple[Path, str]:
-        if request.work_kind != "generate_i2v_clip":
-            raise ProviderAdapterError("NODE_BINDING_SOURCE_INVALID", "source_image is valid only for image-to-video work.")
-        images = [item for item in request.parent_outputs if item.get("asset_type") == "image"]
-        if len(request.parent_outputs) != 1 or len(images) != 1:
-            raise ProviderAdapterError("I2V_PARENT_IMAGE_COUNT_INVALID", "Image-to-video requires exactly one persisted parent image output.")
+    def _source_image(self, request: ProviderExecutionRequest, source: str) -> tuple[Path, str]:
+        expected_kind = "generate_three_frame_i2v_clip" if source != "source_image" else "generate_i2v_clip"
+        if request.work_kind != expected_kind:
+            raise ProviderAdapterError("NODE_BINDING_SOURCE_INVALID", f"{source} is not valid for this work kind.")
+        images = [
+            item for item in request.parent_outputs
+            if item.get("asset_type") == "image"
+            and (item.get("input_slot") == source or (source == "source_image" and item.get("input_slot") in {None, source}))
+        ]
+        expected_total = 3 if request.work_kind == "generate_three_frame_i2v_clip" else 1
+        if len(request.parent_outputs) != expected_total or len(images) != 1:
+            raise ProviderAdapterError("I2V_PARENT_IMAGE_COUNT_INVALID", "Image-to-video parent images do not match the frozen input slots.")
         output = images[0]
         if output.get("storage_backend") != "local" or not str(output.get("mime_type", "")).startswith("image/"):
             raise ProviderAdapterError("I2V_PARENT_IMAGE_INVALID", "The exact parent output is not a local image.")
@@ -214,7 +220,7 @@ class RunningHubAdapter:
 
     def _binding_value(self, request: ProviderExecutionRequest, source: str, uploaded_values: dict[str, str]) -> Any:
         manifest = request.request_manifest
-        if source == "source_image":
+        if source.startswith("source_image"):
             if source not in uploaded_values:
                 raise ProviderAdapterError("NODE_BINDING_SOURCE_INVALID", "source_image was not uploaded for this request.")
             return uploaded_values[source]
@@ -289,14 +295,18 @@ class RunningHubAdapter:
         bindings = workflow.get("node_info_list")
         if not isinstance(bindings, list) or not bindings:
             raise ProviderAdapterError("NODE_BINDING_LIST_INVALID", "The frozen RunningHub NodeInfoList is empty or invalid.")
-        source_image_count = sum(
-            item.get("value_source") == "source_image"
+        source_image_sources = [
+            item.get("value_source")
             for item in bindings
             if isinstance(item, dict)
-        )
+            and str(item.get("value_source") or "").startswith("source_image")
+        ]
+        source_image_count = len(source_image_sources)
         if request.work_kind == "generate_i2v_clip" and source_image_count != 1:
             raise ProviderAdapterError("I2V_SOURCE_IMAGE_BINDING_INVALID", "Image-to-video requires exactly one source_image NodeInfoList binding.")
-        if request.work_kind != "generate_i2v_clip" and source_image_count:
+        if request.work_kind == "generate_three_frame_i2v_clip" and set(source_image_sources) != {"source_image.start", "source_image.middle", "source_image.end"}:
+            raise ProviderAdapterError("I2V_SOURCE_IMAGE_BINDING_INVALID", "Three-frame video requires exact start, middle, and end image bindings.")
+        if request.work_kind not in {"generate_i2v_clip", "generate_three_frame_i2v_clip"} and source_image_count:
             raise ProviderAdapterError("NODE_BINDING_SOURCE_INVALID", "source_image is valid only for image-to-video work.")
         reference_image_count = sum(
             item.get("value_source") == "reference_image.primary"
@@ -308,11 +318,11 @@ class RunningHubAdapter:
         if reference_image_count > 1:
             raise ProviderAdapterError("REFERENCE_IMAGE_BINDING_INVALID", "Keyframe generation accepts at most one primary reference binding.")
         uploaded_values: dict[str, str] = {}
-        if any(item.get("value_source") == "source_image" for item in bindings if isinstance(item, dict)):
-            image_path, mime_type = self._source_image(request)
+        for source in source_image_sources:
+            image_path, mime_type = self._source_image(request, source)
             upload = self.transport.upload(urljoin(base_url, "media/upload/binary"), api_key, image_path, mime_type, timeout)
-            uploaded_values["source_image"] = _first(upload, ("fileName", "file_name", "filename", "path", "filePath", "file_path", "url"))
-            if not uploaded_values["source_image"]:
+            uploaded_values[source] = _first(upload, ("fileName", "file_name", "filename", "path", "filePath", "file_path", "url"))
+            if not uploaded_values[source]:
                 raise ProviderAdapterError("RUNNINGHUB_UPLOAD_VALUE_MISSING", "RunningHub upload did not return a usable file value.")
         if reference_image_count:
             reference = self._reference_image(request)

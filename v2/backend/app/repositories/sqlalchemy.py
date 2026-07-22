@@ -1173,6 +1173,16 @@ class SqlAlchemyWorkRepository:
             WorkItem.dag_node_id.in_(parent_node_ids),
         )))
 
+    def required_parent_input_slots(self, item: WorkItem) -> dict[str, str]:
+        return {
+            edge.parent_node_id: edge.input_slot
+            for edge in self.session.scalars(select(DependencyEdge).where(
+                DependencyEdge.snapshot_id == item.snapshot_id,
+                DependencyEdge.child_node_id == item.dag_node_id,
+                DependencyEdge.dependency_type == "required",
+            ))
+        }
+
     def snapshot_work_states(self, snapshot_id: str) -> list[str]:
         return list(self.session.scalars(select(WorkItem.status).where(
             WorkItem.snapshot_id == snapshot_id

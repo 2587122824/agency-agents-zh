@@ -260,6 +260,65 @@ def test_runninghub_i2v_requires_exactly_one_local_parent_image(tmp_path, monkey
     assert transport.calls[1][2]["nodeInfoList"][0]["fieldValue"] == "uploaded/input.png"
 
 
+def test_runninghub_three_frame_video_uploads_exact_named_parent_slots(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    bindings = [
+        {"node_id": str(index), "field_path": "image", "value_source": f"source_image.{role}", "value_type": "image", "required": True}
+        for index, role in enumerate(("start", "middle", "end"), 1)
+    ]
+    manifest = runninghub_manifest(bindings, "video")
+    parents = []
+    for role in ("start", "middle", "end"):
+        path = tmp_path / "assets" / "parents" / f"{role}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(role.encode())
+        parents.append({
+            "uri": f"runtime://assets/parents/{role}.png",
+            "storage_backend": "local",
+            "asset_type": "image",
+            "mime_type": "image/png",
+            "input_slot": f"source_image.{role}",
+        })
+    adapter.submit(ProviderExecutionRequest(
+        "generate_three_frame_i2v_clip", "7" * 64, manifest, parent_outputs=tuple(parents),
+    ))
+    assert [call[0] for call in transport.calls] == ["upload", "upload", "upload", "post_json"]
+    assert [item["nodeId"] for item in transport.calls[-1][2]["nodeInfoList"]] == ["1", "2", "3"]
+
+
+def test_runninghub_three_frame_video_rejects_a_missing_named_parent(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    transport = FakeRunningHubTransport()
+    adapter = enabled_adapter(transport)
+    bindings = [
+        {"node_id": str(index), "field_path": "image", "value_source": f"source_image.{role}", "value_type": "image", "required": True}
+        for index, role in enumerate(("start", "middle", "end"), 1)
+    ]
+    manifest = runninghub_manifest(bindings, "video")
+    parents = []
+    for role in ("start", "end"):
+        path = tmp_path / "assets" / "parents" / f"{role}.png"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(role.encode())
+        parents.append({
+            "uri": f"runtime://assets/parents/{role}.png",
+            "storage_backend": "local",
+            "asset_type": "image",
+            "mime_type": "image/png",
+            "input_slot": f"source_image.{role}",
+        })
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.submit(ProviderExecutionRequest(
+            "generate_three_frame_i2v_clip", "8" * 64, manifest, parent_outputs=tuple(parents),
+        ))
+
+    assert caught.value.code == "I2V_PARENT_IMAGE_COUNT_INVALID"
+    assert transport.calls == []
+
+
 def test_runninghub_text_to_video_uses_no_parent_image_or_upload() -> None:
     transport = FakeRunningHubTransport()
     adapter = enabled_adapter(transport)

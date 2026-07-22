@@ -163,6 +163,7 @@ def _shot_contract(shot: Shot) -> dict:
         "composition": shot.composition,
         "action": shot.action,
         "visual_prompt": shot.visual_prompt,
+        "guide_frame_prompts": shot.guide_frame_prompts,
         "negative_prompt": shot.negative_prompt,
         "new_information": shot.new_information,
         "generation_requirements": shot.generation_requirements,
@@ -296,19 +297,31 @@ def _compile_manifest(
         image_key = f"{shot.shot_code}.keyframe"
         video_key = f"{shot.shot_code}.video"
         keyframe_workflow, video_workflow = workflow_routes_by_shot_id[shot.id]
+        multi_frame = video_workflow.operation_kind == "multi_frame_video_generation"
+        image_keys = [image_key]
+        if multi_frame:
+            image_keys = [f"{shot.shot_code}.keyframe.{role}" for role in ("start", "middle", "end")]
         if keyframe_workflow:
-            nodes.append({
-                "node_key": image_key,
-                "kind": "generate_keyframe",
-                "shot_id": shot.id,
-                "workflow_slot_version_id": keyframe_workflow.id,
-                "input_contract": {"shot": _shot_contract(shot), "seed": _node_seed(plan.id, image_key), "entity_version_ids": sorted(set(
-                    ([shot.scene_entity_version_id] if shot.scene_entity_version_id else [])
-                    + shot.character_entity_version_ids + shot.outfit_entity_version_ids + shot.product_entity_version_ids
-                )), "reference_image": references_by_shot_id.get(shot.id)},
-                "output_contract": {"media_type": "image", "video_spec_version_id": selection["video_spec_version_id"]},
-            })
-        video_kind = "generate_t2v_clip" if video_workflow.operation_kind == "text_to_video_generation" else "generate_i2v_clip"
+            for index, current_image_key in enumerate(image_keys):
+                shot_contract = _shot_contract(shot)
+                if multi_frame:
+                    role = ("start", "middle", "end")[index]
+                    shot_contract["visual_prompt"] = shot.guide_frame_prompts[role]
+                nodes.append({
+                    "node_key": current_image_key,
+                    "kind": "generate_keyframe",
+                    "shot_id": shot.id,
+                    "workflow_slot_version_id": keyframe_workflow.id,
+                    "input_contract": {"shot": shot_contract, "seed": _node_seed(plan.id, current_image_key), "entity_version_ids": sorted(set(
+                        ([shot.scene_entity_version_id] if shot.scene_entity_version_id else [])
+                        + shot.character_entity_version_ids + shot.outfit_entity_version_ids + shot.product_entity_version_ids
+                    )), "reference_image": references_by_shot_id.get(shot.id)},
+                    "output_contract": {"media_type": "image", "video_spec_version_id": selection["video_spec_version_id"]},
+                })
+        video_kind = {
+            "text_to_video_generation": "generate_t2v_clip",
+            "multi_frame_video_generation": "generate_three_frame_i2v_clip",
+        }.get(video_workflow.operation_kind, "generate_i2v_clip")
         nodes.append({
             "node_key": video_key,
             "kind": video_kind,
@@ -316,7 +329,7 @@ def _compile_manifest(
             "workflow_slot_version_id": video_workflow.id,
             "input_contract": {
                 "shot": _shot_contract(shot),
-                "source_image_node_keys": [image_key] if keyframe_workflow else [],
+                "source_image_node_keys": image_keys if keyframe_workflow else [],
                 "duration_ms": shot.duration_ms,
                 "duration_seconds": shot.duration_ms / 1000,
                 "seed": _node_seed(plan.id, video_key),
@@ -324,7 +337,9 @@ def _compile_manifest(
             "output_contract": {"media_type": "video", "video_spec_version_id": selection["video_spec_version_id"]},
         })
         if keyframe_workflow:
-            edges.append({"parent_node_key": image_key, "child_node_key": video_key, "dependency_type": "required", "input_slot": "source_image"})
+            slots = ("source_image.start", "source_image.middle", "source_image.end") if multi_frame else ("source_image",)
+            for current_image_key, input_slot in zip(image_keys, slots, strict=True):
+                edges.append({"parent_node_key": current_image_key, "child_node_key": video_key, "dependency_type": "required", "input_slot": input_slot})
     timeline_inputs = [f"{shot.shot_code}.video" for shot in shots]
     if audio_mode == "voiceover":
         nodes.append({
@@ -482,7 +497,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         raise ProductionNotFoundError("Plan version not found in project")
     if plan.status != "confirmed" or not plan.is_active:
         errors.append({"code": "PLAN_NOT_ACTIVE", "path": "plan_version_id", "message": "只能分析当前已确认方案。"})
-    if plan.contract_schema_version != "shot-plan.v3":
+    if plan.contract_schema_version != "shot-plan.v4":
         errors.append({
             "code": "SHOT_PLAN_SCHEMA_UNSUPPORTED",
             "path": "plan_version_id",
@@ -598,15 +613,22 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         )
         if keyframe_slot and keyframe_slot.operation_kind != "image_generation":
             errors.append({"code": "KEYFRAME_SLOT_KIND_INVALID", "path": f"shots.{shot.shot_code}.keyframe_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "图片制作方案类型无效。"})
-        if video_slot and video_slot.operation_kind not in {"video_generation", "text_to_video_generation"}:
+        if video_slot and video_slot.operation_kind not in {"video_generation", "multi_frame_video_generation", "text_to_video_generation"}:
             errors.append({"code": "VIDEO_SLOT_KIND_INVALID", "path": f"shots.{shot.shot_code}.video_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "视频制作方案类型无效。"})
         for label, slot in (("keyframe", keyframe_slot), ("video", video_slot)):
             if slot and video_spec and video_spec.id not in (slot.supported_video_spec_ids or []):
                 errors.append({"code": "WORKFLOW_VIDEO_SPEC_UNSUPPORTED", "path": f"shots.{shot.shot_code}.{label}_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "所选制作方案未显式声明支持当前画面规格。"})
-        if video_slot and video_slot.operation_kind == "video_generation" and keyframe_slot is None:
+        if video_slot and video_slot.operation_kind in {"video_generation", "multi_frame_video_generation"} and keyframe_slot is None:
             errors.append({"code": "I2V_KEYFRAME_WORKFLOW_REQUIRED", "path": f"shots.{shot.shot_code}.keyframe_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "首帧生视频必须明确选择图片制作方案。"})
         if video_slot and video_slot.operation_kind == "text_to_video_generation" and keyframe_slot is not None:
             errors.append({"code": "T2V_KEYFRAME_WORKFLOW_NOT_ALLOWED", "path": f"shots.{shot.shot_code}.keyframe_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "纯文本视频不会使用关键帧，请清空该镜头的图片制作方案。"})
+        multi_required = bool((shot.generation_requirements or {}).get("multi_frame_required"))
+        if video_slot and video_slot.operation_kind == "multi_frame_video_generation" and not multi_required:
+            errors.append({"code": "MULTI_FRAME_ROUTE_NOT_REQUESTED", "path": f"shots.{shot.shot_code}.video_workflow_slot_version_id", "shot_code": shot.shot_code, "message": "该镜头没有声明多帧生产要求，不能选择首中尾帧方案。"})
+        if video_slot and video_slot.operation_kind == "multi_frame_video_generation" and (
+            not isinstance(shot.guide_frame_prompts, dict) or set(shot.guide_frame_prompts) != {"start", "middle", "end"}
+        ):
+            errors.append({"code": "MULTI_FRAME_PROMPTS_MISSING", "path": f"shots.{shot.shot_code}.guide_frame_prompts", "shot_code": shot.shot_code, "message": "首中尾帧方案需要三个明确画面状态。"})
         if keyframe_slot:
             keyframe_provider = repository.provider(keyframe_slot.provider_config_version_id)
             _validate_runninghub_keyframe_bindings([shot], references_by_shot_id, keyframe_slot, keyframe_provider, errors)
@@ -1046,6 +1068,8 @@ def _execution_manifest(
             "fps": video_spec.fps,
             "frame_count_rule": video_spec.frame_count_rule,
             "frame_count": frame_count,
+            "middle_frame_index": frame_count // 2 if frame_count is not None else None,
+            "last_frame_index": frame_count - 1 if frame_count is not None else None,
             "long_side": max(video_spec.width, video_spec.height),
             "short_side": min(video_spec.width, video_spec.height),
             "container": video_spec.container,

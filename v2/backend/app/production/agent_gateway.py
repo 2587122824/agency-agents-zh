@@ -73,8 +73,8 @@ _SYSTEM_PROMPT = """你是片场 V2 的制作规划智能体。你只根据已�
 规则：
 1. 必须为输入中的每个镜头返回且只返回一项，顺序和 shot_code 完全一致。
 2. 工作流 ID 只能逐字复制 available_workflow_slots 中的 id，不得使用显示名称、工作流供应商 ID、缩写或自造 ID。
-3. operation_kind=image_generation 的槽位只能作为关键帧方案；video_generation 或 text_to_video_generation 只能作为视频方案。
-4. video_generation 必须同时选择一个关键帧方案；text_to_video_generation 必须把关键帧方案设为 null。
+3. operation_kind=image_generation 的槽位只能作为关键帧方案；video_generation、multi_frame_video_generation 或 text_to_video_generation 只能作为视频方案。
+4. video_generation 和 multi_frame_video_generation 必须同时选择一个关键帧方案；text_to_video_generation 必须把关键帧方案设为 null。
 5. 所选槽位必须显式支持 selected_video_spec.id。
 6. required_input_sources 必须逐字包含两个所选槽位中 required=true 的全部输入来源；不得遗漏、增加、改名或重复。数组排列顺序没有业务含义。
 7. generation_requirements.reference_image_required 或 identity_consistency_required 为 true 时，关键帧槽位的 input_sources 必须包含 reference_image.primary，并且镜头必须已有 primary_reference_entity_version_id。
@@ -188,7 +188,7 @@ class DeterministicProductionPlannerGateway:
     def invoke(self, selection: ProductionPlannerSelection, manifest_payload: dict[str, Any]) -> ProductionPlannerResult:
         slots = manifest_payload["available_workflow_slots"]
         image_slots = [item for item in slots if item["operation_kind"] == "image_generation"]
-        video_slots = [item for item in slots if item["operation_kind"] in {"video_generation", "text_to_video_generation"}]
+        video_slots = [item for item in slots if item["operation_kind"] in {"video_generation", "multi_frame_video_generation", "text_to_video_generation"}]
         assignments = []
         for shot in manifest_payload["shots"]:
             requirements = shot["generation_requirements"]

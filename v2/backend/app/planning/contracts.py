@@ -91,6 +91,7 @@ class ShotContractPatch(BaseModel):
     composition: str | None = Field(default=None, min_length=1, max_length=500)
     action: str | None = Field(default=None, min_length=1, max_length=1000)
     visual_prompt: str | None = Field(default=None, min_length=1, max_length=4000)
+    guide_frame_prompts: dict[str, str] | None = None
     negative_prompt: str | None = Field(default=None, min_length=1, max_length=2000)
     new_information: str | None = Field(default=None, min_length=1, max_length=1000)
     generation_requirements: dict[str, bool] | None = None
@@ -99,7 +100,7 @@ class ShotContractPatch(BaseModel):
     def validate_patch(self):
         if not self.model_fields_set:
             raise ValueError("at least one structured shot field is required")
-        nullable = {"scene_entity_version_id", "primary_reference_entity_version_id", "negative_prompt", "continuity_group_id", "required_on_screen_text"}
+        nullable = {"scene_entity_version_id", "primary_reference_entity_version_id", "negative_prompt", "continuity_group_id", "required_on_screen_text", "guide_frame_prompts"}
         invalid_nulls = [field for field in self.model_fields_set if field not in nullable and getattr(self, field) is None]
         if invalid_nulls:
             raise ValueError(f"fields cannot be null: {', '.join(sorted(invalid_nulls))}")
@@ -182,6 +183,7 @@ class ShotContract(BaseModel):
     composition: str
     action: str
     visual_prompt: str | None = None
+    guide_frame_prompts: dict[str, str] | None = None
     negative_prompt: str | None = None
     new_information: str
     generation_requirements: dict[str, bool]

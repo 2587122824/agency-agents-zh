@@ -372,7 +372,7 @@ export function PlanPage() {
           : '制作设置操作失败'
   const selectedConfig = preparation.data?.published_configurations.find(item => item.id === configId)
   const keyframeSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'image_generation') ?? []
-  const videoSlots = selectedConfig?.workflow_slots.filter(item => ['video_generation', 'text_to_video_generation'].includes(item.operation_kind)) ?? []
+  const videoSlots = selectedConfig?.workflow_slots.filter(item => ['video_generation', 'multi_frame_video_generation', 'text_to_video_generation'].includes(item.operation_kind)) ?? []
   const ttsSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'tts') ?? []
   const selectedVideoSpec = selectedConfig?.video_specs.find(item => item.id === videoSpecId)
   const selectedTtsSlot = ttsSlots.find(item => item.id === ttsSlotId)

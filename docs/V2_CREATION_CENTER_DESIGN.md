@@ -502,7 +502,7 @@ template_version_id nullable
 
 ### 9.4 分镜导演
 
-分镜导演输入合同 `director-input.v2` 只接受已确认 `RequirementVersion`、已确认 Creative Brief、精确实体版本、交付约束和已确认决策。输出 `shot-plan.v3`，每个镜头至少包含：
+分镜导演输入合同 `director-input.v2` 只接受已确认 `RequirementVersion`、已确认 Creative Brief、精确实体版本、交付约束和已确认决策。输出 `shot-plan.v4`，每个镜头至少包含：
 
 ```text
 shot_code / sequence_number / duration_ms / narrative_beat_code / brief_segment_codes[]
@@ -512,7 +512,7 @@ product_entity_version_ids[] / primary_reference_entity_version_id nullable
 continuity_group_id nullable / continuity_relation / action_count = 1
 shot_purpose / framing / camera_angle / camera_motion / subject_motion
 face_visibility / face_subject_entity_version_ids[] / text_policy / required_on_screen_text nullable
-composition / action / generation_description / negative_prompt nullable
+composition / action / generation_description / guide_frame_prompts nullable / negative_prompt nullable
 audio_requirement: off | lip_motion_only | configured
 new_information / generation_requirements
 ```
@@ -523,11 +523,11 @@ new_information / generation_requirements
 - `face_visibility`、精确人脸主体、`text_policy`、`required_on_screen_text` 和主体运动是后续 QC 的权威条件，不从提示词反推。`precise_text_required` 仅表示文字必须由生成模型直接绘制进素材像素；普通成品标题、字幕和教学标注由剪辑文字轨承担。
 - 分镜导演不得选择 Provider、模型、工作流槽位、NodeInfoList 或价格规则。
 
-当前实现使用独立 `director` 模型配置和 `director-input.v2 / shot-plan.v3 / director-prompt.v5`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天或生产工作流配置。Prompt 必须由唯一常量完整列出 `continuity_group_id` 格式及全部结构化枚举，不得以“使用合同枚举”代替实际允许值。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。后端不解析动作或提示词关键词，不自动修改任何字段。
+当前实现使用独立 `director` 模型配置和 `director-input.v2 / shot-plan.v4 / director-prompt.v6`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天或生产工作流配置。Prompt 必须由唯一常量完整列出 `continuity_group_id` 格式及全部结构化枚举，不得以“使用合同枚举”代替实际允许值。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。`multi_frame_required=true` 时必须同时提供 start、middle、end 三个独立画面状态，普通镜头必须为 `null`。后端不解析动作或提示词关键词，不自动修改任何字段。
 
 导演只声明 `reference_image_required / multi_frame_required / identity_consistency_required / precise_text_required`，不选择路由。用户在制作准备中选定工作流后，确定性校验再对照能力标签和 NodeInfoList；不满足时按镜头返回阻断，不换工作流。人工 Patch 与“AI 调整选中镜头”是两个独立命令：后者冻结完整来源方案、选中编号和修改意见，只调用一次模型，未选镜头必须结构完全一致；失败保留来源候选，用户确认费用后才能精确重跑。
 
-方案页显示“节拍 → 脚本段 → 镜头”覆盖关系、缺口、镜头编号和 `new_information`。结构化编辑器使用选择框、复选框和精确文本输入编辑 v3 字段；进入修订模式后占满方案工作区并临时隐藏只读侧栏，退出后恢复。桌面保持固定高度双栏，移动端使用横向镜头导航。
+方案页显示“节拍 → 脚本段 → 镜头”覆盖关系、缺口、镜头编号和 `new_information`。结构化编辑器使用选择框、复选框和精确文本输入编辑 v4 字段；多帧镜头显示首帧、中帧、尾帧三个画面描述输入框。进入修订模式后占满方案工作区并临时隐藏只读侧栏，退出后恢复。桌面保持固定高度双栏，移动端使用横向镜头导航。
 
 每个活动需求版本只自动尝试一次。模型调用、Schema 或跨字段验证失败时只记录失败 `AgentRun`、原始输出和 Provider 审计，不创建候选，不修复输出、不自动重试、不切换配置。方案页可由用户明确确认再次调用模型后，精确重跑最近一次失败的分镜导演；重跑必须复用原 `AgentInputManifest`，且生产配置、模型、Provider、Prompt 与输出 Schema 全部相同。成功只创建待审核 `ShotPlanCandidate`，用户接受后才创建不可变 `PlanVersion`。
 
@@ -1198,7 +1198,7 @@ RequirementDiff
 
 - 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v15`（已完成）
 - 内容策划 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6`，含互斥脚本段、Schema 单一权威来源、完整失败证据、可追溯策划拓展、待确认事实、Brief 不可变修订链与结构化确认项（已完成）
-- 分镜导演 `director-input.v2 / shot-plan.v3 / director-prompt.v5`（已完成）
+- 分镜导演 `director-input.v2 / shot-plan.v4 / director-prompt.v6`（已完成）
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成
 

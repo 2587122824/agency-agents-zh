@@ -16,8 +16,8 @@ from ..providers.credentials import EnvironmentCredentialResolver
 
 
 DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v2"
-DIRECTOR_OUTPUT_SCHEMA_VERSION = "shot-plan.v3"
-DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v5"
+DIRECTOR_OUTPUT_SCHEMA_VERSION = "shot-plan.v4"
+DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v6"
 
 
 class GenerationRequirements(BaseModel):
@@ -33,6 +33,14 @@ class GenerationRequirements(BaseModel):
         if self.identity_consistency_required and not self.reference_image_required:
             raise ValueError("identity consistency requires a reference image")
         return self
+
+
+class GuideFramePrompts(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start: str = Field(min_length=1, max_length=4000)
+    middle: str = Field(min_length=1, max_length=4000)
+    end: str = Field(min_length=1, max_length=4000)
 
 
 class DirectorShotOutput(BaseModel):
@@ -64,6 +72,7 @@ class DirectorShotOutput(BaseModel):
     composition: str = Field(min_length=1, max_length=500)
     action: str = Field(min_length=1, max_length=1000)
     visual_prompt: str = Field(min_length=1, max_length=4000)
+    guide_frame_prompts: GuideFramePrompts | None
     negative_prompt: str | None = Field(default=None, min_length=1, max_length=2000)
     new_information: str = Field(min_length=1, max_length=1000)
     generation_requirements: GenerationRequirements
@@ -101,6 +110,10 @@ class DirectorShotOutput(BaseModel):
             raise ValueError("forbidden text policy requires null on-screen text")
         if self.generation_requirements.precise_text_required and self.text_policy != "required":
             raise ValueError("precise text capability requires required text policy")
+        if self.generation_requirements.multi_frame_required and self.guide_frame_prompts is None:
+            raise ValueError("multi-frame generation requires start, middle, and end frame prompts")
+        if not self.generation_requirements.multi_frame_required and self.guide_frame_prompts is not None:
+            raise ValueError("guide frame prompts are only allowed for multi-frame generation")
         return self
 
 
@@ -143,7 +156,7 @@ class DirectorGateway(Protocol):
 
 
 _DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只把已接受的内容方案拆成结构化镜头候选，或按用户明确授权修订指定镜头；不与用户闲聊，不选择供应商、模型或工作流。
-只返回严格 JSON：{"shots":[{"shot_code":"SH-001","sequence_number":1,"duration_ms":3000,"narrative_beat_code":"BEAT_01","brief_segment_codes":["SEG_01"],"continuity_group_id":null,"continuity_relation":"same_moment","action_count":1,"shot_purpose":"establish","framing":"medium","camera_angle":"eye_level","camera_motion":"locked","subject_motion":"moderate","scene_entity_version_id":null,"character_entity_version_ids":[],"outfit_entity_version_ids":[],"product_entity_version_ids":[],"primary_reference_entity_version_id":null,"face_visibility":"not_visible","face_subject_entity_version_ids":[],"text_policy":"forbidden","required_on_screen_text":null,"audio_requirement":"off","composition":"构图描述","action":"唯一动作","visual_prompt":"画面生成描述","negative_prompt":null,"new_information":"相对前一镜头新增的信息","generation_requirements":{"reference_image_required":false,"multi_frame_required":false,"identity_consistency_required":false,"precise_text_required":false}}]}。
+只返回严格 JSON：{"shots":[{"shot_code":"SH-001","sequence_number":1,"duration_ms":3000,"narrative_beat_code":"BEAT_01","brief_segment_codes":["SEG_01"],"continuity_group_id":null,"continuity_relation":"same_moment","action_count":1,"shot_purpose":"establish","framing":"medium","camera_angle":"eye_level","camera_motion":"locked","subject_motion":"moderate","scene_entity_version_id":null,"character_entity_version_ids":[],"outfit_entity_version_ids":[],"product_entity_version_ids":[],"primary_reference_entity_version_id":null,"face_visibility":"not_visible","face_subject_entity_version_ids":[],"text_policy":"forbidden","required_on_screen_text":null,"audio_requirement":"off","composition":"构图描述","action":"唯一动作","visual_prompt":"视频整体运动描述","guide_frame_prompts":null,"negative_prompt":null,"new_information":"相对前一镜头新增的信息","generation_requirements":{"reference_image_required":false,"multi_frame_required":false,"identity_consistency_required":false,"precise_text_required":false}}]}。
 以下格式与枚举区分大小写，必须逐字使用，不得翻译、缩写或创造近义值：
 - continuity_group_id：只能是 JSON null 或匹配 ^CONT-[0-9]{3}$ 的字符串，例如 CONT-001；禁止 CG_01、group_01 等其他格式。
 - continuity_relation：same_moment | time_jump | location_change | outfit_change
@@ -165,6 +178,7 @@ _DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只�
 7. continuity_relation 明确本镜头与前一镜头的关系。场景或服装发生变化时必须分别使用 location_change 或 outfit_change；同一 continuity_group_id 内实体必须完全一致。不需要连续组时填 null，不得自行创建其他前缀。
 8. new_information 必须说明本镜头相对前一镜头新增的叙事信息，供用户人工检查重复，不得留空。
 9. generation_requirements 只声明生成素材本身所需的生产能力，不得写路由。身份一致性要求必须同时要求参考图。只有用户明确要求文字必须由图像生成模型直接绘制进原始素材像素时，才设置 precise_text_required=true；普通标题、字幕、箭头说明和教学标注必须为 false，并保留 text_policy=required 与 required_on_screen_text 交给后期文字轨。
+   multi_frame_required=true 时 guide_frame_prompts 必须精确提供 start、middle、end 三个连续画面状态；三项必须保持同一主体、服装、场景、光线、机位和构图，只描述同一动作在三个时间点的状态。否则 guide_frame_prompts 必须为 null。
 10. audio_policy=off 时 audio_requirement 只能为 off 或 lip_motion_only，不得建立音频生产依赖。
 11. revision_request 存在时，只能修改 selected_shot_codes；其他镜头必须与 source_shots 结构完全一致。仍需返回完整方案并满足全部合同。
 12. 不得输出 Provider、模型、工作流、NodeInfoList、价格或任务 ID；不得修复输入、猜测 ID、添加默认尾缀或返回 Markdown。"""
@@ -418,6 +432,7 @@ class DeterministicDirectorGateway:
                 composition=str(beat["purpose"]),
                 action=str(beat["summary"]),
                 visual_prompt=f"{brief['content_promise']}。{beat['summary']}。",
+                guide_frame_prompts=None,
                 negative_prompt=None,
                 new_information=str(beat["summary"]),
                 generation_requirements=GenerationRequirements(
