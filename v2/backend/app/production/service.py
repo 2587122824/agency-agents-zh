@@ -43,6 +43,7 @@ from .contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
     ApproveImagePhase,
+    CloseBlockedProduction,
     CreateProductionSnapshot,
     LockProductionSnapshot,
     ShotWorkflowAssignment,
@@ -1308,6 +1309,108 @@ def approve_image_phase(
     ))
     session.commit()
     return execution_view(session, project)
+
+
+def close_blocked_production(
+    session: Session,
+    project: Project,
+    snapshot_id: str,
+    payload: CloseBlockedProduction,
+) -> dict:
+    command_type = "production.blocked.close"
+    receipt = _receipt(session, project.id, payload.command_id, command_type)
+    if receipt:
+        snapshot = _production(session).snapshot(receipt.result_id)
+        if not snapshot:
+            raise ProductionConflictError("COMMAND_RESULT_MISSING", "结束失败制作的命令结果不存在。")
+        cancelled_work_item_ids = [
+            item.id for item in _production(session).work_items(snapshot.id)
+            if item.status == "cancelled"
+        ]
+        return {
+            "project_id": project.id,
+            "project_status": project.status,
+            "closed_snapshot_id": snapshot.id,
+            "closed_snapshot_status": snapshot.status,
+            "cancelled_work_item_ids": cancelled_work_item_ids,
+        }
+    repository = _production(session)
+    snapshot = repository.snapshot(snapshot_id)
+    if not snapshot or snapshot.project_id != project.id:
+        raise ProductionNotFoundError("Production snapshot not found")
+    if project.active_snapshot_id != snapshot.id or project.status != "blocked" or snapshot.status != "execution_blocked":
+        raise ProductionConflictError(
+            "BLOCKED_PRODUCTION_NOT_CURRENT",
+            "只能结束当前已经阻断的制作方案。",
+        )
+    if snapshot.contract_hash != payload.expected_contract_hash:
+        raise ProductionConflictError("SNAPSHOT_CONTRACT_HASH_MISMATCH", "制作方案合同已经变化，请刷新后重新确认。")
+    if not payload.confirm_return_to_production_preparation:
+        raise ProductionConflictError("BLOCKED_PRODUCTION_CLOSE_CONFIRMATION_REQUIRED", "需要明确确认结束本次失败制作。")
+
+    work_items = repository.work_items(snapshot.id)
+    attempts = repository.work_attempts([item.id for item in work_items])
+    active_attempts = [
+        attempt for attempt in attempts
+        if attempt.state in {"claimed", "submitting", "submitted", "polling"}
+    ]
+    active_items = [item for item in work_items if item.status == "in_progress"]
+    if active_attempts or active_items:
+        raise ProductionConflictError(
+            "BLOCKED_PRODUCTION_STILL_EXECUTING",
+            "仍有供应商任务正在提交或轮询，不能结束本次制作。",
+        )
+
+    now = utc_now()
+    cancelled_work_item_ids: list[str] = []
+    attempt_by_item_id = {attempt.work_item_id: attempt for attempt in attempts}
+    for item in work_items:
+        if item.status not in {"queued", "waiting_phase"}:
+            continue
+        item.status = "cancelled"
+        item.finished_at = now
+        item.row_version += 1
+        cancelled_work_item_ids.append(item.id)
+        attempt = attempt_by_item_id.get(item.id)
+        if attempt and attempt.state == "created":
+            attempt.state = "cancelled"
+            attempt.finished_at = now
+
+    snapshot.status = "superseded"
+    project.active_snapshot_id = None
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.BLOCKED_PRODUCTION_CLOSED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={"closed_snapshot_id": snapshot.id},
+    )
+    _save_receipt(session, project.id, payload.command_id, command_type, "production_snapshot", snapshot.id)
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=snapshot.id,
+        event_type="production.blocked_snapshot_closed.v1",
+        aggregate_type="production_snapshot",
+        aggregate_id=snapshot.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
+        message="用户结束失败制作并返回制作准备。",
+        data={
+            "snapshot_id": snapshot.id,
+            "contract_hash": snapshot.contract_hash,
+            "cancelled_work_item_ids": cancelled_work_item_ids,
+        },
+    ))
+    session.commit()
+    return {
+        "project_id": project.id,
+        "project_status": project.status,
+        "closed_snapshot_id": snapshot.id,
+        "closed_snapshot_status": snapshot.status,
+        "cancelled_work_item_ids": cancelled_work_item_ids,
+    }
 
 
 def execution_view(session: Session, project: Project) -> dict:

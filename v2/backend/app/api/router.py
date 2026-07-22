@@ -179,6 +179,8 @@ from ..production.contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionImpact,
     ApproveImagePhase,
+    BlockedProductionClosedRead,
+    CloseBlockedProduction,
     CreateProductionSnapshot,
     DecideProductionPlanCandidate,
     GenerateProductionPlanCandidate,
@@ -203,6 +205,7 @@ from ..production.service import (
     activate_snapshot,
     analyze_impact,
     approve_image_phase,
+    close_blocked_production,
     create_snapshot,
     execution_view,
     lock_snapshot,
@@ -744,6 +747,25 @@ def production_snapshot_approve_image_phase(
 ):
     try:
         return approve_image_phase(session, require_project(session, project_id), snapshot_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots/{snapshot_id}:close-blocked-production",
+    response_model=BlockedProductionClosedRead,
+)
+def production_snapshot_close_blocked(
+    project_id: str,
+    snapshot_id: str,
+    payload: CloseBlockedProduction,
+    session: Session = Depends(get_session),
+):
+    try:
+        return close_blocked_production(session, require_project(session, project_id), snapshot_id, payload)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProductionConflictError as exc:

@@ -6,6 +6,7 @@ from collections import Counter
 
 from sqlalchemy.orm import Session
 
+from ..core.config import CONNECTED_LOCAL_ASSET_ROOT_REF
 from ..db.models import (
     AudioConfigVersion,
     ConfigurationCommandReceipt,
@@ -583,8 +584,12 @@ def _validate(repository: ConfigurationRepository, config: ProductionConfigVersi
             })
     if rows["storage"]:
         storage = rows["storage"][0]
-        if storage.backend_kind == "local" and not storage.local_root_ref:
-            errors.append({"code": "LOCAL_ROOT_REQUIRED", "path": "storage.local_root_ref"})
+        if storage.backend_kind == "local" and storage.local_root_ref != CONNECTED_LOCAL_ASSET_ROOT_REF:
+            errors.append({
+                "code": "LOCAL_STORAGE_REF_NOT_CONNECTED",
+                "path": "storage.local_root_ref",
+                "message": "本地存储必须选择系统已连接的 V2 素材库。",
+            })
         if storage.backend_kind == "oss":
             missing = [field for field in ("region_ref", "bucket_ref", "credential_ref", "lifecycle_days") if not getattr(storage, field)]
             if missing:

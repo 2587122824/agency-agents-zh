@@ -95,6 +95,19 @@ class ApproveImagePhase(ProductionCommand):
     confirm_release_video_phase: bool
 
 
+class CloseBlockedProduction(ProductionCommand):
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    confirm_return_to_production_preparation: bool
+
+
+class BlockedProductionClosedRead(BaseModel):
+    project_id: str
+    project_status: str
+    closed_snapshot_id: str
+    closed_snapshot_status: str
+    cancelled_work_item_ids: list[str]
+
+
 class ImpactAnalysisRead(BaseModel):
     id: str
     project_id: str

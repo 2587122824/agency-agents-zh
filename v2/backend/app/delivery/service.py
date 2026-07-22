@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sqlalchemy.orm import Session
 
+from ..core.config import CONNECTED_LOCAL_ASSET_ROOT_REF
 from ..db.models import (
     Asset,
     DeliveryAttempt,
@@ -242,7 +243,7 @@ def delivery_upload_limit(session: Session, project: Project, attempt_id: str) -
         policy = storage_policy_for_snapshot(session, attempt.snapshot_id)
     except QualityConflictError as exc:
         raise DeliveryConflictError(exc.code, str(exc)) from exc
-    if policy.backend_kind != "local" or policy.local_root_ref != "v2.runtime.assets":
+    if policy.backend_kind != "local" or policy.local_root_ref != CONNECTED_LOCAL_ASSET_ROOT_REF:
         raise DeliveryConflictError("STORAGE_ADAPTER_NOT_CONNECTED", "当前快照没有连接本地最终交付存储。")
     return policy.max_file_size_bytes
 

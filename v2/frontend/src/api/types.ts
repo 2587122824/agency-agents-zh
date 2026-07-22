@@ -620,6 +620,14 @@ export interface ProductionExecution {
   }>
 }
 
+export interface BlockedProductionClosed {
+  project_id: string
+  project_status: string
+  closed_snapshot_id: string
+  closed_snapshot_status: string
+  cancelled_work_item_ids: string[]
+}
+
 export interface QCFinding {
   id: string
   code: string

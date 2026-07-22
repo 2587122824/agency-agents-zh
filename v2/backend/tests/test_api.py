@@ -19,7 +19,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import Base, engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, StoragePolicyVersion, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from v2.backend.app.creation.service import _validated_update_value
 from sqlalchemy import select
@@ -4185,6 +4185,129 @@ def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClien
     assert state["blocked_at"] is not None
 
 
+def test_blocked_production_requires_confirmation_and_returns_to_preparation(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "close-blocked-activate", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "close-blocked-submit",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert process_one("close-blocked-worker") is True
+    before = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    assert before["project_status"] == "blocked"
+    preserved_ids = {
+        item["id"] for item in before["work_items"]
+        if item["status"] in {"blocked", "completed"}
+    }
+
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:close-blocked-production",
+        json={
+            "command_id": "close-blocked-unconfirmed",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "confirm_return_to_production_preparation": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "BLOCKED_PRODUCTION_CLOSE_CONFIRMATION_REQUIRED"
+
+    command = {
+        "command_id": "close-blocked-confirmed",
+        "expected_contract_hash": snapshot["contract_hash"],
+        "confirm_return_to_production_preparation": True,
+    }
+    closed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:close-blocked-production",
+        json=command,
+    )
+    replayed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:close-blocked-production",
+        json=command,
+    )
+    assert closed.status_code == 200
+    assert replayed.status_code == 200
+    result = closed.json()
+    assert replayed.json() == result
+    assert result["project_status"] == "contract_ready"
+    assert result["closed_snapshot_status"] == "superseded"
+    assert result["cancelled_work_item_ids"]
+
+    with SessionLocal() as session:
+        stored_project = session.get(Project, project["id"])
+        stored_snapshot = session.get(ProductionSnapshot, snapshot["id"])
+        items = list(session.scalars(select(WorkItem).where(WorkItem.snapshot_id == snapshot["id"])))
+        attempts = list(session.scalars(select(WorkAttempt).where(
+            WorkAttempt.work_item_id.in_([item.id for item in items])
+        )))
+        events = list(session.scalars(select(ProjectEvent).where(
+            ProjectEvent.project_id == project["id"],
+            ProjectEvent.event_type == "production.blocked_snapshot_closed.v1",
+        )))
+        assert stored_project is not None and stored_project.active_snapshot_id is None
+        assert stored_project.status == "contract_ready"
+        assert stored_snapshot is not None and stored_snapshot.status == "superseded"
+        assert {item.id for item in items if item.status in {"blocked", "completed"}} == preserved_ids
+        assert {item.id for item in items if item.status == "cancelled"} == set(result["cancelled_work_item_ids"])
+        assert all(
+            attempt.state == "cancelled"
+            for attempt in attempts
+            if attempt.work_item_id in result["cancelled_work_item_ids"]
+        )
+        assert len(events) == 1
+
+
+def test_blocked_production_cannot_close_while_provider_attempt_is_active(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "active-close-activate", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "active-close-submit",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert process_one("active-close-worker") is True
+    with SessionLocal() as session:
+        active_item = session.scalar(select(WorkItem).where(
+            WorkItem.snapshot_id == snapshot["id"],
+            WorkItem.status == "queued",
+        ))
+        assert active_item is not None
+        active_attempt = session.get(WorkAttempt, active_item.current_attempt_id)
+        assert active_attempt is not None
+        active_item.status = "in_progress"
+        active_attempt.state = "submitted"
+        session.commit()
+
+    denied = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:close-blocked-production",
+        json={
+            "command_id": "active-close-denied",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "confirm_return_to_production_preparation": True,
+        },
+    )
+    assert denied.status_code == 409
+    assert denied.headers["x-error-code"] == "BLOCKED_PRODUCTION_STILL_EXECUTING"
+
+
 def test_project_control_exposes_exact_production_route_cost_and_blocker(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
     activated = client.post(
@@ -5552,6 +5675,44 @@ def test_system_configuration_contract_rejects_secret_fields(client: TestClient)
         "configuration": configuration,
     })
     assert embedded.status_code == 422
+
+
+def test_system_configuration_rejects_unconnected_local_storage_reference(client: TestClient) -> None:
+    configuration = valid_system_configuration()
+    configuration["storage"]["local_root_ref"] = "v2/runtime/assets"
+    rejected = client.post("/api/v1/system-config/versions", json={
+        "command_id": "config-invalid-local-storage-create",
+        "configuration": configuration,
+    })
+    assert rejected.status_code == 422
+
+    created = client.post("/api/v1/system-config/versions", json={
+        "command_id": "config-valid-local-storage-create",
+        "configuration": valid_system_configuration(),
+    }).json()
+    with SessionLocal() as session:
+        storage = session.scalar(select(StoragePolicyVersion).where(
+            StoragePolicyVersion.production_config_version_id == created["id"]
+        ))
+        assert storage is not None
+        storage.local_root_ref = "v2/runtime/assets"
+        session.commit()
+
+    validated = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:validate",
+        json={
+            "command_id": "config-invalid-local-storage-validate",
+            "expected_row_version": created["row_version"],
+        },
+    )
+    assert validated.status_code == 200
+    report = validated.json()
+    assert report["status"] == "validation_failed"
+    assert any(
+        item["code"] == "LOCAL_STORAGE_REF_NOT_CONNECTED"
+        and item["path"] == "storage.local_root_ref"
+        for item in report["validation_report"]
+    )
 
 
 def test_provider_readiness_is_read_only_and_does_not_enable_unregistered_adapter(

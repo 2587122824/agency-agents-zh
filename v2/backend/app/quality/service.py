@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..creation.agent_gateway import AgentGatewayError
-from ..core.config import RUNTIME_ROOT
+from ..core.config import CONNECTED_LOCAL_ASSET_ROOT_REF, RUNTIME_ROOT
 from ..db.models import (
     AgentInputManifest,
     AgentRun,
@@ -269,7 +269,7 @@ def register_attempt_asset(session: Session, project: Project, attempt_id: str, 
     policy = _storage_policy(session, item.snapshot_id)
     if policy.backend_kind != output["storage_backend"]:
         raise QualityConflictError("ASSET_STORAGE_POLICY_MISMATCH", "Provider output storage backend does not match the snapshot storage policy.")
-    if policy.backend_kind != "local" or policy.local_root_ref != "v2.runtime.assets":
+    if policy.backend_kind != "local" or policy.local_root_ref != CONNECTED_LOCAL_ASSET_ROOT_REF:
         raise QualityConflictError("STORAGE_ADAPTER_NOT_CONNECTED", "The snapshot storage policy is not connected to the local V2 asset store.")
     _local_asset_path(str(output["uri"]))
     node = repository.dag_node(item.dag_node_id)

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, Clock3, GitBranch, Layers3, RefreshCw, ShieldCheck } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock3, GitBranch, Layers3, RefreshCw, RotateCcw, ShieldCheck, X } from 'lucide-react'
 import { useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import type { ProductionExecution } from '../api/types'
@@ -56,8 +56,10 @@ function PhaseWorkList({ items, phaseLabel }: { items: ProductionExecution['work
 
 export function ProductionPage() {
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
   const client = useQueryClient()
   const [projectId, setProjectId] = useState(() => searchParams.get('project') ?? '')
+  const [confirmCloseBlocked, setConfirmCloseBlocked] = useState(false)
   const revisionRequestId = searchParams.get('revisionRequest') ?? ''
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const execution = useQuery({
@@ -79,6 +81,18 @@ export function ProductionPage() {
         client.invalidateQueries({ queryKey: ['production-execution', projectId] }),
         client.invalidateQueries({ queryKey: ['quality-review', projectId] }),
       ])
+    },
+  })
+  const closeBlockedProduction = useMutation({
+    mutationFn: () => api.closeBlockedProduction(projectId, execution.data!),
+    onSuccess: async () => {
+      setConfirmCloseBlocked(false)
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['projects'] }),
+        client.invalidateQueries({ queryKey: ['production-execution', projectId] }),
+        client.invalidateQueries({ queryKey: ['planning-center', projectId] }),
+      ])
+      navigate(`/projects/${projectId}/plan`)
     },
   })
   const productionProjects = projects.data?.filter(project => ['production_ready', 'producing', 'quality_review', 'blocked'].includes(project.status)) ?? []
@@ -111,8 +125,14 @@ export function ProductionPage() {
           {projectId && execution.isPending && <div className={styles.executionEmpty}>正在读取执行状态…</div>}
           {execution.error && <div className={styles.executionEmpty}><AlertTriangle size={22} /><strong>读取失败</strong><span>{execution.error.message}</span></div>}
           {approveImagePhase.error && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>图片阶段确认失败</strong><span>{approveImagePhase.error.message}</span></div></div>}
+          {closeBlockedProduction.error && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>返回制作准备失败</strong><span>{closeBlockedProduction.error.message}</span></div></div>}
           {execution.data && <>
             <header className={styles.executionHeader}><div><span>制作方案 {execution.data.snapshot?.snapshot_number ?? '-'}</span><h2>{label(execution.data.project_status, statusLabels, '制作状态待确认')}</h2></div><div><strong>{execution.data.work_items.filter(item => item.status === 'completed').length}/{execution.data.work_items.length}</strong><small>已完成步骤</small></div></header>
+            {execution.data.project_status === 'blocked' && execution.data.snapshot?.status === 'execution_blocked' && <div className={styles.recoveryAction} data-confirming={confirmCloseBlocked}>
+              <RotateCcw size={18} />
+              <div><strong>{confirmCloseBlocked ? '确认结束本次失败制作？' : '需要修正配置或制作方案'}</strong><span>{confirmCloseBlocked ? '旧任务、失败原因和费用估算会完整保留；尚未开始的步骤将取消。' : '结束当前失败快照后，返回制作准备并使用新配置创建新方案。系统不会自动重跑。'}</span></div>
+              {confirmCloseBlocked ? <><button className="secondaryButton" disabled={closeBlockedProduction.isPending} onClick={() => setConfirmCloseBlocked(false)}><X size={14} />取消</button><button className="primaryButton" disabled={closeBlockedProduction.isPending} onClick={() => closeBlockedProduction.mutate()}>{closeBlockedProduction.isPending ? '正在结束…' : '确认结束并返回'}</button></> : <button className="secondaryButton" onClick={() => setConfirmCloseBlocked(true)}><RotateCcw size={14} />返回制作准备</button>}
+            </div>}
             {groupBlockers(execution.data.blockers).map((group, index) => {
               const presentation = blockerPresentation(group.errorCode ?? '')
               const countLabel = group.blockers.length > 1 ? `，影响 ${group.blockers.length} 个步骤` : ''

@@ -10,7 +10,7 @@ from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from ..core.config import RUNTIME_ROOT
+from ..core.config import CONNECTED_LOCAL_ASSET_ROOT_REF, RUNTIME_ROOT
 from ..creation.service import detect_media_type
 from .base import (
     ProviderAdapterError,
@@ -167,7 +167,7 @@ class RunningHubAdapter:
             raise ProviderAdapterError("PROVIDER_REQUEST_CONTRACT_INCOMPLETE", "The frozen provider, workflow, or storage contract is missing.")
         if provider.get("adapter_kind") != self.adapter_kind:
             raise ProviderAdapterError("PROVIDER_ADAPTER_MISMATCH", "The frozen request does not target RunningHub.")
-        if storage.get("backend_kind") != "local" or storage.get("local_root_ref") != "v2.runtime.assets":
+        if storage.get("backend_kind") != "local" or storage.get("local_root_ref") != CONNECTED_LOCAL_ASSET_ROOT_REF:
             raise ProviderAdapterError("STORAGE_ADAPTER_NOT_CONNECTED", "RunningHub V2 output requires the connected local storage policy.")
         credential = self.credential_resolver.resolve(provider.get("credential_ref"))
         if not credential.available or not credential.secret:

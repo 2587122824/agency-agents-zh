@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
 
+from ..core.config import CONNECTED_LOCAL_ASSET_ROOT_REF
+
 
 Key = str
 
@@ -136,6 +138,14 @@ class StoragePolicyDraft(StrictContract):
     public_url_policy: Literal["none", "signed", "public", "temporary_public"]
     lifecycle_days: int | None = Field(default=None, ge=1, le=3650)
     local_root_ref: str | None = Field(default=None, max_length=160)
+
+    @model_validator(mode="after")
+    def storage_reference_matches_backend(self):
+        if self.backend_kind == "local" and self.local_root_ref != CONNECTED_LOCAL_ASSET_ROOT_REF:
+            raise ValueError("local storage must use the connected V2 asset store")
+        if self.backend_kind == "oss" and self.local_root_ref is not None:
+            raise ValueError("OSS storage must not include a local root reference")
+        return self
 
 
 class PricingRuleDraft(StrictContract):

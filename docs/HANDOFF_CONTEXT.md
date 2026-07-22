@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260722_30 (head)` |
-| 已发布配置 | `production_config_3d100e25ab6d400c8e0df998fbcb2bd8`，版本 49；director Prompt 为 `director-prompt.v6`，production planner Prompt 为 `production-planner-prompt.v2` |
+| 已发布配置 | `production_config_52344c9191e448558020a73ad96ee164`，版本 50；仅修正本地素材库连接引用为 `v2.runtime.assets`，工作流路由不变；director Prompt 为 `director-prompt.v6`，production planner Prompt 为 `production-planner-prompt.v2` |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 密钥通过 Windows 用户环境与白名单注入，不写数据库或仓库 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -55,6 +55,7 @@ v2/runtime/worker.err.log
 - 正式分镜合同与逐镜头制作区均显式展示单画面或首中尾三画面、关键帧数量和逐帧描述；工作流选择不反向改写分镜合同。
 - 系统配置版本、Provider/模型/工作流/视频/音频/存储/价格组件。
 - ProductionSnapshot、DAG、费用影响、锁定、激活、提交和持久化 WorkItem。
+- 本地素材库使用系统固定连接项；配置创建、修订与发布均精确校验。阻断快照可由用户二次确认后显式结束并返回制作准备，保留历史且不自动重跑。
 - 视觉生产真实两阶段门禁：全部分镜图片先执行，视频与后续任务保持 `waiting_phase`；逐项审核后由用户提交完整节点/素材清单，冻结内容哈希并放行。纯文本视频无图片节点时直接进入队列。
 - RunningHub 图片、首帧视频与纯文本视频 Adapter 的严格合同和假传输测试；制作准备按每个镜头显式冻结工作流选择。
 - 质量审核智能体首期图片合同、`QCReportCandidate`、证据引用校验、失败精确重跑与人工落账；视频和音频保持显式人工审核。
@@ -177,6 +178,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-22 | 修复配置 v49 的本地存储引用使用路径格式、导致 8 个关键帧在 RunningHub 提交前统一阻断：本地素材库改为固定系统选项 `v2.runtime.assets`，配置合同和发布校验拒绝其他值，RunningHub/质量/交付共用同一常量；发布配置 v50，工作流与 NodeInfoList 不变。生产页新增用户二次确认的“返回制作准备”，只取消未开始任务并保留旧快照、失败、费用和事件，不自动创建新快照、重跑或调用供应商 |
 | 2026-07-22 | 视觉执行改为真实两阶段生产：包含关键帧的快照提交后先统一执行全部分镜图片，视频、音频和后续节点保持 `waiting_phase`；每个图片节点必须恰好有一份已批准素材，用户显式提交完整节点与素材清单后冻结内容哈希并放行。视频 Worker 只读取冻结批准清单，纯文本视频跳过图片门禁；生产页按两个阶段分区并提供审核与确认入口。不自动审核、放行、重试或替换工作流 |
 | 2026-07-22 | 方案页补齐分镜画面结构可见性：正式分镜合同和逐镜头制作方案统一显示“单画面 · 1 张关键帧”或“首中尾三画面 · 3 张独立关键帧”，多帧逐项展示首、中、尾画面描述；缺失描述原样显示，不自动补写、复制或因工作流选择改写合同 |
 | 2026-07-22 | 更正 RunningHub 工作流 `2072296894507872257` 的权威语义：它是首中尾帧生视频，不是生图。配置 v49 移除错误的“通用参考图关键帧”槽位并新增 `multi_frame_video_generation`；分镜升级 `shot-plan.v4 / director-prompt.v6`，多帧镜头必须给出三段独立画面状态。DAG 生成三个关键帧父节点，通过 `source_image.start / middle / end` 精确传给视频节点；缺帧、普通镜头误选三帧路线均阻断，不重复图片、不自动换工作流、不执行付费调用 |
@@ -236,10 +238,10 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`225 passed`
+- 后端测试：`228 passed`
 - 两阶段生产验收：图片节点全部先执行；后续任务在用户确认前保持 `waiting_phase`；节点或素材清单不一致明确失败；确认后视频读取冻结的已批准素材；纯文本视频无图片门禁并直接排队
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v49，4 个文本智能体模型分工与 6 个镜头工作流槽位；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；导演合同为 `shot-plan.v4 / director-prompt.v6`
+- 当前生产配置：v50，4 个文本智能体模型分工与 6 个镜头工作流槽位；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；导演合同为 `shot-plan.v4 / director-prompt.v6`
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
