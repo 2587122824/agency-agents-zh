@@ -337,7 +337,16 @@ export function PlanPage() {
   const editableShot = data.current_shot_candidate ?? data.revision_draft ?? rejectedShot
   const shots = editableShot?.shots ?? data.active_plan?.shots ?? []
   const characterVersions = data.entity_versions.filter(item => item.entity_type === 'character')
-  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
+  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || registerExistingCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
+  const errorStage = generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error
+    ? '制作规划失败'
+    : generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error
+      ? '内容策划操作失败'
+      : generateShots.error || retryShots.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error
+        ? '分镜操作失败'
+        : uploadCharacter.error || registerExistingCharacter.error
+          ? '人物参考登记失败'
+          : '制作设置操作失败'
   const selectedConfig = preparation.data?.published_configurations.find(item => item.id === configId)
   const keyframeSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'image_generation') ?? []
   const videoSlots = selectedConfig?.workflow_slots.filter(item => ['video_generation', 'text_to_video_generation'].includes(item.operation_kind)) ?? []
@@ -387,6 +396,7 @@ export function PlanPage() {
   return <>
     <PageHeader eyebrow="PLAN REVIEW" title={`${project.data.title} · 方案确认`} description="内容策划智能体与分镜导演智能体只提交候选，用户确认后才创建不可变方案版本。" actions={<Link className="secondaryButton" to={`/projects/${projectId}`}><ArrowLeft size={15} />返回创作中心</Link>} />
     <div className={styles.versionBar}><span><GitBranch size={15} />需求 v{data.active_requirement.version_number}</span><i></i><span data-active={Boolean(brief)}><Sparkles size={15} />{brief ? '内容方案' : '内容方案待生成'}</span><i></i><span data-active={Boolean(data.active_plan)}><LockKeyhole size={15} />{data.active_plan ? `创作方案 v${data.active_plan.version_number}` : '创作方案尚未创建'}</span><b>{nextActionLabel}</b></div>
+    {error && <div className={styles.stickyAlert} role="alert"><CircleAlert size={17} /><div><strong>{errorStage}</strong><span>{error.message}</span></div></div>}
     <main className={styles.layout} data-editing-shots={editingShots}>
       <section className={styles.main}>
         <div className={styles.briefPanel}>
@@ -491,7 +501,6 @@ export function PlanPage() {
         {data.shot_plan_history.length > 0 && <section className={styles.candidateHistory}><div className={styles.asideTitle}><div><GitBranch size={17} /><h3>分镜候选版本</h3></div><b>{data.shot_plan_history.length}</b></div>{data.shot_plan_history.map(candidate => <article key={candidate.id} data-current={candidate.id === data.current_shot_candidate?.id || candidate.id === data.revision_draft?.id}><div><strong>候选 v{candidate.revision_number}</strong><span>{candidate.source === 'manual_revision_draft' ? '手动调整草稿' : candidate.source === 'asset_feedback_draft' ? '成品反馈草稿' : candidate.source === 'user_revision' ? '用户修订' : '分镜导演智能体生成'} · {candidate.status}</span></div><small>{candidate.id.slice(-10)}</small></article>)}</section>}
         <section className={styles.boundary}><CircleAlert size={17} /><div><strong>确认边界</strong><p>{data.active_plan ? '当前创作方案已确认。后续修改需要创建新的需求和方案版本。' : '当前操作只确认创作方案，不会创建制作任务。'}</p></div></section>
         {data.active_plan && <section className={styles.planState}><LockKeyhole size={18} /><div><strong>{latestSnapshot ? `制作方案 ${latestSnapshot.snapshot_number} · ${snapshotStatusLabel(latestSnapshot.status, latestSnapshot.cost_status)}` : `创作方案 v${data.active_plan.version_number}`}</strong><span>{latestSnapshot ? `${latestSnapshot.nodes.length} 个制作步骤 · ${costLabel(latestSnapshot.estimated_cost, latestSnapshot.currency)}` : `${data.active_plan.shots.length} 个镜头 · 尚未保存制作方案`}</span></div></section>}
-        {error && <div className={styles.error}>{error.message}</div>}
       </aside>
     </main>
     {confirmCost && latestSnapshot && <div className={styles.costModal}><section><header><Calculator size={20} /><div><span>费用确认</span><h2>确认制作方案 {latestSnapshot.snapshot_number} 的预计费用</h2></div></header><div className={styles.costAmount}><small>预计制作费用</small><strong>{latestSnapshot.currency} {latestSnapshot.estimated_cost?.toFixed(6)}</strong><span>预计调用生成服务 {latestSnapshot.estimated_call_count} 次</span></div><p>确认后将锁定本次制作内容、计费方案和各步骤费用。本操作不会开始生成，也不会实际扣费。</p><details className={styles.technicalDetails}><summary>查看技术详情</summary><code>{latestSnapshot.contract_hash}</code></details><footer><button className="secondaryButton" onClick={() => setConfirmCost(false)}>取消</button><button className="primaryButton" disabled={lockSnapshot.isPending} onClick={() => lockSnapshot.mutate()}><LockKeyhole size={14} />确认费用并锁定方案</button></footer></section></div>}

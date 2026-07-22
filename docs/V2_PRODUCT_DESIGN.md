@@ -1182,6 +1182,8 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 生产影响分析为每个关键帧节点写入明确的 `reference_image`：选中时冻结附件 ID、运行时 URI、MIME、字节数和 SHA-256；未选择时写入 `null`。快照创建、生产提交和 RunningHub 上传前都会重新核对冻结事实。任一事实不一致、工作流缺少恰好一个画面生成描述映射，或必填主参考图/避免内容不存在时明确阻断，不创建替代输入、不切换工作流、不重试。
 
+方案页当前命令失败使用内容区顶部粘性状态条展示。状态条随页面滚动保持可见，明确区分内容策划、分镜、人物参考、制作规划和制作设置阶段，并显示后端原始用户可读错误；不在侧栏底部重复展示，不自动关闭、重试或改变失败状态。窄屏允许错误内容换行，桌面长错误保持单行省略，完整技术证据仍由对应运行或技术详情承载。
+
 系统配置将新来源显示为“画面生成描述、避免内容、分镜主参考图、是否选择了主参考图”。关键帧参考图与首帧视频的“上一步生成的关键帧”是两类独立输入，不得互换。素材联络表展示分镜的产品实体、主参考标记、画面生成描述、避免内容和快照冻结的文件事实，便于用户在剪辑前核对实际生产依据。
 
 历史发布配置 v25 保持关键帧工作流 `2072296894507872257`、Provider、模型、视频工作流和价格不变，仅将 `shot.negative_prompt` 与 `reference_image.primary` 两个关键帧绑定声明为可选，`reference_image.present` 仍为必填布尔开关。配置 v33 继续保持这些路由并升级导演合同为 v3；当前配置 v35 保持三个文本智能体使用 `deepseek-v4-flash`。DeepSeek 官方 [Chat API](https://api-docs.deepseek.com/api/create-chat-completion) 当前将用户消息 `content` 定义为字符串，官方文档目录也没有视觉输入端点，因此系统不为该 Provider 声明 `vision_analysis`，也不注册 DeepSeek QC 模型。RunningHub 工作流、NodeInfoList、视频规格、音频、存储和价格均不变。
