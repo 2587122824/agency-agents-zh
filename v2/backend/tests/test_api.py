@@ -5,6 +5,7 @@ import hashlib
 import json
 import struct
 import zlib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -1326,7 +1327,7 @@ def test_planning_candidates_require_explicit_acceptance(client: TestClient) -> 
     assert [item["beat_code"] for item in brief["brief"]["narrative_beats"]] == ["BEAT_01", "BEAT_02", "BEAT_03"]
     assert sum(item["target_duration_ms"] for item in brief["brief"]["narrative_beats"]) == 30_000
     assert brief["brief"]["audio_mode"] == "off"
-    assert all(item["spoken_text"] is None for item in brief["brief"]["script_segments"])
+    assert all(item["kind"] not in {"voiceover", "dialogue"} for item in brief["brief"]["script_segments"])
     before_accept = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert before_accept["active_plan"] is None
     assert before_accept["next_action"]["code"] == "REVIEW_CREATIVE_BRIEF"
@@ -1465,6 +1466,89 @@ def test_content_planner_failure_requires_explicit_exact_retry(client: TestClien
         assert [run.status for run in runs] == ["failed", "succeeded"]
         assert runs[0].raw_output == {"unexpected": True}
         assert runs[0].input_manifest_id == runs[1].input_manifest_id
+
+
+def test_content_planner_contract_upgrade_requires_explicit_regeneration_with_new_manifest(client: TestClient) -> None:
+    class ContractUpgradePlannerGateway(DeterministicContentPlannerGateway):
+        select_calls = 0
+        invoke_calls = 0
+
+        def select(self, session):
+            self.select_calls += 1
+            current = super().select(session)
+            if self.select_calls == 1:
+                return replace(
+                    current,
+                    production_config_version_id="production_config_old_planner",
+                    model_config_version_id="model_config_old_planner",
+                    provider_config_version_id="provider_config_old_planner",
+                    prompt_contract_version="content-planner-prompt.v5",
+                    output_schema_version="creative-brief-candidate.v3",
+                )
+            return current
+
+        def invoke(self, selection, manifest_payload):
+            self.invoke_calls += 1
+            if self.invoke_calls == 1:
+                raise AgentGatewayError(
+                    "CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID",
+                    "旧合同没有返回合法脚本段。",
+                    raw_output={"script_segments": [{"kind": "visual_only", "on_screen_text": "非法组合"}]},
+                )
+            return super().invoke(selection, manifest_payload)
+
+    gateway = ContractUpgradePlannerGateway()
+    app.dependency_overrides[get_content_planner_gateway] = lambda: gateway
+    project = create_creation_project(client)
+    requirement_id = client.get(f"/api/v1/projects/{project['id']}/creation-center").json()["active_requirement"]["id"]
+
+    failed = client.post(
+        f"/api/v1/projects/{project['id']}/creative-brief-candidates:generate",
+        json={"command_id": "planner-old-contract-generate", "expected_requirement_version_id": requirement_id},
+    )
+
+    assert failed.status_code == 502
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    failed_run = planning["latest_planner_run"]
+    assert planning["next_action"]["code"] == "REGENERATE_CREATIVE_BRIEF_WITH_CURRENT_CONTRACT"
+    assert planning["next_action"]["incurs_model_cost"] is True
+    unconfirmed = client.post(
+        f"/api/v1/projects/{project['id']}/content-planner-runs/{failed_run['id']}:regenerate-with-current-contract",
+        json={
+            "command_id": "planner-current-contract-unconfirmed",
+            "expected_requirement_version_id": requirement_id,
+            "failed_agent_run_id": failed_run["id"],
+            "confirm_model_cost": False,
+        },
+    )
+    assert unconfirmed.status_code == 409
+    assert unconfirmed.headers["x-error-code"] == "MODEL_COST_CONFIRMATION_REQUIRED"
+    assert gateway.invoke_calls == 1
+
+    regenerated = client.post(
+        f"/api/v1/projects/{project['id']}/content-planner-runs/{failed_run['id']}:regenerate-with-current-contract",
+        json={
+            "command_id": "planner-current-contract-confirmed",
+            "expected_requirement_version_id": requirement_id,
+            "failed_agent_run_id": failed_run["id"],
+            "confirm_model_cost": True,
+        },
+    )
+
+    assert regenerated.status_code == 201
+    recovered = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    assert recovered["next_action"]["code"] == "REVIEW_CREATIVE_BRIEF"
+    assert recovered["latest_planner_run"]["prompt_contract_version"] == "content-planner-prompt.v6"
+    assert recovered["latest_planner_run"]["output_schema_version"] == "creative-brief-candidate.v4"
+    assert recovered["latest_planner_run"]["input_manifest_id"] != failed_run["input_manifest_id"]
+    with SessionLocal() as session:
+        runs = list(session.scalars(
+            select(AgentRun)
+            .where(AgentRun.project_id == project["id"], AgentRun.agent_role == "planner")
+            .order_by(AgentRun.started_at)
+        ))
+        assert [run.status for run in runs] == ["failed", "succeeded"]
+        assert runs[0].raw_output == {"script_segments": [{"kind": "visual_only", "on_screen_text": "非法组合"}]}
 
 
 def test_creative_brief_revision_preserves_requirement_and_supersedes_only_after_success(client: TestClient) -> None:

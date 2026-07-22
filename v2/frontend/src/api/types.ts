@@ -337,7 +337,7 @@ export interface CreativeBrief {
   audience_takeaway: string
   hook: { kind: string; content: string }
   narrative_beats: Array<{ beat_code: string; purpose: string; summary: string; target_duration_ms: number }>
-  script_segments: Array<{ segment_code: string; beat_code: string; kind: string; spoken_text: string | null; on_screen_text: string | null }>
+  script_segments: Array<{ segment_code: string; beat_code: string; kind: string; spoken_text?: string; on_screen_text?: string }>
   tone: string
   pacing: string
   platform_adaptation: string | null

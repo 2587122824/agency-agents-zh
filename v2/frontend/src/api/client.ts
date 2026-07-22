@@ -95,6 +95,9 @@ export const api = {
   retryCreativeBrief: (projectId: string, runId: string, requirementVersionId: string) => request<CreativeBriefCandidate>(`/projects/${projectId}/content-planner-runs/${runId}:retry`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, failed_agent_run_id: runId, confirm_model_cost: true }),
   }),
+  regenerateCreativeBriefWithCurrentContract: (projectId: string, runId: string, requirementVersionId: string) => request<CreativeBriefCandidate>(`/projects/${projectId}/content-planner-runs/${runId}:regenerate-with-current-contract`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, failed_agent_run_id: runId, confirm_model_cost: true }),
+  }),
   reviseCreativeBrief: (projectId: string, candidateId: string, requirementVersionId: string, instruction: string) => request<CreativeBriefCandidate>(`/projects/${projectId}/creative-brief-candidates/${candidateId}:revise`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_requirement_version_id: requirementVersionId, revision_instruction: instruction, confirm_model_cost: true }),
   }),

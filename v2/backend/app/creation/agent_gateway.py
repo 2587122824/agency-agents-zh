@@ -24,11 +24,15 @@ class AgentGatewayError(RuntimeError):
         *,
         raw_output: dict[str, Any] | None = None,
         diagnostics: list[dict[str, Any]] | None = None,
+        provider_request_id: str | None = None,
+        token_usage: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.code = code
         self.raw_output = raw_output
         self.diagnostics = diagnostics or []
+        self.provider_request_id = provider_request_id
+        self.token_usage = token_usage or {}
 
 
 CREATIVE_FIELD_KEYS = Literal[

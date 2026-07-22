@@ -147,6 +147,7 @@ from ..planning.contracts import (
     GenerateShotPlan,
     PlanningCenterView,
     PlanVersionRead,
+    RegenerateBriefWithCurrentContract,
     RetryBrief,
     RetryShotPlan,
     ReviseBrief,
@@ -164,6 +165,7 @@ from ..planning.service import (
     generate_brief,
     generate_shot_plan,
     planning_center_view,
+    regenerate_failed_brief_with_current_contract,
     retry_failed_brief,
     retry_failed_shot_plan,
     revise_brief,
@@ -1179,6 +1181,35 @@ def content_planner_run_retry(
     project = require_project(session, project_id)
     try:
         return retry_failed_brief(session, project, payload, gateway)
+    except CreationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CreationConflictError as exc:
+        raise creation_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
+
+
+@router.post(
+    "/projects/{project_id}/content-planner-runs/{run_id}:regenerate-with-current-contract",
+    response_model=CreativeBriefCandidateRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def content_planner_run_regenerate_with_current_contract(
+    project_id: str,
+    run_id: str,
+    payload: RegenerateBriefWithCurrentContract,
+    gateway: ContentPlannerGateway = Depends(get_content_planner_gateway),
+    session: Session = Depends(get_session),
+):
+    if payload.failed_agent_run_id != run_id:
+        raise HTTPException(status_code=409, detail="失败运行编号与路径不一致。")
+    project = require_project(session, project_id)
+    try:
+        return regenerate_failed_brief_with_current_contract(session, project, payload, gateway)
     except CreationNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CreationConflictError as exc:

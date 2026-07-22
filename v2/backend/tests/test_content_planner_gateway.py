@@ -38,8 +38,8 @@ def selection() -> ContentPlannerSelection:
         credential_ref="env://TEST_AGENT_KEY",
         timeout_seconds=30,
         input_contract_version="content-planner-input.v2",
-        prompt_contract_version="content-planner-prompt.v5",
-        output_schema_version="creative-brief-candidate.v3",
+        prompt_contract_version="content-planner-prompt.v6",
+        output_schema_version="creative-brief-candidate.v4",
         max_output_tokens=2000,
         sampling={"temperature": 0.2, "unsupported": "ignored"},
     )
@@ -82,9 +82,9 @@ def valid_output(*, spoken_text: str | None = None, platform_adaptation: str | N
             {"beat_code": "BEAT_03", "purpose": "收束结果", "summary": "展示结果", "target_duration_ms": 6000},
         ],
         "script_segments": [
-            {"segment_code": "SEG_01", "beat_code": "BEAT_01", "kind": "visual_only" if spoken_text is None else "voiceover", "spoken_text": spoken_text, "on_screen_text": None},
-            {"segment_code": "SEG_02", "beat_code": "BEAT_02", "kind": "visual_only", "spoken_text": None, "on_screen_text": None},
-            {"segment_code": "SEG_03", "beat_code": "BEAT_03", "kind": "visual_only", "spoken_text": None, "on_screen_text": None},
+            ({"segment_code": "SEG_01", "beat_code": "BEAT_01", "kind": "visual_only"} if spoken_text is None else {"segment_code": "SEG_01", "beat_code": "BEAT_01", "kind": "voiceover", "spoken_text": spoken_text}),
+            {"segment_code": "SEG_02", "beat_code": "BEAT_02", "kind": "visual_only"},
+            {"segment_code": "SEG_03", "beat_code": "BEAT_03", "kind": "visual_only"},
         ],
         "tone": "克制、真实",
         "pacing": "前快后稳",
@@ -135,6 +135,10 @@ def test_content_planner_returns_strict_brief_without_conversation_or_retry(monk
     assert [item["role"] for item in sent] == ["system", "user"]
     assert "conversation" not in sent[1]["content"]
     assert "绝不能写 requirement ID、完整 JSON 路径" in sent[0]["content"]
+    assert "权威 JSON Schema" in sent[0]["content"]
+    assert '"discriminator":{"mapping"' in sent[0]["content"]
+    assert "需要同时表达纯画面与画面文字时，必须拆成两个连续脚本段" in sent[0]["content"]
+    assert "任何脚本段都不得出现 spoken_text 字段" in sent[0]["content"]
 
 
 def test_content_planner_accepts_structured_open_question_options(monkeypatch) -> None:
@@ -266,7 +270,7 @@ def test_content_planner_accepts_empty_constraint_summary_when_output_obeys_mani
     result = gateway.invoke(selection(), manifest(audio_policy="off"))
 
     assert result.output.constraints_carried_forward == []
-    assert all(item.spoken_text is None for item in result.output.script_segments)
+    assert all(item.kind not in {"voiceover", "dialogue"} for item in result.output.script_segments)
     assert len(transport.calls) == 1
 
 
@@ -302,8 +306,49 @@ def test_content_planner_rejects_duration_mismatch_and_non_json_without_repair(m
     assert raised.value.code == "CONTENT_PLANNER_OUTPUT_CONTRACT_INVALID"
     assert len(transport.calls) == 1
 
-    gateway, transport = gateway_for({"choices": [{"message": {"content": "```json\n{}\n```"}}]})
+    gateway, transport = gateway_for({
+        "id": "planner-invalid-json",
+        "choices": [{"finish_reason": "stop", "message": {"content": "```json\n{}\n```"}}],
+        "usage": {"total_tokens": 21},
+    })
     with pytest.raises(AgentGatewayError) as raised:
         gateway.invoke(selection(), manifest())
+    assert raised.value.code == "CONTENT_PLANNER_OUTPUT_JSON_INVALID"
+    assert raised.value.raw_output == {"content": "```json\n{}\n```", "finish_reason": "stop"}
+    assert raised.value.provider_request_id == "planner-invalid-json"
+    assert raised.value.token_usage == {"total_tokens": 21}
+    assert raised.value.diagnostics[0]["type"] == "json_decode_error"
+    assert len(transport.calls) == 1
+
+
+def test_content_planner_script_segment_kinds_are_mutually_exclusive(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    output = valid_output()
+    output["script_segments"][0]["on_screen_text"] = "这段文字不能混入纯画面对象"
+    gateway, transport = gateway_for({"choices": [{"message": {"content": json.dumps(output, ensure_ascii=False)}}]})
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest())
+
     assert raised.value.code == "CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID"
+    assert raised.value.raw_output == output
+    assert len(transport.calls) == 1
+
+
+def test_content_planner_preserves_missing_content_response_evidence(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    response = {
+        "id": "planner-empty-response",
+        "choices": [{"finish_reason": "length", "message": {"content": ""}}],
+        "usage": {"total_tokens": 8192},
+    }
+    gateway, transport = gateway_for(response)
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), manifest())
+
+    assert raised.value.code == "CONTENT_PLANNER_RESPONSE_CONTENT_MISSING"
+    assert raised.value.raw_output == {"provider_response": response}
+    assert raised.value.provider_request_id == "planner-empty-response"
+    assert raised.value.token_usage == {"total_tokens": 8192}
     assert len(transport.calls) == 1

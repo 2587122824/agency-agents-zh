@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol
+from typing import Annotated, Any, Literal, Protocol
 from urllib.parse import urljoin
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -31,24 +31,41 @@ class NarrativeBeat(BaseModel):
     target_duration_ms: int = Field(ge=500, le=3_600_000)
 
 
-class ScriptSegment(BaseModel):
+CONTENT_PLANNER_INPUT_CONTRACT_VERSION = "content-planner-input.v2"
+CONTENT_PLANNER_OUTPUT_SCHEMA_VERSION = "creative-brief-candidate.v4"
+CONTENT_PLANNER_PROMPT_CONTRACT_VERSION = "content-planner-prompt.v6"
+
+
+class ScriptSegmentBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     segment_code: str = Field(pattern=r"^SEG_[0-9]{2,3}$")
     beat_code: str = Field(pattern=r"^BEAT_[0-9]{2,3}$")
-    kind: Literal["visual_only", "voiceover", "dialogue", "on_screen_text"]
-    spoken_text: str | None = Field(default=None, min_length=1, max_length=4000)
-    on_screen_text: str | None = Field(default=None, min_length=1, max_length=500)
 
-    @model_validator(mode="after")
-    def content_matches_kind(self):
-        if self.kind in {"voiceover", "dialogue"} and self.spoken_text is None:
-            raise ValueError("spoken_text is required for voiceover and dialogue segments")
-        if self.kind == "visual_only" and (self.spoken_text is not None or self.on_screen_text is not None):
-            raise ValueError("visual_only segments cannot contain spoken or on-screen text")
-        if self.kind == "on_screen_text" and self.on_screen_text is None:
-            raise ValueError("on_screen_text is required for on_screen_text segments")
-        return self
+
+class VisualOnlyScriptSegment(ScriptSegmentBase):
+    kind: Literal["visual_only"]
+
+
+class OnScreenTextScriptSegment(ScriptSegmentBase):
+    kind: Literal["on_screen_text"]
+    on_screen_text: str = Field(min_length=1, max_length=500)
+
+
+class VoiceoverScriptSegment(ScriptSegmentBase):
+    kind: Literal["voiceover"]
+    spoken_text: str = Field(min_length=1, max_length=4000)
+
+
+class DialogueScriptSegment(ScriptSegmentBase):
+    kind: Literal["dialogue"]
+    spoken_text: str = Field(min_length=1, max_length=4000)
+
+
+ScriptSegment = Annotated[
+    VisualOnlyScriptSegment | OnScreenTextScriptSegment | VoiceoverScriptSegment | DialogueScriptSegment,
+    Field(discriminator="kind"),
+]
 
 
 class BriefQuestionOption(BaseModel):
@@ -114,16 +131,16 @@ class ContentPlannerOutput(BaseModel):
     content_promise: str = Field(min_length=1, max_length=500)
     audience_takeaway: str = Field(min_length=1, max_length=500)
     hook: BriefHook
-    narrative_beats: list[NarrativeBeat] = Field(min_length=1, max_length=30)
-    script_segments: list[ScriptSegment] = Field(min_length=1, max_length=80)
+    narrative_beats: list[NarrativeBeat] = Field(min_length=1, max_length=12)
+    script_segments: list[ScriptSegment] = Field(min_length=1, max_length=36)
     tone: str = Field(min_length=1, max_length=200)
     pacing: str = Field(min_length=1, max_length=200)
     platform_adaptation: str | None = Field(default=None, min_length=1, max_length=1000)
     entity_version_ids: list[str] = Field(default_factory=list, max_length=100)
     constraints_carried_forward: list[str] = Field(default_factory=list, max_length=50)
-    creative_additions: list[CreativeAddition] = Field(max_length=30)
-    facts_requiring_confirmation: list[BriefPendingFact] = Field(max_length=20)
-    open_questions: list[BriefOpenQuestion] = Field(default_factory=list, max_length=20)
+    creative_additions: list[CreativeAddition] = Field(max_length=8)
+    facts_requiring_confirmation: list[BriefPendingFact] = Field(max_length=5)
+    open_questions: list[BriefOpenQuestion] = Field(default_factory=list, max_length=5)
 
     @model_validator(mode="after")
     def references_are_consistent(self):
@@ -202,15 +219,14 @@ class ContentPlannerGateway(Protocol):
     ) -> ContentPlannerResult: ...
 
 
-_SYSTEM_PROMPT = """你是片场 V2 的内容策划智能体。你根据已确认需求主动拓展叙事结构、开场、表达方式、内容示例、视觉策略和行动引导，形成可拍摄的内容策略与脚本结构；不与用户闲聊，不生成镜头，不选择生产参数。
-必须只返回一个 JSON 对象，严格符合：
-{"title":"方案标题","content_promise":"内容承诺","audience_takeaway":"观众收获","hook":{"kind":"visual_action|question|contrast|result|statement","content":"开场钩子"},"narrative_beats":[{"beat_code":"BEAT_01","purpose":"节拍目的","summary":"内容摘要","target_duration_ms":5000}],"script_segments":[{"segment_code":"SEG_01","beat_code":"BEAT_01","kind":"visual_only|voiceover|dialogue|on_screen_text","spoken_text":null,"on_screen_text":null}],"tone":"语气","pacing":"节奏","platform_adaptation":null,"entity_version_ids":[],"constraints_carried_forward":[],"creative_additions":[{"addition_code":"ADDITION_01","category":"narrative_structure|hook|expression|example|visual_strategy|call_to_action","content":"策划主动补充的内容","purpose":"该拓展服务于什么创作目标","basis_refs":[{"type":"requirement_field|decision|entity_version","reference_id":"输入合同中对应的真实字段键或 ID"}]}],"facts_requiring_confirmation":[{"fact_code":"FACT_01","statement":"尚未被输入合同确认的事实陈述","reason":"为什么不能把它直接视为事实","resolution_question_code":"QUESTION_01"}],"open_questions":[{"question_code":"QUESTION_01","prompt":"需要用户确认的问题","reason":"为什么此项会影响方案","options":[{"option_code":"OPTION_01","label":"短选项","description":"选择后的具体影响","answer":"作为方案修订依据的完整回答"},{"option_code":"OPTION_02","label":"另一选项","description":"选择后的具体影响","answer":"另一条完整回答"}]}]}
+_SYSTEM_PROMPT_RULES = """你是片场 V2 的内容策划智能体。你根据已确认需求主动拓展叙事结构、开场、表达方式、内容示例、视觉策略和行动引导，形成可拍摄的内容策略与脚本结构；不与用户闲聊，不生成镜头，不选择生产参数。
+必须只返回一个 JSON 对象，并逐字段遵守末尾的权威 JSON Schema。JSON Schema 由运行时输出模型直接生成，是字段、枚举、必填项、互斥结构和附加字段规则的唯一权威来源。
 规则：
 1. 只读取输入合同中的已确认需求、已解决决策、精确实体版本与交付约束；不得读取或假设自由聊天内容。
 2. narrative_beats 的 target_duration_ms 总和必须精确等于 delivery_constraints.duration_ms；代码必须从 BEAT_01 连续编号。
-3. script_segments 只能引用已存在的 beat_code，代码必须从 SEG_01 连续编号。
+3. script_segments 只能引用已存在的 beat_code，代码必须从 SEG_01 连续编号。四种 kind 是互斥对象：visual_only 只允许 segment_code、beat_code、kind；on_screen_text 只额外要求 on_screen_text；voiceover 和 dialogue 只额外要求 spoken_text。需要同时表达纯画面与画面文字时，必须拆成两个连续脚本段，不得在一个对象中混合字段。
 4. entity_version_ids 只能从 confirmed_entity_versions 中逐字复制，不得创建、缩写、改名或猜测实体 ID。
-5. audio_policy=off 时所有 spoken_text 必须为 null，kind 不得为 voiceover 或 dialogue；不得建立旁白、对白、音乐、TTS 或对口型依赖。
+5. audio_policy=off 时 kind 只能为 visual_only 或 on_screen_text，任何脚本段都不得出现 spoken_text 字段；不得建立旁白、对白、音乐、TTS 或对口型依赖。
 6. platform 为 null 时 platform_adaptation 必须为 null；platform 有明确值时 platform_adaptation 必须明确说明如何适配该平台，不得遗漏。
 7. 不得输出镜头 ID、画面提示词、Provider、模型、工作流、NodeInfoList、价格、素材状态或生产任务。
 8. 你应主动进行创意拓展，但每项拓展必须写入 creative_additions，并通过 basis_refs 明确引用输入合同中的真实来源。type=requirement_field 时 reference_id 只能逐字复制 requirement_version.fields 的直接字段键，例如 core_topic、duration_seconds、creative_direction，绝不能写 requirement ID、完整 JSON 路径或 requirement_xxx.fields.duration_seconds；type=decision 时只能逐字复制 confirmed_decisions[].id；type=entity_version 时只能逐字复制 confirmed_entity_versions[].id。创意拓展可以提出叙事组织、表达方式和视觉策略，不得把创意设想伪装成已经确认的事实。
@@ -219,7 +235,66 @@ _SYSTEM_PROMPT = """你是片场 V2 的内容策划智能体。你根据已确�
 11. constraints_carried_forward 是可选的可读说明，只能登记输入合同中真实存在的约束，不得创造默认规则；该字段为空不代表约束失效，后端按不可变输入合同直接验收实际输出。
 12. 不得输出 Markdown 代码块、解释文字或 JSON 之外的内容。
 13. 输入存在 revision_request 时，source_brief 是待调整的冻结原方案，instruction 是用户本轮唯一修改意见。你必须在继续满足已确认需求与全部确定性合同的前提下修改原方案；instruction 中逐项确认的答案可用于解决对应 open_questions，但不得改动需求版本、音频策略、时长、画幅、实体白名单或生产路由。输入不存在 revision_request 时按首次策划处理。
+14. 保持方案紧凑：每个叙事节拍通常使用 1 到 4 个脚本段，只保留会改变内容结构的策划拓展和待确认项。不得通过重复摘要、重复文字段或同义拓展填充输出。
 """
+
+
+_SYSTEM_PROMPT = (
+    _SYSTEM_PROMPT_RULES
+    + "\n权威 JSON Schema：\n"
+    + json.dumps(ContentPlannerOutput.model_json_schema(), ensure_ascii=False, separators=(",", ":"))
+)
+
+
+def select_content_planner_configuration(session: Session) -> ContentPlannerSelection:
+    rows = list(session.execute(
+            select(ModelConfigVersion, ProviderConfigVersion, ProductionConfigVersion)
+            .join(ProviderConfigVersion, ProviderConfigVersion.id == ModelConfigVersion.provider_config_version_id)
+            .join(ProductionConfigVersion, ProductionConfigVersion.id == ModelConfigVersion.production_config_version_id)
+            .where(
+                ModelConfigVersion.agent_role == "planner",
+                ModelConfigVersion.status == "published",
+                ProviderConfigVersion.status == "published",
+                ProductionConfigVersion.status == "published",
+            )
+            .order_by(ModelConfigVersion.config_key, ModelConfigVersion.version_number.desc())
+    ))
+    latest_by_key: dict[str, tuple[ModelConfigVersion, ProviderConfigVersion, ProductionConfigVersion]] = {}
+    for model, provider, config in rows:
+        latest_by_key.setdefault(model.config_key, (model, provider, config))
+    if not latest_by_key:
+        raise AgentGatewayError("CONTENT_PLANNER_MODEL_NOT_CONFIGURED", "当前没有已发布的内容策划模型配置。")
+    if len(latest_by_key) != 1:
+        raise AgentGatewayError("CONTENT_PLANNER_MODEL_SELECTION_AMBIGUOUS", "当前存在多个内容策划模型系列，请在系统配置中保留一个明确选择。")
+    model, provider, config = next(iter(latest_by_key.values()))
+    if provider.adapter_kind != "openai_compatible":
+        raise AgentGatewayError("CONTENT_PLANNER_ADAPTER_UNSUPPORTED", "内容策划模型没有绑定 OpenAI-compatible 服务供应商。")
+    if "text_generation" not in provider.capabilities:
+        raise AgentGatewayError("CONTENT_PLANNER_CAPABILITY_MISSING", "内容策划模型供应商未声明文本生成能力。")
+    expected = {
+        "input_contract_version": CONTENT_PLANNER_INPUT_CONTRACT_VERSION,
+        "output_schema_version": CONTENT_PLANNER_OUTPUT_SCHEMA_VERSION,
+        "prompt_contract_version": CONTENT_PLANNER_PROMPT_CONTRACT_VERSION,
+    }
+    actual = {key: getattr(model, key) for key in expected}
+    if actual != expected:
+        raise AgentGatewayError("CONTENT_PLANNER_CONTRACT_VERSION_UNSUPPORTED", "内容策划模型配置的合同版本与当前运行代码不一致。")
+    return ContentPlannerSelection(
+        production_config_version_id=config.id,
+        model_config_version_id=model.id,
+        provider_config_version_id=provider.id,
+        model_provider=provider.display_name,
+        model_name=model.display_name,
+        provider_model_id=model.provider_model_id,
+        base_url=provider.base_url,
+        credential_ref=provider.credential_ref,
+        timeout_seconds=provider.request_timeout_seconds,
+        input_contract_version=model.input_contract_version,
+        prompt_contract_version=model.prompt_contract_version,
+        output_schema_version=model.output_schema_version,
+        max_output_tokens=model.max_output_tokens,
+        sampling=dict(model.sampling or {}),
+    )
 
 
 class ConfiguredContentPlannerGateway:
@@ -233,54 +308,7 @@ class ConfiguredContentPlannerGateway:
         self.credential_resolver = credential_resolver or EnvironmentCredentialResolver.from_environment()
 
     def select(self, session: Session) -> ContentPlannerSelection:
-        rows = list(session.execute(
-            select(ModelConfigVersion, ProviderConfigVersion, ProductionConfigVersion)
-            .join(ProviderConfigVersion, ProviderConfigVersion.id == ModelConfigVersion.provider_config_version_id)
-            .join(ProductionConfigVersion, ProductionConfigVersion.id == ModelConfigVersion.production_config_version_id)
-            .where(
-                ModelConfigVersion.agent_role == "planner",
-                ModelConfigVersion.status == "published",
-                ProviderConfigVersion.status == "published",
-                ProductionConfigVersion.status == "published",
-            )
-            .order_by(ModelConfigVersion.config_key, ModelConfigVersion.version_number.desc())
-        ))
-        latest_by_key: dict[str, tuple[ModelConfigVersion, ProviderConfigVersion, ProductionConfigVersion]] = {}
-        for model, provider, config in rows:
-            latest_by_key.setdefault(model.config_key, (model, provider, config))
-        if not latest_by_key:
-            raise AgentGatewayError("CONTENT_PLANNER_MODEL_NOT_CONFIGURED", "当前没有已发布的内容策划模型配置。")
-        if len(latest_by_key) != 1:
-            raise AgentGatewayError("CONTENT_PLANNER_MODEL_SELECTION_AMBIGUOUS", "当前存在多个内容策划模型系列，请在系统配置中保留一个明确选择。")
-        model, provider, config = next(iter(latest_by_key.values()))
-        if provider.adapter_kind != "openai_compatible":
-            raise AgentGatewayError("CONTENT_PLANNER_ADAPTER_UNSUPPORTED", "内容策划模型没有绑定 OpenAI-compatible 服务供应商。")
-        if "text_generation" not in provider.capabilities:
-            raise AgentGatewayError("CONTENT_PLANNER_CAPABILITY_MISSING", "内容策划模型供应商未声明文本生成能力。")
-        expected = {
-            "input_contract_version": "content-planner-input.v2",
-            "output_schema_version": "creative-brief-candidate.v3",
-            "prompt_contract_version": "content-planner-prompt.v5",
-        }
-        actual = {key: getattr(model, key) for key in expected}
-        if actual != expected:
-            raise AgentGatewayError("CONTENT_PLANNER_CONTRACT_VERSION_UNSUPPORTED", "内容策划模型配置的合同版本与当前运行代码不一致。")
-        return ContentPlannerSelection(
-            production_config_version_id=config.id,
-            model_config_version_id=model.id,
-            provider_config_version_id=provider.id,
-            model_provider=provider.display_name,
-            model_name=model.display_name,
-            provider_model_id=model.provider_model_id,
-            base_url=provider.base_url,
-            credential_ref=provider.credential_ref,
-            timeout_seconds=provider.request_timeout_seconds,
-            input_contract_version=model.input_contract_version,
-            prompt_contract_version=model.prompt_contract_version,
-            output_schema_version=model.output_schema_version,
-            max_output_tokens=model.max_output_tokens,
-            sampling=dict(model.sampling or {}),
-        )
+        return select_content_planner_configuration(session)
 
     def invoke(
         self,
@@ -315,11 +343,49 @@ class ConfiguredContentPlannerGateway:
             payload=payload,
             timeout_seconds=selection.timeout_seconds,
         )
+        request_id = str(response.get("id") or "").strip() or None
+        usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
         try:
             content = response["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise AgentGatewayError(
+                "CONTENT_PLANNER_RESPONSE_CONTENT_MISSING",
+                "内容策划模型响应中没有可解析的文本内容。",
+                raw_output={"provider_response": response},
+                diagnostics=[{"type": "response_content_missing", "detail": str(exc)}],
+                provider_request_id=request_id,
+                token_usage=usage,
+            ) from exc
+        if not isinstance(content, str) or not content.strip():
+            raise AgentGatewayError(
+                "CONTENT_PLANNER_RESPONSE_CONTENT_MISSING",
+                "内容策划模型响应中的文本内容为空。",
+                raw_output={"provider_response": response},
+                diagnostics=[{"type": "response_content_empty"}],
+                provider_request_id=request_id,
+                token_usage=usage,
+            )
+        try:
             parsed = json.loads(content)
-        except (KeyError, IndexError, TypeError, json.JSONDecodeError) as exc:
-            raise AgentGatewayError("CONTENT_PLANNER_OUTPUT_SCHEMA_INVALID", "内容策划模型输出不是有效 JSON 对象。") from exc
+        except json.JSONDecodeError as exc:
+            choice = response.get("choices", [{}])[0]
+            raise AgentGatewayError(
+                "CONTENT_PLANNER_OUTPUT_JSON_INVALID",
+                "内容策划模型返回的文本不是有效 JSON。",
+                raw_output={
+                    "content": content,
+                    "finish_reason": choice.get("finish_reason") if isinstance(choice, dict) else None,
+                },
+                diagnostics=[{
+                    "type": "json_decode_error",
+                    "message": exc.msg,
+                    "line": exc.lineno,
+                    "column": exc.colno,
+                    "position": exc.pos,
+                }],
+                provider_request_id=request_id,
+                token_usage=usage,
+            ) from exc
         try:
             output = ContentPlannerOutput.model_validate(parsed)
             _validate_output_against_manifest(output, manifest_payload)
@@ -329,15 +395,17 @@ class ConfiguredContentPlannerGateway:
                 "内容策划模型输出不符合严格 Brief 合同。",
                 raw_output=parsed if isinstance(parsed, dict) else None,
                 diagnostics=exc.errors(include_input=False),
+                provider_request_id=request_id,
+                token_usage=usage,
             ) from exc
         except ValueError as exc:
             raise AgentGatewayError(
                 "CONTENT_PLANNER_OUTPUT_CONTRACT_INVALID",
                 str(exc),
                 raw_output=parsed if isinstance(parsed, dict) else None,
+                provider_request_id=request_id,
+                token_usage=usage,
             ) from exc
-        usage = response.get("usage") if isinstance(response.get("usage"), dict) else {}
-        request_id = str(response.get("id") or "").strip() or None
         return ContentPlannerResult(output, parsed, request_id, usage)
 
 
@@ -357,7 +425,7 @@ def _validate_output_against_manifest(output: ContentPlannerOutput, manifest: di
     if unknown_entities:
         raise ValueError(f"内容策划引用了未确认的实体版本：{unknown_entities}。")
     if manifest["audio_policy"] == "off":
-        invalid_audio = [item.segment_code for item in output.script_segments if item.spoken_text is not None or item.kind in {"voiceover", "dialogue"}]
+        invalid_audio = [item.segment_code for item in output.script_segments if item.kind in {"voiceover", "dialogue"}]
         if invalid_audio:
             raise ValueError(f"音频关闭时脚本段不得包含口播或对白：{invalid_audio}。")
     if manifest.get("platform") is None and output.platform_adaptation is not None:
@@ -391,9 +459,9 @@ class DeterministicContentPlannerGateway:
             base_url="https://example.invalid/v1",
             credential_ref=None,
             timeout_seconds=1,
-            input_contract_version="content-planner-input.v2",
-            prompt_contract_version="content-planner-prompt.v5",
-            output_schema_version="creative-brief-candidate.v3",
+            input_contract_version=CONTENT_PLANNER_INPUT_CONTRACT_VERSION,
+            prompt_contract_version=CONTENT_PLANNER_PROMPT_CONTRACT_VERSION,
+            output_schema_version=CONTENT_PLANNER_OUTPUT_SCHEMA_VERSION,
             max_output_tokens=None,
             sampling={},
         )
@@ -414,12 +482,10 @@ class DeterministicContentPlannerGateway:
             ], start=1)
         ]
         segments = [
-            ScriptSegment(
-                segment_code=f"SEG_{index:02d}",
-                beat_code=beat.beat_code,
-                kind="visual_only" if audio_off else "voiceover",
-                spoken_text=None if audio_off else beat.summary,
-                on_screen_text=None,
+            VisualOnlyScriptSegment(
+                segment_code=f"SEG_{index:02d}", beat_code=beat.beat_code, kind="visual_only"
+            ) if audio_off else VoiceoverScriptSegment(
+                segment_code=f"SEG_{index:02d}", beat_code=beat.beat_code, kind="voiceover", spoken_text=beat.summary
             )
             for index, beat in enumerate(beats, start=1)
         ]

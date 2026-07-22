@@ -70,7 +70,7 @@ export function ShotPlanRevisionEditor({
   candidate: ShotPlanCandidate
   projectId: string
   entities: EntityOption[]
-  scriptSegments: Array<{ segment_code: string; beat_code: string; kind: string; spoken_text: string | null; on_screen_text: string | null }>
+  scriptSegments: Array<{ segment_code: string; beat_code: string; kind: string; spoken_text?: string; on_screen_text?: string }>
   saving: boolean
   aiSaving: boolean
   onCancel: () => void

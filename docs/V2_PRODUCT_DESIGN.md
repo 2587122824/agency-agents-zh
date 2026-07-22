@@ -1206,7 +1206,9 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 ## 40. 内容策划智能体实现
 
-内容策划使用 `content-planner-input.v2 / creative-brief-candidate.v3 / content-planner-prompt.v5`。输入清单不包含会话消息，只冻结活动需求版本、已解决 Decision、活动实体版本、时长/画幅交付约束、音频策略、可空平台和可空模板版本。模型配置使用独立 `planner` 分工，不能复用 `creative` 分工作为隐式路由。开发环境直接采用当前合同，不为旧版策划输出增加运行时兼容分支；测试数据需要时显式重建。
+内容策划使用 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6`。输入清单不包含会话消息，只冻结活动需求版本、已解决 Decision、活动实体版本、时长/画幅交付约束、音频策略、可空平台和可空模板版本。模型配置使用独立 `planner` 分工，不能复用 `creative` 分工作为隐式路由。开发环境直接采用当前合同，不为旧版策划输出增加运行时兼容分支；测试数据需要时显式重建。
+
+输出模型是 Prompt 结构的单一权威来源：运行时将 `ContentPlannerOutput` 生成的 JSON Schema 原样附入 Prompt。脚本段按 `kind` 使用互斥联合类型，非法字段组合无法进入候选；跨对象规则仍由确定性验证器执行。响应内容缺失、JSON 无效、Schema 不符和项目合同冲突使用不同错误码，并保存原始响应证据、结束原因、请求 ID、Token 与解析位置。相同合同精确重跑复用原 Manifest；合同升级后的重新生成必须由用户明确确认费用，创建新的 Manifest 和 AgentRun。两者均不自动重试、修补输出或切换模型。
 
 输出必须提供方案名称、内容承诺、观众收获、开场设计、连续编号的内容节拍与脚本段、语气、节奏、可空平台适配、精确实体版本、可选约束说明、`creative_additions`、`facts_requiring_confirmation` 和结构化待确认问题。内容策划应主动补充叙事结构、钩子、表达方式、示例、视觉策略与行动引导；每项拓展必须引用输入清单中真实存在的需求字段、Decision 或实体版本，页面将其明确标为“策划拓展”。输入未确认的数字、结果、身份、经历、时间、地点、品牌或产品信息如需使用，必须作为待确认事实显式列出，并一对一关联真实 `open_questions`；存在待确认事实或问题时方案不能接受。每个问题包含连续 `question_code`、问题、影响原因以及 2–3 个互斥且可直接执行的答案选项；每个选项包含连续 `option_code`、短标签、影响说明和完整答案。用户逐项选择后显式调用一次当前 planner 生成新的 Brief 修订版；已解决事实必须从新候选的待确认列表移除。
 

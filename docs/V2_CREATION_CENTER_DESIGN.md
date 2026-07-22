@@ -426,7 +426,7 @@ platform nullable
 template_version_id nullable
 ```
 
-输出 `creative-brief-candidate.v3`：
+输出 `creative-brief-candidate.v4`：
 
 ```json
 {
@@ -488,7 +488,9 @@ template_version_id nullable
 - 待确认问题必须从 `QUESTION_01` 连续编号，每个问题提供 2–3 个从 `OPTION_01` 连续编号、互斥且答案不同的选项。用户可以点击选项或填写自定义答案；全部回答后明确调用一次 planner 形成新的 Brief 修订版，不能直接把答案写入正式需求或接受旧方案。
 - 后端不扫描关键词判断隐藏事实，不自动重写、修复或补齐模型输出，也不增加第二次模型评审。开发环境只支持当前 v3 输出合同，不保留旧版运行时兼容入口。
 
-当前实现已经按 `content-planner-input.v2 / creative-brief-candidate.v3 / content-planner-prompt.v5` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。每个活动需求版本只自动尝试一次；失败会保存结构化错误、受控原始输出和 Provider 请求审计，不自动重试。用户可以在方案页明确确认模型费用后，重跑当前需求版本最近一次失败运行；重跑必须复用同一 `AgentInputManifest`，并校验生产配置、模型、Provider、Prompt 合同和输出 Schema 与原失败运行完全一致。新命令创建新的 `AgentRun`，不覆盖失败记录、不修复模型输出、不切换配置。模型输出经 Pydantic Schema 后还要通过确定性跨字段验证：节拍总时长必须精确匹配交付时长，节拍与脚本代码连续且引用存在，创意依据与实体 ID 必须来自输入白名单，待确认事实必须绑定真实问题，音频关闭与双向平台约束必须由实际输出遵守。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。内容策划不选择 Provider、工作流、价格或生产路由。
+当前实现已经按 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。`script_segments` 是按 `kind` 判别的互斥联合：`visual_only` 不存在内容字段，`on_screen_text` 只允许精确画面文字，`voiceover / dialogue` 只允许口播文字；需要组合表达时拆为两个连续段。Prompt 直接附带由 Pydantic 输出模型生成的权威 JSON Schema，不再手工复制字段形状；跨对象时长、代码连续性、引用白名单、待确认事实、音频和平台约束继续由确定性代码验证。
+
+每个活动需求版本只自动尝试一次。失败分类为响应内容缺失、JSON 语法错误、Schema 错误或项目合同冲突，并持久化可用的原始文本/Provider 响应、`finish_reason`、请求 ID、Token 和解析位置。系统不剥离 Markdown、不截取 JSON、不改字段、不自动重试。相同配置只能在用户确认费用后精确复用原 `AgentInputManifest`；当前 Prompt 或输出 Schema 已升级时，页面明确提供“使用当前合同重新生成”，重新冻结当前权威输入并创建新 Manifest，旧失败记录不覆盖。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。内容策划不选择 Provider、工作流、价格或生产路由。
 
 方案页将修改分成三个明确命令：
 
@@ -1189,7 +1191,7 @@ RequirementDiff
 ### Creation Sprint 4：创作模型接入
 
 - 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v15`（已完成）
-- 内容策划 `content-planner-input.v2 / creative-brief-candidate.v3 / content-planner-prompt.v5`，含可追溯策划拓展、待确认事实、Brief 不可变修订链与结构化确认项（已完成）
+- 内容策划 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6`，含互斥脚本段、Schema 单一权威来源、完整失败证据、可追溯策划拓展、待确认事实、Brief 不可变修订链与结构化确认项（已完成）
 - 分镜导演 `director-input.v2 / shot-plan.v3 / director-prompt.v4`（已完成）
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成

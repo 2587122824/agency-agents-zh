@@ -19,6 +19,12 @@ class RetryBrief(CommandContext):
     confirm_model_cost: bool
 
 
+class RegenerateBriefWithCurrentContract(CommandContext):
+    expected_requirement_version_id: str
+    failed_agent_run_id: str = Field(min_length=1, max_length=48)
+    confirm_model_cost: bool
+
+
 class ReviseBrief(CommandContext):
     expected_requirement_version_id: str
     revision_instruction: str = Field(min_length=1, max_length=4000)

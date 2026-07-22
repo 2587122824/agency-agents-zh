@@ -33,8 +33,13 @@ from ..db.models import (
 )
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
-from .agent_gateway import ContentPlannerGateway, ContentPlannerSelection
-from .contracts import CancelShotPlanRevision, DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RetryBrief, RetryShotPlan, ReviseBrief, ReviseShotPlan, ReviseShotPlanWithDirector, StartShotPlanRevision
+from .agent_gateway import (
+    CONTENT_PLANNER_OUTPUT_SCHEMA_VERSION,
+    CONTENT_PLANNER_PROMPT_CONTRACT_VERSION,
+    ContentPlannerGateway,
+    ContentPlannerSelection,
+)
+from .contracts import CancelShotPlanRevision, DecideBrief, DecideShotPlan, GenerateBrief, GenerateShotPlan, PlanningNextAction, RegenerateBriefWithCurrentContract, RetryBrief, RetryShotPlan, ReviseBrief, ReviseShotPlan, ReviseShotPlanWithDirector, StartShotPlanRevision
 from .director_gateway import DirectorGateway, DirectorSelection
 
 
@@ -201,6 +206,8 @@ def _execute_director(
                 if exc.diagnostics else str(exc)
             )
             failed_run.raw_output = exc.raw_output
+            failed_run.provider_request_id = exc.provider_request_id
+            failed_run.token_usage = exc.token_usage
             failed_run.finished_at = utc_now()
             _event(session, project.id, "agent.run_failed.v1", "分镜导演智能体本轮运行失败", {
                 "agent_run_id": failed_run.id,
@@ -298,7 +305,7 @@ def _execute_content_planner(
     project: Project,
     requirement: RequirementVersion,
     manifest: AgentInputManifest,
-    payload: GenerateBrief | RetryBrief | ReviseBrief,
+    payload: GenerateBrief | RetryBrief | RegenerateBriefWithCurrentContract | ReviseBrief,
     gateway: ContentPlannerGateway,
     selection: ContentPlannerSelection,
     *,
@@ -340,6 +347,8 @@ def _execute_content_planner(
                 if exc.diagnostics else str(exc)
             )
             failed_run.raw_output = exc.raw_output
+            failed_run.provider_request_id = exc.provider_request_id
+            failed_run.token_usage = exc.token_usage
             failed_run.finished_at = utc_now()
             _event(session, project.id, "agent.run_failed.v1", "内容策划智能体本轮运行失败", {
                 "agent_run_id": failed_run.id,
@@ -582,6 +591,94 @@ def retry_failed_brief(
     )
     if actual_config != expected_config:
         raise CreationConflictError("CONTENT_PLANNER_RETRY_CONFIG_CHANGED", "当前内容策划配置与失败运行不一致，不能静默更换模型或合同后重跑。")
+    return _execute_content_planner(
+        session,
+        project,
+        requirement,
+        manifest,
+        payload,
+        gateway,
+        selection,
+        retry_of_agent_run_id=latest_run.id,
+    )
+
+
+def regenerate_failed_brief_with_current_contract(
+    session: Session,
+    project: Project,
+    payload: RegenerateBriefWithCurrentContract,
+    gateway: ContentPlannerGateway,
+) -> CreativeBriefCandidate:
+    repository = _planning(session)
+    receipt = _receipt(session, project.id, payload.command_id)
+    if receipt:
+        return _receipt_result(session, receipt, CreativeBriefCandidate)
+    if not payload.confirm_model_cost:
+        raise CreationConflictError("MODEL_COST_CONFIRMATION_REQUIRED", "请明确确认本次会使用当前内容策划合同重新调用模型。")
+    requirement = active_requirement(session, project.id)
+    if not requirement or requirement.id != payload.expected_requirement_version_id:
+        raise CreationConflictError("REQUIREMENT_VERSION_CONFLICT", "活动需求版本已变化，不能基于旧失败重新策划。")
+    latest_run = session.scalar(
+        select(AgentRun)
+        .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+        .where(
+            AgentRun.project_id == project.id,
+            AgentRun.agent_role == "planner",
+            AgentInputManifest.base_requirement_version_id == requirement.id,
+        )
+        .order_by(AgentRun.started_at.desc())
+        .limit(1)
+    )
+    if not latest_run or latest_run.id != payload.failed_agent_run_id:
+        raise CreationConflictError("CONTENT_PLANNER_FAILED_RUN_NOT_LATEST", "只能重新生成当前需求版本最近一次失败的内容策划。")
+    if latest_run.status != "failed":
+        raise CreationConflictError("CONTENT_PLANNER_RUN_NOT_FAILED", "指定的内容策划运行不是失败状态。")
+    failed_manifest = session.get(AgentInputManifest, latest_run.input_manifest_id)
+    if not failed_manifest or failed_manifest.base_requirement_version_id != requirement.id:
+        raise CreationConflictError("CONTENT_PLANNER_MANIFEST_MISSING", "失败运行的输入清单不存在或需求版本不一致。")
+    selection = gateway.select(session)
+    previous_config = (
+        latest_run.production_config_version_id,
+        latest_run.model_config_version_id,
+        latest_run.provider_config_version_id,
+        latest_run.prompt_contract_version,
+        latest_run.output_schema_version,
+    )
+    current_config = (
+        selection.production_config_version_id,
+        selection.model_config_version_id,
+        selection.provider_config_version_id,
+        selection.prompt_contract_version,
+        selection.output_schema_version,
+    )
+    if current_config == previous_config:
+        raise CreationConflictError(
+            "CONTENT_PLANNER_CONTRACT_UNCHANGED",
+            "当前内容策划配置与失败运行相同，请使用精确重跑；系统不会把相同配置伪装成新合同。",
+        )
+    manifest_payload = _content_planner_manifest_payload(session, project, requirement)
+    revision_request = failed_manifest.payload.get("revision_request")
+    active_brief = repository.active_brief_for_requirement(project.id, requirement.id)
+    if revision_request:
+        source_candidate_id = revision_request.get("source_candidate_id")
+        if not active_brief or active_brief.id != source_candidate_id:
+            raise CreationConflictError("BRIEF_REVISION_SOURCE_NOT_CURRENT", "失败调整所绑定的原方案已变化，不能使用新合同继续。")
+        manifest_payload["revision_request"] = revision_request
+    elif active_brief:
+        raise CreationConflictError("BRIEF_ALREADY_EXISTS", "当前需求版本已有待审或已接受的内容方案。")
+    manifest_payload["system_config_version"] = selection.production_config_version_id
+    serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    manifest = AgentInputManifest(
+        project_id=project.id,
+        base_requirement_version_id=requirement.id,
+        decision_ids=[item["id"] for item in manifest_payload["confirmed_decisions"]],
+        attachment_binding_ids=repository.confirmed_binding_ids(project.id),
+        system_config_version=selection.production_config_version_id,
+        input_hash=hashlib.sha256(serialized.encode("utf-8")).hexdigest(),
+        payload=manifest_payload,
+    )
+    repository.add(manifest)
+    repository.flush()
     return _execute_content_planner(
         session,
         project,
@@ -1425,6 +1522,14 @@ def planning_center_view(session: Session, project: Project) -> dict:
         and planner_manifest
         and planner_manifest.payload.get("revision_request")
     )
+    planner_contract_changed = bool(
+        planner_attempt
+        and planner_attempt.status == "failed"
+        and (
+            planner_attempt.prompt_contract_version != CONTENT_PLANNER_PROMPT_CONTRACT_VERSION
+            or planner_attempt.output_schema_version != CONTENT_PLANNER_OUTPUT_SCHEMA_VERSION
+        )
+    )
     if current_shot:
         next_action = PlanningNextAction(code="REVIEW_SHOT_PLAN", label="审核分镜候选", target_ids=[current_shot.id])
     elif revision_draft:
@@ -1449,6 +1554,13 @@ def planning_center_view(session: Session, project: Project) -> dict:
         next_action = PlanningNextAction(code="REVISE_REQUIREMENT_FOR_NEW_SHOT_PLAN", label="调整并确认需求后重新生成分镜", target_ids=[director_attempt.id])
     elif accepted_brief:
         next_action = PlanningNextAction(code="GENERATE_SHOT_PLAN", label="生成分镜候选", target_ids=[accepted_brief.id], incurs_model_cost=True)
+    elif failed_revision and planner_contract_changed:
+        next_action = PlanningNextAction(
+            code="REGENERATE_CREATIVE_BRIEF_WITH_CURRENT_CONTRACT",
+            label="确认模型调用并使用当前合同重新生成方案调整",
+            target_ids=[planner_attempt.id],
+            incurs_model_cost=True,
+        )
     elif failed_revision:
         next_action = PlanningNextAction(
             code="RETRY_FAILED_CREATIVE_BRIEF",
@@ -1458,6 +1570,13 @@ def planning_center_view(session: Session, project: Project) -> dict:
         )
     elif current_brief:
         next_action = PlanningNextAction(code="REVIEW_CREATIVE_BRIEF", label="审核内容方案", target_ids=[current_brief.id])
+    elif planner_attempt and planner_attempt.status == "failed" and planner_contract_changed:
+        next_action = PlanningNextAction(
+            code="REGENERATE_CREATIVE_BRIEF_WITH_CURRENT_CONTRACT",
+            label="确认模型调用并使用当前合同重新生成内容方案",
+            target_ids=[planner_attempt.id],
+            incurs_model_cost=True,
+        )
     elif planner_attempt and planner_attempt.status == "failed":
         next_action = PlanningNextAction(
             code="RETRY_FAILED_CREATIVE_BRIEF",
