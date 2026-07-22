@@ -197,8 +197,27 @@ function BriefQuestionResolver({
   </section>
 }
 
+function ShotFrameContract({ shot, compact = false }: { shot: ShotContract; compact?: boolean }) {
+  const multiFrame = shot.generation_requirements.multi_frame_required
+  const framePrompts = shot.guide_frame_prompts
+
+  return <div className={styles.frameContract} data-compact={compact} data-multi-frame={multiFrame}>
+    <div className={styles.frameMode}>
+      <b>{multiFrame ? '首中尾三画面' : '单画面'}</b>
+      <span>{multiFrame ? '3 张独立关键帧' : '1 张关键帧'}</span>
+    </div>
+    {multiFrame ? <div className={styles.frameSequence}>
+      {([['start', '首帧'], ['middle', '中帧'], ['end', '尾帧']] as const).map(([role, label]) => <div key={role}>
+        <span>{label}</span>
+        <p data-missing={!framePrompts?.[role]}>{framePrompts?.[role] || '未填写画面描述'}</p>
+      </div>)}
+    </div> : <p className={styles.singleFramePrompt}>{shot.visual_prompt ?? '缺少画面生成描述'}</p>}
+    {!compact && <small>视频运动描述：{shot.action}</small>}
+  </div>
+}
+
 function ShotTable({ shots, locked }: { shots: ShotContract[]; locked: boolean }) {
-  return <div className={styles.shotTableWrap}><div className={styles.tableTitle}><div><Clapperboard size={17} /><h3>分镜合同</h3></div><span>{shots.length} 个镜头 · {(shots.reduce((sum, shot) => sum + shot.duration_ms, 0) / 1000).toFixed(1)} 秒</span></div><div className={styles.tableScroll}><table><thead><tr><th>镜头</th><th>画面生成描述</th><th>实体与主参考</th><th>约束</th><th>时长</th><th>状态</th></tr></thead><tbody>{shots.map(shot => <tr key={shot.shot_code}><td><strong>{shot.shot_code}</strong><small>{shot.narrative_beat_code ?? '未绑定节拍'} · {shot.shot_purpose} · {shot.framing}</small></td><td><strong>{shot.visual_prompt ?? '缺少画面生成描述'}</strong><small>{shot.new_information} · {shot.composition}</small></td><td><span>{shot.character_entity_version_ids.length ? shot.character_entity_version_ids.join(', ') : '人物未绑定'}</span><small>{shot.primary_reference_entity_version_id ? `主参考 ${shot.primary_reference_entity_version_id}` : '无主参考图'} · {shot.continuity_relation}</small></td><td><span>人脸 {shot.face_visibility}</span><small>文字 {shot.text_policy} · 主体运动 {shot.subject_motion} · 声音 {shot.audio_requirement}</small></td><td>{(shot.duration_ms / 1000).toFixed(1)}s</td><td><em data-locked={locked}>{locked ? '已锁定' : '待确认'}</em></td></tr>)}</tbody></table></div></div>
+  return <div className={styles.shotTableWrap}><div className={styles.tableTitle}><div><Clapperboard size={17} /><h3>分镜合同</h3></div><span>{shots.length} 个镜头 · {(shots.reduce((sum, shot) => sum + shot.duration_ms, 0) / 1000).toFixed(1)} 秒</span></div><div className={styles.tableScroll}><table><thead><tr><th>镜头</th><th>画面结构与生成描述</th><th>实体与主参考</th><th>约束</th><th>时长</th><th>状态</th></tr></thead><tbody>{shots.map(shot => <tr key={shot.shot_code}><td><strong>{shot.shot_code}</strong><small>{shot.narrative_beat_code ?? '未绑定节拍'} · {shot.shot_purpose} · {shot.framing}</small></td><td><ShotFrameContract shot={shot} /><small>{shot.new_information} · {shot.composition}</small></td><td><span>{shot.character_entity_version_ids.length ? shot.character_entity_version_ids.join(', ') : '人物未绑定'}</span><small>{shot.primary_reference_entity_version_id ? `主参考 ${shot.primary_reference_entity_version_id}` : '无主参考图'} · {shot.continuity_relation}</small></td><td><span>人脸 {shot.face_visibility}</span><small>文字 {shot.text_policy} · 主体运动 {shot.subject_motion} · 声音 {shot.audio_requirement}</small></td><td>{(shot.duration_ms / 1000).toFixed(1)}s</td><td><em data-locked={locked}>{locked ? '已锁定' : '待确认'}</em></td></tr>)}</tbody></table></div></div>
 }
 
 function CoverageView({ brief, shots }: { brief: CreativeBriefCandidate['brief']; shots: ShotContract[] }) {
@@ -484,7 +503,7 @@ export function PlanPage() {
                 const textToVideo = selectedVideo?.operation_kind === 'text_to_video_generation'
                 const proposal = productionPlanCandidate?.proposed_assignments.find(item => item.shot_code === shot.shot_code)
                 return <article key={shot.shot_code}>
-                  <div><b>{shot.shot_code}</b><span>{shot.action}</span><small>{proposal?.reason ?? `${shot.duration_ms / 1000} 秒 · ${shot.generation_requirements.identity_consistency_required ? '需要人物一致性' : '普通镜头'}${shot.generation_requirements.reference_image_required ? ' · 需要参考图' : ''}`}</small></div>
+                  <div><b>{shot.shot_code}</b><ShotFrameContract shot={shot} compact /><small>{proposal?.reason ?? `${shot.duration_ms / 1000} 秒 · ${shot.generation_requirements.identity_consistency_required ? '需要人物一致性' : '普通镜头'}${shot.generation_requirements.reference_image_required ? ' · 需要参考图' : ''}`}</small></div>
                   <label>图片方案<select value={assignment.keyframe} disabled={!selectedConfig || textToVideo} onChange={event => assignShot(shot.shot_code, 'keyframe', event.target.value)}><option value="">{textToVideo ? '纯文本视频不使用关键帧' : '请选择图片方案'}</option>{keyframeSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
                   <label>视频方案<select value={assignment.video} disabled={!selectedConfig} onChange={event => assignShot(shot.shot_code, 'video', event.target.value)}><option value="">请选择视频方案</option>{videoSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
                 </article>
