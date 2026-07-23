@@ -350,6 +350,41 @@ export function PlanPage() {
     analyzeImpact.reset()
   }, [planning.data?.active_plan?.id])
   useEffect(() => {
+    const configurations = preparation.data?.published_configurations ?? []
+    if (!configId && configurations.length === 1) {
+      setConfigId(configurations[0].id)
+    }
+  }, [configId, preparation.data?.published_configurations])
+  useEffect(() => {
+    const config = preparation.data?.published_configurations.find(item => item.id === configId)
+    if (!config) return
+    const keyframeOptions = config.workflow_slots.filter(item => item.operation_kind === 'image_generation')
+    const videoOptions = config.workflow_slots.filter(item => ['video_generation', 'multi_frame_video_generation', 'text_to_video_generation'].includes(item.operation_kind))
+    const ttsOptions = config.workflow_slots.filter(item => item.operation_kind === 'tts')
+    if (!videoSpecId && config.video_specs.length === 1) setVideoSpecId(config.video_specs[0].id)
+    if (!pricingCatalogId && config.pricing_catalogs.length === 1) setPricingCatalogId(config.pricing_catalogs[0].id)
+    if (!videoSlotId && videoOptions.length === 1) setVideoSlotId(videoOptions[0].id)
+    if (
+      !keyframeSlotId
+      && keyframeOptions.length === 1
+      && !(videoOptions.length === 1 && videoOptions[0].operation_kind === 'text_to_video_generation')
+    ) {
+      setKeyframeSlotId(keyframeOptions[0].id)
+    }
+    if (preparation.data?.audio_mode === 'voiceover' && !ttsSlotId && ttsOptions.length === 1) {
+      setTtsSlotId(ttsOptions[0].id)
+    }
+  }, [
+    configId,
+    keyframeSlotId,
+    preparation.data?.audio_mode,
+    preparation.data?.published_configurations,
+    pricingCatalogId,
+    ttsSlotId,
+    videoSlotId,
+    videoSpecId,
+  ])
+  useEffect(() => {
     if (!configId || !videoSpecId) return
     const candidate = preparation.data?.production_plan_candidates.find(item =>
       item.production_config_version_id === configId
