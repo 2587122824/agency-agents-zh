@@ -39,9 +39,9 @@ class ReviewAsset(QualityCommand):
     rationale: str = Field(min_length=1, max_length=1000)
 
     @model_validator(mode="after")
-    def exactly_one_review_source(self):
-        if (self.qc_report_candidate_id is None) == (self.qc_report_id is None):
-            raise ValueError("exactly one quality review source is required")
+    def at_most_one_review_source(self):
+        if self.qc_report_candidate_id is not None and self.qc_report_id is not None:
+            raise ValueError("at most one quality review source is allowed")
         return self
 
 
@@ -128,6 +128,7 @@ class AssetRead(BaseModel):
     review_decisions: list[AssetReviewDecisionRead]
     affected_downstream_node_keys: list[str]
     revision_requests: list[dict[str, Any]]
+    review_context: dict[str, Any]
 
 
 class QualityReviewView(BaseModel):

@@ -4837,7 +4837,7 @@ def test_asset_registration_verification_qc_and_human_approval_are_explicit(clie
             "rationale": "Composition and subject continuity are acceptable.",
         },
     )
-    assert approved.status_code == 200
+    assert approved.status_code == 200, approved.text
     assert approved.json()["state"] == "approved"
     assert approved.json()["review_decisions"][0]["decision"] == "approved"
     assert approved.json()["latest_qc_report"]["analyzer"] == "visual-qc.v1"
@@ -4847,6 +4847,94 @@ def test_asset_registration_verification_qc_and_human_approval_are_explicit(clie
     with SessionLocal() as session:
         assert len(list(session.scalars(select(WorkAttempt).where(WorkAttempt.work_item_id == item["id"])))) == 1
         assert session.scalar(select(AssetReviewDecision).where(AssetReviewDecision.asset_id == asset["id"])) is not None
+
+
+def test_verified_asset_can_be_approved_by_direct_human_review(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "direct-review-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    submitted = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "direct-review-submit-00001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert submitted.status_code == 202
+    with SessionLocal() as session:
+        node = session.scalar(select(DAGNode).where(
+            DAGNode.snapshot_id == snapshot["id"],
+            DAGNode.kind == "generate_keyframe",
+        ))
+        assert node is not None
+        asset = Asset(
+            project_id=project["id"],
+            snapshot_id=snapshot["id"],
+            dag_node_id=node.id,
+            output_index=0,
+            asset_type="image",
+            role="keyframe",
+            uri=f"runtime://assets/{project['id']}/direct-review.png",
+            storage_backend="local",
+            provider_output_manifest={},
+            content_hash="a" * 64,
+            mime_type="image/png",
+            byte_size=1024,
+            width=480,
+            height=848,
+            state="verified",
+        )
+        session.add(asset)
+        session.commit()
+        asset_id = asset.id
+
+    approved = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:approve",
+        json={
+            "command_id": "direct-human-review-approve-001",
+            "expected_row_version": 1,
+            "rationale": "人工确认画面符合分镜合同",
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    result = approved.json()
+    assert result["state"] == "approved"
+    assert result["latest_qc_report"]["analyzer"] == "human-direct-review"
+    assert result["latest_qc_report"]["ruleset_version"] == "human-review.v1"
+    assert result["review_decisions"][0]["rationale"] == "人工确认画面符合分镜合同"
+    assert result["review_context"]["shot"]["shot_code"]
+
+
+def test_quality_review_does_not_report_unexecuted_nodes_as_output_gaps(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "quality-gap-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    submitted = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "quality-gap-submit-00001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert submitted.status_code == 202
+
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    assert any(item["status"] == "waiting_phase" for item in execution["work_items"])
+    review = client.get(f"/api/v1/projects/{project['id']}/quality-review")
+    assert review.status_code == 200
+    assert review.json()["output_gaps"] == []
 
 
 def test_storyboard_asset_revision_creates_explicit_draft_and_new_plan(client: TestClient) -> None:

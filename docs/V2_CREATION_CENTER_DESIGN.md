@@ -588,6 +588,8 @@ model_config_version / prompt_contract_version
 
 当前首期实现采用 `qc-agent-input.v1 / qc-report-candidate.v1 / qc-agent-prompt.v1`。确定性文件、尺寸和时长检查先运行；只有单张图片通过这些检查后，才允许调用声明了 `vision_analysis` 能力的已发布 QC 模型。模型接收冻结素材哈希、镜头合同、证据白名单、待审图片和存在时的冻结主参考图片，只能创建 `QCReportCandidate`；参考文件会再次校验路径与哈希。候选不等于权威报告，用户批准或拒绝素材时才把候选发现写入正式 `QCReport` 和 `AssetReviewDecision`。
 
+素材审核在没有已发布图片 QC 模型时不强制调用智能体。确定性检查通过的 `verified` 素材可由用户直接批准或拒绝；服务创建 `human-review.v1` 权威报告和 `AssetReviewDecision`，不伪造 `QCReportCandidate`。审核工作台按当前活动快照提供分镜缩略队列、真实比例大图、冻结合同和文件事实；通过后自动进入下一项，批量通过只处理用户明确勾选并在确认框列出的素材。
+
 素材审核还提供独立的“需要调整”命令，但它不等于拒绝素材或重试任务。命令创建 `AssetRevisionRequest`，字段至少包括 `asset_id / snapshot_id / plan_version_id / shot_id nullable / shot_code nullable / issue_scope / rationale / affected_downstream_node_keys[] / status`。问题类型只能由用户显式选择：
 
 - 分镜问题：必须绑定真实镜头，创建来源方案的修订草稿并导航到结构化分镜编辑器；草稿本身不可确认，至少提交一处人工 Patch 或完成一次显式 AI 修订后才成为候选。

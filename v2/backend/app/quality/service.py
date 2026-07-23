@@ -868,10 +868,12 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
         raise QualityNotFoundError("Quality review candidate not found for asset")
     if source_report and (source_report.asset_id != asset.id or source_report.project_id != project.id):
         raise QualityNotFoundError("QC report not found for asset")
-    if not candidate and not source_report:
-        raise QualityNotFoundError("Quality review source not found for asset")
-    if asset.state != "review_required" or (candidate and candidate.status != "awaiting_review") or (source_report and source_report.status != "review_required"):
-        raise QualityConflictError("ASSET_NOT_AWAITING_REVIEW", "该素材当前没有可确认的质量审核结果。")
+    has_qc_source = candidate is not None or source_report is not None
+    if has_qc_source:
+        if asset.state != "review_required" or (candidate and candidate.status != "awaiting_review") or (source_report and source_report.status != "review_required"):
+            raise QualityConflictError("ASSET_NOT_AWAITING_REVIEW", "该素材当前没有可确认的质量审核结果。")
+    elif asset.state != "verified":
+        raise QualityConflictError("ASSET_NOT_AWAITING_REVIEW", "只有已验证素材可以直接进行人工审核。")
     if asset.row_version != payload.expected_row_version:
         raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "素材已变化，请刷新后再审核。")
     now = utc_now()
@@ -889,10 +891,18 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
                 evidence={"confidence": finding["confidence"], "summary": finding["summary"], "items": finding["evidence"], "contract_refs": finding["contract_refs"], "suggested_review_action": finding["suggested_review_action"]},
                 contract_field=finding["contract_refs"][0], disposition="manual_review",
             ))
-    else:
+    elif source_report:
         report = source_report
         if repository.has_review_decision(report.id):
             raise QualityConflictError("QC_REPORT_ALREADY_REVIEWED", "该人工审核项已经处理。")
+    else:
+        report = QCReport(
+            project_id=project.id, snapshot_id=asset.snapshot_id, asset_id=asset.id,
+            report_number=repository.next_report_number(asset.id), ruleset_version="human-review.v1",
+            status="review_required", analyzer="human-direct-review",
+        )
+        repository.add(report)
+        repository.flush()
     repository.add(AssetReviewDecision(project_id=project.id, asset_id=asset.id, qc_report_id=report.id, decision=decision, rationale=payload.rationale, actor_id=payload.actor_id))
     report.reviewed_at = now
     report.reviewed_by = payload.actor_id
@@ -972,6 +982,20 @@ def asset_read(session: Session, asset: Asset) -> dict:
         {column.name: getattr(item, column.name) for column in item.__table__.columns if column.name != "project_id"}
         for item in revision_requests
     ]
+    shot = node.input_contract.get("shot", {}) if node and isinstance(node.input_contract, dict) else {}
+    result["review_context"] = {
+        "node_kind": node.kind if node else None,
+        "shot": {
+            key: shot.get(key)
+            for key in (
+                "shot_code", "sequence_number", "shot_purpose", "framing", "camera_angle",
+                "camera_motion", "subject_motion", "face_visibility", "text_policy",
+                "required_on_screen_text", "composition", "action", "visual_prompt",
+            )
+            if key in shot
+        },
+        "output_contract": node.output_contract if node else {},
+    }
     return result
 
 
@@ -999,6 +1023,8 @@ def quality_review_view(session: Session, project: Project) -> dict:
         if node_assets and any(asset.state in {"created", "verified", "review_required"} for asset in node_assets):
             continue
         item = repository.work_item_for_node(project.active_snapshot_id, node.id)
+        if not item or item.status not in {"completed", "failed", "blocked"}:
+            continue
         attempt = repository.work_attempt(item.current_attempt_id) if item and item.current_attempt_id else None
         simulated = bool(attempt and attempt.response_manifest and attempt.response_manifest.get("media_created") is False)
         rejected = bool(node_assets)

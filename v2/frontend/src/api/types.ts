@@ -720,6 +720,11 @@ export interface ProductionAsset {
   review_decisions: Array<{ id: string; decision: string; rationale: string; actor_id: string; created_at: string }>
   affected_downstream_node_keys: string[]
   revision_requests: AssetRevisionRequest[]
+  review_context: {
+    node_kind: string | null
+    shot: Record<string, unknown>
+    output_contract: Record<string, unknown>
+  }
 }
 
 export interface AssetRevisionRequest {

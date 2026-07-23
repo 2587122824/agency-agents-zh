@@ -1,6 +1,6 @@
 # 片场 V2 当前交接
 
-> 更新日期：2026-07-23
+> 更新日期：2026-07-24
 >
 > 文档入口见 [README](./README.md)。本文只保留恢复开发所需的当前事实，不再累积完整 Sprint 日志。
 
@@ -63,6 +63,7 @@ v2/runtime/worker.err.log
 - RunningHub V2 创建任务、查询任务和媒体上传统一使用 `Authorization: Bearer <API_KEY>`；创建正文不再包含旧式 `apiKey`，`usePersonalQueue` 按 V2 文档提交字符串 `"false"`。
 - Worker 领取外部任务时在数据库原子条件中执行冻结供应商 `max_concurrency`：同 `provider_key` 活跃容量已满时后续任务保持 `queued`，前一项终态释放容量后才提交；等待不创建失败、Attempt、费用或自动重试。
 - Provider 成功媒体输出由 Worker 在完成事务内逐项校验并自动登记为 `verified` Asset；任一输出缺失、哈希/MIME/策略不一致时整项阻断且不留下部分素材。制作页按精确 `dag_node_id` 展示已验证图片/视频缩略图，点击进入审核，不自动运行内容 QC 或批准。
+- 素材审核页已改为连续工作台：顶部项目与进度、左侧当前快照分镜队列和显式多选、中间真实比例大图/缩放/全屏/前后切换、右侧冻结分镜与文件事实。`verified` 素材无需不可用的 QC 模型即可直接人工通过并形成 `human-review.v1` 报告；拒绝和调整仍需理由，操作后进入下一项，批量通过只处理确认框列出的选择。`waiting_phase / queued / running` 节点不再误报输出缺口。
 - 生产页支持用户确认新增费用后精确重跑单个明确失败 WorkItem：新建 WorkAttempt 并复用原请求清单与指纹，旧失败只读保留；提交结果未知或需要人工对账时禁止重跑。
 - RunningHub 提交已区分明确业务拒绝和结果未知：明确拒绝保存脱敏的 `code / msg / errorMessage / failedReason` 证据，416 与 433 提供中文原因；Worker 不自动重试，历史缺失响应的失败记录不回填。
 - 质量审核智能体首期图片合同、`QCReportCandidate`、证据引用校验、失败精确重跑与人工落账；视频和音频保持显式人工审核。
@@ -254,7 +255,7 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`243 passed`
+- 后端测试：`245 passed`
 - 供应商并发门禁验收：`max_concurrency=1` 时首个外部任务提交并轮询，后续同 Provider 工作项保持 `queued`；首项完成后下一项才提交，等待过程不新增失败、尝试、费用或自动重试
 - 两阶段生产验收：图片节点全部先执行；后续任务在用户确认前保持 `waiting_phase`；节点或素材清单不一致明确失败；确认后视频读取冻结的已批准素材；纯文本视频无图片门禁并直接排队
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
