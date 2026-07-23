@@ -248,11 +248,11 @@ export const api = {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: timeline.row_version, expected_contract_hash: timeline.contract_hash, confirm_delivery_scope: true }),
   }),
   deliveryWorkspace: (projectId: string) => request<DeliveryWorkspace>(`/projects/${projectId}/delivery-workspace`),
-  authorizeDelivery: (projectId: string, workspace: DeliveryWorkspace) => request<DeliveryAttempt>(`/projects/${projectId}/deliveries:authorize`, {
+  authorizeDelivery: (projectId: string, workspace: DeliveryWorkspace, executionKind: 'external_upload' | 'local_ffmpeg') => request<DeliveryAttempt>(`/projects/${projectId}/deliveries:authorize`, {
     method: 'POST', body: JSON.stringify({
       command_id: crypto.randomUUID(), actor_id: 'local-user', timeline_id: workspace.confirmed_timeline!.id,
       expected_timeline_contract_hash: workspace.confirmed_timeline!.contract_hash,
-      execution_kind: 'external_upload', confirm_delivery_authorization: true,
+      execution_kind: executionKind, confirm_delivery_authorization: true,
     }),
   }),
   uploadDelivery: (projectId: string, attempt: DeliveryAttempt, file: File) => {

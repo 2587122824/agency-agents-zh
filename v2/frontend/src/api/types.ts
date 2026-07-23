@@ -1165,10 +1165,11 @@ export interface DeliveryAttempt {
   snapshot_id: string
   timeline_id: string
   attempt_number: number
-  status: 'authorized' | 'output_registered' | 'verified' | 'blocked'
-  execution_kind: 'external_upload'
+  status: 'authorized' | 'queued' | 'rendering' | 'output_registered' | 'verified' | 'blocked'
+  execution_kind: 'external_upload' | 'local_ffmpeg'
   request_manifest: Record<string, unknown>
   request_fingerprint: string
+  work_item_id: string | null
   final_asset_id: string | null
   final_asset: ProductionAsset | null
   error_code: string | null
@@ -1176,6 +1177,8 @@ export interface DeliveryAttempt {
   row_version: number
   created_by: string
   created_at: string
+  render_started_at: string | null
+  render_finished_at: string | null
   output_registered_at: string | null
   verified_at: string | null
 }
@@ -1194,6 +1197,14 @@ export interface DeliveryWorkspace {
     output_spec: Record<string, unknown>
     confirmed_at: string
   } | null
+  delivery_methods: Array<{
+    kind: 'external_upload' | 'local_ffmpeg'
+    label: string
+    available: boolean
+    reason_code: string | null
+    reason: string | null
+    renderer_version: string | null
+  }>
   attempts: DeliveryAttempt[]
   next_action: { code: string; label: string }
 }

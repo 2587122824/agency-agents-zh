@@ -15,6 +15,8 @@ from ..db.models import (
     QCFinding,
     QCReport,
     Timeline,
+    WorkAttempt,
+    WorkItem,
     utc_now,
 )
 from ..repositories import (
@@ -37,6 +39,14 @@ from ..quality.service import (
     storage_policy_for_snapshot,
 )
 from .contracts import AuthorizeDelivery, RegisterDeliveryOutput, VerifyDelivery
+from .renderer import (
+    RENDERER_CONTRACT,
+    LocalRenderError,
+    LocalRenderInput,
+    LocalRenderRequest,
+    LocalRenderResult,
+    inspect_local_ffmpeg,
+)
 
 
 DELIVERY_RULESET_VERSION = "v2.delivery-file-contract.v1"
@@ -112,7 +122,12 @@ def _confirmed_timeline(session: Session, project: Project, timeline_id: str | N
     return rows[0]
 
 
-def _delivery_manifest(session: Session, project: Project, timeline: Timeline) -> dict:
+def _delivery_manifest(
+    session: Session,
+    project: Project,
+    timeline: Timeline,
+    execution: dict,
+) -> dict:
     repository = _delivery(session)
     snapshot = repository.snapshot(timeline.snapshot_id)
     if not snapshot or snapshot.project_id != project.id or project.active_snapshot_id != snapshot.id:
@@ -156,6 +171,8 @@ def _delivery_manifest(session: Session, project: Project, timeline: Timeline) -
             "sequence_number": item.sequence_number,
             "asset_id": asset.id,
             "asset_content_hash": asset.content_hash,
+            "asset_uri": asset.uri,
+            "storage_backend": asset.storage_backend,
             "gap_reason": None,
             "source_in_ms": item.source_in_ms,
             "source_out_ms": item.source_out_ms,
@@ -168,14 +185,69 @@ def _delivery_manifest(session: Session, project: Project, timeline: Timeline) -
     if output_spec.get("container") != "mp4":
         raise DeliveryConflictError("DELIVERY_CONTAINER_UNSUPPORTED", "当前仅连接 MP4 最终交付验证器。")
     return {
-        "schema_version": "v2.delivery-request.v1",
+        "schema_version": "v2.delivery-request.v2",
         "project_id": project.id,
         "snapshot_id": snapshot.id,
         "timeline_id": timeline.id,
         "timeline_contract_hash": timeline.contract_hash,
+        "track_config": timeline.track_config,
         "input_items": input_items,
         "output_spec": output_spec,
+        "execution": execution,
     }
+
+
+def _execution_contract(execution_kind: str) -> dict:
+    if execution_kind == "external_upload":
+        return {"kind": "external_upload"}
+    readiness = inspect_local_ffmpeg()
+    if not readiness.available:
+        raise DeliveryConflictError(
+            readiness.reason_code or "FFMPEG_UNAVAILABLE",
+            readiness.reason or "本机 FFmpeg 当前不可用。",
+        )
+    return {
+        "kind": "local_ffmpeg",
+        "renderer_contract": RENDERER_CONTRACT,
+        "executable_path": readiness.executable_path,
+        "ffmpeg_version": readiness.version,
+        "video_encoder": "libx264",
+        "preset": "medium",
+        "crf": 18,
+    }
+
+
+def _validate_local_render_manifest(manifest: dict) -> None:
+    track_config = manifest.get("track_config") or {}
+    if track_config.get("audio_enabled") or track_config.get("subtitle_enabled"):
+        raise DeliveryConflictError(
+            "LOCAL_RENDER_TRACKS_UNSUPPORTED",
+            "本机合成首期只支持关闭音频和字幕的主视频轨。",
+        )
+    items = manifest.get("input_items") or []
+    if not items:
+        raise DeliveryConflictError("LOCAL_RENDER_INPUT_EMPTY", "本机合成没有可用的视频片段。")
+    cursor = 0
+    for item in sorted(items, key=lambda row: (row["timeline_in_ms"], row["sequence_number"])):
+        if item.get("track_type") != "main_video":
+            raise DeliveryConflictError("LOCAL_RENDER_TRACKS_UNSUPPORTED", "本机合成首期只支持主视频轨。")
+        if not item.get("asset_id") or item.get("gap_reason"):
+            raise DeliveryConflictError("LOCAL_RENDER_GAP_UNSUPPORTED", "本机合成不接受时间线空位。")
+        if item.get("timeline_in_ms") != cursor:
+            raise DeliveryConflictError("LOCAL_RENDER_TIMELINE_NOT_CONTIGUOUS", "主视频轨必须从零开始且连续。")
+        source_duration = (item.get("source_out_ms") or 0) - (item.get("source_in_ms") or 0)
+        timeline_duration = item["timeline_out_ms"] - item["timeline_in_ms"]
+        if source_duration != timeline_duration:
+            raise DeliveryConflictError("LOCAL_RENDER_SPEED_CHANGE_UNSUPPORTED", "本机合成首期不支持变速片段。")
+        if (item.get("transform") or {}).get("fit") != "cover":
+            raise DeliveryConflictError("LOCAL_RENDER_TRANSFORM_UNSUPPORTED", "本机合成首期只支持 cover 画面适配。")
+        cursor = item["timeline_out_ms"]
+    expected = manifest.get("output_spec") or {}
+    if cursor != expected.get("duration_ms"):
+        raise DeliveryConflictError("LOCAL_RENDER_DURATION_MISMATCH", "时间线总时长与交付规格不一致。")
+    for key in ("width", "height", "fps"):
+        if not isinstance(expected.get(key), (int, float)) or expected[key] <= 0:
+            raise DeliveryConflictError("LOCAL_RENDER_OUTPUT_SPEC_INVALID", f"交付规格缺少有效的 {key}。")
 
 
 def authorize_delivery(session: Session, project: Project, payload: AuthorizeDelivery) -> dict:
@@ -198,14 +270,17 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
             "DELIVERY_ATTEMPT_EXISTS",
             "当前时间线已有交付尝试；重试语义尚未确认，不能创建第二次尝试。",
         )
-    manifest = _delivery_manifest(session, project, timeline)
+    execution = _execution_contract(payload.execution_kind)
+    manifest = _delivery_manifest(session, project, timeline, execution)
+    if payload.execution_kind == "local_ffmpeg":
+        _validate_local_render_manifest(manifest)
     fingerprint = _hash(manifest)
     attempt = DeliveryAttempt(
         project_id=project.id,
         snapshot_id=timeline.snapshot_id,
         timeline_id=timeline.id,
         attempt_number=1,
-        status="authorized",
+        status="queued" if payload.execution_kind == "local_ffmpeg" else "authorized",
         execution_kind=payload.execution_kind,
         request_manifest=manifest,
         request_fingerprint=fingerprint,
@@ -213,6 +288,32 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
     )
     repository.add(attempt)
     repository.flush()
+    if payload.execution_kind == "local_ffmpeg":
+        item = WorkItem(
+            project_id=project.id,
+            snapshot_id=None,
+            dag_node_id=None,
+            kind="render_delivery",
+            payload={"delivery_attempt_id": attempt.id},
+            status="queued",
+            priority=500,
+            request_fingerprint=fingerprint,
+        )
+        repository.add(item)
+        repository.flush()
+        work_attempt = WorkAttempt(
+            work_item_id=item.id,
+            attempt_number=1,
+            trigger="user_authorized",
+            provider="local_ffmpeg",
+            request_fingerprint=fingerprint,
+            request_manifest=manifest,
+            state="created",
+        )
+        repository.add(work_attempt)
+        repository.flush()
+        item.current_attempt_id = work_attempt.id
+        attempt.work_item_id = item.id
     _save_receipt(session, project.id, payload.command_id, "delivery.authorize", "delivery_attempt", attempt.id)
     _event(session, ProjectEvent(
         project_id=project.id,
@@ -223,12 +324,17 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
         actor_type="user",
         actor_id=payload.actor_id,
         causation_id=payload.command_id,
-        message="User authorized an exact delivery request without starting a renderer.",
+        message=(
+            "User authorized an exact local FFmpeg render request."
+            if payload.execution_kind == "local_ffmpeg"
+            else "User authorized an exact external-upload delivery request."
+        ),
         data={
             "delivery_attempt_id": attempt.id,
             "timeline_id": timeline.id,
             "request_fingerprint": fingerprint,
             "execution_kind": payload.execution_kind,
+            "work_item_id": attempt.work_item_id,
         },
     ))
     session.commit()
@@ -237,7 +343,11 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
 
 def delivery_upload_limit(session: Session, project: Project, attempt_id: str) -> int:
     attempt = _require_attempt(session, project, attempt_id)
-    if project.status != "delivery_ready" or attempt.status != "authorized":
+    if (
+        project.status != "delivery_ready"
+        or attempt.status != "authorized"
+        or attempt.execution_kind != "external_upload"
+    ):
         raise DeliveryConflictError("DELIVERY_NOT_AWAITING_OUTPUT", "交付尝试当前不接受文件上传。")
     try:
         policy = storage_policy_for_snapshot(session, attempt.snapshot_id)
@@ -261,7 +371,11 @@ def register_delivery_output(
         temporary_path.unlink(missing_ok=True)
         return delivery_attempt_read(session, _require_attempt(session, project, receipt.result_id))
     attempt = _require_attempt(session, project, attempt_id)
-    if project.status != "delivery_ready" or attempt.status != "authorized":
+    if (
+        project.status != "delivery_ready"
+        or attempt.status != "authorized"
+        or attempt.execution_kind != "external_upload"
+    ):
         raise DeliveryConflictError("DELIVERY_NOT_AWAITING_OUTPUT", "交付尝试当前不接受文件上传。")
     if attempt.row_version != payload.expected_row_version:
         raise DeliveryConflictError("DELIVERY_ROW_VERSION_MISMATCH", "交付尝试已变化，请刷新后重试。")
@@ -422,7 +536,12 @@ def verify_delivery(
     if asset.row_version != payload.expected_asset_row_version:
         raise DeliveryConflictError("ASSET_ROW_VERSION_MISMATCH", "最终交付素材已变化，请刷新后重试。")
     timeline = _confirmed_timeline(session, project, attempt.timeline_id)
-    current_manifest = _delivery_manifest(session, project, timeline)
+    current_manifest = _delivery_manifest(
+        session,
+        project,
+        timeline,
+        dict(attempt.request_manifest.get("execution") or {}),
+    )
     if _hash(current_manifest) != attempt.request_fingerprint or current_manifest != attempt.request_manifest:
         raise DeliveryConflictError("DELIVERY_INPUT_CHANGED", "确认时间线或输入素材事实已变化，不能验证旧输出。")
     try:
@@ -533,6 +652,264 @@ def verify_delivery(
     return delivery_attempt_read(session, attempt)
 
 
+def prepare_local_render(
+    session: Session,
+    project: Project,
+    work_item: WorkItem,
+    work_attempt: WorkAttempt,
+) -> tuple[DeliveryAttempt, LocalRenderRequest]:
+    delivery_id = str((work_item.payload or {}).get("delivery_attempt_id") or "")
+    attempt = _require_attempt(session, project, delivery_id)
+    if (
+        project.status != "delivery_ready"
+        or attempt.execution_kind != "local_ffmpeg"
+        or attempt.status != "queued"
+        or attempt.work_item_id != work_item.id
+        or work_item.kind != "render_delivery"
+    ):
+        raise LocalRenderError(
+            "LOCAL_RENDER_AUTHORITY_INVALID",
+            "本地合成交付授权、项目状态或工作项关系无效。",
+        )
+    if (
+        work_attempt.provider != "local_ffmpeg"
+        or work_attempt.request_fingerprint != attempt.request_fingerprint
+        or work_attempt.request_manifest != attempt.request_manifest
+    ):
+        raise LocalRenderError(
+            "LOCAL_RENDER_WORK_CONTRACT_MISMATCH",
+            "本地合成工作尝试与交付请求不一致。",
+        )
+    timeline = _confirmed_timeline(session, project, attempt.timeline_id)
+    current_manifest = _delivery_manifest(
+        session,
+        project,
+        timeline,
+        dict(attempt.request_manifest.get("execution") or {}),
+    )
+    if current_manifest != attempt.request_manifest or _hash(current_manifest) != attempt.request_fingerprint:
+        raise LocalRenderError(
+            "DELIVERY_INPUT_CHANGED",
+            "确认时间线或输入素材事实已变化，不能执行旧交付请求。",
+        )
+    try:
+        _validate_local_render_manifest(current_manifest)
+    except DeliveryConflictError as exc:
+        raise LocalRenderError(exc.code, str(exc)) from exc
+    execution = current_manifest["execution"]
+    readiness = inspect_local_ffmpeg()
+    if not readiness.available:
+        raise LocalRenderError(
+            readiness.reason_code or "FFMPEG_UNAVAILABLE",
+            readiness.reason or "本机 FFmpeg 当前不可用。",
+        )
+    if (
+        readiness.executable_path != execution.get("executable_path")
+        or readiness.version != execution.get("ffmpeg_version")
+    ):
+        raise LocalRenderError(
+            "FFMPEG_AUTHORITY_CHANGED",
+            "当前 FFmpeg 路径或版本与授权时冻结的执行环境不一致。",
+            {
+                "authorized_path": execution.get("executable_path"),
+                "current_path": readiness.executable_path,
+                "authorized_version": execution.get("ffmpeg_version"),
+                "current_version": readiness.version,
+            },
+        )
+    render_inputs: list[LocalRenderInput] = []
+    repository = _delivery(session)
+    for item in sorted(
+        current_manifest["input_items"],
+        key=lambda row: (row["timeline_in_ms"], row["sequence_number"]),
+    ):
+        asset = repository.asset(item["asset_id"])
+        if not asset or asset.uri != item.get("asset_uri") or asset.storage_backend != "local":
+            raise LocalRenderError(
+                "LOCAL_RENDER_ASSET_INVALID",
+                "本地合成输入素材不存在、URI 已变化或不是本地素材。",
+                {"asset_id": item.get("asset_id")},
+            )
+        try:
+            path = resolve_local_asset_path(asset.uri)
+        except QualityConflictError as exc:
+            raise LocalRenderError(exc.code, str(exc), {"asset_id": asset.id}) from exc
+        if not path.is_file():
+            raise LocalRenderError(
+                "LOCAL_RENDER_INPUT_FILE_MISSING",
+                "本地合成输入文件不存在。",
+                {"asset_id": asset.id, "uri": asset.uri},
+            )
+        content_hash, _ = sha256_file(path)
+        if content_hash != item["asset_content_hash"]:
+            raise LocalRenderError(
+                "LOCAL_RENDER_INPUT_HASH_MISMATCH",
+                "本地合成输入文件哈希与授权事实不一致。",
+                {
+                    "asset_id": asset.id,
+                    "expected_hash": item["asset_content_hash"],
+                    "actual_hash": content_hash,
+                },
+            )
+        render_inputs.append(LocalRenderInput(
+            path=path,
+            source_in_ms=item["source_in_ms"],
+            source_out_ms=item["source_out_ms"],
+        ))
+    uri = f"runtime://assets/deliveries/{project.id}/{attempt.id}.mp4"
+    try:
+        output_path = resolve_local_asset_path(uri)
+    except QualityConflictError as exc:
+        raise LocalRenderError(exc.code, str(exc)) from exc
+    if output_path.exists() or repository.asset_by_uri("local", uri):
+        raise LocalRenderError("DELIVERY_OUTPUT_PATH_EXISTS", "目标交付文件或 URI 已存在，不能覆盖。")
+    spec = current_manifest["output_spec"]
+    attempt.status = "rendering"
+    attempt.render_started_at = utc_now()
+    attempt.row_version += 1
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=attempt.snapshot_id,
+        event_type="delivery.render_started.v1",
+        aggregate_type="delivery_attempt",
+        aggregate_id=attempt.id,
+        actor_type="worker",
+        actor_id="local_ffmpeg",
+        message="Local FFmpeg render started from the frozen delivery request.",
+        data={"delivery_attempt_id": attempt.id, "work_item_id": work_item.id},
+    ))
+    return attempt, LocalRenderRequest(
+        ffmpeg_path=Path(readiness.executable_path),
+        inputs=tuple(render_inputs),
+        output_path=output_path,
+        width=int(spec["width"]),
+        height=int(spec["height"]),
+        fps=int(spec["fps"]),
+        video_encoder=str(execution["video_encoder"]),
+        preset=str(execution["preset"]),
+        crf=int(execution["crf"]),
+    )
+
+
+def register_local_render_output(
+    session: Session,
+    project: Project,
+    delivery_attempt: DeliveryAttempt,
+    work_attempt: WorkAttempt,
+    request: LocalRenderRequest,
+    result: LocalRenderResult,
+) -> Asset:
+    if delivery_attempt.status != "rendering" or not request.output_path.is_file():
+        raise LocalRenderError(
+            "LOCAL_RENDER_OUTPUT_NOT_READY",
+            "本地合成没有处于可登记输出的状态。",
+        )
+    content_hash, byte_size = sha256_file(request.output_path)
+    uri = f"runtime://assets/deliveries/{project.id}/{delivery_attempt.id}.mp4"
+    repository = _delivery(session)
+    if repository.asset_by_uri("local", uri):
+        raise LocalRenderError("DELIVERY_ASSET_ALREADY_REGISTERED", "目标交付 URI 已登记。")
+    now = utc_now()
+    asset = Asset(
+        project_id=project.id,
+        snapshot_id=delivery_attempt.snapshot_id,
+        work_attempt_id=work_attempt.id,
+        dag_node_id=None,
+        output_index=0,
+        asset_type="final_delivery",
+        role="final_delivery",
+        uri=uri,
+        storage_backend="local",
+        provider_output_manifest={
+            "schema_version": "v2.delivery-output.v1",
+            "source": "local_ffmpeg",
+            "mime_type": "video/mp4",
+            "content_hash": content_hash,
+            "byte_size": byte_size,
+            "request_fingerprint": delivery_attempt.request_fingerprint,
+            "renderer_contract": RENDERER_CONTRACT,
+            "command": list(result.command),
+            "stdout_tail": result.stdout_tail,
+            "stderr_tail": result.stderr_tail,
+        },
+        mime_type="video/mp4",
+        state="created",
+    )
+    repository.add(asset)
+    repository.flush()
+    delivery_attempt.final_asset_id = asset.id
+    delivery_attempt.status = "output_registered"
+    delivery_attempt.render_finished_at = now
+    delivery_attempt.output_registered_at = now
+    delivery_attempt.row_version += 1
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=delivery_attempt.snapshot_id,
+        event_type="asset.created.v1",
+        aggregate_type="asset",
+        aggregate_id=asset.id,
+        actor_type="worker",
+        actor_id="local_ffmpeg",
+        message="Local FFmpeg output registered as an unverified final delivery asset.",
+        data={
+            "delivery_attempt_id": delivery_attempt.id,
+            "work_item_id": delivery_attempt.work_item_id,
+            "asset_id": asset.id,
+            "request_fingerprint": delivery_attempt.request_fingerprint,
+        },
+    ))
+    return asset
+
+
+def block_local_render(
+    session: Session,
+    project: Project,
+    delivery_attempt: DeliveryAttempt,
+    error: LocalRenderError,
+    *,
+    actor_id: str,
+) -> None:
+    now = utc_now()
+    delivery_attempt.status = "blocked"
+    delivery_attempt.error_code = error.code
+    delivery_attempt.error_detail = {
+        "detail": error.detail,
+        **error.evidence,
+    }
+    delivery_attempt.render_finished_at = now
+    delivery_attempt.row_version += 1
+    block_project(
+        session,
+        project,
+        reason_code=error.code,
+        responsible_aggregate_type="delivery_attempt",
+        responsible_aggregate_id=delivery_attempt.id,
+        actor_type="worker",
+        actor_id=actor_id,
+        event_data={
+            "delivery_attempt_id": delivery_attempt.id,
+            "work_item_id": delivery_attempt.work_item_id,
+            "evidence": delivery_attempt.error_detail,
+        },
+    )
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=delivery_attempt.snapshot_id,
+        event_type="delivery.render_blocked.v1",
+        aggregate_type="delivery_attempt",
+        aggregate_id=delivery_attempt.id,
+        actor_type="worker",
+        actor_id=actor_id,
+        message="Local FFmpeg render stopped with preserved failure evidence.",
+        data={
+            "delivery_attempt_id": delivery_attempt.id,
+            "work_item_id": delivery_attempt.work_item_id,
+            "error_code": error.code,
+            "error_detail": delivery_attempt.error_detail,
+        },
+    ))
+
+
 def delivery_attempt_read(session: Session, attempt: DeliveryAttempt) -> dict:
     result = {column.name: getattr(attempt, column.name) for column in attempt.__table__.columns}
     asset = _delivery(session).asset(attempt.final_asset_id) if attempt.final_asset_id else None
@@ -545,12 +922,35 @@ def delivery_workspace(session: Session, project: Project) -> dict:
     timelines = repository.delivery_timelines(project.id, project.active_snapshot_id) if project.active_snapshot_id else []
     timeline = timelines[0] if timelines else None
     attempts = repository.project_attempts(project.id)
+    readiness = inspect_local_ffmpeg()
+    delivery_methods = [
+        {
+            "kind": "local_ffmpeg",
+            "label": "在本机生成 MP4",
+            "available": readiness.available,
+            "reason_code": readiness.reason_code,
+            "reason": readiness.reason,
+            "renderer_version": readiness.version,
+        },
+        {
+            "kind": "external_upload",
+            "label": "上传已经生成的 MP4",
+            "available": True,
+            "reason_code": None,
+            "reason": None,
+            "renderer_version": None,
+        },
+    ]
     if project.status == "completed" and project.delivery_asset_id:
         next_action = {"code": "DELIVERY_COMPLETE", "label": "最终交付文件已验证"}
     elif attempts and attempts[0].status == "blocked":
         next_action = {"code": "DELIVERY_BLOCKED", "label": "查看交付阻断证据"}
     elif attempts and attempts[0].status == "output_registered":
         next_action = {"code": "VERIFY_DELIVERY", "label": "验证最终交付文件"}
+    elif attempts and attempts[0].status == "rendering":
+        next_action = {"code": "RENDER_DELIVERY", "label": "正在本机生成最终视频"}
+    elif attempts and attempts[0].status == "queued":
+        next_action = {"code": "QUEUE_DELIVERY", "label": "等待本机生成最终视频"}
     elif attempts and attempts[0].status == "authorized":
         next_action = {"code": "UPLOAD_DELIVERY", "label": "上传外部渲染的 MP4"}
     elif project.status == "delivery_ready" and timeline:
@@ -571,6 +971,7 @@ def delivery_workspace(session: Session, project: Project) -> dict:
             "output_spec": timeline.output_spec,
             "confirmed_at": timeline.confirmed_at,
         },
+        "delivery_methods": delivery_methods,
         "attempts": [delivery_attempt_read(session, attempt) for attempt in attempts],
         "next_action": next_action,
     }

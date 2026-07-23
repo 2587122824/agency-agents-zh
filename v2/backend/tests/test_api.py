@@ -32,6 +32,9 @@ from v2.backend.app.planning.director_gateway import DeterministicDirectorGatewa
 from v2.backend.app.production.agent_gateway import DeterministicProductionPlannerGateway, ProductionPlannerOutput, ProductionPlannerResult, get_production_planner_gateway
 from v2.backend.app.editor.agent_gateway import DeterministicEditorAssistantGateway, EditorAssistantResult, get_editor_assistant_gateway
 from v2.backend.app.quality.agent_gateway import DeterministicQCGateway, get_qc_gateway
+from v2.backend.app.delivery import service as delivery_service
+from v2.backend.app.delivery.renderer import FFmpegReadiness, LocalRenderResult
+from v2.backend.app.quality.service import resolve_local_asset_path
 
 
 class FailOnceQCGateway(DeterministicQCGateway):
@@ -5636,6 +5639,154 @@ def test_delivery_verification_blocks_invalid_dimensions_without_retry_or_timeli
     with SessionLocal() as session:
         assert len(list(session.scalars(select(DeliveryAttempt)))) == 1
         assert session.get(Timeline, timeline["id"]).status == "confirmed"
+
+
+def _connect_fake_ffmpeg(monkeypatch) -> None:
+    monkeypatch.setattr(
+        delivery_service,
+        "inspect_local_ffmpeg",
+        lambda: FFmpegReadiness(
+            available=True,
+            reason_code=None,
+            reason=None,
+            executable_path="C:\\test\\ffmpeg.exe",
+            version="ffmpeg version test",
+        ),
+    )
+
+
+def _write_timeline_input_files(timeline_id: str) -> list[Path]:
+    paths: list[Path] = []
+    with SessionLocal() as session:
+        items = list(session.scalars(
+            select(TimelineItem)
+            .where(TimelineItem.timeline_id == timeline_id)
+            .order_by(TimelineItem.sequence_number)
+        ))
+        for index, item in enumerate(items):
+            asset = session.get(Asset, item.asset_id)
+            path = resolve_local_asset_path(asset.uri)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            content = f"local-render-input-{index}".encode()
+            path.write_bytes(content)
+            asset.content_hash = hashlib.sha256(content).hexdigest()
+            paths.append(path)
+        session.commit()
+    return paths
+
+
+class FakeDeliveryRenderer:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def render(self, request):
+        self.calls += 1
+        request.output_path.parent.mkdir(parents=True, exist_ok=True)
+        request.output_path.write_bytes(synthetic_mp4(request.width, request.height, 30_000))
+        return LocalRenderResult(
+            command=("fake-ffmpeg",),
+            stdout_tail="",
+            stderr_tail="",
+        )
+
+
+def test_local_ffmpeg_authorization_requires_connected_renderer_without_creating_attempt(client: TestClient, monkeypatch) -> None:
+    project, _, timeline = create_confirmed_timeline(client)
+    monkeypatch.setattr(
+        delivery_service,
+        "inspect_local_ffmpeg",
+        lambda: FFmpegReadiness(
+            available=False,
+            reason_code="FFMPEG_PATH_NOT_CONFIGURED",
+            reason="未配置 FFmpeg。",
+            executable_path=None,
+            version=None,
+        ),
+    )
+    with SessionLocal() as session:
+        delivery_count = len(list(session.scalars(select(DeliveryAttempt))))
+        work_count = len(list(session.scalars(select(WorkItem))))
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/deliveries:authorize",
+        json={
+            "command_id": "delivery-local-unavailable-001",
+            "timeline_id": timeline["id"],
+            "expected_timeline_contract_hash": timeline["contract_hash"],
+            "execution_kind": "local_ffmpeg",
+            "confirm_delivery_authorization": True,
+        },
+    )
+    assert response.status_code == 409
+    assert response.headers["x-error-code"] == "FFMPEG_PATH_NOT_CONFIGURED"
+    with SessionLocal() as session:
+        assert len(list(session.scalars(select(DeliveryAttempt)))) == delivery_count
+        assert len(list(session.scalars(select(WorkItem)))) == work_count
+
+
+def test_local_ffmpeg_worker_registers_unverified_output_without_completing_project(client: TestClient, monkeypatch) -> None:
+    project, snapshot, timeline = create_confirmed_timeline(client)
+    _write_timeline_input_files(timeline["id"])
+    _connect_fake_ffmpeg(monkeypatch)
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/deliveries:authorize",
+        json={
+            "command_id": "delivery-local-authorize-001",
+            "timeline_id": timeline["id"],
+            "expected_timeline_contract_hash": timeline["contract_hash"],
+            "execution_kind": "local_ffmpeg",
+            "confirm_delivery_authorization": True,
+        },
+    )
+    assert response.status_code == 201
+    queued = response.json()
+    assert queued["status"] == "queued"
+    assert queued["work_item_id"]
+    renderer = FakeDeliveryRenderer()
+    assert process_one(worker_id="delivery-test-worker", delivery_renderer=renderer)
+    assert renderer.calls == 1
+    workspace = client.get(f"/api/v1/projects/{project['id']}/delivery-workspace").json()
+    attempt = workspace["attempts"][0]
+    assert attempt["status"] == "output_registered"
+    assert attempt["execution_kind"] == "local_ffmpeg"
+    assert attempt["final_asset"]["state"] == "created"
+    assert workspace["project_status"] == "delivery_ready"
+    with SessionLocal() as session:
+        item = session.get(WorkItem, queued["work_item_id"])
+        work_attempt = session.get(WorkAttempt, item.current_attempt_id)
+        assert item.status == "completed"
+        assert work_attempt.state == "completed"
+        assert session.get(ProductionSnapshot, snapshot["id"]).status != "execution_blocked"
+
+
+def test_local_ffmpeg_worker_blocks_changed_input_once_without_running_renderer(client: TestClient, monkeypatch) -> None:
+    project, _, timeline = create_confirmed_timeline(client)
+    paths = _write_timeline_input_files(timeline["id"])
+    _connect_fake_ffmpeg(monkeypatch)
+    queued = client.post(
+        f"/api/v1/projects/{project['id']}/deliveries:authorize",
+        json={
+            "command_id": "delivery-local-authorize-change-01",
+            "timeline_id": timeline["id"],
+            "expected_timeline_contract_hash": timeline["contract_hash"],
+            "execution_kind": "local_ffmpeg",
+            "confirm_delivery_authorization": True,
+        },
+    ).json()
+    paths[0].write_bytes(b"changed-after-delivery-authorization")
+    renderer = FakeDeliveryRenderer()
+    assert process_one(worker_id="delivery-test-worker", delivery_renderer=renderer)
+    assert renderer.calls == 0
+    workspace = client.get(f"/api/v1/projects/{project['id']}/delivery-workspace").json()
+    attempt = workspace["attempts"][0]
+    assert attempt["status"] == "blocked"
+    assert attempt["error_code"] == "LOCAL_RENDER_INPUT_HASH_MISMATCH"
+    with SessionLocal() as session:
+        assert len(list(session.scalars(select(DeliveryAttempt)))) == 1
+        item = session.get(WorkItem, queued["work_item_id"])
+        assert item.status == "blocked"
+        assert len(list(session.scalars(select(WorkAttempt).where(
+            WorkAttempt.work_item_id == item.id
+        )))) == 1
 
 
 def test_system_configuration_publish_is_versioned_and_explicit(client: TestClient) -> None:

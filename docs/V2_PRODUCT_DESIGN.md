@@ -736,7 +736,7 @@ GET  /api/v1/projects/{project_id}/events
 - [x] RunningHub 首帧视频适配器（已注册，严格单父图片，真实执行默认关闭，尚未联网验收）
 - [ ] CosyVoice 适配器
 - [ ] OSS 临时音频上传
-- [ ] FFmpeg 合成适配器
+- [x] FFmpeg 本地合成适配器
 - [x] Worker 幂等与执行租约
 - [x] 素材生命周期与引用检查
 - [x] 成本账本
@@ -1136,7 +1136,11 @@ GET  /api/v1/projects/{project_id}/production-execution
 
 ## 34. 最终交付实现边界
 
-最终交付只消费当前活动快照中精确一个 `confirmed` 时间线。首期执行方式为 `external_upload`：用户先确认时间线合同哈希并授权，系统冻结请求清单和 SHA-256 指纹，但不启动 FFmpeg、渲染器或供应商。
+最终交付只消费当前活动快照中精确一个 `confirmed` 时间线。用户必须显式选择 `external_upload` 或 `local_ffmpeg`，系统不会默认选择或在失败时切换方式。两种方式都先冻结 `v2.delivery-request.v2` 请求清单和 SHA-256 指纹；本机方式还冻结 FFmpeg 路径、版本、`libx264`、preset 与 CRF。
+
+`local_ffmpeg` 首期只接受连续、无空位、无变速、`cover` 适配的主视频轨，且音频和字幕轨必须关闭。授权前必须证明配置的 `V2_FFMPEG_PATH` 存在、版本可读取且包含 `libx264`；不满足时不创建 DeliveryAttempt 或 WorkItem。授权后创建独立 `render_delivery` WorkItem/WorkAttempt，它不属于生产 DAG，也不参与 ProductionSnapshot 的生产状态汇总。
+
+Worker 执行前重新核对当前活动快照、确认时间线、素材 URI、数据库内容哈希和本地文件实际哈希。执行环境或输入事实变化时直接阻断，不启动 FFmpeg。渲染只执行一次，使用冻结的裁切、缩放、FPS 和编码参数，输出路径禁止覆盖。失败保存 DeliveryAttempt、WorkAttempt、项目阻断和 FFmpeg 尾部输出证据；不修改时间线、不自动重试，也不切换为 `external_upload`。
 
 上传的 MP4 先登记为 `created` 的 `final_delivery` Asset。完成态只能由后端读取真实文件后计算：
 
@@ -1146,7 +1150,7 @@ GET  /api/v1/projects/{project_id}/production-execution
 - 文件必须位于快照绑定的明确存储策略中。
 - 当前时间线、素材哈希、活动快照和请求指纹必须保持不变。
 
-验证通过后，Asset 进入 `verified`、时间线进入 `exported`、项目写入 `delivery_asset_id` 并进入 `completed`。验证失败会持久化 `blocked` QC 证据并归档该文件；时间线保持 `confirmed`。系统不自动再上传、不创建第二次 DeliveryAttempt，也不更换渲染方式。
+本机生成或外部上传的 MP4 都只登记为 `created` 的 `final_delivery` Asset，必须由用户再执行确定性验证。验证通过后，Asset 进入 `verified`、时间线进入 `exported`、项目写入 `delivery_asset_id` 并进入 `completed`。验证失败会持久化 `blocked` QC 证据并归档该文件；时间线保持 `confirmed`。系统不自动再上传、不创建第二次 DeliveryAttempt，也不更换渲染方式。
 
 接口：
 

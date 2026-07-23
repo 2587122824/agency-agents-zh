@@ -1,69 +1,102 @@
 # 片场 V2 最终交付合同实现
 
-版本：v0.1
+版本：v0.2
 
 状态：已实现
 
-实现目录：`v2/backend/app/delivery/`、`v2/frontend/src/pages/EditorPage.tsx`
+实现目录：`v2/backend/app/delivery/`、`v2/backend/app/workers/worker.py`、`v2/frontend/src/pages/EditorPage.tsx`
 
 ## 1. 范围
 
-首期交付实现把已确认时间线与最终 MP4 文件建立可审计关系。它不实现媒体渲染，不调用 FFmpeg 或供应商，不创建付费调用，也不提供重试。
+最终交付只消费当前活动快照中精确一个 `confirmed` 时间线。用户必须显式选择：
 
-唯一执行方式是 `external_upload`：外部完成渲染后，用户把 MP4 上传到当前 V2 本地存储策略，再由系统验证文件事实。
+- `local_ffmpeg`：在本机生成 MP4。
+- `external_upload`：上传已经生成的 MP4。
+
+系统没有默认方式，不在失败后切换方式，也不创建第二次尝试。
 
 ## 2. 权威链路
 
 ```mermaid
 flowchart LR
     A["Timeline confirmed"] --> B["AuthorizeDelivery"]
-    B --> C["DeliveryAttempt authorized"]
-    C --> D["RegisterDeliveryOutput"]
-    D --> E["Asset final_delivery / created"]
-    E --> F["VerifyDelivery"]
-    F -->|通过| G["Asset verified"]
-    G --> H["Timeline exported"]
-    H --> I["Project completed"]
-    F -->|失败| J["QC blocked evidence"]
-    J --> K["Project blocked"]
+    B --> C{"execution kind"}
+    C -->|external_upload| D["DeliveryAttempt authorized"]
+    D --> E["User uploads MP4"]
+    C -->|local_ffmpeg| F["DeliveryAttempt queued"]
+    F --> G["render_delivery WorkItem"]
+    G --> H["FFmpeg renders once"]
+    E --> I["Asset final_delivery / created"]
+    H --> I
+    I --> J["User verifies delivery"]
+    J -->|passed| K["Asset verified / Project completed"]
+    J -->|blocked| L["QC and project block evidence"]
+    H -->|failed| M["Work and delivery block evidence"]
 ```
 
 ## 3. 冻结请求
 
-授权清单 `v2.delivery-request.v1` 包含：
+`v2.delivery-request.v2` 包含：
 
-- 项目、活动快照、确认时间线和时间线合同哈希。
-- 每个时间线项的轨道、顺序、素材 ID、素材内容哈希、源区间、目标区间和变换。
+- 项目、活动快照、确认时间线和合同哈希。
+- 轨道配置。
+- 每个时间线项的顺序、素材 ID、URI、存储后端、内容哈希、源区间、目标区间和变换。
 - 输出容器、尺寸、FPS、编码规格和项目时长。
+- 交付执行合同。
 
-清单使用稳定 JSON 序列化计算 SHA-256。创建时间、临时路径、文件名等可变事实不进入请求指纹。
+外部上传冻结 `{"kind":"external_upload"}`。本机合成额外冻结：
 
-## 4. 文件登记与验证
+- `renderer_contract=v2.ffmpeg-render.v1`
+- FFmpeg 可执行文件规范路径和完整版本行
+- `video_encoder=libx264`
+- `preset=medium`
+- `crf=18`
 
-API 以 1 MiB 分块读取 multipart 文件，同时计算字节数和 SHA-256。超过当前快照存储策略上限立即拒绝，任何成功、冲突或异常路径都会清理临时上传文件。
+清单使用稳定 JSON 序列化计算 SHA-256。创建时间和临时文件不进入指纹。
 
-登记后 Asset 仍是 `created`，其内容哈希字段保持为空。验证命令重新打开落盘文件并检查：
+## 4. 本机合成
 
-1. 实际 SHA-256 和字节数与上传流记录一致。
-2. 文件头包含有效 MP4 `ftyp` 签名。
-3. MP4 box 中的宽度、高度和时长符合交付请求。
-4. MIME 和文件大小符合快照绑定的已发布存储策略。
-5. 当前活动快照、确认时间线和全部输入素材哈希仍与授权清单一致。
+授权前必须通过 `V2_FFMPEG_PATH` 检查：路径存在、`ffmpeg -version` 成功、编码器清单包含 `libx264`。失败时不创建 DeliveryAttempt、WorkItem 或 WorkAttempt。
 
-调用方提交的扩展名、MIME、尺寸或时长不能替代后端探测结果。
+首期只接受：
 
-## 5. 失败语义
+- 单一连续主视频轨，从 0 开始且没有空位。
+- 源时长与时间线时长一致，不变速。
+- `fit=cover`。
+- 音频和字幕轨关闭。
 
-确定性验证失败会：
+授权后同事务创建一条 `render_delivery` WorkItem 和唯一 WorkAttempt。该工作项不设置生产 `snapshot_id`，快照权威只从 DeliveryAttempt 读取，因此不参与生产 DAG、图片阶段、生产列表或 ProductionSnapshot 状态汇总。
 
-- 创建 `v2.delivery-file-contract.v1` QCReport 和单条 blocked QCFinding。
-- 归档失败的最终 Asset。
-- 将 DeliveryAttempt 与 Project 标记为 `blocked`。
-- 保留原确认时间线，不修改素材取舍。
+Worker 执行前重新计算完整交付请求，并复验每个本地输入文件的实际 SHA-256。随后使用 `trim + setpts + scale + crop + fps + format + concat` 生成 H.264 MP4，输出使用 `-n` 禁止覆盖。输入变化、执行环境变化或 FFmpeg 失败都会停止本次工作并保存证据；没有第二次执行。
 
-失败不会创建第二个 DeliveryAttempt、WorkAttempt、供应商请求、成本事件或替代文件。重试和解除阻断需未来另行设计显式命令、影响范围与费用确认。
+## 5. 文件登记与验证
 
-## 6. API
+外部上传按 1 MiB 分块计算字节数和 SHA-256。本机生成完成后同样计算输出事实。两条路径都只登记 `state=created` 的 `final_delivery` Asset，不自动验证或完成项目。
+
+用户验证时后端重新打开文件并检查：
+
+1. 实际 SHA-256 和字节数与登记事实一致。
+2. 文件头包含有效 MP4 `ftyp`。
+3. 宽度、高度和时长符合冻结输出规格。
+4. MIME 和大小符合快照存储策略。
+5. 当前活动快照、确认时间线、全部输入素材与冻结请求一致。
+
+通过后 Asset 进入 `verified`、Timeline 进入 `exported`、Project 进入 `completed`。
+
+## 6. 失败语义
+
+FFmpeg 执行失败会：
+
+- 将唯一 WorkItem/WorkAttempt 标记为 blocked。
+- 将 DeliveryAttempt 和 Project 标记为 blocked。
+- 保存错误码、FFmpeg 返回码及 stdout/stderr 尾部证据。
+- 保留确认时间线和全部输入素材。
+
+交付验证失败会创建 `v2.delivery-file-contract.v1` QCReport/QCFinding，并归档失败输出。
+
+两类失败都不会自动重试、补素材、修改时间线、切换 Provider、切换 `external_upload`、覆盖目标文件或创建第二个 DeliveryAttempt。
+
+## 7. API
 
 ```text
 GET  /api/v1/projects/{project_id}/delivery-workspace
@@ -73,14 +106,15 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 GET  /api/v1/projects/{project_id}/assets/{asset_id}/content
 ```
 
-所有命令要求 `command_id`；授权和验证使用精确哈希或 `row_version` 进行并发保护。
+`delivery-workspace` 返回两种交付方式的可用性、不可用原因和本机渲染器版本。
 
-## 7. 验收
+## 8. 验收
 
-- 未勾选明确授权时不能创建 DeliveryAttempt。
-- 命令重放返回第一次结果；新命令不能创建第二次尝试。
-- 错误请求指纹和过期行版本拒绝上传，且不残留临时文件。
-- 合规 MP4 验证后项目才进入 `completed`，并可通过 Asset 内容接口读取。
-- 错误尺寸、时长、哈希、签名或存储策略产生持久阻断证据。
-- 交付流程不增加 WorkAttempt、Provider 调用或 CostEvent。
-- 阻断后确认时间线保持不变，不出现自动重试按钮。
+- 未选择方式或未确认授权时不能创建 DeliveryAttempt。
+- 未配置 FFmpeg 时在授权前失败，不创建交付或工作记录。
+- 本机合成必须由用户显式选择，并且只执行一次。
+- 输入文件哈希变化时不启动渲染器，保存确定性阻断证据。
+- 成功只登记待验证 Asset，不自动完成项目。
+- `render_delivery` 不改变 ProductionSnapshot 的生产汇总状态。
+- 失败不创建第二次 WorkAttempt，不切换外部上传。
+- 外部上传现有链路继续通过。

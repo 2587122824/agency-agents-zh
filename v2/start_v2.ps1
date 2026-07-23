@@ -10,7 +10,7 @@ Set-Location $RepoRoot
 
 # Backend credentials stay outside the database and repository. Local user-scoped
 # values are copied into this service process only for explicitly allowlisted names.
-foreach ($Name in @("V2_AGENT_MODEL_EXECUTION_ENABLED", "V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED")) {
+foreach ($Name in @("V2_AGENT_MODEL_EXECUTION_ENABLED", "V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED", "V2_FFMPEG_PATH")) {
   if (-not [Environment]::GetEnvironmentVariable($Name, "Process")) {
     $UserValue = [Environment]::GetEnvironmentVariable($Name, "User")
     if ($UserValue) { [Environment]::SetEnvironmentVariable($Name, $UserValue, "Process") }

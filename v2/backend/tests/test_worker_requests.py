@@ -1,6 +1,11 @@
 from types import SimpleNamespace
 
 from v2.backend.app.workers import worker
+from v2.backend.app.delivery.renderer import (
+    LocalFFmpegRenderer,
+    LocalRenderInput,
+    LocalRenderRequest,
+)
 
 
 class FakeRepository:
@@ -66,3 +71,37 @@ def test_provider_request_preserves_dependency_input_slots(monkeypatch) -> None:
         "source_image.start", "source_image.middle", "source_image.end",
     ]
     assert request.parent_work_item_ids == ("work-start", "work-middle", "work-end")
+
+
+def test_local_ffmpeg_renderer_normalizes_sample_aspect_ratio_and_segment_duration(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    def fake_run(command, **_kwargs):
+        captured["command"] = command
+        (tmp_path / "output.mp4").write_bytes(b"rendered")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("v2.backend.app.delivery.renderer.subprocess.run", fake_run)
+    request = LocalRenderRequest(
+        ffmpeg_path=tmp_path / "ffmpeg.exe",
+        inputs=(
+            LocalRenderInput(tmp_path / "wide.mp4", 0, 1000),
+            LocalRenderInput(tmp_path / "vertical.mp4", 250, 1250),
+        ),
+        output_path=tmp_path / "output.mp4",
+        width=480,
+        height=848,
+        fps=24,
+        video_encoder="libx264",
+        preset="medium",
+        crf=18,
+    )
+
+    LocalFFmpegRenderer().render(request)
+
+    filter_graph = captured["command"][captured["command"].index("-filter_complex") + 1]
+    assert filter_graph.count("setsar=1") == 2
+    assert filter_graph.count("tpad=stop_mode=clone") == 2
+    assert filter_graph.count("trim=duration=1.000") == 2
+    assert "concat=n=2:v=1:a=0[outv]" in filter_graph
+    assert "-n" in captured["command"]

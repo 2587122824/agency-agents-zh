@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { EditorAsset, Timeline, TimelineItemDraft } from '../api/types'
+import type { DeliveryAttempt, EditorAsset, Timeline, TimelineItemDraft } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import { projectStatusLabel } from '../presentation/projectFacts'
 import styles from './EditorPage.module.css'
@@ -117,6 +117,7 @@ export function EditorPage() {
   const [gapSeconds, setGapSeconds] = useState(2)
   const [confirming, setConfirming] = useState<Timeline | null>(null)
   const [authorizingDelivery, setAuthorizingDelivery] = useState(false)
+  const [deliveryMethod, setDeliveryMethod] = useState<DeliveryAttempt['execution_kind'] | null>(null)
   const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const workspace = useQuery({ queryKey: ['editor-workspace', projectId], queryFn: () => api.editorWorkspace(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
@@ -149,7 +150,7 @@ export function EditorPage() {
   })
   const validate = useMutation({ mutationFn: (timeline: Timeline) => api.validateTimeline(projectId, timeline), onSuccess: async timeline => { setSelectedTimelineId(timeline.id); await refresh() } })
   const confirm = useMutation({ mutationFn: (timeline: Timeline) => api.confirmTimeline(projectId, timeline), onSuccess: async timeline => { setConfirming(null); setSelectedTimelineId(timeline.id); await refresh() } })
-  const authorize = useMutation({ mutationFn: () => api.authorizeDelivery(projectId, delivery.data!), onSuccess: async () => { setAuthorizingDelivery(false); await refresh() } })
+  const authorize = useMutation({ mutationFn: () => api.authorizeDelivery(projectId, delivery.data!, deliveryMethod!), onSuccess: async () => { setAuthorizingDelivery(false); setDeliveryMethod(null); await refresh() } })
   const upload = useMutation({ mutationFn: () => api.uploadDelivery(projectId, delivery.data!.attempts[0], deliveryFile!), onSuccess: async () => { setDeliveryFile(null); await refresh() } })
   const verify = useMutation({ mutationFn: () => api.verifyDelivery(projectId, delivery.data!.attempts[0]), onSuccess: refresh })
   const editorProjects = projects.data?.filter(project => ['quality_review', 'editing', 'delivery_ready', 'blocked', 'completed'].includes(project.status)) ?? []
@@ -166,6 +167,7 @@ export function EditorPage() {
     setSelectedDraftIndex(null)
     setSelectedAssetId('')
     setAuthorizingDelivery(false)
+    setDeliveryMethod(null)
     setDeliveryFile(null)
   }, [projectId])
 
@@ -346,7 +348,9 @@ export function EditorPage() {
               <div><dt>合同哈希</dt><dd><code>{delivery.data.confirmed_timeline.contract_hash}</code></dd></div>
               {deliveryAttempt && <div><dt>请求指纹</dt><dd><code>{deliveryAttempt.request_fingerprint}</code></dd></div>}
             </dl>}
-            {!deliveryAttempt && delivery.data.confirmed_timeline && <div className={styles.deliveryAction}><ShieldCheck /><span><strong>等待交付授权</strong><small>当前确认时间线尚未创建交付尝试</small></span><button className="primaryButton" onClick={() => setAuthorizingDelivery(true)}>授权交付</button></div>}
+            {!deliveryAttempt && delivery.data.confirmed_timeline && <div className={styles.deliveryAction}><ShieldCheck /><span><strong>等待交付授权</strong><small>当前确认时间线尚未创建交付尝试</small></span><button className="primaryButton" onClick={() => { setDeliveryMethod(null); setAuthorizingDelivery(true) }}>授权交付</button></div>}
+            {deliveryAttempt?.status === 'queued' && <div className={styles.deliveryAction}><Clock3 /><span><strong>等待本机生成</strong><small>已进入本地交付队列，系统只执行本次已授权请求</small></span></div>}
+            {deliveryAttempt?.status === 'rendering' && <div className={styles.deliveryAction}><RefreshCw className={styles.spinning} /><span><strong>正在生成最终视频</strong><small>FFmpeg 正在按冻结的时间线和编码参数合成 MP4</small></span></div>}
             {deliveryAttempt?.status === 'authorized' && <div className={styles.deliveryAction}><Upload /><span><strong>上传最终 MP4</strong><small>{deliveryFile?.name ?? '尚未选择文件'}</small></span><label className="secondaryButton"><Upload size={14} />选择文件<input type="file" accept="video/mp4,.mp4" onChange={event => setDeliveryFile(event.target.files?.[0] ?? null)} /></label><button className="primaryButton" disabled={!deliveryFile || upload.isPending} onClick={() => upload.mutate()}>上传并登记</button></div>}
             {deliveryAttempt?.status === 'output_registered' && <div className={styles.deliveryAction}><ShieldCheck /><span><strong>{deliveryAttempt.final_asset?.role}</strong><small>{deliveryAttempt.final_asset?.byte_size?.toLocaleString()} bytes · unverified</small></span><button className="primaryButton" disabled={verify.isPending} onClick={() => verify.mutate()}>验证交付文件</button></div>}
             {deliveryAttempt?.status === 'blocked' && <div className={styles.deliveryBlocked}><AlertTriangle /><div><strong>{deliveryAttempt.error_code}</strong><pre>{JSON.stringify(deliveryAttempt.error_detail, null, 2)}</pre></div></div>}
@@ -357,6 +361,6 @@ export function EditorPage() {
       </section>
     </main>
     {confirming && <div className={styles.modal}><section><header><Check /><div><span>TIMELINE AUTHORITY</span><h2>确认剪辑合同 v{confirming.version_number}</h2></div></header><dl><div><dt>快照</dt><dd>{confirming.snapshot_id}</dd></div><div><dt>合同哈希</dt><dd><code>{confirming.contract_hash}</code></dd></div><div><dt>片段</dt><dd>{confirming.items.length}</dd></div></dl><p>确认后该版本不可修改，引用素材进入 used，项目进入 delivery_ready。本操作不会导出、调用供应商或产生费用。</p><footer><button className="secondaryButton" onClick={() => setConfirming(null)}><X size={14} />取消</button><button className="primaryButton" disabled={confirm.isPending} onClick={() => confirm.mutate(confirming)}><Check size={14} />确认当前范围</button></footer></section></div>}
-    {authorizingDelivery && delivery.data?.confirmed_timeline && <div className={styles.modal}><section><header><ShieldCheck /><div><span>DELIVERY AUTHORITY</span><h2>授权最终交付</h2></div></header><dl><div><dt>时间线</dt><dd>v{delivery.data.confirmed_timeline.version_number}</dd></div><div><dt>合同哈希</dt><dd><code>{delivery.data.confirmed_timeline.contract_hash}</code></dd></div><div><dt>执行方式</dt><dd>external_upload</dd></div></dl><p>本次授权只冻结交付请求，不启动渲染器、不调用供应商，也不产生费用。每条时间线当前只允许一次交付尝试。</p><footer><button className="secondaryButton" onClick={() => setAuthorizingDelivery(false)}><X size={14} />取消</button><button className="primaryButton" disabled={authorize.isPending} onClick={() => authorize.mutate()}><ShieldCheck size={14} />确认授权</button></footer></section></div>}
+    {authorizingDelivery && delivery.data?.confirmed_timeline && <div className={styles.modal}><section><header><ShieldCheck /><div><span>DELIVERY AUTHORITY</span><h2>授权最终交付</h2></div></header><dl><div><dt>时间线</dt><dd>v{delivery.data.confirmed_timeline.version_number}</dd></div><div><dt>合同哈希</dt><dd><code>{delivery.data.confirmed_timeline.contract_hash}</code></dd></div></dl><div className={styles.deliveryMethods}>{delivery.data.delivery_methods.map(method => <label key={method.kind} data-selected={deliveryMethod === method.kind} data-disabled={!method.available}><input type="radio" name="delivery-method" checked={deliveryMethod === method.kind} disabled={!method.available} onChange={() => setDeliveryMethod(method.kind)} />{method.kind === 'local_ffmpeg' ? <Film /> : <Upload />}<span><strong>{method.label}</strong><small>{method.available ? (method.renderer_version ?? '等待你上传已生成文件') : method.reason}</small></span></label>)}</div><p>{deliveryMethod === 'local_ffmpeg' ? '确认后会创建一次本地合成任务。失败只保留证据，不会自动重试，也不会切换为上传方式。' : deliveryMethod === 'external_upload' ? '确认后只冻结交付请求，等待你上传已经生成的 MP4，不会启动本地渲染器。' : '请选择本次交付方式。每条确认时间线当前只允许一次交付尝试。'}</p><footer><button className="secondaryButton" onClick={() => { setAuthorizingDelivery(false); setDeliveryMethod(null) }}><X size={14} />取消</button><button className="primaryButton" disabled={!deliveryMethod || authorize.isPending} onClick={() => authorize.mutate()}><ShieldCheck size={14} />确认授权</button></footer></section></div>}
   </>
 }

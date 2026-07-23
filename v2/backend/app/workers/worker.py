@@ -8,12 +8,19 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from ..db.models import (
+    DeliveryAttempt,
     ProductionSnapshot,
     Project,
     ProjectEvent,
     WorkAttempt,
     WorkItem,
     utc_now,
+)
+from ..delivery.renderer import LocalFFmpegRenderer, LocalRenderError
+from ..delivery.service import (
+    block_local_render,
+    prepare_local_render,
+    register_local_render_output,
 )
 from ..db.session import SessionLocal
 from ..orchestration.project_transitions import (
@@ -219,9 +226,14 @@ def _record_terminal_event(
     ))
 
 
-def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterRegistry | None = None) -> bool:
+def process_one(
+    worker_id: str | None = None,
+    adapter_registry: ProviderAdapterRegistry | None = None,
+    delivery_renderer: LocalFFmpegRenderer | None = None,
+) -> bool:
     owner = worker_id or f"v2-worker:{socket.gethostname()}"
     adapters = adapter_registry or default_provider_registry()
+    renderer = delivery_renderer or LocalFFmpegRenderer()
     with SessionLocal() as session:
         repository = _work(session)
         now = utc_now()
@@ -304,7 +316,7 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
                 candidate_snapshot
                 and candidate_snapshot.image_phase_required
                 and not candidate_snapshot.image_phase_approved_at
-                and item.kind != "generate_keyframe"
+                and item.kind not in {"generate_keyframe", "render_delivery"}
             ):
                 continue
             parents = _required_parent_items(session, item)
@@ -386,9 +398,91 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
         item = repository.work_item(selected.id)
         attempt = repository.attempt(selected.current_attempt_id)
         project = repository.project(item.project_id) if item else None
-        snapshot = repository.snapshot(item.snapshot_id) if item else None
+        snapshot = repository.snapshot(item.snapshot_id) if item and item.snapshot_id else None
         if not item or not attempt:
             return False
+
+        if item.kind == "render_delivery":
+            delivery_id = str((item.payload or {}).get("delivery_attempt_id") or "")
+            delivery_attempt = session.get(DeliveryAttempt, delivery_id)
+            if not delivery_attempt:
+                _finish_blocked(
+                    session,
+                    item,
+                    attempt,
+                    "LOCAL_RENDER_AUTHORITY_MISSING",
+                    "The persisted delivery attempt no longer exists.",
+                )
+                session.commit()
+                return True
+            snapshot = repository.snapshot(delivery_attempt.snapshot_id)
+            if not project or not snapshot:
+                _finish_blocked(
+                    session,
+                    item,
+                    attempt,
+                    "EXECUTION_AUTHORITY_MISSING",
+                    "Project or delivery snapshot no longer exists.",
+                )
+                session.commit()
+                return True
+            try:
+                delivery_attempt, render_request = prepare_local_render(
+                    session,
+                    project,
+                    item,
+                    attempt,
+                )
+            except LocalRenderError as exc:
+                _finish_blocked(session, item, attempt, exc.code, exc.detail, exc.evidence)
+                block_local_render(session, project, delivery_attempt, exc, actor_id=owner)
+                session.commit()
+                return True
+            session.commit()
+            try:
+                render_result = renderer.render(render_request)
+                asset = register_local_render_output(
+                    session,
+                    project,
+                    delivery_attempt,
+                    attempt,
+                    render_request,
+                    render_result,
+                )
+            except LocalRenderError as exc:
+                render_request.output_path.unlink(missing_ok=True)
+                _finish_blocked(session, item, attempt, exc.code, exc.detail, exc.evidence)
+                block_local_render(session, project, delivery_attempt, exc, actor_id=owner)
+            else:
+                _finish_completed(
+                    session,
+                    item,
+                    attempt,
+                    {
+                        "schema_version": "v2.delivery-render-response.v1",
+                        "delivery_attempt_id": delivery_attempt.id,
+                        "asset_id": asset.id,
+                        "request_fingerprint": delivery_attempt.request_fingerprint,
+                    },
+                )
+                _event(session, ProjectEvent(
+                    project_id=project.id,
+                    snapshot_id=snapshot.id,
+                    event_type="delivery.work_finished.v1",
+                    aggregate_type="work_attempt",
+                    aggregate_id=attempt.id,
+                    actor_type="worker",
+                    actor_id=owner,
+                    message="Local delivery render work reached a terminal state.",
+                    data={
+                        "delivery_attempt_id": delivery_attempt.id,
+                        "work_item_id": item.id,
+                        "status": item.status,
+                    },
+                ))
+            session.commit()
+            return True
+
         if not project or not snapshot:
             _finish_blocked(session, item, attempt, "EXECUTION_AUTHORITY_MISSING", "Project or snapshot no longer exists.")
             session.commit()

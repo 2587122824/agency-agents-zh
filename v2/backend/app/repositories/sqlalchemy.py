@@ -1229,7 +1229,8 @@ class SqlAlchemyWorkRepository:
 
     def snapshot_work_states(self, snapshot_id: str) -> list[str]:
         return list(self.session.scalars(select(WorkItem.status).where(
-            WorkItem.snapshot_id == snapshot_id
+            WorkItem.snapshot_id == snapshot_id,
+            WorkItem.kind != "render_delivery",
         )))
 
     def lease_candidates(self, available_at: datetime, *, limit: int = 50) -> list[WorkItem]:

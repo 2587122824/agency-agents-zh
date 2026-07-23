@@ -17,7 +17,7 @@ class DeliveryCommand(BaseModel):
 class AuthorizeDelivery(DeliveryCommand):
     timeline_id: str
     expected_timeline_contract_hash: str = Field(min_length=64, max_length=64)
-    execution_kind: Literal["external_upload"]
+    execution_kind: Literal["external_upload", "local_ffmpeg"]
     confirm_delivery_authorization: bool
 
 
@@ -45,6 +45,7 @@ class DeliveryAttemptRead(BaseModel):
     execution_kind: str
     request_manifest: dict
     request_fingerprint: str
+    work_item_id: str | None
     final_asset_id: str | None
     final_asset: AssetRead | None
     error_code: str | None
@@ -52,6 +53,8 @@ class DeliveryAttemptRead(BaseModel):
     row_version: int
     created_by: str
     created_at: datetime
+    render_started_at: datetime | None
+    render_finished_at: datetime | None
     output_registered_at: datetime | None
     verified_at: datetime | None
 
@@ -63,5 +66,6 @@ class DeliveryWorkspaceView(BaseModel):
     active_snapshot_id: str | None
     delivery_asset_id: str | None
     confirmed_timeline: dict | None
+    delivery_methods: list[dict]
     attempts: list[DeliveryAttemptRead]
     next_action: dict
