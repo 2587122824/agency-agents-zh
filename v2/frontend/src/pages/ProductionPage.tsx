@@ -42,12 +42,22 @@ function groupBlockers(blockers: Blocker[]) {
   return [...groups.values()]
 }
 
+function blockerReason(group: { errorCode: string | null; blockers: Blocker[] }, fallback: string) {
+  const reasons = new Set(group.blockers.map(blocker => {
+    const value = blocker.error?.trim()
+    if (!value) return ''
+    const prefix = group.errorCode ? `${group.errorCode}:` : ''
+    return prefix && value.startsWith(prefix) ? value.slice(prefix.length).trim() : value
+  }).filter(Boolean))
+  return reasons.size === 1 ? [...reasons][0] : fallback
+}
+
 function PhaseWorkList({ items, phaseLabel }: { items: ProductionExecution['work_items']; phaseLabel: string }) {
   return <div className={styles.workList}>{items.map((item, index) => {
     const attempt = item.attempts.at(-1)
     return <article key={item.id} data-status={item.status}>
       <span className={styles.nodeState}>{item.status === 'completed' ? <CheckCircle2 /> : item.status === 'blocked' ? <AlertTriangle /> : <Clock3 />}</span>
-      <div className={styles.nodeMain}><strong>{phaseLabel} {index + 1} · {label(item.kind, kindLabels, '制作素材')}</strong><span>{item.status === 'blocked' ? blockerPresentation(attempt?.error_code ?? '').title : label(attempt?.state === 'created' && item.status === 'waiting_phase' ? item.status : attempt?.state ?? item.status, statusLabels, '等待更新')}</span><details><summary>技术详情</summary><code>{item.node_key} · {item.kind} · {item.request_fingerprint.slice(0, 16)} · {attempt?.provider ?? 'NO_PROVIDER'}</code></details></div>
+      <div className={styles.nodeMain}><strong>{phaseLabel} {index + 1} · {label(item.kind, kindLabels, '制作素材')}</strong><span>{item.status === 'blocked' ? blockerPresentation(attempt?.error_code ?? '').title : label(attempt?.state === 'created' && item.status === 'waiting_phase' ? item.status : attempt?.state ?? item.status, statusLabels, '等待更新')}</span><details><summary>技术详情</summary><code>{item.node_key} · {item.kind} · {item.request_fingerprint.slice(0, 16)} · {attempt?.provider ?? 'NO_PROVIDER'}</code>{attempt?.error_detail && <p>{attempt.error_detail}</p>}{attempt?.response_manifest && <pre>{JSON.stringify(attempt.response_manifest, null, 2)}</pre>}</details></div>
       <div className={styles.attempt}><small>第 {attempt?.attempt_number ?? 0} 次执行</small><strong>{label(attempt?.state === 'created' && item.status === 'waiting_phase' ? item.status : attempt?.state ?? item.status, statusLabels, '等待更新')}</strong><span>{attempt?.provider ? '已指定生成服务' : '尚未指定服务'}</span></div>
       <em>{label(item.status, statusLabels, '等待更新')}</em>
     </article>
@@ -136,7 +146,7 @@ export function ProductionPage() {
             {groupBlockers(execution.data.blockers).map((group, index) => {
               const presentation = blockerPresentation(group.errorCode ?? '')
               const countLabel = group.blockers.length > 1 ? `，影响 ${group.blockers.length} 个步骤` : ''
-              return <div className={styles.blocker} key={group.errorCode ?? group.blockers[0].work_item_id}><AlertTriangle size={16} /><div><strong>{presentation.title}{countLabel || (group.errorCode ? '' : ` ${index + 1}`)}</strong><span>{presentation.description}</span><details><summary>技术详情（{group.blockers.length}）</summary><div className={styles.blockerDetails}>{group.blockers.map(blocker => <code key={blocker.work_item_id}>{blocker.error_code ?? 'NO_ERROR_CODE'} · {blocker.node_key} · {blocker.error ?? '没有错误说明'}</code>)}</div></details></div></div>
+              return <div className={styles.blocker} key={group.errorCode ?? group.blockers[0].work_item_id}><AlertTriangle size={16} /><div><strong>{presentation.title}{countLabel || (group.errorCode ? '' : ` ${index + 1}`)}</strong><span>{blockerReason(group, presentation.description)}</span><details><summary>技术详情（{group.blockers.length}）</summary><div className={styles.blockerDetails}>{group.blockers.map(blocker => <code key={blocker.work_item_id}>{blocker.error_code ?? 'NO_ERROR_CODE'} · {blocker.node_key} · {blocker.error ?? '没有错误说明'}</code>)}</div></details></div></div>
             })}
             {execution.data.phases.map(phase => {
               const imagePhase = phase.phase === 'images'

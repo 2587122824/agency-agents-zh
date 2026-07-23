@@ -46,6 +46,8 @@
 .blocker span { font-size:11px;word-break:break-word; }
 .blocker details code { color:#8e321a;font-size:10px; }
 .blockerDetails { display:grid;gap:5px; }
+.nodeMain details p { margin:6px 0;color:#6b7174;line-height:1.45; }
+.nodeMain details pre { max-height:180px;margin:7px 0 0;padding:8px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:4px;background:#f1f2ef;color:#686f72;font-size:9px; }
 .revisionContext { margin:12px 14px 0;padding:11px 12px;display:flex;gap:9px;border:1px solid #e2c5b4;border-radius:5px;background:#fff8f3; }
 .revisionContext > svg { flex:none;color:#a94c2e; }
 .revisionContext > div { display:grid;gap:3px; }

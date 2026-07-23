@@ -98,7 +98,14 @@ def _update_aggregate_state(
         )
 
 
-def _finish_blocked(session, item: WorkItem, attempt: WorkAttempt, code: str, detail: str) -> None:
+def _finish_blocked(
+    session,
+    item: WorkItem,
+    attempt: WorkAttempt,
+    code: str,
+    detail: str,
+    response_manifest: dict | None = None,
+) -> None:
     now = utc_now()
     item.status = "blocked"
     item.error = f"{code}: {detail}"
@@ -107,6 +114,8 @@ def _finish_blocked(session, item: WorkItem, attempt: WorkAttempt, code: str, de
     attempt.state = "blocked"
     attempt.error_code = code
     attempt.error_detail = detail
+    if response_manifest is not None:
+        attempt.response_manifest = response_manifest
     attempt.finished_at = now
     attempt.execution_lock_owner = None
     attempt.execution_lock_expires_at = None
@@ -255,7 +264,7 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
                     try:
                         request = _provider_request(session, item, attempt, parents)
                     except ProviderAdapterError as exc:
-                        _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                        _finish_blocked(session, item, attempt, exc.code, exc.detail, exc.response_manifest)
                     else:
                         # Keep provider I/O outside a database transaction. The
                         # persisted lease remains the execution authority.
@@ -263,7 +272,7 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
                         try:
                             result = adapter.poll(request, str(attempt.provider_task_id))
                         except ProviderAdapterError as exc:
-                            _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                            _finish_blocked(session, item, attempt, exc.code, exc.detail, exc.response_manifest)
                         else:
                             attempt.response_manifest = result.response_manifest
                             attempt.execution_lock_owner = None
@@ -400,7 +409,7 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
             try:
                 request = _provider_request(session, item, attempt, parents)
             except ProviderAdapterError as exc:
-                _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                _finish_blocked(session, item, attempt, exc.code, exc.detail, exc.response_manifest)
             else:
                 if isinstance(adapter, ExternalProviderAdapter):
                     attempt.state = "submitting"
@@ -408,7 +417,7 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
                     try:
                         submission = adapter.submit(request)
                     except ProviderAdapterError as exc:
-                        _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                        _finish_blocked(session, item, attempt, exc.code, exc.detail, exc.response_manifest)
                     else:
                         attempt.provider_task_id = submission.provider_task_id
                         attempt.response_manifest = submission.response_manifest
@@ -422,7 +431,7 @@ def process_one(worker_id: str | None = None, adapter_registry: ProviderAdapterR
                     try:
                         response = adapter.execute(request)
                     except ProviderAdapterError as exc:
-                        _finish_blocked(session, item, attempt, exc.code, exc.detail)
+                        _finish_blocked(session, item, attempt, exc.code, exc.detail, exc.response_manifest)
                     else:
                         _finish_completed(session, item, attempt, response)
         repository.flush()

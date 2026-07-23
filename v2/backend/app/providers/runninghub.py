@@ -114,6 +114,49 @@ def _results(data: dict[str, Any]) -> list[dict[str, Any]]:
     return [item for item in result if isinstance(item, dict)] if isinstance(result, list) else []
 
 
+def _submission_rejection(response: dict[str, Any]) -> tuple[str, str, dict[str, Any]] | None:
+    nested = response.get("data") if isinstance(response.get("data"), dict) else {}
+    sources = (response, nested)
+    raw_code = _first(response, ("code", "errorCode", "error_code"))
+    evidence: dict[str, Any] = {
+        "schema_version": "runninghub-submission-rejection.v1",
+        "provider": "runninghub",
+    }
+    if raw_code:
+        evidence["provider_code"] = raw_code
+    for target, keys in (
+        ("message", ("msg", "message")),
+        ("error_message", ("errorMessage", "error_message")),
+        ("failed_reason", ("failedReason", "failed_reason")),
+    ):
+        value = ""
+        for source in sources:
+            for key in keys:
+                candidate = source.get(key)
+                if isinstance(candidate, (str, int, float, bool)):
+                    value = str(candidate).strip()
+                    if value:
+                        break
+            if value:
+                break
+        if value:
+            evidence[target] = value[:2000]
+
+    normalized_code = raw_code.upper()
+    explicit_error = any(key in evidence for key in ("error_message", "failed_reason"))
+    rejected_code = bool(raw_code and normalized_code not in {"0", "200", "SUCCESS", "OK"})
+    if not rejected_code and not explicit_error:
+        return None
+    if raw_code == "416":
+        detail = "RunningHub 账户余额不足，请充值后重新创建并提交制作方案。"
+    elif raw_code == "433":
+        detail = "RunningHub 拒绝了工作流参数，请根据供应商返回信息检查当前工作流配置。"
+    else:
+        provider_message = evidence.get("error_message") or evidence.get("failed_reason") or evidence.get("message")
+        detail = f"RunningHub 拒绝创建任务：{provider_message}" if provider_message else "RunningHub 明确拒绝创建任务。"
+    return "RUNNINGHUB_SUBMISSION_REJECTED", detail, evidence
+
+
 def _local_output_path(uri: str) -> Path:
     prefix = "runtime://assets/"
     if not uri.startswith(prefix):
@@ -370,7 +413,19 @@ class RunningHubAdapter:
             ) from exc
         task_id = _first(response, ("taskId", "task_id"))
         if not task_id:
-            raise ProviderAdapterError("RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN", "RunningHub submission returned no task ID; manual reconciliation is required.")
+            rejection = _submission_rejection(response)
+            if rejection:
+                code, detail, evidence = rejection
+                raise ProviderAdapterError(code, detail, evidence)
+            raise ProviderAdapterError(
+                "RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN",
+                "RunningHub submission returned no task ID; manual reconciliation is required.",
+                {
+                    "schema_version": "runninghub-submission-unknown.v1",
+                    "provider": "runninghub",
+                    "remote_status": _status(response) or "UNKNOWN",
+                },
+            )
         return ProviderSubmission(task_id, {
             "schema_version": "runninghub-submission.v1",
             "provider": "runninghub",

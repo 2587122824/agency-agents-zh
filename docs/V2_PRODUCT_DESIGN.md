@@ -1082,6 +1082,7 @@ preparing -> locked -> active -> submitted -> execution_completed | execution_bl
 - 系统不创建第二次尝试；后续重试必须由单独的用户确认命令设计并实现。
 - 制作页面的步骤顺序由活动快照中持久化的 `DAGNode + DependencyEdge` 做确定性拓扑排序；同一层只以稳定节点键打破并列，不从节点名称、类型或创建时间推断依赖。边引用缺失节点或图中存在环时明确失败。
 - 制作页面按结构化 `error_code` 合并同类阻塞摘要并显示影响步骤数量；原始节点键、错误代码和错误详情仍逐项保留在技术详情中。界面不解析错误字符串，也不因合并展示而合并、修改或解除任何 WorkItem。
+- Provider 提交必须区分“明确业务拒绝”和“提交结果未知”。RunningHub 返回非成功业务码或明确错误字段且没有任务 ID 时，记录 `RUNNINGHUB_SUBMISSION_REJECTED`，并把白名单内的 `code / msg / errorMessage / failedReason` 脱敏保存到 WorkAttempt 响应清单；余额不足等已知业务码在业务界面显示中文原因。网络超时、响应损坏或成功响应缺少任务 ID 等无法证明是否创建任务的情况使用 `RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN`，要求人工核对。两类错误都不得自动重试、改换工作流或创建新快照。
 
 接口：
 

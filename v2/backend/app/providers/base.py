@@ -14,10 +14,16 @@ class ProviderExecutionRequest:
 
 
 class ProviderAdapterError(RuntimeError):
-    def __init__(self, code: str, detail: str):
+    def __init__(
+        self,
+        code: str,
+        detail: str,
+        response_manifest: dict[str, Any] | None = None,
+    ):
         super().__init__(detail)
         self.code = code
         self.detail = detail
+        self.response_manifest = response_manifest
 
 
 class ProviderAdapter(Protocol):

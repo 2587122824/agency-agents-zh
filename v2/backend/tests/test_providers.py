@@ -153,6 +153,78 @@ def test_runninghub_resolves_only_declared_node_sources() -> None:
     assert "test-secret" not in repr(result)
 
 
+@pytest.mark.parametrize(
+    ("response", "expected_detail"),
+    [
+        (
+            {"code": 416, "msg": "TASK_CREATE_FAILED_BY_NOT_ENOUGH_WALLET"},
+            "RunningHub 账户余额不足",
+        ),
+        (
+            {"code": 433, "errorMessage": "nodeInfoList validation failed", "apiKey": "must-not-persist"},
+            "RunningHub 拒绝了工作流参数",
+        ),
+    ],
+)
+def test_runninghub_preserves_sanitized_explicit_submission_rejection(
+    response: dict,
+    expected_detail: str,
+) -> None:
+    transport = FakeRunningHubTransport()
+    transport.submit_response = response
+    adapter = enabled_adapter(transport)
+    request = ProviderExecutionRequest("generate_keyframe", "4" * 64, runninghub_manifest([
+        {"node_id": "1", "field_path": "text", "value_source": "shot.visual_prompt", "value_type": "string", "required": True},
+    ]))
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.submit(request)
+
+    assert caught.value.code == "RUNNINGHUB_SUBMISSION_REJECTED"
+    assert expected_detail in caught.value.detail
+    assert caught.value.response_manifest["schema_version"] == "runninghub-submission-rejection.v1"
+    assert caught.value.response_manifest["provider_code"] == str(response["code"])
+    assert "apiKey" not in caught.value.response_manifest
+    assert "must-not-persist" not in repr(caught.value.response_manifest)
+
+
+def test_runninghub_missing_task_id_without_rejection_remains_unknown() -> None:
+    transport = FakeRunningHubTransport()
+    transport.submit_response = {"code": 0, "msg": "success", "status": "RUNNING"}
+    adapter = enabled_adapter(transport)
+    request = ProviderExecutionRequest("generate_keyframe", "5" * 64, runninghub_manifest([
+        {"node_id": "1", "field_path": "text", "value_source": "shot.visual_prompt", "value_type": "string", "required": True},
+    ]))
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.submit(request)
+
+    assert caught.value.code == "RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN"
+    assert caught.value.response_manifest == {
+        "schema_version": "runninghub-submission-unknown.v1",
+        "provider": "runninghub",
+        "remote_status": "RUNNING",
+    }
+
+
+def test_runninghub_transport_failure_remains_unknown_without_retry() -> None:
+    class FailingTransport(FakeRunningHubTransport):
+        def post_json(self, url: str, payload: dict, timeout: int) -> dict:
+            raise ProviderAdapterError("RUNNINGHUB_HTTP_FAILED", "request timeout")
+
+    transport = FailingTransport()
+    adapter = enabled_adapter(transport)
+    request = ProviderExecutionRequest("generate_keyframe", "6" * 64, runninghub_manifest([
+        {"node_id": "1", "field_path": "text", "value_source": "shot.visual_prompt", "value_type": "string", "required": True},
+    ]))
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.submit(request)
+
+    assert caught.value.code == "RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN"
+    assert caught.value.response_manifest is None
+
+
 def test_runninghub_uploads_only_frozen_primary_reference_and_omits_optional_null(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
     content = b"\x89PNG\r\n\x1a\nreference"

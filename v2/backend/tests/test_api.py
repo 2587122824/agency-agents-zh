@@ -24,7 +24,7 @@ from v2.backend.app.creation.completeness import evaluate_requirement
 from v2.backend.app.creation.service import _validated_update_value
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
-from v2.backend.app.providers import ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
+from v2.backend.app.providers import ProviderAdapterError, ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
 from v2.backend.app.providers.registry import ProviderAdapterRegistry
 from v2.backend.app.creation.agent_gateway import AgentGatewayError, CreativeAgentOutput, CreativeAgentResult, DeterministicCreativeAgentGateway, get_creative_agent_gateway
 from v2.backend.app.planning.agent_gateway import ContentPlannerOutput, ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
@@ -4108,6 +4108,21 @@ class FakePersistedExternalAdapter:
         })
 
 
+class FakeRejectedExternalAdapter(FakePersistedExternalAdapter):
+    def submit(self, request: ProviderExecutionRequest) -> ProviderSubmission:
+        self.submit_count += 1
+        raise ProviderAdapterError(
+            "RUNNINGHUB_SUBMISSION_REJECTED",
+            "RunningHub 账户余额不足，请充值后重新创建并提交制作方案。",
+            {
+                "schema_version": "runninghub-submission-rejection.v1",
+                "provider": "runninghub",
+                "provider_code": "416",
+                "message": "TASK_CREATE_FAILED_BY_NOT_ENOUGH_WALLET",
+            },
+        )
+
+
 def test_external_worker_persists_task_id_and_resumes_poll_without_resubmit(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
     activated = client.post(
@@ -4155,6 +4170,43 @@ def test_external_worker_persists_task_id_and_resumes_poll_without_resubmit(clie
         item = session.get(WorkItem, attempt.work_item_id)
         assert attempt.state == "completed"
         assert item.status == "completed"
+
+
+def test_external_worker_persists_explicit_submission_rejection_evidence_without_retry(
+    client: TestClient,
+) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "external-reject-activate", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "external-reject-submit",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    adapter = FakeRejectedExternalAdapter()
+    registry = ProviderAdapterRegistry((adapter,))
+
+    assert process_one("external-reject-worker", registry) is True
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    attempt = next(
+        item["attempts"][-1]
+        for item in execution["work_items"]
+        if item["status"] == "blocked"
+    )
+    assert attempt["error_code"] == "RUNNINGHUB_SUBMISSION_REJECTED"
+    assert "余额不足" in attempt["error_detail"]
+    assert attempt["response_manifest"]["provider_code"] == "416"
+    assert adapter.submit_count == 1
+    blocked_item = next(item for item in execution["work_items"] if item["status"] == "blocked")
+    assert len(blocked_item["attempts"]) == 1
 
 
 def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClient) -> None:

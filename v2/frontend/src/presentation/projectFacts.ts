@@ -103,6 +103,8 @@ const blockerPresentations: Record<string, FactPresentation> = {
   DEPENDENCY_BLOCKED: { title: '前置制作步骤被阻断', description: '当前步骤依赖的上游素材没有完成，因此不能继续。' },
   SNAPSHOT_EXECUTION_BLOCKED: { title: '制作方案存在执行阻断', description: '当前制作方案没有通过全部执行条件检查。' },
   PROVIDER_SUBMISSION_RECONCILIATION_REQUIRED: { title: '供应商提交结果需要人工核对', description: '系统无法确认外部任务是否已创建，不会自动再次提交。' },
+  RUNNINGHUB_SUBMISSION_REJECTED: { title: 'RunningHub 拒绝创建任务', description: '供应商已明确拒绝本次提交，请按返回原因修正后创建新的制作方案；系统没有自动重试。' },
+  RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN: { title: 'RunningHub 提交结果需要核对', description: '系统无法确认外部任务是否已经创建，为避免重复扣费，本次不会自动再次提交。' },
   PROVIDER_TASK_FAILED: { title: '外部生成任务失败', description: '供应商已返回失败结果，系统没有自动重试或更换工作流。' },
   ASSET_QC_BLOCKED: { title: '素材未通过确定性检查', description: '文件或合同事实不符合当前制作方案，素材已停止流转。' },
   MEDIA_DIMENSIONS_INVALID: { title: '素材尺寸不符合要求', description: '素材宽高与制作方案冻结的画面规格不一致。' },
