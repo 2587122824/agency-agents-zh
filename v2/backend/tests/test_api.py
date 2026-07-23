@@ -4361,6 +4361,7 @@ def test_project_control_exposes_exact_production_route_cost_and_blocker(client:
     assert blocked_route["provider_workflow_id"] == "mock-workflow-not-executable"
     assert blocked_route["provider_task_id"] is None
     assert control["next_action"]["code"] == "VIEW_PRODUCTION_BLOCKERS"
+    assert control["next_action"]["path"] == f"/production?project={project['id']}"
     assert control["costs"] == [{
         "currency": "CNY",
         "estimated_confirmed": 0.9,

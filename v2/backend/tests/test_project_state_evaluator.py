@@ -142,7 +142,7 @@ def test_project_state_evaluation_is_repeatable_and_does_not_mutate_inputs() -> 
     assert first.next_action.as_dict() == {
         "code": "VIEW_PRODUCTION_BLOCKERS",
         "label": "查看 1 个生产阻断",
-        "path": "/production",
+        "path": "/production?project=project_test",
     }
     assert work_counts == before_work
     assert asset_counts == before_assets

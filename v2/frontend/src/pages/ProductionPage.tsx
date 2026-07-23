@@ -84,7 +84,7 @@ export function ProductionPage() {
     },
   })
   const closeBlockedProduction = useMutation({
-    mutationFn: () => api.closeBlockedProduction(projectId, execution.data!),
+    mutationFn: () => api.closeBlockedProduction(projectId, execution.data!.snapshot!),
     onSuccess: async () => {
       setConfirmCloseBlocked(false)
       await Promise.all([

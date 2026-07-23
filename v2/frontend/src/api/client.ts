@@ -183,8 +183,7 @@ export const api = {
       }),
     })
   },
-  closeBlockedProduction: (projectId: string, execution: ProductionExecution) => {
-    const snapshot = execution.snapshot!
+  closeBlockedProduction: (projectId: string, snapshot: { id: string; contract_hash: string }) => {
     return request<BlockedProductionClosed>(`/projects/${projectId}/production-snapshots/${snapshot.id}:close-blocked-production`, {
       method: 'POST', body: JSON.stringify({
         command_id: crypto.randomUUID(), actor_id: 'local-user', expected_contract_hash: snapshot.contract_hash,

@@ -162,15 +162,16 @@ def evaluate_next_action(facts: ProjectStateFacts, stage: ProjectStage) -> Proje
         return ProjectNextAction("OPEN_QUALITY_REVIEW", label, "/review")
     authority = _authority_snapshot(facts)
     if stage == "production":
+        production_path = f"/production?project={facts.project_id}"
         if facts.work_counts.get("blocked", 0):
             return ProjectNextAction(
                 "VIEW_PRODUCTION_BLOCKERS",
                 f"查看 {facts.work_counts['blocked']} 个生产阻断",
-                "/production",
+                production_path,
             )
         if facts.work_counts.get("in_progress", 0) or facts.work_counts.get("queued", 0):
-            return ProjectNextAction("MONITOR_PRODUCTION", "查看生产执行进度", "/production")
-        return ProjectNextAction("VIEW_PRODUCTION", "查看生产执行", "/production")
+            return ProjectNextAction("MONITOR_PRODUCTION", "查看生产执行进度", production_path)
+        return ProjectNextAction("VIEW_PRODUCTION", "查看生产执行", production_path)
     if stage == "production_preparation":
         if authority is None:
             return ProjectNextAction(

@@ -1,7 +1,7 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { AlertTriangle, ArrowRight, BookOpen, CheckCircle2, CircleDollarSign, Clapperboard, Clock3, FileCheck2, GitBranch, MessageSquareText, Network, ReceiptText, RefreshCw, Route, Workflow } from 'lucide-react'
-import { Link, useParams } from 'react-router-dom'
+import { AlertTriangle, ArrowRight, BookOpen, CheckCircle2, CircleDollarSign, Clapperboard, Clock3, FileCheck2, GitBranch, MessageSquareText, Network, ReceiptText, RefreshCw, RotateCcw, Route, Workflow, X } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import type { ProjectControl } from '../api/types'
@@ -54,13 +54,33 @@ function ProductionBasis({ basis, projectId }: { basis: NonNullable<ProjectContr
 
 export function ProjectControlPage() {
   const { projectId = '' } = useParams()
+  const navigate = useNavigate()
   const client = useQueryClient()
+  const [confirmCloseBlocked, setConfirmCloseBlocked] = useState(false)
   const control = useQuery({ queryKey: ['project-control', projectId], queryFn: () => api.projectControl(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   const refresh = async () => {
     await client.invalidateQueries({ queryKey: ['project-control', projectId] })
     await client.invalidateQueries({ queryKey: ['project-controls'] })
   }
   const data = control.data
+  const closeBlockedProduction = useMutation({
+    mutationFn: () => api.closeBlockedProduction(projectId, data!.active_snapshot!),
+    onSuccess: async () => {
+      setConfirmCloseBlocked(false)
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['project-control', projectId] }),
+        client.invalidateQueries({ queryKey: ['project-controls'] }),
+        client.invalidateQueries({ queryKey: ['projects'] }),
+        client.invalidateQueries({ queryKey: ['production-execution', projectId] }),
+        client.invalidateQueries({ queryKey: ['planning-center', projectId] }),
+      ])
+      navigate(`/projects/${projectId}/plan`)
+    },
+  })
+  const canCloseBlockedProduction = Boolean(
+    data && !data.archived_at && data.persisted_status === 'blocked'
+    && data.active_snapshot?.status === 'execution_blocked',
+  )
 
   return <>
     <PageHeader eyebrow="项目控制" title={data?.title ?? '项目控制台'} description={data?.core_topic ?? '读取项目权威状态与执行证据。'} actions={<><button className="secondaryButton" onClick={refresh}><RefreshCw size={14} />刷新</button>{data && <Link className="secondaryButton" to={`/projects/${projectId}/audit`}><ReceiptText size={14} />费用与事件</Link>}{data && <Link className="secondaryButton" to={`/projects/${projectId}/decision-impact`}><Network size={14} />决策影响</Link>}{data && !data.archived_at && <Link className="primaryButton" to={data.next_action.path}>{data.next_action.label}<ArrowRight size={14} /></Link>}</>} />
@@ -82,6 +102,13 @@ export function ProjectControlPage() {
           </dl>
           <aside><strong>{data.archived_at ? '项目已归档' : data.next_action.label}</strong><small>{data.archived_at ? `归档于 ${timestamp(data.archived_at)}，恢复后可继续操作` : `${data.next_action.confirmation_level === 'high' ? '需要重点确认' : data.next_action.confirmation_level === 'normal' ? '需要确认' : '无需确认'} · ${data.next_action.incurs_production_cost ? '会产生制作费用' : '不会产生制作费用'}`}</small>{data.state_reason_code && <div className={styles.stateBlock}><b>{blockerPresentation(data.state_reason_code).title}</b><span>{projectStatusLabel(data.blocked_from_state)} → {projectStatusLabel(data.persisted_status)}</span><small>责任对象：{aggregateTypeLabel(data.blocked_responsible_aggregate_type)}</small></div>}<details className={styles.stageTechnical}><summary>技术详情</summary><code>{data.persisted_status} · {data.active_snapshot_status ?? 'NO_SNAPSHOT'} · {data.next_action.code}</code><p>{data.state_trigger} · {data.state_actor_type}:{data.state_changed_by}</p>{data.archived_at && <p>{data.archived_at} · {data.archived_by}</p>}{data.state_reason_code && <code>{data.state_reason_code} · {data.blocked_from_state ?? 'NO_PREVIOUS_STATE'} → {data.persisted_status} · {data.blocked_responsible_aggregate_type}:{data.blocked_responsible_aggregate_id}</code>}</details></aside>
         </section>
+
+        {canCloseBlockedProduction && <section className={styles.recovery} data-confirming={confirmCloseBlocked}>
+          <RotateCcw />
+          <div><span>制作已暂停</span><strong>{confirmCloseBlocked ? '确认结束本次失败制作？' : '修正后返回制作准备'}</strong><p>{confirmCloseBlocked ? '旧任务、失败原因和费用估算会完整保留；尚未开始的步骤将取消。' : '结束当前失败快照后回到制作准备，重新选择当前配置。系统不会自动重跑。'}</p></div>
+          {confirmCloseBlocked ? <div className={styles.recoveryButtons}><button className="secondaryButton" disabled={closeBlockedProduction.isPending} onClick={() => setConfirmCloseBlocked(false)}><X size={14} />取消</button><button className="primaryButton" disabled={closeBlockedProduction.isPending} onClick={() => closeBlockedProduction.mutate()}>{closeBlockedProduction.isPending ? '正在结束…' : '确认结束并返回'}</button></div> : <button className="primaryButton" onClick={() => setConfirmCloseBlocked(true)}><RotateCcw size={14} />返回制作准备</button>}
+        </section>}
+        {closeBlockedProduction.error && <div className={styles.recoveryError}><AlertTriangle size={16} /><div><strong>返回制作准备失败</strong><span>{closeBlockedProduction.error.message}</span></div></div>}
 
         {data.production_basis && <ProductionBasis basis={data.production_basis} projectId={projectId} />}
 
