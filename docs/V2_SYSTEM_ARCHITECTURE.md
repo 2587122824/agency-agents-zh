@@ -192,6 +192,7 @@ draft
 - Provider 由已发布配置中的 `adapter_kind + work_kind` 精确解析。
 - 本地单用户阶段，Provider 的 API Key 使用已发布供应商版本中的普通 `api_key` 字段；配置详情 API 原样返回并供设置页回填，不使用环境变量回退。
 - API Key 不进入 Git、错误消息或供应商失败证据；当前数据库明文边界不适用于多用户或公网部署。
+- RunningHub V2 的 JSON 请求和媒体上传统一使用 `Authorization: Bearer <API_KEY>`；创建任务正文不包含 `apiKey`，避免把 V1 鉴权格式带入 V2 接口。
 - RunningHub 只接受严格 NodeInfoList 与声明的结构化来源。
 - Provider 能力标签必须能指向该 Provider 官方 API 的明确请求字段、响应字段或独立端点；模型名称、宣传能力或“OpenAI-compatible”本身不能证明支持图片、音频或视频输入。
 - Provider 或配置不兼容时明确阻断，不切换供应商或工作流。

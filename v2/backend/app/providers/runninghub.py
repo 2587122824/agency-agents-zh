@@ -21,7 +21,13 @@ from .base import (
 
 
 class RunningHubTransport(Protocol):
-    def post_json(self, url: str, payload: dict[str, Any], timeout: int) -> dict[str, Any]: ...
+    def post_json(
+        self,
+        url: str,
+        api_key: str,
+        payload: dict[str, Any],
+        timeout: int,
+    ) -> dict[str, Any]: ...
 
     def upload(
         self,
@@ -36,9 +42,23 @@ class RunningHubTransport(Protocol):
 
 
 class HttpxRunningHubTransport:
-    def post_json(self, url: str, payload: dict[str, Any], timeout: int) -> dict[str, Any]:
+    def post_json(
+        self,
+        url: str,
+        api_key: str,
+        payload: dict[str, Any],
+        timeout: int,
+    ) -> dict[str, Any]:
         try:
-            response = httpx.post(url, json=payload, timeout=timeout)
+            response = httpx.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Accept": "application/json",
+                },
+                json=payload,
+                timeout=timeout,
+            )
             response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, ValueError) as exc:
@@ -393,17 +413,21 @@ class RunningHubAdapter:
                 raise
             node_info.append({"nodeId": identity[0], "fieldName": identity[1], "fieldValue": self._coerce(value, str(binding.get("value_type") or ""))})
         payload = {
-            "apiKey": api_key,
             "addMetadata": True,
             "nodeInfoList": node_info,
             "instanceType": "default",
-            "usePersonalQueue": False,
+            "usePersonalQueue": "false",
         }
         workflow_id = str(workflow.get("provider_workflow_id") or "").strip()
         if not workflow_id:
             raise ProviderAdapterError("RUNNINGHUB_WORKFLOW_ID_MISSING", "The frozen RunningHub workflow ID is missing.")
         try:
-            response = self.transport.post_json(urljoin(base_url, f"run/workflow/{workflow_id}"), payload, timeout)
+            response = self.transport.post_json(
+                urljoin(base_url, f"run/workflow/{workflow_id}"),
+                api_key,
+                payload,
+                timeout,
+            )
         except ProviderAdapterError as exc:
             raise ProviderAdapterError(
                 "RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN",
@@ -437,7 +461,12 @@ class RunningHubAdapter:
         provider, _workflow, storage, api_key = self._contract(request)
         timeout = int(provider["request_timeout_seconds"])
         base_url = str(provider["base_url"]).rstrip("/") + "/"
-        response = self.transport.post_json(urljoin(base_url, "query"), {"taskId": provider_task_id}, timeout)
+        response = self.transport.post_json(
+            urljoin(base_url, "query"),
+            api_key,
+            {"taskId": provider_task_id},
+            timeout,
+        )
         state = _status(response)
         if state in {"FAILED", "FAIL", "ERROR", "CANCELED", "CANCELLED"}:
             return ProviderPollResult("failed", {"schema_version": "runninghub-response.v1", "provider_task_id": provider_task_id, "remote_status": state}, "RUNNINGHUB_TASK_FAILED", "RunningHub reported a terminal task failure.")

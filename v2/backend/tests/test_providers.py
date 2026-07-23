@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
+import httpx
 import pytest
-import hashlib
 
 from v2.backend.app.providers import ProviderAdapterError, ProviderExecutionRequest
 from v2.backend.app.providers.registry import default_provider_registry
-from v2.backend.app.providers.runninghub import RunningHubAdapter
+from v2.backend.app.providers.runninghub import HttpxRunningHubTransport, RunningHubAdapter
 import v2.backend.app.providers.runninghub as runninghub_module
 
 
@@ -42,8 +43,8 @@ class FakeRunningHubTransport:
         self.query_response = {"taskId": "rh-task-1", "status": "RUNNING"}
         self.download_response = (b"image-bytes", "image/png")
 
-    def post_json(self, url: str, payload: dict, timeout: int) -> dict:
-        self.calls.append(("post_json", url, payload, timeout))
+    def post_json(self, url: str, api_key: str, payload: dict, timeout: int) -> dict:
+        self.calls.append(("post_json", url, payload, api_key, timeout))
         return self.query_response if url.endswith("/query") else self.submit_response
 
     def upload(self, url: str, api_key: str, path: Path, mime_type: str, timeout: int) -> dict:
@@ -127,8 +128,36 @@ def test_runninghub_resolves_only_declared_node_sources() -> None:
         {"nodeId": "2", "fieldName": "width", "fieldValue": 480},
         {"nodeId": "3", "fieldName": "flag", "fieldValue": True},
     ]
-    assert payload["apiKey"] == "test-secret"
+    assert "apiKey" not in payload
+    assert payload["usePersonalQueue"] == "false"
+    assert transport.calls[0][3] == "test-secret"
     assert "test-secret" not in repr(result)
+
+
+def test_runninghub_http_transport_uses_v2_bearer_auth(monkeypatch) -> None:
+    captured: dict = {}
+
+    def fake_post(url: str, **kwargs) -> httpx.Response:
+        captured.update(url=url, **kwargs)
+        return httpx.Response(
+            200,
+            json={"taskId": "rh-task-1", "status": "RUNNING"},
+            request=httpx.Request("POST", url),
+        )
+
+    monkeypatch.setattr(runninghub_module.httpx, "post", fake_post)
+    response = HttpxRunningHubTransport().post_json(
+        "https://www.runninghub.cn/openapi/v2/run/workflow/workflow-1",
+        "test-secret",
+        {"addMetadata": True, "nodeInfoList": []},
+        60,
+    )
+
+    assert response["taskId"] == "rh-task-1"
+    assert captured["headers"]["Authorization"] == "Bearer test-secret"
+    assert captured["headers"]["Accept"] == "application/json"
+    assert captured["json"] == {"addMetadata": True, "nodeInfoList": []}
+    assert "apiKey" not in captured["json"]
 
 
 @pytest.mark.parametrize(
@@ -187,7 +216,7 @@ def test_runninghub_missing_task_id_without_rejection_remains_unknown() -> None:
 
 def test_runninghub_transport_failure_remains_unknown_without_retry() -> None:
     class FailingTransport(FakeRunningHubTransport):
-        def post_json(self, url: str, payload: dict, timeout: int) -> dict:
+        def post_json(self, url: str, api_key: str, payload: dict, timeout: int) -> dict:
             raise ProviderAdapterError("RUNNINGHUB_HTTP_FAILED", "request timeout")
 
     transport = FailingTransport()
@@ -399,3 +428,4 @@ def test_runninghub_poll_downloads_deterministic_local_output(tmp_path, monkeypa
     assert output["uri"] == f"runtime://assets/providers/runninghub/{'f' * 64}/output-00.png"
     assert (tmp_path / "assets" / "providers" / "runninghub" / ("f" * 64) / "output-00.png").read_bytes() == b"image-bytes"
     assert transport.calls[0][2] == {"taskId": "rh-task-1"}
+    assert transport.calls[0][3] == "test-secret"

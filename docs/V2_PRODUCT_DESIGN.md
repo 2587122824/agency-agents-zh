@@ -679,8 +679,8 @@ GET  /api/v1/projects/{project_id}/events
 
 本地单用户阶段仍遵循：
 
-- 供应商密钥仅保存在后端运行配置。
-- API 不返回密钥原文。
+- 供应商密钥作为系统配置中的普通字段保存在本地数据库，仅配置详情 API 可以原样返回并用于设置页回填。
+- 项目、事件、生产、错误和供应商证据 API 不返回密钥原文。
 - 上传文件名和路径必须经过安全校验。
 - 静态文件只能从指定目录提供。
 - 项目事件不得写入密钥和完整供应商凭据。
@@ -951,7 +951,9 @@ Worker 只按 WorkAttempt 冻结清单中的精确 `adapter_kind + work_kind` �
 
 RunningHub 使用独立的提交与轮询合同。Worker 在外部请求前持久化 `submitting`，返回后立即保存精确 `provider_task_id`；重启只轮询已保存任务号。提交结果未知或可能在任务号落库前中断时进入人工对账阻断，禁止重新提交。真实外部执行还必须由后端 `V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED` 明确开启，默认关闭；注册适配器、凭据可读和允许真实执行是三个独立事实。
 
-RunningHub 的 WorkAttempt 必须使用 `production-work-request.v2` 冻结 Provider、Workflow、完整 NodeInfoList、结构化 Shot、视频规格和存储策略。适配器只解析声明的结构化来源和 `literal:<JSON>`；不支持旧式 `{{prompt}}` 占位符，不生成或重写提示词。I2V 必须恰好绑定并消费一个父图片输出，多个输入不得静默取第一项。完整边界见 [V2 RunningHub 图片/视频适配器实现](./archive/implementation-notes/V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md)。
+RunningHub V2 的创建任务、查询任务和媒体上传请求必须使用 `Authorization: Bearer <API_KEY>` 请求头。创建任务正文不得再携带旧式 `apiKey` 字段，`usePersonalQueue` 按供应商 V2 合同提交字符串 `"false"`。鉴权失败保留供应商明确拒绝证据，不改写密钥、不切换接口，也不自动重试。
+
+RunningHub 的 WorkAttempt 必须使用 `production-work-request.v3` 冻结 Provider、Workflow、完整 NodeInfoList、结构化 Shot、视频规格和存储策略。适配器只解析声明的结构化来源和 `literal:<JSON>`；不支持旧式 `{{prompt}}` 占位符，不生成或重写提示词。I2V 必须恰好绑定并消费一个父图片输出，多个输入不得静默取第一项。完整边界见 [V2 RunningHub 图片/视频适配器实现](./archive/implementation-notes/V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md)。
 
 配置发布校验和连接准备检查必须共用同一 RunningHub NodeInfoList 合同校验器。设置页用普通名称选择镜头字段、视频规格、单父关键帧或固定值；固定值由界面编码为严格 `literal:<JSON>`。历史旧来源只显示“不兼容并需创建新版本”，禁止自动转换。完整实现见 [V2 生成服务连接准备实现](./archive/implementation-notes/V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md)。
 
@@ -1060,7 +1062,7 @@ GET /api/v1/system-config/workflow-slots/{slot_key}/versions
 - 工作流节点映射不完整时发布失败并列出节点与字段。
 - 发布和停用不修改现有生产快照。
 - 被引用版本不能删除，引用项目和快照可以查询。
-- API、事件和前端均不返回供应商密钥原文。
+- 除本地单用户设置页使用的配置详情 API 外，项目、事件、生产、错误和供应商证据均不返回供应商密钥原文。
 - 音频关闭的快照不包含 TTS 工作项。
 - 配置错误不会触发模型、供应商、工作流或输出格式替换。
 - 发布配置不会调用生产供应商或产生生产费用。
