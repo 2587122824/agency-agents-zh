@@ -1379,6 +1379,18 @@ def retry_production_work(
             "PRODUCTION_RETRY_REQUEST_CHANGED",
             "失败步骤的冻结请求已经变化，不能重跑。",
         )
+    frozen_provider = failed.request_manifest.get("provider")
+    if (
+        failed.request_manifest.get("adapter_kind") == "runninghub"
+        and (
+            not isinstance(frozen_provider, dict)
+            or not str(frozen_provider.get("api_key") or "").strip()
+        )
+    ):
+        raise ProductionConflictError(
+            "PRODUCTION_RETRY_REQUEST_CONTRACT_UNSUPPORTED",
+            "历史步骤没有冻结当前 RunningHub 执行合同要求的 API Key，请返回制作准备并使用当前配置创建新方案。",
+        )
 
     existing_attempts = repository.work_attempts([item.id])
     next_attempt_number = max(attempt.attempt_number for attempt in existing_attempts) + 1

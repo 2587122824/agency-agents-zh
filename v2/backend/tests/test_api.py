@@ -4518,6 +4518,28 @@ def test_user_can_exactly_retry_one_failed_production_work_item(client: TestClie
             "confirm_high_risk_submission": True,
         },
     )
+    with SessionLocal() as session:
+        item = session.scalar(select(WorkItem).where(
+            WorkItem.snapshot_id == snapshot["id"],
+            WorkItem.status == "queued",
+        ))
+        attempt = session.get(WorkAttempt, item.current_attempt_id)
+        manifest = json.loads(json.dumps(attempt.request_manifest))
+        manifest["provider"].pop("credential_ref", None)
+        manifest["provider"]["api_key"] = "test-runninghub-key"
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                manifest,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        item.payload = manifest
+        item.request_fingerprint = fingerprint
+        attempt.request_manifest = manifest
+        attempt.request_fingerprint = fingerprint
+        session.commit()
     assert process_one("retry-work-blocking-worker") is True
     execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
     blocked = next(item for item in execution["work_items"] if item["status"] == "blocked")
@@ -4575,6 +4597,68 @@ def test_user_can_exactly_retry_one_failed_production_work_item(client: TestClie
             event.event_type == "production.work_retry_authorized.v1"
             for event in session.scalars(select(ProjectEvent).where(ProjectEvent.project_id == project["id"]))
         )
+
+
+def test_production_retry_rejects_legacy_frozen_provider_contract(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "legacy-retry-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "legacy-retry-submit-001",
+            "expected_contract_hash": activated["contract_hash"],
+            "expected_estimated_cost": activated["estimated_cost"],
+            "expected_currency": activated["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert process_one("legacy-retry-blocking-worker") is True
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    blocked = next(item for item in execution["work_items"] if item["status"] == "blocked")
+    with SessionLocal() as session:
+        item = session.get(WorkItem, blocked["id"])
+        failed = session.get(WorkAttempt, item.current_attempt_id)
+        manifest = json.loads(json.dumps(failed.request_manifest))
+        manifest["provider"].pop("api_key")
+        manifest["provider"]["credential_ref"] = "env://LEGACY_RUNNINGHUB_KEY"
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                manifest,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        item.payload = manifest
+        item.request_fingerprint = fingerprint
+        failed.request_manifest = manifest
+        failed.request_fingerprint = fingerprint
+        session.commit()
+        failed_attempt_id = failed.id
+
+    denied = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}"
+        f"/work-items/{blocked['id']}:retry",
+        json={
+            "command_id": "legacy-retry-command-001",
+            "actor_id": "local-user",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "failed_attempt_id": failed_attempt_id,
+            "expected_request_fingerprint": fingerprint,
+            "confirm_additional_cost": True,
+        },
+    )
+    assert denied.status_code == 409
+    assert denied.headers["x-error-code"] == "PRODUCTION_RETRY_REQUEST_CONTRACT_UNSUPPORTED"
+    with SessionLocal() as session:
+        attempts = list(session.scalars(select(WorkAttempt).where(
+            WorkAttempt.work_item_id == blocked["id"],
+        )))
+        assert len(attempts) == 1
 
 
 def test_asset_registration_verification_qc_and_human_approval_are_explicit(client: TestClient) -> None:
