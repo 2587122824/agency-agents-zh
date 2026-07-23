@@ -191,6 +191,24 @@ export const api = {
       }),
     })
   },
+  retryProductionWork: (
+    projectId: string,
+    snapshot: { id: string; contract_hash: string },
+    item: { id: string; current_attempt_id: string; request_fingerprint: string },
+  ) => request<ProductionExecution>(
+    `/projects/${projectId}/production-snapshots/${snapshot.id}/work-items/${item.id}:retry`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        command_id: crypto.randomUUID(),
+        actor_id: 'local-user',
+        expected_contract_hash: snapshot.contract_hash,
+        failed_attempt_id: item.current_attempt_id,
+        expected_request_fingerprint: item.request_fingerprint,
+        confirm_additional_cost: true,
+      }),
+    },
+  ),
   qualityReview: (projectId: string) => request<QualityReview>(`/projects/${projectId}/quality-review`),
   verifyAsset: (projectId: string, asset: ProductionAsset) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:verify`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version }),

@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { ProductionExecution } from '../api/types'
+import type { ExecutionWorkItem, ProductionExecution } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import { blockerPresentation } from '../presentation/projectFacts'
 import styles from './StagePage.module.css'
@@ -52,14 +52,20 @@ function blockerReason(group: { errorCode: string | null; blockers: Blocker[] },
   return reasons.size === 1 ? [...reasons][0] : fallback
 }
 
-function PhaseWorkList({ items, phaseLabel }: { items: ProductionExecution['work_items']; phaseLabel: string }) {
+function PhaseWorkList({ items, phaseLabel, onRetry }: {
+  items: ProductionExecution['work_items']
+  phaseLabel: string
+  onRetry: (item: ExecutionWorkItem) => void
+}) {
   return <div className={styles.workList}>{items.map((item, index) => {
     const attempt = item.attempts.at(-1)
     return <article key={item.id} data-status={item.status}>
       <span className={styles.nodeState}>{item.status === 'completed' ? <CheckCircle2 /> : item.status === 'blocked' ? <AlertTriangle /> : <Clock3 />}</span>
       <div className={styles.nodeMain}><strong>{phaseLabel} {index + 1} · {label(item.kind, kindLabels, '制作素材')}</strong><span>{item.status === 'blocked' ? blockerPresentation(attempt?.error_code ?? '').title : label(attempt?.state === 'created' && item.status === 'waiting_phase' ? item.status : attempt?.state ?? item.status, statusLabels, '等待更新')}</span><details><summary>技术详情</summary><code>{item.node_key} · {item.kind} · {item.request_fingerprint.slice(0, 16)} · {attempt?.provider ?? 'NO_PROVIDER'}</code>{attempt?.error_detail && <p>{attempt.error_detail}</p>}{attempt?.response_manifest && <pre>{JSON.stringify(attempt.response_manifest, null, 2)}</pre>}</details></div>
       <div className={styles.attempt}><small>第 {attempt?.attempt_number ?? 0} 次执行</small><strong>{label(attempt?.state === 'created' && item.status === 'waiting_phase' ? item.status : attempt?.state ?? item.status, statusLabels, '等待更新')}</strong><span>{attempt?.provider ? '已指定生成服务' : '尚未指定服务'}</span></div>
-      <em>{label(item.status, statusLabels, '等待更新')}</em>
+      {item.status === 'blocked'
+        ? <button className="secondaryButton" onClick={() => onRetry(item)}><RotateCcw size={13} />重跑</button>
+        : <em>{label(item.status, statusLabels, '等待更新')}</em>}
     </article>
   })}</div>
 }
@@ -70,6 +76,7 @@ export function ProductionPage() {
   const client = useQueryClient()
   const [projectId, setProjectId] = useState(() => searchParams.get('project') ?? '')
   const [confirmCloseBlocked, setConfirmCloseBlocked] = useState(false)
+  const [retryChoice, setRetryChoice] = useState<ExecutionWorkItem | null>(null)
   const revisionRequestId = searchParams.get('revisionRequest') ?? ''
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const execution = useQuery({
@@ -105,6 +112,21 @@ export function ProductionPage() {
       navigate(`/projects/${projectId}/plan`)
     },
   })
+  const retryProductionWork = useMutation({
+    mutationFn: (item: ExecutionWorkItem) => api.retryProductionWork(
+      projectId,
+      execution.data!.snapshot!,
+      item,
+    ),
+    onSuccess: async () => {
+      setRetryChoice(null)
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['projects'] }),
+        client.invalidateQueries({ queryKey: ['production-execution', projectId] }),
+        client.invalidateQueries({ queryKey: ['project-control', projectId] }),
+      ])
+    },
+  })
   const productionProjects = projects.data?.filter(project => ['production_ready', 'producing', 'quality_review', 'blocked'].includes(project.status)) ?? []
   return <>
     <PageHeader eyebrow="PRODUCTION" title="素材制作" description="查看每项素材的制作进度，以及当前需要处理的问题。" actions={<button className="secondaryButton" onClick={refresh}><RefreshCw size={14} />刷新</button>} />
@@ -136,6 +158,7 @@ export function ProductionPage() {
           {execution.error && <div className={styles.executionEmpty}><AlertTriangle size={22} /><strong>读取失败</strong><span>{execution.error.message}</span></div>}
           {approveImagePhase.error && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>图片阶段确认失败</strong><span>{approveImagePhase.error.message}</span></div></div>}
           {closeBlockedProduction.error && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>返回制作准备失败</strong><span>{closeBlockedProduction.error.message}</span></div></div>}
+          {retryProductionWork.error && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>重跑失败</strong><span>{retryProductionWork.error.message}</span></div></div>}
           {execution.data && <>
             <header className={styles.executionHeader}><div><span>制作方案 {execution.data.snapshot?.snapshot_number ?? '-'}</span><h2>{label(execution.data.project_status, statusLabels, '制作状态待确认')}</h2></div><div><strong>{execution.data.work_items.filter(item => item.status === 'completed').length}/{execution.data.work_items.length}</strong><small>已完成步骤</small></div></header>
             {execution.data.project_status === 'blocked' && execution.data.snapshot?.status === 'execution_blocked' && <div className={styles.recoveryAction} data-confirming={confirmCloseBlocked}>
@@ -156,7 +179,7 @@ export function ProductionPage() {
                 {imagePhase && phase.status === 'review_required' && <div className={styles.phaseAction}><div><strong>图片已生成，等待逐项审核</strong><span>请验证文件、运行质量检查，并明确批准每个关键帧。</span></div><Link className="primaryButton" to={`/review?project=${projectId}`}>前往审核图片</Link></div>}
                 {imagePhase && phase.status === 'ready_to_release' && <div className={styles.phaseAction}><div><strong>{phase.approved_count} 张关键帧已全部批准</strong><span>确认后才会把视频和后续步骤放入生产队列，本操作不会修改工作流。</span></div><button className="primaryButton" disabled={approveImagePhase.isPending} onClick={() => approveImagePhase.mutate()}>{approveImagePhase.isPending ? '正在确认…' : '确认并开始视频制作'}</button></div>}
                 {imagePhase && phase.status === 'not_required' && <div className={styles.phaseNote}>当前方案全部为纯文本生视频，不需要图片审核门禁。</div>}
-                <PhaseWorkList items={items} phaseLabel={imagePhase ? '图片' : '后续步骤'} />
+                <PhaseWorkList items={items} phaseLabel={imagePhase ? '图片' : '后续步骤'} onRetry={setRetryChoice} />
               </section>
             })}
             {!execution.data.work_items.length && <div className={styles.executionEmpty}><ShieldCheck size={22} /><strong>快照已激活，尚未提交</strong><span>返回方案页进行独立的高风险生产提交确认。</span></div>}
@@ -166,5 +189,13 @@ export function ProductionPage() {
 
       <aside className={styles.notice}><strong>执行边界</strong><p>系统只使用制作方案中已确认的工作流。图片审核不会自动放行视频，也不会自动重做、替换生成方案或重复调用付费服务。</p></aside>
     </div>
+    {retryChoice && execution.data?.snapshot && <div className={styles.retryModal}>
+      <section>
+        <header><RotateCcw /><div><span>精确重跑</span><h2>重新执行 {retryChoice.node_key}</h2></div></header>
+        <p>系统将复用上次失败时冻结的工作流、节点映射和输入，不会修改提示词、切换供应商或更换工作流。</p>
+        <small>本操作会再次调用生成服务并产生该步骤的供应商费用。旧失败记录会完整保留。</small>
+        <footer><button className="secondaryButton" onClick={() => setRetryChoice(null)}>取消</button><button className="primaryButton" disabled={retryProductionWork.isPending} onClick={() => retryProductionWork.mutate(retryChoice)}>{retryProductionWork.isPending ? '正在提交…' : '确认费用并重跑'}</button></footer>
+      </section>
+    </div>}
   </>
 }

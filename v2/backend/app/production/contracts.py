@@ -100,6 +100,13 @@ class CloseBlockedProduction(ProductionCommand):
     confirm_return_to_production_preparation: bool
 
 
+class RetryProductionWork(ProductionCommand):
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    failed_attempt_id: str
+    expected_request_fingerprint: str = Field(min_length=64, max_length=64)
+    confirm_additional_cost: bool
+
+
 class BlockedProductionClosedRead(BaseModel):
     project_id: str
     project_status: str
@@ -215,6 +222,7 @@ class ExecutionWorkItemRead(BaseModel):
     status: str
     error: str | None
     priority: int
+    row_version: int
     request_fingerprint: str
     current_attempt_id: str
     available_at: datetime

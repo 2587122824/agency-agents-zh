@@ -195,6 +195,7 @@ from ..production.contracts import (
     ProductionPreparationView,
     ProductionPlanCandidateRead,
     ProductionSnapshotRead,
+    RetryProductionWork,
     SubmitProduction,
     RetryProductionPlanner,
 )
@@ -215,6 +216,7 @@ from ..production.service import (
     execution_view,
     lock_snapshot,
     preparation_view,
+    retry_production_work,
     submit_production,
 )
 from ..projects.service import (
@@ -771,6 +773,33 @@ def production_snapshot_close_blocked(
 ):
     try:
         return close_blocked_production(session, require_project(session, project_id), snapshot_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots/{snapshot_id}/work-items/{work_item_id}:retry",
+    response_model=ProductionExecutionView,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def production_work_item_retry(
+    project_id: str,
+    snapshot_id: str,
+    work_item_id: str,
+    payload: RetryProductionWork,
+    session: Session = Depends(get_session),
+):
+    try:
+        return retry_production_work(
+            session,
+            require_project(session, project_id),
+            snapshot_id,
+            work_item_id,
+            payload,
+        )
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProductionConflictError as exc:

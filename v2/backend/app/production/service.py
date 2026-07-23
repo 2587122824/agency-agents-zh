@@ -46,6 +46,7 @@ from .contracts import (
     CloseBlockedProduction,
     CreateProductionSnapshot,
     LockProductionSnapshot,
+    RetryProductionWork,
     ShotWorkflowAssignment,
     SubmitProduction,
 )
@@ -1311,6 +1312,161 @@ def approve_image_phase(
     return execution_view(session, project)
 
 
+def retry_production_work(
+    session: Session,
+    project: Project,
+    snapshot_id: str,
+    work_item_id: str,
+    payload: RetryProductionWork,
+) -> dict:
+    command_type = "production.work.retry"
+    receipt = _receipt(session, project.id, payload.command_id, command_type)
+    if receipt:
+        return execution_view(session, project)
+    repository = _production(session)
+    snapshot = repository.snapshot(snapshot_id)
+    if not snapshot or snapshot.project_id != project.id:
+        raise ProductionNotFoundError("Production snapshot not found")
+    if (
+        project.active_snapshot_id != snapshot.id
+        or project.status != "blocked"
+        or snapshot.status != "execution_blocked"
+    ):
+        raise ProductionConflictError(
+            "PRODUCTION_RETRY_SNAPSHOT_NOT_BLOCKED",
+            "只能重跑当前已暂停制作方案中的失败步骤。",
+        )
+    if snapshot.contract_hash != payload.expected_contract_hash:
+        raise ProductionConflictError(
+            "SNAPSHOT_CONTRACT_HASH_MISMATCH",
+            "制作方案合同已经变化，请刷新后重新确认。",
+        )
+    if not payload.confirm_additional_cost:
+        raise ProductionConflictError(
+            "PRODUCTION_RETRY_COST_CONFIRMATION_REQUIRED",
+            "请明确确认重跑该步骤会再次产生供应商调用费用。",
+        )
+
+    item = session.get(WorkItem, work_item_id)
+    if not item or item.project_id != project.id or item.snapshot_id != snapshot.id:
+        raise ProductionNotFoundError("Production work item not found")
+    if item.status != "blocked" or item.current_attempt_id != payload.failed_attempt_id:
+        raise ProductionConflictError(
+            "PRODUCTION_RETRY_WORK_NOT_CURRENT_FAILURE",
+            "只能重跑当前步骤最新一次明确失败的执行记录。",
+        )
+    failed = session.get(WorkAttempt, payload.failed_attempt_id)
+    if not failed or failed.work_item_id != item.id or failed.state != "blocked":
+        raise ProductionConflictError(
+            "PRODUCTION_RETRY_ATTEMPT_INVALID",
+            "指定的失败执行记录不存在或不是明确失败状态。",
+        )
+    if failed.error_code in {
+        "RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN",
+        "PROVIDER_SUBMISSION_RECONCILIATION_REQUIRED",
+    }:
+        raise ProductionConflictError(
+            "PRODUCTION_RETRY_RECONCILIATION_REQUIRED",
+            "该请求可能已经提交给供应商，必须先人工核对，不能直接重跑。",
+        )
+    if (
+        item.request_fingerprint != payload.expected_request_fingerprint
+        or failed.request_fingerprint != payload.expected_request_fingerprint
+        or item.payload != failed.request_manifest
+        or _hash(failed.request_manifest) != payload.expected_request_fingerprint
+    ):
+        raise ProductionConflictError(
+            "PRODUCTION_RETRY_REQUEST_CHANGED",
+            "失败步骤的冻结请求已经变化，不能重跑。",
+        )
+
+    existing_attempts = repository.work_attempts([item.id])
+    next_attempt_number = max(attempt.attempt_number for attempt in existing_attempts) + 1
+    attempt = WorkAttempt(
+        work_item_id=item.id,
+        attempt_number=next_attempt_number,
+        trigger="user_confirmed_retry",
+        provider=failed.provider,
+        request_fingerprint=failed.request_fingerprint,
+        request_manifest=failed.request_manifest,
+        state="created",
+    )
+    repository.add(attempt)
+    repository.flush()
+
+    node = repository.component(DAGNode, item.dag_node_id)
+    workflow = repository.workflow(node.workflow_slot_version_id) if node and node.workflow_slot_version_id else None
+    if not node or not workflow or node.estimated_cost is None or not snapshot.currency:
+        raise ProductionConflictError(
+            "PRODUCTION_RETRY_COST_NOT_CONFIGURED",
+            "该步骤没有可确认的重跑费用，不能提交。",
+        )
+    repository.add(CostEvent(
+        project_id=project.id,
+        snapshot_id=snapshot.id,
+        work_attempt_id=attempt.id,
+        provider=failed.provider,
+        provider_operation=workflow.slot_key,
+        kind="estimated",
+        amount=node.estimated_cost,
+        currency=snapshot.currency,
+        status="confirmed",
+    ))
+
+    now = utc_now()
+    item.status = "queued"
+    item.error = None
+    item.current_attempt_id = attempt.id
+    item.available_at = now
+    item.started_at = None
+    item.finished_at = None
+    item.row_version += 1
+    snapshot.status = "submitted"
+    transition_project(
+        session,
+        project,
+        ProjectStateTrigger.PRODUCTION_RETRY_AUTHORIZED,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        event_data={
+            "snapshot_id": snapshot.id,
+            "work_item_id": item.id,
+            "failed_attempt_id": failed.id,
+            "retry_attempt_id": attempt.id,
+        },
+    )
+    _save_receipt(
+        session,
+        project.id,
+        payload.command_id,
+        command_type,
+        "work_attempt",
+        attempt.id,
+    )
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=snapshot.id,
+        event_type="production.work_retry_authorized.v1",
+        aggregate_type="work_attempt",
+        aggregate_id=attempt.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
+        message="A single failed production work item was explicitly authorized for an exact retry.",
+        data={
+            "snapshot_id": snapshot.id,
+            "work_item_id": item.id,
+            "failed_attempt_id": failed.id,
+            "retry_attempt_id": attempt.id,
+            "request_fingerprint": attempt.request_fingerprint,
+            "estimated_cost": node.estimated_cost,
+            "currency": snapshot.currency,
+        },
+    ))
+    session.commit()
+    return execution_view(session, project)
+
+
 def close_blocked_production(
     session: Session,
     project: Project,
@@ -1474,6 +1630,7 @@ def execution_view(session: Session, project: Project) -> dict:
             "status": item.status,
             "error": item.error,
             "priority": item.priority,
+            "row_version": item.row_version,
             "request_fingerprint": item.request_fingerprint,
             "current_attempt_id": item.current_attempt_id,
             "available_at": item.available_at,

@@ -593,6 +593,7 @@ export interface ExecutionWorkItem {
   status: string
   error: string | null
   priority: number
+  row_version: number
   request_fingerprint: string
   current_attempt_id: string
   available_at: string

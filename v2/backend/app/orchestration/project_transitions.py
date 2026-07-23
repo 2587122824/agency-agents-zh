@@ -34,6 +34,7 @@ class ProjectStateTrigger(str, Enum):
     PRODUCTION_SUBMITTED = "production_submitted"
     PRODUCTION_PROGRESS = "production_progress"
     PRODUCTION_SETTLED = "production_settled"
+    PRODUCTION_RETRY_AUTHORIZED = "production_retry_authorized"
     BLOCKED_PRODUCTION_CLOSED = "blocked_production_closed"
     QUALITY_RECORDED = "quality_recorded"
     QUALITY_STAGE_APPROVED = "quality_stage_approved"
@@ -131,6 +132,9 @@ TRANSITION_RULES: Mapping[ProjectStateTrigger, Mapping[str, str]] = {
     },
     ProjectStateTrigger.PRODUCTION_SETTLED: {
         "producing": "quality_review",
+    },
+    ProjectStateTrigger.PRODUCTION_RETRY_AUTHORIZED: {
+        "blocked": "producing",
     },
     ProjectStateTrigger.BLOCKED_PRODUCTION_CLOSED: {
         "blocked": "contract_ready",

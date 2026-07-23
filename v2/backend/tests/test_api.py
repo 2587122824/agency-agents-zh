@@ -4501,6 +4501,82 @@ def test_project_control_exposes_exact_production_route_cost_and_blocker(client:
     assert after_ledger_read == before_ledger_read
 
 
+def test_user_can_exactly_retry_one_failed_production_work_item(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "retry-work-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "retry-work-submit-001",
+            "expected_contract_hash": activated["contract_hash"],
+            "expected_estimated_cost": activated["estimated_cost"],
+            "expected_currency": activated["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert process_one("retry-work-blocking-worker") is True
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    blocked = next(item for item in execution["work_items"] if item["status"] == "blocked")
+    failed = blocked["attempts"][-1]
+    payload = {
+        "command_id": "retry-work-command-001",
+        "actor_id": "local-user",
+        "expected_contract_hash": snapshot["contract_hash"],
+        "failed_attempt_id": failed["id"],
+        "expected_request_fingerprint": blocked["request_fingerprint"],
+        "confirm_additional_cost": True,
+    }
+
+    retried = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}"
+        f"/work-items/{blocked['id']}:retry",
+        json=payload,
+    )
+    assert retried.status_code == 202
+    result = retried.json()
+    assert result["project_status"] == "producing"
+    assert result["snapshot"]["status"] == "submitted"
+    target = next(item for item in result["work_items"] if item["id"] == blocked["id"])
+    assert target["status"] == "queued"
+    assert target["error"] is None
+    assert target["row_version"] == blocked["row_version"] + 1
+    assert len(target["attempts"]) == 2
+    retry_attempt = target["attempts"][-1]
+    assert retry_attempt["attempt_number"] == 2
+    assert retry_attempt["trigger"] == "user_confirmed_retry"
+    assert retry_attempt["state"] == "created"
+    assert retry_attempt["request_fingerprint"] == failed["request_fingerprint"]
+    assert retry_attempt["request_manifest"] == failed["request_manifest"]
+    assert target["current_attempt_id"] == retry_attempt["id"]
+
+    repeated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}"
+        f"/work-items/{blocked['id']}:retry",
+        json=payload,
+    )
+    assert repeated.status_code == 202
+    repeated_target = next(item for item in repeated.json()["work_items"] if item["id"] == blocked["id"])
+    assert len(repeated_target["attempts"]) == 2
+
+    with SessionLocal() as session:
+        old_attempt = session.get(WorkAttempt, failed["id"])
+        assert old_attempt.state == "blocked"
+        retry_cost = session.scalar(select(CostEvent).where(
+            CostEvent.work_attempt_id == retry_attempt["id"],
+        ))
+        assert retry_cost is not None
+        assert retry_cost.status == "confirmed"
+        assert retry_cost.amount > 0
+        assert any(
+            event.event_type == "production.work_retry_authorized.v1"
+            for event in session.scalars(select(ProjectEvent).where(ProjectEvent.project_id == project["id"]))
+        )
+
+
 def test_asset_registration_verification_qc_and_human_approval_are_explicit(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client)
     activated = client.post(
