@@ -386,7 +386,20 @@ def process_one(
         attempt = repository.attempt(selected.current_attempt_id)
         if not attempt or attempt.state != "created" or attempt.request_fingerprint != selected.request_fingerprint:
             return False
-        if not repository.claim(selected, now):
+        selected_manifest = attempt.request_manifest or {}
+        selected_adapter = adapters.resolve(selected_manifest.get("adapter_kind"), selected.kind)
+        provider = selected_manifest.get("provider") or {}
+        max_concurrency = provider.get("max_concurrency")
+        if isinstance(selected_adapter, ExternalProviderAdapter) and isinstance(max_concurrency, int):
+            claimed = repository.claim_with_provider_capacity(
+                selected,
+                now,
+                str(selected_manifest.get("provider_key") or attempt.provider),
+                max_concurrency,
+            )
+        else:
+            claimed = repository.claim(selected, now)
+        if not claimed:
             session.rollback()
             return False
         attempt.state = "running"

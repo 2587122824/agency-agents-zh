@@ -4138,6 +4138,35 @@ class FakeRejectedExternalAdapter(FakePersistedExternalAdapter):
         )
 
 
+class FakeCapacityExternalAdapter(FakePersistedExternalAdapter):
+    adapter_kind = "fake_external"
+
+    def submit(self, request: ProviderExecutionRequest) -> ProviderSubmission:
+        self.submit_count += 1
+        return ProviderSubmission(
+            f"capacity-task-{self.submit_count}",
+            {"schema_version": "fake-submission.v1"},
+        )
+
+    def poll(self, request: ProviderExecutionRequest, provider_task_id: str) -> ProviderPollResult:
+        assert provider_task_id.startswith("capacity-task-")
+        self.poll_count += 1
+        if self.poll_count == 1:
+            return ProviderPollResult("running", {"schema_version": "fake-poll.v1", "remote_status": "RUNNING"})
+        return ProviderPollResult("succeeded", {
+            "schema_version": "provider-response.v1",
+            "media_created": True,
+            "outputs": [{
+                "uri": f"runtime://assets/providers/fake/{provider_task_id}.png",
+                "storage_backend": "local",
+                "asset_type": "image",
+                "role": "provider_output",
+                "mime_type": "image/png",
+                "content_hash": "b" * 64,
+            }],
+        })
+
+
 def test_external_worker_persists_task_id_and_resumes_poll_without_resubmit(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
     activated = client.post(
@@ -4185,6 +4214,71 @@ def test_external_worker_persists_task_id_and_resumes_poll_without_resubmit(clie
         item = session.get(WorkItem, attempt.work_item_id)
         assert attempt.state == "completed"
         assert item.status == "completed"
+
+
+def test_external_worker_waits_for_provider_capacity_before_submitting_next_item(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="fake_external")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "capacity-activate-command", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "capacity-submit-command",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    adapter = FakeCapacityExternalAdapter()
+    registry = ProviderAdapterRegistry((adapter,))
+
+    assert process_one("capacity-worker-first", registry) is True
+    assert adapter.submit_count == 1
+    assert process_one("capacity-worker-full", registry) is False
+    assert adapter.submit_count == 1
+    with SessionLocal() as session:
+        image_items = list(session.scalars(
+            select(WorkItem)
+            .where(
+                WorkItem.snapshot_id == snapshot["id"],
+                WorkItem.kind == "generate_keyframe",
+            )
+            .order_by(WorkItem.priority, WorkItem.created_at, WorkItem.id)
+        ))
+        assert [item.status for item in image_items].count("in_progress") == 1
+        assert [item.status for item in image_items].count("queued") == 2
+        active = next(item for item in image_items if item.status == "in_progress")
+        active.available_at = active.created_at
+        session.commit()
+
+    assert process_one("capacity-worker-poll-running", registry) is True
+    assert process_one("capacity-worker-still-full", registry) is False
+    assert adapter.submit_count == 1
+    with SessionLocal() as session:
+        active = session.scalar(select(WorkItem).where(
+            WorkItem.snapshot_id == snapshot["id"],
+            WorkItem.kind == "generate_keyframe",
+            WorkItem.status == "in_progress",
+        ))
+        assert active is not None
+        active.available_at = active.created_at
+        session.commit()
+
+    assert process_one("capacity-worker-poll-complete", registry) is True
+    assert process_one("capacity-worker-next", registry) is True
+    assert adapter.submit_count == 2
+    with SessionLocal() as session:
+        image_statuses = list(session.scalars(select(WorkItem.status).where(
+            WorkItem.snapshot_id == snapshot["id"],
+            WorkItem.kind == "generate_keyframe",
+        )))
+        assert image_statuses.count("completed") == 1
+        assert image_statuses.count("in_progress") == 1
+        assert image_statuses.count("queued") == 1
 
 
 def test_external_worker_persists_explicit_submission_rejection_evidence_without_retry(

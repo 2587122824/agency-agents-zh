@@ -561,6 +561,14 @@ class WorkRepository(Protocol):
 
     def claim(self, item: WorkItem, started_at: datetime) -> bool: ...
 
+    def claim_with_provider_capacity(
+        self,
+        item: WorkItem,
+        started_at: datetime,
+        provider_key: str,
+        max_concurrency: int,
+    ) -> bool: ...
+
     def claim_attempt(self, attempt: WorkAttempt, owner: str, expires_at: datetime, now: datetime) -> bool: ...
 
     def work_item(self, work_item_id: str) -> WorkItem | None: ...

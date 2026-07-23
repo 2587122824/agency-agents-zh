@@ -66,14 +66,14 @@
 
 | 能力 | 状态 | 权威证据与缺口 |
 |---|---|---|
-| Worker 幂等、指纹与执行租约 | 已完成 | WorkItem/WorkAttempt 唯一约束、租约、依赖阻断测试；历史本地验证遇到非法项目状态时明确阻断该任务，不终止 Worker 或伪造成功 |
+| Worker 幂等、指纹、执行租约与供应商并发 | 已完成 | WorkItem/WorkAttempt 唯一约束、租约、依赖阻断测试；外部任务领取以数据库原子条件执行冻结 `max_concurrency`，同 `provider_key` 容量已满时保持排队，释放后再提交，不把限流实现成自动重试；历史本地验证遇到非法项目状态时明确阻断该任务，不终止 Worker 或伪造成功 |
 | 素材生命周期与确定性 QC | 已完成 | Asset/QCReport/QCFinding、文件探测、哈希与引用检查 |
 | 人工审核 | 已完成 | 明确批准/拒绝命令、审核依据和审核页面 |
 | 成品反馈回改 | 已完成 | `AssetRevisionRequest`、迁移 `20260720_27`、素材/快照/方案/镜头精确追溯和 `storyboard / production / editing` 用户分类已实现。分镜问题创建不可直接确认的 `revision_draft`，人工 Patch 或显式导演调用后才形成候选；确认新方案后旧方案、快照和素材保留为历史，项目回到制作准备。历史方案素材不能直接新建分镜回改；开放请求支持显式取消并保留完整证据。生成与剪辑问题只登记并导航，不自动重做、替换或产生费用 |
 | 成本账本 | 已完成 | `CostEvent`、估算与实际费用分离 |
 | 时间线合同与确认 | 已完成 | Timeline/TimelineItem、验证、版本修订、确认和剪辑页 |
 | 最终交付验证 | 已完成 | `v2.delivery-request.v2`、DeliveryAttempt、外部上传、本机 FFmpeg 合成、真实 MP4 验证与完成条件。用户显式选择交付方式；本机方式冻结执行环境与编码参数，创建独立 `render_delivery` WorkItem/WorkAttempt，执行前复验素材文件哈希，成功只登记待验证 Asset。失败不自动重试或切换上传方式 |
-| RunningHub Provider | 部分完成 | 图片、首帧视频和纯文本视频 Adapter、严格 NodeInfoList、`production-work-request.v3`、单父图片、无父图 T2V、显式主参考附件上传、提交任务号持久化、重启轮询恢复与确定性本地下载已用假传输验证。V2 创建、查询和上传统一使用 `Authorization: Bearer`，创建正文不再携带旧式 `apiKey`。提交响应已区分明确业务拒绝与结果未知；明确拒绝仅保存白名单内的供应商错误证据，416 显示余额不足，433 显示工作流参数拒绝，Worker 不自动重试。历史缺失原始响应的记录不回填，文件篡改在联网前阻断。真实外部生产已授权并配置凭据，仍需用户显式重跑选中任务完成真实端到端验收 |
+| RunningHub Provider | 部分完成 | 图片、首帧视频和纯文本视频 Adapter、严格 NodeInfoList、`production-work-request.v3`、单父图片、无父图 T2V、显式主参考附件上传、提交任务号持久化、重启轮询恢复与确定性本地下载已用假传输验证。V2 创建、查询和上传统一使用 `Authorization: Bearer`，创建正文不再携带旧式 `apiKey`。真实任务 `2080307057889857538` 已验证 Bearer 鉴权、提交、轮询、下载成功；同批其余任务暴露 API 队列上限后，Worker 已改为提交前原子执行冻结 `max_concurrency`。明确业务拒绝与结果未知继续分别留证，Worker 不自动重试；历史缺失响应不回填，文件篡改在联网前阻断 |
 | CosyVoice Provider | 未开始，需确认 | 尚未接入 V2；真实调用、声音复刻与临时公网音频仍需单独确认 |
 | OSS 临时音频上传 | 未开始，需确认 | 涉及真实存储凭据、生命周期和外部网络调用 |
 | FFmpeg 本地合成 | 已完成 | `V2_FFMPEG_PATH` 只读环境连接、版本与 `libx264` 准备检查、连续主视频轨 `trim/scale/crop/fps/concat`、`libx264` 输出、工作尝试与失败证据已实现。首期不支持音频、字幕、空位、变速或非 `cover` 变换；失败后没有重试、替换方式或隐藏降级 |

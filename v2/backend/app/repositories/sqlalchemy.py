@@ -1281,6 +1281,46 @@ class SqlAlchemyWorkRepository:
         )
         return claimed.rowcount == 1
 
+    def claim_with_provider_capacity(
+        self,
+        item: WorkItem,
+        started_at: datetime,
+        provider_key: str,
+        max_concurrency: int,
+    ) -> bool:
+        active_item = WorkItem.__table__.alias("active_provider_work_item")
+        active_attempt = WorkAttempt.__table__.alias("active_provider_work_attempt")
+        active_count = (
+            select(func.count(active_item.c.id))
+            .select_from(
+                active_item.join(
+                    active_attempt,
+                    active_attempt.c.id == active_item.c.current_attempt_id,
+                )
+            )
+            .where(
+                active_item.c.status == "in_progress",
+                active_attempt.c.provider == provider_key,
+            )
+            .scalar_subquery()
+        )
+        claimed = self.session.execute(
+            update(WorkItem)
+            .where(
+                WorkItem.id == item.id,
+                WorkItem.status == "queued",
+                WorkItem.row_version == item.row_version,
+                active_count < max_concurrency,
+            )
+            .values(
+                status="in_progress",
+                started_at=started_at,
+                row_version=item.row_version + 1,
+                updated_at=started_at,
+            )
+        )
+        return claimed.rowcount == 1
+
     def claim_attempt(self, attempt: WorkAttempt, owner: str, expires_at: datetime, now: datetime) -> bool:
         claimed = self.session.execute(
             update(WorkAttempt)

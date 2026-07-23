@@ -48,6 +48,7 @@ SQLAlchemy / SQLite / Alembic
 ### 2.3 Worker
 
 - 只领取已持久化且依赖满足的 `WorkItem`。
+- 外部任务领取与冻结供应商 `max_concurrency` 校验在同一数据库原子更新中完成；同 `provider_key` 活跃容量已满时保持排队。
 - 使用冻结的 `WorkRequest`、Provider、工作流和输入资产。
 - 提交成功后持久化精确 Provider 任务 ID，再轮询该任务。
 - 未知提交结果进入明确阻断，不重新提交。
@@ -120,6 +121,7 @@ ProductionSnapshot
 
 - DAG 节点和依赖是执行顺序权威，不按名称或创建时间推断。
 - WorkAttempt 冻结实际 Provider、工作流、参数、输入和请求指纹。
+- Provider 并发容量由 `in_progress WorkItem + current WorkAttempt.provider` 计算；领取条件原子限制活跃数小于冻结 `max_concurrency`，避免单 Worker 连续提交或多 Worker 竞争突破上限。
 - 单工作项精确重跑只创建新的 WorkAttempt，必须复用原请求清单与指纹并单独记账；旧尝试不可修改，结果未知的供应商提交不可重跑。
 - Asset 必须经过真实文件验证和质量审核后才能进入剪辑。
 - 质量审核的确定性检查、智能体候选与人工决定分别持久化。`QCReportCandidate` 不能改变素材批准状态；人工决定落账时才形成权威 `QCReport`。当前多模态合同只授权图片理解，视频与音频保持显式人工审核。
@@ -195,6 +197,7 @@ draft
 - API Key 不进入 Git、错误消息或供应商失败证据；当前数据库明文边界不适用于多用户或公网部署。
 - RunningHub V2 的 JSON 请求和媒体上传统一使用 `Authorization: Bearer <API_KEY>`；创建任务正文不包含 `apiKey`，避免把 V1 鉴权格式带入 V2 接口。
 - RunningHub 只接受严格 NodeInfoList 与声明的结构化来源。
+- `max_concurrency` 是 Worker 的提交前调度约束，不是供应商拒绝后的重试次数；容量不足时任务保留 `queued`，不会调用 RunningHub。
 - Provider 能力标签必须能指向该 Provider 官方 API 的明确请求字段、响应字段或独立端点；模型名称、宣传能力或“OpenAI-compatible”本身不能证明支持图片、音频或视频输入。
 - Provider 或配置不兼容时明确阻断，不切换供应商或工作流。
 - 外部生产执行由独立环境授权控制，默认关闭。

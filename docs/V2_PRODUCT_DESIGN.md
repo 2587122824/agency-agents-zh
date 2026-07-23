@@ -448,6 +448,8 @@ skipped
 
 DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表示缺失不会阻断该节点，不代表系统可以寻找替代输入；任何替换都必须建模为新的用户决策和新快照。完整约束见 [V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)。
 
+外部供应商工作项还必须服从冻结供应商配置的 `max_concurrency`。Worker 领取任务时由数据库在同一原子条件中统计该 `provider_key` 当前 `in_progress` 工作项；容量已满时候选继续保持 `queued`，不创建新 Attempt、不记录失败、不产生额外费用事件。已有任务完成或明确失败并释放容量后，下一项才允许被领取。并发等待属于正常队列调度，不得实现为先提交、收到“队列已满”后自动重试。
+
 ## 13. 分阶段生产
 
 首期视觉生产采用两个真实执行阶段：
@@ -1081,6 +1083,7 @@ preparing -> locked -> active -> submitted -> execution_completed | execution_bl
 - `active` 只表示该快照成为项目唯一活动快照，仍不创建 WorkItem。
 - `submitted` 必须再次提交精确合同哈希、金额、币种和完整 DAG 节点 ID；随后一对一创建 WorkItem 与首个 WorkAttempt。
 - 包含关键帧节点时，`submitted` 只放行图片 WorkItem；其余 WorkItem 使用 `waiting_phase` 等待图片阶段显式确认。图片阶段确认清单冻结节点、素材和内容哈希，且每个图片节点必须恰好对应一份已批准素材。
+- 每次领取外部供应商工作项必须原子校验冻结 Provider 的 `max_concurrency`；容量不足时工作项继续排队，不能先提交后把供应商限流当作自动重试信号。
 - 节点 ID 缺失、重复或额外添加均阻断，不做名称猜测或部分提交。
 - 首期 Worker 只执行明确配置为 `mock` 的适配器和本地时间线合同节点。其他适配器返回 `PROVIDER_ADAPTER_NOT_CONNECTED`，不发送网络请求。
 - Mock 响应只证明编排路径可执行，不伪造图片、视频、音频、供应商任务 ID 或实际扣费。

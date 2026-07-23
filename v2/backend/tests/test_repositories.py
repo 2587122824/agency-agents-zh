@@ -1535,6 +1535,74 @@ def test_work_repository_contract_preserves_candidate_order_dependencies_and_ato
         engine.dispose()
 
 
+def test_work_repository_claim_enforces_provider_capacity_atomically() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine, expire_on_commit=False) as session:
+            repository = SqlAlchemyWorkRepository(session)
+            now = utc_now()
+            active = WorkItem(
+                project_id="project-active",
+                snapshot_id="snapshot-active",
+                kind="generate_keyframe",
+                payload={},
+                status="in_progress",
+                request_fingerprint="a" * 64,
+                available_at=now,
+            )
+            waiting = WorkItem(
+                project_id="project-waiting",
+                snapshot_id="snapshot-waiting",
+                kind="generate_keyframe",
+                payload={},
+                status="queued",
+                request_fingerprint="b" * 64,
+                available_at=now,
+            )
+            session.add_all([active, waiting])
+            session.flush()
+            active_attempt = WorkAttempt(
+                work_item_id=active.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="runninghub",
+                request_fingerprint=active.request_fingerprint,
+                request_manifest={},
+                state="submitted",
+            )
+            waiting_attempt = WorkAttempt(
+                work_item_id=waiting.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="runninghub",
+                request_fingerprint=waiting.request_fingerprint,
+                request_manifest={},
+                state="created",
+            )
+            session.add_all([active_attempt, waiting_attempt])
+            session.flush()
+            active.current_attempt_id = active_attempt.id
+            waiting.current_attempt_id = waiting_attempt.id
+            session.commit()
+
+            assert repository.claim_with_provider_capacity(waiting, now, "runninghub", 1) is False
+            session.rollback()
+            assert repository.work_item(waiting.id).status == "queued"  # type: ignore[union-attr]
+
+            active.status = "completed"
+            session.commit()
+            assert repository.claim_with_provider_capacity(waiting, now, "runninghub", 1) is True
+            session.commit()
+            assert repository.work_item(waiting.id).status == "in_progress"  # type: ignore[union-attr]
+    finally:
+        engine.dispose()
+
+
 def test_configuration_repository_contract_preserves_versions_history_and_scoped_deletion() -> None:
     engine = create_engine(
         "sqlite://",
