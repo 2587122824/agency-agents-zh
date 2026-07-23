@@ -4086,7 +4086,7 @@ def test_image_phase_requires_exact_approved_assets_before_releasing_video(clien
 
 
 class FakePersistedExternalAdapter:
-    adapter_kind = "runninghub"
+    adapter_kind = "fake_external"
     display_name = "Fake RunningHub"
     external = True
     execution_enabled = True
@@ -4109,21 +4109,12 @@ class FakePersistedExternalAdapter:
         self.poll_count += 1
         if self.poll_count == 1:
             return ProviderPollResult("running", {"schema_version": "fake-poll.v1", "remote_status": "RUNNING"})
-        return ProviderPollResult("succeeded", {
-            "schema_version": "provider-response.v1",
-            "media_created": True,
-            "outputs": [{
-                "uri": "runtime://assets/providers/fake/output.png",
-                "storage_backend": "local",
-                "asset_type": "image",
-                "role": "provider_output",
-                "mime_type": "image/png",
-                "content_hash": "a" * 64,
-            }],
-        })
+        return ProviderPollResult("succeeded", fake_provider_response(provider_task_id))
 
 
 class FakeRejectedExternalAdapter(FakePersistedExternalAdapter):
+    adapter_kind = "runninghub"
+
     def submit(self, request: ProviderExecutionRequest) -> ProviderSubmission:
         self.submit_count += 1
         raise ProviderAdapterError(
@@ -4136,6 +4127,27 @@ class FakeRejectedExternalAdapter(FakePersistedExternalAdapter):
                 "message": "TASK_CREATE_FAILED_BY_NOT_ENOUGH_WALLET",
             },
         )
+
+
+def fake_provider_response(provider_task_id: str) -> dict:
+    content = solid_png(480, 848)
+    relative = f"providers/fake/{provider_task_id}.png"
+    path = TEST_RUNTIME / "assets" / "providers" / "fake" / f"{provider_task_id}.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    return {
+        "schema_version": "provider-response.v1",
+        "media_created": True,
+        "outputs": [{
+            "uri": f"runtime://assets/{relative}",
+            "storage_backend": "local",
+            "asset_type": "image",
+            "role": "provider_output",
+            "mime_type": "image/png",
+            "content_hash": hashlib.sha256(content).hexdigest(),
+            "byte_size": len(content),
+        }],
+    }
 
 
 class FakeCapacityExternalAdapter(FakePersistedExternalAdapter):
@@ -4153,22 +4165,11 @@ class FakeCapacityExternalAdapter(FakePersistedExternalAdapter):
         self.poll_count += 1
         if self.poll_count == 1:
             return ProviderPollResult("running", {"schema_version": "fake-poll.v1", "remote_status": "RUNNING"})
-        return ProviderPollResult("succeeded", {
-            "schema_version": "provider-response.v1",
-            "media_created": True,
-            "outputs": [{
-                "uri": f"runtime://assets/providers/fake/{provider_task_id}.png",
-                "storage_backend": "local",
-                "asset_type": "image",
-                "role": "provider_output",
-                "mime_type": "image/png",
-                "content_hash": "b" * 64,
-            }],
-        })
+        return ProviderPollResult("succeeded", fake_provider_response(provider_task_id))
 
 
 def test_external_worker_persists_task_id_and_resumes_poll_without_resubmit(client: TestClient) -> None:
-    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    project, snapshot = create_locked_snapshot(client, adapter_kind="fake_external")
     activated = client.post(
         f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
         json={"command_id": "external-persist-activate", "expected_contract_hash": snapshot["contract_hash"]},
@@ -4214,6 +4215,17 @@ def test_external_worker_persists_task_id_and_resumes_poll_without_resubmit(clie
         item = session.get(WorkItem, attempt.work_item_id)
         assert attempt.state == "completed"
         assert item.status == "completed"
+        asset = session.scalar(select(Asset).where(Asset.work_attempt_id == attempt.id))
+        assert asset is not None
+        assert asset.state == "verified"
+        assert asset.content_hash == attempt.response_manifest["outputs"][0]["content_hash"]
+        assert (asset.width, asset.height) == (480, 848)
+    quality = client.get(f"/api/v1/projects/{project['id']}/quality-review").json()
+    registered = next(asset for asset in quality["assets"] if asset["work_attempt_id"] == attempt.id)
+    assert registered["state"] == "verified"
+    assert registered["content_hash"]
+    assert registered["width"] == 480
+    assert registered["height"] == 848
 
 
 def test_external_worker_waits_for_provider_capacity_before_submitting_next_item(client: TestClient) -> None:

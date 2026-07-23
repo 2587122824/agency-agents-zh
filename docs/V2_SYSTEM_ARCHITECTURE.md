@@ -122,6 +122,7 @@ ProductionSnapshot
 - DAG 节点和依赖是执行顺序权威，不按名称或创建时间推断。
 - WorkAttempt 冻结实际 Provider、工作流、参数、输入和请求指纹。
 - Provider 并发容量由 `in_progress WorkItem + current WorkAttempt.provider` 计算；领取条件原子限制活跃数小于冻结 `max_concurrency`，避免单 Worker 连续提交或多 Worker 竞争突破上限。
+- Provider 返回成功媒体清单后，Worker 在提交完成态前原子登记并确定性验证全部输出 Asset；任一输出文件或清单无效时整项阻断，不留下部分登记。成功 Asset 为 `verified`，内容审核与批准仍由质量阶段负责。
 - 单工作项精确重跑只创建新的 WorkAttempt，必须复用原请求清单与指纹并单独记账；旧尝试不可修改，结果未知的供应商提交不可重跑。
 - Asset 必须经过真实文件验证和质量审核后才能进入剪辑。
 - 质量审核的确定性检查、智能体候选与人工决定分别持久化。`QCReportCandidate` 不能改变素材批准状态；人工决定落账时才形成权威 `QCReport`。当前多模态合同只授权图片理解，视频与音频保持显式人工审核。

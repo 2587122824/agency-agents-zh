@@ -1123,7 +1123,9 @@ GET  /api/v1/projects/{project_id}/production-execution
 }
 ```
 
-后端按精确 `output_index` 登记 `created` Asset，并再次校验整个响应清单哈希。随后：
+正常供应商生产路径在同一次 Worker 完成事务中按精确 `output_index` 登记 Asset，并立即读取本地文件完成 SHA-256、MIME、尺寸、时长和存储策略验证；全部输出验证通过后才同时提交 WorkItem 完成与 `verified` Asset。任一输出缺失、损坏或与响应清单不一致时，工作项明确阻断且不创建部分素材。该自动步骤不调用模型、不审核内容、不产生供应商费用，也不把素材标记为已批准。
+
+显式素材登记 API 仍用于已经完成但尚未进入素材生命周期的明确输出；它再次校验整个响应清单哈希，先创建 `created` Asset，再由确定性验证命令推进。两条路径都不信任前端传入的文件事实。随后：
 
 1. `VerifyAsset` 读取真实文件、计算 SHA-256、探测 MIME、尺寸和时长；不信任前端或适配器传入的文件事实。
 2. 文件缺失、哈希不符、媒体损坏或 MIME 不符会产生持久化 `blocked` QC 证据、归档 Asset 并阻断对应 WorkItem。
@@ -1132,7 +1134,7 @@ GET  /api/v1/projects/{project_id}/production-execution
 5. `ApproveAsset` 与 `RejectAsset` 必须记录审核依据、审核人和 QCReport；拒绝只归档，不创建重试。
 6. Mock 响应的 `media_created=false` 无法登记为素材，审核页明确显示模拟执行没有媒体结果。
 
-审核页面按项目展示真实素材、文件规格、内容哈希、QC findings、人工决定和受影响的下游 DAG 节点。只有每个必需媒体节点至少存在一个 `approved` 或 `used` 素材时，质量阶段才可进入剪辑。
+制作页面按 `dag_node_id` 将已验证 Asset 精确关联回对应完成步骤，直接展示稳定尺寸的图片或视频缩略预览；点击预览进入审核页。没有 Asset 时只显示明确占位，不从文件名、节点名称或响应文案猜测关联。审核页面按项目展示真实素材、文件规格、内容哈希、QC findings、人工决定和受影响的下游 DAG 节点。只有每个必需媒体节点至少存在一个 `approved` 或 `used` 素材时，质量阶段才可进入剪辑。
 
 ## 33. 时间线剪辑合同实现边界
 

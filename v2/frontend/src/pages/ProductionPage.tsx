@@ -1,10 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle2, Clock3, GitBranch, Layers3, RefreshCw, RotateCcw, ShieldCheck, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Clock3, Film, GitBranch, Image as ImageIcon, Layers3, RefreshCw, RotateCcw, ShieldCheck, X } from 'lucide-react'
 import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { ExecutionWorkItem, ProductionExecution } from '../api/types'
+import type { ExecutionWorkItem, ProductionAsset, ProductionExecution } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import { blockerPresentation } from '../presentation/projectFacts'
 import styles from './StagePage.module.css'
@@ -52,15 +52,26 @@ function blockerReason(group: { errorCode: string | null; blockers: Blocker[] },
   return reasons.size === 1 ? [...reasons][0] : fallback
 }
 
-function PhaseWorkList({ items, phaseLabel, onRetry }: {
+function PhaseWorkList({ items, phaseLabel, assets, projectId, onRetry }: {
   items: ProductionExecution['work_items']
   phaseLabel: string
+  assets: ProductionAsset[]
+  projectId: string
   onRetry: (item: ExecutionWorkItem) => void
 }) {
   return <div className={styles.workList}>{items.map((item, index) => {
     const attempt = item.attempts.at(-1)
+    const asset = assets.find(candidate => candidate.dag_node_id === item.dag_node_id && !['archived', 'deleted'].includes(candidate.state))
+    const mediaUrl = asset ? `/api/v1/projects/${projectId}/assets/${asset.id}/content` : ''
     return <article key={item.id} data-status={item.status}>
       <span className={styles.nodeState}>{item.status === 'completed' ? <CheckCircle2 /> : item.status === 'blocked' ? <AlertTriangle /> : <Clock3 />}</span>
+      <Link className={styles.workPreview} to={asset ? `/review?project=${projectId}` : '#'} aria-disabled={!asset} title={asset ? '查看并审核素材' : '素材尚未登记'}>
+        {asset?.asset_type === 'image' && asset.content_hash
+          ? <img src={mediaUrl} alt={`${item.node_key} 预览`} />
+          : asset?.asset_type === 'video' && asset.content_hash
+            ? <video src={mediaUrl} muted preload="metadata" />
+            : item.kind === 'generate_keyframe' ? <ImageIcon /> : <Film />}
+      </Link>
       <div className={styles.nodeMain}><strong>{phaseLabel} {index + 1} · {label(item.kind, kindLabels, '制作素材')}</strong><span>{item.status === 'blocked' ? blockerPresentation(attempt?.error_code ?? '').title : label(attempt?.state === 'created' && item.status === 'waiting_phase' ? item.status : attempt?.state ?? item.status, statusLabels, '等待更新')}</span><details><summary>技术详情</summary><code>{item.node_key} · {item.kind} · {item.request_fingerprint.slice(0, 16)} · {attempt?.provider ?? 'NO_PROVIDER'}</code>{attempt?.error_detail && <p>{attempt.error_detail}</p>}{attempt?.response_manifest && <pre>{JSON.stringify(attempt.response_manifest, null, 2)}</pre>}</details></div>
       <div className={styles.attempt}><small>第 {attempt?.attempt_number ?? 0} 次执行</small><strong>{label(attempt?.state === 'created' && item.status === 'waiting_phase' ? item.status : attempt?.state ?? item.status, statusLabels, '等待更新')}</strong><span>{attempt?.provider ? '已指定生成服务' : '尚未指定服务'}</span></div>
       {item.status === 'blocked'
@@ -85,10 +96,19 @@ export function ProductionPage() {
     enabled: Boolean(projectId),
     refetchInterval: query => query.state.data?.work_items.some(item => activelyUpdating.has(item.status)) ? 2000 : false,
   })
+  const quality = useQuery({
+    queryKey: ['quality-review', projectId],
+    queryFn: () => api.qualityReview(projectId),
+    enabled: Boolean(projectId),
+    refetchInterval: 5000,
+  })
   const revision = useQuery({ queryKey: ['asset-revision-request', projectId, revisionRequestId], queryFn: () => api.assetRevisionRequest(projectId, revisionRequestId), enabled: Boolean(projectId && revisionRequestId) })
   const refresh = () => {
     client.invalidateQueries({ queryKey: ['projects'] })
-    if (projectId) client.invalidateQueries({ queryKey: ['production-execution', projectId] })
+    if (projectId) {
+      client.invalidateQueries({ queryKey: ['production-execution', projectId] })
+      client.invalidateQueries({ queryKey: ['quality-review', projectId] })
+    }
   }
   const approveImagePhase = useMutation({
     mutationFn: () => api.approveImagePhase(projectId, execution.data!),
@@ -179,7 +199,7 @@ export function ProductionPage() {
                 {imagePhase && phase.status === 'review_required' && <div className={styles.phaseAction}><div><strong>图片已生成，等待逐项审核</strong><span>请验证文件、运行质量检查，并明确批准每个关键帧。</span></div><Link className="primaryButton" to={`/review?project=${projectId}`}>前往审核图片</Link></div>}
                 {imagePhase && phase.status === 'ready_to_release' && <div className={styles.phaseAction}><div><strong>{phase.approved_count} 张关键帧已全部批准</strong><span>确认后才会把视频和后续步骤放入生产队列，本操作不会修改工作流。</span></div><button className="primaryButton" disabled={approveImagePhase.isPending} onClick={() => approveImagePhase.mutate()}>{approveImagePhase.isPending ? '正在确认…' : '确认并开始视频制作'}</button></div>}
                 {imagePhase && phase.status === 'not_required' && <div className={styles.phaseNote}>当前方案全部为纯文本生视频，不需要图片审核门禁。</div>}
-                <PhaseWorkList items={items} phaseLabel={imagePhase ? '图片' : '后续步骤'} onRetry={setRetryChoice} />
+                <PhaseWorkList items={items} phaseLabel={imagePhase ? '图片' : '后续步骤'} assets={quality.data?.assets ?? []} projectId={projectId} onRetry={setRetryChoice} />
               </section>
             })}
             {!execution.data.work_items.length && <div className={styles.executionEmpty}><ShieldCheck size={22} /><strong>快照已激活，尚未提交</strong><span>返回方案页进行独立的高风险生产提交确认。</span></div>}

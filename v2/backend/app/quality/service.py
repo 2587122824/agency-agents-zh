@@ -24,6 +24,8 @@ from ..db.models import (
     QCReport,
     QCReportCandidate,
     StoragePolicyVersion,
+    WorkAttempt,
+    WorkItem,
     utc_now,
 )
 from ..repositories import (
@@ -240,6 +242,141 @@ def probe_media(path: Path, declared_type: str) -> dict:
 
 def storage_policy_for_snapshot(session: Session, snapshot_id: str) -> StoragePolicyVersion:
     return _storage_policy(session, snapshot_id)
+
+
+def register_verified_attempt_outputs(
+    session: Session,
+    project: Project,
+    item: WorkItem,
+    attempt: WorkAttempt,
+    actor_id: str,
+) -> list[Asset]:
+    if attempt.state != "completed" or not attempt.response_manifest:
+        raise QualityConflictError(
+            "ATTEMPT_OUTPUT_NOT_COMPLETE",
+            "Only a completed attempt with a response manifest can register verified assets.",
+        )
+    outputs = attempt.response_manifest.get("outputs")
+    if attempt.response_manifest.get("media_created") is not True or not isinstance(outputs, list) or not outputs:
+        raise QualityConflictError(
+            "ATTEMPT_CREATED_NO_MEDIA",
+            "The completed provider attempt did not declare any media outputs.",
+        )
+    repository = _quality(session)
+    policy = _storage_policy(session, item.snapshot_id)
+    node = repository.dag_node(item.dag_node_id)
+    expected_media_type = node.output_contract.get("media_type") if node else None
+    mapped_type = "project_file" if expected_media_type == "timeline" else expected_media_type
+    verified_outputs: list[tuple[int, dict, dict, str, int]] = []
+    required = {"uri", "storage_backend", "asset_type", "role", "mime_type", "content_hash"}
+
+    for output_index, output in enumerate(outputs):
+        if not isinstance(output, dict) or required - output.keys():
+            raise QualityConflictError(
+                "PROVIDER_OUTPUT_MANIFEST_INVALID",
+                "Provider output manifest is missing required asset fields.",
+            )
+        if repository.asset_for_output(attempt.id, output_index):
+            raise QualityConflictError(
+                "ATTEMPT_OUTPUT_ALREADY_REGISTERED",
+                "This provider output index is already registered.",
+            )
+        if output["storage_backend"] != "local" or policy.backend_kind != output["storage_backend"]:
+            raise QualityConflictError(
+                "ASSET_STORAGE_POLICY_MISMATCH",
+                "Provider output storage backend does not match the snapshot storage policy.",
+            )
+        if policy.local_root_ref != CONNECTED_LOCAL_ASSET_ROOT_REF:
+            raise QualityConflictError(
+                "STORAGE_ADAPTER_NOT_CONNECTED",
+                "The snapshot storage policy is not connected to the local V2 asset store.",
+            )
+        if output["asset_type"] != mapped_type:
+            raise QualityConflictError(
+                "ASSET_TYPE_CONTRACT_MISMATCH",
+                "Provider output type does not match the exact DAG output contract.",
+            )
+        path = _local_asset_path(str(output["uri"]))
+        if not path.is_file():
+            raise QualityConflictError("ASSET_FILE_MISSING", "Provider output file is missing from local storage.")
+        content_hash, byte_size = _sha256_file(path)
+        if content_hash != output["content_hash"]:
+            raise QualityConflictError(
+                "ASSET_CONTENT_HASH_MISMATCH",
+                "Provider output file hash does not match the response manifest.",
+            )
+        try:
+            media = _probe(path, str(output["asset_type"]))
+        except (OSError, UnicodeError, ValueError, wave.Error) as exc:
+            raise QualityConflictError("ASSET_FILE_INVALID", f"Provider output file is invalid: {exc}") from exc
+        if media["mime_type"] != output["mime_type"]:
+            raise QualityConflictError(
+                "ASSET_MIME_TYPE_MISMATCH",
+                "Provider output MIME type does not match the response manifest.",
+            )
+        if byte_size > policy.max_file_size_bytes:
+            raise QualityConflictError("ASSET_FILE_TOO_LARGE", "Provider output exceeds the storage size limit.")
+        if media["mime_type"] not in policy.allowed_mime_types:
+            raise QualityConflictError("ASSET_MIME_TYPE_NOT_ALLOWED", "Provider output MIME type is not allowed.")
+        verified_outputs.append((output_index, output, media, content_hash, byte_size))
+
+    assets: list[Asset] = []
+    now = utc_now()
+    for output_index, output, media, content_hash, byte_size in verified_outputs:
+        asset = Asset(
+            project_id=project.id,
+            snapshot_id=item.snapshot_id,
+            work_attempt_id=attempt.id,
+            dag_node_id=item.dag_node_id,
+            output_index=output_index,
+            asset_type=output["asset_type"],
+            role=output["role"],
+            uri=output["uri"],
+            storage_backend=output["storage_backend"],
+            provider_output_manifest=output,
+            content_hash=content_hash,
+            mime_type=media["mime_type"],
+            byte_size=byte_size,
+            width=media["width"],
+            height=media["height"],
+            duration_ms=media["duration_ms"],
+            state="verified",
+            verified_at=now,
+        )
+        repository.add(asset)
+        repository.flush()
+        _event(session, ProjectEvent(
+            project_id=project.id,
+            snapshot_id=asset.snapshot_id,
+            event_type="asset.created.v1",
+            aggregate_type="asset",
+            aggregate_id=asset.id,
+            actor_type="worker",
+            actor_id=actor_id,
+            message="Provider output registered as an asset by the production worker.",
+            data={
+                "asset_id": asset.id,
+                "work_attempt_id": attempt.id,
+                "output_index": output_index,
+            },
+        ))
+        _event(session, ProjectEvent(
+            project_id=project.id,
+            snapshot_id=asset.snapshot_id,
+            event_type="asset.verified.v1",
+            aggregate_type="asset",
+            aggregate_id=asset.id,
+            actor_type="system",
+            actor_id=actor_id,
+            message="Provider output file and content hash verified by the production worker.",
+            data={
+                "asset_id": asset.id,
+                "content_hash": content_hash,
+                "byte_size": byte_size,
+            },
+        ))
+        assets.append(asset)
+    return assets
 
 
 def register_attempt_asset(session: Session, project: Project, attempt_id: str, payload: RegisterAttemptAsset) -> dict:

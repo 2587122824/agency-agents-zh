@@ -62,6 +62,7 @@ v2/runtime/worker.err.log
 - RunningHub 图片、首帧视频与纯文本视频 Adapter 的严格合同和假传输测试；制作准备按每个镜头显式冻结工作流选择。
 - RunningHub V2 创建任务、查询任务和媒体上传统一使用 `Authorization: Bearer <API_KEY>`；创建正文不再包含旧式 `apiKey`，`usePersonalQueue` 按 V2 文档提交字符串 `"false"`。
 - Worker 领取外部任务时在数据库原子条件中执行冻结供应商 `max_concurrency`：同 `provider_key` 活跃容量已满时后续任务保持 `queued`，前一项终态释放容量后才提交；等待不创建失败、Attempt、费用或自动重试。
+- Provider 成功媒体输出由 Worker 在完成事务内逐项校验并自动登记为 `verified` Asset；任一输出缺失、哈希/MIME/策略不一致时整项阻断且不留下部分素材。制作页按精确 `dag_node_id` 展示已验证图片/视频缩略图，点击进入审核，不自动运行内容 QC 或批准。
 - 生产页支持用户确认新增费用后精确重跑单个明确失败 WorkItem：新建 WorkAttempt 并复用原请求清单与指纹，旧失败只读保留；提交结果未知或需要人工对账时禁止重跑。
 - RunningHub 提交已区分明确业务拒绝和结果未知：明确拒绝保存脱敏的 `code / msg / errorMessage / failedReason` 证据，416 与 433 提供中文原因；Worker 不自动重试，历史缺失响应的失败记录不回填。
 - 质量审核智能体首期图片合同、`QCReportCandidate`、证据引用校验、失败精确重跑与人工落账；视频和音频保持显式人工审核。
@@ -184,6 +185,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-24 | 修复真实生产输出已下载但制作页和审核页无预览：Worker 在 Provider 成功后原子登记并确定性验证全部输出为 `verified` Asset，制作步骤按 `dag_node_id` 展示稳定缩略图并链接审核页；文件无效时明确阻断，不自动修复、重试、审核或批准 |
 | 2026-07-23 | 真实 8 张关键帧测试确认 Bearer 鉴权修复有效：`SH-001` 的 RunningHub 任务 `2080307057889857538` 成功生成并下载，其余 7 项被供应商以 API 队列并发上限明确拒绝。根因是 Worker 未执行已冻结 `max_concurrency=1`。现已在 WorkItem 原子领取条件中加入同 `provider_key` 活跃容量统计；容量满时保持排队，释放后再提交，不自动重试既有 7 个失败项 |
 | 2026-07-23 | 新增单个生产步骤精确重跑：命令绑定活动快照合同哈希、当前失败尝试和原请求指纹，用户确认新增费用后只创建一个新 WorkAttempt 与对应费用事件；生产页提供逐项确认入口。旧失败不覆盖，不修改提示词/Provider/工作流/输入，不连带重跑其他任务；提交结果未知或历史 Manifest 缺少当前适配器必需字段时拒绝重跑，不从新配置补值 |
 | 2026-07-23 | 修复 RunningHub V2 鉴权合同：创建任务与查询任务和既有上传接口统一使用 `Authorization: Bearer <API_KEY>`；创建正文删除旧式 `apiKey` 字段，并按官方 V2 示例提交 `usePersonalQueue: "false"`。新增传输层请求头测试，不自动重跑历史失败任务 |

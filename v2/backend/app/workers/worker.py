@@ -36,6 +36,7 @@ from ..providers import (
     ProviderExecutionRequest,
     default_provider_registry,
 )
+from ..quality.service import QualityConflictError, register_verified_attempt_outputs
 from ..repositories import (
     SqlAlchemyEventRepository,
     SqlAlchemyWorkRepository,
@@ -226,6 +227,30 @@ def _record_terminal_event(
     ))
 
 
+def _finish_provider_output(
+    session: Session,
+    owner: str,
+    project: Project,
+    item: WorkItem,
+    attempt: WorkAttempt,
+    response_manifest: dict,
+) -> None:
+    _finish_completed(session, item, attempt, response_manifest)
+    if response_manifest.get("media_created") is not True:
+        return
+    try:
+        register_verified_attempt_outputs(session, project, item, attempt, owner)
+    except QualityConflictError as exc:
+        _finish_blocked(
+            session,
+            item,
+            attempt,
+            exc.code,
+            str(exc),
+            response_manifest,
+        )
+
+
 def process_one(
     worker_id: str | None = None,
     adapter_registry: ProviderAdapterRegistry | None = None,
@@ -302,7 +327,14 @@ def process_one(
                                     result.error_detail or "The provider task failed.",
                                 )
                             else:
-                                _finish_completed(session, item, attempt, result.response_manifest)
+                                _finish_provider_output(
+                                    session,
+                                    owner,
+                                    project,
+                                    item,
+                                    attempt,
+                                    result.response_manifest,
+                                )
             if item.status in {"completed", "blocked"}:
                 _record_terminal_event(session, owner, project, snapshot, item, attempt)
             session.commit()
@@ -540,7 +572,7 @@ def process_one(
                     except ProviderAdapterError as exc:
                         _finish_blocked(session, item, attempt, exc.code, exc.detail, exc.response_manifest)
                     else:
-                        _finish_completed(session, item, attempt, response)
+                        _finish_provider_output(session, owner, project, item, attempt, response)
         repository.flush()
         if item.status in {"completed", "blocked"}:
             _record_terminal_event(session, owner, project, snapshot, item, attempt)
