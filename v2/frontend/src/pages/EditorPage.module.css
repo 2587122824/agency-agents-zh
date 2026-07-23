@@ -176,6 +176,8 @@
   overflow: hidden;
   background: #202328;
 }
+
+.assistantStart,.editorAgentError{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;padding:14px 16px;border:1px solid #dce2dc;border-left:3px solid #47755d;background:#f8faf8}.assistantStart>svg{color:#47755d}.assistantStart strong,.assistantStart span,.editorAgentError strong,.editorAgentError span{display:block}.assistantStart strong,.editorAgentError strong{font-size:13px}.assistantStart span,.editorAgentError span{margin-top:4px;color:#6f7578;font-size:11px;line-height:1.45}.editorAgentError{grid-template-columns:auto minmax(0,1fr);border-left-color:#b64a35;background:#fff8f5}.editorAgentError>svg{color:#b64a35}
 .monitor {
   min-width: 0;
   display: grid;

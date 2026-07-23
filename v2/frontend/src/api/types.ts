@@ -1155,6 +1155,7 @@ export interface EditorWorkspace {
   quality_output_gaps: Array<{ code: string; node_key: string; message: string }>
   available_assets: EditorAsset[]
   timelines: Timeline[]
+  latest_editor_run: AgentRun | null
   next_action: { code: string; label: string }
 }
 

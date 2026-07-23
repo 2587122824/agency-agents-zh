@@ -1079,6 +1079,40 @@ class SqlAlchemyEditorRepository:
             select(Timeline).where(Timeline.project_id == project_id).order_by(Timeline.version_number.desc())
         ))
 
+    def active_plan(self, project_id: str) -> PlanVersion | None:
+        return self.session.scalar(select(PlanVersion).where(
+            PlanVersion.project_id == project_id,
+            PlanVersion.is_active.is_(True),
+            PlanVersion.status == "confirmed",
+        ).order_by(PlanVersion.version_number.desc()))
+
+    def shots(self, plan_version_id: str) -> list[Shot]:
+        return list(self.session.scalars(
+            select(Shot).where(Shot.plan_version_id == plan_version_id).order_by(Shot.sequence_number)
+        ))
+
+    def qc_reports(self, asset_ids: list[str]) -> list[QCReport]:
+        if not asset_ids:
+            return []
+        return list(self.session.scalars(
+            select(QCReport).where(QCReport.asset_id.in_(asset_ids)).order_by(QCReport.asset_id, QCReport.report_number)
+        ))
+
+    def latest_editor_run(self, project_id: str, snapshot_id: str) -> AgentRun | None:
+        return self.session.scalar(
+            select(AgentRun)
+            .join(AgentInputManifest, AgentInputManifest.id == AgentRun.input_manifest_id)
+            .where(
+                AgentRun.project_id == project_id,
+                AgentRun.agent_role == "editor",
+                AgentInputManifest.payload["snapshot_id"].as_string() == snapshot_id,
+            )
+            .order_by(AgentRun.started_at.desc(), AgentRun.id.desc())
+        )
+
+    def input_manifest(self, manifest_id: str) -> AgentInputManifest | None:
+        return self.session.get(AgentInputManifest, manifest_id)
+
 
 class SqlAlchemyDeliveryRepository:
     def __init__(self, session: Session) -> None:

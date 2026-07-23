@@ -6,7 +6,7 @@
 
 ## 1. 当前目标
 
-V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系统。六个智能体与确定性生产编译器的设计已经确认；创作制片人、内容策划、分镜导演、制作规划和质量审核首期图片合同已经实施，下一步先完成制作规划真实模型验收与图片理解配置，再进入剪辑助理：
+V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系统。六个智能体与确定性生产编译器的设计已经确认；创作制片人、内容策划、分镜导演、制作规划、质量审核首期图片合同和剪辑助理已经实施。QC 图片模型仍按用户要求暂不接入，下一阶段应先验收剪辑候选闭环，再决定交付执行或其他后续范围：
 
 - 角色从“需求登记员”调整为“创作制片人”。
 - 输入包含当前会话的用户与助手消息，解决上下文指代丢失。
@@ -26,7 +26,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
 | 数据库迁移 | `20260722_30 (head)` |
-| 已发布配置 | `production_config_52344c9191e448558020a73ad96ee164`，版本 50；仅修正本地素材库连接引用为 `v2.runtime.assets`，工作流路由不变；director Prompt 为 `director-prompt.v6`，production planner Prompt 为 `production-planner-prompt.v2` |
+| 已发布配置 | `production_config_07d5a0f32539406a976a6faf95177e6d`，版本 51；继承 v50 的本地素材库与工作流路由，新增 `editor` 模型 `deepseek-editor-assistant`；editor Prompt 为 `editor-assistant-prompt.v1`，不修改 NodeInfoList |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 密钥通过 Windows 用户环境与白名单注入，不写数据库或仓库 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -244,10 +244,11 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`228 passed`
+- 后端测试：`234 passed`
 - 两阶段生产验收：图片节点全部先执行；后续任务在用户确认前保持 `waiting_phase`；节点或素材清单不一致明确失败；确认后视频读取冻结的已批准素材；纯文本视频无图片门禁并直接排队
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v50，4 个文本智能体模型分工与 6 个镜头工作流槽位；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；导演合同为 `shot-plan.v4 / director-prompt.v6`
+- 当前生产配置：v51，5 个文本智能体模型分工与 6 个镜头工作流槽位；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；剪辑助理合同为 `editor-assistant-input.v1 / timeline-candidate.v1 / editor-assistant-prompt.v1`
+- 剪辑助理端到端验收：只读取活动方案、快照内已批准视频、正式 QC 报告、交付规格和音频策略；模型候选经严格校验后创建待确认 Timeline，选择理由与 QC 证据保存在时间线条目中；素材不足生成显式空位并阻断确认，不自动补素材、复用、循环、变速、补帧或替换
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
@@ -269,4 +270,4 @@ v2/runtime/worker.err.log
 
 ## 9. 下一步
 
-创作制片人、内容策划和分镜导演已完成。质量审核智能体的图片合同、候选持久化、运行审计、失败精确重跑和人工确认边界已完成，但 DeepSeek 官方 API 当前没有文档化图片输入，不能作为 QC 图片 Provider。下一步先选择并确认一个具有官方单图输入合同的 Provider，再发布唯一 QC 模型并完成真实图片审核闭环；视频与音频继续保持显式人工审核。通过后再开发剪辑助理。
+创作制片人、内容策划、分镜导演、制作规划和剪辑助理已完成。质量审核智能体的图片合同、候选持久化、运行审计、失败精确重跑和人工确认边界已完成，但 DeepSeek 官方 API 当前没有文档化图片输入，不能作为 QC 图片 Provider；按用户要求暂不接入 QC 模型，视频与音频继续保持显式人工审核。剪辑助理只生成待确认时间线候选，不渲染交付、不绕过素材批准，也不自动补素材或重试。

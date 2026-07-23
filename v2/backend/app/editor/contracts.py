@@ -16,6 +16,15 @@ class ApproveQualityStage(EditorCommand):
     expected_snapshot_id: str
 
 
+class GenerateEditorTimeline(EditorCommand):
+    expected_snapshot_id: str
+
+
+class RetryEditorTimeline(EditorCommand):
+    failed_agent_run_id: str
+    confirm_model_cost: bool
+
+
 class TimelineTrackConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     audio_enabled: bool
@@ -122,4 +131,5 @@ class EditorWorkspaceView(BaseModel):
     quality_output_gaps: list[dict]
     available_assets: list[EditorAssetRead]
     timelines: list[TimelineRead]
+    latest_editor_run: dict | None
     next_action: dict

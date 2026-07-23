@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, ChevronDown, ChevronUp, Clock3, Download, FileVideo2, Film, ListVideo, Music2, Plus, RefreshCw, Save, Scissors, ShieldCheck, Subtitles, Trash2, Upload, Video, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronUp, Clock3, Download, FileVideo2, Film, ListVideo, Music2, Plus, RefreshCw, Save, Scissors, ShieldCheck, Sparkles, Subtitles, Trash2, Upload, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 
@@ -60,6 +60,14 @@ export function EditorPage() {
     await client.invalidateQueries({ queryKey: ['projects'] })
   }
   const stage = useMutation({ mutationFn: () => api.approveQualityStage(projectId, workspace.data!.active_snapshot_id!), onSuccess: refresh })
+  const generateAssistant = useMutation({
+    mutationFn: () => api.generateEditorTimeline(projectId, workspace.data!.active_snapshot_id!),
+    onSuccess: async timeline => { setSelectedTimelineId(timeline.id); await refresh() },
+  })
+  const retryAssistant = useMutation({
+    mutationFn: () => api.retryEditorTimeline(projectId, workspace.data!.latest_editor_run!.id),
+    onSuccess: async timeline => { setSelectedTimelineId(timeline.id); await refresh() },
+  })
   const save = useMutation({
     mutationFn: () => revisionBase
       ? api.reviseTimelineCandidate(projectId, revisionBase, { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled }, draftItems)
@@ -79,7 +87,7 @@ export function EditorPage() {
   const selectedTimeline = workspace.data?.timelines.find(row => row.id === selectedTimelineId) ?? workspace.data?.timelines[0] ?? null
   const selectedAsset = workspace.data?.available_assets.find(asset => asset.id === selectedAssetId) ?? null
   const deliveryAttempt = delivery.data?.attempts[0] ?? null
-  const error = workspace.error || delivery.error || stage.error || save.error || validate.error || confirm.error || authorize.error || upload.error || verify.error
+  const error = workspace.error || delivery.error || stage.error || generateAssistant.error || retryAssistant.error || save.error || validate.error || confirm.error || authorize.error || upload.error || verify.error
 
   useEffect(() => {
     setSelectedTimelineId('')
@@ -191,6 +199,14 @@ export function EditorPage() {
           </div>}
 
           {['editing', 'delivery_ready'].includes(workspace.data.project_status) && <>
+            {workspace.data.project_status === 'editing' && !workspace.data.timelines.length && <section className={styles.assistantStart}>
+              <Sparkles />
+              <div><strong>让剪辑助理先整理一版草案</strong><span>它只使用当前已批准素材，并保留分镜和 QC 依据；生成后仍由你修改、校验和确认。</span></div>
+              {workspace.data.next_action.code === 'RETRY_EDITOR_ASSISTANT' && workspace.data.latest_editor_run
+                ? <button className="primaryButton" disabled={retryAssistant.isPending} onClick={() => retryAssistant.mutate()}>{retryAssistant.isPending ? '正在重跑…' : '确认模型费用并重跑'}</button>
+                : <button className="primaryButton" disabled={generateAssistant.isPending} onClick={() => generateAssistant.mutate()}>{generateAssistant.isPending ? '正在生成…' : '生成剪辑草案'}</button>}
+            </section>}
+            {workspace.data.latest_editor_run?.status === 'failed' && <div className={styles.editorAgentError}><AlertTriangle /><div><strong>剪辑助理没有生成有效草案</strong><span>{workspace.data.latest_editor_run.error_detail ?? '模型输出没有通过严格合同检查。'} 系统没有自动重试。</span></div></div>}
             <div className={styles.editorTop}>
               <section className={styles.monitor}>
                 <div className={styles.monitorFrame}>{selectedAsset?.asset_type === 'video' ? <video key={selectedAsset.id} src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`} controls preload="metadata" /> : <Film />}</div>

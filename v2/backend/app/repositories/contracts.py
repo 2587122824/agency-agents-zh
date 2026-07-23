@@ -94,7 +94,7 @@ ProductionRecord = (
     | WorkItem
 )
 QualityRecord = Asset | AssetReviewDecision | QCFinding | QCReport | QCReportCandidate | AgentInputManifest | AgentRun
-EditorRecord = Timeline | TimelineItem
+EditorRecord = AgentInputManifest | AgentRun | Timeline | TimelineItem
 DeliveryRecord = Asset | DeliveryAttempt | QCFinding | QCReport
 ConfigurationComponentRecord = (
     ProviderConfigVersion
@@ -494,6 +494,16 @@ class EditorRepository(Protocol):
     def dag_nodes_by_ids(self, node_ids: list[str]) -> list[DAGNode]: ...
 
     def timeline_history(self, project_id: str) -> list[Timeline]: ...
+
+    def active_plan(self, project_id: str) -> PlanVersion | None: ...
+
+    def shots(self, plan_version_id: str) -> list[Shot]: ...
+
+    def qc_reports(self, asset_ids: list[str]) -> list[QCReport]: ...
+
+    def latest_editor_run(self, project_id: str, snapshot_id: str) -> AgentRun | None: ...
+
+    def input_manifest(self, manifest_id: str) -> AgentInputManifest | None: ...
 
 
 class DeliveryRepository(Protocol):

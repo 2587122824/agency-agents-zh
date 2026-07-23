@@ -224,6 +224,14 @@ export const api = {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', reason }),
   }),
   editorWorkspace: (projectId: string) => request<EditorWorkspace>(`/projects/${projectId}/editor-workspace`),
+  generateEditorTimeline: (projectId: string, snapshotId: string) => request<Timeline>(`/projects/${projectId}/editor-assistant:generate`, {
+    method: 'POST',
+    body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: snapshotId }),
+  }),
+  retryEditorTimeline: (projectId: string, runId: string) => request<Timeline>(`/projects/${projectId}/editor-assistant-runs/${runId}:retry`, {
+    method: 'POST',
+    body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', failed_agent_run_id: runId, confirm_model_cost: true }),
+  }),
   approveQualityStage: (projectId: string, snapshotId: string) => request<EditorWorkspace>(`/projects/${projectId}/quality-stage:approve`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: snapshotId }),
   }),

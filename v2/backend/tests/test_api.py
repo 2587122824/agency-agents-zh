@@ -30,6 +30,7 @@ from v2.backend.app.creation.agent_gateway import AgentGatewayError, CreativeAge
 from v2.backend.app.planning.agent_gateway import ContentPlannerOutput, ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
 from v2.backend.app.planning.director_gateway import DeterministicDirectorGateway, get_director_gateway
 from v2.backend.app.production.agent_gateway import DeterministicProductionPlannerGateway, ProductionPlannerOutput, ProductionPlannerResult, get_production_planner_gateway
+from v2.backend.app.editor.agent_gateway import DeterministicEditorAssistantGateway, EditorAssistantResult, get_editor_assistant_gateway
 from v2.backend.app.quality.agent_gateway import DeterministicQCGateway, get_qc_gateway
 
 
@@ -54,6 +55,7 @@ def client():
     app.dependency_overrides[get_content_planner_gateway] = lambda: DeterministicContentPlannerGateway()
     app.dependency_overrides[get_director_gateway] = lambda: DeterministicDirectorGateway()
     app.dependency_overrides[get_production_planner_gateway] = lambda: DeterministicProductionPlannerGateway()
+    app.dependency_overrides[get_editor_assistant_gateway] = lambda: DeterministicEditorAssistantGateway()
     app.dependency_overrides[get_qc_gateway] = lambda: DeterministicQCGateway()
     Base.metadata.create_all(bind=engine)
     with TestClient(app) as test_client:
@@ -62,6 +64,7 @@ def client():
     app.dependency_overrides.pop(get_content_planner_gateway, None)
     app.dependency_overrides.pop(get_director_gateway, None)
     app.dependency_overrides.pop(get_production_planner_gateway, None)
+    app.dependency_overrides.pop(get_editor_assistant_gateway, None)
     app.dependency_overrides.pop(get_qc_gateway, None)
     engine.dispose()
     TEST_DATABASE.unlink(missing_ok=True)
@@ -3608,6 +3611,15 @@ def seed_editor_assets(client: TestClient, project: dict, snapshot: dict) -> lis
             session.add(asset)
             session.flush()
             if media_type == "video":
+                session.add(QCReport(
+                    project_id=project["id"],
+                    snapshot_id=snapshot["id"],
+                    asset_id=asset.id,
+                    report_number=1,
+                    ruleset_version="test-editor-qc.v1",
+                    status="passed",
+                    analyzer="test",
+                ))
                 video_assets.append({
                     "id": asset.id,
                     "node_key": node.node_key,
@@ -5308,6 +5320,35 @@ def test_quality_stage_and_timeline_confirmation_are_explicit_and_idempotent(cli
     with SessionLocal() as session:
         assert session.scalar(select(Timeline).where(Timeline.project_id == project["id"])) is not None
         assert len(list(session.scalars(select(WorkAttempt)))) == 0
+
+
+def test_editor_assistant_creates_auditable_timeline_candidate_for_manual_confirmation(
+    client: TestClient,
+) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    video_assets = seed_editor_assets(client, project, snapshot)
+    client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "editor-agent-stage-approve", "expected_snapshot_id": snapshot["id"]},
+    )
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/editor-assistant:generate",
+        json={"command_id": "editor-agent-generate-001", "expected_snapshot_id": snapshot["id"]},
+    )
+
+    assert response.status_code == 201
+    timeline = response.json()
+    assert timeline["source"] == "editor_assistant"
+    assert timeline["status"] == "candidate"
+    assert timeline["source_agent_run_id"]
+    assert [item["asset_id"] for item in timeline["items"]] == [item["id"] for item in video_assets]
+    assert all(item["transform"]["editor_assistant"]["selection_reason"] for item in timeline["items"])
+    assert all(item["transform"]["editor_assistant"]["qc_report_ids"] for item in timeline["items"])
+    workspace = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
+    assert workspace["latest_editor_run"]["status"] == "succeeded"
+    assert workspace["next_action"]["code"] == "VALIDATE_TIMELINE"
+    assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "editing"
 
 
 def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(client: TestClient) -> None:

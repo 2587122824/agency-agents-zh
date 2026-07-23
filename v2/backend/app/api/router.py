@@ -124,6 +124,8 @@ from ..editor.contracts import (
     ConfirmTimeline,
     CreateTimelineCandidate,
     EditorWorkspaceView,
+    GenerateEditorTimeline,
+    RetryEditorTimeline,
     ReviseTimelineCandidate,
     TimelineRead,
     ValidateTimeline,
@@ -135,9 +137,12 @@ from ..editor.service import (
     confirm_timeline,
     create_timeline_candidate,
     editor_workspace,
+    generate_editor_timeline,
+    retry_editor_timeline,
     revise_timeline_candidate,
     validate_timeline,
 )
+from ..editor.agent_gateway import EditorAssistantGateway, get_editor_assistant_gateway
 from ..planning.contracts import (
     CreativeBriefCandidateRead,
     DecideBrief,
@@ -789,6 +794,53 @@ def project_quality_review(project_id: str, session: Session = Depends(get_sessi
 @router.get("/projects/{project_id}/editor-workspace", response_model=EditorWorkspaceView)
 def project_editor_workspace(project_id: str, session: Session = Depends(get_session)):
     return editor_workspace(session, require_project(session, project_id))
+
+
+@router.post(
+    "/projects/{project_id}/editor-assistant:generate",
+    response_model=TimelineRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_editor_assistant_generate(
+    project_id: str,
+    payload: GenerateEditorTimeline,
+    gateway: EditorAssistantGateway = Depends(get_editor_assistant_gateway),
+    session: Session = Depends(get_session),
+):
+    try:
+        return generate_editor_timeline(session, require_project(session, project_id), payload, gateway)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
+
+
+@router.post(
+    "/projects/{project_id}/editor-assistant-runs/{run_id}:retry",
+    response_model=TimelineRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def project_editor_assistant_retry(
+    project_id: str,
+    run_id: str,
+    payload: RetryEditorTimeline,
+    gateway: EditorAssistantGateway = Depends(get_editor_assistant_gateway),
+    session: Session = Depends(get_session),
+):
+    if payload.failed_agent_run_id != run_id:
+        raise HTTPException(status_code=409, detail="Run ID mismatch", headers={"X-Error-Code": "EDITOR_RUN_ID_MISMATCH"})
+    try:
+        return retry_editor_timeline(session, require_project(session, project_id), payload, gateway)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
+    except AgentGatewayError as exc:
+        raise HTTPException(status_code=502, detail=str(exc), headers={"X-Error-Code": exc.code}) from exc
 
 
 @router.get("/projects/{project_id}/delivery-workspace", response_model=DeliveryWorkspaceView)

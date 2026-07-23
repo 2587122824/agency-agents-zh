@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 from sqlalchemy.orm import Session
 
+from ..creation.agent_gateway import AgentGatewayError
 from ..db.models import (
+    AgentInputManifest,
+    AgentRun,
     Project,
     ProjectEvent,
     ProductionSnapshot,
@@ -25,9 +29,12 @@ from .contracts import (
     ApproveQualityStage,
     ConfirmTimeline,
     CreateTimelineCandidate,
+    GenerateEditorTimeline,
+    RetryEditorTimeline,
     ReviseTimelineCandidate,
     ValidateTimeline,
 )
+from .agent_gateway import EditorAssistantGateway, EditorAssistantResult, EditorSelection
 
 
 class EditorConflictError(ValueError):
@@ -51,6 +58,30 @@ def _event(session: Session, event: ProjectEvent) -> None:
 def _hash(payload: dict) -> str:
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _run_dict(run: AgentRun | None) -> dict[str, Any] | None:
+    if run is None:
+        return None
+    return {
+        "id": run.id,
+        "agent_role": run.agent_role,
+        "status": run.status,
+        "input_manifest_id": run.input_manifest_id,
+        "model_provider": run.model_provider,
+        "model_name": run.model_name,
+        "production_config_version_id": run.production_config_version_id,
+        "model_config_version_id": run.model_config_version_id,
+        "provider_config_version_id": run.provider_config_version_id,
+        "prompt_contract_version": run.prompt_contract_version,
+        "output_schema_version": run.output_schema_version,
+        "provider_request_id": run.provider_request_id,
+        "token_usage": run.token_usage or {},
+        "error_code": run.error_code,
+        "error_detail": run.error_detail,
+        "started_at": run.started_at,
+        "finished_at": run.finished_at,
+    }
 
 
 def _receipt(session: Session, project_id: str, command_id: str, command_type: str):
@@ -208,7 +239,7 @@ def _create_candidate(
         )
     if payload.source == "editor_assistant":
         run = repository.agent_run(payload.source_agent_run_id) if payload.source_agent_run_id else None
-        if not run or run.project_id != project.id or run.agent_role != "editor" or run.status != "completed":
+        if not run or run.project_id != project.id or run.agent_role != "editor" or run.status != "succeeded":
             raise EditorConflictError(
                 "EDITOR_AGENT_RUN_INVALID",
                 "Editor Assistant 候选必须绑定当前项目中已完成的 editor AgentRun。",
@@ -295,6 +326,277 @@ def create_timeline_candidate(
     payload: CreateTimelineCandidate,
 ) -> dict:
     return _create_candidate(session, project, payload, None, "timeline.candidate.create")
+
+
+def _editor_manifest(session: Session, project: Project, snapshot: ProductionSnapshot) -> dict[str, Any]:
+    repository = _editor(session)
+    plan = repository.active_plan(project.id)
+    if not plan or plan.id != snapshot.plan_version_id:
+        raise EditorConflictError("EDITOR_ACTIVE_PLAN_MISMATCH", "当前活动方案与制作快照不一致。")
+    assets = repository.available_assets(project.id, snapshot.id)
+    video_assets = [asset for asset in assets if asset.asset_type == "video"]
+    if not video_assets:
+        raise EditorConflictError("EDITOR_APPROVED_VIDEO_REQUIRED", "剪辑助理至少需要一段已批准视频。")
+    nodes = {
+        node.id: node for node in repository.dag_nodes_by_ids(
+            [asset.dag_node_id for asset in video_assets if asset.dag_node_id]
+        )
+    }
+    shots = {shot.id: shot for shot in repository.shots(plan.id)}
+    reports_by_asset: dict[str, list[str]] = {}
+    for report in repository.qc_reports([asset.id for asset in video_assets]):
+        reports_by_asset.setdefault(report.asset_id, []).append(report.id)
+    approved_assets = []
+    for asset in video_assets:
+        node = nodes.get(asset.dag_node_id)
+        shot = shots.get(node.shot_id) if node and node.shot_id else None
+        if not node or not shot:
+            raise EditorConflictError("EDITOR_ASSET_SHOT_UNRESOLVED", f"素材 {asset.id} 无法精确解析到当前分镜。")
+        qc_ids = reports_by_asset.get(asset.id, [])
+        if not qc_ids:
+            raise EditorConflictError("EDITOR_ASSET_QC_EVIDENCE_MISSING", f"素材 {asset.id} 缺少权威 QC 报告。")
+        approved_assets.append({
+            "id": asset.id,
+            "asset_type": asset.asset_type,
+            "duration_ms": asset.duration_ms,
+            "content_hash": asset.content_hash,
+            "dag_node_id": asset.dag_node_id,
+            "node_key": node.node_key,
+            "shot_id": shot.id,
+            "shot_code": shot.shot_code,
+            "shot_sequence_number": shot.sequence_number,
+            "shot_duration_ms": shot.duration_ms,
+            "qc_report_ids": qc_ids,
+        })
+    approved_assets.sort(key=lambda item: (item["shot_sequence_number"], item["id"]))
+    return {
+        "contract_version": "editor-assistant-input.v1",
+        "project_id": project.id,
+        "snapshot_id": snapshot.id,
+        "plan_version_id": plan.id,
+        "shot_plan_version": plan.contract_schema_version,
+        "creative_brief_version": plan.creative_brief.get("schema_version", "creative-brief.v1"),
+        "approved_asset_ids": [item["id"] for item in approved_assets],
+        "qc_report_ids": sorted({report_id for item in approved_assets for report_id in item["qc_report_ids"]}),
+        "approved_assets": approved_assets,
+        "delivery_contract": {
+            "duration_ms": project.duration_seconds * 1000,
+            "aspect_ratio": project.aspect_ratio,
+            "output_spec": snapshot.output_spec,
+        },
+        "audio_policy": {"mode": project.audio_mode},
+        "subtitle_policy": {"enabled": False},
+        "timeline_policy_version": "timeline-policy.v1",
+    }
+
+
+def _validate_editor_output(output, manifest: dict[str, Any]) -> list[dict[str, Any]]:
+    errors: list[dict[str, Any]] = []
+    target = manifest["delivery_contract"]["duration_ms"]
+    if output.duration_ms != target:
+        errors.append({"code": "EDITOR_DURATION_MISMATCH", "expected": target, "actual": output.duration_ms})
+    assets = {item["id"]: item for item in manifest["approved_assets"]}
+    expected_codes = [f"ITEM_{index:03d}" for index in range(1, len(output.video_items) + 1)]
+    if [item.timeline_item_code for item in output.video_items] != expected_codes:
+        errors.append({"code": "EDITOR_ITEM_CODE_SEQUENCE_INVALID"})
+    cursor = 0
+    seen_assets: set[str] = set()
+    for index, item in enumerate(output.video_items):
+        path = f"video_items.{index}"
+        if item.timeline_in_ms != cursor or item.timeline_out_ms <= item.timeline_in_ms:
+            errors.append({"code": "EDITOR_TIMELINE_NOT_CONTIGUOUS", "path": path, "expected_in_ms": cursor})
+        cursor = item.timeline_out_ms
+        if item.source_asset_id is None:
+            if not item.gap_reason or item.shot_code is not None or item.qc_report_ids or item.source_in_ms is not None or item.source_out_ms is not None:
+                errors.append({"code": "EDITOR_GAP_CONTRACT_INVALID", "path": path})
+            continue
+        asset = assets.get(item.source_asset_id)
+        if asset is None:
+            errors.append({"code": "EDITOR_ASSET_NOT_APPROVED", "path": path, "asset_id": item.source_asset_id})
+            continue
+        if item.source_asset_id in seen_assets:
+            errors.append({"code": "EDITOR_ASSET_REUSE_NOT_ALLOWED", "path": path, "asset_id": item.source_asset_id})
+        seen_assets.add(item.source_asset_id)
+        if item.gap_reason is not None or item.shot_code != asset["shot_code"]:
+            errors.append({"code": "EDITOR_ASSET_SHOT_MISMATCH", "path": path})
+        if set(item.qc_report_ids) != set(asset["qc_report_ids"]) or len(item.qc_report_ids) != len(set(item.qc_report_ids)):
+            errors.append({"code": "EDITOR_QC_EVIDENCE_MISMATCH", "path": path})
+        if item.source_in_ms is None or item.source_out_ms is None or item.source_out_ms <= item.source_in_ms:
+            errors.append({"code": "EDITOR_SOURCE_RANGE_INVALID", "path": path})
+        elif item.source_out_ms > (asset["duration_ms"] or 0):
+            errors.append({"code": "EDITOR_SOURCE_RANGE_EXCEEDS_ASSET", "path": path})
+        elif item.source_out_ms - item.source_in_ms != item.timeline_out_ms - item.timeline_in_ms:
+            errors.append({"code": "EDITOR_SPEED_CHANGE_UNDECLARED", "path": path})
+    if cursor != target:
+        errors.append({"code": "EDITOR_TIMELINE_DURATION_INCOMPLETE", "expected": target, "actual": cursor})
+    if manifest["audio_policy"]["mode"] == "off" and output.audio_cues:
+        errors.append({"code": "EDITOR_AUDIO_DISABLED"})
+    if not manifest["subtitle_policy"]["enabled"] and output.subtitle_cues:
+        errors.append({"code": "EDITOR_SUBTITLE_DISABLED"})
+    return errors
+
+
+def _execute_editor(
+    session: Session,
+    project: Project,
+    manifest: AgentInputManifest,
+    selection: EditorSelection,
+    gateway: EditorAssistantGateway,
+    *,
+    retry_of_agent_run_id: str | None = None,
+) -> dict:
+    repository = _editor(session)
+    run = AgentRun(
+        project_id=project.id,
+        agent_role="editor",
+        status="running",
+        input_manifest_id=manifest.id,
+        model_provider=selection.model_provider,
+        model_name=selection.model_name,
+        production_config_version_id=selection.production_config_version_id,
+        model_config_version_id=selection.model_config_version_id,
+        provider_config_version_id=selection.provider_config_version_id,
+        prompt_contract_version=selection.prompt_contract_version,
+        output_schema_version=selection.output_schema_version,
+        started_at=utc_now(),
+    )
+    repository.add(run)
+    repository.flush()
+    _event(session, ProjectEvent(
+        project_id=project.id, snapshot_id=manifest.payload["snapshot_id"],
+        event_type="agent.run_created.v1", aggregate_type="agent_run", aggregate_id=run.id,
+        actor_type="agent", actor_id="editor-assistant", message="剪辑助理运行已开始",
+        data={"agent_role": "editor", "retry_of_agent_run_id": retry_of_agent_run_id},
+    ))
+    try:
+        result: EditorAssistantResult = gateway.invoke(selection, manifest.payload)
+        errors = _validate_editor_output(result.output, manifest.payload)
+        if errors:
+            raise AgentGatewayError(
+                "EDITOR_OUTPUT_CONTRACT_INVALID",
+                "剪辑助理返回了不满足当前素材和时间线规则的候选。",
+                raw_output=result.raw_output,
+                diagnostics=errors,
+            )
+        run.status = "succeeded"
+        run.raw_output = result.raw_output
+        run.provider_request_id = result.provider_request_id
+        run.token_usage = result.token_usage
+        run.finished_at = utc_now()
+        items = []
+        for sequence, item in enumerate(result.output.video_items, 1):
+            items.append({
+                "track_type": "main_video",
+                "sequence_number": sequence,
+                "asset_id": item.source_asset_id,
+                "label": item.shot_code or "待补素材",
+                "gap_reason": item.gap_reason,
+                "source_in_ms": item.source_in_ms,
+                "source_out_ms": item.source_out_ms,
+                "timeline_in_ms": item.timeline_in_ms,
+                "timeline_out_ms": item.timeline_out_ms,
+                "transform": {
+                    "fit": "cover",
+                    "editor_assistant": {
+                        "timeline_item_code": item.timeline_item_code,
+                        "shot_code": item.shot_code,
+                        "selection_reason": item.selection_reason,
+                        "qc_report_ids": item.qc_report_ids,
+                    },
+                },
+            })
+        payload = CreateTimelineCandidate.model_validate({
+            "command_id": f"editor-run-{run.id}",
+            "actor_id": "editor-assistant",
+            "expected_snapshot_id": manifest.payload["snapshot_id"],
+            "source": "editor_assistant",
+            "source_agent_run_id": run.id,
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": items,
+        })
+        timeline = _create_candidate(session, project, payload, None, "timeline.candidate.create")
+        run = repository.agent_run(run.id)
+        run.parsed_candidate_id = timeline["id"]
+        _event(session, ProjectEvent(
+            project_id=project.id, snapshot_id=manifest.payload["snapshot_id"],
+            event_type="editor.timeline_candidate_created.v1", aggregate_type="timeline", aggregate_id=timeline["id"],
+            actor_type="agent", actor_id="editor-assistant", message="剪辑助理候选已生成，等待用户取舍",
+            data={"timeline_id": timeline["id"], "agent_run_id": run.id, "has_gaps": any(item.source_asset_id is None for item in result.output.video_items)},
+        ))
+        session.commit()
+        return timeline
+    except AgentGatewayError as exc:
+        run.status = "failed"
+        run.error_code = exc.code
+        run.error_detail = str(exc)
+        run.raw_output = exc.raw_output
+        run.finished_at = utc_now()
+        _event(session, ProjectEvent(
+            project_id=project.id, snapshot_id=manifest.payload["snapshot_id"],
+            event_type="agent.run_failed.v1", aggregate_type="agent_run", aggregate_id=run.id,
+            actor_type="agent", actor_id="editor-assistant", message="剪辑助理运行失败",
+            data={"agent_role": "editor", "error_code": exc.code, "diagnostics": exc.diagnostics},
+        ))
+        session.commit()
+        raise
+
+
+def generate_editor_timeline(
+    session: Session,
+    project: Project,
+    payload: GenerateEditorTimeline,
+    gateway: EditorAssistantGateway,
+) -> dict:
+    if project.status != "editing":
+        raise EditorConflictError("EDITOR_STAGE_NOT_READY", "项目必须先完成质量阶段并进入剪辑。")
+    snapshot = _require_active_snapshot(session, project, payload.expected_snapshot_id)
+    repository = _editor(session)
+    if repository.has_timeline(project.id):
+        raise EditorConflictError("TIMELINE_REVISION_REQUIRED", "项目已有时间线，请从现有版本创建人工修订。")
+    selection = gateway.select(session, snapshot.production_config_version_id)
+    manifest_payload = _editor_manifest(session, project, snapshot)
+    manifest = AgentInputManifest(
+        project_id=project.id,
+        base_requirement_version_id=repository.active_plan(project.id).requirement_version_id,
+        message_ids=[],
+        decision_ids=[],
+        attachment_binding_ids=[],
+        system_config_version=selection.production_config_version_id,
+        input_hash=_hash(manifest_payload),
+        payload=manifest_payload,
+    )
+    repository.add(manifest)
+    repository.flush()
+    return _execute_editor(session, project, manifest, selection, gateway)
+
+
+def retry_editor_timeline(
+    session: Session,
+    project: Project,
+    payload: RetryEditorTimeline,
+    gateway: EditorAssistantGateway,
+) -> dict:
+    if not payload.confirm_model_cost:
+        raise EditorConflictError("EDITOR_RETRY_COST_CONFIRMATION_REQUIRED", "必须明确确认本次模型调用费用。")
+    repository = _editor(session)
+    failed = repository.agent_run(payload.failed_agent_run_id)
+    if not failed or failed.project_id != project.id or failed.agent_role != "editor" or failed.status != "failed":
+        raise EditorConflictError("EDITOR_FAILED_RUN_INVALID", "指定记录不是当前项目可重跑的剪辑助理失败运行。")
+    latest = repository.latest_editor_run(project.id, project.active_snapshot_id or "")
+    if not latest or latest.id != failed.id:
+        raise EditorConflictError("EDITOR_FAILED_RUN_NOT_LATEST", "只能重跑当前快照最近一次失败的剪辑助理运行。")
+    manifest = repository.input_manifest(failed.input_manifest_id)
+    if not manifest or manifest.payload.get("snapshot_id") != project.active_snapshot_id:
+        raise EditorConflictError("EDITOR_RETRY_MANIFEST_STALE", "原剪辑输入已不再对应当前活动快照。")
+    selection = gateway.select(session, failed.production_config_version_id)
+    if (
+        selection.model_config_version_id != failed.model_config_version_id
+        or selection.provider_config_version_id != failed.provider_config_version_id
+        or selection.prompt_contract_version != failed.prompt_contract_version
+        or selection.output_schema_version != failed.output_schema_version
+    ):
+        raise EditorConflictError("EDITOR_RETRY_CONTRACT_CHANGED", "剪辑助理配置或合同已变化，不能伪装成精确重跑。")
+    return _execute_editor(session, project, manifest, selection, gateway, retry_of_agent_run_id=failed.id)
 
 
 def revise_timeline_candidate(
@@ -590,13 +892,16 @@ def editor_workspace(session: Session, project: Project) -> dict:
             "content_hash": row.content_hash,
         } for row in rows]
     timelines = repository.timeline_history(project.id)
+    latest_editor_run = repository.latest_editor_run(project.id, project.active_snapshot_id) if project.active_snapshot_id else None
     if project.status == "quality_review":
         next_action = {
             "code": "APPROVE_QUALITY_STAGE" if quality["stage_ready"] else "REVIEW_REQUIRED_ASSETS",
             "label": "确认进入剪辑" if quality["stage_ready"] else "先完成必需素材审核",
         }
+    elif not timelines and latest_editor_run and latest_editor_run.status == "failed":
+        next_action = {"code": "RETRY_EDITOR_ASSISTANT", "label": "确认费用并重跑剪辑助理"}
     elif not timelines:
-        next_action = {"code": "CREATE_TIMELINE_CANDIDATE", "label": "选择素材并创建剪辑候选"}
+        next_action = {"code": "GENERATE_EDITOR_TIMELINE", "label": "让剪辑助理生成草案"}
     elif timelines[0].status == "candidate":
         next_action = {"code": "VALIDATE_TIMELINE", "label": "校验最新时间线候选"}
     elif timelines[0].status == "review":
@@ -617,5 +922,6 @@ def editor_workspace(session: Session, project: Project) -> dict:
         "quality_output_gaps": quality["output_gaps"],
         "available_assets": assets,
         "timelines": [timeline_read(session, row) for row in timelines],
+        "latest_editor_run": _run_dict(latest_editor_run),
         "next_action": next_action,
     }
