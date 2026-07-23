@@ -3108,6 +3108,12 @@ def test_text_to_video_assignment_compiles_without_keyframe_or_parent_edge(clien
     assert created.status_code == 201, created.text
     snapshot = created.json()
     assert snapshot["image_phase_required"] is False
+    preparation = client.get(
+        f"/api/v1/projects/{project['id']}/production-preparation"
+    ).json()
+    assert preparation["current_snapshot"]["id"] == snapshot["id"]
+    assert preparation["snapshots"][0]["id"] == snapshot["id"]
+    assert preparation["next_action"]["code"] == "CONFIRM_PRODUCTION_COST"
     locked = client.post(
         f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:lock",
         json={
@@ -4264,6 +4270,14 @@ def test_blocked_production_requires_confirmation_and_returns_to_preparation(cli
             if attempt.work_item_id in result["cancelled_work_item_ids"]
         )
         assert len(events) == 1
+
+    preparation = client.get(
+        f"/api/v1/projects/{project['id']}/production-preparation"
+    ).json()
+    assert preparation["current_snapshot"] is None
+    assert preparation["snapshots"][0]["id"] == snapshot["id"]
+    assert preparation["snapshots"][0]["status"] == "superseded"
+    assert preparation["next_action"]["code"] == "ANALYZE_PRODUCTION_IMPACT"
 
 
 def test_blocked_production_cannot_close_while_provider_attempt_is_active(client: TestClient) -> None:

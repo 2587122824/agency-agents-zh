@@ -1099,6 +1099,8 @@ RequirementDiff
 
 “查看制作计划”可以反复执行，但“保存本次制作方案”不能生成内容相同的重复快照。影响分析必须返回按完整 `production-snapshot.v2` 合同计算的 `snapshot_contract_hash`；页面使用它与当前项目快照的 `contract_hash` 精确匹配。匹配时显示“相同制作方案已保存”及已有方案编号，不再显示保存按钮；不匹配时才开放保存。前端提示不是权威门禁，后端必须按 `project_id + contract_hash` 拒绝重复创建，不自动复用、覆盖、删除或合并历史方案。
 
+制作准备 API 同时返回 `current_snapshot` 和完整 `snapshots`。`current_snapshot` 是当前操作的唯一权威来源，由后端从项目活动绑定或尚未完成的 `preparing / locked` 制作准备记录解析；`snapshots` 仅用于重复合同校验与历史审计。前端不得把 `snapshots[0]`、最新创建记录或某个状态集合推断为当前方案。用户结束阻断制作后，旧方案继续以“已结束”显示在历史中，当前方案为空，配置选择和“查看制作计划”立即恢复；系统不会因此自动分析、保存或提交新方案。
+
 前端不能使用本地消息数量、动画状态或 Agent 文案设置项目状态。
 
 当前实现由权威项目状态转移器写入需求与规划阶段：消息、Decision、需求确认、Brief/分镜候选及方案确认各自提交显式触发器。pending Decision 存在时不能进入方案生成；最后一个 Decision 解决后，由决策服务根据活动需求的确定性完整性选择 `planning` 或 `collecting_requirements`。转移器不读取员工文本或提示词猜测状态。

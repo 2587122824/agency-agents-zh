@@ -250,6 +250,7 @@ class ProductionPreparationView(BaseModel):
     audio_mode: str
     published_configurations: list[PublishedConfigChoice]
     analyses: list[ImpactAnalysisRead]
+    current_snapshot: ProductionSnapshotRead | None
     snapshots: list[ProductionSnapshotRead]
     production_plan_candidates: list[ProductionPlanCandidateRead]
     latest_production_planner_run: dict | None

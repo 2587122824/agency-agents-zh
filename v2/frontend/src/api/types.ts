@@ -850,6 +850,7 @@ export interface ProductionPreparation {
     pricing_catalogs: Array<{ id: string; key: string; display_name: string; currency: string; confirmation_threshold: number; effective_from: string | null; effective_to: string | null }>
   }>
   analyses: ProductionImpactAnalysis[]
+  current_snapshot: ProductionSnapshot | null
   snapshots: ProductionSnapshot[]
   production_plan_candidates: ProductionPlanCandidate[]
   latest_production_planner_run: AgentRun | null

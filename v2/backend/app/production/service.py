@@ -1589,6 +1589,18 @@ def preparation_view(session: Session, project: Project) -> dict:
         })
     analyses = repository.impact_history(project.id)
     snapshots = repository.snapshot_history(project.id)
+    current_snapshot = (
+        repository.snapshot(project.active_snapshot_id)
+        if project.active_snapshot_id
+        else next(
+            (
+                snapshot
+                for snapshot in snapshots
+                if snapshot.status in {"preparing", "locked"}
+            ),
+            None,
+        )
+    )
     production_plan_candidates = repository.production_plan_candidates(
         project.id, active_plan.id if active_plan else None
     ) if active_plan else []
@@ -1599,15 +1611,15 @@ def preparation_view(session: Session, project: Project) -> dict:
         next_action = {"code": "CONFIRM_PLAN", "label": "先确认方案", "incurs_production_cost": False}
     elif not choices:
         next_action = {"code": "PUBLISH_CONFIGURATION", "label": "发布生产配置", "incurs_production_cost": False}
-    elif snapshots and snapshots[0].status == "preparing" and snapshots[0].cost_status == "estimated":
+    elif current_snapshot and current_snapshot.status == "preparing" and current_snapshot.cost_status == "estimated":
         next_action = {"code": "CONFIRM_PRODUCTION_COST", "label": "确认预计费用并锁定快照", "incurs_production_cost": False}
-    elif snapshots and snapshots[0].status == "preparing":
+    elif current_snapshot and current_snapshot.status == "preparing":
         next_action = {"code": "CONFIGURE_PRICING", "label": "发布含价格目录的新配置并创建新快照", "incurs_production_cost": False}
-    elif snapshots and snapshots[0].status == "locked":
+    elif current_snapshot and current_snapshot.status == "locked":
         next_action = {"code": "ACTIVATE_SNAPSHOT", "label": "确认激活锁定快照", "incurs_production_cost": False}
-    elif snapshots and snapshots[0].status == "active":
+    elif current_snapshot and current_snapshot.status == "active":
         next_action = {"code": "SUBMIT_PRODUCTION", "label": "确认完整 DAG 并提交生产", "incurs_production_cost": True}
-    elif snapshots and snapshots[0].status == "submitted":
+    elif current_snapshot and current_snapshot.status == "submitted":
         next_action = {"code": "VIEW_PRODUCTION", "label": "查看生产执行", "incurs_production_cost": False}
     else:
         next_action = {"code": "ANALYZE_PRODUCTION_IMPACT", "label": "选择精确配置并分析生产影响", "incurs_production_cost": False}
@@ -1617,6 +1629,11 @@ def preparation_view(session: Session, project: Project) -> dict:
         "audio_mode": str(active_plan.creative_brief.get("audio_mode", "")) if active_plan else "",
         "published_configurations": choices,
         "analyses": [_impact_dict(item) for item in analyses],
+        "current_snapshot": (
+            _snapshot_dict(session, current_snapshot)
+            if current_snapshot
+            else None
+        ),
         "snapshots": [_snapshot_dict(session, item) for item in snapshots],
         "production_plan_candidates": [
             {column.name: getattr(item, column.name) for column in item.__table__.columns}
