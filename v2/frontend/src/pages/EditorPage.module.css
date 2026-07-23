@@ -347,6 +347,25 @@
   color: #b8bdc1;
   font-size: 10px;
 }
+.reviewNotice {
+  min-height: 40px;
+  padding: 8px 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #3a3e43;
+  background: #202c27;
+  color: #c9ddd2;
+  font-size: 10px;
+}
+.reviewNotice svg {
+  width: 15px;
+  flex: none;
+}
+.reviewNotice code {
+  margin-left: auto;
+  color: #b7c8bf;
+}
 .timelineTools svg {
   width: 14px;
 }
@@ -490,8 +509,75 @@
   background: #292d31;
   color: #fff;
 }
+.inspector input:disabled {
+  opacity: .78;
+  cursor: default;
+}
 .inspector > button:last-child {
   color: #ef947b;
+}
+.editorEvidence {
+  padding: 11px 12px 12px;
+  border-top: 1px solid #34383d;
+  background: #202328;
+}
+.editorEvidence[data-gap='true'] {
+  background: #302823;
+}
+.editorEvidence > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.editorEvidence > div > svg {
+  width: 16px;
+  color: #75a58c;
+}
+.editorEvidence > div span {
+  display: grid;
+  gap: 2px;
+}
+.editorEvidence strong {
+  font-size: 11px;
+}
+.editorEvidence small,
+.editorEvidence p,
+.editorEvidence summary,
+.editorEvidence dl {
+  font-size: 10px;
+}
+.editorEvidence small {
+  color: #949b97;
+}
+.editorEvidence p {
+  margin: 9px 0 0 24px;
+  color: #d8ddda;
+  line-height: 1.5;
+}
+.editorEvidence details {
+  margin: 8px 0 0 24px;
+}
+.editorEvidence summary {
+  color: #9fb8ab;
+  cursor: pointer;
+}
+.editorEvidence dl {
+  margin: 8px 0 0;
+  display: grid;
+  gap: 5px;
+}
+.editorEvidence dl div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+}
+.editorEvidence dt {
+  color: #8f9692;
+}
+.editorEvidence dd {
+  margin: 0;
+  color: #d6dbd8;
+  overflow-wrap: anywhere;
 }
 .versions {
   margin: 16px;

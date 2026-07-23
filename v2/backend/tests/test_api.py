@@ -5348,6 +5348,10 @@ def test_editor_assistant_creates_auditable_timeline_candidate_for_manual_confir
     workspace = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
     assert workspace["latest_editor_run"]["status"] == "succeeded"
     assert workspace["next_action"]["code"] == "VALIDATE_TIMELINE"
+    persisted_timeline = next(item for item in workspace["timelines"] if item["id"] == timeline["id"])
+    assert persisted_timeline["source"] == "editor_assistant"
+    assert persisted_timeline["items"][0]["transform"]["editor_assistant"]["selection_reason"]
+    assert persisted_timeline["items"][0]["transform"]["editor_assistant"]["qc_report_ids"]
     assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "editing"
 
 

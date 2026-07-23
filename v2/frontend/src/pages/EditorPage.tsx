@@ -6,14 +6,54 @@ import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { EditorAsset, Timeline, TimelineItemDraft } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
+import { projectStatusLabel } from '../presentation/projectFacts'
 import styles from './EditorPage.module.css'
 
 type TrackType = TimelineItemDraft['track_type']
+type DraftMode = 'view' | 'new' | 'revision'
+
+interface EditorEvidence {
+  timeline_item_code: string | null
+  shot_code: string | null
+  selection_reason: string | null
+  qc_report_ids: string[]
+}
 
 const trackMeta: Record<TrackType, { label: string; icon: typeof Video }> = {
   main_video: { label: '主画面', icon: Video },
   audio: { label: '音频', icon: Music2 },
   subtitle: { label: '字幕', icon: Subtitles },
+}
+
+const timelineStatusLabels: Record<Timeline['status'], string> = {
+  candidate: '待校验',
+  review: '待确认',
+  confirmed: '已确认',
+  exported: '已交付',
+  superseded: '历史版本',
+}
+
+const timelineSourceLabels: Record<Timeline['source'], string> = {
+  user: '人工创建',
+  editor_assistant: '剪辑助理',
+}
+
+const assetTypeLabels: Record<EditorAsset['asset_type'], string> = {
+  video: '视频',
+  audio: '音频',
+  subtitle: '字幕',
+}
+
+const assetStateLabels: Record<EditorAsset['state'], string> = {
+  approved: '已批准',
+  used: '已使用',
+}
+
+const timeFieldLabels: Record<'source_in_ms' | 'source_out_ms' | 'timeline_in_ms' | 'timeline_out_ms', string> = {
+  source_in_ms: '素材起点',
+  source_out_ms: '素材终点',
+  timeline_in_ms: '成片起点',
+  timeline_out_ms: '成片终点',
 }
 
 function seconds(ms: number | null) {
@@ -34,6 +74,33 @@ function normalizeSequences(items: TimelineItemDraft[]) {
   return items.map(item => ({ ...item, sequence_number: ++counters[item.track_type] }))
 }
 
+function timelineDraftItems(timeline: Timeline): TimelineItemDraft[] {
+  return timeline.items.map(item => ({
+    track_type: item.track_type,
+    sequence_number: item.sequence_number,
+    asset_id: item.asset_id,
+    label: item.label,
+    gap_reason: item.gap_reason,
+    source_in_ms: item.source_in_ms,
+    source_out_ms: item.source_out_ms,
+    timeline_in_ms: item.timeline_in_ms,
+    timeline_out_ms: item.timeline_out_ms,
+    transform: item.transform,
+  }))
+}
+
+function editorEvidence(transform: Record<string, unknown>): EditorEvidence | null {
+  const value = transform.editor_assistant
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  return {
+    timeline_item_code: typeof record.timeline_item_code === 'string' ? record.timeline_item_code : null,
+    shot_code: typeof record.shot_code === 'string' ? record.shot_code : null,
+    selection_reason: typeof record.selection_reason === 'string' ? record.selection_reason : null,
+    qc_report_ids: Array.isArray(record.qc_report_ids) ? record.qc_report_ids.filter((item): item is string => typeof item === 'string') : [],
+  }
+}
+
 export function EditorPage() {
   const [searchParams] = useSearchParams()
   const client = useQueryClient()
@@ -41,6 +108,7 @@ export function EditorPage() {
   const revisionRequestId = searchParams.get('revisionRequest') ?? ''
   const [selectedTimelineId, setSelectedTimelineId] = useState('')
   const [draftItems, setDraftItems] = useState<TimelineItemDraft[]>([])
+  const [draftMode, setDraftMode] = useState<DraftMode>('view')
   const [revisionBase, setRevisionBase] = useState<Timeline | null>(null)
   const [selectedDraftIndex, setSelectedDraftIndex] = useState<number | null>(null)
   const [selectedAssetId, setSelectedAssetId] = useState('')
@@ -62,11 +130,11 @@ export function EditorPage() {
   const stage = useMutation({ mutationFn: () => api.approveQualityStage(projectId, workspace.data!.active_snapshot_id!), onSuccess: refresh })
   const generateAssistant = useMutation({
     mutationFn: () => api.generateEditorTimeline(projectId, workspace.data!.active_snapshot_id!),
-    onSuccess: async timeline => { setSelectedTimelineId(timeline.id); await refresh() },
+    onSuccess: async timeline => { setDraftMode('view'); setSelectedTimelineId(timeline.id); await refresh() },
   })
   const retryAssistant = useMutation({
     mutationFn: () => api.retryEditorTimeline(projectId, workspace.data!.latest_editor_run!.id),
-    onSuccess: async timeline => { setSelectedTimelineId(timeline.id); await refresh() },
+    onSuccess: async timeline => { setDraftMode('view'); setSelectedTimelineId(timeline.id); await refresh() },
   })
   const save = useMutation({
     mutationFn: () => revisionBase
@@ -74,6 +142,7 @@ export function EditorPage() {
       : api.createTimelineCandidate(projectId, workspace.data!.active_snapshot_id!, 'user', { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled }, draftItems),
     onSuccess: async timeline => {
       setSelectedTimelineId(timeline.id)
+      setDraftMode('view')
       setRevisionBase(null)
       await refresh()
     },
@@ -92,6 +161,7 @@ export function EditorPage() {
   useEffect(() => {
     setSelectedTimelineId('')
     setDraftItems([])
+    setDraftMode('view')
     setRevisionBase(null)
     setSelectedDraftIndex(null)
     setSelectedAssetId('')
@@ -99,8 +169,22 @@ export function EditorPage() {
     setDeliveryFile(null)
   }, [projectId])
 
+  useEffect(() => {
+    if (draftMode !== 'view' || !selectedTimeline) return
+    const items = timelineDraftItems(selectedTimeline)
+    setDraftItems(items)
+    setAudioEnabled(selectedTimeline.track_config.audio_enabled)
+    setSubtitleEnabled(selectedTimeline.track_config.subtitle_enabled)
+    setRevisionBase(null)
+    setSelectedDraftIndex(items.length ? 0 : null)
+    setSelectedAssetId(items.find(item => item.asset_id)?.asset_id ?? '')
+  }, [draftMode, selectedTimeline?.id, selectedTimeline?.row_version])
+
   const timelineDuration = useMemo(() => draftItems.reduce((maximum, item) => Math.max(maximum, item.timeline_out_ms), 0), [draftItems])
+  const selectedDraftItem = selectedDraftIndex == null ? null : draftItems[selectedDraftIndex] ?? null
+  const selectedEvidence = selectedDraftItem ? editorEvidence(selectedDraftItem.transform) : null
   const beginNew = () => {
+    setDraftMode('new')
     setDraftItems([])
     setRevisionBase(null)
     setSelectedDraftIndex(null)
@@ -108,25 +192,16 @@ export function EditorPage() {
     setSubtitleEnabled(false)
   }
   const beginRevision = (timeline: Timeline) => {
-    setDraftItems(timeline.items.map(item => ({
-      track_type: item.track_type,
-      sequence_number: item.sequence_number,
-      asset_id: item.asset_id,
-      label: item.label,
-      gap_reason: item.gap_reason,
-      source_in_ms: item.source_in_ms,
-      source_out_ms: item.source_out_ms,
-      timeline_in_ms: item.timeline_in_ms,
-      timeline_out_ms: item.timeline_out_ms,
-      transform: item.transform,
-    })))
+    setDraftMode('revision')
+    setSelectedTimelineId(timeline.id)
+    setDraftItems(timelineDraftItems(timeline))
     setAudioEnabled(timeline.track_config.audio_enabled)
     setSubtitleEnabled(timeline.track_config.subtitle_enabled)
     setRevisionBase(timeline)
     setSelectedDraftIndex(null)
   }
   const addAsset = (asset: EditorAsset) => {
-    if (!asset.duration_ms || asset.duration_ms <= 0) return
+    if (draftMode === 'view' || !asset.duration_ms || asset.duration_ms <= 0) return
     const duration = asset.duration_ms
     const track = assetTrack(asset)
     const trackRows = draftItems.filter(item => item.track_type === track)
@@ -145,6 +220,7 @@ export function EditorPage() {
     setSelectedAssetId(asset.id)
   }
   const addGap = () => {
+    if (draftMode === 'view') return
     const duration = Math.round(gapSeconds * 1000)
     if (duration <= 0) return
     const rows = draftItems.filter(item => item.track_type === 'main_video')
@@ -179,7 +255,7 @@ export function EditorPage() {
     <main className={styles.layout}>
       <aside className={styles.projects}>
         <header><span>EDITABLE PROJECTS</span><h2>剪辑项目</h2><b>{editorProjects.length}</b></header>
-        {editorProjects.map(project => <button key={project.id} data-selected={projectId === project.id} onClick={() => setProjectId(project.id)}><i>{project.status === 'delivery_ready' ? <Check /> : <Clock3 />}</i><span><strong>{project.title}</strong><small>{project.status}</small></span></button>)}
+        {editorProjects.map(project => <button key={project.id} data-selected={projectId === project.id} onClick={() => setProjectId(project.id)}><i>{project.status === 'delivery_ready' ? <Check /> : <Clock3 />}</i><span><strong>{project.title}</strong><small>{projectStatusLabel(project.status)}</small></span></button>)}
         {!editorProjects.length && <p>暂无进入审核或剪辑阶段的项目</p>}
       </aside>
 
@@ -216,19 +292,21 @@ export function EditorPage() {
                 <header><div><span>APPROVED ASSETS</span><h3>素材箱</h3></div><b>{workspace.data.available_assets.length}</b></header>
                 <div>{workspace.data.available_assets.map(asset => {
                   const disabled = !asset.duration_ms || (asset.asset_type === 'audio' && (!audioEnabled || workspace.data.audio_mode === 'off')) || (asset.asset_type === 'subtitle' && !subtitleEnabled)
-                  return <article key={asset.id} data-selected={selectedAssetId === asset.id} onClick={() => setSelectedAssetId(asset.id)}><i><FileVideo2 /></i><span><strong>{asset.node_key ?? asset.role}</strong><small>{asset.asset_type} · {seconds(asset.duration_ms)} · {asset.state}</small></span><button title="加入时间线" disabled={disabled} onClick={event => { event.stopPropagation(); addAsset(asset) }}><Plus /></button></article>
+                  return <article key={asset.id} data-selected={selectedAssetId === asset.id} onClick={() => setSelectedAssetId(asset.id)}><i><FileVideo2 /></i><span><strong>{asset.node_key ?? asset.role}</strong><small>{assetTypeLabels[asset.asset_type]} · {seconds(asset.duration_ms)} · {assetStateLabels[asset.state]}</small></span><button title={draftMode === 'view' ? '创建修订后才能调整素材' : '加入时间线'} disabled={disabled || draftMode === 'view'} onClick={event => { event.stopPropagation(); addAsset(asset) }}><Plus /></button></article>
                 })}</div>
               </aside>
             </div>
 
             <section className={styles.builder}>
               <header>
-                <div><span>TIMELINE CANDIDATE</span><h3>{revisionBase ? `修订 v${revisionBase.version_number}` : '新时间线候选'}</h3></div>
-                <div className={styles.trackToggles}><label><input type="checkbox" checked={audioEnabled} disabled={workspace.data.audio_mode === 'off'} onChange={event => setAudioEnabled(event.target.checked)} />音频</label><label><input type="checkbox" checked={subtitleEnabled} onChange={event => setSubtitleEnabled(event.target.checked)} />字幕</label></div>
+                <div><span>{draftMode === 'view' ? 'TIMELINE REVIEW' : 'TIMELINE CANDIDATE'}</span><h3>{draftMode === 'view' ? (selectedTimeline ? `审核时间线 v${selectedTimeline.version_number}` : '尚无剪辑草案') : revisionBase ? `修订 v${revisionBase.version_number}` : '新时间线候选'}</h3></div>
+                <div className={styles.trackToggles}><label><input type="checkbox" checked={audioEnabled} disabled={draftMode === 'view' || workspace.data.audio_mode === 'off'} onChange={event => setAudioEnabled(event.target.checked)} />音频</label><label><input type="checkbox" checked={subtitleEnabled} disabled={draftMode === 'view'} onChange={event => setSubtitleEnabled(event.target.checked)} />字幕</label></div>
                 <button className="secondaryButton" disabled={workspace.data.timelines.length > 0} title={workspace.data.timelines.length > 0 ? '已有版本时请从目标版本创建修订' : '新建首个候选'} onClick={beginNew}><Plus size={14} />新建</button>
-                <button className="primaryButton" disabled={!draftItems.length || save.isPending} onClick={() => save.mutate()}><Save size={14} />{revisionBase ? '保存新版本' : '保存候选'}</button>
+                {draftMode !== 'view' && <button className="primaryButton" disabled={!draftItems.length || save.isPending} onClick={() => save.mutate()}><Save size={14} />{revisionBase ? '保存新版本' : '保存候选'}</button>}
               </header>
-              <div className={styles.timelineTools}><Scissors /><span>显式空位</span><input type="number" min="0.1" step="0.1" value={gapSeconds} onChange={event => setGapSeconds(Number(event.target.value))} /><small>秒</small><button onClick={addGap}><Plus />添加</button><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>
+              {draftMode === 'view'
+                ? <div className={styles.reviewNotice}><ShieldCheck /><span>当前是只读审核。需要调整素材、顺序或时间时，请从下方版本创建修订。</span><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>
+                : <div className={styles.timelineTools}><Scissors /><span>显式空位</span><input type="number" min="0.1" step="0.1" value={gapSeconds} onChange={event => setGapSeconds(Number(event.target.value))} /><small>秒</small><button onClick={addGap}><Plus />添加</button><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>}
               <div className={styles.ruler}>{[0, .2, .4, .6, .8, 1].map(mark => <span key={mark}>{timecode(workspace.data!.duration_ms * mark)}</span>)}</div>
               <div className={styles.tracks}>{(['main_video', 'audio', 'subtitle'] as TrackType[]).map(track => {
                 const Icon = trackMeta[track].icon
@@ -236,18 +314,25 @@ export function EditorPage() {
                 const disabled = (track === 'audio' && !audioEnabled) || (track === 'subtitle' && !subtitleEnabled)
                 return <div className={styles.track} key={track} data-disabled={disabled}><header><Icon /><b>{trackMeta[track].label}</b></header><div>{rows.length ? rows.map(({ item, index }) => <button key={`${track}-${item.sequence_number}-${index}`} className={item.asset_id ? styles.clip : styles.gapClip} data-selected={selectedDraftIndex === index} style={{ flexGrow: Math.max(1, item.timeline_out_ms - item.timeline_in_ms) }} onClick={() => { setSelectedDraftIndex(index); if (item.asset_id) setSelectedAssetId(item.asset_id) }}><strong>{item.label}</strong><small>{seconds(item.timeline_out_ms - item.timeline_in_ms)}</small></button>) : <span>{disabled ? '轨道已关闭' : '暂无片段'}</span>}</div></div>
               })}</div>
-              {selectedDraftIndex != null && draftItems[selectedDraftIndex] && <div className={styles.inspector}>
-                <div><span>CLIP INSPECTOR</span><strong>{draftItems[selectedDraftIndex].label}</strong></div>
-                {(['source_in_ms', 'source_out_ms', 'timeline_in_ms', 'timeline_out_ms'] as const).map(field => <label key={field}>{field.replace('_ms', '')}<input type="number" step="0.1" value={(draftItems[selectedDraftIndex][field] ?? 0) / 1000} onChange={event => updateItem(selectedDraftIndex, field, Math.round(Number(event.target.value) * 1000))} /></label>)}
-                <button title="上移" onClick={() => moveItem(selectedDraftIndex, -1)}><ChevronUp /></button><button title="下移" onClick={() => moveItem(selectedDraftIndex, 1)}><ChevronDown /></button><button title="删除片段" onClick={() => removeItem(selectedDraftIndex)}><Trash2 /></button>
-              </div>}
+              {selectedDraftIndex != null && selectedDraftItem && <>
+                <div className={styles.inspector}>
+                  <div><span>片段检查</span><strong>{selectedDraftItem.label}</strong></div>
+                  {(['source_in_ms', 'source_out_ms', 'timeline_in_ms', 'timeline_out_ms'] as const).map(field => <label key={field}>{timeFieldLabels[field]}<input disabled={draftMode === 'view'} type="number" step="0.1" value={(selectedDraftItem[field] ?? 0) / 1000} onChange={event => updateItem(selectedDraftIndex, field, Math.round(Number(event.target.value) * 1000))} /></label>)}
+                  {draftMode !== 'view' && <><button title="上移" onClick={() => moveItem(selectedDraftIndex, -1)}><ChevronUp /></button><button title="下移" onClick={() => moveItem(selectedDraftIndex, 1)}><ChevronDown /></button><button title="删除片段" onClick={() => removeItem(selectedDraftIndex)}><Trash2 /></button></>}
+                </div>
+                {(selectedEvidence || selectedDraftItem.gap_reason) && <div className={styles.editorEvidence} data-gap={!selectedDraftItem.asset_id}>
+                  <div><Sparkles /><span><strong>{selectedDraftItem.asset_id ? '剪辑助理选用依据' : '素材空位说明'}</strong><small>{selectedEvidence?.shot_code ? `对应分镜 ${selectedEvidence.shot_code}` : '该段没有绑定素材'}</small></span></div>
+                  <p>{selectedDraftItem.gap_reason ?? selectedEvidence?.selection_reason ?? '未记录选择理由'}</p>
+                  {selectedEvidence && selectedDraftItem.asset_id && <details><summary>查看审核证据</summary><dl><div><dt>片段编号</dt><dd>{selectedEvidence.timeline_item_code ?? '未记录'}</dd></div><div><dt>QC 报告</dt><dd>{selectedEvidence.qc_report_ids.length ? selectedEvidence.qc_report_ids.join('、') : '未记录'}</dd></div></dl></details>}
+                </div>}
+              </>}
             </section>
 
             <section className={styles.versions}>
               <header><div><span>VERSION HISTORY</span><h3>时间线版本</h3></div></header>
               {!workspace.data.timelines.length && <p>尚未创建时间线候选</p>}
-              {workspace.data.timelines.map(timeline => <article key={timeline.id} data-selected={selectedTimeline?.id === timeline.id} onClick={() => setSelectedTimelineId(timeline.id)}>
-                <div><strong>v{timeline.version_number}</strong><em>{timeline.status}</em><span>{timeline.source}</span></div><small>{timeline.items.length} 个片段 · {timeline.contract_hash?.slice(0, 12) ?? '未校验'}</small>
+              {workspace.data.timelines.map(timeline => <article key={timeline.id} data-selected={selectedTimeline?.id === timeline.id} onClick={() => { setDraftMode('view'); setSelectedTimelineId(timeline.id) }}>
+                <div><strong>v{timeline.version_number}</strong><em>{timelineStatusLabels[timeline.status]}</em><span>{timelineSourceLabels[timeline.source]}</span></div><small>{timeline.items.length} 个片段 · {timeline.contract_hash?.slice(0, 12) ?? '尚未校验'}</small>
                 <footer>{timeline.status === 'candidate' && <button className="secondaryButton" disabled={validate.isPending} onClick={event => { event.stopPropagation(); validate.mutate(timeline) }}>校验</button>}{timeline.status === 'review' && <button className="primaryButton" onClick={event => { event.stopPropagation(); setConfirming(timeline) }}><Check size={14} />确认合同</button>}{!['exported', 'superseded'].includes(timeline.status) && <button className="secondaryButton" onClick={event => { event.stopPropagation(); beginRevision(timeline) }}>创建修订</button>}</footer>
                 {timeline.validation_report.length > 0 && <div className={styles.validation}>{timeline.validation_report.map((row, index) => <p key={`${row.code}-${index}`}><AlertTriangle /><span><b>{row.code}</b>{row.message}</span></p>)}</div>}
               </article>)}
