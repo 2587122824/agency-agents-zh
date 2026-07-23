@@ -12,13 +12,10 @@ from .base import (
     ProviderPollResult,
     ProviderSubmission,
 )
-from .credentials import CredentialResolution, EnvironmentCredentialResolver
 from .registry import ProviderAdapterRegistry, default_provider_registry
 from .runninghub import HttpxRunningHubTransport, RunningHubAdapter, RunningHubTransport
 
 __all__ = [
-    "CredentialResolution",
-    "EnvironmentCredentialResolver",
     "ExternalProviderAdapter",
     "ProviderAdapter",
     "ProviderAdapterError",

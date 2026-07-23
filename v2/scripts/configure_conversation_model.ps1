@@ -52,7 +52,7 @@ $WorkflowKeys = @{}; $Workflows | ForEach-Object { $WorkflowKeys[$_.id] = $_.key
 $ProviderDrafts = @($Providers | ForEach-Object { @{
   provider_key = $_.key; display_name = $_.display_name
   adapter_kind = $_.details.adapter_kind; region = $_.details.region
-  base_url = $_.details.base_url; credential_ref = $_.details.credential_ref
+  base_url = $_.details.base_url; api_key = $_.details.api_key
   capabilities = @($_.details.capabilities)
   request_timeout_seconds = $_.details.request_timeout_seconds
   poll_interval_seconds = $_.details.poll_interval_seconds
@@ -62,7 +62,7 @@ if (-not ($ProviderDrafts | Where-Object { $_.provider_key -eq "deepseek-creativ
   $ProviderDrafts += @{
     provider_key = "deepseek-creative-api"; display_name = "DeepSeek 创作模型"
     adapter_kind = "openai_compatible"; region = $null
-    base_url = "https://api.deepseek.com/v1"; credential_ref = "env://V2_DEEPSEEK_API_KEY"
+    base_url = "https://api.deepseek.com/v1"; api_key = $env:V2_DEEPSEEK_API_KEY
     capabilities = @("text_generation"); request_timeout_seconds = 900
     poll_interval_seconds = 5; max_concurrency = 1
   }

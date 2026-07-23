@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import Any, Literal, Protocol
 from urllib.parse import urljoin
 
 import httpx
@@ -12,8 +12,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
-if TYPE_CHECKING:
-    from ..providers.credentials import EnvironmentCredentialResolver
 
 
 class AgentGatewayError(RuntimeError):
@@ -149,7 +147,7 @@ class CreativeAgentSelection:
     model_name: str
     provider_model_id: str
     base_url: str
-    credential_ref: str | None
+    api_key: str | None
     timeout_seconds: int
     input_contract_version: str
     prompt_contract_version: str
@@ -261,12 +259,8 @@ class ConfiguredCreativeAgentGateway:
         self,
         *,
         transport: AgentChatTransport | None = None,
-        credential_resolver: EnvironmentCredentialResolver | None = None,
     ) -> None:
-        from ..providers.credentials import EnvironmentCredentialResolver
-
         self.transport = transport or HttpxAgentChatTransport()
-        self.credential_resolver = credential_resolver or EnvironmentCredentialResolver.from_environment()
 
     def select(self, session: Session) -> CreativeAgentSelection:
         rows = list(session.execute(
@@ -316,7 +310,7 @@ class ConfiguredCreativeAgentGateway:
             model_name=model.display_name,
             provider_model_id=model.provider_model_id,
             base_url=provider.base_url,
-            credential_ref=provider.credential_ref,
+            api_key=provider.api_key,
             timeout_seconds=provider.request_timeout_seconds,
             input_contract_version=model.input_contract_version,
             prompt_contract_version=model.prompt_contract_version,
@@ -332,9 +326,9 @@ class ConfiguredCreativeAgentGateway:
     ) -> CreativeAgentResult:
         if os.getenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
             raise AgentGatewayError("AGENT_MODEL_EXECUTION_DISABLED", "创作模型真实调用尚未获得后端执行授权。")
-        credential = self.credential_resolver.resolve(selection.credential_ref)
-        if not credential.available or credential.secret is None:
-            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", f"创作模型后端凭据不可用（{credential.state}）。")
+        api_key = str(selection.api_key or "").strip()
+        if not api_key:
+            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", "创作模型供应商的 API Key 未填写。")
         context_payload = {
             key: value for key, value in manifest_payload.items() if key != "conversation"
         }
@@ -401,7 +395,7 @@ class ConfiguredCreativeAgentGateway:
                 payload[key] = value
         response = self.transport.create_chat_completion(
             url=urljoin(selection.base_url.rstrip("/") + "/", "chat/completions"),
-            api_key=credential.secret,
+            api_key=api_key,
             payload=payload,
             timeout_seconds=selection.timeout_seconds,
         )
@@ -436,7 +430,7 @@ class DeterministicCreativeAgentGateway:
             model_name="deterministic-creative-v1",
             provider_model_id="deterministic-creative-v1",
             base_url="https://example.invalid/v1",
-            credential_ref=None,
+            api_key=None,
             timeout_seconds=1,
             input_contract_version=CREATIVE_INPUT_CONTRACT_VERSION,
             prompt_contract_version=CREATIVE_PROMPT_CONTRACT_VERSION,

@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from ..creation.agent_gateway import AgentChatTransport, AgentGatewayError, HttpxAgentChatTransport
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
-from ..providers.credentials import EnvironmentCredentialResolver
 
 
 class BriefHook(BaseModel):
@@ -192,7 +191,7 @@ class ContentPlannerSelection:
     model_name: str
     provider_model_id: str
     base_url: str
-    credential_ref: str | None
+    api_key: str | None
     timeout_seconds: int
     input_contract_version: str
     prompt_contract_version: str
@@ -287,7 +286,7 @@ def select_content_planner_configuration(session: Session) -> ContentPlannerSele
         model_name=model.display_name,
         provider_model_id=model.provider_model_id,
         base_url=provider.base_url,
-        credential_ref=provider.credential_ref,
+        api_key=provider.api_key,
         timeout_seconds=provider.request_timeout_seconds,
         input_contract_version=model.input_contract_version,
         prompt_contract_version=model.prompt_contract_version,
@@ -302,10 +301,8 @@ class ConfiguredContentPlannerGateway:
         self,
         *,
         transport: AgentChatTransport | None = None,
-        credential_resolver: EnvironmentCredentialResolver | None = None,
     ) -> None:
         self.transport = transport or HttpxAgentChatTransport()
-        self.credential_resolver = credential_resolver or EnvironmentCredentialResolver.from_environment()
 
     def select(self, session: Session) -> ContentPlannerSelection:
         return select_content_planner_configuration(session)
@@ -317,9 +314,9 @@ class ConfiguredContentPlannerGateway:
     ) -> ContentPlannerResult:
         if os.getenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
             raise AgentGatewayError("AGENT_MODEL_EXECUTION_DISABLED", "内容策划模型真实调用尚未获得后端执行授权。")
-        credential = self.credential_resolver.resolve(selection.credential_ref)
-        if not credential.available or credential.secret is None:
-            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", f"内容策划模型后端凭据不可用（{credential.state}）。")
+        api_key = str(selection.api_key or "").strip()
+        if not api_key:
+            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", "内容策划模型供应商的 API Key 未填写。")
         payload: dict[str, Any] = {
             "model": selection.provider_model_id,
             "messages": [
@@ -339,7 +336,7 @@ class ConfiguredContentPlannerGateway:
                 payload[key] = value
         response = self.transport.create_chat_completion(
             url=urljoin(selection.base_url.rstrip("/") + "/", "chat/completions"),
-            api_key=credential.secret,
+            api_key=api_key,
             payload=payload,
             timeout_seconds=selection.timeout_seconds,
         )
@@ -457,7 +454,7 @@ class DeterministicContentPlannerGateway:
             model_name="deterministic-content-planner-v1",
             provider_model_id="deterministic-content-planner-v1",
             base_url="https://example.invalid/v1",
-            credential_ref=None,
+            api_key=None,
             timeout_seconds=1,
             input_contract_version=CONTENT_PLANNER_INPUT_CONTRACT_VERSION,
             prompt_contract_version=CONTENT_PLANNER_PROMPT_CONTRACT_VERSION,

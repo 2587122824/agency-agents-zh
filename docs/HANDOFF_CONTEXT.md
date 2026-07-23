@@ -25,10 +25,10 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 分支 | `main` |
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
-| 数据库迁移 | `20260723_31 (head)` |
-| 已发布配置 | `production_config_07d5a0f32539406a976a6faf95177e6d`，版本 51；继承 v50 的本地素材库与工作流路由，新增 `editor` 模型 `deepseek-editor-assistant`；editor Prompt 为 `editor-assistant-prompt.v1`，不修改 NodeInfoList |
+| 数据库迁移 | `20260723_32 (head)` |
+| 已发布配置 | `production_config_1f3f5343b7114ac89b36ae26a5a0bb04`，版本 52；工作流、模型、NodeInfoList 和媒体策略与 v51 相同，供应商组件改为普通 `api_key` 字段并重新校验配置哈希 |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
-| 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 密钥通过 Windows 用户环境与白名单注入，不写数据库或仓库 |
+| 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 与文本模型 API Key 由当前已发布系统配置普通字段提供，不再读取环境变量 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
 
 启动或重启：
@@ -163,7 +163,7 @@ v2/runtime/worker.err.log
 - 音频关闭时不创建 TTS 依赖。
 - 普通首帧视频只能消费一张明确父图片，多图输入必须明确失败或使用已配置多帧工作流。
 - QC 失败不自动发起付费重试，用户选择后才能设计重试命令。
-- 凭据只保存在后端环境变量，不写入 Git、数据库或 API 响应。
+- 本地单用户阶段，API 供应商密钥作为系统配置普通字段写入数据库并由配置详情 API 回填；不得写入 Git、错误消息或供应商失败证据，多用户部署前必须重新设计凭据保护。
 - V1 与 V2 运行代码保持隔离，不复用 V1 运行时逻辑作为隐藏兼容层。
 - `my_workspace/my_asset_library/library.json` 是用户本地改动，除非用户明确要求，否则不得暂存或提交。
 
@@ -181,6 +181,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-23 | 按用户确认将所有 API 供应商密钥改为系统配置普通 `api_key` 字段：设置页直接填写和回填，RunningHub 与全部文本智能体网关读取精确已发布供应商版本，不再使用 `credential_ref`、环境变量白名单或运行时回退；迁移仅一次性将旧环境变量值导入历史供应商版本，并发布哈希一致的配置 v52。当前边界明确限定为本地单用户开发环境 |
 | 2026-07-23 | 完成本机 FFmpeg 最终交付：`v2.delivery-request.v2` 冻结时间线、素材哈希、输出规格、FFmpeg 路径/版本与 `libx264` 参数；用户必须显式选择本机生成或外部上传。`render_delivery` 使用独立 WorkItem/WorkAttempt 且不进入生产快照，执行前复验真实文件哈希，成功只登记待验证 Asset，失败保存一次阻断证据，不自动重试或切换方式。迁移 `20260723_31` |
 | 2026-07-23 | 制作准备页增加统一的唯一选项回填：制作配置、画面规格、计费方案及唯一图片/视频/配音方案自动选中；多个候选保持空值。只初始化可见表单，不沿用历史选择，不自动应用到镜头、调用智能体、分析影响、保存快照、确认费用或开始制作 |
 | 2026-07-23 | 修复返回制作准备后旧快照仍被当作当前方案：`production-preparation` 新增后端显式解析的 `current_snapshot`，后端下一步和前端锁定/激活/提交、弹窗及状态徽标只读取该字段；完整 `snapshots` 继续用于历史审计和重复合同校验。`superseded` 显示为“已结束”且无操作按钮，返回后立即恢复配置选择和影响分析入口，不自动调用或创建新快照 |
@@ -248,13 +249,13 @@ v2/runtime/worker.err.log
 - 后端测试：`238 passed`
 - 两阶段生产验收：图片节点全部先执行；后续任务在用户确认前保持 `waiting_phase`；节点或素材清单不一致明确失败；确认后视频读取冻结的已批准素材；纯文本视频无图片门禁并直接排队
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v51，5 个文本智能体模型分工与 6 个镜头工作流槽位；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；剪辑助理合同为 `editor-assistant-input.v1 / timeline-candidate.v1 / editor-assistant-prompt.v1`
+- 当前生产配置：v52，5 个文本智能体模型分工与 6 个镜头工作流槽位；供应商 API Key 使用配置普通字段；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；剪辑助理合同为 `editor-assistant-input.v1 / timeline-candidate.v1 / editor-assistant-prompt.v1`
 - 剪辑助理端到端验收：只读取活动方案、快照内已批准视频、正式 QC 报告、交付规格和音频策略；模型候选经严格校验后创建待确认 Timeline，选择理由与 QC 证据保存在时间线条目中；素材不足生成显式空位并阻断确认，不自动补素材、复用、循环、变速、补帧或替换
 - 剪辑台审核闭环：生成或选择候选后直接加载该版本的真实轨道并保持只读；片段检查区展示中文时间字段、对应分镜、选择理由、QC 引用和空位原因；只有用户从目标版本显式创建修订后才开放编辑
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
-- Alembic runtime/head：`20260723_31`
+- Alembic runtime/head：`20260723_32`
 - 生产页两阶段浏览器验收：桌面明确分区展示分镜图片与视频后续步骤；窄屏 `scrollWidth == clientWidth`，无控制台错误；等待图片确认时前端不持续轮询
 - 素材审核页桌面与 375px 浏览器验收：通过，无横向溢出；空状态和普通用户可读步骤文案正常
 - 真实 DeepSeek 内容方案首次生成、同需求版本微调与拒绝后返回创作中心：通过

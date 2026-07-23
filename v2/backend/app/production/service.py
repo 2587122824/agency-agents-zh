@@ -1051,7 +1051,7 @@ def _execution_manifest(
             "provider_key": provider.provider_key,
             "adapter_kind": provider.adapter_kind,
             "base_url": provider.base_url,
-            "credential_ref": provider.credential_ref,
+            "api_key": provider.api_key,
             "request_timeout_seconds": provider.request_timeout_seconds,
             "poll_interval_seconds": provider.poll_interval_seconds,
             "max_concurrency": provider.max_concurrency,

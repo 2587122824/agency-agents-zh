@@ -39,7 +39,7 @@ class ProviderDraft(StrictContract):
     adapter_kind: str = Field(min_length=1, max_length=80)
     region: str | None = Field(default=None, max_length=120)
     base_url: HttpUrl
-    credential_ref: str | None = Field(default=None, max_length=160)
+    api_key: str | None = Field(default=None, max_length=4000)
     capabilities: list[str] = Field(min_length=1)
     request_timeout_seconds: int = Field(ge=1, le=3600)
     poll_interval_seconds: int = Field(ge=1, le=300)

@@ -13,7 +13,6 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 
 from v2.backend.app.creation.agent_gateway import AgentGatewayError
 from v2.backend.app.planning.agent_gateway import ConfiguredContentPlannerGateway, ContentPlannerSelection
-from v2.backend.app.providers.credentials import EnvironmentCredentialResolver
 
 
 class FakeTransport:
@@ -35,7 +34,7 @@ def selection() -> ContentPlannerSelection:
         model_name="Content planner",
         provider_model_id="configured-model",
         base_url="https://api.example.test/v1",
-        credential_ref="env://TEST_AGENT_KEY",
+        api_key="secret",
         timeout_seconds=30,
         input_contract_version="content-planner-input.v2",
         prompt_contract_version="content-planner-prompt.v6",
@@ -105,10 +104,7 @@ def valid_output(*, spoken_text: str | None = None, platform_adaptation: str | N
 
 def gateway_for(response: dict) -> tuple[ConfiguredContentPlannerGateway, FakeTransport]:
     transport = FakeTransport(response)
-    gateway = ConfiguredContentPlannerGateway(
-        transport=transport,
-        credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),
-    )
+    gateway = ConfiguredContentPlannerGateway(transport=transport)
     return gateway, transport
 
 

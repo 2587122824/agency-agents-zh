@@ -8,24 +8,10 @@ $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot = Split-Path -Parent $Root
 Set-Location $RepoRoot
 
-# Backend credentials stay outside the database and repository. Local user-scoped
-# values are copied into this service process only for explicitly allowlisted names.
 foreach ($Name in @("V2_AGENT_MODEL_EXECUTION_ENABLED", "V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED", "V2_FFMPEG_PATH")) {
   if (-not [Environment]::GetEnvironmentVariable($Name, "Process")) {
     $UserValue = [Environment]::GetEnvironmentVariable($Name, "User")
     if ($UserValue) { [Environment]::SetEnvironmentVariable($Name, $UserValue, "Process") }
-  }
-}
-$CredentialAllowlist = @(
-  [Environment]::GetEnvironmentVariable("V2_CREDENTIAL_ENV_ALLOWLIST", "Process")
-  [Environment]::GetEnvironmentVariable("V2_CREDENTIAL_ENV_ALLOWLIST", "User")
-) -join ","
-$CredentialAllowlist = ($CredentialAllowlist -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -Unique) -join ","
-[Environment]::SetEnvironmentVariable("V2_CREDENTIAL_ENV_ALLOWLIST", $CredentialAllowlist, "Process")
-foreach ($CredentialName in ($CredentialAllowlist -split "," | ForEach-Object { $_.Trim() } | Where-Object { $_ })) {
-  if (-not [Environment]::GetEnvironmentVariable($CredentialName, "Process")) {
-    $CredentialValue = [Environment]::GetEnvironmentVariable($CredentialName, "User")
-    if ($CredentialValue) { [Environment]::SetEnvironmentVariable($CredentialName, $CredentialValue, "Process") }
   }
 }
 

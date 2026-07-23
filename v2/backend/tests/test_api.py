@@ -5921,15 +5921,18 @@ def test_system_configuration_validation_fails_without_route_substitution(client
     assert publish.headers["x-error-code"] == "CONFIGURATION_NOT_READY"
 
 
-def test_system_configuration_contract_rejects_secret_fields(client: TestClient) -> None:
+def test_system_configuration_contract_persists_provider_api_key_as_plain_field(client: TestClient) -> None:
     configuration = valid_system_configuration()
-    configuration["providers"][0]["api_key"] = "must-not-enter-database"
+    configuration["providers"][0]["api_key"] = "configured-api-key"
     response = client.post("/api/v1/system-config/versions", json={
         "command_id": "config-secret-command-001",
         "configuration": configuration,
     })
-    assert response.status_code == 422
-    assert client.get("/api/v1/system-config/versions").json() == []
+    assert response.status_code == 201
+    provider = next(
+        item for item in response.json()["components"] if item["component_type"] == "provider"
+    )
+    assert provider["details"]["api_key"] == "configured-api-key"
 
     configuration = valid_system_configuration()
     configuration["providers"][0]["base_url"] = "https://user:password@provider.invalid/api"
@@ -5980,14 +5983,13 @@ def test_system_configuration_rejects_unconnected_local_storage_reference(client
 
 def test_provider_readiness_is_read_only_and_does_not_enable_unregistered_adapter(
     client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     configuration = valid_system_configuration()
     configuration["providers"][0].update({
         "provider_key": "runninghub_visual",
         "display_name": "RunningHub",
         "adapter_kind": "runninghub",
-        "credential_ref": "env://READINESS_TEST_API_KEY",
+        "api_key": "must-never-be-returned",
     })
     configuration["workflow_slots"][0]["provider_key"] = "runninghub_visual"
     created = client.post("/api/v1/system-config/versions", json={
@@ -6007,9 +6009,6 @@ def test_provider_readiness_is_read_only_and_does_not_enable_unregistered_adapte
         },
     )
     assert published.status_code == 200
-    monkeypatch.setenv("V2_CREDENTIAL_ENV_ALLOWLIST", "READINESS_TEST_API_KEY")
-    monkeypatch.setenv("READINESS_TEST_API_KEY", "must-never-be-returned")
-
     response = client.get("/api/v1/system-config/provider-readiness")
     assert response.status_code == 200
     view = response.json()
@@ -6021,7 +6020,7 @@ def test_provider_readiness_is_read_only_and_does_not_enable_unregistered_adapte
     assert provider["adapter_kind"] == "runninghub"
     assert provider["adapter_registered"] is True
     assert provider["execution_enabled"] is False
-    assert provider["credential_state"] == "available"
+    assert provider["api_key_state"] == "configured"
     assert provider["configuration_ready"] is True
     assert provider["configuration_issue_count"] == 0
     assert provider["configuration_issue_codes"] == []
@@ -6029,19 +6028,52 @@ def test_provider_readiness_is_read_only_and_does_not_enable_unregistered_adapte
     assert provider["next_action"] == "enable_execution"
     serialized = response.text
     assert "must-never-be-returned" not in serialized
-    assert "READINESS_TEST_API_KEY" not in serialized
+
+
+def test_provider_readiness_requires_api_key_in_published_provider_configuration(
+    client: TestClient,
+) -> None:
+    configuration = valid_system_configuration()
+    configuration["providers"][0].update({
+        "provider_key": "runninghub_without_key",
+        "display_name": "RunningHub",
+        "adapter_kind": "runninghub",
+        "api_key": None,
+    })
+    configuration["workflow_slots"][0]["provider_key"] = "runninghub_without_key"
+    created = client.post("/api/v1/system-config/versions", json={
+        "command_id": "provider-readiness-missing-key-create",
+        "configuration": configuration,
+    }).json()
+    ready = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:validate",
+        json={"command_id": "provider-readiness-missing-key-validate", "expected_row_version": created["row_version"]},
+    ).json()
+    published = client.post(
+        f"/api/v1/system-config/versions/{created['id']}:publish",
+        json={
+            "command_id": "provider-readiness-missing-key-publish",
+            "expected_row_version": ready["row_version"],
+            "confirm_high_risk_changes": True,
+        },
+    )
+    assert published.status_code == 200
+
+    provider = client.get("/api/v1/system-config/provider-readiness").json()["providers"][0]
+    assert provider["api_key_state"] == "missing"
+    assert provider["status"] == "credential_not_ready"
+    assert provider["next_action"] == "configure_credential"
 
 
 def test_provider_readiness_reports_historical_runninghub_contract_without_mutation(
     client: TestClient,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     configuration = valid_system_configuration()
     configuration["providers"][0].update({
         "provider_key": "runninghub_visual",
         "display_name": "RunningHub",
         "adapter_kind": "runninghub",
-        "credential_ref": "env://READINESS_HISTORICAL_KEY",
+        "api_key": "historical-test-key",
     })
     configuration["workflow_slots"][0]["provider_key"] = "runninghub_visual"
     created = client.post("/api/v1/system-config/versions", json={
@@ -6076,8 +6108,6 @@ def test_provider_readiness_reports_historical_runninghub_contract_without_mutat
         workflow.node_info_list = legacy_bindings
         session.commit()
 
-    monkeypatch.setenv("V2_CREDENTIAL_ENV_ALLOWLIST", "READINESS_HISTORICAL_KEY")
-    monkeypatch.setenv("READINESS_HISTORICAL_KEY", "must-never-be-returned")
     response = client.get("/api/v1/system-config/provider-readiness")
     assert response.status_code == 200
     provider = response.json()["providers"][0]
@@ -6095,4 +6125,3 @@ def test_provider_readiness_reports_historical_runninghub_contract_without_mutat
         assert workflow is not None
         assert workflow.node_info_list == legacy_bindings
     assert "must-never-be-returned" not in response.text
-    assert "READINESS_HISTORICAL_KEY" not in response.text

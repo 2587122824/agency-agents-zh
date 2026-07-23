@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from ..creation.agent_gateway import AgentChatTransport, AgentGatewayError, HttpxAgentChatTransport
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
-from ..providers.credentials import EnvironmentCredentialResolver
 
 
 PRODUCTION_PLANNER_INPUT_CONTRACT_VERSION = "production-planner-input.v1"
@@ -45,7 +44,7 @@ class ProductionPlannerSelection:
     model_name: str
     provider_model_id: str
     base_url: str
-    credential_ref: str | None
+    api_key: str | None
     timeout_seconds: int
     input_contract_version: str
     prompt_contract_version: str
@@ -85,9 +84,8 @@ _SYSTEM_PROMPT = """你是片场 V2 的制作规划智能体。你只根据已�
 
 
 class ConfiguredProductionPlannerGateway:
-    def __init__(self, *, transport: AgentChatTransport | None = None, credential_resolver: EnvironmentCredentialResolver | None = None) -> None:
+    def __init__(self, *, transport: AgentChatTransport | None = None) -> None:
         self.transport = transport or HttpxAgentChatTransport()
-        self.credential_resolver = credential_resolver or EnvironmentCredentialResolver.from_environment()
 
     def select(self, session: Session, production_config_version_id: str) -> ProductionPlannerSelection:
         rows = list(session.execute(
@@ -122,7 +120,7 @@ class ConfiguredProductionPlannerGateway:
             raise AgentGatewayError("PRODUCTION_PLANNER_CONTRACT_VERSION_UNSUPPORTED", "制作规划模型配置的合同版本与当前代码不一致。")
         return ProductionPlannerSelection(
             config.id, model.id, provider.id, provider.display_name, model.display_name,
-            model.provider_model_id, provider.base_url, provider.credential_ref,
+            model.provider_model_id, provider.base_url, provider.api_key,
             provider.request_timeout_seconds, model.input_contract_version,
             model.prompt_contract_version, model.output_schema_version,
             model.max_output_tokens, dict(model.sampling or {}),
@@ -131,9 +129,9 @@ class ConfiguredProductionPlannerGateway:
     def invoke(self, selection: ProductionPlannerSelection, manifest_payload: dict[str, Any]) -> ProductionPlannerResult:
         if os.getenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
             raise AgentGatewayError("AGENT_MODEL_EXECUTION_DISABLED", "制作规划模型真实调用尚未获得后端执行授权。")
-        credential = self.credential_resolver.resolve(selection.credential_ref)
-        if not credential.available or credential.secret is None:
-            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", f"制作规划模型后端凭据不可用（{credential.state}）。")
+        api_key = str(selection.api_key or "").strip()
+        if not api_key:
+            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", "制作规划模型供应商的 API Key 未填写。")
         payload: dict[str, Any] = {
             "model": selection.provider_model_id,
             "messages": [
@@ -149,7 +147,7 @@ class ConfiguredProductionPlannerGateway:
                 payload[key] = value
         response = self.transport.create_chat_completion(
             url=urljoin(selection.base_url.rstrip("/") + "/", "chat/completions"),
-            api_key=credential.secret,
+            api_key=api_key,
             payload=payload,
             timeout_seconds=selection.timeout_seconds,
         )

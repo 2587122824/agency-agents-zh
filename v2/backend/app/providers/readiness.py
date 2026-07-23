@@ -3,7 +3,6 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from ..repositories import SqlAlchemyConfigurationRepository
-from .credentials import EnvironmentCredentialResolver
 from .registry import ProviderAdapterRegistry, default_provider_registry
 from .runninghub_contract import runninghub_workflow_contract_issues
 
@@ -12,11 +11,9 @@ def provider_readiness(
     session: Session,
     *,
     registry: ProviderAdapterRegistry | None = None,
-    credential_resolver: EnvironmentCredentialResolver | None = None,
 ) -> dict:
     repository = SqlAlchemyConfigurationRepository(session)
     adapter_registry = registry or default_provider_registry()
-    resolver = credential_resolver or EnvironmentCredentialResolver.from_environment()
     rows: list[dict] = []
     for configuration in repository.configurations():
         if configuration.status != "published":
@@ -25,7 +22,10 @@ def provider_readiness(
         providers = components["provider"]
         for provider in providers:
             adapter = adapter_registry.get(provider.adapter_kind)
-            credential = resolver.resolve(provider.credential_ref)
+            if adapter is not None and not adapter.requires_credential:
+                api_key_state = "not_required"
+            else:
+                api_key_state = "configured" if str(provider.api_key or "").strip() else "missing"
             configuration_issues: list[dict] = []
             if provider.adapter_kind == "runninghub":
                 for workflow in components["workflow_slot"]:
@@ -44,7 +44,7 @@ def provider_readiness(
             elif not configuration_ready:
                 status = "configuration_not_ready"
                 next_action = "revise_configuration"
-            elif adapter.requires_credential and not credential.available:
+            elif adapter.requires_credential and api_key_state != "configured":
                 status = "credential_not_ready"
                 next_action = "configure_credential"
             elif adapter.external and not adapter.execution_enabled:
@@ -65,7 +65,7 @@ def provider_readiness(
                 "external": adapter.external if adapter else None,
                 "execution_enabled": adapter.execution_enabled if adapter else None,
                 "credential_required": adapter.requires_credential if adapter else None,
-                "credential_state": credential.state,
+                "api_key_state": api_key_state,
                 "configuration_ready": configuration_ready,
                 "configuration_issue_count": len(configuration_issues),
                 "configuration_issue_codes": sorted({str(issue["code"]) for issue in configuration_issues}),

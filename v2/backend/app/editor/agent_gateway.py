@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from ..creation.agent_gateway import AgentChatTransport, AgentGatewayError, HttpxAgentChatTransport
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
-from ..providers.credentials import EnvironmentCredentialResolver
 
 
 EDITOR_INPUT_CONTRACT_VERSION = "editor-assistant-input.v1"
@@ -54,7 +53,7 @@ class EditorSelection:
     model_name: str
     provider_model_id: str
     base_url: str
-    credential_ref: str | None
+    api_key: str | None
     timeout_seconds: int
     input_contract_version: str
     prompt_contract_version: str
@@ -90,9 +89,8 @@ _SYSTEM_PROMPT = """你是片场 V2 的剪辑助理。你只根据已确认方�
 
 
 class ConfiguredEditorAssistantGateway:
-    def __init__(self, *, transport: AgentChatTransport | None = None, credential_resolver: EnvironmentCredentialResolver | None = None) -> None:
+    def __init__(self, *, transport: AgentChatTransport | None = None) -> None:
         self.transport = transport or HttpxAgentChatTransport()
-        self.credential_resolver = credential_resolver or EnvironmentCredentialResolver.from_environment()
 
     def select(self, session: Session, production_config_version_id: str) -> EditorSelection:
         rows = list(session.execute(
@@ -120,7 +118,7 @@ class ConfiguredEditorAssistantGateway:
             raise AgentGatewayError("EDITOR_CONTRACT_VERSION_UNSUPPORTED", "剪辑助理模型配置与当前合同版本不一致。")
         return EditorSelection(
             config.id, model.id, provider.id, provider.display_name, model.display_name,
-            model.provider_model_id, provider.base_url, provider.credential_ref,
+            model.provider_model_id, provider.base_url, provider.api_key,
             provider.request_timeout_seconds, model.input_contract_version,
             model.prompt_contract_version, model.output_schema_version,
             model.max_output_tokens, dict(model.sampling or {}),
@@ -129,9 +127,9 @@ class ConfiguredEditorAssistantGateway:
     def invoke(self, selection: EditorSelection, manifest_payload: dict[str, Any]) -> EditorAssistantResult:
         if os.getenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
             raise AgentGatewayError("AGENT_MODEL_EXECUTION_DISABLED", "剪辑助理真实调用尚未获得后端执行授权。")
-        credential = self.credential_resolver.resolve(selection.credential_ref)
-        if not credential.available or credential.secret is None:
-            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", f"剪辑助理后端凭据不可用（{credential.state}）。")
+        api_key = str(selection.api_key or "").strip()
+        if not api_key:
+            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", "剪辑助理模型供应商的 API Key 未填写。")
         payload: dict[str, Any] = {
             "model": selection.provider_model_id,
             "messages": [
@@ -147,7 +145,7 @@ class ConfiguredEditorAssistantGateway:
                 payload[key] = value
         response = self.transport.create_chat_completion(
             url=urljoin(selection.base_url.rstrip("/") + "/", "chat/completions"),
-            api_key=credential.secret,
+            api_key=api_key,
             payload=payload,
             timeout_seconds=selection.timeout_seconds,
         )

@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 from ..creation.agent_gateway import AgentChatTransport, AgentGatewayError, HttpxAgentChatTransport
 from ..core.config import RUNTIME_ROOT
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
-from ..providers.credentials import EnvironmentCredentialResolver
 
 
 class QCEvidenceOutput(BaseModel):
@@ -60,7 +59,7 @@ class QCSelection:
     model_name: str
     provider_model_id: str
     base_url: str
-    credential_ref: str | None
+    api_key: str | None
     timeout_seconds: int
     input_contract_version: str
     prompt_contract_version: str
@@ -100,9 +99,8 @@ _QC_SYSTEM_PROMPT = """你是片场 V2 的质量审核智能体。你只分析�
 
 
 class ConfiguredQCGateway:
-    def __init__(self, *, transport: AgentChatTransport | None = None, credential_resolver: EnvironmentCredentialResolver | None = None) -> None:
+    def __init__(self, *, transport: AgentChatTransport | None = None) -> None:
         self.transport = transport or HttpxAgentChatTransport()
-        self.credential_resolver = credential_resolver or EnvironmentCredentialResolver.from_environment()
 
     def select(self, session: Session) -> QCSelection:
         rows = list(session.execute(
@@ -144,7 +142,7 @@ class ConfiguredQCGateway:
             model_name=model.display_name,
             provider_model_id=model.provider_model_id,
             base_url=provider.base_url,
-            credential_ref=provider.credential_ref,
+            api_key=provider.api_key,
             timeout_seconds=provider.request_timeout_seconds,
             input_contract_version=model.input_contract_version,
             prompt_contract_version=model.prompt_contract_version,
@@ -160,9 +158,9 @@ class ConfiguredQCGateway:
         media = manifest_payload["asset"]
         if media["asset_type"] != "image" or not str(media["mime_type"]).startswith("image/"):
             raise AgentGatewayError("QC_MEDIA_ANALYSIS_UNSUPPORTED", "当前质量审核模型合同只支持单张图片；视频与音频继续由人工审核。")
-        credential = self.credential_resolver.resolve(selection.credential_ref)
-        if not credential.available or credential.secret is None:
-            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", f"质量审核模型后端凭据不可用（{credential.state}）。")
+        api_key = str(selection.api_key or "").strip()
+        if not api_key:
+            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", "质量审核模型供应商的 API Key 未填写。")
         encoded = base64.b64encode(media_path.read_bytes()).decode("ascii")
         user_content: list[dict[str, Any]] = [
             {"type": "text", "text": "以下是不可变质量审核输入合同：" + json.dumps(manifest_payload, ensure_ascii=False, separators=(",", ":")) + "\n第一张图片是待审素材。"},
@@ -198,7 +196,7 @@ class ConfiguredQCGateway:
                 payload[key] = value
         response = self.transport.create_chat_completion(
             url=urljoin(selection.base_url.rstrip("/") + "/", "chat/completions"),
-            api_key=credential.secret,
+            api_key=api_key,
             payload=payload,
             timeout_seconds=selection.timeout_seconds,
         )

@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from ..creation.agent_gateway import AgentChatTransport, AgentGatewayError, HttpxAgentChatTransport
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
-from ..providers.credentials import EnvironmentCredentialResolver
 
 
 DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v2"
@@ -132,7 +131,7 @@ class DirectorSelection:
     model_name: str
     provider_model_id: str
     base_url: str
-    credential_ref: str | None
+    api_key: str | None
     timeout_seconds: int
     input_contract_version: str
     prompt_contract_version: str
@@ -185,9 +184,8 @@ _DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只�
 
 
 class ConfiguredDirectorGateway:
-    def __init__(self, *, transport: AgentChatTransport | None = None, credential_resolver: EnvironmentCredentialResolver | None = None) -> None:
+    def __init__(self, *, transport: AgentChatTransport | None = None) -> None:
         self.transport = transport or HttpxAgentChatTransport()
-        self.credential_resolver = credential_resolver or EnvironmentCredentialResolver.from_environment()
 
     def select(self, session: Session) -> DirectorSelection:
         rows = list(session.execute(
@@ -229,7 +227,7 @@ class ConfiguredDirectorGateway:
             model_name=model.display_name,
             provider_model_id=model.provider_model_id,
             base_url=provider.base_url,
-            credential_ref=provider.credential_ref,
+            api_key=provider.api_key,
             timeout_seconds=provider.request_timeout_seconds,
             input_contract_version=model.input_contract_version,
             prompt_contract_version=model.prompt_contract_version,
@@ -241,9 +239,9 @@ class ConfiguredDirectorGateway:
     def invoke(self, selection: DirectorSelection, manifest_payload: dict[str, Any]) -> DirectorResult:
         if os.getenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "").strip().lower() not in {"1", "true", "yes"}:
             raise AgentGatewayError("AGENT_MODEL_EXECUTION_DISABLED", "分镜导演模型真实调用尚未获得后端执行授权。")
-        credential = self.credential_resolver.resolve(selection.credential_ref)
-        if not credential.available or credential.secret is None:
-            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", f"分镜导演模型后端凭据不可用（{credential.state}）。")
+        api_key = str(selection.api_key or "").strip()
+        if not api_key:
+            raise AgentGatewayError("AGENT_MODEL_CREDENTIAL_UNAVAILABLE", "分镜导演模型供应商的 API Key 未填写。")
         payload: dict[str, Any] = {
             "model": selection.provider_model_id,
             "messages": [
@@ -259,7 +257,7 @@ class ConfiguredDirectorGateway:
                 payload[key] = value
         response = self.transport.create_chat_completion(
             url=urljoin(selection.base_url.rstrip("/") + "/", "chat/completions"),
-            api_key=credential.secret,
+            api_key=api_key,
             payload=payload,
             timeout_seconds=selection.timeout_seconds,
         )
@@ -384,7 +382,7 @@ class DeterministicDirectorGateway:
             model_name="deterministic-director-v1",
             provider_model_id="deterministic-director-v1",
             base_url="https://example.invalid/v1",
-            credential_ref=None,
+            api_key=None,
             timeout_seconds=1,
             input_contract_version=DIRECTOR_INPUT_CONTRACT_VERSION,
             prompt_contract_version=DIRECTOR_PROMPT_CONTRACT_VERSION,

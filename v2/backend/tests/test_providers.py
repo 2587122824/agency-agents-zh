@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import hashlib
 
-from v2.backend.app.providers import EnvironmentCredentialResolver, ProviderAdapterError, ProviderExecutionRequest
+from v2.backend.app.providers import ProviderAdapterError, ProviderExecutionRequest
 from v2.backend.app.providers.registry import default_provider_registry
 from v2.backend.app.providers.runninghub import RunningHubAdapter
 import v2.backend.app.providers.runninghub as runninghub_module
@@ -33,23 +33,6 @@ def test_provider_registry_resolves_only_exact_registered_work_kind() -> None:
         "input_work_item_ids": ["work_1", "work_2"],
         "media_created": False,
     }
-
-
-def test_environment_credential_resolver_requires_exact_allowlist_and_never_infers() -> None:
-    environment = {"PROVIDER_API_KEY": "server-secret"}
-    denied = EnvironmentCredentialResolver(environment, set())
-    assert denied.resolve(None).state == "not_configured"
-    assert denied.resolve("secret://provider/key").state == "unsupported_reference"
-    assert denied.resolve("env://provider_api_key").state == "unsupported_reference"
-    assert denied.resolve("env://PROVIDER_API_KEY").state == "not_authorized"
-
-    allowed = EnvironmentCredentialResolver(environment, {"PROVIDER_API_KEY", "MISSING_KEY"})
-    available = allowed.resolve("env://PROVIDER_API_KEY")
-    assert available.state == "available"
-    assert available.available is True
-    assert available.secret == "server-secret"
-    assert "server-secret" not in repr(available)
-    assert allowed.resolve("env://MISSING_KEY").state == "missing"
 
 
 class FakeRunningHubTransport:
@@ -87,7 +70,7 @@ def runninghub_manifest(bindings: list[dict], media_type: str = "image") -> dict
             "provider_key": "runninghub",
             "adapter_kind": "runninghub",
             "base_url": "https://www.runninghub.cn/openapi/v2",
-            "credential_ref": "env://RUNNINGHUB_API_KEY",
+            "api_key": "test-secret",
             "request_timeout_seconds": 60,
             "poll_interval_seconds": 5,
             "max_concurrency": 1,
@@ -111,10 +94,6 @@ def enabled_adapter(transport: FakeRunningHubTransport) -> RunningHubAdapter:
     return RunningHubAdapter(
         execution_enabled=True,
         transport=transport,
-        credential_resolver=EnvironmentCredentialResolver(
-            {"RUNNINGHUB_API_KEY": "test-secret"},
-            {"RUNNINGHUB_API_KEY"},
-        ),
     )
 
 
@@ -123,7 +102,6 @@ def test_runninghub_disabled_gate_prevents_transport_calls() -> None:
     adapter = RunningHubAdapter(
         execution_enabled=False,
         transport=transport,
-        credential_resolver=EnvironmentCredentialResolver({}, set()),
     )
     request = ProviderExecutionRequest("generate_keyframe", "a" * 64, runninghub_manifest([]))
     with pytest.raises(ProviderAdapterError) as caught:

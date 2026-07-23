@@ -878,7 +878,7 @@ class ProviderConfigVersion(Base):
     adapter_kind: Mapped[str] = mapped_column(String(80))
     region: Mapped[str | None] = mapped_column(String(120), nullable=True)
     base_url: Mapped[str] = mapped_column(String(500))
-    credential_ref: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     capabilities: Mapped[list] = mapped_column(JSON, default=list)
     request_timeout_seconds: Mapped[int] = mapped_column(Integer)
     poll_interval_seconds: Mapped[int] = mapped_column(Integer)

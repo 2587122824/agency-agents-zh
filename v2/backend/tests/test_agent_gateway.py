@@ -21,7 +21,6 @@ from v2.backend.app.creation.agent_gateway import (
     CreativeDiagnosis,
     CreativeAgentSelection,
 )
-from v2.backend.app.providers.credentials import EnvironmentCredentialResolver
 
 
 class FakeTransport:
@@ -51,7 +50,7 @@ def selection() -> CreativeAgentSelection:
         model_name="Creative model",
         provider_model_id="configured-model",
         base_url="https://api.example.test/v1",
-        credential_ref="env://TEST_AGENT_KEY",
+        api_key="secret",
         timeout_seconds=30,
         input_contract_version=CREATIVE_INPUT_CONTRACT_VERSION,
         prompt_contract_version=CREATIVE_PROMPT_CONTRACT_VERSION,
@@ -127,7 +126,7 @@ def configured_rows(
         adapter_kind="openai_compatible",
         capabilities=["text_generation"],
         base_url="https://api.example.test/v1",
-        credential_ref="env://TEST_AGENT_KEY",
+        api_key="secret",
         request_timeout_seconds=30,
     )
     config = SimpleNamespace(id="production_config_1")
@@ -235,10 +234,7 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
         "choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}],
         "usage": {"prompt_tokens": 10, "completion_tokens": 8, "total_tokens": 18},
     })
-    gateway = ConfiguredCreativeAgentGateway(
-        transport=transport,
-        credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),
-    )
+    gateway = ConfiguredCreativeAgentGateway(transport=transport)
 
     result = gateway.invoke(selection(), manifest())
 
@@ -267,10 +263,7 @@ def test_configured_gateway_returns_strict_output_without_retry(monkeypatch) -> 
 def test_configured_gateway_rejects_non_json_without_repair_or_retry(monkeypatch) -> None:
     monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
     transport = FakeTransport({"choices": [{"message": {"content": "```json\n{}\n```"}}]})
-    gateway = ConfiguredCreativeAgentGateway(
-        transport=transport,
-        credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),
-    )
+    gateway = ConfiguredCreativeAgentGateway(transport=transport)
 
     with pytest.raises(AgentGatewayError) as raised:
         gateway.invoke(selection(), manifest())
@@ -289,10 +282,7 @@ def test_configured_gateway_requires_creative_diagnosis(monkeypatch) -> None:
         "clarifying_question": None,
     }
     transport = FakeTransport({"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]})
-    gateway = ConfiguredCreativeAgentGateway(
-        transport=transport,
-        credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),
-    )
+    gateway = ConfiguredCreativeAgentGateway(transport=transport)
 
     with pytest.raises(AgentGatewayError) as raised:
         gateway.invoke(selection(), manifest())
@@ -324,10 +314,7 @@ def test_configured_gateway_rejects_legacy_multi_update_suggestion_shape(monkeyp
         "clarifying_question": None,
     }
     transport = FakeTransport({"choices": [{"message": {"content": json.dumps(content, ensure_ascii=False)}}]})
-    gateway = ConfiguredCreativeAgentGateway(
-        transport=transport,
-        credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),
-    )
+    gateway = ConfiguredCreativeAgentGateway(transport=transport)
 
     with pytest.raises(AgentGatewayError) as raised:
         gateway.invoke(selection(), manifest())
@@ -339,10 +326,7 @@ def test_configured_gateway_rejects_legacy_multi_update_suggestion_shape(monkeyp
 def test_configured_gateway_requires_explicit_execution_authorization(monkeypatch) -> None:
     monkeypatch.delenv("V2_AGENT_MODEL_EXECUTION_ENABLED", raising=False)
     transport = FakeTransport({})
-    gateway = ConfiguredCreativeAgentGateway(
-        transport=transport,
-        credential_resolver=EnvironmentCredentialResolver({"TEST_AGENT_KEY": "secret"}, {"TEST_AGENT_KEY"}),
-    )
+    gateway = ConfiguredCreativeAgentGateway(transport=transport)
 
     with pytest.raises(AgentGatewayError) as raised:
         gateway.invoke(selection(), manifest())

@@ -13,7 +13,6 @@ os.environ["V2_DATABASE_URL"] = f"sqlite:///{TEST_DATABASE.as_posix()}"
 os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 
 from v2.backend.app.creation.agent_gateway import AgentGatewayError
-from v2.backend.app.providers.credentials import EnvironmentCredentialResolver
 from v2.backend.app.quality.agent_gateway import ConfiguredQCGateway, QCSelection
 
 
@@ -34,7 +33,7 @@ class FakeTransport:
 def selection() -> QCSelection:
     return QCSelection(
         "production_config_1", "model_config_qc_1", "provider_config_1", "Vision Provider", "Visual QC",
-        "vision-model", "https://api.example.test/v1", "env://TEST_QC_KEY", 30,
+        "vision-model", "https://api.example.test/v1", "secret", 30,
         "qc-agent-input.v1", "qc-agent-prompt.v1", "qc-report-candidate.v1", 2000, {"temperature": 0.1},
         ("vision_analysis",),
     )
@@ -78,10 +77,7 @@ def output() -> dict:
 
 def gateway_for(value: object) -> tuple[ConfiguredQCGateway, FakeTransport]:
     transport = FakeTransport(value)
-    gateway = ConfiguredQCGateway(
-        transport=transport,
-        credential_resolver=EnvironmentCredentialResolver({"TEST_QC_KEY": "secret"}, {"TEST_QC_KEY"}),
-    )
+    gateway = ConfiguredQCGateway(transport=transport)
     return gateway, transport
 
 

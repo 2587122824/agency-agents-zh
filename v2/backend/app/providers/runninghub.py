@@ -18,7 +18,6 @@ from .base import (
     ProviderPollResult,
     ProviderSubmission,
 )
-from .credentials import EnvironmentCredentialResolver
 
 
 class RunningHubTransport(Protocol):
@@ -189,7 +188,6 @@ def _local_attachment_path(uri: str) -> Path:
 class RunningHubAdapter:
     execution_enabled: bool = False
     transport: RunningHubTransport = field(default_factory=HttpxRunningHubTransport)
-    credential_resolver: EnvironmentCredentialResolver = field(default_factory=EnvironmentCredentialResolver.from_environment)
     adapter_kind: str = "runninghub"
     display_name: str = "RunningHub"
     external: bool = True
@@ -212,10 +210,10 @@ class RunningHubAdapter:
             raise ProviderAdapterError("PROVIDER_ADAPTER_MISMATCH", "The frozen request does not target RunningHub.")
         if storage.get("backend_kind") != "local" or storage.get("local_root_ref") != CONNECTED_LOCAL_ASSET_ROOT_REF:
             raise ProviderAdapterError("STORAGE_ADAPTER_NOT_CONNECTED", "RunningHub V2 output requires the connected local storage policy.")
-        credential = self.credential_resolver.resolve(provider.get("credential_ref"))
-        if not credential.available or not credential.secret:
-            raise ProviderAdapterError("PROVIDER_CREDENTIAL_NOT_READY", "The frozen RunningHub credential reference is not available to V2.")
-        return provider, workflow, storage, credential.secret
+        api_key = str(provider.get("api_key") or "").strip()
+        if not api_key:
+            raise ProviderAdapterError("PROVIDER_CREDENTIAL_NOT_READY", "The frozen RunningHub API Key is missing.")
+        return provider, workflow, storage, api_key
 
     def _source_image(self, request: ProviderExecutionRequest, source: str) -> tuple[Path, str]:
         expected_kind = "generate_three_frame_i2v_clip" if source != "source_image" else "generate_i2v_clip"

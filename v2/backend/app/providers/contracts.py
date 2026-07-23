@@ -4,9 +4,6 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .credentials import CredentialState
-
-
 class ProviderReadinessItem(BaseModel):
     configuration_version_id: str
     configuration_display_name: str
@@ -19,7 +16,7 @@ class ProviderReadinessItem(BaseModel):
     external: bool | None
     execution_enabled: bool | None
     credential_required: bool | None
-    credential_state: CredentialState
+    api_key_state: Literal["not_required", "missing", "configured"]
     configuration_ready: bool
     configuration_issue_count: int
     configuration_issue_codes: list[str]

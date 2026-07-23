@@ -898,7 +898,7 @@ export interface ProviderConfigDraft {
   adapter_kind: string
   region?: string | null
   base_url: string
-  credential_ref?: string | null
+  api_key?: string | null
   capabilities: string[]
   request_timeout_seconds: number
   poll_interval_seconds: number
@@ -1064,7 +1064,7 @@ export interface ProviderReadinessItem {
   external: boolean | null
   execution_enabled: boolean | null
   credential_required: boolean | null
-  credential_state: 'not_configured' | 'unsupported_reference' | 'not_authorized' | 'missing' | 'available'
+  api_key_state: 'not_required' | 'missing' | 'configured'
   configuration_ready: boolean
   configuration_issue_count: number
   configuration_issue_codes: string[]
