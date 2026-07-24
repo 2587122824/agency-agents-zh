@@ -59,6 +59,12 @@ export function ReviewPage() {
   const [rationale, setRationale] = useState('')
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
+  const reviewProjects = useMemo(
+    () => (projects.data ?? [])
+      .filter(project => ['producing', 'quality_review', 'blocked'].includes(project.status))
+      .sort((left, right) => Date.parse(right.updated_at) - Date.parse(left.updated_at) || right.id.localeCompare(left.id)),
+    [projects.data],
+  )
   const quality = useQuery({
     queryKey: ['quality-review', projectId],
     queryFn: () => api.qualityReview(projectId),
@@ -82,6 +88,10 @@ export function ReviewPage() {
   const selectedAsset = visibleAssets.find(asset => asset.id === selectedAssetId) ?? visibleAssets[0] ?? null
   const reviewableAssets = activeAssets.filter(isReviewable)
   const reviewedCount = activeAssets.filter(asset => ['approved', 'archived'].includes(asset.state)).length
+
+  useEffect(() => {
+    if (!projectId && reviewProjects[0]) setProjectId(reviewProjects[0].id)
+  }, [projectId, reviewProjects])
 
   useEffect(() => {
     if (!selectedAsset && visibleAssets[0]) setSelectedAssetId(visibleAssets[0].id)
@@ -184,7 +194,6 @@ export function ReviewPage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [selectedAsset, visibleAssets, reviewChoice, revokeChoice, revisionChoice, retryChoice, batchConfirmOpen])
 
-  const reviewProjects = projects.data?.filter(project => ['producing', 'quality_review', 'blocked'].includes(project.status)) ?? []
   const error = quality.error || verify.error || directReview.error || batchApprove.error || revokeApproval.error || retryQC.error || requestRevision.error
   const shot = selectedAsset?.review_context.shot ?? {}
   const selectedReviewableCount = selectedAssetIds.filter(id => reviewableAssets.some(asset => asset.id === id)).length
@@ -201,7 +210,7 @@ export function ReviewPage() {
         <label>
           <span>审核项目</span>
           <select value={projectId} onChange={event => { setProjectId(event.target.value); setSelectedAssetId(''); setSelectedAssetIds([]) }}>
-            <option value="">选择待审核项目</option>
+            {!reviewProjects.length && <option value="">暂无待审核项目</option>}
             {reviewProjects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}
           </select>
         </label>
