@@ -124,7 +124,7 @@ ProductionSnapshot
 - DAG 节点和依赖是执行顺序权威，不按名称或创建时间推断。
 - WorkAttempt 冻结实际 Provider、工作流、参数、输入和请求指纹。
 - Provider 并发容量由 `in_progress WorkItem + current WorkAttempt.provider` 计算；领取条件原子限制活跃数小于冻结 `max_concurrency`，避免单 Worker 连续提交或多 Worker 竞争突破上限。
-- Provider 返回成功媒体清单后，Worker 在提交完成态前原子登记并确定性验证全部输出 Asset；任一输出文件或清单无效时整项阻断，不留下部分登记。成功 Asset 为 `verified`，内容审核与批准仍由质量阶段负责。
+- Provider 返回成功结果后，Adapter 先按冻结输出合同选出目标媒体，明确的辅助文本、日志或其他非目标媒体只进入审计清单，不登记为 Asset。Worker 在提交完成态前原子登记并确定性验证全部目标输出；任一目标输出文件或清单无效时整项阻断，不留下部分登记。成功 Asset 为 `verified`，内容审核与批准仍由质量阶段负责。
 - 单工作项精确重跑只创建新的 WorkAttempt，必须复用原请求清单与指纹并单独记账；旧尝试不可修改，结果未知的供应商提交不可重跑。
 - Asset 必须经过真实文件验证和质量审核后才能进入剪辑。
 - 质量审核的确定性检查、智能体候选与人工决定分别持久化。`QCReportCandidate` 不能改变素材批准状态；人工决定落账时才形成权威 `QCReport`。没有可用多模态模型时，`verified` 素材可以直接人工审核并形成 `human-review.v1` 报告，不创建伪造的智能体候选。当前多模态合同只授权图片理解，视频与音频保持显式人工审核。
@@ -201,6 +201,7 @@ draft
 - API Key 不进入 Git、错误消息或供应商失败证据；当前数据库明文边界不适用于多用户或公网部署。
 - RunningHub V2 的 JSON 请求和媒体上传统一使用 `Authorization: Bearer <API_KEY>`；创建任务正文不包含 `apiKey`，避免把 V1 鉴权格式带入 V2 接口。
 - RunningHub 只接受严格 NodeInfoList 与声明的结构化来源。
+- RunningHub 成功响应按 `output_contract.media_type` 选择目标输出；`outputType` 或后缀已明确为其他媒体类型的结果写入 `ignored_outputs` 且不下载登记。目标结果下载后以字节签名确定真实 MIME，并核对供应商声明、URL 后缀、非通用响应 MIME 与冻结允许列表；任一矛盾都以带证据的确定性错误阻断。
 - `max_concurrency` 是 Worker 的提交前调度约束，不是供应商拒绝后的重试次数；容量不足时任务保留 `queued`，不会调用 RunningHub。
 - Provider 能力标签必须能指向该 Provider 官方 API 的明确请求字段、响应字段或独立端点；模型名称、宣传能力或“OpenAI-compatible”本身不能证明支持图片、音频或视频输入。
 - Provider 或配置不兼容时明确阻断，不切换供应商或工作流。

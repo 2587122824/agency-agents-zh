@@ -959,6 +959,8 @@ RunningHub V2 的创建任务、查询任务和媒体上传请求必须使用 `A
 
 RunningHub 的 WorkAttempt 必须使用 `production-work-request.v3` 冻结 Provider、Workflow、完整 NodeInfoList、结构化 Shot、视频规格和存储策略。适配器只解析声明的结构化来源和 `literal:<JSON>`；不支持旧式 `{{prompt}}` 占位符，不生成或重写提示词。I2V 必须恰好绑定并消费一个父图片输出，多个输入不得静默取第一项。完整边界见 [V2 RunningHub 图片/视频适配器实现](./archive/implementation-notes/V2_RUNNINGHUB_ADAPTER_IMPLEMENTATION.md)。
 
+RunningHub 工作流可以同时返回目标媒体和日志、文本等辅助输出。适配器必须先按冻结的 `output_contract.media_type` 选择目标媒体，明确声明为其他媒体类型的结果只记录为 `ignored_outputs`，不得拿存储素材白名单误判为失败，也不得登记为 Asset。目标媒体必须下载后以文件签名识别真实 MIME，并与供应商 `outputType`、URL 后缀、非通用 HTTP `Content-Type` 及冻结存储策略交叉校验；不一致时阻断并持久化完整验证证据。该选择顺序属于输出合同校验，不得扩展为 MIME 猜测、格式转换或自动重试。
+
 配置发布校验和连接准备检查必须共用同一 RunningHub NodeInfoList 合同校验器。设置页用普通名称选择镜头字段、视频规格、单父关键帧或固定值；固定值由界面编码为严格 `literal:<JSON>`。历史旧来源只显示“不兼容并需创建新版本”，禁止自动转换。完整实现见 [V2 生成服务连接准备实现](./archive/implementation-notes/V2_PROVIDER_CONNECTION_READINESS_IMPLEMENTATION.md)。
 
 严格关键帧生产已经按用户确认实现完整视觉描述、可空负向描述和显式主参考实体附件合同。历史提案保留在 [V2 分镜生成输入合同提案](./archive/proposals/V2_SHOT_GENERATION_INPUT_CONTRACT_PROPOSAL.md)，实际能力与边界以第 37 节和实现状态为准；历史方案不会自动迁移。

@@ -4171,6 +4171,27 @@ class FakeRejectedExternalAdapter(FakePersistedExternalAdapter):
         )
 
 
+class FakePollValidationExternalAdapter(FakePersistedExternalAdapter):
+    adapter_kind = "runninghub"
+
+    def poll(self, request: ProviderExecutionRequest, provider_task_id: str) -> ProviderPollResult:
+        self.poll_count += 1
+        raise ProviderAdapterError(
+            "RUNNINGHUB_OUTPUT_MIME_INVALID",
+            "RunningHub 返回的目标文件格式 image/webp 不在本次冻结存储策略的允许列表中。",
+            {
+                "schema_version": "runninghub-output-validation.v1",
+                "provider": "runninghub",
+                "provider_task_id": provider_task_id,
+                "remote_status": "SUCCESS",
+                "expected_media_type": "image",
+                "provider_result_index": 0,
+                "detected_mime_type": "image/webp",
+                "allowed_mime_types": ["image/png"],
+            },
+        )
+
+
 def fake_provider_response(provider_task_id: str) -> dict:
     content = solid_png(480, 848)
     relative = f"providers/fake/{provider_task_id}.png"
@@ -4370,6 +4391,45 @@ def test_external_worker_persists_explicit_submission_rejection_evidence_without
     assert adapter.submit_count == 1
     blocked_item = next(item for item in execution["work_items"] if item["status"] == "blocked")
     assert len(blocked_item["attempts"]) == 1
+
+
+def test_external_worker_persists_poll_output_validation_evidence_without_retry(
+    client: TestClient,
+) -> None:
+    project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "external-output-activate", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "external-output-submit",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    adapter = FakePollValidationExternalAdapter()
+    registry = ProviderAdapterRegistry((adapter,))
+
+    assert process_one("external-output-submit-worker", registry) is True
+    with SessionLocal() as session:
+        attempt = session.scalar(select(WorkAttempt).where(WorkAttempt.provider_task_id == "persisted-task-1"))
+        item = session.get(WorkItem, attempt.work_item_id)
+        item.available_at = item.created_at
+        session.commit()
+
+    assert process_one("external-output-poll-worker", registry) is True
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    attempt = next(item["attempts"][-1] for item in execution["work_items"] if item["status"] == "blocked")
+    assert attempt["error_code"] == "RUNNINGHUB_OUTPUT_MIME_INVALID"
+    assert attempt["response_manifest"]["remote_status"] == "SUCCESS"
+    assert attempt["response_manifest"]["detected_mime_type"] == "image/webp"
+    assert adapter.submit_count == 1
+    assert adapter.poll_count == 1
 
 
 def test_unconnected_provider_blocks_without_retry_or_fallback(client: TestClient) -> None:

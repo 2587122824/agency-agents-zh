@@ -41,7 +41,7 @@ class FakeRunningHubTransport:
         self.calls: list[tuple] = []
         self.submit_response = {"taskId": "rh-task-1", "status": "RUNNING"}
         self.query_response = {"taskId": "rh-task-1", "status": "RUNNING"}
-        self.download_response = (b"image-bytes", "image/png")
+        self.download_response = (b"\x89PNG\r\n\x1a\nimage-bytes", "image/png")
 
     def post_json(self, url: str, api_key: str, payload: dict, timeout: int) -> dict:
         self.calls.append(("post_json", url, payload, api_key, timeout))
@@ -426,6 +426,92 @@ def test_runninghub_poll_downloads_deterministic_local_output(tmp_path, monkeypa
     assert result.state == "succeeded"
     output = result.response_manifest["outputs"][0]
     assert output["uri"] == f"runtime://assets/providers/runninghub/{'f' * 64}/output-00.png"
-    assert (tmp_path / "assets" / "providers" / "runninghub" / ("f" * 64) / "output-00.png").read_bytes() == b"image-bytes"
+    assert (tmp_path / "assets" / "providers" / "runninghub" / ("f" * 64) / "output-00.png").read_bytes() == b"\x89PNG\r\n\x1a\nimage-bytes"
     assert transport.calls[0][2] == {"taskId": "rh-task-1"}
     assert transport.calls[0][3] == "test-secret"
+
+
+def test_runninghub_poll_ignores_declared_auxiliary_text_before_validating_image(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    transport = FakeRunningHubTransport()
+    transport.query_response = {
+        "taskId": "rh-task-1",
+        "status": "SUCCESS",
+        "results": [
+            {
+                "url": "https://files.invalid/metadata.txt",
+                "nodeId": "35",
+                "outputType": "txt",
+            },
+            {
+                "url": "https://files.invalid/result.png",
+                "nodeId": "48",
+                "outputType": "png",
+            },
+        ],
+    }
+    adapter = enabled_adapter(transport)
+    request = ProviderExecutionRequest("generate_keyframe", "7" * 64, runninghub_manifest([]))
+
+    result = adapter.poll(request, "rh-task-1")
+
+    assert result.state == "succeeded"
+    assert [call[1] for call in transport.calls if call[0] == "download"] == ["https://files.invalid/result.png"]
+    assert result.response_manifest["outputs"][0]["provider_result_index"] == 1
+    assert result.response_manifest["outputs"][0]["uri"].endswith("/output-01.png")
+    assert result.response_manifest["ignored_outputs"] == [{
+        "schema_version": "runninghub-output-validation.v1",
+        "provider": "runninghub",
+        "provider_task_id": "rh-task-1",
+        "remote_status": "SUCCESS",
+        "expected_media_type": "image",
+        "provider_result_index": 0,
+        "provider_node_id": "35",
+        "provider_output_type": "txt",
+        "declared_mime_type": "text/plain",
+        "url_suffix_mime_type": "text/plain",
+        "response_mime_type": None,
+        "detected_mime_type": None,
+    }]
+
+
+def test_runninghub_poll_blocks_target_media_when_bytes_disagree_with_declared_mime(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    transport = FakeRunningHubTransport()
+    transport.query_response = {
+        "taskId": "rh-task-1",
+        "status": "SUCCESS",
+        "results": [{"url": "https://files.invalid/result.png", "outputType": "png"}],
+    }
+    transport.download_response = (b"\xff\xd8\xffjpeg-bytes", "image/png")
+    adapter = enabled_adapter(transport)
+    request = ProviderExecutionRequest("generate_keyframe", "8" * 64, runninghub_manifest([]))
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.poll(request, "rh-task-1")
+
+    assert caught.value.code == "RUNNINGHUB_OUTPUT_MIME_MISMATCH"
+    assert caught.value.response_manifest["declared_mime_type"] == "image/png"
+    assert caught.value.response_manifest["response_mime_type"] == "image/png"
+    assert caught.value.response_manifest["detected_mime_type"] == "image/jpeg"
+
+
+def test_runninghub_poll_reports_verified_disallowed_target_mime(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runninghub_module, "RUNTIME_ROOT", tmp_path)
+    transport = FakeRunningHubTransport()
+    transport.query_response = {
+        "taskId": "rh-task-1",
+        "status": "SUCCESS",
+        "results": [{"url": "https://files.invalid/result.webp", "outputType": "webp"}],
+    }
+    transport.download_response = (b"RIFF\x08\x00\x00\x00WEBPpayload", "image/webp")
+    adapter = enabled_adapter(transport)
+    request = ProviderExecutionRequest("generate_keyframe", "0" * 64, runninghub_manifest([]))
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.poll(request, "rh-task-1")
+
+    assert caught.value.code == "RUNNINGHUB_OUTPUT_MIME_INVALID"
+    assert "image/webp" in caught.value.detail
+    assert caught.value.response_manifest["detected_mime_type"] == "image/webp"
+    assert caught.value.response_manifest["allowed_mime_types"] == ["image/png", "video/mp4"]

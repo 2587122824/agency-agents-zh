@@ -73,7 +73,7 @@
 | 成本账本 | 已完成 | `CostEvent`、估算与实际费用分离 |
 | 时间线合同与确认 | 已完成 | Timeline/TimelineItem、验证、版本修订、确认和剪辑页 |
 | 最终交付验证 | 已完成 | `v2.delivery-request.v2`、DeliveryAttempt、外部上传、本机 FFmpeg 合成、真实 MP4 验证与完成条件。用户显式选择交付方式；本机方式冻结执行环境与编码参数，创建独立 `render_delivery` WorkItem/WorkAttempt，执行前复验素材文件哈希，成功只登记待验证 Asset。失败不自动重试或切换上传方式 |
-| RunningHub Provider | 部分完成 | 图片、首帧视频和纯文本视频 Adapter、严格 NodeInfoList、`production-work-request.v3`、单父图片、无父图 T2V、显式主参考附件上传、提交任务号持久化、重启轮询恢复与确定性本地下载已用假传输验证。V2 创建、查询和上传统一使用 `Authorization: Bearer`，创建正文不再携带旧式 `apiKey`。真实任务 `2080307057889857538` 已验证 Bearer 鉴权、提交、轮询、下载成功；同批其余任务暴露 API 队列上限后，Worker 已改为提交前原子执行冻结 `max_concurrency`。明确业务拒绝与结果未知继续分别留证，Worker 不自动重试；历史缺失响应不回填，文件篡改在联网前阻断 |
+| RunningHub Provider | 部分完成 | 图片、首帧视频和纯文本视频 Adapter、严格 NodeInfoList、`production-work-request.v3`、单父图片、无父图 T2V、显式主参考附件上传、提交任务号持久化、重启轮询恢复与确定性本地下载已用假传输验证。V2 创建、查询和上传统一使用 `Authorization: Bearer`，创建正文不再携带旧式 `apiKey`。成功响应先按冻结输出媒体类型忽略 TXT 等辅助结果，再对目标媒体执行声明、响应头、字节签名和存储策略交叉验证；真实任务 `2080632860527783937` 的 `TXT + PNG` 返回已复验只登记 PNG。Worker 提交前原子执行冻结 `max_concurrency`；明确业务拒绝、结果未知和输出验证失败分别留证，不自动重试，历史缺失响应不回填 |
 | CosyVoice Provider | 未开始，需确认 | 尚未接入 V2；真实调用、声音复刻与临时公网音频仍需单独确认 |
 | OSS 临时音频上传 | 未开始，需确认 | 涉及真实存储凭据、生命周期和外部网络调用 |
 | FFmpeg 本地合成 | 已完成 | `V2_FFMPEG_PATH` 只读环境连接、版本与 `libx264` 准备检查、连续主视频轨 `trim/scale/crop/fps/concat`、`libx264` 输出、工作尝试与失败证据已实现。首期不支持音频、字幕、空位、变速或非 `cover` 变换；失败后没有重试、替换方式或隐藏降级 |

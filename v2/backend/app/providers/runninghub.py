@@ -19,6 +19,18 @@ from .base import (
     ProviderSubmission,
 )
 
+_RUNNINGHUB_OUTPUT_TYPE_MIMES = {
+    "jpeg": "image/jpeg",
+    "jpg": "image/jpeg",
+    "mp3": "audio/mpeg",
+    "mp4": "video/mp4",
+    "png": "image/png",
+    "txt": "text/plain",
+    "wav": "audio/wav",
+    "webp": "image/webp",
+}
+_GENERIC_MIME_TYPES = {"application/octet-stream", "binary/octet-stream"}
+
 
 class RunningHubTransport(Protocol):
     def post_json(
@@ -120,6 +132,45 @@ def _first(data: dict[str, Any], keys: tuple[str, ...]) -> str:
             if value:
                 return value
     return ""
+
+
+def _result_declared_mime(result: dict[str, Any], url: str) -> tuple[str | None, str | None]:
+    output_type = str(result.get("outputType") or result.get("output_type") or "").strip().lower().lstrip(".")
+    output_mime = _RUNNINGHUB_OUTPUT_TYPE_MIMES.get(output_type)
+    suffix = Path(urlparse(url).path).suffix.lower()
+    suffix_mime = mimetypes.types_map.get(suffix)
+    return output_mime, suffix_mime
+
+
+def _output_evidence(
+    provider_task_id: str,
+    expected_type: str,
+    index: int,
+    result: dict[str, Any],
+    *,
+    declared_mime: str | None,
+    suffix_mime: str | None,
+    header_mime: str | None = None,
+    detected_mime: str | None = None,
+    allowed_mimes: set[str] | None = None,
+) -> dict[str, Any]:
+    evidence: dict[str, Any] = {
+        "schema_version": "runninghub-output-validation.v1",
+        "provider": "runninghub",
+        "provider_task_id": provider_task_id,
+        "remote_status": "SUCCESS",
+        "expected_media_type": expected_type,
+        "provider_result_index": index,
+        "provider_node_id": str(result.get("nodeId") or result.get("node_id") or "") or None,
+        "provider_output_type": str(result.get("outputType") or result.get("output_type") or "") or None,
+        "declared_mime_type": declared_mime,
+        "url_suffix_mime_type": suffix_mime,
+        "response_mime_type": header_mime,
+        "detected_mime_type": detected_mime,
+    }
+    if allowed_mimes is not None:
+        evidence["allowed_mime_types"] = sorted(allowed_mimes)
+    return evidence
 
 
 def _status(data: dict[str, Any]) -> str:
@@ -476,6 +527,7 @@ class RunningHubAdapter:
         max_bytes = int(storage["max_file_size_bytes"])
         allowed_mimes = set(storage.get("allowed_mime_types") or [])
         outputs: list[dict[str, Any]] = []
+        ignored_outputs: list[dict[str, Any]] = []
         output_root = RUNTIME_ROOT / "assets" / "providers" / "runninghub" / request.request_fingerprint
         try:
             output_root.mkdir(parents=True, exist_ok=True)
@@ -485,15 +537,61 @@ class RunningHubAdapter:
             url = str(result.get("url") or result.get("fileUrl") or result.get("download_url") or "").strip()
             if not url:
                 continue
-            content, header_mime = self.transport.download(url, timeout, max_bytes)
-            suffix = Path(urlparse(url).path).suffix.lower()
-            mime_type = header_mime or mimetypes.types_map.get(suffix)
-            if not mime_type or mime_type not in allowed_mimes:
-                raise ProviderAdapterError("RUNNINGHUB_OUTPUT_MIME_INVALID", "RunningHub output MIME is not allowed by the frozen storage policy.")
-            asset_type = mime_type.split("/", 1)[0]
-            if asset_type != expected_type:
+            declared_mime, suffix_mime = _result_declared_mime(result, url)
+            advertised_mime = declared_mime or suffix_mime
+            advertised_type = advertised_mime.split("/", 1)[0] if advertised_mime and "/" in advertised_mime else None
+            if advertised_type and advertised_type != expected_type:
+                ignored_outputs.append(_output_evidence(
+                    provider_task_id,
+                    expected_type,
+                    index,
+                    result,
+                    declared_mime=declared_mime,
+                    suffix_mime=suffix_mime,
+                ))
                 continue
-            extension = mimetypes.guess_extension(mime_type) or suffix or ".bin"
+            content, header_mime = self.transport.download(url, timeout, max_bytes)
+            detected_mime = detect_media_type(content)
+            evidence = _output_evidence(
+                provider_task_id,
+                expected_type,
+                index,
+                result,
+                declared_mime=declared_mime,
+                suffix_mime=suffix_mime,
+                header_mime=header_mime,
+                detected_mime=detected_mime,
+                allowed_mimes=allowed_mimes,
+            )
+            if not detected_mime:
+                raise ProviderAdapterError(
+                    "RUNNINGHUB_OUTPUT_MEDIA_INVALID",
+                    "RunningHub 返回的目标文件不是系统支持的有效媒体文件。",
+                    evidence,
+                )
+            asset_type = detected_mime.split("/", 1)[0]
+            if asset_type != expected_type:
+                ignored_outputs.append(evidence)
+                continue
+            specific_header_mime = header_mime if header_mime not in _GENERIC_MIME_TYPES else None
+            declared_types = {
+                value
+                for value in (declared_mime, suffix_mime, specific_header_mime)
+                if value is not None
+            }
+            if any(value != detected_mime for value in declared_types):
+                raise ProviderAdapterError(
+                    "RUNNINGHUB_OUTPUT_MIME_MISMATCH",
+                    "RunningHub 返回的目标文件声明格式与文件真实格式不一致。",
+                    evidence,
+                )
+            if detected_mime not in allowed_mimes:
+                raise ProviderAdapterError(
+                    "RUNNINGHUB_OUTPUT_MIME_INVALID",
+                    f"RunningHub 返回的目标文件格式 {detected_mime} 不在本次冻结存储策略的允许列表中。",
+                    evidence,
+                )
+            extension = mimetypes.guess_extension(detected_mime) or ".bin"
             path = output_root / f"output-{index:02d}{extension}"
             try:
                 path.write_bytes(content)
@@ -504,13 +602,24 @@ class RunningHubAdapter:
                 "storage_backend": "local",
                 "asset_type": asset_type,
                 "role": "provider_output",
-                "mime_type": mime_type,
+                "mime_type": detected_mime,
                 "content_hash": hashlib.sha256(content).hexdigest(),
                 "byte_size": len(content),
                 "provider_result_index": index,
             })
         if not outputs:
-            raise ProviderAdapterError("RUNNINGHUB_MEDIA_OUTPUT_MISSING", "RunningHub succeeded but returned no matching media output.")
+            raise ProviderAdapterError(
+                "RUNNINGHUB_MEDIA_OUTPUT_MISSING",
+                "RunningHub 任务已成功，但没有返回符合本次输出合同的媒体文件。",
+                {
+                    "schema_version": "runninghub-output-selection.v1",
+                    "provider": "runninghub",
+                    "provider_task_id": provider_task_id,
+                    "remote_status": state,
+                    "expected_media_type": expected_type,
+                    "ignored_outputs": ignored_outputs,
+                },
+            )
         return ProviderPollResult("succeeded", {
             "schema_version": "provider-response.v1",
             "provider": "runninghub",
@@ -518,4 +627,5 @@ class RunningHubAdapter:
             "remote_status": state,
             "media_created": True,
             "outputs": outputs,
+            "ignored_outputs": ignored_outputs,
         })
