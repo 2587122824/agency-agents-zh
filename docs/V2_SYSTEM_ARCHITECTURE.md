@@ -123,6 +123,7 @@ ProductionSnapshot
 
 - DAG 节点和依赖是执行顺序权威，不按名称或创建时间推断。
 - WorkAttempt 冻结实际 Provider、工作流、参数、输入和请求指纹。
+- 制作快照合同去重只约束未结束生命周期：同项目、同 `contract_hash` 且状态不是 `superseded` 时拒绝创建；用户显式结束旧生产后，相同合同可创建新的快照 ID 和递增编号，旧任务与事件保持只读且不被复用。
 - Provider 并发容量由 `in_progress WorkItem + current WorkAttempt.provider` 计算；领取条件原子限制活跃数小于冻结 `max_concurrency`，避免单 Worker 连续提交或多 Worker 竞争突破上限。
 - Provider 返回成功结果后，Adapter 先按冻结输出合同选出目标媒体，明确的辅助文本、日志或其他非目标媒体只进入审计清单，不登记为 Asset。Worker 在提交完成态前原子登记并确定性验证全部目标输出；任一目标输出文件或清单无效时整项阻断，不留下部分登记。成功 Asset 为 `verified`，内容审核与批准仍由质量阶段负责。
 - 单工作项精确重跑只创建新的 WorkAttempt，必须复用原请求清单与指纹并单独记账；旧尝试不可修改，结果未知的供应商提交不可重跑。

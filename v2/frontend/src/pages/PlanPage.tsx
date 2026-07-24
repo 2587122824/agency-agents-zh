@@ -440,7 +440,10 @@ export function PlanPage() {
     && preparation.data.latest_production_planner_run.production_config_version_id === configId
   const impact = analyzeImpact.data
   const savedMatchingSnapshot = impact
-    ? preparation.data?.snapshots.find(snapshot => snapshot.contract_hash === impact.snapshot_contract_hash)
+    ? preparation.data?.snapshots.find(snapshot =>
+        snapshot.status !== 'superseded'
+        && snapshot.contract_hash === impact.snapshot_contract_hash
+      )
     : undefined
   const impactShotCodes = impact?.manifest.shots.map(shot => shot.shot_code) ?? []
   const groupedValidationIssues = impact ? groupValidationIssues(impact.validation_errors, impactShotCodes) : []

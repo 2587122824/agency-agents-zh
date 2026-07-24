@@ -4554,6 +4554,44 @@ def test_blocked_production_requires_confirmation_and_returns_to_preparation(cli
     assert preparation["snapshots"][0]["status"] == "superseded"
     assert preparation["next_action"]["code"] == "ANALYZE_PRODUCTION_IMPACT"
 
+    repeated_impact = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "close-blocked-repeat-impact",
+            "plan_version_id": snapshot["plan_version_id"],
+            "production_config_version_id": snapshot["production_config_version_id"],
+            **snapshot["selection"],
+        },
+    )
+    assert repeated_impact.status_code == 201
+    repeated_analysis = repeated_impact.json()
+    assert repeated_analysis["snapshot_contract_hash"] == snapshot["contract_hash"]
+
+    repeated_snapshot = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "close-blocked-repeat-snapshot",
+            "impact_analysis_id": repeated_analysis["id"],
+            "analysis_hash": repeated_analysis["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    )
+    assert repeated_snapshot.status_code == 201
+    replacement = repeated_snapshot.json()
+    assert replacement["snapshot_number"] == 2
+    assert replacement["status"] == "preparing"
+    assert replacement["contract_hash"] == snapshot["contract_hash"]
+
+    repeated_preparation = client.get(
+        f"/api/v1/projects/{project['id']}/production-preparation"
+    ).json()
+    assert repeated_preparation["current_snapshot"]["id"] == replacement["id"]
+    assert [item["id"] for item in repeated_preparation["snapshots"]] == [
+        replacement["id"],
+        snapshot["id"],
+    ]
+    assert repeated_preparation["snapshots"][1]["status"] == "superseded"
+
 
 def test_blocked_production_cannot_close_while_provider_attempt_is_active(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")

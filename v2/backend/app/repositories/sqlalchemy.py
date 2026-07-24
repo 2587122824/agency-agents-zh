@@ -768,12 +768,13 @@ class SqlAlchemyProductionRepository:
     def attachment(self, attachment_id: str) -> Attachment | None:
         return self.session.get(Attachment, attachment_id)
 
-    def snapshot_for_contract(self, project_id: str, contract_hash: str) -> ProductionSnapshot | None:
+    def open_snapshot_for_contract(self, project_id: str, contract_hash: str) -> ProductionSnapshot | None:
         return self.session.scalar(
             select(ProductionSnapshot)
             .where(
                 ProductionSnapshot.project_id == project_id,
                 ProductionSnapshot.contract_hash == contract_hash,
+                ProductionSnapshot.status != "superseded",
             )
             .order_by(ProductionSnapshot.snapshot_number)
         )

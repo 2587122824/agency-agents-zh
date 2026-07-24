@@ -796,7 +796,7 @@ def create_snapshot(session: Session, project: Project, payload: CreateProductio
 
     contract = _snapshot_contract(analysis.manifest)
     contract_hash = _hash(contract)
-    existing_snapshot = repository.snapshot_for_contract(project.id, contract_hash)
+    existing_snapshot = repository.open_snapshot_for_contract(project.id, contract_hash)
     if existing_snapshot:
         raise ProductionConflictError(
             "PRODUCTION_SNAPSHOT_DUPLICATE",
