@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { DeliveryAttempt, EditorAsset, Timeline, TimelineItemDraft } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
+import { assetRevisionSummary } from '../presentation/assetRevision'
 import { projectStatusLabel } from '../presentation/projectFacts'
 import styles from './EditorPage.module.css'
 
@@ -269,7 +270,7 @@ export function EditorPage() {
             <div><span>NEXT ACTION</span><h2>{workspace.data.next_action.label}</h2></div>
             <dl><div><dt>输出</dt><dd>{seconds(workspace.data.duration_ms)} · {workspace.data.aspect_ratio}</dd></div><div><dt>素材</dt><dd>{workspace.data.available_assets.length}</dd></div><div><dt>版本</dt><dd>{workspace.data.timelines.length}</dd></div></dl>
           </header>
-          {revision.data && <div className={styles.revisionContext}><AlertTriangle size={17} /><div><strong>已登记剪辑取舍问题</strong><span>{revision.data.rationale}</span><small>{revision.data.shot_code ? `对应分镜 ${revision.data.shot_code} · ` : ''}原素材仍保留，请在时间线候选中明确调整。</small></div></div>}
+          {revision.data && <div className={styles.revisionContext}><AlertTriangle size={17} /><div><strong>已登记剪辑取舍问题</strong><span>{assetRevisionSummary(revision.data)}</span><small>{revision.data.shot_code ? `对应分镜 ${revision.data.shot_code} · ` : ''}原素材仍保留，请在时间线候选中明确调整。</small></div></div>}
 
           {workspace.data.project_status === 'quality_review' && <div className={styles.gate} data-ready={workspace.data.quality_stage_ready}>
             <div>{workspace.data.quality_stage_ready ? <Check /> : <AlertTriangle />}<span><strong>{workspace.data.quality_stage_ready ? '必需素材已批准' : '质量阶段尚未完成'}</strong><small>{workspace.data.quality_stage_ready ? '当前批准素材集可以进入剪辑' : `${workspace.data.quality_output_gaps.length} 个必需输出仍未满足`}</small></span></div>

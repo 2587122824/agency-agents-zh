@@ -498,6 +498,36 @@
 .scopeChoices button[data-selected="true"] { border-color: #397357; background: #eef6f1; box-shadow: inset 0 0 0 1px #397357; }
 .scopeChoices strong { font-size: 11px; }
 .scopeChoices span { color: #69716d; font-size: 9px; }
+.reasonChoices {
+  margin: 14px 0;
+  padding: 0;
+  border: 0;
+}
+.reasonChoices legend {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+}
+.reasonChoices > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.reasonChoices button {
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid #d3d8d2;
+  border-radius: 5px;
+  background: #fff;
+  color: #3f4743;
+  cursor: pointer;
+}
+.reasonChoices button[data-selected="true"] {
+  border-color: #397357;
+  background: #eef6f1;
+  color: #245a40;
+  box-shadow: inset 0 0 0 1px #397357;
+}
 .batchList {
   max-height: 190px;
   overflow-y: auto;

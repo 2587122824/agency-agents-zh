@@ -5063,6 +5063,7 @@ def test_storyboard_asset_revision_creates_explicit_draft_and_new_plan(client: T
         "actor_id": "local-user",
         "expected_asset_row_version": 1,
         "issue_scope": "storyboard",
+        "issue_code": "action_mismatch",
         "rationale": "人物动作与已经确认的分镜目标不一致，需要调整这个镜头。",
     }
     created = client.post(
@@ -5081,6 +5082,7 @@ def test_storyboard_asset_revision_creates_explicit_draft_and_new_plan(client: T
         f"/api/v1/projects/{project['id']}/asset-revision-requests/{result['request']['id']}"
     )
     assert request_read.status_code == 200
+    assert request_read.json()["issue_code"] == "action_mismatch"
     assert request_read.json()["rationale"] == command["rationale"]
     duplicate_open = client.post(
         f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
@@ -5176,6 +5178,7 @@ def test_open_storyboard_revision_can_be_explicitly_cancelled(client: TestClient
         json={
             "command_id": "cancel-revision-create-001", "actor_id": "local-user",
             "expected_asset_row_version": 1, "issue_scope": "storyboard",
+            "issue_code": "other",
             "rationale": "误选了分镜问题。",
         },
     ).json()
@@ -5226,17 +5229,59 @@ def test_non_shot_asset_requires_explicit_non_storyboard_scope(client: TestClien
     }
     blocked = client.post(
         f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
-        json={**base, "command_id": "non-shot-storyboard-001", "issue_scope": "storyboard"},
+        json={
+            **base, "command_id": "non-shot-storyboard-001",
+            "issue_scope": "storyboard", "issue_code": "content_mismatch",
+        },
     )
     assert blocked.status_code == 409
     assert blocked.headers["x-error-code"] == "STORYBOARD_REVISION_SHOT_REQUIRED"
     recorded = client.post(
         f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
-        json={**base, "command_id": "non-shot-production-001", "issue_scope": "production"},
+        json={
+            **base, "command_id": "non-shot-production-001",
+            "issue_scope": "production", "issue_code": "visual_artifact", "rationale": "",
+        },
     )
     assert recorded.status_code == 201
     assert recorded.json()["request"]["status"] == "recorded"
+    assert recorded.json()["request"]["issue_code"] == "visual_artifact"
+    assert recorded.json()["request"]["rationale"] == ""
     assert recorded.json()["next_action"]["path"].startswith("/production?")
+    incompatible = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
+        json={
+            **base, "command_id": "non-shot-incompatible-001",
+            "issue_scope": "production", "issue_code": "content_mismatch",
+        },
+    )
+    assert incompatible.status_code == 422
+    missing_other_detail = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
+        json={
+            **base, "command_id": "non-shot-other-empty-001",
+            "issue_scope": "editing", "issue_code": "other", "rationale": "   ",
+        },
+    )
+    assert missing_other_detail.status_code == 422
+    editing = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:request-revision",
+        json={
+            **base, "command_id": "non-shot-editing-001",
+            "issue_scope": "editing", "issue_code": "replace_clip",
+            "rationale": "人物动作不对，但用户明确选择在剪辑阶段替换。",
+        },
+    )
+    assert editing.status_code == 201
+    assert editing.json()["request"]["issue_scope"] == "editing"
+    assert editing.json()["request"]["issue_code"] == "replace_clip"
+    with SessionLocal() as session:
+        event = session.scalar(select(ProjectEvent).where(
+            ProjectEvent.aggregate_id == recorded.json()["request"]["id"],
+            ProjectEvent.event_type == "asset.revision_requested.v1",
+        ))
+        assert event is not None
+        assert event.data["issue_code"] == "visual_artifact"
 
 
 def test_failed_qc_agent_requires_exact_user_confirmed_retry(client: TestClient) -> None:

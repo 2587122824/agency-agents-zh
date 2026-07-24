@@ -545,6 +545,8 @@ new_information / generation_requirements
 2. 确定性检查通过后，用户或阶段命令可调用质量审核智能体，产生 `qc-report-candidate.v1`。
 3. 候选经 Schema 与证据引用校验后进入人工审核；智能体不能自行写入 `passed`、`approved` 或 `rejected`。
 
+人工审核中的“需要调整”使用结构化反馈合同，不把自由文本当成分类依据。用户先选择 `storyboard / production / editing` 处理范围，再选择该范围内的明确原因；补充说明默认可选，仅 `other` 必填。该选择只创建 `AssetRevisionRequest` 并导航到对应工作区，不触发质量审核智能体、自动重做、提示词修改、工作流替换或费用调用。分镜、制作与剪辑页面必须显示结构化原因标签，即使补充说明为空也能独立理解。
+
 输入至少冻结：
 
 ```text

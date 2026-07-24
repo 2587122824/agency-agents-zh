@@ -270,6 +270,7 @@ class AssetRevisionRequest(Base):
     shot_id: Mapped[str | None] = mapped_column(ForeignKey("shots.id"), nullable=True, index=True)
     shot_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
     issue_scope: Mapped[str] = mapped_column(String(24), index=True)
+    issue_code: Mapped[str] = mapped_column(String(40), index=True)
     rationale: Mapped[str] = mapped_column(String(2000))
     status: Mapped[str] = mapped_column(String(32), default="recorded", index=True)
     source_asset_state: Mapped[str] = mapped_column(String(32))

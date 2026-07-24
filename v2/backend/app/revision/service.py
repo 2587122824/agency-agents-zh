@@ -139,6 +139,7 @@ def create_asset_revision_request(
         shot_id=shot.id if shot else None,
         shot_code=shot.shot_code if shot else None,
         issue_scope=payload.issue_scope,
+        issue_code=payload.issue_code,
         rationale=payload.rationale,
         status="recorded",
         source_asset_state=asset.state,
@@ -190,6 +191,7 @@ def create_asset_revision_request(
         data={
             "asset_id": asset.id,
             "issue_scope": payload.issue_scope,
+            "issue_code": payload.issue_code,
             "shot_id": request.shot_id,
             "shot_code": request.shot_code,
             "draft_candidate_id": request.draft_candidate_id,

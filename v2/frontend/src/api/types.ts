@@ -740,6 +740,7 @@ export interface AssetRevisionRequest {
   shot_id: string | null
   shot_code: string | null
   issue_scope: 'storyboard' | 'production' | 'editing'
+  issue_code: 'content_mismatch' | 'action_mismatch' | 'composition_mismatch' | 'character_setup_mismatch' | 'identity_inconsistent' | 'visual_artifact' | 'composition_deviation' | 'text_error' | 'low_clarity' | 'style_mismatch' | 'exclude_asset' | 'shorten_clip' | 'reorder_clip' | 'replace_clip' | 'other'
   rationale: string
   status: string
   source_asset_state: string

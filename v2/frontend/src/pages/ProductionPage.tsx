@@ -6,6 +6,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../api/client'
 import type { ExecutionWorkItem, ProductionAsset, ProductionExecution } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
+import { assetRevisionSummary } from '../presentation/assetRevision'
 import { blockerPresentation } from '../presentation/projectFacts'
 import styles from './StagePage.module.css'
 
@@ -172,7 +173,7 @@ export function ProductionPage() {
         </section>
 
         <section className={styles.executionPanel}>
-          {revision.data && <div className={styles.revisionContext}><AlertTriangle size={17} /><div><strong>已登记生成效果问题</strong><span>{revision.data.rationale}</span><small>{revision.data.shot_code ? `对应分镜 ${revision.data.shot_code} · ` : ''}系统没有自动重做素材，请由你决定后续生产操作。</small></div></div>}
+          {revision.data && <div className={styles.revisionContext}><AlertTriangle size={17} /><div><strong>已登记生成效果问题</strong><span>{assetRevisionSummary(revision.data)}</span><small>{revision.data.shot_code ? `对应分镜 ${revision.data.shot_code} · ` : ''}系统没有自动重做素材，请由你决定后续生产操作。</small></div></div>}
           {!projectId && <div className={styles.executionEmpty}><Layers3 size={24} /><strong>选择一个制作任务</strong><span>这里会显示每项素材的制作进度和需要处理的问题。</span></div>}
           {projectId && execution.isPending && <div className={styles.executionEmpty}>正在读取执行状态…</div>}
           {execution.error && <div className={styles.executionEmpty}><AlertTriangle size={22} /><strong>读取失败</strong><span>{execution.error.message}</span></div>}

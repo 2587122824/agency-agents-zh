@@ -7,12 +7,13 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { ProductionAsset } from '../api/types'
+import type { AssetRevisionRequest, ProductionAsset } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
+import { assetRevisionReasons, assetRevisionSummary } from '../presentation/assetRevision'
 import styles from './ReviewPage.module.css'
 
 type ReviewChoice = { asset: ProductionAsset; action: 'reject' }
-type RevisionChoice = { asset: ProductionAsset; scope: 'storyboard' | 'production' | 'editing' }
+type RevisionChoice = { asset: ProductionAsset; scope: AssetRevisionRequest['issue_scope'] }
 type AssetFilter = 'pending' | 'all' | 'approved' | 'archived'
 
 const APPROVAL_RATIONALE = '人工确认画面符合分镜合同'
@@ -56,6 +57,7 @@ export function ReviewPage() {
   const [batchConfirmOpen, setBatchConfirmOpen] = useState(false)
   const [retryChoice, setRetryChoice] = useState<ProductionAsset | null>(null)
   const [revisionChoice, setRevisionChoice] = useState<RevisionChoice | null>(null)
+  const [issueCode, setIssueCode] = useState<AssetRevisionRequest['issue_code'] | null>(null)
   const [rationale, setRationale] = useState('')
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
@@ -164,9 +166,10 @@ export function ReviewPage() {
     onSuccess: async () => { setRetryChoice(null); await refresh() },
   })
   const requestRevision = useMutation({
-    mutationFn: () => api.requestAssetRevision(projectId, revisionChoice!.asset, revisionChoice!.scope, rationale),
+    mutationFn: () => api.requestAssetRevision(projectId, revisionChoice!.asset, revisionChoice!.scope, issueCode!, rationale),
     onSuccess: async result => {
       setRevisionChoice(null)
+      setIssueCode(null)
       setRationale('')
       await refresh()
       navigate(result.next_action.path)
@@ -318,11 +321,11 @@ export function ReviewPage() {
               <AlertTriangle /><div><strong>智能审核失败</strong><span>{selectedAsset.latest_qc_agent_run.error_detail ?? selectedAsset.latest_qc_agent_run.error_code}</span></div>
               <button onClick={() => setRetryChoice(selectedAsset)}><RotateCcw size={13} />重跑</button>
             </section>}
-            {selectedAsset.revision_requests[0] && <p className={styles.revisionRecorded}>已登记调整：{selectedAsset.revision_requests[0].status}</p>}
+            {selectedAsset.revision_requests[0] && <p className={styles.revisionRecorded}>已登记调整：{assetRevisionSummary(selectedAsset.revision_requests[0])}</p>}
             <footer className={styles.actions}>
               {selectedAsset.state === 'created' && <button className="primaryButton" disabled={verify.isPending} onClick={() => verify.mutate(selectedAsset)}><FileCheck2 size={14} />验证文件</button>}
               {isReviewable(selectedAsset) && <>
-                <button className="secondaryButton" onClick={() => { setRevisionChoice({ asset: selectedAsset, scope: 'storyboard' }); setRationale('') }}><Pencil size={14} />需要调整</button>
+                <button className="secondaryButton" onClick={() => { setRevisionChoice({ asset: selectedAsset, scope: 'storyboard' }); setIssueCode(null); setRationale('') }}><Pencil size={14} />需要调整</button>
                 <button className="secondaryButton" onClick={() => { setReviewChoice({ asset: selectedAsset, action: 'reject' }); setRationale('') }}><X size={14} />拒绝</button>
                 <button className="primaryButton" disabled={directReview.isPending} onClick={() => directReview.mutate({ asset: selectedAsset, action: 'approve', reason: APPROVAL_RATIONALE })}><Check size={14} />通过</button>
               </>}
@@ -367,13 +370,17 @@ export function ReviewPage() {
       <header><Pencil /><div><span>素材调整</span><h2>这个问题应该在哪里处理？</h2></div></header>
       <p>{assetLabel(revisionChoice.asset)}</p>
       <div className={styles.scopeChoices}>
-        <button type="button" data-selected={revisionChoice.scope === 'storyboard'} onClick={() => setRevisionChoice({ ...revisionChoice, scope: 'storyboard' })}><strong>分镜需要调整</strong><span>画面内容、动作、构图或人物设定本身需要改</span></button>
-        <button type="button" data-selected={revisionChoice.scope === 'production'} onClick={() => setRevisionChoice({ ...revisionChoice, scope: 'production' })}><strong>生成效果需要重做</strong><span>分镜没问题，但这次模型生成结果不满意</span></button>
-        <button type="button" data-selected={revisionChoice.scope === 'editing'} onClick={() => setRevisionChoice({ ...revisionChoice, scope: 'editing' })}><strong>剪辑取舍需要调整</strong><span>素材可以保留，在成片中调整选用、时长或顺序</span></button>
+        <button type="button" data-selected={revisionChoice.scope === 'storyboard'} onClick={() => { setRevisionChoice({ ...revisionChoice, scope: 'storyboard' }); setIssueCode(null) }}><strong>分镜需要调整</strong><span>画面内容、动作、构图或人物设定本身需要改</span></button>
+        <button type="button" data-selected={revisionChoice.scope === 'production'} onClick={() => { setRevisionChoice({ ...revisionChoice, scope: 'production' }); setIssueCode(null) }}><strong>生成效果需要重做</strong><span>分镜没问题，但这次模型生成结果不满意</span></button>
+        <button type="button" data-selected={revisionChoice.scope === 'editing'} onClick={() => { setRevisionChoice({ ...revisionChoice, scope: 'editing' }); setIssueCode(null) }}><strong>剪辑取舍需要调整</strong><span>素材可以保留，在成片中调整选用、时长或顺序</span></button>
       </div>
-      <label>具体问题<textarea value={rationale} onChange={event => setRationale(event.target.value)} placeholder="说明哪里不符合预期，以及希望如何调整" /></label>
+      <fieldset className={styles.reasonChoices}>
+        <legend>选择具体原因</legend>
+        <div>{assetRevisionReasons[revisionChoice.scope].map(reason => <button type="button" key={reason.code} data-selected={issueCode === reason.code} onClick={() => setIssueCode(reason.code)}>{reason.label}</button>)}</div>
+      </fieldset>
+      <label>补充说明{issueCode === 'other' ? '（必填）' : '（可选）'}<textarea value={rationale} onChange={event => setRationale(event.target.value)} placeholder={issueCode === 'other' ? '请说明具体问题和希望如何调整' : '需要补充细节时再填写'} /></label>
       <small>系统只登记你选择的问题类型，不会自动重做素材、改分镜或产生费用。</small>
-      <footer><button className="secondaryButton" onClick={() => { setRevisionChoice(null); setRationale('') }}>取消</button><button className="primaryButton" disabled={!rationale.trim() || requestRevision.isPending} onClick={() => requestRevision.mutate()}>登记并前往处理</button></footer>
+      <footer><button className="secondaryButton" onClick={() => { setRevisionChoice(null); setIssueCode(null); setRationale('') }}>取消</button><button className="primaryButton" disabled={!issueCode || (issueCode === 'other' && !rationale.trim()) || requestRevision.isPending} onClick={() => requestRevision.mutate()}>登记并前往处理</button></footer>
     </section></div>}
 
     {retryChoice && <div className={styles.modal}><section>
