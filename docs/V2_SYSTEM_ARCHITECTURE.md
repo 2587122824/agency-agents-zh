@@ -62,6 +62,8 @@ SQLAlchemy / SQLite / Alembic
 | Production | 快照、DAG、费用影响、执行授权和 WorkItem |
 | Provider | 凭据解析、适配器注册、请求提交、轮询和输出清单 |
 | Quality | 文件验证、QC 报告、人工批准与拒绝 |
+
+Planning 的单镜头编辑与多镜头人物绑定共用 `ShotContractPatch`，批量只是前端生成多条精确 `target_shot_code` Patch 的交互方式，不新增批量写库捷径。完整候选仍由 `validate_shots` 一次验证人物实体类型、主参考声明、人脸主体归属及身份一致性与参考图要求；`PlanningRepository` 必须同时提供 EntityVersion 与其 Entity 的明确查询，不能绕过实体类型校验或从附件名称推断人物。
 | Editor | 时间线候选、修订、验证和确认 |
 | Delivery | 最终文件授权、上传、验证和交付完成 |
 | Control | 项目阶段、阻断、费用、事件和下一步只读投影 |

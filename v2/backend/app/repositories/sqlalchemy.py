@@ -585,6 +585,9 @@ class SqlAlchemyPlanningRepository:
     def entity_version(self, version_id: str) -> EntityVersion | None:
         return self.session.get(EntityVersion, version_id)
 
+    def entity(self, entity_id: str) -> Entity | None:
+        return self.session.get(Entity, entity_id)
+
     def attachment(self, attachment_id: str) -> Attachment | None:
         return self.session.get(Attachment, attachment_id)
 

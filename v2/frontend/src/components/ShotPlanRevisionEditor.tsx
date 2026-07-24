@@ -1,4 +1,4 @@
-import { Check, ChevronLeft, ChevronRight, ImageOff, RotateCcw, Save, Search, Sparkles, Undo2 } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, ImageOff, RotateCcw, Save, Search, Sparkles, Undo2, Users } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 
 import type { ShotContract, ShotPlanCandidate } from '../api/types'
@@ -16,6 +16,7 @@ type EntityOption = {
 
 type ShotPatch = { target_shot_code: string; changes: Partial<ShotContract> }
 type ShotFilter = 'all' | 'modified'
+type SelectionMode = 'character' | 'ai' | null
 
 function EntityThumbnail({ entity, projectId }: { entity: EntityOption; projectId: string }) {
   const [failed, setFailed] = useState(false)
@@ -108,8 +109,14 @@ export function ShotPlanRevisionEditor({
   })
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ShotFilter>('all')
+  const [selectionMode, setSelectionMode] = useState<SelectionMode>(null)
+  const [characterSelected, setCharacterSelected] = useState<number[]>([])
   const [aiSelected, setAiSelected] = useState<string[]>([])
   const [aiInstruction, setAiInstruction] = useState('')
+  const [batchCharacterId, setBatchCharacterId] = useState('')
+  const [batchFaceRequired, setBatchFaceRequired] = useState(true)
+  const [batchUseReference, setBatchUseReference] = useState(true)
+  const [batchIdentityRequired, setBatchIdentityRequired] = useState(true)
 
   const changesByIndex = useMemo(
     () => candidate.shots.map((original, index) => shotChanges(original, drafts[index])),
@@ -173,6 +180,55 @@ export function ShotPlanRevisionEditor({
   ])
   const referenceOptions = entities.filter(entity => declaredIds.has(entity.id) && entity.source_attachment_verified && entity.source_attachment_id && entity.source_mime_type?.startsWith('image/'))
   const selectedReference = referenceOptions.find(entity => entity.id === shot.primary_reference_entity_version_id)
+  const batchCharacter = characters.find(entity => entity.id === batchCharacterId)
+  const batchCharacterHasReference = Boolean(
+    batchCharacter?.source_attachment_verified
+    && batchCharacter.source_attachment_id
+    && batchCharacter.source_mime_type?.startsWith('image/'),
+  )
+  const visibleCharacterSelected = visibleIndices.filter(index => characterSelected.includes(index))
+  const allVisibleCharactersSelected = Boolean(visibleIndices.length && visibleCharacterSelected.length === visibleIndices.length)
+
+  const toggleSelectionMode = (mode: Exclude<SelectionMode, null>) => {
+    setSelectionMode(current => current === mode ? null : mode)
+  }
+  const toggleCharacterSelection = (index: number) => {
+    setCharacterSelected(current => current.includes(index) ? current.filter(value => value !== index) : [...current, index])
+  }
+  const toggleAllVisibleCharacters = () => {
+    setCharacterSelected(current => {
+      if (allVisibleCharactersSelected) return current.filter(index => !visibleIndices.includes(index))
+      return [...new Set([...current, ...visibleIndices])]
+    })
+  }
+  const applyCharacterBatch = () => {
+    if (!batchCharacterId || !characterSelected.length) return
+    setDrafts(current => current.map((item, index) => {
+      if (!characterSelected.includes(index)) return item
+      const characterIds = item.character_entity_version_ids.includes(batchCharacterId)
+        ? item.character_entity_version_ids
+        : [...item.character_entity_version_ids, batchCharacterId]
+      const faceSubjectIds = batchFaceRequired && !item.face_subject_entity_version_ids.includes(batchCharacterId)
+        ? [...item.face_subject_entity_version_ids, batchCharacterId]
+        : item.face_subject_entity_version_ids
+      return {
+        ...item,
+        character_entity_version_ids: characterIds,
+        face_visibility: batchFaceRequired ? 'required' : item.face_visibility,
+        face_subject_entity_version_ids: faceSubjectIds,
+        primary_reference_entity_version_id: batchUseReference ? batchCharacterId : item.primary_reference_entity_version_id,
+        generation_requirements: {
+          ...item.generation_requirements,
+          reference_image_required: batchUseReference || batchIdentityRequired
+            ? true
+            : item.generation_requirements.reference_image_required,
+          identity_consistency_required: batchIdentityRequired
+            ? true
+            : item.generation_requirements.identity_consistency_required,
+        },
+      }
+    }))
+  }
 
   return <section className={styles.editor}>
     <header>
@@ -187,6 +243,14 @@ export function ShotPlanRevisionEditor({
           <button type="button" data-active={filter === 'all'} onClick={() => setFilter('all')}>全部</button>
           <button type="button" data-active={filter === 'modified'} onClick={() => setFilter('modified')}>已修改 {modifiedIndices.size}</button>
         </div>
+        <div className={styles.selectionControls}>
+          <div>
+            <button type="button" data-active={selectionMode === 'character'} onClick={() => toggleSelectionMode('character')}><Users size={13} />批量人物</button>
+            <button type="button" data-active={selectionMode === 'ai'} onClick={() => toggleSelectionMode('ai')}><Sparkles size={13} />AI 调整</button>
+          </div>
+          {selectionMode === 'character' && <p><span>已选 {characterSelected.length} 个</span><button type="button" onClick={toggleAllVisibleCharacters}>{allVisibleCharactersSelected ? '取消当前页' : '全选当前页'}</button><button type="button" disabled={!characterSelected.length} onClick={() => setCharacterSelected([])}>清空</button></p>}
+          {selectionMode === 'ai' && <p><span>已选 {aiSelected.length} 个</span><button type="button" disabled={!aiSelected.length} onClick={() => setAiSelected([])}>清空</button></p>}
+        </div>
         <div className={styles.navigationList}>
           {visibleIndices.map(index => {
             const item = drafts[index]
@@ -196,9 +260,16 @@ export function ShotPlanRevisionEditor({
                 <span className={styles.shotSummary}><strong>{item.shot_code || `镜头 ${index + 1}`}</strong><small>{item.action || item.shot_purpose}</small><em>{item.shot_purpose} · {(item.duration_ms / 1000).toFixed(1)} 秒</em></span>
                 {modifiedIndices.has(index) && <span className={styles.modifiedDot}>已修改</span>}
               </button>
-              <label className={styles.aiShotToggle} title="选择此镜头用于 AI 调整">
-                <input type="checkbox" aria-label={`选择 ${item.shot_code} 用于 AI 调整`} checked={aiSelected.includes(item.shot_code)} onChange={() => setAiSelected(current => current.includes(item.shot_code) ? current.filter(code => code !== item.shot_code) : [...current, item.shot_code])} />
-              </label>
+              {selectionMode && <label className={styles.shotSelectionToggle} title={selectionMode === 'character' ? '选择此镜头用于批量设置人物' : '选择此镜头用于 AI 调整'}>
+                <input
+                  type="checkbox"
+                  aria-label={selectionMode === 'character' ? `选择 ${item.shot_code} 用于批量设置人物` : `选择 ${item.shot_code} 用于 AI 调整`}
+                  checked={selectionMode === 'character' ? characterSelected.includes(index) : aiSelected.includes(item.shot_code)}
+                  onChange={() => selectionMode === 'character'
+                    ? toggleCharacterSelection(index)
+                    : setAiSelected(current => current.includes(item.shot_code) ? current.filter(code => code !== item.shot_code) : [...current, item.shot_code])}
+                />
+              </label>}
             </div>
           })}
           {!visibleIndices.length && <div className={styles.emptyList}><strong>没有匹配的镜头</strong><span>调整搜索词或切换筛选条件。</span></div>}
@@ -277,11 +348,26 @@ export function ShotPlanRevisionEditor({
         </div>
       </div>
     </div>
-    <section className={styles.aiRevision}>
+    {selectionMode === 'character' && <section className={styles.characterBatch}>
+      <div className={styles.batchHeading}><Users size={18} /><p><strong>批量设置人物</strong><span>只修改勾选镜头，其他人物与镜头内容保持不变。</span></p></div>
+      <label>人物版本<select value={batchCharacterId} onChange={event => setBatchCharacterId(event.target.value)}><option value="">请选择人物</option>{characters.map(entity => <option key={entity.id} value={entity.id}>{entity.display_name} · v{entity.version_number}</option>)}</select></label>
+      <div className={styles.batchOptions}>
+        <label><input type="checkbox" checked={batchFaceRequired} onChange={event => setBatchFaceRequired(event.target.checked)} />设为必须看清人脸的主体</label>
+        <label><input type="checkbox" checked={batchUseReference} onChange={event => { setBatchUseReference(event.target.checked); if (!event.target.checked) setBatchIdentityRequired(false) }} />设为主参考图</label>
+        <label><input type="checkbox" checked={batchIdentityRequired} onChange={event => { setBatchIdentityRequired(event.target.checked); if (event.target.checked) setBatchUseReference(true) }} />要求身份一致性</label>
+      </div>
+      <div className={styles.batchAction}>
+        {batchCharacterId && batchUseReference && !batchCharacterHasReference
+          ? <span data-error="true">这个人物没有可用的图片附件，不能设为主参考图。</span>
+          : <span>应用后仍需点击底部“创建修订候选”统一保存。</span>}
+        <button className="primaryButton" type="button" disabled={!characterSelected.length || !batchCharacterId || (batchUseReference && !batchCharacterHasReference)} onClick={applyCharacterBatch}>应用到 {characterSelected.length} 个镜头</button>
+      </div>
+    </section>}
+    {selectionMode === 'ai' && <section className={styles.aiRevision}>
       <div><Sparkles size={17} /><p><strong>AI 调整选中镜头</strong><span>只授权分镜导演修改勾选镜头；其他镜头必须保持完全一致。本操作会调用一次当前模型。</span></p></div>
       <textarea value={aiInstruction} onChange={event => setAiInstruction(event.target.value)} placeholder="明确说明选中镜头需要怎样调整" />
       <button className="secondaryButton" type="button" disabled={!aiSelected.length || !aiInstruction.trim() || aiSaving} onClick={() => onAIRevision(aiSelected, aiInstruction.trim())}><Sparkles size={14} />{aiSaving ? '正在调整…' : `确认费用并调整 ${aiSelected.length} 个镜头`}</button>
-    </section>
+    </section>}
     <footer>
       <span>基于候选 v{candidate.revision_number} · row {candidate.row_version}</span>
       <button className="secondaryButton" type="button" onClick={onCancel}><RotateCcw size={14} />取消</button>

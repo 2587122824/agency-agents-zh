@@ -2985,7 +2985,17 @@ def create_plan_with_explicit_primary_reference(client: TestClient) -> tuple[dic
             "expected_candidate_row_version": candidate["row_version"],
             "patches": [{
                 "target_shot_code": item["shot_code"],
-                "changes": {"primary_reference_entity_version_id": binding["entity_version_id"]},
+                "changes": {
+                    "character_entity_version_ids": [binding["entity_version_id"]],
+                    "face_visibility": "required",
+                    "face_subject_entity_version_ids": [binding["entity_version_id"]],
+                    "primary_reference_entity_version_id": binding["entity_version_id"],
+                    "generation_requirements": {
+                        **item["generation_requirements"],
+                        "reference_image_required": True,
+                        "identity_consistency_required": True,
+                    },
+                },
             } for item in candidate["shots"]],
         },
     ).json()
@@ -2998,6 +3008,22 @@ def create_plan_with_explicit_primary_reference(client: TestClient) -> tuple[dic
         },
     ).json()
     return project, plan, attachment
+
+
+def test_character_reference_can_be_bound_to_multiple_shots(client: TestClient) -> None:
+    project, plan, _ = create_plan_with_explicit_primary_reference(client)
+    planning = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
+    active_plan = next(item for item in planning["plan_history"] if item["id"] == plan["id"])
+    shots = active_plan["shots"]
+    assert len(shots) > 1
+    character_id = shots[0]["primary_reference_entity_version_id"]
+    assert character_id
+    assert all(item["character_entity_version_ids"] == [character_id] for item in shots)
+    assert all(item["face_visibility"] == "required" for item in shots)
+    assert all(item["face_subject_entity_version_ids"] == [character_id] for item in shots)
+    assert all(item["primary_reference_entity_version_id"] == character_id for item in shots)
+    assert all(item["generation_requirements"]["reference_image_required"] for item in shots)
+    assert all(item["generation_requirements"]["identity_consistency_required"] for item in shots)
 
 
 def test_required_primary_reference_blocks_without_guessing(client: TestClient) -> None:
