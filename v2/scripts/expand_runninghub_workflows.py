@@ -95,7 +95,7 @@ def workflow_slots(provider_key: str, video_spec_key: str) -> list[WorkflowSlotD
                 binding("27", "seed", "seed", "integer"),
                 binding("24", "steps", "literal:8", "integer"),
                 binding("24", "cfg", "literal:1", "number"),
-                binding("24", "denoise", "literal:0.32", "number"),
+                binding("24", "denoise", "literal:1.0", "number"),
                 binding("48", "filename_prefix", 'literal:"v2/keyframe-identity"', "string"),
             ],
         }),
