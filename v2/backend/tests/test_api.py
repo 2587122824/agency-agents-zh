@@ -4076,6 +4076,22 @@ def test_image_phase_requires_exact_approved_assets_before_releasing_video(clien
         for item in execution["work_items"]
         if item["kind"] != "generate_keyframe"
     )
+    released_asset = next(
+        item for item in client.get(f"/api/v1/projects/{project['id']}/quality-review").json()["assets"]
+        if item["id"] == approved_asset_ids[0]
+    )
+    assert released_asset["approval_revocation"]["allowed"] is False
+    assert released_asset["approval_revocation"]["blocker_code"] == "IMAGE_PHASE_ALREADY_RELEASED"
+    revoke = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{released_asset['id']}:revoke-approval",
+        json={
+            "command_id": "phase-revoke-command-0001",
+            "expected_row_version": released_asset["row_version"],
+            "rationale": "图片阶段已放行，不应允许直接撤销。",
+        },
+    )
+    assert revoke.status_code == 409
+    assert revoke.headers["x-error-code"] == "IMAGE_PHASE_ALREADY_RELEASED"
     assert process_one("test-worker") is True
     after_first_video = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
     completed_videos = [
@@ -4909,6 +4925,79 @@ def test_verified_asset_can_be_approved_by_direct_human_review(client: TestClien
     assert result["latest_qc_report"]["ruleset_version"] == "human-review.v1"
     assert result["review_decisions"][0]["rationale"] == "人工确认画面符合分镜合同"
     assert result["review_context"]["shot"]["shot_code"]
+    assert result["approval_revocation"]["allowed"] is True
+
+    revoked = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:revoke-approval",
+        json={
+            "command_id": "direct-human-review-revoke-001",
+            "expected_row_version": result["row_version"],
+            "rationale": "用户需要重新检查这一张素材。",
+        },
+    )
+    assert revoked.status_code == 200
+    result = revoked.json()
+    assert result["state"] == "verified"
+    assert result["approved_at"] is None
+    assert [item["decision"] for item in result["review_decisions"]] == ["approved", "approval_revoked"]
+
+    approved_again = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:approve",
+        json={
+            "command_id": "direct-human-review-approve-002",
+            "expected_row_version": result["row_version"],
+            "rationale": "重新检查后确认画面符合分镜合同。",
+        },
+    )
+    assert approved_again.status_code == 200
+    result = approved_again.json()
+    assert result["state"] == "approved"
+    assert result["latest_qc_report"]["report_number"] == 2
+
+    with SessionLocal() as session:
+        timeline = Timeline(
+            project_id=project["id"],
+            snapshot_id=snapshot["id"],
+            version_number=1,
+            status="candidate",
+            source="manual",
+            output_spec={},
+            track_config={},
+            validation_report=[],
+            created_by="local-user",
+        )
+        session.add(timeline)
+        session.flush()
+        session.add(TimelineItem(
+            timeline_id=timeline.id,
+            track_type="main_video",
+            sequence_number=1,
+            asset_id=asset_id,
+            label="Referenced approved asset",
+            source_in_ms=0,
+            source_out_ms=1000,
+            timeline_in_ms=0,
+            timeline_out_ms=1000,
+            transform={},
+        ))
+        session.commit()
+
+    referenced = next(
+        item for item in client.get(f"/api/v1/projects/{project['id']}/quality-review").json()["assets"]
+        if item["id"] == asset_id
+    )
+    assert referenced["approval_revocation"]["allowed"] is False
+    assert referenced["approval_revocation"]["blocker_code"] == "ASSET_REFERENCED_BY_TIMELINE"
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset_id}:revoke-approval",
+        json={
+            "command_id": "direct-human-review-revoke-002",
+            "expected_row_version": referenced["row_version"],
+            "rationale": "不应绕过时间线引用。",
+        },
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "ASSET_REFERENCED_BY_TIMELINE"
 
 
 def test_quality_review_does_not_report_unexecuted_nodes_as_output_gaps(client: TestClient) -> None:

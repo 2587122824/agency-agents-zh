@@ -725,6 +725,11 @@ export interface ProductionAsset {
     shot: Record<string, unknown>
     output_contract: Record<string, unknown>
   }
+  approval_revocation: {
+    allowed: boolean
+    blocker_code: string | null
+    message: string
+  }
 }
 
 export interface AssetRevisionRequest {

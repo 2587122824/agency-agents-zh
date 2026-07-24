@@ -164,6 +164,7 @@ const eventPresentations: Record<string, FactPresentation> = {
   'quality.blocked.v1': { title: '素材质量检查被阻断', description: '素材存在确定性合同问题，不能继续流转。' },
   'quality.review_required.v1': { title: '素材等待人工审核', description: '自动分析能力不足以给出最终结论，需要用户判断。' },
   'asset.approved.v1': { title: '素材已通过审核', description: '素材已进入可用于剪辑的状态。' },
+  'asset.approval_revoked.v1': { title: '素材通过结论已撤销', description: '素材在下游放行前重新进入人工审核，原审核记录继续保留。' },
   'asset.rejected.v1': { title: '素材已被拒绝', description: '用户拒绝了该素材，原始审核证据仍保留。' },
   'quality.stage_approved.v1': { title: '素材审核阶段已确认', description: '用户确认当前素材范围可以进入剪辑。' },
   'timeline.candidate_created.v1': { title: '剪辑草案已创建', description: '新的时间线候选正在等待校验和确认。' },

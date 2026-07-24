@@ -387,6 +387,7 @@
   border-top: 1px solid #dfe2dd;
 }
 .approved,
+.approvedBlocked,
 .archived {
   display: flex;
   align-items: center;
@@ -395,6 +396,26 @@
   font-size: 10px;
 }
 .approved svg { width: 15px; }
+.approvedBlocked {
+  align-items: flex-start;
+  color: #59615d;
+}
+.approvedBlocked > svg {
+  width: 15px;
+  flex: none;
+  color: #397357;
+}
+.approvedBlocked > span {
+  display: grid;
+  gap: 3px;
+}
+.approvedBlocked b { font-size: 10px; }
+.approvedBlocked small {
+  max-width: 250px;
+  color: #777d80;
+  font-size: 9px;
+  line-height: 1.45;
+}
 .archived { color: #8e4936; }
 .gap,
 .error {

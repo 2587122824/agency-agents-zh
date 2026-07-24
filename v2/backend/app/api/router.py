@@ -237,6 +237,7 @@ from ..quality.contracts import (
     RegisterAttemptAsset,
     RetryAssetQC,
     ReviewAsset,
+    RevokeAssetApproval,
     RunAssetQC,
     VerifyAsset,
 )
@@ -248,6 +249,7 @@ from ..quality.service import (
     quality_review_view,
     register_attempt_asset,
     retry_failed_asset_qc,
+    revoke_asset_approval,
     review_asset,
     run_asset_qc,
     verify_asset,
@@ -1211,6 +1213,22 @@ def project_asset_approve(project_id: str, asset_id: str, payload: ReviewAsset, 
 @router.post("/projects/{project_id}/assets/{asset_id}:reject", response_model=AssetRead)
 def project_asset_reject(project_id: str, asset_id: str, payload: ReviewAsset, session: Session = Depends(get_session)):
     return _review_asset_command(project_id, asset_id, payload, "rejected", session)
+
+
+@router.post("/projects/{project_id}/assets/{asset_id}:revoke-approval", response_model=AssetRead)
+def project_asset_revoke_approval(
+    project_id: str,
+    asset_id: str,
+    payload: RevokeAssetApproval,
+    session: Session = Depends(get_session),
+):
+    try:
+        return revoke_asset_approval(session, require_project(session, project_id), asset_id, payload)
+    except QualityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except QualityConflictError as exc:
+        session.rollback()
+        raise quality_error(exc) from exc
 
 
 @router.get("/projects/{project_id}/assets/{asset_id}/content")

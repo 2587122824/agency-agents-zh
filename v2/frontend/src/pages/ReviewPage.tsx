@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, Check, CheckCircle2, ChevronLeft, ChevronRight, FileCheck2,
-  Images, Maximize2, Pencil, RefreshCw, RotateCcw, Scaling, Search, X, ZoomIn, ZoomOut,
+  Images, Maximize2, Pencil, RefreshCw, RotateCcw, Scaling, Search, Undo2, X, ZoomIn, ZoomOut,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
@@ -52,6 +52,7 @@ export function ReviewPage() {
   const [filter, setFilter] = useState<AssetFilter>('pending')
   const [zoom, setZoom] = useState<number | null>(null)
   const [reviewChoice, setReviewChoice] = useState<ReviewChoice | null>(null)
+  const [revokeChoice, setRevokeChoice] = useState<ProductionAsset | null>(null)
   const [batchConfirmOpen, setBatchConfirmOpen] = useState(false)
   const [retryChoice, setRetryChoice] = useState<ProductionAsset | null>(null)
   const [revisionChoice, setRevisionChoice] = useState<RevisionChoice | null>(null)
@@ -139,6 +140,15 @@ export function ReviewPage() {
       await refresh()
     },
   })
+  const revokeApproval = useMutation({
+    mutationFn: (asset: ProductionAsset) => api.revokeAssetApproval(projectId, asset),
+    onSuccess: async asset => {
+      setRevokeChoice(null)
+      setFilter('pending')
+      setSelectedAssetId(asset.id)
+      await refresh()
+    },
+  })
   const retryQC = useMutation({
     mutationFn: (asset: ProductionAsset) => api.retryAssetQC(projectId, asset),
     onSuccess: async () => { setRetryChoice(null); await refresh() },
@@ -156,7 +166,7 @@ export function ReviewPage() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
-      if (target.matches('input, textarea, select') || reviewChoice || revisionChoice || retryChoice || batchConfirmOpen) return
+      if (target.matches('input, textarea, select') || reviewChoice || revokeChoice || revisionChoice || retryChoice || batchConfirmOpen) return
       if (event.key === 'ArrowLeft') { event.preventDefault(); moveSelection(-1) }
       if (event.key === 'ArrowRight') { event.preventDefault(); moveSelection(1) }
       if (event.key.toLowerCase() === 'a' && selectedAsset && isReviewable(selectedAsset)) {
@@ -172,10 +182,10 @@ export function ReviewPage() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedAsset, visibleAssets, reviewChoice, revisionChoice, retryChoice, batchConfirmOpen])
+  }, [selectedAsset, visibleAssets, reviewChoice, revokeChoice, revisionChoice, retryChoice, batchConfirmOpen])
 
   const reviewProjects = projects.data?.filter(project => ['producing', 'quality_review', 'blocked'].includes(project.status)) ?? []
-  const error = quality.error || verify.error || directReview.error || batchApprove.error || retryQC.error || requestRevision.error
+  const error = quality.error || verify.error || directReview.error || batchApprove.error || revokeApproval.error || retryQC.error || requestRevision.error
   const shot = selectedAsset?.review_context.shot ?? {}
   const selectedReviewableCount = selectedAssetIds.filter(id => reviewableAssets.some(asset => asset.id === id)).length
 
@@ -307,7 +317,11 @@ export function ReviewPage() {
                 <button className="secondaryButton" onClick={() => { setReviewChoice({ asset: selectedAsset, action: 'reject' }); setRationale('') }}><X size={14} />拒绝</button>
                 <button className="primaryButton" disabled={directReview.isPending} onClick={() => directReview.mutate({ asset: selectedAsset, action: 'approve', reason: APPROVAL_RATIONALE })}><Check size={14} />通过</button>
               </>}
-              {selectedAsset.state === 'approved' && <span className={styles.approved}><CheckCircle2 />已批准进入后续流程</span>}
+              {selectedAsset.state === 'approved' && selectedAsset.approval_revocation.allowed && <>
+                <span className={styles.approved}><CheckCircle2 />已批准进入后续流程</span>
+                <button className="secondaryButton" onClick={() => setRevokeChoice(selectedAsset)}><Undo2 size={14} />撤销通过</button>
+              </>}
+              {selectedAsset.state === 'approved' && !selectedAsset.approval_revocation.allowed && <span className={styles.approvedBlocked}><CheckCircle2 /><span><b>已批准进入后续流程</b><small>{selectedAsset.approval_revocation.message}</small></span></span>}
               {selectedAsset.state === 'archived' && <span className={styles.archived}>该素材已归档</span>}
             </footer>
           </>}
@@ -331,6 +345,13 @@ export function ReviewPage() {
       <div className={styles.batchList}>{selectedAssetIds.map(id => activeAssets.find(asset => asset.id === id)).filter((asset): asset is ProductionAsset => Boolean(asset && isReviewable(asset))).map(asset => <code key={asset.id}>{assetLabel(asset)}</code>)}</div>
       <small>只处理上面明确列出的素材，并逐项记录“{APPROVAL_RATIONALE}”。</small>
       <footer><button className="secondaryButton" onClick={() => setBatchConfirmOpen(false)}>取消</button><button className="primaryButton" disabled={batchApprove.isPending} onClick={() => batchApprove.mutate()}>{batchApprove.isPending ? '正在处理…' : '确认批量通过'}</button></footer>
+    </section></div>}
+
+    {revokeChoice && <div className={styles.modal}><section>
+      <header><Undo2 /><div><span>撤销审核结论</span><h2>让素材重新进入待审核</h2></div></header>
+      <p>{assetLabel(revokeChoice)}</p>
+      <small>原审核报告和通过记录会继续保留，并新增一条撤销记录。本操作不会取消任务、重跑素材或产生费用。</small>
+      <footer><button className="secondaryButton" onClick={() => setRevokeChoice(null)}>取消</button><button className="primaryButton" disabled={revokeApproval.isPending} onClick={() => revokeApproval.mutate(revokeChoice)}>{revokeApproval.isPending ? '正在撤销…' : '确认撤销通过'}</button></footer>
     </section></div>}
 
     {revisionChoice && <div className={styles.modal}><section>

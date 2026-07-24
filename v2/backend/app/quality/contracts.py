@@ -45,6 +45,11 @@ class ReviewAsset(QualityCommand):
         return self
 
 
+class RevokeAssetApproval(QualityCommand):
+    expected_row_version: int = Field(ge=1)
+    rationale: str = Field(min_length=1, max_length=1000)
+
+
 class QCFindingRead(BaseModel):
     id: str
     code: str
@@ -129,6 +134,7 @@ class AssetRead(BaseModel):
     affected_downstream_node_keys: list[str]
     revision_requests: list[dict[str, Any]]
     review_context: dict[str, Any]
+    approval_revocation: dict[str, Any]
 
 
 class QualityReviewView(BaseModel):

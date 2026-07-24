@@ -18,12 +18,14 @@ from ..db.models import (
     AssetRevisionRequest,
     AssetReviewDecision,
     PlanVersion,
+    ProductionSnapshot,
     Project,
     ProjectEvent,
     QCFinding,
     QCReport,
     QCReportCandidate,
     StoragePolicyVersion,
+    TimelineItem,
     WorkAttempt,
     WorkItem,
     utc_now,
@@ -40,7 +42,7 @@ from ..orchestration.project_transitions import (
     transition_project,
 )
 from .agent_gateway import QCGateway, QCSelection
-from .contracts import RegisterAttemptAsset, RetryAssetQC, ReviewAsset, RunAssetQC, VerifyAsset
+from .contracts import RegisterAttemptAsset, RetryAssetQC, ReviewAsset, RevokeAssetApproval, RunAssetQC, VerifyAsset
 
 
 RULESET_VERSION = "v2.file-contract.v1"
@@ -932,6 +934,86 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
     return asset_read(session, asset)
 
 
+def _approval_revocation_context(session: Session, project: Project, asset: Asset) -> dict:
+    if asset.state != "approved":
+        return {"allowed": False, "blocker_code": "ASSET_NOT_APPROVED", "message": "只有已批准素材可以撤销通过。"}
+    if asset.snapshot_id != project.active_snapshot_id:
+        return {"allowed": False, "blocker_code": "ASSET_NOT_IN_ACTIVE_SNAPSHOT", "message": "历史生产快照中的素材不能撤销通过。"}
+    snapshot = session.get(ProductionSnapshot, asset.snapshot_id)
+    if not snapshot or snapshot.project_id != project.id:
+        return {"allowed": False, "blocker_code": "ASSET_SNAPSHOT_NOT_FOUND", "message": "素材对应的生产快照不存在。"}
+    if asset.asset_type == "image" and snapshot.image_phase_approved_at:
+        return {
+            "allowed": False,
+            "blocker_code": "IMAGE_PHASE_ALREADY_RELEASED",
+            "message": "图片阶段已经确认并放行视频制作，不能直接撤销；请使用“需要调整”登记影响。",
+        }
+    timeline_item_id = session.scalar(
+        select(TimelineItem.id).where(TimelineItem.asset_id == asset.id).limit(1)
+    )
+    if timeline_item_id:
+        return {
+            "allowed": False,
+            "blocker_code": "ASSET_REFERENCED_BY_TIMELINE",
+            "message": "素材已经被剪辑时间线引用，不能直接撤销；请创建剪辑修订。",
+        }
+    if project.status in {"editing", "delivery_ready", "completed"}:
+        return {
+            "allowed": False,
+            "blocker_code": "QUALITY_STAGE_ALREADY_RELEASED",
+            "message": "项目已经进入剪辑或交付阶段，不能直接撤销素材通过结论。",
+        }
+    return {"allowed": True, "blocker_code": None, "message": "可以撤销通过并重新进入人工审核。"}
+
+
+def revoke_asset_approval(
+    session: Session,
+    project: Project,
+    asset_id: str,
+    payload: RevokeAssetApproval,
+) -> dict:
+    repository = _quality(session)
+    command_type = "asset.approval.revoke"
+    receipt = _receipt(session, project.id, payload.command_id, command_type)
+    if receipt:
+        return asset_read(session, _require_asset(session, project, receipt.result_id))
+    asset = _require_asset(session, project, asset_id)
+    if asset.row_version != payload.expected_row_version:
+        raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "素材已变化，请刷新后再撤销。")
+    revocation = _approval_revocation_context(session, project, asset)
+    if not revocation["allowed"]:
+        raise QualityConflictError(revocation["blocker_code"], revocation["message"])
+    report = repository.latest_qc_report(asset.id)
+    if not report:
+        raise QualityConflictError("ASSET_APPROVAL_REPORT_MISSING", "素材缺少原审核报告，不能撤销通过。")
+    repository.add(AssetReviewDecision(
+        project_id=project.id,
+        asset_id=asset.id,
+        qc_report_id=report.id,
+        decision="approval_revoked",
+        rationale=payload.rationale,
+        actor_id=payload.actor_id,
+    ))
+    asset.state = "verified"
+    asset.approved_at = None
+    asset.row_version += 1
+    _save_receipt(session, project.id, payload.command_id, command_type, "asset", asset.id)
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=asset.snapshot_id,
+        event_type="asset.approval_revoked.v1",
+        aggregate_type="asset",
+        aggregate_id=asset.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
+        message="User revoked an asset approval before downstream release.",
+        data={"asset_id": asset.id, "qc_report_id": report.id, "rationale": payload.rationale},
+    ))
+    session.commit()
+    return asset_read(session, asset)
+
+
 def qc_report_read(session: Session, report: QCReport) -> dict:
     findings = _quality(session).findings(report.id)
     result = {column.name: getattr(report, column.name) for column in report.__table__.columns if column.name not in {"asset_id", "project_id", "snapshot_id"}}
@@ -996,6 +1078,12 @@ def asset_read(session: Session, asset: Asset) -> dict:
         },
         "output_contract": node.output_contract if node else {},
     }
+    project = session.get(Project, asset.project_id)
+    result["approval_revocation"] = (
+        _approval_revocation_context(session, project, asset)
+        if project
+        else {"allowed": False, "blocker_code": "PROJECT_NOT_FOUND", "message": "素材所属项目不存在。"}
+    )
     return result
 
 

@@ -225,10 +225,18 @@ export const api = {
   reviewAsset: (projectId: string, asset: ProductionAsset, decision: 'approve' | 'reject', rationale: string) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:${decision}`, {
     method: 'POST', body: JSON.stringify({
       command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version,
-      ...(asset.latest_qc_candidate?.status === 'awaiting_review'
+      ...(asset.state === 'review_required' && asset.latest_qc_candidate?.status === 'awaiting_review'
         ? { qc_report_candidate_id: asset.latest_qc_candidate.id }
-        : { qc_report_id: asset.latest_qc_report?.id }),
+        : asset.state === 'review_required' && asset.latest_qc_report?.status === 'review_required'
+          ? { qc_report_id: asset.latest_qc_report.id }
+          : {}),
       rationale,
+    }),
+  }),
+  revokeAssetApproval: (projectId: string, asset: ProductionAsset) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:revoke-approval`, {
+    method: 'POST', body: JSON.stringify({
+      command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: asset.row_version,
+      rationale: '用户撤销已通过结论，素材重新进入人工审核。',
     }),
   }),
   requestAssetRevision: (projectId: string, asset: ProductionAsset, issueScope: 'storyboard' | 'production' | 'editing', rationale: string) => request<AssetRevisionResult>(`/projects/${projectId}/assets/${asset.id}:request-revision`, {
