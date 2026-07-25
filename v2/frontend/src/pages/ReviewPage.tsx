@@ -223,6 +223,16 @@ export function ReviewPage() {
   const error = quality.error || verify.error || directReview.error || batchApprove.error || revokeApproval.error || retryQC.error || requestRevision.error
   const shot = selectedAsset?.review_context.shot ?? {}
   const selectedReviewableCount = selectedAssetIds.filter(id => reviewableAssets.some(asset => asset.id === id)).length
+  const visibleReviewableIds = visibleAssets.filter(isReviewable).map(asset => asset.id)
+  const selectedVisibleReviewableCount = visibleReviewableIds.filter(id => selectedAssetIds.includes(id)).length
+  const allVisibleReviewableSelected = visibleReviewableIds.length > 0
+    && selectedVisibleReviewableCount === visibleReviewableIds.length
+  const toggleVisibleReviewableAssets = () => {
+    const visibleIds = new Set(visibleReviewableIds)
+    setSelectedAssetIds(current => allVisibleReviewableSelected
+      ? current.filter(id => !visibleIds.has(id))
+      : [...new Set([...current, ...visibleReviewableIds])])
+  }
 
   return <>
     <PageHeader
@@ -259,7 +269,21 @@ export function ReviewPage() {
             {(Object.keys(filterLabels) as AssetFilter[]).map(item => <button key={item} data-selected={filter === item} onClick={() => setFilter(item)}>{filterLabels[item]}</button>)}
           </nav>
           <div className={styles.batchBar}>
-            <span>已选 {selectedReviewableCount}</span>
+            <div className={styles.batchSelection}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={allVisibleReviewableSelected}
+                  disabled={!visibleReviewableIds.length}
+                  ref={input => {
+                    if (input) input.indeterminate = selectedVisibleReviewableCount > 0 && !allVisibleReviewableSelected
+                  }}
+                  onChange={toggleVisibleReviewableAssets}
+                />
+                <span>{allVisibleReviewableSelected ? '取消全选' : '全选'}</span>
+              </label>
+              <small>已选 {selectedReviewableCount}</small>
+            </div>
             <button disabled={!selectedReviewableCount} onClick={() => setBatchConfirmOpen(true)}><Check size={13} />批量通过</button>
           </div>
           <div className={styles.assetList}>
