@@ -32,6 +32,13 @@ function isReviewable(asset: ProductionAsset) {
   return asset.state === 'verified' || asset.state === 'review_required'
 }
 
+function filterForLinkedAsset(asset: ProductionAsset): AssetFilter {
+  if (asset.state === 'approved') return 'approved'
+  if (asset.state === 'archived') return 'archived'
+  if (asset.state === 'created' || isReviewable(asset)) return 'pending'
+  return 'all'
+}
+
 function assetLabel(asset: ProductionAsset) {
   return asset.review_context.shot.shot_code as string || asset.node_key || asset.role
 }
@@ -47,6 +54,7 @@ export function ReviewPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const client = useQueryClient()
   const previewRef = useRef<HTMLDivElement>(null)
+  const linkedAssetId = useRef(searchParams.get('asset') ?? '')
   const [projectId, setProjectId] = useState(() => searchParams.get('project') ?? '')
   const [selectedAssetId, setSelectedAssetId] = useState(() => searchParams.get('asset') ?? '')
   const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
@@ -96,8 +104,23 @@ export function ReviewPage() {
   }, [projectId, reviewProjects])
 
   useEffect(() => {
+    if (linkedAssetId.current) return
     if (!selectedAsset && visibleAssets[0]) setSelectedAssetId(visibleAssets[0].id)
   }, [selectedAsset, visibleAssets])
+
+  useEffect(() => {
+    const requestedId = linkedAssetId.current
+    if (!requestedId || !activeAssets.length) return
+    const requestedAsset = activeAssets.find(asset => asset.id === requestedId)
+    linkedAssetId.current = ''
+    if (!requestedAsset) {
+      setSelectedAssetId('')
+      return
+    }
+    setSelectedAssetId(requestedAsset.id)
+    setFilter(filterForLinkedAsset(requestedAsset))
+    setZoom(null)
+  }, [activeAssets])
 
   useEffect(() => {
     if (!projectId) return

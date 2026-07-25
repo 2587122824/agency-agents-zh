@@ -66,7 +66,7 @@ function PhaseWorkList({ items, phaseLabel, assets, projectId, onRetry }: {
     const mediaUrl = asset ? `/api/v1/projects/${projectId}/assets/${asset.id}/content` : ''
     return <article key={item.id} data-status={item.status}>
       <span className={styles.nodeState}>{item.status === 'completed' ? <CheckCircle2 /> : item.status === 'blocked' ? <AlertTriangle /> : <Clock3 />}</span>
-      <Link className={styles.workPreview} to={asset ? `/review?project=${projectId}` : '#'} aria-disabled={!asset} title={asset ? '查看并审核素材' : '素材尚未登记'}>
+      <Link className={styles.workPreview} to={asset ? `/review?project=${projectId}&asset=${asset.id}` : '#'} aria-disabled={!asset} title={asset ? '查看并审核素材' : '素材尚未登记'}>
         {asset?.asset_type === 'image' && asset.content_hash
           ? <img src={mediaUrl} alt={`${item.node_key} 预览`} />
           : asset?.asset_type === 'video' && asset.content_hash
