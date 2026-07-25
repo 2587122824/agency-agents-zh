@@ -1603,6 +1603,68 @@ def test_work_repository_claim_enforces_provider_capacity_atomically() -> None:
         engine.dispose()
 
 
+def test_work_repository_reclaims_expired_sqlite_attempt_lease_with_aware_utc() -> None:
+    engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    Base.metadata.create_all(engine)
+    try:
+        with Session(engine) as session:
+            repository = SqlAlchemyWorkRepository(session)
+            now = utc_now()
+            item = WorkItem(
+                project_id="project-polling",
+                snapshot_id="snapshot-polling",
+                kind="generate_keyframe",
+                payload={},
+                status="in_progress",
+                request_fingerprint="c" * 64,
+                available_at=now,
+            )
+            session.add(item)
+            session.flush()
+            attempt = WorkAttempt(
+                work_item_id=item.id,
+                attempt_number=1,
+                trigger="explicit_submission",
+                provider="runninghub",
+                provider_task_id="provider-task-polling",
+                request_fingerprint=item.request_fingerprint,
+                request_manifest={},
+                state="submitted",
+                execution_lock_owner="expired-worker",
+                execution_lock_expires_at=now - timedelta(seconds=1),
+            )
+            session.add(attempt)
+            session.flush()
+            item.current_attempt_id = attempt.id
+            session.commit()
+            attempt_id = attempt.id
+            session.expunge_all()
+
+            selected = repository.poll_candidates(now)[0]
+            persisted_attempt = repository.attempt(selected.current_attempt_id)
+            assert persisted_attempt is not None
+            assert persisted_attempt.execution_lock_expires_at is not None
+            assert persisted_attempt.execution_lock_expires_at.tzinfo is None
+
+            assert repository.claim_attempt(
+                persisted_attempt,
+                "recovery-worker",
+                now + timedelta(seconds=60),
+                now,
+            ) is True
+            session.commit()
+            session.expire_all()
+            recovered = repository.attempt(attempt_id)
+            assert recovered is not None
+            assert recovered.execution_lock_owner == "recovery-worker"
+    finally:
+        engine.dispose()
+
+
 def test_configuration_repository_contract_preserves_versions_history_and_scoped_deletion() -> None:
     engine = create_engine(
         "sqlite://",

@@ -454,6 +454,8 @@ DAG 依赖分为 `required`、`optional` 和 `informational`。`optional` 仅表
 
 外部供应商工作项还必须服从冻结供应商配置的 `max_concurrency`。Worker 领取任务时由数据库在同一原子条件中统计该 `provider_key` 当前 `in_progress` 工作项；容量已满时候选继续保持 `queued`，不创建新 Attempt、不记录失败、不产生额外费用事件。已有任务完成或明确失败并释放容量后，下一项才允许被领取。并发等待属于正常队列调度，不得实现为先提交、收到“队列已满”后自动重试。
 
+外部任务提交后的轮询租约同样采用数据库原子领取。SQLite 会将 `DateTime(timezone=True)` 读回为无时区对象，而 Worker 的 `utc_now()` 为带 UTC 时区对象；租约过期条件只能由 SQL 执行，ORM 必须使用查询结果同步当前 Attempt，不得在 Python 中求值比较。Worker 崩溃或服务重启后，已保存 `provider_task_id` 的过期租约必须恢复轮询同一供应商任务，不重新提交、不创建新 Attempt 或费用。
+
 ## 13. 分阶段生产
 
 首期视觉生产采用两个真实执行阶段：

@@ -1334,6 +1334,7 @@ class SqlAlchemyWorkRepository:
                 (WorkAttempt.execution_lock_expires_at.is_(None) | (WorkAttempt.execution_lock_expires_at <= now)),
             )
             .values(execution_lock_owner=owner, execution_lock_expires_at=expires_at)
+            .execution_options(synchronize_session="fetch")
         )
         return claimed.rowcount == 1
 
