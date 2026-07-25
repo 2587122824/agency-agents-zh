@@ -48,7 +48,7 @@ const productionActionLabels: Record<string, string> = {
   PUBLISH_CONFIGURATION: '先发布一套制作配置',
   CONFIRM_PRODUCTION_COST: '确认预计费用',
   CONFIGURE_PRICING: '补充并发布计费方案后，重新保存制作方案',
-  ACTIVATE_SNAPSHOT: '设为当前制作方案',
+  ACTIVATE_SNAPSHOT: '确认并开始制作',
   SUBMIT_PRODUCTION: '确认并开始制作',
   VIEW_PRODUCTION: '查看制作进度',
   ANALYZE_PRODUCTION_IMPACT: '选择制作设置并查看制作计划',
@@ -341,8 +341,17 @@ export function PlanPage() {
   const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, { plan_version_id: planning.data!.active_plan!.id, production_config_version_id: configId, video_spec_version_id: videoSpecId, shot_workflow_assignments: planning.data!.active_plan!.shots.map(shot => ({ shot_code: shot.shot_code, keyframe_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.keyframe || null, video_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.video || '' })), tts_workflow_slot_version_id: ttsSlotId || null, pricing_catalog_version_id: pricingCatalogId || null }) })
   const createSnapshot = useMutation({ mutationFn: () => api.createProductionSnapshot(projectId, analyzeImpact.data!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
   const lockSnapshot = useMutation({ mutationFn: () => api.lockProductionSnapshot(projectId, currentSnapshot!), onSuccess: async () => { setConfirmCost(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
-  const activateSnapshot = useMutation({ mutationFn: () => api.activateProductionSnapshot(projectId, currentSnapshot!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
-  const submitProduction = useMutation({ mutationFn: () => api.submitProduction(projectId, currentSnapshot!), onSuccess: async () => { setConfirmSubmit(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
+  const submitProduction = useMutation({
+    mutationFn: async () => {
+      const snapshot = currentSnapshot!
+      const activeSnapshot = snapshot.status === 'locked'
+        ? await api.activateProductionSnapshot(projectId, snapshot)
+        : snapshot
+      return api.submitProduction(projectId, activeSnapshot)
+    },
+    onSuccess: () => setConfirmSubmit(false),
+    onSettled: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }),
+  })
   useEffect(() => {
     if (searchParams.get('revisionRequest') && planning.data?.revision_draft) setEditingShots(true)
   }, [planning.data?.revision_draft, searchParams])
@@ -415,7 +424,7 @@ export function PlanPage() {
   const editableShot = data.current_shot_candidate ?? data.revision_draft ?? rejectedShot
   const shots = editableShot?.shots ?? data.active_plan?.shots ?? []
   const characterVersions = data.entity_versions.filter(item => item.entity_type === 'character')
-  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || registerExistingCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || activateSnapshot.error || submitProduction.error
+  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || registerExistingCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || submitProduction.error
   const errorStage = generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error
     ? '制作规划失败'
     : generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error
@@ -574,7 +583,7 @@ export function PlanPage() {
           </div>}
           {preparation.data?.snapshots.map(snapshot => {
             const isCurrent = snapshot.id === currentSnapshot?.id
-            return <div className={styles.snapshotRow} key={snapshot.id}><LockKeyhole size={17} /><div><strong>制作方案 {snapshot.snapshot_number} · {snapshotStatusLabel(snapshot.status, snapshot.cost_status)}</strong><span>{snapshot.nodes.length} 个制作步骤 · 预计调用生成服务 {snapshot.estimated_call_count} 次 · {costLabel(snapshot.estimated_cost, snapshot.currency)}</span><details className={styles.technicalDetails}><summary>技术详情</summary><dl><div><dt>内部状态</dt><dd><code>{snapshot.status}</code></dd></div><div><dt>步骤与依赖</dt><dd>{snapshot.nodes.length} 个节点 · {snapshot.edges.length} 条依赖</dd></div><div><dt>合同校验码</dt><dd><code>{snapshot.contract_hash}</code></dd></div></dl></details></div>{isCurrent && snapshot.status === 'preparing' && snapshot.cost_status === 'estimated' ? <button className="primaryButton" onClick={() => setConfirmCost(true)}>确认费用并锁定方案</button> : isCurrent && snapshot.status === 'locked' ? <button className="primaryButton" disabled={activateSnapshot.isPending} onClick={() => activateSnapshot.mutate()}>设为当前制作方案</button> : isCurrent && snapshot.status === 'active' ? <button className="primaryButton" onClick={() => setConfirmSubmit(true)}>开始制作</button> : isCurrent && (snapshot.status === 'submitted' || snapshot.status.startsWith('execution_')) ? <Link className="secondaryButton" to={`/production?project=${projectId}`}>查看制作进度</Link> : <em>{snapshotStatusLabel(snapshot.status, snapshot.cost_status)}</em>}</div>
+            return <div className={styles.snapshotRow} key={snapshot.id}><LockKeyhole size={17} /><div><strong>制作方案 {snapshot.snapshot_number} · {snapshotStatusLabel(snapshot.status, snapshot.cost_status)}</strong><span>{snapshot.nodes.length} 个制作步骤 · 预计调用生成服务 {snapshot.estimated_call_count} 次 · {costLabel(snapshot.estimated_cost, snapshot.currency)}</span><details className={styles.technicalDetails}><summary>技术详情</summary><dl><div><dt>内部状态</dt><dd><code>{snapshot.status}</code></dd></div><div><dt>步骤与依赖</dt><dd>{snapshot.nodes.length} 个节点 · {snapshot.edges.length} 条依赖</dd></div><div><dt>合同校验码</dt><dd><code>{snapshot.contract_hash}</code></dd></div></dl></details></div>{isCurrent && snapshot.status === 'preparing' && snapshot.cost_status === 'estimated' ? <button className="primaryButton" onClick={() => setConfirmCost(true)}>确认费用并锁定方案</button> : isCurrent && (snapshot.status === 'locked' || snapshot.status === 'active') ? <button className="primaryButton" disabled={submitProduction.isPending} onClick={() => setConfirmSubmit(true)}>确认并开始制作</button> : isCurrent && (snapshot.status === 'submitted' || snapshot.status.startsWith('execution_')) ? <Link className="secondaryButton" to={`/production?project=${projectId}`}>查看制作进度</Link> : <em>{snapshotStatusLabel(snapshot.status, snapshot.cost_status)}</em>}</div>
           })}
         </section>}
       </section>
