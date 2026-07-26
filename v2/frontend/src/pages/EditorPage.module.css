@@ -421,6 +421,7 @@
   color: #fff;
   padding: 0 6px;
 }
+.timelineTools input[type='range']{width:120px}.timelineTools select{height:27px;border:1px solid #4b5056;border-radius:4px;background:#1c1f23;color:#fff;font-size:9px}
 .timelineTools button {
   height: 27px;
   display: flex;
@@ -447,6 +448,7 @@
   color: #858b90;
   font-size: 8px;
 }
+.timelineViewport{overflow-x:auto}.timelineViewport .ruler{min-width:700px}.timelineViewport .tracks{min-width:700px}
 .track {
   min-height: 66px;
   display: grid;
@@ -484,7 +486,6 @@
 .clip,
 .gapClip {
   min-width: 72px;
-  max-width: 260px;
   padding: 7px;
   display: grid;
   align-content: space-between;
@@ -496,6 +497,7 @@
   overflow: hidden;
   cursor: pointer;
 }
+.clip[draggable='true']{cursor:grab}.clip[draggable='true']:active{cursor:grabbing}
 .gapClip {
   border-style: dashed;
   background: #2c3035;
@@ -518,6 +520,9 @@
   font-size: 8px;
   opacity: .75;
 }
+.waveform{height:24px;display:flex!important;align-items:center;gap:1px;overflow:hidden}.waveform i{width:2px;min-width:1px;border-radius:1px;background:#7bc49c;opacity:.86}.waveformLoading{color:#8d969b;font-size:8px}
+.audioPreview .waveform{width:min(560px,90%);height:70px}.audioPreview .waveform i{flex:1;background:#df744f}
+.effectEditor{padding:10px 12px;border-top:1px solid #3a3e43;background:#23272b;color:#c9ced1;display:flex;align-items:center;gap:9px;overflow-x:auto}.effectEditor>strong{flex:none;font-size:10px}.effectEditor label{flex:none;display:flex;align-items:center;gap:5px;font-size:9px}.effectEditor input,.effectEditor select{width:78px;height:28px;padding:0 6px;border:1px solid #4b5056;border-radius:4px;background:#1c1f23;color:#fff;font-size:9px}.effectEditor select{width:92px}.effectEditor button{min-height:28px;padding:0 7px;display:flex;align-items:center;gap:4px;border:1px solid #4b5056;border-radius:4px;background:#30343a;color:#fff;font-size:9px}.effectEditor button svg{width:12px}.effectEditor small{color:#858b90;font-size:8px}
 .inspector {
   min-height: 62px;
   padding: 9px 12px;

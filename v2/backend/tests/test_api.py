@@ -6201,6 +6201,10 @@ def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
     assert audio_items[0]["timeline_in_ms"] == 0
     assert audio_items[0]["timeline_out_ms"] == 29_000
     assert audio_items[0]["transform"]["source"] == "frozen_approved_voiceover"
+    assert audio_items[0]["transform"]["volume_envelope"] == [
+        {"time_ms": 0, "gain_db": 0.0},
+        {"time_ms": 29_000, "gain_db": 0.0},
+    ]
     assert len(subtitle_items) == 1
     assert subtitle_items[0]["asset_id"] == subtitle_id
     assert subtitle_items[0]["timeline_in_ms"] == 0
@@ -6225,6 +6229,7 @@ def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(cl
     )
     items = timeline_items_for_assets(video_assets)
     items[0]["source_out_ms"] += 1000
+    items[0]["transform"]["transition_in"] = {"type": "unknown", "duration_ms": 500}
     items[1]["asset_id"] = None
     items[1]["gap_reason"] = "等待用户取舍"
     with SessionLocal() as session:
@@ -6251,6 +6256,7 @@ def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(cl
     assert "TIMELINE_SPEED_CHANGE_UNDECLARED" in codes
     assert "TIMELINE_GAP_UNRESOLVED" in codes
     assert "TIMELINE_ASSET_NOT_APPROVED" in codes
+    assert "VIDEO_TRANSITION_INVALID" in codes
     confirm = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{candidate['id']}:confirm",
         json={

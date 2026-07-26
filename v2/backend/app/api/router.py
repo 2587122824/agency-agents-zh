@@ -246,6 +246,7 @@ from ..quality.service import (
     QualityConflictError,
     QualityNotFoundError,
     asset_content_path,
+    asset_waveform,
     quality_review_view,
     register_attempt_asset,
     retry_failed_asset_qc,
@@ -1236,6 +1237,21 @@ def project_asset_content(project_id: str, asset_id: str, session: Session = Dep
     try:
         path, media_type = asset_content_path(session, require_project(session, project_id), asset_id)
         return FileResponse(path, media_type=media_type)
+    except QualityNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except QualityConflictError as exc:
+        raise quality_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/assets/{asset_id}/waveform")
+def project_asset_waveform(
+    project_id: str,
+    asset_id: str,
+    bins: int = Query(default=160, ge=40, le=400),
+    session: Session = Depends(get_session),
+):
+    try:
+        return asset_waveform(session, require_project(session, project_id), asset_id, bins)
     except QualityNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except QualityConflictError as exc:

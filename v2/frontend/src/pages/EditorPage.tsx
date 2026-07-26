@@ -102,6 +102,18 @@ function editorEvidence(transform: Record<string, unknown>): EditorEvidence | nu
   }
 }
 
+function Waveform({ projectId, assetId }: { projectId: string; assetId: string }) {
+  const waveform = useQuery({
+    queryKey: ['audio-waveform', projectId, assetId],
+    queryFn: () => api.audioWaveform(projectId, assetId, 80),
+    staleTime: Infinity,
+  })
+  if (!waveform.data) return <span className={styles.waveformLoading}>波形读取中…</span>
+  return <span className={styles.waveform} aria-label="音频波形">
+    {waveform.data.peaks.map((peak, index) => <i key={index} style={{ height: `${Math.max(4, peak * 100)}%` }} />)}
+  </span>
+}
+
 export function EditorPage() {
   const [searchParams] = useSearchParams()
   const client = useQueryClient()
@@ -115,6 +127,9 @@ export function EditorPage() {
   const [selectedAssetId, setSelectedAssetId] = useState('')
   const [audioEnabled, setAudioEnabled] = useState(false)
   const [subtitleEnabled, setSubtitleEnabled] = useState(false)
+  const [pixelsPerSecond, setPixelsPerSecond] = useState(60)
+  const [snapIntervalMs, setSnapIntervalMs] = useState(100)
+  const [draggedDraftIndex, setDraggedDraftIndex] = useState<number | null>(null)
   const [gapSeconds, setGapSeconds] = useState(2)
   const [confirming, setConfirming] = useState<Timeline | null>(null)
   const [authorizingDelivery, setAuthorizingDelivery] = useState(false)
@@ -140,8 +155,8 @@ export function EditorPage() {
   })
   const save = useMutation({
     mutationFn: () => revisionBase
-      ? api.reviseTimelineCandidate(projectId, revisionBase, { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled }, draftItems)
-      : api.createTimelineCandidate(projectId, workspace.data!.active_snapshot_id!, 'user', { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled }, draftItems),
+      ? api.reviseTimelineCandidate(projectId, revisionBase, { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs }, draftItems)
+      : api.createTimelineCandidate(projectId, workspace.data!.active_snapshot_id!, 'user', { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs }, draftItems),
     onSuccess: async timeline => {
       setSelectedTimelineId(timeline.id)
       setDraftMode('view')
@@ -187,6 +202,8 @@ export function EditorPage() {
     setDraftItems(items)
     setAudioEnabled(selectedTimeline.track_config.audio_enabled)
     setSubtitleEnabled(selectedTimeline.track_config.subtitle_enabled)
+    setPixelsPerSecond(selectedTimeline.track_config.pixels_per_second)
+    setSnapIntervalMs(selectedTimeline.track_config.snap_interval_ms)
     setRevisionBase(null)
     setSelectedDraftIndex(items.length ? 0 : null)
     setSelectedAssetId(items.find(item => item.asset_id)?.asset_id ?? '')
@@ -202,6 +219,8 @@ export function EditorPage() {
     setSelectedDraftIndex(null)
     setAudioEnabled(workspace.data?.audio_mode !== 'off')
     setSubtitleEnabled(false)
+    setPixelsPerSecond(60)
+    setSnapIntervalMs(100)
   }
   const beginRevision = (timeline: Timeline) => {
     setDraftMode('revision')
@@ -209,6 +228,8 @@ export function EditorPage() {
     setDraftItems(timelineDraftItems(timeline))
     setAudioEnabled(timeline.track_config.audio_enabled)
     setSubtitleEnabled(timeline.track_config.subtitle_enabled)
+    setPixelsPerSecond(timeline.track_config.pixels_per_second)
+    setSnapIntervalMs(timeline.track_config.snap_interval_ms)
     setRevisionBase(timeline)
     setSelectedDraftIndex(null)
   }
@@ -227,7 +248,11 @@ export function EditorPage() {
       source_out_ms: duration,
       timeline_in_ms: cursor,
       timeline_out_ms: cursor + duration,
-      transform: track === 'main_video' ? { fit: 'cover' } : track === 'subtitle' ? { render: 'burn_in' } : {},
+      transform: track === 'main_video'
+        ? { fit: 'cover', transition_in: { type: 'cut', duration_ms: 0 }, transition_out: { type: 'cut', duration_ms: 0 } }
+        : track === 'subtitle'
+          ? { render: 'burn_in' }
+          : { volume_envelope: [{ time_ms: 0, gain_db: 0 }, { time_ms: duration, gain_db: 0 }] },
     }])
     setSelectedAssetId(asset.id)
   }
@@ -255,11 +280,55 @@ export function EditorPage() {
       if (!target) return items
       const next = [...items]
       ;[next[index], next[target.itemIndex]] = [next[target.itemIndex], next[index]]
-      return normalizeSequences(next)
+      return reflowTrack(normalizeSequences(next), current.track_type)
     })
   }
-  const updateItem = (index: number, field: keyof TimelineItemDraft, value: string | number | null) => {
-    setDraftItems(items => items.map((item, itemIndex) => itemIndex === index ? { ...item, [field]: value } : item))
+  const reflowTrack = (items: TimelineItemDraft[], track: TrackType) => {
+    let cursor = track === 'main_video' ? 0 : Math.min(...items.filter(item => item.track_type === track).map(item => item.timeline_in_ms), 0)
+    return items.map(item => {
+      if (item.track_type !== track) return item
+      const duration = item.timeline_out_ms - item.timeline_in_ms
+      const next = { ...item, timeline_in_ms: cursor, timeline_out_ms: cursor + duration }
+      cursor += duration
+      return next
+    })
+  }
+  const dropItem = (targetIndex: number) => {
+    if (draggedDraftIndex == null || draggedDraftIndex === targetIndex) return
+    setDraftItems(items => {
+      const source = items[draggedDraftIndex]
+      const target = items[targetIndex]
+      if (!source || !target || source.track_type !== target.track_type) return items
+      const next = [...items]
+      next.splice(draggedDraftIndex, 1)
+      const adjustedTarget = draggedDraftIndex < targetIndex ? targetIndex - 1 : targetIndex
+      next.splice(adjustedTarget, 0, source)
+      return reflowTrack(normalizeSequences(next), source.track_type)
+    })
+    setSelectedDraftIndex(targetIndex)
+    setDraggedDraftIndex(null)
+  }
+  const snapped = (value: number) => Math.round(value / snapIntervalMs) * snapIntervalMs
+  const updateTime = (index: number, field: 'source_in_ms' | 'source_out_ms' | 'timeline_in_ms' | 'timeline_out_ms', value: number) => {
+    setDraftItems(items => items.map((item, itemIndex) => {
+      if (itemIndex !== index) return item
+      const nextValue = Math.max(0, snapped(value))
+      if (field === 'source_in_ms' && item.source_out_ms != null) {
+        return { ...item, source_in_ms: nextValue, timeline_out_ms: item.timeline_in_ms + Math.max(0, item.source_out_ms - nextValue) }
+      }
+      if (field === 'source_out_ms' && item.source_in_ms != null) {
+        return { ...item, source_out_ms: nextValue, timeline_out_ms: item.timeline_in_ms + Math.max(0, nextValue - item.source_in_ms) }
+      }
+      if (field === 'timeline_in_ms') {
+        const duration = item.source_in_ms != null && item.source_out_ms != null ? item.source_out_ms - item.source_in_ms : item.timeline_out_ms - item.timeline_in_ms
+        return { ...item, timeline_in_ms: nextValue, timeline_out_ms: nextValue + duration }
+      }
+      const duration = Math.max(0, nextValue - item.timeline_in_ms)
+      return { ...item, timeline_out_ms: nextValue, source_out_ms: item.source_in_ms == null ? null : item.source_in_ms + duration }
+    }))
+  }
+  const updateTransform = (index: number, key: string, value: unknown) => {
+    setDraftItems(items => items.map((item, itemIndex) => itemIndex === index ? { ...item, transform: { ...item.transform, [key]: value } } : item))
   }
 
   return <>
@@ -299,7 +368,7 @@ export function EditorPage() {
               <section className={styles.monitor}>
                 <div className={styles.monitorFrame}>
                   {selectedAsset?.asset_type === 'video' && <video key={selectedAsset.id} src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`} controls preload="metadata" />}
-                  {selectedAsset?.asset_type === 'audio' && <div className={styles.audioPreview}><Music2 /><strong>配音试听</strong><audio key={selectedAsset.id} src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`} controls preload="metadata" /></div>}
+                  {selectedAsset?.asset_type === 'audio' && <div className={styles.audioPreview}><Music2 /><strong>配音试听</strong><Waveform projectId={projectId} assetId={selectedAsset.id} /><audio key={selectedAsset.id} src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`} controls preload="metadata" /></div>}
                   {selectedAsset?.asset_type === 'subtitle' && <div className={styles.subtitlePreview}><Subtitles /><strong>字幕内容</strong>{subtitlePreview.isPending ? <span>正在读取字幕…</span> : <pre>{subtitlePreview.data}</pre>}</div>}
                   {!selectedAsset && <Film />}
                 </div>
@@ -323,20 +392,49 @@ export function EditorPage() {
               </header>
               {draftMode === 'view'
                 ? <div className={styles.reviewNotice}><ShieldCheck /><span>当前是只读审核。需要调整素材、顺序或时间时，请从下方版本创建修订。</span><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>
-                : <div className={styles.timelineTools}><Scissors /><span>显式空位</span><input type="number" min="0.1" step="0.1" value={gapSeconds} onChange={event => setGapSeconds(Number(event.target.value))} /><small>秒</small><button onClick={addGap}><Plus />添加</button><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>}
-              <div className={styles.ruler}>{[0, .2, .4, .6, .8, 1].map(mark => <span key={mark}>{timecode(workspace.data!.duration_ms * mark)}</span>)}</div>
+                : <div className={styles.timelineTools}><Scissors /><span>显式空位</span><input type="number" min="0.1" step="0.1" value={gapSeconds} onChange={event => setGapSeconds(Number(event.target.value))} /><small>秒</small><button onClick={addGap}><Plus />添加</button><span>缩放</span><input aria-label="时间线缩放" type="range" min="20" max="400" step="10" value={pixelsPerSecond} onChange={event => setPixelsPerSecond(Number(event.target.value))} /><small>{pixelsPerSecond}px/s</small><span>吸附</span><select value={snapIntervalMs} onChange={event => setSnapIntervalMs(Number(event.target.value))}><option value="10">10ms</option><option value="50">50ms</option><option value="100">100ms</option><option value="250">250ms</option><option value="500">500ms</option></select><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>}
+              <div className={styles.timelineViewport}>
+              <div className={styles.ruler} style={{ width: Math.max(700, workspace.data.duration_ms / 1000 * pixelsPerSecond + 108) }}>{[0, .2, .4, .6, .8, 1].map(mark => <span key={mark}>{timecode(workspace.data!.duration_ms * mark)}</span>)}</div>
               <div className={styles.tracks}>{(['main_video', 'audio', 'subtitle'] as TrackType[]).map(track => {
                 const Icon = trackMeta[track].icon
                 const rows = draftItems.map((item, index) => ({ item, index })).filter(row => row.item.track_type === track)
                 const disabled = (track === 'audio' && !audioEnabled) || (track === 'subtitle' && !subtitleEnabled)
-                return <div className={styles.track} key={track} data-disabled={disabled}><header><Icon /><b>{trackMeta[track].label}</b></header><div>{rows.length ? rows.map(({ item, index }) => <button key={`${track}-${item.sequence_number}-${index}`} className={item.asset_id ? styles.clip : styles.gapClip} data-selected={selectedDraftIndex === index} style={{ flexGrow: Math.max(1, item.timeline_out_ms - item.timeline_in_ms) }} onClick={() => { setSelectedDraftIndex(index); if (item.asset_id) setSelectedAssetId(item.asset_id) }}><strong>{item.label}</strong><small>{seconds(item.timeline_out_ms - item.timeline_in_ms)}</small></button>) : <span>{disabled ? '轨道已关闭' : '暂无片段'}</span>}</div></div>
+                return <div className={styles.track} key={track} data-disabled={disabled}><header><Icon /><b>{trackMeta[track].label}</b></header><div style={{ width: Math.max(592, workspace.data.duration_ms / 1000 * pixelsPerSecond) }}>{rows.length ? rows.map(({ item, index }) => <button
+                  key={`${track}-${item.sequence_number}-${index}`}
+                  draggable={draftMode !== 'view'}
+                  onDragStart={() => setDraggedDraftIndex(index)}
+                  onDragOver={event => event.preventDefault()}
+                  onDrop={() => dropItem(index)}
+                  className={item.asset_id ? styles.clip : styles.gapClip}
+                  data-selected={selectedDraftIndex === index}
+                  style={{ flex: `0 0 ${Math.max(20, (item.timeline_out_ms - item.timeline_in_ms) / 1000 * pixelsPerSecond)}px` }}
+                  onClick={() => { setSelectedDraftIndex(index); if (item.asset_id) setSelectedAssetId(item.asset_id) }}
+                ><strong>{item.label}</strong>{track === 'audio' && item.asset_id && <Waveform projectId={projectId} assetId={item.asset_id} />}<small>{seconds(item.timeline_out_ms - item.timeline_in_ms)}</small></button>) : <span>{disabled ? '轨道已关闭' : '暂无片段'}</span>}</div></div>
               })}</div>
+              </div>
               {selectedDraftIndex != null && selectedDraftItem && <>
                 <div className={styles.inspector}>
                   <div><span>片段检查</span><strong>{selectedDraftItem.label}</strong></div>
-                  {(['source_in_ms', 'source_out_ms', 'timeline_in_ms', 'timeline_out_ms'] as const).map(field => <label key={field}>{timeFieldLabels[field]}<input disabled={draftMode === 'view'} type="number" step="0.1" value={(selectedDraftItem[field] ?? 0) / 1000} onChange={event => updateItem(selectedDraftIndex, field, Math.round(Number(event.target.value) * 1000))} /></label>)}
+                  {(['source_in_ms', 'source_out_ms', 'timeline_in_ms', 'timeline_out_ms'] as const).map(field => <label key={field}>{timeFieldLabels[field]}<input disabled={draftMode === 'view'} type="number" step={snapIntervalMs / 1000} value={(selectedDraftItem[field] ?? 0) / 1000} onChange={event => updateTime(selectedDraftIndex, field, Math.round(Number(event.target.value) * 1000))} /></label>)}
                   {draftMode !== 'view' && <><button title="上移" onClick={() => moveItem(selectedDraftIndex, -1)}><ChevronUp /></button><button title="下移" onClick={() => moveItem(selectedDraftIndex, 1)}><ChevronDown /></button><button title="删除片段" onClick={() => removeItem(selectedDraftIndex)}><Trash2 /></button></>}
                 </div>
+                {selectedDraftItem.track_type === 'main_video' && <div className={styles.effectEditor}>
+                  <strong>片段转场</strong>
+                  {(['transition_in', 'transition_out'] as const).map(key => {
+                    const transition = selectedDraftItem.transform[key] as { type?: 'cut' | 'fade'; duration_ms?: number } | undefined
+                    return <label key={key}><span>{key === 'transition_in' ? '入场' : '出场'}</span><select disabled={draftMode === 'view'} value={transition?.type ?? 'cut'} onChange={event => updateTransform(selectedDraftIndex, key, event.target.value === 'fade' ? { type: 'fade', duration_ms: 300 } : { type: 'cut', duration_ms: 0 })}><option value="cut">直接切换</option><option value="fade">淡入淡出</option></select><input disabled={draftMode === 'view' || transition?.type !== 'fade'} type="number" min="0.1" max="2" step="0.1" value={(transition?.duration_ms ?? 0) / 1000} onChange={event => updateTransform(selectedDraftIndex, key, { type: 'fade', duration_ms: Math.round(Number(event.target.value) * 1000) })} /><small>秒</small></label>
+                  })}
+                </div>}
+                {selectedDraftItem.track_type === 'audio' && <div className={styles.effectEditor}>
+                  <strong>音量包络</strong>
+                  {((selectedDraftItem.transform.volume_envelope as Array<{ time_ms: number; gain_db: number }> | undefined) ?? []).map((point, pointIndex, points) => <label key={`${point.time_ms}-${pointIndex}`}><span>关键点 {pointIndex + 1}</span><input disabled={draftMode === 'view'} type="number" min="0" max={(selectedDraftItem.timeline_out_ms - selectedDraftItem.timeline_in_ms) / 1000} step={snapIntervalMs / 1000} value={point.time_ms / 1000} onChange={event => updateTransform(selectedDraftIndex, 'volume_envelope', points.map((row, index) => index === pointIndex ? { ...row, time_ms: snapped(Math.round(Number(event.target.value) * 1000)) } : row))} /><small>秒</small><input disabled={draftMode === 'view'} type="number" min="-60" max="12" step="0.5" value={point.gain_db} onChange={event => updateTransform(selectedDraftIndex, 'volume_envelope', points.map((row, index) => index === pointIndex ? { ...row, gain_db: Number(event.target.value) } : row))} /><small>dB</small>{draftMode !== 'view' && points.length > 2 && pointIndex > 0 && pointIndex < points.length - 1 && <button onClick={() => updateTransform(selectedDraftIndex, 'volume_envelope', points.filter((_, index) => index !== pointIndex))}><Trash2 /></button>}</label>)}
+                  {draftMode !== 'view' && <button onClick={() => {
+                    const duration = selectedDraftItem.timeline_out_ms - selectedDraftItem.timeline_in_ms
+                    const points = ((selectedDraftItem.transform.volume_envelope as Array<{ time_ms: number; gain_db: number }> | undefined) ?? [{ time_ms: 0, gain_db: 0 }, { time_ms: duration, gain_db: 0 }])
+                    const timeMs = snapped(Math.round(duration / 2))
+                    updateTransform(selectedDraftIndex, 'volume_envelope', [...points, { time_ms: timeMs, gain_db: 0 }].sort((a, b) => a.time_ms - b.time_ms))
+                  }}><Plus />添加关键点</button>}
+                </div>}
                 {(selectedEvidence || selectedDraftItem.gap_reason) && <div className={styles.editorEvidence} data-gap={!selectedDraftItem.asset_id}>
                   <div><Sparkles /><span><strong>{selectedDraftItem.asset_id ? '剪辑助理选用依据' : '素材空位说明'}</strong><small>{selectedEvidence?.shot_code ? `对应分镜 ${selectedEvidence.shot_code}` : '该段没有绑定素材'}</small></span></div>
                   <p>{selectedDraftItem.gap_reason ?? selectedEvidence?.selection_reason ?? '未记录选择理由'}</p>

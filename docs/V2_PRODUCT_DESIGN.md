@@ -1164,6 +1164,8 @@ GET  /api/v1/projects/{project_id}/production-execution
 
 时间线仅引用当前活动快照、同一项目且状态为 `approved` 或 `used` 的素材。显式空位可以留在候选中用于取舍，但不能确认；系统不自动补素材、裁切、变速或重排。已有时间线后必须从指定版本创建修订，确认版本不可原地修改。
 
+时间线 v2 把 `pixels_per_second` 与 `snap_interval_ms` 作为轨道配置的一部分保存，使缩放与吸附不是仅存在于浏览器的临时状态。同轨拖放必须重算明确的 `sequence_number` 和连续时间区间；源入出点与成片入出点的裁切联动仍需满足无隐式变速。音频波形由后端读取已验证 PCM WAV，按素材内容哈希与采样点数生成 `audio-waveform-cache.v1`，不得从文件名或浏览器解码结果猜测。视频淡入淡出与音频 `volume_envelope` 关键点进入 TimelineItem.transform：后端校验类型、时长、严格递增时点、片段首尾覆盖和 -60dB～12dB 范围，交付渲染器按冻结值生成 FFmpeg filter；页面显示不构成执行依据。
+
 具体表结构、命令、错误码、API 和验收矩阵见 [V2 时间线剪辑合同实现](./archive/implementation-notes/V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
 
 ## 34. 最终交付实现边界

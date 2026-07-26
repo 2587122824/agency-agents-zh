@@ -1158,7 +1158,7 @@ export interface Timeline {
   source: 'user' | 'editor_assistant'
   source_agent_run_id: string | null
   output_spec: Record<string, unknown>
-  track_config: { audio_enabled: boolean; subtitle_enabled: boolean }
+  track_config: { audio_enabled: boolean; subtitle_enabled: boolean; pixels_per_second: number; snap_interval_ms: number }
   validation_report: Array<{ code: string; path: string; message: string; evidence: Record<string, unknown> }>
   contract_hash: string | null
   row_version: number
@@ -1180,6 +1180,17 @@ export interface TimelineItemDraft {
   timeline_in_ms: number
   timeline_out_ms: number
   transform: Record<string, unknown>
+}
+
+export interface AudioWaveform {
+  schema_version: 'audio-waveform-cache.v1'
+  asset_id: string
+  content_hash: string
+  sample_rate: number
+  channels: number
+  duration_ms: number
+  bin_count: number
+  peaks: number[]
 }
 
 export interface EditorWorkspace {

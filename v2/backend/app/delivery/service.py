@@ -245,6 +245,14 @@ def _validate_local_render_manifest(manifest: dict) -> None:
             raise DeliveryConflictError("LOCAL_RENDER_SPEED_CHANGE_UNSUPPORTED", "本机合成首期不支持变速片段。")
         if (item.get("transform") or {}).get("fit") != "cover":
             raise DeliveryConflictError("LOCAL_RENDER_TRANSFORM_UNSUPPORTED", "本机合成首期只支持 cover 画面适配。")
+        for transition_key in ("transition_in", "transition_out"):
+            transition = (item.get("transform") or {}).get(transition_key)
+            if transition is not None and (
+                not isinstance(transition, dict)
+                or transition.get("type") not in {"cut", "fade"}
+                or not isinstance(transition.get("duration_ms"), int)
+            ):
+                raise DeliveryConflictError("LOCAL_RENDER_TRANSITION_INVALID", "本机合成收到无效的冻结视频转场。")
         cursor = item["timeline_out_ms"]
     for item in sorted(audio_items, key=lambda row: (row["timeline_in_ms"], row["sequence_number"])):
         if not item.get("asset_id") or item.get("gap_reason"):
@@ -253,6 +261,18 @@ def _validate_local_render_manifest(manifest: dict) -> None:
         timeline_duration = item["timeline_out_ms"] - item["timeline_in_ms"]
         if source_duration != timeline_duration:
             raise DeliveryConflictError("LOCAL_RENDER_SPEED_CHANGE_UNSUPPORTED", "本机合成不支持音频变速。")
+        envelope = (item.get("transform") or {}).get("volume_envelope")
+        if envelope is not None and (
+            not isinstance(envelope, list)
+            or len(envelope) < 2
+            or any(
+                not isinstance(point, dict)
+                or not isinstance(point.get("time_ms"), int)
+                or not isinstance(point.get("gain_db"), (int, float))
+                for point in envelope
+            )
+        ):
+            raise DeliveryConflictError("LOCAL_RENDER_VOLUME_ENVELOPE_INVALID", "本机合成收到无效的冻结音量包络。")
     for item in subtitle_items:
         if not item.get("asset_id") or item.get("gap_reason"):
             raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_GAP_UNSUPPORTED", "本机合成不接受字幕轨空位。")
@@ -772,17 +792,24 @@ def prepare_local_render(
                 },
             )
         if item["track_type"] == "main_video":
+            transform = item.get("transform") or {}
+            transition_in = transform.get("transition_in") or {}
+            transition_out = transform.get("transition_out") or {}
             render_inputs.append(LocalRenderInput(
                 path=path,
                 source_in_ms=item["source_in_ms"],
                 source_out_ms=item["source_out_ms"],
+                transition_in_ms=transition_in.get("duration_ms", 0) if transition_in.get("type") == "fade" else 0,
+                transition_out_ms=transition_out.get("duration_ms", 0) if transition_out.get("type") == "fade" else 0,
             ))
         elif item["track_type"] == "audio":
+            envelope = (item.get("transform") or {}).get("volume_envelope") or []
             audio_inputs.append(LocalRenderAudioInput(
                 path=path,
                 source_in_ms=item["source_in_ms"],
                 source_out_ms=item["source_out_ms"],
                 timeline_in_ms=item["timeline_in_ms"],
+                volume_envelope=tuple((point["time_ms"], float(point["gain_db"])) for point in envelope),
             ))
         elif item["track_type"] == "subtitle":
             subtitle_input = LocalRenderSubtitleInput(path=path)

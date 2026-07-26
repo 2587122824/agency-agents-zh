@@ -1,8 +1,11 @@
+import hashlib
 from types import SimpleNamespace
+import wave
 
 from v2.backend.app.workers import worker
 from v2.backend.app.production.service import _compile_manifest
-from v2.backend.app.quality.service import _deterministic_contract_findings
+from v2.backend.app.quality.service import _deterministic_contract_findings, asset_waveform
+import v2.backend.app.quality.service as quality_module
 from v2.backend.app.delivery.renderer import (
     LocalFFmpegRenderer,
     LocalRenderAudioInput,
@@ -137,6 +140,30 @@ def test_audio_duration_gate_uses_frozen_target_and_tolerance() -> None:
     assert blocked[0]["evidence"] == {"actual_ms": 6201, "target_ms": 5000, "tolerance_ms": 1200}
 
 
+def test_audio_waveform_is_deterministic_and_cached_by_content_hash(tmp_path, monkeypatch) -> None:
+    audio_path = tmp_path / "voice.wav"
+    with wave.open(str(audio_path), "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(1000)
+        target.writeframes(b"\x00\x00" * 500 + b"\xff\x7f" * 500)
+    content_hash = hashlib.sha256(audio_path.read_bytes()).hexdigest()
+    asset = SimpleNamespace(id="asset-audio", asset_type="audio", content_hash=content_hash, uri="runtime://voice.wav")
+    monkeypatch.setattr(quality_module, "RUNTIME_ROOT", tmp_path)
+    monkeypatch.setattr(quality_module, "_require_asset", lambda *_args: asset)
+    monkeypatch.setattr(quality_module, "_local_asset_path", lambda _uri: audio_path)
+
+    first = asset_waveform(None, None, "asset-audio", 40)
+    second = asset_waveform(None, None, "asset-audio", 40)
+
+    assert first == second
+    assert first["schema_version"] == "audio-waveform-cache.v1"
+    assert first["duration_ms"] == 1000
+    assert first["peaks"][:20] == [0.0] * 20
+    assert all(peak == 1.0 for peak in first["peaks"][20:])
+    assert (tmp_path / "cache" / "waveforms" / f"{content_hash}-40.json").is_file()
+
+
 def test_provider_request_preserves_dependency_input_slots(monkeypatch) -> None:
     parents = [
         SimpleNamespace(
@@ -231,8 +258,14 @@ def test_local_ffmpeg_renderer_mixes_timeline_audio(monkeypatch, tmp_path) -> No
     monkeypatch.setattr("v2.backend.app.delivery.renderer.subprocess.run", fake_run)
     request = LocalRenderRequest(
         ffmpeg_path=tmp_path / "ffmpeg.exe",
-        inputs=(LocalRenderInput(tmp_path / "video.mp4", 0, 2000),),
-        audio_inputs=(LocalRenderAudioInput(tmp_path / "voice.wav", 100, 1600, 250),),
+        inputs=(LocalRenderInput(tmp_path / "video.mp4", 0, 2000, transition_in_ms=300, transition_out_ms=400),),
+        audio_inputs=(LocalRenderAudioInput(
+            tmp_path / "voice.wav",
+            100,
+            1600,
+            250,
+            volume_envelope=((0, -6.0), (750, 0.0), (1500, -3.0)),
+        ),),
         output_path=tmp_path / "mixed.mp4",
         width=480,
         height=848,
@@ -247,6 +280,10 @@ def test_local_ffmpeg_renderer_mixes_timeline_audio(monkeypatch, tmp_path) -> No
     command = captured["command"]
     filter_graph = command[command.index("-filter_complex") + 1]
     assert "atrim=start=0.100:end=1.600" in filter_graph
+    assert "fade=t=in:st=0:d=0.300" in filter_graph
+    assert "fade=t=out:st=1.600:d=0.400" in filter_graph
+    assert "volume=eval=frame" in filter_graph
+    assert "between(t,0.000,0.750)" in filter_graph
     assert "adelay=250:all=1[a0]" in filter_graph
     assert "amix=inputs=1:duration=longest" in filter_graph
     assert command[command.index("-map") + 1] == "[outv]"

@@ -1220,3 +1220,72 @@ def asset_content_path(session: Session, project: Project, asset_id: str) -> tup
     if not path.is_file():
         raise QualityConflictError("ASSET_FILE_MISSING", "Verified asset file is missing from storage.")
     return path, asset.mime_type or "application/octet-stream"
+
+
+def asset_waveform(session: Session, project: Project, asset_id: str, bins: int = 160) -> dict:
+    if bins < 40 or bins > 400:
+        raise QualityConflictError("WAVEFORM_BIN_COUNT_INVALID", "波形采样点数量必须位于 40 到 400。")
+    asset = _require_asset(session, project, asset_id)
+    if asset.asset_type != "audio" or not asset.content_hash:
+        raise QualityConflictError("WAVEFORM_AUDIO_REQUIRED", "只有已验证音频素材可以生成波形。")
+    path = _local_asset_path(asset.uri)
+    if not path.is_file():
+        raise QualityConflictError("ASSET_FILE_MISSING", "Verified asset file is missing from storage.")
+    cache_path = RUNTIME_ROOT / "cache" / "waveforms" / f"{asset.content_hash}-{bins}.json"
+    if cache_path.is_file():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cached = None
+        if (
+            isinstance(cached, dict)
+            and cached.get("schema_version") == "audio-waveform-cache.v1"
+            and cached.get("content_hash") == asset.content_hash
+            and cached.get("bin_count") == bins
+        ):
+            return cached
+    try:
+        with wave.open(str(path), "rb") as source:
+            channels = source.getnchannels()
+            sample_width = source.getsampwidth()
+            sample_rate = source.getframerate()
+            frame_count = source.getnframes()
+            compression = source.getcomptype()
+            frames = source.readframes(frame_count)
+    except (EOFError, OSError, wave.Error) as exc:
+        raise QualityConflictError("WAVEFORM_WAV_INVALID", "音频文件无法读取为 WAV。") from exc
+    if compression != "NONE" or channels < 1 or sample_width not in {1, 2, 3, 4} or frame_count <= 0:
+        raise QualityConflictError("WAVEFORM_PCM_REQUIRED", "波形缓存只接受非空 PCM WAV。")
+    maximum = float((1 << (sample_width * 8 - 1)) - 1)
+    peaks: list[float] = []
+    for bin_index in range(bins):
+        start_frame = bin_index * frame_count // bins
+        end_frame = max(start_frame + 1, (bin_index + 1) * frame_count // bins)
+        peak = 0
+        for frame_index in range(start_frame, min(end_frame, frame_count)):
+            frame_offset = frame_index * channels * sample_width
+            for channel in range(channels):
+                offset = frame_offset + channel * sample_width
+                raw = frames[offset:offset + sample_width]
+                if len(raw) != sample_width:
+                    continue
+                if sample_width == 1:
+                    value = raw[0] - 128
+                else:
+                    value = int.from_bytes(raw, "little", signed=True)
+                peak = max(peak, abs(value))
+        peaks.append(round(min(1.0, peak / maximum), 4))
+    result = {
+        "schema_version": "audio-waveform-cache.v1",
+        "asset_id": asset.id,
+        "content_hash": asset.content_hash,
+        "sample_rate": sample_rate,
+        "channels": channels,
+        "duration_ms": round(frame_count * 1000 / sample_rate),
+        "bin_count": bins,
+        "peaks": peaks,
+    }
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    if not cache_path.exists():
+        cache_path.write_text(json.dumps(result, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    return result

@@ -192,7 +192,7 @@ def _item_contract(item: TimelineItem) -> dict:
 def _timeline_contract(session: Session, timeline: Timeline) -> dict:
     items = _editor(session).timeline_items(timeline.id)
     return {
-        "contract_version": "v2.timeline-contract.v1",
+        "contract_version": "v2.timeline-contract.v2",
         "project_id": timeline.project_id,
         "snapshot_id": timeline.snapshot_id,
         "version_number": timeline.version_number,
@@ -537,6 +537,8 @@ def _execute_editor(
                 "timeline_out_ms": item.timeline_out_ms,
                 "transform": {
                     "fit": "cover",
+                    "transition_in": {"type": "cut", "duration_ms": 0},
+                    "transition_out": {"type": "cut", "duration_ms": 0},
                     "editor_assistant": {
                         "timeline_item_code": item.timeline_item_code,
                         "shot_code": item.shot_code,
@@ -564,6 +566,10 @@ def _execute_editor(
                 "timeline_out_ms": audio_duration,
                 "transform": {
                     "mix": "voiceover",
+                    "volume_envelope": [
+                        {"time_ms": 0, "gain_db": 0.0},
+                        {"time_ms": audio_duration, "gain_db": 0.0},
+                    ],
                     "qc_report_ids": audio["qc_report_ids"],
                     "source": "frozen_approved_voiceover",
                 },
@@ -702,6 +708,66 @@ def _error(code: str, path: str, message: str, **evidence) -> dict:
     return {"code": code, "path": path, "message": message, "evidence": evidence}
 
 
+def _validate_item_transform(item: TimelineItem, path: str, duration_ms: int) -> list[dict]:
+    errors: list[dict] = []
+    transform = item.transform if isinstance(item.transform, dict) else {}
+    if item.track_type == "main_video":
+        for key in ("transition_in", "transition_out"):
+            transition = transform.get(key)
+            if transition is None:
+                continue
+            if not isinstance(transition, dict) or transition.get("type") not in {"cut", "fade"}:
+                errors.append(_error("VIDEO_TRANSITION_INVALID", f"{path}.transform.{key}", "视频转场必须明确使用 cut 或 fade。"))
+                continue
+            transition_duration = transition.get("duration_ms")
+            if (
+                not isinstance(transition_duration, int)
+                or transition_duration < 0
+                or transition_duration > min(2000, duration_ms // 2)
+                or (transition["type"] == "cut" and transition_duration != 0)
+                or (transition["type"] == "fade" and transition_duration < 100)
+            ):
+                errors.append(_error(
+                    "VIDEO_TRANSITION_DURATION_INVALID",
+                    f"{path}.transform.{key}.duration_ms",
+                    "转场时长必须与类型一致，且不能超过片段时长的一半或 2000ms。",
+                    clip_duration_ms=duration_ms,
+                    transition_duration_ms=transition_duration,
+                ))
+    if item.track_type == "audio":
+        envelope = transform.get("volume_envelope")
+        if envelope is not None:
+            if not isinstance(envelope, list) or len(envelope) < 2 or len(envelope) > 64:
+                errors.append(_error("AUDIO_VOLUME_ENVELOPE_INVALID", f"{path}.transform.volume_envelope", "音量包络必须包含 2 到 64 个关键点。"))
+            else:
+                previous_time = -1
+                for index, point in enumerate(envelope):
+                    point_path = f"{path}.transform.volume_envelope.{index}"
+                    if not isinstance(point, dict):
+                        errors.append(_error("AUDIO_VOLUME_ENVELOPE_POINT_INVALID", point_path, "音量关键点必须是对象。"))
+                        continue
+                    time_ms = point.get("time_ms")
+                    gain_db = point.get("gain_db")
+                    if not isinstance(time_ms, int) or time_ms < 0 or time_ms > duration_ms or time_ms <= previous_time:
+                        errors.append(_error("AUDIO_VOLUME_ENVELOPE_TIME_INVALID", f"{point_path}.time_ms", "音量关键点时间必须严格递增且位于片段范围内。"))
+                    else:
+                        previous_time = time_ms
+                    if not isinstance(gain_db, (int, float)) or gain_db < -60 or gain_db > 12:
+                        errors.append(_error("AUDIO_VOLUME_ENVELOPE_GAIN_INVALID", f"{point_path}.gain_db", "音量关键点增益必须位于 -60dB 到 12dB。"))
+                if (
+                    isinstance(envelope[0], dict)
+                    and isinstance(envelope[-1], dict)
+                    and (envelope[0].get("time_ms") != 0 or envelope[-1].get("time_ms") != duration_ms)
+                ):
+                    errors.append(_error(
+                        "AUDIO_VOLUME_ENVELOPE_BOUNDARY_INVALID",
+                        f"{path}.transform.volume_envelope",
+                        "音量包络必须从片段零点开始并覆盖到片段终点。",
+                        clip_duration_ms=duration_ms,
+                    ))
+    return errors
+
+
 def _validate_items(session: Session, project: Project, timeline: Timeline) -> list[dict]:
     repository = _editor(session)
     errors: list[dict] = []
@@ -785,6 +851,7 @@ def _validate_items(session: Session, project: Project, timeline: Timeline) -> l
             ))
         source_duration = item.source_out_ms - item.source_in_ms
         timeline_duration = item.timeline_out_ms - item.timeline_in_ms
+        errors.extend(_validate_item_transform(item, path, timeline_duration))
         if source_duration != timeline_duration:
             errors.append(_error(
                 "TIMELINE_SPEED_CHANGE_UNDECLARED",

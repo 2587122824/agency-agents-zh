@@ -33,6 +33,8 @@ class LocalRenderInput:
     path: Path
     source_in_ms: int
     source_out_ms: int
+    transition_in_ms: int = 0
+    transition_out_ms: int = 0
 
 
 @dataclass(frozen=True)
@@ -41,6 +43,7 @@ class LocalRenderAudioInput:
     source_in_ms: int
     source_out_ms: int
     timeline_in_ms: int
+    volume_envelope: tuple[tuple[int, float], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -171,7 +174,7 @@ class LocalFFmpegRenderer:
             label = f"v{index}"
             labels.append(f"[{label}]")
             duration_seconds = (item.source_out_ms - item.source_in_ms) / 1000
-            filters.append(
+            video_filters = (
                 f"[{index}:v:0]"
                 f"trim=start={item.source_in_ms / 1000:.3f}:end={item.source_out_ms / 1000:.3f},"
                 "setpts=PTS-STARTPTS,"
@@ -180,8 +183,15 @@ class LocalFFmpegRenderer:
                 f"setsar=1,fps={request.fps},"
                 f"tpad=stop_mode=clone:stop_duration={1 / request.fps:.6f},"
                 f"trim=duration={duration_seconds:.3f},setpts=PTS-STARTPTS,"
-                f"format=yuv420p[{label}]"
             )
+            if item.transition_in_ms:
+                video_filters += f"fade=t=in:st=0:d={item.transition_in_ms / 1000:.3f},"
+            if item.transition_out_ms:
+                video_filters += (
+                    f"fade=t=out:st={max(0, item.source_out_ms - item.source_in_ms - item.transition_out_ms) / 1000:.3f}:"
+                    f"d={item.transition_out_ms / 1000:.3f},"
+                )
+            filters.append(f"{video_filters}format=yuv420p[{label}]")
         filters.append(f"{''.join(labels)}concat=n={len(labels)}:v=1:a=0[outv]")
         video_output_label = "outv"
         execution_cwd: Path | None = None
@@ -202,12 +212,24 @@ class LocalFFmpegRenderer:
                 input_index = len(request.inputs) + audio_index
                 label = f"a{audio_index}"
                 audio_labels.append(f"[{label}]")
-                filters.append(
+                audio_filters = (
                     f"[{input_index}:a:0]"
                     f"atrim=start={item.source_in_ms / 1000:.3f}:end={item.source_out_ms / 1000:.3f},"
                     "asetpts=PTS-STARTPTS,"
-                    f"adelay={item.timeline_in_ms}:all=1[{label}]"
                 )
+                for (start_ms, start_gain), (end_ms, end_gain) in zip(
+                    item.volume_envelope,
+                    item.volume_envelope[1:],
+                ):
+                    start_seconds = start_ms / 1000
+                    end_seconds = end_ms / 1000
+                    audio_filters += (
+                        "volume=eval=frame:"
+                        f"volume='pow(10,({start_gain:.3f}+({end_gain - start_gain:.3f})"
+                        f"*(t-{start_seconds:.3f})/{end_seconds - start_seconds:.3f})/20)':"
+                        f"enable='between(t,{start_seconds:.3f},{end_seconds:.3f})',"
+                    )
+                filters.append(f"{audio_filters}adelay={item.timeline_in_ms}:all=1[{label}]")
             filters.append(
                 f"{''.join(audio_labels)}amix=inputs={len(audio_labels)}:"
                 "duration=longest:dropout_transition=0,aresample=async=1:first_pts=0[outa]"
