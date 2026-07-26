@@ -1170,6 +1170,10 @@ BGM 是音频片段的显式 `background_music` 混音角色，不通过文件�
 
 `audio-qc.v1` 是音频技术放行权威。对 PCM16 WAV 直接读取帧并记录采样率、声道、样本位宽、帧数、时长、样本峰值、-50dBFS 静音比例、最长连续静音和接近满量程的削波样本比例；用冻结的本机 FFmpeg EBU R128 分析器记录 integrated loudness 与 true peak。采样率/声道与 DAG 输出合同不一致、静音比例超过 50%、连续静音超过 3000ms、削波样本比例超过 0.01%、响度偏离目标超过 3LU、true peak 高于 -0.1dBTP 或分析器不可用均阻断旁白素材。最终 MP4 有音频轨时再按时间线冻结的母带目标复测，响度容差 4LU，true peak 容差 0.2dB。技术通过报告只把素材置为 `review_required`；音频批准命令必须引用含 `AUDIO_TECHNICAL_QC_PASSED` 的报告并显式提交 `confirm_audio_listened=true`。审核页只有在用户启动真实音频播放器后才开放“试听后通过”，音频不参加批量通过。
 
+授权声音复刻使用不可变 `VoiceCloneAuthorizationVersion`。每个版本必须精确绑定项目、授权标识、批准的音频样本及其内容哈希、声音主体、供应商音色 ID、`self/contract/guardian` 授权依据、包含 `tts` 的显式范围、可审计证据、授权人和生效/到期时间，并保存合同哈希。修订必须显式引用最新被替代版本；撤销只改变该版本后续可选状态，不改写已经冻结它的历史生产快照。制作准备的音频执行选择必须在发布预设与授权复刻版本中二选一；选择复刻版本时，`audio-execution-selection.v2` 冻结授权版本 ID/合同哈希、样本 ID/哈希和供应商音色 ID。新影响分析遇到未生效、已到期、已撤销、缺少 `tts` 范围、样本不再 approved/used 或样本哈希变化时必须明确阻断。授权登记本身不调用供应商创建声音，也不能作为真实克隆或真实试听已完成的证据。
+
+生产精确重试不修改原 WorkAttempt。单项命令必须绑定当前阻断快照、最新明确失败 Attempt、完整冻结请求及 SHA-256 指纹，并再次确认精确费用；TTS 使用原工作流价格，本地确定性字幕以零费用 `local_subtitles` 记录确认的 CostEvent。依赖级重试先由独立分析命令从用户选择的失败根项计算 DAG 下游闭包，只纳入仍为明确失败且请求清单/指纹未变化的 WorkItem，并冻结 `ProductionRetryBatch`：根项、实际重试项、受影响节点、保留的 approved/used 素材、逐项与总费用、币种和分析哈希。页面必须在执行前展示节点、请求指纹、保留产物和费用；授权命令复验全部冻结事实后才创建 `user_confirmed_dependency_retry` Attempt。已经成功的产物不得被重建或覆盖，旧尝试保持只读；供应商提交结果未知或需要人工对账的请求禁止进入单项或批量重试。
+
 具体表结构、命令、错误码、API 和验收矩阵见 [V2 时间线剪辑合同实现](./archive/implementation-notes/V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
 
 ## 34. 最终交付实现边界

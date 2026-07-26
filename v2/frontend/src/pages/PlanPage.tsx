@@ -41,6 +41,7 @@ const issueMessages: Record<string, string> = {
   REFERENCE_IMAGE_HASH_MISMATCH: '主参考图文件与登记内容不一致，请重新上传并确认。',
   PRICING_NOT_EFFECTIVE: '所选计费方案尚未生效。',
   PRICING_EXPIRED: '所选计费方案已经过期。',
+  VOICE_CLONE_AUTHORIZATION_INVALID: '所选复刻声音的授权已撤销、过期，或声音样本事实已经变化，请重新选择。',
 }
 
 const productionActionLabels: Record<string, string> = {
@@ -234,6 +235,8 @@ export function PlanPage() {
   const planning = useQuery({ queryKey: ['planning-center', projectId], queryFn: () => api.planningCenter(projectId), enabled: Boolean(projectId), refetchInterval: 5000 })
   const creation = useQuery({ queryKey: ['creation-center', projectId], queryFn: () => api.creationCenter(projectId), enabled: Boolean(projectId) })
   const preparation = useQuery({ queryKey: ['production-preparation', projectId], queryFn: () => api.productionPreparation(projectId), enabled: Boolean(projectId) })
+  const voiceAuthorizations = useQuery({ queryKey: ['voice-clone-authorizations', projectId], queryFn: () => api.voiceCloneAuthorizations(projectId), enabled: Boolean(projectId) })
+  const quality = useQuery({ queryKey: ['quality-review', projectId], queryFn: () => api.qualityReview(projectId), enabled: Boolean(projectId) })
   const [configId, setConfigId] = useState('')
   const [videoSpecId, setVideoSpecId] = useState('')
   const [keyframeSlotId, setKeyframeSlotId] = useState('')
@@ -241,8 +244,23 @@ export function PlanPage() {
   const [shotWorkflowAssignments, setShotWorkflowAssignments] = useState<Record<string, { keyframe: string; video: string }>>({})
   const [ttsSlotId, setTtsSlotId] = useState('')
   const [voiceKey, setVoiceKey] = useState('')
+  const [voiceCloneVersionId, setVoiceCloneVersionId] = useState('')
   const [speakingRate, setSpeakingRate] = useState(1)
   const [voiceVolume, setVoiceVolume] = useState(50)
+  const [showVoiceAuthorization, setShowVoiceAuthorization] = useState(false)
+  const [voiceAuthorizationForm, setVoiceAuthorizationForm] = useState({
+    authorization_key: '',
+    sample_asset_id: '',
+    subject_name: '',
+    provider_voice_id: '',
+    authorization_basis: 'self' as 'self' | 'contract' | 'guardian',
+    authorization_scope: ['tts', 'commercial'],
+    consent_evidence: '',
+    authorized_by: '',
+    valid_from: new Date().toISOString().slice(0, 16),
+    expires_at: '',
+    confirm_authority: false,
+  })
   const [pricingCatalogId, setPricingCatalogId] = useState('')
   const [confirmCost, setConfirmCost] = useState(false)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
@@ -341,6 +359,57 @@ export function PlanPage() {
     },
     onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }),
   })
+  const createVoiceAuthorization = useMutation({
+    mutationFn: () => api.createVoiceCloneAuthorization(projectId, {
+      authorization_key: voiceAuthorizationForm.authorization_key,
+      sample_asset_id: voiceAuthorizationForm.sample_asset_id,
+      subject_name: voiceAuthorizationForm.subject_name,
+      provider_voice_id: voiceAuthorizationForm.provider_voice_id,
+      authorization_basis: voiceAuthorizationForm.authorization_basis,
+      authorization_scope: voiceAuthorizationForm.authorization_scope,
+      consent_evidence: voiceAuthorizationForm.consent_evidence,
+      authorized_by: voiceAuthorizationForm.authorized_by,
+      valid_from: new Date(voiceAuthorizationForm.valid_from).toISOString(),
+      expires_at: voiceAuthorizationForm.expires_at
+        ? new Date(voiceAuthorizationForm.expires_at).toISOString()
+        : null,
+    }),
+    onSuccess: async authorization => {
+      setVoiceKey('')
+      setVoiceCloneVersionId(authorization.id)
+      setShowVoiceAuthorization(false)
+      setVoiceAuthorizationForm(current => ({
+        ...current,
+        authorization_key: '',
+        sample_asset_id: '',
+        subject_name: '',
+        provider_voice_id: '',
+        consent_evidence: '',
+        authorized_by: '',
+        expires_at: '',
+        confirm_authority: false,
+      }))
+      analyzeImpact.reset()
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['voice-clone-authorizations', projectId] }),
+        client.invalidateQueries({ queryKey: ['production-preparation', projectId] }),
+      ])
+    },
+  })
+  const revokeVoiceAuthorization = useMutation({
+    mutationFn: (authorizationId: string) => {
+      const authorization = voiceAuthorizations.data!.find(item => item.id === authorizationId)!
+      return api.revokeVoiceCloneAuthorization(projectId, authorization)
+    },
+    onSuccess: async authorization => {
+      if (voiceCloneVersionId === authorization.id) setVoiceCloneVersionId('')
+      analyzeImpact.reset()
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['voice-clone-authorizations', projectId] }),
+        client.invalidateQueries({ queryKey: ['production-preparation', projectId] }),
+      ])
+    },
+  })
   const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, {
     plan_version_id: planning.data!.active_plan!.id,
     production_config_version_id: configId,
@@ -352,7 +421,13 @@ export function PlanPage() {
     })),
     tts_workflow_slot_version_id: ttsSlotId || null,
     audio_execution: preparation.data?.audio_mode === 'voiceover'
-      ? { voice_key: voiceKey, speaking_rate: speakingRate, volume: voiceVolume }
+      ? {
+          ...(voiceCloneVersionId
+            ? { voice_clone_version_id: voiceCloneVersionId }
+            : { voice_key: voiceKey }),
+          speaking_rate: speakingRate,
+          volume: voiceVolume,
+        }
       : null,
     pricing_catalog_version_id: pricingCatalogId || null,
   }) })
@@ -402,9 +477,9 @@ export function PlanPage() {
       setTtsSlotId(ttsOptions[0].id)
     }
     if (preparation.data?.audio_mode === 'voiceover' && config.audio_config) {
-      if (!voiceKey) setVoiceKey(config.audio_config.default_voice_key ?? '')
-      setSpeakingRate(current => voiceKey ? current : config.audio_config!.speaking_rate_default)
-      setVoiceVolume(current => voiceKey ? current : config.audio_config!.volume_default)
+      if (!voiceKey && !voiceCloneVersionId) setVoiceKey(config.audio_config.default_voice_key ?? '')
+      setSpeakingRate(current => voiceKey || voiceCloneVersionId ? current : config.audio_config!.speaking_rate_default)
+      setVoiceVolume(current => voiceKey || voiceCloneVersionId ? current : config.audio_config!.volume_default)
     }
   }, [
     configId,
@@ -412,6 +487,7 @@ export function PlanPage() {
     preparation.data?.audio_mode,
     preparation.data?.published_configurations,
     pricingCatalogId,
+    voiceCloneVersionId,
     voiceKey,
     ttsSlotId,
     videoSlotId,
@@ -447,7 +523,7 @@ export function PlanPage() {
   const editableShot = data.current_shot_candidate ?? data.revision_draft ?? rejectedShot
   const shots = editableShot?.shots ?? data.active_plan?.shots ?? []
   const characterVersions = data.entity_versions.filter(item => item.entity_type === 'character')
-  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || registerExistingCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || submitProduction.error
+  const error = generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error || generateShots.error || retryShots.error || uploadCharacter.error || registerExistingCharacter.error || startShotRevision.error || reviseShots.error || reviseShotsWithDirector.error || decideShots.error || cancelRevision.error || cancelManualRevision.error || generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error || createVoiceAuthorization.error || revokeVoiceAuthorization.error || preparation.error || analyzeImpact.error || createSnapshot.error || lockSnapshot.error || submitProduction.error
   const errorStage = generateProductionPlan.error || retryProductionPlan.error || decideProductionPlan.error
     ? '制作规划失败'
     : generateBrief.error || retryBrief.error || reviseBrief.error || reviseRequirement.error || decideBrief.error
@@ -465,6 +541,10 @@ export function PlanPage() {
   const selectedTtsSlot = ttsSlots.find(item => item.id === ttsSlotId)
   const audioConfig = selectedConfig?.audio_config
   const selectedVoice = audioConfig?.voice_presets.find(item => item.key === voiceKey)
+  const selectedVoiceClone = preparation.data?.voice_clone_authorizations.find(item => item.id === voiceCloneVersionId)
+  const approvedVoiceSamples = quality.data?.assets.filter(asset =>
+    asset.asset_type === 'audio' && ['approved', 'used'].includes(asset.state) && Boolean(asset.content_hash)
+  ) ?? []
   const productionPlanCandidate = preparation.data?.production_plan_candidates.find(item =>
     item.production_config_version_id === configId
     && item.video_spec_version_id === videoSpecId
@@ -487,7 +567,7 @@ export function PlanPage() {
     return Boolean(video && (video.operation_kind === 'text_to_video_generation' || assignment?.keyframe))
   })
   const audioSelectionReady = preparation.data?.audio_mode !== 'voiceover'
-    || Boolean(ttsSlotId && audioConfig && selectedVoice)
+    || Boolean(ttsSlotId && audioConfig && (selectedVoice || selectedVoiceClone))
   const canAnalyze = Boolean(data.active_plan && configId && videoSpecId && allShotsAssigned && audioSelectionReady)
   const nextAction = data.active_plan && preparation.data ? preparation.data.next_action : data.next_action
   const nextActionLabel = productionActionLabels[nextAction.code] ?? nextAction.label
@@ -499,6 +579,7 @@ export function PlanPage() {
     setShotWorkflowAssignments({})
     setTtsSlotId('')
     setVoiceKey('')
+    setVoiceCloneVersionId('')
     setSpeakingRate(1)
     setVoiceVolume(50)
     setPricingCatalogId('')
@@ -582,13 +663,62 @@ export function PlanPage() {
                   key={voice.key}
                   type="button"
                   data-selected={voice.key === voiceKey}
-                  onClick={() => { setVoiceKey(voice.key); analyzeImpact.reset() }}
+                  onClick={() => { setVoiceKey(voice.key); setVoiceCloneVersionId(''); analyzeImpact.reset() }}
                 >
                   <strong>{voice.display_name}</strong>
                   <span>{voice.description}</span>
                   <small>{voice.provider_voice_id}</small>
                 </button>)}
+                {preparation.data.voice_clone_authorizations.map(authorization => <button
+                  key={authorization.id}
+                  type="button"
+                  data-selected={authorization.id === voiceCloneVersionId}
+                  onClick={() => { setVoiceKey(''); setVoiceCloneVersionId(authorization.id); analyzeImpact.reset() }}
+                >
+                  <strong>{authorization.subject_name} · 授权复刻</strong>
+                  <span>{authorization.authorization_basis === 'self' ? '本人授权' : authorization.authorization_basis === 'contract' ? '合同授权' : '监护人授权'} · v{authorization.version_number}</span>
+                  <small>{authorization.provider_voice_id}</small>
+                </button>)}
+                <button type="button" onClick={() => setShowVoiceAuthorization(current => !current)}>
+                  <strong>{showVoiceAuthorization ? '收起授权登记' : '登记授权复刻声音'}</strong>
+                  <span>只接受已有批准音频样本，并保存不可变授权证据。</span>
+                  <small>不会自动克隆或调用供应商</small>
+                </button>
               </div>
+              {showVoiceAuthorization && <div className={styles.voiceAuthorizationForm}>
+                <header><div><strong>登记声音复刻授权版本</strong><span>请填写真实授权事实。登记只开放音色选择，不会执行付费克隆或配音。</span></div></header>
+                <div>
+                  <label>授权标识<input value={voiceAuthorizationForm.authorization_key} placeholder="例如 founder_voice" onChange={event => setVoiceAuthorizationForm(current => ({ ...current, authorization_key: event.target.value }))} /></label>
+                  <label>已批准声音样本<select value={voiceAuthorizationForm.sample_asset_id} onChange={event => setVoiceAuthorizationForm(current => ({ ...current, sample_asset_id: event.target.value }))}><option value="">请选择音频素材</option>{approvedVoiceSamples.map(asset => <option key={asset.id} value={asset.id}>{asset.role} · {asset.id.slice(-10)} · {asset.content_hash?.slice(0, 10)}</option>)}</select></label>
+                  <label>声音主体<input value={voiceAuthorizationForm.subject_name} onChange={event => setVoiceAuthorizationForm(current => ({ ...current, subject_name: event.target.value }))} /></label>
+                  <label>供应商音色 ID<input value={voiceAuthorizationForm.provider_voice_id} onChange={event => setVoiceAuthorizationForm(current => ({ ...current, provider_voice_id: event.target.value }))} /></label>
+                  <label>授权依据<select value={voiceAuthorizationForm.authorization_basis} onChange={event => setVoiceAuthorizationForm(current => ({ ...current, authorization_basis: event.target.value as 'self' | 'contract' | 'guardian' }))}><option value="self">本人授权</option><option value="contract">合同授权</option><option value="guardian">监护人授权</option></select></label>
+                  <label>授权人<input value={voiceAuthorizationForm.authorized_by} onChange={event => setVoiceAuthorizationForm(current => ({ ...current, authorized_by: event.target.value }))} /></label>
+                  <label>生效时间<input type="datetime-local" value={voiceAuthorizationForm.valid_from} onChange={event => setVoiceAuthorizationForm(current => ({ ...current, valid_from: event.target.value }))} /></label>
+                  <label>到期时间（可选）<input type="datetime-local" value={voiceAuthorizationForm.expires_at} onChange={event => setVoiceAuthorizationForm(current => ({ ...current, expires_at: event.target.value }))} /></label>
+                  <label className={styles.voiceAuthorizationEvidence}>授权证据<textarea value={voiceAuthorizationForm.consent_evidence} placeholder="填写合同、签字文件或其他可审计证据编号与说明" onChange={event => setVoiceAuthorizationForm(current => ({ ...current, consent_evidence: event.target.value }))} /></label>
+                </div>
+                <footer>
+                  <label><input type="checkbox" checked={voiceAuthorizationForm.confirm_authority} onChange={event => setVoiceAuthorizationForm(current => ({ ...current, confirm_authority: event.target.checked }))} />我确认有权授权该声音样本用于 TTS 复刻，并确认当前填写的范围与证据真实有效。</label>
+                  <button className="primaryButton" disabled={
+                    createVoiceAuthorization.isPending
+                    || !voiceAuthorizationForm.confirm_authority
+                    || !voiceAuthorizationForm.authorization_key
+                    || !voiceAuthorizationForm.sample_asset_id
+                    || !voiceAuthorizationForm.subject_name
+                    || !voiceAuthorizationForm.provider_voice_id
+                    || !voiceAuthorizationForm.authorized_by
+                    || voiceAuthorizationForm.consent_evidence.length < 8
+                  } onClick={() => createVoiceAuthorization.mutate()}>{createVoiceAuthorization.isPending ? '正在登记…' : '确认并登记授权版本'}</button>
+                </footer>
+              </div>}
+              {(voiceAuthorizations.data?.length ?? 0) > 0 && <details className={styles.voiceAuthorizationHistory}>
+                <summary>查看声音授权版本与撤销状态（{voiceAuthorizations.data?.length}）</summary>
+                <div>{voiceAuthorizations.data?.map(authorization => <article key={authorization.id}>
+                  <p><strong>{authorization.subject_name} · {authorization.authorization_key} v{authorization.version_number}</strong><span>{authorization.status} · {authorization.authorization_scope.join(' / ')}</span><small>{authorization.contract_hash.slice(0, 16)} · 样本 {authorization.sample_content_hash.slice(0, 12)}</small></p>
+                  {authorization.status === 'active' && <button className="secondaryButton" disabled={revokeVoiceAuthorization.isPending} onClick={() => revokeVoiceAuthorization.mutate(authorization.id)}>撤销授权</button>}
+                </article>)}</div>
+              </details>}
               <div className={styles.audioControls}>
                 <label>
                   <span>语速 <b>{speakingRate.toFixed(1)}×</b></span>
@@ -633,7 +763,7 @@ export function PlanPage() {
               })}</div>
             </section>
             <div className={styles.analysisAction}><div><ShieldCheck size={17} /><p><strong>所有生成方式都由你选择</strong><span>系统只按当前选择计算制作步骤，不会自动更换生成方案，也不会在这里开始生成。</span></p></div><button className="primaryButton" disabled={!canAnalyze || analyzeImpact.isPending} onClick={() => analyzeImpact.mutate()}>{analyzeImpact.isPending ? '正在计算…' : '查看制作计划'}</button></div>
-            {selectedConfig && <details className={styles.technicalDetails}><summary>查看当前选择的技术详情</summary><dl><div><dt>配置版本</dt><dd><code>{selectedConfig.id}</code></dd></div>{selectedVideoSpec && <div><dt>画面规格</dt><dd><code>{selectedVideoSpec.id}</code></dd></div>}<div><dt>逐镜头路由</dt><dd>{Object.values(shotWorkflowAssignments).filter(item => item.video).length} 个镜头已明确选择</dd></div>{selectedTtsSlot && <div><dt>配音生成</dt><dd><code>{selectedTtsSlot.key}</code></dd></div>}{selectedVoice && <div><dt>配音执行</dt><dd>{selectedVoice.display_name} · {speakingRate.toFixed(1)}× · 音量 {voiceVolume}</dd></div>}</dl></details>}
+            {selectedConfig && <details className={styles.technicalDetails}><summary>查看当前选择的技术详情</summary><dl><div><dt>配置版本</dt><dd><code>{selectedConfig.id}</code></dd></div>{selectedVideoSpec && <div><dt>画面规格</dt><dd><code>{selectedVideoSpec.id}</code></dd></div>}<div><dt>逐镜头路由</dt><dd>{Object.values(shotWorkflowAssignments).filter(item => item.video).length} 个镜头已明确选择</dd></div>{selectedTtsSlot && <div><dt>配音生成</dt><dd><code>{selectedTtsSlot.key}</code></dd></div>}{(selectedVoice || selectedVoiceClone) && <div><dt>配音执行</dt><dd>{selectedVoice?.display_name ?? `${selectedVoiceClone?.subject_name}（授权复刻）`} · {speakingRate.toFixed(1)}× · 音量 {voiceVolume}</dd></div>}</dl></details>}
           </> : <div className={styles.noConfig}><CircleAlert size={20} /><div><strong>没有已发布生产配置</strong><span>请先到系统配置创建、校验并发布精确版本。</span></div><Link className="secondaryButton" to="/settings">前往系统配置</Link></div>}
           {impact && <div className={styles.impactResult} data-blocked={impact.status === 'blocked'}>
             <header><Calculator size={17} /><div><strong>{impact.status === 'blocked' ? '制作计划需要调整' : '制作计划已生成，等待确认'}</strong><span>{impact.manifest.shots.length} 个镜头 · 预计调用生成服务 {impact.estimated_call_count} 次 · {costLabel(impact.estimated_cost, impact.currency)}</span></div></header>

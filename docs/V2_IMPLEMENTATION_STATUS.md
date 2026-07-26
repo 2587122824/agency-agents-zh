@@ -4,7 +4,7 @@
 >
 > 本文只记录可以由代码、迁移、测试或可运行页面证明的状态。设计目标不等于已实现。
 
-当前自动化基线：`280 passed`；前端生产构建通过。
+当前自动化基线：`284 passed`；前端生产构建通过。
 
 ## 状态定义
 
@@ -76,11 +76,12 @@
 | 时间线合同与确认 | 已完成 | `v2.timeline-contract.v3`、Timeline/TimelineItem、验证、版本修订和确认；迁移 `20260726_35/36` 为已有开发时间线显式补齐缩放/吸附与音频母带合同。剪辑台支持源/成片联动裁切、同轨拖放与确定性重排、20–400px/s 缩放、10–500ms 吸附、按内容哈希缓存的真实 WAV 波形、视频淡入淡出与多关键点音量包络；BGM 必须冻结权利确认，可循环并按精确旁白区间 ducking；响度目标、true peak 上限和 limiter 参数进入交付合同。后端与 FFmpeg 按冻结参数校验、执行，不只依赖前端状态 |
 | 最终交付验证 | 已完成 | `v2.delivery-request.v2`、DeliveryAttempt、外部上传、本机 FFmpeg 合成、真实 MP4 验证与完成条件。用户显式选择交付方式；本机方式冻结执行环境与编码参数，创建独立 `render_delivery` WorkItem/WorkAttempt，执行前复验素材文件哈希，成功只登记待验证 Asset。失败不自动重试或切换上传方式 |
 | RunningHub Provider | 部分完成 | 图片、首帧视频和纯文本视频 Adapter、严格 NodeInfoList、`production-work-request.v3`、单父图片、无父图 T2V、显式主参考附件上传、提交任务号持久化、重启轮询恢复与确定性本地下载已用假传输验证。V2 创建、查询和上传统一使用 `Authorization: Bearer`，创建正文不再携带旧式 `apiKey`。成功响应先按冻结输出媒体类型忽略 TXT 等辅助结果，再对目标媒体执行声明、响应头、字节签名和存储策略交叉验证；真实任务 `2080632860527783937` 的 `TXT + PNG` 返回已复验只登记 PNG。Worker 提交前原子执行冻结 `max_concurrency`；明确业务拒绝、结果未知和输出验证失败分别留证，不自动重试，历史缺失响应不回填 |
-| CosyVoice Provider | 部分完成 | 已实现同步 CosyVoice Adapter、冻结旁白文本/模型/所选音色/语速/音量/采样率、Bearer 鉴权、WAV 签名/完整结构/24kHz/单声道/非空帧/大小/哈希验证、确定性本地落盘和自动登记 `verified` 音频素材。迁移 `20260726_34` 与配置 v55 发布 5 个版本化音色、默认值/范围、时长容差和动态 TTS 绑定；制作准备可显式选择，选择被快照与 WorkAttempt 精确冻结，超时以确定性 QC 阻断。`validate_cosyvoice_connection` 仍只在显式授权且凭据就绪时联网；当前没有 DashScope API Key，真实付费合成和供应商试听仍未完成 |
+| CosyVoice Provider | 部分完成 | 已实现同步 CosyVoice Adapter、冻结旁白文本/模型/所选音色/语速/音量/采样率、Bearer 鉴权、WAV 签名/完整结构/24kHz/单声道/非空帧/大小/哈希验证、确定性本地落盘和自动登记 `verified` 音频素材。迁移 `20260726_34` 与配置 v55 发布 5 个版本化音色、默认值/范围、时长容差和动态 TTS 绑定；制作准备可显式选择发布预设或当前有效的授权复刻版本，`audio-execution-selection.v2` 与 WorkAttempt 精确冻结授权合同、样本哈希和供应商音色 ID，超时以确定性 QC 阻断。`validate_cosyvoice_connection` 仍只在显式授权且凭据就绪时联网；当前没有 DashScope API Key，真实付费合成和供应商试听仍未完成 |
+| 授权声音复刻 | 已完成首期合同闭环 | 迁移 `20260726_37`、`VoiceCloneAuthorizationVersion` 与项目 API 保存授权主体、本人/合同/监护人依据、唯一范围、证据、授权人、生效/到期时间、批准样本 ID/哈希和供应商音色 ID；每次修订形成不可变版本，撤销不修改历史快照。制作准备页可登记、列出、选择和撤销版本；撤销、过期、缺 `tts`、样本状态或哈希变化均以 `VOICE_CLONE_AUTHORIZATION_INVALID` 阻断新的影响分析。当前不调用供应商创建克隆音色，不把授权登记声明为供应商克隆已完成 |
 | OSS 临时音频上传 | 未开始，需确认 | 涉及真实存储凭据、生命周期和外部网络调用 |
 | 确定性字幕与 FFmpeg 烧录 | 已完成首期闭环 | 旁白/对白按确认节拍编译为冻结 cue，本地 Adapter 生成 UTF-8 SRT；严格探测校验连续序号、非空内容和递增无重叠时点；素材经人工审核后进入单一字幕轨，剪辑台可读预览。FFmpeg/libass 使用冻结底部样式烧录，Windows 从字幕目录执行以避免盘符解析错误；真实 480×848 H.264 + AAC 输出验收通过。逐 cue 可视化修订和同步成片预览仍属于后续剪辑体验 |
 | FFmpeg 本地合成 | 已完成 | `V2_FFMPEG_PATH` 只读环境连接、版本与 `libx264` 准备检查、连续主视频轨 `trim/scale/crop/fps/concat`、按音频时间线执行 `atrim/adelay/amix`、BGM 片段确定性重复拼接、旁白区间 attack/release ducking、`loudnorm + alimiter`、单一字幕轨 libass 烧录并编码 AAC、`libx264` 输出、工作尝试与失败证据已实现。真实本机验收已证明 BGM 循环/ducking 与 H.264 + AAC 输出可执行。当前仍不支持空位、普通片段变速或非 `cover` 画面变换；输出响度/true peak 的实测放行归入下一项确定性音频 QC；失败后没有重试、替换方式或隐藏降级 |
-| 精确依赖重试 | 未开始，需确认 | 当前没有第二次尝试；重试范围、费用和确认合同尚未冻结 |
+| 精确依赖重试 | 已完成首期闭环 | 单项生产重试复用失败 Attempt 的完整请求清单与指纹，TTS 可按冻结供应商费用重试，本地字幕以 `local_subtitles` 和确认的零费用创建新 Attempt；旧失败记录保持只读。迁移 `20260726_37` 新增 `ProductionRetryBatch`，分析命令从明确失败根项计算 DAG 下游闭包，冻结精确重试项、请求指纹、逐项/总预计费用、受影响节点和保留的 approved/used 产物；生产页展示完整分析与哈希，用户显式确认后只为清单内仍明确失败且请求未变的项创建 `user_confirmed_dependency_retry` Attempt。提交结果未知或需要人工对账的供应商请求仍禁止重跑 |
 
 ## 当前安全开发顺序
 

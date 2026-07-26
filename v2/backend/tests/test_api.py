@@ -6,6 +6,7 @@ import json
 import struct
 import zlib
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -19,7 +20,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import Base, engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, StoragePolicyVersion, Timeline, TimelineItem, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, StoragePolicyVersion, Timeline, TimelineItem, VoiceCloneAuthorizationVersion, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from v2.backend.app.creation.service import _validated_update_value
 from sqlalchemy import select
@@ -2805,6 +2806,174 @@ def test_voiceover_impact_freezes_exact_voice_rate_volume_and_rejects_invalid_se
     assert voiceover["input_contract"]["loudness_target_lufs"] == -16
 
 
+def test_voiceover_impact_freezes_authorized_clone_and_rejects_changed_authorization_facts(
+    client: TestClient,
+) -> None:
+    project, plan = create_confirmed_plan(client)
+    with SessionLocal() as session:
+        stored = session.get(PlanVersion, plan["id"])
+        assert stored is not None
+        first_beat = stored.creative_brief["narrative_beats"][0]["beat_code"]
+        stored.creative_brief = {
+            **stored.creative_brief,
+            "audio_mode": "voiceover",
+            "script_segments": [{
+                "segment_code": "SEG_CLONE_01",
+                "beat_code": first_beat,
+                "kind": "voiceover",
+                "spoken_text": "这是经过授权的复刻声音旁白。",
+                "on_screen_text": None,
+            }],
+        }
+        session.commit()
+    config = publish_visual_production_configuration(
+        client,
+        with_voiceover=True,
+        command_prefix="voice-clone-impact-config",
+    )
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    base = {
+        "plan_version_id": plan["id"],
+        "production_config_version_id": config["id"],
+        "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+        "shot_workflow_assignments": production_workflow_assignments(
+            plan,
+            components[("workflow_slot", "keyframe_image")]["id"],
+            components[("workflow_slot", "first_frame_video")]["id"],
+        ),
+        "tts_workflow_slot_version_id": components[("workflow_slot", "cosyvoice_voiceover")]["id"],
+    }
+    bootstrap_impact = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "voice-clone-bootstrap-impact-001",
+            **base,
+            "audio_execution": {"voice_key": "steady_male", "speaking_rate": 1, "volume": 50},
+        },
+    ).json()
+    bootstrap_snapshot = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots",
+        json={
+            "command_id": "voice-clone-bootstrap-snapshot-001",
+            "impact_analysis_id": bootstrap_impact["id"],
+            "analysis_hash": bootstrap_impact["analysis_hash"],
+            "confirm_contract_scope": True,
+        },
+    ).json()
+    with SessionLocal() as session:
+        sample_hash = hashlib.sha256(f"{project['id']}-clone-sample".encode()).hexdigest()
+        sample = Asset(
+            project_id=project["id"],
+            snapshot_id=bootstrap_snapshot["id"],
+            output_index=0,
+            asset_type="audio",
+            role="voice_clone_sample",
+            uri=f"runtime://assets/voice-clones/{project['id']}.wav",
+            storage_backend="local",
+            provider_output_manifest={"authorization_sample": True},
+            content_hash=sample_hash,
+            mime_type="audio/wav",
+            byte_size=1000,
+            duration_ms=5000,
+            state="approved",
+        )
+        session.add(sample)
+        session.commit()
+        sample_id = sample.id
+    authorization_response = client.post(
+        f"/api/v1/projects/{project['id']}/voice-clone-authorizations",
+        json={
+            "command_id": "voice-clone-impact-auth-001",
+            "authorization_key": "founder_voice",
+            "sample_asset_id": sample_id,
+            "subject_name": "品牌创始人",
+            "provider_voice_id": f"cosyvoice-clone-{project['id']}",
+            "authorization_basis": "self",
+            "authorization_scope": ["tts", "commercial"],
+            "consent_evidence": "本人明确授权该声音样本用于当前项目商业视频旁白复刻，证据编号 CONSENT-CLONE-001。",
+            "authorized_by": "品牌创始人本人",
+            "valid_from": "2026-07-01T00:00:00+08:00",
+            "expires_at": "2027-07-01T00:00:00+08:00",
+            "confirm_authority": True,
+        },
+    )
+    assert authorization_response.status_code == 201, authorization_response.text
+    authorization = authorization_response.json()
+    base = {
+        **base,
+        "audio_execution": {
+            "voice_clone_version_id": authorization["id"],
+            "speaking_rate": 1.05,
+            "volume": 58,
+        },
+    }
+    valid = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={"command_id": "voice-clone-impact-valid-001", **base},
+    )
+    assert valid.status_code == 201, valid.text
+    assert valid.json()["validation_errors"] == []
+    voice = next(
+        node for node in valid.json()["manifest"]["dag"]["nodes"]
+        if node["node_key"] == "project.voiceover"
+    )["input_contract"]["voice"]
+    assert voice == {
+        "key": "clone.founder_voice.v1",
+        "display_name": "品牌创始人",
+        "provider_voice_id": f"cosyvoice-clone-{project['id']}",
+        "source": "authorized_clone",
+        "voice_clone_version_id": authorization["id"],
+        "authorization_contract_hash": authorization["contract_hash"],
+        "sample_asset_id": sample_id,
+        "sample_content_hash": sample_hash,
+    }
+
+    revoked = client.post(
+        f"/api/v1/projects/{project['id']}/voice-clone-authorizations/{authorization['id']}:revoke",
+        json={
+            "command_id": "voice-clone-impact-revoke-001",
+            "expected_contract_hash": authorization["contract_hash"],
+            "reason": "验证撤销后不能创建新的生产影响分析。",
+            "confirm_revoke": True,
+        },
+    )
+    assert revoked.status_code == 200
+    invalid_revoked = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={"command_id": "voice-clone-impact-revoked-001", **base},
+    ).json()
+    assert "VOICE_CLONE_AUTHORIZATION_INVALID" in {
+        error["code"] for error in invalid_revoked["validation_errors"]
+    }
+
+    with SessionLocal() as session:
+        stored_authorization = session.get(VoiceCloneAuthorizationVersion, authorization["id"])
+        stored_authorization.status = "active"
+        stored_authorization.expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
+        session.commit()
+    invalid_expired = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={"command_id": "voice-clone-impact-expired-001", **base},
+    ).json()
+    assert "VOICE_CLONE_AUTHORIZATION_INVALID" in {
+        error["code"] for error in invalid_expired["validation_errors"]
+    }
+
+    with SessionLocal() as session:
+        stored_authorization = session.get(VoiceCloneAuthorizationVersion, authorization["id"])
+        stored_authorization.expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+        stored_sample = session.get(Asset, sample_id)
+        stored_sample.content_hash = hashlib.sha256(b"changed-clone-sample").hexdigest()
+        session.commit()
+    invalid_sample = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={"command_id": "voice-clone-impact-sample-changed-001", **base},
+    ).json()
+    assert "VOICE_CLONE_AUTHORIZATION_INVALID" in {
+        error["code"] for error in invalid_sample["validation_errors"]
+    }
+
+
 def test_production_planner_proposes_routes_and_requires_explicit_acceptance(client: TestClient) -> None:
     project, plan = create_confirmed_plan(client)
     publish_visual_production_configuration(client, with_pricing=True, command_prefix="production-planner-config")
@@ -4987,6 +5156,236 @@ def test_user_can_exactly_retry_one_failed_production_work_item(client: TestClie
         )
 
 
+def test_dependency_retry_batch_freezes_scope_cost_and_retries_exact_requests(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "batch-retry-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "batch-retry-submit-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    with SessionLocal() as session:
+        items = list(session.scalars(
+            select(WorkItem).where(WorkItem.snapshot_id == snapshot["id"]).order_by(WorkItem.created_at)
+        ))[:2]
+        for item in items:
+            attempt = session.get(WorkAttempt, item.current_attempt_id)
+            item.status = "blocked"
+            item.error = "TEST_EXPLICIT_FAILURE"
+            attempt.state = "blocked"
+            attempt.error_code = "TEST_EXPLICIT_FAILURE"
+        stored_project = session.get(Project, project["id"])
+        stored_snapshot = session.get(ProductionSnapshot, snapshot["id"])
+        stored_project.status = "blocked"
+        stored_project.blocked_from_state = "producing"
+        stored_snapshot.status = "execution_blocked"
+        session.commit()
+        root_ids = [item.id for item in items]
+    analyzed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}/retry-batches:analyze",
+        json={
+            "command_id": "batch-retry-analyze-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "root_work_item_ids": root_ids,
+        },
+    )
+    assert analyzed.status_code == 201, analyzed.text
+    batch = analyzed.json()
+    assert set(batch["retry_work_item_ids"]) == set(root_ids)
+    assert batch["estimated_cost"] > 0
+    assert batch["manifest"]["schema_version"] == "production-retry-batch.v1"
+    replayed_analysis = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}/retry-batches:analyze",
+        json={
+            "command_id": "batch-retry-analyze-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "root_work_item_ids": root_ids,
+        },
+    )
+    assert replayed_analysis.status_code == 201
+    assert replayed_analysis.json()["id"] == batch["id"]
+    denied = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}/retry-batches:authorize",
+        json={
+            "command_id": "batch-retry-denied-001",
+            "retry_batch_id": batch["id"],
+            "expected_analysis_hash": batch["analysis_hash"],
+            "expected_retry_work_item_ids": batch["retry_work_item_ids"],
+            "expected_request_fingerprints": batch["request_fingerprints"],
+            "expected_estimated_cost": batch["estimated_cost"],
+            "expected_currency": batch["currency"],
+            "confirm_additional_cost": False,
+        },
+    )
+    assert denied.status_code == 409
+    authorized = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}/retry-batches:authorize",
+        json={
+            "command_id": "batch-retry-authorize-01",
+            "retry_batch_id": batch["id"],
+            "expected_analysis_hash": batch["analysis_hash"],
+            "expected_retry_work_item_ids": batch["retry_work_item_ids"],
+            "expected_request_fingerprints": batch["request_fingerprints"],
+            "expected_estimated_cost": batch["estimated_cost"],
+            "expected_currency": batch["currency"],
+            "confirm_additional_cost": True,
+        },
+    )
+    assert authorized.status_code == 202, authorized.text
+    result = authorized.json()
+    retried = [item for item in result["work_items"] if item["id"] in root_ids]
+    assert all(item["status"] == "queued" for item in retried)
+    assert all(item["attempts"][-1]["trigger"] == "user_confirmed_dependency_retry" for item in retried)
+    assert all(len(item["attempts"]) == 2 for item in retried)
+    replayed_authorization = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}/retry-batches:authorize",
+        json={
+            "command_id": "batch-retry-authorize-01",
+            "retry_batch_id": batch["id"],
+            "expected_analysis_hash": batch["analysis_hash"],
+            "expected_retry_work_item_ids": batch["retry_work_item_ids"],
+            "expected_request_fingerprints": batch["request_fingerprints"],
+            "expected_estimated_cost": batch["estimated_cost"],
+            "expected_currency": batch["currency"],
+            "confirm_additional_cost": True,
+        },
+    )
+    assert replayed_authorization.status_code == 202
+    replayed_items = [
+        item for item in replayed_authorization.json()["work_items"]
+        if item["id"] in root_ids
+    ]
+    assert all(len(item["attempts"]) == 2 for item in replayed_items)
+
+
+def test_local_subtitle_retry_preserves_exact_request_and_confirms_zero_cost(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "subtitle-retry-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    manifest = {
+        "schema_version": "production-work-request.v3",
+        "snapshot_id": snapshot["id"],
+        "contract_hash": snapshot["contract_hash"],
+        "dag_node_id": "",
+        "node_key": "project.subtitles",
+        "kind": "generate_subtitles",
+        "input_contract": {"cues": [{"timeline_in_ms": 0, "timeline_out_ms": 1000, "text": "精确字幕重试"}]},
+        "output_contract": {"media_type": "subtitle", "format": "srt"},
+        "workflow_slot_version_id": None,
+        "provider_config_version_id": None,
+        "provider": None,
+        "provider_key": "local_subtitle",
+        "adapter_kind": "local_subtitle",
+        "workflow": None,
+        "provider_workflow_id": None,
+        "video_spec": None,
+        "storage_policy": None,
+    }
+    with SessionLocal() as session:
+        node = DAGNode(
+            snapshot_id=snapshot["id"],
+            node_key="project.subtitles",
+            kind="generate_subtitles",
+            input_contract=manifest["input_contract"],
+            output_contract=manifest["output_contract"],
+            workflow_slot_version_id=None,
+            pricing_rule_id=None,
+            pricing_quantity=None,
+            pricing_unit=None,
+            estimated_cost=None,
+            currency=snapshot["currency"],
+        )
+        session.add(node)
+        session.flush()
+        manifest["dag_node_id"] = node.id
+        fingerprint = hashlib.sha256(
+            json.dumps(
+                manifest,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        item = WorkItem(
+            project_id=project["id"],
+            snapshot_id=snapshot["id"],
+            dag_node_id=node.id,
+            kind="generate_subtitles",
+            payload=manifest,
+            status="blocked",
+            error="LOCAL_SUBTITLE_TEST_FAILURE",
+            request_fingerprint=fingerprint,
+        )
+        session.add(item)
+        session.flush()
+        failed = WorkAttempt(
+            work_item_id=item.id,
+            attempt_number=1,
+            trigger="initial_submission",
+            provider="local_subtitle",
+            request_fingerprint=fingerprint,
+            request_manifest=manifest,
+            state="blocked",
+            error_code="LOCAL_SUBTITLE_TEST_FAILURE",
+            error_detail="模拟本地字幕生成失败。",
+        )
+        session.add(failed)
+        session.flush()
+        item.current_attempt_id = failed.id
+        stored_project = session.get(Project, project["id"])
+        stored_snapshot = session.get(ProductionSnapshot, snapshot["id"])
+        stored_project.status = "blocked"
+        stored_project.blocked_from_state = "producing"
+        stored_snapshot.status = "execution_blocked"
+        session.commit()
+        item_id = item.id
+        failed_id = failed.id
+        original_row_version = item.row_version
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}"
+        f"/work-items/{item_id}:retry",
+        json={
+            "command_id": "subtitle-retry-command-001",
+            "actor_id": "local-user",
+            "expected_contract_hash": activated["contract_hash"],
+            "failed_attempt_id": failed_id,
+            "expected_request_fingerprint": fingerprint,
+            "confirm_additional_cost": True,
+        },
+    )
+    assert response.status_code == 202, response.text
+    target = next(item for item in response.json()["work_items"] if item["id"] == item_id)
+    assert target["status"] == "queued"
+    assert target["row_version"] == original_row_version + 1
+    assert len(target["attempts"]) == 2
+    retry_attempt = target["attempts"][-1]
+    assert retry_attempt["attempt_number"] == 2
+    assert retry_attempt["trigger"] == "user_confirmed_retry"
+    assert retry_attempt["request_manifest"] == manifest
+    assert retry_attempt["request_fingerprint"] == fingerprint
+    with SessionLocal() as session:
+        assert session.get(WorkAttempt, failed_id).state == "blocked"
+        retry_cost = session.scalar(select(CostEvent).where(
+            CostEvent.work_attempt_id == retry_attempt["id"],
+        ))
+        assert retry_cost is not None
+        assert retry_cost.provider_operation == "local_subtitles"
+        assert retry_cost.amount == 0
+        assert retry_cost.status == "confirmed"
+
+
 def test_production_retry_rejects_legacy_frozen_provider_contract(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client, adapter_kind="runninghub")
     activated = client.post(
@@ -6420,6 +6819,63 @@ def test_audio_approval_requires_explicit_listening_confirmation(client: TestCli
     )
     assert approved.status_code == 200, approved.text
     assert approved.json()["state"] == "approved"
+
+
+def test_voice_clone_authorization_is_versioned_hashed_and_revocable(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    with SessionLocal() as session:
+        sample_hash = hashlib.sha256(f"{project['id']}-authorized-voice".encode()).hexdigest()
+        sample = Asset(
+            project_id=project["id"], snapshot_id=snapshot["id"], output_index=0,
+            asset_type="audio", role="voice_clone_sample",
+            uri=f"runtime://assets/voice-clones/{project['id']}.wav",
+            storage_backend="local", provider_output_manifest={"authorization_sample": True},
+            content_hash=sample_hash, mime_type="audio/wav", byte_size=1000,
+            duration_ms=5000, state="approved",
+        )
+        session.add(sample)
+        session.commit()
+        sample_id = sample.id
+    base = {
+        "authorization_key": "brand_founder",
+        "sample_asset_id": sample_id,
+        "subject_name": "品牌创始人",
+        "provider_voice_id": f"cosyvoice-clone-{project['id']}",
+        "authorization_basis": "self",
+        "authorization_scope": ["tts", "commercial"],
+        "consent_evidence": "本人签署的声音复刻与商业视频使用授权，证据编号 CONSENT-001。",
+        "authorized_by": "品牌创始人本人",
+        "valid_from": "2026-07-01T00:00:00+08:00",
+        "expires_at": "2027-07-01T00:00:00+08:00",
+    }
+    denied = client.post(
+        f"/api/v1/projects/{project['id']}/voice-clone-authorizations",
+        json={"command_id": "voice-auth-denied-001", **base, "confirm_authority": False},
+    )
+    assert denied.status_code == 409
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/voice-clone-authorizations",
+        json={"command_id": "voice-auth-create-001", **base, "confirm_authority": True},
+    )
+    assert created.status_code == 201, created.text
+    authorization = created.json()
+    assert authorization["version_number"] == 1
+    assert authorization["sample_content_hash"] == sample_hash
+    assert authorization["status"] == "active"
+    assert len(authorization["contract_hash"]) == 64
+    listed = client.get(f"/api/v1/projects/{project['id']}/voice-clone-authorizations").json()
+    assert [row["id"] for row in listed] == [authorization["id"]]
+    revoked = client.post(
+        f"/api/v1/projects/{project['id']}/voice-clone-authorizations/{authorization['id']}:revoke",
+        json={
+            "command_id": "voice-auth-revoke-001",
+            "expected_contract_hash": authorization["contract_hash"],
+            "reason": "授权主体主动终止后续使用",
+            "confirm_revoke": True,
+        },
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["status"] == "revoked"
 
 
 def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(client: TestClient) -> None:

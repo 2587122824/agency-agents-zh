@@ -1,4 +1,4 @@
-import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, WorkItem } from './types'
+import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, VoiceCloneAuthorization, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -148,7 +148,12 @@ export const api = {
       video_workflow_slot_version_id: string
     }>
     tts_workflow_slot_version_id?: string | null
-    audio_execution?: { voice_key: string; speaking_rate: number; volume: number } | null
+    audio_execution?: {
+      voice_key?: string | null
+      voice_clone_version_id?: string | null
+      speaking_rate: number
+      volume: number
+    } | null
     pricing_catalog_version_id?: string | null
   }) => request<ProductionImpactAnalysis>(`/projects/${projectId}/production-impact-analyses`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', ...payload }),
@@ -207,6 +212,80 @@ export const api = {
         failed_attempt_id: item.current_attempt_id,
         expected_request_fingerprint: item.request_fingerprint,
         confirm_additional_cost: true,
+      }),
+    },
+  ),
+  analyzeProductionRetryBatch: (
+    projectId: string,
+    snapshot: { id: string; contract_hash: string },
+    rootWorkItemIds: string[],
+  ) => request<ProductionRetryBatch>(
+    `/projects/${projectId}/production-snapshots/${snapshot.id}/retry-batches:analyze`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        command_id: crypto.randomUUID(),
+        actor_id: 'local-user',
+        expected_contract_hash: snapshot.contract_hash,
+        root_work_item_ids: rootWorkItemIds,
+      }),
+    },
+  ),
+  authorizeProductionRetryBatch: (
+    projectId: string,
+    snapshot: { id: string },
+    batch: ProductionRetryBatch,
+  ) => request<ProductionExecution>(
+    `/projects/${projectId}/production-snapshots/${snapshot.id}/retry-batches:authorize`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        command_id: crypto.randomUUID(),
+        actor_id: 'local-user',
+        retry_batch_id: batch.id,
+        expected_analysis_hash: batch.analysis_hash,
+        expected_retry_work_item_ids: batch.retry_work_item_ids,
+        expected_request_fingerprints: batch.request_fingerprints,
+        expected_estimated_cost: batch.estimated_cost,
+        expected_currency: batch.currency,
+        confirm_additional_cost: true,
+      }),
+    },
+  ),
+  voiceCloneAuthorizations: (projectId: string) => request<VoiceCloneAuthorization[]>(
+    `/projects/${projectId}/voice-clone-authorizations`,
+  ),
+  createVoiceCloneAuthorization: (projectId: string, payload: {
+    authorization_key: string
+    supersedes_version_id?: string | null
+    sample_asset_id: string
+    subject_name: string
+    provider_voice_id: string
+    authorization_basis: 'self' | 'contract' | 'guardian'
+    authorization_scope: string[]
+    consent_evidence: string
+    authorized_by: string
+    valid_from: string
+    expires_at?: string | null
+  }) => request<VoiceCloneAuthorization>(`/projects/${projectId}/voice-clone-authorizations`, {
+    method: 'POST',
+    body: JSON.stringify({
+      command_id: crypto.randomUUID(),
+      actor_id: 'local-user',
+      ...payload,
+      confirm_authority: true,
+    }),
+  }),
+  revokeVoiceCloneAuthorization: (projectId: string, authorization: VoiceCloneAuthorization) => request<VoiceCloneAuthorization>(
+    `/projects/${projectId}/voice-clone-authorizations/${authorization.id}:revoke`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        command_id: crypto.randomUUID(),
+        actor_id: 'local-user',
+        expected_contract_hash: authorization.contract_hash,
+        reason: '用户明确撤销该声音复刻授权，后续制作不得再选择此版本。',
+        confirm_revoke: true,
       }),
     },
   ),

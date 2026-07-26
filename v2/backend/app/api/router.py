@@ -182,11 +182,14 @@ from ..providers.contracts import ProviderReadinessView
 from ..providers.readiness import provider_readiness
 from ..production.contracts import (
     ActivateProductionSnapshot,
+    AnalyzeProductionRetryBatch,
     AnalyzeProductionImpact,
+    AuthorizeProductionRetryBatch,
     ApproveImagePhase,
     BlockedProductionClosedRead,
     CloseBlockedProduction,
     CreateProductionSnapshot,
+    CreateVoiceCloneAuthorization,
     DecideProductionPlanCandidate,
     GenerateProductionPlanCandidate,
     ImpactAnalysisRead,
@@ -196,6 +199,7 @@ from ..production.contracts import (
     ProductionPlanCandidateRead,
     ProductionSnapshotRead,
     RetryProductionWork,
+    RevokeVoiceCloneAuthorization,
     SubmitProduction,
     RetryProductionPlanner,
 )
@@ -209,15 +213,20 @@ from ..production.service import (
     ProductionConflictError,
     ProductionNotFoundError,
     activate_snapshot,
+    analyze_production_retry_batch,
     analyze_impact,
+    authorize_production_retry_batch,
     approve_image_phase,
     close_blocked_production,
     create_snapshot,
+    create_voice_clone_authorization,
     execution_view,
     lock_snapshot,
     preparation_view,
     retry_production_work,
+    revoke_voice_clone_authorization,
     submit_production,
+    voice_clone_authorizations,
 )
 from ..projects.service import (
     ProjectConflictError,
@@ -803,6 +812,81 @@ def production_work_item_retry(
             work_item_id,
             payload,
         )
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots/{snapshot_id}/retry-batches:analyze",
+    status_code=status.HTTP_201_CREATED,
+)
+def production_retry_batch_analyze(
+    project_id: str,
+    snapshot_id: str,
+    payload: AnalyzeProductionRetryBatch,
+    session: Session = Depends(get_session),
+):
+    try:
+        return analyze_production_retry_batch(session, require_project(session, project_id), snapshot_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/production-snapshots/{snapshot_id}/retry-batches:authorize",
+    response_model=ProductionExecutionView,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def production_retry_batch_authorize(
+    project_id: str,
+    snapshot_id: str,
+    payload: AuthorizeProductionRetryBatch,
+    session: Session = Depends(get_session),
+):
+    try:
+        return authorize_production_retry_batch(session, require_project(session, project_id), snapshot_id, payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/voice-clone-authorizations")
+def project_voice_clone_authorizations(project_id: str, session: Session = Depends(get_session)):
+    return voice_clone_authorizations(session, require_project(session, project_id))
+
+
+@router.post("/projects/{project_id}/voice-clone-authorizations", status_code=status.HTTP_201_CREATED)
+def project_voice_clone_authorization_create(
+    project_id: str,
+    payload: CreateVoiceCloneAuthorization,
+    session: Session = Depends(get_session),
+):
+    try:
+        return create_voice_clone_authorization(session, require_project(session, project_id), payload)
+    except ProductionNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProductionConflictError as exc:
+        session.rollback()
+        raise production_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/voice-clone-authorizations/{version_id}:revoke")
+def project_voice_clone_authorization_revoke(
+    project_id: str,
+    version_id: str,
+    payload: RevokeVoiceCloneAuthorization,
+    session: Session = Depends(get_session),
+):
+    try:
+        return revoke_voice_clone_authorization(session, require_project(session, project_id), version_id, payload)
     except ProductionNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ProductionConflictError as exc:

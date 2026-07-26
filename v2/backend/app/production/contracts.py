@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ProductionCommand(BaseModel):
@@ -21,9 +21,52 @@ class ShotWorkflowAssignment(BaseModel):
 
 class AudioExecutionSelection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    voice_key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{1,79}$")
+    voice_key: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_.-]{1,79}$")
+    voice_clone_version_id: str | None = None
     speaking_rate: float = Field(gt=0, le=4)
     volume: int = Field(ge=0, le=100)
+
+    @model_validator(mode="after")
+    def exactly_one_voice_source(self):
+        if (self.voice_key is None) == (self.voice_clone_version_id is None):
+            raise ValueError("exactly one of voice_key or voice_clone_version_id is required")
+        return self
+
+
+class CreateVoiceCloneAuthorization(ProductionCommand):
+    authorization_key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{1,79}$")
+    supersedes_version_id: str | None = None
+    sample_asset_id: str
+    subject_name: str = Field(min_length=1, max_length=160)
+    provider_voice_id: str = Field(min_length=1, max_length=160)
+    authorization_basis: str = Field(pattern=r"^(self|contract|guardian)$")
+    authorization_scope: list[str] = Field(min_length=1, max_length=12)
+    consent_evidence: str = Field(min_length=8, max_length=2000)
+    authorized_by: str = Field(min_length=1, max_length=160)
+    valid_from: datetime
+    expires_at: datetime | None = None
+    confirm_authority: bool
+
+
+class RevokeVoiceCloneAuthorization(ProductionCommand):
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    reason: str = Field(min_length=3, max_length=1000)
+    confirm_revoke: bool
+
+
+class AnalyzeProductionRetryBatch(ProductionCommand):
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    root_work_item_ids: list[str] = Field(min_length=1, max_length=100)
+
+
+class AuthorizeProductionRetryBatch(ProductionCommand):
+    retry_batch_id: str
+    expected_analysis_hash: str = Field(min_length=64, max_length=64)
+    expected_retry_work_item_ids: list[str] = Field(min_length=1, max_length=100)
+    expected_request_fingerprints: dict[str, str]
+    expected_estimated_cost: Decimal = Field(ge=0, max_digits=18, decimal_places=6)
+    expected_currency: str = Field(pattern=r"^[A-Z]{3,12}$")
+    confirm_additional_cost: bool
 
 
 class GenerateProductionPlanCandidate(ProductionCommand):
@@ -264,6 +307,7 @@ class ProductionPreparationView(BaseModel):
     project_id: str
     active_plan_id: str | None
     audio_mode: str
+    voice_clone_authorizations: list[dict]
     published_configurations: list[PublishedConfigChoice]
     analyses: list[ImpactAnalysisRead]
     current_snapshot: ProductionSnapshotRead | None

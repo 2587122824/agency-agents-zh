@@ -7,6 +7,7 @@ from datetime import timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import PurePath, PurePosixPath
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import RUNTIME_ROOT
@@ -14,11 +15,13 @@ from ..creation.service import detect_media_type
 from ..db.models import (
     ConfigurationReference,
     CostEvent,
+    Asset,
     DAGNode,
     DependencyEdge,
     PlanVersion,
     ProductionConfigVersion,
     ProductionImpactAnalysis,
+    ProductionRetryBatch,
     ProductionSnapshot,
     PricingCatalogVersion,
     ProviderConfigVersion,
@@ -31,6 +34,7 @@ from ..db.models import (
     WorkflowSlotVersion,
     WorkAttempt,
     WorkItem,
+    VoiceCloneAuthorizationVersion,
     utc_now,
 )
 from ..repositories import (
@@ -42,12 +46,16 @@ from ..repositories import (
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from .contracts import (
     ActivateProductionSnapshot,
+    AnalyzeProductionRetryBatch,
     AnalyzeProductionImpact,
+    AuthorizeProductionRetryBatch,
     ApproveImagePhase,
     CloseBlockedProduction,
     CreateProductionSnapshot,
+    CreateVoiceCloneAuthorization,
     LockProductionSnapshot,
     RetryProductionWork,
+    RevokeVoiceCloneAuthorization,
     ShotWorkflowAssignment,
     SubmitProduction,
 )
@@ -88,6 +96,150 @@ def _utc(value):
     if value is None:
         return None
     return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc)
+
+
+def voice_clone_read(row: VoiceCloneAuthorizationVersion) -> dict:
+    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+
+
+def voice_clone_authorizations(session: Session, project: Project) -> list[dict]:
+    rows = session.scalars(
+        select(VoiceCloneAuthorizationVersion)
+        .where(VoiceCloneAuthorizationVersion.project_id == project.id)
+        .order_by(
+            VoiceCloneAuthorizationVersion.authorization_key,
+            VoiceCloneAuthorizationVersion.version_number.desc(),
+        )
+    ).all()
+    return [voice_clone_read(row) for row in rows]
+
+
+def create_voice_clone_authorization(
+    session: Session,
+    project: Project,
+    payload: CreateVoiceCloneAuthorization,
+) -> dict:
+    command_type = "voice_clone.authorization.create"
+    receipt = _receipt(session, project.id, payload.command_id, command_type)
+    if receipt:
+        row = session.get(VoiceCloneAuthorizationVersion, receipt.result_id)
+        if not row:
+            raise ProductionConflictError("COMMAND_RESULT_MISSING", "声音授权命令结果不存在。")
+        return voice_clone_read(row)
+    if not payload.confirm_authority:
+        raise ProductionConflictError("VOICE_CLONE_AUTHORITY_CONFIRMATION_REQUIRED", "必须明确确认有权授权该声音样本用于复刻。")
+    scopes = sorted(set(payload.authorization_scope))
+    if len(scopes) != len(payload.authorization_scope) or not set(scopes) <= {"tts", "preview", "commercial", "internal"} or "tts" not in scopes:
+        raise ProductionConflictError("VOICE_CLONE_SCOPE_INVALID", "声音授权范围必须唯一、受支持且包含 tts。")
+    valid_from = _utc(payload.valid_from)
+    expires_at = _utc(payload.expires_at)
+    if expires_at is not None and expires_at <= valid_from:
+        raise ProductionConflictError("VOICE_CLONE_VALIDITY_INVALID", "声音授权到期时间必须晚于生效时间。")
+    if expires_at is not None and expires_at <= utc_now():
+        raise ProductionConflictError("VOICE_CLONE_AUTHORIZATION_EXPIRED", "不能登记已经过期的声音授权。")
+    asset = session.get(Asset, payload.sample_asset_id)
+    if (
+        not asset
+        or asset.project_id != project.id
+        or asset.asset_type != "audio"
+        or asset.state not in {"approved", "used"}
+        or not asset.content_hash
+    ):
+        raise ProductionConflictError("VOICE_CLONE_SAMPLE_INVALID", "声音复刻样本必须是当前项目已批准且具有哈希的音频素材。")
+    existing = session.scalars(
+        select(VoiceCloneAuthorizationVersion)
+        .where(
+            VoiceCloneAuthorizationVersion.project_id == project.id,
+            VoiceCloneAuthorizationVersion.authorization_key == payload.authorization_key,
+        )
+        .order_by(VoiceCloneAuthorizationVersion.version_number.desc())
+    ).all()
+    latest = existing[0] if existing else None
+    if latest and payload.supersedes_version_id != latest.id:
+        raise ProductionConflictError("VOICE_CLONE_SUPERSEDES_REQUIRED", "已有声音授权时必须显式从最新版本创建新版本。")
+    if not latest and payload.supersedes_version_id is not None:
+        raise ProductionConflictError("VOICE_CLONE_SUPERSEDES_INVALID", "首个声音授权版本不能声明被替代版本。")
+    if latest and latest.status == "active":
+        latest.status = "superseded"
+    manifest = {
+        "schema_version": "voice-clone-authorization.v1",
+        "project_id": project.id,
+        "authorization_key": payload.authorization_key,
+        "version_number": (latest.version_number + 1) if latest else 1,
+        "supersedes_version_id": latest.id if latest else None,
+        "sample_asset_id": asset.id,
+        "sample_content_hash": asset.content_hash,
+        "subject_name": payload.subject_name,
+        "provider_voice_id": payload.provider_voice_id,
+        "authorization_basis": payload.authorization_basis,
+        "authorization_scope": scopes,
+        "consent_evidence": payload.consent_evidence,
+        "authorized_by": payload.authorized_by,
+        "valid_from": valid_from.isoformat(),
+        "expires_at": expires_at.isoformat() if expires_at else None,
+    }
+    row = VoiceCloneAuthorizationVersion(
+        project_id=project.id,
+        authorization_key=payload.authorization_key,
+        version_number=manifest["version_number"],
+        supersedes_version_id=latest.id if latest else None,
+        sample_asset_id=asset.id,
+        sample_content_hash=asset.content_hash,
+        subject_name=payload.subject_name,
+        provider_voice_id=payload.provider_voice_id,
+        authorization_basis=payload.authorization_basis,
+        authorization_scope=scopes,
+        consent_evidence=payload.consent_evidence,
+        authorized_by=payload.authorized_by,
+        valid_from=valid_from,
+        expires_at=expires_at,
+        status="active",
+        contract_hash=_hash(manifest),
+        created_by=payload.actor_id,
+    )
+    session.add(row)
+    session.flush()
+    _save_receipt(session, project.id, payload.command_id, command_type, "voice_clone_authorization", row.id)
+    _event(session, ProjectEvent(
+        project_id=project.id,
+        snapshot_id=None,
+        event_type="voice_clone.authorization_created.v1",
+        aggregate_type="voice_clone_authorization",
+        aggregate_id=row.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
+        message="An immutable authorized voice clone version was created.",
+        data={"voice_clone_version_id": row.id, "contract_hash": row.contract_hash, "sample_asset_id": asset.id},
+    ))
+    session.commit()
+    return voice_clone_read(row)
+
+
+def revoke_voice_clone_authorization(
+    session: Session,
+    project: Project,
+    version_id: str,
+    payload: RevokeVoiceCloneAuthorization,
+) -> dict:
+    row = session.get(VoiceCloneAuthorizationVersion, version_id)
+    if not row or row.project_id != project.id:
+        raise ProductionNotFoundError("Voice clone authorization not found")
+    if row.status != "active" or row.contract_hash != payload.expected_contract_hash:
+        raise ProductionConflictError("VOICE_CLONE_AUTHORIZATION_CHANGED", "声音授权版本已变化或不再有效。")
+    if not payload.confirm_revoke:
+        raise ProductionConflictError("VOICE_CLONE_REVOKE_CONFIRMATION_REQUIRED", "必须明确确认撤销声音授权。")
+    row.status = "revoked"
+    row.revoked_at = utc_now()
+    _event(session, ProjectEvent(
+        project_id=project.id, snapshot_id=None, event_type="voice_clone.authorization_revoked.v1",
+        aggregate_type="voice_clone_authorization", aggregate_id=row.id, actor_type="user",
+        actor_id=payload.actor_id, causation_id=payload.command_id,
+        message="Voice clone authorization was revoked without mutating historical snapshots.",
+        data={"reason": payload.reason, "contract_hash": row.contract_hash},
+    ))
+    session.commit()
+    return voice_clone_read(row)
 
 
 def _receipt(session: Session, project_id: str, command_id: str, command_type: str):
@@ -684,12 +836,30 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
             for item in (audio_config.voice_presets or [])
             if isinstance(item, dict)
         }
-        preset = presets.get(payload.audio_execution.voice_key)
-        if not preset:
+        preset = presets.get(payload.audio_execution.voice_key) if payload.audio_execution.voice_key else None
+        clone = session.get(VoiceCloneAuthorizationVersion, payload.audio_execution.voice_clone_version_id) if payload.audio_execution.voice_clone_version_id else None
+        clone_asset = session.get(Asset, clone.sample_asset_id) if clone else None
+        if payload.audio_execution.voice_key and not preset:
             errors.append({
                 "code": "VOICE_PRESET_NOT_IN_AUDIO_CONFIG",
                 "path": "audio_execution.voice_key",
                 "message": "所选音色不在当前已发布音频合同中。",
+            })
+        if payload.audio_execution.voice_clone_version_id and (
+            not clone
+            or clone.project_id != project.id
+            or clone.status != "active"
+            or _utc(clone.valid_from) > utc_now()
+            or (clone.expires_at is not None and _utc(clone.expires_at) <= utc_now())
+            or "tts" not in clone.authorization_scope
+            or not clone_asset
+            or clone_asset.content_hash != clone.sample_content_hash
+            or clone_asset.state not in {"approved", "used"}
+        ):
+            errors.append({
+                "code": "VOICE_CLONE_AUTHORIZATION_INVALID",
+                "path": "audio_execution.voice_clone_version_id",
+                "message": "所选声音复刻版本未生效、已过期/撤销或样本事实已变化。",
             })
         rate_range = audio_config.speaking_rate_range or {}
         if not (
@@ -713,15 +883,25 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
                 "path": "audio_execution.volume",
                 "message": "音量超出当前已发布音频合同范围。",
             })
-        if preset:
+        if preset or (clone and not any(error["code"] == "VOICE_CLONE_AUTHORIZATION_INVALID" for error in errors)):
+            voice = {
+                "key": preset["key"],
+                "display_name": preset["display_name"],
+                "provider_voice_id": preset["provider_voice_id"],
+            } if preset else {
+                "key": f"clone.{clone.authorization_key}.v{clone.version_number}",
+                "display_name": clone.subject_name,
+                "provider_voice_id": clone.provider_voice_id,
+                "source": "authorized_clone",
+                "voice_clone_version_id": clone.id,
+                "authorization_contract_hash": clone.contract_hash,
+                "sample_asset_id": clone.sample_asset_id,
+                "sample_content_hash": clone.sample_content_hash,
+            }
             frozen_audio_execution = {
-                "schema_version": "audio-execution-selection.v1",
+                "schema_version": "audio-execution-selection.v2",
                 "audio_config_version_id": audio_config.id,
-                "voice": {
-                    "key": preset["key"],
-                    "display_name": preset["display_name"],
-                    "provider_voice_id": preset["provider_voice_id"],
-                },
+                "voice": voice,
                 "speaking_rate": payload.audio_execution.speaking_rate,
                 "volume": payload.audio_execution.volume,
                 "target_duration_ms": sum(
@@ -1626,19 +1806,21 @@ def retry_production_work(
 
     node = repository.component(DAGNode, item.dag_node_id)
     workflow = repository.workflow(node.workflow_slot_version_id) if node and node.workflow_slot_version_id else None
-    if not node or not workflow or node.estimated_cost is None or not snapshot.currency:
+    zero_cost_local_subtitle = bool(node and node.kind == "generate_subtitles" and node.workflow_slot_version_id is None)
+    if not node or (not workflow and not zero_cost_local_subtitle) or (node.estimated_cost is None and not zero_cost_local_subtitle) or not snapshot.currency:
         raise ProductionConflictError(
             "PRODUCTION_RETRY_COST_NOT_CONFIGURED",
             "该步骤没有可确认的重跑费用，不能提交。",
         )
+    retry_cost = float(node.estimated_cost or 0)
     repository.add(CostEvent(
         project_id=project.id,
         snapshot_id=snapshot.id,
         work_attempt_id=attempt.id,
         provider=failed.provider,
-        provider_operation=workflow.slot_key,
+        provider_operation=workflow.slot_key if workflow else "local_subtitles",
         kind="estimated",
-        amount=node.estimated_cost,
+        amount=retry_cost,
         currency=snapshot.currency,
         status="confirmed",
     ))
@@ -1689,9 +1871,248 @@ def retry_production_work(
             "failed_attempt_id": failed.id,
             "retry_attempt_id": attempt.id,
             "request_fingerprint": attempt.request_fingerprint,
-            "estimated_cost": node.estimated_cost,
+            "estimated_cost": retry_cost,
             "currency": snapshot.currency,
         },
+    ))
+    session.commit()
+    return execution_view(session, project)
+
+
+def retry_batch_read(row: ProductionRetryBatch) -> dict:
+    return {column.name: getattr(row, column.name) for column in row.__table__.columns}
+
+
+def analyze_production_retry_batch(
+    session: Session,
+    project: Project,
+    snapshot_id: str,
+    payload: AnalyzeProductionRetryBatch,
+) -> dict:
+    command_type = "production.retry_batch.analyze"
+    receipt = _receipt(session, project.id, payload.command_id, command_type)
+    if receipt:
+        row = session.get(ProductionRetryBatch, receipt.result_id)
+        if not row:
+            raise ProductionConflictError("COMMAND_RESULT_MISSING", "批量重试分析命令结果不存在。")
+        return retry_batch_read(row)
+    repository = _production(session)
+    snapshot = repository.snapshot(snapshot_id)
+    if (
+        not snapshot
+        or snapshot.project_id != project.id
+        or project.active_snapshot_id != snapshot.id
+        or project.status != "blocked"
+        or snapshot.status != "execution_blocked"
+    ):
+        raise ProductionConflictError("PRODUCTION_RETRY_SNAPSHOT_NOT_BLOCKED", "只能分析当前已暂停制作方案的依赖级重试。")
+    if snapshot.contract_hash != payload.expected_contract_hash:
+        raise ProductionConflictError("SNAPSHOT_CONTRACT_HASH_MISMATCH", "制作方案合同已经变化。")
+    root_ids = list(dict.fromkeys(payload.root_work_item_ids))
+    if len(root_ids) != len(payload.root_work_item_ids):
+        raise ProductionConflictError("RETRY_BATCH_ROOT_DUPLICATE", "批量重试根步骤不能重复。")
+    items = repository.work_items(snapshot.id)
+    items_by_id = {item.id: item for item in items}
+    roots = [items_by_id.get(item_id) for item_id in root_ids]
+    if any(item is None or item.status != "blocked" for item in roots):
+        raise ProductionConflictError("RETRY_BATCH_ROOT_INVALID", "所有批量重试根步骤都必须是当前明确失败步骤。")
+    nodes = repository.snapshot_nodes(snapshot.id, ordered=True)
+    nodes_by_id = {node.id: node for node in nodes}
+    edges = repository.snapshot_edges(snapshot.id)
+    affected_node_ids = {item.dag_node_id for item in roots if item}
+    changed = True
+    while changed:
+        changed = False
+        for edge in edges:
+            if edge.parent_node_id in affected_node_ids and edge.child_node_id not in affected_node_ids:
+                affected_node_ids.add(edge.child_node_id)
+                changed = True
+    retry_items = [
+        item for item in items
+        if item.dag_node_id in affected_node_ids and item.status == "blocked"
+    ]
+    attempts = {attempt.id: attempt for attempt in repository.work_attempts([item.id for item in retry_items])}
+    manifest_items = []
+    total = Decimal("0")
+    for item in retry_items:
+        failed = attempts.get(item.current_attempt_id)
+        node = nodes_by_id.get(item.dag_node_id)
+        if (
+            not failed
+            or failed.state != "blocked"
+            or failed.error_code in {
+                "RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN",
+                "PROVIDER_SUBMISSION_RECONCILIATION_REQUIRED",
+                "COSYVOICE_SUBMISSION_OUTCOME_UNKNOWN",
+            }
+            or item.payload != failed.request_manifest
+            or item.request_fingerprint != failed.request_fingerprint
+            or _hash(failed.request_manifest) != item.request_fingerprint
+            or not node
+            or (node.estimated_cost is None and node.kind != "generate_subtitles")
+        ):
+            raise ProductionConflictError("RETRY_BATCH_ITEM_NOT_EXACT", "批量范围包含无法精确重跑或费用未知的步骤。")
+        retry_cost = float(node.estimated_cost or 0)
+        total += Decimal(str(retry_cost))
+        manifest_items.append({
+            "work_item_id": item.id,
+            "dag_node_id": item.dag_node_id,
+            "node_key": node.node_key,
+            "kind": node.kind,
+            "failed_attempt_id": failed.id,
+            "request_fingerprint": item.request_fingerprint,
+            "estimated_cost": retry_cost,
+        })
+    if not manifest_items:
+        raise ProductionConflictError("RETRY_BATCH_EMPTY", "依赖范围内没有可精确重跑的失败步骤。")
+    preserved_assets = [
+        asset.id for asset in repository.snapshot_assets(snapshot.id)
+        if asset.state in {"approved", "used"} and asset.dag_node_id not in {item.dag_node_id for item in retry_items}
+    ]
+    manifest = {
+        "schema_version": "production-retry-batch.v1",
+        "project_id": project.id,
+        "snapshot_id": snapshot.id,
+        "snapshot_contract_hash": snapshot.contract_hash,
+        "root_work_item_ids": root_ids,
+        "retry_items": manifest_items,
+        "affected_node_ids": sorted(affected_node_ids),
+        "preserved_asset_ids": sorted(preserved_assets),
+        "estimated_cost": float(_money(total)),
+        "currency": snapshot.currency,
+    }
+    row = ProductionRetryBatch(
+        project_id=project.id,
+        snapshot_id=snapshot.id,
+        status="analyzed",
+        root_work_item_ids=root_ids,
+        retry_work_item_ids=[item["work_item_id"] for item in manifest_items],
+        affected_node_ids=manifest["affected_node_ids"],
+        preserved_asset_ids=manifest["preserved_asset_ids"],
+        request_fingerprints={item["work_item_id"]: item["request_fingerprint"] for item in manifest_items},
+        estimated_cost=float(_money(total)),
+        currency=snapshot.currency,
+        manifest=manifest,
+        analysis_hash=_hash(manifest),
+        created_by=payload.actor_id,
+    )
+    session.add(row)
+    session.flush()
+    _save_receipt(
+        session, project.id, payload.command_id, command_type,
+        "production_retry_batch", row.id,
+    )
+    _event(session, ProjectEvent(
+        project_id=project.id, snapshot_id=snapshot.id, event_type="production.retry_batch_analyzed.v1",
+        aggregate_type="production_retry_batch", aggregate_id=row.id, actor_type="user",
+        actor_id=payload.actor_id, causation_id=payload.command_id,
+        message="Dependency-level retry scope and cost were frozen for confirmation.",
+        data={"analysis_hash": row.analysis_hash, "retry_work_item_ids": row.retry_work_item_ids, "estimated_cost": row.estimated_cost},
+    ))
+    session.commit()
+    return retry_batch_read(row)
+
+
+def authorize_production_retry_batch(
+    session: Session,
+    project: Project,
+    snapshot_id: str,
+    payload: AuthorizeProductionRetryBatch,
+) -> dict:
+    command_type = "production.retry_batch.authorize"
+    receipt = _receipt(session, project.id, payload.command_id, command_type)
+    if receipt:
+        return execution_view(session, project)
+    repository = _production(session)
+    snapshot = repository.snapshot(snapshot_id)
+    batch = session.get(ProductionRetryBatch, payload.retry_batch_id)
+    if (
+        not snapshot or snapshot.project_id != project.id
+        or not batch or batch.project_id != project.id or batch.snapshot_id != snapshot.id
+        or batch.status != "analyzed"
+        or project.active_snapshot_id != snapshot.id
+        or project.status != "blocked"
+        or snapshot.status != "execution_blocked"
+        or batch.manifest.get("snapshot_contract_hash") != snapshot.contract_hash
+    ):
+        raise ProductionConflictError("RETRY_BATCH_NOT_AVAILABLE", "批量重试分析不存在或已处理。")
+    if not payload.confirm_additional_cost:
+        raise ProductionConflictError("PRODUCTION_RETRY_COST_CONFIRMATION_REQUIRED", "必须明确确认批量重试附加费用。")
+    if (
+        batch.analysis_hash != payload.expected_analysis_hash
+        or batch.retry_work_item_ids != payload.expected_retry_work_item_ids
+        or batch.request_fingerprints != payload.expected_request_fingerprints
+        or Decimal(str(batch.estimated_cost)) != payload.expected_estimated_cost
+        or batch.currency != payload.expected_currency
+    ):
+        raise ProductionConflictError("RETRY_BATCH_ANALYSIS_CHANGED", "批量重试范围、请求指纹或费用已变化。")
+    items_by_id = {item.id: item for item in repository.work_items(snapshot.id)}
+    attempts_by_id = {
+        attempt.id: attempt
+        for attempt in repository.work_attempts(batch.retry_work_item_ids)
+    }
+    now = utc_now()
+    new_attempt_ids = []
+    for manifest_item in batch.manifest["retry_items"]:
+        item = items_by_id.get(manifest_item["work_item_id"])
+        failed = attempts_by_id.get(manifest_item["failed_attempt_id"])
+        if (
+            not item or item.status != "blocked" or item.current_attempt_id != manifest_item["failed_attempt_id"]
+            or not failed or failed.state != "blocked"
+            or item.request_fingerprint != manifest_item["request_fingerprint"]
+            or failed.request_fingerprint != manifest_item["request_fingerprint"]
+            or item.payload != failed.request_manifest
+            or _hash(failed.request_manifest) != manifest_item["request_fingerprint"]
+            or failed.error_code in {
+                "RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN",
+                "PROVIDER_SUBMISSION_RECONCILIATION_REQUIRED",
+                "COSYVOICE_SUBMISSION_OUTCOME_UNKNOWN",
+            }
+        ):
+            raise ProductionConflictError("RETRY_BATCH_ITEM_CHANGED", "批量重试中的失败步骤已变化。")
+        item_attempts = repository.work_attempts([item.id])
+        attempt = WorkAttempt(
+            work_item_id=item.id,
+            attempt_number=max(row.attempt_number for row in item_attempts) + 1,
+            trigger="user_confirmed_dependency_retry",
+            provider=failed.provider,
+            request_fingerprint=failed.request_fingerprint,
+            request_manifest=failed.request_manifest,
+            state="created",
+        )
+        repository.add(attempt)
+        repository.flush()
+        repository.add(CostEvent(
+            project_id=project.id, snapshot_id=snapshot.id, work_attempt_id=attempt.id,
+            provider=failed.provider, provider_operation=manifest_item["node_key"],
+            kind="estimated", amount=manifest_item["estimated_cost"], currency=batch.currency, status="confirmed",
+        ))
+        item.status = "queued"
+        item.error = None
+        item.current_attempt_id = attempt.id
+        item.available_at = now
+        item.started_at = None
+        item.finished_at = None
+        item.row_version += 1
+        new_attempt_ids.append(attempt.id)
+    batch.status = "authorized"
+    batch.authorized_at = now
+    snapshot.status = "submitted"
+    _save_receipt(
+        session, project.id, payload.command_id, command_type,
+        "production_retry_batch", batch.id,
+    )
+    transition_project(
+        session, project, ProjectStateTrigger.PRODUCTION_RETRY_AUTHORIZED,
+        actor_type="user", actor_id=payload.actor_id,
+        event_data={"snapshot_id": snapshot.id, "retry_batch_id": batch.id, "retry_attempt_ids": new_attempt_ids},
+    )
+    _event(session, ProjectEvent(
+        project_id=project.id, snapshot_id=snapshot.id, event_type="production.retry_batch_authorized.v1",
+        aggregate_type="production_retry_batch", aggregate_id=batch.id, actor_type="user",
+        actor_id=payload.actor_id, causation_id=payload.command_id,
+        message="Dependency-level exact retries were authorized after scope and cost confirmation.",
+        data={"retry_attempt_ids": new_attempt_ids, "preserved_asset_ids": batch.preserved_asset_ids, "estimated_cost": batch.estimated_cost, "currency": batch.currency},
     ))
     session.commit()
     return execution_view(session, project)
@@ -2029,6 +2450,15 @@ def preparation_view(session: Session, project: Project) -> dict:
         "project_id": project.id,
         "active_plan_id": active_plan.id if active_plan else None,
         "audio_mode": str(active_plan.creative_brief.get("audio_mode", "")) if active_plan else "",
+        "voice_clone_authorizations": [
+            voice_clone_read(row)
+            for row in session.scalars(
+                select(VoiceCloneAuthorizationVersion).where(
+                    VoiceCloneAuthorizationVersion.project_id == project.id,
+                    VoiceCloneAuthorizationVersion.status == "active",
+                ).order_by(VoiceCloneAuthorizationVersion.authorization_key, VoiceCloneAuthorizationVersion.version_number.desc())
+            ).all()
+        ],
         "published_configurations": choices,
         "analyses": [_impact_dict(item) for item in analyses],
         "current_snapshot": (

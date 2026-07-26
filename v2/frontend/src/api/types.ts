@@ -621,6 +621,35 @@ export interface ProductionExecution {
   }>
 }
 
+export interface ProductionRetryBatch {
+  id: string
+  project_id: string
+  snapshot_id: string
+  status: 'analyzed' | 'authorized'
+  root_work_item_ids: string[]
+  retry_work_item_ids: string[]
+  affected_node_ids: string[]
+  preserved_asset_ids: string[]
+  request_fingerprints: Record<string, string>
+  estimated_cost: number
+  currency: string
+  manifest: {
+    schema_version: 'production-retry-batch.v1'
+    retry_items: Array<{
+      work_item_id: string
+      dag_node_id: string
+      node_key: string
+      kind: string
+      failed_attempt_id: string
+      request_fingerprint: string
+      estimated_cost: number
+    }>
+    affected_node_ids: string[]
+    preserved_asset_ids: string[]
+  }
+  analysis_hash: string
+}
+
 export interface BlockedProductionClosed {
   project_id: string
   project_status: string
@@ -852,6 +881,7 @@ export interface ProductionPreparation {
   project_id: string
   active_plan_id: string | null
   audio_mode: string
+  voice_clone_authorizations: VoiceCloneAuthorization[]
   published_configurations: Array<{
     id: string
     config_key: string
@@ -881,6 +911,28 @@ export interface ProductionPreparation {
   production_plan_candidates: ProductionPlanCandidate[]
   latest_production_planner_run: AgentRun | null
   next_action: { code: string; label: string; incurs_production_cost: boolean }
+}
+
+export interface VoiceCloneAuthorization {
+  id: string
+  project_id: string
+  authorization_key: string
+  version_number: number
+  supersedes_version_id: string | null
+  sample_asset_id: string
+  sample_content_hash: string
+  subject_name: string
+  provider_voice_id: string
+  authorization_basis: 'self' | 'contract' | 'guardian'
+  authorization_scope: string[]
+  consent_evidence: string
+  authorized_by: string
+  valid_from: string
+  expires_at: string | null
+  status: 'active' | 'superseded' | 'revoked'
+  contract_hash: string
+  revoked_at: string | null
+  created_at: string
 }
 
 export interface ProductionPlanCandidate {

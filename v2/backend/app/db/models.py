@@ -167,6 +167,56 @@ class WorkAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class VoiceCloneAuthorizationVersion(Base):
+    __tablename__ = "voice_clone_authorization_versions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "authorization_key", "version_number"),
+        UniqueConstraint("provider_voice_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("voice_auth"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    authorization_key: Mapped[str] = mapped_column(String(80), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    supersedes_version_id: Mapped[str | None] = mapped_column(ForeignKey("voice_clone_authorization_versions.id"), nullable=True)
+    sample_asset_id: Mapped[str] = mapped_column(ForeignKey("assets.id"), index=True)
+    sample_content_hash: Mapped[str] = mapped_column(String(64))
+    subject_name: Mapped[str] = mapped_column(String(160))
+    provider_voice_id: Mapped[str] = mapped_column(String(160))
+    authorization_basis: Mapped[str] = mapped_column(String(32))
+    authorization_scope: Mapped[list] = mapped_column(JSON)
+    consent_evidence: Mapped[str] = mapped_column(Text)
+    authorized_by: Mapped[str] = mapped_column(String(160))
+    valid_from: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(24), default="active", index=True)
+    contract_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by: Mapped[str] = mapped_column(String(48))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ProductionRetryBatch(Base):
+    __tablename__ = "production_retry_batches"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("retry_batch"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    status: Mapped[str] = mapped_column(String(24), default="analyzed", index=True)
+    root_work_item_ids: Mapped[list] = mapped_column(JSON)
+    retry_work_item_ids: Mapped[list] = mapped_column(JSON)
+    affected_node_ids: Mapped[list] = mapped_column(JSON)
+    preserved_asset_ids: Mapped[list] = mapped_column(JSON)
+    request_fingerprints: Mapped[dict] = mapped_column(JSON)
+    estimated_cost: Mapped[float] = mapped_column()
+    currency: Mapped[str] = mapped_column(String(12))
+    manifest: Mapped[dict] = mapped_column(JSON)
+    analysis_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by: Mapped[str] = mapped_column(String(48))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    authorized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Asset(Base):
     __tablename__ = "assets"
     __table_args__ = (

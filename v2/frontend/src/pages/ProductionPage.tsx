@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { ExecutionWorkItem, ProductionAsset, ProductionExecution } from '../api/types'
+import type { ExecutionWorkItem, ProductionAsset, ProductionExecution, ProductionRetryBatch } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import { assetRevisionSummary } from '../presentation/assetRevision'
 import { blockerPresentation } from '../presentation/projectFacts'
@@ -89,6 +89,7 @@ export function ProductionPage() {
   const [projectId, setProjectId] = useState(() => searchParams.get('project') ?? '')
   const [confirmCloseBlocked, setConfirmCloseBlocked] = useState(false)
   const [retryChoice, setRetryChoice] = useState<ExecutionWorkItem | null>(null)
+  const [retryBatch, setRetryBatch] = useState<ProductionRetryBatch | null>(null)
   const revisionRequestId = searchParams.get('revisionRequest') ?? ''
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const execution = useQuery({
@@ -148,6 +149,30 @@ export function ProductionPage() {
       ])
     },
   })
+  const analyzeRetryBatch = useMutation({
+    mutationFn: (item: ExecutionWorkItem) => api.analyzeProductionRetryBatch(
+      projectId,
+      execution.data!.snapshot!,
+      [item.id],
+    ),
+    onSuccess: batch => setRetryBatch(batch),
+  })
+  const authorizeRetryBatch = useMutation({
+    mutationFn: () => api.authorizeProductionRetryBatch(
+      projectId,
+      execution.data!.snapshot!,
+      retryBatch!,
+    ),
+    onSuccess: async () => {
+      setRetryBatch(null)
+      setRetryChoice(null)
+      await Promise.all([
+        client.invalidateQueries({ queryKey: ['projects'] }),
+        client.invalidateQueries({ queryKey: ['production-execution', projectId] }),
+        client.invalidateQueries({ queryKey: ['project-control', projectId] }),
+      ])
+    },
+  })
   const productionProjects = projects.data?.filter(project => ['production_ready', 'producing', 'quality_review', 'blocked'].includes(project.status)) ?? []
   return <>
     <PageHeader eyebrow="PRODUCTION" title="素材制作" description="查看每项素材的制作进度，以及当前需要处理的问题。" actions={<button className="secondaryButton" onClick={refresh}><RefreshCw size={14} />刷新</button>} />
@@ -180,6 +205,7 @@ export function ProductionPage() {
           {approveImagePhase.error && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>图片阶段确认失败</strong><span>{approveImagePhase.error.message}</span></div></div>}
           {closeBlockedProduction.error && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>返回制作准备失败</strong><span>{closeBlockedProduction.error.message}</span></div></div>}
           {retryProductionWork.error && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>重跑失败</strong><span>{retryProductionWork.error.message}</span></div></div>}
+          {(analyzeRetryBatch.error || authorizeRetryBatch.error) && <div className={styles.blocker}><AlertTriangle size={16} /><div><strong>依赖重试失败</strong><span>{analyzeRetryBatch.error?.message || authorizeRetryBatch.error?.message}</span></div></div>}
           {execution.data && <>
             <header className={styles.executionHeader}><div><span>制作方案 {execution.data.snapshot?.snapshot_number ?? '-'}</span><h2>{label(execution.data.project_status, statusLabels, '制作状态待确认')}</h2></div><div><strong>{execution.data.work_items.filter(item => item.status === 'completed').length}/{execution.data.work_items.length}</strong><small>已完成步骤</small></div></header>
             {execution.data.project_status === 'blocked' && execution.data.snapshot?.status === 'execution_blocked' && <div className={styles.recoveryAction} data-confirming={confirmCloseBlocked}>
@@ -210,12 +236,32 @@ export function ProductionPage() {
 
       <aside className={styles.notice}><strong>执行边界</strong><p>系统只使用制作方案中已确认的工作流。图片审核不会自动放行视频，也不会自动重做、替换生成方案或重复调用付费服务。</p></aside>
     </div>
-    {retryChoice && execution.data?.snapshot && <div className={styles.retryModal}>
+    {retryChoice && execution.data?.snapshot && !retryBatch && <div className={styles.retryModal}>
       <section>
         <header><RotateCcw /><div><span>精确重跑</span><h2>重新执行 {retryChoice.node_key}</h2></div></header>
         <p>系统将复用上次失败时冻结的工作流、节点映射和输入，不会修改提示词、切换供应商或更换工作流。</p>
-        <small>本操作会再次调用生成服务并产生该步骤的供应商费用。旧失败记录会完整保留。</small>
-        <footer><button className="secondaryButton" onClick={() => setRetryChoice(null)}>取消</button><button className="primaryButton" disabled={retryProductionWork.isPending} onClick={() => retryProductionWork.mutate(retryChoice)}>{retryProductionWork.isPending ? '正在提交…' : '确认费用并重跑'}</button></footer>
+        <small>你可以只重跑当前步骤，也可以先分析其下游依赖范围。分析不会执行任务或产生费用；授权后只创建清单中冻结的精确请求。</small>
+        <footer><button className="secondaryButton" onClick={() => setRetryChoice(null)}>取消</button><button className="secondaryButton" disabled={analyzeRetryBatch.isPending} onClick={() => analyzeRetryBatch.mutate(retryChoice)}>{analyzeRetryBatch.isPending ? '正在分析…' : '分析依赖重试范围'}</button><button className="primaryButton" disabled={retryProductionWork.isPending} onClick={() => retryProductionWork.mutate(retryChoice)}>{retryProductionWork.isPending ? '正在提交…' : '只重跑此项'}</button></footer>
+      </section>
+    </div>}
+    {retryBatch && execution.data?.snapshot && <div className={styles.retryModal}>
+      <section className={styles.retryBatchModal}>
+        <header><GitBranch /><div><span>依赖级批量重试</span><h2>确认受影响范围与费用</h2></div></header>
+        <p>以下清单由当前失败根步骤和 DAG 依赖关系确定。已成功且仍批准/使用的产物会保留，不会被覆盖。</p>
+        <div className={styles.retryBatchSummary}>
+          <div><span>精确重试</span><strong>{retryBatch.retry_work_item_ids.length} 项</strong></div>
+          <div><span>受影响节点</span><strong>{retryBatch.affected_node_ids.length} 个</strong></div>
+          <div><span>保留成功产物</span><strong>{retryBatch.preserved_asset_ids.length} 个</strong></div>
+          <div><span>预计新增费用</span><strong>{retryBatch.currency} {retryBatch.estimated_cost.toFixed(6)}</strong></div>
+        </div>
+        <div className={styles.retryBatchList}>{retryBatch.manifest.retry_items.map(item => <article key={item.work_item_id}>
+          <strong>{item.node_key} · {kindLabels[item.kind] ?? item.kind}</strong>
+          <span>预计 {retryBatch.currency} {item.estimated_cost.toFixed(6)}</span>
+          <code>{item.request_fingerprint}</code>
+        </article>)}</div>
+        <details><summary>查看冻结分析证据</summary><code>{retryBatch.analysis_hash}</code><pre>{JSON.stringify({ affected_node_ids: retryBatch.affected_node_ids, preserved_asset_ids: retryBatch.preserved_asset_ids }, null, 2)}</pre></details>
+        <small>确认后会为上述每一项创建新的执行尝试；旧失败尝试和成功素材保持只读。提交结果未知或需要人工对账的供应商请求不会进入该范围。</small>
+        <footer><button className="secondaryButton" onClick={() => setRetryBatch(null)}>返回</button><button className="primaryButton" disabled={authorizeRetryBatch.isPending} onClick={() => authorizeRetryBatch.mutate()}>{authorizeRetryBatch.isPending ? '正在授权…' : `确认 ${retryBatch.currency} ${retryBatch.estimated_cost.toFixed(6)} 并批量重试`}</button></footer>
       </section>
     </div>}
   </>
