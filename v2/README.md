@@ -46,10 +46,12 @@ Key, then validate and publish the new version. RunningHub, CosyVoice and all te
 gateways read the exact published provider version; there is no environment
 variable fallback.
 
-Configuration v54 includes one explicit CosyVoice preset route
-(`cosyvoice-v1 / longxiaochun / 24000Hz WAV`). It remains unavailable until
-the DashScope API Key is filled and a new configuration version is validated
-and published. Voice cloning is not part of this route.
+Configuration v56 includes one explicit CosyVoice preset route
+(`cosyvoice-v1 / longxiaochun / 24000Hz WAV`) and a configured DashScope API
+Key migrated from the V1 runtime credential file. The migration changes only
+the CosyVoice Provider credential; V1 clone-voice and MP3 UI selections do not
+replace the V2 WAV contract. Voice cloning remains an independently authorized
+project-level selection.
 
 The readiness panel checks whether the API Key field is filled without making
 a network request. This does not prove that the key is valid or that the

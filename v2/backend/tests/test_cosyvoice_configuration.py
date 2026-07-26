@@ -13,6 +13,10 @@ from v2.backend.app.configuration.contracts import (
     StoragePolicyDraft,
 )
 from v2.scripts.enable_cosyvoice_audio import enable_cosyvoice
+from v2.scripts.migrate_v1_cosyvoice_credential import (
+    apply_cosyvoice_credential,
+    read_v1_api_key,
+)
 from v2.scripts.upgrade_audio_execution_contract import upgrade_audio_execution
 from v2.scripts.validate_cosyvoice_connection import (
     CosyVoiceValidationContract,
@@ -110,6 +114,46 @@ def test_upgrade_audio_execution_replaces_literal_voice_with_frozen_selection() 
         "format": "literal:wav",
         "sample_rate": "literal:24000",
     }
+
+
+def test_v1_cosyvoice_credential_migration_reads_secret_without_changing_audio_contract(
+    tmp_path,
+) -> None:
+    runtime_config = tmp_path / "web_runtime_voice_config.json"
+    runtime_config.write_text(
+        json.dumps({"provider": "aliyun_cosyvoice", "api_key": "v1-secret"}),
+        encoding="utf-8",
+    )
+    draft = _draft()
+    assert enable_cosyvoice(draft) is True
+    before_audio = draft.audio.model_dump(mode="json")
+    before_workflows = [
+        workflow.model_dump(mode="json")
+        for workflow in draft.workflow_slots
+    ]
+
+    assert apply_cosyvoice_credential(draft, read_v1_api_key(runtime_config)) is True
+    assert apply_cosyvoice_credential(draft, "v1-secret") is False
+    assert draft.providers[0].api_key == "v1-secret"
+    assert draft.audio.model_dump(mode="json") == before_audio
+    assert [
+        workflow.model_dump(mode="json")
+        for workflow in draft.workflow_slots
+    ] == before_workflows
+
+
+def test_v1_cosyvoice_credential_migration_rejects_conflicting_key(tmp_path) -> None:
+    runtime_config = tmp_path / "web_runtime_voice_config.json"
+    runtime_config.write_text(
+        json.dumps({"provider": "aliyun_cosyvoice", "api_key": "v1-secret"}),
+        encoding="utf-8",
+    )
+    draft = _draft()
+    assert enable_cosyvoice(draft) is True
+    draft.providers[0].api_key = "existing-secret"
+
+    with pytest.raises(RuntimeError, match="different API Key"):
+        apply_cosyvoice_credential(draft, read_v1_api_key(runtime_config))
 
 
 def _validation_contract(api_key: str | None) -> CosyVoiceValidationContract:
