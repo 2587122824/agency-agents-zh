@@ -16,7 +16,7 @@ type ReviewChoice = { asset: ProductionAsset; action: 'reject' }
 type RevisionChoice = { asset: ProductionAsset; scope: AssetRevisionRequest['issue_scope'] }
 type AssetFilter = 'pending' | 'all' | 'approved' | 'archived'
 
-const APPROVAL_RATIONALE = '人工确认画面符合分镜合同'
+const APPROVAL_RATIONALE = '人工确认素材符合生产合同'
 const stateLabels: Record<string, string> = {
   created: '待验证', verified: '待审核', review_required: '待人工确认', approved: '已批准', archived: '已归档',
 }
@@ -67,6 +67,7 @@ export function ReviewPage() {
   const [revisionChoice, setRevisionChoice] = useState<RevisionChoice | null>(null)
   const [issueCode, setIssueCode] = useState<AssetRevisionRequest['issue_code'] | null>(null)
   const [rationale, setRationale] = useState('')
+  const [listenedAssetIds, setListenedAssetIds] = useState<string[]>([])
 
   const projects = useQuery({ queryKey: ['projects'], queryFn: () => api.projects(), refetchInterval: 5000 })
   const reviewProjects = useMemo(
@@ -164,7 +165,7 @@ export function ReviewPage() {
     mutationFn: async () => {
       const assets = selectedAssetIds
         .map(id => activeAssets.find(asset => asset.id === id))
-        .filter((asset): asset is ProductionAsset => Boolean(asset && isReviewable(asset)))
+        .filter((asset): asset is ProductionAsset => Boolean(asset && isReviewable(asset) && asset.asset_type !== 'audio'))
       for (const asset of assets) await api.reviewAsset(projectId, asset, 'approve', APPROVAL_RATIONALE)
       return assets
     },
@@ -205,7 +206,7 @@ export function ReviewPage() {
       if (target.matches('input, textarea, select') || reviewChoice || revokeChoice || revisionChoice || retryChoice || batchConfirmOpen) return
       if (event.key === 'ArrowLeft') { event.preventDefault(); moveSelection(-1) }
       if (event.key === 'ArrowRight') { event.preventDefault(); moveSelection(1) }
-      if (event.key.toLowerCase() === 'a' && selectedAsset && isReviewable(selectedAsset)) {
+      if (event.key.toLowerCase() === 'a' && selectedAsset && isReviewable(selectedAsset) && (selectedAsset.asset_type !== 'audio' || listenedAssetIds.includes(selectedAsset.id))) {
         event.preventDefault()
         directReview.mutate({ asset: selectedAsset, action: 'approve', reason: APPROVAL_RATIONALE })
       }
@@ -218,12 +219,12 @@ export function ReviewPage() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [selectedAsset, visibleAssets, reviewChoice, revokeChoice, revisionChoice, retryChoice, batchConfirmOpen])
+  }, [selectedAsset, visibleAssets, reviewChoice, revokeChoice, revisionChoice, retryChoice, batchConfirmOpen, listenedAssetIds])
 
   const error = quality.error || verify.error || directReview.error || batchApprove.error || revokeApproval.error || retryQC.error || requestRevision.error
   const shot = selectedAsset?.review_context.shot ?? {}
   const selectedReviewableCount = selectedAssetIds.filter(id => reviewableAssets.some(asset => asset.id === id)).length
-  const visibleReviewableIds = visibleAssets.filter(isReviewable).map(asset => asset.id)
+  const visibleReviewableIds = visibleAssets.filter(asset => isReviewable(asset) && asset.asset_type !== 'audio').map(asset => asset.id)
   const selectedVisibleReviewableCount = visibleReviewableIds.filter(id => selectedAssetIds.includes(id)).length
   const allVisibleReviewableSelected = visibleReviewableIds.length > 0
     && selectedVisibleReviewableCount === visibleReviewableIds.length
@@ -323,6 +324,7 @@ export function ReviewPage() {
                 style={zoom === null ? undefined : { width: `${selectedAsset.width ? selectedAsset.width * zoom : 480 * zoom}px` }}
               />}
               {selectedAsset.content_hash && selectedAsset.asset_type === 'video' && <video src={mediaUrl(selectedAsset)} controls preload="metadata" />}
+              {selectedAsset.content_hash && selectedAsset.asset_type === 'audio' && <div className={styles.audioPreview}><strong>请完整试听后确认内容</strong><audio src={mediaUrl(selectedAsset)} controls preload="metadata" onPlay={() => setListenedAssetIds(current => current.includes(selectedAsset.id) ? current : [...current, selectedAsset.id])} /></div>}
               {!selectedAsset.content_hash && <div className={styles.noPreview}><Search /><span>文件尚未完成验证</span></div>}
             </div>
             <footer className={styles.viewerTools}>
@@ -364,6 +366,10 @@ export function ReviewPage() {
                 ? selectedAsset.latest_qc_candidate.findings.map(finding => <p className={styles.finding} key={finding.finding_code}><AlertTriangle />{finding.summary}</p>)
                 : <p className={styles.muted}>没有定位到具体问题，最终仍由人工决定。</p>}
             </section>}
+            {selectedAsset.latest_qc_report && <section>
+              <h3>确定性 QC</h3>
+              {selectedAsset.latest_qc_report.findings.map(finding => <p className={styles.finding} key={finding.id}><CheckCircle2 />{finding.code}<small>{finding.code === 'AUDIO_TECHNICAL_QC_PASSED' ? '采样率、声道、静音、响度、true peak 与削波规则已通过；内容仍需人工试听。' : JSON.stringify(finding.evidence)}</small></p>)}
+            </section>}
             {selectedAsset.latest_qc_agent_run?.status === 'failed' && <section className={styles.agentError}>
               <AlertTriangle /><div><strong>智能审核失败</strong><span>{selectedAsset.latest_qc_agent_run.error_detail ?? selectedAsset.latest_qc_agent_run.error_code}</span></div>
               <button onClick={() => setRetryChoice(selectedAsset)}><RotateCcw size={13} />重跑</button>
@@ -374,7 +380,7 @@ export function ReviewPage() {
               {isReviewable(selectedAsset) && <>
                 <button className="secondaryButton" onClick={() => { setRevisionChoice({ asset: selectedAsset, scope: 'storyboard' }); setIssueCode(null); setRationale('') }}><Pencil size={14} />需要调整</button>
                 <button className="secondaryButton" onClick={() => { setReviewChoice({ asset: selectedAsset, action: 'reject' }); setRationale('') }}><X size={14} />拒绝</button>
-                <button className="primaryButton" disabled={directReview.isPending} onClick={() => directReview.mutate({ asset: selectedAsset, action: 'approve', reason: APPROVAL_RATIONALE })}><Check size={14} />通过</button>
+                <button className="primaryButton" disabled={directReview.isPending || (selectedAsset.asset_type === 'audio' && !listenedAssetIds.includes(selectedAsset.id))} title={selectedAsset.asset_type === 'audio' && !listenedAssetIds.includes(selectedAsset.id) ? '请先试听音频' : '记录人工通过'} onClick={() => directReview.mutate({ asset: selectedAsset, action: 'approve', reason: selectedAsset.asset_type === 'audio' ? '人工试听并确认音频内容符合生产合同' : APPROVAL_RATIONALE })}><Check size={14} />{selectedAsset.asset_type === 'audio' ? '试听后通过' : '通过'}</button>
               </>}
               {selectedAsset.state === 'approved' && selectedAsset.approval_revocation.allowed && <>
                 <span className={styles.approved}><CheckCircle2 />已批准进入后续流程</span>

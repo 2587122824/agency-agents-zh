@@ -37,6 +37,7 @@ class ReviewAsset(QualityCommand):
     qc_report_candidate_id: str | None = None
     qc_report_id: str | None = None
     rationale: str = Field(min_length=1, max_length=1000)
+    confirm_audio_listened: bool = False
 
     @model_validator(mode="after")
     def at_most_one_review_source(self):

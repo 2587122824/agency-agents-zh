@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import os
 import re
+import subprocess
 import struct
 import wave
+from array import array
 from pathlib import Path, PurePosixPath
 
 from sqlalchemy import select
@@ -48,6 +52,7 @@ from .contracts import RegisterAttemptAsset, RetryAssetQC, ReviewAsset, RevokeAs
 
 RULESET_VERSION = "v2.file-contract.v1"
 VISUAL_TYPES = {"image", "video"}
+AUDIO_QC_RULESET_VERSION = "audio-qc.v1"
 
 
 class QualityConflictError(ValueError):
@@ -624,6 +629,123 @@ def _deterministic_contract_findings(session: Session, asset: Asset, node) -> li
     return findings
 
 
+def _analyze_pcm_wav(path: Path) -> dict:
+    with wave.open(str(path), "rb") as source:
+        sample_rate = source.getframerate()
+        channels = source.getnchannels()
+        sample_width = source.getsampwidth()
+        frame_count = source.getnframes()
+        if sample_width != 2:
+            raise ValueError("audio QC currently requires 16-bit PCM WAV")
+        samples = array("h", source.readframes(frame_count))
+    if not samples:
+        raise ValueError("audio contains no PCM samples")
+    maximum = 32767
+    silence_threshold = round(maximum * (10 ** (-50 / 20)))
+    clipped_threshold = round(maximum * (10 ** (-0.1 / 20)))
+    peak = max(abs(value) for value in samples)
+    silent_samples = sum(1 for value in samples if abs(value) <= silence_threshold)
+    clipped_samples = sum(1 for value in samples if abs(value) >= clipped_threshold)
+    longest_silent_frames = 0
+    current_silent_frames = 0
+    for offset in range(0, len(samples), channels):
+        frame = samples[offset:offset + channels]
+        if frame and max(abs(value) for value in frame) <= silence_threshold:
+            current_silent_frames += 1
+            longest_silent_frames = max(longest_silent_frames, current_silent_frames)
+        else:
+            current_silent_frames = 0
+    evidence = {
+        "schema_version": AUDIO_QC_RULESET_VERSION,
+        "sample_rate": sample_rate,
+        "channels": channels,
+        "sample_width_bits": sample_width * 8,
+        "frame_count": frame_count,
+        "duration_ms": round(frame_count * 1000 / sample_rate),
+        "sample_peak_dbfs": round(20 * math.log10(max(peak, 1) / maximum), 3),
+        "silence_threshold_dbfs": -50.0,
+        "silence_ratio": round(silent_samples / len(samples), 6),
+        "longest_silence_ms": round(longest_silent_frames * 1000 / sample_rate),
+        "clipped_sample_ratio": round(clipped_samples / len(samples), 8),
+    }
+    evidence.update(measure_program_audio(path))
+    return evidence
+
+
+def measure_program_audio(path: Path) -> dict:
+    ffmpeg_path = os.environ.get("V2_FFMPEG_PATH", "").strip()
+    if not ffmpeg_path or not Path(ffmpeg_path).is_file():
+        return {"ebur128_status": "analyzer_unavailable"}
+    result = subprocess.run(
+        [ffmpeg_path, "-hide_banner", "-nostdin", "-i", str(path), "-filter_complex", "ebur128=peak=true", "-f", "null", "NUL"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=60,
+        check=False,
+    )
+    output = result.stderr
+    integrated = re.findall(r"^\s*I:\s*(-?\d+(?:\.\d+)?)\s+LUFS\s*$", output, re.MULTILINE)
+    true_peak = re.findall(r"^\s*Peak:\s*(-?\d+(?:\.\d+)?)\s+dBFS\s*$", output, re.MULTILINE)
+    if result.returncode != 0 or not integrated or not true_peak:
+        return {"ebur128_status": "analysis_failed", "analyzer_return_code": result.returncode}
+    return {
+        "ebur128_status": "measured",
+        "integrated_loudness_lufs": float(integrated[-1]),
+        "true_peak_dbtp": float(true_peak[-1]),
+    }
+
+
+def _audio_qc_findings(asset: Asset, node) -> list[dict]:
+    try:
+        evidence = _analyze_pcm_wav(_local_asset_path(asset.uri))
+    except (OSError, ValueError, wave.Error, subprocess.SubprocessError) as exc:
+        return [{
+            "code": "AUDIO_QC_ANALYSIS_FAILED",
+            "severity": "blocked",
+            "evidence": {"error": str(exc)},
+            "contract_field": "output_contract.audio",
+            "disposition": "block",
+        }]
+    expected_sample_rate = node.output_contract.get("sample_rate")
+    expected_channels = node.output_contract.get("channels")
+    loudness_target = node.input_contract.get("loudness_target_lufs")
+    violations: list[tuple[str, str, dict]] = []
+    if evidence["sample_rate"] != expected_sample_rate:
+        violations.append(("AUDIO_SAMPLE_RATE_INVALID", "output_contract.sample_rate", {"actual": evidence["sample_rate"], "expected": expected_sample_rate}))
+    if evidence["channels"] != expected_channels:
+        violations.append(("AUDIO_CHANNEL_COUNT_INVALID", "output_contract.channels", {"actual": evidence["channels"], "expected": expected_channels}))
+    if evidence["silence_ratio"] > 0.5:
+        violations.append(("AUDIO_SILENCE_RATIO_EXCEEDED", "audio_qc.silence_ratio", {"actual": evidence["silence_ratio"], "maximum": 0.5}))
+    if evidence["longest_silence_ms"] > 3000:
+        violations.append(("AUDIO_CONTINUOUS_SILENCE_EXCEEDED", "audio_qc.longest_silence_ms", {"actual_ms": evidence["longest_silence_ms"], "maximum_ms": 3000}))
+    if evidence["clipped_sample_ratio"] > 0.0001:
+        violations.append(("AUDIO_CLIPPING_DETECTED", "audio_qc.clipped_sample_ratio", {"actual": evidence["clipped_sample_ratio"], "maximum": 0.0001}))
+    if evidence.get("ebur128_status") != "measured":
+        violations.append(("AUDIO_LOUDNESS_ANALYZER_UNAVAILABLE", "audio_qc.ebur128", {"status": evidence.get("ebur128_status")}))
+    else:
+        if isinstance(loudness_target, (int, float)) and abs(evidence["integrated_loudness_lufs"] - loudness_target) > 3:
+            violations.append(("AUDIO_LOUDNESS_OUT_OF_RANGE", "input_contract.loudness_target_lufs", {"actual_lufs": evidence["integrated_loudness_lufs"], "target_lufs": loudness_target, "tolerance_lu": 3}))
+        if evidence["true_peak_dbtp"] > -0.1:
+            violations.append(("AUDIO_TRUE_PEAK_EXCEEDED", "audio_qc.true_peak_dbtp", {"actual_dbtp": evidence["true_peak_dbtp"], "maximum_dbtp": -0.1}))
+    if violations:
+        return [{
+            "code": code,
+            "severity": "blocked",
+            "evidence": {**details, "analysis": evidence},
+            "contract_field": field,
+            "disposition": "block",
+        } for code, field, details in violations]
+    return [{
+        "code": "AUDIO_TECHNICAL_QC_PASSED",
+        "severity": "passed",
+        "evidence": evidence,
+        "contract_field": "output_contract.audio",
+        "disposition": "manual_review",
+    }]
+
+
 def _record_contract_block(session: Session, project: Project, asset: Asset, payload: RunAssetQC, findings: list[dict]) -> QCReport:
     repository = _quality(session)
     report = QCReport(
@@ -659,7 +781,13 @@ def _record_contract_block(session: Session, project: Project, asset: Asset, pay
     return report
 
 
-def _record_manual_content_review(session: Session, project: Project, asset: Asset, payload: RunAssetQC) -> QCReport:
+def _record_manual_content_review(
+    session: Session,
+    project: Project,
+    asset: Asset,
+    payload: RunAssetQC,
+    deterministic_findings: list[dict] | None = None,
+) -> QCReport:
     repository = _quality(session)
     code = {
         "video": "VIDEO_CONTENT_REVIEW_REQUIRED",
@@ -673,6 +801,8 @@ def _record_manual_content_review(session: Session, project: Project, asset: Ass
     )
     repository.add(report)
     repository.flush()
+    for finding in deterministic_findings or []:
+        repository.add(QCFinding(qc_report_id=report.id, **finding))
     repository.add(QCFinding(
         qc_report_id=report.id, code=code, severity="review_required",
         evidence={"asset_id": asset.id, "reason": "configured_qc_contract_does_not_claim_this_media_capability"},
@@ -874,8 +1004,12 @@ def run_asset_qc(session: Session, project: Project, asset_id: str, payload: Run
     findings = _deterministic_contract_findings(session, asset, node)
     if findings:
         return qc_report_read(session, _record_contract_block(session, project, asset, payload, findings))
+    audio_findings = _audio_qc_findings(asset, node) if asset.asset_type == "audio" else []
+    audio_blocks = [finding for finding in audio_findings if finding["disposition"] == "block"]
+    if audio_blocks:
+        return qc_report_read(session, _record_contract_block(session, project, asset, payload, audio_blocks))
     if asset.asset_type != "image":
-        return qc_report_read(session, _record_manual_content_review(session, project, asset, payload))
+        return qc_report_read(session, _record_manual_content_review(session, project, asset, payload, audio_findings))
     latest_candidate = repository.latest_qc_candidate(asset.id)
     if latest_candidate and latest_candidate.status == "awaiting_review":
         raise QualityConflictError("QC_CANDIDATE_ALREADY_EXISTS", "该素材已有待确认的质量审核结果。")
@@ -938,6 +1072,18 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
         raise QualityConflictError("ASSET_NOT_AWAITING_REVIEW", "只有已验证素材可以直接进行人工审核。")
     if asset.row_version != payload.expected_row_version:
         raise QualityConflictError("ASSET_ROW_VERSION_MISMATCH", "素材已变化，请刷新后再审核。")
+    if asset.asset_type == "audio" and decision == "approved":
+        technical_qc_passed = bool(
+            source_report
+            and any(
+                finding.code == "AUDIO_TECHNICAL_QC_PASSED"
+                for finding in repository.findings(source_report.id)
+            )
+        )
+        if not technical_qc_passed:
+            raise QualityConflictError("AUDIO_TECHNICAL_QC_REQUIRED", "音频必须先通过确定性技术 QC，才能进入人工试听确认。")
+        if not payload.confirm_audio_listened:
+            raise QualityConflictError("AUDIO_LISTENING_CONFIRMATION_REQUIRED", "音频技术 QC 通过后仍必须试听并显式确认内容。")
     now = utc_now()
     if candidate:
         report = QCReport(

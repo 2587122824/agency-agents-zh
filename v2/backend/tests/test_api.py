@@ -6013,7 +6013,7 @@ def test_quality_stage_and_timeline_confirmation_are_explicit_and_idempotent(cli
     stage_command = {"command_id": "editor-stage-approve-001", "expected_snapshot_id": snapshot["id"]}
     approved = client.post(f"/api/v1/projects/{project['id']}/quality-stage:approve", json=stage_command)
     replayed = client.post(f"/api/v1/projects/{project['id']}/quality-stage:approve", json=stage_command)
-    assert approved.status_code == 200
+    assert approved.status_code == 200, approved.text
     assert replayed.json()["project_status"] == "editing"
     assert approved.json()["quality_stage_ready"] is True
     assert next(row for row in client.get("/api/v1/projects").json() if row["id"] == project["id"])["status"] == "editing"
@@ -6372,6 +6372,54 @@ def test_timeline_freezes_authorized_looping_bgm_ducking_and_mastering(client: T
     frozen_bgm = next(item for item in result["items"] if item["asset_id"] == bgm_id)
     assert frozen_bgm["transform"]["rights"]["evidence"] == "项目商业音乐授权单 TEST-001"
     assert frozen_bgm["transform"]["ducking"]["regions"] == [{"start_ms": 5_000, "end_ms": 20_000}]
+
+
+def test_audio_approval_requires_explicit_listening_confirmation(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    with SessionLocal() as session:
+        persisted_project = session.get(Project, project["id"])
+        persisted_project.status = "producing"
+        audio = Asset(
+            project_id=project["id"], snapshot_id=snapshot["id"], output_index=0,
+            asset_type="audio", role="voiceover", uri=f"runtime://assets/editor/{project['id']}-listen.wav",
+            storage_backend="local", provider_output_manifest={"test": True},
+            content_hash=hashlib.sha256(f"{project['id']}-listen".encode()).hexdigest(),
+            mime_type="audio/wav", byte_size=100, duration_ms=1000, state="review_required",
+        )
+        session.add(audio)
+        session.flush()
+        report = QCReport(
+            project_id=project["id"], snapshot_id=snapshot["id"], asset_id=audio.id,
+            report_number=1, ruleset_version="qc-policy.v1", status="review_required",
+            analyzer="human-review-required",
+        )
+        session.add(report)
+        session.flush()
+        session.add(QCFinding(
+            qc_report_id=report.id, code="AUDIO_TECHNICAL_QC_PASSED", severity="passed",
+            evidence={"schema_version": "audio-qc.v1"}, contract_field="output_contract.audio",
+            disposition="manual_review",
+        ))
+        session.commit()
+        audio_id, row_version, report_id = audio.id, audio.row_version, report.id
+    blocked = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{audio_id}:approve",
+        json={
+            "command_id": "audio-listen-block-001", "expected_row_version": row_version,
+            "qc_report_id": report_id, "rationale": "尚未试听", "confirm_audio_listened": False,
+        },
+    )
+    assert blocked.status_code == 409
+    assert blocked.headers["x-error-code"] == "AUDIO_LISTENING_CONFIRMATION_REQUIRED"
+    approved = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{audio_id}:approve",
+        json={
+            "command_id": "audio-listen-approve-01", "expected_row_version": row_version,
+            "qc_report_id": report_id, "rationale": "已完整试听并确认内容", "confirm_audio_listened": True,
+        },
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["state"] == "approved"
 
 
 def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(client: TestClient) -> None:

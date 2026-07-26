@@ -33,6 +33,7 @@ from ..orchestration.project_transitions import (
 from ..quality.service import (
     QualityConflictError,
     asset_read,
+    measure_program_audio,
     probe_media,
     resolve_local_asset_path,
     sha256_file,
@@ -642,6 +643,27 @@ def verify_delivery(
             "expected_ms": expected_duration,
             "tolerance_ms": 100,
         })
+    audio_evidence = None
+    track_config = attempt.request_manifest.get("track_config") or {}
+    if track_config.get("audio_enabled"):
+        audio_evidence = measure_program_audio(path)
+        mastering = track_config.get("audio_mastering") or {}
+        if audio_evidence.get("ebur128_status") != "measured":
+            return _block_delivery(session, project, attempt, asset, payload, "DELIVERY_AUDIO_QC_ANALYSIS_FAILED", audio_evidence)
+        loudness_target = mastering.get("loudness_target_lufs")
+        true_peak_limit = mastering.get("true_peak_limit_dbtp")
+        if not isinstance(loudness_target, (int, float)) or abs(audio_evidence["integrated_loudness_lufs"] - loudness_target) > 4:
+            return _block_delivery(session, project, attempt, asset, payload, "DELIVERY_AUDIO_LOUDNESS_OUT_OF_RANGE", {
+                **audio_evidence,
+                "target_lufs": loudness_target,
+                "tolerance_lu": 4,
+            })
+        if not isinstance(true_peak_limit, (int, float)) or audio_evidence["true_peak_dbtp"] > true_peak_limit + 0.2:
+            return _block_delivery(session, project, attempt, asset, payload, "DELIVERY_AUDIO_TRUE_PEAK_EXCEEDED", {
+                **audio_evidence,
+                "limit_dbtp": true_peak_limit,
+                "tolerance_db": 0.2,
+            })
     try:
         policy = storage_policy_for_snapshot(session, attempt.snapshot_id)
     except QualityConflictError as exc:
@@ -664,6 +686,16 @@ def verify_delivery(
         analyzer="deterministic-delivery-verifier",
     )
     repository.add(report)
+    repository.flush()
+    if audio_evidence:
+        repository.add(QCFinding(
+            qc_report_id=report.id,
+            code="DELIVERY_AUDIO_TECHNICAL_QC_PASSED",
+            severity="passed",
+            evidence=audio_evidence,
+            contract_field="delivery.request_manifest.track_config.audio_mastering",
+            disposition="pass",
+        ))
     asset.content_hash = content_hash
     asset.byte_size = byte_size
     asset.mime_type = media["mime_type"]

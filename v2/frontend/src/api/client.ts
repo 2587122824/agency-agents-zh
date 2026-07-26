@@ -232,6 +232,7 @@ export const api = {
           ? { qc_report_id: asset.latest_qc_report.id }
           : {}),
       rationale,
+      confirm_audio_listened: asset.asset_type === 'audio' && decision === 'approve',
     }),
   }),
   revokeAssetApproval: (projectId: string, asset: ProductionAsset) => request<ProductionAsset>(`/projects/${projectId}/assets/${asset.id}:revoke-approval`, {

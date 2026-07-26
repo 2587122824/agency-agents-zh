@@ -1168,6 +1168,8 @@ GET  /api/v1/projects/{project_id}/production-execution
 
 BGM 是音频片段的显式 `background_music` 混音角色，不通过文件名或素材 role 猜测。时间线必须冻结用户确认、`owned/licensed/royalty_free` 权利依据和可读证据；循环仅允许源片段短于成片区间，并由渲染器确定性重复后裁到精确出点。启用 ducking 时，冻结区间必须由当前时间线中与 BGM 相交的旁白片段精确投影得到，任何旁白移动都会使旧区间校验失败；attack、release 和 reduction 进入同一不可变合同。轨道级 `audio_mastering` 冻结 -24～-9 LUFS 目标、-3～-0.1 dBTP 上限和 limiter 控制，FFmpeg 执行 `loudnorm + alimiter`。执行参数和命令证据不等于输出已通过音频 QC，实际响度、true peak、削波与静音测量仍由后续确定性 QC 报告负责。
 
+`audio-qc.v1` 是音频技术放行权威。对 PCM16 WAV 直接读取帧并记录采样率、声道、样本位宽、帧数、时长、样本峰值、-50dBFS 静音比例、最长连续静音和接近满量程的削波样本比例；用冻结的本机 FFmpeg EBU R128 分析器记录 integrated loudness 与 true peak。采样率/声道与 DAG 输出合同不一致、静音比例超过 50%、连续静音超过 3000ms、削波样本比例超过 0.01%、响度偏离目标超过 3LU、true peak 高于 -0.1dBTP 或分析器不可用均阻断旁白素材。最终 MP4 有音频轨时再按时间线冻结的母带目标复测，响度容差 4LU，true peak 容差 0.2dB。技术通过报告只把素材置为 `review_required`；音频批准命令必须引用含 `AUDIO_TECHNICAL_QC_PASSED` 的报告并显式提交 `confirm_audio_listened=true`。审核页只有在用户启动真实音频播放器后才开放“试听后通过”，音频不参加批量通过。
+
 具体表结构、命令、错误码、API 和验收矩阵见 [V2 时间线剪辑合同实现](./archive/implementation-notes/V2_TIMELINE_EDITOR_IMPLEMENTATION.md)。
 
 ## 34. 最终交付实现边界
