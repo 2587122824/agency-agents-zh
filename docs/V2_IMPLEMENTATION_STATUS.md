@@ -81,7 +81,7 @@
 | OSS 临时音频上传 | 未开始，需确认 | 涉及真实存储凭据、生命周期和外部网络调用 |
 | 确定性字幕与 FFmpeg 烧录 | 已完成首期闭环 | 旁白/对白按确认节拍编译为冻结 cue，本地 Adapter 生成 UTF-8 SRT；严格探测校验连续序号、非空内容和递增无重叠时点；素材经人工审核后进入单一字幕轨，剪辑台可读预览。FFmpeg/libass 使用冻结底部样式烧录，Windows 从字幕目录执行以避免盘符解析错误；真实 480×848 H.264 + AAC 输出验收通过。逐 cue 可视化修订和同步成片预览仍属于后续剪辑体验 |
 | FFmpeg 本地合成 | 已完成 | `V2_FFMPEG_PATH` 只读环境连接、版本与 `libx264` 准备检查、连续主视频轨 `trim/scale/crop/fps/concat`、按音频时间线执行 `atrim/adelay/amix`、BGM 片段确定性重复拼接、旁白区间 attack/release ducking、`loudnorm + alimiter`、单一字幕轨 libass 烧录并编码 AAC、`libx264` 输出、工作尝试与失败证据已实现。真实本机验收已证明 BGM 循环/ducking 与 H.264 + AAC 输出可执行。当前仍不支持空位、普通片段变速或非 `cover` 画面变换；输出响度/true peak 的实测放行归入下一项确定性音频 QC；失败后没有重试、替换方式或隐藏降级 |
-| 精确依赖重试 | 已完成首期闭环 | 单项生产重试复用失败 Attempt 的完整请求清单与指纹，TTS 可按冻结供应商费用重试，本地字幕以 `local_subtitles` 和确认的零费用创建新 Attempt；旧失败记录保持只读。迁移 `20260726_37` 新增 `ProductionRetryBatch`，分析命令从明确失败根项计算 DAG 下游闭包，冻结精确重试项、请求指纹、逐项/总预计费用、受影响节点和保留的 approved/used 产物；生产页展示完整分析与哈希，用户显式确认后只为清单内仍明确失败且请求未变的项创建 `user_confirmed_dependency_retry` Attempt。提交结果未知或需要人工对账的供应商请求仍禁止重跑 |
+| 精确依赖重试 | 已完成首期闭环 | 单项生产重试复用失败 Attempt 的完整请求清单与指纹，TTS 可按冻结供应商费用重试；没有工作流、请求未指定 Provider 且 Adapter 为 `local/local_subtitle` 的冻结本地确定性节点，以节点 kind 记录确认的零费用新 Attempt，旧失败记录保持只读。迁移 `20260726_37` 新增 `ProductionRetryBatch`，分析命令从明确失败根项计算 DAG 下游闭包，冻结精确重试项、请求指纹、逐项/总预计费用、受影响节点和保留的 approved/used 产物；生产页展示完整分析与哈希，用户显式确认后只为清单内仍明确失败且请求未变的项创建 `user_confirmed_dependency_retry` Attempt。回归测试覆盖付费关键帧根节点及零费用 `assemble_timeline_contract` 后代；真实阻断项目页面显示 3 项闭包、逐项指纹、分析哈希和 `TEST 0.360000` 总费用，未执行最终授权。提交结果未知或需要人工对账的供应商请求仍禁止重跑 |
 
 ## 当前安全开发顺序
 

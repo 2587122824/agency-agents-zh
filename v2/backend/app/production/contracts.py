@@ -300,6 +300,7 @@ class PublishedConfigChoice(BaseModel):
     display_name: str
     video_specs: list[dict]
     workflow_slots: list[dict]
+    audio_config: dict | None
     pricing_catalogs: list[dict]
 
 

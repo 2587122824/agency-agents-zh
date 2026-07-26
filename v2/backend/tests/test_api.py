@@ -2750,6 +2750,23 @@ def test_voiceover_impact_freezes_exact_voice_rate_volume_and_rejects_invalid_se
         command_prefix="voiceover-execution-config",
     )
     components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    preparation = client.get(f"/api/v1/projects/{project['id']}/production-preparation")
+    assert preparation.status_code == 200
+    published_audio = next(
+        item for item in preparation.json()["published_configurations"]
+        if item["id"] == config["id"]
+    )["audio_config"]
+    assert published_audio["voice_presets"] == [{
+        "key": "steady_male",
+        "display_name": "沉稳男声",
+        "provider_voice_id": "longxiaocheng",
+        "description": "稳定、可信，适合解说",
+        "preview_text": "片场 V2 配音试听。",
+    }]
+    assert published_audio["default_voice_key"] == "steady_male"
+    assert published_audio["speaking_rate_range"] == {"min": 0.8, "max": 1.2}
+    assert published_audio["volume_range"] == {"min": 20, "max": 80}
+    assert published_audio["duration_tolerance_ms"] == 1200
     base = {
         "plan_version_id": plan["id"],
         "production_config_version_id": config["id"],
@@ -5267,6 +5284,97 @@ def test_dependency_retry_batch_freezes_scope_cost_and_retries_exact_requests(cl
     assert all(len(item["attempts"]) == 2 for item in replayed_items)
 
 
+def test_dependency_retry_batch_includes_zero_cost_local_timeline_descendant(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "local-descendant-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    submitted = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "local-descendant-submit-001",
+            "expected_contract_hash": activated["contract_hash"],
+            "expected_estimated_cost": activated["estimated_cost"],
+            "expected_currency": activated["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    assert submitted.status_code == 202, submitted.text
+    with SessionLocal() as session:
+        nodes = list(session.scalars(select(DAGNode).where(DAGNode.snapshot_id == snapshot["id"])))
+        root_node = next(node for node in nodes if node.kind == "generate_keyframe")
+        timeline_node = next(node for node in nodes if node.kind == "assemble_timeline_contract")
+        root_item = session.scalar(select(WorkItem).where(WorkItem.dag_node_id == root_node.id))
+        timeline_item = session.scalar(select(WorkItem).where(WorkItem.dag_node_id == timeline_node.id))
+        assert root_item is not None
+        assert timeline_item is not None
+        for item in (root_item, timeline_item):
+            attempt = session.get(WorkAttempt, item.current_attempt_id)
+            assert attempt is not None
+            item.status = "blocked"
+            item.error = "TEST_EXPLICIT_FAILURE"
+            attempt.state = "blocked"
+            attempt.error_code = "TEST_EXPLICIT_FAILURE"
+        stored_project = session.get(Project, project["id"])
+        stored_snapshot = session.get(ProductionSnapshot, snapshot["id"])
+        stored_project.status = "blocked"
+        stored_project.blocked_from_state = "producing"
+        stored_snapshot.status = "execution_blocked"
+        session.commit()
+        root_item_id = root_item.id
+        timeline_item_id = timeline_item.id
+        root_cost = root_node.estimated_cost
+
+    analyzed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}/retry-batches:analyze",
+        json={
+            "command_id": "local-descendant-analyze-001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "root_work_item_ids": [root_item_id],
+        },
+    )
+    assert analyzed.status_code == 201, analyzed.text
+    batch = analyzed.json()
+    assert set(batch["retry_work_item_ids"]) == {root_item_id, timeline_item_id}
+    retry_items = {item["work_item_id"]: item for item in batch["manifest"]["retry_items"]}
+    assert retry_items[timeline_item_id]["kind"] == "assemble_timeline_contract"
+    assert retry_items[timeline_item_id]["estimated_cost"] == 0
+    assert batch["estimated_cost"] == pytest.approx(root_cost)
+
+    authorized = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}/retry-batches:authorize",
+        json={
+            "command_id": "local-descendant-authorize-001",
+            "retry_batch_id": batch["id"],
+            "expected_analysis_hash": batch["analysis_hash"],
+            "expected_retry_work_item_ids": batch["retry_work_item_ids"],
+            "expected_request_fingerprints": batch["request_fingerprints"],
+            "expected_estimated_cost": batch["estimated_cost"],
+            "expected_currency": batch["currency"],
+            "confirm_additional_cost": True,
+        },
+    )
+    assert authorized.status_code == 202, authorized.text
+    retried = {
+        item["id"]: item
+        for item in authorized.json()["work_items"]
+        if item["id"] in {root_item_id, timeline_item_id}
+    }
+    assert set(retried) == {root_item_id, timeline_item_id}
+    assert all(item["status"] == "queued" for item in retried.values())
+    assert all(item["attempts"][-1]["trigger"] == "user_confirmed_dependency_retry" for item in retried.values())
+    assert all(len(item["attempts"]) == 2 for item in retried.values())
+    timeline_attempt_id = retried[timeline_item_id]["attempts"][-1]["id"]
+    with SessionLocal() as session:
+        timeline_cost = session.scalar(select(CostEvent).where(CostEvent.work_attempt_id == timeline_attempt_id))
+        assert timeline_cost is not None
+        assert timeline_cost.provider_operation == "project.timeline"
+        assert timeline_cost.amount == 0
+        assert timeline_cost.status == "confirmed"
+
+
 def test_local_subtitle_retry_preserves_exact_request_and_confirms_zero_cost(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client)
     activated = client.post(
@@ -5381,7 +5489,7 @@ def test_local_subtitle_retry_preserves_exact_request_and_confirms_zero_cost(cli
             CostEvent.work_attempt_id == retry_attempt["id"],
         ))
         assert retry_cost is not None
-        assert retry_cost.provider_operation == "local_subtitles"
+        assert retry_cost.provider_operation == "generate_subtitles"
         assert retry_cost.amount == 0
         assert retry_cost.status == "confirmed"
 

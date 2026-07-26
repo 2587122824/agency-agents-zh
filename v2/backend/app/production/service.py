@@ -1806,8 +1806,13 @@ def retry_production_work(
 
     node = repository.component(DAGNode, item.dag_node_id)
     workflow = repository.workflow(node.workflow_slot_version_id) if node and node.workflow_slot_version_id else None
-    zero_cost_local_subtitle = bool(node and node.kind == "generate_subtitles" and node.workflow_slot_version_id is None)
-    if not node or (not workflow and not zero_cost_local_subtitle) or (node.estimated_cost is None and not zero_cost_local_subtitle) or not snapshot.currency:
+    zero_cost_local = bool(
+        node
+        and node.workflow_slot_version_id is None
+        and failed.request_manifest.get("provider") is None
+        and failed.request_manifest.get("adapter_kind") in {"local", "local_subtitle"}
+    )
+    if not node or (not workflow and not zero_cost_local) or (node.estimated_cost is None and not zero_cost_local) or not snapshot.currency:
         raise ProductionConflictError(
             "PRODUCTION_RETRY_COST_NOT_CONFIGURED",
             "该步骤没有可确认的重跑费用，不能提交。",
@@ -1818,7 +1823,7 @@ def retry_production_work(
         snapshot_id=snapshot.id,
         work_attempt_id=attempt.id,
         provider=failed.provider,
-        provider_operation=workflow.slot_key if workflow else "local_subtitles",
+        provider_operation=workflow.slot_key if workflow else node.kind,
         kind="estimated",
         amount=retry_cost,
         currency=snapshot.currency,
@@ -1949,7 +1954,14 @@ def analyze_production_retry_batch(
             or item.request_fingerprint != failed.request_fingerprint
             or _hash(failed.request_manifest) != item.request_fingerprint
             or not node
-            or (node.estimated_cost is None and node.kind != "generate_subtitles")
+            or (
+                node.estimated_cost is None
+                and not (
+                    node.workflow_slot_version_id is None
+                    and failed.request_manifest.get("provider") is None
+                    and failed.request_manifest.get("adapter_kind") in {"local", "local_subtitle"}
+                )
+            )
         ):
             raise ProductionConflictError("RETRY_BATCH_ITEM_NOT_EXACT", "批量范围包含无法精确重跑或费用未知的步骤。")
         retry_cost = float(node.estimated_cost or 0)
