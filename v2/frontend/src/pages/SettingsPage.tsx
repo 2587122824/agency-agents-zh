@@ -3,7 +3,7 @@ import { AlertTriangle, BadgeCheck, Boxes, Check, ChevronDown, ChevronRight, Cir
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api/client'
-import type { ConfigurationComponent, ModelConfigDraft, NodeBindingDraft, ProviderConfigDraft, ProviderReadinessItem, SystemConfigurationDraft, SystemConfigurationVersion, VideoSpecDraft, WorkflowSlotDraft } from '../api/types'
+import type { AudioConfigDraft, ConfigurationComponent, ModelConfigDraft, NodeBindingDraft, ProviderConfigDraft, ProviderReadinessItem, SystemConfigurationDraft, SystemConfigurationVersion, VideoSpecDraft, WorkflowSlotDraft } from '../api/types'
 import { PageHeader } from '../components/PageHeader'
 import styles from './SettingsPage.module.css'
 
@@ -13,9 +13,16 @@ const providerDraft = (): ProviderConfigDraft => ({ provider_key: generatedKey('
 const modelDraft = (): ModelConfigDraft => ({ config_key: generatedKey('model'), display_name: '', agent_role: 'creative', provider_key: '', provider_model_id: '', input_contract_version: '', output_schema_version: '', prompt_contract_version: '', sampling: {}, capability_tags: [] })
 const workflowDraft = (): WorkflowSlotDraft => ({ slot_key: generatedKey('workflow'), display_name: '', operation_kind: '', provider_key: '', provider_workflow_id: '', input_schema_version: '', output_schema_version: '', node_info_list: [{ node_id: '', field_path: '', value_source: '', value_type: 'string', required: true }], supported_video_spec_keys: [], capability_tags: [] })
 const videoDraft = (): VideoSpecDraft => ({ spec_key: generatedKey('video'), display_name: '', width: 480, height: 848, aspect_ratio: '9:16', fps: 24, duration_min_seconds: 1, duration_max_seconds: 30, frame_count_rule: { type: 'duration_times_fps' }, container: 'mp4', video_codec: 'h264', pixel_format: 'yuv420p', bitrate_policy: {}, safe_crop: {} })
+const voicePresets = [
+  { key: 'warm_female', display_name: '温暖女声', provider_voice_id: 'longxiaochun', description: '自然、温暖，适合品牌旁白', preview_text: '欢迎来到片场 V2 配音试听。' },
+  { key: 'bright_female', display_name: '明亮女声', provider_voice_id: 'longxiaoxia', description: '清晰、明快，适合产品介绍', preview_text: '欢迎来到片场 V2 配音试听。' },
+  { key: 'steady_male', display_name: '沉稳男声', provider_voice_id: 'longxiaocheng', description: '稳定、可信，适合解说', preview_text: '欢迎来到片场 V2 配音试听。' },
+  { key: 'youthful', display_name: '青春声线', provider_voice_id: 'longxiaobai', description: '轻快、有活力，适合短视频', preview_text: '欢迎来到片场 V2 配音试听。' },
+  { key: 'friendly_male', display_name: '亲和男声', provider_voice_id: 'longlaotie', description: '亲切、口语化，适合生活内容', preview_text: '欢迎来到片场 V2 配音试听。' },
+]
 const emptyDraft = (): SystemConfigurationDraft => ({
   config_key: generatedKey('config'), display_name: '', description: '', providers: [providerDraft()], models: [], workflow_slots: [workflowDraft()], video_specs: [videoDraft()],
-  audio: { config_key: generatedKey('audio'), display_name: '', supported_modes: ['off'], sample_rate: 48000, channels: 2, format: 'wav', speaking_rate_min: 0.8, speaking_rate_max: 1.2 },
+  audio: { config_key: generatedKey('audio'), display_name: '', supported_modes: ['off'], voice_presets: [], default_voice_key: null, sample_rate: 48000, channels: 2, format: 'wav', speaking_rate_min: 0.8, speaking_rate_max: 1.2, speaking_rate_default: 1, volume_min: 0, volume_max: 100, volume_default: 50, duration_tolerance_ms: 1500 },
   storage: { policy_key: generatedKey('storage'), display_name: '', backend_kind: 'local', allowed_mime_types: ['image/png', 'video/mp4', 'audio/wav'], max_file_size_bytes: 524288000, public_url_policy: 'none', local_root_ref: CONNECTED_LOCAL_ASSET_ROOT_REF },
 })
 
@@ -44,6 +51,12 @@ const valueSourceOptions = [
 ] as const
 
 function sourceOptions(operationKind: string) {
+  if (operationKind === 'tts') return [
+    { value: 'input_contract.voiceover_text', label: '冻结旁白文本' },
+    { value: 'input_contract.voice.provider_voice_id', label: '所选供应商音色' },
+    { value: 'input_contract.speaking_rate', label: '所选语速' },
+    { value: 'input_contract.volume', label: '所选音量' },
+  ]
   if (operationKind === 'video_generation') return [{ value: 'source_image', label: '上一步生成的关键帧' }, ...valueSourceOptions]
   if (operationKind === 'image_generation') return [
     { value: 'reference_image.primary', label: '分镜主参考图' },
@@ -83,6 +96,45 @@ function NodeBindingEditor({ binding, operationKind, onChange, onRemove, removab
     <label><span>内容类型</span><select aria-label="内容类型" value={binding.value_type} onChange={event => updateType(event.target.value as NodeBindingDraft['value_type'])}>{Object.entries(valueTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
     <label className={styles.requiredField}><input type="checkbox" checked={binding.required} onChange={event => onChange({ ...binding, required: event.target.checked })} /><span>必填</span></label>
     {removable && <button type="button" className="iconButton" title="删除节点映射" onClick={onRemove}><Trash2 size={13} /></button>}
+  </div>
+}
+
+function AudioPolicyEditor({ audio, workflows, onChange }: {
+  audio: AudioConfigDraft
+  workflows: WorkflowSlotDraft[]
+  onChange: (audio: AudioConfigDraft) => void
+}) {
+  const voiceoverEnabled = audio.supported_modes.includes('voiceover')
+  const updateModes = (supportedModes: Array<'off' | 'voiceover'>) => {
+    const nextVoiceover = supportedModes.includes('voiceover')
+    onChange({
+      ...audio,
+      supported_modes: supportedModes,
+      voice_presets: nextVoiceover ? (audio.voice_presets.length ? audio.voice_presets : voicePresets) : [],
+      default_voice_key: nextVoiceover ? (audio.default_voice_key ?? voicePresets[0].key) : null,
+      tts_workflow_slot_key: nextVoiceover ? audio.tts_workflow_slot_key : null,
+    })
+  }
+  return <div>
+    <h3>音频配置</h3>
+    <div className={styles.formGrid}>
+      <label>显示名称<input required value={audio.display_name} onChange={event => onChange({ ...audio, display_name: event.target.value })} /></label>
+      <label>支持模式<select multiple value={audio.supported_modes} onChange={event => updateModes(Array.from(event.target.selectedOptions).map(option => option.value) as Array<'off' | 'voiceover'>)}><option value="off">关闭</option><option value="voiceover">旁白</option></select></label>
+      <label>TTS 槽位<select disabled={!voiceoverEnabled} value={audio.tts_workflow_slot_key ?? ''} onChange={event => onChange({ ...audio, tts_workflow_slot_key: event.target.value || null })}><option value="">不绑定</option>{workflows.filter(workflow => workflow.operation_kind === 'tts').map((workflow, index) => <option key={workflow.slot_key} value={workflow.slot_key}>{workflow.display_name || `TTS 工作流 ${index + 1}`}</option>)}</select></label>
+      <label>默认音色<select disabled={!voiceoverEnabled} value={audio.default_voice_key ?? ''} onChange={event => onChange({ ...audio, default_voice_key: event.target.value || null })}><option value="">请选择</option>{audio.voice_presets.map(voice => <option key={voice.key} value={voice.key}>{voice.display_name} · {voice.provider_voice_id}</option>)}</select></label>
+      <label>采样率<input required type="number" value={audio.sample_rate} onChange={event => onChange({ ...audio, sample_rate: Number(event.target.value) })} /></label>
+      <label>声道<select value={audio.channels} onChange={event => onChange({ ...audio, channels: Number(event.target.value) as 1 | 2 })}><option value="1">单声道</option><option value="2">双声道</option></select></label>
+      <label>格式<input required value={audio.format} onChange={event => onChange({ ...audio, format: event.target.value })} /></label>
+      <label>语速下限<input required type="number" step="0.1" value={audio.speaking_rate_min} onChange={event => onChange({ ...audio, speaking_rate_min: Number(event.target.value) })} /></label>
+      <label>默认语速<input required type="number" step="0.1" value={audio.speaking_rate_default} onChange={event => onChange({ ...audio, speaking_rate_default: Number(event.target.value) })} /></label>
+      <label>语速上限<input required type="number" step="0.1" value={audio.speaking_rate_max} onChange={event => onChange({ ...audio, speaking_rate_max: Number(event.target.value) })} /></label>
+      <label>音量下限<input required type="number" min="0" max="100" value={audio.volume_min} onChange={event => onChange({ ...audio, volume_min: Number(event.target.value) })} /></label>
+      <label>默认音量<input required type="number" min="0" max="100" value={audio.volume_default} onChange={event => onChange({ ...audio, volume_default: Number(event.target.value) })} /></label>
+      <label>音量上限<input required type="number" min="0" max="100" value={audio.volume_max} onChange={event => onChange({ ...audio, volume_max: Number(event.target.value) })} /></label>
+      <label>允许超时（毫秒）<input required type="number" min="0" value={audio.duration_tolerance_ms} onChange={event => onChange({ ...audio, duration_tolerance_ms: Number(event.target.value) })} /></label>
+      <label>响度目标（LUFS）<input type="number" step="0.1" value={audio.loudness_target ?? ''} onChange={event => onChange({ ...audio, loudness_target: event.target.value === '' ? null : Number(event.target.value) })} /></label>
+      {voiceoverEnabled && <div className={styles.wide}><small>当前版本包含 {audio.voice_presets.length} 个可选音色；音色目录、默认值和范围会随配置版本一起冻结。</small></div>}
+    </div>
   </div>
 }
 
@@ -146,6 +198,11 @@ function draftFromVersion(version: SystemConfigurationVersion): SystemConfigurat
       default_voice_entity_version_id: audio.details.default_voice_entity_version_id as string | null, sample_rate: Number(audio.details.sample_rate),
       channels: Number(audio.details.channels) as 1 | 2, format: String(audio.details.format),
       speaking_rate_min: Number((audio.details.speaking_rate_range as { min: number }).min), speaking_rate_max: Number((audio.details.speaking_rate_range as { max: number }).max),
+      speaking_rate_default: Number(audio.details.speaking_rate_default),
+      volume_min: Number((audio.details.volume_range as { min: number }).min), volume_max: Number((audio.details.volume_range as { max: number }).max),
+      volume_default: Number(audio.details.volume_default), duration_tolerance_ms: Number(audio.details.duration_tolerance_ms),
+      voice_presets: audio.details.voice_presets as SystemConfigurationDraft['audio']['voice_presets'],
+      default_voice_key: audio.details.default_voice_key as string | null,
       loudness_target: audio.details.loudness_target as number | null, temporary_upload_policy_version_id: audio.details.temporary_upload_policy_version_id as string | null,
     },
     storage: { policy_key: storage.key, display_name: storage.display_name, ...(storage.details as unknown as Omit<SystemConfigurationDraft['storage'], 'policy_key' | 'display_name'>) },
@@ -306,7 +363,7 @@ export function SettingsPage() {
           </div>)}
         </section>
 
-        <section className={styles.formSection}><header><ShieldCheck /><div><strong>音频与存储策略</strong><span>音频关闭时不能绑定 TTS；OSS 只记录凭据引用</span></div></header><div className={styles.policyColumns}><div><h3>音频配置</h3><div className={styles.formGrid}><label>显示名称<input required value={draft.audio.display_name} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, display_name: event.target.value } })} /></label><label>支持模式<select multiple value={draft.audio.supported_modes} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, supported_modes: Array.from(event.target.selectedOptions).map(option => option.value) as Array<'off' | 'voiceover'> } })}><option value="off">关闭</option><option value="voiceover">旁白</option></select></label><label>TTS 槽位<select value={draft.audio.tts_workflow_slot_key ?? ''} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, tts_workflow_slot_key: event.target.value || null } })}><option value="">不绑定</option>{draft.workflow_slots.filter(workflow => workflow.operation_kind === 'tts').map((workflow, workflowIndex) => <option key={workflow.slot_key} value={workflow.slot_key}>{workflow.display_name || `TTS 工作流 ${workflowIndex + 1}`}</option>)}</select></label><label>采样率<input required type="number" value={draft.audio.sample_rate} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, sample_rate: Number(event.target.value) } })} /></label><label>声道<select value={draft.audio.channels} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, channels: Number(event.target.value) as 1 | 2 } })}><option value="1">单声道</option><option value="2">双声道</option></select></label><label>格式<input required value={draft.audio.format} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, format: event.target.value } })} /></label><label>语速下限<input required type="number" step="0.1" value={draft.audio.speaking_rate_min} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, speaking_rate_min: Number(event.target.value) } })} /></label><label>语速上限<input required type="number" step="0.1" value={draft.audio.speaking_rate_max} onChange={event => setDraft({ ...draft, audio: { ...draft.audio, speaking_rate_max: Number(event.target.value) } })} /></label></div></div><div><h3>存储策略</h3><div className={styles.formGrid}><label>显示名称<input required value={draft.storage.display_name} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, display_name: event.target.value } })} /></label><label>后端<select value={draft.storage.backend_kind} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, backend_kind: event.target.value as 'local' | 'oss', local_root_ref: event.target.value === 'local' ? CONNECTED_LOCAL_ASSET_ROOT_REF : null } })}><option value="local">本地</option><option value="oss">阿里云 OSS</option></select></label><label>公网 URL 策略<select value={draft.storage.public_url_policy} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, public_url_policy: event.target.value as typeof draft.storage.public_url_policy } })}><option value="none">不提供</option><option value="signed">签名 URL</option><option value="public">公共 URL</option><option value="temporary_public">临时公共 URL</option></select></label><label className={styles.wide}>允许 MIME（逗号分隔）<input required value={draft.storage.allowed_mime_types.join(', ')} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, allowed_mime_types: event.target.value.split(',').map(value => value.trim()).filter(Boolean) } })} /></label><label>文件上限（字节）<input required type="number" value={draft.storage.max_file_size_bytes} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, max_file_size_bytes: Number(event.target.value) } })} /></label>{draft.storage.backend_kind === 'local' ? <label>素材保存位置<select value={CONNECTED_LOCAL_ASSET_ROOT_REF} disabled><option value={CONNECTED_LOCAL_ASSET_ROOT_REF}>V2 本地素材库</option></select></label> : <><label>区域引用<input required value={draft.storage.region_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, region_ref: event.target.value || null } })} /></label><label>Bucket 引用<input required value={draft.storage.bucket_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, bucket_ref: event.target.value || null } })} /></label><label>凭据引用<input required value={draft.storage.credential_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, credential_ref: event.target.value || null } })} /></label><label>生命周期（天）<input required type="number" min="1" value={draft.storage.lifecycle_days ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, lifecycle_days: Number(event.target.value) || null } })} /></label></>}</div></div></div></section>
+        <section className={styles.formSection}><header><ShieldCheck /><div><strong>音频与存储策略</strong><span>音频关闭时不能绑定 TTS；OSS 只记录凭据引用</span></div></header><div className={styles.policyColumns}><AudioPolicyEditor audio={draft.audio} workflows={draft.workflow_slots} onChange={audio => setDraft({ ...draft, audio })} /><div><h3>存储策略</h3><div className={styles.formGrid}><label>显示名称<input required value={draft.storage.display_name} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, display_name: event.target.value } })} /></label><label>后端<select value={draft.storage.backend_kind} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, backend_kind: event.target.value as 'local' | 'oss', local_root_ref: event.target.value === 'local' ? CONNECTED_LOCAL_ASSET_ROOT_REF : null } })}><option value="local">本地</option><option value="oss">阿里云 OSS</option></select></label><label>公网 URL 策略<select value={draft.storage.public_url_policy} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, public_url_policy: event.target.value as typeof draft.storage.public_url_policy } })}><option value="none">不提供</option><option value="signed">签名 URL</option><option value="public">公共 URL</option><option value="temporary_public">临时公共 URL</option></select></label><label className={styles.wide}>允许 MIME（逗号分隔）<input required value={draft.storage.allowed_mime_types.join(', ')} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, allowed_mime_types: event.target.value.split(',').map(value => value.trim()).filter(Boolean) } })} /></label><label>文件上限（字节）<input required type="number" value={draft.storage.max_file_size_bytes} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, max_file_size_bytes: Number(event.target.value) } })} /></label>{draft.storage.backend_kind === 'local' ? <label>素材保存位置<select value={CONNECTED_LOCAL_ASSET_ROOT_REF} disabled><option value={CONNECTED_LOCAL_ASSET_ROOT_REF}>V2 本地素材库</option></select></label> : <><label>区域引用<input required value={draft.storage.region_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, region_ref: event.target.value || null } })} /></label><label>Bucket 引用<input required value={draft.storage.bucket_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, bucket_ref: event.target.value || null } })} /></label><label>凭据引用<input required value={draft.storage.credential_ref ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, credential_ref: event.target.value || null } })} /></label><label>生命周期（天）<input required type="number" min="1" value={draft.storage.lifecycle_days ?? ''} onChange={event => setDraft({ ...draft, storage: { ...draft.storage, lifecycle_days: Number(event.target.value) || null } })} /></label></>}</div></div></div></section>
         <section className={styles.formSection}>
           <header><CircleDollarSign /><div><strong>价格目录</strong><span>配置和发布时可选；付费生产执行前必须完成明确估价</span></div>{draft.pricing ? <button type="button" className="secondaryButton" onClick={() => setDraft({ ...draft, pricing: null })}><Trash2 size={13} />移除目录</button> : <button type="button" className="secondaryButton" onClick={() => setDraft({ ...draft, pricing: { catalog_key: generatedKey('pricing'), display_name: '', currency: 'CNY', confirmation_threshold: 0, rules: [{ workflow_slot_key: '', unit: 'call', unit_price: 0, minimum_charge: null, estimated_runtime_seconds: null }] } })}><Plus size={13} />添加目录</button>}</header>
           {draft.pricing ? <div className={styles.repeatBlock}>

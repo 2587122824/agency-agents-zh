@@ -866,6 +866,11 @@ class SqlAlchemyProductionRepository:
             StoragePolicyVersion.production_config_version_id == config_id
         )))
 
+    def audio_configs(self, config_id: str) -> list[AudioConfigVersion]:
+        return list(self.session.scalars(select(AudioConfigVersion).where(
+            AudioConfigVersion.production_config_version_id == config_id
+        )))
+
     def impact_history(self, project_id: str) -> list[ProductionImpactAnalysis]:
         return list(self.session.scalars(
             select(ProductionImpactAnalysis)

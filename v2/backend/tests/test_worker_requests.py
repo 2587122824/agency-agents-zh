@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from v2.backend.app.workers import worker
 from v2.backend.app.production.service import _compile_manifest
+from v2.backend.app.quality.service import _deterministic_contract_findings
 from v2.backend.app.delivery.renderer import (
     LocalFFmpegRenderer,
     LocalRenderAudioInput,
@@ -79,6 +80,17 @@ def test_production_manifest_freezes_voiceover_and_subtitles_as_timeline_depende
     selection = {
         "video_spec_version_id": "video-spec",
         "tts_workflow_slot_version_id": "tts-slot",
+        "audio_execution": {
+            "voice": {"key": "steady_male", "display_name": "沉稳男声", "provider_voice_id": "longxiaocheng"},
+            "speaking_rate": 1.1,
+            "volume": 62,
+            "target_duration_ms": 5000,
+            "duration_tolerance_ms": 1200,
+            "loudness_target_lufs": -16,
+            "format": "wav",
+            "sample_rate": 24000,
+            "channels": 1,
+        },
     }
 
     manifest = _compile_manifest(plan, shots, selection, {"format": "mp4"}, "voiceover", {}, routes)
@@ -91,6 +103,12 @@ def test_production_manifest_freezes_voiceover_and_subtitles_as_timeline_depende
 
     assert node_by_key["project.voiceover"]["kind"] == "generate_tts"
     assert node_by_key["project.voiceover"]["input_contract"]["voiceover_text"] == "第一段旁白。\n第二段对白。"
+    assert node_by_key["project.voiceover"]["input_contract"]["voice"]["provider_voice_id"] == "longxiaocheng"
+    assert node_by_key["project.voiceover"]["input_contract"]["speaking_rate"] == 1.1
+    assert node_by_key["project.voiceover"]["input_contract"]["volume"] == 62
+    assert node_by_key["project.voiceover"]["output_contract"] == {
+        "media_type": "audio", "format": "wav", "sample_rate": 24000, "channels": 1,
+    }
     assert node_by_key["project.subtitles"]["kind"] == "generate_subtitles"
     assert node_by_key["project.subtitles"]["input_contract"]["duration_ms"] == 5000
     assert [cue["text"] for cue in node_by_key["project.subtitles"]["input_contract"]["cues"]] == ["第一段旁白。", "第二段对白。"]
@@ -98,6 +116,25 @@ def test_production_manifest_freezes_voiceover_and_subtitles_as_timeline_depende
 
     silent_manifest = _compile_manifest(plan, shots, selection, {"format": "mp4"}, "off", {}, routes)
     assert all(node["kind"] not in {"generate_tts", "generate_subtitles"} for node in silent_manifest["nodes"])
+
+
+def test_audio_duration_gate_uses_frozen_target_and_tolerance() -> None:
+    node = SimpleNamespace(input_contract={"target_duration_ms": 5000, "duration_tolerance_ms": 1200})
+
+    accepted = _deterministic_contract_findings(
+        None,
+        SimpleNamespace(asset_type="audio", duration_ms=6200),
+        node,
+    )
+    blocked = _deterministic_contract_findings(
+        None,
+        SimpleNamespace(asset_type="audio", duration_ms=6201),
+        node,
+    )
+
+    assert accepted == []
+    assert [finding["code"] for finding in blocked] == ["AUDIO_DURATION_EXCEEDS_TARGET"]
+    assert blocked[0]["evidence"] == {"actual_ms": 6201, "target_ms": 5000, "tolerance_ms": 1200}
 
 
 def test_provider_request_preserves_dependency_input_slots(monkeypatch) -> None:

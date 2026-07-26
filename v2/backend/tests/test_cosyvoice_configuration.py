@@ -13,6 +13,7 @@ from v2.backend.app.configuration.contracts import (
     StoragePolicyDraft,
 )
 from v2.scripts.enable_cosyvoice_audio import enable_cosyvoice
+from v2.scripts.upgrade_audio_execution_contract import upgrade_audio_execution
 from v2.scripts.validate_cosyvoice_connection import (
     CosyVoiceValidationContract,
     CosyVoiceValidationError,
@@ -35,6 +36,12 @@ def _draft():
             format="mp3",
             speaking_rate_min=0.8,
             speaking_rate_max=1.2,
+            speaking_rate_default=1.0,
+            voice_presets=[],
+            volume_min=0,
+            volume_max=100,
+            volume_default=50,
+            duration_tolerance_ms=1500,
         ),
         storage=StoragePolicyDraft(
             policy_key="storage",
@@ -68,8 +75,41 @@ def test_enable_cosyvoice_adds_one_explicit_audio_route() -> None:
     assert draft.audio.supported_modes == ["off", "voiceover"]
     assert draft.audio.tts_workflow_slot_key == "cosyvoice-voiceover-wav"
     assert draft.audio.format == "wav"
+    assert draft.audio.default_voice_key == "warm_female"
+    assert [preset.provider_voice_id for preset in draft.audio.voice_presets] == [
+        "longxiaochun", "longxiaoxia", "longxiaocheng", "longxiaobai", "longlaotie",
+    ]
+    bindings = {binding.field_path: binding.value_source for binding in draft.workflow_slots[0].node_info_list}
+    assert bindings["voice"] == "input_contract.voice.provider_voice_id"
+    assert bindings["rate"] == "input_contract.speaking_rate"
+    assert bindings["volume"] == "input_contract.volume"
     assert "audio/wav" in draft.storage.allowed_mime_types
     assert draft.pricing.rules[-1].unit == "output_second"
+
+
+def test_upgrade_audio_execution_replaces_literal_voice_with_frozen_selection() -> None:
+    draft = _draft()
+    assert enable_cosyvoice(draft) is True
+    workflow = draft.workflow_slots[0]
+    workflow.input_schema_version = "cosyvoice-tts-input.v1"
+    workflow.node_info_list = [
+        binding for binding in workflow.node_info_list
+        if binding.field_path not in {"rate", "volume"}
+    ]
+    workflow.node_info_list[1].value_source = "literal:longxiaochun"
+
+    upgrade_audio_execution(draft)
+
+    bindings = {binding.field_path: binding.value_source for binding in workflow.node_info_list}
+    assert workflow.input_schema_version == "cosyvoice-tts-input.v2"
+    assert bindings == {
+        "text": "input_contract.voiceover_text",
+        "voice": "input_contract.voice.provider_voice_id",
+        "rate": "input_contract.speaking_rate",
+        "volume": "input_contract.volume",
+        "format": "literal:wav",
+        "sample_rate": "literal:24000",
+    }
 
 
 def _validation_contract(api_key: str | None) -> CosyVoiceValidationContract:

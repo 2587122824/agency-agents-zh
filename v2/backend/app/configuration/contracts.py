@@ -105,17 +105,32 @@ class WorkflowSlotDraft(StrictContract):
     capability_tags: list[str] = Field(default_factory=list)
 
 
+class VoicePresetDraft(StrictContract):
+    key: Key = Field(pattern=r"^[a-z][a-z0-9_.-]{1,79}$")
+    display_name: str = Field(min_length=1, max_length=80)
+    provider_voice_id: str = Field(min_length=1, max_length=120)
+    description: str = Field(min_length=1, max_length=200)
+    preview_text: str = Field(min_length=1, max_length=120)
+
+
 class AudioConfigDraft(StrictContract):
     config_key: Key = Field(pattern=r"^[a-z][a-z0-9_.-]{1,119}$")
     display_name: str = Field(min_length=1, max_length=160)
     supported_modes: list[Literal["off", "voiceover"]] = Field(min_length=1)
     tts_workflow_slot_key: Key | None = None
     default_voice_entity_version_id: str | None = None
+    voice_presets: list[VoicePresetDraft]
+    default_voice_key: Key | None = None
     sample_rate: int = Field(ge=8000, le=192000)
     channels: Literal[1, 2]
     format: str = Field(min_length=1, max_length=24)
     speaking_rate_min: float = Field(gt=0, le=4)
     speaking_rate_max: float = Field(gt=0, le=4)
+    speaking_rate_default: float = Field(gt=0, le=4)
+    volume_min: int = Field(ge=0, le=100)
+    volume_max: int = Field(ge=0, le=100)
+    volume_default: int = Field(ge=0, le=100)
+    duration_tolerance_ms: int = Field(ge=0, le=10000)
     loudness_target: float | None = Field(default=None, ge=-70, le=0)
     temporary_upload_policy_version_id: str | None = None
 
@@ -123,6 +138,23 @@ class AudioConfigDraft(StrictContract):
     def speaking_rate_range_is_valid(self):
         if self.speaking_rate_max < self.speaking_rate_min:
             raise ValueError("speaking_rate_max must be greater than or equal to speaking_rate_min")
+        if not self.speaking_rate_min <= self.speaking_rate_default <= self.speaking_rate_max:
+            raise ValueError("speaking_rate_default must be inside the speaking rate range")
+        if self.volume_max < self.volume_min:
+            raise ValueError("volume_max must be greater than or equal to volume_min")
+        if not self.volume_min <= self.volume_default <= self.volume_max:
+            raise ValueError("volume_default must be inside the volume range")
+        preset_keys = [preset.key for preset in self.voice_presets]
+        if len(preset_keys) != len(set(preset_keys)):
+            raise ValueError("voice preset keys must be unique")
+        provider_voice_ids = [preset.provider_voice_id for preset in self.voice_presets]
+        if len(provider_voice_ids) != len(set(provider_voice_ids)):
+            raise ValueError("provider voice ids must be unique")
+        if "voiceover" in self.supported_modes:
+            if not self.voice_presets or self.default_voice_key not in preset_keys:
+                raise ValueError("voiceover mode requires voice presets and a valid default voice key")
+        elif self.default_voice_key is not None:
+            raise ValueError("audio without voiceover must not define a default voice key")
         return self
 
 

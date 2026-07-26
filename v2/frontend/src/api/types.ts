@@ -859,6 +859,20 @@ export interface ProductionPreparation {
     display_name: string
     video_specs: Array<{ id: string; key: string; display_name: string; aspect_ratio: string; width: number; height: number; fps: number }>
     workflow_slots: Array<{ id: string; key: string; display_name: string; operation_kind: string; supported_video_spec_ids: string[]; capability_tags: string[] }>
+    audio_config: {
+      id: string
+      voice_presets: Array<{ key: string; display_name: string; provider_voice_id: string; description: string; preview_text: string }>
+      default_voice_key: string | null
+      speaking_rate_range: { min: number; max: number }
+      speaking_rate_default: number
+      volume_range: { min: number; max: number }
+      volume_default: number
+      duration_tolerance_ms: number
+      loudness_target_lufs: number | null
+      sample_rate: number
+      channels: number
+      format: string
+    } | null
     pricing_catalogs: Array<{ id: string; key: string; display_name: string; currency: string; confirmation_threshold: number; effective_from: string | null; effective_to: string | null }>
   }>
   analyses: ProductionImpactAnalysis[]
@@ -970,11 +984,24 @@ export interface AudioConfigDraft {
   supported_modes: Array<'off' | 'voiceover'>
   tts_workflow_slot_key?: string | null
   default_voice_entity_version_id?: string | null
+  voice_presets: Array<{
+    key: string
+    display_name: string
+    provider_voice_id: string
+    description: string
+    preview_text: string
+  }>
+  default_voice_key?: string | null
   sample_rate: number
   channels: 1 | 2
   format: string
   speaking_rate_min: number
   speaking_rate_max: number
+  speaking_rate_default: number
+  volume_min: number
+  volume_max: number
+  volume_default: number
+  duration_tolerance_ms: number
   loudness_target?: number | null
   temporary_upload_policy_version_id?: string | null
 }

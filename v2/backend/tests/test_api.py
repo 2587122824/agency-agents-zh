@@ -2282,6 +2282,13 @@ def valid_system_configuration() -> dict:
             "format": "wav",
             "speaking_rate_min": 0.8,
             "speaking_rate_max": 1.2,
+            "speaking_rate_default": 1.0,
+            "voice_presets": [],
+            "default_voice_key": None,
+            "volume_min": 0,
+            "volume_max": 100,
+            "volume_default": 50,
+            "duration_tolerance_ms": 1500,
         },
         "storage": {
             "policy_key": "local_runtime",
@@ -2601,6 +2608,7 @@ def publish_visual_production_configuration(
     adapter_kind: str = "mock",
     runtime_pricing: bool = False,
     reference_required: bool = False,
+    with_voiceover: bool = False,
     command_prefix: str = "snapshot-config",
 ) -> dict:
     configuration = valid_system_configuration()
@@ -2631,6 +2639,60 @@ def publish_visual_production_configuration(
         }],
         "supported_video_spec_keys": ["vertical_480p"],
     })
+    if with_voiceover:
+        configuration["providers"].append({
+            "provider_key": "dashscope_cosyvoice",
+            "display_name": "CosyVoice",
+            "adapter_kind": "cosyvoice",
+            "base_url": "https://dashscope.aliyuncs.com",
+            "api_key": "test-cosyvoice-key",
+            "capabilities": ["tts"],
+            "request_timeout_seconds": 60,
+            "poll_interval_seconds": 5,
+            "max_concurrency": 1,
+        })
+        configuration["workflow_slots"].append({
+            "slot_key": "cosyvoice_voiceover",
+            "display_name": "CosyVoice 旁白",
+            "operation_kind": "tts",
+            "provider_key": "dashscope_cosyvoice",
+            "provider_workflow_id": "cosyvoice-v1",
+            "input_schema_version": "cosyvoice-tts-input.v2",
+            "output_schema_version": "cosyvoice-wav-output.v1",
+            "node_info_list": [
+                {"node_id": "input", "field_path": "text", "value_source": "input_contract.voiceover_text", "value_type": "string", "required": True},
+                {"node_id": "input", "field_path": "voice", "value_source": "input_contract.voice.provider_voice_id", "value_type": "string", "required": True},
+                {"node_id": "input", "field_path": "rate", "value_source": "input_contract.speaking_rate", "value_type": "number", "required": True},
+                {"node_id": "input", "field_path": "volume", "value_source": "input_contract.volume", "value_type": "integer", "required": True},
+                {"node_id": "input", "field_path": "format", "value_source": "literal:wav", "value_type": "string", "required": True},
+                {"node_id": "input", "field_path": "sample_rate", "value_source": "literal:24000", "value_type": "integer", "required": True},
+            ],
+            "supported_video_spec_keys": [],
+        })
+        configuration["audio"] = {
+            **configuration["audio"],
+            "display_name": "版本化旁白",
+            "supported_modes": ["off", "voiceover"],
+            "tts_workflow_slot_key": "cosyvoice_voiceover",
+            "voice_presets": [{
+                "key": "steady_male",
+                "display_name": "沉稳男声",
+                "provider_voice_id": "longxiaocheng",
+                "description": "稳定、可信，适合解说",
+                "preview_text": "片场 V2 配音试听。",
+            }],
+            "default_voice_key": "steady_male",
+            "sample_rate": 24000,
+            "channels": 1,
+            "speaking_rate_min": 0.8,
+            "speaking_rate_max": 1.2,
+            "speaking_rate_default": 1.0,
+            "volume_min": 20,
+            "volume_max": 80,
+            "volume_default": 50,
+            "duration_tolerance_ms": 1200,
+            "loudness_target": -16,
+        }
     if with_pricing:
         configuration["pricing"] = {
             "catalog_key": "visual_pricing_cny",
@@ -2661,6 +2723,86 @@ def publish_visual_production_configuration(
     )
     assert response.status_code == 200
     return response.json()
+
+
+def test_voiceover_impact_freezes_exact_voice_rate_volume_and_rejects_invalid_selection(client: TestClient) -> None:
+    project, plan = create_confirmed_plan(client)
+    with SessionLocal() as session:
+        stored = session.get(PlanVersion, plan["id"])
+        assert stored is not None
+        first_beat = stored.creative_brief["narrative_beats"][0]["beat_code"]
+        stored.creative_brief = {
+            **stored.creative_brief,
+            "audio_mode": "voiceover",
+            "script_segments": [{
+                "segment_code": "SEG_VOICE_01",
+                "beat_code": first_beat,
+                "kind": "voiceover",
+                "spoken_text": "这是冻结进生产快照的旁白。",
+                "on_screen_text": None,
+            }],
+        }
+        session.commit()
+    config = publish_visual_production_configuration(
+        client,
+        with_voiceover=True,
+        command_prefix="voiceover-execution-config",
+    )
+    components = {(item["component_type"], item["key"]): item for item in config["components"]}
+    base = {
+        "plan_version_id": plan["id"],
+        "production_config_version_id": config["id"],
+        "video_spec_version_id": components[("video_spec", "vertical_480p")]["id"],
+        "shot_workflow_assignments": production_workflow_assignments(
+            plan,
+            components[("workflow_slot", "keyframe_image")]["id"],
+            components[("workflow_slot", "first_frame_video")]["id"],
+        ),
+        "tts_workflow_slot_version_id": components[("workflow_slot", "cosyvoice_voiceover")]["id"],
+    }
+    missing = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={"command_id": "voiceover-selection-missing", **base},
+    )
+    assert missing.status_code == 201
+    assert "VOICEOVER_EXECUTION_SELECTION_REQUIRED" in {
+        item["code"] for item in missing.json()["validation_errors"]
+    }
+    invalid = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "voiceover-selection-invalid",
+            **base,
+            "audio_execution": {"voice_key": "unknown_voice", "speaking_rate": 1.3, "volume": 81},
+        },
+    )
+    assert invalid.status_code == 201
+    assert {
+        "VOICE_PRESET_NOT_IN_AUDIO_CONFIG",
+        "SPEAKING_RATE_OUT_OF_RANGE",
+        "VOLUME_OUT_OF_RANGE",
+    } <= {item["code"] for item in invalid.json()["validation_errors"]}
+    valid = client.post(
+        f"/api/v1/projects/{project['id']}/production-impact-analyses",
+        json={
+            "command_id": "voiceover-selection-valid",
+            **base,
+            "audio_execution": {"voice_key": "steady_male", "speaking_rate": 1.1, "volume": 62},
+        },
+    )
+    assert valid.status_code == 201, valid.text
+    analysis = valid.json()
+    assert analysis["validation_errors"] == []
+    voiceover = next(node for node in analysis["manifest"]["dag"]["nodes"] if node["node_key"] == "project.voiceover")
+    assert voiceover["input_contract"]["voice"] == {
+        "key": "steady_male",
+        "display_name": "沉稳男声",
+        "provider_voice_id": "longxiaocheng",
+    }
+    assert voiceover["input_contract"]["speaking_rate"] == 1.1
+    assert voiceover["input_contract"]["volume"] == 62
+    assert voiceover["input_contract"]["duration_tolerance_ms"] == 1200
+    assert voiceover["input_contract"]["loudness_target_lufs"] == -16
 
 
 def test_production_planner_proposes_routes_and_requires_explicit_acceptance(client: TestClient) -> None:

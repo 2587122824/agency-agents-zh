@@ -11,6 +11,7 @@ from v2.backend.app.configuration.contracts import (
     RetireConfiguration,
     ReviseConfiguration,
     ValidateConfiguration,
+    VoicePresetDraft,
     WorkflowSlotDraft,
 )
 from v2.backend.app.configuration.service import (
@@ -28,6 +29,13 @@ from v2.backend.app.repositories import SqlAlchemyConfigurationRepository
 
 PROVIDER_KEY = "dashscope-cosyvoice"
 SLOT_KEY = "cosyvoice-voiceover-wav"
+VOICE_PRESETS = [
+    VoicePresetDraft(key="warm_female", display_name="温暖女声", provider_voice_id="longxiaochun", description="自然、温暖，适合品牌旁白", preview_text="欢迎来到片场 V2 配音试听。"),
+    VoicePresetDraft(key="bright_female", display_name="明亮女声", provider_voice_id="longxiaoxia", description="清晰、明快，适合产品介绍", preview_text="欢迎来到片场 V2 配音试听。"),
+    VoicePresetDraft(key="steady_male", display_name="沉稳男声", provider_voice_id="longxiaocheng", description="稳定、可信，适合解说", preview_text="欢迎来到片场 V2 配音试听。"),
+    VoicePresetDraft(key="youthful", display_name="青春声线", provider_voice_id="longxiaobai", description="轻快、有活力，适合短视频", preview_text="欢迎来到片场 V2 配音试听。"),
+    VoicePresetDraft(key="friendly_male", display_name="亲和男声", provider_voice_id="longlaotie", description="亲切、口语化，适合生活内容", preview_text="欢迎来到片场 V2 配音试听。"),
+]
 
 
 def enable_cosyvoice(draft) -> bool:
@@ -53,11 +61,13 @@ def enable_cosyvoice(draft) -> bool:
         provider_workflow_id="cosyvoice-v1",
         provider_workflow_version="v1",
         model_config_key=None,
-        input_schema_version="cosyvoice-tts-input.v1",
+        input_schema_version="cosyvoice-tts-input.v2",
         output_schema_version="cosyvoice-wav-output.v1",
         node_info_list=[
             NodeBinding(node_id="input", field_path="text", value_source="input_contract.voiceover_text", value_type="string"),
-            NodeBinding(node_id="input", field_path="voice", value_source="literal:longxiaochun", value_type="string"),
+            NodeBinding(node_id="input", field_path="voice", value_source="input_contract.voice.provider_voice_id", value_type="string"),
+            NodeBinding(node_id="input", field_path="rate", value_source="input_contract.speaking_rate", value_type="number"),
+            NodeBinding(node_id="input", field_path="volume", value_source="input_contract.volume", value_type="integer"),
             NodeBinding(node_id="input", field_path="format", value_source="literal:wav", value_type="string"),
             NodeBinding(node_id="input", field_path="sample_rate", value_source="literal:24000", value_type="integer"),
         ],
@@ -69,6 +79,13 @@ def enable_cosyvoice(draft) -> bool:
     draft.audio.sample_rate = 24000
     draft.audio.channels = 1
     draft.audio.format = "wav"
+    draft.audio.voice_presets = VOICE_PRESETS
+    draft.audio.default_voice_key = "warm_female"
+    draft.audio.speaking_rate_default = 1.0
+    draft.audio.volume_min = 0
+    draft.audio.volume_max = 100
+    draft.audio.volume_default = 50
+    draft.audio.duration_tolerance_ms = 1500
     if "audio/wav" not in draft.storage.allowed_mime_types:
         draft.storage.allowed_mime_types.append("audio/wav")
     if draft.pricing is None:

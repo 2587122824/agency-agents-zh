@@ -240,6 +240,9 @@ export function PlanPage() {
   const [videoSlotId, setVideoSlotId] = useState('')
   const [shotWorkflowAssignments, setShotWorkflowAssignments] = useState<Record<string, { keyframe: string; video: string }>>({})
   const [ttsSlotId, setTtsSlotId] = useState('')
+  const [voiceKey, setVoiceKey] = useState('')
+  const [speakingRate, setSpeakingRate] = useState(1)
+  const [voiceVolume, setVoiceVolume] = useState(50)
   const [pricingCatalogId, setPricingCatalogId] = useState('')
   const [confirmCost, setConfirmCost] = useState(false)
   const [confirmSubmit, setConfirmSubmit] = useState(false)
@@ -338,7 +341,21 @@ export function PlanPage() {
     },
     onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }),
   })
-  const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, { plan_version_id: planning.data!.active_plan!.id, production_config_version_id: configId, video_spec_version_id: videoSpecId, shot_workflow_assignments: planning.data!.active_plan!.shots.map(shot => ({ shot_code: shot.shot_code, keyframe_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.keyframe || null, video_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.video || '' })), tts_workflow_slot_version_id: ttsSlotId || null, pricing_catalog_version_id: pricingCatalogId || null }) })
+  const analyzeImpact = useMutation({ mutationFn: () => api.analyzeProductionImpact(projectId, {
+    plan_version_id: planning.data!.active_plan!.id,
+    production_config_version_id: configId,
+    video_spec_version_id: videoSpecId,
+    shot_workflow_assignments: planning.data!.active_plan!.shots.map(shot => ({
+      shot_code: shot.shot_code,
+      keyframe_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.keyframe || null,
+      video_workflow_slot_version_id: shotWorkflowAssignments[shot.shot_code]?.video || '',
+    })),
+    tts_workflow_slot_version_id: ttsSlotId || null,
+    audio_execution: preparation.data?.audio_mode === 'voiceover'
+      ? { voice_key: voiceKey, speaking_rate: speakingRate, volume: voiceVolume }
+      : null,
+    pricing_catalog_version_id: pricingCatalogId || null,
+  }) })
   const createSnapshot = useMutation({ mutationFn: () => api.createProductionSnapshot(projectId, analyzeImpact.data!), onSuccess: () => client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) })
   const lockSnapshot = useMutation({ mutationFn: () => api.lockProductionSnapshot(projectId, currentSnapshot!), onSuccess: async () => { setConfirmCost(false); await client.invalidateQueries({ queryKey: ['production-preparation', projectId] }) } })
   const submitProduction = useMutation({
@@ -384,12 +401,18 @@ export function PlanPage() {
     if (preparation.data?.audio_mode === 'voiceover' && !ttsSlotId && ttsOptions.length === 1) {
       setTtsSlotId(ttsOptions[0].id)
     }
+    if (preparation.data?.audio_mode === 'voiceover' && config.audio_config) {
+      if (!voiceKey) setVoiceKey(config.audio_config.default_voice_key ?? '')
+      setSpeakingRate(current => voiceKey ? current : config.audio_config!.speaking_rate_default)
+      setVoiceVolume(current => voiceKey ? current : config.audio_config!.volume_default)
+    }
   }, [
     configId,
     keyframeSlotId,
     preparation.data?.audio_mode,
     preparation.data?.published_configurations,
     pricingCatalogId,
+    voiceKey,
     ttsSlotId,
     videoSlotId,
     videoSpecId,
@@ -440,6 +463,8 @@ export function PlanPage() {
   const ttsSlots = selectedConfig?.workflow_slots.filter(item => item.operation_kind === 'tts') ?? []
   const selectedVideoSpec = selectedConfig?.video_specs.find(item => item.id === videoSpecId)
   const selectedTtsSlot = ttsSlots.find(item => item.id === ttsSlotId)
+  const audioConfig = selectedConfig?.audio_config
+  const selectedVoice = audioConfig?.voice_presets.find(item => item.key === voiceKey)
   const productionPlanCandidate = preparation.data?.production_plan_candidates.find(item =>
     item.production_config_version_id === configId
     && item.video_spec_version_id === videoSpecId
@@ -461,10 +486,26 @@ export function PlanPage() {
     const video = videoSlots.find(item => item.id === assignment?.video)
     return Boolean(video && (video.operation_kind === 'text_to_video_generation' || assignment?.keyframe))
   })
-  const canAnalyze = Boolean(data.active_plan && configId && videoSpecId && allShotsAssigned && (preparation.data?.audio_mode !== 'voiceover' || ttsSlotId))
+  const audioSelectionReady = preparation.data?.audio_mode !== 'voiceover'
+    || Boolean(ttsSlotId && audioConfig && selectedVoice)
+  const canAnalyze = Boolean(data.active_plan && configId && videoSpecId && allShotsAssigned && audioSelectionReady)
   const nextAction = data.active_plan && preparation.data ? preparation.data.next_action : data.next_action
   const nextActionLabel = productionActionLabels[nextAction.code] ?? nextAction.label
-  function chooseConfig(value: string) { setConfigId(value); setVideoSpecId(''); setKeyframeSlotId(''); setVideoSlotId(''); setShotWorkflowAssignments({}); setTtsSlotId(''); setPricingCatalogId(''); generateProductionPlan.reset(); retryProductionPlan.reset(); analyzeImpact.reset() }
+  function chooseConfig(value: string) {
+    setConfigId(value)
+    setVideoSpecId('')
+    setKeyframeSlotId('')
+    setVideoSlotId('')
+    setShotWorkflowAssignments({})
+    setTtsSlotId('')
+    setVoiceKey('')
+    setSpeakingRate(1)
+    setVoiceVolume(50)
+    setPricingCatalogId('')
+    generateProductionPlan.reset()
+    retryProductionPlan.reset()
+    analyzeImpact.reset()
+  }
   function assignShot(shotCode: string, field: 'keyframe' | 'video', value: string) {
     setShotWorkflowAssignments(current => {
       const next = { ...(current[shotCode] ?? { keyframe: '', video: '' }), [field]: value }
@@ -531,6 +572,40 @@ export function PlanPage() {
               {preparation.data.audio_mode === 'voiceover' && <label>配音生成方案<select disabled={!selectedConfig} value={ttsSlotId} onChange={event => { setTtsSlotId(event.target.value); analyzeImpact.reset() }}><option value="">请选择配音生成方案</option>{ttsSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>}
               <label>计费方案<select disabled={!selectedConfig} value={pricingCatalogId} onChange={event => { setPricingCatalogId(event.target.value); analyzeImpact.reset() }}><option value="">暂不选择（只能预览，不能开始制作）</option>{selectedConfig?.pricing_catalogs.map(item => <option key={item.id} value={item.id}>{item.display_name} · {item.currency}</option>)}</select></label>
             </div>
+            {preparation.data.audio_mode === 'voiceover' && audioConfig && <section className={styles.audioExecution}>
+              <header>
+                <div><strong>本次配音参数</strong><span>选择会冻结进生产快照与每次执行记录，不会在运行时自动换声线。</span></div>
+                <small>{audioConfig.format.toUpperCase()} · {audioConfig.sample_rate}Hz · {audioConfig.channels} 声道</small>
+              </header>
+              <div className={styles.voiceCards}>
+                {audioConfig.voice_presets.map(voice => <button
+                  key={voice.key}
+                  type="button"
+                  data-selected={voice.key === voiceKey}
+                  onClick={() => { setVoiceKey(voice.key); analyzeImpact.reset() }}
+                >
+                  <strong>{voice.display_name}</strong>
+                  <span>{voice.description}</span>
+                  <small>{voice.provider_voice_id}</small>
+                </button>)}
+              </div>
+              <div className={styles.audioControls}>
+                <label>
+                  <span>语速 <b>{speakingRate.toFixed(1)}×</b></span>
+                  <input type="range" min={audioConfig.speaking_rate_range.min} max={audioConfig.speaking_rate_range.max} step="0.1" value={speakingRate} onChange={event => { setSpeakingRate(Number(event.target.value)); analyzeImpact.reset() }} />
+                </label>
+                <label>
+                  <span>音量 <b>{voiceVolume}</b></span>
+                  <input type="range" min={audioConfig.volume_range.min} max={audioConfig.volume_range.max} step="1" value={voiceVolume} onChange={event => { setVoiceVolume(Number(event.target.value)); analyzeImpact.reset() }} />
+                </label>
+                <dl>
+                  <div><dt>目标时长</dt><dd>{((brief?.brief.narrative_beats.reduce((sum, beat) => sum + beat.target_duration_ms, 0) ?? 0) / 1000).toFixed(1)} 秒</dd></div>
+                  <div><dt>允许超时</dt><dd>{(audioConfig.duration_tolerance_ms / 1000).toFixed(1)} 秒</dd></div>
+                  <div><dt>响度目标</dt><dd>{audioConfig.loudness_target_lufs === null ? '未配置' : `${audioConfig.loudness_target_lufs} LUFS`}</dd></div>
+                </dl>
+              </div>
+              <p>试听需要真实 CosyVoice 凭据并会产生供应商调用；当前界面不会用浏览器合成音冒充所选声线。</p>
+            </section>}
             <section className={styles.productionPlanner}>
               <header><div><Sparkles size={18} /><span><small>制作规划智能体</small><strong>{productionPlanCandidate?.status === 'accepted' ? '当前路线已采用' : productionPlanCandidate ? '逐镜头路线等待确认' : productionPlannerFailed ? '本次制作规划失败' : '让智能体匹配现有工作流'}</strong></span></div>{productionPlanCandidate && <em data-accepted={productionPlanCandidate.status === 'accepted'}>{productionPlanCandidate.status === 'accepted' ? '已采用' : '待确认'}</em>}</header>
               {productionPlanCandidate ? <>
@@ -558,7 +633,7 @@ export function PlanPage() {
               })}</div>
             </section>
             <div className={styles.analysisAction}><div><ShieldCheck size={17} /><p><strong>所有生成方式都由你选择</strong><span>系统只按当前选择计算制作步骤，不会自动更换生成方案，也不会在这里开始生成。</span></p></div><button className="primaryButton" disabled={!canAnalyze || analyzeImpact.isPending} onClick={() => analyzeImpact.mutate()}>{analyzeImpact.isPending ? '正在计算…' : '查看制作计划'}</button></div>
-            {selectedConfig && <details className={styles.technicalDetails}><summary>查看当前选择的技术详情</summary><dl><div><dt>配置版本</dt><dd><code>{selectedConfig.id}</code></dd></div>{selectedVideoSpec && <div><dt>画面规格</dt><dd><code>{selectedVideoSpec.id}</code></dd></div>}<div><dt>逐镜头路由</dt><dd>{Object.values(shotWorkflowAssignments).filter(item => item.video).length} 个镜头已明确选择</dd></div>{selectedTtsSlot && <div><dt>配音生成</dt><dd><code>{selectedTtsSlot.key}</code></dd></div>}</dl></details>}
+            {selectedConfig && <details className={styles.technicalDetails}><summary>查看当前选择的技术详情</summary><dl><div><dt>配置版本</dt><dd><code>{selectedConfig.id}</code></dd></div>{selectedVideoSpec && <div><dt>画面规格</dt><dd><code>{selectedVideoSpec.id}</code></dd></div>}<div><dt>逐镜头路由</dt><dd>{Object.values(shotWorkflowAssignments).filter(item => item.video).length} 个镜头已明确选择</dd></div>{selectedTtsSlot && <div><dt>配音生成</dt><dd><code>{selectedTtsSlot.key}</code></dd></div>}{selectedVoice && <div><dt>配音执行</dt><dd>{selectedVoice.display_name} · {speakingRate.toFixed(1)}× · 音量 {voiceVolume}</dd></div>}</dl></details>}
           </> : <div className={styles.noConfig}><CircleAlert size={20} /><div><strong>没有已发布生产配置</strong><span>请先到系统配置创建、校验并发布精确版本。</span></div><Link className="secondaryButton" to="/settings">前往系统配置</Link></div>}
           {impact && <div className={styles.impactResult} data-blocked={impact.status === 'blocked'}>
             <header><Calculator size={17} /><div><strong>{impact.status === 'blocked' ? '制作计划需要调整' : '制作计划已生成，等待确认'}</strong><span>{impact.manifest.shots.length} 个镜头 · 预计调用生成服务 {impact.estimated_call_count} 次 · {costLabel(impact.estimated_cost, impact.currency)}</span></div></header>

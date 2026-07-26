@@ -25,8 +25,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 分支 | `main` |
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
-| 数据库迁移 | `20260724_33 (head)` |
-| 已发布配置 | `production_config_63e96a7f4fee4c5a89e1fc1c8cdad314`，版本 54；在 v53 的 6 个视觉工作流基础上新增 `cosyvoice-v1 / longxiaochun / WAV / 24000Hz` TTS 槽位，音频支持 `off / voiceover`；CosyVoice API Key 当前未配置 |
+| 数据库迁移 | `20260726_34 (head)` |
+| 已发布配置 | `production_config_ca83ef58d04d49bba2f9a3f1baf1f507`，版本 55；保持 v54 既有视觉与旁白路线，新增 5 个版本化 CosyVoice 音色、默认语速/音量、允许超时和动态 TTS 参数绑定；CosyVoice API Key 当前未配置 |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 与文本模型 API Key 由当前已发布系统配置普通字段提供，不再读取环境变量 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -71,7 +71,7 @@ v2/runtime/worker.err.log
 - 质量审核智能体首期图片合同、`QCReportCandidate`、证据引用校验、失败精确重跑与人工落账；视频和音频保持显式人工审核。
 - Asset 文件验证、QC、人工审核、素材联络表、时间线和最终交付合同。
 - 最终交付支持用户显式选择本机 FFmpeg 或外部上传；本机方式冻结 FFmpeg 版本和编码参数，创建独立于生产快照的单次 `render_delivery` 工作项，执行前复验输入文件哈希，成功只登记待验证成片，失败不重试或切换方式。
-- 旁白模式把已确认 Creative Brief 中有序的 `voiceover/dialogue` 文本冻结进单一 TTS 节点，并按叙事节拍确定性编译并列字幕节点；CosyVoice Adapter 只提交冻结模型、预设音色、格式和采样率，下载后交叉验证 WAV 签名、文件大小和哈希。本地字幕 Adapter 生成严格 UTF-8 SRT，质量探测校验序号、内容和时点。剪辑助理只接受当前快照唯一已批准旁白与字幕并确定性加入音频轨和烧录字幕轨；剪辑台可试听音频及预览 SRT；本机 FFmpeg 按源区间和时间线入点执行裁剪、延迟、混音、libass 字幕烧录及 AAC 编码。
+- 旁白模式把已确认 Creative Brief 中有序的 `voiceover/dialogue` 文本冻结进单一 TTS 节点，并按叙事节拍确定性编译并列字幕节点；制作准备从版本化目录显式选择 5 个 CosyVoice 音色之一，并设置语速和音量。后端将音色显示名/供应商 ID、语速、音量、目标时长、允许超时、响度和音频格式冻结进快照、TTS DAG 与执行请求；真实 WAV 超时按确定性规则阻断。CosyVoice Adapter 下载后交叉验证 WAV 结构、采样率、声道、文件大小和哈希。本地字幕 Adapter 生成严格 UTF-8 SRT，质量探测校验序号、内容和时点。剪辑助理只接受当前快照唯一已批准旁白与字幕并确定性加入音频轨和烧录字幕轨；剪辑台可试听已生成音频及预览 SRT；本机 FFmpeg 按源区间和时间线入点执行裁剪、延迟、混音、libass 字幕烧录及 AAC 编码。
 - 成品素材可由用户明确归类为分镜、生成或剪辑问题；`AssetRevisionRequest` 独立保存范围、结构化原因与可选补充说明，后端不从说明文本推断分类。分镜回改使用不可直接确认的草稿并保留旧方案、快照和素材。历史方案素材不能直接覆盖当前分镜，开放回改可由用户显式放弃且保留完整证据。
 - 项目控制台、制作队列、事件与费用审计账本、项目归档与恢复。
 - 项目工作区共享页头、导航和按钮已提高字号；项目控制台业务标签最低 11px、正文与事实值 12–13px，默认收起的技术证据 10px，窄屏表格保持容器内滚动。
@@ -190,6 +190,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-26 | 完成版本化配音执行选择：迁移 `20260726_34`，配置 v55 发布 5 个 CosyVoice 音色及默认/范围/时长容差，TTS 工作流升级 `cosyvoice-tts-input.v2` 并从快照读取音色、语速和音量。制作准备页提供音色卡、语速/音量控制与音频事实；设置页维护完整音频策略。影响分析拒绝漏选、未知音色和超范围值且不再 500；WAV 超过目标时长加容差时确定性阻断。真实供应商试听仍因缺 API Key 未执行 |
 | 2026-07-26 | 新增正式 CosyVoice 验收命令：默认只读读取最新已发布配置，只有 `--confirm-paid-call` 且配置凭据/外部执行授权同时就绪才联网；输出不包含 API Key。当前真实命令以 `COSYVOICE_CREDENTIAL_MISSING / network_probe_performed=false` 阻断。Adapter 补齐 WAV 完整结构、24kHz、单声道和非空帧校验，不合同时落盘 |
 | 2026-07-26 | 完成旁白字幕首期闭环：Creative Brief 旁白/对白按节拍编译冻结 cue，新增本地 SRT Adapter、严格字幕文件探测、人工内容审核提示、剪辑助理唯一批准字幕轨、剪辑台音频试听/SRT 内容预览和 FFmpeg/libass 烧录。真实 Windows FFmpeg 验收发现并修复盘符路径解析，最终输出为 480×848 H.264 + AAC。七项后续范围与验收矩阵见 `V2_AUDIO_EDITING_ROADMAP.md` |
 | 2026-07-26 | 完成旁白到剪辑交付的首个闭环：旁白文本冻结进 TTS DAG，新增 CosyVoice 同步 Adapter、WAV 严格验证与本地素材登记；剪辑助理确定性引用唯一已批准旁白，本机 FFmpeg 支持按时间线 `atrim / adelay / amix` 并编码 AAC。发布配置 v54；当前 CosyVoice API Key 未配置，连接状态明确为 `credential_not_ready`，未伪造真实调用 |
@@ -271,17 +272,17 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`272 passed`
+- 后端测试：`275 passed`
 - 供应商并发门禁验收：`max_concurrency=1` 时首个外部任务提交并轮询，后续同 Provider 工作项保持 `queued`；首项完成后下一项才提交，等待过程不新增失败、尝试、费用或自动重试
 - 两阶段生产验收：图片节点全部先执行；后续任务在用户确认前保持 `waiting_phase`；节点或素材清单不一致明确失败；确认后视频读取冻结的已批准素材；纯文本视频无图片门禁并直接排队
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v54，5 个文本智能体模型分工、6 个镜头工作流槽位和 1 个 CosyVoice TTS 槽位；人物一致性关键帧 `2073414172825706497` 的 `24.denoise=1.0` 来自 V1 真实成功请求证据；供应商 API Key 使用配置普通字段，CosyVoice Key 当前缺失；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；剪辑助理合同为 `editor-assistant-input.v1 / timeline-candidate.v1 / editor-assistant-prompt.v1`
+- 当前生产配置：v55，5 个文本智能体模型分工、6 个镜头工作流槽位和 1 个 CosyVoice TTS 槽位；音频合同发布 5 个音色、语速/音量默认值与范围、1500ms 时长容差，TTS 绑定从快照读取所选音色/语速/音量。人物一致性关键帧 `2073414172825706497` 的 `24.denoise=1.0` 来自 V1 真实成功请求证据；供应商 API Key 使用配置普通字段，CosyVoice Key 当前缺失；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；剪辑助理合同为 `editor-assistant-input.v1 / timeline-candidate.v1 / editor-assistant-prompt.v1`
 - 剪辑助理端到端验收：只读取活动方案、快照内已批准视频、正式 QC 报告、交付规格和音频策略；模型候选经严格校验后创建待确认 Timeline，选择理由与 QC 证据保存在时间线条目中；素材不足生成显式空位并阻断确认，不自动补素材、复用、循环、变速、补帧或替换
 - 剪辑台审核闭环：生成或选择候选后直接加载该版本的真实轨道并保持只读；片段检查区展示中文时间字段、对应分镜、选择理由、QC 引用和空位原因；只有用户从目标版本显式创建修订后才开放编辑
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
-- Alembic runtime/head：`20260724_33`
+- Alembic runtime/head：`20260726_34`
 - 生产页两阶段浏览器验收：桌面明确分区展示分镜图片与视频后续步骤；窄屏 `scrollWidth == clientWidth`，无控制台错误；等待图片确认时前端不持续轮询
 - 素材审核页桌面与 375px 浏览器验收：通过，无横向溢出；空状态和普通用户可读步骤文案正常
 - 真实 DeepSeek 内容方案首次生成、同需求版本微调与拒绝后返回创作中心：通过
@@ -300,4 +301,4 @@ v2/runtime/worker.err.log
 
 ## 9. 下一步
 
-旁白字幕的生成、严格探测、人工审核、剪辑台预览和本机 FFmpeg 烧录首期闭环已完成；安全的 CosyVoice 真实验收工具也已完成，但当前配置仍缺少 DashScope API Key，真实付费合成未执行。完整七项后续范围以 [V2 配音与剪辑完善路线图](./V2_AUDIO_EDITING_ROADMAP.md) 为权威：当前继续实施音色/语速/音量/时长合同，随后推进波形与时间线交互、BGM/ducking、确定性音频 QC、授权声音复刻和依赖级费用确认批量重试。不得把工具已就绪声明成真实供应商已经验收。QC 图片模型继续按用户要求暂不接入。
+旁白字幕的生成、严格探测、人工审核、剪辑台预览和本机 FFmpeg 烧录首期闭环已完成；版本化音色/语速/音量选择、请求冻结和时长门禁也已完成。安全的 CosyVoice 真实验收工具已就绪，但当前配置仍缺少 DashScope API Key，真实付费合成和供应商试听未执行。完整七项后续范围以 [V2 配音与剪辑完善路线图](./V2_AUDIO_EDITING_ROADMAP.md) 为权威：当前推进波形与时间线交互、裁切/拖放/缩放/转场/音量包络，随后实施 BGM/ducking、完整确定性音频 QC、授权声音复刻和依赖级费用确认批量重试。不得把工具或选择界面已就绪声明成真实供应商已经验收。QC 图片模型继续按用户要求暂不接入。

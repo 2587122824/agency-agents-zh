@@ -19,6 +19,13 @@ class ShotWorkflowAssignment(BaseModel):
     video_workflow_slot_version_id: str
 
 
+class AudioExecutionSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    voice_key: str = Field(pattern=r"^[a-z][a-z0-9_.-]{1,79}$")
+    speaking_rate: float = Field(gt=0, le=4)
+    volume: int = Field(ge=0, le=100)
+
+
 class GenerateProductionPlanCandidate(ProductionCommand):
     plan_version_id: str
     production_config_version_id: str
@@ -60,6 +67,7 @@ class AnalyzeProductionImpact(ProductionCommand):
     video_spec_version_id: str
     shot_workflow_assignments: list[ShotWorkflowAssignment] = Field(min_length=1)
     tts_workflow_slot_version_id: str | None = None
+    audio_execution: AudioExecutionSelection | None = None
     pricing_catalog_version_id: str | None = None
 
 

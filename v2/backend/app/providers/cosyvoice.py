@@ -128,6 +128,9 @@ def cosyvoice_workflow_contract_issues(bindings: list[dict]) -> list[dict]:
     issues: list[dict] = []
     allowed_sources = {
         "input_contract.voiceover_text",
+        "input_contract.voice.provider_voice_id",
+        "input_contract.speaking_rate",
+        "input_contract.volume",
         "literal:wav",
         "literal:longxiaochun",
         "literal:longxiaoxia",
@@ -206,6 +209,12 @@ class CosyVoiceAdapter:
             try:
                 if source == "input_contract.voiceover_text":
                     value = input_contract["voiceover_text"]
+                elif source == "input_contract.voice.provider_voice_id":
+                    value = input_contract["voice"]["provider_voice_id"]
+                elif source == "input_contract.speaking_rate":
+                    value = input_contract["speaking_rate"]
+                elif source == "input_contract.volume":
+                    value = input_contract["volume"]
                 elif source.startswith("literal:"):
                     value = _literal(source, str(binding["value_type"]))
                 else:

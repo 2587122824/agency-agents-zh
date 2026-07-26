@@ -85,7 +85,12 @@ def wav_bytes(*, sample_rate: int = 24000, channels: int = 1, frame_count: int =
 def cosyvoice_manifest() -> dict:
     return {
         "adapter_kind": "cosyvoice",
-        "input_contract": {"voiceover_text": "你好，世界。"},
+        "input_contract": {
+            "voiceover_text": "你好，世界。",
+            "voice": {"provider_voice_id": "longxiaocheng"},
+            "speaking_rate": 1.1,
+            "volume": 62,
+        },
         "output_contract": {"media_type": "audio"},
         "provider": {
             "provider_key": "dashscope-cosyvoice",
@@ -98,7 +103,9 @@ def cosyvoice_manifest() -> dict:
             "provider_workflow_id": "cosyvoice-v1",
             "node_info_list": [
                 {"node_id": "input", "field_path": "text", "value_source": "input_contract.voiceover_text", "value_type": "string", "required": True},
-                {"node_id": "input", "field_path": "voice", "value_source": "literal:longxiaochun", "value_type": "string", "required": True},
+                {"node_id": "input", "field_path": "voice", "value_source": "input_contract.voice.provider_voice_id", "value_type": "string", "required": True},
+                {"node_id": "input", "field_path": "rate", "value_source": "input_contract.speaking_rate", "value_type": "number", "required": True},
+                {"node_id": "input", "field_path": "volume", "value_source": "input_contract.volume", "value_type": "integer", "required": True},
                 {"node_id": "input", "field_path": "format", "value_source": "literal:wav", "value_type": "string", "required": True},
                 {"node_id": "input", "field_path": "sample_rate", "value_source": "literal:24000", "value_type": "integer", "required": True},
             ],
@@ -126,7 +133,9 @@ def test_cosyvoice_synthesizes_exact_frozen_text_and_registers_wav(tmp_path, mon
         "model": "cosyvoice-v1",
         "input": {
             "text": "你好，世界。",
-            "voice": "longxiaochun",
+            "voice": "longxiaocheng",
+            "rate": 1.1,
+            "volume": 62,
             "format": "wav",
             "sample_rate": 24000,
         },

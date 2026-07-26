@@ -992,13 +992,18 @@ safe_crop_json
 supported_modes[]
 tts_workflow_slot_id nullable
 default_voice_entity_version_id nullable
+voice_presets[] / default_voice_key
 sample_rate / channels / format
-speaking_rate_min / speaking_rate_max
+speaking_rate_min / speaking_rate_default / speaking_rate_max
+volume_min / volume_default / volume_max
+duration_tolerance_ms
 loudness_target
 temporary_upload_policy_id nullable
 ```
 
 默认音色只有在声明、可见、带版本且允许低风险默认时才能物化。复刻声音必须是用户明确确认的 `voice_sample` 绑定和声音实体版本，上传成功不能自动选中。
+
+旁白制作准备必须显式提交音色键、语速和音量。后端只能从当前已发布音频配置解析音色，并把音色显示名、供应商音色 ID、语速、音量、目标时长、允许超时、响度、格式、采样率和声道一起冻结进 `audio-execution-selection.v1`、生产快照、TTS DAG 与执行请求。关闭音频时禁止提交该选择；缺选、未知音色或超范围参数必须返回结构化阻断，不能使用默认值静默补齐。真实 WAV 时长超过目标时长加版本化容差时，确定性 QC 必须阻断；自动门禁不能代替用户试听和人工内容确认。
 
 ### 30.6 配置管理体验
 

@@ -281,10 +281,16 @@ def _create_components(
         supported_modes=draft.audio.supported_modes,
         tts_workflow_slot_version_id=tts_slot.id if tts_slot else None,
         default_voice_entity_version_id=draft.audio.default_voice_entity_version_id,
+        voice_presets=[preset.model_dump(mode="json") for preset in draft.audio.voice_presets],
+        default_voice_key=draft.audio.default_voice_key,
         sample_rate=draft.audio.sample_rate,
         channels=draft.audio.channels,
         format=draft.audio.format,
         speaking_rate_range={"min": draft.audio.speaking_rate_min, "max": draft.audio.speaking_rate_max},
+        speaking_rate_default=draft.audio.speaking_rate_default,
+        volume_range={"min": draft.audio.volume_min, "max": draft.audio.volume_max},
+        volume_default=draft.audio.volume_default,
+        duration_tolerance_ms=draft.audio.duration_tolerance_ms,
         loudness_target=draft.audio.loudness_target,
         temporary_upload_policy_version_id=draft.audio.temporary_upload_policy_version_id,
     )
@@ -420,10 +426,16 @@ def _component_summary(component_type: str, row, lookups: dict[str, dict[str, ob
             "supported_modes": row.supported_modes,
             "tts_workflow_slot_version_id": row.tts_workflow_slot_version_id,
             "default_voice_entity_version_id": row.default_voice_entity_version_id,
+            "voice_presets": row.voice_presets,
+            "default_voice_key": row.default_voice_key,
             "sample_rate": row.sample_rate,
             "channels": row.channels,
             "format": row.format,
             "speaking_rate_range": row.speaking_rate_range,
+            "speaking_rate_default": row.speaking_rate_default,
+            "volume_range": row.volume_range,
+            "volume_default": row.volume_default,
+            "duration_tolerance_ms": row.duration_tolerance_ms,
             "loudness_target": row.loudness_target,
             "temporary_upload_policy_version_id": row.temporary_upload_policy_version_id,
         }
@@ -578,6 +590,13 @@ def _validate(repository: ConfigurationRepository, config: ProductionConfigVersi
                     "code": "VOICEOVER_TTS_SLOT_REQUIRED",
                     "path": "audio.tts_workflow_slot_version_id",
                     "message": "支持旁白时必须精确绑定 operation_kind=tts 的工作流槽位。",
+                })
+            preset_keys = [str(item.get("key") or "") for item in (audio.voice_presets or []) if isinstance(item, dict)]
+            if not preset_keys or audio.default_voice_key not in preset_keys:
+                errors.append({
+                    "code": "VOICEOVER_PRESET_CATALOG_INVALID",
+                    "path": "audio.voice_presets",
+                    "message": "支持旁白时必须发布非空且含默认项的音色目录。",
                 })
         elif audio.tts_workflow_slot_version_id:
             errors.append({
@@ -811,11 +830,13 @@ def _draft_from_config(
         "config_key": audio_item["key"],
         "display_name": audio_item["display_name"],
         **{key: value for key, value in audio_details.items() if key not in {
-            "tts_workflow_slot_version_id", "speaking_rate_range",
+            "tts_workflow_slot_version_id", "speaking_rate_range", "volume_range",
         }},
         "tts_workflow_slot_key": workflow_key_by_id.get(audio_details["tts_workflow_slot_version_id"]),
         "speaking_rate_min": audio_details["speaking_rate_range"]["min"],
         "speaking_rate_max": audio_details["speaking_rate_range"]["max"],
+        "volume_min": audio_details["volume_range"]["min"],
+        "volume_max": audio_details["volume_range"]["max"],
     }
     storage_item = by_type["storage"][0]
     storage = {"policy_key": storage_item["key"], "display_name": storage_item["display_name"], **storage_item["details"]}

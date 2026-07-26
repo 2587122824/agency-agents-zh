@@ -588,6 +588,27 @@ def _deterministic_contract_findings(session: Session, asset: Asset, node) -> li
         expected_duration = node.input_contract.get("duration_ms")
         if expected_duration is not None and (asset.duration_ms is None or abs(asset.duration_ms - expected_duration) > 100):
             _add_finding(findings, "MEDIA_DURATION_INVALID", "blocked", {"actual_ms": asset.duration_ms, "expected_ms": expected_duration, "tolerance_ms": 100}, "input_contract.duration_ms", "block")
+    if asset.asset_type == "audio":
+        target_duration = node.input_contract.get("target_duration_ms")
+        tolerance = node.input_contract.get("duration_tolerance_ms")
+        if (
+            not isinstance(target_duration, int)
+            or not isinstance(tolerance, int)
+            or asset.duration_ms is None
+            or asset.duration_ms > target_duration + tolerance
+        ):
+            _add_finding(
+                findings,
+                "AUDIO_DURATION_EXCEEDS_TARGET",
+                "blocked",
+                {
+                    "actual_ms": asset.duration_ms,
+                    "target_ms": target_duration,
+                    "tolerance_ms": tolerance,
+                },
+                "input_contract.target_duration_ms",
+                "block",
+            )
     if asset.asset_type == "subtitle":
         cues = node.input_contract.get("cues") or []
         expected_duration = cues[-1].get("timeline_out_ms") if cues and isinstance(cues[-1], dict) else None

@@ -148,6 +148,7 @@ export const api = {
       video_workflow_slot_version_id: string
     }>
     tts_workflow_slot_version_id?: string | null
+    audio_execution?: { voice_key: string; speaking_rate: number; volume: number } | null
     pricing_catalog_version_id?: string | null
   }) => request<ProductionImpactAnalysis>(`/projects/${projectId}/production-impact-analyses`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', ...payload }),

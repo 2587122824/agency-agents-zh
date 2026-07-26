@@ -403,7 +403,8 @@ def _compile_manifest(
             for current_image_key, input_slot in zip(image_keys, slots, strict=True):
                 edges.append({"parent_node_key": current_image_key, "child_node_key": video_key, "dependency_type": "required", "input_slot": input_slot})
     timeline_inputs = [f"{shot.shot_code}.video" for shot in shots]
-    if audio_mode == "voiceover":
+    if audio_mode == "voiceover" and selection.get("audio_execution"):
+        audio_execution = selection["audio_execution"]
         spoken_segments = [
             {
                 "segment_code": str(segment.get("segment_code") or ""),
@@ -425,8 +426,19 @@ def _compile_manifest(
                 "plan_version_id": plan.id,
                 "segments": spoken_segments,
                 "voiceover_text": "\n".join(segment["spoken_text"] for segment in spoken_segments),
+                "voice": audio_execution["voice"],
+                "speaking_rate": audio_execution["speaking_rate"],
+                "volume": audio_execution["volume"],
+                "target_duration_ms": audio_execution["target_duration_ms"],
+                "duration_tolerance_ms": audio_execution["duration_tolerance_ms"],
+                "loudness_target_lufs": audio_execution["loudness_target_lufs"],
             },
-            "output_contract": {"media_type": "audio"},
+            "output_contract": {
+                "media_type": "audio",
+                "format": audio_execution["format"],
+                "sample_rate": audio_execution["sample_rate"],
+                "channels": audio_execution["channels"],
+            },
         })
         timeline_inputs.append("project.voiceover")
         subtitle_cues = _compile_subtitle_cues(plan)
@@ -623,6 +635,16 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
     tts_slot = None
     if payload.tts_workflow_slot_version_id:
         tts_slot = _component(session, WorkflowSlotVersion, payload.tts_workflow_slot_version_id, config.id, "tts_workflow_slot", errors)
+    audio_configs = repository.audio_configs(config.id)
+    audio_config = audio_configs[0] if len(audio_configs) == 1 else None
+    if len(audio_configs) != 1:
+        errors.append({
+            "code": "AUDIO_CONFIG_COUNT_INVALID",
+            "path": "production_config_version_id",
+            "message": "生产配置必须精确包含一份音频执行合同。",
+        })
+    elif audio_config.status != "published":
+        errors.append({"code": "AUDIO_CONFIG_NOT_PUBLISHED", "path": "production_config_version_id"})
     pricing = None
     if payload.pricing_catalog_version_id:
         pricing = _component(session, PricingCatalogVersion, payload.pricing_catalog_version_id, config.id, "pricing_catalog", errors)
@@ -643,6 +665,76 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         errors.append({"code": "AUDIO_OFF_HAS_TTS", "path": "tts_workflow_slot_version_id", "message": "项目关闭音频时不得选择 TTS 槽位。"})
     if audio_mode == "voiceover" and not tts_slot:
         errors.append({"code": "VOICEOVER_TTS_REQUIRED", "path": "tts_workflow_slot_version_id", "message": "旁白模式必须显式选择 TTS 槽位。"})
+    if audio_mode == "off" and payload.audio_execution is not None:
+        errors.append({
+            "code": "AUDIO_OFF_HAS_EXECUTION_SELECTION",
+            "path": "audio_execution",
+            "message": "项目关闭音频时不得提交配音执行参数。",
+        })
+    if audio_mode == "voiceover" and payload.audio_execution is None:
+        errors.append({
+            "code": "VOICEOVER_EXECUTION_SELECTION_REQUIRED",
+            "path": "audio_execution",
+            "message": "旁白模式必须显式选择音色、语速和音量。",
+        })
+    frozen_audio_execution = None
+    if audio_mode == "voiceover" and audio_config and payload.audio_execution:
+        presets = {
+            str(item.get("key") or ""): item
+            for item in (audio_config.voice_presets or [])
+            if isinstance(item, dict)
+        }
+        preset = presets.get(payload.audio_execution.voice_key)
+        if not preset:
+            errors.append({
+                "code": "VOICE_PRESET_NOT_IN_AUDIO_CONFIG",
+                "path": "audio_execution.voice_key",
+                "message": "所选音色不在当前已发布音频合同中。",
+            })
+        rate_range = audio_config.speaking_rate_range or {}
+        if not (
+            isinstance(rate_range.get("min"), (int, float))
+            and isinstance(rate_range.get("max"), (int, float))
+            and rate_range["min"] <= payload.audio_execution.speaking_rate <= rate_range["max"]
+        ):
+            errors.append({
+                "code": "SPEAKING_RATE_OUT_OF_RANGE",
+                "path": "audio_execution.speaking_rate",
+                "message": "语速超出当前已发布音频合同范围。",
+            })
+        volume_range = audio_config.volume_range or {}
+        if not (
+            isinstance(volume_range.get("min"), int)
+            and isinstance(volume_range.get("max"), int)
+            and volume_range["min"] <= payload.audio_execution.volume <= volume_range["max"]
+        ):
+            errors.append({
+                "code": "VOLUME_OUT_OF_RANGE",
+                "path": "audio_execution.volume",
+                "message": "音量超出当前已发布音频合同范围。",
+            })
+        if preset:
+            frozen_audio_execution = {
+                "schema_version": "audio-execution-selection.v1",
+                "audio_config_version_id": audio_config.id,
+                "voice": {
+                    "key": preset["key"],
+                    "display_name": preset["display_name"],
+                    "provider_voice_id": preset["provider_voice_id"],
+                },
+                "speaking_rate": payload.audio_execution.speaking_rate,
+                "volume": payload.audio_execution.volume,
+                "target_duration_ms": sum(
+                    int(beat.get("target_duration_ms") or 0)
+                    for beat in (plan.creative_brief.get("narrative_beats") or [])
+                    if isinstance(beat, dict)
+                ),
+                "duration_tolerance_ms": audio_config.duration_tolerance_ms,
+                "loudness_target_lufs": audio_config.loudness_target,
+                "format": audio_config.format,
+                "sample_rate": audio_config.sample_rate,
+                "channels": audio_config.channels,
+            }
     spoken_segments = [
         segment
         for segment in (plan.creative_brief.get("script_segments") or [])
@@ -777,6 +869,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         "video_spec_version_id": payload.video_spec_version_id,
         "shot_workflow_assignments": [assignment.model_dump(mode="json") for assignment in payload.shot_workflow_assignments],
         "tts_workflow_slot_version_id": payload.tts_workflow_slot_version_id,
+        "audio_execution": frozen_audio_execution,
         "pricing_catalog_version_id": payload.pricing_catalog_version_id,
     }
     output_spec = {} if not video_spec else {
@@ -1856,6 +1949,7 @@ def preparation_view(session: Session, project: Project) -> dict:
     for config in configs:
         videos = repository.video_specs(config.id)
         workflows = repository.workflows(config.id)
+        audio_configs = repository.audio_configs(config.id)
         pricing_catalogs = repository.pricing_catalogs(config.id)
         choices.append({
             "id": config.id,
@@ -1871,6 +1965,20 @@ def preparation_view(session: Session, project: Project) -> dict:
                 "supported_video_spec_ids": row.supported_video_spec_ids,
                 "capability_tags": row.capability_tags or [],
             } for row in workflows],
+            "audio_config": None if len(audio_configs) != 1 else {
+                "id": audio_configs[0].id,
+                "voice_presets": audio_configs[0].voice_presets or [],
+                "default_voice_key": audio_configs[0].default_voice_key,
+                "speaking_rate_range": audio_configs[0].speaking_rate_range,
+                "speaking_rate_default": audio_configs[0].speaking_rate_default,
+                "volume_range": audio_configs[0].volume_range,
+                "volume_default": audio_configs[0].volume_default,
+                "duration_tolerance_ms": audio_configs[0].duration_tolerance_ms,
+                "loudness_target_lufs": audio_configs[0].loudness_target,
+                "sample_rate": audio_configs[0].sample_rate,
+                "channels": audio_configs[0].channels,
+                "format": audio_configs[0].format,
+            },
             "pricing_catalogs": [{
                 "id": row.id,
                 "key": row.catalog_key,
