@@ -199,6 +199,49 @@
   max-height: 360px;
   object-fit: contain;
 }
+.audioPreview,
+.subtitlePreview {
+  width: min(560px, calc(100% - 40px));
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  color: #e4e7e9;
+}
+.audioPreview > svg,
+.subtitlePreview > svg {
+  width: 32px;
+  height: 32px;
+  color: #d96642;
+}
+.audioPreview strong,
+.subtitlePreview strong {
+  font-size: 12px;
+}
+.audioPreview audio {
+  width: 100%;
+}
+.subtitlePreview {
+  align-self: stretch;
+  padding: 22px 0;
+  grid-template-rows: auto auto minmax(0, 1fr);
+}
+.subtitlePreview span {
+  color: #969ca1;
+  font-size: 11px;
+}
+.subtitlePreview pre {
+  width: 100%;
+  max-height: 220px;
+  margin: 0;
+  padding: 14px;
+  overflow: auto;
+  border: 1px solid #34383d;
+  border-radius: 5px;
+  background: #202328;
+  color: #d7dadd;
+  font: 11px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: pre-wrap;
+}
 .monitor footer {
   padding: 0 14px;
   display: flex;

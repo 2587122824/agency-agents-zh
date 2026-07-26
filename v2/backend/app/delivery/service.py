@@ -46,6 +46,7 @@ from .renderer import (
     LocalRenderInput,
     LocalRenderRequest,
     LocalRenderResult,
+    LocalRenderSubtitleInput,
     inspect_local_ffmpeg,
 )
 
@@ -220,20 +221,18 @@ def _execution_contract(execution_kind: str) -> dict:
 
 def _validate_local_render_manifest(manifest: dict) -> None:
     track_config = manifest.get("track_config") or {}
-    if track_config.get("subtitle_enabled"):
-        raise DeliveryConflictError(
-            "LOCAL_RENDER_TRACKS_UNSUPPORTED",
-            "本机合成当前尚未支持字幕轨。",
-        )
     items = manifest.get("input_items") or []
     if not items:
         raise DeliveryConflictError("LOCAL_RENDER_INPUT_EMPTY", "本机合成没有可用的视频片段。")
     video_items = [item for item in items if item.get("track_type") == "main_video"]
     audio_items = [item for item in items if item.get("track_type") == "audio"]
-    if any(item.get("track_type") not in {"main_video", "audio"} for item in items):
+    subtitle_items = [item for item in items if item.get("track_type") == "subtitle"]
+    if any(item.get("track_type") not in {"main_video", "audio", "subtitle"} for item in items):
         raise DeliveryConflictError("LOCAL_RENDER_TRACKS_UNSUPPORTED", "本机合成包含不支持的轨道。")
     if bool(audio_items) != bool(track_config.get("audio_enabled")):
         raise DeliveryConflictError("LOCAL_RENDER_AUDIO_CONTRACT_INVALID", "音频轨开关与冻结音频条目不一致。")
+    if bool(subtitle_items) != bool(track_config.get("subtitle_enabled")) or len(subtitle_items) > 1:
+        raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_CONTRACT_INVALID", "字幕轨开关必须精确对应一份冻结字幕素材。")
     cursor = 0
     for item in sorted(video_items, key=lambda row: (row["timeline_in_ms"], row["sequence_number"])):
         if not item.get("asset_id") or item.get("gap_reason"):
@@ -254,6 +253,13 @@ def _validate_local_render_manifest(manifest: dict) -> None:
         timeline_duration = item["timeline_out_ms"] - item["timeline_in_ms"]
         if source_duration != timeline_duration:
             raise DeliveryConflictError("LOCAL_RENDER_SPEED_CHANGE_UNSUPPORTED", "本机合成不支持音频变速。")
+    for item in subtitle_items:
+        if not item.get("asset_id") or item.get("gap_reason"):
+            raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_GAP_UNSUPPORTED", "本机合成不接受字幕轨空位。")
+        if item.get("timeline_in_ms") != 0 or item.get("source_in_ms") != 0:
+            raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_OFFSET_UNSUPPORTED", "字幕轨必须从成片零点开始。")
+        if (item.get("transform") or {}).get("render") != "burn_in":
+            raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_TRANSFORM_UNSUPPORTED", "字幕轨必须明确使用 burn_in 渲染。")
     expected = manifest.get("output_spec") or {}
     if cursor != expected.get("duration_ms"):
         raise DeliveryConflictError("LOCAL_RENDER_DURATION_MISMATCH", "时间线总时长与交付规格不一致。")
@@ -731,6 +737,7 @@ def prepare_local_render(
         )
     render_inputs: list[LocalRenderInput] = []
     audio_inputs: list[LocalRenderAudioInput] = []
+    subtitle_input: LocalRenderSubtitleInput | None = None
     repository = _delivery(session)
     for item in sorted(
         current_manifest["input_items"],
@@ -777,6 +784,8 @@ def prepare_local_render(
                 source_out_ms=item["source_out_ms"],
                 timeline_in_ms=item["timeline_in_ms"],
             ))
+        elif item["track_type"] == "subtitle":
+            subtitle_input = LocalRenderSubtitleInput(path=path)
     uri = f"runtime://assets/deliveries/{project.id}/{attempt.id}.mp4"
     try:
         output_path = resolve_local_asset_path(uri)
@@ -810,6 +819,7 @@ def prepare_local_render(
         preset=str(execution["preset"]),
         crf=int(execution["crf"]),
         audio_inputs=tuple(audio_inputs),
+        subtitle_input=subtitle_input,
     )
 
 

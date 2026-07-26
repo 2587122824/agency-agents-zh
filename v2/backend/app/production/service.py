@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import timezone
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import PurePath, PurePosixPath
@@ -285,6 +286,64 @@ def _verify_frozen_reference_image(reference: dict | None) -> bool:
     )
 
 
+def _subtitle_text_parts(text: str, max_chars: int = 28) -> list[str]:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    sentences = [part.strip() for part in re.split(r"(?<=[。！？!?；;])", normalized) if part.strip()]
+    parts: list[str] = []
+    for sentence in sentences or [normalized]:
+        while len(sentence) > max_chars:
+            parts.append(sentence[:max_chars].strip())
+            sentence = sentence[max_chars:].strip()
+        if sentence:
+            parts.append(sentence)
+    return parts
+
+
+def _compile_subtitle_cues(plan: PlanVersion) -> list[dict]:
+    beats = plan.creative_brief.get("narrative_beats") or []
+    segments = plan.creative_brief.get("script_segments") or []
+    segments_by_beat: dict[str, list[dict]] = {}
+    for segment in segments:
+        if (
+            isinstance(segment, dict)
+            and segment.get("kind") in {"voiceover", "dialogue"}
+            and str(segment.get("spoken_text") or "").strip()
+        ):
+            segments_by_beat.setdefault(str(segment.get("beat_code") or ""), []).append(segment)
+    cues: list[dict] = []
+    beat_cursor = 0
+    for beat in beats:
+        if not isinstance(beat, dict):
+            continue
+        beat_duration = int(beat.get("target_duration_ms") or 0)
+        beat_code = str(beat.get("beat_code") or "")
+        pieces: list[tuple[str, str]] = []
+        for segment in segments_by_beat.get(beat_code, []):
+            pieces.extend(
+                (str(segment.get("segment_code") or ""), part)
+                for part in _subtitle_text_parts(str(segment.get("spoken_text") or ""))
+            )
+        if pieces:
+            max_piece_count = max(1, beat_duration // 500)
+            while len(pieces) > max_piece_count:
+                left_code, left_text = pieces[-2]
+                right_code, right_text = pieces[-1]
+                pieces[-2:] = [(f"{left_code}+{right_code}", f"{left_text}{right_text}")]
+            for index, (segment_code, text) in enumerate(pieces):
+                cue_in = beat_cursor + round(beat_duration * index / len(pieces))
+                cue_out = beat_cursor + round(beat_duration * (index + 1) / len(pieces))
+                cues.append({
+                    "cue_code": f"CUE_{len(cues) + 1:03d}",
+                    "beat_code": beat_code,
+                    "segment_code": segment_code,
+                    "timeline_in_ms": cue_in,
+                    "timeline_out_ms": cue_out,
+                    "text": text,
+                })
+        beat_cursor += beat_duration
+    return cues
+
+
 def _compile_manifest(
     plan: PlanVersion,
     shots: list[Shot],
@@ -370,6 +429,21 @@ def _compile_manifest(
             "output_contract": {"media_type": "audio"},
         })
         timeline_inputs.append("project.voiceover")
+        subtitle_cues = _compile_subtitle_cues(plan)
+        nodes.append({
+            "node_key": "project.subtitles",
+            "kind": "generate_subtitles",
+            "shot_id": None,
+            "workflow_slot_version_id": None,
+            "input_contract": {
+                "source": "confirmed_plan_voiceover",
+                "plan_version_id": plan.id,
+                "duration_ms": sum(shot.duration_ms for shot in shots),
+                "cues": subtitle_cues,
+            },
+            "output_contract": {"media_type": "subtitle"},
+        })
+        timeline_inputs.append("project.subtitles")
     nodes.append({
         "node_key": "project.timeline",
         "kind": "assemble_timeline_contract",
@@ -581,6 +655,12 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
             "code": "VOICEOVER_TEXT_REQUIRED",
             "path": "plan_version_id",
             "message": "旁白模式的已确认方案必须至少包含一段可朗读文本。",
+        })
+    if audio_mode == "voiceover" and not _compile_subtitle_cues(plan):
+        errors.append({
+            "code": "VOICEOVER_SUBTITLE_CUES_REQUIRED",
+            "path": "plan_version_id",
+            "message": "旁白模式的已确认方案无法生成有效字幕时间条目。",
         })
     if tts_slot and tts_slot.operation_kind != "tts":
         errors.append({"code": "TTS_SLOT_KIND_INVALID", "path": "tts_workflow_slot_version_id", "message": "TTS 槽位的 operation_kind 必须是 tts。"})
@@ -1080,6 +1160,7 @@ def _execution_manifest(
         and frame_rule.get("type") == "duration_times_fps"
         else None
     )
+    local_adapter_kind = "local_subtitle" if node.kind == "generate_subtitles" else "local"
     return {
         "schema_version": "production-work-request.v3",
         "snapshot_id": snapshot.id,
@@ -1100,8 +1181,8 @@ def _execution_manifest(
             "poll_interval_seconds": provider.poll_interval_seconds,
             "max_concurrency": provider.max_concurrency,
         },
-        "provider_key": provider.provider_key if provider else "local",
-        "adapter_kind": provider.adapter_kind if provider else "local",
+        "provider_key": provider.provider_key if provider else local_adapter_kind,
+        "adapter_kind": provider.adapter_kind if provider else local_adapter_kind,
         "workflow": None if not workflow else {
             "provider_workflow_id": workflow.provider_workflow_id,
             "provider_workflow_version": workflow.provider_workflow_version,

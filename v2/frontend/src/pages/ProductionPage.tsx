@@ -20,7 +20,7 @@ const statusLabels: Record<string, string> = {
 }
 
 const kindLabels: Record<string, string> = {
-  generate_keyframe: '生成分镜图片', generate_i2v_clip: '生成视频片段', generate_three_frame_i2v_clip: '生成首中尾帧视频', generate_t2v_clip: '生成纯文本视频', generate_tts_audio: '生成配音', assemble_timeline_contract: '整理剪辑时间线', contract_validation: '检查制作合同',
+  generate_keyframe: '生成分镜图片', generate_i2v_clip: '生成视频片段', generate_three_frame_i2v_clip: '生成首中尾帧视频', generate_t2v_clip: '生成纯文本视频', generate_tts: '生成配音', generate_subtitles: '生成字幕', assemble_timeline_contract: '整理剪辑时间线', contract_validation: '检查制作合同',
 }
 
 const phaseStatusLabels: Record<string, string> = {

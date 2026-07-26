@@ -1,11 +1,13 @@
 from types import SimpleNamespace
 
 from v2.backend.app.workers import worker
+from v2.backend.app.production.service import _compile_manifest
 from v2.backend.app.delivery.renderer import (
     LocalFFmpegRenderer,
     LocalRenderAudioInput,
     LocalRenderInput,
     LocalRenderRequest,
+    LocalRenderSubtitleInput,
 )
 
 
@@ -23,6 +25,79 @@ class FakeRepository:
 
     def required_parent_input_slots(self, _item):
         return self.input_slots
+
+
+def test_production_manifest_freezes_voiceover_and_subtitles_as_timeline_dependencies() -> None:
+    plan = SimpleNamespace(
+        id="plan-voiceover",
+        creative_brief={
+            "narrative_beats": [
+                {"beat_code": "BEAT_01", "target_duration_ms": 2000},
+                {"beat_code": "BEAT_02", "target_duration_ms": 3000},
+            ],
+            "script_segments": [
+                {"segment_code": "SEG_01", "beat_code": "BEAT_01", "kind": "voiceover", "spoken_text": "第一段旁白。"},
+                {"segment_code": "SEG_02", "beat_code": "BEAT_02", "kind": "dialogue", "spoken_text": "第二段对白。"},
+            ],
+        },
+    )
+    shots = [
+        SimpleNamespace(
+            id=f"shot-{index}",
+            shot_code=f"SH-{index:03d}",
+            sequence_number=index,
+            duration_ms=duration,
+            narrative_beat_code=f"BEAT_{index:02d}",
+            brief_segment_codes=[f"SEG_{index:02d}"],
+            shot_purpose="推进叙事",
+            framing="medium",
+            camera_angle="eye_level",
+            camera_motion="static",
+            subject_motion="speaking",
+            continuity_relation="continuous",
+            action="action",
+            composition="composition",
+            visual_prompt="visual",
+            negative_prompt=None,
+            guide_frame_prompts={},
+            scene_entity_version_id=None,
+            character_entity_version_ids=[],
+            outfit_entity_version_ids=[],
+            product_entity_version_ids=[],
+            primary_reference_entity_version_id=None,
+            face_visibility="not_visible",
+            face_subject_entity_version_ids=[],
+            text_policy="none",
+            required_on_screen_text=[],
+            new_information="new",
+            generation_requirements={},
+        )
+        for index, duration in ((1, 2000), (2, 3000))
+    ]
+    video_workflow = SimpleNamespace(id="workflow-video", operation_kind="text_to_video_generation")
+    routes = {shot.id: (None, video_workflow) for shot in shots}
+    selection = {
+        "video_spec_version_id": "video-spec",
+        "tts_workflow_slot_version_id": "tts-slot",
+    }
+
+    manifest = _compile_manifest(plan, shots, selection, {"format": "mp4"}, "voiceover", {}, routes)
+    node_by_key = {node["node_key"]: node for node in manifest["nodes"]}
+    timeline_parents = {
+        edge["parent_node_key"]
+        for edge in manifest["edges"]
+        if edge["child_node_key"] == "project.timeline"
+    }
+
+    assert node_by_key["project.voiceover"]["kind"] == "generate_tts"
+    assert node_by_key["project.voiceover"]["input_contract"]["voiceover_text"] == "第一段旁白。\n第二段对白。"
+    assert node_by_key["project.subtitles"]["kind"] == "generate_subtitles"
+    assert node_by_key["project.subtitles"]["input_contract"]["duration_ms"] == 5000
+    assert [cue["text"] for cue in node_by_key["project.subtitles"]["input_contract"]["cues"]] == ["第一段旁白。", "第二段对白。"]
+    assert {"project.voiceover", "project.subtitles"} <= timeline_parents
+
+    silent_manifest = _compile_manifest(plan, shots, selection, {"format": "mp4"}, "off", {}, routes)
+    assert all(node["kind"] not in {"generate_tts", "generate_subtitles"} for node in silent_manifest["nodes"])
 
 
 def test_provider_request_preserves_dependency_input_slots(monkeypatch) -> None:
@@ -140,3 +215,37 @@ def test_local_ffmpeg_renderer_mixes_timeline_audio(monkeypatch, tmp_path) -> No
     assert command[command.index("-map") + 1] == "[outv]"
     assert "[outa]" in command
     assert "-c:a" in command
+
+
+def test_local_ffmpeg_renderer_burns_in_one_frozen_subtitle(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["cwd"] = kwargs.get("cwd")
+        (tmp_path / "subtitled.mp4").write_bytes(b"rendered")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("v2.backend.app.delivery.renderer.subprocess.run", fake_run)
+    request = LocalRenderRequest(
+        ffmpeg_path=tmp_path / "ffmpeg.exe",
+        inputs=(LocalRenderInput(tmp_path / "video.mp4", 0, 2000),),
+        subtitle_input=LocalRenderSubtitleInput(tmp_path / "frozen subtitles.srt"),
+        output_path=tmp_path / "subtitled.mp4",
+        width=480,
+        height=848,
+        fps=24,
+        video_encoder="libx264",
+        preset="medium",
+        crf=18,
+    )
+
+    LocalFFmpegRenderer().render(request)
+
+    command = captured["command"]
+    filter_graph = command[command.index("-filter_complex") + 1]
+    assert "[outv]subtitles=filename='" in filter_graph
+    assert "frozen subtitles.srt" in filter_graph
+    assert "force_style='Alignment=2,MarginV=48,Outline=2,Shadow=0'[outvs]" in filter_graph
+    assert command[command.index("-map") + 1] == "[outvs]"
+    assert captured["cwd"] == tmp_path.resolve()

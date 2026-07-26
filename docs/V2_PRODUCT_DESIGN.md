@@ -6,6 +6,7 @@
 > 产品原型：<http://127.0.0.1:8765/prototype-v2/>
 > V2 应用骨架：<http://127.0.0.1:8766/>
 > 系统架构：[V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)
+> 配音与剪辑路线：[V2 配音与剪辑完善路线图](./V2_AUDIO_EDITING_ROADMAP.md)
 
 ## 1. 产品定义
 

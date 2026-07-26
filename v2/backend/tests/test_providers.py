@@ -7,11 +7,13 @@ import httpx
 import pytest
 
 from v2.backend.app.providers import ProviderAdapterError, ProviderExecutionRequest
+from v2.backend.app.providers.builtin import LocalSubtitleAdapter
 from v2.backend.app.providers.registry import default_provider_registry
 from v2.backend.app.providers.runninghub import HttpxRunningHubTransport, RunningHubAdapter
 from v2.backend.app.providers.cosyvoice import CosyVoiceAdapter
 import v2.backend.app.providers.runninghub as runninghub_module
 import v2.backend.app.providers.cosyvoice as cosyvoice_module
+import v2.backend.app.providers.builtin as builtin_module
 
 
 def test_provider_registry_resolves_only_exact_registered_work_kind() -> None:
@@ -132,6 +134,59 @@ def test_cosyvoice_rejects_non_wav_output_without_persisting(tmp_path, monkeypat
 
     assert caught.value.code == "COSYVOICE_OUTPUT_SIGNATURE_INVALID"
     assert not list(tmp_path.rglob("voiceover.wav"))
+
+
+def subtitle_manifest(cues: list[dict], duration_ms: int = 3000) -> dict:
+    return {
+        "input_contract": {"cues": cues, "duration_ms": duration_ms},
+        "output_contract": {"media_type": "subtitle"},
+        "storage_policy": {
+            "backend_kind": "local",
+            "local_root_ref": "v2.runtime.assets",
+            "max_file_size_bytes": 1024 * 1024,
+        },
+    }
+
+
+def test_local_subtitle_adapter_writes_exact_frozen_srt(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(builtin_module, "RUNTIME_ROOT", tmp_path)
+    fingerprint = "c" * 64
+    result = LocalSubtitleAdapter().execute(ProviderExecutionRequest(
+        "generate_subtitles",
+        fingerprint,
+        subtitle_manifest([
+            {"timeline_in_ms": 0, "timeline_out_ms": 1200, "text": "第一句"},
+            {"timeline_in_ms": 1500, "timeline_out_ms": 3000, "text": "第二句"},
+        ]),
+    ))
+
+    output = tmp_path / "assets" / "providers" / "local_subtitle" / fingerprint / "subtitles.srt"
+    assert output.read_text(encoding="utf-8") == (
+        "1\n00:00:00,000 --> 00:00:01,200\n第一句\n\n"
+        "2\n00:00:01,500 --> 00:00:03,000\n第二句\n"
+    )
+    assert result["outputs"][0]["asset_type"] == "subtitle"
+    assert result["outputs"][0]["duration_ms"] == 3000
+    assert result["outputs"][0]["cue_count"] == 2
+    assert result["outputs"][0]["content_hash"] == hashlib.sha256(output.read_bytes()).hexdigest()
+
+
+def test_local_subtitle_adapter_rejects_overlapping_cues_without_writing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(builtin_module, "RUNTIME_ROOT", tmp_path)
+    fingerprint = "d" * 64
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        LocalSubtitleAdapter().execute(ProviderExecutionRequest(
+            "generate_subtitles",
+            fingerprint,
+            subtitle_manifest([
+                {"timeline_in_ms": 0, "timeline_out_ms": 1600, "text": "第一句"},
+                {"timeline_in_ms": 1500, "timeline_out_ms": 3000, "text": "重叠"},
+            ]),
+        ))
+
+    assert caught.value.code == "SUBTITLE_CUE_INVALID"
+    assert not list(tmp_path.rglob("subtitles.srt"))
 
 
 def runninghub_manifest(bindings: list[dict], media_type: str = "image") -> dict:

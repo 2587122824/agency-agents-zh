@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import struct
 import wave
 from pathlib import Path, PurePosixPath
@@ -205,10 +206,32 @@ def _probe(path: Path, declared_type: str) -> dict:
     if len(head) >= 12 and head[4:8] == b"ftyp":
         width, height, duration_ms = _mp4_probe(path)
         return {"mime_type": "video/mp4", "width": width, "height": height, "duration_ms": duration_ms}
-    if declared_type in {"subtitle", "project_file"}:
-        path.read_text(encoding="utf-8")
-        mime = "application/x-subrip" if declared_type == "subtitle" else "application/json"
-        return {"mime_type": mime, "width": None, "height": None, "duration_ms": None}
+    if declared_type == "subtitle":
+        content = path.read_text(encoding="utf-8")
+        blocks = [block for block in re.split(r"\r?\n\r?\n", content.strip()) if block.strip()]
+        if not blocks:
+            raise ValueError("subtitle file has no cues")
+        previous_out = 0
+        for index, block in enumerate(blocks, 1):
+            lines = block.splitlines()
+            if len(lines) < 3 or lines[0].strip() != str(index):
+                raise ValueError("subtitle sequence is invalid")
+            match = re.fullmatch(
+                r"(\d{2}):(\d{2}):(\d{2}),(\d{3}) --> (\d{2}):(\d{2}):(\d{2}),(\d{3})",
+                lines[1].strip(),
+            )
+            if not match or not "\n".join(lines[2:]).strip():
+                raise ValueError("subtitle cue is invalid")
+            values = [int(value) for value in match.groups()]
+            cue_in = ((values[0] * 60 + values[1]) * 60 + values[2]) * 1000 + values[3]
+            cue_out = ((values[4] * 60 + values[5]) * 60 + values[6]) * 1000 + values[7]
+            if cue_in < previous_out or cue_out <= cue_in:
+                raise ValueError("subtitle timing is not strictly ordered")
+            previous_out = cue_out
+        return {"mime_type": "application/x-subrip", "width": None, "height": None, "duration_ms": previous_out}
+    if declared_type == "project_file":
+        json.loads(path.read_text(encoding="utf-8"))
+        return {"mime_type": "application/json", "width": None, "height": None, "duration_ms": None}
     raise QualityConflictError("ASSET_MEDIA_UNSUPPORTED", "The file signature is not supported by the V2 media probe.")
 
 
@@ -565,6 +588,18 @@ def _deterministic_contract_findings(session: Session, asset: Asset, node) -> li
         expected_duration = node.input_contract.get("duration_ms")
         if expected_duration is not None and (asset.duration_ms is None or abs(asset.duration_ms - expected_duration) > 100):
             _add_finding(findings, "MEDIA_DURATION_INVALID", "blocked", {"actual_ms": asset.duration_ms, "expected_ms": expected_duration, "tolerance_ms": 100}, "input_contract.duration_ms", "block")
+    if asset.asset_type == "subtitle":
+        cues = node.input_contract.get("cues") or []
+        expected_duration = cues[-1].get("timeline_out_ms") if cues and isinstance(cues[-1], dict) else None
+        if expected_duration is None or asset.duration_ms != expected_duration:
+            _add_finding(
+                findings,
+                "SUBTITLE_TIMING_INVALID",
+                "blocked",
+                {"actual_ms": asset.duration_ms, "expected_ms": expected_duration},
+                "input_contract.cues",
+                "block",
+            )
     return findings
 
 
@@ -605,7 +640,11 @@ def _record_contract_block(session: Session, project: Project, asset: Asset, pay
 
 def _record_manual_content_review(session: Session, project: Project, asset: Asset, payload: RunAssetQC) -> QCReport:
     repository = _quality(session)
-    code = "VIDEO_CONTENT_REVIEW_REQUIRED" if asset.asset_type == "video" else "AUDIO_CONTENT_REVIEW_REQUIRED"
+    code = {
+        "video": "VIDEO_CONTENT_REVIEW_REQUIRED",
+        "audio": "AUDIO_CONTENT_REVIEW_REQUIRED",
+        "subtitle": "SUBTITLE_CONTENT_REVIEW_REQUIRED",
+    }.get(asset.asset_type, "MEDIA_CONTENT_REVIEW_REQUIRED")
     report = QCReport(
         project_id=project.id, snapshot_id=asset.snapshot_id, asset_id=asset.id,
         report_number=repository.next_report_number(asset.id), ruleset_version="qc-policy.v1",

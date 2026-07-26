@@ -157,8 +157,17 @@ export function EditorPage() {
   const editorProjects = projects.data?.filter(project => ['quality_review', 'editing', 'delivery_ready', 'blocked', 'completed'].includes(project.status)) ?? []
   const selectedTimeline = workspace.data?.timelines.find(row => row.id === selectedTimelineId) ?? workspace.data?.timelines[0] ?? null
   const selectedAsset = workspace.data?.available_assets.find(asset => asset.id === selectedAssetId) ?? null
+  const subtitlePreview = useQuery({
+    queryKey: ['subtitle-preview', projectId, selectedAssetId],
+    enabled: Boolean(projectId && selectedAsset?.asset_type === 'subtitle'),
+    queryFn: async () => {
+      const response = await fetch(`/api/v1/projects/${projectId}/assets/${selectedAssetId}/content`)
+      if (!response.ok) throw new Error(`字幕读取失败（${response.status}）`)
+      return response.text()
+    },
+  })
   const deliveryAttempt = delivery.data?.attempts[0] ?? null
-  const error = workspace.error || delivery.error || stage.error || generateAssistant.error || retryAssistant.error || save.error || validate.error || confirm.error || authorize.error || upload.error || verify.error
+  const error = workspace.error || delivery.error || subtitlePreview.error || stage.error || generateAssistant.error || retryAssistant.error || save.error || validate.error || confirm.error || authorize.error || upload.error || verify.error
 
   useEffect(() => {
     setSelectedTimelineId('')
@@ -218,7 +227,7 @@ export function EditorPage() {
       source_out_ms: duration,
       timeline_in_ms: cursor,
       timeline_out_ms: cursor + duration,
-      transform: track === 'main_video' ? { fit: 'cover' } : {},
+      transform: track === 'main_video' ? { fit: 'cover' } : track === 'subtitle' ? { render: 'burn_in' } : {},
     }])
     setSelectedAssetId(asset.id)
   }
@@ -288,7 +297,12 @@ export function EditorPage() {
             {workspace.data.latest_editor_run?.status === 'failed' && <div className={styles.editorAgentError}><AlertTriangle /><div><strong>剪辑助理没有生成有效草案</strong><span>{workspace.data.latest_editor_run.error_detail ?? '模型输出没有通过严格合同检查。'} 系统没有自动重试。</span></div></div>}
             <div className={styles.editorTop}>
               <section className={styles.monitor}>
-                <div className={styles.monitorFrame}>{selectedAsset?.asset_type === 'video' ? <video key={selectedAsset.id} src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`} controls preload="metadata" /> : <Film />}</div>
+                <div className={styles.monitorFrame}>
+                  {selectedAsset?.asset_type === 'video' && <video key={selectedAsset.id} src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`} controls preload="metadata" />}
+                  {selectedAsset?.asset_type === 'audio' && <div className={styles.audioPreview}><Music2 /><strong>配音试听</strong><audio key={selectedAsset.id} src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`} controls preload="metadata" /></div>}
+                  {selectedAsset?.asset_type === 'subtitle' && <div className={styles.subtitlePreview}><Subtitles /><strong>字幕内容</strong>{subtitlePreview.isPending ? <span>正在读取字幕…</span> : <pre>{subtitlePreview.data}</pre>}</div>}
+                  {!selectedAsset && <Film />}
+                </div>
                 <footer><span>{selectedAsset?.node_key ?? (selectedTimeline ? `时间线 v${selectedTimeline.version_number}` : '未选择预览素材')}</span><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></footer>
               </section>
               <aside className={styles.assetBin}>

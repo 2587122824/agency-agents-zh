@@ -4,7 +4,7 @@ from collections.abc import Iterable
 import os
 
 from .base import ProviderAdapter
-from .builtin import LocalTimelineAdapter, MockProviderAdapter
+from .builtin import LocalSubtitleAdapter, LocalTimelineAdapter, MockProviderAdapter
 from .cosyvoice import CosyVoiceAdapter
 from .runninghub import RunningHubAdapter
 
@@ -38,6 +38,7 @@ def default_provider_registry() -> ProviderAdapterRegistry:
     return ProviderAdapterRegistry((
         MockProviderAdapter(),
         LocalTimelineAdapter(),
+        LocalSubtitleAdapter(),
         RunningHubAdapter(execution_enabled=external_enabled),
         CosyVoiceAdapter(execution_enabled=external_enabled),
     ))

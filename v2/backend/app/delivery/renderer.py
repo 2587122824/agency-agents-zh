@@ -44,6 +44,11 @@ class LocalRenderAudioInput:
 
 
 @dataclass(frozen=True)
+class LocalRenderSubtitleInput:
+    path: Path
+
+
+@dataclass(frozen=True)
 class LocalRenderRequest:
     ffmpeg_path: Path
     inputs: tuple[LocalRenderInput, ...]
@@ -55,6 +60,7 @@ class LocalRenderRequest:
     preset: str
     crf: int
     audio_inputs: tuple[LocalRenderAudioInput, ...] = ()
+    subtitle_input: LocalRenderSubtitleInput | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +183,19 @@ class LocalFFmpegRenderer:
                 f"format=yuv420p[{label}]"
             )
         filters.append(f"{''.join(labels)}concat=n={len(labels)}:v=1:a=0[outv]")
+        video_output_label = "outv"
+        execution_cwd: Path | None = None
+        if request.subtitle_input:
+            # FFmpeg's subtitles filter on Windows does not reliably consume an
+            # absolute drive-letter path even when the colon is escaped. Run the
+            # process from the frozen subtitle directory and pass only its name.
+            execution_cwd = request.subtitle_input.path.resolve().parent
+            escaped_subtitle_path = request.subtitle_input.path.name.replace("'", "\\'")
+            filters.append(
+                f"[outv]subtitles=filename='{escaped_subtitle_path}':"
+                "force_style='Alignment=2,MarginV=48,Outline=2,Shadow=0'[outvs]"
+            )
+            video_output_label = "outvs"
         if request.audio_inputs:
             audio_labels: list[str] = []
             for audio_index, item in enumerate(request.audio_inputs):
@@ -197,7 +216,7 @@ class LocalFFmpegRenderer:
             "-filter_complex",
             ";".join(filters),
             "-map",
-            "[outv]",
+            f"[{video_output_label}]",
         ])
         if request.audio_inputs:
             command.extend(["-map", "[outa]", "-c:a", "aac", "-b:a", "192k"])
@@ -222,6 +241,7 @@ class LocalFFmpegRenderer:
                 encoding="utf-8",
                 errors="replace",
                 check=False,
+                cwd=execution_cwd,
             )
         except OSError as exc:
             raise LocalRenderError(

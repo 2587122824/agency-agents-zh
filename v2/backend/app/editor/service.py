@@ -336,12 +336,18 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
     assets = repository.available_assets(project.id, snapshot.id)
     video_assets = [asset for asset in assets if asset.asset_type == "video"]
     audio_assets = [asset for asset in assets if asset.asset_type == "audio"]
+    subtitle_assets = [asset for asset in assets if asset.asset_type == "subtitle"]
     if not video_assets:
         raise EditorConflictError("EDITOR_APPROVED_VIDEO_REQUIRED", "剪辑助理至少需要一段已批准视频。")
     if project.audio_mode == "voiceover" and len(audio_assets) != 1:
         raise EditorConflictError(
             "EDITOR_APPROVED_VOICEOVER_NOT_EXACT",
             "旁白项目进入剪辑前必须精确具有一份已批准配音素材。",
+        )
+    if project.audio_mode == "voiceover" and len(subtitle_assets) != 1:
+        raise EditorConflictError(
+            "EDITOR_APPROVED_SUBTITLE_NOT_EXACT",
+            "旁白项目进入剪辑前必须精确具有一份已批准字幕素材。",
         )
     nodes = {
         node.id: node for node in repository.dag_nodes_by_ids(
@@ -350,7 +356,7 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
     }
     shots = {shot.id: shot for shot in repository.shots(plan.id)}
     reports_by_asset: dict[str, list[str]] = {}
-    for report in repository.qc_reports([asset.id for asset in [*video_assets, *audio_assets]]):
+    for report in repository.qc_reports([asset.id for asset in [*video_assets, *audio_assets, *subtitle_assets]]):
         reports_by_asset.setdefault(report.asset_id, []).append(report.id)
     approved_assets = []
     for asset in video_assets:
@@ -388,6 +394,19 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
             "dag_node_id": asset.dag_node_id,
             "qc_report_ids": qc_ids,
         })
+    approved_subtitle_assets = []
+    for asset in subtitle_assets:
+        qc_ids = reports_by_asset.get(asset.id, [])
+        if not qc_ids:
+            raise EditorConflictError("EDITOR_SUBTITLE_QC_EVIDENCE_MISSING", f"字幕素材 {asset.id} 缺少权威 QC 报告。")
+        approved_subtitle_assets.append({
+            "id": asset.id,
+            "asset_type": asset.asset_type,
+            "duration_ms": asset.duration_ms,
+            "content_hash": asset.content_hash,
+            "dag_node_id": asset.dag_node_id,
+            "qc_report_ids": qc_ids,
+        })
     return {
         "contract_version": "editor-assistant-input.v1",
         "project_id": project.id,
@@ -399,13 +418,14 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
         "qc_report_ids": sorted({report_id for item in approved_assets for report_id in item["qc_report_ids"]}),
         "approved_assets": approved_assets,
         "approved_audio_assets": approved_audio_assets,
+        "approved_subtitle_assets": approved_subtitle_assets,
         "delivery_contract": {
             "duration_ms": project.duration_seconds * 1000,
             "aspect_ratio": project.aspect_ratio,
             "output_spec": snapshot.output_spec,
         },
         "audio_policy": {"mode": project.audio_mode},
-        "subtitle_policy": {"enabled": False},
+        "subtitle_policy": {"enabled": bool(approved_subtitle_assets)},
         "timeline_policy_version": "timeline-policy.v1",
     }
 
@@ -548,13 +568,39 @@ def _execute_editor(
                     "source": "frozen_approved_voiceover",
                 },
             })
+        approved_subtitles = manifest.payload.get("approved_subtitle_assets") or []
+        if approved_subtitles:
+            subtitle = approved_subtitles[0]
+            subtitle_duration = min(
+                int(subtitle["duration_ms"]),
+                int(manifest.payload["delivery_contract"]["duration_ms"]),
+            )
+            items.append({
+                "track_type": "subtitle",
+                "sequence_number": 1,
+                "asset_id": subtitle["id"],
+                "label": "已批准字幕",
+                "gap_reason": None,
+                "source_in_ms": 0,
+                "source_out_ms": subtitle_duration,
+                "timeline_in_ms": 0,
+                "timeline_out_ms": subtitle_duration,
+                "transform": {
+                    "render": "burn_in",
+                    "qc_report_ids": subtitle["qc_report_ids"],
+                    "source": "frozen_approved_subtitles",
+                },
+            })
         payload = CreateTimelineCandidate.model_validate({
             "command_id": f"editor-run-{run.id}",
             "actor_id": "editor-assistant",
             "expected_snapshot_id": manifest.payload["snapshot_id"],
             "source": "editor_assistant",
             "source_agent_run_id": run.id,
-            "track_config": {"audio_enabled": bool(approved_audio), "subtitle_enabled": False},
+            "track_config": {
+                "audio_enabled": bool(approved_audio),
+                "subtitle_enabled": bool(approved_subtitles),
+            },
             "items": items,
         })
         timeline = _create_candidate(session, project, payload, None, "timeline.candidate.create")

@@ -6006,8 +6006,37 @@ def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
             status="passed",
             analyzer="human",
         ))
+        subtitle = Asset(
+            project_id=project["id"],
+            snapshot_id=snapshot["id"],
+            work_attempt_id=None,
+            dag_node_id=None,
+            output_index=0,
+            asset_type="subtitle",
+            role="voiceover_subtitles",
+            uri=f"runtime://assets/editor/{project['id']}-subtitles.srt",
+            storage_backend="local",
+            provider_output_manifest={"seeded_for_voiceover_editor_test": True},
+            content_hash=hashlib.sha256(f"{project['id']}-subtitles".encode()).hexdigest(),
+            mime_type="application/x-subrip",
+            byte_size=100,
+            duration_ms=29_000,
+            state="approved",
+        )
+        session.add(subtitle)
+        session.flush()
+        session.add(QCReport(
+            project_id=project["id"],
+            snapshot_id=snapshot["id"],
+            asset_id=subtitle.id,
+            report_number=1,
+            ruleset_version="human-review.v1",
+            status="passed",
+            analyzer="human",
+        ))
         session.commit()
         audio_id = audio.id
+        subtitle_id = subtitle.id
     stage = client.post(
         f"/api/v1/projects/{project['id']}/quality-stage:approve",
         json={"command_id": "editor-audio-stage-approve", "expected_snapshot_id": snapshot["id"]},
@@ -6022,12 +6051,21 @@ def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
     assert response.status_code == 201
     timeline = response.json()
     audio_items = [item for item in timeline["items"] if item["track_type"] == "audio"]
+    subtitle_items = [item for item in timeline["items"] if item["track_type"] == "subtitle"]
     assert timeline["track_config"]["audio_enabled"] is True
+    assert timeline["track_config"]["subtitle_enabled"] is True
     assert len(audio_items) == 1
     assert audio_items[0]["asset_id"] == audio_id
     assert audio_items[0]["timeline_in_ms"] == 0
     assert audio_items[0]["timeline_out_ms"] == 29_000
     assert audio_items[0]["transform"]["source"] == "frozen_approved_voiceover"
+    assert len(subtitle_items) == 1
+    assert subtitle_items[0]["asset_id"] == subtitle_id
+    assert subtitle_items[0]["timeline_in_ms"] == 0
+    assert subtitle_items[0]["timeline_out_ms"] == 29_000
+    assert subtitle_items[0]["transform"]["render"] == "burn_in"
+    assert subtitle_items[0]["transform"]["source"] == "frozen_approved_subtitles"
+    assert len(subtitle_items[0]["transform"]["qc_report_ids"]) == 1
     validated = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:validate",
         json={"command_id": "editor-audio-validate-01", "expected_row_version": timeline["row_version"]},
