@@ -233,6 +233,18 @@ def _validate_local_render_manifest(manifest: dict) -> None:
         raise DeliveryConflictError("LOCAL_RENDER_AUDIO_CONTRACT_INVALID", "音频轨开关与冻结音频条目不一致。")
     if bool(subtitle_items) != bool(track_config.get("subtitle_enabled")) or len(subtitle_items) > 1:
         raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_CONTRACT_INVALID", "字幕轨开关必须精确对应一份冻结字幕素材。")
+    mastering = track_config.get("audio_mastering")
+    if bool(audio_items) and (
+        not isinstance(mastering, dict)
+        or not isinstance(mastering.get("loudness_target_lufs"), (int, float))
+        or mastering["loudness_target_lufs"] < -24
+        or mastering["loudness_target_lufs"] > -9
+        or not isinstance(mastering.get("true_peak_limit_dbtp"), (int, float))
+        or mastering["true_peak_limit_dbtp"] < -3
+        or mastering["true_peak_limit_dbtp"] > -0.1
+        or mastering.get("clipping_control") != "limiter"
+    ):
+        raise DeliveryConflictError("LOCAL_RENDER_MASTERING_CONTRACT_INVALID", "本机合成缺少有效的响度、true peak 和削波控制合同。")
     cursor = 0
     for item in sorted(video_items, key=lambda row: (row["timeline_in_ms"], row["sequence_number"])):
         if not item.get("asset_id") or item.get("gap_reason"):
@@ -259,9 +271,16 @@ def _validate_local_render_manifest(manifest: dict) -> None:
             raise DeliveryConflictError("LOCAL_RENDER_AUDIO_GAP_UNSUPPORTED", "本机合成不接受音频轨空位。")
         source_duration = (item.get("source_out_ms") or 0) - (item.get("source_in_ms") or 0)
         timeline_duration = item["timeline_out_ms"] - item["timeline_in_ms"]
-        if source_duration != timeline_duration:
+        transform = item.get("transform") or {}
+        playback = transform.get("playback") or {"mode": "trim"}
+        mix = transform.get("mix", "voiceover")
+        if source_duration != timeline_duration and not (
+            mix == "background_music"
+            and playback.get("mode") == "loop"
+            and 0 < source_duration < timeline_duration
+        ):
             raise DeliveryConflictError("LOCAL_RENDER_SPEED_CHANGE_UNSUPPORTED", "本机合成不支持音频变速。")
-        envelope = (item.get("transform") or {}).get("volume_envelope")
+        envelope = transform.get("volume_envelope")
         if envelope is not None and (
             not isinstance(envelope, list)
             or len(envelope) < 2
@@ -273,6 +292,13 @@ def _validate_local_render_manifest(manifest: dict) -> None:
             )
         ):
             raise DeliveryConflictError("LOCAL_RENDER_VOLUME_ENVELOPE_INVALID", "本机合成收到无效的冻结音量包络。")
+        if mix == "background_music":
+            rights = transform.get("rights") or {}
+            ducking = transform.get("ducking") or {}
+            if rights.get("confirmed") is not True or rights.get("basis") not in {"owned", "licensed", "royalty_free"}:
+                raise DeliveryConflictError("LOCAL_RENDER_BGM_RIGHTS_INVALID", "本机合成收到未授权的背景音乐。")
+            if not isinstance(ducking.get("enabled"), bool):
+                raise DeliveryConflictError("LOCAL_RENDER_BGM_DUCKING_INVALID", "本机合成收到无效的背景音乐压低合同。")
     for item in subtitle_items:
         if not item.get("asset_id") or item.get("gap_reason"):
             raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_GAP_UNSUPPORTED", "本机合成不接受字幕轨空位。")
@@ -803,13 +829,25 @@ def prepare_local_render(
                 transition_out_ms=transition_out.get("duration_ms", 0) if transition_out.get("type") == "fade" else 0,
             ))
         elif item["track_type"] == "audio":
-            envelope = (item.get("transform") or {}).get("volume_envelope") or []
+            transform = item.get("transform") or {}
+            envelope = transform.get("volume_envelope") or []
+            playback = transform.get("playback") or {"mode": "trim"}
+            ducking = transform.get("ducking") or {}
             audio_inputs.append(LocalRenderAudioInput(
                 path=path,
                 source_in_ms=item["source_in_ms"],
                 source_out_ms=item["source_out_ms"],
                 timeline_in_ms=item["timeline_in_ms"],
                 volume_envelope=tuple((point["time_ms"], float(point["gain_db"])) for point in envelope),
+                loop=playback.get("mode") == "loop",
+                output_duration_ms=item["timeline_out_ms"] - item["timeline_in_ms"],
+                ducking_regions=tuple(
+                    (region["start_ms"], region["end_ms"])
+                    for region in ducking.get("regions", [])
+                ) if ducking.get("enabled") else (),
+                ducking_reduction_db=float(ducking.get("reduction_db", -12)),
+                ducking_attack_ms=int(ducking.get("attack_ms", 200)),
+                ducking_release_ms=int(ducking.get("release_ms", 500)),
             ))
         elif item["track_type"] == "subtitle":
             subtitle_input = LocalRenderSubtitleInput(path=path)
@@ -835,6 +873,7 @@ def prepare_local_render(
         message="Local FFmpeg render started from the frozen delivery request.",
         data={"delivery_attempt_id": attempt.id, "work_item_id": work_item.id},
     ))
+    mastering = (current_manifest.get("track_config") or {}).get("audio_mastering") or {}
     return attempt, LocalRenderRequest(
         ffmpeg_path=Path(readiness.executable_path),
         inputs=tuple(render_inputs),
@@ -847,6 +886,8 @@ def prepare_local_render(
         crf=int(execution["crf"]),
         audio_inputs=tuple(audio_inputs),
         subtitle_input=subtitle_input,
+        loudness_target_lufs=float(mastering.get("loudness_target_lufs", -16)),
+        true_peak_limit_dbtp=float(mastering.get("true_peak_limit_dbtp", -1)),
     )
 
 

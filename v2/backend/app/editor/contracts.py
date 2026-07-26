@@ -25,12 +25,20 @@ class RetryEditorTimeline(EditorCommand):
     confirm_model_cost: bool
 
 
+class AudioMasteringConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    loudness_target_lufs: float = Field(default=-16.0, ge=-24, le=-9)
+    true_peak_limit_dbtp: float = Field(default=-1.0, ge=-3, le=-0.1)
+    clipping_control: Literal["limiter"] = "limiter"
+
+
 class TimelineTrackConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     audio_enabled: bool
     subtitle_enabled: bool
     pixels_per_second: int = Field(default=60, ge=20, le=400)
     snap_interval_ms: int = Field(default=100, ge=10, le=1000)
+    audio_mastering: AudioMasteringConfig = Field(default_factory=AudioMasteringConfig)
 
 
 class TimelineItemInput(BaseModel):

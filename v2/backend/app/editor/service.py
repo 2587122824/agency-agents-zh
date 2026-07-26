@@ -192,7 +192,7 @@ def _item_contract(item: TimelineItem) -> dict:
 def _timeline_contract(session: Session, timeline: Timeline) -> dict:
     items = _editor(session).timeline_items(timeline.id)
     return {
-        "contract_version": "v2.timeline-contract.v2",
+        "contract_version": "v2.timeline-contract.v3",
         "project_id": timeline.project_id,
         "snapshot_id": timeline.snapshot_id,
         "version_number": timeline.version_number,
@@ -566,6 +566,7 @@ def _execute_editor(
                 "timeline_out_ms": audio_duration,
                 "transform": {
                     "mix": "voiceover",
+                    "playback": {"mode": "trim"},
                     "volume_envelope": [
                         {"time_ms": 0, "gain_db": 0.0},
                         {"time_ms": audio_duration, "gain_db": 0.0},
@@ -735,6 +736,48 @@ def _validate_item_transform(item: TimelineItem, path: str, duration_ms: int) ->
                     transition_duration_ms=transition_duration,
                 ))
     if item.track_type == "audio":
+        mix = transform.get("mix", "voiceover")
+        if mix not in {"voiceover", "background_music"}:
+            errors.append(_error("AUDIO_MIX_ROLE_INVALID", f"{path}.transform.mix", "音频片段必须明确属于 voiceover 或 background_music。"))
+        playback = transform.get("playback", {"mode": "trim"})
+        if (
+            not isinstance(playback, dict)
+            or playback.get("mode") not in {"trim", "loop"}
+            or set(playback) != {"mode"}
+        ):
+            errors.append(_error("AUDIO_PLAYBACK_INVALID", f"{path}.transform.playback", "音频播放方式必须明确使用 trim 或 loop。"))
+        if mix == "background_music":
+            rights = transform.get("rights")
+            if (
+                not isinstance(rights, dict)
+                or rights.get("confirmed") is not True
+                or rights.get("basis") not in {"owned", "licensed", "royalty_free"}
+                or not isinstance(rights.get("evidence"), str)
+                or not rights["evidence"].strip()
+                or len(rights["evidence"]) > 500
+            ):
+                errors.append(_error(
+                    "BGM_RIGHTS_AUTHORIZATION_REQUIRED",
+                    f"{path}.transform.rights",
+                    "背景音乐必须冻结用户确认的权利依据和证据。",
+                ))
+            ducking = transform.get("ducking")
+            if not isinstance(ducking, dict) or not isinstance(ducking.get("enabled"), bool):
+                errors.append(_error("BGM_DUCKING_INVALID", f"{path}.transform.ducking", "背景音乐必须明确是否按旁白区间自动压低。"))
+            elif ducking["enabled"]:
+                if (
+                    not isinstance(ducking.get("reduction_db"), (int, float))
+                    or ducking["reduction_db"] < -24
+                    or ducking["reduction_db"] > -3
+                    or not isinstance(ducking.get("attack_ms"), int)
+                    or ducking["attack_ms"] < 0
+                    or ducking["attack_ms"] > 1000
+                    or not isinstance(ducking.get("release_ms"), int)
+                    or ducking["release_ms"] < 0
+                    or ducking["release_ms"] > 2000
+                    or not isinstance(ducking.get("regions"), list)
+                ):
+                    errors.append(_error("BGM_DUCKING_PARAMETERS_INVALID", f"{path}.transform.ducking", "自动压低参数或冻结旁白区间无效。"))
         envelope = transform.get("volume_envelope")
         if envelope is not None:
             if not isinstance(envelope, list) or len(envelope) < 2 or len(envelope) > 64:
@@ -852,11 +895,16 @@ def _validate_items(session: Session, project: Project, timeline: Timeline) -> l
         source_duration = item.source_out_ms - item.source_in_ms
         timeline_duration = item.timeline_out_ms - item.timeline_in_ms
         errors.extend(_validate_item_transform(item, path, timeline_duration))
-        if source_duration != timeline_duration:
+        playback_mode = ((item.transform or {}).get("playback") or {}).get("mode", "trim")
+        if source_duration != timeline_duration and not (
+            item.track_type == "audio"
+            and playback_mode == "loop"
+            and source_duration < timeline_duration
+        ):
             errors.append(_error(
                 "TIMELINE_SPEED_CHANGE_UNDECLARED",
                 path,
-                "首期合同不隐式变速，源区间与时间线区间时长必须一致。",
+                "除显式循环的背景音乐外，源区间与时间线区间时长必须一致。",
                 source_duration_ms=source_duration,
                 timeline_duration_ms=timeline_duration,
             ))
@@ -864,6 +912,11 @@ def _validate_items(session: Session, project: Project, timeline: Timeline) -> l
         ordered = sorted(rows, key=lambda row: (row.timeline_in_ms, row.sequence_number))
         for previous, current in zip(ordered, ordered[1:]):
             if current.timeline_in_ms < previous.timeline_out_ms:
+                if track == "audio":
+                    previous_mix = (previous.transform or {}).get("mix", "voiceover")
+                    current_mix = (current.transform or {}).get("mix", "voiceover")
+                    if {previous_mix, current_mix} == {"voiceover", "background_music"}:
+                        continue
                 errors.append(_error(
                     "TIMELINE_ITEMS_OVERLAP",
                     f"tracks.{track}",
@@ -871,6 +924,28 @@ def _validate_items(session: Session, project: Project, timeline: Timeline) -> l
                     previous_sequence=previous.sequence_number,
                     current_sequence=current.sequence_number,
                 ))
+    audio_rows = track_items["audio"]
+    voiceover_rows = [row for row in audio_rows if (row.transform or {}).get("mix", "voiceover") == "voiceover"]
+    for row in [item for item in audio_rows if (item.transform or {}).get("mix") == "background_music"]:
+        ducking = (row.transform or {}).get("ducking") or {}
+        if not ducking.get("enabled"):
+            continue
+        expected_regions = [
+            {
+                "start_ms": max(voice.timeline_in_ms, row.timeline_in_ms) - row.timeline_in_ms,
+                "end_ms": min(voice.timeline_out_ms, row.timeline_out_ms) - row.timeline_in_ms,
+            }
+            for voice in voiceover_rows
+            if max(voice.timeline_in_ms, row.timeline_in_ms) < min(voice.timeline_out_ms, row.timeline_out_ms)
+        ]
+        if ducking.get("regions") != expected_regions:
+            errors.append(_error(
+                "BGM_DUCKING_REGIONS_STALE",
+                f"items.audio.{row.sequence_number}.transform.ducking.regions",
+                "背景音乐冻结的压低区间必须与当前旁白片段精确一致。",
+                expected_regions=expected_regions,
+                actual_regions=ducking.get("regions"),
+            ))
     video_rows = sorted(track_items["main_video"], key=lambda row: row.timeline_in_ms)
     if not video_rows:
         errors.append(_error("MAIN_VIDEO_TRACK_EMPTY", "tracks.main_video", "主视频轨不能为空。"))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import math
 import subprocess
 from dataclasses import dataclass
 from functools import lru_cache
@@ -44,6 +45,12 @@ class LocalRenderAudioInput:
     source_out_ms: int
     timeline_in_ms: int
     volume_envelope: tuple[tuple[int, float], ...] = ()
+    loop: bool = False
+    output_duration_ms: int | None = None
+    ducking_regions: tuple[tuple[int, int], ...] = ()
+    ducking_reduction_db: float = -12.0
+    ducking_attack_ms: int = 200
+    ducking_release_ms: int = 500
 
 
 @dataclass(frozen=True)
@@ -64,6 +71,8 @@ class LocalRenderRequest:
     crf: int
     audio_inputs: tuple[LocalRenderAudioInput, ...] = ()
     subtitle_input: LocalRenderSubtitleInput | None = None
+    loudness_target_lufs: float = -16.0
+    true_peak_limit_dbtp: float = -1.0
 
 
 @dataclass(frozen=True)
@@ -212,11 +221,31 @@ class LocalFFmpegRenderer:
                 input_index = len(request.inputs) + audio_index
                 label = f"a{audio_index}"
                 audio_labels.append(f"[{label}]")
-                audio_filters = (
-                    f"[{input_index}:a:0]"
-                    f"atrim=start={item.source_in_ms / 1000:.3f}:end={item.source_out_ms / 1000:.3f},"
-                    "asetpts=PTS-STARTPTS,"
-                )
+                source_duration_ms = item.source_out_ms - item.source_in_ms
+                if item.loop:
+                    output_duration_ms = item.output_duration_ms or source_duration_ms
+                    repeat_count = math.ceil(output_duration_ms / source_duration_ms)
+                    segment_labels: list[str] = []
+                    for repeat_index in range(repeat_count):
+                        segment_label = f"aseg{audio_index}_{repeat_index}"
+                        segment_labels.append(f"[{segment_label}]")
+                        filters.append(
+                            f"[{input_index}:a:0]"
+                            f"atrim=start={item.source_in_ms / 1000:.3f}:end={item.source_out_ms / 1000:.3f},"
+                            f"asetpts=PTS-STARTPTS[{segment_label}]"
+                        )
+                    loop_label = f"aloop{audio_index}"
+                    filters.append(
+                        f"{''.join(segment_labels)}concat=n={repeat_count}:v=0:a=1,"
+                        f"atrim=duration={output_duration_ms / 1000:.3f},asetpts=PTS-STARTPTS[{loop_label}]"
+                    )
+                    audio_filters = f"[{loop_label}]"
+                else:
+                    audio_filters = (
+                        f"[{input_index}:a:0]"
+                        f"atrim=start={item.source_in_ms / 1000:.3f}:end={item.source_out_ms / 1000:.3f},"
+                        "asetpts=PTS-STARTPTS,"
+                    )
                 for (start_ms, start_gain), (end_ms, end_gain) in zip(
                     item.volume_envelope,
                     item.volume_envelope[1:],
@@ -229,10 +258,35 @@ class LocalFFmpegRenderer:
                         f"*(t-{start_seconds:.3f})/{end_seconds - start_seconds:.3f})/20)':"
                         f"enable='between(t,{start_seconds:.3f},{end_seconds:.3f})',"
                     )
+                for start_ms, end_ms in item.ducking_regions:
+                    attack_start_ms = max(0, start_ms - item.ducking_attack_ms)
+                    release_end_ms = end_ms + item.ducking_release_ms
+                    if attack_start_ms < start_ms:
+                        audio_filters += (
+                            "volume=eval=frame:"
+                            f"volume='pow(10,({item.ducking_reduction_db:.3f}"
+                            f"*(t-{attack_start_ms / 1000:.3f})/{(start_ms - attack_start_ms) / 1000:.3f})/20)':"
+                            f"enable='between(t,{attack_start_ms / 1000:.3f},{start_ms / 1000:.3f})',"
+                        )
+                    audio_filters += (
+                        f"volume={10 ** (item.ducking_reduction_db / 20):.6f}:"
+                        f"enable='between(t,{start_ms / 1000:.3f},{end_ms / 1000:.3f})',"
+                    )
+                    if release_end_ms > end_ms:
+                        audio_filters += (
+                            "volume=eval=frame:"
+                            f"volume='pow(10,({item.ducking_reduction_db:.3f}"
+                            f"*(1-(t-{end_ms / 1000:.3f})/{(release_end_ms - end_ms) / 1000:.3f}))/20)':"
+                            f"enable='between(t,{end_ms / 1000:.3f},{release_end_ms / 1000:.3f})',"
+                        )
                 filters.append(f"{audio_filters}adelay={item.timeline_in_ms}:all=1[{label}]")
+            limiter_linear = 10 ** (request.true_peak_limit_dbtp / 20)
             filters.append(
                 f"{''.join(audio_labels)}amix=inputs={len(audio_labels)}:"
-                "duration=longest:dropout_transition=0,aresample=async=1:first_pts=0[outa]"
+                "duration=longest:dropout_transition=0,aresample=async=1:first_pts=0,"
+                f"loudnorm=I={request.loudness_target_lufs:.1f}:"
+                f"TP={request.true_peak_limit_dbtp:.1f}:LRA=11,"
+                f"alimiter=limit={limiter_linear:.6f}:attack=5:release=50[outa]"
             )
         command.extend([
             "-filter_complex",

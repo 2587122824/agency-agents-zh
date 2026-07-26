@@ -129,6 +129,8 @@ export function EditorPage() {
   const [subtitleEnabled, setSubtitleEnabled] = useState(false)
   const [pixelsPerSecond, setPixelsPerSecond] = useState(60)
   const [snapIntervalMs, setSnapIntervalMs] = useState(100)
+  const [loudnessTargetLufs, setLoudnessTargetLufs] = useState(-16)
+  const [truePeakLimitDbtp, setTruePeakLimitDbtp] = useState(-1)
   const [draggedDraftIndex, setDraggedDraftIndex] = useState<number | null>(null)
   const [gapSeconds, setGapSeconds] = useState(2)
   const [confirming, setConfirming] = useState<Timeline | null>(null)
@@ -155,8 +157,8 @@ export function EditorPage() {
   })
   const save = useMutation({
     mutationFn: () => revisionBase
-      ? api.reviseTimelineCandidate(projectId, revisionBase, { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs }, draftItems)
-      : api.createTimelineCandidate(projectId, workspace.data!.active_snapshot_id!, 'user', { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs }, draftItems),
+      ? api.reviseTimelineCandidate(projectId, revisionBase, { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs, audio_mastering: { loudness_target_lufs: loudnessTargetLufs, true_peak_limit_dbtp: truePeakLimitDbtp, clipping_control: 'limiter' } }, draftItems)
+      : api.createTimelineCandidate(projectId, workspace.data!.active_snapshot_id!, 'user', { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs, audio_mastering: { loudness_target_lufs: loudnessTargetLufs, true_peak_limit_dbtp: truePeakLimitDbtp, clipping_control: 'limiter' } }, draftItems),
     onSuccess: async timeline => {
       setSelectedTimelineId(timeline.id)
       setDraftMode('view')
@@ -204,6 +206,8 @@ export function EditorPage() {
     setSubtitleEnabled(selectedTimeline.track_config.subtitle_enabled)
     setPixelsPerSecond(selectedTimeline.track_config.pixels_per_second)
     setSnapIntervalMs(selectedTimeline.track_config.snap_interval_ms)
+    setLoudnessTargetLufs(selectedTimeline.track_config.audio_mastering.loudness_target_lufs)
+    setTruePeakLimitDbtp(selectedTimeline.track_config.audio_mastering.true_peak_limit_dbtp)
     setRevisionBase(null)
     setSelectedDraftIndex(items.length ? 0 : null)
     setSelectedAssetId(items.find(item => item.asset_id)?.asset_id ?? '')
@@ -221,6 +225,8 @@ export function EditorPage() {
     setSubtitleEnabled(false)
     setPixelsPerSecond(60)
     setSnapIntervalMs(100)
+    setLoudnessTargetLufs(-16)
+    setTruePeakLimitDbtp(-1)
   }
   const beginRevision = (timeline: Timeline) => {
     setDraftMode('revision')
@@ -230,6 +236,8 @@ export function EditorPage() {
     setSubtitleEnabled(timeline.track_config.subtitle_enabled)
     setPixelsPerSecond(timeline.track_config.pixels_per_second)
     setSnapIntervalMs(timeline.track_config.snap_interval_ms)
+    setLoudnessTargetLufs(timeline.track_config.audio_mastering.loudness_target_lufs)
+    setTruePeakLimitDbtp(timeline.track_config.audio_mastering.true_peak_limit_dbtp)
     setRevisionBase(timeline)
     setSelectedDraftIndex(null)
   }
@@ -252,7 +260,7 @@ export function EditorPage() {
         ? { fit: 'cover', transition_in: { type: 'cut', duration_ms: 0 }, transition_out: { type: 'cut', duration_ms: 0 } }
         : track === 'subtitle'
           ? { render: 'burn_in' }
-          : { volume_envelope: [{ time_ms: 0, gain_db: 0 }, { time_ms: duration, gain_db: 0 }] },
+          : { mix: 'voiceover', playback: { mode: 'trim' }, volume_envelope: [{ time_ms: 0, gain_db: 0 }, { time_ms: duration, gain_db: 0 }] },
     }])
     setSelectedAssetId(asset.id)
   }
@@ -324,11 +332,40 @@ export function EditorPage() {
         return { ...item, timeline_in_ms: nextValue, timeline_out_ms: nextValue + duration }
       }
       const duration = Math.max(0, nextValue - item.timeline_in_ms)
-      return { ...item, timeline_out_ms: nextValue, source_out_ms: item.source_in_ms == null ? null : item.source_in_ms + duration }
+      const looping = item.track_type === 'audio' && (item.transform.playback as { mode?: string } | undefined)?.mode === 'loop'
+      return { ...item, timeline_out_ms: nextValue, source_out_ms: looping || item.source_in_ms == null ? item.source_out_ms : item.source_in_ms + duration }
     }))
   }
   const updateTransform = (index: number, key: string, value: unknown) => {
     setDraftItems(items => items.map((item, itemIndex) => itemIndex === index ? { ...item, transform: { ...item.transform, [key]: value } } : item))
+  }
+  const setAudioMix = (index: number, mix: 'voiceover' | 'background_music') => {
+    setDraftItems(items => items.map((item, itemIndex) => {
+      if (itemIndex !== index) return item
+      const transform: Record<string, unknown> = { ...item.transform, mix, playback: item.transform.playback ?? { mode: 'trim' } }
+      if (mix === 'background_music') {
+        transform.rights = transform.rights ?? { confirmed: false, basis: 'licensed', evidence: '' }
+        transform.ducking = transform.ducking ?? { enabled: false, reduction_db: -12, attack_ms: 200, release_ms: 500, regions: [] }
+      } else {
+        delete transform.rights
+        delete transform.ducking
+      }
+      return { ...item, transform }
+    }))
+  }
+  const applyBgmDucking = (index: number) => {
+    setDraftItems(items => items.map((item, itemIndex) => {
+      if (itemIndex !== index) return item
+      const regions = items
+        .filter(row => row.track_type === 'audio' && (row.transform.mix ?? 'voiceover') === 'voiceover')
+        .filter(row => Math.max(row.timeline_in_ms, item.timeline_in_ms) < Math.min(row.timeline_out_ms, item.timeline_out_ms))
+        .map(row => ({
+          start_ms: Math.max(row.timeline_in_ms, item.timeline_in_ms) - item.timeline_in_ms,
+          end_ms: Math.min(row.timeline_out_ms, item.timeline_out_ms) - item.timeline_in_ms,
+        }))
+      const current = (item.transform.ducking as Record<string, unknown> | undefined) ?? {}
+      return { ...item, transform: { ...item.transform, ducking: { enabled: true, reduction_db: current.reduction_db ?? -12, attack_ms: current.attack_ms ?? 200, release_ms: current.release_ms ?? 500, regions } } }
+    }))
   }
 
   return <>
@@ -392,7 +429,7 @@ export function EditorPage() {
               </header>
               {draftMode === 'view'
                 ? <div className={styles.reviewNotice}><ShieldCheck /><span>当前是只读审核。需要调整素材、顺序或时间时，请从下方版本创建修订。</span><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>
-                : <div className={styles.timelineTools}><Scissors /><span>显式空位</span><input type="number" min="0.1" step="0.1" value={gapSeconds} onChange={event => setGapSeconds(Number(event.target.value))} /><small>秒</small><button onClick={addGap}><Plus />添加</button><span>缩放</span><input aria-label="时间线缩放" type="range" min="20" max="400" step="10" value={pixelsPerSecond} onChange={event => setPixelsPerSecond(Number(event.target.value))} /><small>{pixelsPerSecond}px/s</small><span>吸附</span><select value={snapIntervalMs} onChange={event => setSnapIntervalMs(Number(event.target.value))}><option value="10">10ms</option><option value="50">50ms</option><option value="100">100ms</option><option value="250">250ms</option><option value="500">500ms</option></select><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>}
+                : <div className={styles.timelineTools}><Scissors /><span>显式空位</span><input type="number" min="0.1" step="0.1" value={gapSeconds} onChange={event => setGapSeconds(Number(event.target.value))} /><small>秒</small><button onClick={addGap}><Plus />添加</button><span>缩放</span><input aria-label="时间线缩放" type="range" min="20" max="400" step="10" value={pixelsPerSecond} onChange={event => setPixelsPerSecond(Number(event.target.value))} /><small>{pixelsPerSecond}px/s</small><span>吸附</span><select value={snapIntervalMs} onChange={event => setSnapIntervalMs(Number(event.target.value))}><option value="10">10ms</option><option value="50">50ms</option><option value="100">100ms</option><option value="250">250ms</option><option value="500">500ms</option></select><span>响度</span><input aria-label="成片响度目标" type="number" min="-24" max="-9" step="0.5" value={loudnessTargetLufs} onChange={event => setLoudnessTargetLufs(Number(event.target.value))} /><small>LUFS</small><span>峰值</span><input aria-label="true peak 上限" type="number" min="-3" max="-0.1" step="0.1" value={truePeakLimitDbtp} onChange={event => setTruePeakLimitDbtp(Number(event.target.value))} /><small>dBTP · limiter</small><code>{timecode(timelineDuration)} / {timecode(workspace.data.duration_ms)}</code></div>}
               <div className={styles.timelineViewport}>
               <div className={styles.ruler} style={{ width: Math.max(700, workspace.data.duration_ms / 1000 * pixelsPerSecond + 108) }}>{[0, .2, .4, .6, .8, 1].map(mark => <span key={mark}>{timecode(workspace.data!.duration_ms * mark)}</span>)}</div>
               <div className={styles.tracks}>{(['main_video', 'audio', 'subtitle'] as TrackType[]).map(track => {
@@ -426,7 +463,15 @@ export function EditorPage() {
                   })}
                 </div>}
                 {selectedDraftItem.track_type === 'audio' && <div className={styles.effectEditor}>
-                  <strong>音量包络</strong>
+                  <strong>混音与音量包络</strong>
+                  <label><span>用途</span><select disabled={draftMode === 'view'} value={(selectedDraftItem.transform.mix as string | undefined) ?? 'voiceover'} onChange={event => setAudioMix(selectedDraftIndex, event.target.value as 'voiceover' | 'background_music')}><option value="voiceover">旁白 / 对白</option><option value="background_music">背景音乐（BGM）</option></select></label>
+                  <label><span>播放</span><select disabled={draftMode === 'view'} value={((selectedDraftItem.transform.playback as { mode?: string } | undefined)?.mode) ?? 'trim'} onChange={event => updateTransform(selectedDraftIndex, 'playback', { mode: event.target.value })}><option value="trim">裁切一次</option><option value="loop">循环至成片出点</option></select></label>
+                  {selectedDraftItem.transform.mix === 'background_music' && <>
+                    <label><span>权利依据</span><select disabled={draftMode === 'view'} value={((selectedDraftItem.transform.rights as { basis?: string } | undefined)?.basis) ?? 'licensed'} onChange={event => updateTransform(selectedDraftIndex, 'rights', { ...((selectedDraftItem.transform.rights as Record<string, unknown> | undefined) ?? {}), basis: event.target.value })}><option value="owned">自有版权</option><option value="licensed">已获许可</option><option value="royalty_free">免版税授权</option></select></label>
+                    <label><span>授权证据</span><input disabled={draftMode === 'view'} maxLength={500} value={String(((selectedDraftItem.transform.rights as Record<string, unknown> | undefined)?.evidence) ?? '')} onChange={event => updateTransform(selectedDraftIndex, 'rights', { ...((selectedDraftItem.transform.rights as Record<string, unknown> | undefined) ?? {}), evidence: event.target.value })} /></label>
+                    <label><span>明确确认</span><input disabled={draftMode === 'view'} type="checkbox" checked={Boolean((selectedDraftItem.transform.rights as Record<string, unknown> | undefined)?.confirmed)} onChange={event => updateTransform(selectedDraftIndex, 'rights', { ...((selectedDraftItem.transform.rights as Record<string, unknown> | undefined) ?? {}), confirmed: event.target.checked })} /><small>我确认本项目有权使用该音乐</small></label>
+                    <label><span>旁白压低</span><input disabled={draftMode === 'view'} type="number" min="-24" max="-3" step="1" value={Number(((selectedDraftItem.transform.ducking as Record<string, unknown> | undefined)?.reduction_db) ?? -12)} onChange={event => updateTransform(selectedDraftIndex, 'ducking', { ...((selectedDraftItem.transform.ducking as Record<string, unknown> | undefined) ?? {}), enabled: true, reduction_db: Number(event.target.value), attack_ms: 200, release_ms: 500, regions: [] })} /><small>dB</small>{draftMode !== 'view' && <button onClick={() => applyBgmDucking(selectedDraftIndex)}>按旁白区间生成</button>}</label>
+                  </>}
                   {((selectedDraftItem.transform.volume_envelope as Array<{ time_ms: number; gain_db: number }> | undefined) ?? []).map((point, pointIndex, points) => <label key={`${point.time_ms}-${pointIndex}`}><span>关键点 {pointIndex + 1}</span><input disabled={draftMode === 'view'} type="number" min="0" max={(selectedDraftItem.timeline_out_ms - selectedDraftItem.timeline_in_ms) / 1000} step={snapIntervalMs / 1000} value={point.time_ms / 1000} onChange={event => updateTransform(selectedDraftIndex, 'volume_envelope', points.map((row, index) => index === pointIndex ? { ...row, time_ms: snapped(Math.round(Number(event.target.value) * 1000)) } : row))} /><small>秒</small><input disabled={draftMode === 'view'} type="number" min="-60" max="12" step="0.5" value={point.gain_db} onChange={event => updateTransform(selectedDraftIndex, 'volume_envelope', points.map((row, index) => index === pointIndex ? { ...row, gain_db: Number(event.target.value) } : row))} /><small>dB</small>{draftMode !== 'view' && points.length > 2 && pointIndex > 0 && pointIndex < points.length - 1 && <button onClick={() => updateTransform(selectedDraftIndex, 'volume_envelope', points.filter((_, index) => index !== pointIndex))}><Trash2 /></button>}</label>)}
                   {draftMode !== 'view' && <button onClick={() => {
                     const duration = selectedDraftItem.timeline_out_ms - selectedDraftItem.timeline_in_ms

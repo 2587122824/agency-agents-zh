@@ -1158,7 +1158,7 @@ export interface Timeline {
   source: 'user' | 'editor_assistant'
   source_agent_run_id: string | null
   output_spec: Record<string, unknown>
-  track_config: { audio_enabled: boolean; subtitle_enabled: boolean; pixels_per_second: number; snap_interval_ms: number }
+  track_config: TimelineTrackConfig
   validation_report: Array<{ code: string; path: string; message: string; evidence: Record<string, unknown> }>
   contract_hash: string | null
   row_version: number
@@ -1167,6 +1167,18 @@ export interface Timeline {
   validated_at: string | null
   confirmed_at: string | null
   items: TimelineItem[]
+}
+
+export interface TimelineTrackConfig {
+  audio_enabled: boolean
+  subtitle_enabled: boolean
+  pixels_per_second: number
+  snap_interval_ms: number
+  audio_mastering: {
+    loudness_target_lufs: number
+    true_peak_limit_dbtp: number
+    clipping_control: 'limiter'
+  }
 }
 
 export interface TimelineItemDraft {

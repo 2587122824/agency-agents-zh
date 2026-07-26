@@ -263,10 +263,10 @@ export const api = {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: snapshotId }),
   }),
   audioWaveform: (projectId: string, assetId: string, bins = 160) => request<AudioWaveform>(`/projects/${projectId}/assets/${assetId}/waveform?bins=${bins}`),
-  createTimelineCandidate: (projectId: string, snapshotId: string, source: 'user' | 'editor_assistant', trackConfig: { audio_enabled: boolean; subtitle_enabled: boolean; pixels_per_second: number; snap_interval_ms: number }, items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timeline-candidates`, {
+  createTimelineCandidate: (projectId: string, snapshotId: string, source: 'user' | 'editor_assistant', trackConfig: Timeline['track_config'], items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timeline-candidates`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: snapshotId, source, track_config: trackConfig, items }),
   }),
-  reviseTimelineCandidate: (projectId: string, timeline: Timeline, trackConfig: { audio_enabled: boolean; subtitle_enabled: boolean; pixels_per_second: number; snap_interval_ms: number }, items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:revise`, {
+  reviseTimelineCandidate: (projectId: string, timeline: Timeline, trackConfig: Timeline['track_config'], items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:revise`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: timeline.snapshot_id, expected_row_version: timeline.row_version, source: 'user', track_config: trackConfig, items }),
   }),
   validateTimeline: (projectId: string, timeline: Timeline) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:validate`, {

@@ -291,6 +291,53 @@ def test_local_ffmpeg_renderer_mixes_timeline_audio(monkeypatch, tmp_path) -> No
     assert "-c:a" in command
 
 
+def test_local_ffmpeg_renderer_loops_bgm_ducks_voice_regions_and_masters_output(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    def fake_run(command, **_kwargs):
+        captured["command"] = command
+        (tmp_path / "bgm.mp4").write_bytes(b"rendered")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("v2.backend.app.delivery.renderer.subprocess.run", fake_run)
+    request = LocalRenderRequest(
+        ffmpeg_path=tmp_path / "ffmpeg.exe",
+        inputs=(LocalRenderInput(tmp_path / "video.mp4", 0, 5000),),
+        audio_inputs=(LocalRenderAudioInput(
+            tmp_path / "music.wav",
+            0,
+            2000,
+            0,
+            loop=True,
+            output_duration_ms=5000,
+            ducking_regions=((1000, 3000),),
+            ducking_reduction_db=-12,
+            ducking_attack_ms=200,
+            ducking_release_ms=500,
+        ),),
+        output_path=tmp_path / "bgm.mp4",
+        width=480,
+        height=848,
+        fps=24,
+        video_encoder="libx264",
+        preset="medium",
+        crf=18,
+        loudness_target_lufs=-14,
+        true_peak_limit_dbtp=-1.5,
+    )
+
+    LocalFFmpegRenderer().render(request)
+
+    filter_graph = captured["command"][captured["command"].index("-filter_complex") + 1]
+    assert "concat=n=3:v=0:a=1" in filter_graph
+    assert "atrim=duration=5.000" in filter_graph
+    assert "between(t,0.800,1.000)" in filter_graph
+    assert "between(t,1.000,3.000)" in filter_graph
+    assert "between(t,3.000,3.500)" in filter_graph
+    assert "loudnorm=I=-14.0:TP=-1.5:LRA=11" in filter_graph
+    assert "alimiter=limit=0.841395" in filter_graph
+
+
 def test_local_ffmpeg_renderer_burns_in_one_frozen_subtitle(monkeypatch, tmp_path) -> None:
     captured = {}
 

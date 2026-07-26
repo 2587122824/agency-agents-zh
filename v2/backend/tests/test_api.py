@@ -6270,6 +6270,110 @@ def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(cl
     assert confirm.headers["x-error-code"] == "TIMELINE_NOT_READY_FOR_CONFIRMATION"
 
 
+def test_timeline_freezes_authorized_looping_bgm_ducking_and_mastering(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    video_assets = seed_editor_assets(client, project, snapshot)
+    client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "editor-bgm-stage-approve", "expected_snapshot_id": snapshot["id"]},
+    )
+    with SessionLocal() as session:
+        voiceover = Asset(
+            project_id=project["id"], snapshot_id=snapshot["id"], output_index=0,
+            asset_type="audio", role="voiceover", uri=f"runtime://assets/editor/{project['id']}-voice.wav",
+            storage_backend="local", provider_output_manifest={"test": True},
+            content_hash=hashlib.sha256(f"{project['id']}-voice".encode()).hexdigest(),
+            mime_type="audio/wav", byte_size=100, duration_ms=15_000, state="approved",
+        )
+        bgm = Asset(
+            project_id=project["id"], snapshot_id=snapshot["id"], output_index=1,
+            asset_type="audio", role="background_music", uri=f"runtime://assets/editor/{project['id']}-bgm.wav",
+            storage_backend="local", provider_output_manifest={"test": True},
+            content_hash=hashlib.sha256(f"{project['id']}-bgm".encode()).hexdigest(),
+            mime_type="audio/wav", byte_size=100, duration_ms=10_000, state="approved",
+        )
+        session.add_all([voiceover, bgm])
+        session.commit()
+        voiceover_id, bgm_id = voiceover.id, bgm.id
+    audio_items = [
+        {
+            "track_type": "audio", "sequence_number": 1, "asset_id": voiceover_id, "label": "旁白",
+            "source_in_ms": 0, "source_out_ms": 15_000, "timeline_in_ms": 5_000, "timeline_out_ms": 20_000,
+            "transform": {
+                "mix": "voiceover", "playback": {"mode": "trim"},
+                "volume_envelope": [{"time_ms": 0, "gain_db": 0}, {"time_ms": 15_000, "gain_db": 0}],
+            },
+        },
+        {
+            "track_type": "audio", "sequence_number": 2, "asset_id": bgm_id, "label": "BGM",
+            "source_in_ms": 0, "source_out_ms": 10_000, "timeline_in_ms": 0, "timeline_out_ms": 30_000,
+            "transform": {
+                "mix": "background_music", "playback": {"mode": "loop"},
+                "rights": {"confirmed": True, "basis": "licensed", "evidence": "项目商业音乐授权单 TEST-001"},
+                "ducking": {
+                    "enabled": True, "reduction_db": -12, "attack_ms": 200, "release_ms": 500,
+                    "regions": [{"start_ms": 5_000, "end_ms": 20_000}],
+                },
+                "volume_envelope": [{"time_ms": 0, "gain_db": -6}, {"time_ms": 30_000, "gain_db": -6}],
+            },
+        },
+    ]
+    invalid_audio_items = json.loads(json.dumps(audio_items))
+    invalid_audio_items[1]["transform"]["rights"]["confirmed"] = False
+    invalid_audio_items[1]["transform"]["ducking"]["regions"] = []
+    track_config = {
+        "audio_enabled": True, "subtitle_enabled": False,
+        "audio_mastering": {
+            "loudness_target_lufs": -14, "true_peak_limit_dbtp": -1.5, "clipping_control": "limiter",
+        },
+    }
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "timeline-bgm-create-001", "expected_snapshot_id": snapshot["id"], "source": "user",
+            "track_config": track_config,
+            "items": [*timeline_items_for_assets(video_assets), *invalid_audio_items],
+        },
+    )
+    assert created.status_code == 201
+    timeline = created.json()
+    invalid = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:validate",
+        json={"command_id": "timeline-bgm-validate-001", "expected_row_version": timeline["row_version"]},
+    )
+    assert invalid.status_code == 200
+    assert {row["code"] for row in invalid.json()["validation_report"]} >= {
+        "BGM_RIGHTS_AUTHORIZATION_REQUIRED", "BGM_DUCKING_REGIONS_STALE",
+    }
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:revise",
+        json={
+            "command_id": "timeline-bgm-revise-001", "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": invalid.json()["row_version"], "source": "user",
+            "track_config": track_config,
+            "items": [*timeline_items_for_assets(video_assets), *audio_items],
+        },
+    )
+    assert revised.status_code == 201
+    timeline = revised.json()
+    validated = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:validate",
+        json={"command_id": "timeline-bgm-validate-002", "expected_row_version": timeline["row_version"]},
+    )
+    assert validated.status_code == 200
+    result = validated.json()
+    assert result["status"] == "review"
+    assert result["validation_report"] == []
+    assert result["track_config"]["audio_mastering"] == {
+        "loudness_target_lufs": -14.0,
+        "true_peak_limit_dbtp": -1.5,
+        "clipping_control": "limiter",
+    }
+    frozen_bgm = next(item for item in result["items"] if item["asset_id"] == bgm_id)
+    assert frozen_bgm["transform"]["rights"]["evidence"] == "项目商业音乐授权单 TEST-001"
+    assert frozen_bgm["transform"]["ducking"]["regions"] == [{"start_ms": 5_000, "end_ms": 20_000}]
+
+
 def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client)
     video_assets = seed_editor_assets(client, project, snapshot)
