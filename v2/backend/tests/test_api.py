@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import hashlib
+import io
 import json
 import struct
+import wave
 import zlib
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -20,13 +22,15 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 from v2.backend.app.main import app
 from v2.backend.app.db.session import Base, engine
 from v2.backend.app.db.session import SessionLocal
-from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, StoragePolicyVersion, Timeline, TimelineItem, VoiceCloneAuthorizationVersion, WorkflowSlotVersion, WorkAttempt, WorkItem
+from v2.backend.app.db.models import AgentInputManifest, AgentRun, Asset, AssetReviewDecision, AssetRevisionRequest, Attachment, CommandReceipt, CostEvent, CosyVoiceValidationRun, CreativeBriefCandidate, DAGNode, Decision, DecisionChangeImpactAnalysis, DeliveryAttempt, DependencyEdge, Entity, EntityVersion, PlanVersion, ProductionSnapshot, Project, ProjectEvent, QCFinding, QCReport, QCReportCandidate, RequirementVersion, Shot, ShotPlanCandidate, StoragePolicyVersion, Timeline, TimelineItem, VoiceCloneAuthorizationVersion, WorkflowSlotVersion, WorkAttempt, WorkItem
 from v2.backend.app.creation.completeness import evaluate_requirement
 from v2.backend.app.creation.service import _validated_update_value
 from sqlalchemy import select
 from v2.backend.app.workers.worker import process_one
 from v2.backend.app.providers import ProviderAdapterError, ProviderExecutionRequest, ProviderPollResult, ProviderSubmission
 from v2.backend.app.providers.registry import ProviderAdapterRegistry
+from v2.backend.app.providers.contracts import CosyVoicePaidValidationCommand
+from v2.backend.app.providers.cosyvoice_validation import execute_cosyvoice_paid_validation
 from v2.backend.app.creation.agent_gateway import AgentGatewayError, CreativeAgentOutput, CreativeAgentResult, DeterministicCreativeAgentGateway, get_creative_agent_gateway
 from v2.backend.app.planning.agent_gateway import ContentPlannerOutput, ContentPlannerResult, DeterministicContentPlannerGateway, get_content_planner_gateway
 from v2.backend.app.planning.director_gateway import DeterministicDirectorGateway, get_director_gateway
@@ -7643,6 +7647,111 @@ def test_provider_readiness_requires_api_key_in_published_provider_configuration
     assert provider["api_key_state"] == "missing"
     assert provider["status"] == "credential_not_ready"
     assert provider["next_action"] == "configure_credential"
+
+
+class _CosyVoiceValidationTransport:
+    def __init__(self) -> None:
+        self.calls: list[tuple] = []
+
+    def synthesize(self, url, api_key, payload, timeout, max_bytes):
+        self.calls.append((url, api_key, payload, timeout, max_bytes))
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as target:
+            target.setnchannels(1)
+            target.setsampwidth(2)
+            target.setframerate(24000)
+            target.writeframes(b"\x00\x00" * 2400)
+        return {
+            "request_id": "cosyvoice-validation-request-001",
+            "usage": {"characters": 13},
+        }, buffer.getvalue()
+
+
+def test_cosyvoice_validation_workspace_and_paid_evidence_are_auditable(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED", "true")
+    config = publish_visual_production_configuration(
+        client,
+        with_pricing=True,
+        with_voiceover=True,
+        command_prefix="cosyvoice-validation-config",
+    )
+    workspace_response = client.get(
+        "/api/v1/system-config/cosyvoice-validation",
+        params={"configuration_id": config["id"]},
+    )
+    assert workspace_response.status_code == 200, workspace_response.text
+    workspace = workspace_response.json()
+    assert workspace["preflight"]["status"] == "ready_for_paid_validation"
+    assert workspace["preflight"]["network_probe_performed"] is False
+    assert workspace["preflight"]["audio_contract"] == {
+        "sample_rate": 24000,
+        "channels": 1,
+        "format": "wav",
+        "voice_key": "steady_male",
+        "provider_voice_id": "longxiaocheng",
+        "speaking_rate": 1.0,
+        "volume": 50,
+    }
+    assert workspace["validation_runs"] == []
+    assert "test-cosyvoice-key" not in workspace_response.text
+
+    preflight = workspace["preflight"]
+    transport = _CosyVoiceValidationTransport()
+    payload = CosyVoicePaidValidationCommand(
+        command_id="cosyvoice-validation-paid-001",
+        actor_id="local-user",
+        configuration_id=config["id"],
+        expected_config_hash=preflight["configuration"]["config_hash"],
+        validation_text="片场 V2 配音连接验收。",
+        expected_validation_text_sha256=preflight["validation_text"]["sha256"],
+        confirm_paid_call=True,
+    )
+    with SessionLocal() as session:
+        result = execute_cosyvoice_paid_validation(
+            session,
+            payload,
+            transport=transport,
+        )
+    assert result["status"] == "passed"
+    assert result["network_probe_performed"] is True
+    assert result["request_id"] == "cosyvoice-validation-request-001"
+    assert result["usage"] == {"characters": 13}
+    assert result["output"]["mime_type"] == "audio/wav"
+    assert result["output"]["sample_rate"] == 24000
+    assert result["output"]["channels"] == 1
+    assert transport.calls[0][2]["input"] == {
+        "text": "片场 V2 配音连接验收。",
+        "voice": "longxiaocheng",
+        "rate": 1.0,
+        "volume": 50,
+        "format": "wav",
+        "sample_rate": 24000,
+    }
+
+    with SessionLocal() as session:
+        replayed = execute_cosyvoice_paid_validation(
+            session,
+            payload,
+            transport=transport,
+        )
+        stored = session.get(CosyVoiceValidationRun, result["id"])
+        assert stored is not None
+        assert stored.status == "passed"
+        assert stored.request_id == "cosyvoice-validation-request-001"
+        assert stored.output["content_hash"] == result["output"]["content_hash"]
+    assert replayed["id"] == result["id"]
+    assert len(transport.calls) == 1
+
+    refreshed = client.get(
+        "/api/v1/system-config/cosyvoice-validation",
+        params={"configuration_id": config["id"]},
+    )
+    assert refreshed.status_code == 200
+    assert refreshed.json()["validation_runs"][0]["id"] == result["id"]
+    assert "test-cosyvoice-key" not in refreshed.text
 
 
 def test_provider_readiness_reports_historical_runninghub_contract_without_mutation(

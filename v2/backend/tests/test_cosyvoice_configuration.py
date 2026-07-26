@@ -137,7 +137,19 @@ def _validation_contract(api_key: str | None) -> CosyVoiceValidationContract:
                 {"node_id": "input", "field_path": "sample_rate", "value_source": "literal:24000", "value_type": "integer"},
             ],
         ),
-        audio=SimpleNamespace(sample_rate=24000, channels=1, format="wav"),
+        audio=SimpleNamespace(
+            sample_rate=24000,
+            channels=1,
+            format="wav",
+            voice_presets=[{
+                "key": "warm_female",
+                "display_name": "温暖女声",
+                "provider_voice_id": "longxiaochun",
+            }],
+            default_voice_key="warm_female",
+            speaking_rate_default=1.0,
+            volume_default=50,
+        ),
         storage=SimpleNamespace(
             backend_kind="local",
             local_root_ref="v2.runtime.assets",

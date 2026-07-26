@@ -178,7 +178,17 @@ from ..planning.service import (
     revise_shot_plan_with_director,
     start_shot_plan_revision,
 )
-from ..providers.contracts import ProviderReadinessView
+from ..providers.contracts import (
+    CosyVoicePaidValidationCommand,
+    CosyVoiceValidationRunView,
+    CosyVoiceValidationWorkspaceView,
+    ProviderReadinessView,
+)
+from ..providers.cosyvoice_validation import (
+    CosyVoiceValidationConflictError,
+    cosyvoice_validation_workspace,
+    execute_cosyvoice_paid_validation,
+)
 from ..providers.readiness import provider_readiness
 from ..production.contracts import (
     ActivateProductionSnapshot,
@@ -403,6 +413,44 @@ def entity_registry(session: Session = Depends(get_session)):
 @router.get("/system-config/provider-readiness", response_model=ProviderReadinessView)
 def system_config_provider_readiness(session: Session = Depends(get_session)):
     return provider_readiness(session)
+
+
+@router.get(
+    "/system-config/cosyvoice-validation",
+    response_model=CosyVoiceValidationWorkspaceView,
+)
+def system_config_cosyvoice_validation(
+    configuration_id: str | None = Query(default=None),
+    session: Session = Depends(get_session),
+):
+    try:
+        return cosyvoice_validation_workspace(session, configuration_id)
+    except CosyVoiceValidationConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=exc.detail,
+            headers={"X-Error-Code": exc.code},
+        ) from exc
+
+
+@router.post(
+    "/system-config/cosyvoice-validation:execute",
+    response_model=CosyVoiceValidationRunView,
+    status_code=status.HTTP_201_CREATED,
+)
+def system_config_execute_cosyvoice_validation(
+    payload: CosyVoicePaidValidationCommand,
+    session: Session = Depends(get_session),
+):
+    try:
+        return execute_cosyvoice_paid_validation(session, payload)
+    except CosyVoiceValidationConflictError as exc:
+        session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=exc.detail,
+            headers={"X-Error-Code": exc.code},
+        ) from exc
 
 
 @router.get("/system-config/versions", response_model=list[ConfigurationVersionSummary])

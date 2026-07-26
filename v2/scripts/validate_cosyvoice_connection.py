@@ -135,9 +135,29 @@ def load_validation_contract(
 
 
 def _manifest(contract: CosyVoiceValidationContract, text: str) -> dict[str, Any]:
+    voices = {
+        str(item.get("key")): item
+        for item in (contract.audio.voice_presets or [])
+        if isinstance(item, dict)
+    }
+    voice = voices.get(str(contract.audio.default_voice_key or ""))
+    if not voice or not str(voice.get("provider_voice_id") or "").strip():
+        raise CosyVoiceValidationError(
+            "COSYVOICE_VALIDATION_VOICE_INVALID",
+            "音频合同没有可用于真实验收的默认供应商音色。",
+        )
     return {
         "schema_version": "cosyvoice-validation-request.v1",
-        "input_contract": {"voiceover_text": text},
+        "input_contract": {
+            "voiceover_text": text,
+            "voice": {
+                "key": voice["key"],
+                "display_name": voice["display_name"],
+                "provider_voice_id": voice["provider_voice_id"],
+            },
+            "speaking_rate": contract.audio.speaking_rate_default,
+            "volume": contract.audio.volume_default,
+        },
         "output_contract": {"media_type": "audio"},
         "provider": {
             "provider_key": contract.provider.provider_key,
@@ -166,6 +186,8 @@ def _contract_report(
     contract: CosyVoiceValidationContract,
     text: str,
 ) -> dict[str, Any]:
+    manifest = _manifest(contract, text)
+    voice = manifest["input_contract"]["voice"]
     api_key_configured = bool(str(contract.provider.api_key or "").strip())
     execution_enabled = _external_execution_enabled()
     status = (
@@ -201,6 +223,10 @@ def _contract_report(
             "sample_rate": contract.audio.sample_rate,
             "channels": contract.audio.channels,
             "format": contract.audio.format,
+            "voice_key": voice["key"],
+            "provider_voice_id": voice["provider_voice_id"],
+            "speaking_rate": contract.audio.speaking_rate_default,
+            "volume": contract.audio.volume_default,
         },
         "validation_text": {
             "character_count": len(text),

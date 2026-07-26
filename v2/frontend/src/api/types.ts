@@ -1169,6 +1169,38 @@ export interface ProviderReadiness {
   providers: ProviderReadinessItem[]
 }
 
+export interface CosyVoiceValidationRun {
+  id: string
+  production_config_version_id: string
+  provider_config_version_id: string
+  workflow_slot_version_id: string
+  status: 'passed' | 'blocked'
+  network_probe_performed: boolean
+  validation_text_sha256: string
+  validation_text_character_count: number
+  request_id: string | null
+  usage: Record<string, unknown>
+  output: Record<string, unknown>
+  error_code: string | null
+  error_detail: string | null
+  created_by: string
+  created_at: string
+}
+
+export interface CosyVoiceValidationWorkspace {
+  preflight: {
+    schema_version: string
+    status: 'credential_not_ready' | 'execution_disabled' | 'ready_for_paid_validation'
+    network_probe_performed: false
+    configuration: { id: string; version_number: number; config_hash: string }
+    provider: { id: string; provider_key: string; adapter_kind: string; api_key_state: 'missing' | 'configured'; execution_enabled: boolean }
+    workflow: { id: string; slot_key: string; model: string; version: string | null }
+    audio_contract: { sample_rate: number; channels: number; format: string }
+    validation_text: { character_count: number; sha256: string }
+  }
+  validation_runs: CosyVoiceValidationRun[]
+}
+
 export interface EditorAsset {
   id: string
   snapshot_id: string

@@ -939,6 +939,32 @@ class ProviderConfigVersion(Base):
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
+class CosyVoiceValidationRun(Base):
+    __tablename__ = "cosyvoice_validation_runs"
+
+    id: Mapped[str] = mapped_column(String(48), primary_key=True, default=lambda: new_id("cosyvoice_validation"))
+    production_config_version_id: Mapped[str] = mapped_column(
+        ForeignKey("production_config_versions.id"), index=True
+    )
+    provider_config_version_id: Mapped[str] = mapped_column(
+        ForeignKey("provider_config_versions.id"), index=True
+    )
+    workflow_slot_version_id: Mapped[str] = mapped_column(
+        ForeignKey("workflow_slot_versions.id"), index=True
+    )
+    status: Mapped[str] = mapped_column(String(24), index=True)
+    network_probe_performed: Mapped[bool] = mapped_column(Boolean)
+    validation_text_sha256: Mapped[str] = mapped_column(String(64))
+    validation_text_character_count: Mapped[int] = mapped_column(Integer)
+    request_id: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    usage: Mapped[dict] = mapped_column(JSON, default=dict)
+    output: Mapped[dict] = mapped_column(JSON, default=dict)
+    error_code: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    error_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str] = mapped_column(String(48))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class ModelConfigVersion(Base):
     __tablename__ = "model_config_versions"
     __table_args__ = (UniqueConstraint("config_key", "version_number"),)

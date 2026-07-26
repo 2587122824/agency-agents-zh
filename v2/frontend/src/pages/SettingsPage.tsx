@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, BadgeCheck, Boxes, Check, ChevronDown, ChevronRight, CircleDollarSign, Copy, Database, FileCheck2, History, KeyRound, LockKeyhole, PlugZap, Plus, RefreshCw, Save, Server, Settings2, ShieldCheck, Trash2, Unplug, Workflow, X } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, Boxes, Check, ChevronDown, ChevronRight, CircleDollarSign, Copy, Database, FileCheck2, History, KeyRound, LockKeyhole, PlugZap, Plus, RefreshCw, Save, Server, Settings2, ShieldCheck, Trash2, Unplug, Volume2, Workflow, X } from 'lucide-react'
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 
 import { api } from '../api/client'
@@ -9,6 +9,7 @@ import styles from './SettingsPage.module.css'
 
 const generatedKey = (prefix: string) => `${prefix}_${crypto.randomUUID()}`
 const CONNECTED_LOCAL_ASSET_ROOT_REF = 'v2.runtime.assets'
+const COSYVOICE_VALIDATION_TEXT = '片场 V2 配音连接验收。'
 const providerDraft = (): ProviderConfigDraft => ({ provider_key: generatedKey('provider'), display_name: '', adapter_kind: '', base_url: '', api_key: null, capabilities: [''], request_timeout_seconds: 60, poll_interval_seconds: 5, max_concurrency: 1 })
 const modelDraft = (): ModelConfigDraft => ({ config_key: generatedKey('model'), display_name: '', agent_role: 'creative', provider_key: '', provider_model_id: '', input_contract_version: '', output_schema_version: '', prompt_contract_version: '', sampling: {}, capability_tags: [] })
 const workflowDraft = (): WorkflowSlotDraft => ({ slot_key: generatedKey('workflow'), display_name: '', operation_kind: '', provider_key: '', provider_workflow_id: '', input_schema_version: '', output_schema_version: '', node_info_list: [{ node_id: '', field_path: '', value_source: '', value_type: 'string', required: true }], supported_video_spec_keys: [], capability_tags: [] })
@@ -238,6 +239,8 @@ export function SettingsPage() {
   const [draft, setDraft] = useState<SystemConfigurationDraft>(emptyDraft)
   const [confirmPublish, setConfirmPublish] = useState(false)
   const [confirmRetire, setConfirmRetire] = useState(false)
+  const [confirmPaidValidation, setConfirmPaidValidation] = useState(false)
+  const [paidValidationAccepted, setPaidValidationAccepted] = useState(false)
   const currentVersion = useMemo(() => versions.data?.find(item => item.status === 'published') ?? versions.data?.[0] ?? null, [versions.data])
   const activeDraft = useMemo(() => {
     if (!currentVersion) return null
@@ -245,6 +248,12 @@ export function SettingsPage() {
   }, [currentVersion, versions.data])
   const historyVersions = useMemo(() => versions.data?.filter(item => item.id !== currentVersion?.id && item.id !== activeDraft?.id) ?? [], [activeDraft?.id, currentVersion?.id, versions.data])
   const currentReadiness = useMemo(() => readiness.data?.providers.filter(item => item.configuration_version_id === currentVersion?.id) ?? [], [currentVersion?.id, readiness.data?.providers])
+  const cosyvoiceProvider = useMemo(() => currentReadiness.find(item => item.adapter_kind === 'cosyvoice') ?? null, [currentReadiness])
+  const cosyvoiceValidation = useQuery({
+    queryKey: ['cosyvoice-validation', currentVersion?.id],
+    queryFn: () => api.cosyvoiceValidation(currentVersion!.id),
+    enabled: Boolean(currentVersion?.id && cosyvoiceProvider),
+  })
   const selected = useQuery({ queryKey: ['system-configuration', selectedId], queryFn: () => api.systemConfiguration(selectedId!), enabled: Boolean(selectedId) })
   const diff = useQuery({
     queryKey: ['system-configuration-diff', selected.data?.id, selected.data?.supersedes_version_id],
@@ -272,8 +281,21 @@ export function SettingsPage() {
       await client.invalidateQueries({ queryKey: ['system-configurations'] })
     },
   })
-  const mutationError = create.error || revise.error || validate.error || publish.error || retire.error || prepareEdit.error
-  const busy = create.isPending || revise.isPending || validate.isPending || publish.isPending || retire.isPending || prepareEdit.isPending
+  const executePaidValidation = useMutation({
+    mutationFn: () => api.executeCosyVoiceValidation({
+      configurationId: cosyvoiceValidation.data!.preflight.configuration.id,
+      expectedConfigHash: cosyvoiceValidation.data!.preflight.configuration.config_hash,
+      validationText: COSYVOICE_VALIDATION_TEXT,
+      expectedValidationTextSha256: cosyvoiceValidation.data!.preflight.validation_text.sha256,
+    }),
+    onSuccess: async () => {
+      setConfirmPaidValidation(false)
+      setPaidValidationAccepted(false)
+      await client.invalidateQueries({ queryKey: ['cosyvoice-validation', currentVersion?.id] })
+    },
+  })
+  const mutationError = create.error || revise.error || validate.error || publish.error || retire.error || prepareEdit.error || executePaidValidation.error
+  const busy = create.isPending || revise.isPending || validate.isPending || publish.isPending || retire.isPending || prepareEdit.isPending || executePaidValidation.isPending
   const componentCount = useMemo(() => selected.data?.components.length ?? 0, [selected.data])
 
   function beginCreate() { setDraft(emptyDraft()); setSelectedId(null); setEditing(true) }
@@ -299,6 +321,36 @@ export function SettingsPage() {
         {readiness.error && <p>连接状态读取失败：{readiness.error.message}</p>}
       </div>
     </section>
+    {cosyvoiceProvider && <section className={styles.cosyvoicePanel}>
+      <header>
+        <div><Volume2 /><span><strong>CosyVoice 真实验收</strong><small>只读预检不会联网；只有二次确认后才执行一次可能产生费用的真实合成。</small></span></div>
+        <em data-ready={cosyvoiceValidation.data?.preflight.status === 'ready_for_paid_validation'}>
+          {cosyvoiceValidation.data?.preflight.status === 'ready_for_paid_validation' ? '可执行付费验收' : cosyvoiceValidation.data?.preflight.status === 'execution_disabled' ? '执行授权未开启' : '等待 API Key'}
+        </em>
+      </header>
+      {cosyvoiceValidation.data && <div className={styles.cosyvoiceBody}>
+        <div className={styles.cosyvoiceFacts}>
+          <span><small>配置</small><strong>v{cosyvoiceValidation.data.preflight.configuration.version_number}</strong></span>
+          <span><small>模型</small><strong>{cosyvoiceValidation.data.preflight.workflow.model}</strong></span>
+          <span><small>输出合同</small><strong>{cosyvoiceValidation.data.preflight.audio_contract.sample_rate}Hz · {cosyvoiceValidation.data.preflight.audio_contract.channels}ch · {cosyvoiceValidation.data.preflight.audio_contract.format.toUpperCase()}</strong></span>
+          <span><small>验收记录</small><strong>{cosyvoiceValidation.data.validation_runs.length}</strong></span>
+        </div>
+        <div className={styles.cosyvoiceAction}>
+          <div><strong>{cosyvoiceValidation.data.preflight.status === 'ready_for_paid_validation' ? '合同与凭据已就绪' : '当前只完成只读预检'}</strong><span>{cosyvoiceValidation.data.preflight.status === 'credential_not_ready' ? '请先编辑并发布包含 DashScope API Key 的新配置版本。' : cosyvoiceValidation.data.preflight.status === 'execution_disabled' ? '请先明确开启外部 Provider 执行授权。' : '执行后将不可变保存请求 ID、非敏感用量和 WAV 探测证据。'}</span></div>
+          <button type="button" className="primaryButton" disabled={cosyvoiceValidation.data.preflight.status !== 'ready_for_paid_validation' || busy} onClick={() => setConfirmPaidValidation(true)}><Volume2 size={14} />执行真实付费验收</button>
+        </div>
+        {cosyvoiceValidation.data.validation_runs.length > 0 && <div className={styles.validationRuns}>
+          {cosyvoiceValidation.data.validation_runs.slice(0, 5).map(run => <article key={run.id} data-status={run.status}>
+            <span>{run.status === 'passed' ? <BadgeCheck /> : <AlertTriangle />}</span>
+            <div><strong>{run.status === 'passed' ? '真实验收通过' : '真实验收被阻断'}</strong><small>{new Date(run.created_at).toLocaleString()} · request_id={run.request_id ?? '未返回'}</small></div>
+            <code>{run.output.content_hash ? String(run.output.content_hash) : run.error_code ?? run.validation_text_sha256}</code>
+          </article>)}
+        </div>}
+        <details><summary>只读预检证据</summary><code>{cosyvoiceValidation.data.preflight.configuration.config_hash} · text_sha256={cosyvoiceValidation.data.preflight.validation_text.sha256} · network_probe=false</code></details>
+      </div>}
+      {cosyvoiceValidation.isPending && <p>正在执行只读合同预检…</p>}
+      {cosyvoiceValidation.error && <p>CosyVoice 预检失败：{cosyvoiceValidation.error.message}</p>}
+    </section>}
     <div className={styles.page}>
       <aside className={styles.versionList}>
         <header><div><span>PRODUCTION CONFIG</span><h2>当前配置</h2></div>{currentVersion && <b>v{currentVersion.version_number}</b>}</header>
@@ -394,5 +446,17 @@ export function SettingsPage() {
     </div>
     {confirmPublish && selected.data && <div className={styles.modalBackdrop}><section className={styles.confirmDialog}><header><BadgeCheck size={20} /><div><span>HIGH RISK CONFIRMATION</span><h2>发布系统配置 v{selected.data.version_number}</h2></div></header><p>本版本包含供应商、工作流 ID、NodeInfoList 和媒体规格。发布后不可修改，但不会创建快照、启动 Worker 或产生费用。</p><ul><li>{selected.data.components.length} 个精确组件版本将同时发布</li><li>配置哈希：{selected.data.config_hash?.slice(0, 16)}…</li><li>现有项目和快照不会自动采用该版本</li></ul><div><button className="secondaryButton" onClick={() => setConfirmPublish(false)}>取消</button><button className="primaryButton" disabled={publish.isPending} onClick={() => publish.mutate()}><BadgeCheck size={14} />确认发布</button></div></section></div>}
     {confirmRetire && selected.data && <div className={styles.modalBackdrop}><section className={styles.confirmDialog}><header><AlertTriangle size={20} /><div><span>REFERENCE IMPACT</span><h2>停用配置 v{selected.data.version_number}</h2></div></header><p>停用只阻止新快照选择，历史引用和审计链保持有效。目前共有 {selected.data.references.length} 个引用。</p><div><button className="secondaryButton" onClick={() => setConfirmRetire(false)}>取消</button><button className="primaryButton" disabled={retire.isPending} onClick={() => retire.mutate()}>确认停用</button></div></section></div>}
+    {confirmPaidValidation && cosyvoiceValidation.data && <div className={styles.modalBackdrop}><section className={styles.confirmDialog}>
+      <header><Volume2 size={20} /><div><span>PAID PROVIDER VALIDATION</span><h2>执行一次真实 CosyVoice 合成</h2></div></header>
+      <p>本操作会使用当前发布配置向 DashScope 发起一次真实请求，可能产生费用。不会自动重试，也不会切换音色、模型或供应商。</p>
+      <ul>
+        <li>模型：{cosyvoiceValidation.data.preflight.workflow.model}</li>
+        <li>验收文本：{COSYVOICE_VALIDATION_TEXT}</li>
+        <li>文本哈希：{cosyvoiceValidation.data.preflight.validation_text.sha256}</li>
+        <li>成功后保存请求 ID、非敏感用量与 WAV 探测证据</li>
+      </ul>
+      <label className={styles.paidConfirmation}><input type="checkbox" checked={paidValidationAccepted} onChange={event => setPaidValidationAccepted(event.target.checked)} /><span>我确认执行一次可能产生费用的真实 CosyVoice 调用</span></label>
+      <div><button className="secondaryButton" onClick={() => { setConfirmPaidValidation(false); setPaidValidationAccepted(false) }}>取消</button><button className="primaryButton" disabled={!paidValidationAccepted || executePaidValidation.isPending} onClick={() => executePaidValidation.mutate()}><Volume2 size={14} />确认并执行一次</button></div>
+    </section></div>}
   </>
 }

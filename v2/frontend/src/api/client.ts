@@ -1,4 +1,4 @@
-import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, VoiceCloneAuthorization, WorkItem } from './types'
+import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, VoiceCloneAuthorization, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -380,6 +380,24 @@ export const api = {
   }),
   systemConfigurations: () => request<SystemConfigurationSummary[]>('/system-config/versions'),
   providerReadiness: () => request<ProviderReadiness>('/system-config/provider-readiness'),
+  cosyvoiceValidation: (configurationId: string) => request<CosyVoiceValidationWorkspace>(`/system-config/cosyvoice-validation?configuration_id=${encodeURIComponent(configurationId)}`),
+  executeCosyVoiceValidation: (input: {
+    configurationId: string
+    expectedConfigHash: string
+    validationText: string
+    expectedValidationTextSha256: string
+  }) => request<CosyVoiceValidationRun>('/system-config/cosyvoice-validation:execute', {
+    method: 'POST',
+    body: JSON.stringify({
+      command_id: crypto.randomUUID(),
+      actor_id: 'local-user',
+      configuration_id: input.configurationId,
+      expected_config_hash: input.expectedConfigHash,
+      validation_text: input.validationText,
+      expected_validation_text_sha256: input.expectedValidationTextSha256,
+      confirm_paid_call: true,
+    }),
+  }),
   systemConfiguration: (id: string) => request<SystemConfigurationVersion>(`/system-config/versions/${id}`),
   createSystemConfiguration: (configuration: SystemConfigurationDraft) => request<SystemConfigurationVersion>('/system-config/versions', {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', configuration }),
