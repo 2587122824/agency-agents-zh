@@ -25,6 +25,7 @@ from ..db.models import (
 )
 from ..repositories import ConfigurationRepository, SqlAlchemyConfigurationRepository
 from ..providers.runninghub_contract import runninghub_workflow_contract_issues
+from ..providers.cosyvoice import cosyvoice_workflow_contract_issues
 from .contracts import (
     CloneConfiguration,
     ConfigurationDraftBody,
@@ -548,6 +549,8 @@ def _validate(repository: ConfigurationRepository, config: ProductionConfigVersi
         seen: set[tuple[str, str]] = set()
         if provider and provider.adapter_kind == "runninghub":
             slot_errors.extend(runninghub_workflow_contract_issues(workflow.operation_kind, bindings))
+        elif provider and provider.adapter_kind == "cosyvoice":
+            slot_errors.extend(cosyvoice_workflow_contract_issues(bindings))
         else:
             for index, binding in enumerate(bindings):
                 required = ("node_id", "field_path", "value_source", "value_type", "required")

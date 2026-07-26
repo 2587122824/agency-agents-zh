@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from ..repositories import SqlAlchemyConfigurationRepository
 from .registry import ProviderAdapterRegistry, default_provider_registry
+from .cosyvoice import cosyvoice_workflow_contract_issues
 from .runninghub_contract import runninghub_workflow_contract_issues
 
 
@@ -37,6 +38,10 @@ def provider_readiness(
                             workflow.node_info_list,
                         )
                     )
+            if provider.adapter_kind == "cosyvoice":
+                for workflow in components["workflow_slot"]:
+                    if workflow.provider_config_version_id == provider.id:
+                        configuration_issues.extend(cosyvoice_workflow_contract_issues(workflow.node_info_list or []))
             configuration_ready = not configuration_issues
             if adapter is None:
                 status = "adapter_not_connected"

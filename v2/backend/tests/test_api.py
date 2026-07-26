@@ -5970,6 +5970,72 @@ def test_editor_assistant_creates_auditable_timeline_candidate_for_manual_confir
     assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "editing"
 
 
+def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
+    client: TestClient,
+) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    seed_editor_assets(client, project, snapshot)
+    with SessionLocal() as session:
+        persisted_project = session.get(Project, project["id"])
+        persisted_project.audio_mode = "voiceover"
+        audio = Asset(
+            project_id=project["id"],
+            snapshot_id=snapshot["id"],
+            work_attempt_id=None,
+            dag_node_id=None,
+            output_index=0,
+            asset_type="audio",
+            role="voiceover",
+            uri=f"runtime://assets/editor/{project['id']}-voiceover.wav",
+            storage_backend="local",
+            provider_output_manifest={"seeded_for_voiceover_editor_test": True},
+            content_hash=hashlib.sha256(project["id"].encode()).hexdigest(),
+            mime_type="audio/wav",
+            byte_size=100,
+            duration_ms=29_000,
+            state="approved",
+        )
+        session.add(audio)
+        session.flush()
+        session.add(QCReport(
+            project_id=project["id"],
+            snapshot_id=snapshot["id"],
+            asset_id=audio.id,
+            report_number=1,
+            ruleset_version="human-review.v1",
+            status="passed",
+            analyzer="human",
+        ))
+        session.commit()
+        audio_id = audio.id
+    stage = client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "editor-audio-stage-approve", "expected_snapshot_id": snapshot["id"]},
+    )
+    assert stage.status_code == 200
+
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/editor-assistant:generate",
+        json={"command_id": "editor-audio-generate-01", "expected_snapshot_id": snapshot["id"]},
+    )
+
+    assert response.status_code == 201
+    timeline = response.json()
+    audio_items = [item for item in timeline["items"] if item["track_type"] == "audio"]
+    assert timeline["track_config"]["audio_enabled"] is True
+    assert len(audio_items) == 1
+    assert audio_items[0]["asset_id"] == audio_id
+    assert audio_items[0]["timeline_in_ms"] == 0
+    assert audio_items[0]["timeline_out_ms"] == 29_000
+    assert audio_items[0]["transform"]["source"] == "frozen_approved_voiceover"
+    validated = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:validate",
+        json={"command_id": "editor-audio-validate-01", "expected_row_version": timeline["row_version"]},
+    )
+    assert validated.status_code == 200
+    assert validated.json()["validation_report"] == []
+
+
 def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client)
     video_assets = seed_editor_assets(client, project, snapshot)

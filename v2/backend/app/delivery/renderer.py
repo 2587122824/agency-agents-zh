@@ -36,6 +36,14 @@ class LocalRenderInput:
 
 
 @dataclass(frozen=True)
+class LocalRenderAudioInput:
+    path: Path
+    source_in_ms: int
+    source_out_ms: int
+    timeline_in_ms: int
+
+
+@dataclass(frozen=True)
 class LocalRenderRequest:
     ffmpeg_path: Path
     inputs: tuple[LocalRenderInput, ...]
@@ -46,6 +54,7 @@ class LocalRenderRequest:
     video_encoder: str
     preset: str
     crf: int
+    audio_inputs: tuple[LocalRenderAudioInput, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -148,6 +157,8 @@ class LocalFFmpegRenderer:
         command = [str(request.ffmpeg_path), "-hide_banner", "-nostdin", "-n"]
         for item in request.inputs:
             command.extend(["-i", str(item.path)])
+        for item in request.audio_inputs:
+            command.extend(["-i", str(item.path)])
         filters: list[str] = []
         labels: list[str] = []
         for index, item in enumerate(request.inputs):
@@ -166,12 +177,33 @@ class LocalFFmpegRenderer:
                 f"format=yuv420p[{label}]"
             )
         filters.append(f"{''.join(labels)}concat=n={len(labels)}:v=1:a=0[outv]")
+        if request.audio_inputs:
+            audio_labels: list[str] = []
+            for audio_index, item in enumerate(request.audio_inputs):
+                input_index = len(request.inputs) + audio_index
+                label = f"a{audio_index}"
+                audio_labels.append(f"[{label}]")
+                filters.append(
+                    f"[{input_index}:a:0]"
+                    f"atrim=start={item.source_in_ms / 1000:.3f}:end={item.source_out_ms / 1000:.3f},"
+                    "asetpts=PTS-STARTPTS,"
+                    f"adelay={item.timeline_in_ms}:all=1[{label}]"
+                )
+            filters.append(
+                f"{''.join(audio_labels)}amix=inputs={len(audio_labels)}:"
+                "duration=longest:dropout_transition=0,aresample=async=1:first_pts=0[outa]"
+            )
         command.extend([
             "-filter_complex",
             ";".join(filters),
             "-map",
             "[outv]",
-            "-an",
+        ])
+        if request.audio_inputs:
+            command.extend(["-map", "[outa]", "-c:a", "aac", "-b:a", "192k"])
+        else:
+            command.append("-an")
+        command.extend([
             "-c:v",
             request.video_encoder,
             "-preset",

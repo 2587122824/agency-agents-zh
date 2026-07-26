@@ -9,7 +9,9 @@ import pytest
 from v2.backend.app.providers import ProviderAdapterError, ProviderExecutionRequest
 from v2.backend.app.providers.registry import default_provider_registry
 from v2.backend.app.providers.runninghub import HttpxRunningHubTransport, RunningHubAdapter
+from v2.backend.app.providers.cosyvoice import CosyVoiceAdapter
 import v2.backend.app.providers.runninghub as runninghub_module
+import v2.backend.app.providers.cosyvoice as cosyvoice_module
 
 
 def test_provider_registry_resolves_only_exact_registered_work_kind() -> None:
@@ -54,6 +56,82 @@ class FakeRunningHubTransport:
     def download(self, url: str, timeout: int, max_bytes: int) -> tuple[bytes, str | None]:
         self.calls.append(("download", url, timeout, max_bytes))
         return self.download_response
+
+
+class FakeCosyVoiceTransport:
+    def __init__(self, content: bytes) -> None:
+        self.content = content
+        self.calls: list[tuple] = []
+
+    def synthesize(self, url, api_key, payload, timeout, max_bytes):
+        self.calls.append((url, api_key, payload, timeout, max_bytes))
+        return {"request_id": "cosy-request-1", "usage": {"characters": 4}}, self.content
+
+
+def cosyvoice_manifest() -> dict:
+    return {
+        "adapter_kind": "cosyvoice",
+        "input_contract": {"voiceover_text": "你好，世界。"},
+        "output_contract": {"media_type": "audio"},
+        "provider": {
+            "provider_key": "dashscope-cosyvoice",
+            "adapter_kind": "cosyvoice",
+            "base_url": "https://dashscope.aliyuncs.com",
+            "api_key": "test-secret",
+            "request_timeout_seconds": 60,
+        },
+        "workflow": {
+            "provider_workflow_id": "cosyvoice-v1",
+            "node_info_list": [
+                {"node_id": "input", "field_path": "text", "value_source": "input_contract.voiceover_text", "value_type": "string", "required": True},
+                {"node_id": "input", "field_path": "voice", "value_source": "literal:longxiaochun", "value_type": "string", "required": True},
+                {"node_id": "input", "field_path": "format", "value_source": "literal:wav", "value_type": "string", "required": True},
+                {"node_id": "input", "field_path": "sample_rate", "value_source": "literal:24000", "value_type": "integer", "required": True},
+            ],
+        },
+        "storage_policy": {
+            "backend_kind": "local",
+            "local_root_ref": "v2.runtime.assets",
+            "allowed_mime_types": ["audio/wav"],
+            "max_file_size_bytes": 1024 * 1024,
+        },
+    }
+
+
+def test_cosyvoice_synthesizes_exact_frozen_text_and_registers_wav(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(cosyvoice_module, "RUNTIME_ROOT", tmp_path)
+    content = b"RIFF" + (40).to_bytes(4, "little") + b"WAVE" + b"\x00" * 36
+    transport = FakeCosyVoiceTransport(content)
+    adapter = CosyVoiceAdapter(execution_enabled=True, transport=transport)
+
+    result = adapter.execute(ProviderExecutionRequest(
+        "generate_tts", "a" * 64, cosyvoice_manifest(),
+    ))
+
+    assert transport.calls[0][2] == {
+        "model": "cosyvoice-v1",
+        "input": {
+            "text": "你好，世界。",
+            "voice": "longxiaochun",
+            "format": "wav",
+            "sample_rate": 24000,
+        },
+    }
+    assert transport.calls[0][1] == "test-secret"
+    assert "test-secret" not in repr(result)
+    assert result["outputs"][0]["asset_type"] == "audio"
+    assert (tmp_path / "assets" / "providers" / "cosyvoice" / ("a" * 64) / "voiceover.wav").read_bytes() == content
+
+
+def test_cosyvoice_rejects_non_wav_output_without_persisting(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(cosyvoice_module, "RUNTIME_ROOT", tmp_path)
+    adapter = CosyVoiceAdapter(execution_enabled=True, transport=FakeCosyVoiceTransport(b"not-wav"))
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.execute(ProviderExecutionRequest("generate_tts", "b" * 64, cosyvoice_manifest()))
+
+    assert caught.value.code == "COSYVOICE_OUTPUT_SIGNATURE_INVALID"
+    assert not list(tmp_path.rglob("voiceover.wav"))
 
 
 def runninghub_manifest(bindings: list[dict], media_type: str = "image") -> dict:

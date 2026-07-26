@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from v2.backend.app.workers import worker
 from v2.backend.app.delivery.renderer import (
     LocalFFmpegRenderer,
+    LocalRenderAudioInput,
     LocalRenderInput,
     LocalRenderRequest,
 )
@@ -105,3 +106,37 @@ def test_local_ffmpeg_renderer_normalizes_sample_aspect_ratio_and_segment_durati
     assert filter_graph.count("trim=duration=1.000") == 2
     assert "concat=n=2:v=1:a=0[outv]" in filter_graph
     assert "-n" in captured["command"]
+
+
+def test_local_ffmpeg_renderer_mixes_timeline_audio(monkeypatch, tmp_path) -> None:
+    captured = {}
+
+    def fake_run(command, **_kwargs):
+        captured["command"] = command
+        (tmp_path / "mixed.mp4").write_bytes(b"rendered")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr("v2.backend.app.delivery.renderer.subprocess.run", fake_run)
+    request = LocalRenderRequest(
+        ffmpeg_path=tmp_path / "ffmpeg.exe",
+        inputs=(LocalRenderInput(tmp_path / "video.mp4", 0, 2000),),
+        audio_inputs=(LocalRenderAudioInput(tmp_path / "voice.wav", 100, 1600, 250),),
+        output_path=tmp_path / "mixed.mp4",
+        width=480,
+        height=848,
+        fps=24,
+        video_encoder="libx264",
+        preset="medium",
+        crf=18,
+    )
+
+    LocalFFmpegRenderer().render(request)
+
+    command = captured["command"]
+    filter_graph = command[command.index("-filter_complex") + 1]
+    assert "atrim=start=0.100:end=1.600" in filter_graph
+    assert "adelay=250:all=1[a0]" in filter_graph
+    assert "amix=inputs=1:duration=longest" in filter_graph
+    assert command[command.index("-map") + 1] == "[outv]"
+    assert "[outa]" in command
+    assert "-c:a" in command

@@ -41,6 +41,7 @@ from ..quality.service import (
 from .contracts import AuthorizeDelivery, RegisterDeliveryOutput, VerifyDelivery
 from .renderer import (
     RENDERER_CONTRACT,
+    LocalRenderAudioInput,
     LocalRenderError,
     LocalRenderInput,
     LocalRenderRequest,
@@ -219,18 +220,22 @@ def _execution_contract(execution_kind: str) -> dict:
 
 def _validate_local_render_manifest(manifest: dict) -> None:
     track_config = manifest.get("track_config") or {}
-    if track_config.get("audio_enabled") or track_config.get("subtitle_enabled"):
+    if track_config.get("subtitle_enabled"):
         raise DeliveryConflictError(
             "LOCAL_RENDER_TRACKS_UNSUPPORTED",
-            "本机合成首期只支持关闭音频和字幕的主视频轨。",
+            "本机合成当前尚未支持字幕轨。",
         )
     items = manifest.get("input_items") or []
     if not items:
         raise DeliveryConflictError("LOCAL_RENDER_INPUT_EMPTY", "本机合成没有可用的视频片段。")
+    video_items = [item for item in items if item.get("track_type") == "main_video"]
+    audio_items = [item for item in items if item.get("track_type") == "audio"]
+    if any(item.get("track_type") not in {"main_video", "audio"} for item in items):
+        raise DeliveryConflictError("LOCAL_RENDER_TRACKS_UNSUPPORTED", "本机合成包含不支持的轨道。")
+    if bool(audio_items) != bool(track_config.get("audio_enabled")):
+        raise DeliveryConflictError("LOCAL_RENDER_AUDIO_CONTRACT_INVALID", "音频轨开关与冻结音频条目不一致。")
     cursor = 0
-    for item in sorted(items, key=lambda row: (row["timeline_in_ms"], row["sequence_number"])):
-        if item.get("track_type") != "main_video":
-            raise DeliveryConflictError("LOCAL_RENDER_TRACKS_UNSUPPORTED", "本机合成首期只支持主视频轨。")
+    for item in sorted(video_items, key=lambda row: (row["timeline_in_ms"], row["sequence_number"])):
         if not item.get("asset_id") or item.get("gap_reason"):
             raise DeliveryConflictError("LOCAL_RENDER_GAP_UNSUPPORTED", "本机合成不接受时间线空位。")
         if item.get("timeline_in_ms") != cursor:
@@ -242,6 +247,13 @@ def _validate_local_render_manifest(manifest: dict) -> None:
         if (item.get("transform") or {}).get("fit") != "cover":
             raise DeliveryConflictError("LOCAL_RENDER_TRANSFORM_UNSUPPORTED", "本机合成首期只支持 cover 画面适配。")
         cursor = item["timeline_out_ms"]
+    for item in sorted(audio_items, key=lambda row: (row["timeline_in_ms"], row["sequence_number"])):
+        if not item.get("asset_id") or item.get("gap_reason"):
+            raise DeliveryConflictError("LOCAL_RENDER_AUDIO_GAP_UNSUPPORTED", "本机合成不接受音频轨空位。")
+        source_duration = (item.get("source_out_ms") or 0) - (item.get("source_in_ms") or 0)
+        timeline_duration = item["timeline_out_ms"] - item["timeline_in_ms"]
+        if source_duration != timeline_duration:
+            raise DeliveryConflictError("LOCAL_RENDER_SPEED_CHANGE_UNSUPPORTED", "本机合成不支持音频变速。")
     expected = manifest.get("output_spec") or {}
     if cursor != expected.get("duration_ms"):
         raise DeliveryConflictError("LOCAL_RENDER_DURATION_MISMATCH", "时间线总时长与交付规格不一致。")
@@ -718,6 +730,7 @@ def prepare_local_render(
             },
         )
     render_inputs: list[LocalRenderInput] = []
+    audio_inputs: list[LocalRenderAudioInput] = []
     repository = _delivery(session)
     for item in sorted(
         current_manifest["input_items"],
@@ -751,11 +764,19 @@ def prepare_local_render(
                     "actual_hash": content_hash,
                 },
             )
-        render_inputs.append(LocalRenderInput(
-            path=path,
-            source_in_ms=item["source_in_ms"],
-            source_out_ms=item["source_out_ms"],
-        ))
+        if item["track_type"] == "main_video":
+            render_inputs.append(LocalRenderInput(
+                path=path,
+                source_in_ms=item["source_in_ms"],
+                source_out_ms=item["source_out_ms"],
+            ))
+        elif item["track_type"] == "audio":
+            audio_inputs.append(LocalRenderAudioInput(
+                path=path,
+                source_in_ms=item["source_in_ms"],
+                source_out_ms=item["source_out_ms"],
+                timeline_in_ms=item["timeline_in_ms"],
+            ))
     uri = f"runtime://assets/deliveries/{project.id}/{attempt.id}.mp4"
     try:
         output_path = resolve_local_asset_path(uri)
@@ -788,6 +809,7 @@ def prepare_local_render(
         video_encoder=str(execution["video_encoder"]),
         preset=str(execution["preset"]),
         crf=int(execution["crf"]),
+        audio_inputs=tuple(audio_inputs),
     )
 
 

@@ -2,7 +2,7 @@
 
 > 状态：设计基线
 > 版本：0.4
-> 更新日期：2026-07-20
+> 更新日期：2026-07-26
 > 产品原型：<http://127.0.0.1:8765/prototype-v2/>
 > V2 应用骨架：<http://127.0.0.1:8766/>
 > 系统架构：[V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)
@@ -744,7 +744,7 @@ GET  /api/v1/projects/{project_id}/events
 
 - [x] RunningHub 图片适配器（已注册，真实执行默认关闭，尚未联网验收）
 - [x] RunningHub 首帧视频适配器（已注册，严格单父图片，真实执行默认关闭，尚未联网验收）
-- [ ] CosyVoice 适配器
+- [x] CosyVoice 预设音色 WAV 适配器、确定性音频素材登记与剪辑混音；真实调用仍等待配置 API Key
 - [ ] OSS 临时音频上传
 - [x] FFmpeg 本地合成适配器
 - [x] Worker 幂等与执行租约
@@ -1164,7 +1164,7 @@ GET  /api/v1/projects/{project_id}/production-execution
 
 最终交付只消费当前活动快照中精确一个 `confirmed` 时间线。用户必须显式选择 `external_upload` 或 `local_ffmpeg`，系统不会默认选择或在失败时切换方式。两种方式都先冻结 `v2.delivery-request.v2` 请求清单和 SHA-256 指纹；本机方式还冻结 FFmpeg 路径、版本、`libx264`、preset 与 CRF。
 
-`local_ffmpeg` 首期只接受连续、无空位、无变速、`cover` 适配的主视频轨，且音频和字幕轨必须关闭。授权前必须证明配置的 `V2_FFMPEG_PATH` 存在、版本可读取且包含 `libx264`；不满足时不创建 DeliveryAttempt 或 WorkItem。授权后创建独立 `render_delivery` WorkItem/WorkAttempt，它不属于生产 DAG，也不参与 ProductionSnapshot 的生产状态汇总。
+`local_ffmpeg` 接受连续、无空位、无变速、`cover` 适配的主视频轨，并可消费经过相同哈希复验的 WAV 音频时间线；音频按源区间裁剪、时间线入点延迟和同轨非重叠规则混合为 AAC。字幕轨仍必须关闭。授权前必须证明配置的 `V2_FFMPEG_PATH` 存在、版本可读取且包含 `libx264`；不满足时不创建 DeliveryAttempt 或 WorkItem。授权后创建独立 `render_delivery` WorkItem/WorkAttempt，它不属于生产 DAG，也不参与 ProductionSnapshot 的生产状态汇总。
 
 Worker 执行前重新核对当前活动快照、确认时间线、素材 URI、数据库内容哈希和本地文件实际哈希。执行环境或输入事实变化时直接阻断，不启动 FFmpeg。渲染只执行一次，使用冻结的裁切、缩放、FPS 和编码参数，输出路径禁止覆盖。失败保存 DeliveryAttempt、WorkAttempt、项目阻断和 FFmpeg 尾部输出证据；不修改时间线、不自动重试，也不切换为 `external_upload`。
 
@@ -1288,7 +1288,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 当前配置 v49 提供 6 个可执行镜头工作流槽位：纯文本关键帧 `2069402773254397953`、人物一致性关键帧 `2073414172825706497`、风格参考关键帧 `2066342754241835010`、首帧生视频 `2069607607387639810`、首中尾帧生视频 `2072296894507872257`、纯文本 B-roll 视频 `2071227330307125249`。`2072296894507872257` 的权威语义是生视频，不是生图；NodeInfoList 分别将节点 `447 / 448 / 449` 绑定到首、中、尾三张父图，并关闭工作流内部提示词改写分支。系统不复用同一张图片填充三个槽位，不自动替换工作流。
 
-当前发布配置 v53 修正人物一致性关键帧 `2073414172825706497` 的冻结运行参数：节点 `24.denoise` 使用 V1 多次真实成功请求已经证明的 `1.0`，不再采用从旧节点说明文字误读出的 `0.32`。工作流 ID、其他 NodeInfoList、提示词、随机种子、规格和路由均未改变。工作流迁移必须以历史真实请求体和成功任务为证据，节点描述、建议区间或界面提示不得替代实际运行值。
+配置 v53 修正人物一致性关键帧 `2073414172825706497` 的冻结运行参数：节点 `24.denoise` 使用 V1 多次真实成功请求已经证明的 `1.0`，不再采用从旧节点说明文字误读出的 `0.32`。配置 v54 在此基础上新增唯一 CosyVoice TTS 槽位，冻结 `cosyvoice-v1 / longxiaochun / WAV / 24000Hz`，并把音频策略扩展为 `off / voiceover`；旁白文本直接来自已确认方案的有序 `voiceover/dialogue` 脚本段。当前配置未填写 DashScope API Key，因此只发布可检查合同，不宣称真实供应商调用已经可用。工作流迁移必须以真实请求和成功任务为证据，节点描述、建议区间或界面提示不得替代实际运行值。
 
 V1 中缺少工作流 ID 或 NodeInfoList 的多人物、首尾帧、真人转动漫、动作迁移、口型、增强和修复槽位不迁入；`empty_transition_video` 的映射含提示词改写与固定业务文本，也不迁入。人物+场景双参考需要独立多参考图片合同，基础资产图和转面图属于实体生产阶段，均不得伪装成当前镜头生产能力。
 

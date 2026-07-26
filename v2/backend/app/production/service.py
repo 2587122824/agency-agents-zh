@@ -345,12 +345,28 @@ def _compile_manifest(
                 edges.append({"parent_node_key": current_image_key, "child_node_key": video_key, "dependency_type": "required", "input_slot": input_slot})
     timeline_inputs = [f"{shot.shot_code}.video" for shot in shots]
     if audio_mode == "voiceover":
+        spoken_segments = [
+            {
+                "segment_code": str(segment.get("segment_code") or ""),
+                "kind": str(segment.get("kind") or ""),
+                "spoken_text": str(segment.get("spoken_text") or "").strip(),
+            }
+            for segment in (plan.creative_brief.get("script_segments") or [])
+            if isinstance(segment, dict)
+            and segment.get("kind") in {"voiceover", "dialogue"}
+            and str(segment.get("spoken_text") or "").strip()
+        ]
         nodes.append({
             "node_key": "project.voiceover",
             "kind": "generate_tts",
             "shot_id": None,
             "workflow_slot_version_id": selection["tts_workflow_slot_version_id"],
-            "input_contract": {"source": "confirmed_plan_voiceover"},
+            "input_contract": {
+                "source": "confirmed_plan_voiceover",
+                "plan_version_id": plan.id,
+                "segments": spoken_segments,
+                "voiceover_text": "\n".join(segment["spoken_text"] for segment in spoken_segments),
+            },
             "output_contract": {"media_type": "audio"},
         })
         timeline_inputs.append("project.voiceover")
@@ -553,8 +569,35 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         errors.append({"code": "AUDIO_OFF_HAS_TTS", "path": "tts_workflow_slot_version_id", "message": "项目关闭音频时不得选择 TTS 槽位。"})
     if audio_mode == "voiceover" and not tts_slot:
         errors.append({"code": "VOICEOVER_TTS_REQUIRED", "path": "tts_workflow_slot_version_id", "message": "旁白模式必须显式选择 TTS 槽位。"})
+    spoken_segments = [
+        segment
+        for segment in (plan.creative_brief.get("script_segments") or [])
+        if isinstance(segment, dict)
+        and segment.get("kind") in {"voiceover", "dialogue"}
+        and str(segment.get("spoken_text") or "").strip()
+    ]
+    if audio_mode == "voiceover" and not spoken_segments:
+        errors.append({
+            "code": "VOICEOVER_TEXT_REQUIRED",
+            "path": "plan_version_id",
+            "message": "旁白模式的已确认方案必须至少包含一段可朗读文本。",
+        })
     if tts_slot and tts_slot.operation_kind != "tts":
         errors.append({"code": "TTS_SLOT_KIND_INVALID", "path": "tts_workflow_slot_version_id", "message": "TTS 槽位的 operation_kind 必须是 tts。"})
+    if tts_slot:
+        tts_provider = repository.provider(tts_slot.provider_config_version_id)
+        if not tts_provider or tts_provider.adapter_kind != "cosyvoice":
+            errors.append({
+                "code": "TTS_PROVIDER_ROUTE_INVALID",
+                "path": "tts_workflow_slot_version_id",
+                "message": "当前 TTS 槽位没有连接 CosyVoice Provider。",
+            })
+        elif not str(tts_provider.api_key or "").strip():
+            errors.append({
+                "code": "TTS_PROVIDER_CREDENTIAL_MISSING",
+                "path": "tts_workflow_slot_version_id",
+                "message": "当前 CosyVoice Provider 尚未配置 API Key，不能创建付费制作方案。",
+            })
 
     shots = repository.plan_shots(plan.id)
     if not shots:
@@ -1364,6 +1407,7 @@ def retry_production_work(
     if failed.error_code in {
         "RUNNINGHUB_SUBMISSION_OUTCOME_UNKNOWN",
         "PROVIDER_SUBMISSION_RECONCILIATION_REQUIRED",
+        "COSYVOICE_SUBMISSION_OUTCOME_UNKNOWN",
     }:
         raise ProductionConflictError(
             "PRODUCTION_RETRY_RECONCILIATION_REQUIRED",

@@ -42,9 +42,14 @@ v2\start_v2.bat -NoBrowser
 In the current local single-user phase, every API provider stores its API Key
 as a normal field in the versioned system configuration. Open the settings
 page, edit the current configuration, fill the provider's API address and API
-Key, then validate and publish the new version. RunningHub and all text-agent
+Key, then validate and publish the new version. RunningHub, CosyVoice and all text-agent
 gateways read the exact published provider version; there is no environment
 variable fallback.
+
+Configuration v54 includes one explicit CosyVoice preset route
+(`cosyvoice-v1 / longxiaochun / 24000Hz WAV`). It remains unavailable until
+the DashScope API Key is filled and a new configuration version is validated
+and published. Voice cloning is not part of this route.
 
 The readiness panel checks whether the API Key field is filled without making
 a network request. This does not prove that the key is valid or that the
@@ -66,7 +71,7 @@ this configuration API on a multi-user or public deployment.
 - `quality/`: verified provider outputs, deterministic QC evidence, and explicit human review.
 - `editor/`: immutable timeline candidates, deterministic reference validation, and explicit confirmation.
 - `providers/`: strict provider contracts and independent adapters; RunningHub
-  image and first-frame-video execution is registered but disabled by default.
+  visual execution and CosyVoice WAV synthesis are registered but disabled by default.
 
 No automatic retry, route substitution, prompt rewriting, output repair, or
 provider downgrade belongs in this foundation.

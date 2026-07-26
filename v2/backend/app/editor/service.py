@@ -335,8 +335,14 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
         raise EditorConflictError("EDITOR_ACTIVE_PLAN_MISMATCH", "当前活动方案与制作快照不一致。")
     assets = repository.available_assets(project.id, snapshot.id)
     video_assets = [asset for asset in assets if asset.asset_type == "video"]
+    audio_assets = [asset for asset in assets if asset.asset_type == "audio"]
     if not video_assets:
         raise EditorConflictError("EDITOR_APPROVED_VIDEO_REQUIRED", "剪辑助理至少需要一段已批准视频。")
+    if project.audio_mode == "voiceover" and len(audio_assets) != 1:
+        raise EditorConflictError(
+            "EDITOR_APPROVED_VOICEOVER_NOT_EXACT",
+            "旁白项目进入剪辑前必须精确具有一份已批准配音素材。",
+        )
     nodes = {
         node.id: node for node in repository.dag_nodes_by_ids(
             [asset.dag_node_id for asset in video_assets if asset.dag_node_id]
@@ -344,7 +350,7 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
     }
     shots = {shot.id: shot for shot in repository.shots(plan.id)}
     reports_by_asset: dict[str, list[str]] = {}
-    for report in repository.qc_reports([asset.id for asset in video_assets]):
+    for report in repository.qc_reports([asset.id for asset in [*video_assets, *audio_assets]]):
         reports_by_asset.setdefault(report.asset_id, []).append(report.id)
     approved_assets = []
     for asset in video_assets:
@@ -369,6 +375,19 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
             "qc_report_ids": qc_ids,
         })
     approved_assets.sort(key=lambda item: (item["shot_sequence_number"], item["id"]))
+    approved_audio_assets = []
+    for asset in audio_assets:
+        qc_ids = reports_by_asset.get(asset.id, [])
+        if not qc_ids:
+            raise EditorConflictError("EDITOR_AUDIO_QC_EVIDENCE_MISSING", f"配音素材 {asset.id} 缺少权威 QC 报告。")
+        approved_audio_assets.append({
+            "id": asset.id,
+            "asset_type": asset.asset_type,
+            "duration_ms": asset.duration_ms,
+            "content_hash": asset.content_hash,
+            "dag_node_id": asset.dag_node_id,
+            "qc_report_ids": qc_ids,
+        })
     return {
         "contract_version": "editor-assistant-input.v1",
         "project_id": project.id,
@@ -379,6 +398,7 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
         "approved_asset_ids": [item["id"] for item in approved_assets],
         "qc_report_ids": sorted({report_id for item in approved_assets for report_id in item["qc_report_ids"]}),
         "approved_assets": approved_assets,
+        "approved_audio_assets": approved_audio_assets,
         "delivery_contract": {
             "duration_ms": project.duration_seconds * 1000,
             "aspect_ratio": project.aspect_ratio,
@@ -505,13 +525,36 @@ def _execute_editor(
                     },
                 },
             })
+        approved_audio = manifest.payload.get("approved_audio_assets") or []
+        if approved_audio:
+            audio = approved_audio[0]
+            audio_duration = min(
+                int(audio["duration_ms"]),
+                int(manifest.payload["delivery_contract"]["duration_ms"]),
+            )
+            items.append({
+                "track_type": "audio",
+                "sequence_number": 1,
+                "asset_id": audio["id"],
+                "label": "已批准旁白",
+                "gap_reason": None,
+                "source_in_ms": 0,
+                "source_out_ms": audio_duration,
+                "timeline_in_ms": 0,
+                "timeline_out_ms": audio_duration,
+                "transform": {
+                    "mix": "voiceover",
+                    "qc_report_ids": audio["qc_report_ids"],
+                    "source": "frozen_approved_voiceover",
+                },
+            })
         payload = CreateTimelineCandidate.model_validate({
             "command_id": f"editor-run-{run.id}",
             "actor_id": "editor-assistant",
             "expected_snapshot_id": manifest.payload["snapshot_id"],
             "source": "editor_assistant",
             "source_agent_run_id": run.id,
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": bool(approved_audio), "subtitle_enabled": False},
             "items": items,
         })
         timeline = _create_candidate(session, project, payload, None, "timeline.candidate.create")

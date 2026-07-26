@@ -5,6 +5,7 @@ import os
 
 from .base import ProviderAdapter
 from .builtin import LocalTimelineAdapter, MockProviderAdapter
+from .cosyvoice import CosyVoiceAdapter
 from .runninghub import RunningHubAdapter
 
 
@@ -34,4 +35,9 @@ class ProviderAdapterRegistry:
 
 def default_provider_registry() -> ProviderAdapterRegistry:
     external_enabled = os.getenv("V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED", "").strip().lower() in {"1", "true", "yes"}
-    return ProviderAdapterRegistry((MockProviderAdapter(), LocalTimelineAdapter(), RunningHubAdapter(execution_enabled=external_enabled)))
+    return ProviderAdapterRegistry((
+        MockProviderAdapter(),
+        LocalTimelineAdapter(),
+        RunningHubAdapter(execution_enabled=external_enabled),
+        CosyVoiceAdapter(execution_enabled=external_enabled),
+    ))

@@ -13,6 +13,7 @@ from .base import (
     ProviderSubmission,
 )
 from .registry import ProviderAdapterRegistry, default_provider_registry
+from .cosyvoice import CosyVoiceAdapter, CosyVoiceTransport, HttpxCosyVoiceTransport
 from .runninghub import HttpxRunningHubTransport, RunningHubAdapter, RunningHubTransport
 
 __all__ = [
@@ -23,6 +24,9 @@ __all__ = [
     "ProviderExecutionRequest",
     "ProviderPollResult",
     "ProviderSubmission",
+    "CosyVoiceAdapter",
+    "CosyVoiceTransport",
+    "HttpxCosyVoiceTransport",
     "RunningHubAdapter",
     "RunningHubTransport",
     "HttpxRunningHubTransport",
