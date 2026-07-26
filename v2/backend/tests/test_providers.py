@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import io
 from pathlib import Path
+import wave
 
 import httpx
 import pytest
@@ -70,6 +72,16 @@ class FakeCosyVoiceTransport:
         return {"request_id": "cosy-request-1", "usage": {"characters": 4}}, self.content
 
 
+def wav_bytes(*, sample_rate: int = 24000, channels: int = 1, frame_count: int = 2400) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as target:
+        target.setnchannels(channels)
+        target.setsampwidth(2)
+        target.setframerate(sample_rate)
+        target.writeframes(b"\x00\x00" * frame_count * channels)
+    return buffer.getvalue()
+
+
 def cosyvoice_manifest() -> dict:
     return {
         "adapter_kind": "cosyvoice",
@@ -102,7 +114,7 @@ def cosyvoice_manifest() -> dict:
 
 def test_cosyvoice_synthesizes_exact_frozen_text_and_registers_wav(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cosyvoice_module, "RUNTIME_ROOT", tmp_path)
-    content = b"RIFF" + (40).to_bytes(4, "little") + b"WAVE" + b"\x00" * 36
+    content = wav_bytes()
     transport = FakeCosyVoiceTransport(content)
     adapter = CosyVoiceAdapter(execution_enabled=True, transport=transport)
 
@@ -122,6 +134,9 @@ def test_cosyvoice_synthesizes_exact_frozen_text_and_registers_wav(tmp_path, mon
     assert transport.calls[0][1] == "test-secret"
     assert "test-secret" not in repr(result)
     assert result["outputs"][0]["asset_type"] == "audio"
+    assert result["outputs"][0]["sample_rate"] == 24000
+    assert result["outputs"][0]["channels"] == 1
+    assert result["outputs"][0]["duration_ms"] == 100
     assert (tmp_path / "assets" / "providers" / "cosyvoice" / ("a" * 64) / "voiceover.wav").read_bytes() == content
 
 
@@ -133,6 +148,24 @@ def test_cosyvoice_rejects_non_wav_output_without_persisting(tmp_path, monkeypat
         adapter.execute(ProviderExecutionRequest("generate_tts", "b" * 64, cosyvoice_manifest()))
 
     assert caught.value.code == "COSYVOICE_OUTPUT_SIGNATURE_INVALID"
+    assert not list(tmp_path.rglob("voiceover.wav"))
+
+
+def test_cosyvoice_rejects_wav_with_wrong_sample_rate_before_persisting(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(cosyvoice_module, "RUNTIME_ROOT", tmp_path)
+    adapter = CosyVoiceAdapter(
+        execution_enabled=True,
+        transport=FakeCosyVoiceTransport(wav_bytes(sample_rate=16000)),
+    )
+
+    with pytest.raises(ProviderAdapterError) as caught:
+        adapter.execute(ProviderExecutionRequest("generate_tts", "e" * 64, cosyvoice_manifest()))
+
+    assert caught.value.code == "COSYVOICE_OUTPUT_SAMPLE_RATE_MISMATCH"
+    assert caught.value.response_manifest == {
+        "expected_sample_rate": 24000,
+        "actual_sample_rate": 16000,
+    }
     assert not list(tmp_path.rglob("voiceover.wav"))
 
 

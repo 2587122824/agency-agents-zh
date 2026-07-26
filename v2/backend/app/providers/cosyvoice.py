@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import io
+import wave
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
@@ -237,6 +239,37 @@ class CosyVoiceAdapter:
                 "CosyVoice 返回内容不是有效的 WAV 文件签名。",
                 _safe_response(data),
             )
+        try:
+            with wave.open(io.BytesIO(content), "rb") as source:
+                channels = source.getnchannels()
+                sample_rate = source.getframerate()
+                frame_count = source.getnframes()
+        except (EOFError, wave.Error) as exc:
+            raise ProviderAdapterError(
+                "COSYVOICE_OUTPUT_WAV_INVALID",
+                "CosyVoice 返回内容具有 WAV 签名，但文件结构无法读取。",
+                _safe_response(data),
+            ) from exc
+        expected_sample_rate = payload_input.get("sample_rate")
+        if sample_rate != expected_sample_rate:
+            raise ProviderAdapterError(
+                "COSYVOICE_OUTPUT_SAMPLE_RATE_MISMATCH",
+                "CosyVoice 输出采样率与冻结请求不一致。",
+                {"expected_sample_rate": expected_sample_rate, "actual_sample_rate": sample_rate},
+            )
+        if channels != 1:
+            raise ProviderAdapterError(
+                "COSYVOICE_OUTPUT_CHANNELS_UNSUPPORTED",
+                "CosyVoice 旁白输出必须是单声道 WAV。",
+                {"expected_channels": 1, "actual_channels": channels},
+            )
+        if frame_count <= 0:
+            raise ProviderAdapterError(
+                "COSYVOICE_OUTPUT_EMPTY",
+                "CosyVoice 返回了不包含音频帧的 WAV 文件。",
+                _safe_response(data),
+            )
+        duration_ms = round(frame_count * 1000 / sample_rate)
         relative = Path("assets") / "providers" / "cosyvoice" / request.request_fingerprint / "voiceover.wav"
         output_path = RUNTIME_ROOT / relative
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,5 +290,9 @@ class CosyVoiceAdapter:
                 "role": "voiceover",
                 "mime_type": "audio/wav",
                 "content_hash": content_hash,
+                "byte_size": len(content),
+                "sample_rate": sample_rate,
+                "channels": channels,
+                "duration_ms": duration_ms,
             }],
         }

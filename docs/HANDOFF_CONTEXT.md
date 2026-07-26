@@ -190,6 +190,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-26 | 新增正式 CosyVoice 验收命令：默认只读读取最新已发布配置，只有 `--confirm-paid-call` 且配置凭据/外部执行授权同时就绪才联网；输出不包含 API Key。当前真实命令以 `COSYVOICE_CREDENTIAL_MISSING / network_probe_performed=false` 阻断。Adapter 补齐 WAV 完整结构、24kHz、单声道和非空帧校验，不合同时落盘 |
 | 2026-07-26 | 完成旁白字幕首期闭环：Creative Brief 旁白/对白按节拍编译冻结 cue，新增本地 SRT Adapter、严格字幕文件探测、人工内容审核提示、剪辑助理唯一批准字幕轨、剪辑台音频试听/SRT 内容预览和 FFmpeg/libass 烧录。真实 Windows FFmpeg 验收发现并修复盘符路径解析，最终输出为 480×848 H.264 + AAC。七项后续范围与验收矩阵见 `V2_AUDIO_EDITING_ROADMAP.md` |
 | 2026-07-26 | 完成旁白到剪辑交付的首个闭环：旁白文本冻结进 TTS DAG，新增 CosyVoice 同步 Adapter、WAV 严格验证与本地素材登记；剪辑助理确定性引用唯一已批准旁白，本机 FFmpeg 支持按时间线 `atrim / adelay / amix` 并编码 AAC。发布配置 v54；当前 CosyVoice API Key 未配置，连接状态明确为 `credential_not_ready`，未伪造真实调用 |
 | 2026-07-25 | 素材审核队列新增显式“全选/取消全选”：只作用于当前筛选结果中仍可审核的素材，保留其他筛选下已有选择，不纳入已批准、已归档或不可审核条目；批量通过仍需二次确认并逐项列出目标，页面加载不自动勾选 |
@@ -270,7 +271,7 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`268 passed`
+- 后端测试：`272 passed`
 - 供应商并发门禁验收：`max_concurrency=1` 时首个外部任务提交并轮询，后续同 Provider 工作项保持 `queued`；首项完成后下一项才提交，等待过程不新增失败、尝试、费用或自动重试
 - 两阶段生产验收：图片节点全部先执行；后续任务在用户确认前保持 `waiting_phase`；节点或素材清单不一致明确失败；确认后视频读取冻结的已批准素材；纯文本视频无图片门禁并直接排队
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
@@ -299,4 +300,4 @@ v2/runtime/worker.err.log
 
 ## 9. 下一步
 
-旁白字幕的生成、严格探测、人工审核、剪辑台预览和本机 FFmpeg 烧录首期闭环已完成。完整七项后续范围以 [V2 配音与剪辑完善路线图](./V2_AUDIO_EDITING_ROADMAP.md) 为权威：下一步先增加拒绝缺失凭据且不泄露密钥的 CosyVoice 真实验收工具，再实施音色/语速/音量/时长合同、波形与时间线交互、BGM/ducking、确定性音频 QC、授权声音复刻和依赖级费用确认批量重试。当前配置仍缺少 DashScope API Key，真实付费 CosyVoice 合成未验收，不得声明为已完成。QC 图片模型继续按用户要求暂不接入。
+旁白字幕的生成、严格探测、人工审核、剪辑台预览和本机 FFmpeg 烧录首期闭环已完成；安全的 CosyVoice 真实验收工具也已完成，但当前配置仍缺少 DashScope API Key，真实付费合成未执行。完整七项后续范围以 [V2 配音与剪辑完善路线图](./V2_AUDIO_EDITING_ROADMAP.md) 为权威：当前继续实施音色/语速/音量/时长合同，随后推进波形与时间线交互、BGM/ducking、确定性音频 QC、授权声音复刻和依赖级费用确认批量重试。不得把工具已就绪声明成真实供应商已经验收。QC 图片模型继续按用户要求暂不接入。

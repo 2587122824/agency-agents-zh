@@ -4,7 +4,7 @@
 >
 > 本文只记录可以由代码、迁移、测试或可运行页面证明的状态。设计目标不等于已实现。
 
-当前自动化基线：`268 passed`；前端生产构建通过。
+当前自动化基线：`272 passed`；前端生产构建通过。
 
 ## 状态定义
 
@@ -75,7 +75,7 @@
 | 时间线合同与确认 | 已完成 | Timeline/TimelineItem、验证、版本修订、确认和剪辑页 |
 | 最终交付验证 | 已完成 | `v2.delivery-request.v2`、DeliveryAttempt、外部上传、本机 FFmpeg 合成、真实 MP4 验证与完成条件。用户显式选择交付方式；本机方式冻结执行环境与编码参数，创建独立 `render_delivery` WorkItem/WorkAttempt，执行前复验素材文件哈希，成功只登记待验证 Asset。失败不自动重试或切换上传方式 |
 | RunningHub Provider | 部分完成 | 图片、首帧视频和纯文本视频 Adapter、严格 NodeInfoList、`production-work-request.v3`、单父图片、无父图 T2V、显式主参考附件上传、提交任务号持久化、重启轮询恢复与确定性本地下载已用假传输验证。V2 创建、查询和上传统一使用 `Authorization: Bearer`，创建正文不再携带旧式 `apiKey`。成功响应先按冻结输出媒体类型忽略 TXT 等辅助结果，再对目标媒体执行声明、响应头、字节签名和存储策略交叉验证；真实任务 `2080632860527783937` 的 `TXT + PNG` 返回已复验只登记 PNG。Worker 提交前原子执行冻结 `max_concurrency`；明确业务拒绝、结果未知和输出验证失败分别留证，不自动重试，历史缺失响应不回填 |
-| CosyVoice Provider | 部分完成 | 已实现同步 CosyVoice Adapter、冻结旁白文本/模型/预设音色/采样率、Bearer 鉴权、WAV 签名/大小/哈希验证、确定性本地落盘和自动登记 `verified` 音频素材；配置 v54 发布 `cosyvoice-v1 / longxiaochun / 24000Hz WAV` 单一路线。当前配置没有 DashScope API Key，连接状态明确为 `credential_not_ready`，尚未做真实付费验收；声音复刻和临时公网音频不在本次范围 |
+| CosyVoice Provider | 部分完成 | 已实现同步 CosyVoice Adapter、冻结旁白文本/模型/预设音色/采样率、Bearer 鉴权、WAV 签名/完整结构/24kHz/单声道/非空帧/大小/哈希验证、确定性本地落盘和自动登记 `verified` 音频素材。`validate_cosyvoice_connection` 默认只读检查最新已发布配置，只有显式 `--confirm-paid-call` 且配置凭据与外部执行授权同时就绪才联网；报告不含 API Key，阻断时明确证明未探测网络。配置 v54 发布 `cosyvoice-v1 / longxiaochun / 24000Hz WAV` 单一路线；当前没有 DashScope API Key，状态为 `credential_not_ready`，真实付费验收仍未完成 |
 | OSS 临时音频上传 | 未开始，需确认 | 涉及真实存储凭据、生命周期和外部网络调用 |
 | 确定性字幕与 FFmpeg 烧录 | 已完成首期闭环 | 旁白/对白按确认节拍编译为冻结 cue，本地 Adapter 生成 UTF-8 SRT；严格探测校验连续序号、非空内容和递增无重叠时点；素材经人工审核后进入单一字幕轨，剪辑台可读预览。FFmpeg/libass 使用冻结底部样式烧录，Windows 从字幕目录执行以避免盘符解析错误；真实 480×848 H.264 + AAC 输出验收通过。逐 cue 可视化修订和同步成片预览仍属于后续剪辑体验 |
 | FFmpeg 本地合成 | 已完成 | `V2_FFMPEG_PATH` 只读环境连接、版本与 `libx264` 准备检查、连续主视频轨 `trim/scale/crop/fps/concat`、按音频时间线执行 `atrim/adelay/amix`、单一字幕轨 libass 烧录并编码 AAC、`libx264` 输出、工作尝试与失败证据已实现。真实本机验收已证明输出同时包含烧录字幕的 H.264 视频流和 AAC 音轨。当前仍不支持空位、变速或非 `cover` 画面变换；失败后没有重试、替换方式或隐藏降级 |
