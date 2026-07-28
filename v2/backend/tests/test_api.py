@@ -4379,6 +4379,73 @@ def test_mock_worker_obeys_dag_order_and_makes_no_provider_submission(client: Te
         assert all(item.kind == "estimated" and item.status == "confirmed" for item in cost_events)
 
 
+def test_rejected_image_blocks_snapshot_and_can_return_to_production_preparation(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    activated = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:activate",
+        json={"command_id": "reject-image-activate-001", "expected_contract_hash": snapshot["contract_hash"]},
+    ).json()
+    client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:submit",
+        json={
+            "command_id": "reject-image-submit-0001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "expected_estimated_cost": snapshot["estimated_cost"],
+            "expected_currency": snapshot["currency"],
+            "expected_dag_node_ids": [node["id"] for node in activated["nodes"]],
+            "confirm_high_risk_submission": True,
+        },
+    )
+    item, response_manifest, _ = attach_local_provider_output(project, snapshot, 480, 848)
+    response_hash = hashlib.sha256(json.dumps(
+        response_manifest, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    asset = client.post(
+        f"/api/v1/projects/{project['id']}/work-attempts/{item['attempt_id']}/assets",
+        json={
+            "command_id": "reject-image-register-01",
+            "output_index": 0,
+            "expected_response_manifest_hash": response_hash,
+        },
+    ).json()
+    asset = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:verify",
+        json={"command_id": "reject-image-verify-0001", "expected_row_version": asset["row_version"]},
+    ).json()
+
+    rejected = client.post(
+        f"/api/v1/projects/{project['id']}/assets/{asset['id']}:reject",
+        json={
+            "command_id": "reject-image-review-0001",
+            "expected_row_version": asset["row_version"],
+            "rationale": "同一镜头的器具、机位和构图不连续",
+        },
+    )
+    assert rejected.status_code == 200
+    assert rejected.json()["state"] == "archived"
+    execution = client.get(f"/api/v1/projects/{project['id']}/production-execution").json()
+    assert execution["project_status"] == "blocked"
+    assert execution["snapshot"]["status"] == "execution_blocked"
+    assert next(row for row in execution["work_items"] if row["id"] == item["id"])["status"] == "completed"
+    assert all(
+        row["status"] == "cancelled"
+        for row in execution["work_items"]
+        if row["id"] != item["id"]
+    )
+
+    closed = client.post(
+        f"/api/v1/projects/{project['id']}/production-snapshots/{snapshot['id']}:close-blocked-production",
+        json={
+            "command_id": "reject-image-close-0001",
+            "expected_contract_hash": snapshot["contract_hash"],
+            "confirm_return_to_production_preparation": True,
+        },
+    )
+    assert closed.status_code == 200
+    assert closed.json()["project_status"] == "contract_ready"
+    assert closed.json()["closed_snapshot_status"] == "superseded"
+
+
 def test_image_phase_requires_exact_approved_assets_before_releasing_video(client: TestClient) -> None:
     project, snapshot = create_locked_snapshot(client)
     activated = client.post(

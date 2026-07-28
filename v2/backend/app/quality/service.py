@@ -1054,6 +1054,63 @@ def retry_failed_asset_qc(session: Session, project: Project, asset_id: str, pay
     return qc_candidate_read(_execute_qc_agent(session, project, asset, manifest, payload, gateway, selection, retry_of_agent_run_id=failed.id))
 
 
+def _block_rejected_image_phase(
+    session: Session,
+    project: Project,
+    asset: Asset,
+    *,
+    actor_id: str,
+) -> None:
+    snapshot = session.get(ProductionSnapshot, asset.snapshot_id)
+    if (
+        asset.asset_type != "image"
+        or not snapshot
+        or snapshot.project_id != project.id
+        or project.active_snapshot_id != snapshot.id
+        or snapshot.status != "submitted"
+        or snapshot.image_phase_approved_at is not None
+    ):
+        return
+
+    now = utc_now()
+    pending_items = list(session.scalars(
+        select(WorkItem).where(
+            WorkItem.snapshot_id == snapshot.id,
+            WorkItem.status.in_(("queued", "waiting_phase")),
+        )
+    ))
+    pending_attempt_ids = [item.current_attempt_id for item in pending_items if item.current_attempt_id]
+    pending_attempts = {
+        attempt.id: attempt
+        for attempt in session.scalars(
+            select(WorkAttempt).where(WorkAttempt.id.in_(pending_attempt_ids))
+        )
+    } if pending_attempt_ids else {}
+    for item in pending_items:
+        item.status = "cancelled"
+        item.finished_at = now
+        item.row_version += 1
+        attempt = pending_attempts.get(item.current_attempt_id)
+        if attempt and attempt.state == "created":
+            attempt.state = "cancelled"
+            attempt.finished_at = now
+
+    snapshot.status = "execution_blocked"
+    block_project(
+        session,
+        project,
+        reason_code="IMAGE_REVIEW_REJECTED",
+        responsible_aggregate_type="asset",
+        responsible_aggregate_id=asset.id,
+        actor_type="user",
+        actor_id=actor_id,
+        event_data={
+            "snapshot_id": snapshot.id,
+            "cancelled_work_item_ids": [item.id for item in pending_items],
+        },
+    )
+
+
 def review_asset(session: Session, project: Project, asset_id: str, payload: ReviewAsset, decision: str) -> dict:
     repository = _quality(session)
     command_type = f"asset.review.{decision}"
@@ -1128,6 +1185,7 @@ def review_asset(session: Session, project: Project, asset_id: str, payload: Rev
         asset.state = "archived"
         asset.archived_at = now
         event_type = "asset.rejected.v1"
+        _block_rejected_image_phase(session, project, asset, actor_id=payload.actor_id)
     asset.row_version += 1
     transition_project(
         session,

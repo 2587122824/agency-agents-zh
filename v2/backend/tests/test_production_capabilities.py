@@ -5,7 +5,7 @@ from v2.backend.app.production.planning_service import (
     _route_feasibility_errors,
     _validate_route_assignments,
 )
-from v2.backend.app.production.service import _compile_manifest, _validate_generation_capabilities
+from v2.backend.app.production.service import _compile_manifest, _node_seed, _validate_generation_capabilities
 
 
 def workflow(*, tags: list[str], bindings: list[dict]):
@@ -191,9 +191,15 @@ def test_three_frame_route_compiles_three_distinct_parent_images() -> None:
     )
 
     image_nodes = [node for node in manifest["nodes"] if node["kind"] == "generate_keyframe"]
-    assert [node["input_contract"]["shot"]["visual_prompt"] for node in image_nodes] == [
+    prompts = [node["input_contract"]["shot"]["visual_prompt"] for node in image_nodes]
+    assert all("共同画面基础：continuous turn" in prompt for prompt in prompts)
+    assert all("同一器具与道具" in prompt for prompt in prompts)
+    assert all("景别=medium；镜头角度=eye_level；构图=same composition" in prompt for prompt in prompts)
+    assert [prompt.rsplit("：", 1)[-1] for prompt in prompts] == [
         "facing front", "half turn", "facing back",
     ]
+    assert len({node["input_contract"]["seed"] for node in image_nodes}) == 1
+    assert image_nodes[0]["input_contract"]["seed"] == _node_seed("plan-1", "SH-001.keyframe")
     video_node = next(node for node in manifest["nodes"] if node["kind"] == "generate_three_frame_i2v_clip")
     assert video_node["input_contract"]["source_image_node_keys"] == [
         "SH-001.keyframe.start", "SH-001.keyframe.middle", "SH-001.keyframe.end",

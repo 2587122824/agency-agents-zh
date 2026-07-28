@@ -401,7 +401,7 @@ export function ReviewPage() {
       <header><AlertTriangle /><div><span>人工审核决定</span><h2>拒绝并归档素材</h2></div></header>
       <p>{assetLabel(reviewChoice.asset)}</p>
       <label>拒绝原因<textarea value={rationale} onChange={event => setRationale(event.target.value)} placeholder="说明画面哪里不符合分镜要求" /></label>
-      <small>本操作只记录审核结论，不会重试、重新生成或产生费用。</small>
+      <small>图片阶段拒绝后会阻断本次快照并取消尚未开始的后续任务；不会自动重试、重新生成或产生费用。</small>
       <footer><button className="secondaryButton" onClick={() => { setReviewChoice(null); setRationale('') }}>取消</button><button className="primaryButton" disabled={!rationale.trim() || directReview.isPending} onClick={() => directReview.mutate({ asset: reviewChoice.asset, action: 'reject', reason: rationale })}>确认拒绝</button></footer>
     </section></div>}
 

@@ -89,6 +89,20 @@ def _node_seed(plan_id: str, node_key: str) -> int:
     return int(hashlib.sha256(f"{plan_id}:{node_key}".encode("utf-8")).hexdigest()[:12], 16)
 
 
+def _three_frame_visual_prompt(shot: Shot, role: str) -> str:
+    role_labels = {"start": "首帧", "middle": "中帧", "end": "尾帧"}
+    return "\n".join((
+        f"共同画面基础：{shot.visual_prompt.strip()}",
+        (
+            "连续性锁定：这是同一镜头的首中尾关键帧。三帧必须保持同一主体身份与外观、"
+            "同一服装、同一器具与道具、同一场景与背景、同一光线、同一相机位置、"
+            "同一镜头角度、同一景别和同一构图；只允许动作或物体状态按当前帧描述推进。"
+        ),
+        f"固定镜头参数：景别={shot.framing}；镜头角度={shot.camera_angle}；构图={shot.composition}。",
+        f"当前帧（{role_labels[role]}）：{shot.guide_frame_prompts[role].strip()}",
+    ))
+
+
 def _money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
@@ -517,17 +531,18 @@ def _compile_manifest(
         if multi_frame:
             image_keys = [f"{shot.shot_code}.keyframe.{role}" for role in ("start", "middle", "end")]
         if keyframe_workflow:
+            shared_keyframe_seed = _node_seed(plan.id, image_key)
             for index, current_image_key in enumerate(image_keys):
                 shot_contract = _shot_contract(shot)
                 if multi_frame:
                     role = ("start", "middle", "end")[index]
-                    shot_contract["visual_prompt"] = shot.guide_frame_prompts[role]
+                    shot_contract["visual_prompt"] = _three_frame_visual_prompt(shot, role)
                 nodes.append({
                     "node_key": current_image_key,
                     "kind": "generate_keyframe",
                     "shot_id": shot.id,
                     "workflow_slot_version_id": keyframe_workflow.id,
-                    "input_contract": {"shot": shot_contract, "seed": _node_seed(plan.id, current_image_key), "entity_version_ids": sorted(set(
+                    "input_contract": {"shot": shot_contract, "seed": shared_keyframe_seed, "entity_version_ids": sorted(set(
                         ([shot.scene_entity_version_id] if shot.scene_entity_version_id else [])
                         + shot.character_entity_version_ids + shot.outfit_entity_version_ids + shot.product_entity_version_ids
                     )), "reference_image": references_by_shot_id.get(shot.id)},

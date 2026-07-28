@@ -68,6 +68,8 @@ def _update_aggregate_state(
     current_attempt: WorkAttempt | None = None,
 ) -> None:
     states = _work(session).snapshot_work_states(snapshot.id)
+    if snapshot.status == "execution_blocked" and project.status == "blocked":
+        return
     if states and all(state == "completed" for state in states):
         snapshot.status = "execution_completed"
         transition_project(
