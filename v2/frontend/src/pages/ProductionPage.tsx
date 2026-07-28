@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Clock3, Film, GitBranch, Image as ImageIcon, Layers3, RefreshCw, RotateCcw, ShieldCheck, X } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
@@ -51,6 +51,26 @@ function blockerReason(group: { errorCode: string | null; blockers: Blocker[] },
     return prefix && value.startsWith(prefix) ? value.slice(prefix.length).trim() : value
   }).filter(Boolean))
   return reasons.size === 1 ? [...reasons][0] : fallback
+}
+
+function ProjectTitle({ title }: { title: string }) {
+  const textRef = useRef<HTMLElement>(null)
+  const [truncated, setTruncated] = useState(false)
+
+  useEffect(() => {
+    const text = textRef.current
+    if (!text) return
+    const measure = () => setTruncated(text.scrollWidth > text.clientWidth)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(text)
+    return () => observer.disconnect()
+  }, [title])
+
+  return <span className={styles.projectTitle}>
+    <strong ref={textRef}>{title}</strong>
+    {truncated && <span className={styles.projectTitleTooltip} role="tooltip">{title}</span>}
+  </span>
 }
 
 function PhaseWorkList({ items, phaseLabel, assets, projectId, onRetry }: {
@@ -192,7 +212,7 @@ export function ProductionPage() {
           <header><div><span>当前项目</span><h2>制作任务</h2></div><b>{productionProjects.length}</b></header>
           {productionProjects.map(project => <button className={styles.projectRow} data-selected={projectId === project.id} key={project.id} onClick={() => setProjectId(project.id)}>
             <span className={styles.state}>{project.status === 'blocked' ? <AlertTriangle /> : project.status === 'quality_review' ? <CheckCircle2 /> : <Clock3 />}</span>
-            <div><strong>{project.title}</strong><small>制作方案已选定</small></div><em>{label(project.status, statusLabels, '状态待确认')}</em>
+            <div><ProjectTitle title={project.title} /><small>制作方案已选定</small></div><em>{label(project.status, statusLabels, '状态待确认')}</em>
           </button>)}
           {!productionProjects.length && <div className={styles.empty}>没有已激活或已提交的生产快照</div>}
         </section>

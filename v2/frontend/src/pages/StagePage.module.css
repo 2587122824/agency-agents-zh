@@ -7,7 +7,8 @@
 .stageBar > svg { width:16px;color:#b9bcb8;margin:0 10px; }
 .stageBar .active > span { background:#191c20;color:white;border-color:#191c20; }
 .executionLayout { margin-top:18px;display:grid;grid-template-columns:minmax(280px,0.34fr) minmax(0,1fr);gap:16px;align-items:start; }
-.list,.executionPanel { background:white;border:1px solid #e0e2dd;border-radius:7px;overflow:hidden; }
+.list,.executionPanel { background:white;border:1px solid #e0e2dd;border-radius:7px; }
+.executionPanel { overflow:hidden; }
 .list header,.executionHeader { min-height:68px;padding:0 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #e0e2dd; }
 .list header span,.executionHeader span { color:#c74624;font-size:10px;font-weight:700; }
 .list header h2,.executionHeader h2 { margin:4px 0 0;font-size:17px; }
@@ -18,7 +19,10 @@
 .state,.nodeState { width:30px;height:30px;border-radius:50%;background:#edefeb;display:grid;place-items:center; }
 .state svg,.nodeState svg { width:15px; }
 .projectRow > div { display:grid;gap:4px;min-width:0; }
-.projectRow strong { font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.projectTitle { position:relative;display:block;min-width:0; }
+.projectTitle > strong { display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+.projectTitleTooltip { position:absolute;z-index:20;left:0;top:calc(100% + 8px);width:max-content;max-width:min(360px,calc(100vw - 84px));padding:8px 10px;border:1px solid #d9ddd7;border-radius:5px;background:#202522;color:#fff;font-size:11px;font-weight:500;line-height:1.5;white-space:normal;box-shadow:0 8px 24px rgba(25,32,28,.18);opacity:0;visibility:hidden;transform:translateY(-3px);transition:opacity .14s ease,transform .14s ease,visibility .14s ease;pointer-events:none; }
+.projectTitle:hover .projectTitleTooltip,.projectRow:focus-visible .projectTitleTooltip { opacity:1;visibility:visible;transform:translateY(0); }
 .projectRow small { color:#777d80;font-size:10px;overflow:hidden;text-overflow:ellipsis; }
 .projectRow em,.workList article > em { font-style:normal;font-size:10px;padding:5px 8px;border-radius:10px;background:#edefeb; }
 .executionHeader > div:last-child { display:grid;text-align:right; }
