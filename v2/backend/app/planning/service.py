@@ -2,9 +2,37 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+
+_INTERNAL_COPY_REPLACEMENTS = (
+    (re.compile(r"\bproduction_profile\b", re.IGNORECASE), "项目制作策略"),
+    (re.compile(r"\bvideo_motion_strategy\b", re.IGNORECASE), "视频运动策略"),
+    (re.compile(r"\bkeyframe_strategy\b", re.IGNORECASE), "关键帧策略"),
+    (re.compile(r"\bthree_frame\b", re.IGNORECASE), "首中尾三帧"),
+    (re.compile(r"\bmulti_frame\b", re.IGNORECASE), "多帧"),
+    (re.compile(r"\boperation_kind\b", re.IGNORECASE), "生成类型"),
+    (re.compile(r"\benforcement\b", re.IGNORECASE), "执行要求"),
+)
+
+
+def _user_facing_agent_text(value: str) -> str:
+    result = value
+    for pattern, replacement in _INTERNAL_COPY_REPLACEMENTS:
+        result = pattern.sub(replacement, result)
+    return result
+
+
+def _normalize_brief_user_copy(brief: dict) -> None:
+    for addition in brief.get("creative_additions", []):
+        if not isinstance(addition, dict):
+            continue
+        for key in ("content", "purpose"):
+            if isinstance(addition.get(key), str):
+                addition[key] = _user_facing_agent_text(addition[key])
 
 from ..creation.completeness import evaluate_requirement
 from ..creation.agent_gateway import AgentGatewayError
@@ -366,6 +394,7 @@ def _execute_content_planner(
         "aspect_ratio": requirement.fields["aspect_ratio"],
         "audio_mode": requirement.fields["audio_mode"],
     })
+    _normalize_brief_user_copy(brief)
     sources = {
         key: {"type": "agent_proposal", "reference_id": run.id}
         for key in type(result.output).model_fields

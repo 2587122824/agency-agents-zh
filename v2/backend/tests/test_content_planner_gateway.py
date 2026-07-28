@@ -13,6 +13,7 @@ os.environ["V2_RUNTIME_ROOT"] = str(TEST_RUNTIME)
 
 from v2.backend.app.creation.agent_gateway import AgentGatewayError
 from v2.backend.app.planning.agent_gateway import ConfiguredContentPlannerGateway, ContentPlannerSelection
+from v2.backend.app.planning.service import _normalize_brief_user_copy
 
 
 class FakeTransport:
@@ -23,6 +24,22 @@ class FakeTransport:
     def create_chat_completion(self, **kwargs) -> dict:
         self.calls.append(kwargs)
         return self.response
+
+
+def test_content_planner_user_copy_hides_internal_production_terms() -> None:
+    brief = {
+        "creative_additions": [{
+            "content": "按 three_frame 组织动作。",
+            "purpose": "符合 production_profile 与 video_motion_strategy 要求。",
+        }],
+    }
+
+    _normalize_brief_user_copy(brief)
+
+    assert brief["creative_additions"] == [{
+        "content": "按 首中尾三帧 组织动作。",
+        "purpose": "符合 项目制作策略 与 视频运动策略 要求。",
+    }]
 
 
 def selection() -> ContentPlannerSelection:

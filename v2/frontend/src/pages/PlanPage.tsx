@@ -50,6 +50,7 @@ const productionActionLabels: Record<string, string> = {
   CONFIRM_PRODUCTION_COST: '确认预计费用',
   CONFIGURE_PRICING: '补充并发布计费方案后，重新保存制作方案',
   ACTIVATE_SNAPSHOT: '确认并开始制作',
+  ACTIVATE_AND_SUBMIT_PRODUCTION: '确认并开始制作',
   SUBMIT_PRODUCTION: '确认并开始制作',
   VIEW_PRODUCTION: '查看制作进度',
   ANALYZE_PRODUCTION_IMPACT: '选择制作设置并查看制作计划',
@@ -73,6 +74,22 @@ function snapshotStatusLabel(status: string, costStatus: string) {
 
 function costLabel(cost: number | null, currency: string | null) {
   return cost === null ? '费用待补充' : `预计费用 ${currency} ${cost.toFixed(6)}`
+}
+
+function productionRouteReason(
+  rawReason: string | undefined,
+  shot: ShotContract,
+  strategy: string | undefined,
+) {
+  const technicalReason = /\b(?:production[ _-]?profile|video[ _-]?motion[ _-]?strategy|three[ _-]?frame|multi[ _-]?frame|operation[ _-]?kind|enforcement)\b/i
+  if (rawReason && /[\u3400-\u9fff]/.test(rawReason) && !technicalReason.test(rawReason)) return rawReason
+  const details = strategy === 'three_frame'
+    ? ['项目已选择首中尾三帧，当前视频方案支持三张关键帧共同控制动作']
+    : ['当前图片与视频方案符合这个镜头的画面和运动要求']
+  if (shot.generation_requirements.reference_image_required) details.push('会使用已确认的主参考图')
+  if (shot.generation_requirements.identity_consistency_required) details.push('支持保持人物身份一致')
+  if (shot.generation_requirements.precise_text_required) details.push('支持画面文字要求')
+  return `${details.join('；')}。`
 }
 
 function userIssue(code: string) {
@@ -135,6 +152,17 @@ function additionCategoryLabel(category: string) {
   return ({ narrative_structure: '叙事结构', hook: '开场设计', expression: '表达方式', example: '内容示例', visual_strategy: '视觉策略', call_to_action: '行动引导' } as Record<string, string>)[category] ?? category
 }
 
+function userFacingAgentText(value: string) {
+  return value
+    .replace(/\bproduction_profile\b/gi, '项目制作策略')
+    .replace(/\bvideo_motion_strategy\b/gi, '视频运动策略')
+    .replace(/\bkeyframe_strategy\b/gi, '关键帧策略')
+    .replace(/\bthree_frame\b/gi, '首中尾三帧')
+    .replace(/\bmulti_frame\b/gi, '多帧')
+    .replace(/\boperation_kind\b/gi, '生成类型')
+    .replace(/\benforcement\b/gi, '执行要求')
+}
+
 function BriefView({ candidate }: { candidate: CreativeBriefCandidate }) {
   const brief = candidate.brief
   return <div className={styles.briefContent}>
@@ -154,7 +182,7 @@ function BriefView({ candidate }: { candidate: CreativeBriefCandidate }) {
     </section>
     {brief.creative_additions.length > 0 && <section className={`${styles.briefSection} ${styles.additionsSection}`}>
       <header><div><span>策划拓展</span><strong>智能体主动补充的创意</strong></div><small>{brief.creative_additions.length} 项</small></header>
-      <div className={styles.additionList}>{brief.creative_additions.map(addition => <article key={addition.addition_code}><em>{additionCategoryLabel(addition.category)}</em><div><strong>{addition.content}</strong><span>{addition.purpose}</span></div></article>)}</div>
+      <div className={styles.additionList}>{brief.creative_additions.map(addition => <article key={addition.addition_code}><em>{additionCategoryLabel(addition.category)}</em><div><strong>{userFacingAgentText(addition.content)}</strong><span>{userFacingAgentText(addition.purpose)}</span></div></article>)}</div>
     </section>}
     {brief.facts_requiring_confirmation.length > 0 && <section className={styles.pendingFacts}>
       <header><CircleAlert size={17} /><div><strong>这些事实还没有得到确认</strong><span>它们不会被当作正式创作依据，请在下方逐项选择。</span></div></header>
@@ -756,7 +784,7 @@ export function PlanPage() {
                 const textToVideo = selectedVideo?.operation_kind === 'text_to_video_generation'
                 const proposal = productionPlanCandidate?.proposed_assignments.find(item => item.shot_code === shot.shot_code)
                 return <article key={shot.shot_code}>
-                  <div><b>{shot.shot_code}</b><ShotFrameContract shot={shot} compact /><small>{proposal?.reason ?? `${shot.duration_ms / 1000} 秒 · ${shot.generation_requirements.identity_consistency_required ? '需要人物一致性' : '普通镜头'}${shot.generation_requirements.reference_image_required ? ' · 需要参考图' : ''}`}</small></div>
+                  <div><b>{shot.shot_code}</b><ShotFrameContract shot={shot} compact /><small>{proposal ? productionRouteReason(proposal.reason, shot, project.data?.production_profile.video_motion_strategy) : `${shot.duration_ms / 1000} 秒 · ${shot.generation_requirements.identity_consistency_required ? '需要人物一致性' : '普通镜头'}${shot.generation_requirements.reference_image_required ? ' · 需要参考图' : ''}`}</small></div>
                   <label>图片方案<select value={assignment.keyframe} disabled={!selectedConfig || textToVideo} onChange={event => assignShot(shot.shot_code, 'keyframe', event.target.value)}><option value="">{textToVideo ? '纯文本视频不使用关键帧' : '请选择图片方案'}</option>{keyframeSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
                   <label>视频方案<select value={assignment.video} disabled={!selectedConfig} onChange={event => assignShot(shot.shot_code, 'video', event.target.value)}><option value="">请选择视频方案</option>{videoSlots.map(item => <option key={item.id} value={item.id}>{item.display_name}</option>)}</select></label>
                 </article>
@@ -770,12 +798,13 @@ export function PlanPage() {
             {(() => {
               const referenceNodes = impact.manifest.dag.nodes.filter(node => node.kind === 'generate_keyframe').map(node => {
                 const input = node.input_contract as { shot?: { shot_code?: string }; reference_image?: { attachment_id: string; content_hash: string; mime_type: string } | null }
-                return { key: node.node_key, shotCode: input.shot?.shot_code ?? node.node_key, reference: input.reference_image }
+                const frameRole = node.node_key.endsWith('.start') ? '首帧' : node.node_key.endsWith('.middle') ? '中帧' : node.node_key.endsWith('.end') ? '尾帧' : '关键帧'
+                return { key: node.node_key, shotCode: input.shot?.shot_code ?? node.node_key, frameRole, reference: input.reference_image }
               })
               const selectedCount = referenceNodes.filter(item => item.reference).length
               return <details className={styles.referenceSummary}>
-                <summary><div><span>主参考图</span><strong>{selectedCount} / {referenceNodes.length} 个镜头已选择</strong></div><small>查看逐镜头状态</small></summary>
-                <div className={styles.referenceFacts}>{referenceNodes.map(item => <div key={item.key}><span>{item.shotCode}</span><strong>{item.reference ? '使用主参考图' : '未选择主参考图'}</strong><small>{item.reference ? `${item.reference.mime_type} · ${item.reference.content_hash.slice(0, 12)}` : '系统不会自行选择图片'}</small></div>)}</div>
+                <summary><div><span>关键帧主参考图</span><strong>{selectedCount} / {referenceNodes.length} 个关键帧输入已绑定</strong></div><small>查看逐关键帧状态</small></summary>
+                <div className={styles.referenceFacts}>{referenceNodes.map(item => <div key={item.key}><span>{item.shotCode} · {item.frameRole}</span><strong>{item.reference ? '使用主参考图' : '未选择主参考图'}</strong><small>{item.reference ? `${item.reference.mime_type} · ${item.reference.content_hash.slice(0, 12)}` : '系统不会自行选择图片'}</small></div>)}</div>
               </details>
             })()}
             {groupedValidationIssues.length > 0 && <section className={styles.issueSummary}>
@@ -802,7 +831,7 @@ export function PlanPage() {
       </aside>
     </main>
     {confirmCost && currentSnapshot && <div className={styles.costModal}><section><header><Calculator size={20} /><div><span>费用确认</span><h2>确认制作方案 {currentSnapshot.snapshot_number} 的预计费用</h2></div></header><div className={styles.costAmount}><small>预计制作费用</small><strong>{currentSnapshot.currency} {currentSnapshot.estimated_cost?.toFixed(6)}</strong><span>预计调用生成服务 {currentSnapshot.estimated_call_count} 次</span></div><p>确认后将锁定本次制作内容、计费方案和各步骤费用。本操作不会开始生成，也不会实际扣费。</p><details className={styles.technicalDetails}><summary>查看技术详情</summary><code>{currentSnapshot.contract_hash}</code></details><footer><button className="secondaryButton" onClick={() => setConfirmCost(false)}>取消</button><button className="primaryButton" disabled={lockSnapshot.isPending} onClick={() => lockSnapshot.mutate()}><LockKeyhole size={14} />确认费用并锁定方案</button></footer></section></div>}
-    {confirmSubmit && currentSnapshot && <div className={styles.costModal}><section><header><Network size={20} /><div><span>开始制作确认</span><h2>开始制作方案 {currentSnapshot.snapshot_number}</h2></div></header><div className={styles.costAmount}><small>已确认预计费用</small><strong>{currentSnapshot.currency} {currentSnapshot.estimated_cost?.toFixed(6)}</strong><span>{currentSnapshot.nodes.length} 个制作步骤 · 预计调用生成服务 {currentSnapshot.estimated_call_count} 次</span></div><p>确认后系统将按当前方案创建制作任务并进入队列。系统不会补步骤、更换生成方案或自动重试。</p><details className={styles.technicalDetails}><summary>查看技术详情</summary><code>{currentSnapshot.contract_hash}</code></details><footer><button className="secondaryButton" onClick={() => setConfirmSubmit(false)}>取消</button><button className="primaryButton" disabled={submitProduction.isPending} onClick={() => submitProduction.mutate()}><ShieldCheck size={14} />确认并开始制作</button></footer></section></div>}
+    {confirmSubmit && currentSnapshot && <div className={styles.costModal}><section><header><Network size={20} /><div><span>开始制作确认</span><h2>开始制作方案 {currentSnapshot.snapshot_number}</h2></div></header><div className={styles.costAmount}><small>已确认预计费用</small><strong>{currentSnapshot.currency} {currentSnapshot.estimated_cost?.toFixed(6)}</strong><span>{currentSnapshot.nodes.length} 个制作步骤 · 预计调用生成服务 {currentSnapshot.estimated_call_count} 次</span></div><p>确认后系统会向外部生成服务提交任务，并可能产生实际制作费用。系统不会补步骤、更换生成方案或自动重试。</p><details className={styles.technicalDetails}><summary>查看技术详情</summary><code>{currentSnapshot.contract_hash}</code></details><footer><button className="secondaryButton" onClick={() => setConfirmSubmit(false)}>取消</button><button className="primaryButton" disabled={submitProduction.isPending} onClick={() => submitProduction.mutate()}><ShieldCheck size={14} />确认并开始制作</button></footer></section></div>}
     {confirmCancelRevision && data.revision_context && <div className={styles.costModal}><section><header><CircleAlert size={20} /><div><span>放弃回改确认</span><h2>放弃 {data.revision_context.shot_code} 的本次调整</h2></div></header><p>本次回改草稿或待审候选将标记为已取消。当前正式方案、制作快照和已有素材都不会改变。</p><footer><button className="secondaryButton" onClick={() => setConfirmCancelRevision(false)}>继续调整</button><button className="primaryButton" disabled={cancelRevision.isPending} onClick={() => cancelRevision.mutate()}>确认放弃</button></footer></section></div>}
   </>
 }

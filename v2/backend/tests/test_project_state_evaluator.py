@@ -75,7 +75,7 @@ def test_project_stage_is_deterministic_and_uses_active_authority(
             "CONFIGURE_PRICING",
             "补齐价格目录后创建新快照",
         ),
-        (facts(active_snapshot=SnapshotStateFact("locked")), "ACTIVATE_SNAPSHOT", "激活锁定快照"),
+        (facts(active_snapshot=SnapshotStateFact("locked")), "ACTIVATE_AND_SUBMIT_PRODUCTION", "确认并开始制作"),
         (facts(active_snapshot=SnapshotStateFact("active")), "SUBMIT_PRODUCTION", "确认完整 DAG 并提交生产"),
         (
             facts(active_snapshot=SnapshotStateFact("submitted"), work_counts={"blocked": 2}),
@@ -149,6 +149,9 @@ def test_project_state_evaluation_is_repeatable_and_does_not_mutate_inputs() -> 
 
 
 def test_high_risk_and_cost_metadata_remain_explicit() -> None:
+    locked_submission = evaluate_project_state(
+        facts(active_snapshot=SnapshotStateFact("locked", "confirmed"))
+    ).next_action.as_dict()
     submission = evaluate_project_state(
         facts(active_snapshot=SnapshotStateFact("active", "confirmed"))
     ).next_action.as_dict()
@@ -156,6 +159,8 @@ def test_high_risk_and_cost_metadata_remain_explicit() -> None:
         facts(delivery_status="output_registered")
     ).next_action.as_dict()
 
+    assert locked_submission["confirmation_level"] == "high"
+    assert locked_submission["incurs_production_cost"] is True
     assert submission["confirmation_level"] == "high"
     assert submission["incurs_production_cost"] is True
     assert verification["confirmation_level"] == "normal"

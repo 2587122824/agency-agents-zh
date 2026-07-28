@@ -194,10 +194,11 @@ def evaluate_next_action(facts: ProjectStateFacts, stage: ProjectStage) -> Proje
             )
         if authority.status == "locked":
             return ProjectNextAction(
-                "ACTIVATE_SNAPSHOT",
-                "激活锁定快照",
+                "ACTIVATE_AND_SUBMIT_PRODUCTION",
+                "确认并开始制作",
                 f"{project_path}/plan",
                 confirmation_level="high",
+                incurs_production_cost=True,
             )
         if authority.status == "active":
             return ProjectNextAction(

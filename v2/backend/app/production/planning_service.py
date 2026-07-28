@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -102,6 +103,41 @@ def _required_sources(workflow: WorkflowSlotVersion | None) -> list[str]:
         for item in (workflow.node_info_list or [])
         if isinstance(item, dict) and item.get("required") is True and item.get("value_source")
     })
+
+
+_TECHNICAL_REASON_PATTERN = re.compile(
+    r"\b(?:production[ _-]?profile|video[ _-]?motion[ _-]?strategy|"
+    r"three[ _-]?frame|multi[ _-]?frame|operation[ _-]?kind|enforcement)\b",
+    re.IGNORECASE,
+)
+
+
+def _candidate_assignment_reason(
+    raw_reason: str,
+    shot_payload: dict[str, Any],
+    production_profile: dict[str, Any],
+) -> str:
+    """Keep useful Chinese model copy; replace technical/foreign copy deterministically."""
+    reason = raw_reason.strip()
+    if re.search(r"[\u3400-\u9fff]", reason) and not _TECHNICAL_REASON_PATTERN.search(reason):
+        return reason
+
+    requirements = shot_payload.get("generation_requirements") or {}
+    details: list[str] = []
+    if (
+        production_profile.get("video_motion_strategy") == "three_frame"
+        and production_profile.get("enforcement") == "required"
+    ):
+        details.append("项目已选择首中尾三帧，当前视频方案支持三张关键帧共同控制动作")
+    else:
+        details.append("当前图片与视频方案符合这个镜头的画面和运动要求")
+    if requirements.get("reference_image_required"):
+        details.append("会使用已确认的主参考图")
+    if requirements.get("identity_consistency_required"):
+        details.append("支持保持人物身份一致")
+    if requirements.get("precise_text_required"):
+        details.append("支持画面文字要求")
+    return "；".join(details) + "。"
 
 
 def _input_sources(workflow: WorkflowSlotVersion | None) -> list[str]:
@@ -367,6 +403,18 @@ def _execute(
             raise AgentGatewayError("PRODUCTION_PLANNER_MANIFEST_STALE", "制作规划输入绑定的方案或画面规格不存在。", raw_output=result.raw_output)
         workflows = repository.workflows(selection.production_config_version_id)
         assignments = [item.model_dump(mode="json") for item in result.output.assignments]
+        shot_payloads = {
+            item["shot_code"]: item
+            for item in manifest.payload.get("shots", [])
+            if isinstance(item, dict) and item.get("shot_code")
+        }
+        production_profile = manifest.payload.get("production_profile") or {}
+        for assignment in assignments:
+            assignment["reason"] = _candidate_assignment_reason(
+                assignment["reason"],
+                shot_payloads.get(assignment["shot_code"], {}),
+                production_profile,
+            )
         validation_errors = _validate_route_assignments(
             assignments, repository.plan_shots(plan.id), workflows, video_spec, validate_reported_inputs=True,
         )

@@ -2470,7 +2470,7 @@ def preparation_view(session: Session, project: Project) -> dict:
     elif current_snapshot and current_snapshot.status == "preparing":
         next_action = {"code": "CONFIGURE_PRICING", "label": "发布含价格目录的新配置并创建新快照", "incurs_production_cost": False}
     elif current_snapshot and current_snapshot.status == "locked":
-        next_action = {"code": "ACTIVATE_SNAPSHOT", "label": "确认激活锁定快照", "incurs_production_cost": False}
+        next_action = {"code": "ACTIVATE_AND_SUBMIT_PRODUCTION", "label": "确认并开始制作", "incurs_production_cost": True}
     elif current_snapshot and current_snapshot.status == "active":
         next_action = {"code": "SUBMIT_PRODUCTION", "label": "确认完整 DAG 并提交生产", "incurs_production_cost": True}
     elif current_snapshot and current_snapshot.status == "submitted":

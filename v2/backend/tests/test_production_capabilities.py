@@ -1,6 +1,10 @@
 from types import SimpleNamespace
 
-from v2.backend.app.production.planning_service import _route_feasibility_errors, _validate_route_assignments
+from v2.backend.app.production.planning_service import (
+    _candidate_assignment_reason,
+    _route_feasibility_errors,
+    _validate_route_assignments,
+)
 from v2.backend.app.production.service import _compile_manifest, _validate_generation_capabilities
 
 
@@ -10,6 +14,29 @@ def workflow(*, tags: list[str], bindings: list[dict]):
 
 def shot(code: str, requirements: dict):
     return SimpleNamespace(id=f"id-{code}", shot_code=code, generation_requirements=requirements)
+
+
+def test_production_planner_replaces_technical_english_reason_with_chinese_summary() -> None:
+    reason = _candidate_assignment_reason(
+        "Production profile enforces three_frame video motion strategy.",
+        {
+            "generation_requirements": {
+                "reference_image_required": False,
+                "identity_consistency_required": False,
+                "precise_text_required": False,
+            },
+        },
+        {"video_motion_strategy": "three_frame", "enforcement": "required"},
+    )
+
+    assert reason == "项目已选择首中尾三帧，当前视频方案支持三张关键帧共同控制动作。"
+    assert "three_frame" not in reason
+
+
+def test_production_planner_keeps_readable_chinese_reason() -> None:
+    reason = "所选方案符合这个镜头的连续动作要求。"
+
+    assert _candidate_assignment_reason(reason, {}, {}) == reason
 
 
 def test_generation_capabilities_report_exact_shots_without_route_replacement() -> None:
