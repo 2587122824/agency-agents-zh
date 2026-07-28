@@ -33,6 +33,7 @@ from ..db.models import (
 )
 from ..repositories import PlanningRepository, SqlAlchemyDecisionRepository, SqlAlchemyPlanningRepository
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
+from ..production_profiles import profile_manifest
 from .agent_gateway import (
     CONTENT_PLANNER_OUTPUT_SCHEMA_VERSION,
     CONTENT_PLANNER_PROMPT_CONTRACT_VERSION,
@@ -85,8 +86,9 @@ def _content_planner_manifest_payload(
     entity_rows = repository.active_entity_versions(project.id)
     fields = dict(requirement.fields)
     return {
-        "contract_version": "content-planner-input.v2",
+        "contract_version": "content-planner-input.v3",
         "project_id": project.id,
+        "production_profile": profile_manifest(session, project.id),
         "requirement_version": {"id": requirement.id, "fields": fields},
         "confirmed_decisions": [
             {"id": item.id, "key": item.key, "value": item.value}
@@ -143,8 +145,9 @@ def _director_manifest_payload(
             } if attachment else None),
         })
     return {
-        "contract_version": "director-input.v2",
+        "contract_version": "director-input.v3",
         "project_id": project.id,
+        "production_profile": profile_manifest(session, project.id),
         "requirement_version": {"id": requirement.id, "fields": fields},
         "accepted_creative_brief": {"id": brief.id, "brief": brief.brief},
         "confirmed_decisions": [{"id": item.id, "key": item.key, "value": item.value} for item in decisions],

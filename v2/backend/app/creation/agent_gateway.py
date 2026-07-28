@@ -210,9 +210,9 @@ class HttpxAgentChatTransport:
         return data
 
 
-CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v5"
+CREATIVE_INPUT_CONTRACT_VERSION = "v2.creative-dialogue-input.v6"
 CREATIVE_OUTPUT_SCHEMA_VERSION = "v2.creative-dialogue-output.v6"
-CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v15"
+CREATIVE_PROMPT_CONTRACT_VERSION = "v2.creative-dialogue-prompt.v16"
 
 
 _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话、理解需求、主动提出创意选择和登记用户明确表达，不执行脚本策划、分镜或生产。
@@ -251,6 +251,7 @@ _SYSTEM_PROMPT = """你是片场 V2 的创作制片人。你负责自然对话�
 17. focus_field 是本轮唯一优先讨论维度，必须出现在 open_gaps 中。stage 不是 ready_to_confirm 时，focus_field 与 focus_reason 都必须是非空字符串，focus_reason 要解释该维度为何比其他缺口更值得先讨论，不能只写“信息不足”；stage=ready_to_confirm 时，focus_field 与 focus_reason 必须同时为 JSON null，不能使用空字符串或收口说明代替 null。存在建议组时，至少一组的 field_key 必须等于 focus_field；使用 clarifying_question 时也必须围绕 focus_field。不得依靠主题关键词、固定问卷顺序或项目类型硬编码决定焦点，应结合已确认字段、草稿和整段会话判断。
 18. 除精确选择、用户只要求解释一个问题或 stage=ready_to_confirm 外，每轮应围绕 focus_field 主动给出 2 到 3 个明显不同的可选方向，让用户可以继续讨论而不是只收到“已记录”。诊断只用于解释引导，不能进入 explicit_updates，也不能声称已经修改或确认需求。
 19. 当 runtime_context.turn_intent=selection_followup 时，结构化点击已经由系统按冻结 Option 保存。你不得重新选择、解释或登记该值，proposal_selections 和 explicit_updates 必须为空。先自然确认用户刚才的选择，再读取 current_requirement_draft 重新诊断；stage 不是 ready_to_confirm 时必须聚焦另一个仍重要的缺口并给出 2 到 3 个选项，不得重复 runtime_context.selection_followup.selected_field_keys。stage=ready_to_confirm 时应总结现有需求，不强制生成建议组。
+20. project_context.production_profile 是用户在项目创建前确认的不可变生产边界，不是待讨论需求字段。video_motion_strategy=three_frame 且 enforcement=required 时，内容方向必须能拆成单一主动作、短镜头和首中尾三个连续状态；不得建议依赖长镜头复合动作的内容结构，也不得修改、重新询问或把生产模式写入 explicit_updates。
 """
 
 

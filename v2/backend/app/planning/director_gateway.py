@@ -14,9 +14,9 @@ from ..creation.agent_gateway import AgentChatTransport, AgentGatewayError, Http
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
 
 
-DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v2"
+DIRECTOR_INPUT_CONTRACT_VERSION = "director-input.v3"
 DIRECTOR_OUTPUT_SCHEMA_VERSION = "shot-plan.v4"
-DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v6"
+DIRECTOR_PROMPT_CONTRACT_VERSION = "director-prompt.v7"
 
 
 class GenerationRequirements(BaseModel):
@@ -180,7 +180,8 @@ _DIRECTOR_SYSTEM_PROMPT = """你是片场 V2 的分镜导演智能体。你只�
    multi_frame_required=true 时 guide_frame_prompts 必须精确提供 start、middle、end 三个连续画面状态；三项必须保持同一主体、服装、场景、光线、机位和构图，只描述同一动作在三个时间点的状态。否则 guide_frame_prompts 必须为 null。
 10. audio_policy=off 时 audio_requirement 只能为 off 或 lip_motion_only，不得建立音频生产依赖。
 11. revision_request 存在时，只能修改 selected_shot_codes；其他镜头必须与 source_shots 结构完全一致。仍需返回完整方案并满足全部合同。
-12. 不得输出 Provider、模型、工作流、NodeInfoList、价格或任务 ID；不得修复输入、猜测 ID、添加默认尾缀或返回 Markdown。"""
+12. 不得输出 Provider、模型、工作流、NodeInfoList、价格或任务 ID；不得修复输入、猜测 ID、添加默认尾缀或返回 Markdown。
+13. production_profile 是用户在项目创建前确认的不可变生产边界。video_motion_strategy=three_frame 且 enforcement=required 时，每个镜头都必须设置 generation_requirements.multi_frame_required=true，并精确提供 start、middle、end 三个状态；不得返回单画面镜头、首尾帧镜头或纯文本视频要求。动作过于复杂时必须拆成多个仍满足时长合同的单动作镜头。"""
 
 
 class ConfiguredDirectorGateway:
@@ -356,6 +357,19 @@ def validate_director_output_against_manifest(output: DirectorOutput, manifest: 
         invalid = [shot.shot_code for shot in shots if shot.audio_requirement not in {"off", "lip_motion_only"}]
         if invalid:
             raise ValueError(f"音频关闭时镜头不得建立音频依赖：{invalid}。")
+    production_profile = manifest["production_profile"]
+    if (
+        production_profile["video_motion_strategy"] == "three_frame"
+        and production_profile["enforcement"] == "required"
+    ):
+        invalid = [
+            shot.shot_code
+            for shot in shots
+            if not shot.generation_requirements.multi_frame_required
+            or shot.guide_frame_prompts is None
+        ]
+        if invalid:
+            raise ValueError(f"项目已锁定首中尾三帧生产模式，以下镜头没有完整三帧状态：{invalid}。")
     revision = manifest.get("revision_request")
     if revision:
         selected = set(revision["selected_shot_codes"])
@@ -399,6 +413,10 @@ class DeterministicDirectorGateway:
         outfits = [item for item in referenced if entity_types[item] == "outfit"]
         scenes = [item for item in referenced if entity_types[item] == "scene"]
         products = [item for item in referenced if entity_types[item] == "product"]
+        require_three_frame = (
+            manifest_payload["production_profile"]["video_motion_strategy"] == "three_frame"
+            and manifest_payload["production_profile"]["enforcement"] == "required"
+        )
         shots = [
             DirectorShotOutput(
                 shot_code=f"SH-{index:03d}",
@@ -430,12 +448,20 @@ class DeterministicDirectorGateway:
                 composition=str(beat["purpose"]),
                 action=str(beat["summary"]),
                 visual_prompt=f"{brief['content_promise']}。{beat['summary']}。",
-                guide_frame_prompts=None,
+                guide_frame_prompts=(
+                    GuideFramePrompts(
+                        start=f"{beat['summary']}的动作开始状态，主体、服装、场景、光线、机位和构图保持锁定。",
+                        middle=f"{beat['summary']}的关键过程状态，主体、服装、场景、光线、机位和构图保持锁定。",
+                        end=f"{beat['summary']}的动作结束状态，主体、服装、场景、光线、机位和构图保持锁定。",
+                    )
+                    if require_three_frame
+                    else None
+                ),
                 negative_prompt=None,
                 new_information=str(beat["summary"]),
                 generation_requirements=GenerationRequirements(
                     reference_image_required=False,
-                    multi_frame_required=False,
+                    multi_frame_required=require_three_frame,
                     identity_consistency_required=False,
                     precise_text_required=False,
                 ),

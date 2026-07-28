@@ -248,6 +248,7 @@ from ..projects.service import (
     queue_contract_validation,
     restore_project,
 )
+from ..production_profiles import production_profile_options
 from ..quality.contracts import (
     AssetRead,
     QCReportCandidateRead,
@@ -579,9 +580,21 @@ def projects(
     return list_projects(session, include_archived=include_archived)
 
 
+@router.get("/project-production-profile-options")
+def project_production_profile_options():
+    return production_profile_options()
+
+
 @router.post("/projects", response_model=ProjectDetail, status_code=status.HTTP_201_CREATED)
 def projects_create(payload: ProjectCreate, session: Session = Depends(get_session)):
-    return create_project(session, payload)
+    try:
+        return create_project(session, payload)
+    except ProjectConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=str(exc),
+            headers={"X-Error-Code": exc.code},
+        ) from exc
 
 
 @router.get("/projects/{project_id}", response_model=ProjectDetail)

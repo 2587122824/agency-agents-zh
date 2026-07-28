@@ -24,9 +24,25 @@ export interface ProjectCreate {
   duration_seconds: number
   aspect_ratio: '9:16' | '16:9' | '1:1'
   audio_mode: 'off' | 'voiceover'
+  production_profile: {
+    video_motion_strategy: 'adaptive' | 'three_frame' | 'start_end'
+    keyframe_strategy: 'adaptive' | 'omni_reference'
+    enforcement: 'required'
+  }
 }
 
 export interface Project extends ProjectCreate {
+  production_profile: ProjectCreate['production_profile'] & {
+    id: string
+    version_number: number
+    contract_version: string
+    selected_by: string
+    required_frame_roles: string[]
+    contract_hash: string
+    is_active: boolean
+    created_by: string
+    created_at: string
+  }
   id: string
   row_version: number
   state_changed_at: string
@@ -44,6 +60,25 @@ export interface Project extends ProjectCreate {
   status: ProjectStatus
   created_at: string
   updated_at: string
+}
+
+export interface ProjectProductionProfileOptions {
+  contract_version: string
+  video_motion_strategies: Array<{
+    key: ProjectCreate['production_profile']['video_motion_strategy']
+    display_name: string
+    description: string
+    available: boolean
+    recommended: boolean
+  }>
+  keyframe_strategies: Array<{
+    key: ProjectCreate['production_profile']['keyframe_strategy']
+    display_name: string
+    description: string
+    available: boolean
+    recommended: boolean
+  }>
+  enforcement: 'required'
 }
 
 export interface Decision {
@@ -1370,6 +1405,10 @@ export interface ProjectControlSummary {
   duration_seconds: number
   aspect_ratio: string
   audio_mode: string
+  video_motion_strategy: string
+  keyframe_strategy: string
+  production_profile_version: number
+  production_profile_contract_hash: string
   persisted_status: ProjectStatus
   state_row_version: number
   state_changed_at: string

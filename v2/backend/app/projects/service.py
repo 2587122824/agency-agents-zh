@@ -3,9 +3,14 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from ..contracts.project import ArchiveProject, ProjectCreate, RestoreProject
-from ..db.models import Project, ProjectEvent, WorkItem, utc_now
+from ..db.models import Project, ProjectEvent, ProjectProductionProfileVersion, WorkItem, utc_now
 from ..creation.service import ensure_initial_requirement
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
+from ..production_profiles import (
+    PROFILE_CONTRACT_VERSION,
+    canonical_profile_contract,
+    profile_contract_hash,
+)
 from ..repositories import EventRepository, ProjectRepository, SqlAlchemyCommandRepository, SqlAlchemyEventRepository, SqlAlchemyProjectRepository
 
 
@@ -45,11 +50,60 @@ def create_project(
     events: EventRepository | None = None,
 ) -> Project:
     project_repository, event_repository = _repositories(session, projects, events)
-    project = Project(**payload.model_dump())
+    profile_selection = payload.production_profile
+    if profile_selection.video_motion_strategy == "start_end":
+        raise ProjectConflictError(
+            "当前没有经过真实验证的首尾帧工作流，不能创建首尾帧项目。",
+            "PROJECT_VIDEO_MOTION_STRATEGY_UNAVAILABLE",
+        )
+    if profile_selection.keyframe_strategy == "omni_reference":
+        raise ProjectConflictError(
+            "当前没有多参考输入合同和真实全能参考工作流，不能创建全能参考项目。",
+            "PROJECT_KEYFRAME_STRATEGY_UNAVAILABLE",
+        )
+    project_fields = payload.model_dump(exclude={"production_profile"})
+    project = Project(**project_fields)
     project_repository.add(project)
     project_repository.flush()
+    contract = canonical_profile_contract(
+        project_id=project.id,
+        version_number=1,
+        video_motion_strategy=profile_selection.video_motion_strategy,
+        keyframe_strategy=profile_selection.keyframe_strategy,
+        enforcement=profile_selection.enforcement,
+        selected_by="user",
+    )
+    profile = ProjectProductionProfileVersion(
+        project_id=project.id,
+        version_number=1,
+        contract_version=PROFILE_CONTRACT_VERSION,
+        video_motion_strategy=profile_selection.video_motion_strategy,
+        keyframe_strategy=profile_selection.keyframe_strategy,
+        enforcement=profile_selection.enforcement,
+        selected_by="user",
+        required_frame_roles=contract["required_frame_roles"],
+        contract_hash=profile_contract_hash(contract),
+        is_active=True,
+        created_by="local-user",
+    )
+    session.add(profile)
+    session.flush()
     ensure_initial_requirement(session, project)
-    event_repository.add(ProjectEvent(project_id=project.id, event_type="project.created.v1", aggregate_type="project", aggregate_id=project.id, actor_type="user", actor_id="local-user", message="项目草稿已创建"))
+    event_repository.add(ProjectEvent(
+        project_id=project.id,
+        event_type="project.created.v1",
+        aggregate_type="project",
+        aggregate_id=project.id,
+        actor_type="user",
+        actor_id="local-user",
+        message="项目草稿及不可变生产策略已创建",
+        data={
+            "production_profile_version_id": profile.id,
+            "production_profile_contract_hash": profile.contract_hash,
+            "video_motion_strategy": profile.video_motion_strategy,
+            "keyframe_strategy": profile.keyframe_strategy,
+        },
+    ))
     session.commit()
     return project_repository.get(project.id, with_workspace=True)  # type: ignore[return-value]
 

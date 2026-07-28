@@ -826,6 +826,8 @@ def _record_manual_content_review(
 
 
 def _qc_manifest(session: Session, project: Project, asset: Asset, node, selection: QCSelection) -> AgentInputManifest:
+    from ..production_profiles import profile_manifest
+
     repository = _quality(session)
     snapshot = repository.snapshot(asset.snapshot_id)
     plan = session.get(PlanVersion, snapshot.plan_version_id) if snapshot else None
@@ -856,8 +858,9 @@ def _qc_manifest(session: Session, project: Project, asset: Asset, node, selecti
         if field in shot
     ]
     payload = {
-        "contract_version": "qc-agent-input.v1",
+        "contract_version": "qc-agent-input.v2",
         "project_id": project.id,
+        "production_profile": profile_manifest(session, project.id),
         "asset": {
             "id": asset.id, "content_hash": asset.content_hash, "asset_type": asset.asset_type,
             "mime_type": asset.mime_type, "width": asset.width, "height": asset.height, "duration_ms": asset.duration_ms,

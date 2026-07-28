@@ -26,6 +26,7 @@ from ..repositories import (
 from .agent_gateway import ProductionPlannerGateway, ProductionPlannerResult, ProductionPlannerSelection
 from .contracts import DecideProductionPlanCandidate, GenerateProductionPlanCandidate, RetryProductionPlanner
 from .service import ProductionConflictError, ProductionNotFoundError, _shot_contract
+from ..production_profiles import profile_manifest
 
 
 def _repository(session: Session) -> ProductionRepository:
@@ -114,6 +115,7 @@ def _input_sources(workflow: WorkflowSlotVersion | None) -> list[str]:
 
 
 def _manifest_payload(
+    session: Session,
     repository: ProductionRepository,
     project: Project,
     plan,
@@ -121,9 +123,27 @@ def _manifest_payload(
     workflows: list[WorkflowSlotVersion],
 ) -> dict[str, Any]:
     shots = repository.plan_shots(plan.id)
+    production_profile = profile_manifest(session, project.id)
+    if (
+        production_profile["video_motion_strategy"] == "three_frame"
+        and production_profile["enforcement"] == "required"
+    ):
+        invalid = [
+            shot.shot_code
+            for shot in shots
+            if not (shot.generation_requirements or {}).get("multi_frame_required")
+            or not isinstance(shot.guide_frame_prompts, dict)
+            or set(shot.guide_frame_prompts) != {"start", "middle", "end"}
+        ]
+        if invalid:
+            raise ProductionConflictError(
+                "PROJECT_PRODUCTION_PROFILE_VIOLATED",
+                f"项目已锁定首中尾三帧生产模式，以下镜头缺少完整三帧合同：{invalid}。",
+            )
     return {
-        "contract_version": "production-planner-input.v1",
+        "contract_version": "production-planner-input.v2",
         "project_id": project.id,
+        "production_profile": production_profile,
         "plan": {
             "id": plan.id,
             "contract_schema_version": plan.contract_schema_version,
@@ -437,7 +457,7 @@ def generate_production_plan_candidate(session: Session, project: Project, paylo
             "PRODUCTION_PLAN_NO_FEASIBLE_ROUTE",
             f"当前制作配置无法满足这些镜头的能力要求：{shot_codes}。冲突：{cause_codes}。请先调整分镜能力要求或发布具备对应能力的工作流。",
         )
-    manifest_payload = _manifest_payload(repository, project, plan, video_spec, workflows)
+    manifest_payload = _manifest_payload(session, repository, project, plan, video_spec, workflows)
     serialized = json.dumps(manifest_payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     manifest = AgentInputManifest(
         project_id=project.id,

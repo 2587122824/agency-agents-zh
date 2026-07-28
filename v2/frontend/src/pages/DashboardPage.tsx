@@ -9,7 +9,18 @@ import { PageHeader } from '../components/PageHeader'
 import { projectStatusLabel } from '../presentation/projectFacts'
 import styles from './DashboardPage.module.css'
 
-const emptyForm: ProjectCreate = { title: '', core_topic: '', duration_seconds: 45, aspect_ratio: '9:16', audio_mode: 'off' }
+type ProjectDraft = Omit<ProjectCreate, 'production_profile'> & {
+  production_profile: ProjectCreate['production_profile'] | null
+}
+
+const emptyForm: ProjectDraft = {
+  title: '',
+  core_topic: '',
+  duration_seconds: 45,
+  aspect_ratio: '9:16',
+  audio_mode: 'off',
+  production_profile: null,
+}
 
 function total(values: Record<string, number>) {
   return Object.values(values).reduce((sum, value) => sum + value, 0)
@@ -19,10 +30,11 @@ export function DashboardPage() {
   const [showForm, setShowForm] = useState(false)
   const [showArchived, setShowArchived] = useState(false)
   const [archiveTarget, setArchiveTarget] = useState<ProjectControlSummary | null>(null)
-  const [form, setForm] = useState<ProjectCreate>(emptyForm)
+  const [form, setForm] = useState<ProjectDraft>(emptyForm)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const health = useQuery({ queryKey: ['health'], queryFn: api.health })
+  const profileOptions = useQuery({ queryKey: ['project-production-profile-options'], queryFn: api.projectProductionProfileOptions })
   const controls = useQuery({ queryKey: ['project-controls', 'all'], queryFn: () => api.projectControls(true), refetchInterval: 5000 })
   const create = useMutation({
     mutationFn: api.createProject,
@@ -44,7 +56,8 @@ export function DashboardPage() {
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    create.mutate(form)
+    if (!form.production_profile) return
+    create.mutate({ ...form, production_profile: form.production_profile })
   }
 
   const allProjects = controls.data ?? []
@@ -75,7 +88,47 @@ export function DashboardPage() {
         <label>时长（秒）<input required type="number" min="5" max="3600" value={form.duration_seconds} onChange={event => setForm({ ...form, duration_seconds: Number(event.target.value) })} /></label>
         <label>画幅<select value={form.aspect_ratio} onChange={event => setForm({ ...form, aspect_ratio: event.target.value as ProjectCreate['aspect_ratio'] })}><option>9:16</option><option>16:9</option><option>1:1</option></select></label>
         <label>音频模式<select value={form.audio_mode} onChange={event => setForm({ ...form, audio_mode: event.target.value as ProjectCreate['audio_mode'] })}><option value="off">关闭</option><option value="voiceover">旁白</option></select></label>
-        <div className={styles.formActions}>{create.error && <span>{create.error.message}</span>}<button className="primaryButton" disabled={create.isPending}>{create.isPending ? '创建中...' : '创建需求草稿'}<ArrowRight size={14} /></button></div>
+        <fieldset className={styles.profileFieldset}>
+          <legend>视频运动控制</legend>
+          <p>该选择会在首次智能体调用前冻结，并约束内容策划、分镜、制作规划、审核和生产编译。</p>
+          <div className={styles.profileOptions}>
+            {profileOptions.data?.video_motion_strategies.map(option => <button
+              key={option.key}
+              type="button"
+              disabled={!option.available}
+              data-selected={form.production_profile?.video_motion_strategy === option.key}
+              onClick={() => option.available && setForm({
+                ...form,
+                production_profile: {
+                  video_motion_strategy: option.key,
+                  keyframe_strategy: form.production_profile?.keyframe_strategy ?? 'adaptive',
+                  enforcement: 'required',
+                },
+              })}
+            ><span>{option.display_name}{option.recommended && <b>推荐</b>}</span><small>{option.description}</small></button>)}
+          </div>
+        </fieldset>
+        <fieldset className={styles.profileFieldset}>
+          <legend>关键帧参考方式</legend>
+          <p>参考方式决定三张控制图如何使用人物、风格或未来的多参考输入。</p>
+          <div className={styles.profileOptions}>
+            {profileOptions.data?.keyframe_strategies.map(option => <button
+              key={option.key}
+              type="button"
+              disabled={!option.available}
+              data-selected={form.production_profile?.keyframe_strategy === option.key}
+              onClick={() => option.available && setForm({
+                ...form,
+                production_profile: {
+                  video_motion_strategy: form.production_profile?.video_motion_strategy ?? 'three_frame',
+                  keyframe_strategy: option.key,
+                  enforcement: 'required',
+                },
+              })}
+            ><span>{option.display_name}{option.recommended && <b>推荐</b>}</span><small>{option.description}</small></button>)}
+          </div>
+        </fieldset>
+        <div className={styles.formActions}>{profileOptions.error && <span>{profileOptions.error.message}</span>}{create.error && <span>{create.error.message}</span>}<button className="primaryButton" disabled={create.isPending || !form.production_profile || profileOptions.isPending}>{create.isPending ? '创建中...' : '确认生产模式并创建项目'}<ArrowRight size={14} /></button></div>
       </form>}
 
       <section className={styles.projects}>
@@ -89,7 +142,7 @@ export function DashboardPage() {
           const activeWork = (project.work_counts.queued ?? 0) + (project.work_counts.in_progress ?? 0)
           const archiveDisabled = !project.archived_at && activeWork > 0
           return <article key={project.project_id} data-archived={Boolean(project.archived_at)}><Link className={styles.projectLink} to={`/projects/${project.project_id}/control`}>
-            <div className={styles.identity}><i data-stage={project.evaluated_stage}><FileVideo2 size={17} /></i><div><strong>{project.title}</strong><p>{project.core_topic}</p><small>{project.duration_seconds}s · {project.aspect_ratio} · 音频{project.audio_mode === 'off' ? '关闭' : '旁白'}</small></div></div>
+            <div className={styles.identity}><i data-stage={project.evaluated_stage}><FileVideo2 size={17} /></i><div><strong>{project.title}</strong><p>{project.core_topic}</p><small>{project.duration_seconds}s · {project.aspect_ratio} · 音频{project.audio_mode === 'off' ? '关闭' : '旁白'} · {project.video_motion_strategy === 'three_frame' ? '首中尾三帧' : '按镜头匹配'}</small></div></div>
             <div className={styles.stage}><span>当前阶段</span><strong>{project.stage_label}</strong><small>项目状态：{projectStatusLabel(project.persisted_status)}</small></div>
             <div className={styles.progress}><span>执行进度</span><strong>{workTotal ? `${completed} / ${workTotal}` : '尚未执行'}</strong><small>方案 {project.active_plan_version ? `v${project.active_plan_version}` : '--'} · 快照 {project.active_snapshot_number ? `#${project.active_snapshot_number}` : '--'}</small></div>
             <div className={styles.blocker} data-alert={project.blocker_count > 0}>{project.blocker_count > 0 ? <AlertTriangle size={15} /> : <CircleDot size={15} />}<div><span>阻断</span><strong>{project.blocker_count}</strong></div></div>

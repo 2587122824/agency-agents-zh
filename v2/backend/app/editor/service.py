@@ -329,6 +329,8 @@ def create_timeline_candidate(
 
 
 def _editor_manifest(session: Session, project: Project, snapshot: ProductionSnapshot) -> dict[str, Any]:
+    from ..production_profiles import profile_manifest
+
     repository = _editor(session)
     plan = repository.active_plan(project.id)
     if not plan or plan.id != snapshot.plan_version_id:
@@ -408,8 +410,9 @@ def _editor_manifest(session: Session, project: Project, snapshot: ProductionSna
             "qc_report_ids": qc_ids,
         })
     return {
-        "contract_version": "editor-assistant-input.v1",
+        "contract_version": "editor-assistant-input.v2",
         "project_id": project.id,
+        "production_profile": profile_manifest(session, project.id),
         "snapshot_id": snapshot.id,
         "plan_version_id": plan.id,
         "shot_plan_version": plan.contract_schema_version,

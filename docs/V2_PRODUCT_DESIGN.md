@@ -2,7 +2,7 @@
 
 > 状态：设计基线
 > 版本：0.4
-> 更新日期：2026-07-26
+> 更新日期：2026-07-28
 > 产品原型：<http://127.0.0.1:8765/prototype-v2/>
 > V2 应用骨架：<http://127.0.0.1:8766/>
 > 系统架构：[V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)
@@ -1274,7 +1274,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 ## 40. 内容策划智能体实现
 
-内容策划使用 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6`。输入清单不包含会话消息，只冻结活动需求版本、已解决 Decision、活动实体版本、时长/画幅交付约束、音频策略、可空平台和可空模板版本。模型配置使用独立 `planner` 分工，不能复用 `creative` 分工作为隐式路由。开发环境直接采用当前合同，不为旧版策划输出增加运行时兼容分支；测试数据需要时显式重建。
+内容策划使用 `content-planner-input.v3 / creative-brief-candidate.v4 / content-planner-prompt.v7`。输入清单不包含会话消息，只冻结活动需求版本、已解决 Decision、活动实体版本、项目生产策略、时长/画幅交付约束、音频策略、可空平台和可空模板版本。模型配置使用独立 `planner` 分工，不能复用 `creative` 分工作为隐式路由。开发环境直接采用当前合同，不为旧版策划输出增加运行时兼容分支；测试数据需要时显式重建。
 
 输出模型是 Prompt 结构的单一权威来源：运行时将 `ContentPlannerOutput` 生成的 JSON Schema 原样附入 Prompt。脚本段按 `kind` 使用互斥联合类型，非法字段组合无法进入候选；跨对象规则仍由确定性验证器执行。响应内容缺失、JSON 无效、Schema 不符和项目合同冲突使用不同错误码，并保存原始响应证据、结束原因、请求 ID、Token 与解析位置。相同合同精确重跑复用原 Manifest；合同升级后的重新生成必须由用户明确确认费用，创建新的 Manifest 和 AgentRun。两者均不自动重试、修补输出或切换模型。
 
@@ -1288,7 +1288,7 @@ POST /api/v1/projects/{project_id}/delivery-attempts/{attempt_id}:verify
 
 ## 41. 分镜导演智能体实现
 
-分镜导演使用 `director-input.v2 / shot-plan.v4 / director-prompt.v6` 和独立 `director` 模型分工。输入只冻结已确认需求、唯一已接受内容方案、精确实体版本与来源附件事实、已解决决策、交付约束和音频策略；不读取自由会话，不读取 Provider、工作流、NodeInfoList、价格或生产任务。唯一 Prompt 必须完整列出与输出 Schema 相同的连续组格式和全部枚举，不能依赖模型猜测“合同枚举”。每个镜头必须精确引用所属叙事节拍与至少一个脚本段，最终方案必须覆盖 Brief 的全部脚本段。
+分镜导演使用 `director-input.v3 / shot-plan.v4 / director-prompt.v7` 和独立 `director` 模型分工。输入只冻结已确认需求、唯一已接受内容方案、精确实体版本与来源附件事实、已解决决策、项目生产策略、交付约束和音频策略；不读取自由会话，不读取 Provider、工作流、NodeInfoList、价格或生产任务。唯一 Prompt 必须完整列出与输出 Schema 相同的连续组格式和全部枚举，不能依赖模型猜测“合同枚举”。每个镜头必须精确引用所属叙事节拍与至少一个脚本段，最终方案必须覆盖 Brief 的全部脚本段。项目锁定首中尾三帧时，每个镜头都必须声明 `multi_frame_required=true` 并给出 start/middle/end 三个连续状态；后端确定性拒绝单画面、首尾帧或纯文本视频要求。
 
 每个镜头必须结构化声明 `shot_purpose`、`framing`、`camera_angle`、`camera_motion`、`subject_motion`、`continuity_relation`、唯一主动作、实体版本、精确人脸主体、精确画面文字、`new_information` 和 `generation_requirements`。`face_visibility=required` 必须列出已声明人物实体；`text_policy=required` 必须给出准确文字，`forbidden` 时必须为 `null`；场景与服装变化必须显式声明对应关系。后端只验证结构字段，不解析提示词语义或关键词，不猜测和修正枚举。
 
@@ -1312,7 +1312,7 @@ V1 中缺少工作流 ID 或 NodeInfoList 的多人物、首尾帧、真人转�
 
 ## 43. 制作规划智能体实现
 
-制作规划智能体使用独立 `production_planner` 模型分工及 `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v2`。它只在用户选定已发布制作配置和画面规格后运行，读取当前已确认 `shot-plan.v4` 分镜及该配置中已发布图片/视频工作流的精确能力合同。它不选择配置、Provider、计费方案、TTS 路线，不读取价格，也不创建生产任务。
+制作规划智能体使用独立 `production_planner` 模型分工及 `production-planner-input.v2 / production-plan-candidate.v1 / production-planner-prompt.v3`。它只在用户选定已发布制作配置和画面规格后运行，读取当前已确认 `shot-plan.v4` 分镜、项目生产策略及该配置中已发布图片/视频工作流的精确能力合同。它不能更改用户在项目创建时已选的生产策略；首中尾三帧项目只允许选择 `multi_frame_video_generation`。它不选择配置、Provider、计费方案、TTS 路线，不读取价格，也不创建生产任务。
 
 模型逐镜头返回精确关键帧槽位、视频槽位、必需输入来源和普通用户可读理由。调用模型前，后端先确定性证明每个镜头在当前已发布配置中至少存在一个合法图片/视频工作流组合；任一镜头无解时直接列出镜头和能力冲突，不创建 Manifest、AgentRun 或模型费用。通过预检后，模型结果仍必须满足镜头集合与顺序、槽位 ID、操作类型、规格支持、NodeInfoList 必需输入和 `generation_requirements`。未知、停用、不支持规格、缺少参考图、缺少多帧或生成素材像素内精确文字能力均使整次运行失败；不接受部分候选，不自动替换或退化。
 
@@ -1322,10 +1322,24 @@ V1 中缺少工作流 ID 或 NodeInfoList 的多人物、首尾帧、真人转�
 
 ## 44. 剪辑助理智能体实现
 
-剪辑助理使用独立 `editor` 模型分工及 `editor-assistant-input.v1 / timeline-candidate.v1 / editor-assistant-prompt.v1`。输入清单冻结活动方案、活动生产快照、快照内已批准视频素材、这些素材的正式 QC 报告、交付规格和音频策略；不读取未批准素材、历史快照素材、自由聊天、Provider 路由或价格，也不创建生产任务。
+剪辑助理使用独立 `editor` 模型分工及 `editor-assistant-input.v2 / timeline-candidate.v1 / editor-assistant-prompt.v2`。输入清单冻结活动方案、活动生产快照、项目生产策略、快照内已批准视频素材、这些素材的正式 QC 报告、交付规格和音频策略；生产策略只作为素材来源依据，不能被改写，也不能据此编造素材或生产任务。它不读取未批准素材、历史快照素材、自由聊天、Provider 路由或价格，也不创建生产任务。
 
 模型必须逐条返回精确素材 ID、分镜编号、源素材区间、时间线区间、选择理由和 QC 报告 ID。后端验证素材与快照归属、批准状态、分镜归属、QC 引用、源区间、时间线连续性和交付总时长。音频关闭时不得返回音频 cue。素材不足只能声明结构化空位及受影响区间，不能自行复用、循环、变速、补帧、替换或编造素材；存在空位的候选不能确认。
 
 通过验证的模型输出创建现有 `Timeline` 候选，不另建重复时间线模型；选择理由、QC 证据和智能体运行引用保存在 `TimelineItem.transform.editor_assistant`。智能体运行成功只表示候选已生成，项目继续停留在剪辑阶段，必须经过用户修订和显式确认后才能进入交付。失败只记录本次运行；用户确认模型调用后可按原 Manifest 和配置精确重跑，不自动重试、不修复输出、不切换模型，也不触发渲染或供应商调用。
 
 剪辑台生成或选择已有候选后必须立即把该版本加载到轨道并进入只读审核，不得显示空白编辑草稿让用户误以为生成结果丢失。用户选中片段时直接看到普通用户可读的素材区间、成片区间、对应分镜、选用理由、QC 报告引用或空位原因；技术 ID 收进可展开证据。已有版本只有通过“创建修订”才进入可编辑状态，查看版本、切换版本和生成候选均不自动保存、校验或确认。
+
+## 45. 项目创建时冻结生产策略
+
+用户必须在创建项目、首次调用任何智能体之前选择项目生产策略。该合同为不可变 `project-production-profile.v1`，将“视频如何控制运动”和“关键帧如何使用参考”拆成两个独立维度：
+
+- `video_motion_strategy`：当前开放 `three_frame`（首中尾三帧，推荐）和 `adaptive`（按镜头匹配）；`start_end` 因没有经过真实验证的首尾帧工作流而显示但禁用。
+- `keyframe_strategy`：当前只开放 `adaptive`；`omni_reference` 因尚无 V2 多参考输入合同、供应商节点绑定和真实成功证据而显示但禁用。
+- `enforcement=required`：生产策略是项目边界，不是智能体建议。创建后不得由内容策划、分镜导演、制作规划或工作流选择反向改写。
+
+每个版本保存选择人、版本号、必需帧角色、规范化合同 hash 与创建时间。迁移 `20260728_39` 将历史项目显式回填为 `adaptive/adaptive`，`selected_by=migration`；运行时代码不根据记录缺失猜测旧默认值。新项目缺少 `production_profile` 时 API 直接拒绝，不静默采用推荐项。
+
+冻结策略进入六个智能体的 `AgentInputManifest`，并进入生产影响分析、快照与控制台投影。首中尾模式采用多层确定性强制：内容策划必须设计成可拆分的单动作短镜头；分镜导演每个镜头必须给出 start/middle/end 三个连续状态并声明多帧；制作规划只能选择具备 `multi_frame` 的 `multi_frame_video_generation`；影响分析和生产编译再次验证三帧父节点与依赖输入。任一层不满足都明确阻断，不降级为首帧、首尾帧或纯文本视频，也不更换工作流。
+
+已发布配置 v57 在 v56 基础上只升级 5 个已启用文本智能体的输入与 Prompt 合同：创作制片人 v6/v16、内容策划 v3/v7、分镜导演 v3/v7、制作规划 v2/v3、剪辑助理 v2/v2。质量审核合同升级为 v2/v2，但当前仍未发布视觉模型。视觉工作流、CosyVoice、Provider、NodeInfoList、存储和价格合同保持不变。

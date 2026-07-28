@@ -90,6 +90,11 @@ def test_project_contract_and_explicit_confirmation(client: TestClient) -> None:
             "duration_seconds": 15,
             "aspect_ratio": "9:16",
             "audio_mode": "off",
+            "production_profile": {
+                "video_motion_strategy": "adaptive",
+                "keyframe_strategy": "adaptive",
+                "enforcement": "required",
+            },
         },
     )
     assert response.status_code == 201
@@ -136,6 +141,54 @@ def test_project_contract_and_explicit_confirmation(client: TestClient) -> None:
     assert processed.json()["status"] == "review_required"
     assert processed.json()["state_trigger"] == "legacy_validation_completed"
     assert processed.json()["work_items"][0]["status"] == "completed"
+
+
+def test_project_creation_freezes_explicit_three_frame_profile(client: TestClient) -> None:
+    options = client.get("/api/v1/project-production-profile-options")
+    assert options.status_code == 200
+    motion = {item["key"]: item for item in options.json()["video_motion_strategies"]}
+    references = {item["key"]: item for item in options.json()["keyframe_strategies"]}
+    assert motion["three_frame"]["available"] is True
+    assert motion["start_end"]["available"] is False
+    assert references["omni_reference"]["available"] is False
+
+    response = client.post("/api/v1/projects", json={
+        "title": "Three frame profile",
+        "core_topic": "用首中尾三帧制作训练短片",
+        "duration_seconds": 15,
+        "aspect_ratio": "9:16",
+        "audio_mode": "off",
+        "production_profile": {
+            "video_motion_strategy": "three_frame",
+            "keyframe_strategy": "adaptive",
+            "enforcement": "required",
+        },
+    })
+    assert response.status_code == 201
+    project = response.json()
+    profile = project["production_profile"]
+    assert profile["video_motion_strategy"] == "three_frame"
+    assert profile["required_frame_roles"] == ["start_frame", "middle_frame", "end_frame"]
+    assert len(profile["contract_hash"]) == 64
+
+    control = client.get(f"/api/v1/projects/{project['id']}/control-center").json()
+    assert control["video_motion_strategy"] == "three_frame"
+    assert control["production_profile_contract_hash"] == profile["contract_hash"]
+
+    unavailable = client.post("/api/v1/projects", json={
+        "title": "Unavailable profile",
+        "core_topic": "不能静默使用不存在的首尾帧工作流",
+        "duration_seconds": 15,
+        "aspect_ratio": "9:16",
+        "audio_mode": "off",
+        "production_profile": {
+            "video_motion_strategy": "start_end",
+            "keyframe_strategy": "adaptive",
+            "enforcement": "required",
+        },
+    })
+    assert unavailable.status_code == 409
+    assert unavailable.headers["x-error-code"] == "PROJECT_VIDEO_MOTION_STRATEGY_UNAVAILABLE"
 
 
 def test_legacy_validation_with_invalid_project_state_blocks_item_without_stopping_worker(client: TestClient) -> None:
@@ -312,6 +365,11 @@ def create_creation_project(client: TestClient) -> dict:
             "duration_seconds": 30,
             "aspect_ratio": "9:16",
             "audio_mode": "off",
+            "production_profile": {
+                "video_motion_strategy": "adaptive",
+                "keyframe_strategy": "adaptive",
+                "enforcement": "required",
+            },
         },
     )
     assert response.status_code == 201
@@ -1316,6 +1374,11 @@ def test_completeness_evaluator_does_not_block_optional_fields() -> None:
         "duration_seconds": 30,
         "aspect_ratio": "9:16",
         "audio_mode": "off",
+        "production_profile": {
+            "video_motion_strategy": "adaptive",
+            "keyframe_strategy": "adaptive",
+            "enforcement": "required",
+        },
     }
     sources = {key: {"type": "user"} for key in fields}
     assert evaluate_requirement(fields, sources) == []
@@ -1617,7 +1680,7 @@ def test_content_planner_contract_upgrade_requires_explicit_regeneration_with_ne
     assert regenerated.status_code == 201
     recovered = client.get(f"/api/v1/projects/{project['id']}/planning-center").json()
     assert recovered["next_action"]["code"] == "REVIEW_CREATIVE_BRIEF"
-    assert recovered["latest_planner_run"]["prompt_contract_version"] == "content-planner-prompt.v6"
+    assert recovered["latest_planner_run"]["prompt_contract_version"] == "content-planner-prompt.v7"
     assert recovered["latest_planner_run"]["output_schema_version"] == "creative-brief-candidate.v4"
     assert recovered["latest_planner_run"]["input_manifest_id"] != failed_run["input_manifest_id"]
     with SessionLocal() as session:
@@ -6135,6 +6198,11 @@ def test_contact_sheet_does_not_substitute_a_snapshot_or_create_records(client: 
         "duration_seconds": 15,
         "aspect_ratio": "9:16",
         "audio_mode": "off",
+        "production_profile": {
+            "video_motion_strategy": "adaptive",
+            "keyframe_strategy": "adaptive",
+            "enforcement": "required",
+        },
     }).json()
     with SessionLocal() as session:
         before = (

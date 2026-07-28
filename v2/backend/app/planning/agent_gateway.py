@@ -30,9 +30,9 @@ class NarrativeBeat(BaseModel):
     target_duration_ms: int = Field(ge=500, le=3_600_000)
 
 
-CONTENT_PLANNER_INPUT_CONTRACT_VERSION = "content-planner-input.v2"
+CONTENT_PLANNER_INPUT_CONTRACT_VERSION = "content-planner-input.v3"
 CONTENT_PLANNER_OUTPUT_SCHEMA_VERSION = "creative-brief-candidate.v4"
-CONTENT_PLANNER_PROMPT_CONTRACT_VERSION = "content-planner-prompt.v6"
+CONTENT_PLANNER_PROMPT_CONTRACT_VERSION = "content-planner-prompt.v7"
 
 
 class ScriptSegmentBase(BaseModel):
@@ -235,6 +235,7 @@ _SYSTEM_PROMPT_RULES = """你是片场 V2 的内容策划智能体。你根据�
 12. 不得输出 Markdown 代码块、解释文字或 JSON 之外的内容。
 13. 输入存在 revision_request 时，source_brief 是待调整的冻结原方案，instruction 是用户本轮唯一修改意见。你必须在继续满足已确认需求与全部确定性合同的前提下修改原方案；instruction 中逐项确认的答案可用于解决对应 open_questions，但不得改动需求版本、音频策略、时长、画幅、实体白名单或生产路由。输入不存在 revision_request 时按首次策划处理。
 14. 保持方案紧凑：每个叙事节拍通常使用 1 到 4 个脚本段，只保留会改变内容结构的策划拓展和待确认项。不得通过重复摘要、重复文字段或同义拓展填充输出。
+15. production_profile 是用户在项目创建前确认的不可变生产边界。video_motion_strategy=three_frame 且 enforcement=required 时，节拍与脚本必须能继续拆成短镜头、每镜头一个主动作，并允许分镜导演为动作开始、关键过程和结束分别定义画面状态；不得设计依赖一个长镜头连续完成多个不可分动作的内容。你仍不生成镜头或选择工作流。
 """
 
 

@@ -20,6 +20,10 @@ class ProjectControlSummary(BaseModel):
     duration_seconds: int
     aspect_ratio: str
     audio_mode: str
+    video_motion_strategy: str
+    keyframe_strategy: str
+    production_profile_version: int
+    production_profile_contract_hash: str
     persisted_status: str
     state_row_version: int
     state_changed_at: datetime

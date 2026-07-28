@@ -36,8 +36,8 @@ def selection() -> ContentPlannerSelection:
         base_url="https://api.example.test/v1",
         api_key="secret",
         timeout_seconds=30,
-        input_contract_version="content-planner-input.v2",
-        prompt_contract_version="content-planner-prompt.v6",
+        input_contract_version="content-planner-input.v3",
+        prompt_contract_version="content-planner-prompt.v7",
         output_schema_version="creative-brief-candidate.v4",
         max_output_tokens=2000,
         sampling={"temperature": 0.2, "unsupported": "ignored"},
@@ -46,8 +46,13 @@ def selection() -> ContentPlannerSelection:
 
 def manifest(*, audio_policy: str = "off", platform: str | None = None) -> dict:
     return {
-        "contract_version": "content-planner-input.v2",
+        "contract_version": "content-planner-input.v3",
         "project_id": "project_1",
+        "production_profile": {
+            "video_motion_strategy": "adaptive",
+            "keyframe_strategy": "adaptive",
+            "enforcement": "required",
+        },
         "requirement_version": {
             "id": "requirement_1",
             "fields": {"core_topic": "居家健身", "duration_seconds": 30, "aspect_ratio": "9:16", "audio_mode": audio_policy},

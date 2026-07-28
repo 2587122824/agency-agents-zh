@@ -51,6 +51,42 @@ class Project(Base):
     messages: Mapped[list[Message]] = relationship(back_populates="project", cascade="all, delete-orphan")
     requirement_versions: Mapped[list[RequirementVersion]] = relationship(back_populates="project", cascade="all, delete-orphan")
     requirement_candidates: Mapped[list[RequirementCandidate]] = relationship(back_populates="project", cascade="all, delete-orphan")
+    production_profile_versions: Mapped[list[ProjectProductionProfileVersion]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def production_profile(self) -> ProjectProductionProfileVersion | None:
+        active = [item for item in self.production_profile_versions if item.is_active]
+        return max(active, key=lambda item: item.version_number) if active else None
+
+
+class ProjectProductionProfileVersion(Base):
+    __tablename__ = "project_production_profile_versions"
+    __table_args__ = (
+        UniqueConstraint("project_id", "version_number"),
+    )
+
+    id: Mapped[str] = mapped_column(
+        String(48),
+        primary_key=True,
+        default=lambda: new_id("production_profile"),
+    )
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), index=True)
+    version_number: Mapped[int] = mapped_column(Integer)
+    contract_version: Mapped[str] = mapped_column(String(64))
+    video_motion_strategy: Mapped[str] = mapped_column(String(32))
+    keyframe_strategy: Mapped[str] = mapped_column(String(32))
+    enforcement: Mapped[str] = mapped_column(String(24))
+    selected_by: Mapped[str] = mapped_column(String(24))
+    required_frame_roles: Mapped[list] = mapped_column(JSON, default=list)
+    contract_hash: Mapped[str] = mapped_column(String(64), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    project: Mapped[Project] = relationship(back_populates="production_profile_versions")
 
 
 class Decision(Base):

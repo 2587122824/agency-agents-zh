@@ -34,6 +34,7 @@ from ..db.models import (
     ModelConfigVersion,
     OutboxMessage,
     Project,
+    ProjectProductionProfileVersion,
     ProjectEvent,
     PricingCatalogVersion,
     PricingRule,
@@ -92,7 +93,7 @@ class SqlAlchemyProjectRepository:
         self.session = session
 
     def list_recent(self, *, include_archived: bool = False) -> list[Project]:
-        statement = select(Project)
+        statement = select(Project).options(selectinload(Project.production_profile_versions))
         if not include_archived:
             statement = statement.where(Project.archived_at.is_(None))
         return list(self.session.scalars(statement.order_by(Project.updated_at.desc())))
@@ -100,7 +101,11 @@ class SqlAlchemyProjectRepository:
     def get(self, project_id: str, *, with_workspace: bool = False) -> Project | None:
         statement = select(Project).where(Project.id == project_id)
         if with_workspace:
-            statement = statement.options(selectinload(Project.decisions), selectinload(Project.work_items))
+            statement = statement.options(
+                selectinload(Project.decisions),
+                selectinload(Project.work_items),
+                selectinload(Project.production_profile_versions),
+            )
         return self.session.scalar(statement)
 
     def add(self, project: Project) -> None:

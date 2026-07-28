@@ -2,7 +2,7 @@
 
 > 状态：设计基线
 > 版本：0.3
-> 更新日期：2026-07-20
+> 更新日期：2026-07-28
 > 上位文档：[V2 产品设计文档](./V2_PRODUCT_DESIGN.md)
 > 系统架构：[V2 系统架构](./V2_SYSTEM_ARCHITECTURE.md)
 
@@ -368,10 +368,10 @@ V2 使用六个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.2 创作制片人
 
-创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v5`、`creative-dialogue-output.v6` 和 `creative-dialogue-prompt.v15`：
+创作制片人是用户在创作中心直接对话的唯一智能体入口。它负责自然交流和需求形成，不承担脚本策划与分镜制作。当前合同采用 `creative-dialogue-input.v6`、`creative-dialogue-output.v6` 和 `creative-dialogue-prompt.v16`：
 
 ```text
-输入：runtime_context.turn_intent + project_context.active_requirement + project_context.current_requirement_draft? + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
+输入：runtime_context.turn_intent + project_context.production_profile + project_context.active_requirement + project_context.current_requirement_draft? + 当前 ConversationSession 的用户/助手消息 + proposal_history[] + selection_scope?
 输出：assistant_reply + creative_diagnosis + suggestion_sets[] + proposal_selections[] + explicit_updates[] + clarifying_question?
 ```
 
@@ -382,6 +382,7 @@ V2 使用六个有明确分工的智能体和一个确定性生产编译器。�
 - `selection_scope` 只在最新用户消息通过 `reply_to` 精确回复一个仍有未选择建议组的助手提案时存在；它是该轮唯一包含可提交提案、建议组和选项 ID 的作用域。
 - `proposal_selections` 只能引用 `selection_scope` 中真实存在的 ID；后端从原提案读取冻结更新，模型不得重写选项值。`selection_scope` 为空时必须返回空选择。
 - `explicit_updates` 只允许引用用户消息作为来源，并由后端字段目录校验。
+- `production_profile` 是用户在项目创建前确认的不可变边界，不能重新询问、建议修改或写入 `explicit_updates`。首中尾三帧模式下，内容方向必须能拆成短镜头、单一主动作和三个连续状态。
 - `creative_constraints` 是可选的用户事实，只能在用户明确表达限制时作为字符串列表登记；它不得成为待补齐缺口、诊断焦点或建议组选项，缺失不影响需求收口。
 - 每轮最多提出一个真正阻断的澄清问题；可提供选项时直接提供选项。
 - 首次进入时执行一次持久化 `initial_guidance`，只给一组 2–3 个整体创作方向、不形成字段更新；刷新不重复调用，失败不自动重试。每个冻结方向值必须等于用户看到的短标签，详细说明不得夹带进草稿；方向不得越界描述声音、字幕、镜头、剪辑、转场、特效或生产方式。
@@ -414,10 +415,11 @@ V2 使用六个有明确分工的智能体和一个确定性生产编译器。�
 
 ### 9.3 内容策划
 
-内容策划在需求版本确认后运行，不读取自由聊天记录。输入合同 `content-planner-input.v2` 至少冻结：
+内容策划在需求版本确认后运行，不读取自由聊天记录。输入合同 `content-planner-input.v3` 至少冻结：
 
 ```text
 requirement_version_id
+production_profile
 confirmed_decision_ids[]
 entity_version_ids[]
 delivery_constraints
@@ -488,7 +490,7 @@ template_version_id nullable
 - 待确认问题必须从 `QUESTION_01` 连续编号，每个问题提供 2–3 个从 `OPTION_01` 连续编号、互斥且答案不同的选项。用户可以点击选项或填写自定义答案；全部回答后明确调用一次 planner 形成新的 Brief 修订版，不能直接把答案写入正式需求或接受旧方案。
 - 后端不扫描关键词判断隐藏事实，不自动重写、修复或补齐模型输出，也不增加第二次模型评审。开发环境只支持当前 v3 输出合同，不保留旧版运行时兼容入口。
 
-当前实现已经按 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。`script_segments` 是按 `kind` 判别的互斥联合：`visual_only` 不存在内容字段，`on_screen_text` 只允许精确画面文字，`voiceover / dialogue` 只允许口播文字；需要组合表达时拆为两个连续段。Prompt 直接附带由 Pydantic 输出模型生成的权威 JSON Schema，不再手工复制字段形状；跨对象时长、代码连续性、引用白名单、待确认事实、音频和平台约束继续由确定性代码验证。
+当前实现已经按 `content-planner-input.v3 / creative-brief-candidate.v4 / content-planner-prompt.v7` 接入独立 `planner` 模型配置和真实 OpenAI-compatible 网关。输入同时冻结不可变项目生产策略；首中尾三帧项目的节拍和脚本必须能拆成短镜头、单一主动作与三个连续状态。`script_segments` 是按 `kind` 判别的互斥联合：`visual_only` 不存在内容字段，`on_screen_text` 只允许精确画面文字，`voiceover / dialogue` 只允许口播文字；需要组合表达时拆为两个连续段。Prompt 直接附带由 Pydantic 输出模型生成的权威 JSON Schema，不再手工复制字段形状；跨对象时长、代码连续性、引用白名单、待确认事实、音频和平台约束继续由确定性代码验证。
 
 每个活动需求版本只自动尝试一次。失败分类为响应内容缺失、JSON 语法错误、Schema 错误或项目合同冲突，并持久化可用的原始文本/Provider 响应、`finish_reason`、请求 ID、Token 和解析位置。系统不剥离 Markdown、不截取 JSON、不改字段、不自动重试。相同配置只能在用户确认费用后精确复用原 `AgentInputManifest`；当前 Prompt 或输出 Schema 已升级时，页面明确提供“使用当前合同重新生成”，重新冻结当前权威输入并创建新 Manifest，旧失败记录不覆盖。验证成功只创建 `CreativeBriefCandidate`，用户接受后才允许分镜导演读取。内容策划不选择 Provider、工作流、价格或生产路由。
 
@@ -502,7 +504,7 @@ template_version_id nullable
 
 ### 9.4 分镜导演
 
-分镜导演输入合同 `director-input.v2` 只接受已确认 `RequirementVersion`、已确认 Creative Brief、精确实体版本、交付约束和已确认决策。输出 `shot-plan.v4`，每个镜头至少包含：
+分镜导演输入合同 `director-input.v3` 只接受已确认 `RequirementVersion`、已确认 Creative Brief、精确实体版本、项目生产策略、交付约束和已确认决策。输出 `shot-plan.v4`，每个镜头至少包含：
 
 ```text
 shot_code / sequence_number / duration_ms / narrative_beat_code / brief_segment_codes[]
@@ -523,7 +525,7 @@ new_information / generation_requirements
 - `face_visibility`、精确人脸主体、`text_policy`、`required_on_screen_text` 和主体运动是后续 QC 的权威条件，不从提示词反推。`precise_text_required` 仅表示文字必须由生成模型直接绘制进素材像素；普通成品标题、字幕和教学标注由剪辑文字轨承担。
 - 分镜导演不得选择 Provider、模型、工作流槽位、NodeInfoList 或价格规则。
 
-当前实现使用独立 `director` 模型配置和 `director-input.v2 / shot-plan.v4 / director-prompt.v6`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、交付规格和音频策略，不读取自由聊天或生产工作流配置。Prompt 必须由唯一常量完整列出 `continuity_group_id` 格式及全部结构化枚举，不得以“使用合同枚举”代替实际允许值。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。`multi_frame_required=true` 时必须同时提供 start、middle、end 三个独立画面状态，普通镜头必须为 `null`。后端不解析动作或提示词关键词，不自动修改任何字段。
+当前实现使用独立 `director` 模型配置和 `director-input.v3 / shot-plan.v4 / director-prompt.v7`。输入清单冻结当前需求版本、唯一已接受 Brief 的完整节拍与脚本段、已解决 Decision、已确认实体版本及其来源附件验证事实、项目生产策略、交付规格和音频策略，不读取自由聊天或生产工作流配置。Prompt 必须由唯一常量完整列出 `continuity_group_id` 格式及全部结构化枚举，不得以“使用合同枚举”代替实际允许值。输出经严格 Schema 和确定性跨字段验证：脚本段必须完整覆盖且只能属于引用节拍；镜头语言使用结构化枚举；人脸主体和画面文字必须精确声明；场景与服装变化必须有明确连续关系；每个镜头提供 `new_information` 供人工检查重复。`multi_frame_required=true` 时必须同时提供 start、middle、end 三个独立画面状态，普通镜头必须为 `null`。项目生产策略为 `three_frame/required` 时，后端对每个镜头强制上述三帧合同，不接受单画面、首尾帧或纯文本路线。后端不解析动作或提示词关键词，不自动修改任何字段。
 
 导演只声明 `reference_image_required / multi_frame_required / identity_consistency_required / precise_text_required`，不选择路由。用户在制作准备中选定工作流后，确定性校验再对照能力标签和 NodeInfoList；不满足时按镜头返回阻断，不换工作流。人工 Patch 与“AI 调整选中镜头”是两个独立命令：后者冻结完整来源方案、选中编号和修改意见，只调用一次模型，未选镜头必须结构完全一致；失败保留来源候选，用户确认费用后才能精确重跑。
 
@@ -588,7 +590,7 @@ model_config_version / prompt_contract_version
 - OCR、身份相似度和语义判断默认进入 `review_required`，不作为确定性硬失败。
 - 不满意或不通过时只列出问题与受影响下游，不生成重试、替代素材或提示词修改。
 
-当前首期实现采用 `qc-agent-input.v1 / qc-report-candidate.v1 / qc-agent-prompt.v1`。确定性文件、尺寸和时长检查先运行；只有单张图片通过这些检查后，才允许调用声明了 `vision_analysis` 能力的已发布 QC 模型。模型接收冻结素材哈希、镜头合同、证据白名单、待审图片和存在时的冻结主参考图片，只能创建 `QCReportCandidate`；参考文件会再次校验路径与哈希。候选不等于权威报告，用户批准或拒绝素材时才把候选发现写入正式 `QCReport` 和 `AssetReviewDecision`。
+当前首期实现采用 `qc-agent-input.v2 / qc-report-candidate.v1 / qc-agent-prompt.v2`。确定性文件、尺寸和时长检查先运行；只有单张图片通过这些检查后，才允许调用声明了 `vision_analysis` 能力的已发布 QC 模型。模型接收冻结素材哈希、镜头合同、项目生产策略、证据白名单、待审图片和存在时的冻结主参考图片，只能创建 `QCReportCandidate`；三帧项目的单图审核不能声称已验证完整三帧连续性，参考文件会再次校验路径与哈希。候选不等于权威报告，用户批准或拒绝素材时才把候选发现写入正式 `QCReport` 和 `AssetReviewDecision`。
 
 素材审核在没有已发布图片 QC 模型时不强制调用智能体。确定性检查通过的 `verified` 素材可由用户直接批准或拒绝；服务创建 `human-review.v1` 权威报告和 `AssetReviewDecision`，不伪造 `QCReportCandidate`。审核工作台按当前活动快照提供分镜缩略队列、真实比例大图、冻结合同和文件事实；通过后自动进入下一项，批量通过只处理用户明确勾选并在确认框列出的素材。
 
@@ -610,7 +612,7 @@ model_config_version / prompt_contract_version
 
 ### 9.6 制作规划智能体
 
-制作规划智能体位于已确认 `PlanVersion` 与确定性生产编译器之间。用户必须先明确选择一个已发布制作配置和画面规格；智能体不能替用户选择配置、Provider、模型、价格目录或音频路线。当前合同采用 `production-planner-input.v1 / production-plan-candidate.v1 / production-planner-prompt.v2`。
+制作规划智能体位于已确认 `PlanVersion` 与确定性生产编译器之间。用户必须先明确选择一个已发布制作配置和画面规格；智能体不能替用户选择配置、Provider、模型、价格目录、音频路线或项目生产策略。当前合同采用 `production-planner-input.v2 / production-plan-candidate.v1 / production-planner-prompt.v3`。首中尾三帧项目只允许为所有镜头选择声明 `multi_frame` 的 `multi_frame_video_generation`，找不到合法槽位时明确阻断，不降级。
 
 制作规划智能体只提出每个镜头使用哪组图片与视频工作流，不决定生产批次。确定性编译器按确认路线生成完整 DAG 后，执行层统一采用“全部分镜图片 -> 逐项审核 -> 用户确认 -> 全部视频与后续制作”的两阶段门禁；不得按单个镜头生成一张图片后立即启动该镜头视频。多画面镜头的首、中、尾三张图片仍是三个独立图片节点，全部进入同一图片阶段。
 
@@ -636,10 +638,11 @@ model_config_version / prompt_contract_version
 
 ### 9.7 剪辑助理
 
-剪辑助理只能在质量阶段允许进入剪辑后运行。输入合同 `editor-assistant-input.v1` 至少冻结：
+剪辑助理只能在质量阶段允许进入剪辑后运行。输入合同 `editor-assistant-input.v2` 至少冻结：
 
 ```text
 plan_version_id / snapshot_id
+production_profile
 approved_asset_ids[] / qc_report_ids[]
 shot_plan_version / creative_brief_version
 delivery_contract / audio_policy / subtitle_policy
@@ -1220,9 +1223,9 @@ RequirementDiff
 
 ### Creation Sprint 4：创作模型接入
 
-- 创作制片人 `creative-dialogue-input.v5 / output.v6 / prompt.v15`（已完成）
-- 内容策划 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6`，含互斥脚本段、Schema 单一权威来源、完整失败证据、可追溯策划拓展、待确认事实、Brief 不可变修订链与结构化确认项（已完成）
-- 分镜导演 `director-input.v2 / shot-plan.v4 / director-prompt.v6`（已完成）
+- 创作制片人 `creative-dialogue-input.v6 / output.v6 / prompt.v16`（已完成）
+- 内容策划 `content-planner-input.v3 / creative-brief-candidate.v4 / content-planner-prompt.v7`，含互斥脚本段、Schema 单一权威来源、完整失败证据、可追溯策划拓展、待确认事实、Brief 不可变修订链、结构化确认项与生产策略约束（已完成）
+- 分镜导演 `director-input.v3 / shot-plan.v4 / director-prompt.v7`（已完成）
 - 显式模型、PromptContract、Token、延迟和成本审计
 - 固定验收集和用户触发的重新生成
 
@@ -1237,7 +1240,7 @@ RequirementDiff
 
 ### Creation Sprint 6：剪辑助理
 
-- `editor-assistant-input.v1 / timeline-candidate.v1`
+- `editor-assistant-input.v2 / timeline-candidate.v1 / editor-assistant-prompt.v2`
 - 已批准素材白名单、选择依据和 QC 证据
 - 素材缺口、音频关闭和字幕关闭验收
 - 用户修订与不可变 TimelineVersion 确认
@@ -1276,3 +1279,18 @@ RequirementDiff
 创意建议只作为建议事实保存，不能直接写入 `RequirementVersion`、`Decision` 或项目状态。用户选择精确提案选项后才创建待确认需求候选；字段风险和确认等级由后端版本化目录决定。上下文达到配置上限时明确阻断，不自动摘要或截断，也不增加重试、模型切换、输出修复和生产兜底。
 
 创作制片人及其与其他智能体的权威合同以本文第 9 节为准。原始评审过程保留在 [V2 创作智能体设计提案](./archive/proposals/V2_CREATIVE_AGENT_DESIGN_PROPOSAL.md)；设计已经确认，但本节仍不代表运行代码已实现。
+
+## 24. 项目生产策略的智能体传递
+
+项目创建表单在任何智能体调用前要求用户显式选择 `project-production-profile.v1`。当前可选组合为视频运动 `three_frame` 或 `adaptive`，关键帧参考为 `adaptive`；首尾帧与全能参考保留为禁用说明项，直到各自拥有版本化输入合同、可执行工作流和真实成功证据。
+
+该选择创建后不可由智能体修改，并以 ID、版本号、完整事实和 SHA-256 hash 注入每个 `AgentInputManifest`：
+
+- 创作制片人只根据策略约束创意方向，不重新询问或登记该字段。
+- 内容策划把三帧项目组织成可拆分的短镜头与单一主动作。
+- 分镜导演为三帧项目的每个镜头输出 start/middle/end，并由后端确定性验收。
+- 制作规划只能在策略允许的工作流集合内选择；它不再决定用户的生产方式。
+- 质量审核将策略作为证据边界，单帧检查不能冒充完整连续性检查。
+- 剪辑助理只保留生产来源依据，仍只能消费当前快照内已批准素材。
+
+生产影响分析与快照继续冻结相同 profile ID/hash。任何 Manifest、分镜、路线或快照与项目策略不一致时明确阻断，不自动降级、改写或切换路线。

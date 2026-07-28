@@ -44,6 +44,7 @@ from ..repositories import (
     SqlAlchemyProductionRepository,
 )
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
+from ..production_profiles import profile_manifest
 from .contracts import (
     ActivateProductionSnapshot,
     AnalyzeProductionRetryBatch,
@@ -741,6 +742,7 @@ def _validate_generation_capabilities(
 
 def analyze_impact(session: Session, project: Project, payload: AnalyzeProductionImpact) -> dict:
     repository = _production(session)
+    production_profile = profile_manifest(session, project.id)
     receipt = _receipt(session, project.id, payload.command_id, "production.impact.analyze")
     if receipt:
         row = repository.impact_analysis(receipt.result_id)
@@ -954,6 +956,22 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
     shots = repository.plan_shots(plan.id)
     if not shots:
         errors.append({"code": "PLAN_HAS_NO_SHOTS", "path": "plan_version_id", "message": "方案没有分镜。"})
+    if (
+        production_profile["video_motion_strategy"] == "three_frame"
+        and production_profile["enforcement"] == "required"
+    ):
+        for shot in shots:
+            if (
+                not (shot.generation_requirements or {}).get("multi_frame_required")
+                or not isinstance(shot.guide_frame_prompts, dict)
+                or set(shot.guide_frame_prompts) != {"start", "middle", "end"}
+            ):
+                errors.append({
+                    "code": "PROJECT_PRODUCTION_PROFILE_VIOLATED",
+                    "path": f"shots.{shot.shot_code}",
+                    "shot_code": shot.shot_code,
+                    "message": "项目已锁定首中尾三帧模式，该镜头必须具有完整首、中、尾画面合同。",
+                })
     entity_ids: set[str] = set()
     references_by_shot_id: dict[str, dict | None] = {}
     workflow_routes_by_shot_id: dict[str, tuple[WorkflowSlotVersion | None, WorkflowSlotVersion]] = {}
@@ -1093,6 +1111,7 @@ def analyze_impact(session: Session, project: Project, payload: AnalyzeProductio
         "plan_contract_schema_version": plan.contract_schema_version,
         "production_config_version_id": config.id,
         "production_config_hash": config.config_hash,
+        "production_profile": production_profile,
         "audio_mode": audio_mode,
         "selection": selection,
         "output_spec": output_spec,

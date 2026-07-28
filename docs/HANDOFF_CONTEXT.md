@@ -1,12 +1,12 @@
 # 片场 V2 当前交接
 
-> 更新日期：2026-07-26
+> 更新日期：2026-07-28
 >
 > 文档入口见 [README](./README.md)。本文只保留恢复开发所需的当前事实，不再累积完整 Sprint 日志。
 
 ## 1. 当前目标
 
-V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系统。六个智能体与确定性生产编译器的设计已经确认；创作制片人、内容策划、分镜导演、制作规划、质量审核首期图片合同和剪辑助理已经实施，剪辑候选审核、CosyVoice 旁白合同、本机 FFmpeg 音视频合成和最终交付验证闭环也已实现。CosyVoice 配置 v56 已迁移 V1 运行时 API Key 并通过无网络预检，尚未取得用户授权执行真实付费验收；QC 图片模型仍按用户要求暂不接入：
+V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系统。六个智能体与确定性生产编译器的设计已经确认；创作制片人、内容策划、分镜导演、制作规划、质量审核首期图片合同和剪辑助理已经实施，剪辑候选审核、CosyVoice 旁白合同、本机 FFmpeg 音视频合成和最终交付验证闭环也已实现。项目创建时必须先选择不可变生产策略；当前开放首中尾三帧与按镜头匹配，首尾帧和全能参考因缺少真实可执行合同保持禁用。配置 v57 已发布生产策略合同，CosyVoice API Key 与音频合同保持不变且只通过无网络预检，尚未取得用户授权执行真实付费验收；QC 图片模型仍按用户要求暂不接入：
 
 - 角色从“需求登记员”调整为“创作制片人”。
 - 输入包含当前会话的用户与助手消息，解决上下文指代丢失。
@@ -25,8 +25,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 分支 | `main` |
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
-| 数据库迁移 | `20260726_38 (head)` |
-| 已发布配置 | `production_config_693c61b8485847d3a26e2f81e4aa6eaa`，版本 56；保持 v55 的视觉、WAV 旁白、5 个版本化音色、默认语速/音量、允许超时和动态 TTS 参数绑定不变，仅补齐 CosyVoice API Key |
+| 数据库迁移 | `20260728_39 (head)` |
+| 已发布配置 | `production_config_1d60e74888bb4458a9cd54508501596e`，版本 57；保持 v56 的视觉、CosyVoice、Provider、NodeInfoList、存储和价格不变，只升级 5 个已启用文本智能体的项目生产策略输入与 Prompt 合同 |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 与文本模型 API Key 由当前已发布系统配置普通字段提供，不再读取环境变量 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
@@ -52,6 +52,7 @@ v2/runtime/worker.err.log
 - Repository 边界、项目状态转移器、持久化事件、SSE 和 Transactional Outbox。
 - 对话、助手回复、需求候选、需求版本、Decision、附件绑定和智能体运行审计。
 - Creative Brief、`shot-plan.v4`、脚本覆盖、结构化分镜修订、人物/服装/场景/产品、主参考图、首中尾画面状态与生产能力要求合同。
+- 项目创建表单在首次智能体调用前冻结 `project-production-profile.v1`。当前首中尾三帧为推荐可用项，按镜头匹配可用；首尾帧与全能参考显示为不可用说明。策略版本和 hash 注入六个智能体、影响分析与快照；三帧模式由导演、制作规划和生产编译器确定性强制。
 - 正式分镜合同与逐镜头制作区均显式展示单画面或首中尾三画面、关键帧数量和逐帧描述；工作流选择不反向改写分镜合同。
 - 系统配置版本、Provider/模型/工作流/视频/音频/存储/价格组件。
 - ProductionSnapshot、DAG、费用影响、锁定、激活、提交和持久化 WorkItem。
@@ -89,7 +90,7 @@ v2/runtime/worker.err.log
 
 ## 4. 当前创作智能体事实
 
-当前运行代码使用 `creative-dialogue-input.v5 / output.v6 / prompt.v15`：
+当前运行代码使用 `creative-dialogue-input.v6 / output.v6 / prompt.v16`，输入包含不可变项目生产策略：
 
 - 首次进入空白创作会话时，前端调用一次 `creative-conversation:initialize`；系统消息、AgentRun 和助手引导均持久化，刷新不重复调用，失败不自动重试。
 - `RequirementCandidate` 是会话级不可变草稿修订，通过 `conversation_session_id` 和 `supersedes_candidate_id` 继承；每轮从最新草稿继续，不再从活动正式需求重置。
@@ -118,7 +119,7 @@ v2/runtime/worker.err.log
 - 澄清问题必须直接展示；模型调用提示读取真实下一步费用事实，需求面板使用“已具备最低策划条件”而非虚假的“完整”。
 - 附件只传递文件事实和已确认用途绑定，并标记 `content_access=metadata_only`；当前模型不读取图片、音频或视频内容。
 
-内容策划运行代码使用 `content-planner-input.v2 / creative-brief-candidate.v4 / content-planner-prompt.v6`：
+内容策划运行代码使用 `content-planner-input.v3 / creative-brief-candidate.v4 / content-planner-prompt.v7`：
 
 - 使用独立 `planner` 模型分工，只读取已确认需求、Decision、实体版本和交付约束，不读取自由聊天。
 - 输出内容承诺、开场、连续内容节拍、脚本段、语气、节奏、平台适配、精确实体引用、策划拓展和待确认事实。
@@ -139,7 +140,7 @@ v2/runtime/worker.err.log
 - 相同模型与合同失败时只能由用户确认费用后精确复用原 Manifest；Prompt 或输出 Schema 已升级时，页面改为“使用当前合同重新生成”，重新冻结当前权威输入并创建新 Manifest。两条路径都保留旧失败记录，均不自动调用模型。
 - v45 将内容策划最大输出从 4096 调整为 8192 Token，并由 Schema 将节拍、脚本段、拓展和确认项限制在短视频合理规模；账本仍记录真实 Token，不按上限虚构费用。
 
-分镜导演运行代码使用 `director-input.v2 / shot-plan.v4 / director-prompt.v6`：
+分镜导演运行代码使用 `director-input.v3 / shot-plan.v4 / director-prompt.v7`：
 
 - 使用独立 `director` 模型分工，只读取已确认需求、已接受 Brief、决策、实体与附件事实、交付约束和音频策略。
 - 镜头必须精确引用内容节拍与脚本段，全部脚本段必须被覆盖；`action_count=1`。
@@ -195,6 +196,7 @@ v2/runtime/worker.err.log
 
 | 日期 | 变更 |
 |---|---|
+| 2026-07-28 | 项目创建时新增不可变 `project-production-profile.v1`：用户必须在首次智能体调用前选择视频运动与关键帧参考策略；当前开放首中尾三帧（推荐）和按镜头匹配，首尾帧与全能参考因缺少真实工作流/多参考合同保持禁用。迁移 `20260728_39` 显式回填历史项目为 `adaptive/adaptive`；策略 ID/hash 注入六个智能体、影响分析和快照，三帧模式由分镜、制作规划与编译器多层强制。配置 v57 发布 5 个文本智能体新合同；后端基线 `290 passed`，前端生产构建通过，未执行付费调用 |
 | 2026-07-26 | 从用户当前 V1 Chrome 页面确认已保存 CosyVoice Key，并触发 V1 既有运行时缓存保存；新增一次性 `migrate_v1_cosyvoice_credential` 脚本，只从工作区外运行时 JSON 读取凭据，拒绝空值及覆盖不同 Key，不输出密钥。基于 v55 发布配置 v56，仅 CosyVoice Provider 凭据变化；V1 当前 V3 复刻音色和 MP3 选择不覆盖 V2 WAV 与项目级授权复刻合同。无付费预检为 `ready_for_paid_validation / api_key_state=configured / network_probe=false`；完整后端基线为 `288 passed` |
 | 2026-07-26 | 产品化 CosyVoice 真实验收：迁移 `20260726_38` 新增不可变验收记录，只读 API 与设置页冻结配置、默认音色/语速/音量、文本哈希和 WAV 合同；二次确认后才允许一次真实调用并保存请求 ID、非敏感用量、WAV 探测或失败证据。修复 v55 动态音色/语速/音量未进入原验收请求的问题，假传输证明精确请求和命令幂等；完整后端基线为 `286 passed` |
 | 2026-07-26 | 完成授权声音复刻与依赖重试首期闭环：迁移 `20260726_37`、不可变授权版本、样本/期限/范围/撤销门禁与 `audio-execution-selection.v2` 已接入制作准备；本地字幕零费用精确重试和依赖闭包分析/费用预览/保留成功产物/显式批量授权已接入生产页。完整后端基线为 `284 passed`，前端生产构建通过 |
@@ -283,18 +285,18 @@ v2/runtime/worker.err.log
 
 最近完整基线：
 
-- 后端测试：`288 passed`
+- 后端测试：`290 passed`
 - 供应商并发门禁验收：`max_concurrency=1` 时首个外部任务提交并轮询，后续同 Provider 工作项保持 `queued`；首项完成后下一项才提交，等待过程不新增失败、尝试、费用或自动重试
 - 两阶段生产验收：图片节点全部先执行；后续任务在用户确认前保持 `waiting_phase`；节点或素材清单不一致明确失败；确认后视频读取冻结的已批准素材；纯文本视频无图片门禁并直接排队
 - 逐镜头工作流验收：缺少任一镜头映射时 DAG 不生成；纯文本视频只生成视频节点且无父图片边；RunningHub T2V 假传输不执行上传
-- 当前生产配置：v56，5 个文本智能体模型分工、6 个镜头工作流槽位和 1 个 CosyVoice TTS 槽位；音频合同继续使用 v55 发布的 5 个音色、语速/音量默认值与范围、1500ms 时长容差，TTS 绑定从快照读取所选音色/语速/音量，v56 仅补齐 CosyVoice Provider API Key。人物一致性关键帧 `2073414172825706497` 的 `24.denoise=1.0` 来自 V1 真实成功请求证据；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图；剪辑助理合同为 `editor-assistant-input.v1 / timeline-candidate.v1 / editor-assistant-prompt.v1`
+- 当前生产配置：v57，5 个文本智能体模型分工、6 个镜头工作流槽位和 1 个 CosyVoice TTS 槽位；v57 只升级项目生产策略相关的创作制片人 v6/v16、内容策划 v3/v7、分镜导演 v3/v7、制作规划 v2/v3、剪辑助理 v2/v2 合同。音频继续使用 v56 的 5 个音色、语速/音量范围、1500ms 容差和 CosyVoice API Key；人物一致性关键帧 `2073414172825706497` 的 `24.denoise=1.0` 来自 V1 真实成功请求证据；本地素材库引用为 `v2.runtime.assets`；`2072296894507872257` 为首中尾帧生视频，绑定 `447 / 448 / 449` 三张独立父图
 - 剪辑助理端到端验收：只读取活动方案、快照内已批准视频、正式 QC 报告、交付规格和音频策略；模型候选经严格校验后创建待确认 Timeline，选择理由与 QC 证据保存在时间线条目中；素材不足生成显式空位并阻断确认，不自动补素材、复用、循环、变速、补帧或替换
 - 剪辑台审核闭环：生成或选择候选后直接加载该版本的真实轨道并保持只读；片段检查区展示中文时间字段、对应分镜、选择理由、QC 引用和空位原因；只有用户从目标版本显式创建修订后才开放编辑
 - 剪辑时间线交互验收：`v2.timeline-contract.v2` 持久化 `pixels_per_second=20..400` 与 `snap_interval_ms=10..1000`；同轨拖放确定性重排并重算时间，源区间与成片区间裁切保持时长一致；PCM WAV 波形按内容哈希和 bin 数缓存；视频转场仅接受 `cut/fade`，音频包络要求 2–64 个严格递增且覆盖片段边界的 `-60dB..12dB` 关键点；FFmpeg 渲染与交付 Manifest 均按冻结合同执行或阻断
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
-- Alembic runtime/head：`20260726_38`
+- Alembic runtime/head：`20260728_39`
 - 生产页两阶段浏览器验收：桌面明确分区展示分镜图片与视频后续步骤；窄屏 `scrollWidth == clientWidth`，无控制台错误；等待图片确认时前端不持续轮询
 - 配音制作准备浏览器验收：配置 v55 的 5 个预设音色与“登记授权复刻声音”入口可见，授权确认默认未勾选且提交按钮禁用；`production-preparation` 响应投影已显式保留 `audio_config`；390×844 下 `scrollWidth == clientWidth`
 - 系统配置页 CosyVoice 真实验收入口：只读预检显示 v56、`cosyvoice-v1`、`longxiaochun / rate=1.0 / volume=50` 与 24kHz 单声道 WAV 合同；API Key 已配置且命令行预检为 `ready_for_paid_validation`，记录数仍为 0、`network_probe=false`；付费按钮仍要求用户二次确认
@@ -316,4 +318,4 @@ v2/runtime/worker.err.log
 
 ## 9. 下一步
 
-旁白字幕、版本化音色/语速/音量、时长门禁、时间线交互、BGM/ducking/母带执行、确定性音频 QC 与人工试听确认，以及授权声音复刻、TTS/字幕精确重试和依赖级批量重试首期闭环均已完成。CosyVoice 真实验收已具备命令、只读 API、设置页二次确认和不可变证据记录；配置 v56 已补齐 DashScope API Key 并达到 `ready_for_paid_validation`，但真实付费合成和供应商试听尚未执行，这是七项范围当前唯一尚未完成的验收。必须由用户显式授权一次付费调用，只有持久化 `passed` 记录包含真实请求 ID、非敏感用量与 WAV 探测证据时才能完成。不得把执行参数、工具、授权登记、凭据已配置或选择界面已就绪声明成真实供应商已经验收。QC 图片模型继续按用户要求暂不接入。
+旁白字幕、版本化音色/语速/音量、时长门禁、时间线交互、BGM/ducking/母带执行、确定性音频 QC 与人工试听确认，以及授权声音复刻、TTS/字幕精确重试和依赖级批量重试首期闭环均已完成。CosyVoice 真实验收已具备命令、只读 API、设置页二次确认和不可变证据记录；配置 v57 继承 v56 已补齐的 DashScope API Key 并保持 `ready_for_paid_validation`，但真实付费合成和供应商试听尚未执行，这是七项范围当前唯一尚未完成的验收。必须由用户显式授权一次付费调用，只有持久化 `passed` 记录包含真实请求 ID、非敏感用量与 WAV 探测证据时才能完成。不得把执行参数、工具、授权登记、凭据已配置或选择界面已就绪声明成真实供应商已经验收。QC 图片模型继续按用户要求暂不接入。

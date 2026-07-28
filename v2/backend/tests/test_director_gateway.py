@@ -36,8 +36,8 @@ def selection() -> DirectorSelection:
         base_url="https://api.example.test/v1",
         api_key="secret",
         timeout_seconds=30,
-        input_contract_version="director-input.v2",
-        prompt_contract_version="director-prompt.v6",
+        input_contract_version="director-input.v3",
+        prompt_contract_version="director-prompt.v7",
         output_schema_version="shot-plan.v4",
         max_output_tokens=4000,
         sampling={"temperature": 0.2},
@@ -46,8 +46,13 @@ def selection() -> DirectorSelection:
 
 def manifest(*, audio_policy: str = "off") -> dict:
     return {
-        "contract_version": "director-input.v2",
+        "contract_version": "director-input.v3",
         "project_id": "project_1",
+        "production_profile": {
+            "video_motion_strategy": "adaptive",
+            "keyframe_strategy": "adaptive",
+            "enforcement": "required",
+        },
         "requirement_version": {"id": "requirement_1", "fields": {"audio_mode": audio_policy}},
         "accepted_creative_brief": {"id": "brief_1", "brief": {
             "content_promise": "展示一次完整训练",
@@ -231,6 +236,20 @@ def test_director_rejects_guide_prompts_for_single_frame_shot(monkeypatch) -> No
         gateway.invoke(selection(), manifest())
 
     assert raised.value.code == "DIRECTOR_OUTPUT_SCHEMA_INVALID"
+    assert len(transport.calls) == 1
+
+
+def test_director_enforces_project_level_three_frame_profile(monkeypatch) -> None:
+    monkeypatch.setenv("V2_AGENT_MODEL_EXECUTION_ENABLED", "true")
+    strict_manifest = manifest()
+    strict_manifest["production_profile"]["video_motion_strategy"] = "three_frame"
+    gateway, transport = gateway_for(valid_output())
+
+    with pytest.raises(AgentGatewayError) as raised:
+        gateway.invoke(selection(), strict_manifest)
+
+    assert raised.value.code == "DIRECTOR_OUTPUT_CONTRACT_INVALID"
+    assert "首中尾三帧生产模式" in str(raised.value)
     assert len(transport.calls) == 1
 
 

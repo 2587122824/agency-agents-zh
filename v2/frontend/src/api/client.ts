@@ -1,4 +1,4 @@
-import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, VoiceCloneAuthorization, WorkItem } from './types'
+import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProjectProductionProfileOptions, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, VoiceCloneAuthorization, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -31,6 +31,8 @@ export const api = {
   project: (id: string) => request<ProjectDetail>(`/projects/${id}`),
   createProject: (payload: ProjectCreate) =>
     request<ProjectDetail>('/projects', { method: 'POST', body: JSON.stringify(payload) }),
+  projectProductionProfileOptions: () =>
+    request<ProjectProductionProfileOptions>('/project-production-profile-options'),
   archiveProject: (projectId: string, rowVersion: number) => request<ProjectDetail>(`/projects/${projectId}:archive`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: rowVersion, confirm_archive: true }),
   }),

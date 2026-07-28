@@ -95,6 +95,7 @@ _QC_SYSTEM_PROMPT = """你是片场 V2 的质量审核智能体。你只分析�
 5. 不得提出重试、换模型、换工作流、改写提示词或自动修复方案。
 6. 当前输入是单张图片，不得声称已经检查视频动态、音频内容或未提供的其他镜头。
 7. 不得输出 Markdown、解释文字或 JSON 之外的内容。
+8. production_profile 是用户已确认的生产方式证据。three_frame 模式下只能结合当前单帧的 frame_role 与冻结镜头合同报告可观察问题；不得声称仅凭一张图片已经验证完整首中尾连续性。
 """
 
 
@@ -128,9 +129,9 @@ class ConfiguredQCGateway:
         if "vision_analysis" not in provider.capabilities:
             raise AgentGatewayError("QC_VISION_CAPABILITY_MISSING", "质量审核模型供应商未声明图片理解能力。")
         expected = {
-            "input_contract_version": "qc-agent-input.v1",
+            "input_contract_version": "qc-agent-input.v2",
             "output_schema_version": "qc-report-candidate.v1",
-            "prompt_contract_version": "qc-agent-prompt.v1",
+            "prompt_contract_version": "qc-agent-prompt.v2",
         }
         if {key: getattr(model, key) for key in expected} != expected:
             raise AgentGatewayError("QC_CONTRACT_VERSION_UNSUPPORTED", "质量审核模型配置的合同版本与当前运行代码不一致。")
@@ -241,7 +242,7 @@ class DeterministicQCGateway:
         ) or "v2.qc.test.v1"
         return QCSelection(
             config_id, "model_config_test_qc", "provider_config_test_mock", "mock", "deterministic-qc-v1",
-            "deterministic-qc-v1", "https://example.invalid/v1", None, 1, "qc-agent-input.v1", "qc-agent-prompt.v1",
+            "deterministic-qc-v1", "https://example.invalid/v1", None, 1, "qc-agent-input.v2", "qc-agent-prompt.v2",
             "qc-report-candidate.v1", None, {}, ("vision_analysis",),
         )
 

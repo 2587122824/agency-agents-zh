@@ -14,9 +14,9 @@ from ..creation.agent_gateway import AgentChatTransport, AgentGatewayError, Http
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
 
 
-PRODUCTION_PLANNER_INPUT_CONTRACT_VERSION = "production-planner-input.v1"
+PRODUCTION_PLANNER_INPUT_CONTRACT_VERSION = "production-planner-input.v2"
 PRODUCTION_PLANNER_OUTPUT_SCHEMA_VERSION = "production-plan-candidate.v1"
-PRODUCTION_PLANNER_PROMPT_CONTRACT_VERSION = "production-planner-prompt.v2"
+PRODUCTION_PLANNER_PROMPT_CONTRACT_VERSION = "production-planner-prompt.v3"
 
 
 class ProductionRouteAssignmentOutput(BaseModel):
@@ -80,7 +80,8 @@ _SYSTEM_PROMPT = """你是片场 V2 的制作规划智能体。你只根据已�
 8. multi_frame_required 为 true 时，视频槽位必须声明 multi_frame；precise_text_required 为 true 时，关键帧槽位必须声明 precise_text。
 9. reason 只解释已声明的镜头要求和工作流能力如何匹配，不得声称已经生成、通过审核或开始扣费。
 10. 找不到满足全部要求的路线时不要猜测或退化。仍须使用严格 JSON，但未知、替代或不兼容 ID 会被后端明确拒绝并保留失败证据。
-11. 不得输出 Provider、密钥、NodeInfoList、价格、任务、重试建议、Markdown 或 JSON 之外的文字。"""
+11. 不得输出 Provider、密钥、NodeInfoList、价格、任务、重试建议、Markdown 或 JSON 之外的文字。
+12. production_profile 是用户在项目创建前确认的不可变边界，不是可重新选择的建议。video_motion_strategy=three_frame 且 enforcement=required 时，只能为所有镜头选择 operation_kind=multi_frame_video_generation 且声明 multi_frame 的视频槽位；不得推荐首帧、首尾帧、纯文本视频或其他退化路线。"""
 
 
 class ConfiguredProductionPlannerGateway:

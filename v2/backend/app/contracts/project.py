@@ -16,12 +16,33 @@ DecisionStatus = Literal["pending", "resolved"]
 AudioMode = Literal["off", "voiceover"]
 
 
+class ProjectProductionProfileSelection(BaseModel):
+    video_motion_strategy: Literal["adaptive", "three_frame", "start_end"]
+    keyframe_strategy: Literal["adaptive", "omni_reference"]
+    enforcement: Literal["required"] = "required"
+
+
+class ProjectProductionProfileRead(ProjectProductionProfileSelection):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    version_number: int
+    contract_version: str
+    selected_by: str
+    required_frame_roles: list[str]
+    contract_hash: str
+    is_active: bool
+    created_by: str
+    created_at: datetime
+
+
 class ProjectCreate(BaseModel):
     title: str = Field(min_length=1, max_length=160)
     core_topic: str = Field(min_length=1, max_length=500)
     duration_seconds: int = Field(ge=5, le=3600)
     aspect_ratio: Literal["9:16", "16:9", "1:1"]
     audio_mode: AudioMode
+    production_profile: ProjectProductionProfileSelection
 
 
 class ArchiveProject(BaseModel):
@@ -40,6 +61,7 @@ class RestoreProject(BaseModel):
 class ProjectRead(ProjectCreate):
     model_config = ConfigDict(from_attributes=True)
 
+    production_profile: ProjectProductionProfileRead
     id: str
     status: ProjectStatus
     row_version: int

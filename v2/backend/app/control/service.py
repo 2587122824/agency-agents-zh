@@ -26,6 +26,7 @@ from ..orchestration.project_state import (
     SnapshotStateFact,
     evaluate_project_state,
 )
+from ..production_profiles import profile_manifest
 from ..quality.service import asset_read
 from ..repositories import ControlRepository, SqlAlchemyControlRepository
 
@@ -197,6 +198,7 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
     ))
     stage = evaluation.stage
     events = repository.events(project.id)
+    production_profile = profile_manifest(session, project.id)
     result = {
         "project_id": project.id,
         "title": project.title,
@@ -204,6 +206,10 @@ def _project_control(session: Session, project: Project, include_detail: bool) -
         "duration_seconds": project.duration_seconds,
         "aspect_ratio": project.aspect_ratio,
         "audio_mode": project.audio_mode,
+        "video_motion_strategy": production_profile["video_motion_strategy"],
+        "keyframe_strategy": production_profile["keyframe_strategy"],
+        "production_profile_version": production_profile["version_number"],
+        "production_profile_contract_hash": production_profile["contract_hash"],
         "persisted_status": project.status,
         "state_row_version": project.row_version,
         "state_changed_at": project.state_changed_at,

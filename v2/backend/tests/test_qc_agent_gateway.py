@@ -34,7 +34,7 @@ def selection() -> QCSelection:
     return QCSelection(
         "production_config_1", "model_config_qc_1", "provider_config_1", "Vision Provider", "Visual QC",
         "vision-model", "https://api.example.test/v1", "secret", 30,
-        "qc-agent-input.v1", "qc-agent-prompt.v1", "qc-report-candidate.v1", 2000, {"temperature": 0.1},
+        "qc-agent-input.v2", "qc-agent-prompt.v2", "qc-report-candidate.v1", 2000, {"temperature": 0.1},
         ("vision_analysis",),
     )
 
@@ -42,8 +42,13 @@ def selection() -> QCSelection:
 def manifest(*, face_visibility: str = "required") -> dict:
     ref = "dag_node.node_1.input_contract.shot.face_visibility"
     return {
-        "contract_version": "qc-agent-input.v1",
+        "contract_version": "qc-agent-input.v2",
         "project_id": "project_1",
+        "production_profile": {
+            "video_motion_strategy": "three_frame",
+            "keyframe_strategy": "adaptive",
+            "enforcement": "required",
+        },
         "asset": {"id": "asset_1", "content_hash": "a" * 64, "asset_type": "image", "mime_type": "image/png", "width": 480, "height": 848, "duration_ms": None},
         "media_probe_id": "media-probe:" + "a" * 64,
         "snapshot_id": "snapshot_1",
@@ -93,7 +98,7 @@ def test_qc_gateway_sends_exact_manifest_and_image_once(monkeypatch, tmp_path: P
     assert len(transport.calls) == 1
     content = transport.calls[0]["payload"]["messages"][1]["content"]
     assert content[1]["image_url"]["url"].startswith("data:image/png;base64,")
-    assert "qc-agent-input.v1" in content[0]["text"]
+    assert "qc-agent-input.v2" in content[0]["text"]
 
 
 @pytest.mark.parametrize("mutate", [

@@ -29,6 +29,7 @@ from ..db.models import (
 from .agent_gateway import AgentGatewayError, CreativeAgentGateway, ProposedFieldUpdate
 from ..core.config import RUNTIME_ROOT
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
+from ..production_profiles import profile_manifest
 from ..repositories import (
     CreationRepository,
     SqlAlchemyCommandRepository,
@@ -411,6 +412,7 @@ def _manifest_payload(
         "project_context": {
             "project_id": project.id,
             "project_stage": project.status,
+            "production_profile": profile_manifest(session, project.id),
             "active_requirement": {"id": base.id, "fields": base.fields},
             "current_requirement_draft": (
                 {

@@ -14,9 +14,9 @@ from ..creation.agent_gateway import AgentChatTransport, AgentGatewayError, Http
 from ..db.models import ModelConfigVersion, ProductionConfigVersion, ProviderConfigVersion
 
 
-EDITOR_INPUT_CONTRACT_VERSION = "editor-assistant-input.v1"
+EDITOR_INPUT_CONTRACT_VERSION = "editor-assistant-input.v2"
 EDITOR_OUTPUT_SCHEMA_VERSION = "timeline-candidate.v1"
-EDITOR_PROMPT_CONTRACT_VERSION = "editor-assistant-prompt.v1"
+EDITOR_PROMPT_CONTRACT_VERSION = "editor-assistant-prompt.v2"
 
 
 class EditorTimelineItemOutput(BaseModel):
@@ -85,7 +85,8 @@ _SYSTEM_PROMPT = """你是片场 V2 的剪辑助理。你只根据已确认方�
 4. 素材不足以覆盖完整成片时，使用 source_asset_id=null 的显式空位，填写 gap_reason 和 selection_reason；不得复用素材、插黑帧或编造资产。
 5. 每个真实素材条目必须说明选择理由并携带该素材允许的 QC 报告 ID；不得声称素材已再次审核。
 6. audio_policy.mode=off 时 audio_cues 必须为空；subtitle_policy.enabled=false 时 subtitle_cues 必须为空。
-7. duration_ms 必须等于 delivery_contract.duration_ms；不得输出 Provider、工作流、费用、任务、Markdown 或 JSON 之外的文字。"""
+7. duration_ms 必须等于 delivery_contract.duration_ms；不得输出 Provider、工作流、费用、任务、Markdown 或 JSON 之外的文字。
+8. production_profile 只用于保留素材生产依据。不得改变、重新选择或根据它编造生成任务；时间线条目仍只能消费已批准素材。"""
 
 
 class ConfiguredEditorAssistantGateway:
