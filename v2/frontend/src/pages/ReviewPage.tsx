@@ -318,12 +318,20 @@ export function ReviewPage() {
             </header>
             <div className={styles.canvas} ref={previewRef} data-fit={zoom === null}>
               {selectedAsset.content_hash && selectedAsset.asset_type === 'image' && <img
+                className={styles.mediaPreview}
                 src={mediaUrl(selectedAsset)}
                 alt={assetLabel(selectedAsset)}
                 data-fit={zoom === null}
                 style={zoom === null ? undefined : { width: `${selectedAsset.width ? selectedAsset.width * zoom : 480 * zoom}px` }}
               />}
-              {selectedAsset.content_hash && selectedAsset.asset_type === 'video' && <video src={mediaUrl(selectedAsset)} controls preload="metadata" />}
+              {selectedAsset.content_hash && selectedAsset.asset_type === 'video' && <video
+                className={styles.mediaPreview}
+                src={mediaUrl(selectedAsset)}
+                controls
+                preload="metadata"
+                data-fit={zoom === null}
+                style={zoom === null ? undefined : { width: `${selectedAsset.width ? selectedAsset.width * zoom : 480 * zoom}px` }}
+              />}
               {selectedAsset.content_hash && selectedAsset.asset_type === 'audio' && <div className={styles.audioPreview}><strong>请完整试听后确认内容</strong><audio src={mediaUrl(selectedAsset)} controls preload="metadata" onPlay={() => setListenedAssetIds(current => current.includes(selectedAsset.id) ? current : [...current, selectedAsset.id])} /></div>}
               {!selectedAsset.content_hash && <div className={styles.noPreview}><Search /><span>文件尚未完成验证</span></div>}
             </div>
