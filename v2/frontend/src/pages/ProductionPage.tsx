@@ -62,6 +62,10 @@ function ProjectTitle({ title }: { title: string }) {
     if (!text) return
     const measure = () => setTruncated(text.scrollWidth > text.clientWidth)
     measure()
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', measure)
+      return () => window.removeEventListener('resize', measure)
+    }
     const observer = new ResizeObserver(measure)
     observer.observe(text)
     return () => observer.disconnect()
