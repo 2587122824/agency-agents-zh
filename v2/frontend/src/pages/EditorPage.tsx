@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Check, ChevronDown, ChevronUp, Clock3, Download, FileVideo2, Film, ListVideo, Music2, Plus, RefreshCw, Save, Scissors, ShieldCheck, Sparkles, Subtitles, Trash2, Upload, Video, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
 import type { DeliveryAttempt, EditorAsset, Timeline, TimelineItemDraft } from '../api/types'
@@ -369,7 +369,7 @@ export function EditorPage() {
   }
 
   return <>
-    <PageHeader eyebrow="EDITOR" title="剪辑台" description="素材取舍、时间区间和交付范围以版本化时间线合同记录。" actions={<button className="secondaryButton" onClick={() => refresh()}><RefreshCw size={14} />刷新</button>} />
+    <PageHeader eyebrow="EDITOR" title="剪辑台" description="素材取舍、时间区间和交付范围以版本化时间线合同记录。" actions={<><Link className="secondaryButton" to={`/editor-prototype${projectId ? `?project=${projectId}` : ''}`}><Sparkles size={14} />查看新版原型</Link><button className="secondaryButton" onClick={() => refresh()}><RefreshCw size={14} />刷新</button></>} />
     <main className={styles.layout}>
       <aside className={styles.projects}>
         <header><span>EDITABLE PROJECTS</span><h2>剪辑项目</h2><b>{editorProjects.length}</b></header>

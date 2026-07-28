@@ -8,11 +8,12 @@ import { SettingsPage } from './pages/SettingsPage'
 import { ReviewPage } from './pages/ReviewPage'
 import { ContactSheetPage } from './pages/ContactSheetPage'
 import { EditorPage } from './pages/EditorPage'
+import { EditorPrototypePage } from './pages/EditorPrototypePage'
 import { ProjectControlPage } from './pages/ProjectControlPage'
 import { AssetLibraryPage } from './pages/AssetLibraryPage'
 import { DecisionImpactPage } from './pages/DecisionImpactPage'
 import { AuditLedgerPage } from './pages/AuditLedgerPage'
 
 export function App() {
-  return <Routes><Route element={<AppShell />}><Route index element={<DashboardPage />} /><Route path="projects/:projectId" element={<ProjectPage />} /><Route path="projects/:projectId/control" element={<ProjectControlPage />} /><Route path="projects/:projectId/audit" element={<AuditLedgerPage />} /><Route path="projects/:projectId/decision-impact" element={<DecisionImpactPage />} /><Route path="projects/:projectId/plan" element={<PlanPage />} /><Route path="projects/:projectId/contact-sheet" element={<ContactSheetPage />} /><Route path="production" element={<ProductionPage />} /><Route path="review" element={<ReviewPage />} /><Route path="editor" element={<EditorPage />} /><Route path="library" element={<AssetLibraryPage />} /><Route path="settings" element={<SettingsPage />} /></Route></Routes>
+  return <Routes><Route element={<AppShell />}><Route index element={<DashboardPage />} /><Route path="projects/:projectId" element={<ProjectPage />} /><Route path="projects/:projectId/control" element={<ProjectControlPage />} /><Route path="projects/:projectId/audit" element={<AuditLedgerPage />} /><Route path="projects/:projectId/decision-impact" element={<DecisionImpactPage />} /><Route path="projects/:projectId/plan" element={<PlanPage />} /><Route path="projects/:projectId/contact-sheet" element={<ContactSheetPage />} /><Route path="production" element={<ProductionPage />} /><Route path="review" element={<ReviewPage />} /><Route path="editor" element={<EditorPage />} /><Route path="editor-prototype" element={<EditorPrototypePage />} /><Route path="library" element={<AssetLibraryPage />} /><Route path="settings" element={<SettingsPage />} /></Route></Routes>
 }
