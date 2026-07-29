@@ -9,7 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { Timeline, TimelineItem, TimelineItemDraft } from '../api/types'
+import type { Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
 const DEFAULT_PROJECT_ID = 'project_9cd1c4e1fe5c4c8e88466acef2913e72'
@@ -156,6 +156,8 @@ export function EditorPrototypePage() {
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false)
   const [validationOpen, setValidationOpen] = useState(false)
   const [lastValidation, setLastValidation] = useState<Timeline | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [lastPreview, setLastPreview] = useState<TimelinePreview | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
@@ -185,6 +187,8 @@ export function EditorPrototypePage() {
     setSelectedIndex(0)
     setPlayheadMs(0)
     setLastValidation(sourceTimeline)
+    setLastPreview(null)
+    setPreviewOpen(false)
     setNotice(restored
       ? `已恢复 ${new Date(restored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
       : '当前时间线已同步；开始调整后会自动保存本地草稿。')
@@ -300,6 +304,21 @@ export function EditorPrototypePage() {
       setNotice(timeline.validation_report.length
         ? `时间线 v${timeline.version_number} 已保存，检查发现 ${timeline.validation_report.length} 个问题。`
         : `时间线 v${timeline.version_number} 已保存并通过确定性检查。`)
+    },
+  })
+
+  const renderPreview = useMutation({
+    mutationFn: async () => {
+      if (!sourceTimeline?.contract_hash) throw new Error('当前时间线还没有可复验的合同哈希。')
+      if (dirty) throw new Error('请先保存并检查本地草稿，再生成低清预览。')
+      return api.renderTimelinePreview(projectId, sourceTimeline)
+    },
+    onSuccess: preview => {
+      setLastPreview(preview)
+      setPreviewOpen(true)
+      setNotice(preview.state === 'ready'
+        ? `时间线 v${preview.timeline_version_number} 的 ${preview.width}×${preview.height} 低清预览${preview.cached ? '已从缓存读取' : '已生成'}。`
+        : `低清预览被 ${preview.validation_report.length} 个确定性问题阻断。`)
     },
   })
 
@@ -651,10 +670,11 @@ export function EditorPrototypePage() {
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error)}>
-      {unresolvedCount || validationErrors.length || saveAndValidate.error ? <AlertTriangle /> : <CheckCircle2 />}
+    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error) || Boolean(renderPreview.error)}>
+      {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
       {saveAndValidate.error && <button onClick={() => setConfirmSaveOpen(true)}>{saveAndValidate.error instanceof Error ? saveAndValidate.error.message : '保存失败，请重试'}</button>}
+      {renderPreview.error && <button onClick={() => renderPreview.mutate()}>{renderPreview.error instanceof Error ? renderPreview.error.message : '低清预览失败，请重试'}</button>}
       {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
       <code>{workspace.data.aspect_ratio} · {seconds(durationMs)} · 预览质量</code>
     </section>
@@ -802,6 +822,10 @@ export function EditorPrototypePage() {
       <header className={styles.timelineToolbar}>
         <div><strong>时间线</strong><span>{mainItems.length} 个画面片段 · {audioItems.length} 个音频 · {subtitleItems.length} 个字幕</span></div>
         <button onClick={splitSelected}><Scissors />分割</button>
+        <button disabled={renderPreview.isPending} onClick={() => {
+          if (dirty) setNotice('请先保存并检查本地草稿，再生成低清预览。')
+          else renderPreview.mutate()
+        }}><Film />{renderPreview.isPending ? '预览生成中…' : '低清预览'}</button>
         <button>磁吸 100ms</button>
         <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => { setTimelineZoom(Number(event.target.value)); setDirty(true) }} /></label>
         <code>{timecode(playheadMs)}</code>
@@ -878,6 +902,28 @@ export function EditorPrototypePage() {
         </button>)}
       </div>
       <footer><button onClick={() => setValidationOpen(false)}>返回时间线</button></footer>
+    </section></div>}
+    {previewOpen && lastPreview && <div className={styles.modal}><section className={styles.previewModal}>
+      <header><Film /><div><span>DRAFT PRE-RENDER</span><h2>时间线 v{lastPreview.timeline_version_number} 低清预览</h2></div><button title="关闭" onClick={() => setPreviewOpen(false)}><X /></button></header>
+      {lastPreview.state === 'ready' && lastPreview.content_url ? <>
+        <div className={styles.renderedPreview}><video controls src={lastPreview.content_url} /></div>
+        <dl>
+          <div><dt>预览规格</dt><dd>{lastPreview.width}×{lastPreview.height} · {lastPreview.fps}fps</dd></div>
+          <div><dt>来源</dt><dd>{lastPreview.cached ? '确定性缓存' : '本机 FFmpeg 新生成'}</dd></div>
+          <div><dt>文件大小</dt><dd>{lastPreview.byte_size ? `${(lastPreview.byte_size / 1024 / 1024).toFixed(1)} MB` : '--'}</dd></div>
+          <div><dt>合同状态</dt><dd>仅预览，不是交付</dd></div>
+        </dl>
+      </> : <>
+        <p>低清预览没有启动 FFmpeg。请先处理以下合同问题；点击条目可定位到对应片段。</p>
+        <div className={styles.validationList}>
+          {lastPreview.validation_report.map(error => <button key={`${error.code}-${error.path}`} onClick={() => {
+            setPreviewOpen(false)
+            locateValidationError(error)
+          }}><AlertTriangle /><span><strong>{error.message}</strong><small>{error.path}</small></span><code>{error.code}</code></button>)}
+        </div>
+      </>}
+      <div className={styles.modalWarning}><AlertTriangle /><span>低清预览只写入本机缓存，不确认时间线、不创建交付任务、不登记正式成片，也不产生供应商费用。</span></div>
+      <footer><button onClick={() => setPreviewOpen(false)}>返回时间线</button>{lastPreview.state === 'ready' && <button className={styles.confirmButton} onClick={() => renderPreview.mutate()}>{renderPreview.isPending ? '检查中…' : '重新检查缓存'}</button>}</footer>
     </section></div>}
   </main>
 }

@@ -125,9 +125,11 @@ from ..editor.contracts import (
     CreateTimelineCandidate,
     EditorWorkspaceView,
     GenerateEditorTimeline,
+    RenderTimelinePreview,
     RetryEditorTimeline,
     ReviseTimelineCandidate,
     TimelineRead,
+    TimelinePreviewRead,
     ValidateTimeline,
 )
 from ..editor.service import (
@@ -138,8 +140,10 @@ from ..editor.service import (
     create_timeline_candidate,
     editor_workspace,
     generate_editor_timeline,
+    render_timeline_preview,
     retry_editor_timeline,
     revise_timeline_candidate,
+    timeline_preview_content_path,
     validate_timeline,
 )
 from ..editor.agent_gateway import EditorAssistantGateway, get_editor_assistant_gateway
@@ -1192,6 +1196,44 @@ def project_timeline_validate(
     except EditorConflictError as exc:
         session.rollback()
         raise editor_error(exc) from exc
+
+
+@router.post(
+    "/projects/{project_id}/timelines/{timeline_id}:render-preview",
+    response_model=TimelinePreviewRead,
+)
+def project_timeline_render_preview(
+    project_id: str,
+    timeline_id: str,
+    payload: RenderTimelinePreview,
+    session: Session = Depends(get_session),
+):
+    try:
+        return render_timeline_preview(session, require_project(session, project_id), timeline_id, payload)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/timelines/{timeline_id}/previews/{preview_key}/content")
+def project_timeline_preview_content(
+    project_id: str,
+    timeline_id: str,
+    preview_key: str,
+    session: Session = Depends(get_session),
+):
+    try:
+        path = timeline_preview_content_path(
+            session,
+            require_project(session, project_id),
+            timeline_id,
+            preview_key,
+        )
+        return FileResponse(path, media_type="video/mp4", filename=f"timeline-{timeline_id}-preview.mp4")
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.post("/projects/{project_id}/timelines/{timeline_id}:confirm", response_model=TimelineRead)

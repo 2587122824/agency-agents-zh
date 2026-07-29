@@ -1,13 +1,13 @@
 # 片场 V2 时间线剪辑合同实现
 
-版本：v0.1
+版本：v0.2
 
 状态：已实现
 实现目录：`v2/backend/app/editor/`、`v2/frontend/src/pages/EditorPage.tsx`
 
 ## 1. 目标与边界
 
-首期剪辑台负责素材取舍和交付前的时间线合同，不实现完整非线性编辑器，也不执行媒体导出。
+剪辑台负责素材取舍和交付前的时间线合同，不实现完整非线性编辑器；可生成无交付副作用的本机低清预览缓存，正式媒体导出仍属于独立交付模块。
 
 本阶段实现：
 
@@ -19,7 +19,7 @@
 - 用户确认后形成不可变时间线权威版本。
 - 引用素材进入 `used`，项目进入 `delivery_ready`。
 
-本阶段不实现媒体导出、自动剪辑、自动补空位、自动变速、自动裁切、素材 ID 猜测、跨快照复用、自动重试或供应商调用。
+本阶段不把低清预览登记为媒体导出或正式成片，也不实现自动补空位、自动变速、自动裁切、素材 ID 猜测、跨快照复用、自动重试或供应商调用。
 
 ## 2. 权威链路
 
@@ -124,6 +124,8 @@ POST /api/v1/projects/{project_id}/quality-stage:approve
 POST /api/v1/projects/{project_id}/timeline-candidates
 POST /api/v1/projects/{project_id}/timelines/{timeline_id}:revise
 POST /api/v1/projects/{project_id}/timelines/{timeline_id}:validate
+POST /api/v1/projects/{project_id}/timelines/{timeline_id}:render-preview
+GET  /api/v1/projects/{project_id}/timelines/{timeline_id}/previews/{preview_key}/content
 POST /api/v1/projects/{project_id}/timelines/{timeline_id}:confirm
 ```
 
@@ -134,6 +136,8 @@ POST /api/v1/projects/{project_id}/timelines/{timeline_id}:confirm
 剪辑台按原型实现：可编辑项目列表、输出摘要、质量阶段确认门、预览监视器、批准素材箱、三类轨道、显式空位、四个时间字段、版本历史、校验结果、修订和合同确认。
 
 前端排序和时间输入只是候选编辑状态。只有提交成功的版本具有数据库权威性。
+
+新版 `/editor-prototype` 另提供 `editor-preview.v1` 低清预渲染。它只读取已保存 Timeline，不消费浏览器未提交草稿；服务复验行版本、合同哈希、时间线校验、本机渲染合同、输入文件哈希以及缓存 MP4 的格式/尺寸/时长。合法版本按项目画幅生成长边 640、最高 24fps 的本机缓存；该缓存不是 Asset，不创建 DeliveryAttempt、WorkItem、CostEvent，不确认时间线或改变项目状态。
 
 ## 8. 事件
 

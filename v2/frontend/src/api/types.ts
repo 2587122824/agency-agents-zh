@@ -1288,6 +1288,24 @@ export interface Timeline {
   items: TimelineItem[]
 }
 
+export interface TimelinePreview {
+  schema_version: 'editor-preview.v1'
+  state: 'blocked' | 'ready'
+  timeline_id: string
+  timeline_version_number: number
+  timeline_contract_hash: string
+  quality_profile: 'draft_360p'
+  width: number
+  height: number
+  fps: number
+  duration_ms: number
+  cached: boolean
+  content_url: string | null
+  content_hash: string | null
+  byte_size: number | null
+  validation_report: Timeline['validation_report']
+}
+
 export interface TimelineTrackConfig {
   audio_enabled: boolean
   subtitle_enabled: boolean

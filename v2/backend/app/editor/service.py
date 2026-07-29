@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy.orm import Session
 
 from ..creation.agent_gateway import AgentGatewayError
+from ..core.config import RUNTIME_ROOT
 from ..db.models import (
     AgentInputManifest,
     AgentRun,
@@ -17,6 +19,16 @@ from ..db.models import (
     TimelineItem,
     utc_now,
 )
+from ..delivery.renderer import (
+    LocalFFmpegRenderer,
+    LocalRenderAudioInput,
+    LocalRenderError,
+    LocalRenderInput,
+    LocalRenderRequest,
+    LocalRenderSubtitleInput,
+    inspect_local_ffmpeg,
+)
+from ..delivery.service import DeliveryConflictError, validate_local_render_manifest
 from ..repositories import (
     EditorRepository,
     SqlAlchemyCommandRepository,
@@ -24,13 +36,20 @@ from ..repositories import (
     SqlAlchemyEventRepository,
 )
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
-from ..quality.service import quality_review_view
+from ..quality.service import (
+    QualityConflictError,
+    probe_media,
+    quality_review_view,
+    resolve_local_asset_path,
+    sha256_file,
+)
 from .contracts import (
     ApproveQualityStage,
     ConfirmTimeline,
     CreateTimelineCandidate,
     GenerateEditorTimeline,
     RetryEditorTimeline,
+    RenderTimelinePreview,
     ReviseTimelineCandidate,
     ValidateTimeline,
 )
@@ -1016,6 +1035,302 @@ def validate_timeline(
     ))
     session.commit()
     return timeline_read(session, timeline)
+
+
+def _preview_dimensions(timeline: Timeline, project: Project) -> tuple[int, int, int]:
+    output_spec = timeline.output_spec if isinstance(timeline.output_spec, dict) else {}
+    ratio_parts = str(project.aspect_ratio).split(":")
+    if len(ratio_parts) == 2 and all(part.isdigit() and int(part) > 0 for part in ratio_parts):
+        source_width, source_height = int(ratio_parts[0]), int(ratio_parts[1])
+    else:
+        source_width = int(output_spec.get("width") or 16)
+        source_height = int(output_spec.get("height") or 9)
+    scale = 640 / max(source_width, source_height)
+    width = max(2, round(source_width * scale / 2) * 2)
+    height = max(2, round(source_height * scale / 2) * 2)
+    fps = min(24, max(12, int(output_spec.get("fps") or 24)))
+    return width, height, fps
+
+
+def _preview_key(timeline: Timeline, quality_profile: str, ffmpeg_version: str) -> str:
+    return _hash({
+        "schema_version": "editor-preview.v1",
+        "timeline_id": timeline.id,
+        "timeline_contract_hash": timeline.contract_hash,
+        "quality_profile": quality_profile,
+        "ffmpeg_version": ffmpeg_version,
+    })
+
+
+def _preview_path(project: Project, preview_key: str):
+    return RUNTIME_ROOT / "cache" / "editor-previews" / project.id / f"{preview_key}.mp4"
+
+
+def _preview_response(
+    timeline: Timeline,
+    project: Project,
+    payload: RenderTimelinePreview,
+    *,
+    validation_report: list[dict] | None = None,
+    preview_key: str | None = None,
+    cached: bool = False,
+    content_hash: str | None = None,
+    byte_size: int | None = None,
+) -> dict:
+    width, height, fps = _preview_dimensions(timeline, project)
+    ready = preview_key is not None and not validation_report
+    return {
+        "schema_version": "editor-preview.v1",
+        "state": "ready" if ready else "blocked",
+        "timeline_id": timeline.id,
+        "timeline_version_number": timeline.version_number,
+        "timeline_contract_hash": timeline.contract_hash,
+        "quality_profile": payload.quality_profile,
+        "width": width,
+        "height": height,
+        "fps": fps,
+        "duration_ms": project.duration_seconds * 1000,
+        "cached": cached,
+        "content_url": (
+            f"/api/v1/projects/{project.id}/timelines/{timeline.id}/previews/{preview_key}/content"
+            if ready else None
+        ),
+        "content_hash": content_hash,
+        "byte_size": byte_size,
+        "validation_report": validation_report or [],
+    }
+
+
+def _preview_output_validation(path: Path, width: int, height: int, duration_ms: int) -> dict | None:
+    try:
+        media_probe = probe_media(path, "video")
+    except (QualityConflictError, OSError, ValueError) as exc:
+        return _error(
+            getattr(exc, "code", "PREVIEW_OUTPUT_PROBE_FAILED"),
+            "preview.output",
+            f"低清预览文件探测失败：{exc}",
+        )
+    if (
+        media_probe.get("mime_type") != "video/mp4"
+        or media_probe.get("width") != width
+        or media_probe.get("height") != height
+        or not isinstance(media_probe.get("duration_ms"), int)
+        or abs(media_probe["duration_ms"] - duration_ms) > 250
+    ):
+        return _error(
+            "PREVIEW_OUTPUT_CONTRACT_INVALID",
+            "preview.output",
+            "低清预览输出的格式、尺寸或时长与冻结预览合同不一致。",
+            expected_width=width,
+            expected_height=height,
+            expected_duration_ms=duration_ms,
+            actual=media_probe,
+        )
+    return None
+
+
+def render_timeline_preview(
+    session: Session,
+    project: Project,
+    timeline_id: str,
+    payload: RenderTimelinePreview,
+) -> dict:
+    timeline = _require_timeline(session, project, timeline_id)
+    if timeline.row_version != payload.expected_row_version:
+        raise EditorConflictError("TIMELINE_ROW_VERSION_MISMATCH", "时间线已变化，请刷新后重试。")
+    if not timeline.contract_hash or timeline.contract_hash != payload.expected_contract_hash:
+        raise EditorConflictError("TIMELINE_CONTRACT_HASH_MISMATCH", "时间线合同哈希已变化，请刷新后重试。")
+    errors = _validate_items(session, project, timeline)
+    if errors:
+        return _preview_response(timeline, project, payload, validation_report=errors)
+    repository = _editor(session)
+    input_items: list[dict] = []
+    for item in repository.timeline_items(timeline.id):
+        asset = repository.asset(item.asset_id) if item.asset_id else None
+        input_items.append({
+            "track_type": item.track_type,
+            "sequence_number": item.sequence_number,
+            "asset_id": item.asset_id,
+            "gap_reason": item.gap_reason,
+            "source_in_ms": item.source_in_ms,
+            "source_out_ms": item.source_out_ms,
+            "timeline_in_ms": item.timeline_in_ms,
+            "timeline_out_ms": item.timeline_out_ms,
+            "transform": item.transform,
+            "asset_uri": asset.uri if asset else None,
+            "asset_content_hash": asset.content_hash if asset else None,
+        })
+    original_spec = timeline.output_spec if isinstance(timeline.output_spec, dict) else {}
+    manifest = {
+        "track_config": timeline.track_config,
+        "input_items": input_items,
+        "output_spec": {
+            "width": original_spec.get("width"),
+            "height": original_spec.get("height"),
+            "fps": original_spec.get("fps"),
+            "duration_ms": project.duration_seconds * 1000,
+        },
+    }
+    try:
+        validate_local_render_manifest(manifest)
+    except DeliveryConflictError as exc:
+        return _preview_response(timeline, project, payload, validation_report=[_error(exc.code, "preview.render_contract", str(exc))])
+    readiness = inspect_local_ffmpeg()
+    if not readiness.available or not readiness.executable_path or not readiness.version:
+        return _preview_response(timeline, project, payload, validation_report=[_error(
+            readiness.reason_code or "FFMPEG_UNAVAILABLE",
+            "preview.ffmpeg",
+            readiness.reason or "本机 FFmpeg 当前不可用。",
+        )])
+    render_inputs: list[LocalRenderInput] = []
+    audio_inputs: list[LocalRenderAudioInput] = []
+    subtitle_input: LocalRenderSubtitleInput | None = None
+    for item in sorted(input_items, key=lambda row: (row["track_type"], row["timeline_in_ms"], row["sequence_number"])):
+        asset = repository.asset(item["asset_id"])
+        if not asset or asset.storage_backend != "local":
+            return _preview_response(timeline, project, payload, validation_report=[_error(
+                "PREVIEW_ASSET_NOT_LOCAL",
+                f"items.{item['track_type']}.{item['sequence_number']}",
+                "低清预览只接受已验证的本地素材。",
+                asset_id=item["asset_id"],
+            )])
+        try:
+            path = resolve_local_asset_path(asset.uri)
+        except QualityConflictError as exc:
+            return _preview_response(timeline, project, payload, validation_report=[_error(
+                exc.code,
+                f"items.{item['track_type']}.{item['sequence_number']}",
+                str(exc),
+                asset_id=asset.id,
+            )])
+        if not path.is_file():
+            return _preview_response(timeline, project, payload, validation_report=[_error(
+                "PREVIEW_INPUT_FILE_MISSING",
+                f"items.{item['track_type']}.{item['sequence_number']}",
+                "低清预览输入文件不存在。",
+                asset_id=asset.id,
+            )])
+        actual_hash, _ = sha256_file(path)
+        if actual_hash != asset.content_hash:
+            return _preview_response(timeline, project, payload, validation_report=[_error(
+                "PREVIEW_INPUT_HASH_MISMATCH",
+                f"items.{item['track_type']}.{item['sequence_number']}",
+                "低清预览输入文件哈希与时间线素材事实不一致。",
+                asset_id=asset.id,
+            )])
+        transform = item["transform"] or {}
+        if item["track_type"] == "main_video":
+            transition_in = transform.get("transition_in") or {}
+            transition_out = transform.get("transition_out") or {}
+            render_inputs.append(LocalRenderInput(
+                path=path,
+                source_in_ms=item["source_in_ms"],
+                source_out_ms=item["source_out_ms"],
+                transition_in_ms=transition_in.get("duration_ms", 0) if transition_in.get("type") == "fade" else 0,
+                transition_out_ms=transition_out.get("duration_ms", 0) if transition_out.get("type") == "fade" else 0,
+            ))
+        elif item["track_type"] == "audio":
+            envelope = transform.get("volume_envelope") or []
+            playback = transform.get("playback") or {"mode": "trim"}
+            ducking = transform.get("ducking") or {}
+            audio_inputs.append(LocalRenderAudioInput(
+                path=path,
+                source_in_ms=item["source_in_ms"],
+                source_out_ms=item["source_out_ms"],
+                timeline_in_ms=item["timeline_in_ms"],
+                volume_envelope=tuple((point["time_ms"], float(point["gain_db"])) for point in envelope),
+                loop=playback.get("mode") == "loop",
+                output_duration_ms=item["timeline_out_ms"] - item["timeline_in_ms"],
+                ducking_regions=tuple(
+                    (region["start_ms"], region["end_ms"])
+                    for region in ducking.get("regions", [])
+                ) if ducking.get("enabled") else (),
+                ducking_reduction_db=float(ducking.get("reduction_db", -12)),
+                ducking_attack_ms=int(ducking.get("attack_ms", 200)),
+                ducking_release_ms=int(ducking.get("release_ms", 500)),
+            ))
+        elif item["track_type"] == "subtitle":
+            subtitle_input = LocalRenderSubtitleInput(path=path)
+    preview_key = _preview_key(timeline, payload.quality_profile, readiness.version)
+    output_path = _preview_path(project, preview_key)
+    width, height, fps = _preview_dimensions(timeline, project)
+    duration_ms = project.duration_seconds * 1000
+    if output_path.is_file():
+        output_error = _preview_output_validation(output_path, width, height, duration_ms)
+        if output_error:
+            return _preview_response(timeline, project, payload, validation_report=[output_error])
+        content_hash, byte_size = sha256_file(output_path)
+        return _preview_response(
+            timeline,
+            project,
+            payload,
+            preview_key=preview_key,
+            cached=True,
+            content_hash=content_hash,
+            byte_size=byte_size,
+        )
+    mastering = (timeline.track_config or {}).get("audio_mastering") or {}
+    try:
+        LocalFFmpegRenderer().render(LocalRenderRequest(
+            ffmpeg_path=Path(readiness.executable_path),
+            inputs=tuple(render_inputs),
+            output_path=output_path,
+            width=width,
+            height=height,
+            fps=fps,
+            video_encoder="libx264",
+            preset="veryfast",
+            crf=30,
+            audio_inputs=tuple(audio_inputs),
+            subtitle_input=subtitle_input,
+            loudness_target_lufs=float(mastering.get("loudness_target_lufs", -16)),
+            true_peak_limit_dbtp=float(mastering.get("true_peak_limit_dbtp", -1)),
+        ))
+    except LocalRenderError as exc:
+        return _preview_response(timeline, project, payload, validation_report=[_error(
+            exc.code,
+            "preview.ffmpeg",
+            exc.detail,
+            **exc.evidence,
+        )])
+    content_hash, byte_size = sha256_file(output_path)
+    output_error = _preview_output_validation(output_path, width, height, duration_ms)
+    if output_error:
+        return _preview_response(timeline, project, payload, validation_report=[output_error])
+    return _preview_response(
+        timeline,
+        project,
+        payload,
+        preview_key=preview_key,
+        cached=False,
+        content_hash=content_hash,
+        byte_size=byte_size,
+    )
+
+
+def timeline_preview_content_path(
+    session: Session,
+    project: Project,
+    timeline_id: str,
+    preview_key: str,
+):
+    timeline = _require_timeline(session, project, timeline_id)
+    readiness = inspect_local_ffmpeg()
+    if (
+        len(preview_key) != 64
+        or any(character not in "0123456789abcdef" for character in preview_key)
+        or not readiness.available
+        or not readiness.version
+        or preview_key != _preview_key(timeline, "draft_360p", readiness.version)
+    ):
+        raise EditorNotFoundError("低清预览不存在或已因时间线/执行环境变化而失效。")
+    path = _preview_path(project, preview_key)
+    if not path.is_file():
+        raise EditorNotFoundError("低清预览文件不存在。")
+    width, height, _ = _preview_dimensions(timeline, project)
+    if _preview_output_validation(path, width, height, project.duration_seconds * 1000):
+        raise EditorNotFoundError("低清预览文件不再满足冻结预览合同。")
+    return path
 
 
 def confirm_timeline(

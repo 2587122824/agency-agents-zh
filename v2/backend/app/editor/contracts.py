@@ -77,6 +77,30 @@ class ConfirmTimeline(EditorCommand):
     confirm_delivery_scope: bool
 
 
+class RenderTimelinePreview(EditorCommand):
+    expected_row_version: int = Field(ge=1)
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    quality_profile: Literal["draft_360p"] = "draft_360p"
+
+
+class TimelinePreviewRead(BaseModel):
+    schema_version: Literal["editor-preview.v1"] = "editor-preview.v1"
+    state: Literal["blocked", "ready"]
+    timeline_id: str
+    timeline_version_number: int
+    timeline_contract_hash: str
+    quality_profile: Literal["draft_360p"]
+    width: int
+    height: int
+    fps: int
+    duration_ms: int
+    cached: bool
+    content_url: str | None = None
+    content_hash: str | None = None
+    byte_size: int | None = None
+    validation_report: list[dict] = Field(default_factory=list)
+
+
 class TimelineItemRead(BaseModel):
     id: str
     track_type: str

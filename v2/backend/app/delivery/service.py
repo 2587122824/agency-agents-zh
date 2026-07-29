@@ -220,7 +220,7 @@ def _execution_contract(execution_kind: str) -> dict:
     }
 
 
-def _validate_local_render_manifest(manifest: dict) -> None:
+def validate_local_render_manifest(manifest: dict) -> None:
     track_config = manifest.get("track_config") or {}
     items = manifest.get("input_items") or []
     if not items:
@@ -338,7 +338,7 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
     execution = _execution_contract(payload.execution_kind)
     manifest = _delivery_manifest(session, project, timeline, execution)
     if payload.execution_kind == "local_ffmpeg":
-        _validate_local_render_manifest(manifest)
+        validate_local_render_manifest(manifest)
     fingerprint = _hash(manifest)
     attempt = DeliveryAttempt(
         project_id=project.id,
@@ -789,7 +789,7 @@ def prepare_local_render(
             "确认时间线或输入素材事实已变化，不能执行旧交付请求。",
         )
     try:
-        _validate_local_render_manifest(current_manifest)
+        validate_local_render_manifest(current_manifest)
     except DeliveryConflictError as exc:
         raise LocalRenderError(exc.code, str(exc)) from exc
     execution = current_manifest["execution"]

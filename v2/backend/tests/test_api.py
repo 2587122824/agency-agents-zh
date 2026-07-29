@@ -36,6 +36,7 @@ from v2.backend.app.planning.agent_gateway import ContentPlannerOutput, ContentP
 from v2.backend.app.planning.director_gateway import DeterministicDirectorGateway, get_director_gateway
 from v2.backend.app.production.agent_gateway import DeterministicProductionPlannerGateway, ProductionPlannerOutput, ProductionPlannerResult, get_production_planner_gateway
 from v2.backend.app.editor.agent_gateway import DeterministicEditorAssistantGateway, EditorAssistantResult, get_editor_assistant_gateway
+from v2.backend.app.editor import service as editor_service
 from v2.backend.app.quality.agent_gateway import DeterministicQCGateway, get_qc_gateway
 from v2.backend.app.delivery import service as delivery_service
 from v2.backend.app.delivery.renderer import FFmpegReadiness, LocalRenderResult
@@ -6903,6 +6904,21 @@ def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(cl
     assert "TIMELINE_GAP_UNRESOLVED" in codes
     assert "TIMELINE_ASSET_NOT_APPROVED" in codes
     assert "VIDEO_TRANSITION_INVALID" in codes
+    preview = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{candidate['id']}:render-preview",
+        json={
+            "command_id": "timeline-invalid-preview-01",
+            "expected_row_version": validated["row_version"],
+            "expected_contract_hash": validated["contract_hash"],
+            "quality_profile": "draft_360p",
+        },
+    )
+    assert preview.status_code == 200
+    preview_payload = preview.json()
+    assert preview_payload["state"] == "blocked"
+    assert preview_payload["content_url"] is None
+    assert preview_payload["cached"] is False
+    assert "TIMELINE_GAP_UNRESOLVED" in {row["code"] for row in preview_payload["validation_report"]}
     confirm = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{candidate['id']}:confirm",
         json={
@@ -6914,6 +6930,109 @@ def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(cl
     )
     assert confirm.status_code == 409
     assert confirm.headers["x-error-code"] == "TIMELINE_NOT_READY_FOR_CONFIRMATION"
+
+
+def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_effects(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    video_assets = seed_editor_assets(client, project, snapshot)
+    client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "editor-preview-stage-approve", "expected_snapshot_id": snapshot["id"]},
+    )
+    candidate = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "editor-preview-create-001",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": timeline_items_for_assets(video_assets),
+        },
+    ).json()
+    timeline = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{candidate['id']}:validate",
+        json={"command_id": "editor-preview-validate-01", "expected_row_version": candidate["row_version"]},
+    ).json()
+    with SessionLocal() as session:
+        assets = [session.get(Asset, row["id"]) for row in video_assets]
+        for asset in assets:
+            path = resolve_local_asset_path(asset.uri)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            node_id = Path(asset.uri).stem
+            path.write_bytes(node_id.encode())
+            assert hashlib.sha256(node_id.encode()).hexdigest() == asset.content_hash
+    ffmpeg_path = TEST_RUNTIME / "tools" / "ffmpeg.exe"
+    ffmpeg_path.parent.mkdir(parents=True, exist_ok=True)
+    ffmpeg_path.write_bytes(b"fixture")
+    monkeypatch.setattr(
+        editor_service,
+        "inspect_local_ffmpeg",
+        lambda: FFmpegReadiness(True, None, None, str(ffmpeg_path), "ffmpeg fixture 1.0"),
+    )
+    render_calls = []
+
+    def fake_render(_renderer, request):
+        render_calls.append(request)
+        request.output_path.parent.mkdir(parents=True, exist_ok=True)
+        request.output_path.write_bytes(b"preview-mp4")
+        return LocalRenderResult(("ffmpeg",), "", "")
+
+    monkeypatch.setattr(editor_service.LocalFFmpegRenderer, "render", fake_render)
+    monkeypatch.setattr(
+        editor_service,
+        "probe_media",
+        lambda _path, _declared_type: {"mime_type": "video/mp4", "width": 360, "height": 640, "duration_ms": 30_000},
+    )
+    payload = {
+        "command_id": "editor-preview-render-001",
+        "expected_row_version": timeline["row_version"],
+        "expected_contract_hash": timeline["contract_hash"],
+        "quality_profile": "draft_360p",
+    }
+    first = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:render-preview",
+        json=payload,
+    )
+    assert first.status_code == 200
+    preview = first.json()
+    assert preview["state"] == "ready", preview
+    assert preview["cached"] is False
+    assert preview["width"] == 360
+    assert preview["height"] == 640
+    assert preview["content_hash"] == hashlib.sha256(b"preview-mp4").hexdigest()
+    assert len(render_calls) == 1
+    cached = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:render-preview",
+        json={**payload, "command_id": "editor-preview-render-002"},
+    ).json()
+    assert cached["state"] == "ready"
+    assert cached["cached"] is True
+    assert len(render_calls) == 1
+    content = client.get(preview["content_url"])
+    assert content.status_code == 200
+    assert content.content == b"preview-mp4"
+    monkeypatch.setattr(
+        editor_service,
+        "probe_media",
+        lambda _path, _declared_type: {"mime_type": "video/mp4", "width": 640, "height": 360, "duration_ms": 30_000},
+    )
+    invalid_cache = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:render-preview",
+        json={**payload, "command_id": "editor-preview-render-003"},
+    ).json()
+    assert invalid_cache["state"] == "blocked"
+    assert invalid_cache["validation_report"][0]["code"] == "PREVIEW_OUTPUT_CONTRACT_INVALID"
+    assert client.get(preview["content_url"]).status_code == 404
+    with SessionLocal() as session:
+        assert session.get(Timeline, timeline["id"]).status == "review"
+        assert list(session.scalars(select(DeliveryAttempt).where(DeliveryAttempt.project_id == project["id"]))) == []
+        assert list(session.scalars(select(WorkItem).where(
+            WorkItem.project_id == project["id"],
+            WorkItem.kind == "render_delivery",
+        ))) == []
 
 
 def test_timeline_freezes_authorized_looping_bgm_ducking_and_mastering(client: TestClient) -> None:
