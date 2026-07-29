@@ -766,6 +766,13 @@
 .videoClip[data-selected="true"] .trimHandle { opacity: 1; }
 .trimHandle[data-edge="start"] { left: 0; border-radius: 2px 0 0 2px; }
 .trimHandle[data-edge="end"] { right: 0; border-radius: 0 2px 2px 0; }
+.trimHandle[aria-disabled="true"] { opacity: .25; cursor: not-allowed; }
+.timelineToolbar button:disabled,
+.actionGrid button:disabled,
+.gapActions button:disabled {
+  opacity: .38;
+  cursor: not-allowed;
+}
 .audioClip,
 .subtitleClip {
   padding: 0 5px;

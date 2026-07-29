@@ -738,8 +738,22 @@ export function EditorPrototypePage() {
     setNotice('已恢复下一步本地剪辑操作。')
   }
 
+  const blockMainTrackEdit = (item: TimelineItem | null = selectedItem) => {
+    if (!videoTrackLocked || item?.track_type !== 'main_video') return false
+    setNotice('画面轨已锁定，当前操作没有修改时间线；请先解锁画面轨。')
+    return true
+  }
+
+  const toggleVideoTrackLock = () => {
+    const nextLocked = !videoTrackLocked
+    setVideoTrackLocked(nextLocked)
+    setNotice(nextLocked
+      ? '画面轨已锁定：仍可选择和预览，但不能裁切、分割、移动、删除、替换或修改转场。'
+      : '画面轨已解锁，可以继续调整画面片段。')
+  }
+
   const shiftItem = (direction: -1 | 1) => {
-    if (!selectedItem || selectedItem.track_type !== 'main_video' || videoTrackLocked) return
+    if (!selectedItem || selectedItem.track_type !== 'main_video' || blockMainTrackEdit()) return
     const trackIndexes = items.map((item, index) => ({ item, index })).filter(row => row.item.track_type === 'main_video')
     const position = trackIndexes.findIndex(row => row.index === selectedIndex)
     const target = position + direction
@@ -751,7 +765,12 @@ export function EditorPrototypePage() {
   }
 
   const reorderItem = (targetId: string) => {
-    if (!draggedItemId || draggedItemId === targetId || videoTrackLocked) return
+    if (!draggedItemId || draggedItemId === targetId) return
+    const targetItem = mainItems.find(item => item.id === targetId) ?? null
+    if (blockMainTrackEdit(targetItem)) {
+      setDraggedItemId(null)
+      return
+    }
     const rows = [...mainItems]
     const from = rows.findIndex(item => item.id === draggedItemId)
     const to = rows.findIndex(item => item.id === targetId)
@@ -765,7 +784,11 @@ export function EditorPrototypePage() {
 
   const dropAssetOnItem = (target: TimelineItem, explicitAssetId?: string) => {
     const sourceAssetId = explicitAssetId ?? draggedAssetId
-    if (!sourceAssetId || videoTrackLocked) return
+    if (!sourceAssetId) return
+    if (blockMainTrackEdit(target)) {
+      setDraggedAssetId(null)
+      return
+    }
     const asset = workspace.data?.available_assets.find(row => row.id === sourceAssetId)
     if (!asset || asset.asset_type !== 'video' || !asset.duration_ms) return
     if (mainItems.some(item => item.id !== target.id && item.asset_id === asset.id)) {
@@ -795,6 +818,7 @@ export function EditorPrototypePage() {
   }
 
   const startGapAssetSelection = () => {
+    if (blockMainTrackEdit()) return
     setAssetFilter('video')
     setGapAssetSelection(true)
     const available = workspace.data?.available_assets.filter(asset => (
@@ -843,7 +867,7 @@ export function EditorPrototypePage() {
   }
 
   const updateSelectedTransform = (key: string, value: unknown) => {
-    if (!selectedItem) return
+    if (!selectedItem || blockMainTrackEdit()) return
     commitItems(items.map(item => item.id === selectedItem.id
       ? { ...item, transform: { ...item.transform, [key]: value } }
       : item), `已更新 ${selectedItem.label} 的片段设置。`, selectedItem.id)
@@ -899,7 +923,7 @@ export function EditorPrototypePage() {
   }
 
   const splitSelected = () => {
-    if (!selectedItem?.asset_id || selectedItem.track_type !== 'main_video' || videoTrackLocked) return
+    if (!selectedItem?.asset_id || selectedItem.track_type !== 'main_video' || blockMainTrackEdit()) return
     const splitAt = snapMs(playheadMs)
     if (splitAt <= selectedItem.timeline_in_ms + 200 || splitAt >= selectedItem.timeline_out_ms - 200) {
       setNotice('播放头距离片段边缘过近，至少保留 0.2 秒。')
@@ -929,7 +953,7 @@ export function EditorPrototypePage() {
   const deleteSelected = () => {
     if (!selectedItem) return
     if (selectedItem.track_type === 'main_video') {
-      if (videoTrackLocked) return
+      if (blockMainTrackEdit()) return
       const rows = mainItems.filter(item => item.id !== selectedItem.id)
       const normalized = normalizeMainTrack(rows, durationMs)
       const nextItems = replaceMainTrack(items, normalized)
@@ -946,7 +970,7 @@ export function EditorPrototypePage() {
 
   const beginTrim = (event: React.PointerEvent, item: TimelineItem, edge: 'start' | 'end') => {
     event.stopPropagation()
-    if (!item.asset_id || videoTrackLocked) return
+    if (!item.asset_id || blockMainTrackEdit(item)) return
     const startX = event.clientX
     const original = { sourceIn: item.source_in_ms ?? 0, sourceOut: item.source_out_ms ?? item.asset_duration_ms ?? 0 }
     setHistory(rows => [...rows.slice(-49), items])
@@ -1251,16 +1275,19 @@ export function EditorPrototypePage() {
           <section>
             <h3>素材范围</h3>
             <div className={styles.rangeLabels}><span>{seconds(selectedItem.source_in_ms)}</span><b>{seconds((selectedItem.source_out_ms ?? 0) - (selectedItem.source_in_ms ?? 0))}</b><span>{seconds(selectedItem.source_out_ms)}</span></div>
-            <div className={styles.trimHint}>{selectedItem.track_type === 'main_video' ? '直接拖动时间线片段两侧把手裁切' : '时间范围随不可变时间线版本保存'}</div>
+            <div className={styles.trimHint}>{selectedItem.track_type === 'main_video'
+              ? videoTrackLocked ? '画面轨已锁定；解锁后才能拖动两侧把手裁切' : '直接拖动时间线片段两侧把手裁切'
+              : '时间范围随不可变时间线版本保存'}</div>
           </section>
           {selectedItem.track_type === 'main_video' && <section>
             <h3>片段操作</h3>
             <div className={styles.actionGrid}>
-              <button onClick={splitSelected}><Scissors />播放头分割</button>
-              <button onClick={() => shiftItem(-1)}><ChevronLeft />向前移动</button>
-              <button onClick={() => shiftItem(1)}><ChevronRight />向后移动</button>
-              <button onClick={deleteSelected}>移除片段</button>
+              <button disabled={videoTrackLocked} onClick={splitSelected}><Scissors />播放头分割</button>
+              <button disabled={videoTrackLocked} onClick={() => shiftItem(-1)}><ChevronLeft />向前移动</button>
+              <button disabled={videoTrackLocked} onClick={() => shiftItem(1)}><ChevronRight />向后移动</button>
+              <button disabled={videoTrackLocked} onClick={deleteSelected}>移除片段</button>
             </div>
+            {videoTrackLocked && <div className={styles.trimHint}>画面轨锁定期间只允许选择、寻帧和预览，不写入本地草稿。</div>}
           </section>}
           {selectedItem.track_type === 'main_video' && <section>
             <h3>转场</h3>
@@ -1268,8 +1295,8 @@ export function EditorPrototypePage() {
               const transition = selectedItem.transform[key] as { type?: 'cut' | 'fade'; duration_ms?: number } | undefined
               const type = transition?.type ?? 'cut'
               return <div className={styles.transitionControl} key={key}>
-                <label>{key === 'transition_in' ? '入场' : '出场'}<select value={type} onChange={event => setSelectedTransition(key, event.target.value as 'cut' | 'fade', transition?.duration_ms)}><option value="cut">直接切换</option><option value="fade">{key === 'transition_in' ? '淡入' : '淡出'}</option></select></label>
-                <label>时长<input aria-label={`${key === 'transition_in' ? '入场' : '出场'}转场时长`} disabled={type !== 'fade'} type="number" min="0.1" max={selectedTransitionLimitMs / 1000} step="0.1" value={type === 'fade' ? (transition?.duration_ms ?? 300) / 1000 : 0} onChange={event => setSelectedTransition(key, 'fade', Math.round(Number(event.target.value) * 1000))} /><small>秒</small></label>
+                <label>{key === 'transition_in' ? '入场' : '出场'}<select disabled={videoTrackLocked} value={type} onChange={event => setSelectedTransition(key, event.target.value as 'cut' | 'fade', transition?.duration_ms)}><option value="cut">直接切换</option><option value="fade">{key === 'transition_in' ? '淡入' : '淡出'}</option></select></label>
+                <label>时长<input aria-label={`${key === 'transition_in' ? '入场' : '出场'}转场时长`} disabled={videoTrackLocked || type !== 'fade'} type="number" min="0.1" max={selectedTransitionLimitMs / 1000} step="0.1" value={type === 'fade' ? (transition?.duration_ms ?? 300) / 1000 : 0} onChange={event => setSelectedTransition(key, 'fade', Math.round(Number(event.target.value) * 1000))} /><small>秒</small></label>
               </div>
             })}
             <div className={styles.trimHint}>淡入淡出会写入时间线合同，并在低清预览与最终 FFmpeg 成片中执行。</div>
@@ -1302,7 +1329,7 @@ export function EditorPrototypePage() {
           <div className={styles.gapTitle}><AlertTriangle /><span><strong>缺少 {selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '0.9s'} 画面</strong><small>当前素材不足以覆盖 15 秒目标时长</small></span></div>
           <Link to={`/projects/${projectId}/decision-impact`}><Clock3 /><span><strong>分析缩短成片</strong><small>先评估修改 15 秒目标的下游影响</small></span></Link>
           <Link to={`/production?project=${projectId}`}><WandSparkles /><span><strong>前往生成补充镜头</strong><small>在生产流程登记新镜头，授权后才可能产生费用</small></span></Link>
-          <button onClick={startGapAssetSelection}><Plus /><span><strong>选择其他素材</strong><small>只列出未用于主画面的已批准视频</small></span></button>
+          <button disabled={videoTrackLocked} onClick={startGapAssetSelection}><Plus /><span><strong>{videoTrackLocked ? '先解锁画面轨' : '选择其他素材'}</strong><small>{videoTrackLocked ? '锁定期间不会替换缺口' : '只列出未用于主画面的已批准视频'}</small></span></button>
         </section>}
       </aside>
     </section>
@@ -1310,7 +1337,7 @@ export function EditorPrototypePage() {
     <section className={styles.timelinePanel}>
       <header className={styles.timelineToolbar}>
         <div><strong>时间线</strong><span>{mainItems.length} 个画面片段 · {audioItems.length} 个音频 · {subtitleItems.length} 个字幕</span></div>
-        <button onClick={splitSelected}><Scissors />分割</button>
+        <button disabled={videoTrackLocked || selectedItem?.track_type !== 'main_video' || !selectedItem.asset_id} onClick={splitSelected}><Scissors />分割</button>
         <button disabled={renderPreview.isPending} onClick={() => {
           if (dirty) setNotice('请先保存并检查本地草稿，再生成低清预览。')
           else renderPreview.mutate()
@@ -1350,7 +1377,7 @@ export function EditorPrototypePage() {
           }}
         >{rulerLabel(value)}</i>)}</div></div>
         <div className={styles.trackRow} data-track-hidden={videoTrackHidden}>
-          <label><Film /><span>画面</span><button title={videoTrackHidden ? '显示画面轨' : '隐藏画面轨'} onClick={() => setVideoTrackHidden(value => !value)}>{videoTrackHidden ? <EyeOff /> : <Eye />}</button><button title={videoTrackLocked ? '解锁画面轨' : '锁定画面轨'} onClick={() => setVideoTrackLocked(value => !value)}>{videoTrackLocked ? <Lock /> : <Unlock />}</button></label>
+          <label><Film /><span>画面</span><button title={videoTrackHidden ? '显示画面轨' : '隐藏画面轨'} onClick={() => setVideoTrackHidden(value => !value)}>{videoTrackHidden ? <EyeOff /> : <Eye />}</button><button title={videoTrackLocked ? '解锁画面轨' : '锁定画面轨'} aria-pressed={videoTrackLocked} onClick={toggleVideoTrackLock}>{videoTrackLocked ? <Lock /> : <Unlock />}</button></label>
           <div className={styles.trackLane} data-locked={videoTrackLocked} onDragOver={event => event.preventDefault()}>
             {mainItems.map(item => <button
               key={item.id}
@@ -1367,9 +1394,9 @@ export function EditorPrototypePage() {
                 else reorderItem(item.id)
               }}
               onClick={() => selectItem(item)}
-            >{item.asset_id && <i role="slider" aria-label={`${item.label} 左侧裁切把手`} aria-valuemin={0} aria-valuemax={item.asset_duration_ms ?? 0} aria-valuenow={item.source_in_ms ?? 0} tabIndex={0} className={styles.trimHandle} data-edge="start" onPointerDown={event => beginTrim(event, item, 'start')} />}
+            >{item.asset_id && <i role="slider" aria-label={`${item.label} 左侧裁切把手`} aria-disabled={videoTrackLocked} aria-valuemin={0} aria-valuemax={item.asset_duration_ms ?? 0} aria-valuenow={item.source_in_ms ?? 0} tabIndex={videoTrackLocked ? -1 : 0} className={styles.trimHandle} data-edge="start" onPointerDown={event => beginTrim(event, item, 'start')} />}
               {item.asset_id ? <><Film /><span><strong>{item.label}</strong><small>{seconds(item.timeline_out_ms - item.timeline_in_ms)}</small></span></> : <><AlertTriangle /><span><strong>缺少画面</strong><small>{seconds(item.timeline_out_ms - item.timeline_in_ms)}</small></span></>}
-              {item.asset_id && <i role="slider" aria-label={`${item.label} 右侧裁切把手`} aria-valuemin={0} aria-valuemax={item.asset_duration_ms ?? 0} aria-valuenow={item.source_out_ms ?? 0} tabIndex={0} className={styles.trimHandle} data-edge="end" onPointerDown={event => beginTrim(event, item, 'end')} />}
+              {item.asset_id && <i role="slider" aria-label={`${item.label} 右侧裁切把手`} aria-disabled={videoTrackLocked} aria-valuemin={0} aria-valuemax={item.asset_duration_ms ?? 0} aria-valuenow={item.source_out_ms ?? 0} tabIndex={videoTrackLocked ? -1 : 0} className={styles.trimHandle} data-edge="end" onPointerDown={event => beginTrim(event, item, 'end')} />}
             </button>)}
           </div>
         </div>
