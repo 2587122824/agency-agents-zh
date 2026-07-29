@@ -244,6 +244,23 @@ export function EditorPrototypePage() {
     : Math.round(value)
   const selectedItem = items[selectedIndex] ?? null
   const selectedAsset = workspace.data?.available_assets.find(asset => asset.id === selectedItem?.asset_id) ?? null
+  const selectedClipDurationMs = selectedItem
+    ? selectedItem.timeline_out_ms - selectedItem.timeline_in_ms
+    : 0
+  const selectedTransitionLimitMs = Math.min(2000, Math.floor(selectedClipDurationMs / 2))
+  const selectedPreviewOpacity = (() => {
+    if (!selectedItem || selectedItem.track_type !== 'main_video') return 1
+    const offsetMs = Math.max(0, Math.min(selectedClipDurationMs, playheadMs - selectedItem.timeline_in_ms))
+    const transitionIn = selectedItem.transform.transition_in as { type?: string; duration_ms?: number } | undefined
+    const transitionOut = selectedItem.transform.transition_out as { type?: string; duration_ms?: number } | undefined
+    const fadeInOpacity = transitionIn?.type === 'fade' && transitionIn.duration_ms
+      ? Math.min(1, offsetMs / transitionIn.duration_ms)
+      : 1
+    const fadeOutOpacity = transitionOut?.type === 'fade' && transitionOut.duration_ms
+      ? Math.min(1, Math.max(0, selectedClipDurationMs - offsetMs) / transitionOut.duration_ms)
+      : 1
+    return Math.min(fadeInOpacity, fadeOutOpacity)
+  })()
   const subtitlePreview = useQuery({
     queryKey: ['editor-prototype-subtitle', projectId, selectedAsset?.id],
     enabled: selectedAsset?.asset_type === 'subtitle',
@@ -696,7 +713,23 @@ export function EditorPrototypePage() {
     if (!selectedItem) return
     commitItems(items.map(item => item.id === selectedItem.id
       ? { ...item, transform: { ...item.transform, [key]: value } }
-      : item), `已更新 ${selectedItem.label} 的声音设置。`, selectedItem.id)
+      : item), `已更新 ${selectedItem.label} 的片段设置。`, selectedItem.id)
+  }
+
+  const setSelectedTransition = (
+    key: 'transition_in' | 'transition_out',
+    type: 'cut' | 'fade',
+    durationMs?: number,
+  ) => {
+    if (!selectedItem || selectedItem.track_type !== 'main_video') return
+    const maximum = Math.min(2000, Math.floor((selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) / 2))
+    const requestedDuration = durationMs != null && durationMs >= 100
+      ? durationMs
+      : Math.min(300, maximum)
+    const nextDuration = type === 'cut'
+      ? 0
+      : Math.max(100, Math.min(maximum, requestedDuration))
+    updateSelectedTransform(key, { type, duration_ms: nextDuration })
   }
 
   const setSelectedAudioMix = (mix: 'voiceover' | 'background_music') => {
@@ -988,6 +1021,7 @@ export function EditorPrototypePage() {
             ref={videoRef}
             key={selectedItem?.id}
             src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`}
+            style={{ opacity: selectedPreviewOpacity }}
             preload="metadata"
             muted
             playsInline
@@ -1056,8 +1090,15 @@ export function EditorPrototypePage() {
           </section>}
           {selectedItem.track_type === 'main_video' && <section>
             <h3>转场</h3>
-            <label>入场<select defaultValue="cut"><option value="cut">直接切换</option><option value="fade">淡入</option></select></label>
-            <label>出场<select defaultValue="cut"><option value="cut">直接切换</option><option value="fade">淡出</option></select></label>
+            {(['transition_in', 'transition_out'] as const).map(key => {
+              const transition = selectedItem.transform[key] as { type?: 'cut' | 'fade'; duration_ms?: number } | undefined
+              const type = transition?.type ?? 'cut'
+              return <div className={styles.transitionControl} key={key}>
+                <label>{key === 'transition_in' ? '入场' : '出场'}<select value={type} onChange={event => setSelectedTransition(key, event.target.value as 'cut' | 'fade', transition?.duration_ms)}><option value="cut">直接切换</option><option value="fade">{key === 'transition_in' ? '淡入' : '淡出'}</option></select></label>
+                <label>时长<input aria-label={`${key === 'transition_in' ? '入场' : '出场'}转场时长`} disabled={type !== 'fade'} type="number" min="0.1" max={selectedTransitionLimitMs / 1000} step="0.1" value={type === 'fade' ? (transition?.duration_ms ?? 300) / 1000 : 0} onChange={event => setSelectedTransition(key, 'fade', Math.round(Number(event.target.value) * 1000))} /><small>秒</small></label>
+              </div>
+            })}
+            <div className={styles.trimHint}>淡入淡出会写入时间线合同，并在低清预览与最终 FFmpeg 成片中执行。</div>
           </section>}
           {selectedItem.track_type === 'audio' && <section className={styles.audioInspector}>
             <h3>声音角色与混音</h3>

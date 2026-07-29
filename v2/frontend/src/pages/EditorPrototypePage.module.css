@@ -468,6 +468,19 @@
   font-size: 8px;
 }
 .inspector input[type="checkbox"] { justify-self: start; accent-color: var(--editor-accent); }
+.transitionControl {
+  margin-top: 8px;
+  padding: 7px 8px;
+  border: 1px solid #353c40;
+  border-radius: 5px;
+  background: #22272a;
+}
+.transitionControl label { margin-top: 0; }
+.transitionControl label + label {
+  margin-top: 5px;
+  grid-template-columns: 50px minmax(0, 1fr) 18px;
+}
+.transitionControl small { color: #7f898e; font-size: 8px; }
 .audioInspector input[type="range"] { min-width: 0; accent-color: #8d78d1; }
 .audioFact {
   margin-top: 10px;
