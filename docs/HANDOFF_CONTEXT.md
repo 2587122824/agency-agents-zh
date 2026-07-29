@@ -330,6 +330,7 @@ v2/runtime/worker.err.log
 - 新版剪辑台轨道监看复验：真实咖啡 v4 隐藏画面后按钮 `aria-pressed=true`、monitor `data-video-hidden=true`、视频 opacity 为 0，并显示“画面轨已隐藏/仅影响剪辑预览”；隐藏状态播放约 0.7 秒后视频源时点已从 0 推进到 0.932 秒、时间码为 `00:00:17` 且仍在播放。恢复后 opacity 为 1。声音静音与字幕隐藏按钮均为 `aria-pressed=true`，轨道分别为 muted/hidden，监看标签显示“声音静音/字幕隐藏”；当前真实 v4 无音频和字幕条目，因此本轮未重复伪造媒体，执行逻辑沿用既有真实音频/字幕验收。三项恢复后标签清空、无本地草稿，1280×720 无页面溢出
 - 新版剪辑台事务式裁切复验：真实咖啡 v4 只点击 SH-002 左把手后源入点仍为 0、撤销禁用且没有草稿；拖动 25px 在 60px/s、100ms 磁吸下落到源入点 400ms，只产生一个可撤销步骤，撤销恢复 `0..4709ms`。左把手右方向键单步为 42ms（24fps，ARIA `00:00:01`），Shift+右方向键为 1000ms（`00:01:00`）；右把手左方向键从 4709ms 减到 4667ms（`00:04:16`）。验收后丢弃草稿，恢复 v4 `0..4709ms`、撤销禁用；1280×720 无页面溢出
 - 新版剪辑台快捷键安全复验：打开“时间线版本与审计证据”dialog 后连续按 Delete、S、Space、Ctrl+Z，真实视频仍为 3 个、播放头 0、播放器暂停且无草稿；Escape 关闭版本 dialog，再打开“时间线检查问题”dialog，Escape 同样关闭。首次复验发现当前 WebView 焦点位于播放按钮时 Space 不产生原生 click，导致全局避让后无法暂停；补充播放按钮本地 Space 处理后，从播放状态按一次 Space 变为暂停，稳定 300ms 源时点增量为 0。再次在版本 dialog 中按 Space/S/Delete 仍保持暂停、3 个视频和零草稿
+- 新版剪辑台磁吸合同与草稿复验：迁移 `20260729_40` 已把既有 Timeline 显式回填 `snap_enabled=true`，真实咖啡 v4 API 读取该字段。关闭磁吸后显示 `aria-pressed=false`、产生草稿；刷新仍为“磁吸 关闭”，缩放从 60 调至 100px/s 后与关闭状态一起恢复；丢弃草稿恢复 v4 的 `100ms / 开启 / 60px/s`。前端构建、Python compileall 和完整 API `124 passed` 通过，1280×720 `scrollWidth=clientWidth=1280`、`scrollHeight=clientHeight=720`；验收草稿已清理。
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过

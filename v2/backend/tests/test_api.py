@@ -6601,7 +6601,7 @@ def create_confirmed_timeline(
             "command_id": "delivery-timeline-create-001",
             "expected_snapshot_id": snapshot["id"],
             "source": "user",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
             "items": timeline_items_for_assets(video_assets),
         },
     ).json()
@@ -6698,6 +6698,18 @@ def test_quality_stage_and_timeline_confirmation_are_explicit_and_idempotent(cli
     assert replayed.json()["project_status"] == "editing"
     assert approved.json()["quality_stage_ready"] is True
     assert next(row for row in client.get("/api/v1/projects").json() if row["id"] == project["id"])["status"] == "editing"
+
+    missing_snap = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "timeline-create-missing-snap-001",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": timeline_items_for_assets(video_assets),
+        },
+    )
+    assert missing_snap.status_code == 422
 
     create_command = {
         "command_id": "timeline-create-command-001",
@@ -6925,7 +6937,7 @@ def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(cl
             "command_id": "timeline-invalid-create-001",
             "expected_snapshot_id": snapshot["id"],
             "source": "user",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
             "items": items,
         },
     ).json()
@@ -6984,7 +6996,7 @@ def test_timeline_validation_blocks_reusing_main_video_to_fill_duration(client: 
             "command_id": "timeline-reuse-create-001",
             "expected_snapshot_id": snapshot["id"],
             "source": "user",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
             "items": items,
         },
     ).json()
@@ -7020,7 +7032,7 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
             "command_id": "editor-preview-create-001",
             "expected_snapshot_id": snapshot["id"],
             "source": "user",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
             "items": timeline_items_for_assets(video_assets),
         },
     ).json()
@@ -7360,7 +7372,7 @@ def test_timeline_freezes_authorized_looping_bgm_ducking_and_mastering(client: T
     invalid_audio_items[1]["transform"]["rights"]["confirmed"] = False
     invalid_audio_items[1]["transform"]["ducking"]["regions"] = []
     track_config = {
-        "audio_enabled": True, "subtitle_enabled": False,
+        "audio_enabled": True, "subtitle_enabled": False, "snap_enabled": True,
         "audio_mastering": {
             "loudness_target_lufs": -14, "true_peak_limit_dbtp": -1.5, "clipping_control": "limiter",
         },
@@ -7531,7 +7543,7 @@ def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(
             "command_id": "timeline-agent-unbound-001",
             "expected_snapshot_id": snapshot["id"],
             "source": "editor_assistant",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
             "items": items,
         },
     )
@@ -7543,7 +7555,7 @@ def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(
             "command_id": "timeline-revision-base-001",
             "expected_snapshot_id": snapshot["id"],
             "source": "user",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
             "items": items,
         },
     ).json()
@@ -7566,7 +7578,7 @@ def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(
             "command_id": "timeline-unlinked-version-02",
             "expected_snapshot_id": snapshot["id"],
             "source": "user",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
             "items": items,
         },
     )
@@ -7579,7 +7591,7 @@ def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(
             "expected_snapshot_id": snapshot["id"],
             "expected_row_version": first["row_version"],
             "source": "user",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
             "items": list(reversed([
                 {**item, "sequence_number": len(items) - index}
                 for index, item in enumerate(items)

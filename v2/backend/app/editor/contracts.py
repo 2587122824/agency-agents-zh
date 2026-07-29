@@ -36,7 +36,7 @@ class TimelineTrackConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     audio_enabled: bool
     subtitle_enabled: bool
-    snap_enabled: bool = True
+    snap_enabled: bool
     pixels_per_second: int = Field(default=60, ge=20, le=400)
     snap_interval_ms: int = Field(default=100, ge=10, le=1000)
     audio_mastering: AudioMasteringConfig = Field(default_factory=AudioMasteringConfig)
