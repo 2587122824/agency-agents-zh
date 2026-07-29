@@ -84,6 +84,7 @@
   border-radius: 5px;
 }
 .topActions > button:hover { background: #292e32; }
+.topActions > button:disabled { opacity: .3; cursor: default; }
 .topActions .primaryAction {
   min-width: 142px;
   padding: 0 13px;
@@ -190,6 +191,8 @@
 }
 .assetList > button:hover,
 .assetList > button[data-selected="true"] { border-color: #444b4f; background: #272c30; }
+.assetList > button[draggable="true"] { cursor: grab; }
+.assetList > button[draggable="true"]:active { cursor: grabbing; }
 .assetList > button[data-selected="true"] { box-shadow: inset 2px 0 var(--editor-accent); }
 .assetList > button > i {
   width: 42px;
@@ -318,7 +321,15 @@
 .clipIdentity span { color: #899297; font-size: 8px; }
 .rangeLabels { display: flex; justify-content: space-between; color: #8c9599; font-size: 8px; }
 .rangeLabels b { color: #dfe3e0; }
-.inspector input[type="range"] { width: 100%; accent-color: var(--editor-accent); }
+.trimHint {
+  margin-top: 8px;
+  padding: 8px;
+  border: 1px dashed #434b4f;
+  border-radius: 4px;
+  color: #899297;
+  font-size: 8px;
+  text-align: center;
+}
 .actionGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
 .actionGrid button {
   min-height: 34px;
@@ -415,8 +426,14 @@
   position: relative;
   min-width: 0;
   min-height: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   background: #141719;
+}
+.timelineCanvas {
+  position: relative;
+  min-width: 100%;
+  height: 100%;
 }
 .ruler,
 .trackRow { display: grid; grid-template-columns: 84px minmax(0, 1fr); }
@@ -441,8 +458,24 @@
   color: #8f989c;
   font-size: 9px;
 }
+.trackRow > label > span { margin-right: auto; }
 .trackRow > label svg { width: 13px; }
+.trackRow > label button {
+  width: 22px;
+  height: 26px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: #6f797e;
+  cursor: pointer;
+}
+.trackRow > label button:hover { color: #dce1de; }
+.trackRow > label button svg { width: 12px; }
+.trackRow[data-track-hidden="true"] .trackLane { opacity: .25; }
 .trackLane { position: relative; margin: 5px 0; background: #1c2023; }
+.trackLane[data-locked="true"] { background: repeating-linear-gradient(135deg, #1c2023, #1c2023 8px, #202528 8px, #202528 16px); }
 .trackLane[data-empty="true"] { display: grid; place-items: center; color: #515a5f; font-size: 8px; }
 .trackLane button {
   position: absolute;
@@ -464,6 +497,8 @@
   text-align: left;
 }
 .videoClip[data-selected="true"] { border-color: #ff805e; box-shadow: inset 0 0 0 1px #ff805e; }
+.videoClip[draggable="true"] { cursor: grab; }
+.videoClip[draggable="true"]:active { cursor: grabbing; }
 .videoClip > svg,
 .gapClip > svg { width: 13px; flex: none; }
 .videoClip span,
@@ -478,6 +513,20 @@
   color: #ffc0ad;
 }
 .gapClip[data-selected="true"] { border-style: solid; box-shadow: inset 0 0 0 1px #ff805e; }
+.trimHandle {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  background: rgba(255, 128, 94, .85);
+  opacity: 0;
+  cursor: ew-resize;
+}
+.videoClip:hover .trimHandle,
+.videoClip[data-selected="true"] .trimHandle { opacity: 1; }
+.trimHandle[data-edge="start"] { left: 0; border-radius: 2px 0 0 2px; }
+.trimHandle[data-edge="end"] { right: 0; border-radius: 0 2px 2px 0; }
 .audioClip { border: 1px solid #5d5487; background: #403a61; }
 .subtitleClip { border: 1px solid #6d6540; background: #514b2f; }
 .playhead {
