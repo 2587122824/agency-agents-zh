@@ -40,6 +40,13 @@ function seconds(ms: number | null | undefined) {
   return `${((ms ?? 0) / 1000).toFixed(1)}s`
 }
 
+function rulerLabel(ms: number) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000))
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+}
+
 function normalizeMainTrack(rows: TimelineItem[], durationMs: number) {
   const merged: TimelineItem[] = []
   for (const row of rows) {
@@ -300,6 +307,13 @@ export function EditorPrototypePage() {
     && previewCompareMs < item.timeline_out_ms
   )) ?? null
   const timelineWidth = Math.max(900, (durationMs / 1000) * timelineZoom)
+  const rulerTicks = useMemo(() => {
+    const stepSeconds = [1, 2, 3, 5, 10, 15, 30, 60].find(step => step * timelineZoom >= 90) ?? 60
+    const stepMs = stepSeconds * 1000
+    const ticks = Array.from({ length: Math.floor(durationMs / stepMs) + 1 }, (_, index) => index * stepMs)
+    if (ticks[ticks.length - 1] !== durationMs) ticks.push(durationMs)
+    return ticks
+  }, [durationMs, timelineZoom])
   const validationErrors = lastValidation?.validation_report
     ?? sourceTimeline?.validation_report
     ?? []
@@ -327,6 +341,30 @@ export function EditorPrototypePage() {
     if (playing) void video.play()
     else video.pause()
   }, [playing, selectedItem?.id, selectedItem?.asset_id, selectedItem?.source_in_ms])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (playing || !video || selectedItem?.track_type !== 'main_video' || !selectedItem.asset_id) return
+    const sourceIn = selectedItem.source_in_ms ?? 0
+    const sourceOut = selectedItem.source_out_ms ?? selectedItem.asset_duration_ms ?? sourceIn
+    const timelineOffset = Math.max(0, Math.min(
+      selectedItem.timeline_out_ms - selectedItem.timeline_in_ms,
+      playheadMs - selectedItem.timeline_in_ms,
+    ))
+    const expectedTime = Math.min(sourceOut, sourceIn + timelineOffset) / 1000
+    if (Math.abs(video.currentTime - expectedTime) > .05) video.currentTime = expectedTime
+  }, [
+    playheadMs,
+    playing,
+    selectedItem?.id,
+    selectedItem?.track_type,
+    selectedItem?.asset_id,
+    selectedItem?.source_in_ms,
+    selectedItem?.source_out_ms,
+    selectedItem?.asset_duration_ms,
+    selectedItem?.timeline_in_ms,
+    selectedItem?.timeline_out_ms,
+  ])
 
   useEffect(() => {
     for (const item of audioItems) {
@@ -563,6 +601,20 @@ export function EditorPrototypePage() {
     const index = items.indexOf(item)
     setSelectedIndex(index)
     setPlayheadMs(item.timeline_in_ms)
+    setPlaying(false)
+  }
+
+  const seekTimeline = (positionMs: number) => {
+    const position = Math.max(0, Math.min(durationMs, Math.round(positionMs)))
+    const target = mainItems.find(item => (
+      position >= item.timeline_in_ms
+      && (position < item.timeline_out_ms || (position === durationMs && item.timeline_out_ms === durationMs))
+    ))
+    if (target) {
+      const index = items.findIndex(item => item.id === target.id)
+      if (index >= 0) setSelectedIndex(index)
+    }
+    setPlayheadMs(position)
     setPlaying(false)
   }
 
@@ -1072,7 +1124,15 @@ export function EditorPrototypePage() {
             muted
             playsInline
             onLoadedMetadata={event => {
-              event.currentTarget.currentTime = (selectedItem?.source_in_ms ?? 0) / 1000
+              const sourceIn = selectedItem?.source_in_ms ?? 0
+              const sourceOut = selectedItem?.source_out_ms ?? selectedItem?.asset_duration_ms ?? sourceIn
+              const timelineOffset = selectedItem
+                ? Math.max(0, Math.min(
+                  selectedItem.timeline_out_ms - selectedItem.timeline_in_ms,
+                  playheadMs - selectedItem.timeline_in_ms,
+                ))
+                : 0
+              event.currentTarget.currentTime = Math.min(sourceOut, sourceIn + timelineOffset) / 1000
               if (playing) void event.currentTarget.play().catch(() => setNotice('浏览器阻止了时间线视频播放，请再次点击播放。'))
             }}
             onTimeUpdate={handleTimeUpdate}
@@ -1102,14 +1162,13 @@ export function EditorPrototypePage() {
           <button className={styles.fullscreenButton} title={monitorFullscreen ? '退出全屏' : '全屏'} onClick={() => void toggleMonitorFullscreen()}><Maximize2 /></button>
         </div>
         <div className={styles.transport}>
-          <button title="跳到开头" onClick={() => setPlayheadMs(0)}><ChevronLeft /></button>
+          <button title="跳到开头" onClick={() => seekTimeline(0)}><ChevronLeft /></button>
           <button title={playing ? '暂停' : '播放'} className={styles.playButton} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button>
-          <button title="跳到结尾" onClick={() => setPlayheadMs(durationMs)}><ChevronRight /></button>
+          <button title="跳到结尾" onClick={() => seekTimeline(durationMs)}><ChevronRight /></button>
           <code>{timecode(playheadMs, outputFps)} <span>/ {timecode(durationMs, outputFps)}</span></code>
           <div className={styles.previewScrubber} role="slider" aria-label="预览播放头" aria-valuemin={0} aria-valuemax={durationMs} aria-valuenow={playheadMs} tabIndex={0} onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect()
-            setPlayheadMs(Math.round(((event.clientX - rect.left) / rect.width) * durationMs))
-            setPlaying(false)
+            seekTimeline(((event.clientX - rect.left) / rect.width) * durationMs)
           }}><i style={{ width: `${Math.min(100, (playheadMs / durationMs) * 100)}%` }} /></div>
           <Volume2 />
           <button disabled={selectedAsset?.asset_type !== 'video'} onClick={() => setMonitorScale(value => value === 'fit' ? 'actual' : 'fit')}>{monitorScale === 'fit' ? '适应' : '100%'}</button>
@@ -1200,10 +1259,15 @@ export function EditorPrototypePage() {
           if ((event.target as HTMLElement).closest('button')) return
           const rect = event.currentTarget.getBoundingClientRect()
           const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 84) / timelineWidth))
-          setPlayheadMs(Math.round(ratio * durationMs))
-          setPlaying(false)
+          seekTimeline(ratio * durationMs)
         }}>
-        <div className={styles.ruler}><span /><div>{[0, 3, 6, 9, 12, 15].map(value => <i key={value} style={{ left: `${(value / 15) * 100}%` }}>{`00:${String(value).padStart(2, '0')}`}</i>)}</div></div>
+        <div className={styles.ruler}><span /><div>{rulerTicks.map(value => <i
+          key={value}
+          style={{
+            left: `${(value / durationMs) * 100}%`,
+            transform: value === 0 ? 'none' : value === durationMs ? 'translateX(-100%)' : undefined,
+          }}
+        >{rulerLabel(value)}</i>)}</div></div>
         <div className={styles.trackRow} data-track-hidden={videoTrackHidden}>
           <label><Film /><span>画面</span><button title={videoTrackHidden ? '显示画面轨' : '隐藏画面轨'} onClick={() => setVideoTrackHidden(value => !value)}>{videoTrackHidden ? <EyeOff /> : <Eye />}</button><button title={videoTrackLocked ? '解锁画面轨' : '锁定画面轨'} onClick={() => setVideoTrackLocked(value => !value)}>{videoTrackLocked ? <Lock /> : <Unlock />}</button></label>
           <div className={styles.trackLane} data-locked={videoTrackLocked} onDragOver={event => event.preventDefault()}>
