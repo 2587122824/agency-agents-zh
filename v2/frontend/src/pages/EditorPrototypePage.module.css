@@ -160,6 +160,42 @@
   cursor: pointer;
 }
 .assetPanel header svg { width: 15px; }
+.assetSearch {
+  height: 39px;
+  padding: 5px 7px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--editor-line);
+  background: #1c2023;
+}
+.assetSearch > svg { width: 13px; color: #7f898e; }
+.assetSearch input {
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid #3b4347;
+  border-radius: 4px;
+  outline: 0;
+  background: #262b2f;
+  color: #e0e4e1;
+  font-size: 8px;
+}
+.assetSearch input:focus { border-color: #75618f; }
+.assetSearch button {
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #8e979b;
+  cursor: pointer;
+}
+.assetSearch button:hover { background: #30363a; color: #fff; }
+.assetSearch button svg { width: 12px; }
 .assetPanel nav {
   padding: 7px;
   display: grid;
@@ -203,6 +239,8 @@
 }
 .assetList { height: calc(100% - 96px); overflow-y: auto; padding: 6px; }
 .assetPanel[data-gap-selection="true"] .assetList { height: calc(100% - 139px); }
+.assetPanel[data-search="true"] .assetList { height: calc(100% - 135px); }
+.assetPanel[data-search="true"][data-gap-selection="true"] .assetList { height: calc(100% - 178px); }
 .assetEmpty {
   margin: 8px;
   padding: 12px 8px;

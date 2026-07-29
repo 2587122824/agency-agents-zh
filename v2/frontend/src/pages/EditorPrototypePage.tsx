@@ -156,6 +156,8 @@ export function EditorPrototypePage() {
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
   const [assetFilter, setAssetFilter] = useState<'all' | 'video' | 'audio' | 'subtitle'>('all')
+  const [assetSearchOpen, setAssetSearchOpen] = useState(false)
+  const [assetSearchQuery, setAssetSearchQuery] = useState('')
   const [gapAssetSelection, setGapAssetSelection] = useState(false)
   const [notice, setNotice] = useState('原型模式：所有调整只保存在当前浏览器，不会修改真实时间线。')
   const [history, setHistory] = useState<TimelineItem[][]>([])
@@ -281,9 +283,13 @@ export function EditorPrototypePage() {
     () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
     [mainItems],
   )
+  const normalizedAssetSearch = assetSearchQuery.trim().toLocaleLowerCase('zh-CN')
   const visibleAssets = workspace.data?.available_assets.filter(asset => (
     (assetFilter === 'all' || asset.asset_type === assetFilter)
     && (!gapAssetSelection || (asset.asset_type === 'video' && !usedMainVideoAssetIds.has(asset.id)))
+    && (!normalizedAssetSearch || [asset.node_key, asset.role, asset.asset_type]
+      .filter(Boolean)
+      .some(value => String(value).toLocaleLowerCase('zh-CN').includes(normalizedAssetSearch)))
   )) ?? []
   const activeSubtitleItem = subtitleItems.find(item => item.asset_id && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
@@ -999,8 +1005,19 @@ export function EditorPrototypePage() {
     </section>
 
     <section className={styles.editingArea}>
-      <aside className={styles.assetPanel} data-gap-selection={gapAssetSelection}>
-        <header><div><span>ASSETS</span><strong>素材箱</strong></div><button title="搜索素材"><Search /></button></header>
+      <aside className={styles.assetPanel} data-gap-selection={gapAssetSelection} data-search={assetSearchOpen}>
+        <header><div><span>ASSETS</span><strong>素材箱</strong></div><button title={assetSearchOpen ? '关闭素材搜索' : '搜索素材'} onClick={() => {
+          setAssetSearchOpen(value => {
+            if (value) setAssetSearchQuery('')
+            return !value
+          })
+        }}><Search /></button></header>
+        {assetSearchOpen && <div className={styles.assetSearch}><Search /><input autoFocus aria-label="搜索素材" placeholder="名称、角色或类型" value={assetSearchQuery} onChange={event => setAssetSearchQuery(event.target.value)} onKeyDown={event => {
+          if (event.key === 'Escape') {
+            setAssetSearchQuery('')
+            setAssetSearchOpen(false)
+          }
+        }} />{assetSearchQuery && <button title="清空搜索" onClick={() => setAssetSearchQuery('')}><X /></button>}</div>}
         {gapAssetSelection && <div className={styles.assetSelectionBanner}><strong>缺口素材选择</strong><span>仅显示未用于主画面的已批准视频</span><button onClick={() => setGapAssetSelection(false)}>退出</button></div>}
         <nav>
           {([
@@ -1011,7 +1028,8 @@ export function EditorPrototypePage() {
           ] as const).map(([key, label, Icon]) => <button key={key} data-active={assetFilter === key} onClick={() => setAssetFilter(key)}><Icon />{label}</button>)}
         </nav>
         <div className={styles.assetList}>
-          {gapAssetSelection && visibleAssets.length === 0 && <div className={styles.assetEmpty}><AlertTriangle /><strong>没有可用的新视频</strong><span>重复使用现有镜头会破坏连续性证据，系统不会放行。</span></div>}
+          {gapAssetSelection && visibleAssets.length === 0 && <div className={styles.assetEmpty}><AlertTriangle /><strong>{normalizedAssetSearch ? '没有匹配的未使用视频' : '没有可用的新视频'}</strong><span>{normalizedAssetSearch ? '可清空搜索查看全部未使用候选。' : '重复使用现有镜头会破坏连续性证据，系统不会放行。'}</span></div>}
+          {!gapAssetSelection && normalizedAssetSearch && visibleAssets.length === 0 && <div className={styles.assetEmpty}><Search /><strong>没有匹配素材</strong><span>可更换名称、角色或类型关键词。</span></div>}
           {visibleAssets.map(asset => <button
             key={asset.id}
             draggable={Boolean(asset.duration_ms)}
