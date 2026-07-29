@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboa
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
+import type { DeliveryAttempt, DeliveryWorkspace, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
 const DEFAULT_PROJECT_ID = 'project_9cd1c4e1fe5c4c8e88466acef2913e72'
@@ -304,6 +304,16 @@ export function EditorPrototypePage() {
   const activeSubtitleItem = subtitleItems.find(item => item.asset_id && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
   const deliveryAttempt = deliveryWorkspace.data?.attempts[0] ?? null
+  const cacheDeliveryAttempt = (attempt: DeliveryAttempt) => {
+    for (const queryKey of [
+      ['editor-prototype-delivery', projectId],
+      ['delivery-workspace', projectId],
+    ] as const) {
+      queryClient.setQueryData<DeliveryWorkspace>(queryKey, current => current
+        ? { ...current, attempts: [attempt, ...current.attempts.filter(row => row.id !== attempt.id)] }
+        : current)
+    }
+  }
   const comparisonItem = mainItems.find(item => (
     item.asset_id
     && previewCompareMs >= item.timeline_in_ms
@@ -531,8 +541,9 @@ export function EditorPrototypePage() {
         queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['delivery-workspace', projectId] }),
       ])
-      await deliveryWorkspace.refetch()
-      setDeliveryAuthorizeOpen(true)
+      const refreshedDelivery = await deliveryWorkspace.refetch()
+      if (refreshedDelivery.data?.attempts[0]) setDeliveryStatusOpen(true)
+      else setDeliveryAuthorizeOpen(true)
     },
   })
 
@@ -546,6 +557,7 @@ export function EditorPrototypePage() {
       return api.authorizeDelivery(projectId, current, deliveryMethod)
     },
     onSuccess: async attempt => {
+      cacheDeliveryAttempt(attempt)
       setDeliveryAuthorizeOpen(false)
       setDeliveryStatusOpen(true)
       setDeliveryMethod(null)
@@ -566,7 +578,8 @@ export function EditorPrototypePage() {
       }
       return api.uploadDelivery(projectId, deliveryAttempt, deliveryFile)
     },
-    onSuccess: async () => {
+    onSuccess: async attempt => {
+      cacheDeliveryAttempt(attempt)
       setDeliveryFile(null)
       setNotice('最终 MP4 已上传并登记；请继续执行交付文件验证。')
       await Promise.all([
@@ -584,6 +597,7 @@ export function EditorPrototypePage() {
       return api.verifyDelivery(projectId, deliveryAttempt)
     },
     onSuccess: async attempt => {
+      cacheDeliveryAttempt(attempt)
       setNotice(`交付文件已验证（${attempt.final_asset?.width}×${attempt.final_asset?.height}），可以下载最终 MP4。`)
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] }),
