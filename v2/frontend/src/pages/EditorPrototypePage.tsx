@@ -752,6 +752,30 @@ export function EditorPrototypePage() {
       : '画面轨已解锁，可以继续调整画面片段。')
   }
 
+  const toggleVideoTrackVisibility = () => {
+    const nextHidden = !videoTrackHidden
+    setVideoTrackHidden(nextHidden)
+    setNotice(nextHidden
+      ? '画面轨已在监看中隐藏；视频仍推进时间码，只影响当前剪辑预览。'
+      : '画面轨已恢复监看显示。')
+  }
+
+  const toggleAudioTrackMute = () => {
+    const nextMuted = !audioTrackMuted
+    setAudioTrackMuted(nextMuted)
+    setNotice(nextMuted
+      ? '声音轨已在监看中静音；混音合同和最终成片不会被改写。'
+      : '声音轨已恢复监听。')
+  }
+
+  const toggleSubtitleTrackVisibility = () => {
+    const nextHidden = !subtitleTrackHidden
+    setSubtitleTrackHidden(nextHidden)
+    setNotice(nextHidden
+      ? '字幕轨已在监看中隐藏；烧录字幕合同不会被改写。'
+      : '字幕轨已恢复监看显示。')
+  }
+
   const shiftItem = (direction: -1 | 1) => {
     if (!selectedItem || selectedItem.track_type !== 'main_video' || blockMainTrackEdit()) return
     const trackIndexes = items.map((item, index) => ({ item, index })).filter(row => row.item.track_type === 'main_video')
@@ -1195,7 +1219,7 @@ export function EditorPrototypePage() {
       </aside>
 
       <section className={styles.previewPanel}>
-        <div className={styles.monitor} ref={monitorRef} data-scale={monitorScale}>
+        <div className={styles.monitor} ref={monitorRef} data-scale={monitorScale} data-video-hidden={videoTrackHidden}>
           {selectedAsset?.asset_type === 'video' && <video
             ref={videoRef}
             key={selectedItem?.id}
@@ -1243,7 +1267,13 @@ export function EditorPrototypePage() {
           />)}
           {!subtitleTrackHidden && activeSubtitleItem && <TimelineSubtitle projectId={projectId} item={activeSubtitleItem} playheadMs={playheadMs} />}
           {!selectedAsset && <div className={styles.gapPreview}><AlertTriangle /><strong>缺少画面</strong><span>{selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '选择一个片段'}</span></div>}
+          {videoTrackHidden && selectedAsset?.asset_type === 'video' && <div className={styles.monitorTrackHidden}><EyeOff /><strong>画面轨已隐藏</strong><span>视频仍在后台推进，仅影响剪辑预览</span></div>}
           <div className={styles.monitorBadge}>时间线预览</div>
+          {(videoTrackHidden || audioTrackMuted || subtitleTrackHidden) && <div className={styles.monitorTrackFlags}>
+            {videoTrackHidden && <span><EyeOff />画面隐藏</span>}
+            {audioTrackMuted && <span><VolumeX />声音静音</span>}
+            {subtitleTrackHidden && <span><EyeOff />字幕隐藏</span>}
+          </div>}
           <button className={styles.fullscreenButton} title={monitorFullscreen ? '退出全屏' : '全屏'} onClick={() => void toggleMonitorFullscreen()}><Maximize2 /></button>
         </div>
         <div className={styles.transport}>
@@ -1377,7 +1407,7 @@ export function EditorPrototypePage() {
           }}
         >{rulerLabel(value)}</i>)}</div></div>
         <div className={styles.trackRow} data-track-hidden={videoTrackHidden}>
-          <label><Film /><span>画面</span><button title={videoTrackHidden ? '显示画面轨' : '隐藏画面轨'} onClick={() => setVideoTrackHidden(value => !value)}>{videoTrackHidden ? <EyeOff /> : <Eye />}</button><button title={videoTrackLocked ? '解锁画面轨' : '锁定画面轨'} aria-pressed={videoTrackLocked} onClick={toggleVideoTrackLock}>{videoTrackLocked ? <Lock /> : <Unlock />}</button></label>
+          <label><Film /><span>画面</span><button title={videoTrackHidden ? '显示画面轨' : '隐藏画面轨'} aria-pressed={videoTrackHidden} onClick={toggleVideoTrackVisibility}>{videoTrackHidden ? <EyeOff /> : <Eye />}</button><button title={videoTrackLocked ? '解锁画面轨' : '锁定画面轨'} aria-pressed={videoTrackLocked} onClick={toggleVideoTrackLock}>{videoTrackLocked ? <Lock /> : <Unlock />}</button></label>
           <div className={styles.trackLane} data-locked={videoTrackLocked} onDragOver={event => event.preventDefault()}>
             {mainItems.map(item => <button
               key={item.id}
@@ -1400,12 +1430,12 @@ export function EditorPrototypePage() {
             </button>)}
           </div>
         </div>
-        <div className={styles.trackRow}>
-          <label><Music2 /><span>声音</span><button title={audioTrackMuted ? '恢复声音轨' : '静音声音轨'} onClick={() => setAudioTrackMuted(value => !value)}>{audioTrackMuted ? <VolumeX /> : <Volume2 />}</button></label>
+        <div className={styles.trackRow} data-track-muted={audioTrackMuted}>
+          <label><Music2 /><span>声音</span><button title={audioTrackMuted ? '恢复声音轨' : '静音声音轨'} aria-pressed={audioTrackMuted} onClick={toggleAudioTrackMute}>{audioTrackMuted ? <VolumeX /> : <Volume2 />}</button></label>
           <div className={styles.trackLane} data-empty={!audioItems.length} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addAssetToTrack('audio') }}>{audioItems.length ? audioItems.map(item => <button key={item.id} data-selected={selectedItem?.id === item.id} className={styles.audioClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }} onClick={() => selectItem(item)}><Waveform projectId={projectId} assetId={item.asset_id!} /><strong>{item.label}</strong></button>) : <span>拖入已批准配音或 BGM</span>}</div>
         </div>
         <div className={styles.trackRow} data-track-hidden={subtitleTrackHidden}>
-          <label><Subtitles /><span>字幕</span><button title={subtitleTrackHidden ? '显示字幕轨' : '隐藏字幕轨'} onClick={() => setSubtitleTrackHidden(value => !value)}>{subtitleTrackHidden ? <EyeOff /> : <Eye />}</button></label>
+          <label><Subtitles /><span>字幕</span><button title={subtitleTrackHidden ? '显示字幕轨' : '隐藏字幕轨'} aria-pressed={subtitleTrackHidden} onClick={toggleSubtitleTrackVisibility}>{subtitleTrackHidden ? <EyeOff /> : <Eye />}</button></label>
           <div className={styles.trackLane} data-empty={!subtitleItems.length} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addAssetToTrack('subtitle') }}>{subtitleItems.length ? subtitleItems.map(item => <button key={item.id} data-selected={selectedItem?.id === item.id} className={styles.subtitleClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }} onClick={() => selectItem(item)}><Subtitles /><strong>{item.label}</strong></button>) : <span>拖入已批准字幕</span>}</div>
         </div>
         <i className={styles.playhead} style={{ left: `${84 + timelineWidth * (playheadMs / durationMs)}px` }}><b /></i>

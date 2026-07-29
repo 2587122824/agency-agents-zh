@@ -338,6 +338,7 @@
   flex: none;
   transform: none;
 }
+.monitor[data-video-hidden="true"] video { opacity: 0 !important; }
 .monitor:fullscreen {
   width: 100vw;
   height: 100vh;
@@ -354,6 +355,41 @@
   color: #bfc6c2;
   font-size: 8px;
 }
+.monitorTrackHidden {
+  position: absolute;
+  z-index: 3;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 7px;
+  background: rgba(8, 10, 11, .94);
+  color: #d6dcda;
+  pointer-events: none;
+}
+.monitorTrackHidden svg { width: 28px; color: #7d878b; }
+.monitorTrackHidden strong { font-size: 12px; }
+.monitorTrackHidden span { color: #7f898d; font-size: 8px; }
+.monitorTrackFlags {
+  position: absolute;
+  z-index: 6;
+  top: 9px;
+  left: 86px;
+  display: flex;
+  gap: 5px;
+  pointer-events: none;
+}
+.monitorTrackFlags span {
+  padding: 4px 6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 4px;
+  background: rgba(40, 28, 25, .88);
+  color: #f0b29f;
+  font-size: 7px;
+}
+.monitorTrackFlags svg { width: 10px; height: 10px; }
 .fullscreenButton {
   position: absolute;
   top: 8px;
@@ -713,6 +749,7 @@
 .trackRow > label button:hover { color: #dce1de; }
 .trackRow > label button svg { width: 12px; }
 .trackRow[data-track-hidden="true"] .trackLane { opacity: .25; }
+.trackRow[data-track-muted="true"] .trackLane { opacity: .4; }
 .trackLane { position: relative; margin: 5px 0; background: #1c2023; }
 .trackLane[data-locked="true"] { background: repeating-linear-gradient(135deg, #1c2023, #1c2023 8px, #202528 8px, #202528 16px); }
 .trackLane[data-empty="true"] { display: grid; place-items: center; color: #515a5f; font-size: 8px; }
