@@ -452,9 +452,16 @@
   overflow: hidden;
   border-radius: 3px;
   background: #343a3e;
-  cursor: pointer;
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
 }
 .previewScrubber i { display: block; height: 100%; background: var(--editor-accent); }
+.previewScrubber:focus-visible,
+.ruler > div[role="slider"]:focus-visible {
+  outline: 2px solid #ff9b7f;
+  outline-offset: 2px;
+}
 .inspector > section { padding: 12px; border-bottom: 1px solid var(--editor-line); }
 .inspector h3 { margin: 0 0 10px; color: #a7afb2; font-size: 9px; }
 .clipIdentity { display: flex; align-items: center; gap: 9px; }
@@ -666,7 +673,12 @@
 .trackRow { display: grid; grid-template-columns: 84px minmax(0, 1fr); }
 .ruler { height: 28px; border-bottom: 1px solid #2d3337; }
 .ruler > span { border-right: 1px solid #30363a; }
-.ruler > div { position: relative; }
+.ruler > div {
+  position: relative;
+  cursor: ew-resize;
+  touch-action: none;
+  user-select: none;
+}
 .ruler i {
   position: absolute;
   top: 8px;

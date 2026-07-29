@@ -2,11 +2,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Film,
   Download, Eye, EyeOff, Layers3, Lock, Maximize2, Music2, Pause, Play, Plus, Redo2,
-  RefreshCw,
+  RefreshCw, Minus,
   RotateCcw, Scissors, Search, ShieldCheck, Sparkles, Subtitles, Undo2, Unlock,
   Upload, Volume2, VolumeX, WandSparkles, X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
@@ -199,9 +199,11 @@ export function EditorPrototypePage() {
   const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const monitorRef = useRef<HTMLDivElement | null>(null)
+  const timelineViewportRef = useRef<HTMLDivElement | null>(null)
   const renderedPreviewRef = useRef<HTMLVideoElement | null>(null)
   const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
   const advancingPlaybackRef = useRef(false)
+  const timelineScrubbingRef = useRef(false)
   const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const sourceTimeline = workspace.data?.timelines[0] ?? null
@@ -618,6 +620,55 @@ export function EditorPrototypePage() {
     setPlaying(false)
   }
 
+  const beginScrub = (
+    event: ReactPointerEvent<HTMLElement>,
+    contentOffsetPx = 0,
+    timelineScrub = false,
+  ) => {
+    event.currentTarget.focus()
+    event.preventDefault()
+    event.stopPropagation()
+    const rect = event.currentTarget.getBoundingClientRect()
+    const contentWidth = Math.max(1, rect.width - contentOffsetPx)
+    timelineScrubbingRef.current = timelineScrub
+    const update = (clientX: number) => {
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left - contentOffsetPx) / contentWidth))
+      seekTimeline(ratio * durationMs)
+    }
+    const onMove = (moveEvent: PointerEvent) => update(moveEvent.clientX)
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
+      timelineScrubbingRef.current = false
+    }
+    update(event.clientX)
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
+  }
+
+  const handleSeekKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    const frameMs = 1000 / outputFps
+    const stepMs = event.shiftKey ? 1000 : frameMs
+    let target: number | null = null
+    if (event.key === 'ArrowLeft') target = playheadMs - stepMs
+    if (event.key === 'ArrowRight') target = playheadMs + stepMs
+    if (event.key === 'PageUp') target = playheadMs - 5000
+    if (event.key === 'PageDown') target = playheadMs + 5000
+    if (event.key === 'Home') target = 0
+    if (event.key === 'End') target = durationMs
+    if (target === null) return
+    event.preventDefault()
+    event.stopPropagation()
+    seekTimeline(target)
+  }
+
+  const changeTimelineZoom = (value: number) => {
+    setTimelineZoom(Math.max(40, Math.min(180, Math.round(value))))
+    setDirty(true)
+  }
+
   const togglePlayback = () => {
     if (playing) {
       setPlaying(false)
@@ -958,6 +1009,16 @@ export function EditorPrototypePage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
+  useEffect(() => {
+    const viewport = timelineViewportRef.current
+    if (!viewport || timelineScrubbingRef.current) return
+    const playheadX = 84 + timelineWidth * (playheadMs / durationMs)
+    const visibleStart = viewport.scrollLeft + 24
+    const visibleEnd = viewport.scrollLeft + viewport.clientWidth - 24
+    if (playheadX >= visibleStart && playheadX <= visibleEnd) return
+    viewport.scrollLeft = Math.max(0, playheadX - viewport.clientWidth / 2)
+  }, [durationMs, playheadMs, timelineWidth])
+
   const advancePlayback = () => {
     if (advancingPlaybackRef.current) return
     advancingPlaybackRef.current = true
@@ -1166,10 +1227,18 @@ export function EditorPrototypePage() {
           <button title={playing ? '暂停' : '播放'} className={styles.playButton} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button>
           <button title="跳到结尾" onClick={() => seekTimeline(durationMs)}><ChevronRight /></button>
           <code>{timecode(playheadMs, outputFps)} <span>/ {timecode(durationMs, outputFps)}</span></code>
-          <div className={styles.previewScrubber} role="slider" aria-label="预览播放头" aria-valuemin={0} aria-valuemax={durationMs} aria-valuenow={playheadMs} tabIndex={0} onClick={event => {
-            const rect = event.currentTarget.getBoundingClientRect()
-            seekTimeline(((event.clientX - rect.left) / rect.width) * durationMs)
-          }}><i style={{ width: `${Math.min(100, (playheadMs / durationMs) * 100)}%` }} /></div>
+          <div
+            className={styles.previewScrubber}
+            role="slider"
+            aria-label="预览播放头"
+            aria-valuemin={0}
+            aria-valuemax={durationMs}
+            aria-valuenow={playheadMs}
+            aria-valuetext={timecode(playheadMs, outputFps)}
+            tabIndex={0}
+            onPointerDown={event => beginScrub(event)}
+            onKeyDown={handleSeekKeyDown}
+          ><i style={{ width: `${Math.min(100, (playheadMs / durationMs) * 100)}%` }} /></div>
           <Volume2 />
           <button disabled={selectedAsset?.asset_type !== 'video'} onClick={() => setMonitorScale(value => value === 'fit' ? 'actual' : 'fit')}>{monitorScale === 'fit' ? '适应' : '100%'}</button>
         </div>
@@ -1251,17 +1320,29 @@ export function EditorPrototypePage() {
           {deliveryAttempt?.status === 'verified' ? '成片交付' : deliveryAttempt ? '交付状态' : '授权交付'}
         </button>}
         <button data-active={snapEnabled} onClick={() => setSnapEnabled(value => !value)}>磁吸 {snapEnabled ? `${snapIntervalMs}ms` : '关闭'}</button>
-        <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => { setTimelineZoom(Number(event.target.value)); setDirty(true) }} /></label>
+        <button title="缩小时间线" disabled={timelineZoom <= 40} onClick={() => changeTimelineZoom(timelineZoom - 20)}><Minus /></button>
+        <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => changeTimelineZoom(Number(event.target.value))} /></label>
+        <button title="放大时间线" disabled={timelineZoom >= 180} onClick={() => changeTimelineZoom(timelineZoom + 20)}><Plus /></button>
         <code>{timecode(playheadMs, outputFps)}</code>
       </header>
-      <div className={styles.timelineViewport}>
+      <div className={styles.timelineViewport} ref={timelineViewportRef}>
         <div className={styles.timelineCanvas} style={{ width: `${84 + timelineWidth}px` }} onClick={event => {
           if ((event.target as HTMLElement).closest('button')) return
           const rect = event.currentTarget.getBoundingClientRect()
           const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 84) / timelineWidth))
           seekTimeline(ratio * durationMs)
         }}>
-        <div className={styles.ruler}><span /><div>{rulerTicks.map(value => <i
+        <div className={styles.ruler}><span /><div
+          role="slider"
+          aria-label="时间尺播放头"
+          aria-valuemin={0}
+          aria-valuemax={durationMs}
+          aria-valuenow={playheadMs}
+          aria-valuetext={timecode(playheadMs, outputFps)}
+          tabIndex={0}
+          onPointerDown={event => beginScrub(event, 0, true)}
+          onKeyDown={handleSeekKeyDown}
+        >{rulerTicks.map(value => <i
           key={value}
           style={{
             left: `${(value / durationMs) * 100}%`,
@@ -1303,7 +1384,7 @@ export function EditorPrototypePage() {
         <i className={styles.playhead} style={{ left: `${84 + timelineWidth * (playheadMs / durationMs)}px` }}><b /></i>
         </div>
       </div>
-      <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>Space 播放 · S 分割 · Delete 删除 · Ctrl+Z 撤销</span></footer>
+      <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · Shift 秒级 · Space 播放</span></footer>
     </section>
     {versionOpen && <div className={styles.modal}><section className={styles.versionModal}>
       <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>
