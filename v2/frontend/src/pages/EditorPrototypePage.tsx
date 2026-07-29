@@ -1264,7 +1264,7 @@ export function EditorPrototypePage() {
       {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
       {saveAndValidate.error && <button onClick={() => setConfirmSaveOpen(true)}>{saveAndValidate.error instanceof Error ? saveAndValidate.error.message : '保存失败，请重试'}</button>}
-      {renderPreview.error && <button onClick={() => renderPreview.mutate()}>{renderPreview.error instanceof Error ? renderPreview.error.message : '低清预览失败，请重试'}</button>}
+      {renderPreview.error && <button disabled={renderPreview.isPending} onClick={() => renderPreview.mutate()}>{renderPreview.error instanceof Error ? renderPreview.error.message : '低清预览失败，请重试'}</button>}
       {reviewPreview.error && <button onClick={() => reviewPreview.mutate()}>{reviewPreview.error instanceof Error ? reviewPreview.error.message : '人工复核保存失败，请重试'}</button>}
       {confirmTimeline.error && <button onClick={() => confirmTimeline.mutate()}>{confirmTimeline.error instanceof Error ? confirmTimeline.error.message : '时间线确认失败，请重试'}</button>}
       {authorizeDelivery.error && <button onClick={() => setDeliveryAuthorizeOpen(true)}>{authorizeDelivery.error instanceof Error ? authorizeDelivery.error.message : '交付授权失败，请重试'}</button>}
@@ -1728,7 +1728,7 @@ export function EditorPrototypePage() {
       <div className={styles.modalWarning}><AlertTriangle /><span>低清预览只写入本机缓存，不确认时间线、不创建交付任务、不登记正式成片，也不产生供应商费用。</span></div>
       <footer>
         <button onClick={() => setPreviewOpen(false)}>返回时间线</button>
-        {lastPreview.state === 'ready' && <button onClick={() => renderPreview.mutate()}>{renderPreview.isPending ? '检查中…' : '重新检查缓存'}</button>}
+        {lastPreview.state === 'ready' && <button disabled={renderPreview.isPending} onClick={() => renderPreview.mutate()}>{renderPreview.isPending ? '检查中…' : '重新检查缓存'}</button>}
         {lastPreview.state === 'ready' && lastPreview.quality_report?.status !== 'blocked' && !previewReviewSaved && <button
           className={styles.confirmButton}
           disabled={

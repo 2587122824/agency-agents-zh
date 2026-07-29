@@ -7156,6 +7156,9 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
     assert len(preview["preview_key"]) == 64
     assert preview["quality_report"]["status"] == "review_required"
     assert len(render_calls) == 1
+    assert render_calls[0].output_path.name.startswith(f".{preview['preview_key']}.")
+    assert render_calls[0].output_path.name.endswith(".tmp.mp4")
+    assert not render_calls[0].output_path.exists()
     assert len(quality_calls) == 1
     review_payload = {
         "command_id": "editor-preview-review-001",

@@ -1517,11 +1517,15 @@ def render_timeline_preview(
             quality_report=quality_report,
         )
     mastering = (timeline.track_config or {}).get("audio_mastering") or {}
+    temporary_output_path = output_path.with_name(
+        f".{preview_key}.{hashlib.sha256(payload.command_id.encode('utf-8')).hexdigest()[:12]}.tmp.mp4"
+    )
+    temporary_output_path.unlink(missing_ok=True)
     try:
         LocalFFmpegRenderer().render(LocalRenderRequest(
             ffmpeg_path=Path(readiness.executable_path),
             inputs=tuple(render_inputs),
-            output_path=output_path,
+            output_path=temporary_output_path,
             width=width,
             height=height,
             fps=fps,
@@ -1534,32 +1538,61 @@ def render_timeline_preview(
             true_peak_limit_dbtp=float(mastering.get("true_peak_limit_dbtp", -1)),
         ))
     except LocalRenderError as exc:
+        temporary_output_path.unlink(missing_ok=True)
         return _preview_response(timeline, project, payload, validation_report=[_error(
             exc.code,
             "preview.ffmpeg",
             exc.detail,
             **exc.evidence,
         )])
-    content_hash, byte_size = sha256_file(output_path)
-    output_error = _preview_output_validation(output_path, width, height, duration_ms)
-    if output_error:
-        return _preview_response(timeline, project, payload, validation_report=[output_error])
-    quality_report = _preview_quality_report(
-        output_path,
-        timeline,
-        Path(readiness.executable_path),
-        duration_ms,
-    )
-    return _preview_response(
-        timeline,
-        project,
-        payload,
-        preview_key=preview_key,
-        cached=False,
-        content_hash=content_hash,
-        byte_size=byte_size,
-        quality_report=quality_report,
-    )
+    except Exception:
+        temporary_output_path.unlink(missing_ok=True)
+        raise
+    try:
+        output_error = _preview_output_validation(temporary_output_path, width, height, duration_ms)
+        if output_error:
+            return _preview_response(timeline, project, payload, validation_report=[output_error])
+        temporary_content_hash, temporary_byte_size = sha256_file(temporary_output_path)
+        temporary_quality_report = _preview_quality_report(
+            temporary_output_path,
+            timeline,
+            Path(readiness.executable_path),
+            duration_ms,
+        )
+        if output_path.is_file():
+            output_error = _preview_output_validation(output_path, width, height, duration_ms)
+            if output_error:
+                return _preview_response(timeline, project, payload, validation_report=[output_error])
+            content_hash, byte_size = sha256_file(output_path)
+            quality_report = _preview_quality_report(
+                output_path,
+                timeline,
+                Path(readiness.executable_path),
+                duration_ms,
+            )
+            return _preview_response(
+                timeline,
+                project,
+                payload,
+                preview_key=preview_key,
+                cached=True,
+                content_hash=content_hash,
+                byte_size=byte_size,
+                quality_report=quality_report,
+            )
+        temporary_output_path.replace(output_path)
+        return _preview_response(
+            timeline,
+            project,
+            payload,
+            preview_key=preview_key,
+            cached=False,
+            content_hash=temporary_content_hash,
+            byte_size=temporary_byte_size,
+            quality_report=temporary_quality_report,
+        )
+    finally:
+        temporary_output_path.unlink(missing_ok=True)
 
 
 def timeline_preview_content_path(
