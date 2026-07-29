@@ -81,6 +81,18 @@ function replaceMainTrack(items: TimelineItem[], mainRows: TimelineItem[]) {
   return [...mainRows, ...items.filter(item => item.track_type !== 'main_video')]
 }
 
+function Waveform({ projectId, assetId }: { projectId: string; assetId: string }) {
+  const waveform = useQuery({
+    queryKey: ['editor-prototype-waveform', projectId, assetId],
+    queryFn: () => api.audioWaveform(projectId, assetId, 64),
+    staleTime: Infinity,
+  })
+  if (!waveform.data) return <span className={styles.waveformLoading}>读取波形…</span>
+  return <span className={styles.waveform} aria-label="真实音频波形">
+    {waveform.data.peaks.map((peak, index) => <i key={index} style={{ height: `${Math.max(6, peak * 100)}%` }} />)}
+  </span>
+}
+
 export function EditorPrototypePage() {
   const [params] = useSearchParams()
   const projectId = params.get('project') ?? DEFAULT_PROJECT_ID
@@ -144,6 +156,16 @@ export function EditorPrototypePage() {
   const durationMs = workspace.data?.duration_ms ?? 15000
   const selectedItem = items[selectedIndex] ?? null
   const selectedAsset = workspace.data?.available_assets.find(asset => asset.id === selectedItem?.asset_id) ?? null
+  const subtitlePreview = useQuery({
+    queryKey: ['editor-prototype-subtitle', projectId, selectedAsset?.id],
+    enabled: selectedAsset?.asset_type === 'subtitle',
+    queryFn: async () => {
+      const response = await fetch(`/api/v1/projects/${projectId}/assets/${selectedAsset!.id}/content`)
+      if (!response.ok) throw new Error(`字幕读取失败（${response.status}）`)
+      return response.text()
+    },
+    staleTime: Infinity,
+  })
   const visibleAssets = workspace.data?.available_assets.filter(asset => assetFilter === 'all' || asset.asset_type === assetFilter) ?? []
   const mainItems = useMemo(() => items.filter(item => item.track_type === 'main_video'), [items])
   const audioItems = useMemo(() => items.filter(item => item.track_type === 'audio'), [items])
@@ -199,6 +221,8 @@ export function EditorPrototypePage() {
       if (!sourceTimeline) throw new Error('当前没有可修订的时间线版本。')
       const revised = await api.reviseTimelineCandidate(projectId, sourceTimeline, {
         ...sourceTimeline.track_config,
+        audio_enabled: audioItems.length > 0,
+        subtitle_enabled: subtitleItems.length > 0,
         pixels_per_second: timelineZoom,
       }, draftItems())
       return api.validateTimeline(projectId, revised)
@@ -320,6 +344,83 @@ export function EditorPrototypePage() {
     setDraggedAssetId(null)
   }
 
+  const addAssetToTrack = (trackType: TimelineItem['track_type']) => {
+    if (!draggedAssetId) return
+    const asset = workspace.data?.available_assets.find(row => row.id === draggedAssetId)
+    const expectedType = trackType === 'main_video' ? 'video' : trackType
+    if (!asset || asset.asset_type !== expectedType || !asset.duration_ms) {
+      setNotice(`该素材不能加入${trackType === 'audio' ? '声音' : '字幕'}轨。`)
+      return
+    }
+    const trackRows = items.filter(item => item.track_type === trackType)
+    const cursor = trackRows.reduce((value, item) => Math.max(value, item.timeline_out_ms), 0)
+    const clipDuration = Math.min(asset.duration_ms, Math.max(0, durationMs - cursor))
+    if (clipDuration < 200) {
+      setNotice('当前轨道已没有可用的成片时长。')
+      return
+    }
+    const newItem: TimelineItem = {
+      id: `prototype-${asset.id}-${Date.now()}`,
+      track_type: trackType,
+      sequence_number: trackRows.length + 1,
+      asset_id: asset.id,
+      asset_state: asset.state,
+      asset_type: asset.asset_type,
+      asset_duration_ms: asset.duration_ms,
+      label: asset.node_key ?? asset.role,
+      gap_reason: null,
+      source_in_ms: 0,
+      source_out_ms: clipDuration,
+      timeline_in_ms: cursor,
+      timeline_out_ms: cursor + clipDuration,
+      transform: trackType === 'audio'
+        ? { mix: 'voiceover', playback: { mode: 'trim' }, volume_envelope: [{ time_ms: 0, gain_db: 0 }, { time_ms: clipDuration, gain_db: 0 }] }
+        : { render: 'burn_in' },
+    }
+    commitItems([...items, newItem], `已把 ${newItem.label} 加入${trackType === 'audio' ? '声音' : '字幕'}轨。`, newItem.id)
+    setDraggedAssetId(null)
+  }
+
+  const updateSelectedTransform = (key: string, value: unknown) => {
+    if (!selectedItem) return
+    commitItems(items.map(item => item.id === selectedItem.id
+      ? { ...item, transform: { ...item.transform, [key]: value } }
+      : item), `已更新 ${selectedItem.label} 的声音设置。`, selectedItem.id)
+  }
+
+  const setSelectedAudioMix = (mix: 'voiceover' | 'background_music') => {
+    if (!selectedItem || selectedItem.track_type !== 'audio') return
+    const transform: Record<string, unknown> = { ...selectedItem.transform, mix, playback: selectedItem.transform.playback ?? { mode: 'trim' } }
+    if (mix === 'background_music') {
+      transform.rights = transform.rights ?? { confirmed: false, basis: 'licensed', evidence: '' }
+      transform.ducking = transform.ducking ?? { enabled: false, reduction_db: -12, attack_ms: 200, release_ms: 500, regions: [] }
+    } else {
+      delete transform.rights
+      delete transform.ducking
+    }
+    commitItems(items.map(item => item.id === selectedItem.id ? { ...item, transform } : item), `已设为${mix === 'background_music' ? '背景音乐' : '旁白 / 对白'}。`, selectedItem.id)
+  }
+
+  const applySelectedDucking = () => {
+    if (!selectedItem || selectedItem.track_type !== 'audio') return
+    const regions = audioItems
+      .filter(item => item.id !== selectedItem.id && (item.transform.mix ?? 'voiceover') === 'voiceover')
+      .filter(item => Math.max(item.timeline_in_ms, selectedItem.timeline_in_ms) < Math.min(item.timeline_out_ms, selectedItem.timeline_out_ms))
+      .map(item => ({
+        start_ms: Math.max(item.timeline_in_ms, selectedItem.timeline_in_ms) - selectedItem.timeline_in_ms,
+        end_ms: Math.min(item.timeline_out_ms, selectedItem.timeline_out_ms) - selectedItem.timeline_in_ms,
+      }))
+    const current = (selectedItem.transform.ducking as Record<string, unknown> | undefined) ?? {}
+    updateSelectedTransform('ducking', {
+      enabled: true,
+      reduction_db: current.reduction_db ?? -12,
+      attack_ms: current.attack_ms ?? 200,
+      release_ms: current.release_ms ?? 500,
+      regions,
+    })
+    setNotice(regions.length ? `已按 ${regions.length} 个旁白区间生成 ducking。` : '当前没有与 BGM 重叠的旁白区间。')
+  }
+
   const splitSelected = () => {
     if (!selectedItem?.asset_id || selectedItem.track_type !== 'main_video' || videoTrackLocked) return
     const splitAt = Math.round(playheadMs / 100) * 100
@@ -349,11 +450,20 @@ export function EditorPrototypePage() {
   }
 
   const deleteSelected = () => {
-    if (!selectedItem || selectedItem.track_type !== 'main_video' || videoTrackLocked) return
-    const rows = mainItems.filter(item => item.id !== selectedItem.id)
-    const normalized = normalizeMainTrack(rows, durationMs)
-    const nextItems = replaceMainTrack(items, normalized)
-    commitItems(nextItems, `已删除 ${selectedItem.label}，后续片段已波纹前移。`, normalized[0]?.id ?? null)
+    if (!selectedItem) return
+    if (selectedItem.track_type === 'main_video') {
+      if (videoTrackLocked) return
+      const rows = mainItems.filter(item => item.id !== selectedItem.id)
+      const normalized = normalizeMainTrack(rows, durationMs)
+      const nextItems = replaceMainTrack(items, normalized)
+      commitItems(nextItems, `已删除 ${selectedItem.label}，后续片段已波纹前移。`, normalized[0]?.id ?? null)
+    } else {
+      let sequence = 0
+      const nextItems = items
+        .filter(item => item.id !== selectedItem.id)
+        .map(item => item.track_type === selectedItem.track_type ? { ...item, sequence_number: ++sequence } : item)
+      commitItems(nextItems, `已从${selectedItem.track_type === 'audio' ? '声音' : '字幕'}轨移除 ${selectedItem.label}。`, nextItems[0]?.id ?? null)
+    }
     setPlayheadMs(Math.min(playheadMs, durationMs))
   }
 
@@ -501,9 +611,13 @@ export function EditorPrototypePage() {
         <div className={styles.assetList}>
           {visibleAssets.map(asset => <button
             key={asset.id}
-            draggable={asset.asset_type === 'video'}
+            draggable={Boolean(asset.duration_ms)}
             data-selected={selectedAsset?.id === asset.id}
-            onDragStart={() => { setDraggedAssetId(asset.id); setDraggedItemId(null); setNotice(`正在拖动 ${asset.node_key ?? asset.role}，可投放到画面轨。`) }}
+            onDragStart={() => {
+              setDraggedAssetId(asset.id)
+              setDraggedItemId(null)
+              setNotice(`正在拖动 ${asset.node_key ?? asset.role}，可投放到对应轨道。`)
+            }}
             onDragEnd={() => setDraggedAssetId(null)}
             onClick={() => {
             const item = items.find(row => row.asset_id === asset.id)
@@ -527,6 +641,17 @@ export function EditorPrototypePage() {
             onTimeUpdate={handleTimeUpdate}
             onEnded={handleEnded}
           />}
+          {selectedAsset?.asset_type === 'audio' && <div className={styles.audioPreview}>
+            <Music2 />
+            <strong>{selectedItem?.label}</strong>
+            <Waveform projectId={projectId} assetId={selectedAsset.id} />
+            <audio controls muted={audioTrackMuted} src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`} />
+          </div>}
+          {selectedAsset?.asset_type === 'subtitle' && <div className={styles.subtitlePreview}>
+            <Subtitles />
+            <strong>{selectedItem?.label}</strong>
+            <pre>{subtitlePreview.isPending ? '正在读取字幕…' : subtitlePreview.error ? '字幕读取失败' : subtitlePreview.data}</pre>
+          </div>}
           {!selectedAsset && <div className={styles.gapPreview}><AlertTriangle /><strong>缺少画面</strong><span>{selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '选择一个片段'}</span></div>}
           <div className={styles.monitorBadge}>时间线预览</div>
           <button className={styles.fullscreenButton} title="全屏"><Maximize2 /></button>
@@ -549,13 +674,13 @@ export function EditorPrototypePage() {
       <aside className={styles.inspector}>
         <header><span>INSPECTOR</span><strong>{selectedItem?.asset_id ? '片段属性' : '缺口处理'}</strong></header>
         {selectedItem?.asset_id ? <>
-          <section className={styles.clipIdentity}><i><Film /></i><div><strong>{selectedItem.label}</strong><span>对应分镜 {selectedItem.label.split('.')[0]}</span></div></section>
+          <section className={styles.clipIdentity}><i>{selectedItem.track_type === 'main_video' ? <Film /> : selectedItem.track_type === 'audio' ? <Music2 /> : <Subtitles />}</i><div><strong>{selectedItem.label}</strong><span>{selectedItem.track_type === 'main_video' ? `对应分镜 ${selectedItem.label.split('.')[0]}` : selectedItem.track_type === 'audio' ? '真实音频素材' : '烧录字幕素材'}</span></div></section>
           <section>
             <h3>素材范围</h3>
             <div className={styles.rangeLabels}><span>{seconds(selectedItem.source_in_ms)}</span><b>{seconds((selectedItem.source_out_ms ?? 0) - (selectedItem.source_in_ms ?? 0))}</b><span>{seconds(selectedItem.source_out_ms)}</span></div>
-            <div className={styles.trimHint}>直接拖动时间线片段两侧把手裁切</div>
+            <div className={styles.trimHint}>{selectedItem.track_type === 'main_video' ? '直接拖动时间线片段两侧把手裁切' : '时间范围随不可变时间线版本保存'}</div>
           </section>
-          <section>
+          {selectedItem.track_type === 'main_video' && <section>
             <h3>片段操作</h3>
             <div className={styles.actionGrid}>
               <button onClick={splitSelected}><Scissors />播放头分割</button>
@@ -563,12 +688,36 @@ export function EditorPrototypePage() {
               <button onClick={() => shiftItem(1)}><ChevronRight />向后移动</button>
               <button onClick={deleteSelected}>移除片段</button>
             </div>
-          </section>
-          <section>
+          </section>}
+          {selectedItem.track_type === 'main_video' && <section>
             <h3>转场</h3>
             <label>入场<select defaultValue="cut"><option value="cut">直接切换</option><option value="fade">淡入</option></select></label>
             <label>出场<select defaultValue="cut"><option value="cut">直接切换</option><option value="fade">淡出</option></select></label>
-          </section>
+          </section>}
+          {selectedItem.track_type === 'audio' && <section className={styles.audioInspector}>
+            <h3>声音角色与混音</h3>
+            <label>用途<select value={String(selectedItem.transform.mix ?? 'voiceover')} onChange={event => setSelectedAudioMix(event.target.value as 'voiceover' | 'background_music')}><option value="voiceover">旁白 / 对白</option><option value="background_music">背景音乐 BGM</option></select></label>
+            <label>片段音量<input aria-label="片段音量" type="range" min="-24" max="12" step=".5" value={Number(((selectedItem.transform.volume_envelope as Array<{ gain_db: number }> | undefined)?.[0]?.gain_db) ?? 0)} onChange={event => {
+              const gain = Number(event.target.value)
+              const clipDuration = selectedItem.timeline_out_ms - selectedItem.timeline_in_ms
+              updateSelectedTransform('volume_envelope', [{ time_ms: 0, gain_db: gain }, { time_ms: clipDuration, gain_db: gain }])
+            }} /></label>
+            {selectedItem.transform.mix === 'background_music' && <>
+              <div className={styles.audioFact}><strong>BGM 权利证据</strong><span>{(selectedItem.transform.rights as { confirmed?: boolean } | undefined)?.confirmed ? '将在新版本中冻结' : '保存前必须确认'}</span></div>
+              <label>权利依据<select value={String(((selectedItem.transform.rights as Record<string, unknown> | undefined)?.basis) ?? 'licensed')} onChange={event => updateSelectedTransform('rights', { ...((selectedItem.transform.rights as Record<string, unknown> | undefined) ?? {}), basis: event.target.value })}><option value="owned">自有</option><option value="licensed">已许可</option><option value="royalty_free">免版税</option></select></label>
+              <label>证据说明<input aria-label="BGM 权利证据" value={String(((selectedItem.transform.rights as Record<string, unknown> | undefined)?.evidence) ?? '')} onChange={event => updateSelectedTransform('rights', { ...((selectedItem.transform.rights as Record<string, unknown> | undefined) ?? {}), evidence: event.target.value })} /></label>
+              <label>确认权利<input aria-label="确认 BGM 权利" type="checkbox" checked={Boolean((selectedItem.transform.rights as Record<string, unknown> | undefined)?.confirmed)} onChange={event => updateSelectedTransform('rights', { ...((selectedItem.transform.rights as Record<string, unknown> | undefined) ?? {}), confirmed: event.target.checked })} /></label>
+              <button className={styles.duckingButton} onClick={applySelectedDucking}><VolumeX />按旁白区间生成 Ducking</button>
+              <small>压低 {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.reduction_db) ?? -12)} dB · attack {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.attack_ms) ?? 200)}ms · release {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.release_ms) ?? 500)}ms</small>
+            </>}
+            <button className={styles.removeTrackItem} onClick={deleteSelected}>从声音轨移除</button>
+          </section>}
+          {selectedItem.track_type === 'subtitle' && <section className={styles.subtitleInspector}>
+            <h3>字幕内容</h3>
+            <pre>{subtitlePreview.isPending ? '正在读取字幕…' : subtitlePreview.error ? '字幕读取失败' : subtitlePreview.data}</pre>
+            <div className={styles.trimHint}>当前版本使用烧录字幕；样式和安全区将在低清预渲染阶段检查。</div>
+            <button className={styles.removeTrackItem} onClick={deleteSelected}>从字幕轨移除</button>
+          </section>}
         </> : <section className={styles.gapActions}>
           <div className={styles.gapTitle}><AlertTriangle /><span><strong>缺少 {selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '0.9s'} 画面</strong><small>当前素材不足以覆盖 15 秒目标时长</small></span></div>
           <button onClick={() => setNotice('已选择缩短成片；正式版本将先显示影响预览。')}><Clock3 /><span><strong>缩短成片</strong><small>使用现有素材总时长</small></span></button>
@@ -621,11 +770,11 @@ export function EditorPrototypePage() {
         </div>
         <div className={styles.trackRow}>
           <label><Music2 /><span>声音</span><button title={audioTrackMuted ? '恢复声音轨' : '静音声音轨'} onClick={() => setAudioTrackMuted(value => !value)}>{audioTrackMuted ? <VolumeX /> : <Volume2 />}</button></label>
-          <div className={styles.trackLane} data-empty={!audioItems.length}>{audioItems.length ? audioItems.map(item => <button key={item.id} className={styles.audioClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }}>{item.label}</button>) : <span>尚未启用配音</span>}</div>
+          <div className={styles.trackLane} data-empty={!audioItems.length} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addAssetToTrack('audio') }}>{audioItems.length ? audioItems.map(item => <button key={item.id} data-selected={selectedItem?.id === item.id} className={styles.audioClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }} onClick={() => selectItem(item)}><Waveform projectId={projectId} assetId={item.asset_id!} /><strong>{item.label}</strong></button>) : <span>拖入已批准配音或 BGM</span>}</div>
         </div>
         <div className={styles.trackRow} data-track-hidden={subtitleTrackHidden}>
           <label><Subtitles /><span>字幕</span><button title={subtitleTrackHidden ? '显示字幕轨' : '隐藏字幕轨'} onClick={() => setSubtitleTrackHidden(value => !value)}>{subtitleTrackHidden ? <EyeOff /> : <Eye />}</button></label>
-          <div className={styles.trackLane} data-empty={!subtitleItems.length}>{subtitleItems.length ? subtitleItems.map(item => <button key={item.id} className={styles.subtitleClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }}>{item.label}</button>) : <span>尚未启用字幕</span>}</div>
+          <div className={styles.trackLane} data-empty={!subtitleItems.length} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addAssetToTrack('subtitle') }}>{subtitleItems.length ? subtitleItems.map(item => <button key={item.id} data-selected={selectedItem?.id === item.id} className={styles.subtitleClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }} onClick={() => selectItem(item)}><Subtitles /><strong>{item.label}</strong></button>) : <span>拖入已批准字幕</span>}</div>
         </div>
         <i className={styles.playhead} style={{ left: `${84 + timelineWidth * (playheadMs / durationMs)}px` }}><b /></i>
         </div>
