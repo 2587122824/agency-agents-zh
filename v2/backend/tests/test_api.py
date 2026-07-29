@@ -7098,6 +7098,14 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
     )
     assert replayed_review.status_code == 200
     assert replayed_review.json()["review_id"] == review["review_id"]
+    refreshed_workspace = client.get(
+        f"/api/v1/projects/{project['id']}/editor-workspace",
+    ).json()
+    refreshed_timeline = next(
+        row for row in refreshed_workspace["timelines"] if row["id"] == timeline["id"]
+    )
+    assert refreshed_timeline["preview_review"]["review_id"] == review["review_id"]
+    assert refreshed_timeline["preview_review"]["preview_content_hash"] == preview["content_hash"]
     cached = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:render-preview",
         json={**payload, "command_id": "editor-preview-render-002"},

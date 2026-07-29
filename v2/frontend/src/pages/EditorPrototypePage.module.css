@@ -831,22 +831,76 @@
 .validationList small { color: #7f898e; font-size: 8px; }
 .validationList code { color: #b47b66; font-size: 7px; }
 .previewModal { width: min(680px, 100%) !important; }
+.previewCompareToolbar {
+  margin: 14px 18px -8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.previewCompareToolbar > span { margin-right: auto; color: #7f898e; font-size: 8px; }
+.previewCompareToolbar button {
+  min-height: 26px;
+  padding: 0 8px;
+  border: 1px solid #3b4246;
+  border-radius: 4px;
+  background: #24292d;
+  color: #9fa8ac;
+  font-size: 8px;
+  cursor: pointer;
+}
+.previewCompareToolbar button[data-active="true"] {
+  border-color: var(--editor-accent);
+  background: #40304e;
+  color: #fff;
+}
+.previewCompareToolbar code { color: #b9a4dd; font-size: 8px; }
 .renderedPreview {
   margin: 16px 18px;
   height: min(52vh, 390px);
   display: grid;
-  place-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 1px;
   overflow: hidden;
   border: 1px solid #343a3e;
   border-radius: 6px;
   background: #090b0c;
 }
+.renderedPreview[data-compare="true"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.renderedPreview figure {
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  display: grid;
+  grid-template-rows: 26px minmax(0, 1fr);
+  background: #090b0c;
+}
+.renderedPreview figcaption {
+  padding: 0 9px;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  border-bottom: 1px solid #282d30;
+  color: #899297;
+  font-size: 8px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .renderedPreview video {
   width: 100%;
   height: 100%;
+  min-height: 0;
   object-fit: contain;
   background: #000;
 }
+.previewCompareGap {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: #d89a7e;
+  font-size: 9px;
+}
+.previewCompareGap svg { width: 20px; }
 .previewQuality {
   margin: 0 18px 14px;
   overflow: hidden;
@@ -933,6 +987,44 @@
 .previewReviewChecklist span { display: grid; gap: 2px; }
 .previewReviewChecklist strong { font-size: 9px; line-height: 1.4; }
 .previewReviewChecklist small { color: #7f898e; font-size: 8px; line-height: 1.45; }
+.previewReviewSaved {
+  margin: 0 18px 14px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #34553e;
+  border-radius: 6px;
+  background: #1d2d22;
+}
+.previewReviewSaved > svg { width: 16px; color: #7ac08d; flex: none; }
+.previewReviewSaved span { display: grid; gap: 2px; }
+.previewReviewSaved strong { color: #dce9df; font-size: 9px; }
+.previewReviewSaved small { color: #7e9986; font-size: 8px; }
+.deliveryMethods {
+  margin: 0 18px 14px;
+  display: grid;
+  gap: 7px;
+}
+.deliveryMethods label {
+  min-height: 58px;
+  padding: 9px 11px;
+  display: grid;
+  grid-template-columns: 14px 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #3b4246;
+  border-radius: 6px;
+  background: #24292d;
+  cursor: pointer;
+}
+.deliveryMethods label[data-selected="true"] { border-color: var(--editor-accent); background: #30283a; }
+.deliveryMethods label[data-disabled="true"] { opacity: .5; cursor: default; }
+.deliveryMethods input { accent-color: var(--editor-accent); }
+.deliveryMethods svg { width: 17px; color: #b7a0db; }
+.deliveryMethods span { display: grid; gap: 3px; }
+.deliveryMethods strong { font-size: 9px; }
+.deliveryMethods small { color: #818b90; font-size: 8px; }
 @media (max-width: 1050px) {
   .editingArea { grid-template-columns: 190px minmax(300px, 1fr) 230px; }
 }

@@ -2,8 +2,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Film,
   Eye, EyeOff, Layers3, Lock, Maximize2, Music2, Pause, Play, Plus, Redo2,
-  RotateCcw, Scissors, Search, Sparkles, Subtitles, Undo2, Unlock, Volume2,
-  VolumeX, WandSparkles, X,
+  RotateCcw, Scissors, Search, ShieldCheck, Sparkles, Subtitles, Undo2, Unlock,
+  Upload, Volume2, VolumeX, WandSparkles, X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
@@ -137,6 +137,10 @@ export function EditorPrototypePage() {
     queryKey: ['editor-prototype-workspace', projectId],
     queryFn: () => api.editorWorkspace(projectId),
   })
+  const deliveryWorkspace = useQuery({
+    queryKey: ['editor-prototype-delivery', projectId],
+    queryFn: () => api.deliveryWorkspace(projectId),
+  })
   const [items, setItems] = useState<TimelineItem[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [playheadMs, setPlayheadMs] = useState(0)
@@ -158,13 +162,20 @@ export function EditorPrototypePage() {
   const [lastValidation, setLastValidation] = useState<Timeline | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [lastPreview, setLastPreview] = useState<TimelinePreview | null>(null)
+  const [previewCompareMode, setPreviewCompareMode] = useState<'result' | 'compare'>('result')
+  const [previewCompareMs, setPreviewCompareMs] = useState(0)
+  const [previewReviewSaved, setPreviewReviewSaved] = useState(false)
   const [previewReviewChecks, setPreviewReviewChecks] = useState({
     visualContinuity: false,
     subjectiveSync: false,
     subtitleReadability: false,
     warnings: false,
   })
+  const [deliveryAuthorizeOpen, setDeliveryAuthorizeOpen] = useState(false)
+  const [deliveryMethod, setDeliveryMethod] = useState<'external_upload' | 'local_ffmpeg' | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const renderedPreviewRef = useRef<HTMLVideoElement | null>(null)
+  const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
   const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const sourceTimeline = workspace.data?.timelines[0] ?? null
@@ -194,6 +205,9 @@ export function EditorPrototypePage() {
     setPlayheadMs(0)
     setLastValidation(sourceTimeline)
     setLastPreview(null)
+    setPreviewCompareMode('result')
+    setPreviewCompareMs(0)
+    setPreviewReviewSaved(Boolean(sourceTimeline.preview_review))
     setPreviewReviewChecks({
       visualContinuity: false,
       subjectiveSync: false,
@@ -225,6 +239,11 @@ export function EditorPrototypePage() {
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
   const activeSubtitleItem = subtitleItems.find(item => item.asset_id && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
+  const comparisonItem = mainItems.find(item => (
+    item.asset_id
+    && previewCompareMs >= item.timeline_in_ms
+    && previewCompareMs < item.timeline_out_ms
+  )) ?? null
   const timelineWidth = Math.max(900, (durationMs / 1000) * timelineZoom)
   const validationErrors = lastValidation?.validation_report
     ?? sourceTimeline?.validation_report
@@ -267,6 +286,21 @@ export function EditorPrototypePage() {
       else audio.pause()
     }
   }, [audioItems, audioTrackMuted, playheadMs, playing])
+
+  useEffect(() => {
+    const source = sourceCompareRef.current
+    if (!source || !comparisonItem?.asset_id || previewCompareMode !== 'compare') return
+    const sourceTime = (
+      (comparisonItem.source_in_ms ?? 0)
+      + Math.max(0, previewCompareMs - comparisonItem.timeline_in_ms)
+    ) / 1000
+    if (Math.abs(source.currentTime - sourceTime) > .08) source.currentTime = sourceTime
+    if (renderedPreviewRef.current && !renderedPreviewRef.current.paused) {
+      void source.play().catch(() => undefined)
+    } else {
+      source.pause()
+    }
+  }, [comparisonItem?.id, comparisonItem?.asset_id, previewCompareMode, previewCompareMs])
 
   useEffect(() => {
     if (!sourceTimeline || !dirty || !items.length) return
@@ -327,6 +361,13 @@ export function EditorPrototypePage() {
     },
     onSuccess: preview => {
       setLastPreview(preview)
+      setPreviewCompareMode('result')
+      setPreviewCompareMs(0)
+      setPreviewReviewSaved(Boolean(
+        sourceTimeline?.preview_review
+        && sourceTimeline.preview_review.preview_key === preview.preview_key
+        && sourceTimeline.preview_review.preview_content_hash === preview.content_hash
+      ))
       setPreviewReviewChecks({
         visualContinuity: false,
         subjectiveSync: false,
@@ -354,7 +395,53 @@ export function EditorPrototypePage() {
     },
     onSuccess: review => {
       setNotice(`低清预览人工复核已保存（${review.review_id}），可以继续确认时间线与正式交付。`)
+      setPreviewReviewSaved(true)
+      void queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] })
+    },
+  })
+
+  const confirmTimeline = useMutation({
+    mutationFn: async () => {
+      if (!sourceTimeline || sourceTimeline.status !== 'review') {
+        throw new Error('当前时间线不是待确认状态。')
+      }
+      if (!previewReviewSaved) throw new Error('请先保存本次低清预览人工复核。')
+      return api.confirmTimeline(projectId, sourceTimeline)
+    },
+    onSuccess: async timeline => {
+      setNotice(`时间线 v${timeline.version_number} 已确认；预览复核保持绑定，可以选择正式交付方式。`)
       setPreviewOpen(false)
+      setDeliveryMethod(null)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['editor-prototype-workspace', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['editor-workspace', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['delivery-workspace', projectId] }),
+      ])
+      await deliveryWorkspace.refetch()
+      setDeliveryAuthorizeOpen(true)
+    },
+  })
+
+  const authorizeDelivery = useMutation({
+    mutationFn: async () => {
+      if (!deliveryMethod) throw new Error('请选择正式交付方式。')
+      const current = await api.deliveryWorkspace(projectId)
+      if (!current.confirmed_timeline || !current.preview_review) {
+        throw new Error('正式交付仍缺少已确认时间线或精确预览复核。')
+      }
+      return api.authorizeDelivery(projectId, current, deliveryMethod)
+    },
+    onSuccess: async attempt => {
+      setDeliveryAuthorizeOpen(false)
+      setDeliveryMethod(null)
+      setNotice(attempt.execution_kind === 'local_ffmpeg'
+        ? '正式交付已授权，本机 FFmpeg 任务已进入队列。'
+        : '正式交付已授权，请继续上传已经生成的 MP4。')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['delivery-workspace', projectId] }),
+      ])
     },
   })
 
@@ -706,12 +793,14 @@ export function EditorPrototypePage() {
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error)}>
-      {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error ? <AlertTriangle /> : <CheckCircle2 />}
+    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error)}>
+      {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
       {saveAndValidate.error && <button onClick={() => setConfirmSaveOpen(true)}>{saveAndValidate.error instanceof Error ? saveAndValidate.error.message : '保存失败，请重试'}</button>}
       {renderPreview.error && <button onClick={() => renderPreview.mutate()}>{renderPreview.error instanceof Error ? renderPreview.error.message : '低清预览失败，请重试'}</button>}
       {reviewPreview.error && <button onClick={() => reviewPreview.mutate()}>{reviewPreview.error instanceof Error ? reviewPreview.error.message : '人工复核保存失败，请重试'}</button>}
+      {confirmTimeline.error && <button onClick={() => confirmTimeline.mutate()}>{confirmTimeline.error instanceof Error ? confirmTimeline.error.message : '时间线确认失败，请重试'}</button>}
+      {authorizeDelivery.error && <button onClick={() => setDeliveryAuthorizeOpen(true)}>{authorizeDelivery.error instanceof Error ? authorizeDelivery.error.message : '交付授权失败，请重试'}</button>}
       {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
       <code>{workspace.data.aspect_ratio} · {seconds(durationMs)} · 预览质量</code>
     </section>
@@ -943,7 +1032,44 @@ export function EditorPrototypePage() {
     {previewOpen && lastPreview && <div className={styles.modal}><section className={styles.previewModal}>
       <header><Film /><div><span>DRAFT PRE-RENDER</span><h2>时间线 v{lastPreview.timeline_version_number} 低清预览</h2></div><button title="关闭" onClick={() => setPreviewOpen(false)}><X /></button></header>
       {lastPreview.state === 'ready' && lastPreview.content_url ? <>
-        <div className={styles.renderedPreview}><video controls src={lastPreview.content_url} /></div>
+        <div className={styles.previewCompareToolbar}>
+          <span>预览方式</span>
+          <button data-active={previewCompareMode === 'result'} onClick={() => setPreviewCompareMode('result')}>只看结果</button>
+          <button data-active={previewCompareMode === 'compare'} onClick={() => setPreviewCompareMode('compare')}>源时间线对比</button>
+          {previewCompareMode === 'compare' && <code>{timecode(previewCompareMs)}</code>}
+        </div>
+        <div className={styles.renderedPreview} data-compare={previewCompareMode === 'compare'}>
+          {previewCompareMode === 'compare' && <figure>
+            <figcaption>源时间线监看 · {comparisonItem?.label ?? '空位'}</figcaption>
+            {comparisonItem?.asset_id
+              ? <video
+                  ref={sourceCompareRef}
+                  muted
+                  playsInline
+                  src={`/api/v1/projects/${projectId}/assets/${comparisonItem.asset_id}/content`}
+                />
+              : <div className={styles.previewCompareGap}><AlertTriangle /><span>该时点是显式空位</span></div>}
+          </figure>}
+          <figure>
+            <figcaption>低清渲染结果</figcaption>
+            <video
+              ref={renderedPreviewRef}
+              controls
+              playsInline
+              src={lastPreview.content_url}
+              onLoadedMetadata={event => {
+                event.currentTarget.currentTime = previewCompareMs / 1000
+              }}
+              onTimeUpdate={event => setPreviewCompareMs(Math.round(event.currentTarget.currentTime * 1000))}
+              onSeeked={event => setPreviewCompareMs(Math.round(event.currentTarget.currentTime * 1000))}
+              onPlay={() => {
+                const source = sourceCompareRef.current
+                if (source && previewCompareMode === 'compare') void source.play().catch(() => undefined)
+              }}
+              onPause={() => sourceCompareRef.current?.pause()}
+            />
+          </figure>
+        </div>
         <dl>
           <div><dt>预览规格</dt><dd>{lastPreview.width}×{lastPreview.height} · {lastPreview.fps}fps</dd></div>
           <div><dt>来源</dt><dd>{lastPreview.cached ? '确定性缓存' : '本机 FFmpeg 新生成'}</dd></div>
@@ -966,13 +1092,14 @@ export function EditorPrototypePage() {
             </article>)}
           </div>
         </section>}
-        {lastPreview.quality_report && lastPreview.quality_report.status !== 'blocked' && <fieldset className={styles.previewReviewChecklist}>
+        {lastPreview.quality_report && lastPreview.quality_report.status !== 'blocked' && !previewReviewSaved && <fieldset className={styles.previewReviewChecklist}>
           <legend>观看后逐项确认</legend>
           <label><input type="checkbox" checked={previewReviewChecks.visualContinuity} onChange={event => setPreviewReviewChecks(value => ({ ...value, visualContinuity: event.target.checked }))} /><span><strong>画面连续性</strong><small>已完整观看镜头衔接、主体一致性、动作连续性和异常闪跳。</small></span></label>
           <label><input type="checkbox" checked={previewReviewChecks.subjectiveSync} onChange={event => setPreviewReviewChecks(value => ({ ...value, subjectiveSync: event.target.checked }))} /><span><strong>主观音画同步</strong><small>已检查旁白、音乐、字幕与画面节奏是否符合预期。</small></span></label>
           {sourceTimeline?.track_config.subtitle_enabled && <label><input type="checkbox" checked={previewReviewChecks.subtitleReadability} onChange={event => setPreviewReviewChecks(value => ({ ...value, subtitleReadability: event.target.checked }))} /><span><strong>字幕可读性</strong><small>已检查文字、换行、遮挡和画面安全区。</small></span></label>}
           {lastPreview.quality_report.checks.some(check => check.state === 'warning') && <label><input type="checkbox" checked={previewReviewChecks.warnings} onChange={event => setPreviewReviewChecks(value => ({ ...value, warnings: event.target.checked }))} /><span><strong>警告项已逐项确认</strong><small>已确认检测到的黑画面或其他警告均为有意效果或可接受结果。</small></span></label>}
         </fieldset>}
+        {previewReviewSaved && <div className={styles.previewReviewSaved}><CheckCircle2 /><span><strong>人工复核已保存</strong><small>记录已绑定当前时间线合同和本次预览文件哈希。</small></span></div>}
       </> : <>
         <p>低清预览没有启动 FFmpeg。请先处理以下合同问题；点击条目可定位到对应片段。</p>
         <div className={styles.validationList}>
@@ -986,7 +1113,7 @@ export function EditorPrototypePage() {
       <footer>
         <button onClick={() => setPreviewOpen(false)}>返回时间线</button>
         {lastPreview.state === 'ready' && <button onClick={() => renderPreview.mutate()}>{renderPreview.isPending ? '检查中…' : '重新检查缓存'}</button>}
-        {lastPreview.state === 'ready' && lastPreview.quality_report?.status !== 'blocked' && <button
+        {lastPreview.state === 'ready' && lastPreview.quality_report?.status !== 'blocked' && !previewReviewSaved && <button
           className={styles.confirmButton}
           disabled={
             reviewPreview.isPending
@@ -997,7 +1124,24 @@ export function EditorPrototypePage() {
           }
           onClick={() => reviewPreview.mutate()}
         >{reviewPreview.isPending ? '正在保存复核…' : '保存人工复核'}</button>}
+        {previewReviewSaved && sourceTimeline?.status === 'review' && <button className={styles.confirmButton} disabled={confirmTimeline.isPending} onClick={() => confirmTimeline.mutate()}>{confirmTimeline.isPending ? '正在确认…' : '确认时间线并继续'}</button>}
+        {previewReviewSaved && sourceTimeline?.status === 'confirmed' && <button className={styles.confirmButton} onClick={() => {
+          setPreviewOpen(false)
+          setDeliveryAuthorizeOpen(true)
+        }}>继续授权交付</button>}
       </footer>
+    </section></div>}
+    {deliveryAuthorizeOpen && <div className={styles.modal}><section>
+      <header><ShieldCheck /><div><span>FINAL DELIVERY</span><h2>授权正式交付</h2></div><button title="关闭" onClick={() => setDeliveryAuthorizeOpen(false)}><X /></button></header>
+      <p>当前确认时间线已经绑定低清预览人工复核。请选择一次明确的交付方式；失败不会自动重试或切换方式。</p>
+      <div className={styles.deliveryMethods}>
+        {(deliveryWorkspace.data?.delivery_methods ?? []).map(method => <label key={method.kind} data-selected={deliveryMethod === method.kind} data-disabled={!method.available}>
+          <input type="radio" name="prototype-delivery-method" checked={deliveryMethod === method.kind} disabled={!method.available} onChange={() => setDeliveryMethod(method.kind)} />
+          {method.kind === 'local_ffmpeg' ? <Film /> : <Upload />}
+          <span><strong>{method.label}</strong><small>{method.available ? (method.renderer_version ?? '等待上传最终 MP4') : method.reason}</small></span>
+        </label>)}
+      </div>
+      <footer><button onClick={() => setDeliveryAuthorizeOpen(false)}>取消</button><button className={styles.confirmButton} disabled={!deliveryMethod || authorizeDelivery.isPending} onClick={() => authorizeDelivery.mutate()}>{authorizeDelivery.isPending ? '正在授权…' : '确认授权'}</button></footer>
     </section></div>}
   </main>
 }

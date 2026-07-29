@@ -1285,6 +1285,7 @@ export interface Timeline {
   created_at: string
   validated_at: string | null
   confirmed_at: string | null
+  preview_review: TimelinePreviewReview | null
   items: TimelineItem[]
 }
 

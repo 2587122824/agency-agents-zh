@@ -1589,6 +1589,26 @@ def _preview_review_read(event: ProjectEvent) -> dict:
     }
 
 
+def _matching_preview_review(session: Session, timeline: Timeline) -> dict | None:
+    if not timeline.contract_hash:
+        return None
+    events = session.scalars(
+        select(ProjectEvent)
+        .where(
+            ProjectEvent.project_id == timeline.project_id,
+            ProjectEvent.event_type == "timeline.preview_reviewed.v1",
+            ProjectEvent.aggregate_type == "timeline",
+            ProjectEvent.aggregate_id == timeline.id,
+        )
+        .order_by(ProjectEvent.project_sequence.desc())
+    )
+    for event in events:
+        data = event.data if isinstance(event.data, dict) else {}
+        if data.get("timeline_contract_hash") == timeline.contract_hash:
+            return _preview_review_read(event)
+    return None
+
+
 def review_timeline_preview(
     session: Session,
     project: Project,
@@ -1777,6 +1797,7 @@ def timeline_read(session: Session, timeline: Timeline) -> dict:
         for asset in repository.assets_by_ids([item.asset_id for item in items if item.asset_id])
     } if any(item.asset_id for item in items) else {}
     result = {column.name: getattr(timeline, column.name) for column in timeline.__table__.columns}
+    result["preview_review"] = _matching_preview_review(session, timeline)
     result["items"] = []
     for item in items:
         asset = assets.get(item.asset_id)

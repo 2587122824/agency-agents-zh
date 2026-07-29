@@ -162,6 +162,7 @@ class TimelineRead(BaseModel):
     created_at: datetime
     validated_at: datetime | None
     confirmed_at: datetime | None
+    preview_review: TimelinePreviewReviewRead | None = None
     items: list[TimelineItemRead]
 
 
