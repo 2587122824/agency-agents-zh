@@ -501,10 +501,15 @@ export function EditorPrototypePage() {
         previewReviewChecks,
       )
     },
-    onSuccess: review => {
+    onSuccess: async review => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['editor-prototype-workspace', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['editor-workspace', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['delivery-workspace', projectId] }),
+      ])
       setNotice(`低清预览人工复核已保存（${review.review_id}），可以继续确认时间线与正式交付。`)
       setPreviewReviewSaved(true)
-      void queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] })
     },
   })
 
@@ -1728,7 +1733,7 @@ export function EditorPrototypePage() {
       <div className={styles.modalWarning}><AlertTriangle /><span>低清预览只写入本机缓存，不确认时间线、不创建交付任务、不登记正式成片，也不产生供应商费用。</span></div>
       <footer>
         <button onClick={() => setPreviewOpen(false)}>返回时间线</button>
-        {lastPreview.state === 'ready' && <button disabled={renderPreview.isPending} onClick={() => renderPreview.mutate()}>{renderPreview.isPending ? '检查中…' : '重新检查缓存'}</button>}
+        {lastPreview.state === 'ready' && <button disabled={renderPreview.isPending || reviewPreview.isPending || confirmTimeline.isPending} onClick={() => renderPreview.mutate()}>{renderPreview.isPending ? '检查中…' : '重新检查缓存'}</button>}
         {lastPreview.state === 'ready' && lastPreview.quality_report?.status !== 'blocked' && !previewReviewSaved && <button
           className={styles.confirmButton}
           disabled={
