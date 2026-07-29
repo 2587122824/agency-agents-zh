@@ -287,6 +287,25 @@
   background: #000;
   transform: translate(-50%, -50%);
 }
+.monitor[data-scale="actual"] {
+  place-items: start;
+  overflow: auto;
+}
+.monitor[data-scale="actual"] video {
+  position: relative;
+  top: auto;
+  left: auto;
+  max-width: none;
+  max-height: none;
+  flex: none;
+  transform: none;
+}
+.monitor:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+  background-color: #090a0b;
+}
 .monitorBadge {
   position: absolute;
   top: 9px;

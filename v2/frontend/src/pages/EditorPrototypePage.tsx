@@ -153,6 +153,8 @@ export function EditorPrototypePage() {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [playheadMs, setPlayheadMs] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
+  const [monitorFullscreen, setMonitorFullscreen] = useState(false)
   const [assetFilter, setAssetFilter] = useState<'all' | 'video' | 'audio' | 'subtitle'>('all')
   const [gapAssetSelection, setGapAssetSelection] = useState(false)
   const [notice, setNotice] = useState('原型模式：所有调整只保存在当前浏览器，不会修改真实时间线。')
@@ -187,6 +189,7 @@ export function EditorPrototypePage() {
   const [deliveryMethod, setDeliveryMethod] = useState<'external_upload' | 'local_ffmpeg' | null>(null)
   const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const monitorRef = useRef<HTMLDivElement | null>(null)
   const renderedPreviewRef = useRef<HTMLVideoElement | null>(null)
   const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
   const advancingPlaybackRef = useRef(false)
@@ -303,6 +306,12 @@ export function EditorPrototypePage() {
   useEffect(() => {
     advancingPlaybackRef.current = false
   }, [selectedItem?.id])
+
+  useEffect(() => {
+    const syncFullscreen = () => setMonitorFullscreen(document.fullscreenElement === monitorRef.current)
+    document.addEventListener('fullscreenchange', syncFullscreen)
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen)
+  }, [])
 
   useEffect(() => {
     const video = videoRef.current
@@ -569,6 +578,21 @@ export function EditorPrototypePage() {
     if (selectedItem?.id !== target.id) selectItem(target)
     advancingPlaybackRef.current = false
     setPlaying(true)
+  }
+
+  const toggleMonitorFullscreen = async () => {
+    const monitor = monitorRef.current
+    if (!monitor) return
+    try {
+      if (document.fullscreenElement === monitor) await document.exitFullscreen()
+      else await monitor.requestFullscreen()
+      const active = document.fullscreenElement === monitor
+      setMonitorFullscreen(active)
+      if (!active) setNotice('当前浏览器没有进入监看全屏；仍可使用适应窗口或 100% 像素模式。')
+    } catch {
+      setMonitorFullscreen(false)
+      setNotice('浏览器没有允许监看窗口进入全屏，请检查当前窗口权限。')
+    }
   }
 
   const commitItems = (nextItems: TimelineItem[], message: string, selectedId?: string | null) => {
@@ -1016,12 +1040,16 @@ export function EditorPrototypePage() {
       </aside>
 
       <section className={styles.previewPanel}>
-        <div className={styles.monitor}>
+        <div className={styles.monitor} ref={monitorRef} data-scale={monitorScale}>
           {selectedAsset?.asset_type === 'video' && <video
             ref={videoRef}
             key={selectedItem?.id}
             src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`}
-            style={{ opacity: selectedPreviewOpacity }}
+            style={{
+              opacity: selectedPreviewOpacity,
+              width: monitorScale === 'actual' && selectedAsset.width ? `${selectedAsset.width}px` : undefined,
+              height: monitorScale === 'actual' && selectedAsset.height ? `${selectedAsset.height}px` : undefined,
+            }}
             preload="metadata"
             muted
             playsInline
@@ -1053,7 +1081,7 @@ export function EditorPrototypePage() {
           {!subtitleTrackHidden && activeSubtitleItem && <TimelineSubtitle projectId={projectId} item={activeSubtitleItem} playheadMs={playheadMs} />}
           {!selectedAsset && <div className={styles.gapPreview}><AlertTriangle /><strong>缺少画面</strong><span>{selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '选择一个片段'}</span></div>}
           <div className={styles.monitorBadge}>时间线预览</div>
-          <button className={styles.fullscreenButton} title="全屏"><Maximize2 /></button>
+          <button className={styles.fullscreenButton} title={monitorFullscreen ? '退出全屏' : '全屏'} onClick={() => void toggleMonitorFullscreen()}><Maximize2 /></button>
         </div>
         <div className={styles.transport}>
           <button title="跳到开头" onClick={() => setPlayheadMs(0)}><ChevronLeft /></button>
@@ -1066,7 +1094,7 @@ export function EditorPrototypePage() {
             setPlaying(false)
           }}><i style={{ width: `${Math.min(100, (playheadMs / durationMs) * 100)}%` }} /></div>
           <Volume2 />
-          <button>适应</button>
+          <button disabled={selectedAsset?.asset_type !== 'video'} onClick={() => setMonitorScale(value => value === 'fit' ? 'actual' : 'fit')}>{monitorScale === 'fit' ? '适应' : '100%'}</button>
         </div>
       </section>
 
