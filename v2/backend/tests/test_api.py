@@ -42,6 +42,7 @@ from v2.backend.app.quality.agent_gateway import DeterministicQCGateway, get_qc_
 from v2.backend.app.delivery import service as delivery_service
 from v2.backend.app.delivery.renderer import FFmpegReadiness, LocalRenderResult
 from v2.backend.app.quality.service import resolve_local_asset_path
+from v2.backend.app.repositories import SqlAlchemyEventRepository
 
 
 class FailOnceQCGateway(DeterministicQCGateway):
@@ -56,7 +57,8 @@ class FailOnceQCGateway(DeterministicQCGateway):
 
 
 @pytest.fixture()
-def client():
+def client(monkeypatch):
+    monkeypatch.setenv("V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED", "false")
     TEST_DATABASE.unlink(missing_ok=True)
     if TEST_RUNTIME.exists():
         import shutil
@@ -6581,7 +6583,11 @@ def timeline_items_for_assets(video_assets: list[dict]) -> list[dict]:
     return items
 
 
-def create_confirmed_timeline(client: TestClient) -> tuple[dict, dict, dict]:
+def create_confirmed_timeline(
+    client: TestClient,
+    *,
+    include_preview_review: bool = True,
+) -> tuple[dict, dict, dict]:
     project, snapshot = create_locked_snapshot(client)
     video_assets = seed_editor_assets(client, project, snapshot)
     stage = client.post(
@@ -6612,6 +6618,33 @@ def create_confirmed_timeline(client: TestClient) -> tuple[dict, dict, dict]:
             "confirm_delivery_scope": True,
         },
     ).json()
+    if include_preview_review:
+        with SessionLocal() as session:
+            SqlAlchemyEventRepository(session).add(ProjectEvent(
+                project_id=project["id"],
+                snapshot_id=snapshot["id"],
+                event_type="timeline.preview_reviewed.v1",
+                aggregate_type="timeline",
+                aggregate_id=timeline["id"],
+                actor_type="user",
+                actor_id="test-reviewer",
+                causation_id="delivery-preview-review-fixture",
+                message="Test reviewer approved the exact preview.",
+                data={
+                    "timeline_contract_hash": timeline["contract_hash"],
+                    "preview_key": "a" * 64,
+                    "preview_content_hash": "b" * 64,
+                    "quality_status": "review_required",
+                    "quality_check_codes": ["PREVIEW_VISUAL_CONTINUITY_REVIEW_REQUIRED"],
+                    "confirmed_manual_checks": {
+                        "visual_continuity": True,
+                        "subjective_sync": True,
+                        "subtitle_readability": True,
+                        "warnings": True,
+                    },
+                },
+            ))
+            session.commit()
     return project, snapshot, timeline
 
 
@@ -7019,9 +7052,52 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
     assert preview["width"] == 360
     assert preview["height"] == 640
     assert preview["content_hash"] == hashlib.sha256(b"preview-mp4").hexdigest()
+    assert len(preview["preview_key"]) == 64
     assert preview["quality_report"]["status"] == "review_required"
     assert len(render_calls) == 1
     assert len(quality_calls) == 1
+    review_payload = {
+        "command_id": "editor-preview-review-001",
+        "expected_row_version": timeline["row_version"],
+        "expected_contract_hash": timeline["contract_hash"],
+        "preview_key": preview["preview_key"],
+        "expected_preview_content_hash": preview["content_hash"],
+        "confirm_visual_continuity_reviewed": False,
+        "confirm_subjective_sync_reviewed": True,
+        "confirm_subtitle_readability_reviewed": True,
+        "confirm_warnings_reviewed": True,
+    }
+    missing_manual_review = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:review-preview",
+        json=review_payload,
+    )
+    assert missing_manual_review.status_code == 409
+    assert missing_manual_review.headers["x-error-code"] == "PREVIEW_VISUAL_CONTINUITY_REVIEW_REQUIRED"
+    reviewed = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:review-preview",
+        json={
+            **review_payload,
+            "command_id": "editor-preview-review-002",
+            "confirm_visual_continuity_reviewed": True,
+        },
+    )
+    assert reviewed.status_code == 200, reviewed.text
+    review = reviewed.json()
+    assert review["schema_version"] == "editor-preview-review.v1"
+    assert review["timeline_id"] == timeline["id"]
+    assert review["preview_key"] == preview["preview_key"]
+    assert review["preview_content_hash"] == preview["content_hash"]
+    assert review["quality_status"] == "review_required"
+    replayed_review = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:review-preview",
+        json={
+            **review_payload,
+            "command_id": "editor-preview-review-002",
+            "confirm_visual_continuity_reviewed": True,
+        },
+    )
+    assert replayed_review.status_code == 200
+    assert replayed_review.json()["review_id"] == review["review_id"]
     cached = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:render-preview",
         json={**payload, "command_id": "editor-preview-render-002"},
@@ -7029,7 +7105,7 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
     assert cached["state"] == "ready"
     assert cached["cached"] is True
     assert len(render_calls) == 1
-    assert len(quality_calls) == 2
+    assert len(quality_calls) == 4
     content = client.get(preview["content_url"])
     assert content.status_code == 200
     assert content.content == b"preview-mp4"
@@ -7047,6 +7123,12 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
     assert client.get(preview["content_url"]).status_code == 404
     with SessionLocal() as session:
         assert session.get(Timeline, timeline["id"]).status == "review"
+        review_events = list(session.scalars(select(ProjectEvent).where(
+            ProjectEvent.project_id == project["id"],
+            ProjectEvent.event_type == "timeline.preview_reviewed.v1",
+            ProjectEvent.aggregate_id == timeline["id"],
+        )))
+        assert len(review_events) == 1
         assert list(session.scalars(select(DeliveryAttempt).where(DeliveryAttempt.project_id == project["id"]))) == []
         assert list(session.scalars(select(WorkItem).where(
             WorkItem.project_id == project["id"],
@@ -7493,7 +7575,10 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     replay = authorize_delivery_attempt(client, project, timeline)
     assert replay["id"] == attempt["id"]
     assert attempt["status"] == "authorized"
+    assert attempt["request_manifest"]["schema_version"] == "v2.delivery-request.v3"
     assert attempt["request_manifest"]["timeline_contract_hash"] == timeline["contract_hash"]
+    assert attempt["request_manifest"]["preview_review"]["schema_version"] == "editor-preview-review.v1"
+    assert attempt["request_manifest"]["preview_review"]["timeline_contract_hash"] == timeline["contract_hash"]
     assert attempt["request_manifest"]["output_spec"]["duration_ms"] == 30_000
 
     second = client.post(
@@ -7574,6 +7659,29 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
         assert len(list(session.scalars(select(WorkAttempt)))) == work_attempt_count
         assert len(list(session.scalars(select(CostEvent)))) == cost_event_count
         assert session.get(Project, project["id"]).active_snapshot_id == snapshot["id"]
+
+
+def test_delivery_authorization_requires_exact_preview_review(client: TestClient) -> None:
+    project, _, timeline = create_confirmed_timeline(client, include_preview_review=False)
+    workspace = client.get(f"/api/v1/projects/{project['id']}/delivery-workspace").json()
+    assert workspace["preview_review"] is None
+    assert workspace["next_action"]["code"] == "REVIEW_TIMELINE_PREVIEW"
+    response = client.post(
+        f"/api/v1/projects/{project['id']}/deliveries:authorize",
+        json={
+            "command_id": "delivery-without-preview-review",
+            "timeline_id": timeline["id"],
+            "expected_timeline_contract_hash": timeline["contract_hash"],
+            "execution_kind": "external_upload",
+            "confirm_delivery_authorization": True,
+        },
+    )
+    assert response.status_code == 409
+    assert response.headers["x-error-code"] == "DELIVERY_PREVIEW_REVIEW_REQUIRED"
+    with SessionLocal() as session:
+        assert list(session.scalars(select(DeliveryAttempt).where(
+            DeliveryAttempt.project_id == project["id"],
+        ))) == []
 
 
 def test_delivery_verification_blocks_invalid_dimensions_without_retry_or_timeline_mutation(client: TestClient) -> None:

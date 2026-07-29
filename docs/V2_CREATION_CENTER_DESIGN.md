@@ -1252,7 +1252,7 @@ RequirementDiff
 ### Creation Sprint 7：最终交付
 
 - 用户显式选择本机 FFmpeg 或外部上传，不提供默认选择。
-- `v2.delivery-request.v2` 冻结时间线、素材哈希、输出规格和执行合同。
+- `v2.delivery-request.v3` 冻结时间线、素材哈希、输出规格、执行合同，以及同一时间线合同的低清预览人工复核 ID、缓存键和文件哈希。
 - 本地合成工作项独立于生产 DAG 与生产状态汇总。
 - 执行前复验本地素材实际哈希；输入或 FFmpeg 环境变化直接阻断。
 - 成功只登记待验证 `final_delivery` Asset，验证通过后才完成项目。

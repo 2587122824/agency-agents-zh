@@ -4,6 +4,7 @@ import hashlib
 import json
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..core.config import CONNECTED_LOCAL_ASSET_ROOT_REF
@@ -130,6 +131,7 @@ def _delivery_manifest(
     project: Project,
     timeline: Timeline,
     execution: dict,
+    preview_review_id: str,
 ) -> dict:
     repository = _delivery(session)
     snapshot = repository.snapshot(timeline.snapshot_id)
@@ -187,8 +189,13 @@ def _delivery_manifest(
     output_spec["duration_ms"] = project.duration_seconds * 1000
     if output_spec.get("container") != "mp4":
         raise DeliveryConflictError("DELIVERY_CONTAINER_UNSUPPORTED", "当前仅连接 MP4 最终交付验证器。")
+    preview_review = _preview_review_evidence(
+        session,
+        timeline,
+        review_id=preview_review_id,
+    )
     return {
-        "schema_version": "v2.delivery-request.v2",
+        "schema_version": "v2.delivery-request.v3",
         "project_id": project.id,
         "snapshot_id": snapshot.id,
         "timeline_id": timeline.id,
@@ -197,7 +204,62 @@ def _delivery_manifest(
         "input_items": input_items,
         "output_spec": output_spec,
         "execution": execution,
+        "preview_review": preview_review,
     }
+
+
+def _preview_review_evidence(
+    session: Session,
+    timeline: Timeline,
+    *,
+    review_id: str | None = None,
+) -> dict:
+    statement = (
+        select(ProjectEvent)
+        .where(
+            ProjectEvent.project_id == timeline.project_id,
+            ProjectEvent.event_type == "timeline.preview_reviewed.v1",
+            ProjectEvent.aggregate_type == "timeline",
+            ProjectEvent.aggregate_id == timeline.id,
+        )
+        .order_by(ProjectEvent.project_sequence.desc())
+    )
+    events = list(session.scalars(statement))
+    if review_id:
+        events = [event for event in events if event.event_id == review_id]
+    for event in events:
+        data = event.data if isinstance(event.data, dict) else {}
+        manual = data.get("confirmed_manual_checks") or {}
+        if (
+            data.get("timeline_contract_hash") == timeline.contract_hash
+            and data.get("quality_status") in {"review_required", "passed"}
+            and isinstance(data.get("preview_key"), str)
+            and len(data["preview_key"]) == 64
+            and isinstance(data.get("preview_content_hash"), str)
+            and len(data["preview_content_hash"]) == 64
+            and manual.get("visual_continuity") is True
+            and manual.get("subjective_sync") is True
+            and (
+                not (timeline.track_config or {}).get("subtitle_enabled")
+                or manual.get("subtitle_readability") is True
+            )
+        ):
+            return {
+                "schema_version": "editor-preview-review.v1",
+                "review_id": event.event_id,
+                "timeline_contract_hash": data["timeline_contract_hash"],
+                "preview_key": data["preview_key"],
+                "preview_content_hash": data["preview_content_hash"],
+                "quality_status": data["quality_status"],
+                "quality_check_codes": data.get("quality_check_codes") or [],
+                "confirmed_manual_checks": manual,
+                "reviewed_by": event.actor_id,
+                "reviewed_at": event.created_at.isoformat(),
+            }
+    raise DeliveryConflictError(
+        "DELIVERY_PREVIEW_REVIEW_REQUIRED",
+        "正式交付前必须完成与当前时间线合同精确匹配的低清预览人工复核。",
+    )
 
 
 def _execution_contract(execution_kind: str) -> dict:
@@ -336,7 +398,14 @@ def authorize_delivery(session: Session, project: Project, payload: AuthorizeDel
             "当前时间线已有交付尝试；重试语义尚未确认，不能创建第二次尝试。",
         )
     execution = _execution_contract(payload.execution_kind)
-    manifest = _delivery_manifest(session, project, timeline, execution)
+    preview_review = _preview_review_evidence(session, timeline)
+    manifest = _delivery_manifest(
+        session,
+        project,
+        timeline,
+        execution,
+        preview_review["review_id"],
+    )
     if payload.execution_kind == "local_ffmpeg":
         validate_local_render_manifest(manifest)
     fingerprint = _hash(manifest)
@@ -606,6 +675,7 @@ def verify_delivery(
         project,
         timeline,
         dict(attempt.request_manifest.get("execution") or {}),
+        str((attempt.request_manifest.get("preview_review") or {}).get("review_id") or ""),
     )
     if _hash(current_manifest) != attempt.request_fingerprint or current_manifest != attempt.request_manifest:
         raise DeliveryConflictError("DELIVERY_INPUT_CHANGED", "确认时间线或输入素材事实已变化，不能验证旧输出。")
@@ -782,6 +852,7 @@ def prepare_local_render(
         project,
         timeline,
         dict(attempt.request_manifest.get("execution") or {}),
+        str((attempt.request_manifest.get("preview_review") or {}).get("review_id") or ""),
     )
     if current_manifest != attempt.request_manifest or _hash(current_manifest) != attempt.request_fingerprint:
         raise LocalRenderError(
@@ -1053,6 +1124,12 @@ def delivery_workspace(session: Session, project: Project) -> dict:
     repository = _delivery(session)
     timelines = repository.delivery_timelines(project.id, project.active_snapshot_id) if project.active_snapshot_id else []
     timeline = timelines[0] if timelines else None
+    preview_review = None
+    if timeline:
+        try:
+            preview_review = _preview_review_evidence(session, timeline)
+        except DeliveryConflictError:
+            preview_review = None
     attempts = repository.project_attempts(project.id)
     readiness = inspect_local_ffmpeg()
     delivery_methods = [
@@ -1085,6 +1162,8 @@ def delivery_workspace(session: Session, project: Project) -> dict:
         next_action = {"code": "QUEUE_DELIVERY", "label": "等待本机生成最终视频"}
     elif attempts and attempts[0].status == "authorized":
         next_action = {"code": "UPLOAD_DELIVERY", "label": "上传外部渲染的 MP4"}
+    elif project.status == "delivery_ready" and timeline and not preview_review:
+        next_action = {"code": "REVIEW_TIMELINE_PREVIEW", "label": "先完成低清预览人工复核"}
     elif project.status == "delivery_ready" and timeline:
         next_action = {"code": "AUTHORIZE_DELIVERY", "label": "授权当前确认时间线交付"}
     else:
@@ -1103,6 +1182,7 @@ def delivery_workspace(session: Session, project: Project) -> dict:
             "output_spec": timeline.output_spec,
             "confirmed_at": timeline.confirmed_at,
         },
+        "preview_review": preview_review,
         "delivery_methods": delivery_methods,
         "attempts": [delivery_attempt_read(session, attempt) for attempt in attempts],
         "next_action": next_action,

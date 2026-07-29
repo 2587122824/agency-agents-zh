@@ -1300,6 +1300,7 @@ export interface TimelinePreview {
   fps: number
   duration_ms: number
   cached: boolean
+  preview_key: string | null
   content_url: string | null
   content_hash: string | null
   byte_size: number | null
@@ -1314,6 +1315,19 @@ export interface TimelinePreview {
       evidence: Record<string, unknown>
     }>
   } | null
+}
+
+export interface TimelinePreviewReview {
+  schema_version: 'editor-preview-review.v1'
+  review_id: string
+  timeline_id: string
+  timeline_contract_hash: string
+  preview_key: string
+  preview_content_hash: string
+  quality_status: 'review_required' | 'passed'
+  quality_check_codes: string[]
+  reviewed_by: string
+  reviewed_at: string
 }
 
 export interface TimelineTrackConfig {
@@ -1405,6 +1419,23 @@ export interface DeliveryWorkspace {
     contract_hash: string
     output_spec: Record<string, unknown>
     confirmed_at: string
+  } | null
+  preview_review: {
+    schema_version: 'editor-preview-review.v1'
+    review_id: string
+    timeline_contract_hash: string
+    preview_key: string
+    preview_content_hash: string
+    quality_status: 'review_required' | 'passed'
+    quality_check_codes: string[]
+    confirmed_manual_checks: {
+      visual_continuity: boolean
+      subjective_sync: boolean
+      subtitle_readability: boolean
+      warnings: boolean
+    }
+    reviewed_by: string
+    reviewed_at: string
   } | null
   delivery_methods: Array<{
     kind: 'external_upload' | 'local_ffmpeg'

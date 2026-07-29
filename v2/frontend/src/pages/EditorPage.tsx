@@ -504,9 +504,11 @@ export function EditorPage() {
             {delivery.data.confirmed_timeline && <dl>
               <div><dt>时间线</dt><dd>v{delivery.data.confirmed_timeline.version_number} · {delivery.data.confirmed_timeline.status}</dd></div>
               <div><dt>合同哈希</dt><dd><code>{delivery.data.confirmed_timeline.contract_hash}</code></dd></div>
+              <div><dt>预览复核</dt><dd>{delivery.data.preview_review ? `${delivery.data.preview_review.reviewed_by} · 已保存` : '尚未完成'}</dd></div>
               {deliveryAttempt && <div><dt>请求指纹</dt><dd><code>{deliveryAttempt.request_fingerprint}</code></dd></div>}
             </dl>}
-            {!deliveryAttempt && delivery.data.confirmed_timeline && <div className={styles.deliveryAction}><ShieldCheck /><span><strong>等待交付授权</strong><small>当前确认时间线尚未创建交付尝试</small></span><button className="primaryButton" onClick={() => { setDeliveryMethod(null); setAuthorizingDelivery(true) }}>授权交付</button></div>}
+            {!deliveryAttempt && delivery.data.confirmed_timeline && !delivery.data.preview_review && <div className={styles.deliveryAction}><Film /><span><strong>需要先完成低清预览复核</strong><small>正式交付必须引用同一时间线合同、预览文件哈希和人工观看记录</small></span><Link className="primaryButton" to={`/editor-prototype?project=${projectId}`}>进入新版剪辑台</Link></div>}
+            {!deliveryAttempt && delivery.data.confirmed_timeline && delivery.data.preview_review && <div className={styles.deliveryAction}><ShieldCheck /><span><strong>等待交付授权</strong><small>预览复核已绑定，当前确认时间线尚未创建交付尝试</small></span><button className="primaryButton" onClick={() => { setDeliveryMethod(null); setAuthorizingDelivery(true) }}>授权交付</button></div>}
             {deliveryAttempt?.status === 'queued' && <div className={styles.deliveryAction}><Clock3 /><span><strong>等待本机生成</strong><small>已进入本地交付队列，系统只执行本次已授权请求</small></span></div>}
             {deliveryAttempt?.status === 'rendering' && <div className={styles.deliveryAction}><RefreshCw className={styles.spinning} /><span><strong>正在生成最终视频</strong><small>FFmpeg 正在按冻结的时间线和编码参数合成 MP4</small></span></div>}
             {deliveryAttempt?.status === 'authorized' && <div className={styles.deliveryAction}><Upload /><span><strong>上传最终 MP4</strong><small>{deliveryFile?.name ?? '尚未选择文件'}</small></span><label className="secondaryButton"><Upload size={14} />选择文件<input type="file" accept="video/mp4,.mp4" onChange={event => setDeliveryFile(event.target.files?.[0] ?? null)} /></label><button className="primaryButton" disabled={!deliveryFile || upload.isPending} onClick={() => upload.mutate()}>上传并登记</button></div>}

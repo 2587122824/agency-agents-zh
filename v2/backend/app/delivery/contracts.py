@@ -66,6 +66,7 @@ class DeliveryWorkspaceView(BaseModel):
     active_snapshot_id: str | None
     delivery_asset_id: str | None
     confirmed_timeline: dict | None
+    preview_review: dict | None
     delivery_methods: list[dict]
     attempts: list[DeliveryAttemptRead]
     next_action: dict

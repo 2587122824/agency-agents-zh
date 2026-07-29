@@ -7,6 +7,7 @@ import re
 import subprocess
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..creation.agent_gateway import AgentGatewayError
@@ -53,6 +54,7 @@ from .contracts import (
     GenerateEditorTimeline,
     RetryEditorTimeline,
     RenderTimelinePreview,
+    ReviewTimelinePreview,
     ReviseTimelineCandidate,
     ValidateTimeline,
 )
@@ -1095,6 +1097,7 @@ def _preview_response(
         "fps": fps,
         "duration_ms": project.duration_seconds * 1000,
         "cached": cached,
+        "preview_key": preview_key,
         "content_url": (
             f"/api/v1/projects/{project.id}/timelines/{timeline.id}/previews/{preview_key}/content"
             if ready else None
@@ -1568,6 +1571,138 @@ def timeline_preview_content_path(
     if _preview_output_validation(path, width, height, project.duration_seconds * 1000):
         raise EditorNotFoundError("低清预览文件不再满足冻结预览合同。")
     return path
+
+
+def _preview_review_read(event: ProjectEvent) -> dict:
+    data = event.data if isinstance(event.data, dict) else {}
+    return {
+        "schema_version": "editor-preview-review.v1",
+        "review_id": event.event_id,
+        "timeline_id": event.aggregate_id,
+        "timeline_contract_hash": data["timeline_contract_hash"],
+        "preview_key": data["preview_key"],
+        "preview_content_hash": data["preview_content_hash"],
+        "quality_status": data["quality_status"],
+        "quality_check_codes": data["quality_check_codes"],
+        "reviewed_by": event.actor_id,
+        "reviewed_at": event.created_at,
+    }
+
+
+def review_timeline_preview(
+    session: Session,
+    project: Project,
+    timeline_id: str,
+    payload: ReviewTimelinePreview,
+) -> dict:
+    receipt = _receipt(session, project.id, payload.command_id, "timeline.review_preview")
+    if receipt:
+        replay = session.scalar(select(ProjectEvent).where(
+            ProjectEvent.project_id == project.id,
+            ProjectEvent.event_id == receipt.result_id,
+        ))
+        if not replay:
+            raise EditorConflictError(
+                "PREVIEW_REVIEW_RECEIPT_INVALID",
+                "预览复核幂等回执指向的审计事件不存在。",
+            )
+        return _preview_review_read(replay)
+    timeline = _require_timeline(session, project, timeline_id)
+    _require_active_snapshot(session, project, timeline.snapshot_id)
+    if timeline.status not in {"review", "confirmed"} or timeline.validation_report:
+        raise EditorConflictError(
+            "TIMELINE_PREVIEW_REVIEW_NOT_READY",
+            "时间线必须已通过确定性校验且尚未交付，才能提交预览人工复核。",
+        )
+    if timeline.row_version != payload.expected_row_version:
+        raise EditorConflictError("TIMELINE_ROW_VERSION_MISMATCH", "时间线已变化，请刷新后重新预览。")
+    current_hash = _hash(_timeline_contract(session, timeline))
+    if timeline.contract_hash != payload.expected_contract_hash or current_hash != payload.expected_contract_hash:
+        raise EditorConflictError("TIMELINE_CONTRACT_HASH_MISMATCH", "时间线合同已变化，请重新生成预览。")
+    path = timeline_preview_content_path(session, project, timeline.id, payload.preview_key)
+    content_hash, _ = sha256_file(path)
+    if content_hash != payload.expected_preview_content_hash:
+        raise EditorConflictError(
+            "PREVIEW_CONTENT_HASH_MISMATCH",
+            "低清预览文件已变化，请重新生成并完成观看检查。",
+        )
+    readiness = inspect_local_ffmpeg()
+    if not readiness.available or not readiness.executable_path:
+        raise EditorConflictError(
+            readiness.reason_code or "FFMPEG_UNAVAILABLE",
+            readiness.reason or "本机 FFmpeg 当前不可用。",
+        )
+    quality_report = _preview_quality_report(
+        path,
+        timeline,
+        Path(readiness.executable_path),
+        project.duration_seconds * 1000,
+    )
+    if quality_report["status"] == "blocked":
+        blocked_codes = [
+            check["code"] for check in quality_report["checks"] if check["state"] == "blocked"
+        ]
+        raise EditorConflictError(
+            "PREVIEW_TECHNICAL_QC_BLOCKED",
+            f"低清预览仍有技术阻断，不能完成人工复核：{', '.join(blocked_codes)}",
+        )
+    if not payload.confirm_visual_continuity_reviewed:
+        raise EditorConflictError(
+            "PREVIEW_VISUAL_CONTINUITY_REVIEW_REQUIRED",
+            "必须实际观看并确认镜头衔接、主体和动作连续性。",
+        )
+    if not payload.confirm_subjective_sync_reviewed:
+        raise EditorConflictError(
+            "PREVIEW_SUBJECTIVE_SYNC_REVIEW_REQUIRED",
+            "必须实际观看并确认声音、字幕与画面节奏的主观同步。",
+        )
+    track_config = timeline.track_config if isinstance(timeline.track_config, dict) else {}
+    if track_config.get("subtitle_enabled") and not payload.confirm_subtitle_readability_reviewed:
+        raise EditorConflictError(
+            "PREVIEW_SUBTITLE_REVIEW_REQUIRED",
+            "启用字幕的时间线必须人工确认文字、换行、遮挡和安全区。",
+        )
+    has_warning = any(check["state"] == "warning" for check in quality_report["checks"])
+    if has_warning and not payload.confirm_warnings_reviewed:
+        raise EditorConflictError(
+            "PREVIEW_WARNING_REVIEW_REQUIRED",
+            "预览存在警告项，必须逐项观看并确认后才能提交复核。",
+        )
+    event = ProjectEvent(
+        project_id=project.id,
+        snapshot_id=timeline.snapshot_id,
+        event_type="timeline.preview_reviewed.v1",
+        aggregate_type="timeline",
+        aggregate_id=timeline.id,
+        actor_type="user",
+        actor_id=payload.actor_id,
+        causation_id=payload.command_id,
+        message="User reviewed the exact low-resolution timeline preview.",
+        data={
+            "timeline_contract_hash": timeline.contract_hash,
+            "preview_key": payload.preview_key,
+            "preview_content_hash": content_hash,
+            "quality_status": quality_report["status"],
+            "quality_check_codes": [check["code"] for check in quality_report["checks"]],
+            "confirmed_manual_checks": {
+                "visual_continuity": payload.confirm_visual_continuity_reviewed,
+                "subjective_sync": payload.confirm_subjective_sync_reviewed,
+                "subtitle_readability": payload.confirm_subtitle_readability_reviewed,
+                "warnings": payload.confirm_warnings_reviewed,
+            },
+        },
+    )
+    _event(session, event)
+    _save_receipt(
+        session,
+        project.id,
+        payload.command_id,
+        "timeline.review_preview",
+        "timeline_preview_review",
+        event.event_id,
+    )
+    session.commit()
+    return _preview_review_read(event)
 
 
 def confirm_timeline(

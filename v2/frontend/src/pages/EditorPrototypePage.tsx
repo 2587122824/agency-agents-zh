@@ -158,6 +158,12 @@ export function EditorPrototypePage() {
   const [lastValidation, setLastValidation] = useState<Timeline | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [lastPreview, setLastPreview] = useState<TimelinePreview | null>(null)
+  const [previewReviewChecks, setPreviewReviewChecks] = useState({
+    visualContinuity: false,
+    subjectiveSync: false,
+    subtitleReadability: false,
+    warnings: false,
+  })
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
@@ -188,6 +194,12 @@ export function EditorPrototypePage() {
     setPlayheadMs(0)
     setLastValidation(sourceTimeline)
     setLastPreview(null)
+    setPreviewReviewChecks({
+      visualContinuity: false,
+      subjectiveSync: false,
+      subtitleReadability: false,
+      warnings: false,
+    })
     setPreviewOpen(false)
     setNotice(restored
       ? `已恢复 ${new Date(restored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
@@ -315,10 +327,34 @@ export function EditorPrototypePage() {
     },
     onSuccess: preview => {
       setLastPreview(preview)
+      setPreviewReviewChecks({
+        visualContinuity: false,
+        subjectiveSync: false,
+        subtitleReadability: false,
+        warnings: false,
+      })
       setPreviewOpen(true)
       setNotice(preview.state === 'ready'
         ? `时间线 v${preview.timeline_version_number} 的 ${preview.width}×${preview.height} 低清预览${preview.cached ? '已从缓存读取' : '已生成'}；${preview.quality_report?.status === 'blocked' ? '技术检查存在阻断' : '请继续完成人工观看复核'}。`
         : `低清预览被 ${preview.validation_report.length} 个确定性问题阻断。`)
+    },
+  })
+
+  const reviewPreview = useMutation({
+    mutationFn: async () => {
+      if (!sourceTimeline || !lastPreview?.preview_key || !lastPreview.content_hash) {
+        throw new Error('当前没有可提交人工复核的精确预览文件。')
+      }
+      return api.reviewTimelinePreview(
+        projectId,
+        sourceTimeline,
+        lastPreview,
+        previewReviewChecks,
+      )
+    },
+    onSuccess: review => {
+      setNotice(`低清预览人工复核已保存（${review.review_id}），可以继续确认时间线与正式交付。`)
+      setPreviewOpen(false)
     },
   })
 
@@ -670,11 +706,12 @@ export function EditorPrototypePage() {
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error) || Boolean(renderPreview.error)}>
-      {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error ? <AlertTriangle /> : <CheckCircle2 />}
+    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error)}>
+      {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
       {saveAndValidate.error && <button onClick={() => setConfirmSaveOpen(true)}>{saveAndValidate.error instanceof Error ? saveAndValidate.error.message : '保存失败，请重试'}</button>}
       {renderPreview.error && <button onClick={() => renderPreview.mutate()}>{renderPreview.error instanceof Error ? renderPreview.error.message : '低清预览失败，请重试'}</button>}
+      {reviewPreview.error && <button onClick={() => reviewPreview.mutate()}>{reviewPreview.error instanceof Error ? reviewPreview.error.message : '人工复核保存失败，请重试'}</button>}
       {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
       <code>{workspace.data.aspect_ratio} · {seconds(durationMs)} · 预览质量</code>
     </section>
@@ -929,6 +966,13 @@ export function EditorPrototypePage() {
             </article>)}
           </div>
         </section>}
+        {lastPreview.quality_report && lastPreview.quality_report.status !== 'blocked' && <fieldset className={styles.previewReviewChecklist}>
+          <legend>观看后逐项确认</legend>
+          <label><input type="checkbox" checked={previewReviewChecks.visualContinuity} onChange={event => setPreviewReviewChecks(value => ({ ...value, visualContinuity: event.target.checked }))} /><span><strong>画面连续性</strong><small>已完整观看镜头衔接、主体一致性、动作连续性和异常闪跳。</small></span></label>
+          <label><input type="checkbox" checked={previewReviewChecks.subjectiveSync} onChange={event => setPreviewReviewChecks(value => ({ ...value, subjectiveSync: event.target.checked }))} /><span><strong>主观音画同步</strong><small>已检查旁白、音乐、字幕与画面节奏是否符合预期。</small></span></label>
+          {sourceTimeline?.track_config.subtitle_enabled && <label><input type="checkbox" checked={previewReviewChecks.subtitleReadability} onChange={event => setPreviewReviewChecks(value => ({ ...value, subtitleReadability: event.target.checked }))} /><span><strong>字幕可读性</strong><small>已检查文字、换行、遮挡和画面安全区。</small></span></label>}
+          {lastPreview.quality_report.checks.some(check => check.state === 'warning') && <label><input type="checkbox" checked={previewReviewChecks.warnings} onChange={event => setPreviewReviewChecks(value => ({ ...value, warnings: event.target.checked }))} /><span><strong>警告项已逐项确认</strong><small>已确认检测到的黑画面或其他警告均为有意效果或可接受结果。</small></span></label>}
+        </fieldset>}
       </> : <>
         <p>低清预览没有启动 FFmpeg。请先处理以下合同问题；点击条目可定位到对应片段。</p>
         <div className={styles.validationList}>
@@ -939,7 +983,21 @@ export function EditorPrototypePage() {
         </div>
       </>}
       <div className={styles.modalWarning}><AlertTriangle /><span>低清预览只写入本机缓存，不确认时间线、不创建交付任务、不登记正式成片，也不产生供应商费用。</span></div>
-      <footer><button onClick={() => setPreviewOpen(false)}>返回时间线</button>{lastPreview.state === 'ready' && <button className={styles.confirmButton} onClick={() => renderPreview.mutate()}>{renderPreview.isPending ? '检查中…' : '重新检查缓存'}</button>}</footer>
+      <footer>
+        <button onClick={() => setPreviewOpen(false)}>返回时间线</button>
+        {lastPreview.state === 'ready' && <button onClick={() => renderPreview.mutate()}>{renderPreview.isPending ? '检查中…' : '重新检查缓存'}</button>}
+        {lastPreview.state === 'ready' && lastPreview.quality_report?.status !== 'blocked' && <button
+          className={styles.confirmButton}
+          disabled={
+            reviewPreview.isPending
+            || !previewReviewChecks.visualContinuity
+            || !previewReviewChecks.subjectiveSync
+            || Boolean(sourceTimeline?.track_config.subtitle_enabled && !previewReviewChecks.subtitleReadability)
+            || Boolean(lastPreview.quality_report?.checks.some(check => check.state === 'warning') && !previewReviewChecks.warnings)
+          }
+          onClick={() => reviewPreview.mutate()}
+        >{reviewPreview.isPending ? '正在保存复核…' : '保存人工复核'}</button>}
+      </footer>
     </section></div>}
   </main>
 }

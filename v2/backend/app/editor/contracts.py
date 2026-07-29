@@ -83,6 +83,30 @@ class RenderTimelinePreview(EditorCommand):
     quality_profile: Literal["draft_360p"] = "draft_360p"
 
 
+class ReviewTimelinePreview(EditorCommand):
+    expected_row_version: int = Field(ge=1)
+    expected_contract_hash: str = Field(min_length=64, max_length=64)
+    preview_key: str = Field(min_length=64, max_length=64)
+    expected_preview_content_hash: str = Field(min_length=64, max_length=64)
+    confirm_visual_continuity_reviewed: bool
+    confirm_subjective_sync_reviewed: bool
+    confirm_subtitle_readability_reviewed: bool
+    confirm_warnings_reviewed: bool
+
+
+class TimelinePreviewReviewRead(BaseModel):
+    schema_version: Literal["editor-preview-review.v1"] = "editor-preview-review.v1"
+    review_id: str
+    timeline_id: str
+    timeline_contract_hash: str
+    preview_key: str
+    preview_content_hash: str
+    quality_status: Literal["review_required", "passed"]
+    quality_check_codes: list[str]
+    reviewed_by: str
+    reviewed_at: datetime
+
+
 class TimelinePreviewRead(BaseModel):
     schema_version: Literal["editor-preview.v1"] = "editor-preview.v1"
     state: Literal["blocked", "ready"]
@@ -95,6 +119,7 @@ class TimelinePreviewRead(BaseModel):
     fps: int
     duration_ms: int
     cached: bool
+    preview_key: str | None = None
     content_url: str | None = None
     content_hash: str | None = None
     byte_size: int | None = None

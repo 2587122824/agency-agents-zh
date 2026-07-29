@@ -900,6 +900,39 @@
 .previewQualityList article[data-state="blocked"] > b,
 .previewQualityList article[data-state="warning"] > b { background: #3a2922; color: #efa382; }
 .previewQualityList article[data-state="manual_review"] > b { background: #38301f; color: #e2bb70; }
+.previewReviewChecklist {
+  margin: 0 18px 14px;
+  padding: 10px 12px 12px;
+  display: grid;
+  gap: 8px;
+  border: 1px solid #3b4246;
+  border-radius: 6px;
+  background: #202427;
+}
+.previewReviewChecklist legend {
+  padding: 0 5px;
+  color: #aab2b6;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .04em;
+}
+.previewReviewChecklist label {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  color: #dce1de;
+  cursor: pointer;
+}
+.previewReviewChecklist input {
+  width: 13px;
+  height: 13px;
+  margin: 2px 0 0;
+  accent-color: var(--editor-accent);
+}
+.previewReviewChecklist span { display: grid; gap: 2px; }
+.previewReviewChecklist strong { font-size: 9px; line-height: 1.4; }
+.previewReviewChecklist small { color: #7f898e; font-size: 8px; line-height: 1.45; }
 @media (max-width: 1050px) {
   .editingArea { grid-template-columns: 190px minmax(300px, 1fr) 230px; }
 }

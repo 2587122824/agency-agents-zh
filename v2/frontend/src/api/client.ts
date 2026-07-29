@@ -1,4 +1,4 @@
-import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProjectProductionProfileOptions, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, TimelinePreview, VoiceCloneAuthorization, WorkItem } from './types'
+import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProjectProductionProfileOptions, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, TimelinePreview, TimelinePreviewReview, VoiceCloneAuthorization, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -356,6 +356,31 @@ export const api = {
   }),
   renderTimelinePreview: (projectId: string, timeline: Timeline) => request<TimelinePreview>(`/projects/${projectId}/timelines/${timeline.id}:render-preview`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: timeline.row_version, expected_contract_hash: timeline.contract_hash, quality_profile: 'draft_360p' }),
+  }),
+  reviewTimelinePreview: (
+    projectId: string,
+    timeline: Timeline,
+    preview: TimelinePreview,
+    confirmations: {
+      visualContinuity: boolean
+      subjectiveSync: boolean
+      subtitleReadability: boolean
+      warnings: boolean
+    },
+  ) => request<TimelinePreviewReview>(`/projects/${projectId}/timelines/${timeline.id}:review-preview`, {
+    method: 'POST',
+    body: JSON.stringify({
+      command_id: crypto.randomUUID(),
+      actor_id: 'local-user',
+      expected_row_version: timeline.row_version,
+      expected_contract_hash: timeline.contract_hash,
+      preview_key: preview.preview_key,
+      expected_preview_content_hash: preview.content_hash,
+      confirm_visual_continuity_reviewed: confirmations.visualContinuity,
+      confirm_subjective_sync_reviewed: confirmations.subjectiveSync,
+      confirm_subtitle_readability_reviewed: confirmations.subtitleReadability,
+      confirm_warnings_reviewed: confirmations.warnings,
+    }),
   }),
   confirmTimeline: (projectId: string, timeline: Timeline) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:confirm`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: timeline.row_version, expected_contract_hash: timeline.contract_hash, confirm_delivery_scope: true }),
