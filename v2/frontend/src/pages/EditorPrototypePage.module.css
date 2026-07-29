@@ -1364,11 +1364,56 @@
   background: #30211f;
 }
 .deliveryBlocked > svg { width: 19px; color: #e58b78; }
-.deliveryBlocked strong { color: #f0b09f; font-size: 9px; }
-.deliveryBlocked pre {
+.deliveryBlocked strong { display: block; color: #f0b09f; font-size: 10px; }
+.deliveryBlocked p {
+  margin: 5px 0 3px;
+  color: #d9cac6;
+  font-size: 9px;
+  line-height: 1.5;
+}
+.deliveryBlocked small {
+  display: block;
+  color: #a98f89;
+  font-size: 8px;
+  line-height: 1.55;
+}
+.deliveryBlockedActions { display: flex; gap: 7px; margin-top: 10px; }
+.deliveryBlockedActions button,
+.deliveryRefreshError button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid #5a4a46;
+  border-radius: 5px;
+  background: #352b28;
+  color: #e3d8d5;
+  font: inherit;
+  font-size: 8px;
+  cursor: pointer;
+}
+.deliveryRefreshError {
+  margin: 0 18px 14px;
+  padding: 10px 12px;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #705b31;
+  border-radius: 6px;
+  background: #302b1f;
+}
+.deliveryRefreshError > svg { width: 17px; color: #ddb55e; }
+.deliveryRefreshError span { min-width: 0; }
+.deliveryRefreshError strong { display: block; color: #efd39a; font-size: 9px; }
+.deliveryRefreshError small { display: block; margin-top: 3px; color: #a99d83; font-size: 8px; line-height: 1.45; }
+.deliveryRefreshError button:disabled { opacity: .5; cursor: default; }
+.deliveryEvidence pre {
   max-height: 150px;
   overflow: auto;
-  color: #a98f89;
+  margin: 9px 0 0;
+  padding: 8px;
+  border-radius: 4px;
+  background: #1f2325;
+  color: #9da5a9;
   font-size: 8px;
   white-space: pre-wrap;
 }

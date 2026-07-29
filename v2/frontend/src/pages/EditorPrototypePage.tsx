@@ -41,6 +41,62 @@ function seconds(ms: number | null | undefined) {
   return `${((ms ?? 0) / 1000).toFixed(1)}s`
 }
 
+function deliveryBlockCopy(attempt: DeliveryAttempt) {
+  const code = attempt.error_code ?? 'DELIVERY_BLOCKED'
+  if (code.includes('DIMENSIONS')) {
+    return {
+      title: '成片画幅与交付合同不一致',
+      reason: '输出文件的宽高不符合已确认时间线冻结的画幅规格。',
+    }
+  }
+  if (code.includes('DURATION')) {
+    return {
+      title: '成片时长与交付合同不一致',
+      reason: '输出文件的实际时长超出已确认时长允许的误差范围。',
+    }
+  }
+  if (code.includes('AUDIO_LOUDNESS') || code.includes('TRUE_PEAK')) {
+    return {
+      title: '成片声音没有通过母带检查',
+      reason: '响度或峰值超出当前时间线冻结的声音交付标准。',
+    }
+  }
+  if (code.includes('AUDIO_QC')) {
+    return {
+      title: '成片声音无法完成技术检测',
+      reason: '系统没有取得足够的音频分析证据，不能把文件标记为已验证。',
+    }
+  }
+  if (code.includes('MIME') || code.includes('CONTAINER')) {
+    return {
+      title: '文件格式不符合交付要求',
+      reason: '当前正式交付只接受可验证的 MP4 文件。',
+    }
+  }
+  if (code.includes('FILE_MISSING') || code.includes('FILE_INVALID') || code.includes('FILE_FACT')) {
+    return {
+      title: '交付文件缺失、损坏或已发生变化',
+      reason: '登记文件与验证时读取到的文件事实不一致，系统无法确认它是原始交付输出。',
+    }
+  }
+  if (code.includes('INPUT') || code.includes('FINGERPRINT') || code.includes('HASH_MISMATCH')) {
+    return {
+      title: '交付输入与已冻结合同不一致',
+      reason: '时间线、素材或请求指纹在生成与验证之间发生了变化。',
+    }
+  }
+  if (code.includes('STORAGE') || code.includes('OUTPUT_PATH') || code.includes('ASSET_ALREADY')) {
+    return {
+      title: '交付文件无法按冻结策略登记',
+      reason: '输出路径、文件大小、存储类型或素材登记与当前交付策略冲突。',
+    }
+  }
+  return {
+    title: '本次交付已被确定性检查阻断',
+    reason: '系统保留了失败事实，但没有足够依据把本次输出标记为已完成。',
+  }
+}
+
 function rulerLabel(ms: number) {
   const totalSeconds = Math.max(0, Math.round(ms / 1000))
   const minutes = Math.floor(totalSeconds / 60)
@@ -153,6 +209,7 @@ export function EditorPrototypePage() {
     queryKey: ['editor-prototype-delivery', projectId],
     queryFn: () => api.deliveryWorkspace(projectId),
     refetchInterval: query => {
+      if (query.state.error) return false
       const status = query.state.data?.attempts[0]?.status
       return status === 'queued' || status === 'rendering' ? 3000 : false
     },
@@ -304,6 +361,10 @@ export function EditorPrototypePage() {
   const activeSubtitleItem = subtitleItems.find(item => item.asset_id && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
   const deliveryAttempt = deliveryWorkspace.data?.attempts[0] ?? null
+  const cacheDeliveryWorkspace = (current: DeliveryWorkspace) => {
+    queryClient.setQueryData(['editor-prototype-delivery', projectId], current)
+    queryClient.setQueryData(['delivery-workspace', projectId], current)
+  }
   const cacheDeliveryAttempt = (attempt: DeliveryAttempt) => {
     for (const queryKey of [
       ['editor-prototype-delivery', projectId],
@@ -573,10 +634,16 @@ export function EditorPrototypePage() {
 
   const uploadDelivery = useMutation({
     mutationFn: async () => {
-      if (!deliveryAttempt || deliveryAttempt.status !== 'authorized' || !deliveryFile) {
-        throw new Error('当前没有等待上传的交付尝试，或尚未选择 MP4。')
+      if (!deliveryFile) {
+        throw new Error('请先选择要上传的 MP4。')
       }
-      return api.uploadDelivery(projectId, deliveryAttempt, deliveryFile)
+      const current = await api.deliveryWorkspace(projectId)
+      cacheDeliveryWorkspace(current)
+      const currentAttempt = current.attempts[0] ?? null
+      if (!currentAttempt || currentAttempt.id !== deliveryAttempt?.id || currentAttempt.status !== 'authorized') {
+        throw new Error('交付状态已在其他窗口或后台发生变化，已刷新为最新状态；请按当前可用动作继续。')
+      }
+      return api.uploadDelivery(projectId, currentAttempt, deliveryFile)
     },
     onSuccess: async attempt => {
       cacheDeliveryAttempt(attempt)
@@ -591,10 +658,13 @@ export function EditorPrototypePage() {
 
   const verifyDelivery = useMutation({
     mutationFn: async () => {
-      if (!deliveryAttempt || deliveryAttempt.status !== 'output_registered' || !deliveryAttempt.final_asset) {
-        throw new Error('当前没有可以验证的已登记交付文件。')
+      const current = await api.deliveryWorkspace(projectId)
+      cacheDeliveryWorkspace(current)
+      const currentAttempt = current.attempts[0] ?? null
+      if (!currentAttempt || currentAttempt.id !== deliveryAttempt?.id || currentAttempt.status !== 'output_registered' || !currentAttempt.final_asset) {
+        throw new Error('交付状态已在其他窗口或后台发生变化，已刷新为最新状态；请按当前可用动作继续。')
       }
-      return api.verifyDelivery(projectId, deliveryAttempt)
+      return api.verifyDelivery(projectId, currentAttempt)
     },
     onSuccess: async attempt => {
       cacheDeliveryAttempt(attempt)
@@ -1780,6 +1850,11 @@ export function EditorPrototypePage() {
     </section></div>}
     {deliveryStatusOpen && deliveryWorkspace.data && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="最终交付状态"><section className={styles.deliveryStatusModal}>
       <header><ShieldCheck /><div><span>DELIVERY STATUS</span><h2>最终交付闭环</h2></div><button title="关闭" onClick={() => setDeliveryStatusOpen(false)}><X /></button></header>
+      {deliveryWorkspace.error && <div className={styles.deliveryRefreshError}>
+        <AlertTriangle />
+        <span><strong>交付状态刷新失败，自动刷新已暂停</strong><small>{deliveryWorkspace.error instanceof Error ? deliveryWorkspace.error.message : '暂时无法读取最新交付状态。'} 页面保留的是上一次成功读取的状态。</small></span>
+        <button disabled={deliveryWorkspace.isFetching} onClick={() => deliveryWorkspace.refetch()}>{deliveryWorkspace.isFetching ? '重试中…' : '重新连接'}</button>
+      </div>}
       <dl>
         <div><dt>确认时间线</dt><dd>{deliveryWorkspace.data.confirmed_timeline ? `v${deliveryWorkspace.data.confirmed_timeline.version_number}` : '尚未确认'}</dd></div>
         <div><dt>预览复核</dt><dd>{deliveryWorkspace.data.preview_review ? '已绑定精确复核' : '尚未完成'}</dd></div>
@@ -1814,14 +1889,26 @@ export function EditorPrototypePage() {
         <ShieldCheck /><span><strong>输出已经登记，尚未验证</strong><small>{deliveryAttempt.final_asset?.byte_size?.toLocaleString() ?? 0} bytes · 验证将复查 MP4、画幅、时长与音频合同。</small></span>
         <button className={styles.confirmButton} disabled={verifyDelivery.isPending} onClick={() => verifyDelivery.mutate()}>{verifyDelivery.isPending ? '验证中…' : '验证交付文件'}</button>
       </div>}
-      {deliveryAttempt?.status === 'blocked' && <div className={styles.deliveryBlocked}>
-        <AlertTriangle /><div><strong>{deliveryAttempt.error_code ?? 'DELIVERY_BLOCKED'}</strong><pre>{JSON.stringify(deliveryAttempt.error_detail, null, 2)}</pre></div>
-      </div>}
+      {deliveryAttempt?.status === 'blocked' && (() => {
+        const copy = deliveryBlockCopy(deliveryAttempt)
+        return <div className={styles.deliveryBlocked}>
+          <AlertTriangle />
+          <div>
+            <strong>{copy.title}</strong>
+            <p>{copy.reason}</p>
+            <small>本次 Attempt 已结束，系统不会自动重试、改写输出或切换交付方式。请返回剪辑台，创建并复核新的时间线版本后，再明确授权一次新交付。</small>
+            <div className={styles.deliveryBlockedActions}>
+              <button onClick={() => setDeliveryStatusOpen(false)}>返回剪辑处理</button>
+              <button onClick={() => { setDeliveryStatusOpen(false); setVersionOpen(true) }}>查看时间线证据</button>
+            </div>
+          </div>
+        </div>
+      })()}
       {deliveryAttempt?.status === 'verified' && deliveryAttempt.final_asset && <div className={styles.deliveryStep} data-complete="true">
         <CheckCircle2 /><span><strong>最终 MP4 已通过验证</strong><small>{deliveryAttempt.final_asset.width}×{deliveryAttempt.final_asset.height} · {seconds(deliveryAttempt.final_asset.duration_ms)}</small></span>
         <a className={styles.confirmButton} download href={`/api/v1/projects/${projectId}/assets/${deliveryAttempt.final_asset.id}/content`}><Download />下载 MP4</a>
       </div>}
-      {deliveryAttempt && <details className={styles.deliveryEvidence}><summary>查看交付证据</summary><dl><div><dt>Attempt</dt><dd><code>{deliveryAttempt.id}</code></dd></div><div><dt>请求指纹</dt><dd><code>{deliveryAttempt.request_fingerprint}</code></dd></div><div><dt>执行方式</dt><dd>{deliveryAttempt.execution_kind}</dd></div></dl></details>}
+      {deliveryAttempt && <details className={styles.deliveryEvidence}><summary>查看交付证据</summary><dl><div><dt>Attempt</dt><dd><code>{deliveryAttempt.id}</code></dd></div><div><dt>请求指纹</dt><dd><code>{deliveryAttempt.request_fingerprint}</code></dd></div><div><dt>执行方式</dt><dd>{deliveryAttempt.execution_kind}</dd></div>{deliveryAttempt.error_code && <div><dt>阻断代码</dt><dd><code>{deliveryAttempt.error_code}</code></dd></div>}</dl>{deliveryAttempt.error_detail && <pre>{JSON.stringify(deliveryAttempt.error_detail, null, 2)}</pre>}</details>}
       <footer><button onClick={() => setDeliveryStatusOpen(false)}>关闭</button></footer>
     </section></div>}
   </main>
