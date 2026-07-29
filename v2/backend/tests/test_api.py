@@ -6807,6 +6807,57 @@ def test_editor_assistant_creates_auditable_timeline_candidate_for_manual_confir
     assert client.get(f"/api/v1/projects/{project['id']}").json()["status"] == "editing"
 
 
+def test_timeline_revision_freezes_snap_toggle_and_changes_contract_hash(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    video_assets = seed_editor_assets(client, project, snapshot)
+    stage = client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "timeline-snap-stage-approve-001", "expected_snapshot_id": snapshot["id"]},
+    )
+    assert stage.status_code == 200
+    created = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "timeline-snap-create-001",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": False},
+            "items": timeline_items_for_assets(video_assets),
+        },
+    )
+    assert created.status_code == 201
+    first_validated = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{created.json()['id']}:validate",
+        json={"command_id": "timeline-snap-validate-001", "expected_row_version": created.json()["row_version"]},
+    )
+    assert first_validated.status_code == 200
+    first = first_validated.json()
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{first['id']}:revise",
+        json={
+            "command_id": "timeline-snap-revise-001",
+            "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": first["row_version"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
+            "items": timeline_items_for_assets(video_assets),
+        },
+    )
+    assert revised.status_code == 201
+    second_validated = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{revised.json()['id']}:validate",
+        json={"command_id": "timeline-snap-validate-002", "expected_row_version": revised.json()["row_version"]},
+    )
+    assert second_validated.status_code == 200
+    second = second_validated.json()
+    assert first["track_config"]["snap_enabled"] is False
+    assert second["track_config"]["snap_enabled"] is True
+    assert second["contract_hash"] != first["contract_hash"]
+    original = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()["timelines"][-1]
+    assert original["id"] == first["id"]
+    assert original["track_config"]["snap_enabled"] is False
+
+
 def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
     client: TestClient,
 ) -> None:
