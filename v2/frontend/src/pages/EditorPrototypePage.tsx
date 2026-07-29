@@ -992,39 +992,103 @@ export function EditorPrototypePage() {
     setPlayheadMs(Math.min(playheadMs, durationMs))
   }
 
-  const beginTrim = (event: React.PointerEvent, item: TimelineItem, edge: 'start' | 'end') => {
+  const buildTrimmedItems = (
+    baseItems: TimelineItem[],
+    item: TimelineItem,
+    edge: 'start' | 'end',
+    deltaMs: number,
+  ) => {
+    const sourceIn = item.source_in_ms ?? 0
+    const sourceOut = item.source_out_ms ?? item.asset_duration_ms ?? 0
+    const nextSourceIn = edge === 'start'
+      ? Math.max(0, Math.min(sourceOut - 200, sourceIn + deltaMs))
+      : sourceIn
+    const nextSourceOut = edge === 'end'
+      ? Math.max(sourceIn + 200, Math.min(item.asset_duration_ms ?? sourceOut, sourceOut + deltaMs))
+      : sourceOut
+    const changed = nextSourceIn !== sourceIn || nextSourceOut !== sourceOut
+    if (!changed) return { items: baseItems, changed, sourceIn, sourceOut }
+    const mainTrack = baseItems.filter(row => row.track_type === 'main_video').map(row => row.id === item.id
+      ? {
+        ...row,
+        source_in_ms: nextSourceIn,
+        source_out_ms: nextSourceOut,
+        timeline_out_ms: row.timeline_in_ms + (nextSourceOut - nextSourceIn),
+      }
+      : row)
+    return {
+      items: replaceMainTrack(baseItems, normalizeMainTrack(mainTrack, durationMs)),
+      changed,
+      sourceIn: nextSourceIn,
+      sourceOut: nextSourceOut,
+    }
+  }
+
+  const handleTrimKeyDown = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    item: TimelineItem,
+    edge: 'start' | 'end',
+  ) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
     event.stopPropagation()
     if (!item.asset_id || blockMainTrackEdit(item)) return
+    const stepMs = event.shiftKey ? 1000 : Math.max(1, Math.round(1000 / outputFps))
+    const result = buildTrimmedItems(items, item, edge, event.key === 'ArrowRight' ? stepMs : -stepMs)
+    if (!result.changed) {
+      setNotice(`${edge === 'start' ? '左' : '右'}侧裁切已到素材边界。`)
+      return
+    }
+    setPlaying(false)
+    commitItems(
+      result.items,
+      `已用键盘把${edge === 'start' ? '左' : '右'}侧裁切到源时点 ${timecode(edge === 'start' ? result.sourceIn : result.sourceOut, outputFps)}。`,
+      item.id,
+    )
+  }
+
+  const beginTrim = (event: ReactPointerEvent<HTMLElement>, item: TimelineItem, edge: 'start' | 'end') => {
+    event.currentTarget.focus()
+    event.preventDefault()
+    event.stopPropagation()
+    if (!item.asset_id || blockMainTrackEdit(item)) return
+    setPlaying(false)
+    const originalItems = items
     const startX = event.clientX
-    const original = { sourceIn: item.source_in_ms ?? 0, sourceOut: item.source_out_ms ?? item.asset_duration_ms ?? 0 }
-    setHistory(rows => [...rows.slice(-49), items])
-    setFuture([])
-    setDirty(true)
+    let changed = false
     const onMove = (moveEvent: PointerEvent) => {
       const rawDeltaMs = ((moveEvent.clientX - startX) / timelineZoom) * 1000
       const deltaMs = snapEnabled
         ? Math.round(rawDeltaMs / snapIntervalMs) * snapIntervalMs
         : Math.round(rawDeltaMs)
-      setItems(current => {
-        const currentMain = current.filter(row => row.track_type === 'main_video').map(row => {
-          if (row.id !== item.id) return row
-          if (edge === 'start') {
-            const sourceIn = Math.max(0, Math.min(original.sourceOut - 200, original.sourceIn + deltaMs))
-            return { ...row, source_in_ms: sourceIn, timeline_out_ms: row.timeline_in_ms + (original.sourceOut - sourceIn) }
-          }
-          const sourceOut = Math.max(original.sourceIn + 200, Math.min(item.asset_duration_ms ?? original.sourceOut, original.sourceOut + deltaMs))
-          return { ...row, source_out_ms: sourceOut, timeline_out_ms: row.timeline_in_ms + (sourceOut - original.sourceIn) }
-        })
-        return replaceMainTrack(current, normalizeMainTrack(currentMain, durationMs))
-      })
+      const result = buildTrimmedItems(originalItems, item, edge, deltaMs)
+      changed = result.changed
+      setItems(result.items)
     }
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+    const onUp = () => {
+      cleanup()
+      if (!changed) {
+        setItems(originalItems)
+        return
+      }
+      setHistory(rows => [...rows.slice(-49), originalItems])
+      setFuture([])
+      setDirty(true)
       setNotice(`已拖动${edge === 'start' ? '左' : '右'}边缘裁切片段，后续片段自动波纹对齐。`)
+    }
+    const onCancel = () => {
+      cleanup()
+      setItems(originalItems)
+      setNotice('裁切手势已取消，时间线保持不变。')
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   useEffect(() => {
@@ -1424,9 +1488,35 @@ export function EditorPrototypePage() {
                 else reorderItem(item.id)
               }}
               onClick={() => selectItem(item)}
-            >{item.asset_id && <i role="slider" aria-label={`${item.label} 左侧裁切把手`} aria-disabled={videoTrackLocked} aria-valuemin={0} aria-valuemax={item.asset_duration_ms ?? 0} aria-valuenow={item.source_in_ms ?? 0} tabIndex={videoTrackLocked ? -1 : 0} className={styles.trimHandle} data-edge="start" onPointerDown={event => beginTrim(event, item, 'start')} />}
+            >{item.asset_id && <i
+              role="slider"
+              aria-label={`${item.label} 左侧裁切把手`}
+              aria-disabled={videoTrackLocked}
+              aria-valuemin={0}
+              aria-valuemax={item.asset_duration_ms ?? 0}
+              aria-valuenow={item.source_in_ms ?? 0}
+              aria-valuetext={timecode(item.source_in_ms ?? 0, outputFps)}
+              tabIndex={videoTrackLocked ? -1 : 0}
+              className={styles.trimHandle}
+              data-edge="start"
+              onPointerDown={event => beginTrim(event, item, 'start')}
+              onKeyDown={event => handleTrimKeyDown(event, item, 'start')}
+            />}
               {item.asset_id ? <><Film /><span><strong>{item.label}</strong><small>{seconds(item.timeline_out_ms - item.timeline_in_ms)}</small></span></> : <><AlertTriangle /><span><strong>缺少画面</strong><small>{seconds(item.timeline_out_ms - item.timeline_in_ms)}</small></span></>}
-              {item.asset_id && <i role="slider" aria-label={`${item.label} 右侧裁切把手`} aria-disabled={videoTrackLocked} aria-valuemin={0} aria-valuemax={item.asset_duration_ms ?? 0} aria-valuenow={item.source_out_ms ?? 0} tabIndex={videoTrackLocked ? -1 : 0} className={styles.trimHandle} data-edge="end" onPointerDown={event => beginTrim(event, item, 'end')} />}
+              {item.asset_id && <i
+                role="slider"
+                aria-label={`${item.label} 右侧裁切把手`}
+                aria-disabled={videoTrackLocked}
+                aria-valuemin={0}
+                aria-valuemax={item.asset_duration_ms ?? 0}
+                aria-valuenow={item.source_out_ms ?? 0}
+                aria-valuetext={timecode(item.source_out_ms ?? 0, outputFps)}
+                tabIndex={videoTrackLocked ? -1 : 0}
+                className={styles.trimHandle}
+                data-edge="end"
+                onPointerDown={event => beginTrim(event, item, 'end')}
+                onKeyDown={event => handleTrimKeyDown(event, item, 'end')}
+              />}
             </button>)}
           </div>
         </div>
