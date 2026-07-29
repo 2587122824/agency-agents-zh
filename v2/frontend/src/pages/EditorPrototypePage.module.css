@@ -847,6 +847,59 @@
   object-fit: contain;
   background: #000;
 }
+.previewQuality {
+  margin: 0 18px 14px;
+  overflow: hidden;
+  border: 1px solid #343a3e;
+  border-radius: 6px;
+  background: #171a1c;
+}
+.previewQuality > header {
+  padding: 11px 12px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-bottom: 1px solid #343a3e;
+}
+.previewQuality > header[data-state="blocked"] { background: #30231e; }
+.previewQuality > header > svg { width: 16px; color: #77ba8a; flex: none; }
+.previewQuality > header[data-state="blocked"] > svg { color: #e48a69; }
+.previewQuality > header > div { display: grid; gap: 3px; }
+.previewQuality > header strong { font-size: 10px; }
+.previewQuality > header small { color: #899297; font-size: 8px; line-height: 1.5; }
+.previewQualityList {
+  max-height: 220px;
+  overflow-y: auto;
+  display: grid;
+}
+.previewQualityList article {
+  min-height: 48px;
+  padding: 8px 11px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid #2c3134;
+}
+.previewQualityList article:last-child { border-bottom: 0; }
+.previewQualityList article > svg { width: 14px; color: #77ba8a; }
+.previewQualityList article[data-state="blocked"] > svg,
+.previewQualityList article[data-state="warning"] > svg { color: #e48a69; }
+.previewQualityList article[data-state="manual_review"] > svg { color: #d0aa67; }
+.previewQualityList article > span { min-width: 0; display: grid; gap: 3px; }
+.previewQualityList article strong { font-size: 9px; line-height: 1.45; }
+.previewQualityList article small { color: #6f797e; font-size: 7px; }
+.previewQualityList article > b {
+  padding: 3px 5px;
+  border-radius: 3px;
+  background: #26362b;
+  color: #83c895;
+  font-size: 7px;
+  white-space: nowrap;
+}
+.previewQualityList article[data-state="blocked"] > b,
+.previewQualityList article[data-state="warning"] > b { background: #3a2922; color: #efa382; }
+.previewQualityList article[data-state="manual_review"] > b { background: #38301f; color: #e2bb70; }
 @media (max-width: 1050px) {
   .editingArea { grid-template-columns: 190px minmax(300px, 1fr) 230px; }
 }

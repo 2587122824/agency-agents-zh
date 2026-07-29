@@ -10,6 +10,7 @@ import zlib
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -6981,6 +6982,21 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
         return LocalRenderResult(("ffmpeg",), "", "")
 
     monkeypatch.setattr(editor_service.LocalFFmpegRenderer, "render", fake_render)
+    quality_calls = []
+    monkeypatch.setattr(
+        editor_service,
+        "_preview_quality_report",
+        lambda path, _timeline, _ffmpeg_path, duration_ms: quality_calls.append((path, duration_ms)) or {
+            "schema_version": "editor-preview-qc.v1",
+            "status": "review_required",
+            "checks": [{
+                "code": "PREVIEW_VISUAL_CONTINUITY_REVIEW_REQUIRED",
+                "state": "manual_review",
+                "message": "manual review",
+                "evidence": {},
+            }],
+        },
+    )
     monkeypatch.setattr(
         editor_service,
         "probe_media",
@@ -7003,7 +7019,9 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
     assert preview["width"] == 360
     assert preview["height"] == 640
     assert preview["content_hash"] == hashlib.sha256(b"preview-mp4").hexdigest()
+    assert preview["quality_report"]["status"] == "review_required"
     assert len(render_calls) == 1
+    assert len(quality_calls) == 1
     cached = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:render-preview",
         json={**payload, "command_id": "editor-preview-render-002"},
@@ -7011,6 +7029,7 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
     assert cached["state"] == "ready"
     assert cached["cached"] is True
     assert len(render_calls) == 1
+    assert len(quality_calls) == 2
     content = client.get(preview["content_url"])
     assert content.status_code == 200
     assert content.content == b"preview-mp4"
@@ -7033,6 +7052,132 @@ def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_ef
             WorkItem.project_id == project["id"],
             WorkItem.kind == "render_delivery",
         ))) == []
+
+
+def test_preview_quality_report_blocks_audio_failures_and_requires_visual_review(monkeypatch) -> None:
+    timeline = SimpleNamespace(track_config={
+        "audio_enabled": True,
+        "subtitle_enabled": True,
+        "audio_mastering": {
+            "loudness_target_lufs": -16,
+            "true_peak_limit_dbtp": -1,
+        },
+    })
+    monkeypatch.setattr(
+        editor_service,
+        "_preview_black_segments",
+        lambda _path, _ffmpeg: ([{"start_ms": 1000, "end_ms": 1700, "duration_ms": 700}], None),
+    )
+    monkeypatch.setattr(
+        editor_service,
+        "measure_program_audio",
+        lambda _path, _ffmpeg: {
+            "ebur128_status": "measured",
+            "integrated_loudness_lufs": -8.0,
+            "true_peak_dbtp": 0.0,
+        },
+    )
+    monkeypatch.setattr(
+        editor_service,
+        "_preview_audio_duration",
+        lambda _path, _ffmpeg: {"status": "measured", "duration_ms": 29_000},
+    )
+    report = editor_service._preview_quality_report(
+        Path("preview.mp4"),
+        timeline,
+        Path("ffmpeg.exe"),
+        30_000,
+    )
+    by_code = {check["code"]: check for check in report["checks"]}
+    assert report["status"] == "blocked"
+    assert by_code["PREVIEW_BLACK_SEGMENTS_DETECTED"]["state"] == "warning"
+    assert by_code["PREVIEW_AUDIO_LOUDNESS_OUT_OF_RANGE"]["state"] == "blocked"
+    assert by_code["PREVIEW_AUDIO_TRUE_PEAK_EXCEEDED"]["state"] == "blocked"
+    assert by_code["PREVIEW_AUDIO_DURATION_MISMATCH"]["state"] == "blocked"
+    assert by_code["PREVIEW_SUBTITLE_VISUAL_REVIEW_REQUIRED"]["state"] == "manual_review"
+    assert by_code["PREVIEW_VISUAL_CONTINUITY_REVIEW_REQUIRED"]["state"] == "manual_review"
+    assert by_code["PREVIEW_SUBJECTIVE_SYNC_REVIEW_REQUIRED"]["state"] == "manual_review"
+
+
+def test_preview_quality_report_passes_technical_checks_but_keeps_manual_gate(monkeypatch) -> None:
+    timeline = SimpleNamespace(track_config={
+        "audio_enabled": True,
+        "subtitle_enabled": False,
+        "audio_mastering": {
+            "loudness_target_lufs": -16,
+            "true_peak_limit_dbtp": -1,
+        },
+    })
+    monkeypatch.setattr(editor_service, "_preview_black_segments", lambda _path, _ffmpeg: ([], None))
+    monkeypatch.setattr(
+        editor_service,
+        "measure_program_audio",
+        lambda _path, _ffmpeg: {
+            "ebur128_status": "measured",
+            "integrated_loudness_lufs": -16.2,
+            "true_peak_dbtp": -1.1,
+        },
+    )
+    monkeypatch.setattr(
+        editor_service,
+        "_preview_audio_duration",
+        lambda _path, _ffmpeg: {"status": "measured", "duration_ms": 30_100},
+    )
+    report = editor_service._preview_quality_report(
+        Path("preview.mp4"),
+        timeline,
+        Path("ffmpeg.exe"),
+        30_000,
+    )
+    assert report["status"] == "review_required"
+    assert not [check for check in report["checks"] if check["state"] == "blocked"]
+    assert {check["code"] for check in report["checks"] if check["state"] == "passed"} >= {
+        "PREVIEW_BLACK_FRAME_CHECK_PASSED",
+        "PREVIEW_AUDIO_LOUDNESS_PASSED",
+        "PREVIEW_AUDIO_TRUE_PEAK_PASSED",
+        "PREVIEW_AUDIO_DURATION_PASSED",
+    }
+
+
+def test_preview_quality_report_blocks_when_enabled_audio_cannot_be_measured(monkeypatch) -> None:
+    timeline = SimpleNamespace(track_config={"audio_enabled": True, "subtitle_enabled": False})
+    monkeypatch.setattr(editor_service, "_preview_black_segments", lambda _path, _ffmpeg: ([], None))
+    monkeypatch.setattr(
+        editor_service,
+        "measure_program_audio",
+        lambda _path, _ffmpeg: {"ebur128_status": "analysis_failed", "analyzer_return_code": 1},
+    )
+    monkeypatch.setattr(
+        editor_service,
+        "_preview_audio_duration",
+        lambda _path, _ffmpeg: {"status": "analysis_failed", "return_code": 1},
+    )
+    report = editor_service._preview_quality_report(
+        Path("preview.mp4"),
+        timeline,
+        Path("ffmpeg.exe"),
+        30_000,
+    )
+    blocked_codes = {check["code"] for check in report["checks"] if check["state"] == "blocked"}
+    assert report["status"] == "blocked"
+    assert blocked_codes == {"PREVIEW_AUDIO_ANALYSIS_FAILED", "PREVIEW_AUDIO_DURATION_MISMATCH"}
+
+
+def test_preview_black_segment_parser_is_deterministic(monkeypatch) -> None:
+    result = SimpleNamespace(
+        returncode=0,
+        stderr=(
+            "[blackdetect @ fixture] black_start:0.5 black_end:1.25 black_duration:0.75\n"
+            "[blackdetect @ fixture] black_start:5 black_end:5.6 black_duration:0.6"
+        ),
+    )
+    monkeypatch.setattr(editor_service.subprocess, "run", lambda *_args, **_kwargs: result)
+    segments, error = editor_service._preview_black_segments(Path("preview.mp4"), Path("ffmpeg.exe"))
+    assert error is None
+    assert segments == [
+        {"start_ms": 500, "end_ms": 1250, "duration_ms": 750},
+        {"start_ms": 5000, "end_ms": 5600, "duration_ms": 600},
+    ]
 
 
 def test_timeline_freezes_authorized_looping_bgm_ducking_and_mastering(client: TestClient) -> None:

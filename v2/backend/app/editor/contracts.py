@@ -99,6 +99,7 @@ class TimelinePreviewRead(BaseModel):
     content_hash: str | None = None
     byte_size: int | None = None
     validation_report: list[dict] = Field(default_factory=list)
+    quality_report: dict | None = None
 
 
 class TimelineItemRead(BaseModel):

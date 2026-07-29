@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
+import subprocess
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -38,6 +40,7 @@ from ..repositories import (
 from ..orchestration.project_transitions import ProjectStateTrigger, transition_project
 from ..quality.service import (
     QualityConflictError,
+    measure_program_audio,
     probe_media,
     quality_review_view,
     resolve_local_asset_path,
@@ -1076,6 +1079,7 @@ def _preview_response(
     cached: bool = False,
     content_hash: str | None = None,
     byte_size: int | None = None,
+    quality_report: dict | None = None,
 ) -> dict:
     width, height, fps = _preview_dimensions(timeline, project)
     ready = preview_key is not None and not validation_report
@@ -1098,6 +1102,7 @@ def _preview_response(
         "content_hash": content_hash,
         "byte_size": byte_size,
         "validation_report": validation_report or [],
+        "quality_report": quality_report,
     }
 
 
@@ -1127,6 +1132,224 @@ def _preview_output_validation(path: Path, width: int, height: int, duration_ms:
             actual=media_probe,
         )
     return None
+
+
+def _preview_black_segments(path: Path, ffmpeg_path: Path) -> tuple[list[dict], dict | None]:
+    try:
+        result = subprocess.run(
+            [
+                str(ffmpeg_path),
+                "-hide_banner",
+                "-nostdin",
+                "-i",
+                str(path),
+                "-vf",
+                "blackdetect=d=0.5:pix_th=0.10",
+                "-an",
+                "-f",
+                "null",
+                "NUL",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [], {"error": str(exc)}
+    if result.returncode != 0:
+        return [], {"return_code": result.returncode}
+    segments = []
+    for start, end, duration in re.findall(
+        r"black_start:(\d+(?:\.\d+)?)\s+black_end:(\d+(?:\.\d+)?)\s+black_duration:(\d+(?:\.\d+)?)",
+        result.stderr,
+    ):
+        segments.append({
+            "start_ms": round(float(start) * 1000),
+            "end_ms": round(float(end) * 1000),
+            "duration_ms": round(float(duration) * 1000),
+        })
+    return segments, None
+
+
+def _preview_audio_duration(path: Path, ffmpeg_path: Path) -> dict:
+    try:
+        result = subprocess.run(
+            [
+                str(ffmpeg_path),
+                "-hide_banner",
+                "-nostdin",
+                "-i",
+                str(path),
+                "-progress",
+                "pipe:1",
+                "-map",
+                "0:a:0",
+                "-f",
+                "null",
+                "NUL",
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {"status": "analysis_failed", "error": str(exc)}
+    if result.returncode != 0:
+        return {"status": "analysis_failed", "return_code": result.returncode}
+    timestamps = re.findall(r"^out_time=(\d+):(\d+):(\d+(?:\.\d+)?)$", result.stdout, re.MULTILINE)
+    if not timestamps:
+        return {"status": "analysis_failed", "return_code": result.returncode}
+    hours, minutes, seconds = timestamps[-1]
+    duration_ms = round((int(hours) * 3600 + int(minutes) * 60 + float(seconds)) * 1000)
+    return {"status": "measured", "duration_ms": duration_ms}
+
+
+def _preview_quality_report(
+    path: Path,
+    timeline: Timeline,
+    ffmpeg_path: Path,
+    duration_ms: int,
+) -> dict:
+    checks: list[dict] = [{
+        "code": "PREVIEW_OUTPUT_TECHNICAL_CONTRACT_PASSED",
+        "state": "passed",
+        "message": "低清预览的 MP4 格式、画幅和时长符合冻结合同。",
+        "evidence": {"duration_ms": duration_ms},
+    }]
+    black_segments, black_error = _preview_black_segments(path, ffmpeg_path)
+    if black_error:
+        checks.append({
+            "code": "PREVIEW_BLACK_FRAME_ANALYSIS_FAILED",
+            "state": "blocked",
+            "message": "黑帧分析未完成，不能把该预览视为技术检查通过。",
+            "evidence": black_error,
+        })
+    elif black_segments:
+        checks.append({
+            "code": "PREVIEW_BLACK_SEGMENTS_DETECTED",
+            "state": "warning",
+            "message": f"检测到 {len(black_segments)} 段连续黑画面，请确认是否为有意转场。",
+            "evidence": {"segments": black_segments, "minimum_duration_ms": 500, "pixel_threshold": 0.10},
+        })
+    else:
+        checks.append({
+            "code": "PREVIEW_BLACK_FRAME_CHECK_PASSED",
+            "state": "passed",
+            "message": "未检测到持续 0.5 秒以上的黑画面。",
+            "evidence": {"minimum_duration_ms": 500, "pixel_threshold": 0.10},
+        })
+
+    track_config = timeline.track_config if isinstance(timeline.track_config, dict) else {}
+    if track_config.get("audio_enabled"):
+        audio_evidence = measure_program_audio(path, ffmpeg_path)
+        mastering = track_config.get("audio_mastering") or {}
+        target_lufs = float(mastering.get("loudness_target_lufs", -16))
+        peak_limit = float(mastering.get("true_peak_limit_dbtp", -1))
+        if audio_evidence.get("ebur128_status") != "measured":
+            checks.append({
+                "code": "PREVIEW_AUDIO_ANALYSIS_FAILED",
+                "state": "blocked",
+                "message": "预览已启用声音，但响度与峰值分析没有得到有效实测结果。",
+                "evidence": audio_evidence,
+            })
+        else:
+            actual_lufs = float(audio_evidence["integrated_loudness_lufs"])
+            actual_peak = float(audio_evidence["true_peak_dbtp"])
+            if abs(actual_lufs - target_lufs) > 4:
+                checks.append({
+                    "code": "PREVIEW_AUDIO_LOUDNESS_OUT_OF_RANGE",
+                    "state": "blocked",
+                    "message": "预览综合响度超出目标容差。",
+                    "evidence": {**audio_evidence, "target_lufs": target_lufs, "tolerance_lu": 4},
+                })
+            else:
+                checks.append({
+                    "code": "PREVIEW_AUDIO_LOUDNESS_PASSED",
+                    "state": "passed",
+                    "message": "预览综合响度在冻结目标容差内。",
+                    "evidence": {**audio_evidence, "target_lufs": target_lufs, "tolerance_lu": 4},
+                })
+            if actual_peak > peak_limit + 0.2:
+                checks.append({
+                    "code": "PREVIEW_AUDIO_TRUE_PEAK_EXCEEDED",
+                    "state": "blocked",
+                    "message": "预览真峰值超过冻结上限。",
+                    "evidence": {**audio_evidence, "limit_dbtp": peak_limit, "tolerance_db": 0.2},
+                })
+            else:
+                checks.append({
+                    "code": "PREVIEW_AUDIO_TRUE_PEAK_PASSED",
+                    "state": "passed",
+                    "message": "预览真峰值未超过冻结上限。",
+                    "evidence": {**audio_evidence, "limit_dbtp": peak_limit, "tolerance_db": 0.2},
+                })
+        audio_duration = _preview_audio_duration(path, ffmpeg_path)
+        if (
+            audio_duration.get("status") != "measured"
+            or abs(int(audio_duration.get("duration_ms", -1)) - duration_ms) > 250
+        ):
+            checks.append({
+                "code": "PREVIEW_AUDIO_DURATION_MISMATCH",
+                "state": "blocked",
+                "message": "预览音轨未覆盖完整成片时长，或音轨时长无法实测。",
+                "evidence": {**audio_duration, "expected_duration_ms": duration_ms, "tolerance_ms": 250},
+            })
+        else:
+            checks.append({
+                "code": "PREVIEW_AUDIO_DURATION_PASSED",
+                "state": "passed",
+                "message": "预览音轨与成片时长一致。",
+                "evidence": {**audio_duration, "expected_duration_ms": duration_ms, "tolerance_ms": 250},
+            })
+    else:
+        checks.append({
+            "code": "PREVIEW_AUDIO_NOT_ENABLED",
+            "state": "passed",
+            "message": "当前时间线未启用音轨，本项不适用。",
+            "evidence": {"audio_enabled": False},
+        })
+
+    if track_config.get("subtitle_enabled"):
+        checks.append({
+            "code": "PREVIEW_SUBTITLE_VISUAL_REVIEW_REQUIRED",
+            "state": "manual_review",
+            "message": "字幕已按合同烧录；仍需人工检查文字、换行、遮挡和安全区。",
+            "evidence": {"subtitle_enabled": True, "render_mode": "burn_in"},
+        })
+    else:
+        checks.append({
+            "code": "PREVIEW_SUBTITLE_NOT_ENABLED",
+            "state": "passed",
+            "message": "当前时间线未启用字幕，本项不适用。",
+            "evidence": {"subtitle_enabled": False},
+        })
+    checks.extend([
+        {
+            "code": "PREVIEW_VISUAL_CONTINUITY_REVIEW_REQUIRED",
+            "state": "manual_review",
+            "message": "请人工观看并检查镜头衔接、主体一致性、动作连续性和异常闪跳。",
+            "evidence": {},
+        },
+        {
+            "code": "PREVIEW_SUBJECTIVE_SYNC_REVIEW_REQUIRED",
+            "state": "manual_review",
+            "message": "请人工检查旁白、音乐、字幕与画面节奏的主观同步效果。",
+            "evidence": {},
+        },
+    ])
+    states = {check["state"] for check in checks}
+    status = "blocked" if "blocked" in states else "review_required" if states & {"warning", "manual_review"} else "passed"
+    return {
+        "schema_version": "editor-preview-qc.v1",
+        "status": status,
+        "checks": checks,
+    }
 
 
 def render_timeline_preview(
@@ -1260,6 +1483,12 @@ def render_timeline_preview(
         if output_error:
             return _preview_response(timeline, project, payload, validation_report=[output_error])
         content_hash, byte_size = sha256_file(output_path)
+        quality_report = _preview_quality_report(
+            output_path,
+            timeline,
+            Path(readiness.executable_path),
+            duration_ms,
+        )
         return _preview_response(
             timeline,
             project,
@@ -1268,6 +1497,7 @@ def render_timeline_preview(
             cached=True,
             content_hash=content_hash,
             byte_size=byte_size,
+            quality_report=quality_report,
         )
     mastering = (timeline.track_config or {}).get("audio_mastering") or {}
     try:
@@ -1297,6 +1527,12 @@ def render_timeline_preview(
     output_error = _preview_output_validation(output_path, width, height, duration_ms)
     if output_error:
         return _preview_response(timeline, project, payload, validation_report=[output_error])
+    quality_report = _preview_quality_report(
+        output_path,
+        timeline,
+        Path(readiness.executable_path),
+        duration_ms,
+    )
     return _preview_response(
         timeline,
         project,
@@ -1305,6 +1541,7 @@ def render_timeline_preview(
         cached=False,
         content_hash=content_hash,
         byte_size=byte_size,
+        quality_report=quality_report,
     )
 
 

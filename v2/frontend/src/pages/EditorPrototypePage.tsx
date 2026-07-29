@@ -317,7 +317,7 @@ export function EditorPrototypePage() {
       setLastPreview(preview)
       setPreviewOpen(true)
       setNotice(preview.state === 'ready'
-        ? `时间线 v${preview.timeline_version_number} 的 ${preview.width}×${preview.height} 低清预览${preview.cached ? '已从缓存读取' : '已生成'}。`
+        ? `时间线 v${preview.timeline_version_number} 的 ${preview.width}×${preview.height} 低清预览${preview.cached ? '已从缓存读取' : '已生成'}；${preview.quality_report?.status === 'blocked' ? '技术检查存在阻断' : '请继续完成人工观看复核'}。`
         : `低清预览被 ${preview.validation_report.length} 个确定性问题阻断。`)
     },
   })
@@ -913,6 +913,22 @@ export function EditorPrototypePage() {
           <div><dt>文件大小</dt><dd>{lastPreview.byte_size ? `${(lastPreview.byte_size / 1024 / 1024).toFixed(1)} MB` : '--'}</dd></div>
           <div><dt>合同状态</dt><dd>仅预览，不是交付</dd></div>
         </dl>
+        {lastPreview.quality_report && <section className={styles.previewQuality}>
+          <header data-state={lastPreview.quality_report.status}>
+            {lastPreview.quality_report.status === 'blocked' ? <AlertTriangle /> : <CheckCircle2 />}
+            <div>
+              <strong>{lastPreview.quality_report.status === 'blocked' ? '技术检查有阻断' : lastPreview.quality_report.status === 'review_required' ? '技术检查完成，等待人工复核' : '预览质量检查通过'}</strong>
+              <small>自动检查不能代替观看确认；阻断项必须处理，警告与人工项需要逐项观看。</small>
+            </div>
+          </header>
+          <div className={styles.previewQualityList}>
+            {lastPreview.quality_report.checks.map(check => <article key={check.code} data-state={check.state}>
+              {check.state === 'passed' ? <CheckCircle2 /> : <AlertTriangle />}
+              <span><strong>{check.message}</strong><small>{check.code}</small></span>
+              <b>{check.state === 'blocked' ? '阻断' : check.state === 'warning' ? '警告' : check.state === 'manual_review' ? '人工检查' : '通过'}</b>
+            </article>)}
+          </div>
+        </section>}
       </> : <>
         <p>低清预览没有启动 FFmpeg。请先处理以下合同问题；点击条目可定位到对应片段。</p>
         <div className={styles.validationList}>

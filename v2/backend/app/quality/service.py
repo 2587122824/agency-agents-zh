@@ -672,12 +672,12 @@ def _analyze_pcm_wav(path: Path) -> dict:
     return evidence
 
 
-def measure_program_audio(path: Path) -> dict:
-    ffmpeg_path = os.environ.get("V2_FFMPEG_PATH", "").strip()
-    if not ffmpeg_path or not Path(ffmpeg_path).is_file():
+def measure_program_audio(path: Path, ffmpeg_executable: Path | None = None) -> dict:
+    ffmpeg_path = ffmpeg_executable or Path(os.environ.get("V2_FFMPEG_PATH", "").strip())
+    if not str(ffmpeg_path) or not ffmpeg_path.is_file():
         return {"ebur128_status": "analyzer_unavailable"}
     result = subprocess.run(
-        [ffmpeg_path, "-hide_banner", "-nostdin", "-i", str(path), "-filter_complex", "ebur128=peak=true", "-f", "null", "NUL"],
+        [str(ffmpeg_path), "-hide_banner", "-nostdin", "-i", str(path), "-filter_complex", "ebur128=peak=true", "-f", "null", "NUL"],
         capture_output=True,
         text=True,
         encoding="utf-8",

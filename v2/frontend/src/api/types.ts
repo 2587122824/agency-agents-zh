@@ -1304,6 +1304,16 @@ export interface TimelinePreview {
   content_hash: string | null
   byte_size: number | null
   validation_report: Timeline['validation_report']
+  quality_report: {
+    schema_version: 'editor-preview-qc.v1'
+    status: 'blocked' | 'review_required' | 'passed'
+    checks: Array<{
+      code: string
+      state: 'blocked' | 'warning' | 'manual_review' | 'passed'
+      message: string
+      evidence: Record<string, unknown>
+    }>
+  } | null
 }
 
 export interface TimelineTrackConfig {
