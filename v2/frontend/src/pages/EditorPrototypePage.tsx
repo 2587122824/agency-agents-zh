@@ -14,7 +14,7 @@ import type { Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from 
 import styles from './EditorPrototypePage.module.css'
 
 const DEFAULT_PROJECT_ID = 'project_9cd1c4e1fe5c4c8e88466acef2913e72'
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v1'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v2'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -22,6 +22,7 @@ interface LocalEditorDraft {
   base_row_version: number
   items: TimelineItem[]
   timeline_zoom: number
+  snap_enabled: boolean
   saved_at: string
 }
 
@@ -226,7 +227,7 @@ export function EditorPrototypePage() {
     }
     setItems(restored?.items ?? sourceTimeline.items)
     setTimelineZoom(restored?.timeline_zoom ?? sourceTimeline.track_config.pixels_per_second ?? 82)
-    setSnapEnabled(true)
+    setSnapEnabled(restored?.snap_enabled ?? sourceTimeline.track_config.snap_enabled)
     setDirty(Boolean(restored))
     setHistory([])
     setFuture([])
@@ -415,10 +416,11 @@ export function EditorPrototypePage() {
       base_row_version: sourceTimeline.row_version,
       items,
       timeline_zoom: timelineZoom,
+      snap_enabled: snapEnabled,
       saved_at: new Date().toISOString(),
     }
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
-  }, [dirty, items, localDraftKey, sourceTimeline, timelineZoom])
+  }, [dirty, items, localDraftKey, snapEnabled, sourceTimeline, timelineZoom])
 
   const draftItems = (): TimelineItemDraft[] => items.map(item => ({
     track_type: item.track_type,
@@ -440,6 +442,7 @@ export function EditorPrototypePage() {
         ...sourceTimeline.track_config,
         audio_enabled: audioItems.length > 0,
         subtitle_enabled: subtitleItems.length > 0,
+        snap_enabled: snapEnabled,
         pixels_per_second: timelineZoom,
       }, draftItems())
       return api.validateTimeline(projectId, revised)
@@ -590,6 +593,7 @@ export function EditorPrototypePage() {
     window.localStorage.removeItem(localDraftKey)
     setItems(sourceTimeline.items)
     setTimelineZoom(sourceTimeline.track_config.pixels_per_second)
+    setSnapEnabled(sourceTimeline.track_config.snap_enabled)
     setHistory([])
     setFuture([])
     setDirty(false)
@@ -674,6 +678,15 @@ export function EditorPrototypePage() {
   const changeTimelineZoom = (value: number) => {
     setTimelineZoom(Math.max(40, Math.min(180, Math.round(value))))
     setDirty(true)
+  }
+
+  const toggleSnap = () => {
+    const next = !snapEnabled
+    setSnapEnabled(next)
+    setDirty(true)
+    setNotice(next
+      ? `已开启 ${snapIntervalMs}ms 磁吸；该设置会随本地草稿恢复，并在保存后冻结到新时间线版本。`
+      : '已关闭磁吸；该设置会随本地草稿恢复，并在保存后冻结到新时间线版本。')
   }
 
   const togglePlayback = () => {
@@ -1472,7 +1485,12 @@ export function EditorPrototypePage() {
           {deliveryAttempt?.status === 'queued' || deliveryAttempt?.status === 'rendering' ? <RefreshCw /> : deliveryAttempt?.status === 'verified' ? <CheckCircle2 /> : <ShieldCheck />}
           {deliveryAttempt?.status === 'verified' ? '成片交付' : deliveryAttempt ? '交付状态' : '授权交付'}
         </button>}
-        <button data-active={snapEnabled} onClick={() => setSnapEnabled(value => !value)}>磁吸 {snapEnabled ? `${snapIntervalMs}ms` : '关闭'}</button>
+        <button
+          data-active={snapEnabled}
+          aria-pressed={snapEnabled}
+          title={snapEnabled ? `已开启 ${snapIntervalMs}ms 磁吸` : '磁吸已关闭'}
+          onClick={toggleSnap}
+        >磁吸 {snapEnabled ? `${snapIntervalMs}ms` : '关闭'}</button>
         <button title="缩小时间线" disabled={timelineZoom <= 40} onClick={() => changeTimelineZoom(timelineZoom - 20)}><Minus /></button>
         <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => changeTimelineZoom(Number(event.target.value))} /></label>
         <button title="放大时间线" disabled={timelineZoom >= 180} onClick={() => changeTimelineZoom(timelineZoom + 20)}><Plus /></button>

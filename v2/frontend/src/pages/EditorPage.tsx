@@ -127,6 +127,7 @@ export function EditorPage() {
   const [selectedAssetId, setSelectedAssetId] = useState('')
   const [audioEnabled, setAudioEnabled] = useState(false)
   const [subtitleEnabled, setSubtitleEnabled] = useState(false)
+  const [snapEnabled, setSnapEnabled] = useState(true)
   const [pixelsPerSecond, setPixelsPerSecond] = useState(60)
   const [snapIntervalMs, setSnapIntervalMs] = useState(100)
   const [loudnessTargetLufs, setLoudnessTargetLufs] = useState(-16)
@@ -157,8 +158,8 @@ export function EditorPage() {
   })
   const save = useMutation({
     mutationFn: () => revisionBase
-      ? api.reviseTimelineCandidate(projectId, revisionBase, { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs, audio_mastering: { loudness_target_lufs: loudnessTargetLufs, true_peak_limit_dbtp: truePeakLimitDbtp, clipping_control: 'limiter' } }, draftItems)
-      : api.createTimelineCandidate(projectId, workspace.data!.active_snapshot_id!, 'user', { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs, audio_mastering: { loudness_target_lufs: loudnessTargetLufs, true_peak_limit_dbtp: truePeakLimitDbtp, clipping_control: 'limiter' } }, draftItems),
+      ? api.reviseTimelineCandidate(projectId, revisionBase, { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, snap_enabled: snapEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs, audio_mastering: { loudness_target_lufs: loudnessTargetLufs, true_peak_limit_dbtp: truePeakLimitDbtp, clipping_control: 'limiter' } }, draftItems)
+      : api.createTimelineCandidate(projectId, workspace.data!.active_snapshot_id!, 'user', { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, snap_enabled: snapEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs, audio_mastering: { loudness_target_lufs: loudnessTargetLufs, true_peak_limit_dbtp: truePeakLimitDbtp, clipping_control: 'limiter' } }, draftItems),
     onSuccess: async timeline => {
       setSelectedTimelineId(timeline.id)
       setDraftMode('view')
@@ -204,6 +205,7 @@ export function EditorPage() {
     setDraftItems(items)
     setAudioEnabled(selectedTimeline.track_config.audio_enabled)
     setSubtitleEnabled(selectedTimeline.track_config.subtitle_enabled)
+    setSnapEnabled(selectedTimeline.track_config.snap_enabled)
     setPixelsPerSecond(selectedTimeline.track_config.pixels_per_second)
     setSnapIntervalMs(selectedTimeline.track_config.snap_interval_ms)
     setLoudnessTargetLufs(selectedTimeline.track_config.audio_mastering.loudness_target_lufs)
@@ -223,6 +225,7 @@ export function EditorPage() {
     setSelectedDraftIndex(null)
     setAudioEnabled(workspace.data?.audio_mode !== 'off')
     setSubtitleEnabled(false)
+    setSnapEnabled(true)
     setPixelsPerSecond(60)
     setSnapIntervalMs(100)
     setLoudnessTargetLufs(-16)
@@ -234,6 +237,7 @@ export function EditorPage() {
     setDraftItems(timelineDraftItems(timeline))
     setAudioEnabled(timeline.track_config.audio_enabled)
     setSubtitleEnabled(timeline.track_config.subtitle_enabled)
+    setSnapEnabled(timeline.track_config.snap_enabled)
     setPixelsPerSecond(timeline.track_config.pixels_per_second)
     setSnapIntervalMs(timeline.track_config.snap_interval_ms)
     setLoudnessTargetLufs(timeline.track_config.audio_mastering.loudness_target_lufs)

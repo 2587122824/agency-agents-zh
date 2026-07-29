@@ -6703,7 +6703,7 @@ def test_quality_stage_and_timeline_confirmation_are_explicit_and_idempotent(cli
         "command_id": "timeline-create-command-001",
         "expected_snapshot_id": snapshot["id"],
         "source": "user",
-        "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+        "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": False},
         "items": timeline_items_for_assets(video_assets),
     }
     created = client.post(f"/api/v1/projects/{project['id']}/timeline-candidates", json=create_command)
@@ -6712,6 +6712,7 @@ def test_quality_stage_and_timeline_confirmation_are_explicit_and_idempotent(cli
     timeline = created.json()
     assert replayed_candidate.json()["id"] == timeline["id"]
     assert timeline["status"] == "candidate"
+    assert timeline["track_config"]["snap_enabled"] is False
 
     validated = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:validate",
@@ -6780,6 +6781,7 @@ def test_editor_assistant_creates_auditable_timeline_candidate_for_manual_confir
     assert timeline["source"] == "editor_assistant"
     assert timeline["status"] == "candidate"
     assert timeline["source_agent_run_id"]
+    assert timeline["track_config"]["snap_enabled"] is True
     assert [item["asset_id"] for item in timeline["items"]] == [item["id"] for item in video_assets]
     assert all(item["transform"]["editor_assistant"]["selection_reason"] for item in timeline["items"])
     assert all(item["transform"]["editor_assistant"]["qc_report_ids"] for item in timeline["items"])

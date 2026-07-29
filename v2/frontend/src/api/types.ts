@@ -1334,6 +1334,7 @@ export interface TimelinePreviewReview {
 export interface TimelineTrackConfig {
   audio_enabled: boolean
   subtitle_enabled: boolean
+  snap_enabled: boolean
   pixels_per_second: number
   snap_interval_ms: number
   audio_mastering: {

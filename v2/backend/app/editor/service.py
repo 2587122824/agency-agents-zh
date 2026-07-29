@@ -634,6 +634,7 @@ def _execute_editor(
             "track_config": {
                 "audio_enabled": bool(approved_audio),
                 "subtitle_enabled": bool(approved_subtitles),
+                "snap_enabled": True,
             },
             "items": items,
         })
