@@ -664,6 +664,13 @@ export function EditorPrototypePage() {
     seekTimeline(target)
   }
 
+  const handlePlayButtonKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.code !== 'Space') return
+    event.preventDefault()
+    event.stopPropagation()
+    togglePlayback()
+  }
+
   const changeTimelineZoom = (value: number) => {
     setTimelineZoom(Math.max(40, Math.min(180, Math.round(value))))
     setDirty(true)
@@ -1091,11 +1098,36 @@ export function EditorPrototypePage() {
     window.addEventListener('pointercancel', onCancel)
   }
 
+  const overlayOpen = versionOpen
+    || confirmSaveOpen
+    || validationOpen
+    || previewOpen
+    || deliveryAuthorizeOpen
+    || deliveryStatusOpen
+
+  const closeTopOverlay = () => {
+    if (deliveryStatusOpen) setDeliveryStatusOpen(false)
+    else if (deliveryAuthorizeOpen) setDeliveryAuthorizeOpen(false)
+    else if (previewOpen) setPreviewOpen(false)
+    else if (validationOpen) setValidationOpen(false)
+    else if (confirmSaveOpen) setConfirmSaveOpen(false)
+    else if (versionOpen) setVersionOpen(false)
+    else return false
+    return true
+  }
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target?.closest('input, select, textarea')) return
+      if (event.key === 'Escape' && closeTopOverlay()) {
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
+      if (overlayOpen) return
+      if (target?.closest('input, select, textarea, [contenteditable="true"]')) return
       if (event.code === 'Space') {
+        if (target?.closest('button, a, [role="button"], audio, video')) return
         event.preventDefault()
         togglePlayback()
       }
@@ -1342,7 +1374,7 @@ export function EditorPrototypePage() {
         </div>
         <div className={styles.transport}>
           <button title="跳到开头" onClick={() => seekTimeline(0)}><ChevronLeft /></button>
-          <button title={playing ? '暂停' : '播放'} className={styles.playButton} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button>
+          <button title={playing ? '暂停' : '播放'} className={styles.playButton} onClick={togglePlayback} onKeyDown={handlePlayButtonKeyDown}>{playing ? <Pause /> : <Play />}</button>
           <button title="跳到结尾" onClick={() => seekTimeline(durationMs)}><ChevronRight /></button>
           <code>{timecode(playheadMs, outputFps)} <span>/ {timecode(durationMs, outputFps)}</span></code>
           <div
@@ -1533,7 +1565,7 @@ export function EditorPrototypePage() {
       </div>
       <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · Shift 秒级 · Space 播放</span></footer>
     </section>
-    {versionOpen && <div className={styles.modal}><section className={styles.versionModal}>
+    {versionOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线版本与审计证据"><section className={styles.versionModal}>
       <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>
       <p>版本按新到旧排列。当前工作区只编辑最新基线；历史合同保持只读，不会被本地草稿覆盖。</p>
       <div className={styles.versionList}>
@@ -1568,7 +1600,7 @@ export function EditorPrototypePage() {
       </div>
       <footer><button onClick={() => setVersionOpen(false)}>关闭</button></footer>
     </section></div>}
-    {confirmSaveOpen && <div className={styles.modal}><section>
+    {confirmSaveOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="保存并检查新时间线版本"><section>
       <header><CheckCircle2 /><div><span>IMMUTABLE REVISION</span><h2>保存并检查新时间线版本</h2></div><button title="关闭" onClick={() => setConfirmSaveOpen(false)}><X /></button></header>
       <p>这会基于时间线 v{sourceTimeline?.version_number} 创建不可变的新版本，然后立即执行确定性检查。不会确认交付、启动渲染或产生供应商费用。</p>
       <dl>
@@ -1580,7 +1612,7 @@ export function EditorPrototypePage() {
       {unresolvedCount > 0 && <div className={styles.modalWarning}><AlertTriangle /><span>允许保存含空位的候选，但检查不会通过；保存后会精确定位这些问题。</span></div>}
       <footer><button onClick={() => setConfirmSaveOpen(false)}>继续调整</button><button className={styles.confirmButton} disabled={saveAndValidate.isPending} onClick={() => saveAndValidate.mutate()}>{saveAndValidate.isPending ? '正在创建并检查…' : '创建新版本并检查'}</button></footer>
     </section></div>}
-    {validationOpen && <div className={styles.modal}><section>
+    {validationOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线检查问题"><section>
       <header><AlertTriangle /><div><span>VALIDATION ISSUES</span><h2>需要处理的时间线问题</h2></div><button title="关闭" onClick={() => setValidationOpen(false)}><X /></button></header>
       <p>点击问题会定位到对应片段。技术代码只用于审计，实际处理以中文说明为准。</p>
       <div className={styles.validationList}>
@@ -1595,7 +1627,7 @@ export function EditorPrototypePage() {
       </div>
       <footer><button onClick={() => setValidationOpen(false)}>返回时间线</button></footer>
     </section></div>}
-    {previewOpen && lastPreview && <div className={styles.modal}><section className={styles.previewModal}>
+    {previewOpen && lastPreview && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线低清预览"><section className={styles.previewModal}>
       <header><Film /><div><span>DRAFT PRE-RENDER</span><h2>时间线 v{lastPreview.timeline_version_number} 低清预览</h2></div><button title="关闭" onClick={() => setPreviewOpen(false)}><X /></button></header>
       {lastPreview.state === 'ready' && lastPreview.content_url ? <>
         <div className={styles.previewCompareToolbar}>
@@ -1697,7 +1729,7 @@ export function EditorPrototypePage() {
         }}>继续授权交付</button>}
       </footer>
     </section></div>}
-    {deliveryAuthorizeOpen && <div className={styles.modal}><section>
+    {deliveryAuthorizeOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="授权正式交付"><section>
       <header><ShieldCheck /><div><span>FINAL DELIVERY</span><h2>授权正式交付</h2></div><button title="关闭" onClick={() => setDeliveryAuthorizeOpen(false)}><X /></button></header>
       <p>当前确认时间线已经绑定低清预览人工复核。请选择一次明确的交付方式；失败不会自动重试或切换方式。</p>
       <div className={styles.deliveryMethods}>
@@ -1709,7 +1741,7 @@ export function EditorPrototypePage() {
       </div>
       <footer><button onClick={() => setDeliveryAuthorizeOpen(false)}>取消</button><button className={styles.confirmButton} disabled={!deliveryMethod || authorizeDelivery.isPending} onClick={() => authorizeDelivery.mutate()}>{authorizeDelivery.isPending ? '正在授权…' : '确认授权'}</button></footer>
     </section></div>}
-    {deliveryStatusOpen && deliveryWorkspace.data && <div className={styles.modal}><section className={styles.deliveryStatusModal}>
+    {deliveryStatusOpen && deliveryWorkspace.data && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="最终交付状态"><section className={styles.deliveryStatusModal}>
       <header><ShieldCheck /><div><span>DELIVERY STATUS</span><h2>最终交付闭环</h2></div><button title="关闭" onClick={() => setDeliveryStatusOpen(false)}><X /></button></header>
       <dl>
         <div><dt>确认时间线</dt><dd>{deliveryWorkspace.data.confirmed_timeline ? `v${deliveryWorkspace.data.confirmed_timeline.version_number}` : '尚未确认'}</dd></div>
