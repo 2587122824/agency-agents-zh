@@ -25,11 +25,14 @@ interface LocalEditorDraft {
   saved_at: string
 }
 
-function timecode(ms: number) {
+function timecode(ms: number, fps = 24) {
   const value = Math.max(0, Math.round(ms))
-  const minutes = Math.floor(value / 60000)
-  const seconds = Math.floor((value % 60000) / 1000)
-  const frames = Math.floor((value % 1000) / 40)
+  const safeFps = Math.max(1, Math.round(fps))
+  const totalFrames = Math.floor((value * safeFps) / 1000)
+  const totalSeconds = Math.floor(totalFrames / safeFps)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  const frames = totalFrames % safeFps
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}:${String(frames).padStart(2, '0')}`
 }
 
@@ -155,6 +158,7 @@ export function EditorPrototypePage() {
   const [history, setHistory] = useState<TimelineItem[][]>([])
   const [future, setFuture] = useState<TimelineItem[][]>([])
   const [timelineZoom, setTimelineZoom] = useState(82)
+  const [snapEnabled, setSnapEnabled] = useState(true)
   const [draggedItemId, setDraggedItemId] = useState<string | null>(null)
   const [draggedAssetId, setDraggedAssetId] = useState<string | null>(null)
   const [videoTrackLocked, setVideoTrackLocked] = useState(false)
@@ -162,6 +166,7 @@ export function EditorPrototypePage() {
   const [audioTrackMuted, setAudioTrackMuted] = useState(false)
   const [subtitleTrackHidden, setSubtitleTrackHidden] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [versionOpen, setVersionOpen] = useState(false)
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false)
   const [validationOpen, setValidationOpen] = useState(false)
   const [lastValidation, setLastValidation] = useState<Timeline | null>(null)
@@ -183,6 +188,7 @@ export function EditorPrototypePage() {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const renderedPreviewRef = useRef<HTMLVideoElement | null>(null)
   const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
+  const advancingPlaybackRef = useRef(false)
   const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const sourceTimeline = workspace.data?.timelines[0] ?? null
@@ -205,11 +211,13 @@ export function EditorPrototypePage() {
     }
     setItems(restored?.items ?? sourceTimeline.items)
     setTimelineZoom(restored?.timeline_zoom ?? sourceTimeline.track_config.pixels_per_second ?? 82)
+    setSnapEnabled(true)
     setDirty(Boolean(restored))
     setHistory([])
     setFuture([])
     setSelectedIndex(0)
     setPlayheadMs(0)
+    setPlaying(false)
     setLastValidation(sourceTimeline)
     setLastPreview(null)
     setPreviewCompareMode('result')
@@ -228,6 +236,11 @@ export function EditorPrototypePage() {
   }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey])
 
   const durationMs = workspace.data?.duration_ms ?? 15000
+  const outputFps = Math.max(1, Number(sourceTimeline?.output_spec.fps) || 24)
+  const snapIntervalMs = sourceTimeline?.track_config.snap_interval_ms ?? 100
+  const snapMs = (value: number) => snapEnabled
+    ? Math.round(value / snapIntervalMs) * snapIntervalMs
+    : Math.round(value)
   const selectedItem = items[selectedIndex] ?? null
   const selectedAsset = workspace.data?.available_assets.find(asset => asset.id === selectedItem?.asset_id) ?? null
   const subtitlePreview = useQuery({
@@ -261,6 +274,10 @@ export function EditorPrototypePage() {
     const currentIndex = items.findIndex(item => item.track_type === 'main_video' && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms)
     if (playing && currentIndex >= 0 && currentIndex !== selectedIndex) setSelectedIndex(currentIndex)
   }, [playheadMs, items, playing, selectedIndex])
+
+  useEffect(() => {
+    advancingPlaybackRef.current = false
+  }, [selectedItem?.id])
 
   useEffect(() => {
     const video = videoRef.current
@@ -498,6 +515,7 @@ export function EditorPrototypePage() {
     setDirty(false)
     setSelectedIndex(0)
     setPlayheadMs(0)
+    setPlaying(false)
     setNotice('已丢弃本地调整，恢复到当前时间线版本。')
   }
 
@@ -506,6 +524,26 @@ export function EditorPrototypePage() {
     setSelectedIndex(index)
     setPlayheadMs(item.timeline_in_ms)
     setPlaying(false)
+  }
+
+  const togglePlayback = () => {
+    if (playing) {
+      setPlaying(false)
+      return
+    }
+    let target = mainItems.find(item => playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
+    if (!target && playheadMs >= durationMs) {
+      target = mainItems[0] ?? null
+      if (target) selectItem(target)
+    }
+    if (!target?.asset_id) {
+      if (target) selectItem(target)
+      setNotice(target ? '当前播放头位于显式空位，请先选择补齐方式。' : '当前时间线没有可以播放的画面。')
+      return
+    }
+    if (selectedItem?.id !== target.id) selectItem(target)
+    advancingPlaybackRef.current = false
+    setPlaying(true)
   }
 
   const commitItems = (nextItems: TimelineItem[], message: string, selectedId?: string | null) => {
@@ -670,7 +708,7 @@ export function EditorPrototypePage() {
 
   const splitSelected = () => {
     if (!selectedItem?.asset_id || selectedItem.track_type !== 'main_video' || videoTrackLocked) return
-    const splitAt = Math.round(playheadMs / 100) * 100
+    const splitAt = snapMs(playheadMs)
     if (splitAt <= selectedItem.timeline_in_ms + 200 || splitAt >= selectedItem.timeline_out_ms - 200) {
       setNotice('播放头距离片段边缘过近，至少保留 0.2 秒。')
       return
@@ -693,7 +731,7 @@ export function EditorPrototypePage() {
     }
     const rows = mainItems.flatMap(item => item.id === selectedItem.id ? [left, right] : [item])
     const nextItems = replaceMainTrack(items, normalizeMainTrack(rows, durationMs))
-    commitItems(nextItems, `已在 ${timecode(splitAt)} 分割片段。`, right.id)
+    commitItems(nextItems, `已在 ${timecode(splitAt, outputFps)} 分割片段。`, right.id)
   }
 
   const deleteSelected = () => {
@@ -723,7 +761,10 @@ export function EditorPrototypePage() {
     setFuture([])
     setDirty(true)
     const onMove = (moveEvent: PointerEvent) => {
-      const deltaMs = Math.round(((moveEvent.clientX - startX) / timelineZoom) * 10000) / 10
+      const rawDeltaMs = ((moveEvent.clientX - startX) / timelineZoom) * 1000
+      const deltaMs = snapEnabled
+        ? Math.round(rawDeltaMs / snapIntervalMs) * snapIntervalMs
+        : Math.round(rawDeltaMs)
       setItems(current => {
         const currentMain = current.filter(row => row.track_type === 'main_video').map(row => {
           if (row.id !== item.id) return row
@@ -752,7 +793,7 @@ export function EditorPrototypePage() {
       if (target?.closest('input, select, textarea')) return
       if (event.code === 'Space') {
         event.preventDefault()
-        setPlaying(value => !value)
+        togglePlayback()
       }
       if (event.key.toLowerCase() === 's') {
         event.preventDefault()
@@ -776,23 +817,47 @@ export function EditorPrototypePage() {
     return () => window.removeEventListener('keydown', onKeyDown)
   })
 
+  const advancePlayback = () => {
+    if (advancingPlaybackRef.current) return
+    advancingPlaybackRef.current = true
+    videoRef.current?.pause()
+    const position = mainItems.findIndex(item => item.id === selectedItem?.id)
+    const next = position >= 0 ? mainItems[position + 1] : null
+    if (!next) {
+      setPlayheadMs(durationMs)
+      setPlaying(false)
+      advancingPlaybackRef.current = false
+      setNotice('时间线预览播放完成。')
+      return
+    }
+    selectItem(next)
+    if (!next.asset_id) {
+      setPlaying(false)
+      setNotice('播放到缺口：需要先选择一种补齐方式。')
+      return
+    }
+    setPlaying(true)
+  }
+
   const handleTimeUpdate = () => {
     const video = videoRef.current
     if (!video || !selectedItem) return
     const sourceIn = selectedItem.source_in_ms ?? 0
+    const sourceOut = selectedItem.source_out_ms ?? selectedItem.asset_duration_ms ?? 0
+    if (playing && sourceOut > sourceIn && video.currentTime * 1000 >= sourceOut - (500 / outputFps)) {
+      setPlayheadMs(selectedItem.timeline_out_ms)
+      advancePlayback()
+      return
+    }
     const next = selectedItem.timeline_in_ms + Math.max(0, video.currentTime * 1000 - sourceIn)
     setPlayheadMs(Math.min(next, selectedItem.timeline_out_ms))
   }
 
-  const handleEnded = () => {
-    const next = mainItems.find(item => item.timeline_in_ms >= (selectedItem?.timeline_out_ms ?? 0))
-    if (!next || !next.asset_id) {
-      setPlaying(false)
-      setNotice(next ? '播放到缺口：需要先选择一种补齐方式。' : '时间线预览播放完成。')
-      return
-    }
-    selectItem(next)
-    setPlaying(true)
+  const handleEnded = (event: React.SyntheticEvent<HTMLVideoElement>) => {
+    if (videoRef.current !== event.currentTarget || !selectedItem?.asset_id) return
+    const sourceOut = selectedItem.source_out_ms ?? selectedItem.asset_duration_ms ?? 0
+    if (event.currentTarget.currentTime * 1000 + (1000 / outputFps) < sourceOut) return
+    advancePlayback()
   }
 
   const locateValidationError = (error: Timeline['validation_report'][number]) => {
@@ -820,7 +885,7 @@ export function EditorPrototypePage() {
         <span>剪辑台新版原型</span>
         <strong>{workspace.data.project_title}</strong>
       </div>
-      <button className={styles.versionButton}>时间线 v{sourceTimeline?.version_number ?? '--'} <small>{dirty ? '本地草稿未提交' : '已同步'}</small></button>
+      <button className={styles.versionButton} onClick={() => setVersionOpen(true)}>时间线 v{sourceTimeline?.version_number ?? '--'} <small>{dirty ? '本地草稿未提交' : '已同步'} · 查看版本证据</small></button>
       <div className={styles.topActions}>
         <button title="撤销" disabled={!history.length} onClick={undo}><Undo2 /></button>
         <button title="重做" disabled={!future.length} onClick={redo}><Redo2 /></button>
@@ -847,7 +912,7 @@ export function EditorPrototypePage() {
       {uploadDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{uploadDelivery.error instanceof Error ? uploadDelivery.error.message : '交付文件上传失败'}</button>}
       {verifyDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{verifyDelivery.error instanceof Error ? verifyDelivery.error.message : '交付文件验证失败'}</button>}
       {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
-      <code>{workspace.data.aspect_ratio} · {seconds(durationMs)} · 预览质量</code>
+      <code>{workspace.data.aspect_ratio} · {outputFps}fps · {seconds(durationMs)} · 预览质量</code>
     </section>
 
     <section className={styles.editingArea}>
@@ -889,9 +954,15 @@ export function EditorPrototypePage() {
         <div className={styles.monitor}>
           {selectedAsset?.asset_type === 'video' && <video
             ref={videoRef}
-            key={selectedAsset.id}
+            key={selectedItem?.id}
             src={`/api/v1/projects/${projectId}/assets/${selectedAsset.id}/content`}
             preload="metadata"
+            muted
+            playsInline
+            onLoadedMetadata={event => {
+              event.currentTarget.currentTime = (selectedItem?.source_in_ms ?? 0) / 1000
+              if (playing) void event.currentTarget.play().catch(() => setNotice('浏览器阻止了时间线视频播放，请再次点击播放。'))
+            }}
             onTimeUpdate={handleTimeUpdate}
             onEnded={handleEnded}
           />}
@@ -920,9 +991,9 @@ export function EditorPrototypePage() {
         </div>
         <div className={styles.transport}>
           <button title="跳到开头" onClick={() => setPlayheadMs(0)}><ChevronLeft /></button>
-          <button title={playing ? '暂停' : '播放'} className={styles.playButton} onClick={() => setPlaying(value => !value)}>{playing ? <Pause /> : <Play />}</button>
+          <button title={playing ? '暂停' : '播放'} className={styles.playButton} onClick={togglePlayback}>{playing ? <Pause /> : <Play />}</button>
           <button title="跳到结尾" onClick={() => setPlayheadMs(durationMs)}><ChevronRight /></button>
-          <code>{timecode(playheadMs)} <span>/ {timecode(durationMs)}</span></code>
+          <code>{timecode(playheadMs, outputFps)} <span>/ {timecode(durationMs, outputFps)}</span></code>
           <div className={styles.previewScrubber} role="slider" aria-label="预览播放头" aria-valuemin={0} aria-valuemax={durationMs} aria-valuenow={playheadMs} tabIndex={0} onClick={event => {
             const rect = event.currentTarget.getBoundingClientRect()
             setPlayheadMs(Math.round(((event.clientX - rect.left) / rect.width) * durationMs))
@@ -1001,9 +1072,9 @@ export function EditorPrototypePage() {
           {deliveryAttempt?.status === 'queued' || deliveryAttempt?.status === 'rendering' ? <RefreshCw /> : deliveryAttempt?.status === 'verified' ? <CheckCircle2 /> : <ShieldCheck />}
           {deliveryAttempt?.status === 'verified' ? '成片交付' : deliveryAttempt ? '交付状态' : '授权交付'}
         </button>}
-        <button>磁吸 100ms</button>
+        <button data-active={snapEnabled} onClick={() => setSnapEnabled(value => !value)}>磁吸 {snapEnabled ? `${snapIntervalMs}ms` : '关闭'}</button>
         <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => { setTimelineZoom(Number(event.target.value)); setDirty(true) }} /></label>
-        <code>{timecode(playheadMs)}</code>
+        <code>{timecode(playheadMs, outputFps)}</code>
       </header>
       <div className={styles.timelineViewport}>
         <div className={styles.timelineCanvas} style={{ width: `${84 + timelineWidth}px` }} onClick={event => {
@@ -1051,6 +1122,41 @@ export function EditorPrototypePage() {
       </div>
       <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>Space 播放 · S 分割 · Delete 删除 · Ctrl+Z 撤销</span></footer>
     </section>
+    {versionOpen && <div className={styles.modal}><section className={styles.versionModal}>
+      <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>
+      <p>版本按新到旧排列。当前工作区只编辑最新基线；历史合同保持只读，不会被本地草稿覆盖。</p>
+      <div className={styles.versionList}>
+        {workspace.data.timelines.map((timeline, index) => {
+          const videoCount = timeline.items.filter(item => item.track_type === 'main_video').length
+          const audioCount = timeline.items.filter(item => item.track_type === 'audio').length
+          const subtitleCount = timeline.items.filter(item => item.track_type === 'subtitle').length
+          return <details key={timeline.id} open={index === 0} data-current={timeline.id === sourceTimeline?.id}>
+            <summary>
+              <i>v{timeline.version_number}</i>
+              <span><strong>{({
+                candidate: '候选',
+                review: '待确认',
+                confirmed: '已确认',
+                exported: '已导出',
+                superseded: '已被修订',
+              } as Record<string, string>)[timeline.status]}</strong><small>{videoCount} 画面 · {audioCount} 声音 · {subtitleCount} 字幕 · {timeline.validation_report.length} 个检查问题</small></span>
+              {timeline.id === sourceTimeline?.id && <em>当前</em>}
+            </summary>
+            <dl>
+              <div><dt>来源</dt><dd>{timeline.source === 'editor_assistant' ? '剪辑助理候选' : '用户修订'}</dd></div>
+              <div><dt>创建时间</dt><dd>{new Date(timeline.created_at).toLocaleString('zh-CN', { hour12: false })}</dd></div>
+              <div><dt>输出规格</dt><dd>{String(timeline.output_spec.width ?? '—')}×{String(timeline.output_spec.height ?? '—')} · {String(timeline.output_spec.fps ?? '—')}fps</dd></div>
+              <div><dt>复核证据</dt><dd>{timeline.preview_review ? '已绑定低清预览复核' : '尚未绑定'}</dd></div>
+              <div><dt>行版本</dt><dd>{timeline.row_version}</dd></div>
+              <div><dt>创建者</dt><dd>{timeline.created_by}</dd></div>
+            </dl>
+            <div className={styles.versionHash}><span>合同哈希</span><code>{timeline.contract_hash ?? '尚未形成合同哈希'}</code></div>
+            {timeline.validation_report.length > 0 && <div className={styles.versionIssues}>{timeline.validation_report.map((issue, issueIndex) => <p key={`${issue.code}-${issueIndex}`}><AlertTriangle /><span><strong>{issue.message}</strong><code>{issue.code} · {issue.path}</code></span></p>)}</div>}
+          </details>
+        })}
+      </div>
+      <footer><button onClick={() => setVersionOpen(false)}>关闭</button></footer>
+    </section></div>}
     {confirmSaveOpen && <div className={styles.modal}><section>
       <header><CheckCircle2 /><div><span>IMMUTABLE REVISION</span><h2>保存并检查新时间线版本</h2></div><button title="关闭" onClick={() => setConfirmSaveOpen(false)}><X /></button></header>
       <p>这会基于时间线 v{sourceTimeline?.version_number} 创建不可变的新版本，然后立即执行确定性检查。不会确认交付、启动渲染或产生供应商费用。</p>
@@ -1085,7 +1191,7 @@ export function EditorPrototypePage() {
           <span>预览方式</span>
           <button data-active={previewCompareMode === 'result'} onClick={() => setPreviewCompareMode('result')}>只看结果</button>
           <button data-active={previewCompareMode === 'compare'} onClick={() => setPreviewCompareMode('compare')}>源时间线对比</button>
-          {previewCompareMode === 'compare' && <code>{timecode(previewCompareMs)}</code>}
+          {previewCompareMode === 'compare' && <code>{timecode(previewCompareMs, lastPreview.fps)}</code>}
         </div>
         <div className={styles.renderedPreview} data-compare={previewCompareMode === 'compare'}>
           {previewCompareMode === 'compare' && <figure>
