@@ -93,6 +93,42 @@ function Waveform({ projectId, assetId }: { projectId: string; assetId: string }
   </span>
 }
 
+function srtTimestampMs(value: string) {
+  const match = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/.exec(value.trim())
+  if (!match) return null
+  return (((Number(match[1]) * 60 + Number(match[2])) * 60 + Number(match[3])) * 1000) + Number(match[4])
+}
+
+function activeSrtText(srt: string, sourceTimeMs: number) {
+  for (const block of srt.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
+    const lines = block.split('\n').map(line => line.trim()).filter(Boolean)
+    const timingIndex = lines.findIndex(line => line.includes('-->'))
+    if (timingIndex < 0) continue
+    const [startText, endText] = lines[timingIndex].split('-->').map(value => value.trim().split(/\s+/)[0])
+    const start = srtTimestampMs(startText)
+    const end = srtTimestampMs(endText)
+    if (start != null && end != null && sourceTimeMs >= start && sourceTimeMs < end) {
+      return lines.slice(timingIndex + 1).join('\n')
+    }
+  }
+  return ''
+}
+
+function TimelineSubtitle({ projectId, item, playheadMs }: { projectId: string; item: TimelineItem; playheadMs: number }) {
+  const subtitle = useQuery({
+    queryKey: ['editor-prototype-subtitle', projectId, item.asset_id],
+    queryFn: async () => {
+      const response = await fetch(`/api/v1/projects/${projectId}/assets/${item.asset_id}/content`)
+      if (!response.ok) throw new Error(`字幕读取失败（${response.status}）`)
+      return response.text()
+    },
+    staleTime: Infinity,
+  })
+  const sourceTimeMs = (item.source_in_ms ?? 0) + Math.max(0, playheadMs - item.timeline_in_ms)
+  const text = subtitle.data ? activeSrtText(subtitle.data, sourceTimeMs) : ''
+  return text ? <div className={styles.timelineSubtitle}>{text}</div> : null
+}
+
 export function EditorPrototypePage() {
   const [params] = useSearchParams()
   const projectId = params.get('project') ?? DEFAULT_PROJECT_ID
@@ -121,6 +157,7 @@ export function EditorPrototypePage() {
   const [validationOpen, setValidationOpen] = useState(false)
   const [lastValidation, setLastValidation] = useState<Timeline | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const sourceTimeline = workspace.data?.timelines[0] ?? null
   const localDraftKey = `agency-studio.editor-draft.${projectId}`
@@ -170,6 +207,7 @@ export function EditorPrototypePage() {
   const mainItems = useMemo(() => items.filter(item => item.track_type === 'main_video'), [items])
   const audioItems = useMemo(() => items.filter(item => item.track_type === 'audio'), [items])
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
+  const activeSubtitleItem = subtitleItems.find(item => item.asset_id && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
   const timelineWidth = Math.max(900, (durationMs / 1000) * timelineZoom)
   const validationErrors = lastValidation?.validation_report
@@ -178,8 +216,8 @@ export function EditorPrototypePage() {
 
   useEffect(() => {
     const currentIndex = items.findIndex(item => item.track_type === 'main_video' && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms)
-    if (currentIndex >= 0 && currentIndex !== selectedIndex) setSelectedIndex(currentIndex)
-  }, [playheadMs, items, selectedIndex])
+    if (playing && currentIndex >= 0 && currentIndex !== selectedIndex) setSelectedIndex(currentIndex)
+  }, [playheadMs, items, playing, selectedIndex])
 
   useEffect(() => {
     const video = videoRef.current
@@ -189,6 +227,30 @@ export function EditorPrototypePage() {
     if (playing) void video.play()
     else video.pause()
   }, [playing, selectedItem?.id, selectedItem?.asset_id, selectedItem?.source_in_ms])
+
+  useEffect(() => {
+    for (const item of audioItems) {
+      const audio = timelineAudioRefs.current[item.id]
+      if (!audio || !item.asset_id) continue
+      const active = playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms
+      audio.muted = audioTrackMuted
+      if (!active) {
+        audio.pause()
+        continue
+      }
+      const sourceIn = item.source_in_ms ?? 0
+      const sourceOut = item.source_out_ms ?? item.asset_duration_ms ?? sourceIn
+      const sourceDuration = Math.max(1, sourceOut - sourceIn)
+      const elapsed = playheadMs - item.timeline_in_ms
+      const loop = (item.transform.playback as { mode?: string } | undefined)?.mode === 'loop'
+      const expectedSeconds = (sourceIn + (loop ? elapsed % sourceDuration : elapsed)) / 1000
+      if (Number.isFinite(audio.duration) && Math.abs(audio.currentTime - expectedSeconds) > .16) {
+        audio.currentTime = Math.min(expectedSeconds, Math.max(0, audio.duration - .01))
+      }
+      if (playing) void audio.play().catch(() => setNotice('浏览器阻止了时间线声音播放，请再次点击播放。'))
+      else audio.pause()
+    }
+  }, [audioItems, audioTrackMuted, playheadMs, playing])
 
   useEffect(() => {
     if (!sourceTimeline || !dirty || !items.length) return
@@ -344,9 +406,9 @@ export function EditorPrototypePage() {
     setDraggedAssetId(null)
   }
 
-  const addAssetToTrack = (trackType: TimelineItem['track_type']) => {
-    if (!draggedAssetId) return
-    const asset = workspace.data?.available_assets.find(row => row.id === draggedAssetId)
+  const addAssetToTrack = (trackType: TimelineItem['track_type'], assetId = draggedAssetId) => {
+    if (!assetId) return
+    const asset = workspace.data?.available_assets.find(row => row.id === assetId)
     const expectedType = trackType === 'main_video' ? 'video' : trackType
     if (!asset || asset.asset_type !== expectedType || !asset.duration_ms) {
       setNotice(`该素材不能加入${trackType === 'audio' ? '声音' : '字幕'}轨。`)
@@ -378,7 +440,7 @@ export function EditorPrototypePage() {
         : { render: 'burn_in' },
     }
     commitItems([...items, newItem], `已把 ${newItem.label} 加入${trackType === 'audio' ? '声音' : '字幕'}轨。`, newItem.id)
-    setDraggedAssetId(null)
+    if (assetId === draggedAssetId) setDraggedAssetId(null)
   }
 
   const updateSelectedTransform = (key: string, value: unknown) => {
@@ -620,9 +682,10 @@ export function EditorPrototypePage() {
             }}
             onDragEnd={() => setDraggedAssetId(null)}
             onClick={() => {
-            const item = items.find(row => row.asset_id === asset.id)
-            if (item) selectItem(item)
-            else setNotice(`${asset.node_key ?? asset.role} 尚未加入当前时间线。`)
+              const item = items.find(row => row.asset_id === asset.id)
+              if (item) selectItem(item)
+              else if (asset.asset_type === 'audio' || asset.asset_type === 'subtitle') addAssetToTrack(asset.asset_type, asset.id)
+              else setNotice(`${asset.node_key ?? asset.role} 尚未加入当前时间线，请拖到目标画面位置。`)
           }}>
             <i>{asset.asset_type === 'video' ? <Film /> : asset.asset_type === 'audio' ? <Music2 /> : <Subtitles />}</i>
             <span><strong>{asset.node_key ?? asset.role}</strong><small>{seconds(asset.duration_ms)} · {asset.width && asset.height ? `${asset.width}×${asset.height}` : '已批准'}</small></span>
@@ -652,6 +715,14 @@ export function EditorPrototypePage() {
             <strong>{selectedItem?.label}</strong>
             <pre>{subtitlePreview.isPending ? '正在读取字幕…' : subtitlePreview.error ? '字幕读取失败' : subtitlePreview.data}</pre>
           </div>}
+          {audioItems.filter(item => item.asset_id).map(item => <audio
+            key={`timeline-audio-${item.id}`}
+            className={styles.timelineAudio}
+            ref={node => { timelineAudioRefs.current[item.id] = node }}
+            preload="metadata"
+            src={`/api/v1/projects/${projectId}/assets/${item.asset_id}/content`}
+          />)}
+          {!subtitleTrackHidden && activeSubtitleItem && <TimelineSubtitle projectId={projectId} item={activeSubtitleItem} playheadMs={playheadMs} />}
           {!selectedAsset && <div className={styles.gapPreview}><AlertTriangle /><strong>缺少画面</strong><span>{selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '选择一个片段'}</span></div>}
           <div className={styles.monitorBadge}>时间线预览</div>
           <button className={styles.fullscreenButton} title="全屏"><Maximize2 /></button>

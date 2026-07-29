@@ -311,6 +311,26 @@
   font: 9px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
   white-space: pre-wrap;
 }
+.timelineAudio { display: none; }
+.timelineSubtitle {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: 20px;
+  width: min(82%, 520px);
+  padding: 5px 10px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, .72);
+  color: #fff;
+  font-size: clamp(11px, 1.35vw, 16px);
+  font-weight: 700;
+  line-height: 1.45;
+  text-align: center;
+  white-space: pre-line;
+  text-shadow: 0 1px 3px #000;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
 .transport {
   min-width: 0;
   display: flex;
