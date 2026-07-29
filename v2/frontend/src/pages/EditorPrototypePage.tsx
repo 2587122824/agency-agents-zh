@@ -1,18 +1,28 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Film,
   Eye, EyeOff, Layers3, Lock, Maximize2, Music2, Pause, Play, Plus, Redo2,
-  Scissors, Search, Sparkles, Subtitles, Undo2, Unlock, Volume2, VolumeX,
-  WandSparkles,
+  RotateCcw, Scissors, Search, Sparkles, Subtitles, Undo2, Unlock, Volume2,
+  VolumeX, WandSparkles, X,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
-import type { TimelineItem } from '../api/types'
+import type { Timeline, TimelineItem, TimelineItemDraft } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
 const DEFAULT_PROJECT_ID = 'project_9cd1c4e1fe5c4c8e88466acef2913e72'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v1'
+
+interface LocalEditorDraft {
+  schema_version: typeof LOCAL_DRAFT_SCHEMA
+  base_timeline_id: string
+  base_row_version: number
+  items: TimelineItem[]
+  timeline_zoom: number
+  saved_at: string
+}
 
 function timecode(ms: number) {
   const value = Math.max(0, Math.round(ms))
@@ -74,6 +84,7 @@ function replaceMainTrack(items: TimelineItem[], mainRows: TimelineItem[]) {
 export function EditorPrototypePage() {
   const [params] = useSearchParams()
   const projectId = params.get('project') ?? DEFAULT_PROJECT_ID
+  const queryClient = useQueryClient()
   const workspace = useQuery({
     queryKey: ['editor-prototype-workspace', projectId],
     queryFn: () => api.editorWorkspace(projectId),
@@ -93,17 +104,42 @@ export function EditorPrototypePage() {
   const [videoTrackHidden, setVideoTrackHidden] = useState(false)
   const [audioTrackMuted, setAudioTrackMuted] = useState(false)
   const [subtitleTrackHidden, setSubtitleTrackHidden] = useState(false)
+  const [dirty, setDirty] = useState(false)
+  const [confirmSaveOpen, setConfirmSaveOpen] = useState(false)
+  const [validationOpen, setValidationOpen] = useState(false)
+  const [lastValidation, setLastValidation] = useState<Timeline | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
 
   const sourceTimeline = workspace.data?.timelines[0] ?? null
+  const localDraftKey = `agency-studio.editor-draft.${projectId}`
   useEffect(() => {
     if (!sourceTimeline) return
-    setItems(sourceTimeline.items)
+    let restored: LocalEditorDraft | null = null
+    try {
+      const raw = window.localStorage.getItem(localDraftKey)
+      const parsed = raw ? JSON.parse(raw) as LocalEditorDraft : null
+      if (
+        parsed?.schema_version === LOCAL_DRAFT_SCHEMA
+        && parsed.base_timeline_id === sourceTimeline.id
+        && parsed.base_row_version === sourceTimeline.row_version
+        && Array.isArray(parsed.items)
+      ) restored = parsed
+      else if (raw) window.localStorage.removeItem(localDraftKey)
+    } catch {
+      window.localStorage.removeItem(localDraftKey)
+    }
+    setItems(restored?.items ?? sourceTimeline.items)
+    setTimelineZoom(restored?.timeline_zoom ?? sourceTimeline.track_config.pixels_per_second ?? 82)
+    setDirty(Boolean(restored))
     setHistory([])
     setFuture([])
     setSelectedIndex(0)
     setPlayheadMs(0)
-  }, [sourceTimeline?.id])
+    setLastValidation(sourceTimeline)
+    setNotice(restored
+      ? `已恢复 ${new Date(restored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
+      : '当前时间线已同步；开始调整后会自动保存本地草稿。')
+  }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey])
 
   const durationMs = workspace.data?.duration_ms ?? 15000
   const selectedItem = items[selectedIndex] ?? null
@@ -114,6 +150,9 @@ export function EditorPrototypePage() {
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
   const timelineWidth = Math.max(900, (durationMs / 1000) * timelineZoom)
+  const validationErrors = lastValidation?.validation_report
+    ?? sourceTimeline?.validation_report
+    ?? []
 
   useEffect(() => {
     const currentIndex = items.findIndex(item => item.track_type === 'main_video' && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms)
@@ -129,6 +168,68 @@ export function EditorPrototypePage() {
     else video.pause()
   }, [playing, selectedItem?.id, selectedItem?.asset_id, selectedItem?.source_in_ms])
 
+  useEffect(() => {
+    if (!sourceTimeline || !dirty || !items.length) return
+    const draft: LocalEditorDraft = {
+      schema_version: LOCAL_DRAFT_SCHEMA,
+      base_timeline_id: sourceTimeline.id,
+      base_row_version: sourceTimeline.row_version,
+      items,
+      timeline_zoom: timelineZoom,
+      saved_at: new Date().toISOString(),
+    }
+    window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
+  }, [dirty, items, localDraftKey, sourceTimeline, timelineZoom])
+
+  const draftItems = (): TimelineItemDraft[] => items.map(item => ({
+    track_type: item.track_type,
+    sequence_number: item.sequence_number,
+    asset_id: item.asset_id,
+    label: item.label,
+    gap_reason: item.gap_reason,
+    source_in_ms: item.source_in_ms,
+    source_out_ms: item.source_out_ms,
+    timeline_in_ms: item.timeline_in_ms,
+    timeline_out_ms: item.timeline_out_ms,
+    transform: item.transform,
+  }))
+
+  const saveAndValidate = useMutation({
+    mutationFn: async () => {
+      if (!sourceTimeline) throw new Error('当前没有可修订的时间线版本。')
+      const revised = await api.reviseTimelineCandidate(projectId, sourceTimeline, {
+        ...sourceTimeline.track_config,
+        pixels_per_second: timelineZoom,
+      }, draftItems())
+      return api.validateTimeline(projectId, revised)
+    },
+    onSuccess: async timeline => {
+      window.localStorage.removeItem(localDraftKey)
+      setDirty(false)
+      setConfirmSaveOpen(false)
+      setLastValidation(timeline)
+      setValidationOpen(Boolean(timeline.validation_report.length))
+      await queryClient.invalidateQueries({ queryKey: ['editor-prototype-workspace', projectId] })
+      await queryClient.invalidateQueries({ queryKey: ['editor-workspace', projectId] })
+      setNotice(timeline.validation_report.length
+        ? `时间线 v${timeline.version_number} 已保存，检查发现 ${timeline.validation_report.length} 个问题。`
+        : `时间线 v${timeline.version_number} 已保存并通过确定性检查。`)
+    },
+  })
+
+  const discardDraft = () => {
+    if (!sourceTimeline) return
+    window.localStorage.removeItem(localDraftKey)
+    setItems(sourceTimeline.items)
+    setTimelineZoom(sourceTimeline.track_config.pixels_per_second)
+    setHistory([])
+    setFuture([])
+    setDirty(false)
+    setSelectedIndex(0)
+    setPlayheadMs(0)
+    setNotice('已丢弃本地调整，恢复到当前时间线版本。')
+  }
+
   const selectItem = (item: TimelineItem) => {
     const index = items.indexOf(item)
     setSelectedIndex(index)
@@ -140,6 +241,7 @@ export function EditorPrototypePage() {
     setHistory(rows => [...rows.slice(-49), items])
     setFuture([])
     setItems(nextItems)
+    setDirty(true)
     if (selectedId !== undefined) {
       const nextIndex = selectedId ? nextItems.findIndex(item => item.id === selectedId) : -1
       setSelectedIndex(nextIndex >= 0 ? nextIndex : 0)
@@ -153,6 +255,7 @@ export function EditorPrototypePage() {
     setFuture(rows => [items, ...rows].slice(0, 50))
     setHistory(rows => rows.slice(0, -1))
     setItems(previous)
+    setDirty(true)
     setSelectedIndex(index => Math.min(index, Math.max(0, previous.length - 1)))
     setNotice('已撤销上一步本地剪辑操作。')
   }
@@ -163,6 +266,7 @@ export function EditorPrototypePage() {
     setHistory(rows => [...rows.slice(-49), items])
     setFuture(rows => rows.slice(1))
     setItems(next)
+    setDirty(true)
     setSelectedIndex(index => Math.min(index, Math.max(0, next.length - 1)))
     setNotice('已恢复下一步本地剪辑操作。')
   }
@@ -260,6 +364,7 @@ export function EditorPrototypePage() {
     const original = { sourceIn: item.source_in_ms ?? 0, sourceOut: item.source_out_ms ?? item.asset_duration_ms ?? 0 }
     setHistory(rows => [...rows.slice(-49), items])
     setFuture([])
+    setDirty(true)
     const onMove = (moveEvent: PointerEvent) => {
       const deltaMs = Math.round(((moveEvent.clientX - startX) / timelineZoom) * 10000) / 10
       setItems(current => {
@@ -333,6 +438,21 @@ export function EditorPrototypePage() {
     setPlaying(true)
   }
 
+  const locateValidationError = (error: Timeline['validation_report'][number]) => {
+    const match = /^items\.(main_video|audio|subtitle)\.(\d+)/.exec(error.path)
+    if (match) {
+      const sequence = Number(match[2])
+      const item = items.find(row => row.track_type === match[1] && row.sequence_number === sequence)
+      if (item) {
+        selectItem(item)
+        setNotice(`已定位：${error.message}`)
+      }
+    } else {
+      setNotice(error.message)
+    }
+    setValidationOpen(false)
+  }
+
   if (workspace.isPending) return <main className={styles.loading}><Film /><strong>正在装载新版剪辑台原型…</strong></main>
   if (!workspace.data || workspace.error) return <main className={styles.loading}><AlertTriangle /><strong>原型无法读取当前剪辑项目</strong></main>
 
@@ -343,20 +463,27 @@ export function EditorPrototypePage() {
         <span>剪辑台新版原型</span>
         <strong>{workspace.data.project_title}</strong>
       </div>
-      <button className={styles.versionButton}>时间线 v{sourceTimeline?.version_number ?? '--'} <small>本地草稿</small></button>
+      <button className={styles.versionButton}>时间线 v{sourceTimeline?.version_number ?? '--'} <small>{dirty ? '本地草稿未提交' : '已同步'}</small></button>
       <div className={styles.topActions}>
         <button title="撤销" disabled={!history.length} onClick={undo}><Undo2 /></button>
         <button title="重做" disabled={!future.length} onClick={redo}><Redo2 /></button>
-        <button className={styles.primaryAction} onClick={() => setNotice(unresolvedCount ? `仍有 ${unresolvedCount} 个画面缺口，请先处理。` : '草稿检查通过，可以保存为新版本。')}>
-          {unresolvedCount ? <AlertTriangle /> : <CheckCircle2 />}
-          {unresolvedCount ? `处理 ${unresolvedCount} 个问题` : '保存并检查'}
+        {dirty && <button title="丢弃本地草稿" onClick={discardDraft}><RotateCcw /></button>}
+        <button className={styles.primaryAction} disabled={saveAndValidate.isPending} onClick={() => {
+          if (dirty) setConfirmSaveOpen(true)
+          else if (validationErrors.length || unresolvedCount) setValidationOpen(true)
+          else setNotice('当前版本已经通过检查，可以进入确认阶段。')
+        }}>
+          {dirty ? <CheckCircle2 /> : unresolvedCount || validationErrors.length ? <AlertTriangle /> : <CheckCircle2 />}
+          {saveAndValidate.isPending ? '正在保存…' : dirty ? '保存并检查' : unresolvedCount || validationErrors.length ? `处理 ${Math.max(unresolvedCount, validationErrors.length)} 个问题` : '版本已通过'}
         </button>
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={unresolvedCount > 0}>
-      {unresolvedCount ? <AlertTriangle /> : <CheckCircle2 />}
+    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error)}>
+      {unresolvedCount || validationErrors.length || saveAndValidate.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
+      {saveAndValidate.error && <button onClick={() => setConfirmSaveOpen(true)}>{saveAndValidate.error instanceof Error ? saveAndValidate.error.message : '保存失败，请重试'}</button>}
+      {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
       <code>{workspace.data.aspect_ratio} · {seconds(durationMs)} · 预览质量</code>
     </section>
 
@@ -456,7 +583,7 @@ export function EditorPrototypePage() {
         <div><strong>时间线</strong><span>{mainItems.length} 个画面片段 · {audioItems.length} 个音频 · {subtitleItems.length} 个字幕</span></div>
         <button onClick={splitSelected}><Scissors />分割</button>
         <button>磁吸 100ms</button>
-        <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => setTimelineZoom(Number(event.target.value))} /></label>
+        <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => { setTimelineZoom(Number(event.target.value)); setDirty(true) }} /></label>
         <code>{timecode(playheadMs)}</code>
       </header>
       <div className={styles.timelineViewport}>
@@ -505,5 +632,32 @@ export function EditorPrototypePage() {
       </div>
       <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>Space 播放 · S 分割 · Delete 删除 · Ctrl+Z 撤销</span></footer>
     </section>
+    {confirmSaveOpen && <div className={styles.modal}><section>
+      <header><CheckCircle2 /><div><span>IMMUTABLE REVISION</span><h2>保存并检查新时间线版本</h2></div><button title="关闭" onClick={() => setConfirmSaveOpen(false)}><X /></button></header>
+      <p>这会基于时间线 v{sourceTimeline?.version_number} 创建不可变的新版本，然后立即执行确定性检查。不会确认交付、启动渲染或产生供应商费用。</p>
+      <dl>
+        <div><dt>新版本</dt><dd>v{(sourceTimeline?.version_number ?? 0) + 1}</dd></div>
+        <div><dt>画面片段</dt><dd>{mainItems.length}</dd></div>
+        <div><dt>显式空位</dt><dd>{unresolvedCount}</dd></div>
+        <div><dt>基线版本</dt><dd>v{sourceTimeline?.version_number} · row {sourceTimeline?.row_version}</dd></div>
+      </dl>
+      {unresolvedCount > 0 && <div className={styles.modalWarning}><AlertTriangle /><span>允许保存含空位的候选，但检查不会通过；保存后会精确定位这些问题。</span></div>}
+      <footer><button onClick={() => setConfirmSaveOpen(false)}>继续调整</button><button className={styles.confirmButton} disabled={saveAndValidate.isPending} onClick={() => saveAndValidate.mutate()}>{saveAndValidate.isPending ? '正在创建并检查…' : '创建新版本并检查'}</button></footer>
+    </section></div>}
+    {validationOpen && <div className={styles.modal}><section>
+      <header><AlertTriangle /><div><span>VALIDATION ISSUES</span><h2>需要处理的时间线问题</h2></div><button title="关闭" onClick={() => setValidationOpen(false)}><X /></button></header>
+      <p>点击问题会定位到对应片段。技术代码只用于审计，实际处理以中文说明为准。</p>
+      <div className={styles.validationList}>
+        {(validationErrors.length ? validationErrors : mainItems.filter(item => !item.asset_id).map(item => ({
+          code: 'TIMELINE_GAP_UNRESOLVED',
+          path: `items.main_video.${item.sequence_number}`,
+          message: '候选保留了显式空位，必须完成素材取舍后才能确认。',
+          evidence: {},
+        }))).map(error => <button key={`${error.code}-${error.path}`} onClick={() => locateValidationError(error)}>
+          <AlertTriangle /><span><strong>{error.message}</strong><small>{error.path}</small></span><code>{error.code}</code>
+        </button>)}
+      </div>
+      <footer><button onClick={() => setValidationOpen(false)}>返回时间线</button></footer>
+    </section></div>}
   </main>
 }
