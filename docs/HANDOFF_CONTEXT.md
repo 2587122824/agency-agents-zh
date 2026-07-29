@@ -25,7 +25,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 分支 | `main` |
 | V2 地址 | `http://127.0.0.1:8766/` |
 | 健康检查 | `GET /api/v1/health` |
-| 数据库迁移 | `20260728_39 (head)` |
+| 数据库迁移 | `20260729_40 (head)` |
 | 已发布配置 | `production_config_1d60e74888bb4458a9cd54508501596e`，版本 57；保持 v56 的视觉、CosyVoice、Provider、NodeInfoList、存储和价格不变，只升级 5 个已启用文本智能体的项目生产策略输入与 Prompt 合同 |
 | 智能体模型 | `DeepSeek V4 Flash`，OpenAI-compatible Provider；仅声明文本生成 |
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 与文本模型 API Key 由当前已发布系统配置普通字段提供，不再读取环境变量 |
@@ -334,7 +334,7 @@ v2/runtime/worker.err.log
 - 质量审核智能体严格网关与 API 验收：图片 Manifest/图片内容只提交一次，非法素材 ID、合同引用、推荐状态和 `face_visibility=not_visible` 下的正脸缺失均明确失败；候选经人工决定后才形成正式 QC 报告
 - Python compileall：通过
 - Vite production build：通过
-- Alembic runtime/head：`20260728_39`
+- Alembic runtime/head：`20260729_40`
 - 生产页两阶段浏览器验收：桌面明确分区展示分镜图片与视频后续步骤；窄屏 `scrollWidth == clientWidth`，无控制台错误；等待图片确认时前端不持续轮询
 - 配音制作准备浏览器验收：配置 v55 的 5 个预设音色与“登记授权复刻声音”入口可见，授权确认默认未勾选且提交按钮禁用；`production-preparation` 响应投影已显式保留 `audio_config`；390×844 下 `scrollWidth == clientWidth`
 - 系统配置页 CosyVoice 真实验收入口：只读预检显示 v56、`cosyvoice-v1`、`longxiaochun / rate=1.0 / volume=50` 与 24kHz 单声道 WAV 合同；API Key 已配置且命令行预检为 `ready_for_paid_validation`，记录数仍为 0、`network_probe=false`；付费按钮仍要求用户二次确认
