@@ -422,6 +422,7 @@
   padding: 0 6px;
 }
 .timelineTools input[type='range']{width:120px}.timelineTools select{height:27px;border:1px solid #4b5056;border-radius:4px;background:#1c1f23;color:#fff;font-size:9px}
+.snapToggle{display:flex;align-items:center;gap:4px;white-space:nowrap}.timelineTools .snapToggle input[type='checkbox']{width:14px;height:14px;margin:0;padding:0;accent-color:#8f70b5}.timelineTools select:disabled{opacity:.45;cursor:not-allowed}
 .timelineTools button {
   height: 27px;
   display: flex;

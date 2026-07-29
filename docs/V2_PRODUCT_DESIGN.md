@@ -1169,7 +1169,7 @@ GET  /api/v1/projects/{project_id}/production-execution
 
 时间线仅引用当前活动快照、同一项目且状态为 `approved` 或 `used` 的素材。显式空位可以留在候选中用于取舍，但不能确认；系统不自动补素材、裁切、变速或重排。已有时间线后必须从指定版本创建修订，确认版本不可原地修改。
 
-时间线 v3 把 `pixels_per_second`、`snap_enabled`、`snap_interval_ms` 与 `audio_mastering` 作为轨道配置的一部分保存，使缩放、磁吸开关、吸附间隔和母带目标不是仅存在于浏览器的临时状态。同轨拖放必须重算明确的 `sequence_number` 和连续时间区间；源入出点与成片入出点的裁切联动仍需满足无隐式变速。音频波形由后端读取已验证 PCM WAV，按素材内容哈希与采样点数生成 `audio-waveform-cache.v1`，不得从文件名或浏览器解码结果猜测。视频淡入淡出与音频 `volume_envelope` 关键点进入 TimelineItem.transform：后端校验类型、时长、严格递增时点、片段首尾覆盖和 -60dB～12dB 范围，交付渲染器按冻结值生成 FFmpeg filter；页面显示不构成执行依据。
+时间线 v3 把 `pixels_per_second`、`snap_enabled`、`snap_interval_ms` 与 `audio_mastering` 作为轨道配置的一部分保存，使缩放、磁吸开关、吸附间隔和母带目标不是仅存在于浏览器的临时状态。现有剪辑页和新版原型都必须公开磁吸开关；关闭时保留间隔合同但所有时间编辑按毫秒取整，不能暗中继续吸附。同轨拖放必须重算明确的 `sequence_number` 和连续时间区间；源入出点与成片入出点的裁切联动仍需满足无隐式变速。音频波形由后端读取已验证 PCM WAV，按素材内容哈希与采样点数生成 `audio-waveform-cache.v1`，不得从文件名或浏览器解码结果猜测。视频淡入淡出与音频 `volume_envelope` 关键点进入 TimelineItem.transform：后端校验类型、时长、严格递增时点、片段首尾覆盖和 -60dB～12dB 范围，交付渲染器按冻结值生成 FFmpeg filter；页面显示不构成执行依据。
 
 BGM 是音频片段的显式 `background_music` 混音角色，不通过文件名或素材 role 猜测。时间线必须冻结用户确认、`owned/licensed/royalty_free` 权利依据和可读证据；循环仅允许源片段短于成片区间，并由渲染器确定性重复后裁到精确出点。启用 ducking 时，冻结区间必须由当前时间线中与 BGM 相交的旁白片段精确投影得到，任何旁白移动都会使旧区间校验失败；attack、release 和 reduction 进入同一不可变合同。轨道级 `audio_mastering` 冻结 -24～-9 LUFS 目标、-3～-0.1 dBTP 上限和 limiter 控制，FFmpeg 执行 `loudnorm + alimiter`。执行参数和命令证据不等于输出已通过音频 QC，实际响度、true peak、削波与静音测量仍由后续确定性 QC 报告负责。
 
