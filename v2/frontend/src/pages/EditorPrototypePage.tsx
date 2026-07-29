@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Film,
-  Eye, EyeOff, Layers3, Lock, Maximize2, Music2, Pause, Play, Plus, Redo2,
+  Download, Eye, EyeOff, Layers3, Lock, Maximize2, Music2, Pause, Play, Plus, Redo2,
+  RefreshCw,
   RotateCcw, Scissors, Search, ShieldCheck, Sparkles, Subtitles, Undo2, Unlock,
   Upload, Volume2, VolumeX, WandSparkles, X,
 } from 'lucide-react'
@@ -140,6 +141,10 @@ export function EditorPrototypePage() {
   const deliveryWorkspace = useQuery({
     queryKey: ['editor-prototype-delivery', projectId],
     queryFn: () => api.deliveryWorkspace(projectId),
+    refetchInterval: query => {
+      const status = query.state.data?.attempts[0]?.status
+      return status === 'queued' || status === 'rendering' ? 3000 : false
+    },
   })
   const [items, setItems] = useState<TimelineItem[]>([])
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -172,7 +177,9 @@ export function EditorPrototypePage() {
     warnings: false,
   })
   const [deliveryAuthorizeOpen, setDeliveryAuthorizeOpen] = useState(false)
+  const [deliveryStatusOpen, setDeliveryStatusOpen] = useState(false)
   const [deliveryMethod, setDeliveryMethod] = useState<'external_upload' | 'local_ffmpeg' | null>(null)
+  const [deliveryFile, setDeliveryFile] = useState<File | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const renderedPreviewRef = useRef<HTMLVideoElement | null>(null)
   const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
@@ -239,6 +246,7 @@ export function EditorPrototypePage() {
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
   const activeSubtitleItem = subtitleItems.find(item => item.asset_id && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
+  const deliveryAttempt = deliveryWorkspace.data?.attempts[0] ?? null
   const comparisonItem = mainItems.find(item => (
     item.asset_id
     && previewCompareMs >= item.timeline_in_ms
@@ -434,6 +442,7 @@ export function EditorPrototypePage() {
     },
     onSuccess: async attempt => {
       setDeliveryAuthorizeOpen(false)
+      setDeliveryStatusOpen(true)
       setDeliveryMethod(null)
       setNotice(attempt.execution_kind === 'local_ffmpeg'
         ? '正式交付已授权，本机 FFmpeg 任务已进入队列。'
@@ -441,6 +450,40 @@ export function EditorPrototypePage() {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] }),
         queryClient.invalidateQueries({ queryKey: ['delivery-workspace', projectId] }),
+      ])
+    },
+  })
+
+  const uploadDelivery = useMutation({
+    mutationFn: async () => {
+      if (!deliveryAttempt || deliveryAttempt.status !== 'authorized' || !deliveryFile) {
+        throw new Error('当前没有等待上传的交付尝试，或尚未选择 MP4。')
+      }
+      return api.uploadDelivery(projectId, deliveryAttempt, deliveryFile)
+    },
+    onSuccess: async () => {
+      setDeliveryFile(null)
+      setNotice('最终 MP4 已上传并登记；请继续执行交付文件验证。')
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['delivery-workspace', projectId] }),
+      ])
+    },
+  })
+
+  const verifyDelivery = useMutation({
+    mutationFn: async () => {
+      if (!deliveryAttempt || deliveryAttempt.status !== 'output_registered' || !deliveryAttempt.final_asset) {
+        throw new Error('当前没有可以验证的已登记交付文件。')
+      }
+      return api.verifyDelivery(projectId, deliveryAttempt)
+    },
+    onSuccess: async attempt => {
+      setNotice(`交付文件已验证（${attempt.final_asset?.width}×${attempt.final_asset?.height}），可以下载最终 MP4。`)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['editor-prototype-delivery', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['delivery-workspace', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['editor-prototype-workspace', projectId] }),
       ])
     },
   })
@@ -793,14 +836,16 @@ export function EditorPrototypePage() {
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error)}>
-      {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
+    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
+      {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
       {saveAndValidate.error && <button onClick={() => setConfirmSaveOpen(true)}>{saveAndValidate.error instanceof Error ? saveAndValidate.error.message : '保存失败，请重试'}</button>}
       {renderPreview.error && <button onClick={() => renderPreview.mutate()}>{renderPreview.error instanceof Error ? renderPreview.error.message : '低清预览失败，请重试'}</button>}
       {reviewPreview.error && <button onClick={() => reviewPreview.mutate()}>{reviewPreview.error instanceof Error ? reviewPreview.error.message : '人工复核保存失败，请重试'}</button>}
       {confirmTimeline.error && <button onClick={() => confirmTimeline.mutate()}>{confirmTimeline.error instanceof Error ? confirmTimeline.error.message : '时间线确认失败，请重试'}</button>}
       {authorizeDelivery.error && <button onClick={() => setDeliveryAuthorizeOpen(true)}>{authorizeDelivery.error instanceof Error ? authorizeDelivery.error.message : '交付授权失败，请重试'}</button>}
+      {uploadDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{uploadDelivery.error instanceof Error ? uploadDelivery.error.message : '交付文件上传失败'}</button>}
+      {verifyDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{verifyDelivery.error instanceof Error ? verifyDelivery.error.message : '交付文件验证失败'}</button>}
       {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
       <code>{workspace.data.aspect_ratio} · {seconds(durationMs)} · 预览质量</code>
     </section>
@@ -952,6 +997,10 @@ export function EditorPrototypePage() {
           if (dirty) setNotice('请先保存并检查本地草稿，再生成低清预览。')
           else renderPreview.mutate()
         }}><Film />{renderPreview.isPending ? '预览生成中…' : '低清预览'}</button>
+        {(deliveryWorkspace.data?.confirmed_timeline || deliveryAttempt) && <button onClick={() => setDeliveryStatusOpen(true)}>
+          {deliveryAttempt?.status === 'queued' || deliveryAttempt?.status === 'rendering' ? <RefreshCw /> : deliveryAttempt?.status === 'verified' ? <CheckCircle2 /> : <ShieldCheck />}
+          {deliveryAttempt?.status === 'verified' ? '成片交付' : deliveryAttempt ? '交付状态' : '授权交付'}
+        </button>}
         <button>磁吸 100ms</button>
         <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => { setTimelineZoom(Number(event.target.value)); setDirty(true) }} /></label>
         <code>{timecode(playheadMs)}</code>
@@ -1142,6 +1191,52 @@ export function EditorPrototypePage() {
         </label>)}
       </div>
       <footer><button onClick={() => setDeliveryAuthorizeOpen(false)}>取消</button><button className={styles.confirmButton} disabled={!deliveryMethod || authorizeDelivery.isPending} onClick={() => authorizeDelivery.mutate()}>{authorizeDelivery.isPending ? '正在授权…' : '确认授权'}</button></footer>
+    </section></div>}
+    {deliveryStatusOpen && deliveryWorkspace.data && <div className={styles.modal}><section className={styles.deliveryStatusModal}>
+      <header><ShieldCheck /><div><span>DELIVERY STATUS</span><h2>最终交付闭环</h2></div><button title="关闭" onClick={() => setDeliveryStatusOpen(false)}><X /></button></header>
+      <dl>
+        <div><dt>确认时间线</dt><dd>{deliveryWorkspace.data.confirmed_timeline ? `v${deliveryWorkspace.data.confirmed_timeline.version_number}` : '尚未确认'}</dd></div>
+        <div><dt>预览复核</dt><dd>{deliveryWorkspace.data.preview_review ? '已绑定精确复核' : '尚未完成'}</dd></div>
+        <div><dt>当前状态</dt><dd>{deliveryAttempt ? ({
+          authorized: '等待外部上传',
+          queued: '等待本机生成',
+          rendering: '正在生成',
+          output_registered: '等待文件验证',
+          verified: '交付完成',
+          blocked: '交付阻断',
+        } as Record<string, string>)[deliveryAttempt.status] : '尚未授权'}</dd></div>
+      </dl>
+      {!deliveryAttempt && deliveryWorkspace.data.confirmed_timeline && deliveryWorkspace.data.preview_review && <div className={styles.deliveryStep}>
+        <ShieldCheck /><span><strong>等待明确授权</strong><small>请选择本机 FFmpeg 或外部上传；系统不会默认选择。</small></span>
+        <button className={styles.confirmButton} onClick={() => { setDeliveryStatusOpen(false); setDeliveryAuthorizeOpen(true) }}>选择交付方式</button>
+      </div>}
+      {!deliveryAttempt && (!deliveryWorkspace.data.confirmed_timeline || !deliveryWorkspace.data.preview_review) && <div className={styles.deliveryStep} data-warning="true">
+        <AlertTriangle /><span><strong>交付条件尚未满足</strong><small>请先完成低清预览复核并确认当前时间线。</small></span>
+        <button onClick={() => setDeliveryStatusOpen(false)}>返回剪辑</button>
+      </div>}
+      {(deliveryAttempt?.status === 'queued' || deliveryAttempt?.status === 'rendering') && <div className={styles.deliveryStep}>
+        <RefreshCw className={deliveryAttempt.status === 'rendering' ? styles.spinning : undefined} />
+        <span><strong>{deliveryAttempt.status === 'queued' ? '等待本机生成' : '正在生成最终 MP4'}</strong><small>Worker 只执行本次冻结请求；页面会自动刷新状态。</small></span>
+        <button disabled={deliveryWorkspace.isFetching} onClick={() => deliveryWorkspace.refetch()}>{deliveryWorkspace.isFetching ? '刷新中…' : '立即刷新'}</button>
+      </div>}
+      {deliveryAttempt?.status === 'authorized' && <div className={styles.deliveryStep}>
+        <Upload /><span><strong>上传最终 MP4</strong><small>{deliveryFile?.name ?? '尚未选择文件；只接受 MP4。'}</small></span>
+        <label className={styles.deliveryFileButton}><Upload />选择文件<input type="file" accept="video/mp4,.mp4" onChange={event => setDeliveryFile(event.target.files?.[0] ?? null)} /></label>
+        <button className={styles.confirmButton} disabled={!deliveryFile || uploadDelivery.isPending} onClick={() => uploadDelivery.mutate()}>{uploadDelivery.isPending ? '上传中…' : '上传并登记'}</button>
+      </div>}
+      {deliveryAttempt?.status === 'output_registered' && <div className={styles.deliveryStep}>
+        <ShieldCheck /><span><strong>输出已经登记，尚未验证</strong><small>{deliveryAttempt.final_asset?.byte_size?.toLocaleString() ?? 0} bytes · 验证将复查 MP4、画幅、时长与音频合同。</small></span>
+        <button className={styles.confirmButton} disabled={verifyDelivery.isPending} onClick={() => verifyDelivery.mutate()}>{verifyDelivery.isPending ? '验证中…' : '验证交付文件'}</button>
+      </div>}
+      {deliveryAttempt?.status === 'blocked' && <div className={styles.deliveryBlocked}>
+        <AlertTriangle /><div><strong>{deliveryAttempt.error_code ?? 'DELIVERY_BLOCKED'}</strong><pre>{JSON.stringify(deliveryAttempt.error_detail, null, 2)}</pre></div>
+      </div>}
+      {deliveryAttempt?.status === 'verified' && deliveryAttempt.final_asset && <div className={styles.deliveryStep} data-complete="true">
+        <CheckCircle2 /><span><strong>最终 MP4 已通过验证</strong><small>{deliveryAttempt.final_asset.width}×{deliveryAttempt.final_asset.height} · {seconds(deliveryAttempt.final_asset.duration_ms)}</small></span>
+        <a className={styles.confirmButton} download href={`/api/v1/projects/${projectId}/assets/${deliveryAttempt.final_asset.id}/content`}><Download />下载 MP4</a>
+      </div>}
+      {deliveryAttempt && <details className={styles.deliveryEvidence}><summary>查看交付证据</summary><dl><div><dt>Attempt</dt><dd><code>{deliveryAttempt.id}</code></dd></div><div><dt>请求指纹</dt><dd><code>{deliveryAttempt.request_fingerprint}</code></dd></div><div><dt>执行方式</dt><dd>{deliveryAttempt.execution_kind}</dd></div></dl></details>}
+      <footer><button onClick={() => setDeliveryStatusOpen(false)}>关闭</button></footer>
     </section></div>}
   </main>
 }

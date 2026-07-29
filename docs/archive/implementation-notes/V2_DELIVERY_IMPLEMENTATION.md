@@ -109,7 +109,7 @@ GET  /api/v1/projects/{project_id}/assets/{asset_id}/content
 
 `delivery-workspace` 返回两种交付方式的可用性、不可用原因和本机渲染器版本。
 
-新版 `/editor-prototype` 在保存精确预览复核并显式确认时间线后读取同一 DeliveryWorkspace，展示 `local_ffmpeg / external_upload` 两种方式并调用既有授权接口。前端不会默认选择方式；授权前重新读取确认时间线和同合同复核，失败不自动重试或切换。外部文件上传、本机任务进度、输出验证与成片下载仍由下述独立交付命令负责，后续继续收进新版工作台。
+新版 `/editor-prototype` 在保存精确预览复核并显式确认时间线后读取同一 DeliveryWorkspace，展示 `local_ffmpeg / external_upload` 两种方式并调用既有授权接口。前端不会默认选择方式；授权前重新读取确认时间线和同合同复核，失败不自动重试或切换。授权后继续复用同一投影：本机 `queued / rendering` 期间轮询状态；外部 `authorized` 时选择并上传 MP4；`output_registered` 时显式验证；`blocked` 显示结构化证据；`verified` 时通过 Asset 内容接口下载。各步骤仍由下述独立交付命令负责。
 
 ## 8. 验收
 

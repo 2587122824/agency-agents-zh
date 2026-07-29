@@ -147,6 +147,8 @@ Timeline 读取投影会从不可变事件中选择当前 Timeline ID 与合同�
 
 复核完成后，新版剪辑台继续显式调用时间线确认命令；确认成功才打开交付授权弹窗。授权前重新读取 DeliveryWorkspace，要求确认时间线与精确复核同时存在，再由用户选择 `local_ffmpeg` 或 `external_upload`。这只是把既有合同步骤编排到同一界面，不合并命令、不隐式授权、不自动重试。
 
+授权后剪辑台复用 DeliveryWorkspace 的最新 Attempt。`queued / rendering` 仅以 3 秒间隔轮询只读状态并允许手动刷新；`authorized` 提供 MP4 文件选择并调用既有上传登记；`output_registered` 要求显式调用验证；`blocked` 原样展示错误代码与结构化证据；`verified` 才展示探测规格和 Asset 内容下载。页面不从文件名猜状态，不在上传后自动验证，也不给阻断 Attempt 创建第二次尝试。
+
 ## 8. 事件
 
 ```text
@@ -180,6 +182,7 @@ Alembic 修订：`20260716_09`。
 - 未冻结同一时间线合同的 `editor-preview-review.v1` 时不能授权正式交付；交付清单重建继续复验原 review ID。
 - 双窗结果播放头跨片段时必须切换源素材并按时间线/源入点确定性映射；刷新后相同合同复核必须恢复。
 - 新版剪辑台内确认和交付授权仍是两个独立用户动作；未选择交付方式不能授权。
+- 外部上传后必须停在 `output_registered` 等待显式验证；本机生成只轮询状态；只有 `verified` 才提供成片下载。
 
 ## 11. 后续接口
 
