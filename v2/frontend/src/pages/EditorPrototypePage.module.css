@@ -182,7 +182,41 @@
 }
 .assetPanel nav button[data-active="true"] { background: #30363a; color: #fff; }
 .assetPanel nav svg { width: 13px; height: 13px; }
+.assetSelectionBanner {
+  padding: 7px 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 7px;
+  border-bottom: 1px solid #5e493f;
+  background: #332721;
+}
+.assetSelectionBanner strong { color: #f0b098; font-size: 8px; }
+.assetSelectionBanner span { grid-column: 1; color: #a89389; font-size: 7px; }
+.assetSelectionBanner button {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  border: 0;
+  background: transparent;
+  color: #c8b5ac;
+  font-size: 7px;
+  cursor: pointer;
+}
 .assetList { height: calc(100% - 96px); overflow-y: auto; padding: 6px; }
+.assetPanel[data-gap-selection="true"] .assetList { height: calc(100% - 139px); }
+.assetEmpty {
+  margin: 8px;
+  padding: 12px 8px;
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  border: 1px dashed #59483f;
+  border-radius: 5px;
+  color: #a9978f;
+  text-align: center;
+}
+.assetEmpty svg { width: 17px; color: #d68e70; }
+.assetEmpty strong { color: #d7c6be; font-size: 8px; }
+.assetEmpty span { font-size: 7px; line-height: 1.5; }
 .assetList > button {
   width: 100%;
   min-width: 0;
@@ -480,7 +514,8 @@
 .gapTitle span { display: grid; gap: 4px; }
 .gapTitle strong { font-size: 11px; }
 .gapTitle small { color: #91999d; font-size: 8px; }
-.gapActions > button {
+.gapActions > button,
+.gapActions > a {
   min-height: 55px;
   padding: 8px;
   display: grid;
@@ -491,14 +526,20 @@
   border-radius: 5px;
   background: #24292d;
   color: #dde1de;
+  text-decoration: none;
   text-align: left;
   cursor: pointer;
 }
-.gapActions > button:hover { border-color: #6a4a40; background: #2d2522; }
-.gapActions > button > svg { width: 16px; color: var(--editor-accent); }
-.gapActions > button span { display: grid; gap: 3px; }
-.gapActions > button strong { font-size: 9px; }
-.gapActions > button small { color: #8b9498; font-size: 8px; }
+.gapActions > button:hover,
+.gapActions > a:hover { border-color: #6a4a40; background: #2d2522; }
+.gapActions > button > svg,
+.gapActions > a > svg { width: 16px; color: var(--editor-accent); }
+.gapActions > button span,
+.gapActions > a span { display: grid; gap: 3px; }
+.gapActions > button strong,
+.gapActions > a strong { font-size: 9px; }
+.gapActions > button small,
+.gapActions > a small { color: #8b9498; font-size: 8px; }
 .timelinePanel {
   min-width: 0;
   min-height: 0;

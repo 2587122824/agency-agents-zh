@@ -846,6 +846,7 @@ def _validate_items(session: Session, project: Project, timeline: Timeline) -> l
     expected_types = {"main_video": "video", "audio": "audio", "subtitle": "subtitle"}
     duration_ms = project.duration_seconds * 1000
     seen_positions: set[tuple[str, int]] = set()
+    seen_main_video_assets: dict[str, int] = {}
     for item in items:
         path = f"items.{item.track_type}.{item.sequence_number}"
         position = (item.track_type, item.sequence_number)
@@ -906,6 +907,18 @@ def _validate_items(session: Session, project: Project, timeline: Timeline) -> l
                 asset_type=asset.asset_type,
                 expected_type=expected_types.get(item.track_type),
             ))
+        if item.track_type == "main_video":
+            previous_sequence = seen_main_video_assets.get(asset.id)
+            if previous_sequence is not None:
+                errors.append(_error(
+                    "TIMELINE_VIDEO_ASSET_REUSE_NOT_ALLOWED",
+                    path,
+                    "主画面素材不能重复引用来填补时长缺口；请选择未使用素材或返回生产流程补充镜头。",
+                    asset_id=asset.id,
+                    previous_sequence_number=previous_sequence,
+                ))
+            else:
+                seen_main_video_assets[asset.id] = item.sequence_number
         if item.source_in_ms is None or item.source_out_ms is None or item.source_out_ms <= item.source_in_ms:
             errors.append(_error("SOURCE_RANGE_INVALID", path, "素材源入点和出点必须形成有效区间。"))
             continue

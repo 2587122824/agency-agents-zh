@@ -6966,6 +6966,42 @@ def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(cl
     assert confirm.headers["x-error-code"] == "TIMELINE_NOT_READY_FOR_CONFIRMATION"
 
 
+def test_timeline_validation_blocks_reusing_main_video_to_fill_duration(client: TestClient) -> None:
+    project, snapshot = create_locked_snapshot(client)
+    video_assets = seed_editor_assets(client, project, snapshot)
+    client.post(
+        f"/api/v1/projects/{project['id']}/quality-stage:approve",
+        json={"command_id": "editor-reuse-stage-approve", "expected_snapshot_id": snapshot["id"]},
+    )
+    items = timeline_items_for_assets(video_assets)
+    items[1]["asset_id"] = items[0]["asset_id"]
+    items[1]["label"] = items[0]["label"]
+    candidate = client.post(
+        f"/api/v1/projects/{project['id']}/timeline-candidates",
+        json={
+            "command_id": "timeline-reuse-create-001",
+            "expected_snapshot_id": snapshot["id"],
+            "source": "user",
+            "track_config": {"audio_enabled": False, "subtitle_enabled": False},
+            "items": items,
+        },
+    ).json()
+
+    validated = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{candidate['id']}:validate",
+        json={"command_id": "timeline-reuse-validate-001", "expected_row_version": candidate["row_version"]},
+    ).json()
+
+    issue = next(
+        row for row in validated["validation_report"]
+        if row["code"] == "TIMELINE_VIDEO_ASSET_REUSE_NOT_ALLOWED"
+    )
+    assert validated["status"] == "candidate"
+    assert issue["path"] == "items.main_video.2"
+    assert issue["evidence"]["asset_id"] == video_assets[0]["id"]
+    assert issue["evidence"]["previous_sequence_number"] == 1
+
+
 def test_timeline_preview_renders_cached_low_resolution_without_delivery_side_effects(
     client: TestClient,
     monkeypatch,

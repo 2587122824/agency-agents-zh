@@ -154,6 +154,7 @@ export function EditorPrototypePage() {
   const [playheadMs, setPlayheadMs] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [assetFilter, setAssetFilter] = useState<'all' | 'video' | 'audio' | 'subtitle'>('all')
+  const [gapAssetSelection, setGapAssetSelection] = useState(false)
   const [notice, setNotice] = useState('原型模式：所有调整只保存在当前浏览器，不会修改真实时间线。')
   const [history, setHistory] = useState<TimelineItem[][]>([])
   const [future, setFuture] = useState<TimelineItem[][]>([])
@@ -253,10 +254,17 @@ export function EditorPrototypePage() {
     },
     staleTime: Infinity,
   })
-  const visibleAssets = workspace.data?.available_assets.filter(asset => assetFilter === 'all' || asset.asset_type === assetFilter) ?? []
   const mainItems = useMemo(() => items.filter(item => item.track_type === 'main_video'), [items])
   const audioItems = useMemo(() => items.filter(item => item.track_type === 'audio'), [items])
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
+  const usedMainVideoAssetIds = useMemo(
+    () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
+    [mainItems],
+  )
+  const visibleAssets = workspace.data?.available_assets.filter(asset => (
+    (assetFilter === 'all' || asset.asset_type === assetFilter)
+    && (!gapAssetSelection || (asset.asset_type === 'video' && !usedMainVideoAssetIds.has(asset.id)))
+  )) ?? []
   const activeSubtitleItem = subtitleItems.find(item => item.asset_id && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
   const deliveryAttempt = deliveryWorkspace.data?.attempts[0] ?? null
@@ -605,10 +613,16 @@ export function EditorPrototypePage() {
     setDraggedItemId(null)
   }
 
-  const dropAssetOnItem = (target: TimelineItem) => {
-    if (!draggedAssetId || videoTrackLocked) return
-    const asset = workspace.data?.available_assets.find(row => row.id === draggedAssetId)
+  const dropAssetOnItem = (target: TimelineItem, explicitAssetId?: string) => {
+    const sourceAssetId = explicitAssetId ?? draggedAssetId
+    if (!sourceAssetId || videoTrackLocked) return
+    const asset = workspace.data?.available_assets.find(row => row.id === sourceAssetId)
     if (!asset || asset.asset_type !== 'video' || !asset.duration_ms) return
+    if (mainItems.some(item => item.id !== target.id && item.asset_id === asset.id)) {
+      setNotice(`${asset.node_key ?? asset.role} 已用于当前主画面，不能重复引用来填补缺口。`)
+      setDraggedAssetId(null)
+      return
+    }
     const replacement: TimelineItem = {
       ...target,
       id: `prototype-${asset.id}-${Date.now()}`,
@@ -627,6 +641,18 @@ export function EditorPrototypePage() {
     const normalized = normalizeMainTrack(rows, durationMs)
     commitItems(replaceMainTrack(items, normalized), `已把 ${replacement.label} 投放到时间线。`, replacement.id)
     setDraggedAssetId(null)
+    setGapAssetSelection(false)
+  }
+
+  const startGapAssetSelection = () => {
+    setAssetFilter('video')
+    setGapAssetSelection(true)
+    const available = workspace.data?.available_assets.filter(asset => (
+      asset.asset_type === 'video' && !usedMainVideoAssetIds.has(asset.id)
+    )) ?? []
+    setNotice(available.length
+      ? `素材箱已只显示 ${available.length} 个未用于主画面的已批准视频；点击即可填入当前缺口。`
+      : '当前没有未使用的已批准视频。请返回生产流程生成补充镜头，或先分析缩短目标时长的影响。')
   }
 
   const addAssetToTrack = (trackType: TimelineItem['track_type'], assetId = draggedAssetId) => {
@@ -916,8 +942,9 @@ export function EditorPrototypePage() {
     </section>
 
     <section className={styles.editingArea}>
-      <aside className={styles.assetPanel}>
+      <aside className={styles.assetPanel} data-gap-selection={gapAssetSelection}>
         <header><div><span>ASSETS</span><strong>素材箱</strong></div><button title="搜索素材"><Search /></button></header>
+        {gapAssetSelection && <div className={styles.assetSelectionBanner}><strong>缺口素材选择</strong><span>仅显示未用于主画面的已批准视频</span><button onClick={() => setGapAssetSelection(false)}>退出</button></div>}
         <nav>
           {([
             ['all', '全部', Layers3],
@@ -927,6 +954,7 @@ export function EditorPrototypePage() {
           ] as const).map(([key, label, Icon]) => <button key={key} data-active={assetFilter === key} onClick={() => setAssetFilter(key)}><Icon />{label}</button>)}
         </nav>
         <div className={styles.assetList}>
+          {gapAssetSelection && visibleAssets.length === 0 && <div className={styles.assetEmpty}><AlertTriangle /><strong>没有可用的新视频</strong><span>重复使用现有镜头会破坏连续性证据，系统不会放行。</span></div>}
           {visibleAssets.map(asset => <button
             key={asset.id}
             draggable={Boolean(asset.duration_ms)}
@@ -938,6 +966,10 @@ export function EditorPrototypePage() {
             }}
             onDragEnd={() => setDraggedAssetId(null)}
             onClick={() => {
+              if (gapAssetSelection && asset.asset_type === 'video' && selectedItem && !selectedItem.asset_id) {
+                dropAssetOnItem(selectedItem, asset.id)
+                return
+              }
               const item = items.find(row => row.asset_id === asset.id)
               if (item) selectItem(item)
               else if (asset.asset_type === 'audio' || asset.asset_type === 'subtitle') addAssetToTrack(asset.asset_type, asset.id)
@@ -1053,9 +1085,9 @@ export function EditorPrototypePage() {
           </section>}
         </> : <section className={styles.gapActions}>
           <div className={styles.gapTitle}><AlertTriangle /><span><strong>缺少 {selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '0.9s'} 画面</strong><small>当前素材不足以覆盖 15 秒目标时长</small></span></div>
-          <button onClick={() => setNotice('已选择缩短成片；正式版本将先显示影响预览。')}><Clock3 /><span><strong>缩短成片</strong><small>使用现有素材总时长</small></span></button>
-          <button onClick={() => setNotice('将创建一个明确的补充镜头生产请求。')}><WandSparkles /><span><strong>生成补充镜头</strong><small>返回生产流程，可能产生费用</small></span></button>
-          <button onClick={() => setNotice('请从素材箱选择另一个已批准视频。')}><Plus /><span><strong>选择其他素材</strong><small>只使用已批准且未归档素材</small></span></button>
+          <Link to={`/projects/${projectId}/decision-impact`}><Clock3 /><span><strong>分析缩短成片</strong><small>先评估修改 15 秒目标的下游影响</small></span></Link>
+          <Link to={`/production?project=${projectId}`}><WandSparkles /><span><strong>前往生成补充镜头</strong><small>在生产流程登记新镜头，授权后才可能产生费用</small></span></Link>
+          <button onClick={startGapAssetSelection}><Plus /><span><strong>选择其他素材</strong><small>只列出未用于主画面的已批准视频</small></span></button>
         </section>}
       </aside>
     </section>
