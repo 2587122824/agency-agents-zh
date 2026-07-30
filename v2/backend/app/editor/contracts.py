@@ -201,6 +201,8 @@ class EditorAssetRead(BaseModel):
     snapshot_id: str
     dag_node_id: str | None
     node_key: str | None
+    shot_code: str | None
+    shot_sequence_number: int | None
     asset_type: str
     role: str
     duration_ms: int | None
@@ -208,6 +210,13 @@ class EditorAssetRead(BaseModel):
     height: int | None
     state: str
     content_hash: str | None
+
+
+class EditorShotRead(BaseModel):
+    shot_code: str
+    sequence_number: int
+    continuity_group_id: str | None
+    continuity_relation: str
 
 
 class EditorWorkspaceView(BaseModel):
@@ -220,6 +229,7 @@ class EditorWorkspaceView(BaseModel):
     audio_mode: str
     quality_stage_ready: bool
     quality_output_gaps: list[dict]
+    shot_sequence: list[EditorShotRead]
     available_assets: list[EditorAssetRead]
     timelines: list[TimelineRead]
     latest_editor_run: dict | None

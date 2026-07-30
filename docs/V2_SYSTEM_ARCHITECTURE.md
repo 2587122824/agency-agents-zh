@@ -224,6 +224,8 @@ draft
 - 编辑器边界预览是只读播放会话：从相邻主画面切点前后各 1 秒映射到已有媒体时钟，跨片段继续逐帧推进并在冻结结束点自动暂停，不写 `EditorDraftSession`。
 - 成对柔和过渡仍是两个相邻 TimelineItem 上的 `transition_out / transition_in` 冻结值，由一次前端事务和一个撤销步骤修改；后端校验与 FFmpeg 继续只认识既有 `cut/fade`，不增加改变时长的隐式叠化合同。
 - `EditorDraftSession` 请求把浏览器播放头规范化为整数毫秒。同一内容指纹失败后自动保存停止，只有用户显式重试或内容变化才可再次写入；API 的结构化校验错误向用户保留字段路径和消息，不触发客户端自动重试。
+- EditorWorkspace 从活动 ProductionSnapshot 的 `plan_version_id` 读取权威 Shot 顺序，并通过 Asset → DAGNode → Shot 关系投影每个视频素材的 `shot_code / shot_sequence_number`。顺序检查只消费这些类型化字段，不解析标签或节点名；一键整理是可撤销草稿事务，未知补充素材保持槽位，声音/字幕保持原成片时点。
+- 切点末帧/首帧对比使用两个独立静音视频元素分别定位 `source_out_ms - one_output_frame` 与 `source_in_ms`；元素只读、暂停、按需挂载，点击定格才调用统一时间线 seek。该预览不创建分析候选，也不声称已完成视觉连续性判断。
 
 ## 11. 当前技术栈
 

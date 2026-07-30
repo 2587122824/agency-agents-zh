@@ -2018,26 +2018,42 @@ def editor_workspace(session: Session, project: Project) -> dict:
     repository = _editor(session)
     quality = quality_review_view(session, project)
     assets = []
+    shot_rows = []
     if project.active_snapshot_id:
+        snapshot = repository.snapshot(project.active_snapshot_id)
+        shots = repository.shots(snapshot.plan_version_id) if snapshot else []
+        shots_by_id = {shot.id: shot for shot in shots}
+        shot_rows = [{
+            "shot_code": shot.shot_code,
+            "sequence_number": shot.sequence_number,
+            "continuity_group_id": shot.continuity_group_id,
+            "continuity_relation": shot.continuity_relation,
+        } for shot in shots]
         rows = repository.available_assets(project.id, project.active_snapshot_id)
         node_ids = [row.dag_node_id for row in rows if row.dag_node_id]
         nodes = {
             node.id: node
             for node in repository.dag_nodes_by_ids(node_ids)
         } if node_ids else {}
-        assets = [{
-            "id": row.id,
-            "snapshot_id": row.snapshot_id,
-            "dag_node_id": row.dag_node_id,
-            "node_key": nodes[row.dag_node_id].node_key if row.dag_node_id in nodes else None,
-            "asset_type": row.asset_type,
-            "role": row.role,
-            "duration_ms": row.duration_ms,
-            "width": row.width,
-            "height": row.height,
-            "state": row.state,
-            "content_hash": row.content_hash,
-        } for row in rows]
+        assets = []
+        for row in rows:
+            node = nodes.get(row.dag_node_id) if row.dag_node_id else None
+            shot = shots_by_id.get(node.shot_id) if node and node.shot_id else None
+            assets.append({
+                "id": row.id,
+                "snapshot_id": row.snapshot_id,
+                "dag_node_id": row.dag_node_id,
+                "node_key": node.node_key if node else None,
+                "shot_code": shot.shot_code if shot else None,
+                "shot_sequence_number": shot.sequence_number if shot else None,
+                "asset_type": row.asset_type,
+                "role": row.role,
+                "duration_ms": row.duration_ms,
+                "width": row.width,
+                "height": row.height,
+                "state": row.state,
+                "content_hash": row.content_hash,
+            })
     timelines = repository.timeline_history(project.id)
     latest_editor_run = repository.latest_editor_run(project.id, project.active_snapshot_id) if project.active_snapshot_id else None
     if project.status == "quality_review":
@@ -2067,6 +2083,7 @@ def editor_workspace(session: Session, project: Project) -> dict:
         "audio_mode": project.audio_mode,
         "quality_stage_ready": quality["stage_ready"],
         "quality_output_gaps": quality["output_gaps"],
+        "shot_sequence": shot_rows,
         "available_assets": assets,
         "timelines": [timeline_read(session, row) for row in timelines],
         "latest_editor_run": _run_dict(latest_editor_run),

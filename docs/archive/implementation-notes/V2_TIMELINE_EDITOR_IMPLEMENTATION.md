@@ -161,6 +161,12 @@ POST /api/v1/projects/{project_id}/timelines/{timeline_id}:confirm
 
 真实咖啡 v6 在 SH-002 → SH-001 的 `00:04:17` 边界验收：切点预览自动停在 `00:05:16`；选择 0.3 秒柔和过渡后，服务端草稿精确保存 SH-002 `transition_out=fade:300` 与 SH-001 `transition_in=fade:300`，等待后 PUT 计数不再增长，一次撤销恢复双方 `cut:0`。丢弃后 GET 草稿为 `null`；锁定画面轨后衔接下拉禁用、切点预览仍可用且没有新 PUT。前端生产构建通过。
 
+EditorWorkspace 新增 `shot_sequence`，并给每个可用 Asset 投影 `shot_code / shot_sequence_number`。服务端从活动快照读取精确 `plan_version_id`，再以 Asset 的 `dag_node_id` 解析 DAGNode `shot_id` 和正式 Shot；无法映射的补充素材保持 `null`，不从 `node_key` 猜测。前端只按该数值检测已映射主画面的相邻倒序，相关片段与边界同时高亮；显式整理对已映射条目做稳定排序，把未知素材/空位保留在原槽位，再复用 `normalizeMainTrack + commitItems` 重算画面时间线，因此只有一个撤销步骤。声音和字幕保持绝对成片时点，状态栏要求重新复核切点。
+
+`BoundaryFrameStill` 仅在用户展开边界定格时挂载两个静音、暂停、`preload=auto` 的视频元素。前镜定位 `max(source_in, source_out - round(1000/fps))`，后镜定位 `source_in`；`seeked` 后才标记画面就绪，点击定格调用统一 `seekTimeline` 定位主监看。真实咖啡 v6 的倒序边界显示 SH-002 末帧 `4.667s / readyState=4` 与 SH-001 首帧 `0s / readyState=4`，两者均暂停。
+
+真实顺序整理验收从 `SH-002 → SH-001 → SH-003 → provider_output` 得到 `SH-001 → SH-002 → SH-003 → provider_output`，权威 Shot/Asset 映射分别为 `1/2/3`；服务端草稿 row version 增长且一次撤销恢复倒序提示、一次重做恢复正式顺序。锁轨后“按正式分镜整理”禁用，但定格对比保持可用。验收草稿最终删除；1280×720 的页面 `scrollWidth/clientWidth` 与 `scrollHeight/clientHeight` 均相等，浏览器控制台无错误。完整 API `125 passed`、Python compileall 和 Vite 生产构建通过。
+
 提交 `9c159075` 推送到 `main` 后使用标准启动脚本重启 8766：API PID `66460`、Worker PID `50140`，两个进程创建时间均为 2026-07-30 17:54:02；`GET /api/v1/health` 返回 `ok`，Alembic runtime/head 均为 `20260730_42`。Worker 错误日志为空，API 的 stderr 仅包含 Uvicorn 正常启动信息，没有错误堆栈。
 
 真实咖啡 v4 浏览器验收在约 9.958 秒定位到 SH-003，暂停源时点 0.547 秒，与 9.418 秒片段入点的差值一致；结尾选择 873ms 显式空位，开头恢复 SH-002/0 秒。15 秒、60px/s 刻度为 `00:00, 00:02, …, 00:14, 00:15`，末标签右边界为 1280px，页面没有横向或纵向溢出。

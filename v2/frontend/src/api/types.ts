@@ -1241,6 +1241,8 @@ export interface EditorAsset {
   snapshot_id: string
   dag_node_id: string | null
   node_key: string | null
+  shot_code: string | null
+  shot_sequence_number: number | null
   asset_type: 'video' | 'audio' | 'subtitle'
   role: string
   duration_ms: number | null
@@ -1392,6 +1394,12 @@ export interface EditorWorkspace {
   audio_mode: string
   quality_stage_ready: boolean
   quality_output_gaps: Array<{ code: string; node_key: string; message: string }>
+  shot_sequence: Array<{
+    shot_code: string
+    sequence_number: number
+    continuity_group_id: string | null
+    continuity_relation: string
+  }>
   available_assets: EditorAsset[]
   timelines: Timeline[]
   latest_editor_run: AgentRun | null

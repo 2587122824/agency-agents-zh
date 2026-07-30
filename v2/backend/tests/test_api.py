@@ -6802,6 +6802,14 @@ def test_editor_assistant_creates_auditable_timeline_candidate_for_manual_confir
     workspace = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
     assert workspace["latest_editor_run"]["status"] == "succeeded"
     assert workspace["next_action"]["code"] == "VALIDATE_TIMELINE"
+    assert [shot["sequence_number"] for shot in workspace["shot_sequence"]] == [1, 2, 3]
+    assert [shot["shot_code"] for shot in workspace["shot_sequence"]] == ["SH-001", "SH-002", "SH-003"]
+    video_workspace_assets = sorted(
+        (asset for asset in workspace["available_assets"] if asset["asset_type"] == "video"),
+        key=lambda asset: asset["shot_sequence_number"],
+    )
+    assert [asset["shot_code"] for asset in video_workspace_assets] == ["SH-001", "SH-002", "SH-003"]
+    assert [asset["shot_sequence_number"] for asset in video_workspace_assets] == [1, 2, 3]
     persisted_timeline = next(item for item in workspace["timelines"] if item["id"] == timeline["id"])
     assert persisted_timeline["source"] == "editor_assistant"
     assert persisted_timeline["items"][0]["transform"]["editor_assistant"]["selection_reason"]

@@ -171,6 +171,50 @@ function Waveform({ projectId, assetId }: { projectId: string; assetId: string }
   </span>
 }
 
+function BoundaryFrameStill({
+  projectId,
+  item,
+  sourceTimeMs,
+  label,
+  fps,
+  onActivate,
+}: {
+  projectId: string
+  item: TimelineItem
+  sourceTimeMs: number
+  label: string
+  fps: number
+  onActivate: () => void
+}) {
+  const frameRef = useRef<HTMLVideoElement | null>(null)
+  const [ready, setReady] = useState(false)
+  const seekFrame = useCallback(() => {
+    const video = frameRef.current
+    if (!video || !Number.isFinite(video.duration)) return
+    const latestTime = Math.max(0, video.duration - .001)
+    video.currentTime = Math.min(latestTime, Math.max(0, sourceTimeMs / 1000))
+  }, [sourceTimeMs])
+
+  useEffect(() => {
+    setReady(false)
+    seekFrame()
+  }, [seekFrame])
+
+  return <button className={styles.boundaryFrame} data-ready={ready} onClick={onActivate}>
+    <video
+      ref={frameRef}
+      aria-label={label}
+      muted
+      playsInline
+      preload="auto"
+      src={`/api/v1/projects/${projectId}/assets/${item.asset_id}/content`}
+      onLoadedMetadata={seekFrame}
+      onSeeked={() => setReady(true)}
+    />
+    <span><strong>{label}</strong><code>{timecode(sourceTimeMs, fps)}</code></span>
+  </button>
+}
+
 function srtTimestampMs(value: string) {
   const match = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/.exec(value.trim())
   if (!match) return null
@@ -296,6 +340,7 @@ export function EditorPrototypePage() {
   const [playheadMs, setPlayheadMs] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [boundaryPreviewEndMs, setBoundaryPreviewEndMs] = useState<number | null>(null)
+  const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
   const [assetFilter, setAssetFilter] = useState<'all' | 'video' | 'audio' | 'subtitle'>('all')
@@ -361,6 +406,7 @@ export function EditorPrototypePage() {
     setPlayheadMs(0)
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
+    setBoundaryFrameComparisonKey(null)
     setDirty(false)
     setLastValidation(null)
     setLastPreview(null)
@@ -493,6 +539,42 @@ export function EditorPrototypePage() {
   const mainItems = useMemo(() => items.filter(item => item.track_type === 'main_video'), [items])
   const audioItems = useMemo(() => items.filter(item => item.track_type === 'audio'), [items])
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
+  const shotSequenceByAssetId = useMemo(() => new Map(
+    (workspace.data?.available_assets ?? [])
+      .filter(asset => asset.shot_sequence_number != null)
+      .map(asset => [asset.id, asset.shot_sequence_number as number]),
+  ), [workspace.data?.available_assets])
+  const shotCodeByAssetId = useMemo(() => new Map(
+    (workspace.data?.available_assets ?? [])
+      .filter(asset => asset.shot_code)
+      .map(asset => [asset.id, asset.shot_code as string]),
+  ), [workspace.data?.available_assets])
+  const shotOrderIssues = useMemo(() => {
+    const issues: Array<{ left: TimelineItem; right: TimelineItem; leftSequence: number; rightSequence: number }> = []
+    let previous: { item: TimelineItem; sequence: number } | null = null
+    for (const item of mainItems) {
+      const sequence = item.asset_id ? shotSequenceByAssetId.get(item.asset_id) : undefined
+      if (sequence == null) continue
+      if (previous && previous.sequence > sequence) {
+        issues.push({
+          left: previous.item,
+          right: item,
+          leftSequence: previous.sequence,
+          rightSequence: sequence,
+        })
+      }
+      previous = { item, sequence }
+    }
+    return issues
+  }, [mainItems, shotSequenceByAssetId])
+  const shotOrderIssueItemIds = useMemo(
+    () => new Set(shotOrderIssues.flatMap(issue => [issue.left.id, issue.right.id])),
+    [shotOrderIssues],
+  )
+  const formalShotOrderText = (workspace.data?.shot_sequence ?? []).map(shot => shot.shot_code).join(' → ')
+  const currentShotOrderText = mainItems
+    .flatMap(item => item.asset_id && shotCodeByAssetId.get(item.asset_id) ? [shotCodeByAssetId.get(item.asset_id)!] : [])
+    .join(' → ')
   const selectedMainPosition = mainItems.findIndex(item => item.id === selectedItem?.id)
   const previousMainItem = selectedMainPosition > 0 ? mainItems[selectedMainPosition - 1] : null
   const nextMainItem = selectedMainPosition >= 0 ? mainItems[selectedMainPosition + 1] ?? null : null
@@ -1191,6 +1273,30 @@ export function EditorPrototypePage() {
     const normalized = normalizeMainTrack(rows, durationMs)
     commitItems(replaceMainTrack(items, normalized), `已把 ${moved.label} 拖到新的位置。`, moved.id)
     setDraggedItemId(null)
+  }
+
+  const organizeMainTrackByShotOrder = () => {
+    if (!shotOrderIssues.length || blockMainTrackEdit(mainItems[0] ?? null)) return
+    const sortable = mainItems
+      .map((item, index) => ({
+        item,
+        index,
+        sequence: item.asset_id ? shotSequenceByAssetId.get(item.asset_id) : undefined,
+      }))
+      .filter((row): row is { item: TimelineItem; index: number; sequence: number } => row.sequence != null)
+      .sort((left, right) => left.sequence - right.sequence || left.index - right.index)
+    let sortableIndex = 0
+    const reordered = mainItems.map(item => (
+      item.asset_id && shotSequenceByAssetId.has(item.asset_id)
+        ? sortable[sortableIndex++].item
+        : item
+    ))
+    const normalized = normalizeMainTrack(reordered, durationMs)
+    commitItems(
+      replaceMainTrack(items, normalized),
+      `已按正式分镜顺序整理 ${sortable.length} 个画面片段；补充素材、声音和字幕保持原位置，请重新预览切点。`,
+      selectedItem?.id ?? normalized[0]?.id ?? null,
+    )
   }
 
   const dropAssetOnItem = (target: TimelineItem, explicitAssetId?: string) => {
@@ -2410,12 +2516,21 @@ export function EditorPrototypePage() {
                 const presetValue = pairedCut
                   ? 'cut'
                   : pairedFade ? `fade:${durationMs}` : 'mixed'
-                return <div className={styles.boundaryControl} key={`${left.id}-${right.id}`}>
+                const boundaryKey = `${left.id}-${right.id}`
+                const leftShotSequence = left.asset_id ? shotSequenceByAssetId.get(left.asset_id) : undefined
+                const rightShotSequence = right.asset_id ? shotSequenceByAssetId.get(right.asset_id) : undefined
+                const orderWarning = leftShotSequence != null && rightShotSequence != null && leftShotSequence > rightShotSequence
+                const frameStepMs = Math.max(1, Math.round(1000 / outputFps))
+                const leftFrameSourceMs = Math.max(left.source_in_ms ?? 0, (left.source_out_ms ?? 0) - frameStepMs)
+                const rightFrameSourceMs = right.source_in_ms ?? 0
+                const framesOpen = boundaryFrameComparisonKey === boundaryKey
+                return <div className={styles.boundaryControl} data-order-warning={orderWarning} key={boundaryKey}>
                   <header>
                     <span><strong>{left.label}</strong><i>→</i><strong>{right.label}</strong></span>
+                    {orderWarning && <em>顺序倒退</em>}
                     <code>{timecode(left.timeline_out_ms, outputFps)}</code>
                   </header>
-                  <div>
+                  <div className={styles.boundaryActions}>
                     <button
                       disabled={!left.asset_id || !right.asset_id}
                       onClick={() => previewBoundary(left, right)}
@@ -2430,17 +2545,41 @@ export function EditorPrototypePage() {
                       }}
                     >
                       {presetValue === 'mixed' && <option value="mixed" disabled>两侧设置不一致</option>}
-                      {pairedFade && ![200, 300, 500].includes(durationMs) && <option value={`fade:${durationMs}`}>柔和过渡 · {seconds(durationMs)}</option>}
+                      {pairedFade && ![200, 300, 500].includes(durationMs) && <option value={`fade:${durationMs}`}>淡出淡入 · {seconds(durationMs)}</option>}
                       <option value="cut">直接切换</option>
-                      <option value="fade:200">柔和过渡 · 0.2s</option>
-                      <option value="fade:300">柔和过渡 · 0.3s</option>
-                      <option value="fade:500">柔和过渡 · 0.5s</option>
+                      <option value="fade:200">淡出淡入 · 0.2s</option>
+                      <option value="fade:300">淡出淡入 · 0.3s</option>
+                      <option value="fade:500">淡出淡入 · 0.5s</option>
                     </select>
                   </div>
+                  <button
+                    className={styles.boundaryFrameToggle}
+                    disabled={!left.asset_id || !right.asset_id}
+                    aria-expanded={framesOpen}
+                    onClick={() => setBoundaryFrameComparisonKey(value => value === boundaryKey ? null : boundaryKey)}
+                  ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button>
+                  {framesOpen && left.asset_id && right.asset_id && <div className={styles.boundaryFrames}>
+                    <BoundaryFrameStill
+                      projectId={projectId}
+                      item={left}
+                      sourceTimeMs={leftFrameSourceMs}
+                      label={`${left.label} 末帧`}
+                      fps={outputFps}
+                      onActivate={() => seekTimeline(Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs))}
+                    />
+                    <BoundaryFrameStill
+                      projectId={projectId}
+                      item={right}
+                      sourceTimeMs={rightFrameSourceMs}
+                      label={`${right.label} 首帧`}
+                      fps={outputFps}
+                      onActivate={() => seekTimeline(right.timeline_in_ms)}
+                    />
+                  </div>}
                 </div>
               })}
             </div>
-            <div className={styles.trimHint}>柔和过渡会同时设置前镜淡出和后镜淡入，并作为一个撤销步骤写入草稿；正式预览和导出使用同一冻结参数。</div>
+            <div className={styles.trimHint}>淡出淡入会同时设置前镜淡出和后镜淡入，并作为一个撤销步骤写入草稿；它不是交叉叠化。正式预览和导出使用同一冻结参数。</div>
           </section>}
           {selectedItem.track_type === 'main_video' && <section>
             <h3>转场</h3>
@@ -2569,7 +2708,7 @@ export function EditorPrototypePage() {
       </aside>
     </section>
 
-    <section className={styles.timelinePanel}>
+    <section className={styles.timelinePanel} data-shot-order-warning={shotOrderIssues.length > 0}>
       <header className={styles.timelineToolbar}>
         <div><strong>时间线</strong><span>{mainItems.length} 个画面片段 · {audioItems.length} 个音频 · {subtitleItems.length} 个字幕</span></div>
         <button disabled={videoTrackLocked || selectedItem?.track_type !== 'main_video' || !selectedItem.asset_id} onClick={splitSelected}><Scissors />分割</button>
@@ -2599,6 +2738,16 @@ export function EditorPrototypePage() {
         <button title="时间线适应窗口（\\）" onClick={fitTimelineToViewport}><Maximize2 />适应</button>
         <code>{timecode(playheadMs, outputFps)}</code>
       </header>
+      {shotOrderIssues.length > 0 && <div className={styles.shotOrderWarning}>
+        <AlertTriangle />
+        <span>
+          <strong>发现 {shotOrderIssues.length} 处分镜顺序倒退</strong>
+          <small>当前：{currentShotOrderText || '未识别'} · 正式：{formalShotOrderText || '暂无正式分镜顺序'}</small>
+        </span>
+        <button disabled={videoTrackLocked} onClick={organizeMainTrackByShotOrder}>
+          {videoTrackLocked ? '解锁后整理' : '按正式分镜整理'}
+        </button>
+      </div>}
       <div className={styles.timelineViewport} ref={timelineViewportRef}>
         <div className={styles.timelineCanvas} style={{ width: `${84 + timelineWidth}px` }} onClick={event => {
           if ((event.target as HTMLElement).closest('button')) return
@@ -2631,6 +2780,7 @@ export function EditorPrototypePage() {
               draggable={!videoTrackLocked}
               className={item.asset_id ? styles.videoClip : styles.gapClip}
               data-selected={selectedItem?.id === item.id}
+              data-order-warning={shotOrderIssueItemIds.has(item.id)}
               style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }}
               onDragStart={() => { setDraggedItemId(item.id); setDraggedAssetId(null) }}
               onDragEnd={() => setDraggedItemId(null)}
