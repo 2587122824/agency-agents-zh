@@ -31,7 +31,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 与文本模型 API Key 由当前已发布系统配置普通字段提供，不再读取环境变量 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
 
-提交 `69bbc8ee` 的进程身份重启门禁已于 2026-07-30 使用管理员 PowerShell 复验；提交 `d497c040` 发布剪辑台无缺口整链修复后，API PID 已从 `59512` 切换为 `62924`，Worker PID 已从 `11776` 切换为 `29500`。API 日志记录新进程启动，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_41`。修复后的脚本已同时证明旧实例无法结束时会失败、成功时只接受本次新 API PID 的健康响应。
+提交 `17f55081` 发布正式剪辑工作台、项目草稿会话与重复导出恢复后，管理员入口先结束旧 API `62924` / Worker `29500`，标准启动脚本再启动 API `15740` / Worker `38476`。首次迁移发现 SQLite 非事务 DDL 已完整创建空的 `editor_draft_sessions` 表和两个索引、但 `alembic_version` 仍停在 41；只读核对结构与迁移 42 完全一致且行数为 0 后，显式 `stamp 20260730_42` 修复开发库账本，没有增加运行时兼容分支。最终健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`，新 API 日志已记录工作台投影请求。
 
 启动或重启：
 

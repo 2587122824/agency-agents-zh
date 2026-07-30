@@ -169,6 +169,8 @@ POST /api/v1/projects/{project_id}/timelines/{timeline_id}:confirm
 
 `start_v2.ps1` 把进程身份纳入重启验收：旧 API/Worker 必须被成功结束且 8766 实际释放，否则脚本立即失败；本次 API/Worker 进程通过 `PassThru` 跟踪，健康响应只有在 8766 的监听 PID 精确等于本次 API PID 时才算成功。启动失败会清理本次新进程，避免旧实例继续响应 `/health` 时产生假重启记录。
 
+迁移 `20260730_42` 部署时，SQLite 非事务 DDL 曾完整留下空的 `editor_draft_sessions` 表与两个预期索引，但版本账本仍停在 41，后续标准升级因此以 `table already exists` 明确失败。部署只读核对列、主键、三条外键、索引和 0 行数据均与迁移完全一致后，显式 `alembic stamp 20260730_42` 修复开发库账本；没有在迁移或运行时加入“表存在即跳过”的旧状态兼容分支。随后启动 API `15740` / Worker `38476`，runtime/head 均为 42、健康检查为 `ok`。
+
 真实咖啡 v4 验收把预览拖动到 10.500 秒，SH-003 源时点为 1.082 秒；方向键单步为 42ms，Shift 单步为 1000ms。180px/s 下时间线滚动范围为 2789/1056，End 后 `scrollLeft=1733` 且 15 秒播放头可见；直接拖动放大时间尺到 13.472 秒，源时点 4.054 秒，滚动位置仅保留浏览器 5px 原生焦点调整而未自动重心跳转。验收草稿随后丢弃。
 
 画面轨写操作统一经过 `blockMainTrackEdit(item)`。锁定时 `shiftItem / reorderItem / dropAssetOnItem / startGapAssetSelection / updateSelectedTransform / splitSelected / deleteSelected / beginTrim` 都返回同一可读说明；因此即使快捷键、陈旧拖放会话或程序化事件绕过按钮禁用，也不能修改本地条目。锁按钮只改变会话预览状态；UI 同步禁用片段操作、转场控件、工具栏分割、缺口替换和裁切 slider，并把裁切 slider 移出 Tab 序列。撤销/重做不受锁定影响。
