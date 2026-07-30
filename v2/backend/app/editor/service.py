@@ -216,7 +216,7 @@ def _item_contract(item: TimelineItem) -> dict:
 def _timeline_contract(session: Session, timeline: Timeline) -> dict:
     items = _editor(session).timeline_items(timeline.id)
     return {
-        "contract_version": "v2.timeline-contract.v3",
+        "contract_version": "v2.timeline-contract.v4",
         "project_id": timeline.project_id,
         "snapshot_id": timeline.snapshot_id,
         "version_number": timeline.version_number,
@@ -621,6 +621,7 @@ def _execute_editor(
                 "timeline_out_ms": subtitle_duration,
                 "transform": {
                     "render": "burn_in",
+                    "subtitle_cues": None,
                     "qc_report_ids": subtitle["qc_report_ids"],
                     "source": "frozen_approved_subtitles",
                 },
@@ -836,6 +837,77 @@ def _validate_item_transform(item: TimelineItem, path: str, duration_ms: int) ->
                         "音量包络必须从片段零点开始并覆盖到片段终点。",
                         clip_duration_ms=duration_ms,
                     ))
+    if item.track_type == "subtitle":
+        if transform.get("render") != "burn_in":
+            errors.append(_error(
+                "SUBTITLE_RENDER_MODE_INVALID",
+                f"{path}.transform.render",
+                "字幕轨必须明确使用 burn_in 渲染。",
+            ))
+        if "subtitle_cues" not in transform:
+            errors.append(_error(
+                "SUBTITLE_CUES_CONTRACT_REQUIRED",
+                f"{path}.transform.subtitle_cues",
+                "字幕轨必须明确冻结原始字幕或逐条修订后的 cue。",
+            ))
+        else:
+            cues = transform.get("subtitle_cues")
+            if cues is not None:
+                if not isinstance(cues, list) or not 1 <= len(cues) <= 200:
+                    errors.append(_error(
+                        "SUBTITLE_CUES_INVALID",
+                        f"{path}.transform.subtitle_cues",
+                        "逐条字幕修订必须包含 1 到 200 个 cue。",
+                    ))
+                else:
+                    previous_end = 0
+                    for index, cue in enumerate(cues, 1):
+                        cue_path = f"{path}.transform.subtitle_cues.{index - 1}"
+                        if not isinstance(cue, dict) or set(cue) != {"sequence", "start_ms", "end_ms", "text"}:
+                            errors.append(_error(
+                                "SUBTITLE_CUE_SHAPE_INVALID",
+                                cue_path,
+                                "字幕 cue 必须只包含 sequence、start_ms、end_ms 和 text。",
+                            ))
+                            continue
+                        sequence = cue.get("sequence")
+                        start_ms = cue.get("start_ms")
+                        end_ms = cue.get("end_ms")
+                        text = cue.get("text")
+                        if sequence != index:
+                            errors.append(_error(
+                                "SUBTITLE_CUE_SEQUENCE_INVALID",
+                                f"{cue_path}.sequence",
+                                "字幕 cue 序号必须从 1 连续递增。",
+                            ))
+                        if (
+                            not isinstance(start_ms, int)
+                            or isinstance(start_ms, bool)
+                            or not isinstance(end_ms, int)
+                            or isinstance(end_ms, bool)
+                            or start_ms < previous_end
+                            or end_ms <= start_ms
+                            or end_ms > duration_ms
+                        ):
+                            errors.append(_error(
+                                "SUBTITLE_CUE_TIMING_INVALID",
+                                cue_path,
+                                "字幕 cue 必须按时间顺序排列、互不重叠并位于字幕片段范围内。",
+                                clip_duration_ms=duration_ms,
+                            ))
+                        else:
+                            previous_end = end_ms
+                        if (
+                            not isinstance(text, str)
+                            or not text.strip()
+                            or len(text) > 500
+                            or "\x00" in text
+                        ):
+                            errors.append(_error(
+                                "SUBTITLE_CUE_TEXT_INVALID",
+                                f"{cue_path}.text",
+                                "字幕文字不能为空、不能包含空字符且不能超过 500 字符。",
+                            ))
     return errors
 
 
@@ -1490,7 +1562,14 @@ def render_timeline_preview(
                 ducking_release_ms=int(ducking.get("release_ms", 500)),
             ))
         elif item["track_type"] == "subtitle":
-            subtitle_input = LocalRenderSubtitleInput(path=path)
+            cues = transform.get("subtitle_cues")
+            subtitle_input = LocalRenderSubtitleInput(
+                path=path,
+                cues=tuple(
+                    (int(cue["start_ms"]), int(cue["end_ms"]), str(cue["text"]))
+                    for cue in cues
+                ) if cues is not None else None,
+            )
     preview_key = _preview_key(timeline, payload.quality_profile, readiness.version)
     output_path = _preview_path(project, preview_key)
     width, height, fps = _preview_dimensions(timeline, project)

@@ -438,6 +438,89 @@
   font: 9px/1.65 ui-monospace, SFMono-Regular, Consolas, monospace;
   white-space: pre-wrap;
 }
+.subtitleInspectorHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.subtitleInspectorHeader > span { min-width: 0; margin-right: auto; display: grid; gap: 2px; }
+.subtitleInspectorHeader h3 { margin: 0; }
+.subtitleInspectorHeader small { color: #918b6b; font-size: 8px; }
+.subtitleInspectorHeader > button {
+  min-height: 25px;
+  padding: 0 7px;
+  border: 1px solid #625b39;
+  border-radius: 4px;
+  background: #3d3826;
+  color: #d9d1a5;
+  font-size: 8px;
+  cursor: pointer;
+}
+.subtitleInspectorHeader > button:disabled { opacity: .35; cursor: default; }
+.subtitleCueState {
+  margin-top: 8px;
+  padding: 9px;
+  border: 1px solid #403c2d;
+  border-radius: 4px;
+  background: #252319;
+  color: #aaa27d;
+  font-size: 8px;
+}
+.subtitleCueList {
+  max-height: 238px;
+  margin: 8px 0 0;
+  padding: 0 2px 0 0;
+  display: grid;
+  gap: 7px;
+  overflow-y: auto;
+  list-style: none;
+}
+.subtitleCueList li {
+  padding: 7px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #45402e;
+  border-radius: 4px;
+  background: #29261b;
+}
+.subtitleCueList li > div {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 5px;
+}
+.subtitleCueList li > div > button {
+  height: 27px;
+  padding: 0;
+  border: 1px solid #69603b;
+  border-radius: 4px;
+  background: #494229;
+  color: #f2e8b9;
+  font-size: 8px;
+  cursor: pointer;
+}
+.subtitleCueList label {
+  display: grid;
+  grid-template-columns: 1fr 18px;
+  gap: 3px;
+  color: #938b69;
+  font-size: 7px;
+}
+.subtitleCueList label input { grid-column: 1; width: 100%; }
+.subtitleCueList label small { grid-column: 2; align-self: center; color: #77715b; }
+.subtitleCueList textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 6px 7px;
+  resize: vertical;
+  border: 1px solid #484330;
+  border-radius: 4px;
+  background: #1d1c16;
+  color: #e6e0c6;
+  font-family: inherit;
+  font-size: 9px;
+  line-height: 1.45;
+}
 .timelineAudio { display: none; }
 .timelineSubtitle {
   position: absolute;
@@ -868,7 +951,23 @@
   white-space: nowrap;
   font-size: 8px;
 }
-.subtitleClip > svg { width: 12px; flex: none; }
+.subtitleClip > svg { position: relative; z-index: 1; width: 12px; flex: none; }
+.subtitleCueStrip {
+  position: absolute;
+  z-index: 0;
+  inset: 3px;
+  overflow: hidden;
+  pointer-events: none;
+}
+.subtitleCueStrip i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+  border: 1px solid rgba(255, 242, 177, .34);
+  border-radius: 2px;
+  background: rgba(230, 208, 111, .2);
+}
 .waveform {
   min-width: 0;
   height: 28px;

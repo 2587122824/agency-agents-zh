@@ -367,8 +367,36 @@ def validate_local_render_manifest(manifest: dict) -> None:
             raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_GAP_UNSUPPORTED", "本机合成不接受字幕轨空位。")
         if item.get("timeline_in_ms") != 0 or item.get("source_in_ms") != 0:
             raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_OFFSET_UNSUPPORTED", "字幕轨必须从成片零点开始。")
-        if (item.get("transform") or {}).get("render") != "burn_in":
+        transform = item.get("transform") or {}
+        if transform.get("render") != "burn_in":
             raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_TRANSFORM_UNSUPPORTED", "字幕轨必须明确使用 burn_in 渲染。")
+        if "subtitle_cues" not in transform:
+            raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_CUES_REQUIRED", "字幕轨缺少明确的逐条字幕修订合同。")
+        cues = transform.get("subtitle_cues")
+        if cues is not None:
+            timeline_duration = item["timeline_out_ms"] - item["timeline_in_ms"]
+            previous_end = 0
+            if not isinstance(cues, list) or not 1 <= len(cues) <= 200:
+                raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_CUES_INVALID", "逐条字幕修订必须包含 1 到 200 个 cue。")
+            for index, cue in enumerate(cues, 1):
+                if (
+                    not isinstance(cue, dict)
+                    or set(cue) != {"sequence", "start_ms", "end_ms", "text"}
+                    or cue.get("sequence") != index
+                    or not isinstance(cue.get("start_ms"), int)
+                    or isinstance(cue.get("start_ms"), bool)
+                    or not isinstance(cue.get("end_ms"), int)
+                    or isinstance(cue.get("end_ms"), bool)
+                    or cue["start_ms"] < previous_end
+                    or cue["end_ms"] <= cue["start_ms"]
+                    or cue["end_ms"] > timeline_duration
+                    or not isinstance(cue.get("text"), str)
+                    or not cue["text"].strip()
+                    or len(cue["text"]) > 500
+                    or "\x00" in cue["text"]
+                ):
+                    raise DeliveryConflictError("LOCAL_RENDER_SUBTITLE_CUE_INVALID", "本机合成收到无效的逐条字幕修订。")
+                previous_end = cue["end_ms"]
     expected = manifest.get("output_spec") or {}
     if cursor != expected.get("duration_ms"):
         raise DeliveryConflictError("LOCAL_RENDER_DURATION_MISMATCH", "时间线总时长与交付规格不一致。")
@@ -953,7 +981,14 @@ def prepare_local_render(
                 ducking_release_ms=int(ducking.get("release_ms", 500)),
             ))
         elif item["track_type"] == "subtitle":
-            subtitle_input = LocalRenderSubtitleInput(path=path)
+            cues = (item.get("transform") or {}).get("subtitle_cues")
+            subtitle_input = LocalRenderSubtitleInput(
+                path=path,
+                cues=tuple(
+                    (int(cue["start_ms"]), int(cue["end_ms"]), str(cue["text"]))
+                    for cue in cues
+                ) if cues is not None else None,
+            )
     uri = f"runtime://assets/deliveries/{project.id}/{attempt.id}.mp4"
     try:
         output_path = resolve_local_asset_path(uri)

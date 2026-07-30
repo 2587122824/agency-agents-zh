@@ -157,6 +157,12 @@ POST /api/v1/projects/{project_id}/timelines/{timeline_id}:confirm
 
 真实咖啡 v4 使用两条隔离 5 秒、24kHz、单声道 PCM16 WAV 验收：BGM 左裁切 1 秒得到源 `1..5s`、成片 `3..7s`，右把手裁到 6.5 秒后撤销恢复；关闭磁吸时左把手右移一帧得到源/成片入点 `00:01:01 / 00:03:01`。左右把手只点击不制造空撤销；删除相交旁白后 Ducking 从 1 区间变 0，撤销恢复 1；把重叠 BGM 改回旁白被明确阻断。刷新恢复草稿，1280×720 页面宽度保持 1280。验收后丢弃草稿并精确删除两个测试 Asset/WAV，API 恢复 3 个视频素材、Timeline v4 保持 0 音频。
 
+迁移 `20260730_41` 把 Timeline 合同升级为 `v2.timeline-contract.v4`：所有字幕条目显式增加 `transform.subtitle_cues=null` 并重算已验证 Timeline 的合同哈希；`null` 表示使用已批准 Asset 原始 SRT，非空列表表示本 Timeline 完整覆盖。验证器要求 1–200 条 cue，字段集合固定为 `sequence/start_ms/end_ms/text`，序号连续、时点严格递增互不重叠、出点不超过字幕片段时长，文字非空且不超过 500 字符。交付 Manifest 重复同一门禁，缺少显式字段不进入旧版兼容分支。本地草稿同步升级为 `editor-local-draft.v3`，旧草稿按既有 schema 门禁丢弃。
+
+新版 Inspector 通过原始 SRT 或冻结覆盖列表派生同一 `SubtitleCue[]`，每条提供定位、开始/结束秒输入和文字 textarea；只在 blur 后一次性提交有效修改，原值或非法值不产生历史。恢复原文把覆盖显式写回 `null`；cue 列表、监看叠加和时间线分段共用同一派生函数。渲染请求将覆盖 cue 传给 `LocalRenderSubtitleInput`，渲染器序列化严格 SRT 到与输出命令隔离的临时文件，以 `charenc=UTF-8 + FontName=Microsoft YaHei` 调用 libass，并在成功、失败或进程启动异常后清理临时文件。
+
+真实咖啡 v4 使用隔离的 3 cue UTF-8 SRT 验收：第一条文字改为“第一条修订字幕”、结束时点从 2.000 秒改为 2.500 秒，监看、轨道分段与 Inspector 同步；尝试改为 3.500 秒因与第二条重叠被阻断且输入恢复 2.500 秒。定位第二条跳到 `00:03:00`，恢复原文后撤销恢复修订，刷新仍保留覆盖列表；1280×720 页面 `scrollWidth/scrollHeight` 精确等于视口。真实 FFmpeg 先暴露测试脚本管道编码造成的问号假象，改用 Unicode 事实后确认 Microsoft YaHei 正确烧录“真实修订字幕一”；临时 Asset/SRT/MP4/帧图与草稿均已清理。完整 API/Worker 回归为 `133 passed`。
+
 `start_v2.ps1` 把进程身份纳入重启验收：旧 API/Worker 必须被成功结束且 8766 实际释放，否则脚本立即失败；本次 API/Worker 进程通过 `PassThru` 跟踪，健康响应只有在 8766 的监听 PID 精确等于本次 API PID 时才算成功。启动失败会清理本次新进程，避免旧实例继续响应 `/health` 时产生假重启记录。
 
 真实咖啡 v4 验收把预览拖动到 10.500 秒，SH-003 源时点为 1.082 秒；方向键单步为 42ms，Shift 单步为 1000ms。180px/s 下时间线滚动范围为 2789/1056，End 后 `scrollLeft=1733` 且 15 秒播放头可见；直接拖动放大时间尺到 13.472 秒，源时点 4.054 秒，滚动位置仅保留浏览器 5px 原生焦点调整而未自动重心跳转。验收草稿随后丢弃。

@@ -344,6 +344,9 @@ def test_local_ffmpeg_renderer_burns_in_one_frozen_subtitle(monkeypatch, tmp_pat
     def fake_run(command, **kwargs):
         captured["command"] = command
         captured["cwd"] = kwargs.get("cwd")
+        generated_subtitles = list(tmp_path.glob(".*.timeline-subtitles.srt"))
+        captured["subtitle_content"] = generated_subtitles[0].read_text(encoding="utf-8")
+        captured["subtitle_path"] = generated_subtitles[0]
         (tmp_path / "subtitled.mp4").write_bytes(b"rendered")
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
@@ -351,7 +354,10 @@ def test_local_ffmpeg_renderer_burns_in_one_frozen_subtitle(monkeypatch, tmp_pat
     request = LocalRenderRequest(
         ffmpeg_path=tmp_path / "ffmpeg.exe",
         inputs=(LocalRenderInput(tmp_path / "video.mp4", 0, 2000),),
-        subtitle_input=LocalRenderSubtitleInput(tmp_path / "frozen subtitles.srt"),
+        subtitle_input=LocalRenderSubtitleInput(
+            tmp_path / "frozen subtitles.srt",
+            cues=((0, 900, "修订字幕一"), (1000, 2000, "修订字幕二\n第二行")),
+        ),
         output_path=tmp_path / "subtitled.mp4",
         width=480,
         height=848,
@@ -366,7 +372,16 @@ def test_local_ffmpeg_renderer_burns_in_one_frozen_subtitle(monkeypatch, tmp_pat
     command = captured["command"]
     filter_graph = command[command.index("-filter_complex") + 1]
     assert "[outv]subtitles=filename='" in filter_graph
-    assert "frozen subtitles.srt" in filter_graph
-    assert "force_style='Alignment=2,MarginV=48,Outline=2,Shadow=0'[outvs]" in filter_graph
+    assert ":charenc=UTF-8:" in filter_graph
+    assert ".subtitled.timeline-subtitles.srt" in filter_graph
+    assert (
+        "force_style='FontName=Microsoft YaHei,Alignment=2,MarginV=48,Outline=2,Shadow=0'[outvs]"
+        in filter_graph
+    )
     assert command[command.index("-map") + 1] == "[outvs]"
     assert captured["cwd"] == tmp_path.resolve()
+    assert captured["subtitle_content"] == (
+        "1\n00:00:00,000 --> 00:00:00,900\n修订字幕一\n\n"
+        "2\n00:00:01,000 --> 00:00:02,000\n修订字幕二\n第二行\n"
+    )
+    assert not captured["subtitle_path"].exists()

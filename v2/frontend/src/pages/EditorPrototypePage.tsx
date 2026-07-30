@@ -18,7 +18,7 @@ import type { DeliveryAttempt, DeliveryWorkspace, Timeline, TimelineItem, Timeli
 import styles from './EditorPrototypePage.module.css'
 
 const DEFAULT_PROJECT_ID = 'project_9cd1c4e1fe5c4c8e88466acef2913e72'
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v2'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v3'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -28,6 +28,13 @@ interface LocalEditorDraft {
   timeline_zoom: number
   snap_enabled: boolean
   saved_at: string
+}
+
+interface SubtitleCue {
+  sequence: number
+  start_ms: number
+  end_ms: number
+  text: string
 }
 
 function timecode(ms: number, fps = 24) {
@@ -171,7 +178,8 @@ function srtTimestampMs(value: string) {
   return (((Number(match[1]) * 60 + Number(match[2])) * 60 + Number(match[3])) * 1000) + Number(match[4])
 }
 
-function activeSrtText(srt: string, sourceTimeMs: number) {
+function parseSrtCues(srt: string): SubtitleCue[] {
+  const cues: SubtitleCue[] = []
   for (const block of srt.replace(/\r\n/g, '\n').split(/\n{2,}/)) {
     const lines = block.split('\n').map(line => line.trim()).filter(Boolean)
     const timingIndex = lines.findIndex(line => line.includes('-->'))
@@ -179,11 +187,38 @@ function activeSrtText(srt: string, sourceTimeMs: number) {
     const [startText, endText] = lines[timingIndex].split('-->').map(value => value.trim().split(/\s+/)[0])
     const start = srtTimestampMs(startText)
     const end = srtTimestampMs(endText)
-    if (start != null && end != null && sourceTimeMs >= start && sourceTimeMs < end) {
-      return lines.slice(timingIndex + 1).join('\n')
-    }
+    const text = lines.slice(timingIndex + 1).join('\n').trim()
+    if (start == null || end == null || end <= start || !text) continue
+    cues.push({ sequence: cues.length + 1, start_ms: start, end_ms: end, text })
   }
-  return ''
+  return cues
+}
+
+function effectiveSubtitleCues(item: TimelineItem, srt: string | undefined) {
+  const frozen = item.transform.subtitle_cues
+  if (Array.isArray(frozen)) return frozen as unknown as SubtitleCue[]
+  return srt ? parseSrtCues(srt) : []
+}
+
+function activeSubtitleText(cues: SubtitleCue[], sourceTimeMs: number) {
+  return cues.find(cue => sourceTimeMs >= cue.start_ms && sourceTimeMs < cue.end_ms)?.text ?? ''
+}
+
+function subtitleCueError(cues: SubtitleCue[], durationMs: number) {
+  if (!cues.length || cues.length > 200) return '字幕必须保留 1 到 200 条 cue。'
+  let previousEnd = 0
+  for (const [index, cue] of cues.entries()) {
+    if (cue.sequence !== index + 1) return '字幕序号必须从 1 连续递增。'
+    if (!Number.isInteger(cue.start_ms) || !Number.isInteger(cue.end_ms)
+      || cue.start_ms < previousEnd || cue.end_ms <= cue.start_ms || cue.end_ms > durationMs) {
+      return `第 ${index + 1} 条字幕必须按顺序、互不重叠并位于片段范围内。`
+    }
+    if (!cue.text.trim() || cue.text.length > 500 || cue.text.includes('\0')) {
+      return `第 ${index + 1} 条字幕不能为空且不能超过 500 字符。`
+    }
+    previousEnd = cue.end_ms
+  }
+  return null
 }
 
 function TimelineSubtitle({ projectId, item, playheadMs }: { projectId: string; item: TimelineItem; playheadMs: number }) {
@@ -197,8 +232,32 @@ function TimelineSubtitle({ projectId, item, playheadMs }: { projectId: string; 
     staleTime: Infinity,
   })
   const sourceTimeMs = (item.source_in_ms ?? 0) + Math.max(0, playheadMs - item.timeline_in_ms)
-  const text = subtitle.data ? activeSrtText(subtitle.data, sourceTimeMs) : ''
+  const text = activeSubtitleText(effectiveSubtitleCues(item, subtitle.data), sourceTimeMs)
   return text ? <div className={styles.timelineSubtitle}>{text}</div> : null
+}
+
+function SubtitleCueStrip({ projectId, item }: { projectId: string; item: TimelineItem }) {
+  const subtitle = useQuery({
+    queryKey: ['editor-prototype-subtitle', projectId, item.asset_id],
+    queryFn: async () => {
+      const response = await fetch(`/api/v1/projects/${projectId}/assets/${item.asset_id}/content`)
+      if (!response.ok) throw new Error(`字幕读取失败（${response.status}）`)
+      return response.text()
+    },
+    staleTime: Infinity,
+  })
+  const cues = effectiveSubtitleCues(item, subtitle.data)
+  const duration = Math.max(1, item.timeline_out_ms - item.timeline_in_ms)
+  return <span className={styles.subtitleCueStrip} aria-label={`${cues.length} 条字幕 cue`}>
+    {cues.map(cue => <i
+      key={`${cue.sequence}-${cue.start_ms}-${cue.end_ms}`}
+      title={`${cue.sequence}. ${cue.text}`}
+      style={{
+        left: `${Math.max(0, Math.min(100, (cue.start_ms / duration) * 100))}%`,
+        width: `${Math.max(0.5, Math.min(100, ((cue.end_ms - cue.start_ms) / duration) * 100))}%`,
+      }}
+    />)}
+  </span>
 }
 
 export function EditorPrototypePage() {
@@ -353,6 +412,12 @@ export function EditorPrototypePage() {
     },
     staleTime: Infinity,
   })
+  const selectedSubtitleCues = useMemo(
+    () => selectedItem?.track_type === 'subtitle'
+      ? effectiveSubtitleCues(selectedItem, subtitlePreview.data)
+      : [],
+    [selectedItem, subtitlePreview.data],
+  )
   const mainItems = useMemo(() => items.filter(item => item.track_type === 'main_video'), [items])
   const audioItems = useMemo(() => items.filter(item => item.track_type === 'audio'), [items])
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
@@ -1033,7 +1098,7 @@ export function EditorPrototypePage() {
       timeline_out_ms: cursor + clipDuration,
       transform: trackType === 'audio'
         ? { mix: 'voiceover', playback: { mode: 'trim' }, volume_envelope: [{ time_ms: 0, gain_db: 0 }, { time_ms: clipDuration, gain_db: 0 }] }
-        : { render: 'burn_in' },
+        : { render: 'burn_in', subtitle_cues: null },
     }
     commitItems([...items, newItem], `已把 ${newItem.label} 加入${trackType === 'audio' ? '声音' : '字幕'}轨。`, newItem.id)
     if (assetId === draggedAssetId) setDraggedAssetId(null)
@@ -1405,6 +1470,42 @@ export function EditorPrototypePage() {
     commitItems(items.map(item => item.id === selectedItem.id
       ? { ...item, transform: { ...item.transform, [key]: value } }
       : item), `已更新 ${selectedItem.label} 的片段设置。`, selectedItem.id)
+  }
+
+  const setSelectedSubtitleCues = (cues: SubtitleCue[] | null, message: string) => {
+    if (!selectedItem || selectedItem.track_type !== 'subtitle') return false
+    if (cues) {
+      const error = subtitleCueError(cues, selectedItem.timeline_out_ms - selectedItem.timeline_in_ms)
+      if (error) {
+        setNotice(error)
+        return false
+      }
+    }
+    commitItems(items.map(item => item.id === selectedItem.id
+      ? { ...item, transform: { ...item.transform, subtitle_cues: cues } }
+      : item), message, selectedItem.id)
+    return true
+  }
+
+  const updateSelectedSubtitleCue = (
+    cueIndex: number,
+    patch: Partial<Pick<SubtitleCue, 'start_ms' | 'end_ms' | 'text'>>,
+  ) => {
+    const cue = selectedSubtitleCues[cueIndex]
+    if (!cue) return false
+    if (
+      (patch.start_ms == null || patch.start_ms === cue.start_ms)
+      && (patch.end_ms == null || patch.end_ms === cue.end_ms)
+      && (patch.text == null || patch.text === cue.text)
+    ) return true
+    const next = selectedSubtitleCues.map((row, index) => index === cueIndex
+      ? { ...row, ...patch }
+      : row)
+    const changed = next[cueIndex]
+    return setSelectedSubtitleCues(
+      next,
+      `已修订第 ${changed.sequence} 条字幕的${patch.text != null ? '文字' : '时点'}。`,
+    )
   }
 
   const setSelectedTransition = (
@@ -2022,9 +2123,76 @@ export function EditorPrototypePage() {
             <button className={styles.removeTrackItem} onClick={deleteSelected}>从声音轨移除</button>
           </section>}
           {selectedItem.track_type === 'subtitle' && <section className={styles.subtitleInspector}>
-            <h3>字幕内容</h3>
-            <pre>{subtitlePreview.isPending ? '正在读取字幕…' : subtitlePreview.error ? '字幕读取失败' : subtitlePreview.data}</pre>
-            <div className={styles.trimHint}>当前版本使用烧录字幕；样式和安全区将在低清预渲染阶段检查。</div>
+            <div className={styles.subtitleInspectorHeader}>
+              <span><h3>逐条字幕</h3><small>{selectedSubtitleCues.length} 条 · {Array.isArray(selectedItem.transform.subtitle_cues) ? '本地修订' : '原始 SRT'}</small></span>
+              <button
+                disabled={!Array.isArray(selectedItem.transform.subtitle_cues)}
+                onClick={() => setSelectedSubtitleCues(null, '已撤销逐条字幕修订，恢复冻结的原始 SRT。')}
+              >恢复原文</button>
+            </div>
+            {subtitlePreview.isPending
+              ? <div className={styles.subtitleCueState}>正在读取字幕…</div>
+              : subtitlePreview.error
+                ? <div className={styles.subtitleCueState}>字幕读取失败，不能安全修订。</div>
+                : selectedSubtitleCues.length
+                  ? <ol className={styles.subtitleCueList}>
+                    {selectedSubtitleCues.map((cue, cueIndex) => <li key={`${cue.sequence}-${cue.start_ms}-${cue.end_ms}-${cue.text}`}>
+                      <div>
+                        <button
+                          aria-label={`定位第 ${cue.sequence} 条字幕`}
+                          onClick={() => {
+                            setPlaying(false)
+                            setPlayheadMs(selectedItem.timeline_in_ms + cue.start_ms)
+                          }}
+                        >#{cue.sequence}</button>
+                        <label>开始<input
+                          key={`start-${cue.sequence}-${cue.start_ms}`}
+                          aria-label={`第 ${cue.sequence} 条字幕开始时间`}
+                          type="number"
+                          min="0"
+                          max={(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) / 1000}
+                          step=".001"
+                          defaultValue={(cue.start_ms / 1000).toFixed(3)}
+                          onBlur={event => {
+                            const nextMs = Math.round(Number(event.currentTarget.value) * 1000)
+                            if (!Number.isFinite(nextMs) || !updateSelectedSubtitleCue(cueIndex, { start_ms: nextMs })) {
+                              event.currentTarget.value = (cue.start_ms / 1000).toFixed(3)
+                            }
+                          }}
+                        /><small>秒</small></label>
+                        <label>结束<input
+                          key={`end-${cue.sequence}-${cue.end_ms}`}
+                          aria-label={`第 ${cue.sequence} 条字幕结束时间`}
+                          type="number"
+                          min="0"
+                          max={(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) / 1000}
+                          step=".001"
+                          defaultValue={(cue.end_ms / 1000).toFixed(3)}
+                          onBlur={event => {
+                            const nextMs = Math.round(Number(event.currentTarget.value) * 1000)
+                            if (!Number.isFinite(nextMs) || !updateSelectedSubtitleCue(cueIndex, { end_ms: nextMs })) {
+                              event.currentTarget.value = (cue.end_ms / 1000).toFixed(3)
+                            }
+                          }}
+                        /><small>秒</small></label>
+                      </div>
+                      <textarea
+                        key={`text-${cue.sequence}-${cue.text}`}
+                        aria-label={`第 ${cue.sequence} 条字幕文字`}
+                        defaultValue={cue.text}
+                        maxLength={500}
+                        rows={2}
+                        onBlur={event => {
+                          const nextText = event.currentTarget.value.replace(/\r\n/g, '\n').trim()
+                          if (!updateSelectedSubtitleCue(cueIndex, { text: nextText })) {
+                            event.currentTarget.value = cue.text
+                          }
+                        }}
+                      />
+                    </li>)}
+                  </ol>
+                  : <div className={styles.subtitleCueState}>字幕文件没有可编辑的有效 cue。</div>}
+            <div className={styles.trimHint}>文字和时点修订进入本地草稿、撤销/重做与新 Timeline 合同；低清预览和最终 FFmpeg 使用同一冻结 cue。</div>
             <button className={styles.removeTrackItem} onClick={deleteSelected}>从字幕轨移除</button>
           </section>}
         </> : <section className={styles.gapActions}>
@@ -2184,7 +2352,7 @@ export function EditorPrototypePage() {
         </div>
         <div className={styles.trackRow} data-track-hidden={subtitleTrackHidden}>
           <label><Subtitles /><span>字幕</span><button title={subtitleTrackHidden ? '显示字幕轨' : '隐藏字幕轨'} aria-pressed={subtitleTrackHidden} onClick={toggleSubtitleTrackVisibility}>{subtitleTrackHidden ? <EyeOff /> : <Eye />}</button></label>
-          <div className={styles.trackLane} data-empty={!subtitleItems.length} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addAssetToTrack('subtitle') }}>{subtitleItems.length ? subtitleItems.map(item => <button key={item.id} data-selected={selectedItem?.id === item.id} className={styles.subtitleClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }} onClick={() => selectItem(item)}><Subtitles /><strong>{item.label}</strong></button>) : <span>拖入已批准字幕</span>}</div>
+          <div className={styles.trackLane} data-empty={!subtitleItems.length} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addAssetToTrack('subtitle') }}>{subtitleItems.length ? subtitleItems.map(item => <button key={item.id} data-selected={selectedItem?.id === item.id} className={styles.subtitleClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }} onClick={() => selectItem(item)}><SubtitleCueStrip projectId={projectId} item={item} /><Subtitles /><strong>{item.label}</strong></button>) : <span>拖入已批准字幕</span>}</div>
         </div>
         <i className={styles.playhead} style={{ left: `${84 + timelineWidth * (playheadMs / durationMs)}px` }}><b /></i>
         </div>

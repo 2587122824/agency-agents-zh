@@ -263,7 +263,7 @@ export function EditorPage() {
       transform: track === 'main_video'
         ? { fit: 'cover', transition_in: { type: 'cut', duration_ms: 0 }, transition_out: { type: 'cut', duration_ms: 0 } }
         : track === 'subtitle'
-          ? { render: 'burn_in' }
+          ? { render: 'burn_in', subtitle_cues: null }
           : { mix: 'voiceover', playback: { mode: 'trim' }, volume_envelope: [{ time_ms: 0, gain_db: 0 }, { time_ms: duration, gain_db: 0 }] },
     }])
     setSelectedAssetId(asset.id)

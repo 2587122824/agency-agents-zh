@@ -6956,6 +6956,7 @@ def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
     assert subtitle_items[0]["timeline_in_ms"] == 0
     assert subtitle_items[0]["timeline_out_ms"] == 29_000
     assert subtitle_items[0]["transform"]["render"] == "burn_in"
+    assert subtitle_items[0]["transform"]["subtitle_cues"] is None
     assert subtitle_items[0]["transform"]["source"] == "frozen_approved_subtitles"
     assert len(subtitle_items[0]["transform"]["qc_report_ids"]) == 1
     validated = client.post(
@@ -6964,6 +6965,75 @@ def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
     )
     assert validated.status_code == 200
     assert validated.json()["validation_report"] == []
+    revised_items = []
+    for item in timeline["items"]:
+        draft = {
+            key: item[key]
+            for key in (
+                "track_type", "sequence_number", "asset_id", "label", "gap_reason",
+                "source_in_ms", "source_out_ms", "timeline_in_ms", "timeline_out_ms", "transform",
+            )
+        }
+        if item["track_type"] == "subtitle":
+            draft["transform"] = {
+                **item["transform"],
+                "subtitle_cues": [
+                    {"sequence": 1, "start_ms": 0, "end_ms": 1800, "text": "逐条修订后的第一句"},
+                    {"sequence": 2, "start_ms": 2000, "end_ms": 4200, "text": "第二句\n允许明确换行"},
+                ],
+            }
+        revised_items.append(draft)
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:revise",
+        json={
+            "command_id": "editor-subtitle-cues-revise-01",
+            "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": validated.json()["row_version"],
+            "source": "user",
+            "track_config": timeline["track_config"],
+            "items": revised_items,
+        },
+    )
+    assert revised.status_code == 201
+    revised_validation = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{revised.json()['id']}:validate",
+        json={
+            "command_id": "editor-subtitle-cues-validate-01",
+            "expected_row_version": revised.json()["row_version"],
+        },
+    )
+    assert revised_validation.status_code == 200
+    assert revised_validation.json()["validation_report"] == []
+    frozen_subtitle = next(
+        item for item in revised_validation.json()["items"] if item["track_type"] == "subtitle"
+    )
+    assert frozen_subtitle["transform"]["subtitle_cues"][1]["text"] == "第二句\n允许明确换行"
+    invalid_items = json.loads(json.dumps(revised_items, ensure_ascii=False))
+    invalid_subtitle = next(item for item in invalid_items if item["track_type"] == "subtitle")
+    invalid_subtitle["transform"]["subtitle_cues"][1]["start_ms"] = 1500
+    invalid_revision = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{revised.json()['id']}:revise",
+        json={
+            "command_id": "editor-subtitle-cues-revise-invalid-01",
+            "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": revised_validation.json()["row_version"],
+            "source": "user",
+            "track_config": timeline["track_config"],
+            "items": invalid_items,
+        },
+    )
+    assert invalid_revision.status_code == 201
+    invalid_validation = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{invalid_revision.json()['id']}:validate",
+        json={
+            "command_id": "editor-subtitle-cues-validate-invalid-01",
+            "expected_row_version": invalid_revision.json()["row_version"],
+        },
+    )
+    assert invalid_validation.status_code == 200
+    assert "SUBTITLE_CUE_TIMING_INVALID" in {
+        row["code"] for row in invalid_validation.json()["validation_report"]
+    }
 
 
 def test_timeline_validation_blocks_unapproved_assets_gaps_and_source_overrun(client: TestClient) -> None:

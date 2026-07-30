@@ -56,6 +56,7 @@ class LocalRenderAudioInput:
 @dataclass(frozen=True)
 class LocalRenderSubtitleInput:
     path: Path
+    cues: tuple[tuple[int, int, str], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -80,6 +81,23 @@ class LocalRenderResult:
     command: tuple[str, ...]
     stdout_tail: str
     stderr_tail: str
+
+
+def _srt_timestamp(time_ms: int) -> str:
+    hours, remainder = divmod(time_ms, 3_600_000)
+    minutes, remainder = divmod(remainder, 60_000)
+    seconds, milliseconds = divmod(remainder, 1000)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d},{milliseconds:03d}"
+
+
+def serialize_subtitle_cues(cues: tuple[tuple[int, int, str], ...]) -> str:
+    blocks = []
+    for sequence, (start_ms, end_ms, text) in enumerate(cues, 1):
+        normalized_text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
+        blocks.append(
+            f"{sequence}\n{_srt_timestamp(start_ms)} --> {_srt_timestamp(end_ms)}\n{normalized_text}"
+        )
+    return "\n\n".join(blocks) + "\n"
 
 
 def inspect_local_ffmpeg() -> FFmpegReadiness:
@@ -204,15 +222,28 @@ class LocalFFmpegRenderer:
         filters.append(f"{''.join(labels)}concat=n={len(labels)}:v=1:a=0[outv]")
         video_output_label = "outv"
         execution_cwd: Path | None = None
+        temporary_subtitle_path: Path | None = None
         if request.subtitle_input:
             # FFmpeg's subtitles filter on Windows does not reliably consume an
             # absolute drive-letter path even when the colon is escaped. Run the
             # process from the frozen subtitle directory and pass only its name.
-            execution_cwd = request.subtitle_input.path.resolve().parent
-            escaped_subtitle_path = request.subtitle_input.path.name.replace("'", "\\'")
+            subtitle_path = request.subtitle_input.path
+            if request.subtitle_input.cues is not None:
+                temporary_subtitle_path = request.output_path.with_name(
+                    f".{request.output_path.stem}.timeline-subtitles.srt"
+                )
+                temporary_subtitle_path.unlink(missing_ok=True)
+                temporary_subtitle_path.write_text(
+                    serialize_subtitle_cues(request.subtitle_input.cues),
+                    encoding="utf-8",
+                    newline="\n",
+                )
+                subtitle_path = temporary_subtitle_path
+            execution_cwd = subtitle_path.resolve().parent
+            escaped_subtitle_path = subtitle_path.name.replace("'", "\\'")
             filters.append(
-                f"[outv]subtitles=filename='{escaped_subtitle_path}':"
-                "force_style='Alignment=2,MarginV=48,Outline=2,Shadow=0'[outvs]"
+                f"[outv]subtitles=filename='{escaped_subtitle_path}':charenc=UTF-8:"
+                "force_style='FontName=Microsoft YaHei,Alignment=2,MarginV=48,Outline=2,Shadow=0'[outvs]"
             )
             video_output_label = "outvs"
         if request.audio_inputs:
@@ -310,38 +341,42 @@ class LocalFFmpegRenderer:
             str(request.output_path),
         ])
         try:
-            result = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                check=False,
-                cwd=execution_cwd,
+            try:
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    check=False,
+                    cwd=execution_cwd,
+                )
+            except OSError as exc:
+                raise LocalRenderError(
+                    "FFMPEG_PROCESS_START_FAILED",
+                    f"无法启动 FFmpeg：{exc}",
+                ) from exc
+            if result.returncode != 0:
+                request.output_path.unlink(missing_ok=True)
+                raise LocalRenderError(
+                    "FFMPEG_RENDER_FAILED",
+                    "FFmpeg 本地合成失败。",
+                    {
+                        "return_code": result.returncode,
+                        "stdout_tail": result.stdout[-4000:],
+                        "stderr_tail": result.stderr[-8000:],
+                    },
+                )
+            if not request.output_path.is_file():
+                raise LocalRenderError(
+                    "FFMPEG_OUTPUT_MISSING",
+                    "FFmpeg 返回成功，但没有生成目标文件。",
+                )
+            return LocalRenderResult(
+                tuple(command),
+                result.stdout[-4000:],
+                result.stderr[-8000:],
             )
-        except OSError as exc:
-            raise LocalRenderError(
-                "FFMPEG_PROCESS_START_FAILED",
-                f"无法启动 FFmpeg：{exc}",
-            ) from exc
-        if result.returncode != 0:
-            request.output_path.unlink(missing_ok=True)
-            raise LocalRenderError(
-                "FFMPEG_RENDER_FAILED",
-                "FFmpeg 本地合成失败。",
-                {
-                    "return_code": result.returncode,
-                    "stdout_tail": result.stdout[-4000:],
-                    "stderr_tail": result.stderr[-8000:],
-                },
-            )
-        if not request.output_path.is_file():
-            raise LocalRenderError(
-                "FFMPEG_OUTPUT_MISSING",
-                "FFmpeg 返回成功，但没有生成目标文件。",
-            )
-        return LocalRenderResult(
-            tuple(command),
-            result.stdout[-4000:],
-            result.stderr[-8000:],
-        )
+        finally:
+            if temporary_subtitle_path is not None:
+                temporary_subtitle_path.unlink(missing_ok=True)
