@@ -6,7 +6,11 @@ import {
   RotateCcw, Scissors, Search, ShieldCheck, Sparkles, Subtitles, Undo2, Unlock,
   Upload, Volume2, VolumeX, WandSparkles, X,
 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import {
+  useEffect, useMemo, useRef, useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
 import { api } from '../api/client'
@@ -267,6 +271,7 @@ export function EditorPrototypePage() {
     playheadViewportX: number
     fit: boolean
   } | null>(null)
+  const audioPointerMovedRef = useRef(false)
   const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const sourceTimeline = workspace.data?.timelines[0] ?? null
@@ -1034,6 +1039,115 @@ export function EditorPrototypePage() {
     if (assetId === draggedAssetId) setDraggedAssetId(null)
   }
 
+  const buildMovedAudioItems = (baseItems: TimelineItem[], item: TimelineItem, requestedStartMs: number) => {
+    if (item.track_type !== 'audio') return false
+    const baseAudio = baseItems.filter(row => row.track_type === 'audio')
+    const clipDuration = item.timeline_out_ms - item.timeline_in_ms
+    const nextStart = Math.max(0, Math.min(durationMs - clipDuration, snapMs(requestedStartMs)))
+    const nextEnd = nextStart + clipDuration
+    const itemMix = String(item.transform.mix ?? 'voiceover')
+    const conflict = baseAudio.find(other => {
+      if (other.id === item.id) return false
+      if (nextStart >= other.timeline_out_ms || nextEnd <= other.timeline_in_ms) return false
+      const otherMix = String(other.transform.mix ?? 'voiceover')
+      return new Set([itemMix, otherMix]).size !== 2
+        || !new Set([itemMix, otherMix]).has('voiceover')
+        || !new Set([itemMix, otherMix]).has('background_music')
+    })
+    if (conflict) return { nextItems: null, nextStart, conflict }
+    if (nextStart === item.timeline_in_ms) return { nextItems: baseItems, nextStart, conflict: null }
+    const moved = { ...item, timeline_in_ms: nextStart, timeline_out_ms: nextEnd }
+    const nextAudio = baseAudio
+      .map(row => row.id === item.id ? moved : row)
+      .sort((left, right) => left.timeline_in_ms - right.timeline_in_ms || left.sequence_number - right.sequence_number)
+      .map((row, index) => ({ ...row, sequence_number: index + 1 }))
+    const nextItems = [
+      ...baseItems.filter(row => row.track_type === 'main_video'),
+      ...nextAudio,
+      ...baseItems.filter(row => row.track_type === 'subtitle'),
+    ]
+    return { nextItems, nextStart, conflict: null }
+  }
+
+  const moveAudioTrackItem = (item: TimelineItem, requestedStartMs: number) => {
+    const result = buildMovedAudioItems(items, item, requestedStartMs)
+    if (!result) return false
+    if (result.conflict) {
+      setNotice(`无法移动：会与同类声音 ${result.conflict.label} 重叠。旁白与 BGM 可以重叠，同类声音不能。`)
+      return false
+    }
+    if (result.nextStart === item.timeline_in_ms) return false
+    setPlaying(false)
+    setPlayheadMs(result.nextStart)
+    commitItems(result.nextItems, `已把 ${item.label} 移到 ${timecode(result.nextStart, outputFps)}。`, item.id)
+    return true
+  }
+
+  const beginAudioTrackDrag = (event: ReactPointerEvent<HTMLButtonElement>, item: TimelineItem) => {
+    if (event.button !== 0) return
+    event.currentTarget.focus()
+    event.preventDefault()
+    event.stopPropagation()
+    const lane = event.currentTarget.parentElement
+    if (!lane) return
+    const laneRect = lane.getBoundingClientRect()
+    const clipRect = event.currentTarget.getBoundingClientRect()
+    const grabOffsetMs = ((event.clientX - clipRect.left) / Math.max(1, clipRect.width))
+      * (item.timeline_out_ms - item.timeline_in_ms)
+    const originalItems = items
+    let latestItems = originalItems
+    let latestStart = item.timeline_in_ms
+    let conflictLabel: string | null = null
+    audioPointerMovedRef.current = false
+    setPlaying(false)
+    setSelectedIndex(items.findIndex(row => row.id === item.id))
+    const onMove = (moveEvent: PointerEvent) => {
+      if (Math.abs(moveEvent.clientX - event.clientX) >= 3) audioPointerMovedRef.current = true
+      const positionMs = ((moveEvent.clientX - laneRect.left) / Math.max(1, laneRect.width)) * durationMs
+      const result = buildMovedAudioItems(originalItems, item, positionMs - grabOffsetMs)
+      if (!result) return
+      if (result.conflict) {
+        conflictLabel = result.conflict.label
+        return
+      }
+      conflictLabel = null
+      latestItems = result.nextItems
+      latestStart = result.nextStart
+      setItems(result.nextItems)
+      setPlayheadMs(result.nextStart)
+    }
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+    const onUp = () => {
+      cleanup()
+      if (latestStart === item.timeline_in_ms) {
+        setItems(originalItems)
+        if (conflictLabel) {
+          setNotice(`无法移动：会与同类声音 ${conflictLabel} 重叠。旁白与 BGM 可以重叠，同类声音不能。`)
+        }
+        return
+      }
+      setHistory(rows => [...rows.slice(-49), originalItems])
+      setFuture([])
+      setItems(latestItems)
+      setDirty(true)
+      setSelectedIndex(latestItems.findIndex(row => row.id === item.id))
+      setNotice(`已把 ${item.label} 拖到 ${timecode(latestStart, outputFps)}。`)
+    }
+    const onCancel = () => {
+      cleanup()
+      setItems(originalItems)
+      setPlayheadMs(item.timeline_in_ms)
+      setNotice('声音片段拖动已取消，时间线保持不变。')
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+  }
+
   const updateSelectedTransform = (key: string, value: unknown) => {
     if (!selectedItem || blockMainTrackEdit()) return
     commitItems(items.map(item => item.id === selectedItem.id
@@ -1271,6 +1385,20 @@ export function EditorPrototypePage() {
       if (event.key === '\\') {
         event.preventDefault()
         fitTimelineToViewport()
+      }
+      if (
+        event.altKey
+        && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')
+        && selectedItem?.track_type === 'audio'
+      ) {
+        event.preventDefault()
+        const stepMs = event.shiftKey
+          ? 1000
+          : snapEnabled ? snapIntervalMs : Math.max(1, Math.round(1000 / outputFps))
+        moveAudioTrackItem(
+          selectedItem,
+          selectedItem.timeline_in_ms + (event.key === 'ArrowRight' ? stepMs : -stepMs),
+        )
       }
       if (event.key.toLowerCase() === 's') {
         event.preventDefault()
@@ -1578,6 +1706,21 @@ export function EditorPrototypePage() {
           </section>}
           {selectedItem.track_type === 'audio' && <section className={styles.audioInspector}>
             <h3>声音角色与混音</h3>
+            <div className={styles.audioPosition}>
+              <span>成片位置</span>
+              <strong>{timecode(selectedItem.timeline_in_ms, outputFps)} – {timecode(selectedItem.timeline_out_ms, outputFps)}</strong>
+              <div>
+                <button
+                  disabled={selectedItem.timeline_in_ms <= 0}
+                  onClick={() => moveAudioTrackItem(selectedItem, selectedItem.timeline_in_ms - (snapEnabled ? snapIntervalMs : Math.max(1, Math.round(1000 / outputFps))))}
+                ><ChevronLeft />向左</button>
+                <button
+                  disabled={selectedItem.timeline_out_ms >= durationMs}
+                  onClick={() => moveAudioTrackItem(selectedItem, selectedItem.timeline_in_ms + (snapEnabled ? snapIntervalMs : Math.max(1, Math.round(1000 / outputFps))))}
+                >向右<ChevronRight /></button>
+              </div>
+              <small>拖动声音片段定位；Alt+方向键精调，Shift+Alt+方向键移动 1 秒。</small>
+            </div>
             <label>用途<select value={String(selectedItem.transform.mix ?? 'voiceover')} onChange={event => setSelectedAudioMix(event.target.value as 'voiceover' | 'background_music')}><option value="voiceover">旁白 / 对白</option><option value="background_music">背景音乐 BGM</option></select></label>
             <label>片段音量<input aria-label="片段音量" type="range" min="-24" max="12" step=".5" value={Number(((selectedItem.transform.volume_envelope as Array<{ gain_db: number }> | undefined)?.[0]?.gain_db) ?? 0)} onChange={event => {
               const gain = Number(event.target.value)
@@ -1709,7 +1852,24 @@ export function EditorPrototypePage() {
         </div>
         <div className={styles.trackRow} data-track-muted={audioTrackMuted}>
           <label><Music2 /><span>声音</span><button title={audioTrackMuted ? '恢复声音轨' : '静音声音轨'} aria-pressed={audioTrackMuted} onClick={toggleAudioTrackMute}>{audioTrackMuted ? <VolumeX /> : <Volume2 />}</button></label>
-          <div className={styles.trackLane} data-empty={!audioItems.length} onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); addAssetToTrack('audio') }}>{audioItems.length ? audioItems.map(item => <button key={item.id} data-selected={selectedItem?.id === item.id} className={styles.audioClip} style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }} onClick={() => selectItem(item)}><Waveform projectId={projectId} assetId={item.asset_id!} /><strong>{item.label}</strong></button>) : <span>拖入已批准配音或 BGM</span>}</div>
+          <div className={styles.trackLane} data-empty={!audioItems.length} onDragOver={event => event.preventDefault()} onDrop={event => {
+            event.preventDefault()
+            addAssetToTrack('audio')
+          }}>{audioItems.length ? audioItems.map(item => <button
+            key={item.id}
+            data-selected={selectedItem?.id === item.id}
+            className={styles.audioClip}
+            style={{ left: `${(item.timeline_in_ms / durationMs) * 100}%`, width: `${((item.timeline_out_ms - item.timeline_in_ms) / durationMs) * 100}%` }}
+            onPointerDown={event => beginAudioTrackDrag(event, item)}
+            onClick={event => {
+              if (audioPointerMovedRef.current) {
+                event.preventDefault()
+                audioPointerMovedRef.current = false
+                return
+              }
+              selectItem(item)
+            }}
+          ><Waveform projectId={projectId} assetId={item.asset_id!} /><strong>{item.label}</strong></button>) : <span>拖入已批准配音或 BGM</span>}</div>
         </div>
         <div className={styles.trackRow} data-track-hidden={subtitleTrackHidden}>
           <label><Subtitles /><span>字幕</span><button title={subtitleTrackHidden ? '显示字幕轨' : '隐藏字幕轨'} aria-pressed={subtitleTrackHidden} onClick={toggleSubtitleTrackVisibility}>{subtitleTrackHidden ? <EyeOff /> : <Eye />}</button></label>

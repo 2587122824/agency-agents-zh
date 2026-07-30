@@ -582,6 +582,34 @@
 }
 .transitionControl small { color: #7f898e; font-size: 8px; }
 .audioInspector input[type="range"] { min-width: 0; accent-color: #8d78d1; }
+.audioPosition {
+  margin: 8px 0 10px;
+  padding: 8px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid #443f58;
+  border-radius: 4px;
+  background: #292638;
+}
+.audioPosition > span,
+.audioPosition > small { color: #a39db8; font-size: 8px; line-height: 1.45; }
+.audioPosition > strong { color: #e8e2ff; font-size: 9px; }
+.audioPosition > div { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.audioPosition button {
+  min-height: 27px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid #5b527e;
+  border-radius: 4px;
+  background: #3b3654;
+  color: #ded8f4;
+  font-size: 8px;
+  cursor: pointer;
+}
+.audioPosition button:disabled { opacity: .35; cursor: default; }
+.audioPosition button svg { width: 12px; }
 .audioFact {
   margin-top: 10px;
   padding: 8px;
@@ -824,7 +852,8 @@
   text-align: left;
   cursor: pointer;
 }
-.audioClip { border: 1px solid #5d5487; background: #403a61; }
+.audioClip { border: 1px solid #5d5487; background: #403a61; cursor: grab; }
+.audioClip:active { cursor: grabbing; }
 .subtitleClip { border: 1px solid #6d6540; background: #514b2f; }
 .audioClip[data-selected="true"],
 .subtitleClip[data-selected="true"] { border-color: #ff805e; box-shadow: inset 0 0 0 1px #ff805e; }
