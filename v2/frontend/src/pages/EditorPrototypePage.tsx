@@ -1034,6 +1034,8 @@ export function EditorPrototypePage() {
       setDraggedAssetId(null)
       return
     }
+    const targetDuration = Math.max(200, target.timeline_out_ms - target.timeline_in_ms)
+    const replacementDuration = Math.min(asset.duration_ms, targetDuration)
     const replacement: TimelineItem = {
       ...target,
       id: `prototype-${asset.id}-${Date.now()}`,
@@ -1044,13 +1046,19 @@ export function EditorPrototypePage() {
       label: asset.node_key ?? asset.role,
       gap_reason: null,
       source_in_ms: 0,
-      source_out_ms: asset.duration_ms,
-      timeline_out_ms: target.timeline_in_ms + asset.duration_ms,
+      source_out_ms: replacementDuration,
+      timeline_out_ms: target.timeline_in_ms + replacementDuration,
       transform: { fit: 'cover', transition_in: { type: 'cut', duration_ms: 0 }, transition_out: { type: 'cut', duration_ms: 0 } },
     }
     const rows = mainItems.map(item => item.id === target.id ? replacement : item)
     const normalized = normalizeMainTrack(rows, durationMs)
-    commitItems(replaceMainTrack(items, normalized), `已把 ${replacement.label} 投放到时间线。`, replacement.id)
+    commitItems(
+      replaceMainTrack(items, normalized),
+      asset.duration_ms > replacementDuration
+        ? `已把 ${replacement.label} 投放到时间线，并按 ${(replacementDuration / 1000).toFixed(1)}s 缺口裁切。`
+        : `已把 ${replacement.label} 投放到时间线。`,
+      replacement.id,
+    )
     setDraggedAssetId(null)
     setGapAssetSelection(false)
   }
@@ -2573,7 +2581,9 @@ export function EditorPrototypePage() {
         <button className={styles.confirmButton} disabled={!deliveryFile || uploadDelivery.isPending} onClick={() => uploadDelivery.mutate()}>{uploadDelivery.isPending ? '上传中…' : '上传并登记'}</button>
       </div>}
       {deliveryAttempt?.status === 'output_registered' && <div className={styles.deliveryStep}>
-        <ShieldCheck /><span><strong>输出已经登记，尚未验证</strong><small>{deliveryAttempt.final_asset?.byte_size?.toLocaleString() ?? 0} bytes · 验证将复查 MP4、画幅、时长与音频合同。</small></span>
+        <ShieldCheck /><span><strong>输出已经登记，尚未验证</strong><small>{deliveryAttempt.final_asset?.byte_size
+          ? `${deliveryAttempt.final_asset.byte_size.toLocaleString()} bytes`
+          : '文件大小将在验证时读取'} · 验证将复查 MP4、画幅、时长与音频合同。</small></span>
         <button className={styles.confirmButton} disabled={verifyDelivery.isPending} onClick={() => verifyDelivery.mutate()}>{verifyDelivery.isPending ? '验证中…' : '验证交付文件'}</button>
       </div>}
       {deliveryAttempt?.status === 'blocked' && (() => {

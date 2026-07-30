@@ -211,6 +211,10 @@ Timeline 读取投影会从不可变事件中选择当前 Timeline ID 与合同�
 
 授权后剪辑台复用 DeliveryWorkspace 的最新 Attempt。`queued / rendering` 仅以 3 秒间隔轮询只读状态并允许手动刷新；轮询失败立即暂停自动刷新，保留上一次成功状态并显示错误，用户点击重新连接成功后才恢复轮询。`authorized` 提供 MP4 文件选择并调用既有上传登记；`output_registered` 要求显式调用验证；两项 mutation 都在提交前重新读取 DeliveryWorkspace 并使用最新 Attempt 行版本，若 Attempt 已跨窗口或 Worker 变化则刷新 UI 并拒绝旧动作。`blocked` 主区按错误类别显示可读原因、明确不会自动重试/切换方式，并给出返回剪辑和查看时间线证据入口；错误代码与结构化 JSON 只保留在折叠证据区。`verified` 才展示探测规格和 Asset 内容下载。页面不从文件名猜状态，不在上传后自动验证，也不给阻断 Attempt 创建第二次尝试。
 
+真实无缺口整链验收使用咖啡测试项目完成。为 873ms 显式空位提供一条 1 秒、960×1664、24fps 的真实 H.264 补充镜头后，首次从界面投放并保存得到 v5，后端正确返回 `TIMELINE_OUTPUT_OVERRUN`，暴露前端把替换素材全长写入短缺口的问题。`dropAssetOnItem` 现以目标片段长度为上限，同时裁切 `source_out_ms` 与 `timeline_out_ms`，并在状态栏说明自动裁切；修复后同一素材产生 873ms 片段，v6 确定性校验零问题。
+
+v6 随后从界面生成 360×640、24fps 低清预览，格式/画幅/时长及持续黑画面检查通过，真实播放器完整播放后保存视觉连续性和主观音画同步复核；再独立确认时间线、选择 `local_ffmpeg`、等待 Worker 输出、显式验证并点击下载。最终 Timeline v6 为 `exported`，项目为 `completed`，DeliveryAttempt `delivery_76884237a45e4f49a17e6b520fab8a51` 为 `verified`。最终 Asset `asset_03994547e14c4e81a3b74ecca6e414c9` 为 480×848、14959ms、3270030 bytes，下载文件 SHA-256 与登记值 `a102bc3d005cf1720660050220b07d948b789b4f8f42aa341fbe8215ba73c51d` 精确一致。输出已登记但验证前若字节数尚未投影，界面改为“文件大小将在验证时读取”，不再显示误导性的 `0 bytes`。完整 API/Worker `133 passed`、Vite 生产构建和 Python compileall 通过。
+
 ## 8. 事件
 
 ```text
