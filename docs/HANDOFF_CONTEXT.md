@@ -31,6 +31,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 与文本模型 API Key 由当前已发布系统配置普通字段提供，不再读取环境变量 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
 
+当前 8766 监听进程 PID `58132` 由同一 Windows 用户的提升权限会话启动；本轮非提升会话无法结束它，修复后的启动脚本已正确以 `Access is denied` 失败而不再误报重启。现有实例健康检查仍为 `ok`，前端静态文件会读取最新构建且声音片段浏览器验收已通过，但提交 `69bbc8ee` 的最终“新进程身份”重启门禁仍需在管理员 PowerShell 执行下方启动命令后复验。
+
 启动或重启：
 
 ```powershell
