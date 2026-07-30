@@ -703,7 +703,7 @@ export function EditorPrototypePage() {
   }
 
   const selectItem = (item: TimelineItem) => {
-    const index = items.indexOf(item)
+    const index = items.findIndex(row => row.id === item.id)
     setSelectedIndex(index)
     setPlayheadMs(item.timeline_in_ms)
     setPlaying(false)
@@ -1039,26 +1039,87 @@ export function EditorPrototypePage() {
     if (assetId === draggedAssetId) setDraggedAssetId(null)
   }
 
+  const audioItemsConflict = (
+    item: TimelineItem,
+    startMs: number,
+    endMs: number,
+    rows: TimelineItem[],
+  ) => rows.find(other => {
+    if (other.id === item.id || startMs >= other.timeline_out_ms || endMs <= other.timeline_in_ms) return false
+    const roles = new Set([
+      String(item.transform.mix ?? 'voiceover'),
+      String(other.transform.mix ?? 'voiceover'),
+    ])
+    return roles.size !== 2 || !roles.has('voiceover') || !roles.has('background_music')
+  }) ?? null
+
+  const refreshEnabledDucking = (rows: TimelineItem[]) => {
+    const voiceovers = rows.filter(row => String(row.transform.mix ?? 'voiceover') === 'voiceover')
+    return rows.map(row => {
+      if (String(row.transform.mix ?? 'voiceover') !== 'background_music') return row
+      const ducking = row.transform.ducking as Record<string, unknown> | undefined
+      if (!ducking?.enabled) return row
+      const regions = voiceovers
+        .filter(voice => Math.max(voice.timeline_in_ms, row.timeline_in_ms) < Math.min(voice.timeline_out_ms, row.timeline_out_ms))
+        .map(voice => ({
+          start_ms: Math.max(voice.timeline_in_ms, row.timeline_in_ms) - row.timeline_in_ms,
+          end_ms: Math.min(voice.timeline_out_ms, row.timeline_out_ms) - row.timeline_in_ms,
+        }))
+      return { ...row, transform: { ...row.transform, ducking: { ...ducking, regions } } }
+    })
+  }
+
+  const envelopeGainAt = (points: Array<{ time_ms: number, gain_db: number }>, timeMs: number) => {
+    if (!points.length) return 0
+    if (timeMs <= points[0].time_ms) return points[0].gain_db
+    if (timeMs >= points[points.length - 1].time_ms) return points[points.length - 1].gain_db
+    const rightIndex = points.findIndex(point => point.time_ms >= timeMs)
+    const left = points[Math.max(0, rightIndex - 1)]
+    const right = points[rightIndex]
+    const ratio = (timeMs - left.time_ms) / Math.max(1, right.time_ms - left.time_ms)
+    return left.gain_db + ((right.gain_db - left.gain_db) * ratio)
+  }
+
+  const rebaseAudioEnvelope = (
+    transform: Record<string, unknown>,
+    trimStartDeltaMs: number,
+    nextDurationMs: number,
+  ) => {
+    const raw = transform.volume_envelope
+    if (!Array.isArray(raw)) return transform
+    const points = raw
+      .filter((point): point is { time_ms: number, gain_db: number } => (
+        Boolean(point)
+        && typeof point === 'object'
+        && Number.isFinite((point as { time_ms?: unknown }).time_ms)
+        && Number.isFinite((point as { gain_db?: unknown }).gain_db)
+      ))
+      .map(point => ({ time_ms: Number(point.time_ms), gain_db: Number(point.gain_db) }))
+      .sort((left, right) => left.time_ms - right.time_ms)
+    if (points.length < 2) return transform
+    const sourceStartMs = trimStartDeltaMs
+    const sourceEndMs = trimStartDeltaMs + nextDurationMs
+    const nextEnvelope = [
+      { time_ms: 0, gain_db: envelopeGainAt(points, sourceStartMs) },
+      ...points
+        .filter(point => point.time_ms > sourceStartMs && point.time_ms < sourceEndMs)
+        .map(point => ({ time_ms: Math.round(point.time_ms - sourceStartMs), gain_db: point.gain_db })),
+      { time_ms: nextDurationMs, gain_db: envelopeGainAt(points, sourceEndMs) },
+    ]
+    return { ...transform, volume_envelope: nextEnvelope }
+  }
+
   const buildMovedAudioItems = (baseItems: TimelineItem[], item: TimelineItem, requestedStartMs: number) => {
     if (item.track_type !== 'audio') return false
     const baseAudio = baseItems.filter(row => row.track_type === 'audio')
     const clipDuration = item.timeline_out_ms - item.timeline_in_ms
     const nextStart = Math.max(0, Math.min(durationMs - clipDuration, snapMs(requestedStartMs)))
     const nextEnd = nextStart + clipDuration
-    const itemMix = String(item.transform.mix ?? 'voiceover')
-    const conflict = baseAudio.find(other => {
-      if (other.id === item.id) return false
-      if (nextStart >= other.timeline_out_ms || nextEnd <= other.timeline_in_ms) return false
-      const otherMix = String(other.transform.mix ?? 'voiceover')
-      return new Set([itemMix, otherMix]).size !== 2
-        || !new Set([itemMix, otherMix]).has('voiceover')
-        || !new Set([itemMix, otherMix]).has('background_music')
-    })
+    const conflict = audioItemsConflict(item, nextStart, nextEnd, baseAudio)
     if (conflict) return { nextItems: null, nextStart, conflict }
     if (nextStart === item.timeline_in_ms) return { nextItems: baseItems, nextStart, conflict: null }
     const moved = { ...item, timeline_in_ms: nextStart, timeline_out_ms: nextEnd }
-    const nextAudio = baseAudio
-      .map(row => row.id === item.id ? moved : row)
+    const nextAudio = refreshEnabledDucking(baseAudio.map(row => row.id === item.id ? moved : row))
       .sort((left, right) => left.timeline_in_ms - right.timeline_in_ms || left.sequence_number - right.sequence_number)
       .map((row, index) => ({ ...row, sequence_number: index + 1 }))
     const nextItems = [
@@ -1148,6 +1209,197 @@ export function EditorPrototypePage() {
     window.addEventListener('pointercancel', onCancel)
   }
 
+  const buildTrimmedAudioItems = (
+    baseItems: TimelineItem[],
+    item: TimelineItem,
+    edge: 'start' | 'end',
+    requestedDeltaMs: number,
+  ) => {
+    if (item.track_type !== 'audio') return null
+    const sourceIn = item.source_in_ms ?? 0
+    const sourceOut = item.source_out_ms ?? item.asset_duration_ms ?? 0
+    const timelineIn = item.timeline_in_ms
+    const timelineOut = item.timeline_out_ms
+    const oldDuration = timelineOut - timelineIn
+    const playbackMode = String((item.transform.playback as { mode?: string } | undefined)?.mode ?? 'trim')
+    let nextSourceIn = sourceIn
+    let nextSourceOut = sourceOut
+    let nextTimelineIn = timelineIn
+    let nextTimelineOut = timelineOut
+    if (playbackMode === 'loop') {
+      const minimumDuration = Math.max(200, sourceOut - sourceIn)
+      if (edge === 'start') {
+        nextTimelineIn = Math.max(0, Math.min(timelineOut - minimumDuration, timelineIn + requestedDeltaMs))
+      } else {
+        nextTimelineOut = Math.max(timelineIn + minimumDuration, Math.min(durationMs, timelineOut + requestedDeltaMs))
+      }
+    } else if (edge === 'start') {
+      const deltaMs = Math.max(
+        Math.max(-sourceIn, -timelineIn),
+        Math.min(sourceOut - sourceIn - 200, requestedDeltaMs),
+      )
+      nextSourceIn = sourceIn + deltaMs
+      nextTimelineIn = timelineIn + deltaMs
+    } else {
+      const maximumDelta = Math.min(
+        (item.asset_duration_ms ?? sourceOut) - sourceOut,
+        durationMs - timelineOut,
+      )
+      const deltaMs = Math.max(-(sourceOut - sourceIn - 200), Math.min(maximumDelta, requestedDeltaMs))
+      nextSourceOut = sourceOut + deltaMs
+      nextTimelineOut = timelineOut + deltaMs
+    }
+    const changed = nextTimelineIn !== timelineIn || nextTimelineOut !== timelineOut
+      || nextSourceIn !== sourceIn || nextSourceOut !== sourceOut
+    if (!changed) {
+      return {
+        nextItems: baseItems,
+        changed,
+        conflict: null,
+        sourceIn,
+        sourceOut,
+        timelineIn,
+        timelineOut,
+      }
+    }
+    const baseAudio = baseItems.filter(row => row.track_type === 'audio')
+    const conflict = audioItemsConflict(item, nextTimelineIn, nextTimelineOut, baseAudio)
+    if (conflict) {
+      return {
+        nextItems: null,
+        changed: false,
+        conflict,
+        sourceIn,
+        sourceOut,
+        timelineIn,
+        timelineOut,
+      }
+    }
+    const nextDuration = nextTimelineOut - nextTimelineIn
+    const trimStartDelta = nextTimelineIn - timelineIn
+    const transform = rebaseAudioEnvelope(item.transform, trimStartDelta, nextDuration)
+    const trimmed: TimelineItem = {
+      ...item,
+      source_in_ms: nextSourceIn,
+      source_out_ms: nextSourceOut,
+      timeline_in_ms: nextTimelineIn,
+      timeline_out_ms: nextTimelineOut,
+      transform,
+    }
+    const nextAudio = refreshEnabledDucking(baseAudio.map(row => row.id === item.id ? trimmed : row))
+      .sort((left, right) => left.timeline_in_ms - right.timeline_in_ms || left.sequence_number - right.sequence_number)
+      .map((row, index) => ({ ...row, sequence_number: index + 1 }))
+    return {
+      nextItems: [
+        ...baseItems.filter(row => row.track_type === 'main_video'),
+        ...nextAudio,
+        ...baseItems.filter(row => row.track_type === 'subtitle'),
+      ],
+      changed,
+      conflict: null,
+      sourceIn: nextSourceIn,
+      sourceOut: nextSourceOut,
+      timelineIn: nextTimelineIn,
+      timelineOut: nextTimelineOut,
+    }
+  }
+
+  const handleAudioTrimKeyDown = (
+    event: ReactKeyboardEvent<HTMLElement>,
+    item: TimelineItem,
+    edge: 'start' | 'end',
+  ) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    event.stopPropagation()
+    const stepMs = event.shiftKey
+      ? 1000
+      : snapEnabled ? snapIntervalMs : Math.max(1, Math.round(1000 / outputFps))
+    const result = buildTrimmedAudioItems(
+      items,
+      item,
+      edge,
+      event.key === 'ArrowRight' ? stepMs : -stepMs,
+    )
+    if (!result) return
+    if (result.conflict) {
+      setNotice(`无法裁切：会与同类声音 ${result.conflict.label} 重叠。`)
+      return
+    }
+    if (!result.changed) {
+      setNotice(`${edge === 'start' ? '左' : '右'}侧声音裁切已到合法边界。`)
+      return
+    }
+    setPlaying(false)
+    setPlayheadMs(edge === 'start' ? result.timelineIn : result.timelineOut)
+    commitItems(
+      result.nextItems,
+      `已用键盘裁切 ${item.label} 的${edge === 'start' ? '左' : '右'}边缘。`,
+      item.id,
+    )
+  }
+
+  const beginAudioTrim = (
+    event: ReactPointerEvent<HTMLElement>,
+    item: TimelineItem,
+    edge: 'start' | 'end',
+  ) => {
+    event.currentTarget.focus()
+    event.preventDefault()
+    event.stopPropagation()
+    setPlaying(false)
+    const originalItems = items
+    const startX = event.clientX
+    let latestItems = originalItems
+    let latestResult = buildTrimmedAudioItems(originalItems, item, edge, 0)
+    let conflictLabel: string | null = null
+    const onMove = (moveEvent: PointerEvent) => {
+      const rawDeltaMs = ((moveEvent.clientX - startX) / timelineZoom) * 1000
+      const deltaMs = snapEnabled
+        ? Math.round(rawDeltaMs / snapIntervalMs) * snapIntervalMs
+        : Math.round(rawDeltaMs)
+      const result = buildTrimmedAudioItems(originalItems, item, edge, deltaMs)
+      if (!result) return
+      if (result.conflict) {
+        conflictLabel = result.conflict.label
+        return
+      }
+      conflictLabel = null
+      latestResult = result
+      latestItems = result.nextItems
+      setItems(result.nextItems)
+      setPlayheadMs(edge === 'start' ? result.timelineIn : result.timelineOut)
+    }
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+    const onUp = () => {
+      cleanup()
+      if (!latestResult || !latestResult.changed) {
+        setItems(originalItems)
+        if (conflictLabel) setNotice(`无法裁切：会与同类声音 ${conflictLabel} 重叠。`)
+        return
+      }
+      setHistory(rows => [...rows.slice(-49), originalItems])
+      setFuture([])
+      setItems(latestItems)
+      setDirty(true)
+      setSelectedIndex(latestItems.findIndex(row => row.id === item.id))
+      setNotice(`已拖动 ${item.label} 的${edge === 'start' ? '左' : '右'}边缘完成声音裁切。`)
+    }
+    const onCancel = () => {
+      cleanup()
+      setItems(originalItems)
+      setPlayheadMs(item.timeline_in_ms)
+      setNotice('声音裁切手势已取消，时间线保持不变。')
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
+  }
+
   const updateSelectedTransform = (key: string, value: unknown) => {
     if (!selectedItem || blockMainTrackEdit()) return
     commitItems(items.map(item => item.id === selectedItem.id
@@ -1181,7 +1433,25 @@ export function EditorPrototypePage() {
       delete transform.rights
       delete transform.ducking
     }
-    commitItems(items.map(item => item.id === selectedItem.id ? { ...item, transform } : item), `已设为${mix === 'background_music' ? '背景音乐' : '旁白 / 对白'}。`, selectedItem.id)
+    const changedItem = { ...selectedItem, transform }
+    const baseAudio = audioItems.map(item => item.id === selectedItem.id ? changedItem : item)
+    const conflict = audioItemsConflict(
+      changedItem,
+      changedItem.timeline_in_ms,
+      changedItem.timeline_out_ms,
+      baseAudio,
+    )
+    if (conflict) {
+      setNotice(`无法更改用途：会与同类声音 ${conflict.label} 重叠。请先调整成片位置。`)
+      return
+    }
+    const nextAudio = refreshEnabledDucking(baseAudio)
+    const nextItems = [
+      ...items.filter(item => item.track_type === 'main_video'),
+      ...nextAudio,
+      ...items.filter(item => item.track_type === 'subtitle'),
+    ]
+    commitItems(nextItems, `已设为${mix === 'background_music' ? '背景音乐' : '旁白 / 对白'}。`, selectedItem.id)
   }
 
   const applySelectedDucking = () => {
@@ -1240,12 +1510,24 @@ export function EditorPrototypePage() {
       const normalized = normalizeMainTrack(rows, durationMs)
       const nextItems = replaceMainTrack(items, normalized)
       commitItems(nextItems, `已删除 ${selectedItem.label}，后续片段已波纹前移。`, normalized[0]?.id ?? null)
+    } else if (selectedItem.track_type === 'audio') {
+      const nextAudio = refreshEnabledDucking(
+        audioItems
+          .filter(item => item.id !== selectedItem.id)
+          .map((item, index) => ({ ...item, sequence_number: index + 1 })),
+      )
+      const nextItems = [
+        ...items.filter(item => item.track_type === 'main_video'),
+        ...nextAudio,
+        ...items.filter(item => item.track_type === 'subtitle'),
+      ]
+      commitItems(nextItems, `已从声音轨移除 ${selectedItem.label}。`, nextAudio[0]?.id ?? nextItems[0]?.id ?? null)
     } else {
       let sequence = 0
       const nextItems = items
         .filter(item => item.id !== selectedItem.id)
         .map(item => item.track_type === selectedItem.track_type ? { ...item, sequence_number: ++sequence } : item)
-      commitItems(nextItems, `已从${selectedItem.track_type === 'audio' ? '声音' : '字幕'}轨移除 ${selectedItem.label}。`, nextItems[0]?.id ?? null)
+      commitItems(nextItems, `已从字幕轨移除 ${selectedItem.label}。`, nextItems[0]?.id ?? null)
     }
     setPlayheadMs(Math.min(playheadMs, durationMs))
   }
@@ -1680,7 +1962,9 @@ export function EditorPrototypePage() {
             <div className={styles.rangeLabels}><span>{seconds(selectedItem.source_in_ms)}</span><b>{seconds((selectedItem.source_out_ms ?? 0) - (selectedItem.source_in_ms ?? 0))}</b><span>{seconds(selectedItem.source_out_ms)}</span></div>
             <div className={styles.trimHint}>{selectedItem.track_type === 'main_video'
               ? videoTrackLocked ? '画面轨已锁定；解锁后才能拖动两侧把手裁切' : '直接拖动时间线片段两侧把手裁切'
-              : '时间范围随不可变时间线版本保存'}</div>
+              : selectedItem.track_type === 'audio'
+                ? '拖动声音片段两侧把手裁切；方向键精调，Shift 按 1 秒调整'
+                : '时间范围随不可变时间线版本保存'}</div>
           </section>
           {selectedItem.track_type === 'main_video' && <section>
             <h3>片段操作</h3>
@@ -1733,7 +2017,7 @@ export function EditorPrototypePage() {
               <label>证据说明<input aria-label="BGM 权利证据" value={String(((selectedItem.transform.rights as Record<string, unknown> | undefined)?.evidence) ?? '')} onChange={event => updateSelectedTransform('rights', { ...((selectedItem.transform.rights as Record<string, unknown> | undefined) ?? {}), evidence: event.target.value })} /></label>
               <label>确认权利<input aria-label="确认 BGM 权利" type="checkbox" checked={Boolean((selectedItem.transform.rights as Record<string, unknown> | undefined)?.confirmed)} onChange={event => updateSelectedTransform('rights', { ...((selectedItem.transform.rights as Record<string, unknown> | undefined) ?? {}), confirmed: event.target.checked })} /></label>
               <button className={styles.duckingButton} onClick={applySelectedDucking}><VolumeX />按旁白区间生成 Ducking</button>
-              <small>压低 {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.reduction_db) ?? -12)} dB · attack {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.attack_ms) ?? 200)}ms · release {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.release_ms) ?? 500)}ms</small>
+              <small>压低 {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.reduction_db) ?? -12)} dB · attack {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.attack_ms) ?? 200)}ms · release {String(((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.release_ms) ?? 500)}ms · 区间 {Array.isArray((selectedItem.transform.ducking as Record<string, unknown> | undefined)?.regions) ? ((selectedItem.transform.ducking as Record<string, unknown>).regions as unknown[]).length : 0} 个（随位置自动更新）</small>
             </>}
             <button className={styles.removeTrackItem} onClick={deleteSelected}>从声音轨移除</button>
           </section>}
@@ -1869,7 +2153,34 @@ export function EditorPrototypePage() {
               }
               selectItem(item)
             }}
-          ><Waveform projectId={projectId} assetId={item.asset_id!} /><strong>{item.label}</strong></button>) : <span>拖入已批准配音或 BGM</span>}</div>
+          ><i
+              role="slider"
+              aria-label={`${item.label} 声音左侧裁切把手`}
+              aria-valuemin={0}
+              aria-valuemax={durationMs}
+              aria-valuenow={item.timeline_in_ms}
+              aria-valuetext={`${timecode(item.timeline_in_ms, outputFps)}，源入点 ${timecode(item.source_in_ms ?? 0, outputFps)}`}
+              tabIndex={0}
+              className={styles.trimHandle}
+              data-edge="start"
+              onPointerDown={event => beginAudioTrim(event, item, 'start')}
+              onKeyDown={event => handleAudioTrimKeyDown(event, item, 'start')}
+            />
+            <Waveform projectId={projectId} assetId={item.asset_id!} /><strong>{item.label}</strong>
+            <i
+              role="slider"
+              aria-label={`${item.label} 声音右侧裁切把手`}
+              aria-valuemin={0}
+              aria-valuemax={durationMs}
+              aria-valuenow={item.timeline_out_ms}
+              aria-valuetext={`${timecode(item.timeline_out_ms, outputFps)}，源出点 ${timecode(item.source_out_ms ?? 0, outputFps)}`}
+              tabIndex={0}
+              className={styles.trimHandle}
+              data-edge="end"
+              onPointerDown={event => beginAudioTrim(event, item, 'end')}
+              onKeyDown={event => handleAudioTrimKeyDown(event, item, 'end')}
+            />
+          </button>) : <span>拖入已批准配音或 BGM</span>}</div>
         </div>
         <div className={styles.trackRow} data-track-hidden={subtitleTrackHidden}>
           <label><Subtitles /><span>字幕</span><button title={subtitleTrackHidden ? '显示字幕轨' : '隐藏字幕轨'} aria-pressed={subtitleTrackHidden} onClick={toggleSubtitleTrackVisibility}>{subtitleTrackHidden ? <EyeOff /> : <Eye />}</button></label>
