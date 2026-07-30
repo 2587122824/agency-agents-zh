@@ -151,6 +151,10 @@ POST /api/v1/projects/{project_id}/timelines/{timeline_id}:confirm
 
 暂停定位由 `seekTimeline(positionMs)` 统一处理预览拖动条、时间线背景和首尾跳转：目标时点先解析覆盖的主画面条目（终点允许匹配同终点空位），再原子更新选择、播放头和暂停状态。暂停视频 effect 与 `loadedmetadata` 都按 `source_in + timeline offset` 计算同一源时点，并限制到冻结源出点，避免新视频元素晚加载后重置到源入点。时间尺从 `durationMs / timelineZoom` 派生刻度步长，强制追加非整步终点；首标签不左移、末标签左移自身宽度，保证边界内完整显示。
 
+连续播放切片使用逐帧媒体时钟：可见视频 `preload=auto`，`requestVideoFrameCallback` 每个解码帧按 `mediaTime` 计算成片位置，在距离冻结 `source_out_ms` 一个输出帧时进入 `advancePlayback`；不支持该 API 时以 `requestAnimationFrame + currentTime` 降级。当前条目同时派生下一主画面条目，使用不可见、静音、不可聚焦的独立视频元素提前 `preload=auto` 并在元数据可用时定位 `source_in_ms`，切换后新可见元素直接命中已加载资源。`advancingPlaybackRef` 在切换事务内屏蔽旧元素最后一次 `timeupdate / ended`；到达末片段时保持门禁直到用户重新播放或选择其他条目，避免 15 秒终点被旧媒体时间回写为 14.9 秒。
+
+真实咖啡 v6 在 1280×720 浏览器连续播放验收中，5.0 秒已进入第二片段 SH-001、可见视频 `currentTime=0.449 / readyState=4 / paused=false`；9.7 秒已进入第三片段 SH-003、`currentTime=0.409 / readyState=4 / paused=false`。完整播放后预览与时间线时间码都精确为 `00:15:00`，可见视频停在冻结源出点 0.873 秒；页面 `scrollWidth=clientWidth=1280`，控制台无错误。播放没有写项目草稿或新 Timeline。
+
 真实咖啡 v4 浏览器验收在约 9.958 秒定位到 SH-003，暂停源时点 0.547 秒，与 9.418 秒片段入点的差值一致；结尾选择 873ms 显式空位，开头恢复 SH-002/0 秒。15 秒、60px/s 刻度为 `00:00, 00:02, …, 00:14, 00:15`，末标签右边界为 1280px，页面没有横向或纵向溢出。
 
 `beginScrub` 为预览拖动条与时间尺共用指针会话：pointer down 先聚焦 slider，再按初始边界把移动位置映射为成片毫秒；pointer up/cancel 统一移除全局监听。时间尺拖动期间用 ref 暂停自动居中，避免滚动改变指针映射；预览拖动、键盘定位和正常播放则由 viewport effect 在播放头越界时居中。`handleSeekKeyDown` 以真实 fps 计算单帧步长，并提供秒级、五秒和首尾跳转。缩放 range 与 ±20px/s 按钮统一走 `changeTimelineZoom`，限制 40–180px/s 并标记本地草稿。每次缩放前记录 `播放头画布位置 - viewport.scrollLeft`，新宽度提交后按同一锚点反算滚动位置，并把锚点限制在 24px 视口安全边界内。`fitTimelineToViewport` 从 `viewport.clientWidth - 84px 轨道头 - 12px 安全边距` 与总时长计算 px/s；按钮与 `\` 快捷键调用同一函数并回到起点，窗口过窄时停在 40px/s 并保留横向滚动。计算结果等于当前缩放时直接复位 `scrollLeft`，清除待处理锚点且不调用 `setDirty`。刷新从 `editor-local-draft.v2.timeline_zoom` 恢复，丢弃草稿恢复服务端 `track_config.pixels_per_second`。

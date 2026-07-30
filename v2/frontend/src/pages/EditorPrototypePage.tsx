@@ -7,7 +7,7 @@ import {
   Upload, Volume2, VolumeX, WandSparkles, X,
 } from 'lucide-react'
 import {
-  useEffect, useMemo, useRef, useState,
+  useCallback, useEffect, useMemo, useRef, useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
@@ -488,6 +488,11 @@ export function EditorPrototypePage() {
   const mainItems = useMemo(() => items.filter(item => item.track_type === 'main_video'), [items])
   const audioItems = useMemo(() => items.filter(item => item.track_type === 'audio'), [items])
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
+  const nextMainItem = useMemo(() => {
+    const position = mainItems.findIndex(item => item.id === selectedItem?.id)
+    return position >= 0 ? mainItems[position + 1] ?? null : null
+  }, [mainItems, selectedItem?.id])
+  const nextMainAsset = workspace.data?.available_assets.find(asset => asset.id === nextMainItem?.asset_id) ?? null
   const usedMainVideoAssetIds = useMemo(
     () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
     [mainItems],
@@ -1947,7 +1952,7 @@ export function EditorPrototypePage() {
     viewport.scrollLeft = Math.max(0, playheadX - viewport.clientWidth / 2)
   }, [durationMs, playheadMs, timelineWidth])
 
-  const advancePlayback = () => {
+  const advancePlayback = useCallback(() => {
     if (advancingPlaybackRef.current) return
     advancingPlaybackRef.current = true
     videoRef.current?.pause()
@@ -1956,7 +1961,6 @@ export function EditorPrototypePage() {
     if (!next) {
       setPlayheadMs(durationMs)
       setPlaying(false)
-      advancingPlaybackRef.current = false
       setNotice('时间线预览播放完成。')
       return
     }
@@ -1967,18 +1971,12 @@ export function EditorPrototypePage() {
       return
     }
     setPlaying(true)
-  }
+  }, [durationMs, mainItems, selectedItem?.id])
 
   const handleTimeUpdate = () => {
     const video = videoRef.current
-    if (!video || !selectedItem) return
+    if (!video || !selectedItem || advancingPlaybackRef.current) return
     const sourceIn = selectedItem.source_in_ms ?? 0
-    const sourceOut = selectedItem.source_out_ms ?? selectedItem.asset_duration_ms ?? 0
-    if (playing && sourceOut > sourceIn && video.currentTime * 1000 >= sourceOut - (500 / outputFps)) {
-      setPlayheadMs(selectedItem.timeline_out_ms)
-      advancePlayback()
-      return
-    }
     const next = selectedItem.timeline_in_ms + Math.max(0, video.currentTime * 1000 - sourceIn)
     setPlayheadMs(Math.min(next, selectedItem.timeline_out_ms))
   }
@@ -1989,6 +1987,61 @@ export function EditorPrototypePage() {
     if (event.currentTarget.currentTime * 1000 + (1000 / outputFps) < sourceOut) return
     advancePlayback()
   }
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!playing || !video || !selectedItem?.asset_id || selectedItem.track_type !== 'main_video') return
+    const sourceIn = selectedItem.source_in_ms ?? 0
+    const sourceOut = selectedItem.source_out_ms ?? selectedItem.asset_duration_ms ?? sourceIn
+    if (sourceOut <= sourceIn) return
+    const boundaryLeadMs = 1000 / outputFps
+    let cancelled = false
+    let videoFrameId: number | null = null
+    let animationFrameId: number | null = null
+    const frameApi = video as unknown as {
+      requestVideoFrameCallback?: (callback: (now: number, metadata: { mediaTime: number }) => void) => number
+      cancelVideoFrameCallback?: (id: number) => void
+    }
+
+    const inspectFrame = (mediaTimeSeconds: number) => {
+      if (cancelled || videoRef.current !== video) return
+      const mediaTimeMs = mediaTimeSeconds * 1000
+      const timelinePosition = selectedItem.timeline_in_ms + Math.max(0, mediaTimeMs - sourceIn)
+      setPlayheadMs(Math.min(timelinePosition, selectedItem.timeline_out_ms))
+      if (mediaTimeMs >= sourceOut - boundaryLeadMs) {
+        setPlayheadMs(selectedItem.timeline_out_ms)
+        advancePlayback()
+        return
+      }
+      schedule()
+    }
+    const schedule = () => {
+      if (cancelled) return
+      if (frameApi.requestVideoFrameCallback) {
+        videoFrameId = frameApi.requestVideoFrameCallback((_now, metadata) => inspectFrame(metadata.mediaTime))
+      } else {
+        animationFrameId = window.requestAnimationFrame(() => inspectFrame(video.currentTime))
+      }
+    }
+    schedule()
+    return () => {
+      cancelled = true
+      if (videoFrameId != null) frameApi.cancelVideoFrameCallback?.(videoFrameId)
+      if (animationFrameId != null) window.cancelAnimationFrame(animationFrameId)
+    }
+  }, [
+    advancePlayback,
+    outputFps,
+    playing,
+    selectedItem?.asset_duration_ms,
+    selectedItem?.asset_id,
+    selectedItem?.id,
+    selectedItem?.source_in_ms,
+    selectedItem?.source_out_ms,
+    selectedItem?.timeline_in_ms,
+    selectedItem?.timeline_out_ms,
+    selectedItem?.track_type,
+  ])
 
   const locateValidationError = (error: Timeline['validation_report'][number]) => {
     const match = /^items\.(main_video|audio|subtitle)\.(\d+)/.exec(error.path)
@@ -2129,7 +2182,7 @@ export function EditorPrototypePage() {
               width: monitorScale === 'actual' && selectedAsset.width ? `${selectedAsset.width}px` : undefined,
               height: monitorScale === 'actual' && selectedAsset.height ? `${selectedAsset.height}px` : undefined,
             }}
-            preload="metadata"
+            preload="auto"
             muted
             playsInline
             onLoadedMetadata={event => {
@@ -2146,6 +2199,19 @@ export function EditorPrototypePage() {
             }}
             onTimeUpdate={handleTimeUpdate}
             onEnded={handleEnded}
+          />}
+          {nextMainItem?.asset_id && nextMainAsset?.asset_type === 'video' && <video
+            key={`preload-${nextMainItem.id}`}
+            className={styles.nextVideoPreload}
+            aria-hidden="true"
+            tabIndex={-1}
+            src={`/api/v1/projects/${projectId}/assets/${nextMainItem.asset_id}/content`}
+            preload="auto"
+            muted
+            playsInline
+            onLoadedMetadata={event => {
+              event.currentTarget.currentTime = (nextMainItem.source_in_ms ?? 0) / 1000
+            }}
           />}
           {selectedAsset?.asset_type === 'audio' && <div className={styles.audioPreview}>
             <Music2 />

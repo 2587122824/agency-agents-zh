@@ -384,6 +384,15 @@
 .monitorTrackHidden svg { width: 28px; color: #7d878b; }
 .monitorTrackHidden strong { font-size: 12px; }
 .monitorTrackHidden span { color: #7f898d; font-size: 8px; }
+.nextVideoPreload {
+  position: absolute;
+  width: 1px !important;
+  height: 1px !important;
+  left: -2px;
+  bottom: 0;
+  opacity: 0;
+  pointer-events: none;
+}
 .monitorTrackFlags {
   position: absolute;
   z-index: 6;
