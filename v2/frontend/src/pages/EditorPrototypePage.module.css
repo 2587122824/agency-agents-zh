@@ -646,6 +646,56 @@
   cursor: pointer;
 }
 .actionGrid svg { width: 13px; }
+.boundaryList { display: grid; gap: 7px; }
+.boundaryControl {
+  padding: 8px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid #3b4246;
+  border-radius: 5px;
+  background: #22272a;
+}
+.boundaryControl > header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.boundaryControl > header span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.boundaryControl > header strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boundaryControl > header i { color: #777f83; font-style: normal; }
+.boundaryControl > header code { margin-left: auto; color: #9da5a1; white-space: nowrap; }
+.boundaryControl > div { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; }
+.boundaryControl button,
+.boundaryControl select {
+  min-width: 0;
+  height: 31px;
+  margin: 0;
+  border: 1px solid #434b4f;
+  border-radius: 4px;
+  background: #292f33;
+  color: #dce1de;
+}
+.boundaryControl button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.boundaryControl button svg { width: 12px; }
+.boundaryControl button:disabled,
+.boundaryControl select:disabled { opacity: .4; cursor: not-allowed; }
 .inspector label {
   margin-top: 7px;
   display: grid;

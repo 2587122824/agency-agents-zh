@@ -2,6 +2,35 @@ import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, Audi
 
 const API_ROOT = '/api/v1'
 
+function formatApiErrorDetail(detail: unknown): string | null {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map(entry => {
+        if (!entry || typeof entry !== 'object') return String(entry)
+        const issue = entry as { loc?: unknown; msg?: unknown }
+        const path = Array.isArray(issue.loc)
+          ? issue.loc.filter(part => part !== 'body').map(String).join('.')
+          : ''
+        const message = typeof issue.msg === 'string' ? issue.msg : JSON.stringify(entry)
+        return path ? `${path}：${message}` : message
+      })
+      .filter(Boolean)
+    return messages.length ? messages.join('；') : null
+  }
+  if (detail && typeof detail === 'object') {
+    const issue = detail as { loc?: unknown; msg?: unknown }
+    if (typeof issue.msg === 'string') {
+      const path = Array.isArray(issue.loc)
+        ? issue.loc.filter(part => part !== 'body').map(String).join('.')
+        : ''
+      return path ? `${path}：${issue.msg}` : issue.msg
+    }
+    return JSON.stringify(detail)
+  }
+  return null
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const isFormData = init?.body instanceof FormData
   const response = await fetch(`${API_ROOT}${path}`, {
@@ -9,8 +38,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { ...(!isFormData ? { 'Content-Type': 'application/json' } : {}), ...init?.headers },
   })
   if (!response.ok) {
-    const payload = (await response.json().catch(() => null)) as { detail?: string } | null
-    throw new Error(payload?.detail || `请求失败：${response.status}`)
+    const payload = (await response.json().catch(() => null)) as { detail?: unknown } | null
+    throw new Error(formatApiErrorDetail(payload?.detail) || `请求失败：${response.status}`)
   }
   return response.json() as Promise<T>
 }
@@ -361,7 +390,7 @@ export const api = {
         timeline_out_ms: item.timeline_out_ms,
         transform: item.transform,
       })),
-      playhead_ms: playheadMs,
+      playhead_ms: Math.max(0, Math.round(playheadMs)),
     }),
   }),
   discardEditorDraft: (projectId: string) => request<{ status: 'discarded' }>(`/projects/${projectId}/editor-draft`, {

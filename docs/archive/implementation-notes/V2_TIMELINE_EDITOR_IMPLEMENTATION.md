@@ -155,6 +155,12 @@ POST /api/v1/projects/{project_id}/timelines/{timeline_id}:confirm
 
 真实咖啡 v6 在 1280×720 浏览器连续播放验收中，5.0 秒已进入第二片段 SH-001、可见视频 `currentTime=0.449 / readyState=4 / paused=false`；9.7 秒已进入第三片段 SH-003、`currentTime=0.409 / readyState=4 / paused=false`。完整播放后预览与时间线时间码都精确为 `00:15:00`，可见视频停在冻结源出点 0.873 秒；页面 `scrollWidth=clientWidth=1280`，控制台无错误。播放没有写项目草稿或新 Timeline。
 
+相邻主画面的边界预览复用同一逐帧切片链：`previewBoundary` 把播放头定位到左片段出点前 1 秒，并用 `boundaryPreviewEndMs` 保留右片段入点后 1 秒的停止门限；`advancePlayback` 在跨条目选择时保留该门限，逐帧 effect 到点后精确暂停。`setBoundaryTransition` 在一个 `commitItems` 中成对设置左条目的 `transition_out` 和右条目的 `transition_in`，选项只映射既有 `cut/0ms` 或 `fade/200|300|500ms`，因此一条历史记录即可整体撤销。
+
+草稿保存修复了媒体浮点时钟与 Pydantic 整数合同的边界：指纹和 PUT payload 都使用 `Math.max(0, Math.round(playheadMs))`。页面额外记录最后一次尝试指纹，自动保存 effect 在成功或失败后都不再提交相同内容；显式“重试保存”仍可重新提交同一指纹。API 客户端把 FastAPI 422 的 `detail[]` 格式化为 `字段路径：msg`，避免 `[object Object]`。
+
+真实咖啡 v6 在 SH-002 → SH-001 的 `00:04:17` 边界验收：切点预览自动停在 `00:05:16`；选择 0.3 秒柔和过渡后，服务端草稿精确保存 SH-002 `transition_out=fade:300` 与 SH-001 `transition_in=fade:300`，等待后 PUT 计数不再增长，一次撤销恢复双方 `cut:0`。丢弃后 GET 草稿为 `null`；锁定画面轨后衔接下拉禁用、切点预览仍可用且没有新 PUT。前端生产构建通过。
+
 真实咖啡 v4 浏览器验收在约 9.958 秒定位到 SH-003，暂停源时点 0.547 秒，与 9.418 秒片段入点的差值一致；结尾选择 873ms 显式空位，开头恢复 SH-002/0 秒。15 秒、60px/s 刻度为 `00:00, 00:02, …, 00:14, 00:15`，末标签右边界为 1280px，页面没有横向或纵向溢出。
 
 `beginScrub` 为预览拖动条与时间尺共用指针会话：pointer down 先聚焦 slider，再按初始边界把移动位置映射为成片毫秒；pointer up/cancel 统一移除全局监听。时间尺拖动期间用 ref 暂停自动居中，避免滚动改变指针映射；预览拖动、键盘定位和正常播放则由 viewport effect 在播放头越界时居中。`handleSeekKeyDown` 以真实 fps 计算单帧步长，并提供秒级、五秒和首尾跳转。缩放 range 与 ±20px/s 按钮统一走 `changeTimelineZoom`，限制 40–180px/s 并标记本地草稿。每次缩放前记录 `播放头画布位置 - viewport.scrollLeft`，新宽度提交后按同一锚点反算滚动位置，并把锚点限制在 24px 视口安全边界内。`fitTimelineToViewport` 从 `viewport.clientWidth - 84px 轨道头 - 12px 安全边距` 与总时长计算 px/s；按钮与 `\` 快捷键调用同一函数并回到起点，窗口过窄时停在 40px/s 并保留横向滚动。计算结果等于当前缩放时直接复位 `scrollLeft`，清除待处理锚点且不调用 `setDirty`。刷新从 `editor-local-draft.v2.timeline_zoom` 恢复，丢弃草稿恢复服务端 `track_config.pixels_per_second`。

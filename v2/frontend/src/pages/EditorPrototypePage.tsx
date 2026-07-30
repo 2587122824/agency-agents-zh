@@ -295,6 +295,7 @@ export function EditorPrototypePage() {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [playheadMs, setPlayheadMs] = useState(0)
   const [playing, setPlaying] = useState(false)
+  const [boundaryPreviewEndMs, setBoundaryPreviewEndMs] = useState<number | null>(null)
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
   const [assetFilter, setAssetFilter] = useState<'all' | 'video' | 'audio' | 'subtitle'>('all')
@@ -315,6 +316,7 @@ export function EditorPrototypePage() {
   const [dirty, setDirty] = useState(false)
   const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string | null>(null)
   const [lastAutoSavedFingerprint, setLastAutoSavedFingerprint] = useState<string | null>(null)
+  const [lastAutoSaveAttemptFingerprint, setLastAutoSaveAttemptFingerprint] = useState<string | null>(null)
   const [versionOpen, setVersionOpen] = useState(false)
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false)
   const [validationOpen, setValidationOpen] = useState(false)
@@ -358,11 +360,13 @@ export function EditorPrototypePage() {
     setSelectedIndex(0)
     setPlayheadMs(0)
     setPlaying(false)
+    setBoundaryPreviewEndMs(null)
     setDirty(false)
     setLastValidation(null)
     setLastPreview(null)
     setLastAutoSavedAt(null)
     setLastAutoSavedFingerprint(null)
+    setLastAutoSaveAttemptFingerprint(null)
   }, [projectId])
 
   useEffect(() => {
@@ -420,6 +424,7 @@ export function EditorPrototypePage() {
     setDirty(Boolean(remoteItems || localRestored))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
     setLastAutoSavedFingerprint(null)
+    setLastAutoSaveAttemptFingerprint(null)
     setHistory([])
     setFuture([])
     setSelectedIndex(0)
@@ -488,10 +493,9 @@ export function EditorPrototypePage() {
   const mainItems = useMemo(() => items.filter(item => item.track_type === 'main_video'), [items])
   const audioItems = useMemo(() => items.filter(item => item.track_type === 'audio'), [items])
   const subtitleItems = useMemo(() => items.filter(item => item.track_type === 'subtitle'), [items])
-  const nextMainItem = useMemo(() => {
-    const position = mainItems.findIndex(item => item.id === selectedItem?.id)
-    return position >= 0 ? mainItems[position + 1] ?? null : null
-  }, [mainItems, selectedItem?.id])
+  const selectedMainPosition = mainItems.findIndex(item => item.id === selectedItem?.id)
+  const previousMainItem = selectedMainPosition > 0 ? mainItems[selectedMainPosition - 1] : null
+  const nextMainItem = selectedMainPosition >= 0 ? mainItems[selectedMainPosition + 1] ?? null : null
   const nextMainAsset = workspace.data?.available_assets.find(asset => asset.id === nextMainItem?.asset_id) ?? null
   const usedMainVideoAssetIds = useMemo(
     () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
@@ -543,7 +547,7 @@ export function EditorPrototypePage() {
   const autoSaveFingerprint = useMemo(() => JSON.stringify({
     base: sourceTimeline ? [sourceTimeline.id, sourceTimeline.row_version] : null,
     items,
-    playhead_ms: playheadMs,
+    playhead_ms: Math.max(0, Math.round(playheadMs)),
     snap_enabled: snapEnabled,
     pixels_per_second: timelineZoom,
   }), [items, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
@@ -566,11 +570,26 @@ export function EditorPrototypePage() {
   useEffect(() => {
     const video = videoRef.current
     if (!video || !selectedItem?.asset_id) return
-    const expectedTime = (selectedItem.source_in_ms ?? 0) / 1000
+    const sourceIn = selectedItem.source_in_ms ?? 0
+    const sourceOut = selectedItem.source_out_ms ?? selectedItem.asset_duration_ms ?? sourceIn
+    const timelineOffset = Math.max(0, Math.min(
+      selectedItem.timeline_out_ms - selectedItem.timeline_in_ms,
+      playheadMs - selectedItem.timeline_in_ms,
+    ))
+    const expectedTime = Math.min(sourceOut, sourceIn + timelineOffset) / 1000
     if (Math.abs(video.currentTime - expectedTime) > .05) video.currentTime = expectedTime
     if (playing) void video.play()
     else video.pause()
-  }, [playing, selectedItem?.id, selectedItem?.asset_id, selectedItem?.source_in_ms])
+  }, [
+    playing,
+    selectedItem?.id,
+    selectedItem?.asset_id,
+    selectedItem?.source_in_ms,
+    selectedItem?.source_out_ms,
+    selectedItem?.asset_duration_ms,
+    selectedItem?.timeline_in_ms,
+    selectedItem?.timeline_out_ms,
+  ])
 
   useEffect(() => {
     const video = videoRef.current
@@ -668,8 +687,18 @@ export function EditorPrototypePage() {
   })
 
   useEffect(() => {
-    if (!sourceTimeline || !dirty || !items.length || autoSaveDraft.isPending || autoSaveFingerprint === lastAutoSavedFingerprint) return
-    const timer = window.setTimeout(() => autoSaveDraft.mutate(autoSaveFingerprint), 900)
+    if (
+      !sourceTimeline
+      || !dirty
+      || !items.length
+      || autoSaveDraft.isPending
+      || autoSaveFingerprint === lastAutoSavedFingerprint
+      || autoSaveFingerprint === lastAutoSaveAttemptFingerprint
+    ) return
+    const timer = window.setTimeout(() => {
+      setLastAutoSaveAttemptFingerprint(autoSaveFingerprint)
+      autoSaveDraft.mutate(autoSaveFingerprint)
+    }, 900)
     return () => window.clearTimeout(timer)
   }, [
     dirty,
@@ -680,6 +709,7 @@ export function EditorPrototypePage() {
     timelineZoom,
     autoSaveDraft.isPending,
     autoSaveFingerprint,
+    lastAutoSaveAttemptFingerprint,
     lastAutoSavedFingerprint,
   ])
 
@@ -882,17 +912,20 @@ export function EditorPrototypePage() {
     setDirty(false)
     setLastAutoSavedAt(null)
     setLastAutoSavedFingerprint(null)
+    setLastAutoSaveAttemptFingerprint(null)
     setSelectedIndex(0)
     setPlayheadMs(0)
     setPlaying(false)
+    setBoundaryPreviewEndMs(null)
     setNotice('已丢弃自动保存的项目草稿，恢复到当前时间线版本。')
   }
 
-  const selectItem = (item: TimelineItem) => {
+  const selectItem = (item: TimelineItem, preserveBoundaryPreview = false) => {
     const index = items.findIndex(row => row.id === item.id)
     setSelectedIndex(index)
     setPlayheadMs(item.timeline_in_ms)
     setPlaying(false)
+    if (!preserveBoundaryPreview) setBoundaryPreviewEndMs(null)
   }
 
   const seekTimeline = (positionMs: number) => {
@@ -907,6 +940,7 @@ export function EditorPrototypePage() {
     }
     setPlayheadMs(position)
     setPlaying(false)
+    setBoundaryPreviewEndMs(null)
   }
 
   const beginScrub = (
@@ -1007,6 +1041,7 @@ export function EditorPrototypePage() {
   const togglePlayback = () => {
     if (playing) {
       setPlaying(false)
+      setBoundaryPreviewEndMs(null)
       return
     }
     let target = mainItems.find(item => playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
@@ -1021,7 +1056,24 @@ export function EditorPrototypePage() {
     }
     if (selectedItem?.id !== target.id) selectItem(target)
     advancingPlaybackRef.current = false
+    setBoundaryPreviewEndMs(null)
     setPlaying(true)
+  }
+
+  const previewBoundary = (left: TimelineItem, right: TimelineItem) => {
+    if (!left.asset_id || !right.asset_id) {
+      setNotice('切点两侧必须都有已批准画面，才能预览衔接。')
+      return
+    }
+    const boundaryMs = left.timeline_out_ms
+    const startMs = Math.max(left.timeline_in_ms, boundaryMs - 1000)
+    const endMs = Math.min(right.timeline_out_ms, boundaryMs + 1000)
+    selectItem(left)
+    setPlayheadMs(startMs)
+    advancingPlaybackRef.current = false
+    setBoundaryPreviewEndMs(endMs)
+    setPlaying(true)
+    setNotice(`正在预览 ${left.label} → ${right.label} 的切点前后 1 秒。`)
   }
 
   const toggleMonitorFullscreen = async () => {
@@ -1653,6 +1705,49 @@ export function EditorPrototypePage() {
     updateSelectedTransform(key, { type, duration_ms: nextDuration })
   }
 
+  const setBoundaryTransition = (
+    left: TimelineItem,
+    right: TimelineItem,
+    type: 'cut' | 'fade',
+    requestedDurationMs = 300,
+  ) => {
+    if (blockMainTrackEdit(left)) return
+    if (!left.asset_id || !right.asset_id || left.timeline_out_ms !== right.timeline_in_ms) {
+      setNotice('只有紧邻且两侧都有画面的片段才能设置成对转场。')
+      return
+    }
+    const maximum = Math.min(
+      2000,
+      Math.floor((left.timeline_out_ms - left.timeline_in_ms) / 2),
+      Math.floor((right.timeline_out_ms - right.timeline_in_ms) / 2),
+    )
+    const durationMs = type === 'cut'
+      ? 0
+      : Math.max(100, Math.min(maximum, requestedDurationMs))
+    const nextItems = items.map(item => {
+      if (item.id === left.id) {
+        return {
+          ...item,
+          transform: { ...item.transform, transition_out: { type, duration_ms: durationMs } },
+        }
+      }
+      if (item.id === right.id) {
+        return {
+          ...item,
+          transform: { ...item.transform, transition_in: { type, duration_ms: durationMs } },
+        }
+      }
+      return item
+    })
+    commitItems(
+      nextItems,
+      type === 'fade'
+        ? `已为 ${left.label} → ${right.label} 成对设置 ${seconds(durationMs)} 淡出/淡入；一次撤销可整体恢复。`
+        : `已把 ${left.label} → ${right.label} 恢复为直接切换；一次撤销可整体恢复。`,
+      right.id,
+    )
+  }
+
   const setSelectedAudioMix = (mix: 'voiceover' | 'background_music') => {
     if (!selectedItem || selectedItem.track_type !== 'audio') return
     const transform: Record<string, unknown> = { ...selectedItem.transform, mix, playback: selectedItem.transform.playback ?? { mode: 'trim' } }
@@ -1964,7 +2059,7 @@ export function EditorPrototypePage() {
       setNotice('时间线预览播放完成。')
       return
     }
-    selectItem(next)
+    selectItem(next, true)
     if (!next.asset_id) {
       setPlaying(false)
       setNotice('播放到缺口：需要先选择一种补齐方式。')
@@ -2008,6 +2103,13 @@ export function EditorPrototypePage() {
       const mediaTimeMs = mediaTimeSeconds * 1000
       const timelinePosition = selectedItem.timeline_in_ms + Math.max(0, mediaTimeMs - sourceIn)
       setPlayheadMs(Math.min(timelinePosition, selectedItem.timeline_out_ms))
+      if (boundaryPreviewEndMs != null && timelinePosition >= boundaryPreviewEndMs - boundaryLeadMs) {
+        setPlayheadMs(boundaryPreviewEndMs)
+        setPlaying(false)
+        setBoundaryPreviewEndMs(null)
+        setNotice('切点前后 1 秒预览完成；可调整过渡后再次对比。')
+        return
+      }
       if (mediaTimeMs >= sourceOut - boundaryLeadMs) {
         setPlayheadMs(selectedItem.timeline_out_ms)
         advancePlayback()
@@ -2031,6 +2133,7 @@ export function EditorPrototypePage() {
     }
   }, [
     advancePlayback,
+    boundaryPreviewEndMs,
     outputFps,
     playing,
     selectedItem?.asset_duration_ms,
@@ -2106,7 +2209,10 @@ export function EditorPrototypePage() {
     <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(autoSaveDraft.error) || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
       {autoSaveDraft.isPending ? <Cloud /> : autoSaveDraft.error ? <CloudOff /> : unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
-      {autoSaveDraft.error && <button disabled={autoSaveDraft.isPending} onClick={() => autoSaveDraft.mutate(autoSaveFingerprint)}>{autoSaveDraft.error instanceof Error ? autoSaveDraft.error.message : '项目草稿保存失败，请重试'}</button>}
+      {autoSaveDraft.error && <button disabled={autoSaveDraft.isPending} onClick={() => {
+        setLastAutoSaveAttemptFingerprint(autoSaveFingerprint)
+        autoSaveDraft.mutate(autoSaveFingerprint)
+      }}>{autoSaveDraft.error instanceof Error ? `${autoSaveDraft.error.message} · 重试保存` : '项目草稿保存失败 · 重试保存'}</button>}
       {saveAndValidate.error && <button onClick={() => setConfirmSaveOpen(true)}>{saveAndValidate.error instanceof Error ? saveAndValidate.error.message : '保存失败，请重试'}</button>}
       {renderPreview.error && <button disabled={renderPreview.isPending} onClick={() => renderPreview.mutate()}>{renderPreview.error instanceof Error ? renderPreview.error.message : '低清预览失败，请重试'}</button>}
       {reviewPreview.error && <button onClick={() => reviewPreview.mutate()}>{reviewPreview.error instanceof Error ? reviewPreview.error.message : '人工复核保存失败，请重试'}</button>}
@@ -2286,6 +2392,55 @@ export function EditorPrototypePage() {
               <button disabled={videoTrackLocked} onClick={deleteSelected}>移除片段</button>
             </div>
             {videoTrackLocked && <div className={styles.trimHint}>画面轨锁定期间只允许选择、寻帧和预览，不写入本地草稿。</div>}
+          </section>}
+          {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section>
+            <h3>镜头衔接</h3>
+            <div className={styles.boundaryList}>
+              {([
+                previousMainItem ? [previousMainItem, selectedItem] : null,
+                nextMainItem ? [selectedItem, nextMainItem] : null,
+              ] as Array<[TimelineItem, TimelineItem] | null>).filter((boundary): boundary is [TimelineItem, TimelineItem] => Boolean(boundary)).map(([left, right]) => {
+                const transitionOut = left.transform.transition_out as { type?: string; duration_ms?: number } | undefined
+                const transitionIn = right.transform.transition_in as { type?: string; duration_ms?: number } | undefined
+                const pairedFade = transitionOut?.type === 'fade'
+                  && transitionIn?.type === 'fade'
+                  && transitionOut.duration_ms === transitionIn.duration_ms
+                const pairedCut = (transitionOut?.type ?? 'cut') === 'cut' && (transitionIn?.type ?? 'cut') === 'cut'
+                const durationMs = pairedFade ? transitionOut.duration_ms ?? 300 : 0
+                const presetValue = pairedCut
+                  ? 'cut'
+                  : pairedFade ? `fade:${durationMs}` : 'mixed'
+                return <div className={styles.boundaryControl} key={`${left.id}-${right.id}`}>
+                  <header>
+                    <span><strong>{left.label}</strong><i>→</i><strong>{right.label}</strong></span>
+                    <code>{timecode(left.timeline_out_ms, outputFps)}</code>
+                  </header>
+                  <div>
+                    <button
+                      disabled={!left.asset_id || !right.asset_id}
+                      onClick={() => previewBoundary(left, right)}
+                    ><Play />预览切点</button>
+                    <select
+                      aria-label={`${left.label} 到 ${right.label} 的衔接方式`}
+                      disabled={videoTrackLocked || !left.asset_id || !right.asset_id}
+                      value={presetValue}
+                      onChange={event => {
+                        const [type, rawDuration] = event.target.value.split(':')
+                        setBoundaryTransition(left, right, type as 'cut' | 'fade', Number(rawDuration) || 0)
+                      }}
+                    >
+                      {presetValue === 'mixed' && <option value="mixed" disabled>两侧设置不一致</option>}
+                      {pairedFade && ![200, 300, 500].includes(durationMs) && <option value={`fade:${durationMs}`}>柔和过渡 · {seconds(durationMs)}</option>}
+                      <option value="cut">直接切换</option>
+                      <option value="fade:200">柔和过渡 · 0.2s</option>
+                      <option value="fade:300">柔和过渡 · 0.3s</option>
+                      <option value="fade:500">柔和过渡 · 0.5s</option>
+                    </select>
+                  </div>
+                </div>
+              })}
+            </div>
+            <div className={styles.trimHint}>柔和过渡会同时设置前镜淡出和后镜淡入，并作为一个撤销步骤写入草稿；正式预览和导出使用同一冻结参数。</div>
           </section>}
           {selectedItem.track_type === 'main_video' && <section>
             <h3>转场</h3>
