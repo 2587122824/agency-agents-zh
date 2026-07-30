@@ -223,3 +223,20 @@ def test_terminal_project_cannot_be_blocked(session: Session) -> None:
 
     assert caught.value.code == "PROJECT_TERMINAL_STATE"
     assert project.status == "completed"
+
+
+def test_completed_project_can_start_a_new_timeline_revision(session: Session) -> None:
+    project = project_row(status="completed")
+    session.add(project)
+    session.flush()
+
+    result = transition_project(
+        session,
+        project,
+        ProjectStateTrigger.TIMELINE_CANDIDATE_CREATED,
+        actor_type="user",
+        actor_id="editor-user",
+    )
+
+    assert result.to_state == "editing"
+    assert project.status == "editing"

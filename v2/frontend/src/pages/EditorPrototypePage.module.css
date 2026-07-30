@@ -73,6 +73,20 @@
   font-size: 10px;
 }
 .versionButton small { margin-left: 5px; color: var(--editor-muted); }
+.projectSwitcher {
+  min-width: 140px;
+  max-width: 220px;
+  height: 32px;
+  padding: 0 28px 0 9px;
+  border: 1px solid var(--editor-line);
+  border-radius: 5px;
+  outline: 0;
+  background: #202529;
+  color: #dfe3e0;
+  font: inherit;
+  font-size: 11px;
+}
+.projectSwitcher:focus { border-color: #765d98; }
 .topActions { margin-left: auto; display: flex; gap: 5px; align-items: center; }
 .topActions > button {
   min-width: 32px;
@@ -798,6 +812,11 @@
   border-color: #8767ae;
   background: #3b3048;
   color: #f0e8ff;
+}
+.timelineToolbar .deleteAction:not(:disabled) {
+  border-color: #684238;
+  background: #35231f;
+  color: #f2b29d;
 }
 .timelineToolbar button svg { width: 12px; }
 .timelineToolbar label { display: flex; align-items: center; gap: 5px; color: #8d969b; font-size: 8px; }
@@ -1551,6 +1570,20 @@
 .deliveryEvidence summary { cursor: pointer; }
 .deliveryEvidence dl { margin: 9px 0 0; }
 .deliveryEvidence code { overflow-wrap: anywhere; color: #b9a4dd; font-size: 7px; }
+
+/* 剪辑台是高密度工作区，但正文与操作文字不能低于可读下限。 */
+.prototype :where(button, input, select, textarea, p, label, span, small, code, dt, dd, em, time) {
+  font-size: 11px !important;
+}
+.prototype :where(strong, summary) {
+  font-size: 12px !important;
+}
+.prototype .projectTitle strong {
+  font-size: 15px !important;
+}
+.prototype .modal h2 {
+  font-size: 17px !important;
+}
 .spinning { animation: editorSpin 1s linear infinite; }
 @keyframes editorSpin { to { transform: rotate(360deg); } }
 @media (max-width: 1050px) {

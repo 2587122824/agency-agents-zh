@@ -27,6 +27,7 @@ from ..db.models import (
     DecisionChangeImpactAnalysis,
     DecisionChangeImpactTarget,
     DeliveryAttempt,
+    EditorDraftSession,
     DependencyEdge,
     Entity,
     EntityVersion,
@@ -1027,6 +1028,12 @@ class SqlAlchemyEditorRepository:
 
     def timeline(self, timeline_id: str) -> Timeline | None:
         return self.session.get(Timeline, timeline_id)
+
+    def editor_draft(self, project_id: str) -> EditorDraftSession | None:
+        return self.session.get(EditorDraftSession, project_id)
+
+    def delete_editor_draft(self, project_id: str) -> None:
+        self.session.execute(delete(EditorDraftSession).where(EditorDraftSession.project_id == project_id))
 
     def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None:
         return self.session.get(ProductionSnapshot, snapshot_id)

@@ -1357,6 +1357,20 @@ export interface TimelineItemDraft {
   transform: Record<string, unknown>
 }
 
+export interface EditorDraft {
+  schema_version: 'editor-draft-session.v1'
+  project_id: string
+  snapshot_id: string
+  base_timeline_id: string
+  base_timeline_row_version: number
+  track_config: TimelineTrackConfig
+  items: Array<TimelineItemDraft & { client_item_id: string }>
+  playhead_ms: number
+  row_version: number
+  updated_by: string
+  updated_at: string
+}
+
 export interface AudioWaveform {
   schema_version: 'audio-waveform-cache.v1'
   asset_id: string

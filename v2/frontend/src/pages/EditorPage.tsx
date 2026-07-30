@@ -375,7 +375,7 @@ export function EditorPage() {
   }
 
   return <>
-    <PageHeader eyebrow="EDITOR" title="剪辑台" description="素材取舍、时间区间和交付范围以版本化时间线合同记录。" actions={<><Link className="secondaryButton" to={`/editor-prototype${projectId ? `?project=${projectId}` : ''}`}><Sparkles size={14} />查看新版原型</Link><button className="secondaryButton" onClick={() => refresh()}><RefreshCw size={14} />刷新</button></>} />
+    <PageHeader eyebrow="TIMELINE SETUP" title="时间线准备" description="创建或选择可编辑时间线后，进入正式剪辑工作台继续处理。" actions={<><Link className="secondaryButton" to={`/editor${projectId ? `?project=${projectId}` : ''}`}><Sparkles size={14} />进入剪辑工作台</Link><button className="secondaryButton" onClick={() => refresh()}><RefreshCw size={14} />刷新</button></>} />
     <main className={styles.layout}>
       <aside className={styles.projects}>
         <header><span>EDITABLE PROJECTS</span><h2>剪辑项目</h2><b>{editorProjects.length}</b></header>
@@ -513,7 +513,7 @@ export function EditorPage() {
               <div><dt>预览复核</dt><dd>{delivery.data.preview_review ? `${delivery.data.preview_review.reviewed_by} · 已保存` : '尚未完成'}</dd></div>
               {deliveryAttempt && <div><dt>请求指纹</dt><dd><code>{deliveryAttempt.request_fingerprint}</code></dd></div>}
             </dl>}
-            {!deliveryAttempt && delivery.data.confirmed_timeline && !delivery.data.preview_review && <div className={styles.deliveryAction}><Film /><span><strong>需要先完成低清预览复核</strong><small>正式交付必须引用同一时间线合同、预览文件哈希和人工观看记录</small></span><Link className="primaryButton" to={`/editor-prototype?project=${projectId}`}>进入新版剪辑台</Link></div>}
+            {!deliveryAttempt && delivery.data.confirmed_timeline && !delivery.data.preview_review && <div className={styles.deliveryAction}><Film /><span><strong>需要先完成低清预览复核</strong><small>正式交付必须引用同一时间线合同、预览文件哈希和人工观看记录</small></span><Link className="primaryButton" to={`/editor?project=${projectId}`}>进入剪辑工作台</Link></div>}
             {!deliveryAttempt && delivery.data.confirmed_timeline && delivery.data.preview_review && <div className={styles.deliveryAction}><ShieldCheck /><span><strong>等待交付授权</strong><small>预览复核已绑定，当前确认时间线尚未创建交付尝试</small></span><button className="primaryButton" onClick={() => { setDeliveryMethod(null); setAuthorizingDelivery(true) }}>授权交付</button></div>}
             {deliveryAttempt?.status === 'queued' && <div className={styles.deliveryAction}><Clock3 /><span><strong>等待本机生成</strong><small>已进入本地交付队列，系统只执行本次已授权请求</small></span></div>}
             {deliveryAttempt?.status === 'rendering' && <div className={styles.deliveryAction}><RefreshCw className={styles.spinning} /><span><strong>正在生成最终视频</strong><small>FFmpeg 正在按冻结的时间线和编码参数合成 MP4</small></span></div>}

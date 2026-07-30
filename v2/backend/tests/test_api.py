@@ -2781,10 +2781,12 @@ def publish_visual_production_configuration(
                 },
             ],
         }
-    draft = client.post("/api/v1/system-config/versions", json={
+    draft_response = client.post("/api/v1/system-config/versions", json={
         "command_id": f"{command_prefix}-create-001",
         "configuration": configuration,
-    }).json()
+    })
+    assert draft_response.status_code == 201, draft_response.text
+    draft = draft_response.json()
     ready = client.post(
         f"/api/v1/system-config/versions/{draft['id']}:validate",
         json={"command_id": f"{command_prefix}-validate-001", "expected_row_version": draft["row_version"]},
@@ -7841,6 +7843,61 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
         assert len(list(session.scalars(select(WorkAttempt)))) == work_attempt_count
         assert len(list(session.scalars(select(CostEvent)))) == cost_event_count
         assert session.get(Project, project["id"]).active_snapshot_id == snapshot["id"]
+
+    editor = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
+    exported = editor["timelines"][0]
+    assert exported["status"] == "exported"
+    draft_items = [{
+        "client_item_id": item["id"],
+        "track_type": item["track_type"],
+        "sequence_number": item["sequence_number"],
+        "asset_id": item["asset_id"],
+        "label": item["label"],
+        "gap_reason": item["gap_reason"],
+        "source_in_ms": item["source_in_ms"],
+        "source_out_ms": item["source_out_ms"],
+        "timeline_in_ms": item["timeline_in_ms"],
+        "timeline_out_ms": item["timeline_out_ms"],
+        "transform": item["transform"],
+    } for item in exported["items"]]
+    saved_draft = client.put(
+        f"/api/v1/projects/{project['id']}/editor-draft",
+        json={
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "base_timeline_id": exported["id"],
+            "base_timeline_row_version": exported["row_version"],
+            "track_config": exported["track_config"],
+            "items": draft_items,
+            "playhead_ms": 12_000,
+        },
+    )
+    assert saved_draft.status_code == 200
+    assert saved_draft.json()["playhead_ms"] == 12_000
+    assert client.get(f"/api/v1/projects/{project['id']}/editor-draft").json()["items"] == draft_items
+
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{exported['id']}:revise",
+        json={
+            "command_id": "post-delivery-revision-001",
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": exported["row_version"],
+            "source": "user",
+            "track_config": exported["track_config"],
+            "items": [{key: value for key, value in item.items() if key != "client_item_id"} for item in draft_items],
+        },
+    )
+    assert revised.status_code == 201
+    assert revised.json()["status"] == "candidate"
+    assert revised.json()["supersedes_timeline_id"] == exported["id"]
+    assert client.get(f"/api/v1/projects/{project['id']}/editor-draft").json() is None
+    editor = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
+    assert editor["project_status"] == "editing"
+    assert next(row for row in editor["timelines"] if row["id"] == exported["id"])["status"] == "exported"
+    control = client.get(f"/api/v1/projects/{project['id']}/control-center").json()
+    assert control["evaluated_stage"] == "editing"
+    assert control["delivery"]["status"] == "verified"
 
 
 def test_delivery_authorization_requires_exact_preview_review(client: TestClient) -> None:

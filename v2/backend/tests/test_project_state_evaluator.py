@@ -25,6 +25,8 @@ def facts(**overrides: object) -> ProjectStateFacts:
     [
         (facts(has_delivery_asset=True, delivery_status="blocked"), "completed"),
         (facts(delivery_status="verified"), "completed"),
+        (facts(persisted_status="editing", has_delivery_asset=True, delivery_status="verified", timeline_status="candidate"), "editing"),
+        (facts(persisted_status="delivery_ready", has_delivery_asset=True, delivery_status="verified", timeline_status="confirmed"), "delivery"),
         (facts(delivery_status="authorized"), "delivery"),
         (facts(timeline_status="confirmed"), "delivery"),
         (facts(persisted_status="delivery_ready"), "delivery"),

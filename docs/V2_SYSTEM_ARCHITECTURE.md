@@ -37,6 +37,7 @@ SQLAlchemy / SQLite / Alembic
 - 展示后端投影和允许执行的明确命令。
 - 不从文案、错误字符串或本地动画推断项目状态。
 - 不保存密钥，不直接调用生产 Provider。
+- `/editor` 直接装载权威剪辑工作台；未携带项目参数时从项目投影选择首个具备剪辑资格的项目，顶部切换只修改 URL 项目上下文并重新读取对应投影。项目上下文变化时先清空内存编辑状态，待新投影按基线恢复，禁止跨项目残留。无 Timeline 时才进入 `/editor/setup` 创建或选择时间线；该准备页不是“旧剪辑页 → 新版原型”的必经跳板。
 
 ### 2.2 应用服务
 
@@ -149,9 +150,10 @@ draft
 → editing
 → delivery_ready
 → completed
+→ editing（用户基于已导出版本继续剪辑）
 ```
 
-异常状态使用 `blocked`，并保留 `blocked_from_status`、结构化原因、责任聚合和原始证据。归档是独立列表元数据，不等于取消、失败或删除。
+`completed` 表示已经存在通过验证的成片，不表示项目永久只读。用户从最新 `exported` Timeline 创建新候选时，旧 Timeline、DeliveryAttempt 和成片 Asset 保持不可变，项目回到 `editing`；日常调整写入独立可变 `EditorDraftSession`，不改变项目阶段。异常状态使用 `blocked`，并保留 `blocked_from_status`、结构化原因、责任聚合和原始证据。归档是独立列表元数据，不等于取消、失败或删除。
 
 创作会话中的消息、建议选择和草稿修订均保持在 `collecting_requirements`；只有用户最终确认最新草稿并生成新的 `RequirementVersion` 时，`REQUIREMENT_CONFIRMED` 才允许项目进入 `planning`。项目已进入策划后，普通 `MESSAGE_ADDED` 不允许隐式回退。
 

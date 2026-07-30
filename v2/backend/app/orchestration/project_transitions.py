@@ -150,6 +150,7 @@ TRANSITION_RULES: Mapping[ProjectStateTrigger, Mapping[str, str]] = {
     ProjectStateTrigger.TIMELINE_CANDIDATE_CREATED: {
         "editing": "editing",
         "delivery_ready": "editing",
+        "completed": "editing",
     },
     ProjectStateTrigger.TIMELINE_CONFIRMED: {
         "editing": "delivery_ready",

@@ -86,6 +86,10 @@ transform, created_at
 | `ValidateTimeline` | 状态为 `candidate`；行版本匹配 | 通过后进入 `review`，失败仍为 `candidate` |
 | `ConfirmTimeline` | 状态为 `review`；合同哈希和行版本匹配；用户明确确认 | 时间线 `confirmed`，素材 `used`，项目 `delivery_ready` |
 
+项目日常编辑不再把浏览器内存当作唯一事实。迁移 `20260730_42` 新增一项目一行的可变 `editor_draft_sessions`：保存基线 Timeline ID/行版本、轨道合同、带稳定客户端 ID 的条目、播放头和更新时间。前端仍即时写本地副本，900ms 空闲后串接服务端保存；恢复时只接受当前最新基线，生成 Timeline 修订或显式丢弃时删除草稿。该表不是审计合同，不参与交付 Manifest，也不改变项目状态。
+
+交付验证仍把本次 Timeline 标成 `exported` 并留下不可变 DeliveryAttempt/Asset，但 `completed` 现在表示“已有已验证成片”而不是永久锁定。用户可从最新 `exported` Timeline 创建下一 `candidate`，状态转移器把项目恢复为 `editing`；旧交付不改写。阶段评估优先读取最新候选/待确认/已确认 Timeline，避免旧 verified Attempt 抢占新一轮剪辑或交付。前端同样按当前确认 Timeline 精确选择 Attempt，不能误把旧成片显示成新版本的交付状态。
+
 所有写命令使用 `CommandReceipt` 幂等。相同命令 ID 不能用于另一命令类型。
 
 ## 5. 确定性校验
@@ -133,11 +137,11 @@ POST /api/v1/projects/{project_id}/timelines/{timeline_id}:confirm
 
 ## 7. 前端剪辑台
 
-剪辑台按原型实现：可编辑项目列表、输出摘要、质量阶段确认门、预览监视器、批准素材箱、三类轨道、显式空位、四个时间字段、版本历史、校验结果、修订和合同确认。
+正式 `/editor` 直接装载完整剪辑工作台：顶部项目切换、输出摘要、预览监视器、批准素材箱、三类轨道、显式空位、时间字段、版本历史、校验结果、修订和合同确认。旧页面和“查看新版原型”二次入口不再参与路由。时间线工具栏为当前选择提供显式“删除所选”，与 Inspector 和 Delete 快捷键共用 `deleteSelected`、锁轨门禁、波纹前移及撤销链；画面、声音和字幕条目均按各自合同删除。高密度工作区所有正文和操作文字最低 11px，真实 1280×720 页面 `scrollWidth == clientWidth == 1280`、`scrollHeight == clientHeight == 720`。
 
 前端排序和时间输入只是候选编辑状态。只有提交成功的版本具有数据库权威性。
 
-新版 `/editor-prototype` 另提供 `editor-preview.v1` 低清预渲染。它只读取已保存 Timeline，不消费浏览器未提交草稿；服务复验行版本、合同哈希、时间线校验、本机渲染合同、输入文件哈希以及缓存 MP4 的格式/尺寸/时长。合法版本按项目画幅生成长边 640、最高 24fps 的本机缓存；首次生成写入按命令隔离的临时 MP4，验证与质量探测完成后原子替换确定性缓存，异常始终清理临时文件。页面生成和重检期间禁用重复提交。该缓存不是 Asset，不创建 DeliveryAttempt、WorkItem、CostEvent，不确认时间线或改变项目状态。
+`/editor` 提供 `editor-preview.v1` 低清预渲染。它只读取已保存 Timeline，不消费尚未冻结为可导出版本的项目草稿；服务复验行版本、合同哈希、时间线校验、本机渲染合同、输入文件哈希以及缓存 MP4 的格式/尺寸/时长。合法版本按项目画幅生成长边 640、最高 24fps 的本机缓存；首次生成写入按命令隔离的临时 MP4，验证与质量探测完成后原子替换确定性缓存，异常始终清理临时文件。页面生成和重检期间禁用重复提交。该缓存不是 Asset，不创建 DeliveryAttempt、WorkItem、CostEvent，不确认时间线或改变项目状态。
 
 人工复核成功回调必须等待 `editor-prototype-workspace / editor-workspace / editor-prototype-delivery / delivery-workspace` 四类查询完成失效与活动重取，随后才把本地 `previewReviewSaved` 置为真。复核 mutation 进行中，缓存重检和时间线确认保持禁用；因此同一预览刚保存复核时不会被闭包中陈旧的 `sourceTimeline.preview_review` 重新清空。
 

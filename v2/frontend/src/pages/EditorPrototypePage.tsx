@@ -1,9 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Film,
-  Download, Eye, EyeOff, Layers3, Lock, Maximize2, Music2, Pause, Play, Plus, Redo2,
+  Cloud, CloudOff, Download, Eye, EyeOff, Layers3, Lock, Maximize2, Music2, Pause, Play, Plus, Redo2,
   RefreshCw, Minus,
-  RotateCcw, Scissors, Search, ShieldCheck, Sparkles, Subtitles, Undo2, Unlock,
+  RotateCcw, Scissors, Search, ShieldCheck, Sparkles, Subtitles, Trash2, Undo2, Unlock,
   Upload, Volume2, VolumeX, WandSparkles, X,
 } from 'lucide-react'
 import {
@@ -17,7 +17,6 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const DEFAULT_PROJECT_ID = 'project_9cd1c4e1fe5c4c8e88466acef2913e72'
 const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v3'
 
 interface LocalEditorDraft {
@@ -261,19 +260,34 @@ function SubtitleCueStrip({ projectId, item }: { projectId: string; item: Timeli
 }
 
 export function EditorPrototypePage() {
-  const [params] = useSearchParams()
-  const projectId = params.get('project') ?? DEFAULT_PROJECT_ID
+  const [params, setParams] = useSearchParams()
   const queryClient = useQueryClient()
+  const projects = useQuery({
+    queryKey: ['projects'],
+    queryFn: () => api.projects(),
+    refetchInterval: 5000,
+  })
+  const editorProjects = projects.data?.filter(project => ['quality_review', 'editing', 'delivery_ready', 'blocked', 'completed'].includes(project.status)) ?? []
+  const requestedProjectId = params.get('project') ?? ''
+  const projectId = requestedProjectId || editorProjects[0]?.id || ''
   const workspace = useQuery({
     queryKey: ['editor-prototype-workspace', projectId],
     queryFn: () => api.editorWorkspace(projectId),
+    enabled: Boolean(projectId),
+  })
+  const serverDraft = useQuery({
+    queryKey: ['editor-prototype-draft', projectId],
+    queryFn: () => api.editorDraft(projectId),
+    enabled: Boolean(projectId),
   })
   const deliveryWorkspace = useQuery({
     queryKey: ['editor-prototype-delivery', projectId],
     queryFn: () => api.deliveryWorkspace(projectId),
+    enabled: Boolean(projectId),
     refetchInterval: query => {
       if (query.state.error) return false
-      const status = query.state.data?.attempts[0]?.status
+      const currentTimelineId = query.state.data?.confirmed_timeline?.id
+      const status = query.state.data?.attempts.find(attempt => attempt.timeline_id === currentTimelineId)?.status
       return status === 'queued' || status === 'rendering' ? 3000 : false
     },
   })
@@ -287,7 +301,7 @@ export function EditorPrototypePage() {
   const [assetSearchOpen, setAssetSearchOpen] = useState(false)
   const [assetSearchQuery, setAssetSearchQuery] = useState('')
   const [gapAssetSelection, setGapAssetSelection] = useState(false)
-  const [notice, setNotice] = useState('原型模式：所有调整只保存在当前浏览器，不会修改真实时间线。')
+  const [notice, setNotice] = useState('剪辑调整会自动保存为项目草稿；生成可导出版本时才冻结新时间线。')
   const [history, setHistory] = useState<TimelineItem[][]>([])
   const [future, setFuture] = useState<TimelineItem[][]>([])
   const [timelineZoom, setTimelineZoom] = useState(82)
@@ -299,6 +313,8 @@ export function EditorPrototypePage() {
   const [audioTrackMuted, setAudioTrackMuted] = useState(false)
   const [subtitleTrackHidden, setSubtitleTrackHidden] = useState(false)
   const [dirty, setDirty] = useState(false)
+  const [lastAutoSavedAt, setLastAutoSavedAt] = useState<string | null>(null)
+  const [lastAutoSavedFingerprint, setLastAutoSavedFingerprint] = useState<string | null>(null)
   const [versionOpen, setVersionOpen] = useState(false)
   const [confirmSaveOpen, setConfirmSaveOpen] = useState(false)
   const [validationOpen, setValidationOpen] = useState(false)
@@ -336,8 +352,22 @@ export function EditorPrototypePage() {
   const sourceTimeline = workspace.data?.timelines[0] ?? null
   const localDraftKey = `agency-studio.editor-draft.${projectId}`
   useEffect(() => {
-    if (!sourceTimeline) return
-    let restored: LocalEditorDraft | null = null
+    setItems([])
+    setHistory([])
+    setFuture([])
+    setSelectedIndex(0)
+    setPlayheadMs(0)
+    setPlaying(false)
+    setDirty(false)
+    setLastValidation(null)
+    setLastPreview(null)
+    setLastAutoSavedAt(null)
+    setLastAutoSavedFingerprint(null)
+  }, [projectId])
+
+  useEffect(() => {
+    if (!sourceTimeline || !workspace.data || serverDraft.isPending) return
+    let localRestored: LocalEditorDraft | null = null
     try {
       const raw = window.localStorage.getItem(localDraftKey)
       const parsed = raw ? JSON.parse(raw) as LocalEditorDraft : null
@@ -346,19 +376,54 @@ export function EditorPrototypePage() {
         && parsed.base_timeline_id === sourceTimeline.id
         && parsed.base_row_version === sourceTimeline.row_version
         && Array.isArray(parsed.items)
-      ) restored = parsed
+      ) localRestored = parsed
       else if (raw) window.localStorage.removeItem(localDraftKey)
     } catch {
       window.localStorage.removeItem(localDraftKey)
     }
-    setItems(restored?.items ?? sourceTimeline.items)
-    setTimelineZoom(restored?.timeline_zoom ?? sourceTimeline.track_config.pixels_per_second ?? 82)
-    setSnapEnabled(restored?.snap_enabled ?? sourceTimeline.track_config.snap_enabled)
-    setDirty(Boolean(restored))
+    const remote = serverDraft.data
+    const remoteMatches = Boolean(
+      remote
+      && remote.base_timeline_id === sourceTimeline.id
+      && remote.base_timeline_row_version === sourceTimeline.row_version
+    )
+    const useRemote = Boolean(
+      remoteMatches
+      && (!localRestored || new Date(remote!.updated_at).getTime() >= new Date(localRestored.saved_at).getTime())
+    )
+    const remoteItems: TimelineItem[] | null = useRemote && remote
+      ? remote.items.map(item => {
+        const asset = workspace.data.available_assets.find(row => row.id === item.asset_id)
+        return {
+          id: item.client_item_id,
+          track_type: item.track_type,
+          sequence_number: item.sequence_number,
+          asset_id: item.asset_id,
+          asset_state: asset?.state ?? null,
+          asset_type: asset?.asset_type ?? null,
+          asset_duration_ms: asset?.duration_ms ?? null,
+          label: item.label,
+          gap_reason: item.gap_reason ?? null,
+          source_in_ms: item.source_in_ms,
+          source_out_ms: item.source_out_ms,
+          timeline_in_ms: item.timeline_in_ms,
+          timeline_out_ms: item.timeline_out_ms,
+          transform: item.transform,
+        }
+      })
+      : null
+    setItems(remoteItems ?? localRestored?.items ?? sourceTimeline.items)
+    setTimelineZoom(remote?.track_config.pixels_per_second && useRemote
+      ? remote.track_config.pixels_per_second
+      : localRestored?.timeline_zoom ?? sourceTimeline.track_config.pixels_per_second ?? 82)
+    setSnapEnabled(useRemote && remote ? remote.track_config.snap_enabled : localRestored?.snap_enabled ?? sourceTimeline.track_config.snap_enabled)
+    setDirty(Boolean(remoteItems || localRestored))
+    setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
+    setLastAutoSavedFingerprint(null)
     setHistory([])
     setFuture([])
     setSelectedIndex(0)
-    setPlayheadMs(0)
+    setPlayheadMs(useRemote && remote ? remote.playhead_ms : 0)
     setPlaying(false)
     setLastValidation(sourceTimeline)
     setLastPreview(null)
@@ -372,10 +437,12 @@ export function EditorPrototypePage() {
       warnings: false,
     })
     setPreviewOpen(false)
-    setNotice(restored
-      ? `已恢复 ${new Date(restored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
-      : '当前时间线已同步；开始调整后会自动保存本地草稿。')
-  }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey])
+    setNotice(useRemote && remote
+      ? `已恢复 ${new Date(remote.updated_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 自动保存的项目草稿。`
+      : localRestored
+        ? `已恢复 ${new Date(localRestored.saved_at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 的本地草稿。`
+        : '当前时间线已同步；开始调整后会自动保存到项目。')
+  }, [sourceTimeline?.id, sourceTimeline?.row_version, localDraftKey, serverDraft.data, serverDraft.isPending, workspace.data])
 
   const durationMs = workspace.data?.duration_ms ?? 15000
   const outputFps = Math.max(1, Number(sourceTimeline?.output_spec.fps) || 24)
@@ -435,7 +502,9 @@ export function EditorPrototypePage() {
   )) ?? []
   const activeSubtitleItem = subtitleItems.find(item => item.asset_id && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
   const unresolvedCount = mainItems.filter(item => !item.asset_id).length
-  const deliveryAttempt = deliveryWorkspace.data?.attempts[0] ?? null
+  const deliveryAttempt = deliveryWorkspace.data?.attempts.find(
+    attempt => attempt.timeline_id === deliveryWorkspace.data?.confirmed_timeline?.id,
+  ) ?? null
   const cacheDeliveryWorkspace = (current: DeliveryWorkspace) => {
     queryClient.setQueryData(['editor-prototype-delivery', projectId], current)
     queryClient.setQueryData(['delivery-workspace', projectId], current)
@@ -466,6 +535,13 @@ export function EditorPrototypePage() {
   const validationErrors = lastValidation?.validation_report
     ?? sourceTimeline?.validation_report
     ?? []
+  const autoSaveFingerprint = useMemo(() => JSON.stringify({
+    base: sourceTimeline ? [sourceTimeline.id, sourceTimeline.row_version] : null,
+    items,
+    playhead_ms: playheadMs,
+    snap_enabled: snapEnabled,
+    pixels_per_second: timelineZoom,
+  }), [items, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
 
   useEffect(() => {
     const currentIndex = items.findIndex(item => item.track_type === 'main_video' && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms)
@@ -568,6 +644,40 @@ export function EditorPrototypePage() {
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
   }, [dirty, items, localDraftKey, snapEnabled, sourceTimeline, timelineZoom])
 
+  const autoSaveDraft = useMutation({
+    mutationFn: async (fingerprint: string) => {
+      if (!sourceTimeline) throw new Error('当前没有可保存的剪辑基线。')
+      const draft = await api.saveEditorDraft(projectId, sourceTimeline, {
+        ...sourceTimeline.track_config,
+        audio_enabled: audioItems.length > 0,
+        subtitle_enabled: subtitleItems.length > 0,
+        snap_enabled: snapEnabled,
+        pixels_per_second: timelineZoom,
+      }, items, playheadMs)
+      return { draft, fingerprint }
+    },
+    onSuccess: ({ draft, fingerprint }) => {
+      setLastAutoSavedAt(draft.updated_at)
+      setLastAutoSavedFingerprint(fingerprint)
+    },
+  })
+
+  useEffect(() => {
+    if (!sourceTimeline || !dirty || !items.length || autoSaveDraft.isPending || autoSaveFingerprint === lastAutoSavedFingerprint) return
+    const timer = window.setTimeout(() => autoSaveDraft.mutate(autoSaveFingerprint), 900)
+    return () => window.clearTimeout(timer)
+  }, [
+    dirty,
+    items,
+    playheadMs,
+    snapEnabled,
+    sourceTimeline,
+    timelineZoom,
+    autoSaveDraft.isPending,
+    autoSaveFingerprint,
+    lastAutoSavedFingerprint,
+  ])
+
   const draftItems = (): TimelineItemDraft[] => items.map(item => ({
     track_type: item.track_type,
     sequence_number: item.sequence_number,
@@ -595,6 +705,7 @@ export function EditorPrototypePage() {
     },
     onSuccess: async timeline => {
       window.localStorage.removeItem(localDraftKey)
+      await api.discardEditorDraft(projectId)
       setDirty(false)
       setConfirmSaveOpen(false)
       setLastValidation(timeline)
@@ -610,7 +721,7 @@ export function EditorPrototypePage() {
   const renderPreview = useMutation({
     mutationFn: async () => {
       if (!sourceTimeline?.contract_hash) throw new Error('当前时间线还没有可复验的合同哈希。')
-      if (dirty) throw new Error('请先保存并检查本地草稿，再生成低清预览。')
+      if (dirty) throw new Error('请先生成一个可导出版本，再生成低清预览。')
       return api.renderTimelinePreview(projectId, sourceTimeline)
     },
     onSuccess: preview => {
@@ -678,7 +789,9 @@ export function EditorPrototypePage() {
         queryClient.invalidateQueries({ queryKey: ['delivery-workspace', projectId] }),
       ])
       const refreshedDelivery = await deliveryWorkspace.refetch()
-      if (refreshedDelivery.data?.attempts[0]) setDeliveryStatusOpen(true)
+      const currentTimelineId = refreshedDelivery.data?.confirmed_timeline?.id
+      const currentAttempt = refreshedDelivery.data?.attempts.find(attempt => attempt.timeline_id === currentTimelineId)
+      if (currentAttempt) setDeliveryStatusOpen(true)
       else setDeliveryAuthorizeOpen(true)
     },
   })
@@ -714,7 +827,7 @@ export function EditorPrototypePage() {
       }
       const current = await api.deliveryWorkspace(projectId)
       cacheDeliveryWorkspace(current)
-      const currentAttempt = current.attempts[0] ?? null
+      const currentAttempt = current.attempts.find(attempt => attempt.timeline_id === current.confirmed_timeline?.id) ?? null
       if (!currentAttempt || currentAttempt.id !== deliveryAttempt?.id || currentAttempt.status !== 'authorized') {
         throw new Error('交付状态已在其他窗口或后台发生变化，已刷新为最新状态；请按当前可用动作继续。')
       }
@@ -735,7 +848,7 @@ export function EditorPrototypePage() {
     mutationFn: async () => {
       const current = await api.deliveryWorkspace(projectId)
       cacheDeliveryWorkspace(current)
-      const currentAttempt = current.attempts[0] ?? null
+      const currentAttempt = current.attempts.find(attempt => attempt.timeline_id === current.confirmed_timeline?.id) ?? null
       if (!currentAttempt || currentAttempt.id !== deliveryAttempt?.id || currentAttempt.status !== 'output_registered' || !currentAttempt.final_asset) {
         throw new Error('交付状态已在其他窗口或后台发生变化，已刷新为最新状态；请按当前可用动作继续。')
       }
@@ -755,16 +868,19 @@ export function EditorPrototypePage() {
   const discardDraft = () => {
     if (!sourceTimeline) return
     window.localStorage.removeItem(localDraftKey)
+    void api.discardEditorDraft(projectId)
     setItems(sourceTimeline.items)
     setTimelineZoom(sourceTimeline.track_config.pixels_per_second)
     setSnapEnabled(sourceTimeline.track_config.snap_enabled)
     setHistory([])
     setFuture([])
     setDirty(false)
+    setLastAutoSavedAt(null)
+    setLastAutoSavedFingerprint(null)
     setSelectedIndex(0)
     setPlayheadMs(0)
     setPlaying(false)
-    setNotice('已丢弃本地调整，恢复到当前时间线版本。')
+    setNotice('已丢弃自动保存的项目草稿，恢复到当前时间线版本。')
   }
 
   const selectItem = (item: TimelineItem) => {
@@ -1889,35 +2005,55 @@ export function EditorPrototypePage() {
     setValidationOpen(false)
   }
 
-  if (workspace.isPending) return <main className={styles.loading}><Film /><strong>正在装载新版剪辑台原型…</strong></main>
-  if (!workspace.data || workspace.error) return <main className={styles.loading}><AlertTriangle /><strong>原型无法读取当前剪辑项目</strong></main>
+  if (projects.isPending || workspace.isPending) return <main className={styles.loading}><Film /><strong>正在装载剪辑台…</strong></main>
+  if (!projectId) return <main className={styles.loading}><AlertTriangle /><strong>当前没有可进入剪辑台的项目</strong></main>
+  if (!workspace.data || workspace.error) return <main className={styles.loading}><AlertTriangle /><strong>无法读取当前剪辑项目</strong></main>
+  if (!sourceTimeline) return <main className={styles.loading}>
+    <AlertTriangle />
+    <strong>{workspace.data.project_title} 还没有可编辑时间线</strong>
+    <span>先创建或选择一个时间线版本，再进入剪辑工作台。</span>
+    <Link className="primaryButton" to={`/editor/setup?project=${projectId}`}>前往时间线准备</Link>
+  </main>
 
   return <main className={styles.prototype}>
     <header className={styles.topbar}>
-      <Link to={`/editor?project=${projectId}`} title="返回现有剪辑台"><ArrowLeft /></Link>
+      <Link to="/" title="返回项目列表"><ArrowLeft /></Link>
       <div className={styles.projectTitle}>
-        <span>剪辑台新版原型</span>
+        <span>剪辑台</span>
         <strong>{workspace.data.project_title}</strong>
       </div>
-      <button className={styles.versionButton} onClick={() => setVersionOpen(true)}>时间线 v{sourceTimeline?.version_number ?? '--'} <small>{dirty ? '本地草稿未提交' : '已同步'} · 查看版本证据</small></button>
+      <select
+        className={styles.projectSwitcher}
+        aria-label="切换剪辑项目"
+        value={projectId}
+        onChange={event => {
+          const next = new URLSearchParams(params)
+          next.set('project', event.target.value)
+          setParams(next)
+        }}
+      >
+        {editorProjects.map(project => <option key={project.id} value={project.id}>{project.title}</option>)}
+      </select>
+      <button className={styles.versionButton} onClick={() => setVersionOpen(true)}>时间线 v{sourceTimeline?.version_number ?? '--'} <small>{autoSaveDraft.isPending ? '正在自动保存…' : autoSaveDraft.error ? '云端保存失败' : dirty ? '项目草稿已自动保存' : '已同步'} · 查看版本证据</small></button>
       <div className={styles.topActions}>
         <button title="撤销" disabled={!history.length} onClick={undo}><Undo2 /></button>
         <button title="重做" disabled={!future.length} onClick={redo}><Redo2 /></button>
-        {dirty && <button title="丢弃本地草稿" onClick={discardDraft}><RotateCcw /></button>}
+        {dirty && <button title="丢弃自动保存的项目草稿" onClick={discardDraft}><RotateCcw /></button>}
         <button className={styles.primaryAction} disabled={saveAndValidate.isPending} onClick={() => {
           if (dirty) setConfirmSaveOpen(true)
           else if (validationErrors.length || unresolvedCount) setValidationOpen(true)
           else setNotice('当前版本已经通过检查，可以进入确认阶段。')
         }}>
           {dirty ? <CheckCircle2 /> : unresolvedCount || validationErrors.length ? <AlertTriangle /> : <CheckCircle2 />}
-          {saveAndValidate.isPending ? '正在保存…' : dirty ? '保存并检查' : unresolvedCount || validationErrors.length ? `处理 ${Math.max(unresolvedCount, validationErrors.length)} 个问题` : '版本已通过'}
+          {saveAndValidate.isPending ? '正在生成…' : dirty ? '生成可导出版本' : unresolvedCount || validationErrors.length ? `处理 ${Math.max(unresolvedCount, validationErrors.length)} 个问题` : '版本已通过'}
         </button>
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
-      {unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
+    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(autoSaveDraft.error) || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
+      {autoSaveDraft.isPending ? <Cloud /> : autoSaveDraft.error ? <CloudOff /> : unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
+      {autoSaveDraft.error && <button disabled={autoSaveDraft.isPending} onClick={() => autoSaveDraft.mutate(autoSaveFingerprint)}>{autoSaveDraft.error instanceof Error ? autoSaveDraft.error.message : '项目草稿保存失败，请重试'}</button>}
       {saveAndValidate.error && <button onClick={() => setConfirmSaveOpen(true)}>{saveAndValidate.error instanceof Error ? saveAndValidate.error.message : '保存失败，请重试'}</button>}
       {renderPreview.error && <button disabled={renderPreview.isPending} onClick={() => renderPreview.mutate()}>{renderPreview.error instanceof Error ? renderPreview.error.message : '低清预览失败，请重试'}</button>}
       {reviewPreview.error && <button onClick={() => reviewPreview.mutate()}>{reviewPreview.error instanceof Error ? reviewPreview.error.message : '人工复核保存失败，请重试'}</button>}
@@ -1926,7 +2062,7 @@ export function EditorPrototypePage() {
       {uploadDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{uploadDelivery.error instanceof Error ? uploadDelivery.error.message : '交付文件上传失败'}</button>}
       {verifyDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{verifyDelivery.error instanceof Error ? verifyDelivery.error.message : '交付文件验证失败'}</button>}
       {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
-      <code>{workspace.data.aspect_ratio} · {outputFps}fps · {seconds(durationMs)} · 预览质量</code>
+      <code>{lastAutoSavedAt ? `自动保存 ${new Date(lastAutoSavedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} · ` : ''}{workspace.data.aspect_ratio} · {outputFps}fps · {seconds(durationMs)}</code>
     </section>
 
     <section className={styles.editingArea}>
@@ -2200,7 +2336,7 @@ export function EditorPrototypePage() {
                     </li>)}
                   </ol>
                   : <div className={styles.subtitleCueState}>字幕文件没有可编辑的有效 cue。</div>}
-            <div className={styles.trimHint}>文字和时点修订进入本地草稿、撤销/重做与新 Timeline 合同；低清预览和最终 FFmpeg 使用同一冻结 cue。</div>
+            <div className={styles.trimHint}>文字和时点修订会自动保存到项目草稿；生成可导出版本后，低清预览和最终 FFmpeg 使用同一冻结 cue。</div>
             <button className={styles.removeTrackItem} onClick={deleteSelected}>从字幕轨移除</button>
           </section>}
         </> : <section className={styles.gapActions}>
@@ -2216,8 +2352,14 @@ export function EditorPrototypePage() {
       <header className={styles.timelineToolbar}>
         <div><strong>时间线</strong><span>{mainItems.length} 个画面片段 · {audioItems.length} 个音频 · {subtitleItems.length} 个字幕</span></div>
         <button disabled={videoTrackLocked || selectedItem?.track_type !== 'main_video' || !selectedItem.asset_id} onClick={splitSelected}><Scissors />分割</button>
+        <button
+          className={styles.deleteAction}
+          title={selectedItem ? `删除所选：${selectedItem.label}（Delete）` : '请先选择时间轴上的片段'}
+          disabled={!selectedItem || (selectedItem.track_type === 'main_video' && videoTrackLocked)}
+          onClick={deleteSelected}
+        ><Trash2 />删除所选</button>
         <button disabled={renderPreview.isPending} onClick={() => {
-          if (dirty) setNotice('请先保存并检查本地草稿，再生成低清预览。')
+          if (dirty) setNotice('请先生成一个可导出版本，再生成低清预览。')
           else renderPreview.mutate()
         }}><Film />{renderPreview.isPending ? '预览生成中…' : '低清预览'}</button>
         {(deliveryWorkspace.data?.confirmed_timeline || deliveryAttempt) && <button onClick={() => setDeliveryStatusOpen(true)}>
@@ -2369,7 +2511,7 @@ export function EditorPrototypePage() {
     </section>
     {versionOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线版本与审计证据"><section className={styles.versionModal}>
       <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>
-      <p>版本按新到旧排列。当前工作区只编辑最新基线；历史合同保持只读，不会被本地草稿覆盖。</p>
+      <p>版本按新到旧排列。项目草稿随时自动保存；只有生成可导出版本时才冻结新合同，历史版本和历次成片都不会被覆盖。</p>
       <div className={styles.versionList}>
         {workspace.data.timelines.map((timeline, index) => {
           const videoCount = timeline.items.filter(item => item.track_type === 'main_video').length
@@ -2402,9 +2544,9 @@ export function EditorPrototypePage() {
       </div>
       <footer><button onClick={() => setVersionOpen(false)}>关闭</button></footer>
     </section></div>}
-    {confirmSaveOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="保存并检查新时间线版本"><section>
-      <header><CheckCircle2 /><div><span>IMMUTABLE REVISION</span><h2>保存并检查新时间线版本</h2></div><button title="关闭" onClick={() => setConfirmSaveOpen(false)}><X /></button></header>
-      <p>这会基于时间线 v{sourceTimeline?.version_number} 创建不可变的新版本，然后立即执行确定性检查。不会确认交付、启动渲染或产生供应商费用。</p>
+    {confirmSaveOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="生成可导出时间线版本"><section>
+      <header><CheckCircle2 /><div><span>EXPORTABLE REVISION</span><h2>生成可导出版本并检查</h2></div><button title="关闭" onClick={() => setConfirmSaveOpen(false)}><X /></button></header>
+      <p>当前项目草稿已经自动保存。这里会基于时间线 v{sourceTimeline?.version_number} 冻结一个新的可导出版本并立即检查；不会自动导出、覆盖旧成片或产生供应商费用。</p>
       <dl>
         <div><dt>新版本</dt><dd>v{(sourceTimeline?.version_number ?? 0) + 1}</dd></div>
         <div><dt>画面片段</dt><dd>{mainItems.length}</dd></div>
@@ -2412,7 +2554,7 @@ export function EditorPrototypePage() {
         <div><dt>基线版本</dt><dd>v{sourceTimeline?.version_number} · row {sourceTimeline?.row_version}</dd></div>
       </dl>
       {unresolvedCount > 0 && <div className={styles.modalWarning}><AlertTriangle /><span>允许保存含空位的候选，但检查不会通过；保存后会精确定位这些问题。</span></div>}
-      <footer><button onClick={() => setConfirmSaveOpen(false)}>继续调整</button><button className={styles.confirmButton} disabled={saveAndValidate.isPending} onClick={() => saveAndValidate.mutate()}>{saveAndValidate.isPending ? '正在创建并检查…' : '创建新版本并检查'}</button></footer>
+      <footer><button onClick={() => setConfirmSaveOpen(false)}>继续调整</button><button className={styles.confirmButton} disabled={saveAndValidate.isPending} onClick={() => saveAndValidate.mutate()}>{saveAndValidate.isPending ? '正在生成并检查…' : '生成可导出版本'}</button></footer>
     </section></div>}
     {validationOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线检查问题"><section>
       <header><AlertTriangle /><div><span>VALIDATION ISSUES</span><h2>需要处理的时间线问题</h2></div><button title="关闭" onClick={() => setValidationOpen(false)}><X /></button></header>
@@ -2602,11 +2744,11 @@ export function EditorPrototypePage() {
         </div>
       })()}
       {deliveryAttempt?.status === 'verified' && deliveryAttempt.final_asset && <div className={styles.deliveryStep} data-complete="true">
-        <CheckCircle2 /><span><strong>最终 MP4 已通过验证</strong><small>{deliveryAttempt.final_asset.width}×{deliveryAttempt.final_asset.height} · {seconds(deliveryAttempt.final_asset.duration_ms)}</small></span>
+        <CheckCircle2 /><span><strong>本次 MP4 已通过验证</strong><small>{deliveryAttempt.final_asset.width}×{deliveryAttempt.final_asset.height} · {seconds(deliveryAttempt.final_asset.duration_ms)} · 可随时返回时间线继续剪辑并再次导出</small></span>
         <a className={styles.confirmButton} download href={`/api/v1/projects/${projectId}/assets/${deliveryAttempt.final_asset.id}/content`}><Download />下载 MP4</a>
       </div>}
       {deliveryAttempt && <details className={styles.deliveryEvidence}><summary>查看交付证据</summary><dl><div><dt>Attempt</dt><dd><code>{deliveryAttempt.id}</code></dd></div><div><dt>请求指纹</dt><dd><code>{deliveryAttempt.request_fingerprint}</code></dd></div><div><dt>执行方式</dt><dd>{deliveryAttempt.execution_kind}</dd></div>{deliveryAttempt.error_code && <div><dt>阻断代码</dt><dd><code>{deliveryAttempt.error_code}</code></dd></div>}</dl>{deliveryAttempt.error_detail && <pre>{JSON.stringify(deliveryAttempt.error_detail, null, 2)}</pre>}</details>}
-      <footer><button onClick={() => setDeliveryStatusOpen(false)}>关闭</button></footer>
+      <footer><button onClick={() => setDeliveryStatusOpen(false)}>{deliveryAttempt?.status === 'verified' ? '继续剪辑' : '关闭'}</button></footer>
     </section></div>}
   </main>
 }

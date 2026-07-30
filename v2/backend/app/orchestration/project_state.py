@@ -83,15 +83,18 @@ def _authority_snapshot(facts: ProjectStateFacts) -> SnapshotStateFact | None:
 
 
 def evaluate_stage(facts: ProjectStateFacts) -> ProjectStage:
+    if facts.timeline_status in {"candidate", "review"} or facts.persisted_status == "editing":
+        return "editing"
+    if facts.timeline_status == "confirmed" or facts.persisted_status == "delivery_ready":
+        return "delivery"
     if facts.has_delivery_asset or facts.delivery_status == "verified":
         return "completed"
     if (
         facts.delivery_status is not None
-        or facts.timeline_status in {"confirmed", "exported"}
-        or facts.persisted_status == "delivery_ready"
+        or facts.timeline_status == "exported"
     ):
         return "delivery"
-    if facts.timeline_status is not None or facts.persisted_status == "editing":
+    if facts.timeline_status is not None:
         return "editing"
     authority = _authority_snapshot(facts)
     if facts.persisted_status == "quality_review" or (

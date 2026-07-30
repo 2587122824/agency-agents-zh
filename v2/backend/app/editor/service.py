@@ -15,6 +15,7 @@ from ..core.config import RUNTIME_ROOT
 from ..db.models import (
     AgentInputManifest,
     AgentRun,
+    EditorDraftSession,
     Project,
     ProjectEvent,
     ProductionSnapshot,
@@ -51,6 +52,7 @@ from .contracts import (
     ApproveQualityStage,
     ConfirmTimeline,
     CreateTimelineCandidate,
+    SaveEditorDraft,
     GenerateEditorTimeline,
     RetryEditorTimeline,
     RenderTimelinePreview,
@@ -77,6 +79,81 @@ def _editor(session: Session) -> EditorRepository:
 
 def _event(session: Session, event: ProjectEvent) -> None:
     SqlAlchemyEventRepository(session).add(event)
+
+
+def _editor_draft_read(draft: EditorDraftSession) -> dict:
+    return {
+        "schema_version": draft.schema_version,
+        "project_id": draft.project_id,
+        "snapshot_id": draft.snapshot_id,
+        "base_timeline_id": draft.base_timeline_id,
+        "base_timeline_row_version": draft.base_timeline_row_version,
+        "track_config": draft.track_config,
+        "items": draft.items,
+        "playhead_ms": draft.playhead_ms,
+        "row_version": draft.row_version,
+        "updated_by": draft.updated_by,
+        "updated_at": draft.updated_at,
+    }
+
+
+def editor_draft(session: Session, project: Project) -> dict | None:
+    draft = _editor(session).editor_draft(project.id)
+    return _editor_draft_read(draft) if draft else None
+
+
+def save_editor_draft(session: Session, project: Project, payload: SaveEditorDraft) -> dict:
+    repository = _editor(session)
+    if project.status not in {"editing", "delivery_ready", "completed"}:
+        raise EditorConflictError("PROJECT_NOT_EDITABLE", "项目尚未进入剪辑阶段，不能保存剪辑草稿。")
+    snapshot = _require_active_snapshot(session, project, payload.expected_snapshot_id)
+    timeline = _require_timeline(session, project, payload.base_timeline_id)
+    latest = repository.timeline_history(project.id)
+    if not latest or latest[0].id != timeline.id:
+        raise EditorConflictError("EDITOR_DRAFT_BASE_STALE", "剪辑基线已更新，请刷新后继续编辑。")
+    if timeline.snapshot_id != snapshot.id:
+        raise EditorConflictError("TIMELINE_SNAPSHOT_MISMATCH", "剪辑草稿基线不属于当前活动快照。")
+    if timeline.row_version != payload.base_timeline_row_version:
+        raise EditorConflictError("TIMELINE_ROW_VERSION_MISMATCH", "剪辑基线已变化，请刷新后继续编辑。")
+    if timeline.status == "superseded":
+        raise EditorConflictError("TIMELINE_NOT_REVISABLE", "已被替代的时间线不能继续保存草稿。")
+    positions = [(item.track_type, item.sequence_number) for item in payload.items]
+    if len(positions) != len(set(positions)):
+        raise EditorConflictError("TIMELINE_SEQUENCE_DUPLICATE", "同一轨道的 sequence_number 必须唯一。")
+    now = utc_now()
+    draft = repository.editor_draft(project.id)
+    if not draft:
+        draft = EditorDraftSession(
+            project_id=project.id,
+            snapshot_id=snapshot.id,
+            base_timeline_id=timeline.id,
+            base_timeline_row_version=timeline.row_version,
+            track_config=payload.track_config.model_dump(),
+            items=[item.model_dump() for item in payload.items],
+            playhead_ms=min(payload.playhead_ms, project.duration_seconds * 1000),
+            updated_by=payload.actor_id,
+            updated_at=now,
+        )
+        repository.add(draft)
+    else:
+        draft.snapshot_id = snapshot.id
+        draft.base_timeline_id = timeline.id
+        draft.base_timeline_row_version = timeline.row_version
+        draft.track_config = payload.track_config.model_dump()
+        draft.items = [item.model_dump() for item in payload.items]
+        draft.playhead_ms = min(payload.playhead_ms, project.duration_seconds * 1000)
+        draft.row_version += 1
+        draft.updated_by = payload.actor_id
+        draft.updated_at = now
+    repository.flush()
+    session.commit()
+    return _editor_draft_read(draft)
+
+
+def discard_editor_draft(session: Session, project: Project) -> None:
+    repository = _editor(session)
+    repository.delete_editor_draft(project.id)
+    session.commit()
 
 
 def _hash(payload: dict) -> str:
@@ -256,7 +333,7 @@ def _create_candidate(
     if receipt:
         return timeline_read(session, _require_timeline(session, project, receipt.result_id))
     snapshot = _require_active_snapshot(session, project, payload.expected_snapshot_id)
-    if project.status not in {"editing", "delivery_ready"}:
+    if project.status not in {"editing", "delivery_ready", "completed"}:
         raise EditorConflictError(
             "PROJECT_NOT_EDITABLE",
             "项目必须先明确完成质量阶段，才能创建时间线候选。",
@@ -290,8 +367,8 @@ def _create_candidate(
         expected = getattr(payload, "expected_row_version", None)
         if supersedes.row_version != expected:
             raise EditorConflictError("TIMELINE_ROW_VERSION_MISMATCH", "时间线已变化，请刷新后重试。")
-        if supersedes.status in {"exported", "superseded"}:
-            raise EditorConflictError("TIMELINE_NOT_REVISABLE", "已导出或已被替代的时间线不能再修订。")
+        if supersedes.status == "superseded":
+            raise EditorConflictError("TIMELINE_NOT_REVISABLE", "已被替代的时间线不能再修订。")
     version = repository.next_timeline_version(project.id)
     timeline = Timeline(
         project_id=project.id,
@@ -309,6 +386,8 @@ def _create_candidate(
     repository.add(timeline)
     repository.flush()
     _add_items(session, timeline, payload.items)
+    if payload.source == "user":
+        repository.delete_editor_draft(project.id)
     if supersedes and supersedes.status in {"candidate", "review"}:
         supersedes.status = "superseded"
         supersedes.row_version += 1

@@ -1,4 +1,4 @@
-import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProjectProductionProfileOptions, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItemDraft, TimelinePreview, TimelinePreviewReview, VoiceCloneAuthorization, WorkItem } from './types'
+import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorDraft, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProjectProductionProfileOptions, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview, TimelinePreviewReview, VoiceCloneAuthorization, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -333,6 +333,40 @@ export const api = {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', reason }),
   }),
   editorWorkspace: (projectId: string) => request<EditorWorkspace>(`/projects/${projectId}/editor-workspace`),
+  editorDraft: (projectId: string) => request<EditorDraft | null>(`/projects/${projectId}/editor-draft`),
+  saveEditorDraft: (
+    projectId: string,
+    timeline: Timeline,
+    trackConfig: Timeline['track_config'],
+    items: TimelineItem[],
+    playheadMs: number,
+  ) => request<EditorDraft>(`/projects/${projectId}/editor-draft`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      actor_id: 'local-user',
+      expected_snapshot_id: timeline.snapshot_id,
+      base_timeline_id: timeline.id,
+      base_timeline_row_version: timeline.row_version,
+      track_config: trackConfig,
+      items: items.map(item => ({
+        client_item_id: item.id,
+        track_type: item.track_type,
+        sequence_number: item.sequence_number,
+        asset_id: item.asset_id,
+        label: item.label,
+        gap_reason: item.gap_reason,
+        source_in_ms: item.source_in_ms,
+        source_out_ms: item.source_out_ms,
+        timeline_in_ms: item.timeline_in_ms,
+        timeline_out_ms: item.timeline_out_ms,
+        transform: item.transform,
+      })),
+      playhead_ms: playheadMs,
+    }),
+  }),
+  discardEditorDraft: (projectId: string) => request<{ status: 'discarded' }>(`/projects/${projectId}/editor-draft`, {
+    method: 'DELETE',
+  }),
   generateEditorTimeline: (projectId: string, snapshotId: string) => request<Timeline>(`/projects/${projectId}/editor-assistant:generate`, {
     method: 'POST',
     body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: snapshotId }),

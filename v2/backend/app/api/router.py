@@ -123,12 +123,14 @@ from ..editor.contracts import (
     ApproveQualityStage,
     ConfirmTimeline,
     CreateTimelineCandidate,
+    EditorDraftRead,
     EditorWorkspaceView,
     GenerateEditorTimeline,
     RenderTimelinePreview,
     ReviewTimelinePreview,
     RetryEditorTimeline,
     ReviseTimelineCandidate,
+    SaveEditorDraft,
     TimelineRead,
     TimelinePreviewRead,
     TimelinePreviewReviewRead,
@@ -140,10 +142,13 @@ from ..editor.service import (
     approve_quality_stage,
     confirm_timeline,
     create_timeline_candidate,
+    discard_editor_draft,
+    editor_draft,
     editor_workspace,
     generate_editor_timeline,
     render_timeline_preview,
     review_timeline_preview,
+    save_editor_draft,
     retry_editor_timeline,
     revise_timeline_candidate,
     timeline_preview_content_path,
@@ -1163,6 +1168,32 @@ def project_timeline_candidate_create(
     except EditorConflictError as exc:
         session.rollback()
         raise editor_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/editor-draft", response_model=EditorDraftRead | None)
+def project_editor_draft(project_id: str, session: Session = Depends(get_session)):
+    return editor_draft(session, require_project(session, project_id))
+
+
+@router.put("/projects/{project_id}/editor-draft", response_model=EditorDraftRead)
+def project_editor_draft_save(
+    project_id: str,
+    payload: SaveEditorDraft,
+    session: Session = Depends(get_session),
+):
+    try:
+        return save_editor_draft(session, require_project(session, project_id), payload)
+    except EditorNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EditorConflictError as exc:
+        session.rollback()
+        raise editor_error(exc) from exc
+
+
+@router.delete("/projects/{project_id}/editor-draft")
+def project_editor_draft_discard(project_id: str, session: Session = Depends(get_session)):
+    discard_editor_draft(session, require_project(session, project_id))
+    return {"status": "discarded"}
 
 
 @router.post(

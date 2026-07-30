@@ -56,6 +56,35 @@ class TimelineItemInput(BaseModel):
     transform: dict = Field(default_factory=dict)
 
 
+class EditorDraftItem(TimelineItemInput):
+    client_item_id: str = Field(min_length=1, max_length=96)
+
+
+class SaveEditorDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    actor_id: str = Field(default="local-user", min_length=1, max_length=48)
+    expected_snapshot_id: str
+    base_timeline_id: str
+    base_timeline_row_version: int = Field(ge=1)
+    track_config: TimelineTrackConfig
+    items: list[EditorDraftItem] = Field(min_length=1, max_length=500)
+    playhead_ms: int = Field(default=0, ge=0)
+
+
+class EditorDraftRead(BaseModel):
+    schema_version: Literal["editor-draft-session.v1"] = "editor-draft-session.v1"
+    project_id: str
+    snapshot_id: str
+    base_timeline_id: str
+    base_timeline_row_version: int
+    track_config: TimelineTrackConfig
+    items: list[EditorDraftItem]
+    playhead_ms: int
+    row_version: int
+    updated_by: str
+    updated_at: datetime
+
+
 class CreateTimelineCandidate(EditorCommand):
     expected_snapshot_id: str
     source: Literal["user", "editor_assistant"]

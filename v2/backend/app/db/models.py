@@ -418,6 +418,22 @@ class TimelineItem(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
+class EditorDraftSession(Base):
+    __tablename__ = "editor_draft_sessions"
+
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"), primary_key=True)
+    snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
+    base_timeline_id: Mapped[str] = mapped_column(ForeignKey("timelines.id"), index=True)
+    base_timeline_row_version: Mapped[int] = mapped_column(Integer)
+    schema_version: Mapped[str] = mapped_column(String(40), default="editor-draft-session.v1")
+    track_config: Mapped[dict] = mapped_column(JSON)
+    items: Mapped[list] = mapped_column(JSON)
+    playhead_ms: Mapped[int] = mapped_column(Integer, default=0)
+    row_version: Mapped[int] = mapped_column(Integer, default=1)
+    updated_by: Mapped[str] = mapped_column(String(48), default="local-user")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class DeliveryAttempt(Base):
     __tablename__ = "delivery_attempts"
     __table_args__ = (UniqueConstraint("timeline_id", "attempt_number"),)

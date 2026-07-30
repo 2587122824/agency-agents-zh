@@ -25,6 +25,7 @@ from ..db.models import (
     DecisionChangeImpactAnalysis,
     DecisionChangeImpactTarget,
     DeliveryAttempt,
+    EditorDraftSession,
     DependencyEdge,
     Entity,
     EntityVersion,
@@ -94,7 +95,7 @@ ProductionRecord = (
     | WorkItem
 )
 QualityRecord = Asset | AssetReviewDecision | QCFinding | QCReport | QCReportCandidate | AgentInputManifest | AgentRun
-EditorRecord = AgentInputManifest | AgentRun | Timeline | TimelineItem
+EditorRecord = AgentInputManifest | AgentRun | EditorDraftSession | Timeline | TimelineItem
 DeliveryRecord = Asset | DeliveryAttempt | QCFinding | QCReport
 ConfigurationComponentRecord = (
     ProviderConfigVersion
@@ -472,6 +473,10 @@ class EditorRepository(Protocol):
     def flush(self) -> None: ...
 
     def timeline(self, timeline_id: str) -> Timeline | None: ...
+
+    def editor_draft(self, project_id: str) -> EditorDraftSession | None: ...
+
+    def delete_editor_draft(self, project_id: str) -> None: ...
 
     def snapshot(self, snapshot_id: str) -> ProductionSnapshot | None: ...
 
