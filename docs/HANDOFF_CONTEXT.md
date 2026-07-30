@@ -31,7 +31,7 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 | 外部生产执行 | 用户已明确授权，`V2_EXTERNAL_PROVIDER_EXECUTION_ENABLED=true`；RunningHub 与文本模型 API Key 由当前已发布系统配置普通字段提供，不再读取环境变量 |
 | 创作模型执行 | 独立授权 `V2_AGENT_MODEL_EXECUTION_ENABLED=true` |
 
-提交 `69bbc8ee` 的进程身份重启门禁已于 2026-07-30 使用管理员 PowerShell 复验：8766 监听 PID 从旧实例 `58132` 切换为新 API PID `40580`，同一启动会话创建 Worker PID `13684`；API 日志记录新进程启动，健康检查为 `ok`，Alembic runtime/head 均为 `20260729_40`。修复后的脚本已同时证明旧实例无法结束时会失败、成功时只接受本次新 API PID 的健康响应。
+提交 `69bbc8ee` 的进程身份重启门禁已于 2026-07-30 使用管理员 PowerShell 复验；提交 `08e0a050` 发布后再次从 API PID `40580` / Worker PID `13684` 切换为 API PID `58324` / Worker PID `51736`。API 日志记录新进程启动，健康检查为 `ok`，Alembic runtime/head 均为 `20260729_40`。修复后的脚本已同时证明旧实例无法结束时会失败、成功时只接受本次新 API PID 的健康响应。
 
 启动或重启：
 
