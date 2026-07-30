@@ -262,6 +262,11 @@ export function EditorPrototypePage() {
   const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
   const advancingPlaybackRef = useRef(false)
   const timelineScrubbingRef = useRef(false)
+  const pendingTimelineViewRef = useRef<{
+    playheadRatio: number
+    playheadViewportX: number
+    fit: boolean
+  } | null>(null)
   const timelineAudioRefs = useRef<Record<string, HTMLAudioElement | null>>({})
 
   const sourceTimeline = workspace.data?.timelines[0] ?? null
@@ -764,9 +769,39 @@ export function EditorPrototypePage() {
     togglePlayback()
   }
 
-  const changeTimelineZoom = (value: number) => {
-    setTimelineZoom(Math.max(40, Math.min(180, Math.round(value))))
+  const changeTimelineZoom = (value: number, fit = false) => {
+    const viewport = timelineViewportRef.current
+    const playheadRatio = durationMs > 0 ? playheadMs / durationMs : 0
+    const nextZoom = Math.max(40, Math.min(180, Math.round(value)))
+    if (viewport) {
+      const currentPlayheadX = 84 + timelineWidth * playheadRatio
+      pendingTimelineViewRef.current = {
+        playheadRatio,
+        playheadViewportX: Math.max(24, Math.min(
+          viewport.clientWidth - 24,
+          currentPlayheadX - viewport.scrollLeft,
+        )),
+        fit,
+      }
+    }
+    if (nextZoom === timelineZoom) {
+      pendingTimelineViewRef.current = null
+      if (fit && viewport) viewport.scrollLeft = 0
+      return
+    }
+    setTimelineZoom(nextZoom)
     setDirty(true)
+  }
+
+  const fitTimelineToViewport = () => {
+    const viewport = timelineViewportRef.current
+    if (!viewport || durationMs <= 0) return
+    const usableWidth = Math.max(1, viewport.clientWidth - 84 - 12)
+    const fitZoom = Math.floor(usableWidth / (durationMs / 1000))
+    changeTimelineZoom(fitZoom, true)
+    setNotice(fitZoom < 40
+      ? '时间线已缩放到最小；当前窗口仍可横向滚动查看完整内容。'
+      : '时间线已适应当前窗口，并回到时间线起点。')
   }
 
   const toggleSnap = () => {
@@ -1233,6 +1268,10 @@ export function EditorPrototypePage() {
         event.preventDefault()
         togglePlayback()
       }
+      if (event.key === '\\') {
+        event.preventDefault()
+        fitTimelineToViewport()
+      }
       if (event.key.toLowerCase() === 's') {
         event.preventDefault()
         splitSelected()
@@ -1258,6 +1297,14 @@ export function EditorPrototypePage() {
   useEffect(() => {
     const viewport = timelineViewportRef.current
     if (!viewport || timelineScrubbingRef.current) return
+    const pendingView = pendingTimelineViewRef.current
+    if (pendingView) {
+      pendingTimelineViewRef.current = null
+      viewport.scrollLeft = pendingView.fit
+        ? 0
+        : Math.max(0, 84 + timelineWidth * pendingView.playheadRatio - pendingView.playheadViewportX)
+      return
+    }
     const playheadX = 84 + timelineWidth * (playheadMs / durationMs)
     const visibleStart = viewport.scrollLeft + 24
     const visibleEnd = viewport.scrollLeft + viewport.clientWidth - 24
@@ -1583,6 +1630,7 @@ export function EditorPrototypePage() {
         <button title="缩小时间线" disabled={timelineZoom <= 40} onClick={() => changeTimelineZoom(timelineZoom - 20)}><Minus /></button>
         <label>缩放<input aria-label="时间线缩放" type="range" min="40" max="180" value={timelineZoom} onChange={event => changeTimelineZoom(Number(event.target.value))} /></label>
         <button title="放大时间线" disabled={timelineZoom >= 180} onClick={() => changeTimelineZoom(timelineZoom + 20)}><Plus /></button>
+        <button title="时间线适应窗口（\\）" onClick={fitTimelineToViewport}><Maximize2 />适应</button>
         <code>{timecode(playheadMs, outputFps)}</code>
       </header>
       <div className={styles.timelineViewport} ref={timelineViewportRef}>
@@ -1670,7 +1718,7 @@ export function EditorPrototypePage() {
         <i className={styles.playhead} style={{ left: `${84 + timelineWidth * (playheadMs / durationMs)}px` }}><b /></i>
         </div>
       </div>
-      <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · Shift 秒级 · Space 播放</span></footer>
+      <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · Shift 秒级 · \ 适应 · Space 播放</span></footer>
     </section>
     {versionOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线版本与审计证据"><section className={styles.versionModal}>
       <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>
