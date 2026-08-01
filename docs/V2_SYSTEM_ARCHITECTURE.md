@@ -223,6 +223,7 @@ draft
 - 剪辑模型只产生 `TimelineCandidate`；素材缺口必须显式列出，不能自动复用、补帧或插入替代素材。
 - 编辑器边界预览是只读播放会话：从相邻主画面切点前后各 1 秒映射到已有媒体时钟，跨片段继续逐帧推进并在冻结结束点自动暂停，不写 `EditorDraftSession`。
 - 成对柔和过渡仍是两个相邻 TimelineItem 上的 `transition_out / transition_in` 冻结值，由一次前端事务和一个撤销步骤修改；后端校验与 FFmpeg 继续只认识既有 `cut/fade`，不增加改变时长的隐式叠化合同。
+- 结构编辑通过客户端 `reconcileStructuralTransitions(previousRows, nextRows)` 维护成对转场完整性：它用稳定 TimelineItem ID 比较编辑前后的有序相邻边界，只保留仍按原顺序相邻且两侧类型、时长一致的 fade；已断开边界的左侧 `transition_out` 与右侧 `transition_in` 在同一次 `commitItems` 中归零为 `cut:0`。删除、重排、Inspector 移动和正式分镜整理复用同一重建函数；分割则显式让新内部边界为双方 `cut:0`，仅保留原片段外侧转场。该规则不新增服务端字段、迁移或旧数据兼容分支，后端现有 Timeline v4 校验继续作为最终门禁。
 - `EditorDraftSession` 请求把浏览器播放头规范化为整数毫秒。同一内容指纹失败后自动保存停止，只有用户显式重试或内容变化才可再次写入；API 的结构化校验错误向用户保留字段路径和消息，不触发客户端自动重试。
 - EditorWorkspace 从活动 ProductionSnapshot 的 `plan_version_id` 读取权威 Shot 顺序，并通过 Asset → DAGNode → Shot 关系投影每个视频素材的 `shot_code / shot_sequence_number`。顺序检查只消费这些类型化字段，不解析标签或节点名；一键整理是可撤销草稿事务，未知补充素材保持槽位，声音/字幕保持原成片时点。
 - 切点末帧/首帧对比使用两个独立静音视频元素分别定位 `source_out_ms - one_output_frame` 与 `source_in_ms`；元素只读、暂停、按需挂载，点击定格才调用统一时间线 seek。该预览不创建分析候选，也不声称已完成视觉连续性判断。

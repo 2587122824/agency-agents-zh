@@ -88,6 +88,41 @@ function minimumVideoDurationForTransitions(item: TimelineItem) {
   return Math.max(200, fadeDuration * 2)
 }
 
+function pairedFadeDuration(left: TimelineItem, right: TimelineItem) {
+  const transitionOut = left.transform.transition_out as { type?: string; duration_ms?: number } | undefined
+  const transitionIn = right.transform.transition_in as { type?: string; duration_ms?: number } | undefined
+  if (
+    transitionOut?.type !== 'fade'
+    || transitionIn?.type !== 'fade'
+    || transitionOut.duration_ms !== transitionIn.duration_ms
+  ) return null
+  return transitionOut.duration_ms ?? 0
+}
+
+function reconcileStructuralTransitions(previousRows: TimelineItem[], nextRows: TimelineItem[]) {
+  const nextBoundaryKeys = new Set(nextRows.slice(0, -1).map((row, index) => `${row.id}\u0000${nextRows[index + 1].id}`))
+  const clearTransitionOut = new Set<string>()
+  const clearTransitionIn = new Set<string>()
+  let resetBoundaryCount = 0
+  previousRows.slice(0, -1).forEach((left, index) => {
+    const right = previousRows[index + 1]
+    if (pairedFadeDuration(left, right) == null || nextBoundaryKeys.has(`${left.id}\u0000${right.id}`)) return
+    clearTransitionOut.add(left.id)
+    clearTransitionIn.add(right.id)
+    resetBoundaryCount += 1
+  })
+  return {
+    resetBoundaryCount,
+    rows: nextRows.map(row => {
+      if (!clearTransitionOut.has(row.id) && !clearTransitionIn.has(row.id)) return row
+      const transform = { ...row.transform }
+      if (clearTransitionOut.has(row.id)) transform.transition_out = { type: 'cut', duration_ms: 0 }
+      if (clearTransitionIn.has(row.id)) transform.transition_in = { type: 'cut', duration_ms: 0 }
+      return { ...row, transform }
+    }),
+  }
+}
+
 function isMediaPlaybackInterruption(error: unknown) {
   return typeof error === 'object'
     && error !== null
@@ -1368,6 +1403,15 @@ export function EditorPrototypePage() {
     setNotice(message)
   }
 
+  const resetStructuralPreviewState = () => {
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryFrameComparisonKey(null)
+    setBoundaryFrameOverlayKey(null)
+    setBoundaryContinuityChecks({})
+  }
+
   const undo = () => {
     const previous = history[history.length - 1]
     if (!previous) return
@@ -1437,7 +1481,13 @@ export function EditorPrototypePage() {
     const reordered = [...trackIndexes.map(row => row.item)]
     ;[reordered[position], reordered[target]] = [reordered[target], reordered[position]]
     const normalized = normalizeMainTrack(reordered, durationMs)
-    commitItems(replaceMainTrack(items, normalized), '已在本地草稿中调整片段顺序。', selectedItem.id)
+    const reconciled = reconcileStructuralTransitions(mainItems, normalized)
+    resetStructuralPreviewState()
+    commitItems(
+      replaceMainTrack(items, reconciled.rows),
+      `已在本地草稿中调整片段顺序${reconciled.resetBoundaryCount ? `；${reconciled.resetBoundaryCount} 组失效的成对转场已恢复为直接切换` : ''}。`,
+      selectedItem.id,
+    )
   }
 
   const reorderItem = (targetId: string) => {
@@ -1454,7 +1504,13 @@ export function EditorPrototypePage() {
     const [moved] = rows.splice(from, 1)
     rows.splice(to, 0, moved)
     const normalized = normalizeMainTrack(rows, durationMs)
-    commitItems(replaceMainTrack(items, normalized), `已把 ${moved.label} 拖到新的位置。`, moved.id)
+    const reconciled = reconcileStructuralTransitions(mainItems, normalized)
+    resetStructuralPreviewState()
+    commitItems(
+      replaceMainTrack(items, reconciled.rows),
+      `已把 ${moved.label} 拖到新的位置${reconciled.resetBoundaryCount ? `；${reconciled.resetBoundaryCount} 组失效的成对转场已恢复为直接切换` : ''}。`,
+      moved.id,
+    )
     setDraggedItemId(null)
   }
 
@@ -1475,9 +1531,11 @@ export function EditorPrototypePage() {
         : item
     ))
     const normalized = normalizeMainTrack(reordered, durationMs)
+    const reconciled = reconcileStructuralTransitions(mainItems, normalized)
+    resetStructuralPreviewState()
     commitItems(
-      replaceMainTrack(items, normalized),
-      `已按正式分镜顺序整理 ${sortable.length} 个画面片段；补充素材、声音和字幕保持原位置，请重新预览切点。`,
+      replaceMainTrack(items, reconciled.rows),
+      `已按正式分镜顺序整理 ${sortable.length} 个画面片段；补充素材、声音和字幕保持原位置${reconciled.resetBoundaryCount ? `，${reconciled.resetBoundaryCount} 组失效的成对转场已恢复为直接切换` : ''}，请重新预览切点。`,
       selectedItem?.id ?? normalized[0]?.id ?? null,
     )
   }
@@ -2294,6 +2352,10 @@ export function EditorPrototypePage() {
       label: `${selectedItem.label} A`,
       source_out_ms: sourceIn + leftDuration,
       timeline_out_ms: splitAt,
+      transform: {
+        ...selectedItem.transform,
+        transition_out: { type: 'cut', duration_ms: 0 },
+      },
     }
     const right = {
       ...selectedItem,
@@ -2301,10 +2363,15 @@ export function EditorPrototypePage() {
       label: `${selectedItem.label} B`,
       source_in_ms: sourceIn + leftDuration,
       timeline_in_ms: splitAt,
+      transform: {
+        ...selectedItem.transform,
+        transition_in: { type: 'cut', duration_ms: 0 },
+      },
     }
     const rows = mainItems.flatMap(item => item.id === selectedItem.id ? [left, right] : [item])
     const nextItems = replaceMainTrack(items, normalizeMainTrack(rows, durationMs))
-    commitItems(nextItems, `已在 ${timecode(splitAt, outputFps)} 分割片段。`, right.id)
+    resetStructuralPreviewState()
+    commitItems(nextItems, `已在 ${timecode(splitAt, outputFps)} 分割片段；新内部切点使用直接切换，原片段外侧转场保持不变。`, right.id)
   }
 
   const deleteSelected = () => {
@@ -2313,8 +2380,14 @@ export function EditorPrototypePage() {
       if (blockMainTrackEdit()) return
       const rows = mainItems.filter(item => item.id !== selectedItem.id)
       const normalized = normalizeMainTrack(rows, durationMs)
-      const nextItems = replaceMainTrack(items, normalized)
-      commitItems(nextItems, `已删除 ${selectedItem.label}，后续片段已波纹前移。`, normalized[0]?.id ?? null)
+      const reconciled = reconcileStructuralTransitions(mainItems, normalized)
+      const nextItems = replaceMainTrack(items, reconciled.rows)
+      resetStructuralPreviewState()
+      commitItems(
+        nextItems,
+        `已删除 ${selectedItem.label}，后续片段已波纹前移${reconciled.resetBoundaryCount ? `；${reconciled.resetBoundaryCount} 组失效的成对转场已恢复为直接切换` : ''}。`,
+        reconciled.rows[0]?.id ?? null,
+      )
     } else if (selectedItem.track_type === 'audio') {
       const nextAudio = refreshEnabledDucking(
         audioItems
