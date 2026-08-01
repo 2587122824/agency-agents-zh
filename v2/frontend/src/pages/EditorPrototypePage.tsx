@@ -2340,7 +2340,7 @@ export function EditorPrototypePage() {
     return true
   }
 
-  const applyBoundaryFrame = (left: TimelineItem, right: TimelineItem, deltaMs: number) => {
+  const applyBoundaryRoll = (left: TimelineItem, right: TimelineItem, deltaMs: number) => {
     if (rollBoundary(left, right, deltaMs)) {
       setPendingBoundaryPreviewKey(`${left.id}-${right.id}`)
     }
@@ -2733,6 +2733,22 @@ export function EditorPrototypePage() {
       if (event.key === '\\') {
         event.preventDefault()
         fitTimelineToViewport()
+      }
+      if (
+        !event.altKey
+        && !event.ctrlKey
+        && !event.metaKey
+        && (event.code === 'Comma' || event.code === 'Period')
+      ) {
+        event.preventDefault()
+        const boundary = mainBoundaries[activeBoundaryIndex]
+        if (!boundary) {
+          setNotice('当前没有可修剪的相邻切点，请先选择画面片段或定位切点。')
+          return
+        }
+        const stepMs = event.shiftKey ? 1000 : frameStepMs
+        applyBoundaryRoll(boundary.left, boundary.right, event.code === 'Period' ? stepMs : -stepMs)
+        return
       }
       if (
         event.altKey
@@ -3444,13 +3460,13 @@ export function EditorPrototypePage() {
                      ><Repeat2 />{loopPreviewActive ? '停止循环' : '循环预览'}</button>
                    </div>
                    <div className={styles.boundaryRoll}>
-                     <div><strong>滚动剪辑</strong><span>联动两侧源区间，总时长不变</span></div>
+                     <div><strong>滚动剪辑</strong><span>联动源区间并自动试听；, / . 逐帧，Shift 粗调</span></div>
                      <div>
-                       <button aria-label={`${left.label} 到 ${right.label} 切点前移 1 秒`} disabled={videoTrackLocked || !canRollEarlier} onClick={() => rollBoundary(left, right, -1000)}>−1s</button>
-                       <button aria-label={`${left.label} 到 ${right.label} 切点前移 1 帧`} disabled={videoTrackLocked || !canRollEarlier} onClick={() => rollBoundary(left, right, -frameStepMs)}>−1帧</button>
+                       <button aria-label={`${left.label} 到 ${right.label} 切点前移 1 秒`} disabled={videoTrackLocked || !canRollEarlier} onClick={() => applyBoundaryRoll(left, right, -1000)}>−1s</button>
+                       <button aria-keyshortcuts="," aria-label={`${left.label} 到 ${right.label} 切点前移 1 帧`} disabled={videoTrackLocked || !canRollEarlier} onClick={() => applyBoundaryRoll(left, right, -frameStepMs)}>−1帧</button>
                        <code>{timecode(left.timeline_out_ms, outputFps)}</code>
-                       <button aria-label={`${left.label} 到 ${right.label} 切点后移 1 帧`} disabled={videoTrackLocked || !canRollLater} onClick={() => rollBoundary(left, right, frameStepMs)}>+1帧</button>
-                       <button aria-label={`${left.label} 到 ${right.label} 切点后移 1 秒`} disabled={videoTrackLocked || !canRollLater} onClick={() => rollBoundary(left, right, 1000)}>+1s</button>
+                       <button aria-keyshortcuts="." aria-label={`${left.label} 到 ${right.label} 切点后移 1 帧`} disabled={videoTrackLocked || !canRollLater} onClick={() => applyBoundaryRoll(left, right, frameStepMs)}>+1帧</button>
+                       <button aria-label={`${left.label} 到 ${right.label} 切点后移 1 秒`} disabled={videoTrackLocked || !canRollLater} onClick={() => applyBoundaryRoll(left, right, 1000)}>+1s</button>
                      </div>
                    </div>
                    <div className={styles.boundarySlip}>
@@ -3535,7 +3551,7 @@ export function EditorPrototypePage() {
                                    : canApplyFrame
                                    ? `把${frame.label}直接应用为${row.role}`
                                    : '该帧超出当前切点的合法滚动范围。'}
-                                 onClick={() => applyBoundaryFrame(left, right, frame.rollDeltaMs)}
+                                 onClick={() => applyBoundaryRoll(left, right, frame.rollDeltaMs)}
                                >{currentFrame ? row.currentLabel : row.applyLabel}</button>
                              </div>
                            })}</div>
@@ -3899,7 +3915,7 @@ export function EditorPrototypePage() {
         <i className={styles.playhead} style={{ left: `${84 + timelineWidth * (playheadMs / durationMs)}px` }}><b /></i>
         </div>
       </div>
-      <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · [ / ] 切点巡检 · \ 适应 · Space 播放</span></footer>
+      <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · [ / ] 巡检 · , / . 修剪切点 · \ 适应 · Space 播放</span></footer>
     </section>
     {versionOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线版本与审计证据"><section className={styles.versionModal}>
       <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>
