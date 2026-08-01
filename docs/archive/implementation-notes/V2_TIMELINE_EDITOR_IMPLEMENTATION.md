@@ -167,6 +167,8 @@ EditorWorkspace 新增 `shot_sequence`，并给每个可用 Asset 投影 `shot_c
 
 真实顺序整理验收从 `SH-002 → SH-001 → SH-003 → provider_output` 得到 `SH-001 → SH-002 → SH-003 → provider_output`，权威 Shot/Asset 映射分别为 `1/2/3`；服务端草稿 row version 增长且一次撤销恢复倒序提示、一次重做恢复正式顺序。锁轨后“按正式分镜整理”禁用，但定格对比保持可用。验收草稿最终删除；1280×720 的页面 `scrollWidth/clientWidth` 与 `scrollHeight/clientHeight` 均相等，浏览器控制台无错误。完整 API `125 passed`、Python compileall 和 Vite 生产构建通过。
 
+镜头衔接面板新增关系合同与人工检查清单。正式相邻边界读取右镜 `continuity_relation`，并在两镜共享非空 `continuity_group_id` 时显示连续组；`same_moment / time_jump / location_change / outfit_change` 分别生成三项针对性检查。当前顺序跳过正式镜头、发生倒序、拆分同一镜头或包含补充素材时不误套正式关系，显示通用主体/动作/变化可读性清单。真实咖啡草稿的 SH-002 → SH-001 倒序边界显示非正式相邻说明和 `0/3` 进度，勾选主体项后变为 `1/3`；等待自动保存窗口后服务端草稿仍为 `row_version=7 / updated_at=2026-08-01T12:51:22.811623`，证明检查状态不写草稿。1280×720 页面尺寸精确等于视口，控制台无错误；完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
+
 提交 `9c159075` 推送到 `main` 后使用标准启动脚本重启 8766：API PID `66460`、Worker PID `50140`，两个进程创建时间均为 2026-07-30 17:54:02；`GET /api/v1/health` 返回 `ok`，Alembic runtime/head 均为 `20260730_42`。Worker 错误日志为空，API 的 stderr 仅包含 Uvicorn 正常启动信息，没有错误堆栈。
 
 提交 `60aa0139` 推送到 `main` 并发布正式分镜顺序检查与切点定格对比后，本轮发现 8766 已停止监听，随后从仓库根目录重新执行标准启动脚本，恢复为 API PID `15096`、Worker PID `37540`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，Worker 日志为空，没有实际错误堆栈。

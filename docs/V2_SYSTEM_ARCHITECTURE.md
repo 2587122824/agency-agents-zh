@@ -226,6 +226,7 @@ draft
 - `EditorDraftSession` 请求把浏览器播放头规范化为整数毫秒。同一内容指纹失败后自动保存停止，只有用户显式重试或内容变化才可再次写入；API 的结构化校验错误向用户保留字段路径和消息，不触发客户端自动重试。
 - EditorWorkspace 从活动 ProductionSnapshot 的 `plan_version_id` 读取权威 Shot 顺序，并通过 Asset → DAGNode → Shot 关系投影每个视频素材的 `shot_code / shot_sequence_number`。顺序检查只消费这些类型化字段，不解析标签或节点名；一键整理是可撤销草稿事务，未知补充素材保持槽位，声音/字幕保持原成片时点。
 - 切点末帧/首帧对比使用两个独立静音视频元素分别定位 `source_out_ms - one_output_frame` 与 `source_in_ms`；元素只读、暂停、按需挂载，点击定格才调用统一时间线 seek。该预览不创建分析候选，也不声称已完成视觉连续性判断。
+- 连续性提示只消费 EditorWorkspace 已投影的 Shot `continuity_group_id / continuity_relation` 与 Asset 映射。只有正式序号相邻的边界才能套用右镜相对前镜的关系合同；跳序、拆分或补充素材边界使用通用人工检查项。勾选状态只存在于当前 React 页面会话，不进入 `EditorDraftSession` 或 Timeline 合同，正式放行仍由预览复核的独立不可变事件承担。
 
 ## 11. 当前技术栈
 

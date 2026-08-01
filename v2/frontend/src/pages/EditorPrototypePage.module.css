@@ -687,6 +687,40 @@
   white-space: nowrap;
 }
 .boundaryControl > header code { margin-left: auto; color: #9da5a1; white-space: nowrap; }
+.continuityContract {
+  padding: 7px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid #3d5149;
+  border-radius: 4px;
+  background: #202b27;
+}
+.continuityContract[data-tone="change"] {
+  border-color: #5a4e38;
+  background: #2a271f;
+}
+.continuityContract > div { display: flex; align-items: center; gap: 5px; }
+.continuityContract span {
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: #315246;
+  color: #bfe7d6;
+  font-weight: 700;
+}
+.continuityContract[data-tone="change"] span { background: #5a4829; color: #f1d39a; }
+.continuityContract code { color: #a8b4ae; }
+.continuityContract em { margin-left: auto; color: #8f9b96; font-style: normal; }
+.continuityContract p { margin: 0; color: #abb5b0; line-height: 1.45; }
+.continuityUnavailable {
+  padding: 7px;
+  display: grid;
+  gap: 4px;
+  border: 1px dashed #5b5144;
+  border-radius: 4px;
+  color: #c7b796;
+  line-height: 1.45;
+}
+.continuityUnavailable em { color: #8f8980; font-style: normal; }
 .boundaryActions { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; }
 .boundaryControl button,
 .boundaryControl select {
@@ -750,6 +784,25 @@
   white-space: nowrap;
 }
 .boundaryFrame code { color: #8f999d; }
+.continuityChecklist { display: grid; gap: 4px; }
+.boundaryControl .continuityChecklist button {
+  width: 100%;
+  height: auto;
+  min-height: 30px;
+  padding: 5px 7px;
+  justify-content: flex-start;
+  text-align: left;
+  line-height: 1.35;
+  color: #aeb8b3;
+}
+.boundaryControl .continuityChecklist button svg { flex: 0 0 auto; color: #66716c; }
+.boundaryControl .continuityChecklist button[data-checked="true"] {
+  border-color: #3f6958;
+  background: #263b33;
+  color: #d5e8df;
+}
+.boundaryControl .continuityChecklist button[data-checked="true"] svg { color: #73c49e; fill: #294f3e; }
+.continuityChecklist small { color: #7f8984; line-height: 1.4; }
 .inspector label {
   margin-top: 7px;
   display: grid;

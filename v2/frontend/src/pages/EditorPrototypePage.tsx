@@ -36,6 +36,48 @@ interface SubtitleCue {
   text: string
 }
 
+type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
+
+const CONTINUITY_RELATION_COPY: Record<ContinuityRelation, { label: string; tone: 'locked' | 'change'; summary: string }> = {
+  same_moment: { label: '同一时刻', tone: 'locked', summary: '重点核对主体、动作阶段和运动方向是否连续。' },
+  time_jump: { label: '时间跳转', tone: 'change', summary: '允许时间变化，但跳转意图应清楚且主体身份可辨。' },
+  location_change: { label: '地点变化', tone: 'change', summary: '允许场景变化，但地点切换应清楚且叙事承接成立。' },
+  outfit_change: { label: '换装', tone: 'change', summary: '允许服装变化，但换装应有明确叙事依据。' },
+}
+
+const CONTINUITY_CHECKS: Record<ContinuityRelation, Array<{ id: string; label: string }>> = {
+  same_moment: [
+    { id: 'subject', label: '主体身份、服装和场景保持一致' },
+    { id: 'motion', label: '动作阶段与运动方向自然承接' },
+    { id: 'eyeline', label: '构图、视线与主体位置没有异常跳变' },
+  ],
+  time_jump: [
+    { id: 'jump-readable', label: '时间跳转在画面或叙事中足够清楚' },
+    { id: 'subject', label: '跳转前后主体身份仍可辨认' },
+    { id: 'new-information', label: '后镜提供了符合跳转意图的新信息' },
+  ],
+  location_change: [
+    { id: 'location-readable', label: '新地点在切点后能够被清楚识别' },
+    { id: 'subject', label: '跨地点的主体与叙事承接一致' },
+    { id: 'orientation', label: '空间方向变化不会造成误读' },
+  ],
+  outfit_change: [
+    { id: 'outfit-readable', label: '服装变化明确且不是生成漂移' },
+    { id: 'reason', label: '换装与时间、地点或剧情变化一致' },
+    { id: 'subject', label: '人物身份和其他稳定特征保持一致' },
+  ],
+}
+
+const GENERAL_CONTINUITY_CHECKS = [
+  { id: 'subject', label: '主体身份和外观没有非预期漂移' },
+  { id: 'motion', label: '动作阶段、运动方向与切点节奏自然' },
+  { id: 'change-readable', label: '时间、地点或服装变化是有意且可读的' },
+]
+
+function normalizeContinuityRelation(value: string | undefined): ContinuityRelation {
+  return value && value in CONTINUITY_RELATION_COPY ? value as ContinuityRelation : 'same_moment'
+}
+
 function timecode(ms: number, fps = 24) {
   const value = Math.max(0, Math.round(ms))
   const safeFps = Math.max(1, Math.round(fps))
@@ -341,6 +383,7 @@ export function EditorPrototypePage() {
   const [playing, setPlaying] = useState(false)
   const [boundaryPreviewEndMs, setBoundaryPreviewEndMs] = useState<number | null>(null)
   const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
+  const [boundaryContinuityChecks, setBoundaryContinuityChecks] = useState<Record<string, string[]>>({})
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
   const [assetFilter, setAssetFilter] = useState<'all' | 'video' | 'audio' | 'subtitle'>('all')
@@ -407,6 +450,7 @@ export function EditorPrototypePage() {
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryFrameComparisonKey(null)
+    setBoundaryContinuityChecks({})
     setDirty(false)
     setLastValidation(null)
     setLastPreview(null)
@@ -549,6 +593,9 @@ export function EditorPrototypePage() {
       .filter(asset => asset.shot_code)
       .map(asset => [asset.id, asset.shot_code as string]),
   ), [workspace.data?.available_assets])
+  const formalShotByCode = useMemo(() => new Map(
+    (workspace.data?.shot_sequence ?? []).map(shot => [shot.shot_code, shot]),
+  ), [workspace.data?.shot_sequence])
   const shotOrderIssues = useMemo(() => {
     const issues: Array<{ left: TimelineItem; right: TimelineItem; leftSequence: number; rightSequence: number }> = []
     let previous: { item: TimelineItem; sequence: number } | null = null
@@ -2517,20 +2564,49 @@ export function EditorPrototypePage() {
                   ? 'cut'
                   : pairedFade ? `fade:${durationMs}` : 'mixed'
                 const boundaryKey = `${left.id}-${right.id}`
-                const leftShotSequence = left.asset_id ? shotSequenceByAssetId.get(left.asset_id) : undefined
-                const rightShotSequence = right.asset_id ? shotSequenceByAssetId.get(right.asset_id) : undefined
-                const orderWarning = leftShotSequence != null && rightShotSequence != null && leftShotSequence > rightShotSequence
-                const frameStepMs = Math.max(1, Math.round(1000 / outputFps))
+                 const leftShotSequence = left.asset_id ? shotSequenceByAssetId.get(left.asset_id) : undefined
+                 const rightShotSequence = right.asset_id ? shotSequenceByAssetId.get(right.asset_id) : undefined
+                 const orderWarning = leftShotSequence != null && rightShotSequence != null && leftShotSequence > rightShotSequence
+                 const leftShotCode = left.asset_id ? shotCodeByAssetId.get(left.asset_id) : undefined
+                 const rightShotCode = right.asset_id ? shotCodeByAssetId.get(right.asset_id) : undefined
+                 const leftFormalShot = leftShotCode ? formalShotByCode.get(leftShotCode) : undefined
+                 const rightFormalShot = rightShotCode ? formalShotByCode.get(rightShotCode) : undefined
+                 const formalAdjacent = leftShotSequence != null && rightShotSequence === leftShotSequence + 1
+                 const continuityRelation = normalizeContinuityRelation(rightFormalShot?.continuity_relation)
+                 const continuityCopy = CONTINUITY_RELATION_COPY[continuityRelation]
+                 const continuityChecks = formalAdjacent
+                   ? CONTINUITY_CHECKS[continuityRelation]
+                   : GENERAL_CONTINUITY_CHECKS
+                 const completedContinuityChecks = boundaryContinuityChecks[boundaryKey] ?? []
+                 const sharedContinuityGroup = formalAdjacent
+                   && leftFormalShot?.continuity_group_id
+                   && leftFormalShot.continuity_group_id === rightFormalShot?.continuity_group_id
+                   ? leftFormalShot.continuity_group_id
+                   : null
+                 const frameStepMs = Math.max(1, Math.round(1000 / outputFps))
                 const leftFrameSourceMs = Math.max(left.source_in_ms ?? 0, (left.source_out_ms ?? 0) - frameStepMs)
                 const rightFrameSourceMs = right.source_in_ms ?? 0
                 const framesOpen = boundaryFrameComparisonKey === boundaryKey
                 return <div className={styles.boundaryControl} data-order-warning={orderWarning} key={boundaryKey}>
-                  <header>
+                   <header>
                     <span><strong>{left.label}</strong><i>→</i><strong>{right.label}</strong></span>
                     {orderWarning && <em>顺序倒退</em>}
-                    <code>{timecode(left.timeline_out_ms, outputFps)}</code>
-                  </header>
-                  <div className={styles.boundaryActions}>
+                     <code>{timecode(left.timeline_out_ms, outputFps)}</code>
+                   </header>
+                   {formalAdjacent && leftFormalShot && rightFormalShot ? <div className={styles.continuityContract} data-tone={continuityCopy.tone}>
+                     <div>
+                       <span>{continuityCopy.label}</span>
+                       {sharedContinuityGroup && <code>{sharedContinuityGroup}</code>}
+                       <em>{completedContinuityChecks.length}/{continuityChecks.length} 已检查</em>
+                     </div>
+                     <p>{continuityCopy.summary}</p>
+                   </div> : <div className={styles.continuityUnavailable}>
+                     <span>{leftShotSequence == null || rightShotSequence == null
+                       ? '边界含补充素材，正式分镜没有声明这组衔接关系，请完整人工检查。'
+                       : '当前两镜不是正式相邻分镜，不能套用原连续性关系，请按当前叙事人工判断。'}</span>
+                     <em>{completedContinuityChecks.length}/{continuityChecks.length} 已检查</em>
+                   </div>}
+                   <div className={styles.boundaryActions}>
                     <button
                       disabled={!left.asset_id || !right.asset_id}
                       onClick={() => previewBoundary(left, right)}
@@ -2558,7 +2634,7 @@ export function EditorPrototypePage() {
                     aria-expanded={framesOpen}
                     onClick={() => setBoundaryFrameComparisonKey(value => value === boundaryKey ? null : boundaryKey)}
                   ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button>
-                  {framesOpen && left.asset_id && right.asset_id && <div className={styles.boundaryFrames}>
+                   {framesOpen && left.asset_id && right.asset_id && <div className={styles.boundaryFrames}>
                     <BoundaryFrameStill
                       projectId={projectId}
                       item={left}
@@ -2574,9 +2650,31 @@ export function EditorPrototypePage() {
                       label={`${right.label} 首帧`}
                       fps={outputFps}
                       onActivate={() => seekTimeline(right.timeline_in_ms)}
-                    />
-                  </div>}
-                </div>
+                     />
+                   </div>}
+                   <div className={styles.continuityChecklist} aria-label={`${left.label} 到 ${right.label} 的人工连续性检查`}>
+                     {continuityChecks.map(check => {
+                       const checked = completedContinuityChecks.includes(check.id)
+                       return <button
+                         key={check.id}
+                         type="button"
+                         role="checkbox"
+                         aria-checked={checked}
+                         data-checked={checked}
+                         onClick={() => setBoundaryContinuityChecks(current => {
+                           const completed = current[boundaryKey] ?? []
+                           return {
+                             ...current,
+                             [boundaryKey]: checked
+                               ? completed.filter(value => value !== check.id)
+                               : [...completed, check.id],
+                           }
+                         })}
+                       ><CheckCircle2 />{check.label}</button>
+                     })}
+                     <small>仅记录本次页面的人工检查进度，不写入草稿，也不代表自动视觉分析或正式复核。</small>
+                   </div>
+                 </div>
               })}
             </div>
             <div className={styles.trimHint}>淡出淡入会同时设置前镜淡出和后镜淡入，并作为一个撤销步骤写入草稿；它不是交叉叠化。正式预览和导出使用同一冻结参数。</div>
