@@ -513,6 +513,7 @@ export function EditorPrototypePage() {
   const [playing, setPlaying] = useState(false)
   const [boundaryPreviewEndMs, setBoundaryPreviewEndMs] = useState<number | null>(null)
   const [boundaryPreviewWindowMs, setBoundaryPreviewWindowMs] = useState<500 | 1000 | 2000>(1000)
+  const [boundaryPreviewRate, setBoundaryPreviewRate] = useState<0.25 | 0.5 | 1>(1)
   const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
     boundaryKey: string
     leftItemId: string
@@ -591,6 +592,7 @@ export function EditorPrototypePage() {
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
+    setBoundaryPreviewRate(1)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameBlendPercent(50)
@@ -894,11 +896,20 @@ export function EditorPrototypePage() {
   ])
 
   useEffect(() => {
+    const rate = boundaryPreviewEndMs == null ? 1 : boundaryPreviewRate
+    if (videoRef.current) videoRef.current.playbackRate = rate
+    Object.values(timelineAudioRefs.current).forEach(audio => {
+      if (audio) audio.playbackRate = rate
+    })
+  }, [boundaryPreviewEndMs, boundaryPreviewRate, selectedItem?.id])
+
+  useEffect(() => {
     for (const item of audioItems) {
       const audio = timelineAudioRefs.current[item.id]
       if (!audio || !item.asset_id) continue
       const active = playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms
       audio.muted = audioTrackMuted
+      audio.playbackRate = boundaryPreviewEndMs == null ? 1 : boundaryPreviewRate
       if (!active) {
         audio.pause()
         continue
@@ -915,7 +926,7 @@ export function EditorPrototypePage() {
       if (playing) void audio.play().catch(() => setNotice('浏览器阻止了时间线声音播放，请再次点击播放。'))
       else audio.pause()
     }
-  }, [audioItems, audioTrackMuted, playheadMs, playing])
+  }, [audioItems, audioTrackMuted, boundaryPreviewEndMs, boundaryPreviewRate, playheadMs, playing])
 
   useEffect(() => {
     const source = sourceCompareRef.current
@@ -1361,7 +1372,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(endMs)
     setBoundaryPreviewLoop(loop ? { boundaryKey, leftItemId: left.id, startMs, endMs, windowMs: boundaryPreviewWindowMs, label } : null)
     setPlaying(true)
-    setNotice(`正在${loop ? '循环' : ''}预览 ${label} 的切点前后 ${seconds(boundaryPreviewWindowMs)}。`)
+    setNotice(`正在以 ${boundaryPreviewRate}× ${loop ? '循环' : ''}预览 ${label} 的切点前后 ${seconds(boundaryPreviewWindowMs)}。`)
   }
 
   const toggleBoundaryLoop = (left: TimelineItem, right: TimelineItem) => {
@@ -2665,7 +2676,7 @@ export function EditorPrototypePage() {
             setSelectedIndex(leftIndex)
             setPlayheadMs(boundaryPreviewLoop.startMs)
             setPlaying(true)
-            setNotice(`正在循环预览 ${boundaryPreviewLoop.label} 的切点前后 ${seconds(boundaryPreviewLoop.windowMs)}。`)
+            setNotice(`正在以 ${boundaryPreviewRate}× 循环预览 ${boundaryPreviewLoop.label} 的切点前后 ${seconds(boundaryPreviewLoop.windowMs)}。`)
             return
           }
         }
@@ -2701,6 +2712,7 @@ export function EditorPrototypePage() {
     advancePlayback,
     boundaryPreviewEndMs,
     boundaryPreviewLoop,
+    boundaryPreviewRate,
     boundaryPreviewWindowMs,
     items,
     outputFps,
@@ -2870,6 +2882,7 @@ export function EditorPrototypePage() {
                 ))
                 : 0
               event.currentTarget.currentTime = Math.min(sourceOut, sourceIn + timelineOffset) / 1000
+              event.currentTarget.playbackRate = boundaryPreviewEndMs == null ? 1 : boundaryPreviewRate
               if (playing) void event.currentTarget.play().catch(() => setNotice('浏览器阻止了时间线视频播放，请再次点击播放。'))
             }}
             onTimeUpdate={handleTimeUpdate}
@@ -3145,6 +3158,25 @@ export function EditorPrototypePage() {
                          <option value={500}>前后 0.5 秒</option>
                          <option value={1000}>前后 1 秒</option>
                          <option value={2000}>前后 2 秒</option>
+                       </select>
+                     </label>
+                     <label>
+                       <span>速度</span>
+                       <select
+                         aria-label={`${left.label} 到 ${right.label} 的切点预览速度`}
+                         disabled={!left.asset_id || !right.asset_id}
+                         value={boundaryPreviewRate}
+                         onChange={event => {
+                           const rate = Number(event.target.value) as 0.25 | 0.5 | 1
+                           setBoundaryPreviewRate(rate)
+                           setNotice(boundaryPreviewEndMs == null
+                             ? `已把切点预览速度设为 ${rate}×；下次预览生效。`
+                             : `当前切点预览已切换为 ${rate}×。`)
+                         }}
+                       >
+                         <option value={0.25}>0.25×</option>
+                         <option value={0.5}>0.5×</option>
+                         <option value={1}>1×</option>
                        </select>
                      </label>
                      <button
