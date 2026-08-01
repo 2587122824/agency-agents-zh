@@ -531,6 +531,7 @@ export function EditorPrototypePage() {
   const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
   const [boundaryFrameStripKey, setBoundaryFrameStripKey] = useState<string | null>(null)
+  const [pendingBoundaryPreviewKey, setPendingBoundaryPreviewKey] = useState<string | null>(null)
   const [boundaryFrameBlendPercent, setBoundaryFrameBlendPercent] = useState(50)
   const [boundaryContinuityChecks, setBoundaryContinuityChecks] = useState<Record<string, string[]>>({})
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
@@ -605,6 +606,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
+    setPendingBoundaryPreviewKey(null)
     setBoundaryFrameBlendPercent(50)
     setBoundaryContinuityChecks({})
     setDirty(false)
@@ -678,6 +680,7 @@ export function EditorPrototypePage() {
     setPlaying(false)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
     setLastValidation(sourceTimeline)
     setLastPreview(null)
     setPreviewCompareMode('result')
@@ -1239,6 +1242,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
     setNotice('已丢弃自动保存的项目草稿，恢复到当前时间线版本。')
   }
 
@@ -1260,6 +1264,7 @@ export function EditorPrototypePage() {
       setBoundaryPreviewLoop(null)
       setBoundaryFocusKey(boundaryKeyForItem(item))
       setBoundaryReviewSession(null)
+      setPendingBoundaryPreviewKey(null)
     }
   }
 
@@ -1279,6 +1284,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
   }
 
   const focusBoundaryAt = (targetIndex: number) => {
@@ -1296,6 +1302,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
+    setPendingBoundaryPreviewKey(null)
     setSelectedIndex(itemIndex)
     setPlayheadMs(target.left.timeline_out_ms)
     setBoundaryFocusKey(target.key)
@@ -1444,6 +1451,17 @@ export function EditorPrototypePage() {
     setNotice(`正在以 ${boundaryPreviewRate}× ${loop ? '循环' : ''}预览 ${label} 的切点前后 ${seconds(boundaryPreviewWindowMs)}。`)
   }
 
+  useEffect(() => {
+    if (!pendingBoundaryPreviewKey) return
+    const boundary = mainBoundaries.find(row => row.key === pendingBoundaryPreviewKey)
+    setPendingBoundaryPreviewKey(null)
+    if (!boundary) {
+      setNotice('切点应用成功，但更新后的相邻边界已不存在，未启动自动预览。')
+      return
+    }
+    previewBoundary(boundary.left, boundary.right)
+  }, [items, mainBoundaries, pendingBoundaryPreviewKey])
+
   const toggleBoundaryLoop = (left: TimelineItem, right: TimelineItem) => {
     const boundaryKey = `${left.id}-${right.id}`
     if (boundaryPreviewLoop?.boundaryKey === boundaryKey) {
@@ -1552,10 +1570,18 @@ export function EditorPrototypePage() {
     setBoundaryFrameStripKey(null)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
     setBoundaryContinuityChecks({})
   }
 
   const undo = () => {
+    videoRef.current?.pause()
+    advancingPlaybackRef.current = true
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
     const previous = history[history.length - 1]
     if (!previous) return
     setFuture(rows => [items, ...rows].slice(0, 50))
@@ -1567,6 +1593,13 @@ export function EditorPrototypePage() {
   }
 
   const redo = () => {
+    videoRef.current?.pause()
+    advancingPlaybackRef.current = true
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
     const next = future[0]
     if (!next) return
     setHistory(rows => [...rows.slice(-49), items])
@@ -2239,7 +2272,7 @@ export function EditorPrototypePage() {
   }
 
   const rollBoundary = (left: TimelineItem, right: TimelineItem, requestedDeltaMs: number) => {
-    if (blockMainTrackEdit(left)) return
+    if (blockMainTrackEdit(left)) return false
     if (
       !left.asset_id
       || !right.asset_id
@@ -2250,7 +2283,7 @@ export function EditorPrototypePage() {
       || right.source_out_ms == null
     ) {
       setNotice('只有紧邻且两侧都有完整源区间的画面，才能滚动剪辑切点。')
-      return
+      return false
     }
     const leftDuration = left.source_out_ms - left.source_in_ms
     const rightDuration = right.source_out_ms - right.source_in_ms
@@ -2269,7 +2302,7 @@ export function EditorPrototypePage() {
       setNotice(requestedDeltaMs < 0
         ? '切点已到可前移边界：前镜不能再缩短，或后镜源入点已到素材开头。'
         : '切点已到可后移边界：前镜没有更多源画面，或后镜不能再缩短。')
-      return
+      return false
     }
     const nextBoundaryMs = left.timeline_out_ms + deltaMs
     const boundaryKey = `${left.id}-${right.id}`
@@ -2304,6 +2337,13 @@ export function EditorPrototypePage() {
       `已把 ${left.label} → ${right.label} 的切点${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), outputFps)}；成片总时长不变，连续性检查已重置。`,
       right.id,
     )
+    return true
+  }
+
+  const applyBoundaryFrame = (left: TimelineItem, right: TimelineItem, deltaMs: number) => {
+    if (rollBoundary(left, right, deltaMs)) {
+      setPendingBoundaryPreviewKey(`${left.id}-${right.id}`)
+    }
   }
 
   const slipBoundaryItem = (item: TimelineItem, requestedDeltaMs: number, focusTimelineMs: number) => {
@@ -2800,7 +2840,7 @@ export function EditorPrototypePage() {
     }
 
     const inspectFrame = (mediaTimeSeconds: number) => {
-      if (cancelled || videoRef.current !== video) return
+      if (cancelled || advancingPlaybackRef.current || videoRef.current !== video) return
       const mediaTimeMs = mediaTimeSeconds * 1000
       const timelinePosition = selectedItem.timeline_in_ms + Math.max(0, mediaTimeMs - sourceIn)
       setPlayheadMs(Math.min(timelinePosition, selectedItem.timeline_out_ms))
@@ -3495,12 +3535,12 @@ export function EditorPrototypePage() {
                                    : canApplyFrame
                                    ? `把${frame.label}直接应用为${row.role}`
                                    : '该帧超出当前切点的合法滚动范围。'}
-                                 onClick={() => rollBoundary(left, right, frame.rollDeltaMs)}
+                                 onClick={() => applyBoundaryFrame(left, right, frame.rollDeltaMs)}
                                >{currentFrame ? row.currentLabel : row.applyLabel}</button>
                              </div>
                            })}</div>
                          </section>)}
-                         <small>点击画面只定位主监看；“设为末帧 / 首帧”会按合法范围直接滚动切点，并形成一次可撤销操作。</small>
+                         <small>点击画面只定位主监看；“设为末帧 / 首帧”会形成一次可撤销操作，并自动播放调整后的切点窗口。</small>
                        </div>
                        : overlayFrames
                        ? <BoundaryFrameOverlay
