@@ -761,6 +761,29 @@
 }
 .boundaryControl .boundaryRoll button { height: 27px; padding: 0 3px; font-size: 8px; }
 .boundaryRoll code { color: #c8cfcc; text-align: center; white-space: nowrap; }
+.boundarySlip {
+  padding: 7px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #42464d;
+  border-radius: 4px;
+  background: #25292f;
+}
+.boundarySlip > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.boundarySlip > div:first-child strong { color: #d4d8dd; }
+.boundarySlip > div:first-child span { color: #858c96; text-align: right; }
+.boundarySlip > div:not(:first-child) {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 42px 30px 38px minmax(84px, 1fr) 38px 30px;
+  align-items: center;
+  gap: 4px;
+}
+.boundarySlip > div:not(:first-child) > span { min-width: 0; display: grid; }
+.boundarySlip b { color: #aeb6bd; }
+.boundarySlip small { overflow: hidden; color: #747e87; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryControl .boundarySlip button { height: 27px; padding: 0 2px; font-size: 8px; }
+.boundarySlip code { overflow: hidden; color: #c9cfd4; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryControl button,
 .boundaryControl select {
   min-width: 0;

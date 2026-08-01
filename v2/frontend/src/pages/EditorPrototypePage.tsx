@@ -2022,6 +2022,47 @@ export function EditorPrototypePage() {
     )
   }
 
+  const slipBoundaryItem = (item: TimelineItem, requestedDeltaMs: number, focusTimelineMs: number) => {
+    if (blockMainTrackEdit(item)) return
+    if (!item.asset_id || item.source_in_ms == null || item.source_out_ms == null || item.asset_duration_ms == null) {
+      setNotice('只有具备完整源区间和素材时长的画面，才能滑移源窗口。')
+      return
+    }
+    const minimumDelta = -item.source_in_ms
+    const maximumDelta = item.asset_duration_ms - item.source_out_ms
+    const deltaMs = Math.max(minimumDelta, Math.min(maximumDelta, requestedDeltaMs))
+    if (!deltaMs) {
+      setNotice(requestedDeltaMs < 0
+        ? `${item.label} 的源窗口已到素材开头。`
+        : `${item.label} 的源窗口已到素材结尾。`)
+      return
+    }
+    const itemPosition = mainItems.findIndex(row => row.id === item.id)
+    const affectedBoundaryKeys = new Set<string>()
+    if (itemPosition > 0) affectedBoundaryKeys.add(`${mainItems[itemPosition - 1].id}-${item.id}`)
+    if (itemPosition >= 0 && itemPosition < mainItems.length - 1) {
+      affectedBoundaryKeys.add(`${item.id}-${mainItems[itemPosition + 1].id}`)
+    }
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryContinuityChecks(current => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !affectedBoundaryKeys.has(key)),
+    ))
+    setPlayheadMs(Math.max(item.timeline_in_ms, Math.min(item.timeline_out_ms, focusTimelineMs)))
+    commitItems(
+      items.map(row => row.id === item.id
+        ? {
+          ...row,
+          source_in_ms: item.source_in_ms! + deltaMs,
+          source_out_ms: item.source_out_ms! + deltaMs,
+        }
+        : row),
+      `已把 ${item.label} 的源窗口${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), outputFps)}；成片位置和时长不变，相邻连续性检查已重置。`,
+      item.id,
+    )
+  }
+
   const setSelectedAudioMix = (mix: 'voiceover' | 'background_music') => {
     if (!selectedItem || selectedItem.track_type !== 'audio') return
     const transform: Record<string, unknown> = { ...selectedItem.transform, mix, playback: selectedItem.transform.playback ?? { mode: 'trim' } }
@@ -2748,6 +2789,14 @@ export function EditorPrototypePage() {
                  const canRollEarlier = rollMinimumDelta < 0
                  const canRollLater = rollMaximumDelta > 0
                  const loopPreviewActive = boundaryPreviewLoop?.boundaryKey === boundaryKey
+                 const canSlipLeftEarlier = left.source_in_ms != null && left.source_in_ms > 0
+                 const canSlipLeftLater = left.source_out_ms != null
+                   && left.asset_duration_ms != null
+                   && left.source_out_ms < left.asset_duration_ms
+                 const canSlipRightEarlier = right.source_in_ms != null && right.source_in_ms > 0
+                 const canSlipRightLater = right.source_out_ms != null
+                   && right.asset_duration_ms != null
+                   && right.source_out_ms < right.asset_duration_ms
                  return <div className={styles.boundaryControl} data-order-warning={orderWarning} key={boundaryKey}>
                    <header>
                     <span><strong>{left.label}</strong><i>→</i><strong>{right.label}</strong></span>
@@ -2824,6 +2873,20 @@ export function EditorPrototypePage() {
                        <button aria-label={`${left.label} 到 ${right.label} 切点后移 1 帧`} disabled={videoTrackLocked || !canRollLater} onClick={() => rollBoundary(left, right, frameStepMs)}>+1帧</button>
                        <button aria-label={`${left.label} 到 ${right.label} 切点后移 1 秒`} disabled={videoTrackLocked || !canRollLater} onClick={() => rollBoundary(left, right, 1000)}>+1s</button>
                      </div>
+                   </div>
+                   <div className={styles.boundarySlip}>
+                     <div><strong>源窗口滑移</strong><span>更换动作帧，成片位置不变</span></div>
+                     {([
+                       { item: left, role: '前镜', earlier: canSlipLeftEarlier, later: canSlipLeftLater, focusMs: Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs) },
+                       { item: right, role: '后镜', earlier: canSlipRightEarlier, later: canSlipRightLater, focusMs: right.timeline_in_ms },
+                     ] as const).map(row => <div key={`${boundaryKey}-${row.role}`}>
+                       <span><b>{row.role}</b><small>{row.item.label}</small></span>
+                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口前移 1 秒`} disabled={videoTrackLocked || !row.earlier} onClick={() => slipBoundaryItem(row.item, -1000, row.focusMs)}>−1s</button>
+                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口前移 1 帧`} disabled={videoTrackLocked || !row.earlier} onClick={() => slipBoundaryItem(row.item, -frameStepMs, row.focusMs)}>−1帧</button>
+                       <code>{timecode(row.item.source_in_ms ?? 0, outputFps)}–{timecode(row.item.source_out_ms ?? 0, outputFps)}</code>
+                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口后移 1 帧`} disabled={videoTrackLocked || !row.later} onClick={() => slipBoundaryItem(row.item, frameStepMs, row.focusMs)}>+1帧</button>
+                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口后移 1 秒`} disabled={videoTrackLocked || !row.later} onClick={() => slipBoundaryItem(row.item, 1000, row.focusMs)}>+1s</button>
+                     </div>)}
                    </div>
                    <button
                     className={styles.boundaryFrameToggle}
