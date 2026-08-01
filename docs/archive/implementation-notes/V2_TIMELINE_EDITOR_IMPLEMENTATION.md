@@ -171,6 +171,8 @@ EditorWorkspace 新增 `shot_sequence`，并给每个可用 Asset 投影 `shot_c
 
 镜头衔接面板新增滚动剪辑。`rollBoundary` 以同一个 delta 联动前镜 `source_out_ms / timeline_out_ms` 和后镜 `source_in_ms / timeline_in_ms`，不移动后镜结束点或任何下游条目；边界范围同时受素材尾部余量、后镜源入点、两侧 200ms 最短时长以及已有 fade 两倍时长约束。操作停止播放、定位新切点、清空该边界页面级连续性勾选并通过一次 `commitItems` 写入历史。真实咖啡草稿的同 Asset 拆分边界 SH-003 A → SH-003 B 在 24fps 下后移一帧：切点 `6900→6942ms`、A 源出点 `1782→1824ms`、B 源入点 `1782→1824ms`，B 结束仍为 `9827ms`；一次撤销恢复全部原值，最终服务端草稿保持原条目并把播放头恢复为 0。画面轨锁定后后移按钮禁用；1280×720 页面尺寸等于视口，控制台无错误。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
 
+提交 `8c79bb0b` 推送到 `main` 后使用标准脚本重启 8766：API PID `27424`、Worker PID `24292`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
+
 提交 `9f1dbabf` 推送到 `main` 后使用标准脚本重启 8766：API PID `32052`、Worker PID `37524`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
 
 提交 `9c159075` 推送到 `main` 后使用标准启动脚本重启 8766：API PID `66460`、Worker PID `50140`，两个进程创建时间均为 2026-07-30 17:54:02；`GET /api/v1/health` 返回 `ok`，Alembic runtime/head 均为 `20260730_42`。Worker 错误日志为空，API 的 stderr 仅包含 Uvicorn 正常启动信息，没有错误堆栈。
