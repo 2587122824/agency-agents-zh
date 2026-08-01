@@ -530,6 +530,7 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
+  const [boundaryFrameStripKey, setBoundaryFrameStripKey] = useState<string | null>(null)
   const [boundaryFrameBlendPercent, setBoundaryFrameBlendPercent] = useState(50)
   const [boundaryContinuityChecks, setBoundaryContinuityChecks] = useState<Record<string, string[]>>({})
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
@@ -603,6 +604,7 @@ export function EditorPrototypePage() {
     setBoundaryReviewSession(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameStripKey(null)
     setBoundaryFrameBlendPercent(50)
     setBoundaryContinuityChecks({})
     setDirty(false)
@@ -1293,6 +1295,7 @@ export function EditorPrototypePage() {
     setBoundaryReviewSession(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameStripKey(null)
     setSelectedIndex(itemIndex)
     setPlayheadMs(target.left.timeline_out_ms)
     setBoundaryFocusKey(target.key)
@@ -1472,6 +1475,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameStripKey(null)
     setBoundaryReviewSession({
       boundaryIndexes: reviewableBoundaryIndexes,
       position: 0,
@@ -1545,6 +1549,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameStripKey(null)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
     setBoundaryContinuityChecks({})
@@ -3245,6 +3250,32 @@ export function EditorPrototypePage() {
                  const rightFrameSourceMs = right.source_in_ms ?? 0
                  const framesOpen = boundaryFrameComparisonKey === boundaryKey
                  const overlayFrames = boundaryFrameOverlayKey === boundaryKey
+                 const stripFrames = boundaryFrameStripKey === boundaryKey
+                 const leftSourceInMs = left.source_in_ms ?? 0
+                 const leftSourceOutMs = left.source_out_ms ?? leftSourceInMs
+                 const rightSourceInMs = right.source_in_ms ?? 0
+                 const rightSourceOutMs = right.source_out_ms ?? rightSourceInMs
+                 const leftStripFrames = [3, 2, 1].map(offset => {
+                   const sourceTimeMs = Math.max(leftSourceInMs, leftSourceOutMs - offset * frameStepMs)
+                   return {
+                     key: `left-${offset}`,
+                     label: `切前 ${offset} 帧`,
+                     sourceTimeMs,
+                     timelineTimeMs: Math.min(left.timeline_out_ms - frameStepMs, left.timeline_in_ms + sourceTimeMs - leftSourceInMs),
+                   }
+                 })
+                 const rightStripFrames = [0, 1, 2].map(offset => {
+                   const sourceTimeMs = Math.min(
+                     Math.max(rightSourceInMs, rightSourceOutMs - frameStepMs),
+                     rightSourceInMs + offset * frameStepMs,
+                   )
+                   return {
+                     key: `right-${offset}`,
+                     label: `切后 ${offset} 帧`,
+                     sourceTimeMs,
+                     timelineTimeMs: Math.min(right.timeline_out_ms - frameStepMs, right.timeline_in_ms + sourceTimeMs - rightSourceInMs),
+                   }
+                 })
                  const rollReady = Boolean(
                    left.asset_id
                    && right.asset_id
@@ -3403,8 +3434,18 @@ export function EditorPrototypePage() {
                     {framesOpen && left.asset_id && right.asset_id && <>
                      <div className={styles.boundaryFrameModes}>
                        <div>
-                         <button aria-pressed={!overlayFrames} onClick={() => setBoundaryFrameOverlayKey(null)}>并排</button>
-                         <button aria-pressed={overlayFrames} onClick={() => setBoundaryFrameOverlayKey(boundaryKey)}>叠加对齐</button>
+                         <button aria-pressed={!overlayFrames && !stripFrames} onClick={() => {
+                           setBoundaryFrameOverlayKey(null)
+                           setBoundaryFrameStripKey(null)
+                         }}>并排</button>
+                         <button aria-pressed={overlayFrames} onClick={() => {
+                           setBoundaryFrameOverlayKey(boundaryKey)
+                           setBoundaryFrameStripKey(null)
+                         }}>叠加对齐</button>
+                         <button aria-pressed={stripFrames} onClick={() => {
+                           setBoundaryFrameOverlayKey(null)
+                           setBoundaryFrameStripKey(boundaryKey)
+                         }}>动作帧带</button>
                        </div>
                        {overlayFrames && <label>首帧透明度
                          <input
@@ -3419,7 +3460,26 @@ export function EditorPrototypePage() {
                          <code>{boundaryFrameBlendPercent}%</code>
                        </label>}
                      </div>
-                     {overlayFrames
+                     {stripFrames
+                       ? <div className={styles.boundaryFrameStrip} aria-label={`${left.label} 到 ${right.label} 的动作连续帧带`}>
+                         {([
+                           { role: '前镜末端', item: left, frames: leftStripFrames },
+                           { role: '后镜开头', item: right, frames: rightStripFrames },
+                         ] as const).map(row => <section key={`${boundaryKey}-${row.role}`}>
+                           <header><strong>{row.role}</strong><span>{row.item.label}</span></header>
+                           <div>{row.frames.map(frame => <BoundaryFrameStill
+                             key={frame.key}
+                             projectId={projectId}
+                             item={row.item}
+                             sourceTimeMs={frame.sourceTimeMs}
+                             label={`${row.item.label} ${frame.label}`}
+                             fps={outputFps}
+                             onActivate={() => seekTimeline(frame.timelineTimeMs)}
+                           />)}</div>
+                         </section>)}
+                         <small>按真实输出帧率展示切点两侧连续帧；点击任一帧定位主监看，再用滚动剪辑或源窗口滑移调整。</small>
+                       </div>
+                       : overlayFrames
                        ? <BoundaryFrameOverlay
                          projectId={projectId}
                          left={left}

@@ -906,7 +906,7 @@
 }
 .boundaryFrame code { color: #8f999d; }
 .boundaryFrameModes { display: grid; gap: 5px; }
-.boundaryFrameModes > div { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.boundaryFrameModes > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
 .boundaryControl .boundaryFrameModes button {
   height: 26px;
   border-color: #41494d;
@@ -928,6 +928,40 @@
 }
 .boundaryFrameModes input { min-width: 0; accent-color: #6d9b88; }
 .boundaryFrameModes code { color: #c4ceca; text-align: right; }
+.boundaryFrameStrip {
+  min-width: 0;
+  display: grid;
+  gap: 7px;
+}
+.boundaryFrameStrip section { min-width: 0; display: grid; gap: 4px; }
+.boundaryFrameStrip header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  color: #c3ccc8;
+}
+.boundaryFrameStrip header span {
+  min-width: 0;
+  overflow: hidden;
+  color: #87918d;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.boundaryFrameStrip section > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+.boundaryFrameStrip .boundaryFrame video { height: 64px; }
+.boundaryFrameStrip .boundaryFrame span { padding: 4px; }
+.boundaryFrameStrip .boundaryFrame strong { font-size: 10px; }
+.boundaryFrameStrip .boundaryFrame code { font-size: 9px; }
+.boundaryFrameStrip > small {
+  color: #78827e;
+  line-height: 1.45;
+}
 .boundaryOverlay {
   min-width: 0;
   display: grid;
