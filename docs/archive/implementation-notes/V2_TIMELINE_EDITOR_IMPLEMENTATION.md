@@ -177,6 +177,8 @@ EditorWorkspace 新增 `shot_sequence`，并给每个可用 Asset 投影 `shot_c
 
 提交 `8743e135` 推送到 `main` 后使用标准脚本重启 8766：API PID `8036`、Worker PID `2640`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
 
+提交 `00182bcb` 推送到 `main` 后使用标准脚本重启 8766：API PID `35224`、Worker PID `6240`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有正常项目列表与健康检查请求，Worker 日志为空，没有实际错误堆栈。
+
 提交 `8c79bb0b` 推送到 `main` 后使用标准脚本重启 8766：API PID `27424`、Worker PID `24292`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
 
 提交 `9f1dbabf` 推送到 `main` 后使用标准脚本重启 8766：API PID `32052`、Worker PID `37524`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
