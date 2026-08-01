@@ -229,6 +229,7 @@ draft
 - 连续性提示只消费 EditorWorkspace 已投影的 Shot `continuity_group_id / continuity_relation` 与 Asset 映射。只有正式序号相邻的边界才能套用右镜相对前镜的关系合同；跳序、拆分或补充素材边界使用通用人工检查项。勾选状态只存在于当前 React 页面会话，不进入 `EditorDraftSession` 或 Timeline 合同，正式放行仍由预览复核的独立不可变事件承担。
 - 边界滚动剪辑不引入新的服务端合同：前镜源/成片出点和后镜源/成片入点以同一有符号 delta 原子写入现有 TimelineItem v4 草稿，源区间与成片区间继续等长，时间线总时长不变。客户端用素材 duration、最短 200ms 和两侧 fade 时长推导可移动区间；一次 `commitItems` 形成一个撤销步骤，后端保存与不可变 Timeline 校验继续作为最终合同门禁。
 - 源窗口滑移同样复用 TimelineItem v4 与 EditorDraftSession：客户端只给单个完整画面的 `source_in_ms / source_out_ms` 加同一个有符号 delta，时间线入出点和片段时长不变，并用 `0 <= source_in_ms < source_out_ms <= asset_duration_ms` 限定区间。一次 `commitItems` 原子进入本地撤销历史和项目草稿自动保存；不新增旧数据兼容分支，也不改变后端冻结与 FFmpeg 对源区间的既有解释。
+- 片段滑动继续只写现有 TimelineItem v4：前镜 `source_out_ms / timeline_out_ms`、目标镜 `timeline_in_ms / timeline_out_ms` 与后镜 `source_in_ms / timeline_in_ms` 同加一个 delta，目标源区间、目标时长、时间线连续性和总时长均不变。客户端以相邻素材把手、最短片段和 fade 下限计算可用区间，一次 `commitItems` 原子保存三条修改；后端既有源/成片等长、连续性、素材边界和转场校验仍是不可变版本门禁，不增加新的数据结构或运行时兼容逻辑。
 - 切点预览会话在客户端保存窗口起点、终点、前镜条目和循环标记。逐帧媒体时钟到达预览终点时，单次模式停止；循环模式切回前镜并保持播放状态，继续复用下一片段预载与跨条目门禁。切换媒体元素导致的 `HTMLMediaElement.play()` AbortError 属于预期中断并被显式吞掉，其他播放拒绝仍转换为用户可读提示。窗口/循环不进入 Timeline 合同；播放头继续使用既有 EditorDraftSession 字段。
 
 ## 11. 当前技术栈

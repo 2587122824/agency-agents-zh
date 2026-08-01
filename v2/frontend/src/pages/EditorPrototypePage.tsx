@@ -568,6 +568,7 @@ export function EditorPrototypePage() {
 
   const durationMs = workspace.data?.duration_ms ?? 15000
   const outputFps = Math.max(1, Number(sourceTimeline?.output_spec.fps) || 24)
+  const frameStepMs = Math.max(1, Math.round(1000 / outputFps))
   const snapIntervalMs = sourceTimeline?.track_config.snap_interval_ms ?? 100
   const snapMs = (value: number) => snapEnabled
     ? Math.round(value / snapIntervalMs) * snapIntervalMs
@@ -2063,6 +2064,88 @@ export function EditorPrototypePage() {
     )
   }
 
+  const slideMainItem = (item: TimelineItem, requestedDeltaMs: number) => {
+    if (blockMainTrackEdit(item)) return
+    const itemPosition = mainItems.findIndex(row => row.id === item.id)
+    const previous = itemPosition > 0 ? mainItems[itemPosition - 1] : null
+    const next = itemPosition >= 0 ? mainItems[itemPosition + 1] ?? null : null
+    if (
+      !previous?.asset_id
+      || !item.asset_id
+      || !next?.asset_id
+      || previous.timeline_out_ms !== item.timeline_in_ms
+      || item.timeline_out_ms !== next.timeline_in_ms
+      || previous.source_in_ms == null
+      || previous.source_out_ms == null
+      || previous.asset_duration_ms == null
+      || item.source_in_ms == null
+      || item.source_out_ms == null
+      || next.source_in_ms == null
+      || next.source_out_ms == null
+    ) {
+      setNotice('只有前后紧邻且三段都有完整源区间的中间画面，才能滑动片段。')
+      return
+    }
+    const previousDuration = previous.source_out_ms - previous.source_in_ms
+    const nextDuration = next.source_out_ms - next.source_in_ms
+    const minimumDelta = Math.max(
+      -(previousDuration - minimumVideoDurationForTransitions(previous)),
+      -next.source_in_ms,
+    )
+    const maximumDelta = Math.min(
+      previous.asset_duration_ms - previous.source_out_ms,
+      nextDuration - minimumVideoDurationForTransitions(next),
+    )
+    const deltaMs = Math.max(minimumDelta, Math.min(maximumDelta, requestedDeltaMs))
+    if (!deltaMs) {
+      setNotice(requestedDeltaMs < 0
+        ? `${item.label} 已到可前移边界：前镜不能再缩短，或后镜没有更早的源画面。`
+        : `${item.label} 已到可后移边界：前镜没有更多源画面，或后镜不能再缩短。`)
+      return
+    }
+    const nextTimelineIn = item.timeline_in_ms + deltaMs
+    const nextTimelineOut = item.timeline_out_ms + deltaMs
+    const affectedBoundaryKeys = new Set([
+      `${previous.id}-${item.id}`,
+      `${item.id}-${next.id}`,
+    ])
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryContinuityChecks(current => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !affectedBoundaryKeys.has(key)),
+    ))
+    setPlayheadMs(nextTimelineIn)
+    commitItems(
+      items.map(row => {
+        if (row.id === previous.id) {
+          return {
+            ...row,
+            source_out_ms: previous.source_out_ms! + deltaMs,
+            timeline_out_ms: nextTimelineIn,
+          }
+        }
+        if (row.id === item.id) {
+          return {
+            ...row,
+            timeline_in_ms: nextTimelineIn,
+            timeline_out_ms: nextTimelineOut,
+          }
+        }
+        if (row.id === next.id) {
+          return {
+            ...row,
+            source_in_ms: next.source_in_ms! + deltaMs,
+            timeline_in_ms: nextTimelineOut,
+          }
+        }
+        return row
+      }),
+      `已把 ${item.label} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), outputFps)}；片段内容和时长不变，前后切点及连续性检查已联动。`,
+      item.id,
+    )
+  }
+
   const setSelectedAudioMix = (mix: 'voiceover' | 'background_music') => {
     if (!selectedItem || selectedItem.track_type !== 'audio') return
     const transform: Record<string, unknown> = { ...selectedItem.transform, mix, playback: selectedItem.transform.playback ?? { mode: 'trim' } }
@@ -2722,6 +2805,57 @@ export function EditorPrototypePage() {
               <button disabled={videoTrackLocked} onClick={() => shiftItem(1)}><ChevronRight />向后移动</button>
               <button disabled={videoTrackLocked} onClick={deleteSelected}>移除片段</button>
             </div>
+            {previousMainItem && nextMainItem && (() => {
+              const slideContractReady = Boolean(
+                previousMainItem.asset_id
+                && selectedItem.asset_id
+                && nextMainItem.asset_id
+                && previousMainItem.timeline_out_ms === selectedItem.timeline_in_ms
+                && selectedItem.timeline_out_ms === nextMainItem.timeline_in_ms
+                && previousMainItem.source_in_ms != null
+                && previousMainItem.source_out_ms != null
+                && previousMainItem.asset_duration_ms != null
+                && selectedItem.source_in_ms != null
+                && selectedItem.source_out_ms != null
+                && nextMainItem.source_in_ms != null
+                && nextMainItem.source_out_ms != null,
+              )
+              const previousDuration = previousMainItem.source_in_ms != null && previousMainItem.source_out_ms != null
+                ? previousMainItem.source_out_ms - previousMainItem.source_in_ms
+                : 0
+              const nextDuration = nextMainItem.source_in_ms != null && nextMainItem.source_out_ms != null
+                ? nextMainItem.source_out_ms - nextMainItem.source_in_ms
+                : 0
+              const minimumSlideDelta = slideContractReady
+                && previousMainItem.source_in_ms != null
+                && previousMainItem.source_out_ms != null
+                && nextMainItem.source_in_ms != null
+                ? Math.max(
+                  -(previousDuration - minimumVideoDurationForTransitions(previousMainItem)),
+                  -nextMainItem.source_in_ms,
+                )
+                : 0
+              const maximumSlideDelta = slideContractReady
+                && previousMainItem.source_out_ms != null
+                && previousMainItem.asset_duration_ms != null
+                && nextMainItem.source_in_ms != null
+                && nextMainItem.source_out_ms != null
+                ? Math.min(
+                  previousMainItem.asset_duration_ms - previousMainItem.source_out_ms,
+                  nextDuration - minimumVideoDurationForTransitions(nextMainItem),
+                )
+                : 0
+              return <div className={styles.clipSlide}>
+                <div><strong>片段滑动</strong><span>内容和时长不变，联动前后切点</span></div>
+                <div>
+                  <button aria-label={`${selectedItem.label} 向前滑动 1 秒`} disabled={videoTrackLocked || minimumSlideDelta >= 0} onClick={() => slideMainItem(selectedItem, -1000)}>−1s</button>
+                  <button aria-label={`${selectedItem.label} 向前滑动 1 帧`} disabled={videoTrackLocked || minimumSlideDelta >= 0} onClick={() => slideMainItem(selectedItem, -frameStepMs)}>−1帧</button>
+                  <code>{timecode(selectedItem.timeline_in_ms, outputFps)}–{timecode(selectedItem.timeline_out_ms, outputFps)}</code>
+                  <button aria-label={`${selectedItem.label} 向后滑动 1 帧`} disabled={videoTrackLocked || maximumSlideDelta <= 0} onClick={() => slideMainItem(selectedItem, frameStepMs)}>+1帧</button>
+                  <button aria-label={`${selectedItem.label} 向后滑动 1 秒`} disabled={videoTrackLocked || maximumSlideDelta <= 0} onClick={() => slideMainItem(selectedItem, 1000)}>+1s</button>
+                </div>
+              </div>
+            })()}
             {videoTrackLocked && <div className={styles.trimHint}>画面轨锁定期间只允许选择、寻帧和预览，不写入本地草稿。</div>}
           </section>}
           {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section>
@@ -2761,7 +2895,6 @@ export function EditorPrototypePage() {
                    && leftFormalShot.continuity_group_id === rightFormalShot?.continuity_group_id
                    ? leftFormalShot.continuity_group_id
                    : null
-                 const frameStepMs = Math.max(1, Math.round(1000 / outputFps))
                  const leftFrameSourceMs = Math.max(left.source_in_ms ?? 0, (left.source_out_ms ?? 0) - frameStepMs)
                  const rightFrameSourceMs = right.source_in_ms ?? 0
                  const framesOpen = boundaryFrameComparisonKey === boundaryKey

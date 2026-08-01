@@ -175,6 +175,8 @@ EditorWorkspace 新增 `shot_sequence`，并给每个可用 Asset 投影 `shot_c
 
 镜头衔接面板继续新增单片段源窗口滑移。`slipBoundaryItem` 在素材边界内把目标片段的 `source_in_ms / source_out_ms` 同步前移或后移 1 帧/1 秒，完全不改 `timeline_in_ms / timeline_out_ms`；操作停止播放和循环预览、重置目标片段前后两个边界的页面级连续性检查，并通过一次 `commitItems` 形成一个撤销步骤。真实咖啡草稿在 SH-002 → SH-001 边界把 SH-001 源区间从 `0..409ms` 后移一帧到 `42..451ms`，时间线继续保持 `4709..5118ms`，切点定格首帧从 `00:00:00` 更新为 `00:00:01`；一次撤销恢复源区间和定格，服务端最终播放头恢复 0。锁定画面轨后前后镜滑移按钮均禁用；1280×720 的 `scrollWidth/clientWidth` 与 `scrollHeight/clientHeight` 分别保持 `1280/1280`、`720/720`。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
 
+Inspector 片段操作新增三点联动的片段滑动。`slideMainItem` 保持中间画面的源入出点和时长不变，把前镜出点、中间镜时间线入出点和后镜入点同加一个 delta；范围受前镜素材尾部、后镜源入点、两侧最短时长和 fade 合同限制。操作停止播放/循环预览、同时清空两侧页面级连续性检查并通过一次 `commitItems` 保存。真实咖啡草稿把 SH-003 A 后移一帧：其源区间仍为 `0..1782ms`、时间线从 `5118..6900ms` 平移到 `5160..6942ms`；SH-001 源/时间线出点从 `409/5118ms` 变为 `451/5160ms`，SH-003 B 源/时间线入点从 `1782/6900ms` 变为 `1824/6942ms`，下游结束仍为 `9827ms`。两侧各一项连续性勾选均重置，一次撤销恢复全部值，最终服务端草稿 `row_version=30 / playhead_ms=0`。锁轨后滑动按钮禁用；1280×720 页面宽高均无溢出，控制台零日志。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
+
 提交 `8743e135` 推送到 `main` 后使用标准脚本重启 8766：API PID `8036`、Worker PID `2640`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
 
 提交 `00182bcb` 推送到 `main` 后使用标准脚本重启 8766：API PID `35224`、Worker PID `6240`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有正常项目列表与健康检查请求，Worker 日志为空，没有实际错误堆栈。

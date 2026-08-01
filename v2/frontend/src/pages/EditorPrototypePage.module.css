@@ -646,6 +646,27 @@
   cursor: pointer;
 }
 .actionGrid svg { width: 13px; }
+.clipSlide {
+  margin-top: 7px;
+  padding: 7px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #3f4947;
+  border-radius: 4px;
+  background: #252b2a;
+}
+.clipSlide > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.clipSlide > div:first-child strong { color: #d3d9d6; }
+.clipSlide > div:first-child span { color: #87918d; text-align: right; }
+.clipSlide > div:last-child {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 30px 38px minmax(84px, 1fr) 38px 30px;
+  align-items: center;
+  gap: 4px;
+}
+.clipSlide button { height: 27px; padding: 0 2px; border: 1px solid #414a47; border-radius: 3px; background: #2d3432; color: #d9dfdc; font-size: 8px; }
+.clipSlide code { overflow: hidden; color: #c9d0cd; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryList { display: grid; gap: 7px; }
 .boundaryControl {
   padding: 8px;
