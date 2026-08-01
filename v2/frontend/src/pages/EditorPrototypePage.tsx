@@ -78,6 +78,16 @@ function normalizeContinuityRelation(value: string | undefined): ContinuityRelat
   return value && value in CONTINUITY_RELATION_COPY ? value as ContinuityRelation : 'same_moment'
 }
 
+function minimumVideoDurationForTransitions(item: TimelineItem) {
+  const transitionIn = item.transform.transition_in as { type?: string; duration_ms?: number } | undefined
+  const transitionOut = item.transform.transition_out as { type?: string; duration_ms?: number } | undefined
+  const fadeDuration = Math.max(
+    transitionIn?.type === 'fade' ? transitionIn.duration_ms ?? 0 : 0,
+    transitionOut?.type === 'fade' ? transitionOut.duration_ms ?? 0 : 0,
+  )
+  return Math.max(200, fadeDuration * 2)
+}
+
 function timecode(ms: number, fps = 24) {
   const value = Math.max(0, Math.round(ms))
   const safeFps = Math.max(1, Math.round(fps))
@@ -1901,6 +1911,73 @@ export function EditorPrototypePage() {
     )
   }
 
+  const rollBoundary = (left: TimelineItem, right: TimelineItem, requestedDeltaMs: number) => {
+    if (blockMainTrackEdit(left)) return
+    if (
+      !left.asset_id
+      || !right.asset_id
+      || left.timeline_out_ms !== right.timeline_in_ms
+      || left.source_in_ms == null
+      || left.source_out_ms == null
+      || right.source_in_ms == null
+      || right.source_out_ms == null
+    ) {
+      setNotice('只有紧邻且两侧都有完整源区间的画面，才能滚动剪辑切点。')
+      return
+    }
+    const leftDuration = left.source_out_ms - left.source_in_ms
+    const rightDuration = right.source_out_ms - right.source_in_ms
+    const minimumLeftDuration = minimumVideoDurationForTransitions(left)
+    const minimumRightDuration = minimumVideoDurationForTransitions(right)
+    const minimumDelta = Math.max(
+      -(leftDuration - minimumLeftDuration),
+      -right.source_in_ms,
+    )
+    const maximumDelta = Math.min(
+      (left.asset_duration_ms ?? left.source_out_ms) - left.source_out_ms,
+      rightDuration - minimumRightDuration,
+    )
+    const deltaMs = Math.max(minimumDelta, Math.min(maximumDelta, requestedDeltaMs))
+    if (!deltaMs) {
+      setNotice(requestedDeltaMs < 0
+        ? '切点已到可前移边界：前镜不能再缩短，或后镜源入点已到素材开头。'
+        : '切点已到可后移边界：前镜没有更多源画面，或后镜不能再缩短。')
+      return
+    }
+    const nextBoundaryMs = left.timeline_out_ms + deltaMs
+    const boundaryKey = `${left.id}-${right.id}`
+    const nextItems = items.map(item => {
+      if (item.id === left.id) {
+        return {
+          ...item,
+          source_out_ms: left.source_out_ms! + deltaMs,
+          timeline_out_ms: nextBoundaryMs,
+        }
+      }
+      if (item.id === right.id) {
+        return {
+          ...item,
+          source_in_ms: right.source_in_ms! + deltaMs,
+          timeline_in_ms: nextBoundaryMs,
+        }
+      }
+      return item
+    })
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryContinuityChecks(current => {
+      const next = { ...current }
+      delete next[boundaryKey]
+      return next
+    })
+    setPlayheadMs(nextBoundaryMs)
+    commitItems(
+      nextItems,
+      `已把 ${left.label} → ${right.label} 的切点${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), outputFps)}；成片总时长不变，连续性检查已重置。`,
+      right.id,
+    )
+  }
+
   const setSelectedAudioMix = (mix: 'voiceover' | 'background_music') => {
     if (!selectedItem || selectedItem.track_type !== 'audio') return
     const transform: Record<string, unknown> = { ...selectedItem.transform, mix, playback: selectedItem.transform.playback ?? { mode: 'trim' } }
@@ -2584,10 +2661,33 @@ export function EditorPrototypePage() {
                    ? leftFormalShot.continuity_group_id
                    : null
                  const frameStepMs = Math.max(1, Math.round(1000 / outputFps))
-                const leftFrameSourceMs = Math.max(left.source_in_ms ?? 0, (left.source_out_ms ?? 0) - frameStepMs)
-                const rightFrameSourceMs = right.source_in_ms ?? 0
-                const framesOpen = boundaryFrameComparisonKey === boundaryKey
-                return <div className={styles.boundaryControl} data-order-warning={orderWarning} key={boundaryKey}>
+                 const leftFrameSourceMs = Math.max(left.source_in_ms ?? 0, (left.source_out_ms ?? 0) - frameStepMs)
+                 const rightFrameSourceMs = right.source_in_ms ?? 0
+                 const framesOpen = boundaryFrameComparisonKey === boundaryKey
+                 const rollReady = Boolean(
+                   left.asset_id
+                   && right.asset_id
+                   && left.timeline_out_ms === right.timeline_in_ms
+                   && left.source_in_ms != null
+                   && left.source_out_ms != null
+                   && right.source_in_ms != null
+                   && right.source_out_ms != null,
+                 )
+                 const rollMinimumDelta = rollReady
+                   ? Math.max(
+                     -((left.source_out_ms! - left.source_in_ms!) - minimumVideoDurationForTransitions(left)),
+                     -right.source_in_ms!,
+                   )
+                   : 0
+                 const rollMaximumDelta = rollReady
+                   ? Math.min(
+                     (left.asset_duration_ms ?? left.source_out_ms!) - left.source_out_ms!,
+                     (right.source_out_ms! - right.source_in_ms!) - minimumVideoDurationForTransitions(right),
+                   )
+                   : 0
+                 const canRollEarlier = rollMinimumDelta < 0
+                 const canRollLater = rollMaximumDelta > 0
+                 return <div className={styles.boundaryControl} data-order-warning={orderWarning} key={boundaryKey}>
                    <header>
                     <span><strong>{left.label}</strong><i>→</i><strong>{right.label}</strong></span>
                     {orderWarning && <em>顺序倒退</em>}
@@ -2626,9 +2726,19 @@ export function EditorPrototypePage() {
                       <option value="fade:200">淡出淡入 · 0.2s</option>
                       <option value="fade:300">淡出淡入 · 0.3s</option>
                       <option value="fade:500">淡出淡入 · 0.5s</option>
-                    </select>
-                  </div>
-                  <button
+                     </select>
+                   </div>
+                   <div className={styles.boundaryRoll}>
+                     <div><strong>滚动剪辑</strong><span>联动两侧源区间，总时长不变</span></div>
+                     <div>
+                       <button aria-label={`${left.label} 到 ${right.label} 切点前移 1 秒`} disabled={videoTrackLocked || !canRollEarlier} onClick={() => rollBoundary(left, right, -1000)}>−1s</button>
+                       <button aria-label={`${left.label} 到 ${right.label} 切点前移 1 帧`} disabled={videoTrackLocked || !canRollEarlier} onClick={() => rollBoundary(left, right, -frameStepMs)}>−1帧</button>
+                       <code>{timecode(left.timeline_out_ms, outputFps)}</code>
+                       <button aria-label={`${left.label} 到 ${right.label} 切点后移 1 帧`} disabled={videoTrackLocked || !canRollLater} onClick={() => rollBoundary(left, right, frameStepMs)}>+1帧</button>
+                       <button aria-label={`${left.label} 到 ${right.label} 切点后移 1 秒`} disabled={videoTrackLocked || !canRollLater} onClick={() => rollBoundary(left, right, 1000)}>+1s</button>
+                     </div>
+                   </div>
+                   <button
                     className={styles.boundaryFrameToggle}
                     disabled={!left.asset_id || !right.asset_id}
                     aria-expanded={framesOpen}

@@ -722,6 +722,25 @@
 }
 .continuityUnavailable em { color: #8f8980; font-style: normal; }
 .boundaryActions { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; }
+.boundaryRoll {
+  padding: 7px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #3d4549;
+  border-radius: 4px;
+  background: #242a2d;
+}
+.boundaryRoll > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
+.boundaryRoll > div:first-child strong { color: #d2d8d5; }
+.boundaryRoll > div:first-child span { color: #858f8b; text-align: right; }
+.boundaryRoll > div:last-child {
+  display: grid;
+  grid-template-columns: 34px 43px minmax(64px, 1fr) 43px 34px;
+  align-items: center;
+  gap: 4px;
+}
+.boundaryControl .boundaryRoll button { height: 27px; padding: 0 3px; font-size: 8px; }
+.boundaryRoll code { color: #c8cfcc; text-align: center; white-space: nowrap; }
 .boundaryControl button,
 .boundaryControl select {
   min-width: 0;
