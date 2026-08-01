@@ -514,6 +514,7 @@ export function EditorPrototypePage() {
   const [boundaryPreviewEndMs, setBoundaryPreviewEndMs] = useState<number | null>(null)
   const [boundaryPreviewWindowMs, setBoundaryPreviewWindowMs] = useState<500 | 1000 | 2000>(1000)
   const [boundaryPreviewRate, setBoundaryPreviewRate] = useState<0.25 | 0.5 | 1>(1)
+  const [boundaryFocusKey, setBoundaryFocusKey] = useState<string | null>(null)
   const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
     boundaryKey: string
     leftItemId: string
@@ -593,6 +594,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryPreviewRate(1)
+    setBoundaryFocusKey(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameBlendPercent(50)
@@ -666,6 +668,7 @@ export function EditorPrototypePage() {
     setSelectedIndex(0)
     setPlayheadMs(useRemote && remote ? remote.playhead_ms : 0)
     setPlaying(false)
+    setBoundaryFocusKey(null)
     setLastValidation(sourceTimeline)
     setLastPreview(null)
     setPreviewCompareMode('result')
@@ -772,6 +775,20 @@ export function EditorPrototypePage() {
   const selectedMainPosition = mainItems.findIndex(item => item.id === selectedItem?.id)
   const previousMainItem = selectedMainPosition > 0 ? mainItems[selectedMainPosition - 1] : null
   const nextMainItem = selectedMainPosition >= 0 ? mainItems[selectedMainPosition + 1] ?? null : null
+  const mainBoundaries = useMemo(
+    () => mainItems.slice(0, -1).map((left, index) => ({
+      key: `${left.id}-${mainItems[index + 1].id}`,
+      left,
+      right: mainItems[index + 1],
+    })),
+    [mainItems],
+  )
+  const focusedBoundaryIndex = mainBoundaries.findIndex(boundary => boundary.key === boundaryFocusKey)
+  const inferredBoundaryIndex = selectedMainPosition < 0 || !mainBoundaries.length
+    ? -1
+    : Math.min(selectedMainPosition, mainBoundaries.length - 1)
+  const activeBoundaryIndex = focusedBoundaryIndex >= 0 ? focusedBoundaryIndex : inferredBoundaryIndex
+  const activeBoundaryKey = activeBoundaryIndex >= 0 ? mainBoundaries[activeBoundaryIndex]?.key ?? null : null
   const nextMainAsset = workspace.data?.available_assets.find(asset => asset.id === nextMainItem?.asset_id) ?? null
   const usedMainVideoAssetIds = useMemo(
     () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
@@ -1207,7 +1224,16 @@ export function EditorPrototypePage() {
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
+    setBoundaryFocusKey(null)
     setNotice('已丢弃自动保存的项目草稿，恢复到当前时间线版本。')
+  }
+
+  const boundaryKeyForItem = (item: TimelineItem) => {
+    if (item.track_type !== 'main_video') return null
+    const position = mainItems.findIndex(row => row.id === item.id)
+    if (position < 0 || mainItems.length < 2) return null
+    const leftPosition = Math.min(position, mainItems.length - 2)
+    return `${mainItems[leftPosition].id}-${mainItems[leftPosition + 1].id}`
   }
 
   const selectItem = (item: TimelineItem, preserveBoundaryPreview = false) => {
@@ -1218,6 +1244,7 @@ export function EditorPrototypePage() {
     if (!preserveBoundaryPreview) {
       setBoundaryPreviewEndMs(null)
       setBoundaryPreviewLoop(null)
+      setBoundaryFocusKey(boundaryKeyForItem(item))
     }
   }
 
@@ -1230,11 +1257,31 @@ export function EditorPrototypePage() {
     if (target) {
       const index = items.findIndex(item => item.id === target.id)
       if (index >= 0) setSelectedIndex(index)
+      setBoundaryFocusKey(boundaryKeyForItem(target))
     }
     setPlayheadMs(position)
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
+  }
+
+  const focusBoundaryAt = (targetIndex: number) => {
+    const target = mainBoundaries[targetIndex]
+    if (!target) return
+    const focusItem = target.right.asset_id ? target.right : target.left
+    const itemIndex = items.findIndex(item => item.id === focusItem.id)
+    if (itemIndex < 0) return
+    videoRef.current?.pause()
+    advancingPlaybackRef.current = true
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryFrameComparisonKey(null)
+    setBoundaryFrameOverlayKey(null)
+    setSelectedIndex(itemIndex)
+    setPlayheadMs(target.left.timeline_out_ms)
+    setBoundaryFocusKey(target.key)
+    setNotice(`已定位第 ${targetIndex + 1}/${mainBoundaries.length} 个切点：${target.left.label} → ${target.right.label}。`)
   }
 
   const beginScrub = (
@@ -1367,6 +1414,7 @@ export function EditorPrototypePage() {
     const boundaryKey = `${left.id}-${right.id}`
     const label = `${left.label} → ${right.label}`
     selectItem(left)
+    setBoundaryFocusKey(boundaryKey)
     setPlayheadMs(startMs)
     advancingPlaybackRef.current = false
     setBoundaryPreviewEndMs(endMs)
@@ -1420,6 +1468,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
+    setBoundaryFocusKey(null)
     setBoundaryContinuityChecks({})
   }
 
@@ -2548,6 +2597,11 @@ export function EditorPrototypePage() {
       }
       if (overlayOpen) return
       if (target?.closest('input, select, textarea, [contenteditable="true"]')) return
+      if (event.key === '[' || event.key === ']') {
+        event.preventDefault()
+        focusBoundaryAt(activeBoundaryIndex + (event.key === ']' ? 1 : -1))
+        return
+      }
       if (event.code === 'Space') {
         if (target?.closest('button, a, [role="button"], audio, video')) return
         event.preventDefault()
@@ -3027,7 +3081,26 @@ export function EditorPrototypePage() {
             {videoTrackLocked && <div className={styles.trimHint}>画面轨锁定期间只允许选择、寻帧和预览，不写入本地草稿。</div>}
           </section>}
           {selectedItem.track_type === 'main_video' && (previousMainItem || nextMainItem) && <section>
-            <h3>镜头衔接</h3>
+            <div className={styles.boundarySectionHeader}>
+              <h3>镜头衔接</h3>
+              <div aria-label="切点顺序导航">
+                <button
+                  title="上一个切点（[）"
+                  aria-label="上一个切点"
+                  aria-keyshortcuts="["
+                  disabled={activeBoundaryIndex <= 0}
+                  onClick={() => focusBoundaryAt(activeBoundaryIndex - 1)}
+                ><ChevronLeft /></button>
+                <span><b>{activeBoundaryIndex + 1}</b> / {mainBoundaries.length}</span>
+                <button
+                  title="下一个切点（]）"
+                  aria-label="下一个切点"
+                  aria-keyshortcuts="]"
+                  disabled={activeBoundaryIndex < 0 || activeBoundaryIndex >= mainBoundaries.length - 1}
+                  onClick={() => focusBoundaryAt(activeBoundaryIndex + 1)}
+                ><ChevronRight /></button>
+              </div>
+            </div>
             <div className={styles.boundaryList}>
               {([
                 previousMainItem ? [previousMainItem, selectedItem] : null,
@@ -3099,7 +3172,13 @@ export function EditorPrototypePage() {
                  const canSlipRightLater = right.source_out_ms != null
                    && right.asset_duration_ms != null
                    && right.source_out_ms < right.asset_duration_ms
-                 return <div className={styles.boundaryControl} data-order-warning={orderWarning} key={boundaryKey}>
+                 return <div
+                   className={styles.boundaryControl}
+                   data-order-warning={orderWarning}
+                   data-focused={activeBoundaryKey === boundaryKey}
+                   key={boundaryKey}
+                   onFocusCapture={() => setBoundaryFocusKey(boundaryKey)}
+                 >
                    <header>
                     <span><strong>{left.label}</strong><i>→</i><strong>{right.label}</strong></span>
                     {orderWarning && <em>顺序倒退</em>}
@@ -3591,7 +3670,7 @@ export function EditorPrototypePage() {
         <i className={styles.playhead} style={{ left: `${84 + timelineWidth * (playheadMs / durationMs)}px` }}><b /></i>
         </div>
       </div>
-      <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · Shift 秒级 · \ 适应 · Space 播放</span></footer>
+      <footer><span><Sparkles />AI 初剪依据和版本证据已收进右侧抽屉</span><span>拖动时间尺寻帧 · ←/→ 逐帧 · [ / ] 切点巡检 · \ 适应 · Space 播放</span></footer>
     </section>
     {versionOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线版本与审计证据"><section className={styles.versionModal}>
       <header><Layers3 /><div><span>VERSION EVIDENCE</span><h2>时间线版本与审计证据</h2></div><button title="关闭" onClick={() => setVersionOpen(false)}><X /></button></header>

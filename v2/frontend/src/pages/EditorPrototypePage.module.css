@@ -667,6 +667,25 @@
 }
 .clipSlide button { height: 27px; padding: 0 2px; border: 1px solid #414a47; border-radius: 3px; background: #2d3432; color: #d9dfdc; font-size: 8px; }
 .clipSlide code { overflow: hidden; color: #c9d0cd; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.boundarySectionHeader { margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.inspector .boundarySectionHeader h3 { margin: 0; }
+.boundarySectionHeader > div { display: flex; align-items: center; gap: 5px; color: #89938e; }
+.boundarySectionHeader button {
+  width: 25px;
+  height: 25px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid #41494d;
+  border-radius: 3px;
+  background: #272d30;
+  color: #d5dbd8;
+  cursor: pointer;
+}
+.boundarySectionHeader button:disabled { opacity: .35; cursor: not-allowed; }
+.boundarySectionHeader button svg { width: 12px; }
+.boundarySectionHeader span { min-width: 37px; text-align: center; }
+.boundarySectionHeader b { color: #e2e7e4; }
 .boundaryList { display: grid; gap: 7px; }
 .boundaryControl {
   padding: 8px;
@@ -676,6 +695,7 @@
   border-radius: 5px;
   background: #22272a;
 }
+.boundaryControl[data-focused="true"] { border-color: #557866; box-shadow: 0 0 0 1px #324c40 inset; }
 .boundaryControl[data-order-warning="true"] {
   border-color: #8a5a2e;
   background: #2b251f;
