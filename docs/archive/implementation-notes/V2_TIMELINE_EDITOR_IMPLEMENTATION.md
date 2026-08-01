@@ -173,6 +173,8 @@ EditorWorkspace 新增 `shot_sequence`，并给每个可用 Asset 投影 `shot_c
 
 切点预览增加 0.5/1/2 秒可选窗口与循环模式。循环会话冻结边界 key、左条目、窗口起止与标签，逐帧时钟到达右侧终点后重新选择左条目并回到窗口起点；停止循环后播放头稳定不再推进。首次真实验收完整往返成立，但暴露媒体元素快速卸载或暂停时未处理 `video.play()` Promise，产生连续 AbortError；主监看播放 effect 随后显式忽略预期 AbortError，只把其他播放失败转为提示。复验咖啡 SH-002 → SH-001 的前后 0.5 秒窗口，样本从 SH-002 `00:04:10/16` 跨到 SH-001 `00:04:19/00:05:01`，随后重新回到 SH-002 `00:04:07`；点击停止后稳定在 `00:04:11`，400ms 无变化，控制台零错误。2 秒窗口选择成功，锁轨时循环预览仍可用；1280×720 页面尺寸等于视口。验收只推进既有草稿播放头，条目切点保持 `1782ms / 6900ms`，最终播放头恢复 0。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
 
+提交 `8743e135` 推送到 `main` 后使用标准脚本重启 8766：API PID `8036`、Worker PID `2640`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
+
 提交 `8c79bb0b` 推送到 `main` 后使用标准脚本重启 8766：API PID `27424`、Worker PID `24292`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
 
 提交 `9f1dbabf` 推送到 `main` 后使用标准脚本重启 8766：API PID `32052`、Worker PID `37524`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
