@@ -287,6 +287,12 @@ Timeline 读取投影会从不可变事件中选择当前 Timeline ID 与合同�
 
 v6 随后从界面生成 360×640、24fps 低清预览，格式/画幅/时长及持续黑画面检查通过，真实播放器完整播放后保存视觉连续性和主观音画同步复核；再独立确认时间线、选择 `local_ffmpeg`、等待 Worker 输出、显式验证并点击下载。最终 Timeline v6 为 `exported`，项目为 `completed`，DeliveryAttempt `delivery_76884237a45e4f49a17e6b520fab8a51` 为 `verified`。最终 Asset `asset_03994547e14c4e81a3b74ecca6e414c9` 为 480×848、14959ms、3270030 bytes，下载文件 SHA-256 与登记值 `a102bc3d005cf1720660050220b07d948b789b4f8f42aa341fbe8215ba73c51d` 精确一致。输出已登记但验证前若字节数尚未投影，界面改为“文件大小将在验证时读取”，不再显示误导性的 `0 bytes`。完整 API/Worker `133 passed`、Vite 生产构建和 Python compileall 通过。
 
+切点动态预览把原先对称的 `boundaryPreviewWindowMs` 拆为页面级 `boundaryPreviewBeforeMs / boundaryPreviewAfterMs`，两侧均支持 250、500、1000、2000ms。`previewBoundary` 分别从切点向前后计算并钳制窗口，单次播放、循环播放、`boundaryReviewSession` 连续巡检和滚动剪辑/动作帧带应用后的自动试听统一复用这两个值。显示层使用独立 `previewSeconds` 保留 0.25 秒精度，避免通用 `seconds()` 的一位小数把 0.25 秒显示成 0.3 秒。该状态不保存到 EditorDraftSession，也不扩展 Timeline、迁移或 FFmpeg 合同。
+
+长时间循环验收暴露旧回绕竞态：媒体到达窗口终点后在同一 render 中保持 `playing=true` 并直接修改播放头，偶发不会形成新的媒体播放会话，逐帧回调继续推进到 10700ms 缺口而循环按钮仍显示活动。循环会话现在冻结 `leftItemId / startMs / endMs / beforeMs / afterMs / iteration`；每轮结束先 `pause`、门禁推进回调、清除终点并设置 `playing=false`，随后递增 `iteration`，专用 effect 在下一 render 重新选择前镜、定位窗口并启动播放。真实 SH-003 A → B 以切前 0.25 秒、切后 1 秒循环多轮未再逃逸，停止后媒体保持暂停。
+
+真实咖啡 v6 在 24fps 下验收非对称窗口：SH-003 A → B 单次预览最终停在后镜源时点 2.782 秒，提示精确为“切前 0.25s、切后 1s”；滚动剪辑 `+1帧` 把成片切点从 6900ms 移到 6942ms 后，自动试听最终停在新后镜源入点 1.824 秒加 1 秒的位置 2.824 秒，一次撤销恢复双方源切点 1782ms、成片切点 6900ms 与 B 结束 9827ms。连续巡检依次真实播放 `1/4 → 2/4 → 3/4 → 4/4`，四段媒体均为 `readyState=4 / paused=false / playbackRate=1`，10700ms 含缺口边界未进入媒体播放，完成后会话退出。最终草稿 `row_version=124 / playhead_ms=0`；1280×720 的 document/body 宽度与 document 高度均无溢出，浏览器控制台零页面错误。
+
 ## 8. 事件
 
 ```text

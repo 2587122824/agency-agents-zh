@@ -145,6 +145,10 @@ function seconds(ms: number | null | undefined) {
   return `${((ms ?? 0) / 1000).toFixed(1)}s`
 }
 
+function previewSeconds(ms: number) {
+  return `${Number((ms / 1000).toFixed(2))}s`
+}
+
 function deliveryBlockCopy(attempt: DeliveryAttempt) {
   const code = attempt.error_code ?? 'DELIVERY_BLOCKED'
   if (code.includes('DIMENSIONS')) {
@@ -512,7 +516,8 @@ export function EditorPrototypePage() {
   const [playheadMs, setPlayheadMs] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [boundaryPreviewEndMs, setBoundaryPreviewEndMs] = useState<number | null>(null)
-  const [boundaryPreviewWindowMs, setBoundaryPreviewWindowMs] = useState<500 | 1000 | 2000>(1000)
+  const [boundaryPreviewBeforeMs, setBoundaryPreviewBeforeMs] = useState<250 | 500 | 1000 | 2000>(1000)
+  const [boundaryPreviewAfterMs, setBoundaryPreviewAfterMs] = useState<250 | 500 | 1000 | 2000>(1000)
   const [boundaryPreviewRate, setBoundaryPreviewRate] = useState<0.25 | 0.5 | 1>(1)
   const [boundaryFocusKey, setBoundaryFocusKey] = useState<string | null>(null)
   const [boundaryReviewSession, setBoundaryReviewSession] = useState<{
@@ -525,8 +530,10 @@ export function EditorPrototypePage() {
     leftItemId: string
     startMs: number
     endMs: number
-    windowMs: number
+    beforeMs: number
+    afterMs: number
     label: string
+    iteration: number
   } | null>(null)
   const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
@@ -1436,8 +1443,8 @@ export function EditorPrototypePage() {
       return
     }
     const boundaryMs = left.timeline_out_ms
-    const startMs = Math.max(left.timeline_in_ms, boundaryMs - boundaryPreviewWindowMs)
-    const endMs = Math.min(right.timeline_out_ms, boundaryMs + boundaryPreviewWindowMs)
+    const startMs = Math.max(left.timeline_in_ms, boundaryMs - boundaryPreviewBeforeMs)
+    const endMs = Math.min(right.timeline_out_ms, boundaryMs + boundaryPreviewAfterMs)
     const boundaryKey = `${left.id}-${right.id}`
     const label = `${left.label} → ${right.label}`
     setBoundaryReviewSession(null)
@@ -1446,9 +1453,18 @@ export function EditorPrototypePage() {
     setPlayheadMs(startMs)
     advancingPlaybackRef.current = false
     setBoundaryPreviewEndMs(endMs)
-    setBoundaryPreviewLoop(loop ? { boundaryKey, leftItemId: left.id, startMs, endMs, windowMs: boundaryPreviewWindowMs, label } : null)
+    setBoundaryPreviewLoop(loop ? {
+      boundaryKey,
+      leftItemId: left.id,
+      startMs,
+      endMs,
+      beforeMs: boundaryPreviewBeforeMs,
+      afterMs: boundaryPreviewAfterMs,
+      label,
+      iteration: 0,
+    } : null)
     setPlaying(true)
-    setNotice(`正在以 ${boundaryPreviewRate}× ${loop ? '循环' : ''}预览 ${label} 的切点前后 ${seconds(boundaryPreviewWindowMs)}。`)
+    setNotice(`正在以 ${boundaryPreviewRate}× ${loop ? '循环' : ''}预览 ${label}：切前 ${previewSeconds(boundaryPreviewBeforeMs)}，切后 ${previewSeconds(boundaryPreviewAfterMs)}。`)
   }
 
   useEffect(() => {
@@ -1473,6 +1489,23 @@ export function EditorPrototypePage() {
     }
     previewBoundary(left, right, true)
   }
+
+  useEffect(() => {
+    if (!boundaryPreviewLoop || boundaryPreviewLoop.iteration === 0) return
+    const leftIndex = items.findIndex(item => item.id === boundaryPreviewLoop.leftItemId)
+    if (leftIndex < 0) {
+      setBoundaryPreviewLoop(null)
+      setNotice('循环预览对应的切点已不存在，播放已安全停止。')
+      return
+    }
+    advancingPlaybackRef.current = false
+    setSelectedIndex(leftIndex)
+    setBoundaryFocusKey(boundaryPreviewLoop.boundaryKey)
+    setPlayheadMs(boundaryPreviewLoop.startMs)
+    setBoundaryPreviewEndMs(boundaryPreviewLoop.endMs)
+    setPlaying(true)
+    setNotice(`正在以 ${boundaryPreviewRate}× 循环预览 ${boundaryPreviewLoop.label}：切前 ${previewSeconds(boundaryPreviewLoop.beforeMs)}，切后 ${previewSeconds(boundaryPreviewLoop.afterMs)}。`)
+  }, [boundaryPreviewLoop?.iteration])
 
   const toggleBoundaryReview = () => {
     if (boundaryReviewSession) {
@@ -1518,8 +1551,8 @@ export function EditorPrototypePage() {
       return
     }
     const boundaryMs = boundary.left.timeline_out_ms
-    const startMs = Math.max(boundary.left.timeline_in_ms, boundaryMs - boundaryPreviewWindowMs)
-    const endMs = Math.min(boundary.right.timeline_out_ms, boundaryMs + boundaryPreviewWindowMs)
+    const startMs = Math.max(boundary.left.timeline_in_ms, boundaryMs - boundaryPreviewBeforeMs)
+    const endMs = Math.min(boundary.right.timeline_out_ms, boundaryMs + boundaryPreviewAfterMs)
     advancingPlaybackRef.current = false
     setSelectedIndex(leftIndex)
     setBoundaryFocusKey(boundary.key)
@@ -1528,7 +1561,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setPlaying(true)
     setNotice(`连续巡检 ${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}：正在以 ${boundaryPreviewRate}× 预览 ${boundary.left.label} → ${boundary.right.label}。`)
-  }, [boundaryReviewSession, boundaryPreviewWindowMs, items, mainBoundaries])
+  }, [boundaryReviewSession, boundaryPreviewAfterMs, boundaryPreviewBeforeMs, items, mainBoundaries])
 
   const toggleMonitorFullscreen = async () => {
     const monitor = monitorRef.current
@@ -2862,16 +2895,12 @@ export function EditorPrototypePage() {
       setPlayheadMs(Math.min(timelinePosition, selectedItem.timeline_out_ms))
       if (boundaryPreviewEndMs != null && timelinePosition >= boundaryPreviewEndMs - boundaryLeadMs) {
         if (boundaryPreviewLoop) {
-          const leftIndex = items.findIndex(item => item.id === boundaryPreviewLoop.leftItemId)
-          if (leftIndex >= 0) {
-            video.pause()
-            advancingPlaybackRef.current = false
-            setSelectedIndex(leftIndex)
-            setPlayheadMs(boundaryPreviewLoop.startMs)
-            setPlaying(true)
-            setNotice(`正在以 ${boundaryPreviewRate}× 循环预览 ${boundaryPreviewLoop.label} 的切点前后 ${seconds(boundaryPreviewLoop.windowMs)}。`)
-            return
-          }
+          video.pause()
+          advancingPlaybackRef.current = true
+          setPlaying(false)
+          setBoundaryPreviewEndMs(null)
+          setBoundaryPreviewLoop({ ...boundaryPreviewLoop, iteration: boundaryPreviewLoop.iteration + 1 })
+          return
         }
         if (boundaryReviewSession) {
           const nextPosition = boundaryReviewSession.position + 1
@@ -2895,7 +2924,7 @@ export function EditorPrototypePage() {
         setPlaying(false)
         setBoundaryPreviewEndMs(null)
         setBoundaryPreviewLoop(null)
-        setNotice(`切点前后 ${seconds(boundaryPreviewWindowMs)} 预览完成；可调整切点或过渡后再次对比。`)
+        setNotice(`切前 ${previewSeconds(boundaryPreviewBeforeMs)}、切后 ${previewSeconds(boundaryPreviewAfterMs)} 预览完成；可调整切点或过渡后再次对比。`)
         return
       }
       if (mediaTimeMs >= sourceOut - boundaryLeadMs) {
@@ -2925,7 +2954,8 @@ export function EditorPrototypePage() {
     boundaryPreviewLoop,
     boundaryPreviewRate,
     boundaryReviewSession,
-    boundaryPreviewWindowMs,
+    boundaryPreviewAfterMs,
+    boundaryPreviewBeforeMs,
     items,
     outputFps,
     playing,
@@ -3415,23 +3445,45 @@ export function EditorPrototypePage() {
                     </div>
                    <div className={styles.boundaryPreviewTools}>
                      <label>
-                       <span>预览窗口</span>
+                       <span>切前</span>
                        <select
-                         aria-label={`${left.label} 到 ${right.label} 的切点预览窗口`}
+                         aria-label={`${left.label} 到 ${right.label} 的切前预览窗口`}
                          disabled={!left.asset_id || !right.asset_id}
-                         value={boundaryPreviewWindowMs}
+                         value={boundaryPreviewBeforeMs}
                          onChange={event => {
-                           setBoundaryPreviewWindowMs(Number(event.target.value) as 500 | 1000 | 2000)
+                           setBoundaryPreviewBeforeMs(Number(event.target.value) as 250 | 500 | 1000 | 2000)
                            setPlaying(false)
                            setBoundaryPreviewEndMs(null)
                            setBoundaryPreviewLoop(null)
                            setBoundaryReviewSession(null)
-                           setNotice('已更新切点预览窗口；重新预览后生效。')
+                           setNotice('已更新切前预览窗口；重新预览后生效。')
                          }}
                        >
-                         <option value={500}>前后 0.5 秒</option>
-                         <option value={1000}>前后 1 秒</option>
-                         <option value={2000}>前后 2 秒</option>
+                         <option value={250}>0.25 秒</option>
+                         <option value={500}>0.5 秒</option>
+                         <option value={1000}>1 秒</option>
+                         <option value={2000}>2 秒</option>
+                       </select>
+                     </label>
+                     <label>
+                       <span>切后</span>
+                       <select
+                         aria-label={`${left.label} 到 ${right.label} 的切后预览窗口`}
+                         disabled={!left.asset_id || !right.asset_id}
+                         value={boundaryPreviewAfterMs}
+                         onChange={event => {
+                           setBoundaryPreviewAfterMs(Number(event.target.value) as 250 | 500 | 1000 | 2000)
+                           setPlaying(false)
+                           setBoundaryPreviewEndMs(null)
+                           setBoundaryPreviewLoop(null)
+                           setBoundaryReviewSession(null)
+                           setNotice('已更新切后预览窗口；重新预览后生效。')
+                         }}
+                       >
+                         <option value={250}>0.25 秒</option>
+                         <option value={500}>0.5 秒</option>
+                         <option value={1000}>1 秒</option>
+                         <option value={2000}>2 秒</option>
                        </select>
                      </label>
                      <label>
