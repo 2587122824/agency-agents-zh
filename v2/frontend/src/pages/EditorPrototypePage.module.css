@@ -722,6 +722,26 @@
 }
 .continuityUnavailable em { color: #8f8980; font-style: normal; }
 .boundaryActions { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 6px; }
+.boundaryPreviewTools { display: grid; grid-template-columns: minmax(0, 1fr) 92px; gap: 6px; }
+.boundaryPreviewTools label {
+  height: 31px;
+  margin: 0;
+  padding-left: 7px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #434b4f;
+  border-radius: 4px;
+  background: #292f33;
+}
+.boundaryPreviewTools label span { color: #8f9994; white-space: nowrap; }
+.boundaryPreviewTools label select { height: 27px; border: 0; background: transparent; }
+.boundaryControl .boundaryPreviewTools button[aria-pressed="true"] {
+  border-color: #4b765f;
+  background: #294438;
+  color: #cce8db;
+}
 .boundaryRoll {
   padding: 7px;
   display: grid;

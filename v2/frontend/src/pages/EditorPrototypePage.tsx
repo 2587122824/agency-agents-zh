@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowLeft, CheckCircle2, ChevronLeft, ChevronRight, Clock3, Film,
   Cloud, CloudOff, Download, Eye, EyeOff, Layers3, Lock, Maximize2, Music2, Pause, Play, Plus, Redo2,
-  RefreshCw, Minus,
+  RefreshCw, Minus, Repeat2,
   RotateCcw, Scissors, Search, ShieldCheck, Sparkles, Subtitles, Trash2, Undo2, Unlock,
   Upload, Volume2, VolumeX, WandSparkles, X,
 } from 'lucide-react'
@@ -86,6 +86,13 @@ function minimumVideoDurationForTransitions(item: TimelineItem) {
     transitionOut?.type === 'fade' ? transitionOut.duration_ms ?? 0 : 0,
   )
   return Math.max(200, fadeDuration * 2)
+}
+
+function isMediaPlaybackInterruption(error: unknown) {
+  return typeof error === 'object'
+    && error !== null
+    && 'name' in error
+    && (error as { name?: unknown }).name === 'AbortError'
 }
 
 function timecode(ms: number, fps = 24) {
@@ -392,6 +399,15 @@ export function EditorPrototypePage() {
   const [playheadMs, setPlayheadMs] = useState(0)
   const [playing, setPlaying] = useState(false)
   const [boundaryPreviewEndMs, setBoundaryPreviewEndMs] = useState<number | null>(null)
+  const [boundaryPreviewWindowMs, setBoundaryPreviewWindowMs] = useState<500 | 1000 | 2000>(1000)
+  const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
+    boundaryKey: string
+    leftItemId: string
+    startMs: number
+    endMs: number
+    windowMs: number
+    label: string
+  } | null>(null)
   const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
   const [boundaryContinuityChecks, setBoundaryContinuityChecks] = useState<Record<string, string[]>>({})
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
@@ -459,6 +475,7 @@ export function EditorPrototypePage() {
     setPlayheadMs(0)
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryContinuityChecks({})
     setDirty(false)
@@ -717,7 +734,11 @@ export function EditorPrototypePage() {
     ))
     const expectedTime = Math.min(sourceOut, sourceIn + timelineOffset) / 1000
     if (Math.abs(video.currentTime - expectedTime) > .05) video.currentTime = expectedTime
-    if (playing) void video.play()
+    if (playing) {
+      void video.play().catch(error => {
+        if (!isMediaPlaybackInterruption(error)) setNotice('浏览器阻止了时间线视频播放，请再次点击播放。')
+      })
+    }
     else video.pause()
   }, [
     playing,
@@ -1056,6 +1077,7 @@ export function EditorPrototypePage() {
     setPlayheadMs(0)
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
     setNotice('已丢弃自动保存的项目草稿，恢复到当前时间线版本。')
   }
 
@@ -1064,7 +1086,10 @@ export function EditorPrototypePage() {
     setSelectedIndex(index)
     setPlayheadMs(item.timeline_in_ms)
     setPlaying(false)
-    if (!preserveBoundaryPreview) setBoundaryPreviewEndMs(null)
+    if (!preserveBoundaryPreview) {
+      setBoundaryPreviewEndMs(null)
+      setBoundaryPreviewLoop(null)
+    }
   }
 
   const seekTimeline = (positionMs: number) => {
@@ -1080,6 +1105,7 @@ export function EditorPrototypePage() {
     setPlayheadMs(position)
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
   }
 
   const beginScrub = (
@@ -1181,6 +1207,7 @@ export function EditorPrototypePage() {
     if (playing) {
       setPlaying(false)
       setBoundaryPreviewEndMs(null)
+      setBoundaryPreviewLoop(null)
       return
     }
     let target = mainItems.find(item => playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
@@ -1196,23 +1223,39 @@ export function EditorPrototypePage() {
     if (selectedItem?.id !== target.id) selectItem(target)
     advancingPlaybackRef.current = false
     setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
     setPlaying(true)
   }
 
-  const previewBoundary = (left: TimelineItem, right: TimelineItem) => {
+  const previewBoundary = (left: TimelineItem, right: TimelineItem, loop = false) => {
     if (!left.asset_id || !right.asset_id) {
       setNotice('切点两侧必须都有已批准画面，才能预览衔接。')
       return
     }
     const boundaryMs = left.timeline_out_ms
-    const startMs = Math.max(left.timeline_in_ms, boundaryMs - 1000)
-    const endMs = Math.min(right.timeline_out_ms, boundaryMs + 1000)
+    const startMs = Math.max(left.timeline_in_ms, boundaryMs - boundaryPreviewWindowMs)
+    const endMs = Math.min(right.timeline_out_ms, boundaryMs + boundaryPreviewWindowMs)
+    const boundaryKey = `${left.id}-${right.id}`
+    const label = `${left.label} → ${right.label}`
     selectItem(left)
     setPlayheadMs(startMs)
     advancingPlaybackRef.current = false
     setBoundaryPreviewEndMs(endMs)
+    setBoundaryPreviewLoop(loop ? { boundaryKey, leftItemId: left.id, startMs, endMs, windowMs: boundaryPreviewWindowMs, label } : null)
     setPlaying(true)
-    setNotice(`正在预览 ${left.label} → ${right.label} 的切点前后 1 秒。`)
+    setNotice(`正在${loop ? '循环' : ''}预览 ${label} 的切点前后 ${seconds(boundaryPreviewWindowMs)}。`)
+  }
+
+  const toggleBoundaryLoop = (left: TimelineItem, right: TimelineItem) => {
+    const boundaryKey = `${left.id}-${right.id}`
+    if (boundaryPreviewLoop?.boundaryKey === boundaryKey) {
+      setPlaying(false)
+      setBoundaryPreviewEndMs(null)
+      setBoundaryPreviewLoop(null)
+      setNotice(`已停止 ${left.label} → ${right.label} 的切点循环预览。`)
+      return
+    }
+    previewBoundary(left, right, true)
   }
 
   const toggleMonitorFullscreen = async () => {
@@ -1965,6 +2008,7 @@ export function EditorPrototypePage() {
     })
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
     setBoundaryContinuityChecks(current => {
       const next = { ...current }
       delete next[boundaryKey]
@@ -2334,10 +2378,23 @@ export function EditorPrototypePage() {
       const timelinePosition = selectedItem.timeline_in_ms + Math.max(0, mediaTimeMs - sourceIn)
       setPlayheadMs(Math.min(timelinePosition, selectedItem.timeline_out_ms))
       if (boundaryPreviewEndMs != null && timelinePosition >= boundaryPreviewEndMs - boundaryLeadMs) {
+        if (boundaryPreviewLoop) {
+          const leftIndex = items.findIndex(item => item.id === boundaryPreviewLoop.leftItemId)
+          if (leftIndex >= 0) {
+            video.pause()
+            advancingPlaybackRef.current = false
+            setSelectedIndex(leftIndex)
+            setPlayheadMs(boundaryPreviewLoop.startMs)
+            setPlaying(true)
+            setNotice(`正在循环预览 ${boundaryPreviewLoop.label} 的切点前后 ${seconds(boundaryPreviewLoop.windowMs)}。`)
+            return
+          }
+        }
         setPlayheadMs(boundaryPreviewEndMs)
         setPlaying(false)
         setBoundaryPreviewEndMs(null)
-        setNotice('切点前后 1 秒预览完成；可调整过渡后再次对比。')
+        setBoundaryPreviewLoop(null)
+        setNotice(`切点前后 ${seconds(boundaryPreviewWindowMs)} 预览完成；可调整切点或过渡后再次对比。`)
         return
       }
       if (mediaTimeMs >= sourceOut - boundaryLeadMs) {
@@ -2364,6 +2421,9 @@ export function EditorPrototypePage() {
   }, [
     advancePlayback,
     boundaryPreviewEndMs,
+    boundaryPreviewLoop,
+    boundaryPreviewWindowMs,
+    items,
     outputFps,
     playing,
     selectedItem?.asset_duration_ms,
@@ -2687,6 +2747,7 @@ export function EditorPrototypePage() {
                    : 0
                  const canRollEarlier = rollMinimumDelta < 0
                  const canRollLater = rollMaximumDelta > 0
+                 const loopPreviewActive = boundaryPreviewLoop?.boundaryKey === boundaryKey
                  return <div className={styles.boundaryControl} data-order-warning={orderWarning} key={boundaryKey}>
                    <header>
                     <span><strong>{left.label}</strong><i>→</i><strong>{right.label}</strong></span>
@@ -2727,6 +2788,32 @@ export function EditorPrototypePage() {
                       <option value="fade:300">淡出淡入 · 0.3s</option>
                       <option value="fade:500">淡出淡入 · 0.5s</option>
                      </select>
+                    </div>
+                   <div className={styles.boundaryPreviewTools}>
+                     <label>
+                       <span>预览窗口</span>
+                       <select
+                         aria-label={`${left.label} 到 ${right.label} 的切点预览窗口`}
+                         disabled={!left.asset_id || !right.asset_id}
+                         value={boundaryPreviewWindowMs}
+                         onChange={event => {
+                           setBoundaryPreviewWindowMs(Number(event.target.value) as 500 | 1000 | 2000)
+                           setPlaying(false)
+                           setBoundaryPreviewEndMs(null)
+                           setBoundaryPreviewLoop(null)
+                           setNotice('已更新切点预览窗口；重新预览后生效。')
+                         }}
+                       >
+                         <option value={500}>前后 0.5 秒</option>
+                         <option value={1000}>前后 1 秒</option>
+                         <option value={2000}>前后 2 秒</option>
+                       </select>
+                     </label>
+                     <button
+                       disabled={!left.asset_id || !right.asset_id}
+                       aria-pressed={loopPreviewActive}
+                       onClick={() => toggleBoundaryLoop(left, right)}
+                     ><Repeat2 />{loopPreviewActive ? '停止循环' : '循环预览'}</button>
                    </div>
                    <div className={styles.boundaryRoll}>
                      <div><strong>滚动剪辑</strong><span>联动两侧源区间，总时长不变</span></div>
