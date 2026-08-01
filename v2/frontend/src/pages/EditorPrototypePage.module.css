@@ -954,6 +954,24 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
 }
+.boundaryFrameChoice { min-width: 0; display: grid; gap: 2px; }
+.boundaryFrameChoice .boundaryFrame { width: 100%; }
+.boundaryControl .boundaryFrameChoice > button:last-child {
+  width: 100%;
+  height: auto;
+  min-height: 23px;
+  padding: 3px 2px;
+  border-color: #3f514a;
+  background: #25332e;
+  color: #bdd3ca;
+  font-size: 8px;
+  line-height: 1.2;
+}
+.boundaryControl .boundaryFrameChoice > button:last-child:disabled {
+  border-color: #343b3e;
+  background: #202527;
+  color: #66706c;
+}
 .boundaryFrameStrip .boundaryFrame video { height: 64px; }
 .boundaryFrameStrip .boundaryFrame span { padding: 4px; }
 .boundaryFrameStrip .boundaryFrame strong { font-size: 10px; }

@@ -3260,6 +3260,7 @@ export function EditorPrototypePage() {
                    return {
                      key: `left-${offset}`,
                      label: `切前 ${offset} 帧`,
+                     rollDeltaMs: sourceTimeMs + frameStepMs - leftSourceOutMs,
                      sourceTimeMs,
                      timelineTimeMs: Math.min(left.timeline_out_ms - frameStepMs, left.timeline_in_ms + sourceTimeMs - leftSourceInMs),
                    }
@@ -3272,6 +3273,7 @@ export function EditorPrototypePage() {
                    return {
                      key: `right-${offset}`,
                      label: `切后 ${offset} 帧`,
+                     rollDeltaMs: sourceTimeMs - rightSourceInMs,
                      sourceTimeMs,
                      timelineTimeMs: Math.min(right.timeline_out_ms - frameStepMs, right.timeline_in_ms + sourceTimeMs - rightSourceInMs),
                    }
@@ -3429,6 +3431,7 @@ export function EditorPrototypePage() {
                     className={styles.boundaryFrameToggle}
                     disabled={!left.asset_id || !right.asset_id}
                     aria-expanded={framesOpen}
+                    aria-label={`${left.label} 到 ${right.label} ${framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}`}
                     onClick={() => setBoundaryFrameComparisonKey(value => value === boundaryKey ? null : boundaryKey)}
                   ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button>
                     {framesOpen && left.asset_id && right.asset_id && <>
@@ -3463,21 +3466,41 @@ export function EditorPrototypePage() {
                      {stripFrames
                        ? <div className={styles.boundaryFrameStrip} aria-label={`${left.label} 到 ${right.label} 的动作连续帧带`}>
                          {([
-                           { role: '前镜末端', item: left, frames: leftStripFrames },
-                           { role: '后镜开头', item: right, frames: rightStripFrames },
+                           { role: '前镜末端', item: left, frames: leftStripFrames, applyLabel: '设为前镜末帧', currentLabel: '当前末帧' },
+                           { role: '后镜开头', item: right, frames: rightStripFrames, applyLabel: '设为后镜首帧', currentLabel: '当前首帧' },
                          ] as const).map(row => <section key={`${boundaryKey}-${row.role}`}>
                            <header><strong>{row.role}</strong><span>{row.item.label}</span></header>
-                           <div>{row.frames.map(frame => <BoundaryFrameStill
-                             key={frame.key}
-                             projectId={projectId}
-                             item={row.item}
-                             sourceTimeMs={frame.sourceTimeMs}
-                             label={`${row.item.label} ${frame.label}`}
-                             fps={outputFps}
-                             onActivate={() => seekTimeline(frame.timelineTimeMs)}
-                           />)}</div>
+                           <div>{row.frames.map(frame => {
+                             const currentFrame = frame.rollDeltaMs === 0
+                             const canApplyFrame = rollReady
+                               && !currentFrame
+                               && frame.rollDeltaMs >= rollMinimumDelta
+                               && frame.rollDeltaMs <= rollMaximumDelta
+                             return <div className={styles.boundaryFrameChoice} key={frame.key}>
+                               <BoundaryFrameStill
+                                 projectId={projectId}
+                                 item={row.item}
+                                 sourceTimeMs={frame.sourceTimeMs}
+                                 label={`${row.item.label} ${frame.label}`}
+                                 fps={outputFps}
+                                 onActivate={() => seekTimeline(frame.timelineTimeMs)}
+                               />
+                               <button
+                                 aria-label={`${left.label} 到 ${right.label} ${frame.label} ${row.applyLabel}`}
+                                 disabled={videoTrackLocked || !canApplyFrame}
+                                 title={videoTrackLocked
+                                   ? '画面轨已锁定，不能修改切点。'
+                                   : currentFrame
+                                   ? '当前切点已经使用这一帧。'
+                                   : canApplyFrame
+                                   ? `把${frame.label}直接应用为${row.role}`
+                                   : '该帧超出当前切点的合法滚动范围。'}
+                                 onClick={() => rollBoundary(left, right, frame.rollDeltaMs)}
+                               >{currentFrame ? row.currentLabel : row.applyLabel}</button>
+                             </div>
+                           })}</div>
                          </section>)}
-                         <small>按真实输出帧率展示切点两侧连续帧；点击任一帧定位主监看，再用滚动剪辑或源窗口滑移调整。</small>
+                         <small>点击画面只定位主监看；“设为末帧 / 首帧”会按合法范围直接滚动切点，并形成一次可撤销操作。</small>
                        </div>
                        : overlayFrames
                        ? <BoundaryFrameOverlay
