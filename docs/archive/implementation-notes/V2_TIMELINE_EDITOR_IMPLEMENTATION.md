@@ -177,6 +177,8 @@ EditorWorkspace 新增 `shot_sequence`，并给每个可用 Asset 投影 `shot_c
 
 Inspector 片段操作新增三点联动的片段滑动。`slideMainItem` 保持中间画面的源入出点和时长不变，把前镜出点、中间镜时间线入出点和后镜入点同加一个 delta；范围受前镜素材尾部、后镜源入点、两侧最短时长和 fade 合同限制。操作停止播放/循环预览、同时清空两侧页面级连续性检查并通过一次 `commitItems` 保存。真实咖啡草稿把 SH-003 A 后移一帧：其源区间仍为 `0..1782ms`、时间线从 `5118..6900ms` 平移到 `5160..6942ms`；SH-001 源/时间线出点从 `409/5118ms` 变为 `451/5160ms`，SH-003 B 源/时间线入点从 `1782/6900ms` 变为 `1824/6942ms`，下游结束仍为 `9827ms`。两侧各一项连续性勾选均重置，一次撤销恢复全部值，最终服务端草稿 `row_version=30 / playhead_ms=0`。锁轨后滑动按钮禁用；1280×720 页面宽高均无溢出，控制台零日志。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
 
+切点定格新增同画布叠加对齐。`BoundaryFrameOverlay` 分别把前镜末帧和后镜首帧定位到冻结源时点，两路均完成 `seeked` 后显示；右侧首帧通过页面级 0–100% opacity 控制覆盖左侧末帧，并保留两个独立主监看定位按钮。首次浏览器验收发现当前 WebView 的 range 连续交互不可靠触发 React `change`，改用 `input` 后拖动和键盘填值均实时更新。真实咖啡 SH-002 → SH-001 边界分别停在 `4.667s / 0s`，两路 `readyState=4 / paused=true`；70% 时首帧实际 opacity 为 `0.7`，锁轨后仍可调到 35%。等待自动保存窗口后服务端草稿保持 `row_version=32 / playhead_ms=0 / updated_at=2026-08-01T14:10:03.562583`，证明模式与透明度不写草稿。1280×720 页面宽高均无溢出，控制台零日志。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
+
 提交 `8743e135` 推送到 `main` 后使用标准脚本重启 8766：API PID `8036`、Worker PID `2640`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查，Worker 日志为空，没有实际错误堆栈。
 
 提交 `00182bcb` 推送到 `main` 后使用标准脚本重启 8766：API PID `35224`、Worker PID `6240`。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有正常项目列表与健康检查请求，Worker 日志为空，没有实际错误堆栈。

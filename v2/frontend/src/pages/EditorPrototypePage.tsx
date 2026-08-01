@@ -274,6 +274,84 @@ function BoundaryFrameStill({
   </button>
 }
 
+function BoundaryFrameOverlay({
+  projectId,
+  left,
+  right,
+  leftSourceTimeMs,
+  rightSourceTimeMs,
+  leftLabel,
+  rightLabel,
+  fps,
+  blendPercent,
+  onLeftActivate,
+  onRightActivate,
+}: {
+  projectId: string
+  left: TimelineItem
+  right: TimelineItem
+  leftSourceTimeMs: number
+  rightSourceTimeMs: number
+  leftLabel: string
+  rightLabel: string
+  fps: number
+  blendPercent: number
+  onLeftActivate: () => void
+  onRightActivate: () => void
+}) {
+  const leftRef = useRef<HTMLVideoElement | null>(null)
+  const rightRef = useRef<HTMLVideoElement | null>(null)
+  const [leftReady, setLeftReady] = useState(false)
+  const [rightReady, setRightReady] = useState(false)
+  const seekFrame = useCallback((video: HTMLVideoElement | null, sourceTimeMs: number) => {
+    if (!video || !Number.isFinite(video.duration)) return
+    const latestTime = Math.max(0, video.duration - .001)
+    video.currentTime = Math.min(latestTime, Math.max(0, sourceTimeMs / 1000))
+  }, [])
+
+  useEffect(() => {
+    setLeftReady(false)
+    setRightReady(false)
+    seekFrame(leftRef.current, leftSourceTimeMs)
+    seekFrame(rightRef.current, rightSourceTimeMs)
+  }, [leftSourceTimeMs, rightSourceTimeMs, seekFrame])
+
+  return <div className={styles.boundaryOverlay} data-ready={leftReady && rightReady}>
+    <div
+      className={styles.boundaryOverlayCanvas}
+      role="img"
+      aria-label={`${leftLabel} 与 ${rightLabel} 叠加对齐，首帧透明度 ${blendPercent}%`}
+    >
+      <video
+        ref={leftRef}
+        aria-label={leftLabel}
+        muted
+        playsInline
+        preload="auto"
+        src={`/api/v1/projects/${projectId}/assets/${left.asset_id}/content`}
+        onLoadedMetadata={event => seekFrame(event.currentTarget, leftSourceTimeMs)}
+        onSeeked={() => setLeftReady(true)}
+      />
+      <video
+        ref={rightRef}
+        aria-label={rightLabel}
+        muted
+        playsInline
+        preload="auto"
+        style={{ opacity: rightReady ? blendPercent / 100 : .35 }}
+        src={`/api/v1/projects/${projectId}/assets/${right.asset_id}/content`}
+        onLoadedMetadata={event => seekFrame(event.currentTarget, rightSourceTimeMs)}
+        onSeeked={() => setRightReady(true)}
+      />
+    </div>
+    <div className={styles.boundaryOverlayFacts}>
+      <button onClick={onLeftActivate}><strong>{leftLabel}</strong><code>{timecode(leftSourceTimeMs, fps)}</code></button>
+      <span>叠加对齐</span>
+      <button onClick={onRightActivate}><strong>{rightLabel}</strong><code>{timecode(rightSourceTimeMs, fps)}</code></button>
+    </div>
+  </div>
+}
+
 function srtTimestampMs(value: string) {
   const match = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/.exec(value.trim())
   if (!match) return null
@@ -409,6 +487,8 @@ export function EditorPrototypePage() {
     label: string
   } | null>(null)
   const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
+  const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
+  const [boundaryFrameBlendPercent, setBoundaryFrameBlendPercent] = useState(50)
   const [boundaryContinuityChecks, setBoundaryContinuityChecks] = useState<Record<string, string[]>>({})
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
@@ -477,6 +557,8 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryFrameComparisonKey(null)
+    setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameBlendPercent(50)
     setBoundaryContinuityChecks({})
     setDirty(false)
     setLastValidation(null)
@@ -2898,6 +2980,7 @@ export function EditorPrototypePage() {
                  const leftFrameSourceMs = Math.max(left.source_in_ms ?? 0, (left.source_out_ms ?? 0) - frameStepMs)
                  const rightFrameSourceMs = right.source_in_ms ?? 0
                  const framesOpen = boundaryFrameComparisonKey === boundaryKey
+                 const overlayFrames = boundaryFrameOverlayKey === boundaryKey
                  const rollReady = Boolean(
                    left.asset_id
                    && right.asset_id
@@ -3027,24 +3110,58 @@ export function EditorPrototypePage() {
                     aria-expanded={framesOpen}
                     onClick={() => setBoundaryFrameComparisonKey(value => value === boundaryKey ? null : boundaryKey)}
                   ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button>
-                   {framesOpen && left.asset_id && right.asset_id && <div className={styles.boundaryFrames}>
-                    <BoundaryFrameStill
-                      projectId={projectId}
-                      item={left}
-                      sourceTimeMs={leftFrameSourceMs}
-                      label={`${left.label} 末帧`}
-                      fps={outputFps}
-                      onActivate={() => seekTimeline(Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs))}
-                    />
-                    <BoundaryFrameStill
-                      projectId={projectId}
-                      item={right}
-                      sourceTimeMs={rightFrameSourceMs}
-                      label={`${right.label} 首帧`}
-                      fps={outputFps}
-                      onActivate={() => seekTimeline(right.timeline_in_ms)}
-                     />
-                   </div>}
+                    {framesOpen && left.asset_id && right.asset_id && <>
+                     <div className={styles.boundaryFrameModes}>
+                       <div>
+                         <button aria-pressed={!overlayFrames} onClick={() => setBoundaryFrameOverlayKey(null)}>并排</button>
+                         <button aria-pressed={overlayFrames} onClick={() => setBoundaryFrameOverlayKey(boundaryKey)}>叠加对齐</button>
+                       </div>
+                       {overlayFrames && <label>首帧透明度
+                         <input
+                           aria-label={`${left.label} 到 ${right.label} 叠加首帧透明度`}
+                           type="range"
+                           min="0"
+                           max="100"
+                           step="5"
+                           value={boundaryFrameBlendPercent}
+                           onInput={event => setBoundaryFrameBlendPercent(Number(event.currentTarget.value))}
+                         />
+                         <code>{boundaryFrameBlendPercent}%</code>
+                       </label>}
+                     </div>
+                     {overlayFrames
+                       ? <BoundaryFrameOverlay
+                         projectId={projectId}
+                         left={left}
+                         right={right}
+                         leftSourceTimeMs={leftFrameSourceMs}
+                         rightSourceTimeMs={rightFrameSourceMs}
+                         leftLabel={`${left.label} 末帧`}
+                         rightLabel={`${right.label} 首帧`}
+                         fps={outputFps}
+                         blendPercent={boundaryFrameBlendPercent}
+                         onLeftActivate={() => seekTimeline(Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs))}
+                         onRightActivate={() => seekTimeline(right.timeline_in_ms)}
+                       />
+                       : <div className={styles.boundaryFrames}>
+                         <BoundaryFrameStill
+                           projectId={projectId}
+                           item={left}
+                           sourceTimeMs={leftFrameSourceMs}
+                           label={`${left.label} 末帧`}
+                           fps={outputFps}
+                           onActivate={() => seekTimeline(Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs))}
+                         />
+                         <BoundaryFrameStill
+                           projectId={projectId}
+                           item={right}
+                           sourceTimeMs={rightFrameSourceMs}
+                           label={`${right.label} 首帧`}
+                           fps={outputFps}
+                           onActivate={() => seekTimeline(right.timeline_in_ms)}
+                         />
+                       </div>}
+                   </>}
                    <div className={styles.continuityChecklist} aria-label={`${left.label} 到 ${right.label} 的人工连续性检查`}>
                      {continuityChecks.map(check => {
                        const checked = completedContinuityChecks.includes(check.id)
