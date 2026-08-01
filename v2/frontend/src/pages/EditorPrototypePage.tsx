@@ -515,6 +515,11 @@ export function EditorPrototypePage() {
   const [boundaryPreviewWindowMs, setBoundaryPreviewWindowMs] = useState<500 | 1000 | 2000>(1000)
   const [boundaryPreviewRate, setBoundaryPreviewRate] = useState<0.25 | 0.5 | 1>(1)
   const [boundaryFocusKey, setBoundaryFocusKey] = useState<string | null>(null)
+  const [boundaryReviewSession, setBoundaryReviewSession] = useState<{
+    boundaryIndexes: number[]
+    position: number
+    skippedCount: number
+  } | null>(null)
   const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
     boundaryKey: string
     leftItemId: string
@@ -595,6 +600,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryPreviewRate(1)
     setBoundaryFocusKey(null)
+    setBoundaryReviewSession(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameBlendPercent(50)
@@ -669,6 +675,7 @@ export function EditorPrototypePage() {
     setPlayheadMs(useRemote && remote ? remote.playhead_ms : 0)
     setPlaying(false)
     setBoundaryFocusKey(null)
+    setBoundaryReviewSession(null)
     setLastValidation(sourceTimeline)
     setLastPreview(null)
     setPreviewCompareMode('result')
@@ -789,6 +796,10 @@ export function EditorPrototypePage() {
     : Math.min(selectedMainPosition, mainBoundaries.length - 1)
   const activeBoundaryIndex = focusedBoundaryIndex >= 0 ? focusedBoundaryIndex : inferredBoundaryIndex
   const activeBoundaryKey = activeBoundaryIndex >= 0 ? mainBoundaries[activeBoundaryIndex]?.key ?? null : null
+  const reviewableBoundaryIndexes = useMemo(
+    () => mainBoundaries.flatMap((boundary, index) => boundary.left.asset_id && boundary.right.asset_id ? [index] : []),
+    [mainBoundaries],
+  )
   const nextMainAsset = workspace.data?.available_assets.find(asset => asset.id === nextMainItem?.asset_id) ?? null
   const usedMainVideoAssetIds = useMemo(
     () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
@@ -1225,6 +1236,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryFocusKey(null)
+    setBoundaryReviewSession(null)
     setNotice('已丢弃自动保存的项目草稿，恢复到当前时间线版本。')
   }
 
@@ -1245,6 +1257,7 @@ export function EditorPrototypePage() {
       setBoundaryPreviewEndMs(null)
       setBoundaryPreviewLoop(null)
       setBoundaryFocusKey(boundaryKeyForItem(item))
+      setBoundaryReviewSession(null)
     }
   }
 
@@ -1263,6 +1276,7 @@ export function EditorPrototypePage() {
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
   }
 
   const focusBoundaryAt = (targetIndex: number) => {
@@ -1276,6 +1290,7 @@ export function EditorPrototypePage() {
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setSelectedIndex(itemIndex)
@@ -1384,6 +1399,7 @@ export function EditorPrototypePage() {
       setPlaying(false)
       setBoundaryPreviewEndMs(null)
       setBoundaryPreviewLoop(null)
+      setBoundaryReviewSession(null)
       return
     }
     let target = mainItems.find(item => playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
@@ -1400,6 +1416,7 @@ export function EditorPrototypePage() {
     advancingPlaybackRef.current = false
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
     setPlaying(true)
   }
 
@@ -1413,6 +1430,7 @@ export function EditorPrototypePage() {
     const endMs = Math.min(right.timeline_out_ms, boundaryMs + boundaryPreviewWindowMs)
     const boundaryKey = `${left.id}-${right.id}`
     const label = `${left.label} → ${right.label}`
+    setBoundaryReviewSession(null)
     selectItem(left)
     setBoundaryFocusKey(boundaryKey)
     setPlayheadMs(startMs)
@@ -1435,6 +1453,61 @@ export function EditorPrototypePage() {
     previewBoundary(left, right, true)
   }
 
+  const toggleBoundaryReview = () => {
+    if (boundaryReviewSession) {
+      setPlaying(false)
+      setBoundaryPreviewEndMs(null)
+      setBoundaryPreviewLoop(null)
+      setBoundaryReviewSession(null)
+      setNotice('已停止全时间线切点连续巡检。')
+      return
+    }
+    if (!reviewableBoundaryIndexes.length) {
+      setNotice('当前时间线没有两侧画面都已补齐的切点，无法连续巡检。')
+      return
+    }
+    videoRef.current?.pause()
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryFrameComparisonKey(null)
+    setBoundaryFrameOverlayKey(null)
+    setBoundaryReviewSession({
+      boundaryIndexes: reviewableBoundaryIndexes,
+      position: 0,
+      skippedCount: mainBoundaries.length - reviewableBoundaryIndexes.length,
+    })
+  }
+
+  useEffect(() => {
+    if (!boundaryReviewSession) return
+    const boundaryIndex = boundaryReviewSession.boundaryIndexes[boundaryReviewSession.position]
+    const boundary = mainBoundaries[boundaryIndex]
+    if (!boundary?.left.asset_id || !boundary.right.asset_id) {
+      setPlaying(false)
+      setBoundaryPreviewEndMs(null)
+      setBoundaryReviewSession(null)
+      setNotice('时间线在连续巡检期间发生变化，已安全停止；请重新开始。')
+      return
+    }
+    const leftIndex = items.findIndex(item => item.id === boundary.left.id)
+    if (leftIndex < 0) {
+      setBoundaryReviewSession(null)
+      return
+    }
+    const boundaryMs = boundary.left.timeline_out_ms
+    const startMs = Math.max(boundary.left.timeline_in_ms, boundaryMs - boundaryPreviewWindowMs)
+    const endMs = Math.min(boundary.right.timeline_out_ms, boundaryMs + boundaryPreviewWindowMs)
+    advancingPlaybackRef.current = false
+    setSelectedIndex(leftIndex)
+    setBoundaryFocusKey(boundary.key)
+    setPlayheadMs(startMs)
+    setBoundaryPreviewEndMs(endMs)
+    setBoundaryPreviewLoop(null)
+    setPlaying(true)
+    setNotice(`连续巡检 ${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}：正在以 ${boundaryPreviewRate}× 预览 ${boundary.left.label} → ${boundary.right.label}。`)
+  }, [boundaryReviewSession, boundaryPreviewWindowMs, items, mainBoundaries])
+
   const toggleMonitorFullscreen = async () => {
     const monitor = monitorRef.current
     if (!monitor) return
@@ -1451,6 +1524,10 @@ export function EditorPrototypePage() {
   }
 
   const commitItems = (nextItems: TimelineItem[], message: string, selectedId?: string | null) => {
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
     setHistory(rows => [...rows.slice(-49), items])
     setFuture([])
     setItems(nextItems)
@@ -1469,6 +1546,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFocusKey(null)
+    setBoundaryReviewSession(null)
     setBoundaryContinuityChecks({})
   }
 
@@ -2734,6 +2812,24 @@ export function EditorPrototypePage() {
             return
           }
         }
+        if (boundaryReviewSession) {
+          const nextPosition = boundaryReviewSession.position + 1
+          if (nextPosition < boundaryReviewSession.boundaryIndexes.length) {
+            video.pause()
+            advancingPlaybackRef.current = true
+            setPlaying(false)
+            setBoundaryPreviewEndMs(null)
+            setBoundaryReviewSession({ ...boundaryReviewSession, position: nextPosition })
+            return
+          }
+          setPlayheadMs(boundaryPreviewEndMs)
+          setPlaying(false)
+          setBoundaryPreviewEndMs(null)
+          setBoundaryPreviewLoop(null)
+          setBoundaryReviewSession(null)
+          setNotice(`全时间线切点连续巡检播放完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个可用切点${boundaryReviewSession.skippedCount ? `，跳过 ${boundaryReviewSession.skippedCount} 个含缺口边界` : ''}；人工检查项仍需逐项确认。`)
+          return
+        }
         setPlayheadMs(boundaryPreviewEndMs)
         setPlaying(false)
         setBoundaryPreviewEndMs(null)
@@ -2767,6 +2863,7 @@ export function EditorPrototypePage() {
     boundaryPreviewEndMs,
     boundaryPreviewLoop,
     boundaryPreviewRate,
+    boundaryReviewSession,
     boundaryPreviewWindowMs,
     items,
     outputFps,
@@ -3101,6 +3198,14 @@ export function EditorPrototypePage() {
                 ><ChevronRight /></button>
               </div>
             </div>
+            <button
+              className={styles.boundaryReviewRun}
+              aria-pressed={Boolean(boundaryReviewSession)}
+              disabled={!reviewableBoundaryIndexes.length}
+              onClick={toggleBoundaryReview}
+            ><Repeat2 />{boundaryReviewSession
+                ? `停止连续巡检（${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}）`
+                : `连续巡检 ${reviewableBoundaryIndexes.length} 个可播放切点${mainBoundaries.length > reviewableBoundaryIndexes.length ? ` · 跳过 ${mainBoundaries.length - reviewableBoundaryIndexes.length} 个缺口` : ''}`}</button>
             <div className={styles.boundaryList}>
               {([
                 previousMainItem ? [previousMainItem, selectedItem] : null,
@@ -3231,6 +3336,7 @@ export function EditorPrototypePage() {
                            setPlaying(false)
                            setBoundaryPreviewEndMs(null)
                            setBoundaryPreviewLoop(null)
+                           setBoundaryReviewSession(null)
                            setNotice('已更新切点预览窗口；重新预览后生效。')
                          }}
                        >

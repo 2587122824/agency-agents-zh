@@ -686,6 +686,23 @@
 .boundarySectionHeader button svg { width: 12px; }
 .boundarySectionHeader span { min-width: 37px; text-align: center; }
 .boundarySectionHeader b { color: #e2e7e4; }
+.boundaryReviewRun {
+  width: 100%;
+  min-height: 31px;
+  margin-bottom: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #46534d;
+  border-radius: 4px;
+  background: #27312d;
+  color: #cbd8d1;
+  cursor: pointer;
+}
+.boundaryReviewRun[aria-pressed="true"] { border-color: #679278; background: #294438; color: #dbf0e5; }
+.boundaryReviewRun:disabled { opacity: .4; cursor: not-allowed; }
+.boundaryReviewRun svg { width: 13px; }
 .boundaryList { display: grid; gap: 7px; }
 .boundaryControl {
   padding: 8px;
