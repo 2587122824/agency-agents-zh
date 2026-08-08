@@ -307,6 +307,8 @@ v6 随后从界面生成 360×640、24fps 低清预览，格式/画幅/时长及
 
 真实项目 `project_9cd1c4e1fe5c4c8e88466acef2913e72` 先把 SH-001 源窗口从 `0..409ms` 滑移为 `42..451ms`，再用真实指针把 SH-002 → SH-001 时间线把手左拖 12px；受 42ms 后镜源把手限制，切点精确 `4709→4667ms`，SH-002 出点同步为 4667ms，SH-001 源入点回到 0ms，后镜结束仍为 5118ms，并自动以 1× 播放新切点。只点击把手未形成额外历史：第一次撤销恢复切点 4709ms 但保留可前移把手，第二次撤销才恢复 SH-001 源入点 0ms 并禁用切点把手。最终 API 草稿 `row_version=168 / playhead_ms=0`，三个主画面恢复 `0..4709 / 4709..5118 / 5118..15000ms`，所有真实画面转场为 `cut:0`。1280×720 下 html/body 宽高均精确等于视口，两个视频均 `readyState=4 / paused=true / playbackRate=1`，页面日志为空。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
 
+提交 `5857bf51` 推送到 `main` 后使用标准脚本重启 8766：API PID `26180`、Worker PID `23280`，两个进程创建时间均为 2026-08-09 00:15:29。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。
+
 ## 8. 事件
 
 ```text
