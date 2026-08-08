@@ -343,6 +343,8 @@ v6 随后从界面生成 360×640、24fps 低清预览，格式/画幅/时长及
 
 提交 `102fbbd7` 推送到 `main` 后使用标准脚本重启 8766：API PID `40512`、Worker PID `41104`，两个进程创建时间均为 2026-08-09 01:56:10。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。
 
+提交 `5c4a6f26` 推送到 `main` 后使用标准脚本重启 8766：API PID `26916`、Worker PID `13392`，两个进程创建时间均为 2026-08-09 02:11:53。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。
+
 ## 8. 事件
 
 ```text
