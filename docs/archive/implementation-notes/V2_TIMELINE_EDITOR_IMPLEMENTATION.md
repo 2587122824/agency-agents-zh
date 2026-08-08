@@ -303,6 +303,10 @@ v6 随后从界面生成 360×640、24fps 低清预览，格式/画幅/时长及
 
 真实咖啡 v6 在 24fps 下验收非对称窗口：SH-003 A → B 单次预览最终停在后镜源时点 2.782 秒，提示精确为“切前 0.25s、切后 1s”；滚动剪辑 `+1帧` 把成片切点从 6900ms 移到 6942ms 后，自动试听最终停在新后镜源入点 1.824 秒加 1 秒的位置 2.824 秒，一次撤销恢复双方源切点 1782ms、成片切点 6900ms 与 B 结束 9827ms。连续巡检依次真实播放 `1/4 → 2/4 → 3/4 → 4/4`，四段媒体均为 `readyState=4 / paused=false / playbackRate=1`，10700ms 含缺口边界未进入媒体播放，完成后会话退出。最终草稿 `row_version=124 / playhead_ms=0`；1280×720 的 document/body 宽度与 document 高度均无溢出，浏览器控制台零页面错误。
 
+时间线相邻完整画面现在直接投影独立滚动剪辑 slider，层级高于片段双侧裁切把手，缺口边界不投影，无可移动范围或锁轨时以 `aria-disabled` 明确禁用。`buildRolledBoundaryItems` 从冻结条目重新取得左右片段，统一计算素材边界、200ms 与 fade 门禁；`beginBoundaryRoll` 在 pointer down 清理旧媒体会话，move 依时间线像素/秒和磁吸间隔实时投影新边界，up 只在有实际 delta 时写一个撤销快照并自动试听，零位移/回原位/cancel 恢复原 items、选择和播放头。键盘 Arrow 与 Shift 粗调继续走 `applyBoundaryRoll`。本轮没有变更 TimelineItem v4、EditorDraftSession、迁移或 FFmpeg 合同。
+
+真实项目 `project_9cd1c4e1fe5c4c8e88466acef2913e72` 先把 SH-001 源窗口从 `0..409ms` 滑移为 `42..451ms`，再用真实指针把 SH-002 → SH-001 时间线把手左拖 12px；受 42ms 后镜源把手限制，切点精确 `4709→4667ms`，SH-002 出点同步为 4667ms，SH-001 源入点回到 0ms，后镜结束仍为 5118ms，并自动以 1× 播放新切点。只点击把手未形成额外历史：第一次撤销恢复切点 4709ms 但保留可前移把手，第二次撤销才恢复 SH-001 源入点 0ms 并禁用切点把手。最终 API 草稿 `row_version=168 / playhead_ms=0`，三个主画面恢复 `0..4709 / 4709..5118 / 5118..15000ms`，所有真实画面转场为 `cut:0`。1280×720 下 html/body 宽高均精确等于视口，两个视频均 `readyState=4 / paused=true / playbackRate=1`，页面日志为空。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
+
 ## 8. 事件
 
 ```text

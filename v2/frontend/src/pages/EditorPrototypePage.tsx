@@ -2393,58 +2393,77 @@ export function EditorPrototypePage() {
     setPendingBoundaryPreviewKey(boundaryKey)
   }
 
-  const rollBoundary = (left: TimelineItem, right: TimelineItem, requestedDeltaMs: number) => {
-    if (blockMainTrackEdit(left)) return false
+  const buildRolledBoundaryItems = (
+    baseItems: TimelineItem[],
+    left: TimelineItem,
+    right: TimelineItem,
+    requestedDeltaMs: number,
+  ) => {
+    const baseLeft = baseItems.find(item => item.id === left.id)
+    const baseRight = baseItems.find(item => item.id === right.id)
     if (
-      !left.asset_id
-      || !right.asset_id
-      || left.timeline_out_ms !== right.timeline_in_ms
-      || left.source_in_ms == null
-      || left.source_out_ms == null
-      || right.source_in_ms == null
-      || right.source_out_ms == null
-    ) {
-      setNotice('只有紧邻且两侧都有完整源区间的画面，才能滚动剪辑切点。')
-      return false
-    }
-    const leftDuration = left.source_out_ms - left.source_in_ms
-    const rightDuration = right.source_out_ms - right.source_in_ms
-    const minimumLeftDuration = minimumVideoDurationForTransitions(left)
-    const minimumRightDuration = minimumVideoDurationForTransitions(right)
+      !baseLeft?.asset_id
+      || !baseRight?.asset_id
+      || baseLeft.timeline_out_ms !== baseRight.timeline_in_ms
+      || baseLeft.source_in_ms == null
+      || baseLeft.source_out_ms == null
+      || baseRight.source_in_ms == null
+      || baseRight.source_out_ms == null
+    ) return null
+    const leftDuration = baseLeft.source_out_ms - baseLeft.source_in_ms
+    const rightDuration = baseRight.source_out_ms - baseRight.source_in_ms
+    const minimumLeftDuration = minimumVideoDurationForTransitions(baseLeft)
+    const minimumRightDuration = minimumVideoDurationForTransitions(baseRight)
     const minimumDelta = Math.max(
       -(leftDuration - minimumLeftDuration),
-      -right.source_in_ms,
+      -baseRight.source_in_ms,
     )
     const maximumDelta = Math.min(
-      (left.asset_duration_ms ?? left.source_out_ms) - left.source_out_ms,
+      (baseLeft.asset_duration_ms ?? baseLeft.source_out_ms) - baseLeft.source_out_ms,
       rightDuration - minimumRightDuration,
     )
     const deltaMs = Math.max(minimumDelta, Math.min(maximumDelta, requestedDeltaMs))
+    const nextBoundaryMs = baseLeft.timeline_out_ms + deltaMs
+    return {
+      nextItems: deltaMs ? baseItems.map(item => {
+        if (item.id === baseLeft.id) {
+          return {
+            ...item,
+            source_out_ms: baseLeft.source_out_ms! + deltaMs,
+            timeline_out_ms: nextBoundaryMs,
+          }
+        }
+        if (item.id === baseRight.id) {
+          return {
+            ...item,
+            source_in_ms: baseRight.source_in_ms! + deltaMs,
+            timeline_in_ms: nextBoundaryMs,
+          }
+        }
+        return item
+      }) : baseItems,
+      deltaMs,
+      nextBoundaryMs,
+      minimumDelta,
+      maximumDelta,
+    }
+  }
+
+  const rollBoundary = (left: TimelineItem, right: TimelineItem, requestedDeltaMs: number) => {
+    if (blockMainTrackEdit(left)) return false
+    const result = buildRolledBoundaryItems(items, left, right, requestedDeltaMs)
+    if (!result) {
+      setNotice('只有紧邻且两侧都有完整源区间的画面，才能滚动剪辑切点。')
+      return false
+    }
+    const { deltaMs, nextBoundaryMs, nextItems } = result
     if (!deltaMs) {
       setNotice(requestedDeltaMs < 0
         ? '切点已到可前移边界：前镜不能再缩短，或后镜源入点已到素材开头。'
         : '切点已到可后移边界：前镜没有更多源画面，或后镜不能再缩短。')
       return false
     }
-    const nextBoundaryMs = left.timeline_out_ms + deltaMs
     const boundaryKey = `${left.id}-${right.id}`
-    const nextItems = items.map(item => {
-      if (item.id === left.id) {
-        return {
-          ...item,
-          source_out_ms: left.source_out_ms! + deltaMs,
-          timeline_out_ms: nextBoundaryMs,
-        }
-      }
-      if (item.id === right.id) {
-        return {
-          ...item,
-          source_in_ms: right.source_in_ms! + deltaMs,
-          timeline_in_ms: nextBoundaryMs,
-        }
-      }
-      return item
-    })
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
@@ -2466,6 +2485,93 @@ export function EditorPrototypePage() {
     if (rollBoundary(left, right, deltaMs)) {
       setPendingBoundaryPreviewKey(`${left.id}-${right.id}`)
     }
+  }
+
+  const beginBoundaryRoll = (
+    event: ReactPointerEvent<HTMLElement>,
+    left: TimelineItem,
+    right: TimelineItem,
+  ) => {
+    event.currentTarget.focus()
+    event.preventDefault()
+    event.stopPropagation()
+    if (blockMainTrackEdit(left)) return
+    const originalItems = items
+    const initial = buildRolledBoundaryItems(originalItems, left, right, 0)
+    if (!initial) {
+      setNotice('只有紧邻且两侧都有完整源区间的画面，才能拖动滚动剪辑切点。')
+      return
+    }
+    if (initial.minimumDelta === 0 && initial.maximumDelta === 0) {
+      setNotice('该切点两个方向都已到素材或最短时长边界，暂时无法拖动。')
+      return
+    }
+    videoRef.current?.pause()
+    advancingPlaybackRef.current = true
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
+    setPendingBoundaryReview(null)
+    const boundaryKey = `${left.id}-${right.id}`
+    const startX = event.clientX
+    const originalSelectedIndex = selectedIndex
+    let latest = initial
+    const onMove = (moveEvent: PointerEvent) => {
+      const rawDeltaMs = ((moveEvent.clientX - startX) / timelineZoom) * 1000
+      const requestedDeltaMs = snapEnabled
+        ? Math.round(rawDeltaMs / snapIntervalMs) * snapIntervalMs
+        : Math.round(rawDeltaMs)
+      const result = buildRolledBoundaryItems(originalItems, left, right, requestedDeltaMs)
+      if (!result) return
+      latest = result
+      setItems(result.nextItems)
+      setPlayheadMs(result.nextBoundaryMs)
+      if (result.deltaMs) {
+        const rightIndex = result.nextItems.findIndex(item => item.id === right.id)
+        if (rightIndex >= 0) setSelectedIndex(rightIndex)
+      } else setSelectedIndex(originalSelectedIndex)
+    }
+    const cleanup = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
+    }
+    const onUp = () => {
+      cleanup()
+      if (!latest.deltaMs) {
+        advancingPlaybackRef.current = false
+        setItems(originalItems)
+        setPlayheadMs(initial.nextBoundaryMs)
+        setSelectedIndex(originalSelectedIndex)
+        return
+      }
+      setHistory(rows => [...rows.slice(-49), originalItems])
+      setFuture([])
+      setItems(latest.nextItems)
+      setDirty(true)
+      setSelectedIndex(Math.max(0, latest.nextItems.findIndex(item => item.id === right.id)))
+      setBoundaryFocusKey(boundaryKey)
+      setBoundaryContinuityChecks(current => {
+        const next = { ...current }
+        delete next[boundaryKey]
+        return next
+      })
+      setNotice(`已把 ${left.label} → ${right.label} 的切点${latest.deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(latest.deltaMs), outputFps)}；本次拖动只记录一次撤销，正在自动试听。`)
+      setPendingBoundaryPreviewKey(boundaryKey)
+    }
+    const onCancel = () => {
+      cleanup()
+      advancingPlaybackRef.current = false
+      setItems(originalItems)
+      setPlayheadMs(initial.nextBoundaryMs)
+      setSelectedIndex(originalSelectedIndex)
+      setNotice('切点拖动已取消，时间线和撤销历史保持不变。')
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   const slipBoundaryItem = (item: TimelineItem, requestedDeltaMs: number, focusTimelineMs: number, previewBoundaryKey: string) => {
@@ -3975,7 +4081,7 @@ export function EditorPrototypePage() {
       </div>}
       <div className={styles.timelineViewport} ref={timelineViewportRef}>
         <div className={styles.timelineCanvas} style={{ width: `${84 + timelineWidth}px` }} onClick={event => {
-          if ((event.target as HTMLElement).closest('button')) return
+          if ((event.target as HTMLElement).closest('button, [data-timeline-control]')) return
           const rect = event.currentTarget.getBoundingClientRect()
           const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left - 84) / timelineWidth))
           seekTimeline(ratio * durationMs)
@@ -4046,6 +4152,34 @@ export function EditorPrototypePage() {
                 onKeyDown={event => handleTrimKeyDown(event, item, 'end')}
               />}
             </button>)}
+            {mainBoundaries.map(({ key, left, right }) => {
+              const roll = buildRolledBoundaryItems(items, left, right, 0)
+              if (!roll) return null
+              const disabled = videoTrackLocked || (roll.minimumDelta === 0 && roll.maximumDelta === 0)
+              return <i
+                key={key}
+                role="slider"
+                data-timeline-control
+                className={styles.boundaryRollHandle}
+                aria-label={`${left.label} 到 ${right.label} 的滚动剪辑切点拖动把手`}
+                aria-disabled={disabled}
+                aria-valuemin={left.timeline_out_ms + roll.minimumDelta}
+                aria-valuemax={left.timeline_out_ms + roll.maximumDelta}
+                aria-valuenow={left.timeline_out_ms}
+                aria-valuetext={timecode(left.timeline_out_ms, outputFps)}
+                tabIndex={disabled ? -1 : 0}
+                style={{ left: `${(left.timeline_out_ms / durationMs) * 100}%` }}
+                onClick={event => event.stopPropagation()}
+                onPointerDown={event => beginBoundaryRoll(event, left, right)}
+                onKeyDown={event => {
+                  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  const stepMs = event.shiftKey ? 1000 : snapEnabled ? snapIntervalMs : frameStepMs
+                  applyBoundaryRoll(left, right, event.key === 'ArrowRight' ? stepMs : -stepMs)
+                }}
+              />
+            })}
           </div>
         </div>
         <div className={styles.trackRow} data-track-muted={audioTrackMuted}>

@@ -1378,6 +1378,41 @@
   outline: 2px solid #fff0eb;
   outline-offset: 1px;
 }
+.boundaryRollHandle {
+  position: absolute;
+  z-index: 5;
+  top: 50%;
+  width: 10px;
+  height: 28px;
+  border: 1px solid #ffd2c6;
+  border-radius: 4px;
+  background: #ff805e;
+  box-shadow: 0 0 0 2px rgba(28, 32, 35, .85);
+  cursor: col-resize;
+  transform: translate(-50%, -50%);
+}
+.boundaryRollHandle::before,
+.boundaryRollHandle::after {
+  content: '';
+  position: absolute;
+  top: 8px;
+  width: 2px;
+  height: 10px;
+  border-radius: 1px;
+  background: #562a20;
+}
+.boundaryRollHandle::before { left: 2px; }
+.boundaryRollHandle::after { right: 2px; }
+.boundaryRollHandle:hover,
+.boundaryRollHandle:focus-visible {
+  background: #ff9a7e;
+  outline: 2px solid #fff0eb;
+  outline-offset: 2px;
+}
+.boundaryRollHandle[aria-disabled="true"] {
+  opacity: .35;
+  cursor: not-allowed;
+}
 .timelineToolbar button:disabled,
 .actionGrid button:disabled,
 .gapActions button:disabled {
