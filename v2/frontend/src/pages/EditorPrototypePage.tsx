@@ -499,8 +499,17 @@ function BoundaryActionComparison({
   const leftRef = useRef<HTMLVideoElement | null>(null)
   const rightRef = useRef<HTMLVideoElement | null>(null)
   const animationRef = useRef<number | null>(null)
+  const sequenceLeftRef = useRef<HTMLVideoElement | null>(null)
+  const sequenceRightRef = useRef<HTMLVideoElement | null>(null)
+  const sequenceAnimationRef = useRef<number | null>(null)
+  const sequenceSideRef = useRef<'left' | 'right'>('left')
   const [playing, setComparisonPlaying] = useState(false)
   const [progressMs, setProgressMs] = useState(0)
+  const [sequencePlaying, setSequencePlaying] = useState(false)
+  const [sequenceSide, setSequenceSide] = useState<'left' | 'right'>('left')
+  const [sequenceProgressMs, setSequenceProgressMs] = useState(0)
+  const [sequenceLeftReady, setSequenceLeftReady] = useState(false)
+  const [sequenceRightReady, setSequenceRightReady] = useState(false)
   const [leftPhaseDeltaMs, setLeftPhaseDeltaMs] = useState(0)
   const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
@@ -531,6 +540,14 @@ function BoundaryActionComparison({
   const leftStartMs = leftEndMs - comparisonDurationMs
   const rightStartMs = rightSourceInMs
   const rightEndMs = rightStartMs + comparisonDurationMs
+  const sequenceLeftStartMs = Math.max(leftSourceInMs, leftSourceOutMs - beforeMs)
+  const sequenceLeftEndMs = leftSourceOutMs
+  const sequenceRightStartMs = rightSourceInMs
+  const sequenceRightEndMs = Math.min(rightSourceOutMs, rightSourceInMs + afterMs)
+  const sequenceLeftDurationMs = Math.max(0, sequenceLeftEndMs - sequenceLeftStartMs)
+  const sequenceRightDurationMs = Math.max(0, sequenceRightEndMs - sequenceRightStartMs)
+  const sequenceDurationMs = sequenceLeftDurationMs + sequenceRightDurationMs
+  const sequenceVisible = sequencePlaying || sequenceProgressMs > 0
 
   const positionMedia = useCallback(() => {
     if (leftRef.current && Number.isFinite(leftRef.current.duration)) leftRef.current.currentTime = leftStartMs / 1000
@@ -544,10 +561,28 @@ function BoundaryActionComparison({
     setComparisonPlaying(false)
   }, [])
 
+  const positionSequenceMedia = useCallback(() => {
+    const leftVideo = sequenceLeftRef.current
+    const rightVideo = sequenceRightRef.current
+    if (leftVideo && Number.isFinite(leftVideo.duration)) leftVideo.currentTime = sequenceLeftStartMs / 1000
+    if (rightVideo && Number.isFinite(rightVideo.duration)) rightVideo.currentTime = sequenceRightStartMs / 1000
+    sequenceSideRef.current = 'left'
+    setSequenceSide('left')
+    setSequenceProgressMs(0)
+  }, [sequenceLeftStartMs, sequenceRightStartMs])
+
+  const pauseSequenceMedia = useCallback(() => {
+    sequenceLeftRef.current?.pause()
+    sequenceRightRef.current?.pause()
+    setSequencePlaying(false)
+  }, [])
+
   useEffect(() => {
     pauseMedia()
+    pauseSequenceMedia()
     positionMedia()
-  }, [left.id, leftStartMs, pauseMedia, positionMedia, right.id, rightStartMs])
+    positionSequenceMedia()
+  }, [left.id, leftStartMs, pauseMedia, pauseSequenceMedia, positionMedia, positionSequenceMedia, right.id, rightStartMs])
 
   useEffect(() => {
     setLeftPhaseDeltaMs(0)
@@ -556,8 +591,15 @@ function BoundaryActionComparison({
   }, [left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
 
   useEffect(() => {
+    setSequenceLeftReady(false)
+    setSequenceRightReady(false)
+  }, [left.asset_id, right.asset_id])
+
+  useEffect(() => {
     if (leftRef.current) leftRef.current.playbackRate = rate
     if (rightRef.current) rightRef.current.playbackRate = rate
+    if (sequenceLeftRef.current) sequenceLeftRef.current.playbackRate = rate
+    if (sequenceRightRef.current) sequenceRightRef.current.playbackRate = rate
   }, [rate])
 
   useEffect(() => {
@@ -595,14 +637,61 @@ function BoundaryActionComparison({
     }
   }, [comparisonDurationMs, left.label, leftEndMs, leftStartMs, onNotice, playing, right.label, rightEndMs, rightStartMs, viewingTunedPhase])
 
+  useEffect(() => {
+    if (!sequencePlaying) return
+    const tick = () => {
+      const leftVideo = sequenceLeftRef.current
+      const rightVideo = sequenceRightRef.current
+      if (!leftVideo || !rightVideo) return
+      if (sequenceSideRef.current === 'left') {
+        const leftProgressMs = Math.max(0, leftVideo.currentTime * 1000 - sequenceLeftStartMs)
+        setSequenceProgressMs(Math.min(sequenceLeftDurationMs, leftProgressMs))
+        if (leftVideo.currentTime * 1000 >= sequenceLeftEndMs - 4 || leftVideo.ended) {
+          leftVideo.pause()
+          leftVideo.currentTime = sequenceLeftEndMs / 1000
+          rightVideo.currentTime = sequenceRightStartMs / 1000
+          rightVideo.playbackRate = rate
+          sequenceSideRef.current = 'right'
+          setSequenceSide('right')
+          void rightVideo.play().catch(reason => {
+            if (isMediaPlaybackInterruption(reason)) return
+            pauseSequenceMedia()
+            onNotice('浏览器没有允许当前相位顺序试播，请再点击一次。')
+          })
+        }
+      } else {
+        const rightProgressMs = Math.max(0, rightVideo.currentTime * 1000 - sequenceRightStartMs)
+        setSequenceProgressMs(Math.min(sequenceDurationMs, sequenceLeftDurationMs + rightProgressMs))
+        if (rightVideo.currentTime * 1000 >= sequenceRightEndMs - 4 || rightVideo.ended) {
+          rightVideo.pause()
+          rightVideo.currentTime = sequenceRightEndMs / 1000
+          setSequenceProgressMs(sequenceDurationMs)
+          setSequencePlaying(false)
+          onNotice(`${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原相位'}顺序试播已完成；可切换 A/B 后重播。`)
+          return
+        }
+      }
+      sequenceAnimationRef.current = window.requestAnimationFrame(tick)
+    }
+    sequenceAnimationRef.current = window.requestAnimationFrame(tick)
+    return () => {
+      if (sequenceAnimationRef.current != null) window.cancelAnimationFrame(sequenceAnimationRef.current)
+      sequenceAnimationRef.current = null
+    }
+  }, [left.label, onNotice, pauseSequenceMedia, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
+
   useEffect(() => () => {
     leftRef.current?.pause()
     rightRef.current?.pause()
+    sequenceLeftRef.current?.pause()
+    sequenceRightRef.current?.pause()
   }, [])
 
   const startComparison = async () => {
     if (comparisonDurationMs <= 0) return
     onBeforePlay()
+    pauseSequenceMedia()
+    positionSequenceMedia()
     positionMedia()
     const leftVideo = leftRef.current
     const rightVideo = rightRef.current
@@ -618,9 +707,33 @@ function BoundaryActionComparison({
     }
   }
 
+  const startSequencePreview = async () => {
+    if (sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady) return
+    onBeforePlay()
+    onNotice(`正在以 ${rate}× 顺序试播 ${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原相位'}切点。`)
+    pauseMedia()
+    positionMedia()
+    positionSequenceMedia()
+    const leftVideo = sequenceLeftRef.current
+    const rightVideo = sequenceRightRef.current
+    if (!leftVideo || !rightVideo) return
+    leftVideo.playbackRate = rate
+    rightVideo.playbackRate = rate
+    setSequencePlaying(true)
+    try {
+      await leftVideo.play()
+    } catch (reason) {
+      if (isMediaPlaybackInterruption(reason)) return
+      pauseSequenceMedia()
+      onNotice('浏览器没有允许当前相位顺序试播，请再点击一次。')
+    }
+  }
+
   const adjustPhase = (side: 'left' | 'right', requestedDeltaMs: number) => {
     onBeforePlay()
     pauseMedia()
+    pauseSequenceMedia()
+    positionSequenceMedia()
     setPhaseView('tuned')
     if (side === 'left') {
       setLeftPhaseDeltaMs(value => Math.max(leftMinimumPhaseMs, Math.min(leftMaximumPhaseMs, value + requestedDeltaMs)))
@@ -637,6 +750,8 @@ function BoundaryActionComparison({
   const resetPhase = () => {
     onBeforePlay()
     pauseMedia()
+    pauseSequenceMedia()
+    positionSequenceMedia()
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
     setPhaseView('baseline')
@@ -647,6 +762,8 @@ function BoundaryActionComparison({
     if (view === 'tuned' && !hasPhaseTrial) return
     onBeforePlay()
     pauseMedia()
+    pauseSequenceMedia()
+    positionSequenceMedia()
     setPhaseView(view)
     setProgressMs(0)
   }
@@ -659,6 +776,37 @@ function BoundaryActionComparison({
     <div className={styles.boundaryPhaseViewSwitch} role="group" aria-label="同步动作相位 A/B 对照">
       <button aria-pressed={!viewingTunedPhase} onClick={() => showPhaseView('baseline')}>A 原相位</button>
       <button aria-pressed={viewingTunedPhase} disabled={!hasPhaseTrial} title={hasPhaseTrial ? '查看当前保留的相位试调' : '先调整前镜或后镜相位'} onClick={() => showPhaseView('tuned')}>B 当前试调</button>
+    </div>
+    <div className={styles.boundarySequencePreview} data-open={sequenceVisible} aria-hidden={!sequenceVisible}>
+      <video
+        ref={sequenceLeftRef}
+        aria-label={`${left.label} 当前相位顺序试播前镜`}
+        data-visible={sequenceSide === 'left'}
+        muted
+        playsInline
+        preload="auto"
+        src={`/api/v1/projects/${projectId}/assets/${left.asset_id}/content`}
+        onLoadedMetadata={event => {
+          event.currentTarget.currentTime = sequenceLeftStartMs / 1000
+          event.currentTarget.playbackRate = rate
+          setSequenceLeftReady(true)
+        }}
+      />
+      <video
+        ref={sequenceRightRef}
+        aria-label={`${right.label} 当前相位顺序试播后镜`}
+        data-visible={sequenceSide === 'right'}
+        muted
+        playsInline
+        preload="auto"
+        src={`/api/v1/projects/${projectId}/assets/${right.asset_id}/content`}
+        onLoadedMetadata={event => {
+          event.currentTarget.currentTime = sequenceRightStartMs / 1000
+          event.currentTarget.playbackRate = rate
+          setSequenceRightReady(true)
+        }}
+      />
+      <span><strong>{sequenceSide === 'left' ? left.label : right.label}</strong><small>{sequenceSide === 'left' ? '切前' : '切后'} · {viewingTunedPhase ? 'B 当前试调' : 'A 原相位'}</small><code>{timecode(sequenceProgressMs, fps)} / {timecode(sequenceDurationMs, fps)}</code></span>
     </div>
     <div>
       <figure>
@@ -708,7 +856,8 @@ function BoundaryActionComparison({
     </div>
     <footer>
       <button disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? <Pause /> : <Play />}{playing ? '暂停' : progressMs > 0 ? '重播' : '同步播放'}</button>
-      <button onClick={() => { pauseMedia(); positionMedia() }}><RotateCcw />回到窗口开头</button>
+      <button disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying ? <Pause /> : <Play />}{sequencePlaying ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
+      <button onClick={() => { pauseMedia(); pauseSequenceMedia(); positionMedia(); positionSequenceMedia() }}><RotateCcw />回到窗口开头</button>
       <button disabled={!hasPhaseTrial} onClick={resetPhase}><RotateCcw />清除相位试调</button>
       <button
         disabled={editLocked || leftPhaseDeltaMs === 0 || rightPhaseDeltaMs === 0 || !viewingTunedPhase}
@@ -722,7 +871,7 @@ function BoundaryActionComparison({
         onClick={() => onApplyPhasePair(leftPhaseDeltaMs, rightPhaseDeltaMs)}
       >应用双方相位</button>
     </footer>
-    <small>试调后可在 A 原相位与 B 当前试调之间反复对照，切回 A 不会丢失试调值；只有正在查看 B 时才能应用。可单侧应用，也可把双方组合为一个撤销步骤。锁轨时仍可 A/B 试调，但不能应用。</small>
+    <small>同步播放用于并排看动作阶段；顺序试播会在同一画面区静音播放前镜再切后镜，更接近真实切点节奏。试调后可在 A 原相位与 B 当前试调之间反复对照，切回 A 不会丢失试调值；只有正在查看 B 时才能应用。锁轨时仍可试播，但不能应用。</small>
   </section>
 }
 

@@ -1042,6 +1042,39 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
 }
+.boundaryActionComparison > .boundarySequencePreview {
+  position: relative;
+  height: 108px;
+  display: block;
+  overflow: hidden;
+  border: 1px solid #4c655b;
+  border-radius: 5px;
+  background: #050606;
+}
+.boundaryActionComparison > .boundarySequencePreview[data-open="false"] { display: none; }
+.boundarySequencePreview video {
+  position: absolute;
+  inset: 0;
+  height: 108px;
+  opacity: 0;
+  transition: none;
+}
+.boundarySequencePreview video[data-visible="true"] { opacity: 1; }
+.boundarySequencePreview > span {
+  position: absolute;
+  inset: auto 5px 5px;
+  z-index: 1;
+  min-width: 0;
+  padding: 4px 5px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 5px;
+  border-radius: 3px;
+  background: rgba(4, 7, 6, 0.82);
+  color: #dbe6e1;
+}
+.boundarySequencePreview > span small { overflow: hidden; color: #9eb0a8; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.boundarySequencePreview > span code { grid-column: 1 / -1; color: #bdd2c8; }
 .boundaryActionComparison figure {
   min-width: 0;
   margin: 0;
@@ -1089,6 +1122,7 @@
 .boundaryControl .boundaryActionPhase > button:last-child { height: 26px; font-size: 10px; }
 .boundaryActionComparison > footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
 .boundaryControl .boundaryActionComparison > footer button { height: 28px; }
+.boundaryActionComparison > footer button:last-child { grid-column: 1 / -1; }
 .boundaryActionComparison > small { color: #81908a; line-height: 1.45; }
 .boundaryFrameStrip {
   min-width: 0;
