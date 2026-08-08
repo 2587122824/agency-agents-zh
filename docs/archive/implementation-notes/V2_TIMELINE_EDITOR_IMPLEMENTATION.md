@@ -251,9 +251,11 @@ Inspector 片段操作新增三点联动的片段滑动。`slideMainItem` 保持
 
 真实咖啡 v4 隐藏画面时视频 opacity 为 0，播放约 0.7 秒后源时点推进至 0.932 秒、时间码 `00:00:17`，证明隐藏没有停止时钟；恢复后 opacity=1。声音和字幕当前无条目，本轮验证其按钮、轨道和 monitor flags 往返，不创建测试素材；既有真实音频/字幕同步验收继续作为媒体执行证据。三项开关均未产生本地草稿。
 
-`buildTrimmedItems` 从会话冻结的基线条目计算左右源边界与波纹时间线，不在 pointer move 中叠加增量。`beginTrim` 只在移动期间把派生条目放入内存预览；pointer up 检测最终值确实变化后才把原始条目压入历史、清空 future、标记 dirty，pointer cancel 或无移动恢复原数组且不产生历史。`handleTrimKeyDown` 对左右把手使用相同方向语义：右键增加对应源时点、左键减少；普通步长为 `round(1000/fps)`，Shift 为 1000ms，每次有效修改通过 `commitItems` 形成独立撤销步骤。slider 暴露源时点 `aria-valuetext` 与焦点轮廓。
+`buildTrimmedItems` 从会话冻结的基线条目计算左右源边界与波纹时间线，不在 pointer move 中叠加增量。`beginTrim` 只在移动期间把派生条目放入内存预览，并在 pointer down 清理旧单次/循环/巡检与待启动复检；pointer up 检测最终值确实变化后才把原始条目压入历史、清空 future、标记 dirty，pointer cancel 或无移动恢复原数组且不产生历史。`handleTrimKeyDown` 对左右把手使用相同方向语义：右键增加对应源时点、左键减少；普通步长为 `round(1000/fps)`，Shift 为 1000ms，每次有效修改通过 `commitItems` 形成独立撤销步骤。slider 暴露源时点 `aria-valuetext` 与焦点轮廓。成功提交后两条路径统一调用 `queueTrimBoundaryReview`：左裁切清理并复检入点/出点，右裁切清理并复检出点；一个可播放边界登记单切点 key，两个边界登记 `scope=trim` 的局部巡检，不增加历史。
 
 真实咖啡 v4 验收中无移动点击保持零草稿；25px 左裁切按 60px/s 与 100ms 磁吸得到 400ms，并可一步撤销。24fps 左把手单帧为 42ms、Shift 为 1000ms；右把手左移一帧把 4709ms 改为 4667ms。最终丢弃草稿恢复 `0..4709ms`。
+
+裁切调整即复检使用当前真实咖啡草稿复验。SH-002 右把手按方向键左移一帧后，源/成片出点从 `4709→4667ms`，SH-001 成片区间波纹到 `4667..5076ms`；页面立即按切前/切后各 0.25 秒、1× 试听 SH-002 → SH-001，开始时前镜 `currentTime=4.514 / readyState=4 / paused=false`，完成后后镜 `currentTime=0.221 / paused=true`。临时把未使用 SH-003 投入缺口后，SH-001 左把手右移一帧得到 `source_in=42ms / timeline=4709..5076ms`，SH-003 从 `5076ms` 开始；局部复检完整显示 `片段裁切后试听 1/2 → 2/2 → 完成`，两段活动媒体均为 `readyState=4 / playbackRate=1`。另用真实指针把 SH-002 右把手左拖 12px，在 60px/s 与 100ms 磁吸下得到 `source/timeline_out=4509ms`，同样自动试听并暂停。所有临时操作逐步撤销，最终服务端草稿恢复 SH-002 `0..4709ms`、SH-001 `4709..5118ms`、缺口 `5118..15000ms`，`row_version=158 / playhead_ms=0`；1280×720 document/body 宽高等于视口，页面控制台零错误。
 
 `overlayOpen / closeTopOverlay` 汇总版本、保存、检查、预览、交付授权和交付状态六类弹窗。全局 keydown 先处理 Escape，再在任一 overlay 打开时直接返回；无 overlay 时排除文本输入/contenteditable，并让按钮、链接和音视频消费自己的 Space。六类外层均声明命名 dialog 与 `aria-modal=true`。由于当前 WebView 的 CUA Space 不执行原生 button click，播放按钮另设 `handlePlayButtonKeyDown`：只处理 Space，阻止默认与冒泡后调用一次 `togglePlayback`，避免与全局或原生路径叠加。
 
