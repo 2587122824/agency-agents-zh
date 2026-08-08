@@ -478,6 +478,7 @@ function BoundaryActionComparison({
   onBeforePlay,
   onApplyLeftPhase,
   onApplyRightPhase,
+  onApplyPhasePair,
   onNotice,
 }: {
   projectId: string
@@ -492,6 +493,7 @@ function BoundaryActionComparison({
   onBeforePlay: () => void
   onApplyLeftPhase: (deltaMs: number) => void
   onApplyRightPhase: (deltaMs: number) => void
+  onApplyPhasePair: (leftDeltaMs: number, rightDeltaMs: number) => void
   onNotice: (message: string) => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
@@ -688,8 +690,17 @@ function BoundaryActionComparison({
       <button disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? <Pause /> : <Play />}{playing ? '暂停' : progressMs > 0 ? '重播' : '同步播放'}</button>
       <button onClick={() => { pauseMedia(); positionMedia() }}><RotateCcw />回到窗口开头</button>
       <button disabled={leftPhaseDeltaMs === 0 && rightPhaseDeltaMs === 0} onClick={resetPhase}><RotateCcw />清除相位试调</button>
+      <button
+        disabled={editLocked || leftPhaseDeltaMs === 0 || rightPhaseDeltaMs === 0}
+        title={editLocked
+          ? '画面轨已锁定，只能试调，不能应用。'
+          : leftPhaseDeltaMs === 0 || rightPhaseDeltaMs === 0
+          ? '前镜和后镜都产生相位试调后，才能作为一组一次应用。'
+          : '把双方当前试调作为一个组合写入，并只记录一次撤销'}
+        onClick={() => onApplyPhasePair(leftPhaseDeltaMs, rightPhaseDeltaMs)}
+      >应用双方相位</button>
     </footer>
-    <small>相位按钮只在同步区试调；“应用”才形成一次可撤销的源窗口滑移并自动顺序试听。锁轨时仍可试调，但不能应用。</small>
+    <small>相位按钮只在同步区试调；可单侧应用，也可把双方试调作为一个组合一次应用。组合应用只形成一个撤销步骤，并自动顺序试听。锁轨时仍可试调，但不能应用。</small>
   </section>
 }
 
@@ -2979,6 +2990,70 @@ export function EditorPrototypePage() {
     setPendingBoundaryPreviewKey(previewBoundaryKey)
   }
 
+  const slipBoundaryPair = (
+    left: TimelineItem,
+    right: TimelineItem,
+    requestedLeftDeltaMs: number,
+    requestedRightDeltaMs: number,
+    previewBoundaryKey: string,
+  ) => {
+    if (blockMainTrackEdit(left)) return
+    const completeSourceItem = (item: TimelineItem) => Boolean(
+      item.asset_id
+      && item.source_in_ms != null
+      && item.source_out_ms != null
+      && item.asset_duration_ms != null,
+    )
+    if (!completeSourceItem(left) || !completeSourceItem(right)) {
+      setNotice('前镜和后镜都必须具备完整源区间与素材时长，才能一次应用双方相位。')
+      return
+    }
+    const clampDelta = (item: TimelineItem, requestedDeltaMs: number) => Math.max(
+      -item.source_in_ms!,
+      Math.min(item.asset_duration_ms! - item.source_out_ms!, requestedDeltaMs),
+    )
+    const leftDeltaMs = clampDelta(left, requestedLeftDeltaMs)
+    const rightDeltaMs = clampDelta(right, requestedRightDeltaMs)
+    if (!leftDeltaMs || !rightDeltaMs) {
+      setNotice('双方都产生合法相位变化后，才能作为一个组合一次应用。')
+      return
+    }
+    const affectedBoundaryKeys = new Set<string>()
+    for (const item of [left, right]) {
+      const itemPosition = mainItems.findIndex(row => row.id === item.id)
+      if (itemPosition > 0) affectedBoundaryKeys.add(`${mainItems[itemPosition - 1].id}-${item.id}`)
+      if (itemPosition >= 0 && itemPosition < mainItems.length - 1) {
+        affectedBoundaryKeys.add(`${item.id}-${mainItems[itemPosition + 1].id}`)
+      }
+    }
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryContinuityChecks(current => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !affectedBoundaryKeys.has(key)),
+    ))
+    setPlayheadMs(right.timeline_in_ms)
+    commitItems(
+      items.map(row => row.id === left.id
+        ? {
+          ...row,
+          source_in_ms: left.source_in_ms! + leftDeltaMs,
+          source_out_ms: left.source_out_ms! + leftDeltaMs,
+        }
+        : row.id === right.id
+        ? {
+          ...row,
+          source_in_ms: right.source_in_ms! + rightDeltaMs,
+          source_out_ms: right.source_out_ms! + rightDeltaMs,
+        }
+        : row),
+      `已把 ${left.label} 与 ${right.label} 的试调相位作为一个组合应用；成片位置和时长不变，本次只记录一次撤销，正在自动试听。`,
+      right.id,
+    )
+    setBoundaryFocusKey(previewBoundaryKey)
+    setPendingBoundaryPreviewKey(previewBoundaryKey)
+  }
+
   const slideMainItem = (item: TimelineItem, requestedDeltaMs: number) => {
     if (blockMainTrackEdit(item)) return
     const itemPosition = mainItems.findIndex(row => row.id === item.id)
@@ -4260,6 +4335,7 @@ export function EditorPrototypePage() {
                          }}
                          onApplyLeftPhase={deltaMs => slipBoundaryItem(left, deltaMs, Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs), boundaryKey)}
                          onApplyRightPhase={deltaMs => slipBoundaryItem(right, deltaMs, right.timeline_in_ms, boundaryKey)}
+                         onApplyPhasePair={(leftDeltaMs, rightDeltaMs) => slipBoundaryPair(left, right, leftDeltaMs, rightDeltaMs, boundaryKey)}
                          onNotice={setNotice}
                        />
                        : overlayFrames
