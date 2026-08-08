@@ -2299,7 +2299,35 @@ export function EditorPrototypePage() {
     const nextDuration = type === 'cut'
       ? 0
       : Math.max(100, Math.min(maximum, requestedDuration))
-    updateSelectedTransform(key, { type, duration_ms: nextDuration })
+    const currentTransition = selectedItem.transform[key] as { type?: string; duration_ms?: number } | undefined
+    if (
+      (currentTransition?.type ?? 'cut') === type
+      && (currentTransition?.duration_ms ?? 0) === nextDuration
+    ) return
+    const mainPosition = mainItems.findIndex(item => item.id === selectedItem.id)
+    const left = key === 'transition_in' ? mainItems[mainPosition - 1] : selectedItem
+    const right = key === 'transition_in' ? selectedItem : mainItems[mainPosition + 1]
+    const boundaryKey = left && right ? `${left.id}-${right.id}` : null
+    videoRef.current?.pause()
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
+    setPendingBoundaryReview(null)
+    setPendingBoundaryPreviewKey(null)
+    if (boundaryKey) {
+      setBoundaryContinuityChecks(current => Object.fromEntries(
+        Object.entries(current).filter(([candidate]) => candidate !== boundaryKey),
+      ))
+    }
+    commitItems(items.map(item => item.id === selectedItem.id
+      ? { ...item, transform: { ...item.transform, [key]: { type, duration_ms: nextDuration } } }
+      : item), `${selectedItem.label} 的${key === 'transition_in' ? '入场' : '出场'}已改为${type === 'fade' ? `${seconds(nextDuration)} 淡${key === 'transition_in' ? '入' : '出'}` : '直接切换'}。`, selectedItem.id)
+    if (boundaryKey && left && right && left.asset_id && right.asset_id && left.timeline_out_ms === right.timeline_in_ms) {
+      setPendingBoundaryPreviewKey(boundaryKey)
+    } else {
+      setNotice(`${selectedItem.label} 的${key === 'transition_in' ? '入场' : '出场'}已更新；当前没有双侧完整画面的相邻切点，未启动自动试听。`)
+    }
   }
 
   const setBoundaryTransition = (
@@ -2321,6 +2349,25 @@ export function EditorPrototypePage() {
     const durationMs = type === 'cut'
       ? 0
       : Math.max(100, Math.min(maximum, requestedDurationMs))
+    const currentLeftTransition = left.transform.transition_out as { type?: string; duration_ms?: number } | undefined
+    const currentRightTransition = right.transform.transition_in as { type?: string; duration_ms?: number } | undefined
+    if (
+      (currentLeftTransition?.type ?? 'cut') === type
+      && (currentLeftTransition?.duration_ms ?? 0) === durationMs
+      && (currentRightTransition?.type ?? 'cut') === type
+      && (currentRightTransition?.duration_ms ?? 0) === durationMs
+    ) return
+    const boundaryKey = `${left.id}-${right.id}`
+    videoRef.current?.pause()
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
+    setPendingBoundaryReview(null)
+    setPendingBoundaryPreviewKey(null)
+    setBoundaryContinuityChecks(current => Object.fromEntries(
+      Object.entries(current).filter(([candidate]) => candidate !== boundaryKey),
+    ))
     const nextItems = items.map(item => {
       if (item.id === left.id) {
         return {
@@ -2343,6 +2390,7 @@ export function EditorPrototypePage() {
         : `已把 ${left.label} → ${right.label} 恢复为直接切换；一次撤销可整体恢复。`,
       right.id,
     )
+    setPendingBoundaryPreviewKey(boundaryKey)
   }
 
   const rollBoundary = (left: TimelineItem, right: TimelineItem, requestedDeltaMs: number) => {
