@@ -474,7 +474,10 @@ function BoundaryActionComparison({
   rate,
   frameStepMs,
   fps,
+  editLocked,
   onBeforePlay,
+  onApplyLeftPhase,
+  onApplyRightPhase,
   onNotice,
 }: {
   projectId: string
@@ -485,7 +488,10 @@ function BoundaryActionComparison({
   rate: number
   frameStepMs: number
   fps: number
+  editLocked: boolean
   onBeforePlay: () => void
+  onApplyLeftPhase: (deltaMs: number) => void
+  onApplyRightPhase: (deltaMs: number) => void
   onNotice: (message: string) => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
@@ -493,10 +499,20 @@ function BoundaryActionComparison({
   const animationRef = useRef<number | null>(null)
   const [playing, setComparisonPlaying] = useState(false)
   const [progressMs, setProgressMs] = useState(0)
-  const leftSourceInMs = left.source_in_ms ?? 0
-  const leftSourceOutMs = left.source_out_ms ?? leftSourceInMs
-  const rightSourceInMs = right.source_in_ms ?? 0
-  const rightSourceOutMs = right.source_out_ms ?? rightSourceInMs
+  const [leftPhaseDeltaMs, setLeftPhaseDeltaMs] = useState(0)
+  const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
+  const leftBaseSourceInMs = left.source_in_ms ?? 0
+  const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
+  const rightBaseSourceInMs = right.source_in_ms ?? 0
+  const rightBaseSourceOutMs = right.source_out_ms ?? rightBaseSourceInMs
+  const leftMinimumPhaseMs = -leftBaseSourceInMs
+  const leftMaximumPhaseMs = Math.max(0, (left.asset_duration_ms ?? leftBaseSourceOutMs) - leftBaseSourceOutMs)
+  const rightMinimumPhaseMs = -rightBaseSourceInMs
+  const rightMaximumPhaseMs = Math.max(0, (right.asset_duration_ms ?? rightBaseSourceOutMs) - rightBaseSourceOutMs)
+  const leftSourceInMs = leftBaseSourceInMs + leftPhaseDeltaMs
+  const leftSourceOutMs = leftBaseSourceOutMs + leftPhaseDeltaMs
+  const rightSourceInMs = rightBaseSourceInMs + rightPhaseDeltaMs
+  const rightSourceOutMs = rightBaseSourceOutMs + rightPhaseDeltaMs
   const leftEndMs = Math.max(leftSourceInMs, leftSourceOutMs - frameStepMs)
   const rightMaximumEndMs = Math.max(rightSourceInMs, rightSourceOutMs - frameStepMs)
   const comparisonDurationMs = Math.max(0, Math.min(
@@ -525,6 +541,11 @@ function BoundaryActionComparison({
     pauseMedia()
     positionMedia()
   }, [left.id, leftStartMs, pauseMedia, positionMedia, right.id, rightStartMs])
+
+  useEffect(() => {
+    setLeftPhaseDeltaMs(0)
+    setRightPhaseDeltaMs(0)
+  }, [left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
 
   useEffect(() => {
     if (leftRef.current) leftRef.current.playbackRate = rate
@@ -589,6 +610,29 @@ function BoundaryActionComparison({
     }
   }
 
+  const adjustPhase = (side: 'left' | 'right', requestedDeltaMs: number) => {
+    onBeforePlay()
+    pauseMedia()
+    if (side === 'left') {
+      setLeftPhaseDeltaMs(value => Math.max(leftMinimumPhaseMs, Math.min(leftMaximumPhaseMs, value + requestedDeltaMs)))
+    } else {
+      setRightPhaseDeltaMs(value => Math.max(rightMinimumPhaseMs, Math.min(rightMaximumPhaseMs, value + requestedDeltaMs)))
+    }
+    setProgressMs(0)
+  }
+
+  const phaseLabel = (deltaMs: number) => deltaMs === 0
+    ? '原相位'
+    : `${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)}`
+
+  const resetPhase = () => {
+    onBeforePlay()
+    pauseMedia()
+    setLeftPhaseDeltaMs(0)
+    setRightPhaseDeltaMs(0)
+    setProgressMs(0)
+  }
+
   return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
     <header>
       <span><strong>同步动作</strong><small>共同窗口 {previewSeconds(comparisonDurationMs)} · {rate}×</small></span>
@@ -606,6 +650,16 @@ function BoundaryActionComparison({
           onLoadedMetadata={event => { event.currentTarget.currentTime = leftStartMs / 1000; event.currentTarget.playbackRate = rate }}
         />
         <figcaption><strong>{left.label}</strong><span>切前动作</span><code>{timecode(leftStartMs, fps)}–{timecode(leftEndMs, fps)}</code></figcaption>
+        <div className={styles.boundaryActionPhase}>
+          <span><b>前镜相位</b><code>{phaseLabel(leftPhaseDeltaMs)}</code></span>
+          <div>
+            <button aria-label={`${left.label} 同步动作相位前移 1 秒`} disabled={leftPhaseDeltaMs <= leftMinimumPhaseMs} onClick={() => adjustPhase('left', -1000)}>−1s</button>
+            <button aria-label={`${left.label} 同步动作相位前移 1 帧`} disabled={leftPhaseDeltaMs <= leftMinimumPhaseMs} onClick={() => adjustPhase('left', -frameStepMs)}>−1帧</button>
+            <button aria-label={`${left.label} 同步动作相位后移 1 帧`} disabled={leftPhaseDeltaMs >= leftMaximumPhaseMs} onClick={() => adjustPhase('left', frameStepMs)}>+1帧</button>
+            <button aria-label={`${left.label} 同步动作相位后移 1 秒`} disabled={leftPhaseDeltaMs >= leftMaximumPhaseMs} onClick={() => adjustPhase('left', 1000)}>+1s</button>
+          </div>
+          <button disabled={editLocked || leftPhaseDeltaMs === 0} title={editLocked ? '画面轨已锁定，只能试调，不能应用。' : '把当前试调写入前镜源窗口'} onClick={() => onApplyLeftPhase(leftPhaseDeltaMs)}>应用前镜相位</button>
+        </div>
       </figure>
       <figure>
         <video
@@ -618,13 +672,24 @@ function BoundaryActionComparison({
           onLoadedMetadata={event => { event.currentTarget.currentTime = rightStartMs / 1000; event.currentTarget.playbackRate = rate }}
         />
         <figcaption><strong>{right.label}</strong><span>切后动作</span><code>{timecode(rightStartMs, fps)}–{timecode(rightEndMs, fps)}</code></figcaption>
+        <div className={styles.boundaryActionPhase}>
+          <span><b>后镜相位</b><code>{phaseLabel(rightPhaseDeltaMs)}</code></span>
+          <div>
+            <button aria-label={`${right.label} 同步动作相位前移 1 秒`} disabled={rightPhaseDeltaMs <= rightMinimumPhaseMs} onClick={() => adjustPhase('right', -1000)}>−1s</button>
+            <button aria-label={`${right.label} 同步动作相位前移 1 帧`} disabled={rightPhaseDeltaMs <= rightMinimumPhaseMs} onClick={() => adjustPhase('right', -frameStepMs)}>−1帧</button>
+            <button aria-label={`${right.label} 同步动作相位后移 1 帧`} disabled={rightPhaseDeltaMs >= rightMaximumPhaseMs} onClick={() => adjustPhase('right', frameStepMs)}>+1帧</button>
+            <button aria-label={`${right.label} 同步动作相位后移 1 秒`} disabled={rightPhaseDeltaMs >= rightMaximumPhaseMs} onClick={() => adjustPhase('right', 1000)}>+1s</button>
+          </div>
+          <button disabled={editLocked || rightPhaseDeltaMs === 0} title={editLocked ? '画面轨已锁定，只能试调，不能应用。' : '把当前试调写入后镜源窗口'} onClick={() => onApplyRightPhase(rightPhaseDeltaMs)}>应用后镜相位</button>
+        </div>
       </figure>
     </div>
     <footer>
       <button disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? <Pause /> : <Play />}{playing ? '暂停' : progressMs > 0 ? '重播' : '同步播放'}</button>
       <button onClick={() => { pauseMedia(); positionMedia() }}><RotateCcw />回到窗口开头</button>
+      <button disabled={leftPhaseDeltaMs === 0 && rightPhaseDeltaMs === 0} onClick={resetPhase}><RotateCcw />清除相位试调</button>
     </footer>
-    <small>两镜用相同窗口和速度同时前进；用于比较动作方向和节奏，不代替真实顺序切点试听。</small>
+    <small>相位按钮只在同步区试调；“应用”才形成一次可撤销的源窗口滑移并自动顺序试听。锁轨时仍可试调，但不能应用。</small>
   </section>
 }
 
@@ -4181,6 +4246,7 @@ export function EditorPrototypePage() {
                          rate={boundaryPreviewRate}
                          frameStepMs={frameStepMs}
                          fps={outputFps}
+                         editLocked={videoTrackLocked}
                          onBeforePlay={() => {
                            videoRef.current?.pause()
                            advancingPlaybackRef.current = true
@@ -4192,6 +4258,8 @@ export function EditorPrototypePage() {
                            setPendingBoundaryReview(null)
                            setNotice(`正在以 ${boundaryPreviewRate}× 同步对比 ${left.label} 切前动作与 ${right.label} 切后动作。`)
                          }}
+                         onApplyLeftPhase={deltaMs => slipBoundaryItem(left, deltaMs, Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs), boundaryKey)}
+                         onApplyRightPhase={deltaMs => slipBoundaryItem(right, deltaMs, right.timeline_in_ms, boundaryKey)}
                          onNotice={setNotice}
                        />
                        : overlayFrames

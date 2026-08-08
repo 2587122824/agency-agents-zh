@@ -1052,7 +1052,27 @@
 .boundaryActionComparison figcaption strong { overflow: hidden; color: #dbe4e0; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryActionComparison figcaption span { overflow: hidden; color: #87958f; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryActionComparison figcaption code { grid-column: 1 / -1; color: #a9bbb3; }
-.boundaryActionComparison > footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.boundaryActionPhase {
+  min-width: 0;
+  padding: 5px 6px 6px;
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #27312e;
+  background: #121715;
+}
+.boundaryActionPhase > span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  color: #a8b4af;
+}
+.boundaryActionPhase > span code { color: #8fb6a5; white-space: nowrap; }
+.boundaryActionPhase > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; }
+.boundaryControl .boundaryActionPhase button { min-width: 0; height: 24px; padding: 0 3px; font-size: 9px; }
+.boundaryControl .boundaryActionPhase > button:last-child { height: 26px; font-size: 10px; }
+.boundaryActionComparison > footer { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
 .boundaryControl .boundaryActionComparison > footer button { height: 28px; }
 .boundaryActionComparison > small { color: #81908a; line-height: 1.45; }
 .boundaryFrameStrip {
