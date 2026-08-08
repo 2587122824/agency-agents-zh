@@ -524,6 +524,7 @@ export function EditorPrototypePage() {
     boundaryIndexes: number[]
     position: number
     skippedCount: number
+    scope: 'timeline' | 'affected'
   } | null>(null)
   const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
     boundaryKey: string
@@ -539,6 +540,7 @@ export function EditorPrototypePage() {
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
   const [boundaryFrameStripKey, setBoundaryFrameStripKey] = useState<string | null>(null)
   const [pendingBoundaryPreviewKey, setPendingBoundaryPreviewKey] = useState<string | null>(null)
+  const [pendingBoundaryReviewKeys, setPendingBoundaryReviewKeys] = useState<string[] | null>(null)
   const [boundaryFrameBlendPercent, setBoundaryFrameBlendPercent] = useState(50)
   const [boundaryContinuityChecks, setBoundaryContinuityChecks] = useState<Record<string, string[]>>({})
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
@@ -1478,6 +1480,29 @@ export function EditorPrototypePage() {
     previewBoundary(boundary.left, boundary.right)
   }, [items, mainBoundaries, pendingBoundaryPreviewKey])
 
+  useEffect(() => {
+    if (!pendingBoundaryReviewKeys) return
+    const boundaryIndexes = pendingBoundaryReviewKeys
+      .map(key => mainBoundaries.findIndex(boundary => boundary.key === key))
+      .filter(index => index >= 0)
+    setPendingBoundaryReviewKeys(null)
+    if (!boundaryIndexes.length) {
+      setNotice('片段滑动成功，但更新后的前后切点已不存在，未启动自动试听。')
+      return
+    }
+    videoRef.current?.pause()
+    advancingPlaybackRef.current = true
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession({
+      boundaryIndexes,
+      position: 0,
+      skippedCount: 0,
+      scope: 'affected',
+    })
+  }, [items, mainBoundaries, pendingBoundaryReviewKeys])
+
   const toggleBoundaryLoop = (left: TimelineItem, right: TimelineItem) => {
     const boundaryKey = `${left.id}-${right.id}`
     if (boundaryPreviewLoop?.boundaryKey === boundaryKey) {
@@ -1513,7 +1538,9 @@ export function EditorPrototypePage() {
       setBoundaryPreviewEndMs(null)
       setBoundaryPreviewLoop(null)
       setBoundaryReviewSession(null)
-      setNotice('已停止全时间线切点连续巡检。')
+      setNotice(boundaryReviewSession.scope === 'affected'
+        ? '已停止片段滑动后的前后切点试听。'
+        : '已停止全时间线切点连续巡检。')
       return
     }
     if (!reviewableBoundaryIndexes.length) {
@@ -1531,6 +1558,7 @@ export function EditorPrototypePage() {
       boundaryIndexes: reviewableBoundaryIndexes,
       position: 0,
       skippedCount: mainBoundaries.length - reviewableBoundaryIndexes.length,
+      scope: 'timeline',
     })
   }
 
@@ -1560,7 +1588,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(endMs)
     setBoundaryPreviewLoop(null)
     setPlaying(true)
-    setNotice(`连续巡检 ${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}：正在以 ${boundaryPreviewRate}× 预览 ${boundary.left.label} → ${boundary.right.label}。`)
+    setNotice(`${boundaryReviewSession.scope === 'affected' ? '片段滑动后试听' : '连续巡检'} ${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}：正在以 ${boundaryPreviewRate}× 预览 ${boundary.left.label} → ${boundary.right.label}。`)
   }, [boundaryReviewSession, boundaryPreviewAfterMs, boundaryPreviewBeforeMs, items, mainBoundaries])
 
   const toggleMonitorFullscreen = async () => {
@@ -1604,6 +1632,7 @@ export function EditorPrototypePage() {
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
     setPendingBoundaryPreviewKey(null)
+    setPendingBoundaryReviewKeys(null)
     setBoundaryContinuityChecks({})
   }
 
@@ -1615,6 +1644,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
     setPendingBoundaryPreviewKey(null)
+    setPendingBoundaryReviewKeys(null)
     const previous = history[history.length - 1]
     if (!previous) return
     setFuture(rows => [items, ...rows].slice(0, 50))
@@ -1633,6 +1663,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
     setPendingBoundaryPreviewKey(null)
+    setPendingBoundaryReviewKeys(null)
     const next = future[0]
     if (!next) return
     setHistory(rows => [...rows.slice(-49), items])
@@ -2379,7 +2410,7 @@ export function EditorPrototypePage() {
     }
   }
 
-  const slipBoundaryItem = (item: TimelineItem, requestedDeltaMs: number, focusTimelineMs: number) => {
+  const slipBoundaryItem = (item: TimelineItem, requestedDeltaMs: number, focusTimelineMs: number, previewBoundaryKey: string) => {
     if (blockMainTrackEdit(item)) return
     if (!item.asset_id || item.source_in_ms == null || item.source_out_ms == null || item.asset_duration_ms == null) {
       setNotice('只有具备完整源区间和素材时长的画面，才能滑移源窗口。')
@@ -2418,6 +2449,7 @@ export function EditorPrototypePage() {
       `已把 ${item.label} 的源窗口${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), outputFps)}；成片位置和时长不变，相邻连续性检查已重置。`,
       item.id,
     )
+    setPendingBoundaryPreviewKey(previewBoundaryKey)
   }
 
   const slideMainItem = (item: TimelineItem, requestedDeltaMs: number) => {
@@ -2500,6 +2532,7 @@ export function EditorPrototypePage() {
       `已把 ${item.label} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), outputFps)}；片段内容和时长不变，前后切点及连续性检查已联动。`,
       item.id,
     )
+    setPendingBoundaryReviewKeys([...affectedBoundaryKeys])
   }
 
   const setSelectedAudioMix = (mix: 'voiceover' | 'background_music') => {
@@ -2917,7 +2950,9 @@ export function EditorPrototypePage() {
           setBoundaryPreviewEndMs(null)
           setBoundaryPreviewLoop(null)
           setBoundaryReviewSession(null)
-          setNotice(`全时间线切点连续巡检播放完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个可用切点${boundaryReviewSession.skippedCount ? `，跳过 ${boundaryReviewSession.skippedCount} 个含缺口边界` : ''}；人工检查项仍需逐项确认。`)
+          setNotice(boundaryReviewSession.scope === 'affected'
+            ? `片段滑动后的前后切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个受影响切点；人工连续性检查仍需逐项确认。`
+            : `全时间线切点连续巡检播放完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个可用切点${boundaryReviewSession.skippedCount ? `，跳过 ${boundaryReviewSession.skippedCount} 个含缺口边界` : ''}；人工检查项仍需逐项确认。`)
           return
         }
         setPlayheadMs(boundaryPreviewEndMs)
@@ -3295,7 +3330,7 @@ export function EditorPrototypePage() {
               disabled={!reviewableBoundaryIndexes.length}
               onClick={toggleBoundaryReview}
             ><Repeat2 />{boundaryReviewSession
-                ? `停止连续巡检（${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}）`
+                ? `${boundaryReviewSession.scope === 'affected' ? '停止前后切点试听' : '停止连续巡检'}（${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}）`
                 : `连续巡检 ${reviewableBoundaryIndexes.length} 个可播放切点${mainBoundaries.length > reviewableBoundaryIndexes.length ? ` · 跳过 ${mainBoundaries.length - reviewableBoundaryIndexes.length} 个缺口` : ''}`}</button>
             <div className={styles.boundaryList}>
               {([
@@ -3528,11 +3563,11 @@ export function EditorPrototypePage() {
                        { item: right, role: '后镜', earlier: canSlipRightEarlier, later: canSlipRightLater, focusMs: right.timeline_in_ms },
                      ] as const).map(row => <div key={`${boundaryKey}-${row.role}`}>
                        <span><b>{row.role}</b><small>{row.item.label}</small></span>
-                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口前移 1 秒`} disabled={videoTrackLocked || !row.earlier} onClick={() => slipBoundaryItem(row.item, -1000, row.focusMs)}>−1s</button>
-                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口前移 1 帧`} disabled={videoTrackLocked || !row.earlier} onClick={() => slipBoundaryItem(row.item, -frameStepMs, row.focusMs)}>−1帧</button>
+                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口前移 1 秒`} disabled={videoTrackLocked || !row.earlier} onClick={() => slipBoundaryItem(row.item, -1000, row.focusMs, boundaryKey)}>−1s</button>
+                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口前移 1 帧`} disabled={videoTrackLocked || !row.earlier} onClick={() => slipBoundaryItem(row.item, -frameStepMs, row.focusMs, boundaryKey)}>−1帧</button>
                        <code>{timecode(row.item.source_in_ms ?? 0, outputFps)}–{timecode(row.item.source_out_ms ?? 0, outputFps)}</code>
-                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口后移 1 帧`} disabled={videoTrackLocked || !row.later} onClick={() => slipBoundaryItem(row.item, frameStepMs, row.focusMs)}>+1帧</button>
-                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口后移 1 秒`} disabled={videoTrackLocked || !row.later} onClick={() => slipBoundaryItem(row.item, 1000, row.focusMs)}>+1s</button>
+                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口后移 1 帧`} disabled={videoTrackLocked || !row.later} onClick={() => slipBoundaryItem(row.item, frameStepMs, row.focusMs, boundaryKey)}>+1帧</button>
+                       <button aria-label={`${left.label} 到 ${right.label} ${row.role}源窗口后移 1 秒`} disabled={videoTrackLocked || !row.later} onClick={() => slipBoundaryItem(row.item, 1000, row.focusMs, boundaryKey)}>+1s</button>
                      </div>)}
                    </div>
                    <button
