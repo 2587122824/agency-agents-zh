@@ -311,6 +311,10 @@ v6 随后从界面生成 360×640、24fps 低清预览，格式/画幅/时长及
 
 真实咖啡项目先把 SH-001 源窗口滑移到 `42..451ms`。悬停 SH-002 → SH-001 切点把手后，1280×720 主监看完整显示前镜末帧 `00:04:16` 与后镜首帧 `00:00:01`，两个 9:16 画面保持固有比例，中央切线、“原切点”和 `Esc 取消 · 松开并试听` 状态可见。真实指针左拖 12px 后切点再次精确 `4709→4667ms`，定格监看在松手后清理，动态切点试听立即进入播放。验收修改全部恢复后，API 草稿为 `row_version=176 / playhead_ms=0`，主画面仍为 `0..4709 / 4709..5118 / 5118..15000ms`且真实画面转场均为 `cut:0`；页面日志为空。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
 
+定格区新增 `BoundaryActionComparison`，作为并排、叠加对齐和动作帧带后的第四种模式。它以切前/切后配置及两侧可用源区间的最小值计算 `comparisonDurationMs`，让前镜尾部和后镜开头共享 `boundaryPreviewRate` 同时播放；两路不循环、不拉伸、不独立补速。RAF 分别读取真实 `currentTime`，先到终点的一路立即 pause 并精确冻结，双路完成后才显示重播；同步暂停、重播和归位均不改主播放头。启动前停止主时间线、循环、巡检与待启动复检，`playing/items/mode` 变化和组件卸载都会清理或暂停媒体。整个会话只存在于页面状态，不新增 Timeline、EditorDraftSession、撤销历史、迁移或 FFmpeg 合同。
+
+真实项目 `project_9cd1c4e1fe5c4c8e88466acef2913e72` 的 SH-002 → SH-001 边界使用切前/切后各 1 秒，但 SH-001 只有 `0..409ms`，扣除 42ms 输出帧后共同窗口正确为 `367ms`；界面显示前镜 `00:04:07–00:04:16`、后镜 `00:00:00–00:00:08`。1× 完成后两路精确冻结在 `4.667s / 0.367s` 且均 `paused=true / playbackRate=1`；0.5× 重播时两路均为 `paused=false / playbackRate=0.5`，媒体 `readyState=4`。运行中点击主播放会卸载两路比较媒体并由主时间线接管。1280×720 页面宽高均无溢出、页面日志为空；最终 API 草稿 `row_version=179 / playhead_ms=0`，主画面保持 `0..4709 / 4709..5118 / 5118..15000ms`，证明同步模式未修改 TimelineItem。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过。
+
 提交 `5857bf51` 推送到 `main` 后使用标准脚本重启 8766：API PID `26180`、Worker PID `23280`，两个进程创建时间均为 2026-08-09 00:15:29。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。
 
 提交 `1db36ab1` 推送到 `main` 后使用标准脚本重启 8766：API PID `42312`、Worker PID `12188`，两个进程创建时间均为 2026-08-09 00:37:57。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。

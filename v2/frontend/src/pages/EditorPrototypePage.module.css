@@ -980,7 +980,7 @@
 }
 .boundaryFrame code { color: #8f999d; }
 .boundaryFrameModes { display: grid; gap: 5px; }
-.boundaryFrameModes > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.boundaryFrameModes > div { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .boundaryControl .boundaryFrameModes button {
   height: 26px;
   border-color: #41494d;
@@ -1002,6 +1002,59 @@
 }
 .boundaryFrameModes input { min-width: 0; accent-color: #6d9b88; }
 .boundaryFrameModes code { color: #c4ceca; text-align: right; }
+.boundaryActionComparison {
+  min-width: 0;
+  padding: 7px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid #41534e;
+  border-radius: 5px;
+  background: #202a27;
+}
+.boundaryActionComparison > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.boundaryActionComparison > header span { min-width: 0; display: grid; gap: 2px; }
+.boundaryActionComparison > header strong { color: #d8e5df; }
+.boundaryActionComparison > header small { color: #82928c; }
+.boundaryActionComparison > header code { color: #a9c7ba; white-space: nowrap; }
+.boundaryActionComparison > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+.boundaryActionComparison figure {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid #3c4945;
+  border-radius: 4px;
+  background: #090c0b;
+}
+.boundaryActionComparison video {
+  width: 100%;
+  height: 96px;
+  display: block;
+  object-fit: contain;
+  background: #050606;
+}
+.boundaryActionComparison figcaption {
+  min-width: 0;
+  padding: 5px 6px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 5px;
+}
+.boundaryActionComparison figcaption strong { overflow: hidden; color: #dbe4e0; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryActionComparison figcaption span { overflow: hidden; color: #87958f; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryActionComparison figcaption code { grid-column: 1 / -1; color: #a9bbb3; }
+.boundaryActionComparison > footer { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.boundaryControl .boundaryActionComparison > footer button { height: 28px; }
+.boundaryActionComparison > small { color: #81908a; line-height: 1.45; }
 .boundaryFrameStrip {
   min-width: 0;
   display: grid;

@@ -465,6 +465,169 @@ function BoundaryRollTrimMonitor({
   </section>
 }
 
+function BoundaryActionComparison({
+  projectId,
+  left,
+  right,
+  beforeMs,
+  afterMs,
+  rate,
+  frameStepMs,
+  fps,
+  onBeforePlay,
+  onNotice,
+}: {
+  projectId: string
+  left: TimelineItem
+  right: TimelineItem
+  beforeMs: number
+  afterMs: number
+  rate: number
+  frameStepMs: number
+  fps: number
+  onBeforePlay: () => void
+  onNotice: (message: string) => void
+}) {
+  const leftRef = useRef<HTMLVideoElement | null>(null)
+  const rightRef = useRef<HTMLVideoElement | null>(null)
+  const animationRef = useRef<number | null>(null)
+  const [playing, setComparisonPlaying] = useState(false)
+  const [progressMs, setProgressMs] = useState(0)
+  const leftSourceInMs = left.source_in_ms ?? 0
+  const leftSourceOutMs = left.source_out_ms ?? leftSourceInMs
+  const rightSourceInMs = right.source_in_ms ?? 0
+  const rightSourceOutMs = right.source_out_ms ?? rightSourceInMs
+  const leftEndMs = Math.max(leftSourceInMs, leftSourceOutMs - frameStepMs)
+  const rightMaximumEndMs = Math.max(rightSourceInMs, rightSourceOutMs - frameStepMs)
+  const comparisonDurationMs = Math.max(0, Math.min(
+    beforeMs,
+    afterMs,
+    leftEndMs - leftSourceInMs,
+    rightMaximumEndMs - rightSourceInMs,
+  ))
+  const leftStartMs = leftEndMs - comparisonDurationMs
+  const rightStartMs = rightSourceInMs
+  const rightEndMs = rightStartMs + comparisonDurationMs
+
+  const positionMedia = useCallback(() => {
+    if (leftRef.current && Number.isFinite(leftRef.current.duration)) leftRef.current.currentTime = leftStartMs / 1000
+    if (rightRef.current && Number.isFinite(rightRef.current.duration)) rightRef.current.currentTime = rightStartMs / 1000
+    setProgressMs(0)
+  }, [leftStartMs, rightStartMs])
+
+  const pauseMedia = useCallback(() => {
+    leftRef.current?.pause()
+    rightRef.current?.pause()
+    setComparisonPlaying(false)
+  }, [])
+
+  useEffect(() => {
+    pauseMedia()
+    positionMedia()
+  }, [left.id, leftStartMs, pauseMedia, positionMedia, right.id, rightStartMs])
+
+  useEffect(() => {
+    if (leftRef.current) leftRef.current.playbackRate = rate
+    if (rightRef.current) rightRef.current.playbackRate = rate
+  }, [rate])
+
+  useEffect(() => {
+    if (!playing) return
+    const tick = () => {
+      const leftVideo = leftRef.current
+      const rightVideo = rightRef.current
+      if (!leftVideo || !rightVideo) return
+      const leftProgress = Math.max(0, leftVideo.currentTime * 1000 - leftStartMs)
+      const rightProgress = Math.max(0, rightVideo.currentTime * 1000 - rightStartMs)
+      const nextProgress = Math.min(comparisonDurationMs, Math.max(leftProgress, rightProgress))
+      setProgressMs(nextProgress)
+      const leftDone = leftVideo.currentTime * 1000 >= leftEndMs - 4
+      const rightDone = rightVideo.currentTime * 1000 >= rightEndMs - 4
+      if (leftDone) {
+        leftVideo.pause()
+        leftVideo.currentTime = leftEndMs / 1000
+      }
+      if (rightDone) {
+        rightVideo.pause()
+        rightVideo.currentTime = rightEndMs / 1000
+      }
+      if (leftDone && rightDone) {
+        setProgressMs(comparisonDurationMs)
+        setComparisonPlaying(false)
+        onNotice(`${left.label} 与 ${right.label} 的同步动作对比已完成；可重播或调整切点。`)
+        return
+      }
+      animationRef.current = window.requestAnimationFrame(tick)
+    }
+    animationRef.current = window.requestAnimationFrame(tick)
+    return () => {
+      if (animationRef.current != null) window.cancelAnimationFrame(animationRef.current)
+      animationRef.current = null
+    }
+  }, [comparisonDurationMs, left.label, leftEndMs, leftStartMs, onNotice, playing, right.label, rightEndMs, rightStartMs])
+
+  useEffect(() => () => {
+    leftRef.current?.pause()
+    rightRef.current?.pause()
+  }, [])
+
+  const startComparison = async () => {
+    if (comparisonDurationMs <= 0) return
+    onBeforePlay()
+    positionMedia()
+    const leftVideo = leftRef.current
+    const rightVideo = rightRef.current
+    if (!leftVideo || !rightVideo) return
+    leftVideo.playbackRate = rate
+    rightVideo.playbackRate = rate
+    setComparisonPlaying(true)
+    const results = await Promise.allSettled([leftVideo.play(), rightVideo.play()])
+    const unexpected = results.find(result => result.status === 'rejected' && !isMediaPlaybackInterruption(result.reason))
+    if (unexpected?.status === 'rejected') {
+      pauseMedia()
+      onNotice('浏览器没有允许同步动作对比播放，请再点击一次。')
+    }
+  }
+
+  return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
+    <header>
+      <span><strong>同步动作</strong><small>共同窗口 {previewSeconds(comparisonDurationMs)} · {rate}×</small></span>
+      <code>{timecode(progressMs, fps)} / {timecode(comparisonDurationMs, fps)}</code>
+    </header>
+    <div>
+      <figure>
+        <video
+          ref={leftRef}
+          aria-label={`${left.label} 切前动作窗口`}
+          muted
+          playsInline
+          preload="auto"
+          src={`/api/v1/projects/${projectId}/assets/${left.asset_id}/content`}
+          onLoadedMetadata={event => { event.currentTarget.currentTime = leftStartMs / 1000; event.currentTarget.playbackRate = rate }}
+        />
+        <figcaption><strong>{left.label}</strong><span>切前动作</span><code>{timecode(leftStartMs, fps)}–{timecode(leftEndMs, fps)}</code></figcaption>
+      </figure>
+      <figure>
+        <video
+          ref={rightRef}
+          aria-label={`${right.label} 切后动作窗口`}
+          muted
+          playsInline
+          preload="auto"
+          src={`/api/v1/projects/${projectId}/assets/${right.asset_id}/content`}
+          onLoadedMetadata={event => { event.currentTarget.currentTime = rightStartMs / 1000; event.currentTarget.playbackRate = rate }}
+        />
+        <figcaption><strong>{right.label}</strong><span>切后动作</span><code>{timecode(rightStartMs, fps)}–{timecode(rightEndMs, fps)}</code></figcaption>
+      </figure>
+    </div>
+    <footer>
+      <button disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? <Pause /> : <Play />}{playing ? '暂停' : progressMs > 0 ? '重播' : '同步播放'}</button>
+      <button onClick={() => { pauseMedia(); positionMedia() }}><RotateCcw />回到窗口开头</button>
+    </footer>
+    <small>两镜用相同窗口和速度同时前进；用于比较动作方向和节奏，不代替真实顺序切点试听。</small>
+  </section>
+}
+
 function srtTimestampMs(value: string) {
   const match = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/.exec(value.trim())
   if (!match) return null
@@ -613,6 +776,7 @@ export function EditorPrototypePage() {
   const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
   const [boundaryFrameStripKey, setBoundaryFrameStripKey] = useState<string | null>(null)
+  const [boundaryActionComparisonKey, setBoundaryActionComparisonKey] = useState<string | null>(null)
   const [pendingBoundaryPreviewKey, setPendingBoundaryPreviewKey] = useState<string | null>(null)
   const [boundaryRollMonitor, setBoundaryRollMonitor] = useState<{
     boundaryKey: string
@@ -701,6 +865,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
+    setBoundaryActionComparisonKey(null)
     setPendingBoundaryPreviewKey(null)
     setBoundaryRollMonitor(null)
     setBoundaryFrameBlendPercent(50)
@@ -961,6 +1126,14 @@ export function EditorPrototypePage() {
     const currentIndex = items.findIndex(item => item.track_type === 'main_video' && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms)
     if (playing && currentIndex >= 0 && currentIndex !== selectedIndex) setSelectedIndex(currentIndex)
   }, [playheadMs, items, playing, selectedIndex])
+
+  useEffect(() => {
+    setBoundaryActionComparisonKey(null)
+  }, [items])
+
+  useEffect(() => {
+    if (playing) setBoundaryActionComparisonKey(null)
+  }, [playing])
 
   useEffect(() => {
     advancingPlaybackRef.current = false
@@ -1383,6 +1556,7 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
     setPendingBoundaryPreviewKey(null)
+    setBoundaryActionComparisonKey(null)
   }
 
   const focusBoundaryAt = (targetIndex: number) => {
@@ -1725,6 +1899,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameComparisonKey(null)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
+    setBoundaryActionComparisonKey(null)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
     setPendingBoundaryPreviewKey(null)
@@ -3711,6 +3886,7 @@ export function EditorPrototypePage() {
                  const framesOpen = boundaryFrameComparisonKey === boundaryKey
                  const overlayFrames = boundaryFrameOverlayKey === boundaryKey
                  const stripFrames = boundaryFrameStripKey === boundaryKey
+                 const actionComparison = boundaryActionComparisonKey === boundaryKey
                  const leftSourceInMs = left.source_in_ms ?? 0
                  const leftSourceOutMs = left.source_out_ms ?? leftSourceInMs
                  const rightSourceInMs = right.source_in_ms ?? 0
@@ -3914,23 +4090,34 @@ export function EditorPrototypePage() {
                     disabled={!left.asset_id || !right.asset_id}
                     aria-expanded={framesOpen}
                     aria-label={`${left.label} 到 ${right.label} ${framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}`}
-                    onClick={() => setBoundaryFrameComparisonKey(value => value === boundaryKey ? null : boundaryKey)}
+                    onClick={() => {
+                      setBoundaryFrameComparisonKey(value => value === boundaryKey ? null : boundaryKey)
+                      if (framesOpen) setBoundaryActionComparisonKey(null)
+                    }}
                   ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button>
                     {framesOpen && left.asset_id && right.asset_id && <>
                      <div className={styles.boundaryFrameModes}>
                        <div>
-                         <button aria-pressed={!overlayFrames && !stripFrames} onClick={() => {
+                         <button aria-pressed={!overlayFrames && !stripFrames && !actionComparison} onClick={() => {
                            setBoundaryFrameOverlayKey(null)
                            setBoundaryFrameStripKey(null)
+                           setBoundaryActionComparisonKey(null)
                          }}>并排</button>
                          <button aria-pressed={overlayFrames} onClick={() => {
                            setBoundaryFrameOverlayKey(boundaryKey)
                            setBoundaryFrameStripKey(null)
+                           setBoundaryActionComparisonKey(null)
                          }}>叠加对齐</button>
                          <button aria-pressed={stripFrames} onClick={() => {
                            setBoundaryFrameOverlayKey(null)
                            setBoundaryFrameStripKey(boundaryKey)
+                           setBoundaryActionComparisonKey(null)
                          }}>动作帧带</button>
+                         <button aria-pressed={actionComparison} onClick={() => {
+                           setBoundaryFrameOverlayKey(null)
+                           setBoundaryFrameStripKey(null)
+                           setBoundaryActionComparisonKey(boundaryKey)
+                         }}>同步动作</button>
                        </div>
                        {overlayFrames && <label>首帧透明度
                          <input
@@ -3984,6 +4171,29 @@ export function EditorPrototypePage() {
                          </section>)}
                          <small>点击画面只定位主监看；“设为末帧 / 首帧”会形成一次可撤销操作，并自动播放调整后的切点窗口。</small>
                        </div>
+                       : actionComparison
+                       ? <BoundaryActionComparison
+                         projectId={projectId}
+                         left={left}
+                         right={right}
+                         beforeMs={boundaryPreviewBeforeMs}
+                         afterMs={boundaryPreviewAfterMs}
+                         rate={boundaryPreviewRate}
+                         frameStepMs={frameStepMs}
+                         fps={outputFps}
+                         onBeforePlay={() => {
+                           videoRef.current?.pause()
+                           advancingPlaybackRef.current = true
+                           setPlaying(false)
+                           setBoundaryPreviewEndMs(null)
+                           setBoundaryPreviewLoop(null)
+                           setBoundaryReviewSession(null)
+                           setPendingBoundaryPreviewKey(null)
+                           setPendingBoundaryReview(null)
+                           setNotice(`正在以 ${boundaryPreviewRate}× 同步对比 ${left.label} 切前动作与 ${right.label} 切后动作。`)
+                         }}
+                         onNotice={setNotice}
+                       />
                        : overlayFrames
                        ? <BoundaryFrameOverlay
                          projectId={projectId}
