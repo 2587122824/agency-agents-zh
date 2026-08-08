@@ -331,6 +331,10 @@ v6 随后从界面生成 360×640、24fps 低清预览，格式/画幅/时长及
 
 真实咖啡 SH-002 → SH-001 在 A 原相位、1×、切前/切后各 1 秒时，开始后前镜真实 `currentTime=4.080148s / paused=false / visible=true`；跨切点后前镜精确冻结 `4.708333s` 并隐藏，后镜从 `0s` 起播，采样时为 `0.23656s / paused=false / visible=true`，最终明确提示原相位顺序试播完成。后镜本地 `+1帧` 后，隐藏舞台预定位精确为 `0.042s`；B 顺序试播跨切点后后镜为 `0.33113s` 并完成当前试调提示。启动并排同步会暂停两路顺序媒体并隐藏舞台，切到 A 同样暂停、隐藏并把后镜恢复到 `0s`。锁轨时舞台仍真实播放，后镜应用 disabled。1280×720 的 html/body 均为视口尺寸；最终清除、解锁，API 草稿为 `row_version=194 / playhead_ms=0` 且片段区间保持 `0..4709 / 4709..5118 / 5118..15000ms`。完整 API `125 passed`、Python compileall、Vite 生产构建和差异格式检查通过；Vite 仅有既有大 chunk 警告。
 
+同步动作比较新增一键 A→B 连续对照。独立的 baseline/tuned 阶段机复用当前顺序舞台：A 原相位完整播放前镜再切后镜，A 后镜结束后自动把视图切到 B、按保留 delta 重新定位并完整播放 B；舞台和按钮分别显示 `1/2`、`2/2`，B 完成后停留在当前试调。会话启动、取消和阶段切换均由同步 ref 与启动 token 门禁，手动 A/B、继续试调、清除、同步播放、普通顺序播放或条目变化会立即失效迟到回调，不会在用户停止后续播。该静音比较不写草稿/撤销，不新增 API、TimelineItem、迁移、FFmpeg 或旧版兼容分支。
+
+真实咖啡 SH-002 → SH-001 后镜本地 `+1帧` 后，一键对照从“A 原相位 · 1/2”完整跨切点，自动进入“B 当前试调 · 2/2”，最终停在 B 后镜与 `00:01:09 / 00:01:09`，应用后镜相位可用。A 播放中手动切 B 或启动同步播放都立即退出整组状态；点击“停止 A（1/2）”后等待 3.2 秒仍保持 A，没有迟到回调续播 B。1280×720 下页面 `scrollWidth=1280 / scrollHeight=720`；清除本地试调后服务端草稿保持 `row_version=195 / playhead_ms=0` 且画面内容不变。完整后端 `305 passed`、Python compileall、Vite 生产构建和 `git diff --check` 通过；Vite 仅有既有大 chunk 警告。
+
 提交 `5857bf51` 推送到 `main` 后使用标准脚本重启 8766：API PID `26180`、Worker PID `23280`，两个进程创建时间均为 2026-08-09 00:15:29。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。
 
 提交 `1db36ab1` 推送到 `main` 后使用标准脚本重启 8766：API PID `42312`、Worker PID `12188`，两个进程创建时间均为 2026-08-09 00:37:57。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。

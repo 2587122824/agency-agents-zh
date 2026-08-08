@@ -503,6 +503,8 @@ function BoundaryActionComparison({
   const sequenceRightRef = useRef<HTMLVideoElement | null>(null)
   const sequenceAnimationRef = useRef<number | null>(null)
   const sequenceSideRef = useRef<'left' | 'right'>('left')
+  const phaseSequenceCompareStageRef = useRef<'idle' | 'baseline' | 'tuned'>('idle')
+  const phaseSequenceStartTokenRef = useRef(0)
   const [playing, setComparisonPlaying] = useState(false)
   const [progressMs, setProgressMs] = useState(0)
   const [sequencePlaying, setSequencePlaying] = useState(false)
@@ -510,6 +512,7 @@ function BoundaryActionComparison({
   const [sequenceProgressMs, setSequenceProgressMs] = useState(0)
   const [sequenceLeftReady, setSequenceLeftReady] = useState(false)
   const [sequenceRightReady, setSequenceRightReady] = useState(false)
+  const [phaseSequenceCompareStage, setPhaseSequenceCompareStage] = useState<'idle' | 'baseline' | 'tuned'>('idle')
   const [leftPhaseDeltaMs, setLeftPhaseDeltaMs] = useState(0)
   const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
@@ -547,7 +550,7 @@ function BoundaryActionComparison({
   const sequenceLeftDurationMs = Math.max(0, sequenceLeftEndMs - sequenceLeftStartMs)
   const sequenceRightDurationMs = Math.max(0, sequenceRightEndMs - sequenceRightStartMs)
   const sequenceDurationMs = sequenceLeftDurationMs + sequenceRightDurationMs
-  const sequenceVisible = sequencePlaying || sequenceProgressMs > 0
+  const sequenceVisible = sequencePlaying || sequenceProgressMs > 0 || phaseSequenceCompareStage !== 'idle'
 
   const positionMedia = useCallback(() => {
     if (leftRef.current && Number.isFinite(leftRef.current.duration)) leftRef.current.currentTime = leftStartMs / 1000
@@ -577,6 +580,13 @@ function BoundaryActionComparison({
     setSequencePlaying(false)
   }, [])
 
+  const cancelPhaseSequenceComparison = useCallback(() => {
+    phaseSequenceStartTokenRef.current += 1
+    phaseSequenceCompareStageRef.current = 'idle'
+    setPhaseSequenceCompareStage('idle')
+    pauseSequenceMedia()
+  }, [pauseSequenceMedia])
+
   useEffect(() => {
     pauseMedia()
     pauseSequenceMedia()
@@ -588,7 +598,8 @@ function BoundaryActionComparison({
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
     setPhaseView('baseline')
-  }, [left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
+    cancelPhaseSequenceComparison()
+  }, [cancelPhaseSequenceComparison, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
 
   useEffect(() => {
     setSequenceLeftReady(false)
@@ -601,6 +612,31 @@ function BoundaryActionComparison({
     if (sequenceLeftRef.current) sequenceLeftRef.current.playbackRate = rate
     if (sequenceRightRef.current) sequenceRightRef.current.playbackRate = rate
   }, [rate])
+
+  useEffect(() => {
+    if (phaseSequenceCompareStage === 'idle') return
+    const expectedView = phaseSequenceCompareStage === 'baseline' ? 'baseline' : 'tuned'
+    if (phaseView !== expectedView || (expectedView === 'tuned' && !hasPhaseTrial)) return
+    const token = phaseSequenceStartTokenRef.current + 1
+    phaseSequenceStartTokenRef.current = token
+    pauseMedia()
+    positionMedia()
+    positionSequenceMedia()
+    const leftVideo = sequenceLeftRef.current
+    const rightVideo = sequenceRightRef.current
+    if (!leftVideo || !rightVideo) return
+    leftVideo.playbackRate = rate
+    rightVideo.playbackRate = rate
+    setSequencePlaying(true)
+    void leftVideo.play().catch(reason => {
+      if (token !== phaseSequenceStartTokenRef.current || isMediaPlaybackInterruption(reason)) return
+      cancelPhaseSequenceComparison()
+      onNotice('浏览器没有允许 A→B 连续对照试播，请再点击一次。')
+    })
+    return () => {
+      if (phaseSequenceStartTokenRef.current === token) phaseSequenceStartTokenRef.current += 1
+    }
+  }, [cancelPhaseSequenceComparison, hasPhaseTrial, onNotice, pauseMedia, phaseSequenceCompareStage, phaseView, positionMedia, positionSequenceMedia, rate])
 
   useEffect(() => {
     if (!playing) return
@@ -667,6 +703,19 @@ function BoundaryActionComparison({
           rightVideo.currentTime = sequenceRightEndMs / 1000
           setSequenceProgressMs(sequenceDurationMs)
           setSequencePlaying(false)
+          if (phaseSequenceCompareStageRef.current === 'baseline') {
+            phaseSequenceCompareStageRef.current = 'tuned'
+            setPhaseSequenceCompareStage('tuned')
+            setPhaseView('tuned')
+            onNotice('A 原相位已播放完成，正在自动切换到 B 当前试调。')
+            return
+          }
+          if (phaseSequenceCompareStageRef.current === 'tuned') {
+            phaseSequenceCompareStageRef.current = 'idle'
+            setPhaseSequenceCompareStage('idle')
+            onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；当前停在 B，可直接应用或继续调整。`)
+            return
+          }
           onNotice(`${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原相位'}顺序试播已完成；可切换 A/B 后重播。`)
           return
         }
@@ -690,7 +739,7 @@ function BoundaryActionComparison({
   const startComparison = async () => {
     if (comparisonDurationMs <= 0) return
     onBeforePlay()
-    pauseSequenceMedia()
+    cancelPhaseSequenceComparison()
     positionSequenceMedia()
     positionMedia()
     const leftVideo = leftRef.current
@@ -710,6 +759,7 @@ function BoundaryActionComparison({
   const startSequencePreview = async () => {
     if (sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady) return
     onBeforePlay()
+    cancelPhaseSequenceComparison()
     onNotice(`正在以 ${rate}× 顺序试播 ${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原相位'}切点。`)
     pauseMedia()
     positionMedia()
@@ -729,10 +779,22 @@ function BoundaryActionComparison({
     }
   }
 
+  const startPhaseSequenceComparison = () => {
+    if (!hasPhaseTrial || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady) return
+    onBeforePlay()
+    pauseMedia()
+    positionMedia()
+    pauseSequenceMedia()
+    phaseSequenceCompareStageRef.current = 'baseline'
+    setPhaseSequenceCompareStage('baseline')
+    setPhaseView('baseline')
+    onNotice(`正在连续对照 ${left.label} → ${right.label}：先播放 A 原相位，再自动播放 B 当前试调。`)
+  }
+
   const adjustPhase = (side: 'left' | 'right', requestedDeltaMs: number) => {
     onBeforePlay()
     pauseMedia()
-    pauseSequenceMedia()
+    cancelPhaseSequenceComparison()
     positionSequenceMedia()
     setPhaseView('tuned')
     if (side === 'left') {
@@ -750,7 +812,7 @@ function BoundaryActionComparison({
   const resetPhase = () => {
     onBeforePlay()
     pauseMedia()
-    pauseSequenceMedia()
+    cancelPhaseSequenceComparison()
     positionSequenceMedia()
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
@@ -762,7 +824,7 @@ function BoundaryActionComparison({
     if (view === 'tuned' && !hasPhaseTrial) return
     onBeforePlay()
     pauseMedia()
-    pauseSequenceMedia()
+    cancelPhaseSequenceComparison()
     positionSequenceMedia()
     setPhaseView(view)
     setProgressMs(0)
@@ -806,7 +868,7 @@ function BoundaryActionComparison({
           setSequenceRightReady(true)
         }}
       />
-      <span><strong>{sequenceSide === 'left' ? left.label : right.label}</strong><small>{sequenceSide === 'left' ? '切前' : '切后'} · {viewingTunedPhase ? 'B 当前试调' : 'A 原相位'}</small><code>{timecode(sequenceProgressMs, fps)} / {timecode(sequenceDurationMs, fps)}</code></span>
+      <span><strong>{sequenceSide === 'left' ? left.label : right.label}</strong><small>{sequenceSide === 'left' ? '切前' : '切后'} · {viewingTunedPhase ? 'B 当前试调' : 'A 原相位'}{phaseSequenceCompareStage !== 'idle' ? ` · ${phaseSequenceCompareStage === 'baseline' ? '1/2' : '2/2'}` : ''}</small><code>{timecode(sequenceProgressMs, fps)} / {timecode(sequenceDurationMs, fps)}</code></span>
     </div>
     <div>
       <figure>
@@ -856,8 +918,9 @@ function BoundaryActionComparison({
     </div>
     <footer>
       <button disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? <Pause /> : <Play />}{playing ? '暂停' : progressMs > 0 ? '重播' : '同步播放'}</button>
-      <button disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying ? <Pause /> : <Play />}{sequencePlaying ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
-      <button onClick={() => { pauseMedia(); pauseSequenceMedia(); positionMedia(); positionSequenceMedia() }}><RotateCcw />回到窗口开头</button>
+      <button disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying && phaseSequenceCompareStage === 'idle' ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying && phaseSequenceCompareStage === 'idle' ? <Pause /> : <Play />}{sequencePlaying && phaseSequenceCompareStage === 'idle' ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
+      <button disabled={!hasPhaseTrial || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} title={hasPhaseTrial ? '先播放 A 原相位，再自动播放 B 当前试调；全程静音且不写入草稿。' : '先调整前镜或后镜相位，再进行连续对照。'} onClick={phaseSequenceCompareStage !== 'idle' ? cancelPhaseSequenceComparison : startPhaseSequenceComparison}>{phaseSequenceCompareStage !== 'idle' ? <Pause /> : <Play />}{phaseSequenceCompareStage === 'baseline' ? '停止 A（1/2）' : phaseSequenceCompareStage === 'tuned' ? '停止 B（2/2）' : 'A→B 连续对照'}</button>
+      <button onClick={() => { pauseMedia(); cancelPhaseSequenceComparison(); positionMedia(); positionSequenceMedia() }}><RotateCcw />回到窗口开头</button>
       <button disabled={!hasPhaseTrial} onClick={resetPhase}><RotateCcw />清除相位试调</button>
       <button
         disabled={editLocked || leftPhaseDeltaMs === 0 || rightPhaseDeltaMs === 0 || !viewingTunedPhase}
@@ -871,7 +934,7 @@ function BoundaryActionComparison({
         onClick={() => onApplyPhasePair(leftPhaseDeltaMs, rightPhaseDeltaMs)}
       >应用双方相位</button>
     </footer>
-    <small>同步播放用于并排看动作阶段；顺序试播会在同一画面区静音播放前镜再切后镜，更接近真实切点节奏。试调后可在 A 原相位与 B 当前试调之间反复对照，切回 A 不会丢失试调值；只有正在查看 B 时才能应用。锁轨时仍可试播，但不能应用。</small>
+    <small>同步播放用于并排看动作阶段；顺序试播会在同一画面区静音播放前镜再切后镜，更接近真实切点节奏。一键 A→B 会先播原相位，再自动播当前试调，结束后停在 B；它不写草稿，也不包含音频、字幕和转场。切回 A 不会丢失试调值；只有正在查看 B 时才能应用。锁轨时仍可试播，但不能应用。</small>
   </section>
 }
 
