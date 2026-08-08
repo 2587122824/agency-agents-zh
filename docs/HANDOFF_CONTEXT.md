@@ -45,6 +45,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 
 提交 `5857bf51` 发布时间线切点直接拖动滚动剪辑后，标准脚本重启为 API `26180`、Worker `23280`，两个进程创建时间均为 2026-08-09 00:15:29。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
 
+提交 `1db36ab1` 发布滚动剪辑双画面修剪监看后，标准脚本重启为 API `42312`、Worker `12188`，两个进程创建时间均为 2026-08-09 00:37:57。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，Worker 两份日志为空，标准四份日志均无实际错误。
+
 启动或重启：
 
 ```powershell
