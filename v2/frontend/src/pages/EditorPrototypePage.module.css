@@ -1021,6 +1021,21 @@
 .boundaryActionComparison > header strong { color: #d8e5df; }
 .boundaryActionComparison > header small { color: #82928c; }
 .boundaryActionComparison > header code { color: #a9c7ba; white-space: nowrap; }
+.boundaryPhaseViewSwitch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+  padding: 5px;
+  border: 1px solid #2a3531;
+  border-radius: 5px;
+  background: #101513;
+}
+.boundaryControl .boundaryPhaseViewSwitch button { height: 26px; }
+.boundaryControl .boundaryPhaseViewSwitch button[aria-pressed="true"] {
+  border-color: #5c8b77;
+  background: #29483c;
+  color: #e0f0e9;
+}
 .boundaryActionComparison > div {
   min-width: 0;
   display: grid;

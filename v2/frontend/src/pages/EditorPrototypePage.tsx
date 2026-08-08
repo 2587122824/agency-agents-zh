@@ -503,6 +503,7 @@ function BoundaryActionComparison({
   const [progressMs, setProgressMs] = useState(0)
   const [leftPhaseDeltaMs, setLeftPhaseDeltaMs] = useState(0)
   const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
+  const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
   const leftBaseSourceInMs = left.source_in_ms ?? 0
   const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
   const rightBaseSourceInMs = right.source_in_ms ?? 0
@@ -511,10 +512,14 @@ function BoundaryActionComparison({
   const leftMaximumPhaseMs = Math.max(0, (left.asset_duration_ms ?? leftBaseSourceOutMs) - leftBaseSourceOutMs)
   const rightMinimumPhaseMs = -rightBaseSourceInMs
   const rightMaximumPhaseMs = Math.max(0, (right.asset_duration_ms ?? rightBaseSourceOutMs) - rightBaseSourceOutMs)
-  const leftSourceInMs = leftBaseSourceInMs + leftPhaseDeltaMs
-  const leftSourceOutMs = leftBaseSourceOutMs + leftPhaseDeltaMs
-  const rightSourceInMs = rightBaseSourceInMs + rightPhaseDeltaMs
-  const rightSourceOutMs = rightBaseSourceOutMs + rightPhaseDeltaMs
+  const hasPhaseTrial = leftPhaseDeltaMs !== 0 || rightPhaseDeltaMs !== 0
+  const viewingTunedPhase = phaseView === 'tuned' && hasPhaseTrial
+  const leftActivePhaseDeltaMs = viewingTunedPhase ? leftPhaseDeltaMs : 0
+  const rightActivePhaseDeltaMs = viewingTunedPhase ? rightPhaseDeltaMs : 0
+  const leftSourceInMs = leftBaseSourceInMs + leftActivePhaseDeltaMs
+  const leftSourceOutMs = leftBaseSourceOutMs + leftActivePhaseDeltaMs
+  const rightSourceInMs = rightBaseSourceInMs + rightActivePhaseDeltaMs
+  const rightSourceOutMs = rightBaseSourceOutMs + rightActivePhaseDeltaMs
   const leftEndMs = Math.max(leftSourceInMs, leftSourceOutMs - frameStepMs)
   const rightMaximumEndMs = Math.max(rightSourceInMs, rightSourceOutMs - frameStepMs)
   const comparisonDurationMs = Math.max(0, Math.min(
@@ -547,6 +552,7 @@ function BoundaryActionComparison({
   useEffect(() => {
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
+    setPhaseView('baseline')
   }, [left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
 
   useEffect(() => {
@@ -577,7 +583,7 @@ function BoundaryActionComparison({
       if (leftDone && rightDone) {
         setProgressMs(comparisonDurationMs)
         setComparisonPlaying(false)
-        onNotice(`${left.label} 与 ${right.label} 的同步动作对比已完成；可重播或调整切点。`)
+        onNotice(`${left.label} 与 ${right.label} 的${viewingTunedPhase ? '当前试调' : '原相位'}同步动作对比已完成；可重播或继续 A/B 对照。`)
         return
       }
       animationRef.current = window.requestAnimationFrame(tick)
@@ -587,7 +593,7 @@ function BoundaryActionComparison({
       if (animationRef.current != null) window.cancelAnimationFrame(animationRef.current)
       animationRef.current = null
     }
-  }, [comparisonDurationMs, left.label, leftEndMs, leftStartMs, onNotice, playing, right.label, rightEndMs, rightStartMs])
+  }, [comparisonDurationMs, left.label, leftEndMs, leftStartMs, onNotice, playing, right.label, rightEndMs, rightStartMs, viewingTunedPhase])
 
   useEffect(() => () => {
     leftRef.current?.pause()
@@ -615,6 +621,7 @@ function BoundaryActionComparison({
   const adjustPhase = (side: 'left' | 'right', requestedDeltaMs: number) => {
     onBeforePlay()
     pauseMedia()
+    setPhaseView('tuned')
     if (side === 'left') {
       setLeftPhaseDeltaMs(value => Math.max(leftMinimumPhaseMs, Math.min(leftMaximumPhaseMs, value + requestedDeltaMs)))
     } else {
@@ -632,14 +639,27 @@ function BoundaryActionComparison({
     pauseMedia()
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
+    setPhaseView('baseline')
+    setProgressMs(0)
+  }
+
+  const showPhaseView = (view: 'baseline' | 'tuned') => {
+    if (view === 'tuned' && !hasPhaseTrial) return
+    onBeforePlay()
+    pauseMedia()
+    setPhaseView(view)
     setProgressMs(0)
   }
 
   return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
     <header>
-      <span><strong>同步动作</strong><small>共同窗口 {previewSeconds(comparisonDurationMs)} · {rate}×</small></span>
+      <span><strong>同步动作</strong><small>{viewingTunedPhase ? 'B 当前试调' : 'A 原相位'} · 共同窗口 {previewSeconds(comparisonDurationMs)} · {rate}×</small></span>
       <code>{timecode(progressMs, fps)} / {timecode(comparisonDurationMs, fps)}</code>
     </header>
+    <div className={styles.boundaryPhaseViewSwitch} role="group" aria-label="同步动作相位 A/B 对照">
+      <button aria-pressed={!viewingTunedPhase} onClick={() => showPhaseView('baseline')}>A 原相位</button>
+      <button aria-pressed={viewingTunedPhase} disabled={!hasPhaseTrial} title={hasPhaseTrial ? '查看当前保留的相位试调' : '先调整前镜或后镜相位'} onClick={() => showPhaseView('tuned')}>B 当前试调</button>
+    </div>
     <div>
       <figure>
         <video
@@ -653,14 +673,14 @@ function BoundaryActionComparison({
         />
         <figcaption><strong>{left.label}</strong><span>切前动作</span><code>{timecode(leftStartMs, fps)}–{timecode(leftEndMs, fps)}</code></figcaption>
         <div className={styles.boundaryActionPhase}>
-          <span><b>前镜相位</b><code>{phaseLabel(leftPhaseDeltaMs)}</code></span>
+          <span><b>前镜相位</b><code>{phaseLabel(leftActivePhaseDeltaMs)}</code></span>
           <div>
             <button aria-label={`${left.label} 同步动作相位前移 1 秒`} disabled={leftPhaseDeltaMs <= leftMinimumPhaseMs} onClick={() => adjustPhase('left', -1000)}>−1s</button>
             <button aria-label={`${left.label} 同步动作相位前移 1 帧`} disabled={leftPhaseDeltaMs <= leftMinimumPhaseMs} onClick={() => adjustPhase('left', -frameStepMs)}>−1帧</button>
             <button aria-label={`${left.label} 同步动作相位后移 1 帧`} disabled={leftPhaseDeltaMs >= leftMaximumPhaseMs} onClick={() => adjustPhase('left', frameStepMs)}>+1帧</button>
             <button aria-label={`${left.label} 同步动作相位后移 1 秒`} disabled={leftPhaseDeltaMs >= leftMaximumPhaseMs} onClick={() => adjustPhase('left', 1000)}>+1s</button>
           </div>
-          <button disabled={editLocked || leftPhaseDeltaMs === 0} title={editLocked ? '画面轨已锁定，只能试调，不能应用。' : '把当前试调写入前镜源窗口'} onClick={() => onApplyLeftPhase(leftPhaseDeltaMs)}>应用前镜相位</button>
+          <button disabled={editLocked || leftPhaseDeltaMs === 0 || !viewingTunedPhase} title={editLocked ? '画面轨已锁定，只能试调，不能应用。' : !viewingTunedPhase && leftPhaseDeltaMs !== 0 ? '请先返回 B 当前试调，确认正在看到要应用的相位。' : '把当前试调写入前镜源窗口'} onClick={() => onApplyLeftPhase(leftPhaseDeltaMs)}>应用前镜相位</button>
         </div>
       </figure>
       <figure>
@@ -675,32 +695,34 @@ function BoundaryActionComparison({
         />
         <figcaption><strong>{right.label}</strong><span>切后动作</span><code>{timecode(rightStartMs, fps)}–{timecode(rightEndMs, fps)}</code></figcaption>
         <div className={styles.boundaryActionPhase}>
-          <span><b>后镜相位</b><code>{phaseLabel(rightPhaseDeltaMs)}</code></span>
+          <span><b>后镜相位</b><code>{phaseLabel(rightActivePhaseDeltaMs)}</code></span>
           <div>
             <button aria-label={`${right.label} 同步动作相位前移 1 秒`} disabled={rightPhaseDeltaMs <= rightMinimumPhaseMs} onClick={() => adjustPhase('right', -1000)}>−1s</button>
             <button aria-label={`${right.label} 同步动作相位前移 1 帧`} disabled={rightPhaseDeltaMs <= rightMinimumPhaseMs} onClick={() => adjustPhase('right', -frameStepMs)}>−1帧</button>
             <button aria-label={`${right.label} 同步动作相位后移 1 帧`} disabled={rightPhaseDeltaMs >= rightMaximumPhaseMs} onClick={() => adjustPhase('right', frameStepMs)}>+1帧</button>
             <button aria-label={`${right.label} 同步动作相位后移 1 秒`} disabled={rightPhaseDeltaMs >= rightMaximumPhaseMs} onClick={() => adjustPhase('right', 1000)}>+1s</button>
           </div>
-          <button disabled={editLocked || rightPhaseDeltaMs === 0} title={editLocked ? '画面轨已锁定，只能试调，不能应用。' : '把当前试调写入后镜源窗口'} onClick={() => onApplyRightPhase(rightPhaseDeltaMs)}>应用后镜相位</button>
+          <button disabled={editLocked || rightPhaseDeltaMs === 0 || !viewingTunedPhase} title={editLocked ? '画面轨已锁定，只能试调，不能应用。' : !viewingTunedPhase && rightPhaseDeltaMs !== 0 ? '请先返回 B 当前试调，确认正在看到要应用的相位。' : '把当前试调写入后镜源窗口'} onClick={() => onApplyRightPhase(rightPhaseDeltaMs)}>应用后镜相位</button>
         </div>
       </figure>
     </div>
     <footer>
       <button disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? <Pause /> : <Play />}{playing ? '暂停' : progressMs > 0 ? '重播' : '同步播放'}</button>
       <button onClick={() => { pauseMedia(); positionMedia() }}><RotateCcw />回到窗口开头</button>
-      <button disabled={leftPhaseDeltaMs === 0 && rightPhaseDeltaMs === 0} onClick={resetPhase}><RotateCcw />清除相位试调</button>
+      <button disabled={!hasPhaseTrial} onClick={resetPhase}><RotateCcw />清除相位试调</button>
       <button
-        disabled={editLocked || leftPhaseDeltaMs === 0 || rightPhaseDeltaMs === 0}
+        disabled={editLocked || leftPhaseDeltaMs === 0 || rightPhaseDeltaMs === 0 || !viewingTunedPhase}
         title={editLocked
           ? '画面轨已锁定，只能试调，不能应用。'
+          : !viewingTunedPhase && leftPhaseDeltaMs !== 0 && rightPhaseDeltaMs !== 0
+          ? '请先返回 B 当前试调，确认正在看到要应用的双方相位。'
           : leftPhaseDeltaMs === 0 || rightPhaseDeltaMs === 0
           ? '前镜和后镜都产生相位试调后，才能作为一组一次应用。'
           : '把双方当前试调作为一个组合写入，并只记录一次撤销'}
         onClick={() => onApplyPhasePair(leftPhaseDeltaMs, rightPhaseDeltaMs)}
       >应用双方相位</button>
     </footer>
-    <small>相位按钮只在同步区试调；可单侧应用，也可把双方试调作为一个组合一次应用。组合应用只形成一个撤销步骤，并自动顺序试听。锁轨时仍可试调，但不能应用。</small>
+    <small>试调后可在 A 原相位与 B 当前试调之间反复对照，切回 A 不会丢失试调值；只有正在查看 B 时才能应用。可单侧应用，也可把双方组合为一个撤销步骤。锁轨时仍可 A/B 试调，但不能应用。</small>
   </section>
 }
 
