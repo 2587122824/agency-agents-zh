@@ -391,6 +391,80 @@ function BoundaryFrameOverlay({
   </div>
 }
 
+function BoundaryRollTrimMonitor({
+  projectId,
+  left,
+  right,
+  leftSourceTimeMs,
+  rightSourceTimeMs,
+  deltaMs,
+  fps,
+}: {
+  projectId: string
+  left: TimelineItem
+  right: TimelineItem
+  leftSourceTimeMs: number
+  rightSourceTimeMs: number
+  deltaMs: number
+  fps: number
+}) {
+  const leftRef = useRef<HTMLVideoElement | null>(null)
+  const rightRef = useRef<HTMLVideoElement | null>(null)
+  const [leftReady, setLeftReady] = useState(false)
+  const [rightReady, setRightReady] = useState(false)
+  const seekFrame = useCallback((video: HTMLVideoElement | null, sourceTimeMs: number) => {
+    if (!video || !Number.isFinite(video.duration)) return
+    video.currentTime = Math.min(Math.max(0, video.duration - .001), Math.max(0, sourceTimeMs / 1000))
+  }, [])
+
+  useEffect(() => {
+    setLeftReady(false)
+    setRightReady(false)
+    seekFrame(leftRef.current, leftSourceTimeMs)
+    seekFrame(rightRef.current, rightSourceTimeMs)
+  }, [leftSourceTimeMs, rightSourceTimeMs, seekFrame])
+
+  const deltaLabel = deltaMs === 0
+    ? '原切点'
+    : `${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)}`
+  return <section
+    className={styles.boundaryRollTrimMonitor}
+    data-ready={leftReady && rightReady}
+    aria-label={`${left.label} 到 ${right.label} 的滚动剪辑双画面监看，${deltaLabel}`}
+  >
+    <header><strong>滚动剪辑监看</strong><code>{deltaLabel}</code><span>Esc 取消 · 松开并试听</span></header>
+    <div>
+      <figure data-ready={leftReady}>
+        <video
+          ref={leftRef}
+          aria-label={`${left.label} 前镜末帧`}
+          muted
+          playsInline
+          preload="auto"
+          src={`/api/v1/projects/${projectId}/assets/${left.asset_id}/content`}
+          onLoadedMetadata={event => seekFrame(event.currentTarget, leftSourceTimeMs)}
+          onSeeked={() => setLeftReady(true)}
+        />
+        <figcaption><strong>{left.label}</strong><span>前镜末帧</span><code>{timecode(leftSourceTimeMs, fps)}</code></figcaption>
+      </figure>
+      <i aria-hidden="true" />
+      <figure data-ready={rightReady}>
+        <video
+          ref={rightRef}
+          aria-label={`${right.label} 后镜首帧`}
+          muted
+          playsInline
+          preload="auto"
+          src={`/api/v1/projects/${projectId}/assets/${right.asset_id}/content`}
+          onLoadedMetadata={event => seekFrame(event.currentTarget, rightSourceTimeMs)}
+          onSeeked={() => setRightReady(true)}
+        />
+        <figcaption><strong>{right.label}</strong><span>后镜首帧</span><code>{timecode(rightSourceTimeMs, fps)}</code></figcaption>
+      </figure>
+    </div>
+  </section>
+}
+
 function srtTimestampMs(value: string) {
   const match = /^(\d{2}):(\d{2}):(\d{2})[,.](\d{3})$/.exec(value.trim())
   if (!match) return null
@@ -540,6 +614,15 @@ export function EditorPrototypePage() {
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
   const [boundaryFrameStripKey, setBoundaryFrameStripKey] = useState<string | null>(null)
   const [pendingBoundaryPreviewKey, setPendingBoundaryPreviewKey] = useState<string | null>(null)
+  const [boundaryRollMonitor, setBoundaryRollMonitor] = useState<{
+    boundaryKey: string
+    active: boolean
+    left: TimelineItem
+    right: TimelineItem
+    leftSourceTimeMs: number
+    rightSourceTimeMs: number
+    deltaMs: number
+  } | null>(null)
   const [pendingBoundaryReview, setPendingBoundaryReview] = useState<{
     keys: string[]
     scope: 'slide' | 'trim'
@@ -619,6 +702,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
     setPendingBoundaryPreviewKey(null)
+    setBoundaryRollMonitor(null)
     setBoundaryFrameBlendPercent(50)
     setBoundaryContinuityChecks({})
     setDirty(false)
@@ -989,7 +1073,7 @@ export function EditorPrototypePage() {
   }, [comparisonItem?.id, comparisonItem?.asset_id, previewCompareMode, previewCompareMs])
 
   useEffect(() => {
-    if (!sourceTimeline || !dirty || !items.length) return
+    if (!sourceTimeline || !dirty || !items.length || boundaryRollMonitor?.active) return
     const draft: LocalEditorDraft = {
       schema_version: LOCAL_DRAFT_SCHEMA,
       base_timeline_id: sourceTimeline.id,
@@ -1000,7 +1084,7 @@ export function EditorPrototypePage() {
       saved_at: new Date().toISOString(),
     }
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
-  }, [dirty, items, localDraftKey, snapEnabled, sourceTimeline, timelineZoom])
+  }, [boundaryRollMonitor, dirty, items, localDraftKey, snapEnabled, sourceTimeline, timelineZoom])
 
   const autoSaveDraft = useMutation({
     mutationFn: async (fingerprint: string) => {
@@ -1025,6 +1109,7 @@ export function EditorPrototypePage() {
       !sourceTimeline
       || !dirty
       || !items.length
+      || boundaryRollMonitor?.active
       || autoSaveDraft.isPending
       || autoSaveFingerprint === lastAutoSavedFingerprint
       || autoSaveFingerprint === lastAutoSaveAttemptFingerprint
@@ -1043,6 +1128,7 @@ export function EditorPrototypePage() {
     timelineZoom,
     autoSaveDraft.isPending,
     autoSaveFingerprint,
+    boundaryRollMonitor,
     lastAutoSaveAttemptFingerprint,
     lastAutoSavedFingerprint,
   ])
@@ -1642,6 +1728,7 @@ export function EditorPrototypePage() {
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
     setPendingBoundaryPreviewKey(null)
+    setBoundaryRollMonitor(null)
     setPendingBoundaryReview(null)
     setBoundaryContinuityChecks({})
   }
@@ -2487,6 +2574,30 @@ export function EditorPrototypePage() {
     }
   }
 
+  const showBoundaryRollMonitor = (
+    left: TimelineItem,
+    right: TimelineItem,
+    result: NonNullable<ReturnType<typeof buildRolledBoundaryItems>>,
+    active: boolean,
+  ) => {
+    const nextLeft = result.nextItems.find(item => item.id === left.id)!
+    const nextRight = result.nextItems.find(item => item.id === right.id)!
+    setBoundaryRollMonitor({
+      boundaryKey: `${left.id}-${right.id}`,
+      active,
+      left: nextLeft,
+      right: nextRight,
+      leftSourceTimeMs: Math.max(nextLeft.source_in_ms!, nextLeft.source_out_ms! - frameStepMs),
+      rightSourceTimeMs: nextRight.source_in_ms!,
+      deltaMs: result.deltaMs,
+    })
+  }
+
+  const previewBoundaryRollMonitor = (left: TimelineItem, right: TimelineItem) => {
+    const result = buildRolledBoundaryItems(items, left, right, 0)
+    if (result) showBoundaryRollMonitor(left, right, result, false)
+  }
+
   const beginBoundaryRoll = (
     event: ReactPointerEvent<HTMLElement>,
     left: TimelineItem,
@@ -2518,6 +2629,8 @@ export function EditorPrototypePage() {
     const startX = event.clientX
     const originalSelectedIndex = selectedIndex
     let latest = initial
+    const updateMonitor = (result: typeof initial) => showBoundaryRollMonitor(left, right, result, true)
+    updateMonitor(initial)
     const onMove = (moveEvent: PointerEvent) => {
       const rawDeltaMs = ((moveEvent.clientX - startX) / timelineZoom) * 1000
       const requestedDeltaMs = snapEnabled
@@ -2526,6 +2639,7 @@ export function EditorPrototypePage() {
       const result = buildRolledBoundaryItems(originalItems, left, right, requestedDeltaMs)
       if (!result) return
       latest = result
+      updateMonitor(result)
       setItems(result.nextItems)
       setPlayheadMs(result.nextBoundaryMs)
       if (result.deltaMs) {
@@ -2537,9 +2651,11 @@ export function EditorPrototypePage() {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onCancel)
+      window.removeEventListener('keydown', onKeyDown)
     }
     const onUp = () => {
       cleanup()
+      setBoundaryRollMonitor(null)
       if (!latest.deltaMs) {
         advancingPlaybackRef.current = false
         setItems(originalItems)
@@ -2563,15 +2679,22 @@ export function EditorPrototypePage() {
     }
     const onCancel = () => {
       cleanup()
+      setBoundaryRollMonitor(null)
       advancingPlaybackRef.current = false
       setItems(originalItems)
       setPlayheadMs(initial.nextBoundaryMs)
       setSelectedIndex(originalSelectedIndex)
       setNotice('切点拖动已取消，时间线和撤销历史保持不变。')
     }
+    const onKeyDown = (keyEvent: KeyboardEvent) => {
+      if (keyEvent.key !== 'Escape') return
+      keyEvent.preventDefault()
+      onCancel()
+    }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
     window.addEventListener('pointercancel', onCancel)
+    window.addEventListener('keydown', onKeyDown)
   }
 
   const slipBoundaryItem = (item: TimelineItem, requestedDeltaMs: number, focusTimelineMs: number, previewBoundaryKey: string) => {
@@ -3367,6 +3490,15 @@ export function EditorPrototypePage() {
             }}
             onTimeUpdate={handleTimeUpdate}
             onEnded={handleEnded}
+          />}
+          {boundaryRollMonitor && !videoTrackHidden && <BoundaryRollTrimMonitor
+            projectId={projectId}
+            left={boundaryRollMonitor.left}
+            right={boundaryRollMonitor.right}
+            leftSourceTimeMs={boundaryRollMonitor.leftSourceTimeMs}
+            rightSourceTimeMs={boundaryRollMonitor.rightSourceTimeMs}
+            deltaMs={boundaryRollMonitor.deltaMs}
+            fps={outputFps}
           />}
           {nextMainItem?.asset_id && nextMainAsset?.asset_type === 'video' && <video
             key={`preload-${nextMainItem.id}`}
@@ -4170,11 +4302,20 @@ export function EditorPrototypePage() {
                 tabIndex={disabled ? -1 : 0}
                 style={{ left: `${(left.timeline_out_ms / durationMs) * 100}%` }}
                 onClick={event => event.stopPropagation()}
+                onPointerEnter={() => previewBoundaryRollMonitor(left, right)}
+                onPointerLeave={() => setBoundaryRollMonitor(current => (
+                  current?.boundaryKey === key && !current.active ? null : current
+                ))}
+                onFocus={() => previewBoundaryRollMonitor(left, right)}
+                onBlur={() => setBoundaryRollMonitor(current => (
+                  current?.boundaryKey === key && !current.active ? null : current
+                ))}
                 onPointerDown={event => beginBoundaryRoll(event, left, right)}
                 onKeyDown={event => {
                   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
                   event.preventDefault()
                   event.stopPropagation()
+                  setBoundaryRollMonitor(null)
                   const stepMs = event.shiftKey ? 1000 : snapEnabled ? snapIntervalMs : frameStepMs
                   applyBoundaryRoll(left, right, event.key === 'ArrowRight' ? stepMs : -stepMs)
                 }}
