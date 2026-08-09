@@ -287,3 +287,9 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 - [历史与待确认提案](./archive/proposals/)
 
 归档资料出现冲突时，以本文、[产品设计](./V2_PRODUCT_DESIGN.md)、[实现状态](./V2_IMPLEMENTATION_STATUS.md) 和当前代码为准。
+
+### 剪辑台 A/B 证据会话门禁
+
+同步动作的 A/B 播放状态机以页面内 `sourceKey` 约束异步媒体与 Canvas 结果：像素 key 包含两侧 Asset ID 和切点帧时点，动作 key 包含两侧 Asset ID 与四个连续帧时点，顺序媒体 key 包含 Asset ID 与当前播放窗口起止点。探针回调只把分析登记到创建回调时冻结的 key；父组件只消费与当前 key 相等的 evidence。Asset 或时点变化会先把派生结果视为未就绪，即使旧 React state 尚未被异步清理也不能通过门禁。
+
+`comparisonEvidenceReady` 要求当前试调存在且 A/B 像素、A/B 动作四套 evidence 同时匹配；手动与候选自动 A→B 都还要求两路顺序媒体已经 seek 到当前 source key。A/B 阶段切换导致窗口改变时，播放 effect 等待新一轮 `seeked`，不会沿用上一视图的 loaded 状态。决策不再是独立布尔值，而记录包含条目、素材、基础源窗、相位、滚动和转场参数的试调 key；只有该 key 仍等于当前试调且四套证据仍有效时才渲染结论。证据失效会停止活动对照，所有调整与清除路径清空结论和候选等待。该实现不进入 Timeline、EditorDraftSession、API、数据库迁移或 FFmpeg。

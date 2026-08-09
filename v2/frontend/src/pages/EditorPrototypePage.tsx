@@ -699,7 +699,7 @@ function BoundaryPixelProbe({
     onAnalysis(null)
     seekFrame(leftRef.current, leftSourceTimeMs)
     seekFrame(rightRef.current, rightSourceTimeMs)
-  }, [leftSourceTimeMs, onAnalysis, rightSourceTimeMs, seekFrame])
+  }, [left.asset_id, leftSourceTimeMs, onAnalysis, right.asset_id, rightSourceTimeMs, seekFrame])
 
   useEffect(() => {
     if (!leftReady || !rightReady || !leftRef.current || !rightRef.current) return
@@ -724,7 +724,7 @@ function BoundaryPixelProbe({
       cancelled = true
       window.cancelAnimationFrame(frame)
     }
-  }, [leftReady, leftSourceTimeMs, onAnalysis, rightReady, rightSourceTimeMs])
+  }, [left.asset_id, leftReady, leftSourceTimeMs, onAnalysis, right.asset_id, rightReady, rightSourceTimeMs])
 
   const levelLabel = analysis?.level === 'high'
     ? '变化较高'
@@ -824,7 +824,7 @@ function BoundaryMotionProbe({
     seekFrame(leftCurrentRef.current, leftCurrentSourceTimeMs)
     seekFrame(rightCurrentRef.current, rightCurrentSourceTimeMs)
     seekFrame(rightNextRef.current, rightNextSourceTimeMs)
-  }, [leftCurrentSourceTimeMs, leftPreviousSourceTimeMs, onAnalysis, rightCurrentSourceTimeMs, rightNextSourceTimeMs, seekFrame])
+  }, [left.asset_id, leftCurrentSourceTimeMs, leftPreviousSourceTimeMs, onAnalysis, right.asset_id, rightCurrentSourceTimeMs, rightNextSourceTimeMs, seekFrame])
 
   useEffect(() => {
     if (!hasLeftPair || !hasRightPair || readyMask !== 15) return
@@ -1126,22 +1126,21 @@ function BoundaryActionComparison({
   const [sequencePlaying, setSequencePlaying] = useState(false)
   const [sequenceSide, setSequenceSide] = useState<'left' | 'right'>('left')
   const [sequenceProgressMs, setSequenceProgressMs] = useState(0)
-  const [sequenceLeftReady, setSequenceLeftReady] = useState(false)
-  const [sequenceRightReady, setSequenceRightReady] = useState(false)
+  const [sequenceLeftEvidenceKey, setSequenceLeftEvidenceKey] = useState<string | null>(null)
+  const [sequenceRightEvidenceKey, setSequenceRightEvidenceKey] = useState<string | null>(null)
   const [phaseSequenceCompareStage, setPhaseSequenceCompareStage] = useState<'idle' | 'baseline' | 'tuned'>('idle')
-  const [phaseDecisionReady, setPhaseDecisionReady] = useState(false)
+  const [phaseDecisionSourceKey, setPhaseDecisionSourceKey] = useState<string | null>(null)
   const [rollTrialDeltaMs, setRollTrialDeltaMs] = useState(0)
   const [transitionTrial, setTransitionTrial] = useState<{ type: 'cut' | 'fade'; durationMs: number } | null>(null)
   const [leftPhaseDeltaMs, setLeftPhaseDeltaMs] = useState(0)
   const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
-  const [baselinePixelAnalysis, setBaselinePixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
+  const [baselinePixelEvidence, setBaselinePixelEvidence] = useState<{ sourceKey: string; analysis: BoundaryPixelAnalysis } | null>(null)
   const [tunedPixelEvidence, setTunedPixelEvidence] = useState<{ sourceKey: string; analysis: BoundaryPixelAnalysis } | null>(null)
   const [baselineMotionEvidence, setBaselineMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [tunedMotionEvidence, setTunedMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
-  const handleBaselinePixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => setBaselinePixelAnalysis(analysis), [])
   const leftBaseSourceInMs = left.source_in_ms ?? 0
   const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
   const rightBaseSourceInMs = right.source_in_ms ?? 0
@@ -1182,8 +1181,8 @@ function BoundaryActionComparison({
     rightBaseSourceOutMs + rightPhaseDeltaMs - frameStepMs,
   )
   const tunedMotionRightNextMs = Math.min(tunedMotionRightMaximumMs, tunedPixelRightMs + frameStepMs)
-  const baselineMotionSourceKey = `${baselineMotionLeftPreviousMs}:${baselinePixelLeftMs}:${baselinePixelRightMs}:${baselineMotionRightNextMs}`
-  const tunedMotionSourceKey = `${tunedMotionLeftPreviousMs}:${tunedPixelLeftMs}:${tunedPixelRightMs}:${tunedMotionRightNextMs}`
+  const baselineMotionSourceKey = `${left.asset_id}:${baselineMotionLeftPreviousMs}:${baselinePixelLeftMs}:${right.asset_id}:${baselinePixelRightMs}:${baselineMotionRightNextMs}`
+  const tunedMotionSourceKey = `${left.asset_id}:${tunedMotionLeftPreviousMs}:${tunedPixelLeftMs}:${right.asset_id}:${tunedPixelRightMs}:${tunedMotionRightNextMs}`
   const baselineMotionAnalysis = baselineMotionEvidence?.sourceKey === baselineMotionSourceKey ? baselineMotionEvidence.analysis : null
   const tunedMotionAnalysis = tunedMotionEvidence?.sourceKey === tunedMotionSourceKey ? tunedMotionEvidence.analysis : null
   const handleBaselineMotionAnalysis = useCallback((analysis: BoundaryMotionAnalysis | null) => {
@@ -1192,7 +1191,12 @@ function BoundaryActionComparison({
   const handleTunedMotionAnalysis = useCallback((analysis: BoundaryMotionAnalysis | null) => {
     setTunedMotionEvidence(analysis ? { sourceKey: tunedMotionSourceKey, analysis } : null)
   }, [tunedMotionSourceKey])
-  const tunedPixelSourceKey = `${tunedPixelLeftMs}:${tunedPixelRightMs}`
+  const baselinePixelSourceKey = `${left.asset_id}:${baselinePixelLeftMs}:${right.asset_id}:${baselinePixelRightMs}`
+  const baselinePixelAnalysis = baselinePixelEvidence?.sourceKey === baselinePixelSourceKey ? baselinePixelEvidence.analysis : null
+  const handleBaselinePixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
+    setBaselinePixelEvidence(analysis ? { sourceKey: baselinePixelSourceKey, analysis } : null)
+  }, [baselinePixelSourceKey])
+  const tunedPixelSourceKey = `${left.asset_id}:${tunedPixelLeftMs}:${right.asset_id}:${tunedPixelRightMs}`
   const tunedPixelAnalysis = tunedPixelEvidence?.sourceKey === tunedPixelSourceKey ? tunedPixelEvidence.analysis : null
   const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
     setTunedPixelEvidence(analysis ? { sourceKey: tunedPixelSourceKey, analysis } : null)
@@ -1218,6 +1222,33 @@ function BoundaryActionComparison({
   const sequenceLeftDurationMs = Math.max(0, sequenceLeftEndMs - sequenceLeftStartMs)
   const sequenceRightDurationMs = Math.max(0, sequenceRightEndMs - sequenceRightStartMs)
   const sequenceDurationMs = sequenceLeftDurationMs + sequenceRightDurationMs
+  const sequenceLeftSourceKey = `${left.asset_id}:${sequenceLeftStartMs}:${sequenceLeftEndMs}`
+  const sequenceRightSourceKey = `${right.asset_id}:${sequenceRightStartMs}:${sequenceRightEndMs}`
+  const sequenceLeftReady = sequenceLeftEvidenceKey === sequenceLeftSourceKey
+  const sequenceRightReady = sequenceRightEvidenceKey === sequenceRightSourceKey
+  const phaseTrialSourceKey = [
+    left.id,
+    left.asset_id,
+    right.id,
+    right.asset_id,
+    leftBaseSourceInMs,
+    leftBaseSourceOutMs,
+    rightBaseSourceInMs,
+    rightBaseSourceOutMs,
+    leftPhaseDeltaMs,
+    rightPhaseDeltaMs,
+    rollTrialDeltaMs,
+    transitionTrial?.type ?? 'none',
+    transitionTrial?.durationMs ?? 0,
+  ].join(':')
+  const comparisonEvidenceReady = Boolean(
+    hasComparisonTrial
+    && baselinePixelAnalysis
+    && tunedPixelAnalysis
+    && baselineMotionAnalysis
+    && tunedMotionAnalysis,
+  )
+  const phaseDecisionReady = phaseDecisionSourceKey === phaseTrialSourceKey && comparisonEvidenceReady
   const sequenceVisible = sequencePlaying || sequenceProgressMs > 0 || phaseSequenceCompareStage !== 'idle'
   const baselineTransitionOut = left.transform.transition_out as { type?: string; duration_ms?: number } | undefined
   const baselineTransitionIn = right.transform.transition_in as { type?: string; duration_ms?: number } | undefined
@@ -1302,7 +1333,7 @@ function BoundaryActionComparison({
     setRightPhaseDeltaMs(0)
     setPhaseCandidateScanSide(null)
     setPhaseView('baseline')
-    setPhaseDecisionReady(false)
+    setPhaseDecisionSourceKey(null)
     cancelPhaseSequenceComparison()
   }, [
     baselineTransitionIn?.duration_ms,
@@ -1319,8 +1350,8 @@ function BoundaryActionComparison({
   ])
 
   useEffect(() => {
-    setSequenceLeftReady(false)
-    setSequenceRightReady(false)
+    setSequenceLeftEvidenceKey(null)
+    setSequenceRightEvidenceKey(null)
   }, [left.asset_id, right.asset_id])
 
   useEffect(() => {
@@ -1332,6 +1363,7 @@ function BoundaryActionComparison({
 
   useEffect(() => {
     if (phaseSequenceCompareStage === 'idle') return
+    if (!comparisonEvidenceReady || !sequenceLeftReady || !sequenceRightReady) return
     const expectedView = phaseSequenceCompareStage === 'baseline' ? 'baseline' : 'tuned'
     if (phaseView !== expectedView || (expectedView === 'tuned' && !hasComparisonTrial)) return
     const token = phaseSequenceStartTokenRef.current + 1
@@ -1353,7 +1385,14 @@ function BoundaryActionComparison({
     return () => {
       if (phaseSequenceStartTokenRef.current === token) phaseSequenceStartTokenRef.current += 1
     }
-  }, [cancelPhaseSequenceComparison, hasComparisonTrial, onNotice, pauseMedia, phaseSequenceCompareStage, phaseView, positionMedia, positionSequenceMedia, rate])
+  }, [cancelPhaseSequenceComparison, comparisonEvidenceReady, hasComparisonTrial, onNotice, pauseMedia, phaseSequenceCompareStage, phaseView, positionMedia, positionSequenceMedia, rate, sequenceLeftReady, sequenceRightReady])
+
+  useEffect(() => {
+    if (phaseSequenceCompareStage === 'idle' || comparisonEvidenceReady) return
+    setPhaseDecisionSourceKey(null)
+    cancelPhaseSequenceComparison()
+    onNotice('当前 A/B 像素或动作证据已失效；已停止本轮对照，请等待当前证据完成后重试。')
+  }, [cancelPhaseSequenceComparison, comparisonEvidenceReady, onNotice, phaseSequenceCompareStage])
 
   useEffect(() => {
     if (!playing) return
@@ -1438,7 +1477,12 @@ function BoundaryActionComparison({
           if (phaseSequenceCompareStageRef.current === 'tuned') {
             phaseSequenceCompareStageRef.current = 'idle'
             setPhaseSequenceCompareStage('idle')
-            setPhaseDecisionReady(true)
+            if (!comparisonEvidenceReady) {
+              cancelPhaseSequenceComparison()
+              onNotice('当前 A/B 动作证据已失效；请等待证据重新完成后再对照。')
+              return
+            }
+            setPhaseDecisionSourceKey(phaseTrialSourceKey)
             onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；请选择保留 A 或采用 B。`)
             return
           }
@@ -1453,7 +1497,7 @@ function BoundaryActionComparison({
       if (sequenceAnimationRef.current != null) window.cancelAnimationFrame(sequenceAnimationRef.current)
       sequenceAnimationRef.current = null
     }
-  }, [activeLeftFadeMs, activeRightFadeMs, left.label, onNotice, pauseSequenceMedia, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
+  }, [activeLeftFadeMs, activeRightFadeMs, cancelPhaseSequenceComparison, comparisonEvidenceReady, left.label, onNotice, pauseSequenceMedia, phaseTrialSourceKey, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
 
   useEffect(() => () => {
     leftRef.current?.pause()
@@ -1507,7 +1551,7 @@ function BoundaryActionComparison({
   }
 
   const startPhaseSequenceComparison = () => {
-    if (!hasComparisonTrial || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady) return
+    if (!comparisonEvidenceReady || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady) return
     setPendingPhaseCandidateCompare(null)
     onBeforePlay()
     pauseMedia()
@@ -1515,7 +1559,7 @@ function BoundaryActionComparison({
     pauseSequenceMedia()
     phaseSequenceCompareStageRef.current = 'baseline'
     setPhaseSequenceCompareStage('baseline')
-    setPhaseDecisionReady(false)
+    setPhaseDecisionSourceKey(null)
     setPhaseView('baseline')
     onNotice(`正在连续对照 ${left.label} → ${right.label}：先播放 A 原切点，再自动播放 B 当前试调。`)
   }
@@ -1531,7 +1575,7 @@ function BoundaryActionComparison({
     pauseMedia()
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
-    setPhaseDecisionReady(false)
+    setPhaseDecisionSourceKey(null)
     setPhaseView('tuned')
     if (side === 'left') {
       setLeftPhaseDeltaMs(nextDeltaMs)
@@ -1550,14 +1594,14 @@ function BoundaryActionComparison({
     pauseMedia()
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
-    setPhaseDecisionReady(false)
+    setPhaseDecisionSourceKey(null)
     setLeftPhaseDeltaMs(side === 'left' ? deltaMs : 0)
     setRightPhaseDeltaMs(side === 'right' ? deltaMs : 0)
     setPhaseView('tuned')
     setProgressMs(0)
     setPendingPhaseCandidateCompare(compareAfterEvidence ? { side, deltaMs } : null)
     onNotice(compareAfterEvidence
-      ? `已把${side === 'left' ? '前镜' : '后镜'} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)} 设为本地 B；正在等待对应 B 像素证据后自动开始 A→B 对照。`
+      ? `已把${side === 'left' ? '前镜' : '后镜'} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)} 设为本地 B；正在等待对应像素、动作证据与顺序媒体后自动开始 A→B 对照。`
       : `已把${side === 'left' ? '前镜' : '后镜'} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)} 设为本地 B；可继续顺序试播或 A→B 对照。`)
   }
 
@@ -1570,10 +1614,11 @@ function BoundaryActionComparison({
       setPendingPhaseCandidateCompare(null)
       return
     }
-    if (!baselinePixelAnalysis || !tunedPixelAnalysis || !sequenceLeftReady || !sequenceRightReady || sequenceDurationMs <= 0) return
+    if (!comparisonEvidenceReady || !sequenceLeftReady || !sequenceRightReady || sequenceDurationMs <= 0) return
     startPhaseSequenceComparison()
   }, [
     baselinePixelAnalysis,
+    comparisonEvidenceReady,
     leftPhaseDeltaMs,
     pendingPhaseCandidateCompare,
     phaseView,
@@ -1609,7 +1654,7 @@ function BoundaryActionComparison({
     pauseMedia()
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
-    setPhaseDecisionReady(false)
+    setPhaseDecisionSourceKey(null)
     setPhaseView('tuned')
     setPhaseCandidateScanSide(null)
     setRollTrialDeltaMs(nextDeltaMs)
@@ -1635,7 +1680,7 @@ function BoundaryActionComparison({
     pauseMedia()
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
-    setPhaseDecisionReady(false)
+    setPhaseDecisionSourceKey(null)
     setPhaseCandidateScanSide(null)
     setTransitionTrial(matchesBaseline ? null : { type, durationMs })
     setPhaseView(matchesBaseline ? 'baseline' : 'tuned')
@@ -1654,7 +1699,7 @@ function BoundaryActionComparison({
     setTransitionTrial(null)
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
-    setPhaseDecisionReady(false)
+    setPhaseDecisionSourceKey(null)
     setPhaseView('baseline')
     setProgressMs(0)
     onNotice(`已清除 ${left.label} → ${right.label} 的全部本地试调；草稿未改变。`)
@@ -1680,7 +1725,7 @@ function BoundaryActionComparison({
     if (editLocked || !viewingTunedPhase || !hasComparisonTrial) return
     pauseMedia()
     cancelPhaseSequenceComparison()
-    setPhaseDecisionReady(false)
+    setPhaseDecisionSourceKey(null)
     if (rollTrialDeltaMs !== 0) {
       onApplyRoll(rollTrialDeltaMs)
     } else if (transitionTrial) {
@@ -1909,9 +1954,17 @@ function BoundaryActionComparison({
         preload="auto"
         src={`/api/v1/projects/${projectId}/assets/${left.asset_id}/content`}
         onLoadedMetadata={event => {
-          event.currentTarget.currentTime = sequenceLeftStartMs / 1000
+          const targetSeconds = sequenceLeftStartMs / 1000
+          event.currentTarget.currentTime = targetSeconds
           event.currentTarget.playbackRate = rate
-          setSequenceLeftReady(true)
+          if (!event.currentTarget.seeking && Math.abs(event.currentTarget.currentTime - targetSeconds) <= 0.004) {
+            setSequenceLeftEvidenceKey(sequenceLeftSourceKey)
+          }
+        }}
+        onSeeked={event => {
+          if (Math.abs(event.currentTarget.currentTime - sequenceLeftStartMs / 1000) <= 0.004) {
+            setSequenceLeftEvidenceKey(sequenceLeftSourceKey)
+          }
         }}
       />
       <video
@@ -1924,9 +1977,17 @@ function BoundaryActionComparison({
         preload="auto"
         src={`/api/v1/projects/${projectId}/assets/${right.asset_id}/content`}
         onLoadedMetadata={event => {
-          event.currentTarget.currentTime = sequenceRightStartMs / 1000
+          const targetSeconds = sequenceRightStartMs / 1000
+          event.currentTarget.currentTime = targetSeconds
           event.currentTarget.playbackRate = rate
-          setSequenceRightReady(true)
+          if (!event.currentTarget.seeking && Math.abs(event.currentTarget.currentTime - targetSeconds) <= 0.004) {
+            setSequenceRightEvidenceKey(sequenceRightSourceKey)
+          }
+        }}
+        onSeeked={event => {
+          if (Math.abs(event.currentTarget.currentTime - sequenceRightStartMs / 1000) <= 0.004) {
+            setSequenceRightEvidenceKey(sequenceRightSourceKey)
+          }
         }}
       />
       <span><strong>{sequenceSide === 'left' ? left.label : right.label}</strong><small>{sequenceSide === 'left' ? '切前' : '切后'} · {viewingTunedPhase ? 'B 当前试调' : 'A 原方案'}{phaseSequenceCompareStage !== 'idle' ? ` · ${phaseSequenceCompareStage === 'baseline' ? '1/2' : '2/2'}` : ''}</small><code>{timecode(sequenceProgressMs, fps)} / {timecode(sequenceDurationMs, fps)}</code></span>
@@ -1991,7 +2052,17 @@ function BoundaryActionComparison({
     <footer>
       <button disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? <Pause /> : <Play />}{playing ? '暂停' : progressMs > 0 ? '重播' : '同步播放'}</button>
       <button disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying && phaseSequenceCompareStage === 'idle' ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying && phaseSequenceCompareStage === 'idle' ? <Pause /> : <Play />}{sequencePlaying && phaseSequenceCompareStage === 'idle' ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
-      <button disabled={!hasComparisonTrial || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} title={hasComparisonTrial ? '先播放 A 原方案，再自动播放 B 当前试调；全程静音且不写入草稿。' : '先试调转场、滚动切位或前后镜相位，再进行连续对照。'} onClick={phaseSequenceCompareStage !== 'idle' ? cancelPhaseSequenceComparison : startPhaseSequenceComparison}>{phaseSequenceCompareStage !== 'idle' ? <Pause /> : <Play />}{phaseSequenceCompareStage === 'baseline' ? '停止 A（1/2）' : phaseSequenceCompareStage === 'tuned' ? '停止 B（2/2）' : 'A→B 连续对照'}</button>
+      <button
+        disabled={phaseSequenceCompareStage === 'idle' && (!comparisonEvidenceReady || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady)}
+        title={!hasComparisonTrial
+          ? '先试调转场、滚动切位或前后镜相位，再进行连续对照。'
+          : !comparisonEvidenceReady
+          ? '正在等待当前 A/B 的像素与动作证据完成。'
+          : !sequenceLeftReady || !sequenceRightReady
+          ? '正在等待两路顺序媒体定位到当前源时点。'
+          : '先播放 A 原方案，再自动播放 B 当前试调；全程静音且不写入草稿。'}
+        onClick={phaseSequenceCompareStage !== 'idle' ? cancelPhaseSequenceComparison : startPhaseSequenceComparison}
+      >{phaseSequenceCompareStage !== 'idle' ? <Pause /> : <Play />}{phaseSequenceCompareStage === 'baseline' ? '停止 A（1/2）' : phaseSequenceCompareStage === 'tuned' ? '停止 B（2/2）' : hasComparisonTrial && (!comparisonEvidenceReady || !sequenceLeftReady || !sequenceRightReady) ? '等待 A/B 证据' : 'A→B 连续对照'}</button>
       <button onClick={() => { pauseMedia(); cancelPhaseSequenceComparison(); positionMedia(); positionSequenceMedia() }}><RotateCcw />回到窗口开头</button>
       <button disabled={!hasComparisonTrial} onClick={resetPhase}><RotateCcw />清除当前试调</button>
       <button
