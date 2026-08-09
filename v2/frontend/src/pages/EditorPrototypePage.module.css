@@ -1011,6 +1011,21 @@
 }
 .boundaryFrameModes input { min-width: 0; accent-color: #6d9b88; }
 .boundaryFrameModes code { color: #c4ceca; text-align: right; }
+.boundaryCandidateReviewSummary {
+  min-width: 0;
+  padding: 5px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #3a494f;
+  border-radius: 4px;
+  background: #1d272b;
+}
+.boundaryCandidateReviewSummary > span { min-width: 0; display: grid; gap: 1px; }
+.boundaryCandidateReviewSummary strong { color: #cbd8dc; font-size: 9px; }
+.boundaryCandidateReviewSummary small { color: #89979c; font-size: 8px; line-height: 1.35; }
+.boundaryControl .boundaryCandidateReviewSummary > button { min-width: 62px; height: 28px; padding: 0 6px; font-size: 8px; }
 .boundaryActionComparison {
   min-width: 0;
   padding: 7px;

@@ -5984,8 +5984,18 @@ export function EditorPrototypePage() {
                  const stripFrames = boundaryFrameStripKey === boundaryKey
                  const actionComparison = boundaryActionComparisonKey === boundaryKey
                  const candidateReviewSessionKey = boundaryCandidateReviewSessionKey(projectId, left, right, frameStepMs, outputFps)
-                 const candidateReviewSession = boundaryCandidateReviewSessions[candidateReviewSessionKey]
-                   ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+                  const candidateReviewSession = boundaryCandidateReviewSessions[candidateReviewSessionKey]
+                    ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+                  const candidateReviewOutcomes = Object.values(candidateReviewSession.comparisonOutcomes)
+                  const candidateReviewKeptCount = candidateReviewOutcomes.filter(outcome => outcome === 'kept_baseline').length
+                  const candidateReviewUndecidedCount = candidateReviewOutcomes.filter(outcome => outcome === 'completed').length
+                  const candidateReviewShortlistedCount = candidateReviewOutcomes.filter(outcome => outcome === 'shortlisted').length
+                  const candidateReviewMeasuredOnlyCount = Object.keys(candidateReviewSession.measuredMotionEvidence)
+                    .filter(sourceKey => !candidateReviewSession.comparisonOutcomes[sourceKey]).length
+                  const hasCandidateReviewMemory = candidateReviewOutcomes.length > 0 || candidateReviewMeasuredOnlyCount > 0
+                  const hasCandidateReviewFollowUp = candidateReviewUndecidedCount > 0
+                    || candidateReviewShortlistedCount > 0
+                    || candidateReviewMeasuredOnlyCount > 0
                  const leftSourceInMs = left.source_in_ms ?? 0
                  const leftSourceOutMs = left.source_out_ms ?? leftSourceInMs
                  const rightSourceInMs = right.source_in_ms ?? 0
@@ -6212,7 +6222,7 @@ export function EditorPrototypePage() {
                            setBoundaryActionComparisonKey(boundaryKey)
                          }}>同步动作</button>
                        </div>
-                       {overlayFrames && <label>首帧透明度
+                        {overlayFrames && <label>首帧透明度
                          <input
                            aria-label={`${left.label} 到 ${right.label} 叠加首帧透明度`}
                            type="range"
@@ -6222,9 +6232,30 @@ export function EditorPrototypePage() {
                            value={boundaryFrameBlendPercent}
                            onInput={event => setBoundaryFrameBlendPercent(Number(event.currentTarget.value))}
                          />
-                         <code>{boundaryFrameBlendPercent}%</code>
-                       </label>}
-                     </div>
+                          <code>{boundaryFrameBlendPercent}%</code>
+                        </label>}
+                        {hasCandidateReviewMemory && <section
+                          className={styles.boundaryCandidateReviewSummary}
+                          aria-label={`${left.label} 到 ${right.label} 的候选审核记忆`}
+                        >
+                          <span>
+                            <strong>候选审核记忆</strong>
+                            <small>
+                              待决定 {candidateReviewUndecidedCount} · 待复看 {candidateReviewShortlistedCount} · 保留 A {candidateReviewKeptCount}
+                              {candidateReviewMeasuredOnlyCount > 0 ? ` · 已实测未对照 ${candidateReviewMeasuredOnlyCount}` : ''}
+                            </small>
+                          </span>
+                          {!actionComparison && hasCandidateReviewFollowUp && <button
+                            type="button"
+                            title="只打开同步动作；不会恢复扫描侧、设置 B 或启动播放。"
+                            onClick={() => {
+                              setBoundaryFrameOverlayKey(null)
+                              setBoundaryFrameStripKey(null)
+                              setBoundaryActionComparisonKey(boundaryKey)
+                            }}
+                          >继续审核</button>}
+                        </section>}
+                      </div>
                      {stripFrames
                        ? <div className={styles.boundaryFrameStrip} aria-label={`${left.label} 到 ${right.label} 的动作连续帧带`}>
                          {([
