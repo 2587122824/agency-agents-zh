@@ -71,6 +71,29 @@ function boundaryPixelDeltas(baseline: BoundaryPixelAnalysis, candidate: Boundar
   }
 }
 
+function boundaryMotionDeltas(baseline: BoundaryMotionAnalysis, candidate: BoundaryMotionAnalysis) {
+  const delta = (candidateValue: number, baselineValue: number) => (
+    Math.round((candidateValue - baselineValue) * 10) / 10
+  )
+  return {
+    left_change: delta(candidate.left_change_percent, baseline.left_change_percent),
+    right_change: delta(candidate.right_change_percent, baseline.right_change_percent),
+    balance: delta(candidate.right_minus_left_percentage_points, baseline.right_minus_left_percentage_points),
+    left_grid: candidate.left_grid_change_percent.map((value, index) => delta(value, baseline.left_grid_change_percent[index])),
+    right_grid: candidate.right_grid_change_percent.map((value, index) => delta(value, baseline.right_grid_change_percent[index])),
+    left_centroid: baseline.left_centroid && candidate.left_centroid ? {
+      x: delta(candidate.left_centroid.x_percent, baseline.left_centroid.x_percent),
+      y: delta(candidate.left_centroid.y_percent, baseline.left_centroid.y_percent),
+      dispersion: delta(candidate.left_centroid.dispersion_percent, baseline.left_centroid.dispersion_percent),
+    } : null,
+    right_centroid: baseline.right_centroid && candidate.right_centroid ? {
+      x: delta(candidate.right_centroid.x_percent, baseline.right_centroid.x_percent),
+      y: delta(candidate.right_centroid.y_percent, baseline.right_centroid.y_percent),
+      dispersion: delta(candidate.right_centroid.dispersion_percent, baseline.right_centroid.dispersion_percent),
+    } : null,
+  }
+}
+
 function signedPercentagePoint(value: number) {
   return value === 0
     ? '0.0 个百分点'
@@ -756,6 +779,7 @@ function BoundaryMotionProbe({
   fps,
   label,
   note,
+  onAnalysis,
 }: {
   projectId: string
   left: TimelineItem
@@ -767,6 +791,7 @@ function BoundaryMotionProbe({
   fps: number
   label: string
   note: string
+  onAnalysis: (analysis: BoundaryMotionAnalysis | null) => void
 }) {
   const leftPreviousRef = useRef<HTMLVideoElement | null>(null)
   const leftCurrentRef = useRef<HTMLVideoElement | null>(null)
@@ -794,11 +819,12 @@ function BoundaryMotionProbe({
     setReadyMask(0)
     setAnalysis(null)
     setAnalysisError(null)
+    onAnalysis(null)
     seekFrame(leftPreviousRef.current, leftPreviousSourceTimeMs)
     seekFrame(leftCurrentRef.current, leftCurrentSourceTimeMs)
     seekFrame(rightCurrentRef.current, rightCurrentSourceTimeMs)
     seekFrame(rightNextRef.current, rightNextSourceTimeMs)
-  }, [leftCurrentSourceTimeMs, leftPreviousSourceTimeMs, rightCurrentSourceTimeMs, rightNextSourceTimeMs, seekFrame])
+  }, [leftCurrentSourceTimeMs, leftPreviousSourceTimeMs, onAnalysis, rightCurrentSourceTimeMs, rightNextSourceTimeMs, seekFrame])
 
   useEffect(() => {
     if (!hasLeftPair || !hasRightPair || readyMask !== 15) return
@@ -813,7 +839,7 @@ function BoundaryMotionProbe({
         const leftMotion = analyzeFrameMotion(leftPreviousVideo, leftCurrentVideo)
         const rightMotion = analyzeFrameMotion(rightCurrentVideo, rightNextVideo)
         if (!cancelled) {
-          setAnalysis({
+          const nextAnalysis: BoundaryMotionAnalysis = {
             left_change_percent: leftMotion.change_percent,
             right_change_percent: rightMotion.change_percent,
             right_minus_left_percentage_points: Math.round((rightMotion.change_percent - leftMotion.change_percent) * 10) / 10,
@@ -824,7 +850,9 @@ function BoundaryMotionProbe({
             )),
             left_centroid: leftMotion.centroid,
             right_centroid: rightMotion.centroid,
-          })
+          }
+          setAnalysis(nextAnalysis)
+          onAnalysis(nextAnalysis)
         }
       } catch (reason) {
         if (!cancelled) setAnalysisError(reason instanceof Error ? reason.message : '局部动作幅度读取失败。')
@@ -834,7 +862,7 @@ function BoundaryMotionProbe({
       cancelled = true
       window.cancelAnimationFrame(frame)
     }
-  }, [hasLeftPair, hasRightPair, readyMask])
+  }, [hasLeftPair, hasRightPair, onAnalysis, readyMask])
 
   const media = [
     { ref: leftPreviousRef, item: left, sourceTimeMs: leftPreviousSourceTimeMs, bit: 1 },
@@ -1109,6 +1137,8 @@ function BoundaryActionComparison({
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
   const [baselinePixelAnalysis, setBaselinePixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
   const [tunedPixelEvidence, setTunedPixelEvidence] = useState<{ sourceKey: string; analysis: BoundaryPixelAnalysis } | null>(null)
+  const [baselineMotionEvidence, setBaselineMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
+  const [tunedMotionEvidence, setTunedMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const handleBaselinePixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => setBaselinePixelAnalysis(analysis), [])
@@ -1152,6 +1182,16 @@ function BoundaryActionComparison({
     rightBaseSourceOutMs + rightPhaseDeltaMs - frameStepMs,
   )
   const tunedMotionRightNextMs = Math.min(tunedMotionRightMaximumMs, tunedPixelRightMs + frameStepMs)
+  const baselineMotionSourceKey = `${baselineMotionLeftPreviousMs}:${baselinePixelLeftMs}:${baselinePixelRightMs}:${baselineMotionRightNextMs}`
+  const tunedMotionSourceKey = `${tunedMotionLeftPreviousMs}:${tunedPixelLeftMs}:${tunedPixelRightMs}:${tunedMotionRightNextMs}`
+  const baselineMotionAnalysis = baselineMotionEvidence?.sourceKey === baselineMotionSourceKey ? baselineMotionEvidence.analysis : null
+  const tunedMotionAnalysis = tunedMotionEvidence?.sourceKey === tunedMotionSourceKey ? tunedMotionEvidence.analysis : null
+  const handleBaselineMotionAnalysis = useCallback((analysis: BoundaryMotionAnalysis | null) => {
+    setBaselineMotionEvidence(analysis ? { sourceKey: baselineMotionSourceKey, analysis } : null)
+  }, [baselineMotionSourceKey])
+  const handleTunedMotionAnalysis = useCallback((analysis: BoundaryMotionAnalysis | null) => {
+    setTunedMotionEvidence(analysis ? { sourceKey: tunedMotionSourceKey, analysis } : null)
+  }, [tunedMotionSourceKey])
   const tunedPixelSourceKey = `${tunedPixelLeftMs}:${tunedPixelRightMs}`
   const tunedPixelAnalysis = tunedPixelEvidence?.sourceKey === tunedPixelSourceKey ? tunedPixelEvidence.analysis : null
   const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
@@ -1671,6 +1711,9 @@ function BoundaryActionComparison({
   const pixelDeltas = baselinePixelAnalysis && tunedPixelAnalysis
     ? boundaryPixelDeltas(baselinePixelAnalysis, tunedPixelAnalysis)
     : null
+  const motionDeltas = baselineMotionAnalysis && tunedMotionAnalysis
+    ? boundaryMotionDeltas(baselineMotionAnalysis, tunedMotionAnalysis)
+    : null
 
   return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
     <header>
@@ -1739,6 +1782,7 @@ function BoundaryActionComparison({
           fps={fps}
           label="A 原方案"
           note="后镜减前镜只表示切点后局部画面变化幅度的增减，不推断运动方向、主体或衔接优劣。"
+          onAnalysis={handleBaselineMotionAnalysis}
         />
         {hasComparisonTrial && <BoundaryMotionProbe
           projectId={projectId}
@@ -1753,8 +1797,37 @@ function BoundaryActionComparison({
           note={transitionTrial && !hasMotionTrial
             ? '本次只改变转场时间呈现，连续帧源时点与 A 相同。'
             : '继续调整相位或滚动切位后，会按新的连续帧重新计算。'}
+          onAnalysis={handleTunedMotionAnalysis}
         />}
       </div>
+      {hasComparisonTrial && <section className={styles.boundaryMotionTrialDelta} aria-label="B − A 动作证据变化" aria-live="polite">
+        <header><strong>B − A 动作证据变化</strong><small>{pixelTrialSourceSummary}</small></header>
+        {motionDeltas ? <>
+          <div className={styles.boundaryMotionTrialDeltaSummary}>
+            <span><b>前镜末段</b><code>{signedPercentagePoint(motionDeltas.left_change).replace(' 个百分点', ' 点')}</code></span>
+            <span><b>后镜开端</b><code>{signedPercentagePoint(motionDeltas.right_change).replace(' 个百分点', ' 点')}</code></span>
+            <span><b>后−前平衡</b><code>{signedPercentagePoint(motionDeltas.balance).replace(' 个百分点', ' 点')}</code></span>
+          </div>
+          <div className={styles.boundaryMotionTrialDeltaGrids}>
+            {[
+              { label: '前镜九格 B − A', values: motionDeltas.left_grid },
+              { label: '后镜九格 B − A', values: motionDeltas.right_grid },
+            ].map(group => <section key={group.label} aria-label={group.label}>
+              <strong>{group.label}</strong>
+              <div>{group.values.map((value, index) => <span key={MOTION_GRID_REGIONS[index]}><b>{MOTION_GRID_REGIONS[index]}</b><code>{signedPercentagePoint(value).replace(' 个百分点', '')}</code></span>)}</div>
+            </section>)}
+          </div>
+          <div className={styles.boundaryMotionTrialCentroidDelta}>
+            <span><b>前镜重心 B − A</b>{motionDeltas.left_centroid
+              ? <code>X {signedPercentagePoint(motionDeltas.left_centroid.x).replace(' 个百分点', '')} · Y {signedPercentagePoint(motionDeltas.left_centroid.y).replace(' 个百分点', '')} · 分散 {signedPercentagePoint(motionDeltas.left_centroid.dispersion).replace(' 个百分点', '')}</code>
+              : <small>至少一套方案没有可定位变化。</small>}</span>
+            <span><b>后镜重心 B − A</b>{motionDeltas.right_centroid
+              ? <code>X {signedPercentagePoint(motionDeltas.right_centroid.x).replace(' 个百分点', '')} · Y {signedPercentagePoint(motionDeltas.right_centroid.y).replace(' 个百分点', '')} · 分散 {signedPercentagePoint(motionDeltas.right_centroid.dispersion).replace(' 个百分点', '')}</code>
+              : <small>至少一套方案没有可定位变化。</small>}</span>
+          </div>
+        </> : <small>正在等待 A、B 两套连续帧证据完成后计算差值…</small>}
+        <small>正负只表示 B 相对 A 的数值变化方向，不代表当前试调更好或更差。</small>
+      </section>}
     </section>
     <section className={styles.boundaryPhaseScan} aria-label="单侧邻帧候选扫描">
       <header>

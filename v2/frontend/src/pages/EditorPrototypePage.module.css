@@ -1256,6 +1256,65 @@
 .boundaryMotionCentroidDelta b { color: #9f9b82; font-size: 9px; }
 .boundaryMotionCentroidDelta code { overflow: hidden; color: #d0d7c9; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryMotionCentroidDelta small { grid-column: 1 / -1; color: #81877b; font-size: 8px; }
+.boundaryMotionTrialDelta {
+  min-width: 0;
+  padding: 5px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid #3f4d45;
+  border-radius: 4px;
+  background: #121a16;
+}
+.boundaryMotionTrialDelta > header { min-width: 0; display: grid; gap: 2px; }
+.boundaryMotionTrialDelta > header strong { color: #c7d4ca; }
+.boundaryMotionTrialDelta > header small,
+.boundaryMotionTrialDelta > small { color: #87958b; line-height: 1.35; }
+.boundaryMotionTrialDeltaSummary {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+.boundaryMotionTrialDeltaSummary span,
+.boundaryMotionTrialCentroidDelta span {
+  min-width: 0;
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+  border-radius: 3px;
+  background: #19231e;
+}
+.boundaryMotionTrialDeltaSummary b,
+.boundaryMotionTrialCentroidDelta b { color: #91a097; font-weight: 500; }
+.boundaryMotionTrialDeltaSummary code,
+.boundaryMotionTrialCentroidDelta code { overflow: hidden; color: #d3ddd6; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryMotionTrialCentroidDelta small { color: #819087; }
+.boundaryMotionTrialDeltaGrids {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+.boundaryMotionTrialDeltaGrids > section { min-width: 0; display: grid; gap: 3px; }
+.boundaryMotionTrialDeltaGrids > section > strong { color: #a7b3ab; font-size: 9px; }
+.boundaryMotionTrialDeltaGrids > section > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+}
+.boundaryMotionTrialDeltaGrids span {
+  min-width: 0;
+  padding: 3px;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  border-radius: 2px;
+  background: #1c2923;
+}
+.boundaryMotionTrialDeltaGrids b { color: #86958b; font-size: 8px; font-weight: 500; }
+.boundaryMotionTrialDeltaGrids code { color: #cbd8d0; font-size: 9px; }
+.boundaryMotionTrialCentroidDelta { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 3px; }
 .boundaryMotionCard b { overflow: hidden; color: #99917d; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryMotionCard code { color: #ded6c0; white-space: nowrap; }
 .boundaryMotionCard > small { color: #8b8370; line-height: 1.35; }
