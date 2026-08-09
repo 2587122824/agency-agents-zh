@@ -1130,6 +1130,51 @@
 }
 .boundaryABPixelDelta b { color: #87978f; font-weight: 500; }
 .boundaryABPixelDelta code { color: #d1ddd7; white-space: nowrap; }
+.boundaryActionComparison > .boundaryPhaseScan {
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #3c4b52;
+  border-radius: 5px;
+  background: #12191d;
+}
+.boundaryPhaseScan > header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 6px;
+}
+.boundaryPhaseScan > header > span { min-width: 0; display: grid; gap: 2px; color: #ced8dd; }
+.boundaryPhaseScan > header small,
+.boundaryPhaseScan > small { color: #7f8d93; line-height: 1.35; }
+.boundaryPhaseScan > header > div { display: grid; grid-template-columns: repeat(2, 42px); gap: 3px; }
+.boundaryControl .boundaryPhaseScan > header button { min-width: 0; height: 25px; padding: 0 4px; font-size: 9px; }
+.boundaryControl .boundaryPhaseScan > header button[aria-pressed="true"] { border-color: #628394; background: #29414c; color: #eaf7fc; }
+.boundaryPhaseScan > div:not([role="group"]) { min-width: 0; display: grid; gap: 5px; }
+.boundaryPhaseCandidate {
+  min-width: 0;
+  padding: 4px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid #2f3b40;
+  border-radius: 4px;
+  background: #0d1316;
+}
+.boundaryPhaseCandidate[data-selected="true"] { border-color: #5d899a; box-shadow: inset 0 0 0 1px #314d58; }
+.boundaryPhaseCandidate > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+}
+.boundaryPhaseCandidate > div span { min-width: 0; display: grid; gap: 2px; }
+.boundaryPhaseCandidate > div code { overflow: hidden; color: #8fa8b2; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryPhaseCandidate > div small { color: #78878d; }
+.boundaryControl .boundaryPhaseCandidate > div button { min-width: 62px; height: 26px; padding: 0 5px; font-size: 9px; }
+.boundaryControl .boundaryPhaseCandidate > div button[aria-pressed="true"] { border-color: #638b9a; background: #2b4954; color: #effbff; }
 .boundaryPixelProbeMedia {
   position: absolute;
   width: 1px;

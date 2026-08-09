@@ -44,6 +44,20 @@ interface BoundaryPixelAnalysis {
   level: 'low' | 'medium' | 'high'
 }
 
+function boundaryPixelDeltas(baseline: BoundaryPixelAnalysis, candidate: BoundaryPixelAnalysis) {
+  return {
+    luminance: Math.round((candidate.luminance_delta_percent - baseline.luminance_delta_percent) * 10) / 10,
+    color: Math.round((candidate.color_delta_percent - baseline.color_delta_percent) * 10) / 10,
+    pixel: Math.round((candidate.pixel_change_percent - baseline.pixel_change_percent) * 10) / 10,
+  }
+}
+
+function signedPercentagePoint(value: number) {
+  return value === 0
+    ? '0.0 个百分点'
+    : `${value > 0 ? '+' : '−'}${Math.abs(value).toFixed(1)} 个百分点`
+}
+
 function canonicalDraftValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalDraftValue)
   if (!value || typeof value !== 'object') return value
@@ -648,6 +662,54 @@ function BoundaryPixelProbe({
   </article>
 }
 
+function BoundaryPhaseCandidate({
+  projectId,
+  left,
+  right,
+  leftSourceTimeMs,
+  rightSourceTimeMs,
+  fps,
+  label,
+  baselineAnalysis,
+  selected,
+  onSelect,
+}: {
+  projectId: string
+  left: TimelineItem
+  right: TimelineItem
+  leftSourceTimeMs: number
+  rightSourceTimeMs: number
+  fps: number
+  label: string
+  baselineAnalysis: BoundaryPixelAnalysis | null
+  selected: boolean
+  onSelect: () => void
+}) {
+  const [analysis, setAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
+  const deltas = baselineAnalysis && analysis ? boundaryPixelDeltas(baselineAnalysis, analysis) : null
+  return <div className={styles.boundaryPhaseCandidate} data-selected={selected}>
+    <BoundaryPixelProbe
+      projectId={projectId}
+      left={left}
+      right={right}
+      leftSourceTimeMs={leftSourceTimeMs}
+      rightSourceTimeMs={rightSourceTimeMs}
+      fps={fps}
+      label={label}
+      note="相对 A 的单侧邻帧候选；尚未写入草稿。"
+      onAnalysis={setAnalysis}
+    />
+    <div>
+      {deltas ? <span aria-label={`${label} 相对 A 的精确差值`}>
+        <code>明暗 {signedPercentagePoint(deltas.luminance)}</code>
+        <code>色彩 {signedPercentagePoint(deltas.color)}</code>
+        <code>像素 {signedPercentagePoint(deltas.pixel)}</code>
+      </span> : <small>等待 A 与候选帧证据…</small>}
+      <button aria-pressed={selected} onClick={onSelect}>{selected ? '当前 B' : '设为单侧 B'}</button>
+    </div>
+  </div>
+}
+
 function BoundaryRollTrimMonitor({
   projectId,
   left,
@@ -786,6 +848,7 @@ function BoundaryActionComparison({
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
   const [baselinePixelAnalysis, setBaselinePixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
   const [tunedPixelAnalysis, setTunedPixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
+  const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const handleBaselinePixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => setBaselinePixelAnalysis(analysis), [])
   const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => setTunedPixelAnalysis(analysis), [])
   const leftBaseSourceInMs = left.source_in_ms ?? 0
@@ -816,6 +879,11 @@ function BoundaryActionComparison({
     leftBaseSourceOutMs + leftPhaseDeltaMs + rollTrialDeltaMs - frameStepMs,
   )
   const tunedPixelRightMs = rightBaseSourceInMs + rightPhaseDeltaMs + rollTrialDeltaMs
+  const nearbyPhaseCandidates = [-2, -1, 1, 2]
+    .map(frameOffset => ({ frameOffset, deltaMs: frameOffset * frameStepMs }))
+    .filter(candidate => phaseCandidateScanSide === 'left'
+      ? candidate.deltaMs >= leftMinimumPhaseMs && candidate.deltaMs <= leftMaximumPhaseMs
+      : candidate.deltaMs >= rightMinimumPhaseMs && candidate.deltaMs <= rightMaximumPhaseMs)
   const comparisonDurationMs = Math.max(0, Math.min(
     beforeMs,
     afterMs,
@@ -913,6 +981,7 @@ function BoundaryActionComparison({
     setTransitionTrial(null)
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
+    setPhaseCandidateScanSide(null)
     setPhaseView('baseline')
     setPhaseDecisionReady(false)
     cancelPhaseSequenceComparison()
@@ -1077,6 +1146,7 @@ function BoundaryActionComparison({
   const startComparison = async () => {
     if (comparisonDurationMs <= 0) return
     onBeforePlay()
+    onNotice(`正在以 ${rate}× 同步对比 ${left.label} 切前动作与 ${right.label} 切后动作。`)
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
     positionMedia()
@@ -1132,6 +1202,11 @@ function BoundaryActionComparison({
 
   const adjustPhase = (side: 'left' | 'right', requestedDeltaMs: number) => {
     if (rollTrialDeltaMs !== 0 || transitionTrial) return
+    const currentDeltaMs = side === 'left' ? leftPhaseDeltaMs : rightPhaseDeltaMs
+    const minimumDeltaMs = side === 'left' ? leftMinimumPhaseMs : rightMinimumPhaseMs
+    const maximumDeltaMs = side === 'left' ? leftMaximumPhaseMs : rightMaximumPhaseMs
+    const nextDeltaMs = Math.max(minimumDeltaMs, Math.min(maximumDeltaMs, currentDeltaMs + requestedDeltaMs))
+    if (nextDeltaMs === currentDeltaMs) return
     onBeforePlay()
     pauseMedia()
     cancelPhaseSequenceComparison()
@@ -1139,11 +1214,40 @@ function BoundaryActionComparison({
     setPhaseDecisionReady(false)
     setPhaseView('tuned')
     if (side === 'left') {
-      setLeftPhaseDeltaMs(value => Math.max(leftMinimumPhaseMs, Math.min(leftMaximumPhaseMs, value + requestedDeltaMs)))
+      setLeftPhaseDeltaMs(nextDeltaMs)
     } else {
-      setRightPhaseDeltaMs(value => Math.max(rightMinimumPhaseMs, Math.min(rightMaximumPhaseMs, value + requestedDeltaMs)))
+      setRightPhaseDeltaMs(nextDeltaMs)
     }
     setProgressMs(0)
+    onNotice(nextDeltaMs === 0
+      ? `${side === 'left' ? '前镜' : '后镜'}相位试调已回到 A 原方案，尚未写入草稿。`
+      : `已在本地把${side === 'left' ? '前镜' : '后镜'}${nextDeltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(nextDeltaMs), fps)}；可顺序试播或使用 A→B 连续对照。`)
+  }
+
+  const selectPhaseCandidate = (side: 'left' | 'right', deltaMs: number) => {
+    if (rollTrialDeltaMs !== 0 || transitionTrial) return
+    onBeforePlay()
+    pauseMedia()
+    cancelPhaseSequenceComparison()
+    positionSequenceMedia()
+    setPhaseDecisionReady(false)
+    setLeftPhaseDeltaMs(side === 'left' ? deltaMs : 0)
+    setRightPhaseDeltaMs(side === 'right' ? deltaMs : 0)
+    setPhaseView('tuned')
+    setProgressMs(0)
+    onNotice(`已把${side === 'left' ? '前镜' : '后镜'} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)} 设为本地 B；可继续顺序试播或 A→B 对照。`)
+  }
+
+  const togglePhaseCandidateScan = (side: 'left' | 'right') => {
+    onBeforePlay()
+    pauseMedia()
+    cancelPhaseSequenceComparison()
+    positionSequenceMedia()
+    const opening = phaseCandidateScanSide !== side
+    setPhaseCandidateScanSide(opening ? side : null)
+    onNotice(opening
+      ? `正在按需读取${side === 'left' ? '前镜' : '后镜'}前后 2 帧内的合法候选；不会写入草稿。`
+      : `已收起${side === 'left' ? '前镜' : '后镜'}邻帧候选扫描。`)
   }
 
   const adjustRollTrial = (requestedDeltaMs: number) => {
@@ -1159,6 +1263,7 @@ function BoundaryActionComparison({
     positionSequenceMedia()
     setPhaseDecisionReady(false)
     setPhaseView('tuned')
+    setPhaseCandidateScanSide(null)
     setRollTrialDeltaMs(nextDeltaMs)
     setProgressMs(0)
     onNotice(nextDeltaMs === 0
@@ -1183,6 +1288,7 @@ function BoundaryActionComparison({
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
     setPhaseDecisionReady(false)
+    setPhaseCandidateScanSide(null)
     setTransitionTrial(matchesBaseline ? null : { type, durationMs })
     setPhaseView(matchesBaseline ? 'baseline' : 'tuned')
     setProgressMs(0)
@@ -1203,6 +1309,7 @@ function BoundaryActionComparison({
     setPhaseDecisionReady(false)
     setPhaseView('baseline')
     setProgressMs(0)
+    onNotice(`已清除 ${left.label} → ${right.label} 的全部本地试调；草稿未改变。`)
   }
 
   const showPhaseView = (view: 'baseline' | 'tuned') => {
@@ -1213,6 +1320,7 @@ function BoundaryActionComparison({
     positionSequenceMedia()
     setPhaseView(view)
     setProgressMs(0)
+    onNotice(`已切换到 ${view === 'baseline' ? 'A 原方案' : 'B 当前试调'}；保留的试调值未改变。`)
   }
 
   const keepBaselinePhase = () => {
@@ -1252,14 +1360,9 @@ function BoundaryActionComparison({
     : leftPhaseDeltaMs !== 0
     ? '只有前镜末帧使用了当前相位试调。'
     : '只有后镜首帧使用了当前相位试调。'
-  const pixelDeltas = baselinePixelAnalysis && tunedPixelAnalysis ? {
-    luminance: Math.round((tunedPixelAnalysis.luminance_delta_percent - baselinePixelAnalysis.luminance_delta_percent) * 10) / 10,
-    color: Math.round((tunedPixelAnalysis.color_delta_percent - baselinePixelAnalysis.color_delta_percent) * 10) / 10,
-    pixel: Math.round((tunedPixelAnalysis.pixel_change_percent - baselinePixelAnalysis.pixel_change_percent) * 10) / 10,
-  } : null
-  const signedPercentagePoint = (value: number) => value === 0
-    ? '0.0 个百分点'
-    : `${value > 0 ? '+' : '−'}${Math.abs(value).toFixed(1)} 个百分点`
+  const pixelDeltas = baselinePixelAnalysis && tunedPixelAnalysis
+    ? boundaryPixelDeltas(baselinePixelAnalysis, tunedPixelAnalysis)
+    : null
 
   return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
     <header>
@@ -1310,6 +1413,50 @@ function BoundaryActionComparison({
         </div> : <small>正在等待 A、B 两套帧证据完成后计算差值…</small>}
         <small>正值只表示 B 的该项变化幅度高于 A，负值表示低于 A；方向不代表衔接更好或更差。</small>
       </div>}
+    </section>
+    <section className={styles.boundaryPhaseScan} aria-label="单侧邻帧候选扫描">
+      <header>
+        <span><strong>邻帧候选扫描</strong><small>一次读取前后 2 帧内合法候选；不排序、不推荐，选择后才成为本地 B。</small></span>
+        <div role="group" aria-label="选择邻帧扫描侧">
+          <button
+            aria-pressed={phaseCandidateScanSide === 'left'}
+            disabled={rollTrialDeltaMs !== 0 || transitionTrial != null}
+            onClick={() => togglePhaseCandidateScan('left')}
+          >前镜</button>
+          <button
+            aria-pressed={phaseCandidateScanSide === 'right'}
+            disabled={rollTrialDeltaMs !== 0 || transitionTrial != null}
+            onClick={() => togglePhaseCandidateScan('right')}
+          >后镜</button>
+        </div>
+      </header>
+      {phaseCandidateScanSide && <div>
+        {nearbyPhaseCandidates.length ? nearbyPhaseCandidates.map(candidate => {
+          const sideLabel = phaseCandidateScanSide === 'left' ? '前镜' : '后镜'
+          const directionLabel = candidate.deltaMs < 0 ? '前移' : '后移'
+          const selected = phaseCandidateScanSide === 'left'
+            ? leftPhaseDeltaMs === candidate.deltaMs && rightPhaseDeltaMs === 0
+            : rightPhaseDeltaMs === candidate.deltaMs && leftPhaseDeltaMs === 0
+          return <BoundaryPhaseCandidate
+            key={`${phaseCandidateScanSide}-${candidate.deltaMs}`}
+            projectId={projectId}
+            left={left}
+            right={right}
+            leftSourceTimeMs={phaseCandidateScanSide === 'left'
+              ? Math.max(leftBaseSourceInMs + candidate.deltaMs, leftBaseSourceOutMs + candidate.deltaMs - frameStepMs)
+              : baselinePixelLeftMs}
+            rightSourceTimeMs={phaseCandidateScanSide === 'right'
+              ? rightBaseSourceInMs + candidate.deltaMs
+              : baselinePixelRightMs}
+            fps={fps}
+            label={`${sideLabel}${directionLabel} ${Math.abs(candidate.frameOffset)} 帧`}
+            baselineAnalysis={baselinePixelAnalysis}
+            selected={selected}
+            onSelect={() => selectPhaseCandidate(phaseCandidateScanSide, candidate.deltaMs)}
+          />
+        }) : <small>这一侧在当前素材把手内没有可扫描的 ±2 帧邻近相位。</small>}
+      </div>}
+      {!phaseCandidateScanSide && <small>选择前镜或后镜后再按需加载候选，不会后台扫描整段素材。</small>}
     </section>
     <div className={styles.boundaryTransitionTrial}>
       <span><strong>转场无损试用</strong><small>A 为当前 {baselineTransitionLabel}；B 在顺序舞台真实显示淡出至黑场再淡入，不是交叉叠化。</small></span>
@@ -5096,7 +5243,6 @@ export function EditorPrototypePage() {
                            setBoundaryReviewSession(null)
                            setPendingBoundaryPreviewKey(null)
                            setPendingBoundaryReview(null)
-                           setNotice(`正在以 ${boundaryPreviewRate}× 同步对比 ${left.label} 切前动作与 ${right.label} 切后动作。`)
                          }}
                          onApplyRoll={deltaMs => applyBoundaryRoll(left, right, deltaMs)}
                          onApplyTransition={(type, transitionDurationMs) => setBoundaryTransition(left, right, type, transitionDurationMs)}
