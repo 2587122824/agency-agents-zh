@@ -1536,6 +1536,10 @@ function BoundaryActionComparison({
   const nextUnreviewedPhaseCandidate = phaseCandidateScanSide
     ? nearbyPhaseCandidates.find(candidate => !candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)]) ?? null
     : null
+  const nextShortlistedPhaseCandidate = phaseCandidateScanSide
+    ? nearbyPhaseCandidates.find(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'shortlisted') ?? null
+    : null
+  const nextReviewPhaseCandidate = nextUnreviewedPhaseCandidate ?? nextShortlistedPhaseCandidate
   useEffect(() => {
     setMeasuredCandidateMotionEvidence({})
     setCandidateComparisonOutcomes({})
@@ -2286,10 +2290,16 @@ function BoundaryActionComparison({
             <small>保留 A {keptBaselinePhaseCandidateCount} · 待复看 {shortlistedPhaseCandidateCount}</small>
           </span>
           <button
-            disabled={!nextUnreviewedPhaseCandidate || hasComparisonTrial}
+            disabled={!nextReviewPhaseCandidate || hasComparisonTrial}
             title={hasComparisonTrial ? '请先保留 A、采用 B 或清除当前试调，再继续下一个候选。' : undefined}
-            onClick={() => nextUnreviewedPhaseCandidate && selectPhaseCandidate(phaseCandidateScanSide, nextUnreviewedPhaseCandidate.deltaMs, true)}
-          >{!nearbyPhaseCandidates.length ? '没有合法候选' : nextUnreviewedPhaseCandidate ? '对照下一个未看候选' : '本侧候选已看完'}</button>
+            onClick={() => nextReviewPhaseCandidate && selectPhaseCandidate(phaseCandidateScanSide, nextReviewPhaseCandidate.deltaMs, true)}
+          >{!nearbyPhaseCandidates.length
+            ? '没有合法候选'
+            : nextUnreviewedPhaseCandidate
+              ? '对照下一个未看候选'
+              : nextShortlistedPhaseCandidate
+                ? '复看下一个待复看'
+                : '本侧候选已看完'}</button>
         </div>
         <div>
           {nearbyPhaseCandidates.length ? nearbyPhaseCandidates.map(candidate => {
