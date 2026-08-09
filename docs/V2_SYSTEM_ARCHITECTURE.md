@@ -307,3 +307,5 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 候选审核进度是 `nearbyPhaseCandidates` 与 `candidateComparisonOutcomes` 的同步派生投影：reviewed 统计存在任一 outcome 的 exact key，kept 只统计 `kept_baseline`，shortlisted 只统计 `shortlisted`；`nextUnreviewed` 使用固定候选数组的第一个缺失 key，`nextShortlisted` 使用同一数组的第一个 `shortlisted` key，统一目标以前者优先。按钮根据目标显示“对照下一个未看候选”或“复看下一个待复看”，并直接调用既有 `selectPhaseCandidate(side, delta, true)`，因此继续受证据、媒体和迟到回调门禁约束；`hasComparisonTrial` 为真时禁用，不能越过当前待决 B。派生目标与计数不增加 state、effect、媒体、缓存键、排序或持久化。
 
 候选范围扩展只增加一个组件内布尔页面态。默认偏移数组为 `[-2,-1,1,2]`；用户显式扩展后切换为 `[-4,-3,-2,-1,1,2,3,4]`，再统一经过既有素材把手过滤。扩展入口只在过滤后确有 `abs(offset)>2` 的候选且 `hasComparisonTrial=false` 时可用；切侧、收起或基础边界依赖变化会复位范围，不清除仍有效的 exact-key 缓存。额外候选各自复用现有 `BoundaryPixelProbe`，动作证据仍只在候选成为当前 B 后由主探针产生，因此没有后台动作扫描、指标排序、推荐、自动播放、草稿字段、API 或迁移。
+
+候选快速导航不引入 React state。父组件对每个当前合法候选同步调用现有 exact-key 派生：当前单侧 delta 优先投影为 `当前 B`，其后依次读取 `kept_baseline / shortlisted / completed`，没有人工结果但存在动作记忆时为 `已实测`，否则为 `未看`。稳定 DOM ID 由双方 item ID、扫描侧和整数帧偏移组成；点击只执行 `focus({preventScroll:true}) + scrollIntoView({block:'nearest'})`。候选卡通过 `tabIndex=-1` 接受程序化焦点，导航按钮用 `aria-controls` 绑定目标。该路径不调用 `selectPhaseCandidate`、播放状态机、证据回调、保存或排序逻辑。

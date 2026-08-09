@@ -1492,6 +1492,12 @@
 .boundaryPhaseScanExpansion small { color: #819097; font-size: 8px; line-height: 1.25; }
 .boundaryControl .boundaryPhaseScanExpansion > button { min-width: 0; height: 30px; padding: 0 5px; font-size: 8px; line-height: 1.15; white-space: normal; }
 .boundaryPhaseScan > .boundaryPhaseScanExpandedNote { color: #80949d; font-size: 8px; line-height: 1.3; }
+.boundaryPhaseCandidateNavigator { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 3px; }
+.boundaryControl .boundaryPhaseCandidateNavigator > button { min-width: 0; height: 28px; padding: 0 5px; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 4px; font-size: 8px; }
+.boundaryPhaseCandidateNavigator code { color: #c5d4da; font-size: 9px; white-space: nowrap; }
+.boundaryPhaseCandidateNavigator small { overflow: hidden; color: #819097; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryControl .boundaryPhaseCandidateNavigator > button[data-selected="true"] { border-color: #638b9a; background: #2b4954; }
+.boundaryPhaseCandidate:focus { outline: 1px solid #7fa5b5; outline-offset: 1px; }
 .boundaryPhaseCandidateMeasured { min-width: 0; display: grid; gap: 3px; padding: 5px; border: 1px solid #35464e; border-radius: 4px; background: #172328; }
 .boundaryPhaseCandidateMeasured > strong { color: #b9c8cf; font-size: 9px; letter-spacing: .04em; }
 .boundaryPhaseCandidateMeasured > span { min-width: 0; display: flex; flex-wrap: wrap; gap: 3px 6px; }

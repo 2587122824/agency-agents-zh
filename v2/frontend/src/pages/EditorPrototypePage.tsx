@@ -1153,6 +1153,7 @@ function BoundaryMotionProbe({
 }
 
 function BoundaryPhaseCandidate({
+  elementId,
   projectId,
   left,
   right,
@@ -1169,6 +1170,7 @@ function BoundaryPhaseCandidate({
   onSelect,
   onCompare,
 }: {
+  elementId: string
   projectId: string
   left: TimelineItem
   right: TimelineItem
@@ -1190,7 +1192,7 @@ function BoundaryPhaseCandidate({
   const motionDeltas = baselineMotionAnalysis && measuredMotionAnalysis
     ? boundaryMotionDeltas(baselineMotionAnalysis, measuredMotionAnalysis)
     : null
-  return <div className={styles.boundaryPhaseCandidate} data-selected={selected}>
+  return <div id={elementId} tabIndex={-1} className={styles.boundaryPhaseCandidate} data-selected={selected}>
     <BoundaryPixelProbe
       projectId={projectId}
       left={left}
@@ -1546,6 +1548,24 @@ function BoundaryActionComparison({
     ? nearbyPhaseCandidates.find(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'shortlisted') ?? null
     : null
   const nextReviewPhaseCandidate = nextUnreviewedPhaseCandidate ?? nextShortlistedPhaseCandidate
+  const phaseCandidateElementId = (side: 'left' | 'right', frameOffset: number) => `phase-candidate-${left.id}-${right.id}-${side}-${frameOffset}`
+  const isPhaseCandidateSelected = (side: 'left' | 'right', deltaMs: number) => side === 'left'
+    ? leftPhaseDeltaMs === deltaMs && rightPhaseDeltaMs === 0
+    : rightPhaseDeltaMs === deltaMs && leftPhaseDeltaMs === 0
+  const phaseCandidateStatusLabel = (side: 'left' | 'right', deltaMs: number) => {
+    if (isPhaseCandidateSelected(side, deltaMs)) return '当前 B'
+    const sourceKey = candidateMotionSourceKey(side, deltaMs)
+    const outcome = candidateComparisonOutcomes[sourceKey]
+    if (outcome === 'kept_baseline') return '保留 A'
+    if (outcome === 'shortlisted') return '待复看'
+    if (outcome === 'completed') return '待决定'
+    return measuredCandidateMotionEvidence[sourceKey] ? '已实测' : '未看'
+  }
+  const focusPhaseCandidate = (side: 'left' | 'right', frameOffset: number) => {
+    const candidateElement = document.getElementById(phaseCandidateElementId(side, frameOffset))
+    candidateElement?.focus({ preventScroll: true })
+    candidateElement?.scrollIntoView({ block: 'nearest' })
+  }
   useEffect(() => {
     setMeasuredCandidateMotionEvidence({})
     setCandidateComparisonOutcomes({})
@@ -2324,15 +2344,29 @@ function BoundaryActionComparison({
           >扩展到 ±4 帧</button>
         </div>}
         {phaseCandidateScanExpanded && <small className={styles.boundaryPhaseScanExpandedNote}>已扩展到 ±4 帧；审核进度与短名单继续沿用同一页面会话。</small>}
+        {nearbyPhaseCandidates.length > 0 && <nav className={styles.boundaryPhaseCandidateNavigator} aria-label={`${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}邻帧候选快速导航`}>
+          {nearbyPhaseCandidates.map(candidate => {
+            const direction = candidate.frameOffset < 0 ? '−' : '+'
+            const status = phaseCandidateStatusLabel(phaseCandidateScanSide, candidate.deltaMs)
+            return <button
+              key={`${phaseCandidateScanSide}-${candidate.frameOffset}`}
+              type="button"
+              data-status={status}
+              data-selected={isPhaseCandidateSelected(phaseCandidateScanSide, candidate.deltaMs)}
+              aria-controls={phaseCandidateElementId(phaseCandidateScanSide, candidate.frameOffset)}
+              title="只定位候选卡，不会设为 B、播放或写入草稿。"
+              onClick={() => focusPhaseCandidate(phaseCandidateScanSide, candidate.frameOffset)}
+            ><code>{direction}{Math.abs(candidate.frameOffset)}帧</code><small>{status}</small></button>
+          })}
+        </nav>}
         <div>
           {nearbyPhaseCandidates.length ? nearbyPhaseCandidates.map(candidate => {
           const sideLabel = phaseCandidateScanSide === 'left' ? '前镜' : '后镜'
           const directionLabel = candidate.deltaMs < 0 ? '前移' : '后移'
-          const selected = phaseCandidateScanSide === 'left'
-            ? leftPhaseDeltaMs === candidate.deltaMs && rightPhaseDeltaMs === 0
-            : rightPhaseDeltaMs === candidate.deltaMs && leftPhaseDeltaMs === 0
+          const selected = isPhaseCandidateSelected(phaseCandidateScanSide, candidate.deltaMs)
           return <BoundaryPhaseCandidate
             key={`${phaseCandidateScanSide}-${candidate.deltaMs}`}
+            elementId={phaseCandidateElementId(phaseCandidateScanSide, candidate.frameOffset)}
             projectId={projectId}
             left={left}
             right={right}
