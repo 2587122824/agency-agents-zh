@@ -1240,6 +1240,22 @@
 }
 .boundaryMotionRhythmSlope b { color: #918975; font-size: 8px; }
 .boundaryMotionRhythmSlope code { overflow: hidden; text-overflow: ellipsis; }
+.boundaryMotionCentroidPaths {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 3px;
+}
+.boundaryMotionCentroidPaths > span {
+  min-width: 0;
+  padding: 3px 4px;
+  display: grid;
+  gap: 2px;
+  border-radius: 2px;
+  background: #211f17;
+}
+.boundaryMotionCentroidPaths b { color: #918975; font-size: 8px; }
+.boundaryMotionCentroidPaths code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryMotionGrids {
   min-width: 0;
   display: grid;
@@ -1358,6 +1374,8 @@
 .boundaryMotionTrialRhythm code { color: #cbd8d0; }
 .boundaryMotionTrialRhythm .boundaryMotionRhythmSlope > span { background: #203029; }
 .boundaryMotionTrialRhythm .boundaryMotionRhythmSlope b { color: #91a097; }
+.boundaryMotionTrialRhythm .boundaryMotionCentroidPaths > span { background: #1c2923; }
+.boundaryMotionTrialRhythm .boundaryMotionCentroidPaths b { color: #91a097; }
 .boundaryMotionTrialDeltaGrids > section { min-width: 0; display: grid; gap: 3px; }
 .boundaryMotionTrialDeltaGrids > section > strong { color: #a7b3ab; font-size: 9px; }
 .boundaryMotionTrialDeltaGrids > section > div {
