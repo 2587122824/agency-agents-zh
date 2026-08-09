@@ -431,6 +431,8 @@ A/B 决策门禁已从“候选快捷操作等待像素”收紧为统一的当�
 
 真实咖啡 SH-002 → SH-001 复验确认上述 A 与 `+1帧` 数值；转场-only `fade:200` 三项斜率影响全部 `0.0点`；后镜 `+2帧` 候选四点 `B−A` 为 `0.0 / 0.0 / −0.1 / −2.9点`，派生斜率影响为 `0.0 / −2.8 / −2.8点`。清除并回到开头后，草稿仍为 `row_version=226 / updated_at=2026-08-09T09:27:08.977394 / playhead_ms=0`，SH-001 源窗 `0..409ms`，API 日志零 editor-draft PUT。1280×720 无横向溢出，浏览器 warning/error 为空。完整后端 `305 passed`、Python compileall、Vite 生产构建和差异检查通过；Vite 仅有既有大 chunk 警告。
 
+提交 `213cd2db` 推送到 `main` 后使用标准脚本重启 8766：API PID `37204`、Worker PID `24392`，进程创建时间分别为 2026-08-09 17:50:56.927 / 17:50:56.943。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有三次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动信息，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
+
 ## 8. 事件
 
 ```text
