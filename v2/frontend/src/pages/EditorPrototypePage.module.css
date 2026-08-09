@@ -1036,6 +1036,79 @@
   background: #29483c;
   color: #e0f0e9;
 }
+.boundaryActionComparison > .boundaryABPixelEvidence {
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  border: 1px solid #3b4c46;
+  border-radius: 5px;
+  background: #121916;
+}
+.boundaryABPixelEvidence > header {
+  min-width: 0;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 7px;
+}
+.boundaryABPixelEvidence > header span { min-width: 0; display: grid; gap: 2px; }
+.boundaryABPixelEvidence > header strong { color: #d3dfda; }
+.boundaryABPixelEvidence > header small { color: #83918b; line-height: 1.35; }
+.boundaryABPixelEvidence > header em { color: #8da197; font-style: normal; white-space: nowrap; }
+.boundaryABPixelEvidence > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+.boundaryABPixelEvidence > div[data-single="true"] { grid-template-columns: minmax(0, 1fr); }
+.boundaryABPixelCard {
+  position: relative;
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  gap: 5px;
+  overflow: hidden;
+  border: 1px solid #35413d;
+  border-radius: 4px;
+  background: #0d1210;
+}
+.boundaryABPixelCard > header { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
+.boundaryABPixelCard > header strong { color: #c8d4cf; }
+.boundaryABPixelCard > header em { color: #91a39b; font-style: normal; }
+.boundaryABPixelCard[data-level="medium"] { border-color: #655c3e; background: #19170f; }
+.boundaryABPixelCard[data-level="medium"] > header em { color: #d2bd70; }
+.boundaryABPixelCard[data-level="high"] { border-color: #754740; background: #1b1110; }
+.boundaryABPixelCard[data-level="high"] > header em { color: #e3988c; }
+.boundaryABPixelCard > code { color: #8eaaa0; }
+.boundaryABPixelCard > div:not(.boundaryPixelProbeMedia) {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+.boundaryABPixelCard > div:not(.boundaryPixelProbeMedia) span {
+  min-width: 0;
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+  border-radius: 3px;
+  background: #1a211e;
+}
+.boundaryABPixelCard b { overflow: hidden; color: #85928d; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryABPixelCard > div code { color: #d0dbd7; }
+.boundaryABPixelCard > small { color: #78857f; line-height: 1.35; }
+.boundaryPixelProbeMedia {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: .001;
+  pointer-events: none;
+}
+.boundaryActionComparison .boundaryPixelProbeMedia video { width: 1px; height: 1px; }
 .boundaryActionComparison > .boundaryRollTrial {
   padding: 6px;
   display: grid;

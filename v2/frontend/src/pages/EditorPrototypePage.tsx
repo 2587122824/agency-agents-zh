@@ -534,6 +534,111 @@ function BoundaryFrameOverlay({
   </div>
 }
 
+function BoundaryPixelProbe({
+  projectId,
+  left,
+  right,
+  leftSourceTimeMs,
+  rightSourceTimeMs,
+  fps,
+  label,
+  note,
+}: {
+  projectId: string
+  left: TimelineItem
+  right: TimelineItem
+  leftSourceTimeMs: number
+  rightSourceTimeMs: number
+  fps: number
+  label: string
+  note: string
+}) {
+  const leftRef = useRef<HTMLVideoElement | null>(null)
+  const rightRef = useRef<HTMLVideoElement | null>(null)
+  const [leftReady, setLeftReady] = useState(false)
+  const [rightReady, setRightReady] = useState(false)
+  const [analysis, setAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const seekFrame = useCallback((video: HTMLVideoElement | null, sourceTimeMs: number) => {
+    if (!video || !Number.isFinite(video.duration)) return
+    video.currentTime = Math.min(Math.max(0, video.duration - .001), Math.max(0, sourceTimeMs / 1000))
+  }, [])
+  const frameIsCurrent = useCallback((video: HTMLVideoElement, sourceTimeMs: number) => {
+    if (!Number.isFinite(video.duration)) return false
+    const expected = Math.min(Math.max(0, video.duration - .001), Math.max(0, sourceTimeMs / 1000))
+    return Math.abs(video.currentTime - expected) <= .02
+  }, [])
+
+  useEffect(() => {
+    setLeftReady(false)
+    setRightReady(false)
+    setAnalysis(null)
+    setAnalysisError(null)
+    seekFrame(leftRef.current, leftSourceTimeMs)
+    seekFrame(rightRef.current, rightSourceTimeMs)
+  }, [leftSourceTimeMs, rightSourceTimeMs, seekFrame])
+
+  useEffect(() => {
+    if (!leftReady || !rightReady || !leftRef.current || !rightRef.current) return
+    const leftVideo = leftRef.current
+    const rightVideo = rightRef.current
+    let cancelled = false
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const result = analyzeBoundaryPixels(leftVideo, rightVideo)
+        if (!cancelled) setAnalysis(result)
+      } catch (reason) {
+        if (!cancelled) setAnalysisError(reason instanceof Error ? reason.message : '画面像素读取失败。')
+      }
+    })
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+    }
+  }, [leftReady, leftSourceTimeMs, rightReady, rightSourceTimeMs])
+
+  const levelLabel = analysis?.level === 'high'
+    ? '变化较高'
+    : analysis?.level === 'medium' ? '变化中等' : '变化较低'
+
+  return <article className={styles.boundaryABPixelCard} data-level={analysis?.level ?? 'pending'}>
+    <div className={styles.boundaryPixelProbeMedia} aria-hidden="true">
+      <video
+        ref={leftRef}
+        muted
+        playsInline
+        preload="auto"
+        src={`/api/v1/projects/${projectId}/assets/${left.asset_id}/content`}
+        onLoadedMetadata={event => seekFrame(event.currentTarget, leftSourceTimeMs)}
+        onSeeked={event => {
+          if (frameIsCurrent(event.currentTarget, leftSourceTimeMs)) setLeftReady(true)
+        }}
+      />
+      <video
+        ref={rightRef}
+        muted
+        playsInline
+        preload="auto"
+        src={`/api/v1/projects/${projectId}/assets/${right.asset_id}/content`}
+        onLoadedMetadata={event => seekFrame(event.currentTarget, rightSourceTimeMs)}
+        onSeeked={event => {
+          if (frameIsCurrent(event.currentTarget, rightSourceTimeMs)) setRightReady(true)
+        }}
+      />
+    </div>
+    <header><strong>{label}</strong><em>{analysis ? levelLabel : '读取中'}</em></header>
+    <code>{timecode(leftSourceTimeMs, fps)} → {timecode(rightSourceTimeMs, fps)}</code>
+    {analysis ? <div>
+      <span><b>明暗</b><code>{analysis.luminance_delta_percent}%</code></span>
+      <span><b>综合色彩</b><code>{analysis.color_delta_percent}%</code></span>
+      <span><b>逐像素</b><code>{analysis.pixel_change_percent}%</code></span>
+    </div> : analysisError
+      ? <small>像素证据暂不可用：{analysisError}</small>
+      : <small>正在读取末帧与首帧的本地像素…</small>}
+    <small>{note}</small>
+  </article>
+}
+
 function BoundaryRollTrimMonitor({
   projectId,
   left,
@@ -691,6 +796,13 @@ function BoundaryActionComparison({
   const rightSourceOutMs = rightBaseSourceOutMs + rightActivePhaseDeltaMs
   const leftEndMs = Math.max(leftSourceInMs, leftSourceOutMs - frameStepMs)
   const rightMaximumEndMs = Math.max(rightSourceInMs, rightSourceOutMs - frameStepMs)
+  const baselinePixelLeftMs = Math.max(leftBaseSourceInMs, leftBaseSourceOutMs - frameStepMs)
+  const baselinePixelRightMs = rightBaseSourceInMs
+  const tunedPixelLeftMs = Math.max(
+    leftBaseSourceInMs + leftPhaseDeltaMs,
+    leftBaseSourceOutMs + leftPhaseDeltaMs + rollTrialDeltaMs - frameStepMs,
+  )
+  const tunedPixelRightMs = rightBaseSourceInMs + rightPhaseDeltaMs + rollTrialDeltaMs
   const comparisonDurationMs = Math.max(0, Math.min(
     beforeMs,
     afterMs,
@@ -1124,6 +1236,36 @@ function BoundaryActionComparison({
       <button aria-pressed={!viewingTunedPhase} onClick={() => showPhaseView('baseline')}>A 原方案</button>
       <button aria-pressed={viewingTunedPhase} disabled={!hasComparisonTrial} title={hasComparisonTrial ? '查看当前保留的试调' : '先试调转场、滚动切位或前后镜相位'} onClick={() => showPhaseView('tuned')}>B 当前试调</button>
     </div>
+    <section className={styles.boundaryABPixelEvidence} aria-label="A/B 切点像素证据">
+      <header>
+        <span><strong>切点像素证据</strong><small>同时比较末帧与首帧；数值只辅助人工判断，不自动给出好坏结论。</small></span>
+        {!hasComparisonTrial && <em>先产生 B 试调</em>}
+      </header>
+      <div data-single={!hasComparisonTrial}>
+        <BoundaryPixelProbe
+          projectId={projectId}
+          left={left}
+          right={right}
+          leftSourceTimeMs={baselinePixelLeftMs}
+          rightSourceTimeMs={baselinePixelRightMs}
+          fps={fps}
+          label="A 原方案"
+          note="当前草稿的末帧与首帧基线。"
+        />
+        {hasComparisonTrial && <BoundaryPixelProbe
+          projectId={projectId}
+          left={left}
+          right={right}
+          leftSourceTimeMs={tunedPixelLeftMs}
+          rightSourceTimeMs={tunedPixelRightMs}
+          fps={fps}
+          label="B 当前试调"
+          note={transitionTrial && !hasMotionTrial
+            ? '本次只改变淡出、黑场与淡入的时间呈现，不改变切点两帧，因此指标应与 A 相同。'
+            : '当前本地试调的末帧与首帧；继续调整后会重新计算。'}
+        />}
+      </div>
+    </section>
     <div className={styles.boundaryTransitionTrial}>
       <span><strong>转场无损试用</strong><small>A 为当前 {baselineTransitionLabel}；B 在顺序舞台真实显示淡出至黑场再淡入，不是交叉叠化。</small></span>
       <div>
