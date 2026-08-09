@@ -6197,7 +6197,29 @@ export function EditorPrototypePage() {
                       setBoundaryFrameComparisonKey(value => value === boundaryKey ? null : boundaryKey)
                       if (framesOpen) setBoundaryActionComparisonKey(null)
                     }}
-                  ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button>
+                   ><Layers3 />{framesOpen ? '收起切点定格' : '对比末帧 / 首帧'}</button>
+                    {!framesOpen && hasCandidateReviewFollowUp && <section
+                      className={styles.boundaryCandidateReviewReminder}
+                      aria-label={`${left.label} 到 ${right.label} 的候选审核待办`}
+                    >
+                      <span>
+                        <strong>候选审核未完成</strong>
+                        <small>
+                          待决定 {candidateReviewUndecidedCount} · 待复看 {candidateReviewShortlistedCount}
+                          {candidateReviewMeasuredOnlyCount > 0 ? ` · 已实测未对照 ${candidateReviewMeasuredOnlyCount}` : ''}
+                        </small>
+                      </span>
+                      <button
+                        type="button"
+                        title="展开同步动作；不会恢复扫描侧、设置 B 或启动播放。"
+                        onClick={() => {
+                          setBoundaryFrameComparisonKey(boundaryKey)
+                          setBoundaryFrameOverlayKey(null)
+                          setBoundaryFrameStripKey(null)
+                          setBoundaryActionComparisonKey(boundaryKey)
+                        }}
+                      >继续审核</button>
+                    </section>}
                     {framesOpen && left.asset_id && right.asset_id && <>
                      <div className={styles.boundaryFrameModes}>
                        <div>

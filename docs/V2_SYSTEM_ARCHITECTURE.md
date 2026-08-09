@@ -303,6 +303,8 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 
 边界观察模式工具栏直接对当前 `BoundaryCandidateReviewSession` 做只读聚合：`comparisonOutcomes` 分别统计 `completed / shortlisted / kept_baseline`，`measuredMotionEvidence` 中没有对应 outcome 的 key 统计为“已实测未对照”。任一计数非零才渲染摘要；非同步动作模式且仍有 `completed / shortlisted / measured-only` 时渲染“继续审核”，点击只把 overlay/strip key 清空并把 action comparison key 设为当前 boundary。该路径不触碰组件内部扫描侧、phase delta、pending、媒体或保存函数；session key 变化后聚合自然归零。所有计数均为 render-time 派生，不增加 React state、effect、缓存表或后端合同。
 
+当 `boundaryFrameComparisonKey` 不等于当前 boundary、但同一聚合结果的 follow-up 为真时，边界主卡渲染收起态 reminder。其继续按钮一次设置 frame comparison key 和 action comparison key 为当前 boundary，并把 overlay/strip key 清空；React 随后挂载新的 `BoundaryActionComparison`，所有内部 state 仍使用默认空值，因此不会把 reminder 点击解释为选择候选或恢复播放。follow-up 只由 completed、shortlisted、measured-only 构成，kept-only 不渲染；reminder 不增加独立状态或第二套计数。
+
 候选卡的相对 A 影响不保存第二份派生状态：渲染时仅当 `baselineMotionAnalysis` 与 exact-key 命中的 `measuredMotionAnalysis` 同时存在，才复用 `boundaryMotionDeltas` 计算一位小数的幅度和接续几何差。夹角只在 A/B 两个原始夹角均可用时相减；轨迹缺失则整组接续影响不可比。该投影不增加 effect、媒体、Canvas 遍历、缓存 key、持久化或决策逻辑。
 
 候选人工结果记忆使用同一父级 review session 内的 `Record<exactCandidateSourceKey, 'completed' | 'kept_baseline' | 'shortlisted'>`。A→B 状态机只有在 tuned 阶段播放到右侧冻结终点、当前四套 source-key 证据仍有效时，才把当前已挂载的合法单侧 `±1..±4` 帧候选登记为 `completed`；当前 exact trial 的结论门禁仍有效时，用户点击“保留 A”更新为 `kept_baseline`，点击“暂存 B 待复看”更新为 `shortlisted`，两者随后都复用 reset 清除试调且零草稿写入。短名单入口只在 `activePhaseCandidateSourceKey` 存在时渲染，滚动、转场和双侧相位没有写入路径。再次完整播放同一候选会用 `completed` 覆盖旧结果；停止、异常、只播放 A 或证据失效也没有写入路径。组件卸载时只清理播放、pending、B、扫描侧、结论门禁与媒体，不清理父级 session；基础边界依赖变化通过新的 review session key 隔离旧结果。该记录不复用 `phaseDecisionSourceKey` 充当持久事实，也不进入 Timeline、EditorDraftSession、history、API、localStorage、排序或采用逻辑。

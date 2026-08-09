@@ -1026,6 +1026,21 @@
 .boundaryCandidateReviewSummary strong { color: #cbd8dc; font-size: 9px; }
 .boundaryCandidateReviewSummary small { color: #89979c; font-size: 8px; line-height: 1.35; }
 .boundaryControl .boundaryCandidateReviewSummary > button { min-width: 62px; height: 28px; padding: 0 6px; font-size: 8px; }
+.boundaryCandidateReviewReminder {
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #5a4a38;
+  border-radius: 4px;
+  background: #2b261f;
+}
+.boundaryCandidateReviewReminder > span { min-width: 0; display: grid; gap: 2px; }
+.boundaryCandidateReviewReminder strong { color: #e2cda7; font-size: 9px; }
+.boundaryCandidateReviewReminder small { color: #aa9b84; font-size: 8px; line-height: 1.35; }
+.boundaryControl .boundaryCandidateReviewReminder > button { min-width: 62px; height: 28px; padding: 0 6px; border-color: #6b5b45; background: #3b3227; color: #ead9b8; font-size: 8px; }
 .boundaryActionComparison {
   min-width: 0;
   padding: 7px;
