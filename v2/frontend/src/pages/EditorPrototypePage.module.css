@@ -1481,6 +1481,11 @@
 .boundaryControl .boundaryPhaseScan > header button { min-width: 0; height: 25px; padding: 0 4px; font-size: 9px; }
 .boundaryControl .boundaryPhaseScan > header button[aria-pressed="true"] { border-color: #628394; background: #29414c; color: #eaf7fc; }
 .boundaryPhaseScan > div:not([role="group"]) { min-width: 0; display: grid; gap: 5px; }
+.boundaryPhaseScan > .boundaryPhaseReviewProgress { grid-template-columns: minmax(0, 1fr) 88px; align-items: center; padding: 5px; border: 1px solid #35434a; border-radius: 4px; background: #172126; }
+.boundaryPhaseReviewProgress > span { min-width: 0; display: grid; gap: 1px; }
+.boundaryPhaseReviewProgress strong { color: #d0dce1; font-size: 9px; }
+.boundaryPhaseReviewProgress small { overflow: hidden; color: #839197; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryControl .boundaryPhaseReviewProgress > button { min-width: 0; height: 30px; padding: 0 5px; font-size: 8px; line-height: 1.15; white-space: normal; }
 .boundaryPhaseCandidateMeasured { min-width: 0; display: grid; gap: 3px; padding: 5px; border: 1px solid #35464e; border-radius: 4px; background: #172328; }
 .boundaryPhaseCandidateMeasured > strong { color: #b9c8cf; font-size: 9px; letter-spacing: .04em; }
 .boundaryPhaseCandidateMeasured > span { min-width: 0; display: flex; flex-wrap: wrap; gap: 3px 6px; }

@@ -303,3 +303,5 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 候选卡的相对 A 影响不保存第二份派生状态：渲染时仅当 `baselineMotionAnalysis` 与 exact-key 命中的 `measuredMotionAnalysis` 同时存在，才复用 `boundaryMotionDeltas` 计算一位小数的幅度和接续几何差。夹角只在 A/B 两个原始夹角均可用时相减；轨迹缺失则整组接续影响不可比。该投影不增加 effect、媒体、Canvas 遍历、缓存 key、持久化或决策逻辑。
 
 候选人工结果记忆使用同组件内的 `Record<exactCandidateSourceKey, 'completed' | 'kept_baseline'>`。A→B 状态机只有在 tuned 阶段播放到右侧冻结终点、当前四套 source-key 证据仍有效时，才把当前合法单侧 `±1/±2` 帧候选登记为 `completed`；当前 exact trial 的结论门禁仍有效且用户点击“保留 A”时，才更新为 `kept_baseline`。再次完整播放同一候选会用 `completed` 覆盖旧保留结果，停止、异常、只播放 A、证据失效、滚动或转场试调没有写入路径。基础边界依赖变化时与实测动作缓存同步清空。该记录不复用 `phaseDecisionSourceKey` 充当持久事实，也不进入 Timeline、EditorDraftSession、history、API、localStorage、排序或采用逻辑。
+
+候选审核进度是 `nearbyPhaseCandidates` 与 `candidateComparisonOutcomes` 的同步派生投影：reviewed 统计存在任一 outcome 的 exact key，kept 只统计 `kept_baseline`，next 使用固定候选数组的第一个缺失 key。按钮直接调用既有 `selectPhaseCandidate(side, delta, true)`，因此继续受证据、媒体和迟到回调门禁约束；`hasComparisonTrial` 为真时禁用，不能越过当前待决 B。派生计数不增加 state、effect、媒体、缓存键、排序或持久化。

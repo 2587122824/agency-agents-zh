@@ -1518,6 +1518,15 @@ function BoundaryActionComparison({
     .filter(candidate => phaseCandidateScanSide === 'left'
       ? candidate.deltaMs >= leftMinimumPhaseMs && candidate.deltaMs <= leftMaximumPhaseMs
       : candidate.deltaMs >= rightMinimumPhaseMs && candidate.deltaMs <= rightMaximumPhaseMs)
+  const reviewedPhaseCandidateCount = phaseCandidateScanSide
+    ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)]).length
+    : 0
+  const keptBaselinePhaseCandidateCount = phaseCandidateScanSide
+    ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'kept_baseline').length
+    : 0
+  const nextUnreviewedPhaseCandidate = phaseCandidateScanSide
+    ? nearbyPhaseCandidates.find(candidate => !candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)]) ?? null
+    : null
   useEffect(() => {
     setMeasuredCandidateMotionEvidence({})
     setCandidateComparisonOutcomes({})
@@ -2254,8 +2263,20 @@ function BoundaryActionComparison({
           >后镜</button>
         </div>
       </header>
-      {phaseCandidateScanSide && <div>
-        {nearbyPhaseCandidates.length ? nearbyPhaseCandidates.map(candidate => {
+      {phaseCandidateScanSide && <>
+        <div className={styles.boundaryPhaseReviewProgress} aria-label={`${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}邻帧候选对照进度`}>
+          <span>
+            <strong>{reviewedPhaseCandidateCount}/{nearbyPhaseCandidates.length} 已对照</strong>
+            <small>{keptBaselinePhaseCandidateCount} 项本次保留 A · 按固定时间顺序</small>
+          </span>
+          <button
+            disabled={!nextUnreviewedPhaseCandidate || hasComparisonTrial}
+            title={hasComparisonTrial ? '请先保留 A、采用 B 或清除当前试调，再继续下一个候选。' : undefined}
+            onClick={() => nextUnreviewedPhaseCandidate && selectPhaseCandidate(phaseCandidateScanSide, nextUnreviewedPhaseCandidate.deltaMs, true)}
+          >{!nearbyPhaseCandidates.length ? '没有合法候选' : nextUnreviewedPhaseCandidate ? '对照下一个未看候选' : '本侧候选已看完'}</button>
+        </div>
+        <div>
+          {nearbyPhaseCandidates.length ? nearbyPhaseCandidates.map(candidate => {
           const sideLabel = phaseCandidateScanSide === 'left' ? '前镜' : '后镜'
           const directionLabel = candidate.deltaMs < 0 ? '前移' : '后移'
           const selected = phaseCandidateScanSide === 'left'
@@ -2284,8 +2305,9 @@ function BoundaryActionComparison({
             onSelect={() => selectPhaseCandidate(phaseCandidateScanSide, candidate.deltaMs)}
             onCompare={() => selectPhaseCandidate(phaseCandidateScanSide, candidate.deltaMs, true)}
           />
-        }) : <small>这一侧在当前素材把手内没有可扫描的 ±2 帧邻近相位。</small>}
-      </div>}
+          }) : <small>这一侧在当前素材把手内没有可扫描的 ±2 帧邻近相位。</small>}
+        </div>
+      </>}
       {!phaseCandidateScanSide && <small>选择前镜或后镜后再按需加载候选，不会后台扫描整段素材。</small>}
     </section>
     <div className={styles.boundaryTransitionTrial}>
