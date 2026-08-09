@@ -1173,8 +1173,10 @@
 .boundaryPhaseCandidate > div span { min-width: 0; display: grid; gap: 2px; }
 .boundaryPhaseCandidate > div code { overflow: hidden; color: #8fa8b2; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryPhaseCandidate > div small { color: #78878d; }
-.boundaryControl .boundaryPhaseCandidate > div button { min-width: 62px; height: 26px; padding: 0 5px; font-size: 9px; }
-.boundaryControl .boundaryPhaseCandidate > div button[aria-pressed="true"] { border-color: #638b9a; background: #2b4954; color: #effbff; }
+.boundaryPhaseCandidateActions { display: grid; gap: 3px; }
+.boundaryControl .boundaryPhaseCandidateActions button { min-width: 74px; height: 24px; padding: 0 5px; font-size: 9px; }
+.boundaryControl .boundaryPhaseCandidateActions button[aria-pressed="true"] { border-color: #638b9a; background: #2b4954; color: #effbff; }
+.boundaryControl .boundaryPhaseCandidateActions button[aria-busy="true"] { border-color: #7d7560; color: #e4d7ad; }
 .boundaryPixelProbeMedia {
   position: absolute;
   width: 1px;

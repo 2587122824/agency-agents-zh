@@ -672,7 +672,9 @@ function BoundaryPhaseCandidate({
   label,
   baselineAnalysis,
   selected,
+  comparePending,
   onSelect,
+  onCompare,
 }: {
   projectId: string
   left: TimelineItem
@@ -683,7 +685,9 @@ function BoundaryPhaseCandidate({
   label: string
   baselineAnalysis: BoundaryPixelAnalysis | null
   selected: boolean
+  comparePending: boolean
   onSelect: () => void
+  onCompare: () => void
 }) {
   const [analysis, setAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
   const deltas = baselineAnalysis && analysis ? boundaryPixelDeltas(baselineAnalysis, analysis) : null
@@ -705,7 +709,10 @@ function BoundaryPhaseCandidate({
         <code>色彩 {signedPercentagePoint(deltas.color)}</code>
         <code>像素 {signedPercentagePoint(deltas.pixel)}</code>
       </span> : <small>等待 A 与候选帧证据…</small>}
-      <button aria-pressed={selected} onClick={onSelect}>{selected ? '当前 B' : '设为单侧 B'}</button>
+      <div className={styles.boundaryPhaseCandidateActions}>
+        <button aria-pressed={selected} onClick={onSelect}>{selected ? '当前 B' : '设为单侧 B'}</button>
+        <button aria-busy={comparePending} onClick={onCompare}>{comparePending ? '等待证据…' : '设为 B 并对照'}</button>
+      </div>
     </div>
   </div>
 }
@@ -847,10 +854,10 @@ function BoundaryActionComparison({
   const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
   const [baselinePixelAnalysis, setBaselinePixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
-  const [tunedPixelAnalysis, setTunedPixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
+  const [tunedPixelEvidence, setTunedPixelEvidence] = useState<{ sourceKey: string; analysis: BoundaryPixelAnalysis } | null>(null)
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
+  const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const handleBaselinePixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => setBaselinePixelAnalysis(analysis), [])
-  const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => setTunedPixelAnalysis(analysis), [])
   const leftBaseSourceInMs = left.source_in_ms ?? 0
   const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
   const rightBaseSourceInMs = right.source_in_ms ?? 0
@@ -879,6 +886,11 @@ function BoundaryActionComparison({
     leftBaseSourceOutMs + leftPhaseDeltaMs + rollTrialDeltaMs - frameStepMs,
   )
   const tunedPixelRightMs = rightBaseSourceInMs + rightPhaseDeltaMs + rollTrialDeltaMs
+  const tunedPixelSourceKey = `${tunedPixelLeftMs}:${tunedPixelRightMs}`
+  const tunedPixelAnalysis = tunedPixelEvidence?.sourceKey === tunedPixelSourceKey ? tunedPixelEvidence.analysis : null
+  const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
+    setTunedPixelEvidence(analysis ? { sourceKey: tunedPixelSourceKey, analysis } : null)
+  }, [tunedPixelSourceKey])
   const nearbyPhaseCandidates = [-2, -1, 1, 2]
     .map(frameOffset => ({ frameOffset, deltaMs: frameOffset * frameStepMs }))
     .filter(candidate => phaseCandidateScanSide === 'left'
@@ -927,7 +939,7 @@ function BoundaryActionComparison({
   const [sequenceRightOpacity, setSequenceRightOpacity] = useState(1)
 
   useEffect(() => {
-    if (!hasComparisonTrial) setTunedPixelAnalysis(null)
+    if (!hasComparisonTrial) setTunedPixelEvidence(null)
   }, [hasComparisonTrial])
 
   const positionMedia = useCallback(() => {
@@ -966,6 +978,7 @@ function BoundaryActionComparison({
     phaseSequenceStartTokenRef.current += 1
     phaseSequenceCompareStageRef.current = 'idle'
     setPhaseSequenceCompareStage('idle')
+    setPendingPhaseCandidateCompare(null)
     pauseSequenceMedia()
   }, [pauseSequenceMedia])
 
@@ -1189,6 +1202,7 @@ function BoundaryActionComparison({
 
   const startPhaseSequenceComparison = () => {
     if (!hasComparisonTrial || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady) return
+    setPendingPhaseCandidateCompare(null)
     onBeforePlay()
     pauseMedia()
     positionMedia()
@@ -1224,7 +1238,7 @@ function BoundaryActionComparison({
       : `已在本地把${side === 'left' ? '前镜' : '后镜'}${nextDeltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(nextDeltaMs), fps)}；可顺序试播或使用 A→B 连续对照。`)
   }
 
-  const selectPhaseCandidate = (side: 'left' | 'right', deltaMs: number) => {
+  const selectPhaseCandidate = (side: 'left' | 'right', deltaMs: number, compareAfterEvidence = false) => {
     if (rollTrialDeltaMs !== 0 || transitionTrial) return
     onBeforePlay()
     pauseMedia()
@@ -1235,8 +1249,36 @@ function BoundaryActionComparison({
     setRightPhaseDeltaMs(side === 'right' ? deltaMs : 0)
     setPhaseView('tuned')
     setProgressMs(0)
-    onNotice(`已把${side === 'left' ? '前镜' : '后镜'} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)} 设为本地 B；可继续顺序试播或 A→B 对照。`)
+    setPendingPhaseCandidateCompare(compareAfterEvidence ? { side, deltaMs } : null)
+    onNotice(compareAfterEvidence
+      ? `已把${side === 'left' ? '前镜' : '后镜'} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)} 设为本地 B；正在等待对应 B 像素证据后自动开始 A→B 对照。`
+      : `已把${side === 'left' ? '前镜' : '后镜'} ${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)} 设为本地 B；可继续顺序试播或 A→B 对照。`)
   }
+
+  useEffect(() => {
+    if (!pendingPhaseCandidateCompare) return
+    const matchesCandidate = pendingPhaseCandidateCompare.side === 'left'
+      ? leftPhaseDeltaMs === pendingPhaseCandidateCompare.deltaMs && rightPhaseDeltaMs === 0
+      : rightPhaseDeltaMs === pendingPhaseCandidateCompare.deltaMs && leftPhaseDeltaMs === 0
+    if (!matchesCandidate || phaseView !== 'tuned' || rollTrialDeltaMs !== 0 || transitionTrial) {
+      setPendingPhaseCandidateCompare(null)
+      return
+    }
+    if (!baselinePixelAnalysis || !tunedPixelAnalysis || !sequenceLeftReady || !sequenceRightReady || sequenceDurationMs <= 0) return
+    startPhaseSequenceComparison()
+  }, [
+    baselinePixelAnalysis,
+    leftPhaseDeltaMs,
+    pendingPhaseCandidateCompare,
+    phaseView,
+    rightPhaseDeltaMs,
+    rollTrialDeltaMs,
+    sequenceDurationMs,
+    sequenceLeftReady,
+    sequenceRightReady,
+    transitionTrial,
+    tunedPixelAnalysis,
+  ])
 
   const togglePhaseCandidateScan = (side: 'left' | 'right') => {
     onBeforePlay()
@@ -1452,7 +1494,10 @@ function BoundaryActionComparison({
             label={`${sideLabel}${directionLabel} ${Math.abs(candidate.frameOffset)} 帧`}
             baselineAnalysis={baselinePixelAnalysis}
             selected={selected}
+            comparePending={pendingPhaseCandidateCompare?.side === phaseCandidateScanSide
+              && pendingPhaseCandidateCompare.deltaMs === candidate.deltaMs}
             onSelect={() => selectPhaseCandidate(phaseCandidateScanSide, candidate.deltaMs)}
+            onCompare={() => selectPhaseCandidate(phaseCandidateScanSide, candidate.deltaMs, true)}
           />
         }) : <small>这一侧在当前素材把手内没有可扫描的 ±2 帧邻近相位。</small>}
       </div>}
