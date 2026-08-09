@@ -2843,6 +2843,7 @@ export function EditorPrototypePage() {
   const renderedPreviewRef = useRef<HTMLVideoElement | null>(null)
   const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
   const advancingPlaybackRef = useRef(false)
+  const preservePlayheadOnReviewFocusRef = useRef(false)
   const timelineScrubbingRef = useRef(false)
   const pendingTimelineViewRef = useRef<{
     playheadRatio: number
@@ -3213,6 +3214,10 @@ export function EditorPrototypePage() {
   }, [playing])
 
   useEffect(() => {
+    if (preservePlayheadOnReviewFocusRef.current) {
+      preservePlayheadOnReviewFocusRef.current = false
+      return
+    }
     advancingPlaybackRef.current = false
   }, [selectedItem?.id])
 
@@ -3667,6 +3672,7 @@ export function EditorPrototypePage() {
     if (itemIndex < 0) return null
     videoRef.current?.pause()
     advancingPlaybackRef.current = true
+    if (itemIndex !== selectedIndex) preservePlayheadOnReviewFocusRef.current = true
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
