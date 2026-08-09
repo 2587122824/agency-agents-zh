@@ -1045,6 +1045,20 @@
   border-radius: 5px;
   background: #151c19;
 }
+.boundaryActionComparison > .boundaryTransitionTrial {
+  padding: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  border: 1px solid #475748;
+  border-radius: 5px;
+  background: #191d17;
+}
+.boundaryTransitionTrial > span { min-width: 0; display: grid; gap: 2px; color: #d7decf; }
+.boundaryTransitionTrial > span small { color: #929b88; line-height: 1.35; }
+.boundaryTransitionTrial > div { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; }
+.boundaryControl .boundaryTransitionTrial button { min-width: 0; height: 26px; padding: 0 4px; font-size: 9px; }
+.boundaryControl .boundaryTransitionTrial button[aria-pressed="true"] { border-color: #718d67; background: #34452f; color: #eff7e9; }
 .boundaryRollTrial > span { min-width: 0; display: grid; gap: 2px; color: #cbd8d2; }
 .boundaryRollTrial > span small { color: #82928b; line-height: 1.35; }
 .boundaryRollTrial > div {

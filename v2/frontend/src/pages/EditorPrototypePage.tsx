@@ -479,6 +479,7 @@ function BoundaryActionComparison({
   rollMaximumDeltaMs,
   onBeforePlay,
   onApplyRoll,
+  onApplyTransition,
   onApplyLeftPhase,
   onApplyRightPhase,
   onApplyPhasePair,
@@ -497,6 +498,7 @@ function BoundaryActionComparison({
   rollMaximumDeltaMs: number
   onBeforePlay: () => void
   onApplyRoll: (deltaMs: number) => void
+  onApplyTransition: (type: 'cut' | 'fade', durationMs: number) => void
   onApplyLeftPhase: (deltaMs: number) => void
   onApplyRightPhase: (deltaMs: number) => void
   onApplyPhasePair: (leftDeltaMs: number, rightDeltaMs: number) => void
@@ -521,6 +523,7 @@ function BoundaryActionComparison({
   const [phaseSequenceCompareStage, setPhaseSequenceCompareStage] = useState<'idle' | 'baseline' | 'tuned'>('idle')
   const [phaseDecisionReady, setPhaseDecisionReady] = useState(false)
   const [rollTrialDeltaMs, setRollTrialDeltaMs] = useState(0)
+  const [transitionTrial, setTransitionTrial] = useState<{ type: 'cut' | 'fade'; durationMs: number } | null>(null)
   const [leftPhaseDeltaMs, setLeftPhaseDeltaMs] = useState(0)
   const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
@@ -533,7 +536,8 @@ function BoundaryActionComparison({
   const rightMinimumPhaseMs = -rightBaseSourceInMs
   const rightMaximumPhaseMs = Math.max(0, (right.asset_duration_ms ?? rightBaseSourceOutMs) - rightBaseSourceOutMs)
   const hasPhaseTrial = leftPhaseDeltaMs !== 0 || rightPhaseDeltaMs !== 0
-  const hasComparisonTrial = hasPhaseTrial || rollTrialDeltaMs !== 0
+  const hasMotionTrial = hasPhaseTrial || rollTrialDeltaMs !== 0
+  const hasComparisonTrial = hasMotionTrial || transitionTrial != null
   const viewingTunedPhase = phaseView === 'tuned' && hasComparisonTrial
   const leftActivePhaseDeltaMs = viewingTunedPhase ? leftPhaseDeltaMs : 0
   const rightActivePhaseDeltaMs = viewingTunedPhase ? rightPhaseDeltaMs : 0
@@ -561,6 +565,30 @@ function BoundaryActionComparison({
   const sequenceRightDurationMs = Math.max(0, sequenceRightEndMs - sequenceRightStartMs)
   const sequenceDurationMs = sequenceLeftDurationMs + sequenceRightDurationMs
   const sequenceVisible = sequencePlaying || sequenceProgressMs > 0 || phaseSequenceCompareStage !== 'idle'
+  const baselineTransitionOut = left.transform.transition_out as { type?: string; duration_ms?: number } | undefined
+  const baselineTransitionIn = right.transform.transition_in as { type?: string; duration_ms?: number } | undefined
+  const baselinePairedFade = baselineTransitionOut?.type === 'fade'
+    && baselineTransitionIn?.type === 'fade'
+    && baselineTransitionOut.duration_ms === baselineTransitionIn.duration_ms
+  const baselinePairedCut = (baselineTransitionOut?.type ?? 'cut') === 'cut'
+    && (baselineTransitionIn?.type ?? 'cut') === 'cut'
+  const baselineTransitionLabel = baselinePairedFade
+    ? `淡出淡入 ${seconds(baselineTransitionOut?.duration_ms ?? 0)}`
+    : baselinePairedCut ? '直接切换' : '两侧设置不一致'
+  const transitionMaximumDurationMs = Math.min(
+    2000,
+    Math.floor((left.timeline_out_ms - left.timeline_in_ms) / 2),
+    Math.floor((right.timeline_out_ms - right.timeline_in_ms) / 2),
+  )
+  const activeTransitionTrial = viewingTunedPhase ? transitionTrial : null
+  const activeLeftFadeMs = activeTransitionTrial
+    ? activeTransitionTrial.type === 'fade' ? activeTransitionTrial.durationMs : 0
+    : baselineTransitionOut?.type === 'fade' ? baselineTransitionOut.duration_ms ?? 0 : 0
+  const activeRightFadeMs = activeTransitionTrial
+    ? activeTransitionTrial.type === 'fade' ? activeTransitionTrial.durationMs : 0
+    : baselineTransitionIn?.type === 'fade' ? baselineTransitionIn.duration_ms ?? 0 : 0
+  const [sequenceLeftOpacity, setSequenceLeftOpacity] = useState(1)
+  const [sequenceRightOpacity, setSequenceRightOpacity] = useState(1)
 
   const positionMedia = useCallback(() => {
     if (leftRef.current && Number.isFinite(leftRef.current.duration)) leftRef.current.currentTime = leftStartMs / 1000
@@ -582,7 +610,11 @@ function BoundaryActionComparison({
     sequenceSideRef.current = 'left'
     setSequenceSide('left')
     setSequenceProgressMs(0)
-  }, [sequenceLeftStartMs, sequenceRightStartMs])
+    setSequenceLeftOpacity(activeLeftFadeMs > 0
+      ? Math.max(0, Math.min(1, (sequenceLeftEndMs - sequenceLeftStartMs) / activeLeftFadeMs))
+      : 1)
+    setSequenceRightOpacity(activeRightFadeMs > 0 ? 0 : 1)
+  }, [activeLeftFadeMs, activeRightFadeMs, sequenceLeftEndMs, sequenceLeftStartMs, sequenceRightStartMs])
 
   const pauseSequenceMedia = useCallback(() => {
     sequenceLeftRef.current?.pause()
@@ -606,12 +638,25 @@ function BoundaryActionComparison({
 
   useEffect(() => {
     setRollTrialDeltaMs(0)
+    setTransitionTrial(null)
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
     setPhaseView('baseline')
     setPhaseDecisionReady(false)
     cancelPhaseSequenceComparison()
-  }, [cancelPhaseSequenceComparison, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
+  }, [
+    baselineTransitionIn?.duration_ms,
+    baselineTransitionIn?.type,
+    baselineTransitionOut?.duration_ms,
+    baselineTransitionOut?.type,
+    cancelPhaseSequenceComparison,
+    left.id,
+    leftBaseSourceInMs,
+    leftBaseSourceOutMs,
+    right.id,
+    rightBaseSourceInMs,
+    rightBaseSourceOutMs,
+  ])
 
   useEffect(() => {
     setSequenceLeftReady(false)
@@ -694,11 +739,16 @@ function BoundaryActionComparison({
       if (sequenceSideRef.current === 'left') {
         const leftProgressMs = Math.max(0, leftVideo.currentTime * 1000 - sequenceLeftStartMs)
         setSequenceProgressMs(Math.min(sequenceLeftDurationMs, leftProgressMs))
+        setSequenceLeftOpacity(activeLeftFadeMs > 0
+          ? Math.max(0, Math.min(1, (sequenceLeftEndMs - leftVideo.currentTime * 1000) / activeLeftFadeMs))
+          : 1)
         if (leftVideo.currentTime * 1000 >= sequenceLeftEndMs - 4 || leftVideo.ended) {
           leftVideo.pause()
           leftVideo.currentTime = sequenceLeftEndMs / 1000
+          setSequenceLeftOpacity(activeLeftFadeMs > 0 ? 0 : 1)
           rightVideo.currentTime = sequenceRightStartMs / 1000
           rightVideo.playbackRate = rate
+          setSequenceRightOpacity(activeRightFadeMs > 0 ? 0 : 1)
           sequenceSideRef.current = 'right'
           setSequenceSide('right')
           void rightVideo.play().catch(reason => {
@@ -710,6 +760,9 @@ function BoundaryActionComparison({
       } else {
         const rightProgressMs = Math.max(0, rightVideo.currentTime * 1000 - sequenceRightStartMs)
         setSequenceProgressMs(Math.min(sequenceDurationMs, sequenceLeftDurationMs + rightProgressMs))
+        setSequenceRightOpacity(activeRightFadeMs > 0
+          ? Math.max(0, Math.min(1, rightProgressMs / activeRightFadeMs))
+          : 1)
         if (rightVideo.currentTime * 1000 >= sequenceRightEndMs - 4 || rightVideo.ended) {
           rightVideo.pause()
           rightVideo.currentTime = sequenceRightEndMs / 1000
@@ -740,7 +793,7 @@ function BoundaryActionComparison({
       if (sequenceAnimationRef.current != null) window.cancelAnimationFrame(sequenceAnimationRef.current)
       sequenceAnimationRef.current = null
     }
-  }, [left.label, onNotice, pauseSequenceMedia, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
+  }, [activeLeftFadeMs, activeRightFadeMs, left.label, onNotice, pauseSequenceMedia, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
 
   useEffect(() => () => {
     leftRef.current?.pause()
@@ -806,7 +859,7 @@ function BoundaryActionComparison({
   }
 
   const adjustPhase = (side: 'left' | 'right', requestedDeltaMs: number) => {
-    if (rollTrialDeltaMs !== 0) return
+    if (rollTrialDeltaMs !== 0 || transitionTrial) return
     onBeforePlay()
     pauseMedia()
     cancelPhaseSequenceComparison()
@@ -822,7 +875,7 @@ function BoundaryActionComparison({
   }
 
   const adjustRollTrial = (requestedDeltaMs: number) => {
-    if (hasPhaseTrial) return
+    if (hasPhaseTrial || transitionTrial) return
     const nextDeltaMs = Math.max(
       rollMinimumDeltaMs,
       Math.min(rollMaximumDeltaMs, rollTrialDeltaMs + requestedDeltaMs),
@@ -845,12 +898,34 @@ function BoundaryActionComparison({
     ? '原相位'
     : `${deltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(deltaMs), fps)}`
 
+  const chooseTransitionTrial = (type: 'cut' | 'fade', requestedDurationMs = 0) => {
+    if (hasMotionTrial) return
+    const durationMs = type === 'fade'
+      ? Math.max(100, Math.min(transitionMaximumDurationMs, requestedDurationMs))
+      : 0
+    const matchesBaseline = type === 'cut'
+      ? baselinePairedCut
+      : baselinePairedFade && (baselineTransitionOut?.duration_ms ?? 0) === durationMs
+    onBeforePlay()
+    pauseMedia()
+    cancelPhaseSequenceComparison()
+    positionSequenceMedia()
+    setPhaseDecisionReady(false)
+    setTransitionTrial(matchesBaseline ? null : { type, durationMs })
+    setPhaseView(matchesBaseline ? 'baseline' : 'tuned')
+    setProgressMs(0)
+    onNotice(matchesBaseline
+      ? `转场试用已回到 A 当前方案（${baselineTransitionLabel}），尚未写入草稿。`
+      : `已在本地试用 B ${type === 'fade' ? `${seconds(durationMs)} 淡出淡入` : '直接切换'}；可顺序试播或使用 A→B 连续对照。`)
+  }
+
   const resetPhase = () => {
     onBeforePlay()
     pauseMedia()
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
     setRollTrialDeltaMs(0)
+    setTransitionTrial(null)
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
     setPhaseDecisionReady(false)
@@ -880,6 +955,8 @@ function BoundaryActionComparison({
     setPhaseDecisionReady(false)
     if (rollTrialDeltaMs !== 0) {
       onApplyRoll(rollTrialDeltaMs)
+    } else if (transitionTrial) {
+      onApplyTransition(transitionTrial.type, transitionTrial.durationMs)
     } else if (leftPhaseDeltaMs !== 0 && rightPhaseDeltaMs !== 0) {
       onApplyPhasePair(leftPhaseDeltaMs, rightPhaseDeltaMs)
     } else if (leftPhaseDeltaMs !== 0) {
@@ -891,25 +968,39 @@ function BoundaryActionComparison({
 
   const tunedTrialSummary = rollTrialDeltaMs !== 0
     ? `B 将切点${rollTrialDeltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(rollTrialDeltaMs), fps)}，采用后仍只形成一次撤销。`
+    : transitionTrial
+    ? `B 将采用${transitionTrial.type === 'fade' ? `${seconds(transitionTrial.durationMs)} 淡出淡入` : '直接切换'}，一次写入前镜淡出与后镜淡入。`
     : 'B 会按当前单侧或双侧源窗口相位形成一次撤销。'
 
   return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
     <header>
-      <span><strong>同步动作</strong><small>{viewingTunedPhase ? 'B 当前试调' : 'A 原切点'} · 共同窗口 {previewSeconds(comparisonDurationMs)} · {rate}×</small></span>
+      <span><strong>同步动作</strong><small>{viewingTunedPhase ? 'B 当前试调' : 'A 原方案'} · 共同窗口 {previewSeconds(comparisonDurationMs)} · {rate}×</small></span>
       <code>{timecode(progressMs, fps)} / {timecode(comparisonDurationMs, fps)}</code>
     </header>
     <div className={styles.boundaryPhaseViewSwitch} role="group" aria-label="同步动作切点 A/B 对照">
-      <button aria-pressed={!viewingTunedPhase} onClick={() => showPhaseView('baseline')}>A 原切点</button>
-      <button aria-pressed={viewingTunedPhase} disabled={!hasComparisonTrial} title={hasComparisonTrial ? '查看当前保留的切点试调' : '先试调滚动切位或前后镜相位'} onClick={() => showPhaseView('tuned')}>B 当前试调</button>
+      <button aria-pressed={!viewingTunedPhase} onClick={() => showPhaseView('baseline')}>A 原方案</button>
+      <button aria-pressed={viewingTunedPhase} disabled={!hasComparisonTrial} title={hasComparisonTrial ? '查看当前保留的试调' : '先试调转场、滚动切位或前后镜相位'} onClick={() => showPhaseView('tuned')}>B 当前试调</button>
+    </div>
+    <div className={styles.boundaryTransitionTrial}>
+      <span><strong>转场无损试用</strong><small>A 为当前 {baselineTransitionLabel}；B 在顺序舞台真实显示淡出至黑场再淡入，不是交叉叠化。</small></span>
+      <div>
+        <button disabled={hasMotionTrial} aria-pressed={transitionTrial?.type === 'cut'} onClick={() => chooseTransitionTrial('cut')}>直接切换</button>
+        {[200, 300, 500].map(durationMs => <button
+          key={durationMs}
+          disabled={hasMotionTrial || durationMs > transitionMaximumDurationMs}
+          aria-pressed={transitionTrial?.type === 'fade' && transitionTrial.durationMs === durationMs}
+          onClick={() => chooseTransitionTrial('fade', durationMs)}
+        >淡出淡入 {seconds(durationMs)}</button>)}
+      </div>
     </div>
     <div className={styles.boundaryRollTrial}>
       <span><strong>滚动切位试调</strong><small>临时联动前镜末端与后镜首端，不写草稿；与源窗口相位二选一。</small></span>
       <div>
-        <button aria-label={`${left.label} 到 ${right.label} 滚动切位试调前移 1 秒`} disabled={hasPhaseTrial || rollTrialDeltaMs <= rollMinimumDeltaMs} onClick={() => adjustRollTrial(-1000)}>−1s</button>
-        <button aria-label={`${left.label} 到 ${right.label} 滚动切位试调前移 1 帧`} disabled={hasPhaseTrial || rollTrialDeltaMs <= rollMinimumDeltaMs} onClick={() => adjustRollTrial(-frameStepMs)}>−1帧</button>
+        <button aria-label={`${left.label} 到 ${right.label} 滚动切位试调前移 1 秒`} disabled={hasPhaseTrial || transitionTrial != null || rollTrialDeltaMs <= rollMinimumDeltaMs} onClick={() => adjustRollTrial(-1000)}>−1s</button>
+        <button aria-label={`${left.label} 到 ${right.label} 滚动切位试调前移 1 帧`} disabled={hasPhaseTrial || transitionTrial != null || rollTrialDeltaMs <= rollMinimumDeltaMs} onClick={() => adjustRollTrial(-frameStepMs)}>−1帧</button>
         <code>{rollTrialDeltaMs === 0 ? '原切点' : `${rollTrialDeltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(rollTrialDeltaMs), fps)}`}</code>
-        <button aria-label={`${left.label} 到 ${right.label} 滚动切位试调后移 1 帧`} disabled={hasPhaseTrial || rollTrialDeltaMs >= rollMaximumDeltaMs} onClick={() => adjustRollTrial(frameStepMs)}>+1帧</button>
-        <button aria-label={`${left.label} 到 ${right.label} 滚动切位试调后移 1 秒`} disabled={hasPhaseTrial || rollTrialDeltaMs >= rollMaximumDeltaMs} onClick={() => adjustRollTrial(1000)}>+1s</button>
+        <button aria-label={`${left.label} 到 ${right.label} 滚动切位试调后移 1 帧`} disabled={hasPhaseTrial || transitionTrial != null || rollTrialDeltaMs >= rollMaximumDeltaMs} onClick={() => adjustRollTrial(frameStepMs)}>+1帧</button>
+        <button aria-label={`${left.label} 到 ${right.label} 滚动切位试调后移 1 秒`} disabled={hasPhaseTrial || transitionTrial != null || rollTrialDeltaMs >= rollMaximumDeltaMs} onClick={() => adjustRollTrial(1000)}>+1s</button>
       </div>
     </div>
     <div className={styles.boundarySequencePreview} data-open={sequenceVisible} aria-hidden={!sequenceVisible}>
@@ -917,6 +1008,7 @@ function BoundaryActionComparison({
         ref={sequenceLeftRef}
         aria-label={`${left.label} 当前试调顺序试播前镜`}
         data-visible={sequenceSide === 'left'}
+        style={{ opacity: sequenceSide === 'left' ? sequenceLeftOpacity : 0 }}
         muted
         playsInline
         preload="auto"
@@ -931,6 +1023,7 @@ function BoundaryActionComparison({
         ref={sequenceRightRef}
         aria-label={`${right.label} 当前试调顺序试播后镜`}
         data-visible={sequenceSide === 'right'}
+        style={{ opacity: sequenceSide === 'right' ? sequenceRightOpacity : 0 }}
         muted
         playsInline
         preload="auto"
@@ -941,15 +1034,15 @@ function BoundaryActionComparison({
           setSequenceRightReady(true)
         }}
       />
-      <span><strong>{sequenceSide === 'left' ? left.label : right.label}</strong><small>{sequenceSide === 'left' ? '切前' : '切后'} · {viewingTunedPhase ? 'B 当前试调' : 'A 原切点'}{phaseSequenceCompareStage !== 'idle' ? ` · ${phaseSequenceCompareStage === 'baseline' ? '1/2' : '2/2'}` : ''}</small><code>{timecode(sequenceProgressMs, fps)} / {timecode(sequenceDurationMs, fps)}</code></span>
+      <span><strong>{sequenceSide === 'left' ? left.label : right.label}</strong><small>{sequenceSide === 'left' ? '切前' : '切后'} · {viewingTunedPhase ? 'B 当前试调' : 'A 原方案'}{phaseSequenceCompareStage !== 'idle' ? ` · ${phaseSequenceCompareStage === 'baseline' ? '1/2' : '2/2'}` : ''}</small><code>{timecode(sequenceProgressMs, fps)} / {timecode(sequenceDurationMs, fps)}</code></span>
     </div>
     {phaseDecisionReady && <div className={styles.boundaryPhaseDecision} role="group" aria-label="A/B 切点对照结论">
       <span><strong>选择这次对照结果</strong><small>保留 A 不写草稿；{tunedTrialSummary}</small></span>
       <div>
-        <button onClick={keepBaselinePhase}><RotateCcw />保留 A 原切点</button>
+        <button onClick={keepBaselinePhase}><RotateCcw />保留 A 原方案</button>
         <button
           disabled={editLocked || !viewingTunedPhase}
-          title={editLocked ? '画面轨已锁定，只能比较或保留 A，不能采用 B。' : !viewingTunedPhase ? '请先切回 B 当前试调，确认要采用的画面。' : '把当前滚动切位或全部非零相位试调作为一次操作写入草稿'}
+          title={editLocked ? '画面轨已锁定，只能比较或保留 A，不能采用 B。' : !viewingTunedPhase ? '请先切回 B 当前试调，确认要采用的画面。' : '把当前转场、滚动切位或全部非零相位试调作为一次操作写入草稿'}
           onClick={applyTunedPhase}
         ><CheckCircle2 />采用 B 当前试调</button>
       </div>
@@ -969,10 +1062,10 @@ function BoundaryActionComparison({
         <div className={styles.boundaryActionPhase}>
           <span><b>前镜相位</b><code>{phaseLabel(leftActivePhaseDeltaMs)}</code></span>
           <div>
-            <button aria-label={`${left.label} 同步动作相位前移 1 秒`} disabled={rollTrialDeltaMs !== 0 || leftPhaseDeltaMs <= leftMinimumPhaseMs} onClick={() => adjustPhase('left', -1000)}>−1s</button>
-            <button aria-label={`${left.label} 同步动作相位前移 1 帧`} disabled={rollTrialDeltaMs !== 0 || leftPhaseDeltaMs <= leftMinimumPhaseMs} onClick={() => adjustPhase('left', -frameStepMs)}>−1帧</button>
-            <button aria-label={`${left.label} 同步动作相位后移 1 帧`} disabled={rollTrialDeltaMs !== 0 || leftPhaseDeltaMs >= leftMaximumPhaseMs} onClick={() => adjustPhase('left', frameStepMs)}>+1帧</button>
-            <button aria-label={`${left.label} 同步动作相位后移 1 秒`} disabled={rollTrialDeltaMs !== 0 || leftPhaseDeltaMs >= leftMaximumPhaseMs} onClick={() => adjustPhase('left', 1000)}>+1s</button>
+            <button aria-label={`${left.label} 同步动作相位前移 1 秒`} disabled={rollTrialDeltaMs !== 0 || transitionTrial != null || leftPhaseDeltaMs <= leftMinimumPhaseMs} onClick={() => adjustPhase('left', -1000)}>−1s</button>
+            <button aria-label={`${left.label} 同步动作相位前移 1 帧`} disabled={rollTrialDeltaMs !== 0 || transitionTrial != null || leftPhaseDeltaMs <= leftMinimumPhaseMs} onClick={() => adjustPhase('left', -frameStepMs)}>−1帧</button>
+            <button aria-label={`${left.label} 同步动作相位后移 1 帧`} disabled={rollTrialDeltaMs !== 0 || transitionTrial != null || leftPhaseDeltaMs >= leftMaximumPhaseMs} onClick={() => adjustPhase('left', frameStepMs)}>+1帧</button>
+            <button aria-label={`${left.label} 同步动作相位后移 1 秒`} disabled={rollTrialDeltaMs !== 0 || transitionTrial != null || leftPhaseDeltaMs >= leftMaximumPhaseMs} onClick={() => adjustPhase('left', 1000)}>+1s</button>
           </div>
           <button disabled={editLocked || leftPhaseDeltaMs === 0 || !viewingTunedPhase} title={editLocked ? '画面轨已锁定，只能试调，不能应用。' : !viewingTunedPhase && leftPhaseDeltaMs !== 0 ? '请先返回 B 当前试调，确认正在看到要应用的相位。' : '把当前试调写入前镜源窗口'} onClick={() => onApplyLeftPhase(leftPhaseDeltaMs)}>应用前镜相位</button>
         </div>
@@ -991,10 +1084,10 @@ function BoundaryActionComparison({
         <div className={styles.boundaryActionPhase}>
           <span><b>后镜相位</b><code>{phaseLabel(rightActivePhaseDeltaMs)}</code></span>
           <div>
-            <button aria-label={`${right.label} 同步动作相位前移 1 秒`} disabled={rollTrialDeltaMs !== 0 || rightPhaseDeltaMs <= rightMinimumPhaseMs} onClick={() => adjustPhase('right', -1000)}>−1s</button>
-            <button aria-label={`${right.label} 同步动作相位前移 1 帧`} disabled={rollTrialDeltaMs !== 0 || rightPhaseDeltaMs <= rightMinimumPhaseMs} onClick={() => adjustPhase('right', -frameStepMs)}>−1帧</button>
-            <button aria-label={`${right.label} 同步动作相位后移 1 帧`} disabled={rollTrialDeltaMs !== 0 || rightPhaseDeltaMs >= rightMaximumPhaseMs} onClick={() => adjustPhase('right', frameStepMs)}>+1帧</button>
-            <button aria-label={`${right.label} 同步动作相位后移 1 秒`} disabled={rollTrialDeltaMs !== 0 || rightPhaseDeltaMs >= rightMaximumPhaseMs} onClick={() => adjustPhase('right', 1000)}>+1s</button>
+            <button aria-label={`${right.label} 同步动作相位前移 1 秒`} disabled={rollTrialDeltaMs !== 0 || transitionTrial != null || rightPhaseDeltaMs <= rightMinimumPhaseMs} onClick={() => adjustPhase('right', -1000)}>−1s</button>
+            <button aria-label={`${right.label} 同步动作相位前移 1 帧`} disabled={rollTrialDeltaMs !== 0 || transitionTrial != null || rightPhaseDeltaMs <= rightMinimumPhaseMs} onClick={() => adjustPhase('right', -frameStepMs)}>−1帧</button>
+            <button aria-label={`${right.label} 同步动作相位后移 1 帧`} disabled={rollTrialDeltaMs !== 0 || transitionTrial != null || rightPhaseDeltaMs >= rightMaximumPhaseMs} onClick={() => adjustPhase('right', frameStepMs)}>+1帧</button>
+            <button aria-label={`${right.label} 同步动作相位后移 1 秒`} disabled={rollTrialDeltaMs !== 0 || transitionTrial != null || rightPhaseDeltaMs >= rightMaximumPhaseMs} onClick={() => adjustPhase('right', 1000)}>+1s</button>
           </div>
           <button disabled={editLocked || rightPhaseDeltaMs === 0 || !viewingTunedPhase} title={editLocked ? '画面轨已锁定，只能试调，不能应用。' : !viewingTunedPhase && rightPhaseDeltaMs !== 0 ? '请先返回 B 当前试调，确认正在看到要应用的相位。' : '把当前试调写入后镜源窗口'} onClick={() => onApplyRightPhase(rightPhaseDeltaMs)}>应用后镜相位</button>
         </div>
@@ -1003,7 +1096,7 @@ function BoundaryActionComparison({
     <footer>
       <button disabled={comparisonDurationMs <= 0} onClick={playing ? pauseMedia : startComparison}>{playing ? <Pause /> : <Play />}{playing ? '暂停' : progressMs > 0 ? '重播' : '同步播放'}</button>
       <button disabled={sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} onClick={sequencePlaying && phaseSequenceCompareStage === 'idle' ? pauseSequenceMedia : startSequencePreview}>{sequencePlaying && phaseSequenceCompareStage === 'idle' ? <Pause /> : <Play />}{sequencePlaying && phaseSequenceCompareStage === 'idle' ? '暂停顺序试播' : sequenceProgressMs > 0 ? '重播顺序切点' : '顺序试播切点'}</button>
-      <button disabled={!hasComparisonTrial || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} title={hasComparisonTrial ? '先播放 A 原切点，再自动播放 B 当前试调；全程静音且不写入草稿。' : '先试调滚动切位或前后镜相位，再进行连续对照。'} onClick={phaseSequenceCompareStage !== 'idle' ? cancelPhaseSequenceComparison : startPhaseSequenceComparison}>{phaseSequenceCompareStage !== 'idle' ? <Pause /> : <Play />}{phaseSequenceCompareStage === 'baseline' ? '停止 A（1/2）' : phaseSequenceCompareStage === 'tuned' ? '停止 B（2/2）' : 'A→B 连续对照'}</button>
+      <button disabled={!hasComparisonTrial || sequenceDurationMs <= 0 || !sequenceLeftReady || !sequenceRightReady} title={hasComparisonTrial ? '先播放 A 原方案，再自动播放 B 当前试调；全程静音且不写入草稿。' : '先试调转场、滚动切位或前后镜相位，再进行连续对照。'} onClick={phaseSequenceCompareStage !== 'idle' ? cancelPhaseSequenceComparison : startPhaseSequenceComparison}>{phaseSequenceCompareStage !== 'idle' ? <Pause /> : <Play />}{phaseSequenceCompareStage === 'baseline' ? '停止 A（1/2）' : phaseSequenceCompareStage === 'tuned' ? '停止 B（2/2）' : 'A→B 连续对照'}</button>
       <button onClick={() => { pauseMedia(); cancelPhaseSequenceComparison(); positionMedia(); positionSequenceMedia() }}><RotateCcw />回到窗口开头</button>
       <button disabled={!hasComparisonTrial} onClick={resetPhase}><RotateCcw />清除当前试调</button>
       <button
@@ -1018,7 +1111,7 @@ function BoundaryActionComparison({
         onClick={() => onApplyPhasePair(leftPhaseDeltaMs, rightPhaseDeltaMs)}
       >应用双方相位</button>
     </footer>
-    <small>同步播放用于并排看动作阶段；顺序试播会在同一画面区静音播放前镜再切后镜，更接近真实切点节奏。滚动切位与源窗口相位均可先无损试调，再用 A→B 连续对照和明确结论决定是否写入；两类试调互斥。该会话不写草稿，也不包含音频、字幕和转场。切回 A 不会丢失试调值；只有正在查看 B 时才能采用。锁轨时仍可试播，但不能采用。</small>
+    <small>同步播放用于并排看动作阶段；顺序试播会在同一黑色舞台播放前镜再切后镜，并真实消费当前 A/B 的淡出淡入透明度。转场、滚动切位与源窗口相位均可先无损试调，再用 A→B 连续对照和明确结论决定是否写入；三类试调互斥。该会话不写草稿，也不包含音频或字幕。切回 A 不会丢失试调值；只有正在查看 B 时才能采用。锁轨时仍可试播，但不能采用。</small>
   </section>
 }
 
@@ -4434,22 +4527,16 @@ export function EditorPrototypePage() {
                       disabled={!left.asset_id || !right.asset_id}
                       onClick={() => previewBoundary(left, right)}
                     ><Play />预览切点</button>
-                    <select
-                      aria-label={`${left.label} 到 ${right.label} 的衔接方式`}
-                      disabled={videoTrackLocked || !left.asset_id || !right.asset_id}
-                      value={presetValue}
-                      onChange={event => {
-                        const [type, rawDuration] = event.target.value.split(':')
-                        setBoundaryTransition(left, right, type as 'cut' | 'fade', Number(rawDuration) || 0)
+                    <button
+                      aria-label={`${left.label} 到 ${right.label} 无损对比衔接方式`}
+                      disabled={!left.asset_id || !right.asset_id}
+                      onClick={() => {
+                        setBoundaryFrameComparisonKey(boundaryKey)
+                        setBoundaryFrameOverlayKey(null)
+                        setBoundaryFrameStripKey(null)
+                        setBoundaryActionComparisonKey(boundaryKey)
                       }}
-                    >
-                      {presetValue === 'mixed' && <option value="mixed" disabled>两侧设置不一致</option>}
-                      {pairedFade && ![200, 300, 500].includes(durationMs) && <option value={`fade:${durationMs}`}>淡出淡入 · {seconds(durationMs)}</option>}
-                      <option value="cut">直接切换</option>
-                      <option value="fade:200">淡出淡入 · 0.2s</option>
-                      <option value="fade:300">淡出淡入 · 0.3s</option>
-                      <option value="fade:500">淡出淡入 · 0.5s</option>
-                     </select>
+                    ><Layers3 />转场 A/B · {presetValue === 'mixed' ? '两侧不一致' : pairedFade ? `${seconds(durationMs)} 淡出淡入` : '直接切换'}</button>
                     </div>
                    <div className={styles.boundaryPreviewTools}>
                      <label>
@@ -4654,6 +4741,7 @@ export function EditorPrototypePage() {
                            setNotice(`正在以 ${boundaryPreviewRate}× 同步对比 ${left.label} 切前动作与 ${right.label} 切后动作。`)
                          }}
                          onApplyRoll={deltaMs => applyBoundaryRoll(left, right, deltaMs)}
+                         onApplyTransition={(type, transitionDurationMs) => setBoundaryTransition(left, right, type, transitionDurationMs)}
                          onApplyLeftPhase={deltaMs => slipBoundaryItem(left, deltaMs, Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs), boundaryKey)}
                          onApplyRightPhase={deltaMs => slipBoundaryItem(right, deltaMs, right.timeline_in_ms, boundaryKey)}
                          onApplyPhasePair={(leftDeltaMs, rightDeltaMs) => slipBoundaryPair(left, right, leftDeltaMs, rightDeltaMs, boundaryKey)}
