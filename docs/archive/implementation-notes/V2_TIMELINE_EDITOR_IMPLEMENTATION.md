@@ -351,6 +351,10 @@ A→B 连续对照完成后新增明确结论区。结论只在两阶段完整�
 
 真实项目首次打开前记录服务端草稿 `row_version=214 / updated_at=2026-08-09T00:45:44.463173 / playhead_ms=0`；等待超过 900ms 后保持完全不变且当前 API 日志没有 editor-draft PUT，刷新再等待仍为 214。播放头键盘前移一帧只产生一次 PUT，草稿变为 `row_version=215 / playhead_ms=42`；刷新恢复 `00:00:01` 且版本不再推进。Home 恢复到开头只再产生一次 PUT，最终为 `row_version=216 / playhead_ms=0`；再次刷新仍保持 216。主画面保持 `0..4709 / 4709..5118 / 5118..15000ms`，双方转场保持 `cut:0`；1280×720 的 html/body `scrollWidth == clientWidth`、`scrollHeight == clientHeight`。
 
+叠加对齐补齐本地确定性像素跳变证据。`BoundaryFrameOverlay` 等待双方定格完成后把视频帧分别绘制到同一离屏 Canvas 的两个 `48×48` 采样区，计算 Rec.709 平均亮度差、平均 RGB 色差和逐像素平均绝对差，并以一位小数百分比展示 low/medium/high 阈值等级。源时点变化会先清空旧结果再于下一 animation frame 重算；Canvas 或安全读取失败只显示可读不可用原因。指标不写草稿、不进入 Timeline/QC/FFmpeg，也不自动勾选或替代人工连续性判断。
+
+真实咖啡 SH-002 → SH-001 的冻结末帧/首帧在叠加模式得到“变化中等”：明暗 `3.8%`、综合色彩 `9.1%`、逐像素 `27.2%`。把 SH-001 源窗口后移一帧后，首帧时码从 `00:00:00` 更新为 `00:00:01` 并重新读取当前帧；一次撤销恢复 `source=0..409ms / timeline=4709..5118ms`。Home 恢复开头后最终服务端草稿为 `row_version=219 / playhead_ms=0`，全部三段仍为 `0..4709 / 4709..5118 / 5118..15000ms`。刷新后的指标恢复上述基线值；1280×720 的 html/body 宽高与视口完全一致。
+
 提交 `5857bf51` 推送到 `main` 后使用标准脚本重启 8766：API PID `26180`、Worker PID `23280`，两个进程创建时间均为 2026-08-09 00:15:29。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。
 
 提交 `1db36ab1` 推送到 `main` 后使用标准脚本重启 8766：API PID `42312`、Worker PID `12188`，两个进程创建时间均为 2026-08-09 00:37:57。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。

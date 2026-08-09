@@ -37,6 +37,13 @@ interface SubtitleCue {
   text: string
 }
 
+interface BoundaryPixelAnalysis {
+  luminance_delta_percent: number
+  color_delta_percent: number
+  pixel_change_percent: number
+  level: 'low' | 'medium' | 'high'
+}
+
 function canonicalDraftValue(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalDraftValue)
   if (!value || typeof value !== 'object') return value
@@ -71,6 +78,65 @@ function editorDraftFingerprint(
     snap_enabled: snapEnabled,
     pixels_per_second: timelineZoom,
   }))
+}
+
+function analyzeBoundaryPixels(leftVideo: HTMLVideoElement, rightVideo: HTMLVideoElement): BoundaryPixelAnalysis {
+  if (!leftVideo.videoWidth || !leftVideo.videoHeight || !rightVideo.videoWidth || !rightVideo.videoHeight) {
+    throw new Error('当前定格尚未具备可读取的视频画面。')
+  }
+  const size = 48
+  const canvas = document.createElement('canvas')
+  canvas.width = size * 2
+  canvas.height = size
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) throw new Error('浏览器没有提供画面像素读取能力。')
+  context.drawImage(leftVideo, 0, 0, size, size)
+  context.drawImage(rightVideo, size, 0, size, size)
+  const leftPixels = context.getImageData(0, 0, size, size).data
+  const rightPixels = context.getImageData(size, 0, size, size).data
+  let leftRed = 0
+  let leftGreen = 0
+  let leftBlue = 0
+  let rightRed = 0
+  let rightGreen = 0
+  let rightBlue = 0
+  let pixelDifference = 0
+  const pixelCount = size * size
+  for (let index = 0; index < leftPixels.length; index += 4) {
+    leftRed += leftPixels[index]
+    leftGreen += leftPixels[index + 1]
+    leftBlue += leftPixels[index + 2]
+    rightRed += rightPixels[index]
+    rightGreen += rightPixels[index + 1]
+    rightBlue += rightPixels[index + 2]
+    pixelDifference += (
+      Math.abs(leftPixels[index] - rightPixels[index])
+      + Math.abs(leftPixels[index + 1] - rightPixels[index + 1])
+      + Math.abs(leftPixels[index + 2] - rightPixels[index + 2])
+    ) / 3
+  }
+  const leftAverage = [leftRed, leftGreen, leftBlue].map(value => value / pixelCount)
+  const rightAverage = [rightRed, rightGreen, rightBlue].map(value => value / pixelCount)
+  const leftLuminance = .2126 * leftAverage[0] + .7152 * leftAverage[1] + .0722 * leftAverage[2]
+  const rightLuminance = .2126 * rightAverage[0] + .7152 * rightAverage[1] + .0722 * rightAverage[2]
+  const luminanceDelta = Math.abs(leftLuminance - rightLuminance) / 255 * 100
+  const colorDelta = Math.sqrt(
+    (leftAverage[0] - rightAverage[0]) ** 2
+    + (leftAverage[1] - rightAverage[1]) ** 2
+    + (leftAverage[2] - rightAverage[2]) ** 2,
+  ) / (Math.sqrt(3) * 255) * 100
+  const pixelChange = pixelDifference / pixelCount / 255 * 100
+  const level = luminanceDelta >= 20 || colorDelta >= 20 || pixelChange >= 55
+    ? 'high'
+    : luminanceDelta >= 8 || colorDelta >= 10 || pixelChange >= 25
+    ? 'medium'
+    : 'low'
+  return {
+    luminance_delta_percent: Math.round(luminanceDelta * 10) / 10,
+    color_delta_percent: Math.round(colorDelta * 10) / 10,
+    pixel_change_percent: Math.round(pixelChange * 10) / 10,
+    level,
+  }
 }
 
 type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
@@ -379,6 +445,8 @@ function BoundaryFrameOverlay({
   const rightRef = useRef<HTMLVideoElement | null>(null)
   const [leftReady, setLeftReady] = useState(false)
   const [rightReady, setRightReady] = useState(false)
+  const [pixelAnalysis, setPixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
+  const [pixelAnalysisError, setPixelAnalysisError] = useState<string | null>(null)
   const seekFrame = useCallback((video: HTMLVideoElement | null, sourceTimeMs: number) => {
     if (!video || !Number.isFinite(video.duration)) return
     const latestTime = Math.max(0, video.duration - .001)
@@ -388,9 +456,34 @@ function BoundaryFrameOverlay({
   useEffect(() => {
     setLeftReady(false)
     setRightReady(false)
+    setPixelAnalysis(null)
+    setPixelAnalysisError(null)
     seekFrame(leftRef.current, leftSourceTimeMs)
     seekFrame(rightRef.current, rightSourceTimeMs)
   }, [leftSourceTimeMs, rightSourceTimeMs, seekFrame])
+
+  useEffect(() => {
+    if (!leftReady || !rightReady || !leftRef.current || !rightRef.current) return
+    const leftVideo = leftRef.current
+    const rightVideo = rightRef.current
+    let cancelled = false
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const result = analyzeBoundaryPixels(leftVideo, rightVideo)
+        if (!cancelled) setPixelAnalysis(result)
+      } catch (reason) {
+        if (!cancelled) setPixelAnalysisError(reason instanceof Error ? reason.message : '画面像素读取失败。')
+      }
+    })
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+    }
+  }, [leftReady, leftSourceTimeMs, rightReady, rightSourceTimeMs])
+
+  const analysisLevelLabel = pixelAnalysis?.level === 'high'
+    ? '变化较高'
+    : pixelAnalysis?.level === 'medium' ? '变化中等' : '变化较低'
 
   return <div className={styles.boundaryOverlay} data-ready={leftReady && rightReady}>
     <div
@@ -424,6 +517,19 @@ function BoundaryFrameOverlay({
       <button onClick={onLeftActivate}><strong>{leftLabel}</strong><code>{timecode(leftSourceTimeMs, fps)}</code></button>
       <span>叠加对齐</span>
       <button onClick={onRightActivate}><strong>{rightLabel}</strong><code>{timecode(rightSourceTimeMs, fps)}</code></button>
+    </div>
+    <div className={styles.boundaryPixelAnalysis} data-level={pixelAnalysis?.level ?? 'pending'} aria-live="polite">
+      {pixelAnalysis ? <>
+        <header><strong>切点像素跳变</strong><em>{analysisLevelLabel}</em></header>
+        <div>
+          <span><b>明暗</b><code>{pixelAnalysis.luminance_delta_percent}%</code></span>
+          <span><b>综合色彩</b><code>{pixelAnalysis.color_delta_percent}%</code></span>
+          <span><b>逐像素</b><code>{pixelAnalysis.pixel_change_percent}%</code></span>
+        </div>
+        <small>数值只比较当前末帧与首帧。较高变化提示检查闪跳、构图或曝光，不代表衔接一定有问题，也不是自动视觉结论。</small>
+      </> : pixelAnalysisError
+        ? <small>像素跳变暂不可用：{pixelAnalysisError}</small>
+        : <small>正在读取当前末帧与首帧的本地像素证据…</small>}
     </div>
   </div>
 }

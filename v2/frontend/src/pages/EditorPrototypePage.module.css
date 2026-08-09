@@ -1258,6 +1258,36 @@
 .boundaryOverlayFacts strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryOverlayFacts code { color: #8f999d; }
 .boundaryOverlayFacts span { color: #789085; font-size: 8px; white-space: nowrap; }
+.boundaryPixelAnalysis {
+  margin: 0 6px 6px;
+  padding: 6px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid #35413d;
+  border-radius: 4px;
+  background: #101513;
+}
+.boundaryPixelAnalysis header { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.boundaryPixelAnalysis header strong { color: #c4d0cb; }
+.boundaryPixelAnalysis header em { color: #91a39b; font-style: normal; }
+.boundaryPixelAnalysis[data-level="medium"] { border-color: #655c3e; background: #19170f; }
+.boundaryPixelAnalysis[data-level="medium"] header em { color: #d2bd70; }
+.boundaryPixelAnalysis[data-level="high"] { border-color: #754740; background: #1b1110; }
+.boundaryPixelAnalysis[data-level="high"] header em { color: #e3988c; }
+.boundaryPixelAnalysis > div { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.boundaryPixelAnalysis > div span {
+  min-width: 0;
+  padding: 4px 5px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  border-radius: 3px;
+  background: #1b2220;
+}
+.boundaryPixelAnalysis > div b { overflow: hidden; color: #85928d; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryPixelAnalysis > div code { color: #d0dbd7; }
+.boundaryPixelAnalysis small { color: #78857f; line-height: 1.4; }
 .continuityChecklist { display: grid; gap: 4px; }
 .boundaryControl .continuityChecklist button {
   width: 100%;
