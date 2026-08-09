@@ -543,6 +543,7 @@ function BoundaryPixelProbe({
   fps,
   label,
   note,
+  onAnalysis,
 }: {
   projectId: string
   left: TimelineItem
@@ -552,6 +553,7 @@ function BoundaryPixelProbe({
   fps: number
   label: string
   note: string
+  onAnalysis: (analysis: BoundaryPixelAnalysis | null) => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
   const rightRef = useRef<HTMLVideoElement | null>(null)
@@ -574,9 +576,10 @@ function BoundaryPixelProbe({
     setRightReady(false)
     setAnalysis(null)
     setAnalysisError(null)
+    onAnalysis(null)
     seekFrame(leftRef.current, leftSourceTimeMs)
     seekFrame(rightRef.current, rightSourceTimeMs)
-  }, [leftSourceTimeMs, rightSourceTimeMs, seekFrame])
+  }, [leftSourceTimeMs, onAnalysis, rightSourceTimeMs, seekFrame])
 
   useEffect(() => {
     if (!leftReady || !rightReady || !leftRef.current || !rightRef.current) return
@@ -586,16 +589,22 @@ function BoundaryPixelProbe({
     const frame = window.requestAnimationFrame(() => {
       try {
         const result = analyzeBoundaryPixels(leftVideo, rightVideo)
-        if (!cancelled) setAnalysis(result)
+        if (!cancelled) {
+          setAnalysis(result)
+          onAnalysis(result)
+        }
       } catch (reason) {
-        if (!cancelled) setAnalysisError(reason instanceof Error ? reason.message : '画面像素读取失败。')
+        if (!cancelled) {
+          setAnalysisError(reason instanceof Error ? reason.message : '画面像素读取失败。')
+          onAnalysis(null)
+        }
       }
     })
     return () => {
       cancelled = true
       window.cancelAnimationFrame(frame)
     }
-  }, [leftReady, leftSourceTimeMs, rightReady, rightSourceTimeMs])
+  }, [leftReady, leftSourceTimeMs, onAnalysis, rightReady, rightSourceTimeMs])
 
   const levelLabel = analysis?.level === 'high'
     ? '变化较高'
@@ -775,6 +784,10 @@ function BoundaryActionComparison({
   const [leftPhaseDeltaMs, setLeftPhaseDeltaMs] = useState(0)
   const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
+  const [baselinePixelAnalysis, setBaselinePixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
+  const [tunedPixelAnalysis, setTunedPixelAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
+  const handleBaselinePixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => setBaselinePixelAnalysis(analysis), [])
+  const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => setTunedPixelAnalysis(analysis), [])
   const leftBaseSourceInMs = left.source_in_ms ?? 0
   const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
   const rightBaseSourceInMs = right.source_in_ms ?? 0
@@ -844,6 +857,10 @@ function BoundaryActionComparison({
     : baselineTransitionIn?.type === 'fade' ? baselineTransitionIn.duration_ms ?? 0 : 0
   const [sequenceLeftOpacity, setSequenceLeftOpacity] = useState(1)
   const [sequenceRightOpacity, setSequenceRightOpacity] = useState(1)
+
+  useEffect(() => {
+    if (!hasComparisonTrial) setTunedPixelAnalysis(null)
+  }, [hasComparisonTrial])
 
   const positionMedia = useCallback(() => {
     if (leftRef.current && Number.isFinite(leftRef.current.duration)) leftRef.current.currentTime = leftStartMs / 1000
@@ -1226,6 +1243,23 @@ function BoundaryActionComparison({
     : transitionTrial
     ? `B 将采用${transitionTrial.type === 'fade' ? `${seconds(transitionTrial.durationMs)} 淡出淡入` : '直接切换'}，一次写入前镜淡出与后镜淡入。`
     : 'B 会按当前单侧或双侧源窗口相位形成一次撤销。'
+  const pixelTrialSourceSummary = transitionTrial && !hasMotionTrial
+    ? '仅转场时间呈现变化，切点两帧不变。'
+    : rollTrialDeltaMs !== 0
+    ? `滚动切位使前镜末帧与后镜首帧同时${rollTrialDeltaMs < 0 ? '前移' : '后移'} ${timecode(Math.abs(rollTrialDeltaMs), fps)}。`
+    : leftPhaseDeltaMs !== 0 && rightPhaseDeltaMs !== 0
+    ? '前镜末帧与后镜首帧都使用了当前相位试调。'
+    : leftPhaseDeltaMs !== 0
+    ? '只有前镜末帧使用了当前相位试调。'
+    : '只有后镜首帧使用了当前相位试调。'
+  const pixelDeltas = baselinePixelAnalysis && tunedPixelAnalysis ? {
+    luminance: Math.round((tunedPixelAnalysis.luminance_delta_percent - baselinePixelAnalysis.luminance_delta_percent) * 10) / 10,
+    color: Math.round((tunedPixelAnalysis.color_delta_percent - baselinePixelAnalysis.color_delta_percent) * 10) / 10,
+    pixel: Math.round((tunedPixelAnalysis.pixel_change_percent - baselinePixelAnalysis.pixel_change_percent) * 10) / 10,
+  } : null
+  const signedPercentagePoint = (value: number) => value === 0
+    ? '0.0 个百分点'
+    : `${value > 0 ? '+' : '−'}${Math.abs(value).toFixed(1)} 个百分点`
 
   return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
     <header>
@@ -1251,6 +1285,7 @@ function BoundaryActionComparison({
           fps={fps}
           label="A 原方案"
           note="当前草稿的末帧与首帧基线。"
+          onAnalysis={handleBaselinePixelAnalysis}
         />
         {hasComparisonTrial && <BoundaryPixelProbe
           projectId={projectId}
@@ -1263,8 +1298,18 @@ function BoundaryActionComparison({
           note={transitionTrial && !hasMotionTrial
             ? '本次只改变淡出、黑场与淡入的时间呈现，不改变切点两帧，因此指标应与 A 相同。'
             : '当前本地试调的末帧与首帧；继续调整后会重新计算。'}
+          onAnalysis={handleTunedPixelAnalysis}
         />}
       </div>
+      {hasComparisonTrial && <div className={styles.boundaryABPixelDelta} aria-live="polite">
+        <header><strong>B − A 精确差值</strong><small>{pixelTrialSourceSummary}</small></header>
+        {pixelDeltas ? <div>
+          <span><b>明暗</b><code>{signedPercentagePoint(pixelDeltas.luminance)}</code></span>
+          <span><b>综合色彩</b><code>{signedPercentagePoint(pixelDeltas.color)}</code></span>
+          <span><b>逐像素</b><code>{signedPercentagePoint(pixelDeltas.pixel)}</code></span>
+        </div> : <small>正在等待 A、B 两套帧证据完成后计算差值…</small>}
+        <small>正值只表示 B 的该项变化幅度高于 A，负值表示低于 A；方向不代表衔接更好或更差。</small>
+      </div>}
     </section>
     <div className={styles.boundaryTransitionTrial}>
       <span><strong>转场无损试用</strong><small>A 为当前 {baselineTransitionLabel}；B 在顺序舞台真实显示淡出至黑场再淡入，不是交叉叠化。</small></span>

@@ -1100,6 +1100,36 @@
 .boundaryABPixelCard b { overflow: hidden; color: #85928d; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryABPixelCard > div code { color: #d0dbd7; }
 .boundaryABPixelCard > small { color: #78857f; line-height: 1.35; }
+.boundaryABPixelEvidence > .boundaryABPixelDelta {
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  border: 1px solid #3b5047;
+  border-radius: 4px;
+  background: #111b17;
+}
+.boundaryABPixelDelta > header { min-width: 0; display: grid; gap: 2px; }
+.boundaryABPixelDelta > header strong { color: #c9d9d2; }
+.boundaryABPixelDelta > header small,
+.boundaryABPixelDelta > small { color: #7f9189; line-height: 1.35; }
+.boundaryABPixelDelta > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+.boundaryABPixelDelta > div span {
+  min-width: 0;
+  padding: 4px 5px;
+  display: grid;
+  gap: 2px;
+  border-radius: 3px;
+  background: #1a2621;
+}
+.boundaryABPixelDelta b { color: #87978f; font-weight: 500; }
+.boundaryABPixelDelta code { color: #d1ddd7; white-space: nowrap; }
 .boundaryPixelProbeMedia {
   position: absolute;
   width: 1px;
