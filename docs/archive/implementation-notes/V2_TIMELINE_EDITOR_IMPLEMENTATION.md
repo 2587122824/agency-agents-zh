@@ -373,6 +373,8 @@ A→B 连续对照完成后新增明确结论区。结论只在两阶段完整�
 
 提交 `3f6fa8ec` 推送到 `main` 后使用标准脚本重启 8766：API PID `19152`、Worker PID `604`，两个进程创建时间均为 2026-08-09 09:03:58。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stdout 只有三次健康检查 200，API stderr 只有 Uvicorn 正常启动信息，Worker 两份日志为空，标准四份日志均无实际错误。
 
+提交 `d53ffeb8` 推送到 `main` 后使用标准脚本重启 8766：API PID `18420`、Worker PID `28688`，两个进程创建时间均为 2026-08-09 09:26:57。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动信息，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
+
 ## 8. 事件
 
 ```text

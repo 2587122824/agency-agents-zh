@@ -65,6 +65,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 
 提交 `3f6fa8ec` 发布成对转场无损 A/B、黑场淡出淡入顺序试播与确定性采用后，标准脚本重启为 API `19152`、Worker `604`，两个进程创建时间均为 2026-08-09 09:03:58。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有三次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
 
+提交 `d53ffeb8` 发布草稿恢复语义指纹与首次打开零写入后，标准脚本重启为 API `18420`、Worker `28688`，两个进程创建时间均为 2026-08-09 09:26:57。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
+
 启动或重启：
 
 ```powershell
