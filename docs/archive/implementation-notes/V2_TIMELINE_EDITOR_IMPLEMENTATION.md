@@ -435,7 +435,7 @@ A/B 像素证据现补齐精确差值与变化来源。`BoundaryPixelProbe` 新�
 
 真实咖啡 SH-002 → SH-001 后镜只把 `+1帧` 设为 B 并完成动作实测后收起观察区，边界主卡准确显示 `候选审核未完成 / 待决定 0 · 待复看 0 · 已实测未对照 1 / 继续审核`；同步动作扫描区卸载、当前 B 消失、全部媒体暂停。点击继续后精确进入同步动作 A 原方案，前/后镜扫描按钮均未选中、无当前 B且没有播放。随后完整对照 `+1帧` 并保留 A，再收起时 reminder 数量为 0；另把 `+2帧` 仅实测后收起，reminder 重新出现且为 `200/200 clientWidth/scrollWidth`，Inspector 为 `244/244`。1280×720 html/body 无溢出，页面 warning/error 为空；API 零 editor-draft PUT，草稿保持 `row_version=230 / updated_at=2026-08-09T11:20:59.370282 / playhead_ms=0`。
 
-镜头衔接区新增全时间线候选审核待办投影。页面遍历当前 `mainBoundaries`，只对双方素材完整的边界重新计算稳定 review session key，并把命中的 `completed / shortlisted / measured-only` 聚合为待办边界；旧边界、旧素材或旧源窗 session 即使仍在页面 map 中也不会污染计数。入口按当前活动切点之后的时间线顺序定位首个待办，末尾循环回第一个；点击复用切点定位媒体门禁，再展开定格区并打开同步动作。新组件不恢复扫描侧、扩展范围、B、pending 或播放，也不写草稿、API、history 或新状态。
+镜头衔接区新增全时间线候选审核待办投影。页面遍历当前 `mainBoundaries`，只对双方素材完整的边界重新计算稳定 review session key，并把命中的 `completed / shortlisted / measured-only` 聚合为待办边界；旧边界、旧素材或旧源窗 session 即使仍在页面 map 中也不会污染计数。入口按当前活动切点之后的时间线顺序定位首个待办，末尾循环回第一个；点击通过独立只读 focus 路径停止旧媒体并切换 Inspector/边界焦点，再展开定格区并打开同步动作，不复用会设置播放头的普通切点导航。新组件不恢复扫描侧、扩展范围、B、pending 或播放，播放头和草稿指纹保持不变，也不写 API、history 或新状态。
 
 真实跨切点定位首次把 Inspector 切到中间片段时，发现既有 `clipSlide` 五列固定最小宽度总和大于 204px 内容区，使 Inspector `clientWidth/scrollWidth=244/256`。控制现改为可收缩的两组秒/帧按钮与弹性时间码列，并让容器、标题和直接子项显式 `min-width:0`；操作数量与片段滑动逻辑保持不变。
 

@@ -3637,7 +3637,18 @@ export function EditorPrototypePage() {
   const focusCandidateReviewFollowUpAt = (targetIndex: number) => {
     const target = mainBoundaries[targetIndex]
     if (!target) return
-    focusBoundaryAt(targetIndex)
+    const focusItem = target.right.asset_id ? target.right : target.left
+    const itemIndex = items.findIndex(item => item.id === focusItem.id)
+    if (itemIndex < 0) return
+    videoRef.current?.pause()
+    advancingPlaybackRef.current = true
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
+    setSelectedIndex(itemIndex)
+    setBoundaryFocusKey(target.key)
     setBoundaryFrameComparisonKey(target.key)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
