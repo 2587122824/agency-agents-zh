@@ -53,6 +53,8 @@ interface BoundaryMotionAnalysis {
   right_minus_left_grid_percentage_points: number[]
   left_centroid: MotionChangeCentroid | null
   right_centroid: MotionChangeCentroid | null
+  left_rhythm_change_percent: Array<number | null>
+  right_rhythm_change_percent: Array<number | null>
 }
 
 interface MotionChangeCentroid {
@@ -81,6 +83,16 @@ function boundaryMotionDeltas(baseline: BoundaryMotionAnalysis, candidate: Bound
     balance: delta(candidate.right_minus_left_percentage_points, baseline.right_minus_left_percentage_points),
     left_grid: candidate.left_grid_change_percent.map((value, index) => delta(value, baseline.left_grid_change_percent[index])),
     right_grid: candidate.right_grid_change_percent.map((value, index) => delta(value, baseline.right_grid_change_percent[index])),
+    left_rhythm: candidate.left_rhythm_change_percent.map((value, index) => (
+      value == null || baseline.left_rhythm_change_percent[index] == null
+        ? null
+        : delta(value, baseline.left_rhythm_change_percent[index] as number)
+    )),
+    right_rhythm: candidate.right_rhythm_change_percent.map((value, index) => (
+      value == null || baseline.right_rhythm_change_percent[index] == null
+        ? null
+        : delta(value, baseline.right_rhythm_change_percent[index] as number)
+    )),
     left_centroid: baseline.left_centroid && candidate.left_centroid ? {
       x: delta(candidate.left_centroid.x_percent, baseline.left_centroid.x_percent),
       y: delta(candidate.left_centroid.y_percent, baseline.left_centroid.y_percent),
@@ -772,10 +784,12 @@ function BoundaryMotionProbe({
   projectId,
   left,
   right,
+  leftEarlierSourceTimeMs,
   leftPreviousSourceTimeMs,
   leftCurrentSourceTimeMs,
   rightCurrentSourceTimeMs,
   rightNextSourceTimeMs,
+  rightLaterSourceTimeMs,
   fps,
   label,
   note,
@@ -784,24 +798,31 @@ function BoundaryMotionProbe({
   projectId: string
   left: TimelineItem
   right: TimelineItem
+  leftEarlierSourceTimeMs: number
   leftPreviousSourceTimeMs: number
   leftCurrentSourceTimeMs: number
   rightCurrentSourceTimeMs: number
   rightNextSourceTimeMs: number
+  rightLaterSourceTimeMs: number
   fps: number
   label: string
   note: string
   onAnalysis: (analysis: BoundaryMotionAnalysis | null) => void
 }) {
+  const leftEarlierRef = useRef<HTMLVideoElement | null>(null)
   const leftPreviousRef = useRef<HTMLVideoElement | null>(null)
   const leftCurrentRef = useRef<HTMLVideoElement | null>(null)
   const rightCurrentRef = useRef<HTMLVideoElement | null>(null)
   const rightNextRef = useRef<HTMLVideoElement | null>(null)
+  const rightLaterRef = useRef<HTMLVideoElement | null>(null)
   const [readyMask, setReadyMask] = useState(0)
   const [analysis, setAnalysis] = useState<BoundaryMotionAnalysis | null>(null)
   const [analysisError, setAnalysisError] = useState<string | null>(null)
   const hasLeftPair = leftCurrentSourceTimeMs - leftPreviousSourceTimeMs >= 1
   const hasRightPair = rightNextSourceTimeMs - rightCurrentSourceTimeMs >= 1
+  const hasLeftEarlierStep = leftPreviousSourceTimeMs - leftEarlierSourceTimeMs >= 1
+  const hasRightLaterStep = rightLaterSourceTimeMs - rightNextSourceTimeMs >= 1
+  const requiredReadyMask = 2 | 4 | 8 | 16 | (hasLeftEarlierStep ? 1 : 0) | (hasRightLaterStep ? 32 : 0)
   const seekFrame = useCallback((video: HTMLVideoElement | null, sourceTimeMs: number) => {
     if (!video || !Number.isFinite(video.duration)) return
     video.currentTime = Math.min(Math.max(0, video.duration - .001), Math.max(0, sourceTimeMs / 1000))
@@ -820,24 +841,34 @@ function BoundaryMotionProbe({
     setAnalysis(null)
     setAnalysisError(null)
     onAnalysis(null)
+    if (hasLeftEarlierStep) seekFrame(leftEarlierRef.current, leftEarlierSourceTimeMs)
     seekFrame(leftPreviousRef.current, leftPreviousSourceTimeMs)
     seekFrame(leftCurrentRef.current, leftCurrentSourceTimeMs)
     seekFrame(rightCurrentRef.current, rightCurrentSourceTimeMs)
     seekFrame(rightNextRef.current, rightNextSourceTimeMs)
-  }, [left.asset_id, leftCurrentSourceTimeMs, leftPreviousSourceTimeMs, onAnalysis, right.asset_id, rightCurrentSourceTimeMs, rightNextSourceTimeMs, seekFrame])
+    if (hasRightLaterStep) seekFrame(rightLaterRef.current, rightLaterSourceTimeMs)
+  }, [hasLeftEarlierStep, hasRightLaterStep, left.asset_id, leftCurrentSourceTimeMs, leftEarlierSourceTimeMs, leftPreviousSourceTimeMs, onAnalysis, right.asset_id, rightCurrentSourceTimeMs, rightLaterSourceTimeMs, rightNextSourceTimeMs, seekFrame])
 
   useEffect(() => {
-    if (!hasLeftPair || !hasRightPair || readyMask !== 15) return
+    if (!hasLeftPair || !hasRightPair || readyMask !== requiredReadyMask) return
+    const leftEarlierVideo = leftEarlierRef.current
     const leftPreviousVideo = leftPreviousRef.current
     const leftCurrentVideo = leftCurrentRef.current
     const rightCurrentVideo = rightCurrentRef.current
     const rightNextVideo = rightNextRef.current
+    const rightLaterVideo = rightLaterRef.current
     if (!leftPreviousVideo || !leftCurrentVideo || !rightCurrentVideo || !rightNextVideo) return
     let cancelled = false
     const frame = window.requestAnimationFrame(() => {
       try {
         const leftMotion = analyzeFrameMotion(leftPreviousVideo, leftCurrentVideo)
         const rightMotion = analyzeFrameMotion(rightCurrentVideo, rightNextVideo)
+        const leftEarlierMotion = hasLeftEarlierStep && leftEarlierVideo
+          ? analyzeFrameMotion(leftEarlierVideo, leftPreviousVideo)
+          : null
+        const rightLaterMotion = hasRightLaterStep && rightLaterVideo
+          ? analyzeFrameMotion(rightNextVideo, rightLaterVideo)
+          : null
         if (!cancelled) {
           const nextAnalysis: BoundaryMotionAnalysis = {
             left_change_percent: leftMotion.change_percent,
@@ -850,6 +881,8 @@ function BoundaryMotionProbe({
             )),
             left_centroid: leftMotion.centroid,
             right_centroid: rightMotion.centroid,
+            left_rhythm_change_percent: [leftEarlierMotion?.change_percent ?? null, leftMotion.change_percent],
+            right_rhythm_change_percent: [rightMotion.change_percent, rightLaterMotion?.change_percent ?? null],
           }
           setAnalysis(nextAnalysis)
           onAnalysis(nextAnalysis)
@@ -862,13 +895,15 @@ function BoundaryMotionProbe({
       cancelled = true
       window.cancelAnimationFrame(frame)
     }
-  }, [hasLeftPair, hasRightPair, onAnalysis, readyMask])
+  }, [hasLeftEarlierStep, hasLeftPair, hasRightLaterStep, hasRightPair, onAnalysis, readyMask, requiredReadyMask])
 
   const media = [
-    { ref: leftPreviousRef, item: left, sourceTimeMs: leftPreviousSourceTimeMs, bit: 1 },
-    { ref: leftCurrentRef, item: left, sourceTimeMs: leftCurrentSourceTimeMs, bit: 2 },
-    { ref: rightCurrentRef, item: right, sourceTimeMs: rightCurrentSourceTimeMs, bit: 4 },
-    { ref: rightNextRef, item: right, sourceTimeMs: rightNextSourceTimeMs, bit: 8 },
+    ...(hasLeftEarlierStep ? [{ ref: leftEarlierRef, item: left, sourceTimeMs: leftEarlierSourceTimeMs, bit: 1 }] : []),
+    { ref: leftPreviousRef, item: left, sourceTimeMs: leftPreviousSourceTimeMs, bit: 2 },
+    { ref: leftCurrentRef, item: left, sourceTimeMs: leftCurrentSourceTimeMs, bit: 4 },
+    { ref: rightCurrentRef, item: right, sourceTimeMs: rightCurrentSourceTimeMs, bit: 8 },
+    { ref: rightNextRef, item: right, sourceTimeMs: rightNextSourceTimeMs, bit: 16 },
+    ...(hasRightLaterStep ? [{ ref: rightLaterRef, item: right, sourceTimeMs: rightLaterSourceTimeMs, bit: 32 }] : []),
   ]
   const unavailableMessage = !hasLeftPair
     ? '前镜切点前不足两个可用帧。'
@@ -887,12 +922,23 @@ function BoundaryMotionProbe({
         onSeeked={event => markReady(bit, event.currentTarget, sourceTimeMs)}
       />)}
     </div>
-    <header><strong>{label}</strong><code>{timecode(leftPreviousSourceTimeMs, fps)}→{timecode(leftCurrentSourceTimeMs, fps)} · {timecode(rightCurrentSourceTimeMs, fps)}→{timecode(rightNextSourceTimeMs, fps)}</code></header>
+    <header><strong>{label}</strong><code>{hasLeftEarlierStep ? `${timecode(leftEarlierSourceTimeMs, fps)}→` : ''}{timecode(leftPreviousSourceTimeMs, fps)}→{timecode(leftCurrentSourceTimeMs, fps)} · {timecode(rightCurrentSourceTimeMs, fps)}→{timecode(rightNextSourceTimeMs, fps)}{hasRightLaterStep ? `→${timecode(rightLaterSourceTimeMs, fps)}` : ''}</code></header>
     {analysis ? <>
       <div className={styles.boundaryMotionSummary}>
         <span><b>前镜末段</b><code>{analysis.left_change_percent}%</code></span>
         <span><b>后镜开端</b><code>{analysis.right_change_percent}%</code></span>
         <span><b>后镜 − 前镜</b><code>{signedPercentagePoint(analysis.right_minus_left_percentage_points)}</code></span>
+      </div>
+      <div className={styles.boundaryMotionRhythm} aria-label="动作节奏轨迹">
+        <strong>动作节奏轨迹</strong>
+        {[
+          { label: '前镜', steps: ['较早→前一', '前一→切点'], values: analysis.left_rhythm_change_percent },
+          { label: '后镜', steps: ['切点→后一', '后一→更后'], values: analysis.right_rhythm_change_percent },
+        ].map(group => <section key={group.label}>
+          <b>{group.label}</b>
+          {group.values.map((value, index) => <span key={group.steps[index]}><small>{group.steps[index]}</small><code>{value == null ? '边缘无帧' : `${value.toFixed(1)}%`}</code></span>)}
+        </section>)}
+        {(!hasLeftEarlierStep || !hasRightLaterStep) && <small>素材边缘不足三帧的一侧只保留真实可用步长，不用重复帧补零。</small>}
       </div>
       <div className={styles.boundaryMotionGrids}>
         <section aria-label="前镜末段局部动作分区">
@@ -939,7 +985,7 @@ function BoundaryMotionProbe({
       ? <small>动作幅度证据暂不可用：{unavailableMessage}</small>
       : analysisError
       ? <small>动作幅度证据暂不可用：{analysisError}</small>
-      : <small>正在读取切点两侧各两个连续帧的本地像素变化…</small>}
+      : <small>正在读取切点两侧最多各三个连续帧的本地像素变化…</small>}
     <small>{note}</small>
   </article>
 }
@@ -1170,19 +1216,24 @@ function BoundaryActionComparison({
   )
   const tunedPixelRightMs = rightBaseSourceInMs + rightPhaseDeltaMs + rollTrialDeltaMs
   const baselineMotionLeftPreviousMs = Math.max(leftBaseSourceInMs, baselinePixelLeftMs - frameStepMs)
+  const baselineMotionLeftEarlierMs = Math.max(leftBaseSourceInMs, baselineMotionLeftPreviousMs - frameStepMs)
   const baselineMotionRightNextMs = Math.min(
     Math.max(rightBaseSourceInMs, rightBaseSourceOutMs - frameStepMs),
     baselinePixelRightMs + frameStepMs,
   )
+  const baselineMotionRightMaximumMs = Math.max(rightBaseSourceInMs, rightBaseSourceOutMs - frameStepMs)
+  const baselineMotionRightLaterMs = Math.min(baselineMotionRightMaximumMs, baselineMotionRightNextMs + frameStepMs)
   const tunedMotionLeftMinimumMs = leftBaseSourceInMs + leftPhaseDeltaMs
   const tunedMotionLeftPreviousMs = Math.max(tunedMotionLeftMinimumMs, tunedPixelLeftMs - frameStepMs)
+  const tunedMotionLeftEarlierMs = Math.max(tunedMotionLeftMinimumMs, tunedMotionLeftPreviousMs - frameStepMs)
   const tunedMotionRightMaximumMs = Math.max(
     rightBaseSourceInMs + rightPhaseDeltaMs + rollTrialDeltaMs,
     rightBaseSourceOutMs + rightPhaseDeltaMs - frameStepMs,
   )
   const tunedMotionRightNextMs = Math.min(tunedMotionRightMaximumMs, tunedPixelRightMs + frameStepMs)
-  const baselineMotionSourceKey = `${left.asset_id}:${baselineMotionLeftPreviousMs}:${baselinePixelLeftMs}:${right.asset_id}:${baselinePixelRightMs}:${baselineMotionRightNextMs}`
-  const tunedMotionSourceKey = `${left.asset_id}:${tunedMotionLeftPreviousMs}:${tunedPixelLeftMs}:${right.asset_id}:${tunedPixelRightMs}:${tunedMotionRightNextMs}`
+  const tunedMotionRightLaterMs = Math.min(tunedMotionRightMaximumMs, tunedMotionRightNextMs + frameStepMs)
+  const baselineMotionSourceKey = `${left.asset_id}:${baselineMotionLeftEarlierMs}:${baselineMotionLeftPreviousMs}:${baselinePixelLeftMs}:${right.asset_id}:${baselinePixelRightMs}:${baselineMotionRightNextMs}:${baselineMotionRightLaterMs}`
+  const tunedMotionSourceKey = `${left.asset_id}:${tunedMotionLeftEarlierMs}:${tunedMotionLeftPreviousMs}:${tunedPixelLeftMs}:${right.asset_id}:${tunedPixelRightMs}:${tunedMotionRightNextMs}:${tunedMotionRightLaterMs}`
   const baselineMotionAnalysis = baselineMotionEvidence?.sourceKey === baselineMotionSourceKey ? baselineMotionEvidence.analysis : null
   const tunedMotionAnalysis = tunedMotionEvidence?.sourceKey === tunedMotionSourceKey ? tunedMotionEvidence.analysis : null
   const handleBaselineMotionAnalysis = useCallback((analysis: BoundaryMotionAnalysis | null) => {
@@ -1812,7 +1863,7 @@ function BoundaryActionComparison({
     </section>
     <section className={styles.boundaryMotionEvidence} aria-label="A/B 切点动作幅度证据">
       <header>
-        <span><strong>切点动作幅度</strong><small>分别比较前镜最后两个可用帧、后镜最初两个可用帧的逐像素变化。</small></span>
+        <span><strong>切点动作幅度</strong><small>用切点两侧最多各三个真实连续帧，同时核对局部幅度与前后两步节奏。</small></span>
         {!hasComparisonTrial && <em>当前只显示 A</em>}
       </header>
       <div data-single={!hasComparisonTrial}>
@@ -1820,10 +1871,12 @@ function BoundaryActionComparison({
           projectId={projectId}
           left={left}
           right={right}
+          leftEarlierSourceTimeMs={baselineMotionLeftEarlierMs}
           leftPreviousSourceTimeMs={baselineMotionLeftPreviousMs}
           leftCurrentSourceTimeMs={baselinePixelLeftMs}
           rightCurrentSourceTimeMs={baselinePixelRightMs}
           rightNextSourceTimeMs={baselineMotionRightNextMs}
+          rightLaterSourceTimeMs={baselineMotionRightLaterMs}
           fps={fps}
           label="A 原方案"
           note="后镜减前镜只表示切点后局部画面变化幅度的增减，不推断运动方向、主体或衔接优劣。"
@@ -1833,10 +1886,12 @@ function BoundaryActionComparison({
           projectId={projectId}
           left={left}
           right={right}
+          leftEarlierSourceTimeMs={tunedMotionLeftEarlierMs}
           leftPreviousSourceTimeMs={tunedMotionLeftPreviousMs}
           leftCurrentSourceTimeMs={tunedPixelLeftMs}
           rightCurrentSourceTimeMs={tunedPixelRightMs}
           rightNextSourceTimeMs={tunedMotionRightNextMs}
+          rightLaterSourceTimeMs={tunedMotionRightLaterMs}
           fps={fps}
           label="B 当前试调"
           note={transitionTrial && !hasMotionTrial
@@ -1852,6 +1907,16 @@ function BoundaryActionComparison({
             <span><b>前镜末段</b><code>{signedPercentagePoint(motionDeltas.left_change).replace(' 个百分点', ' 点')}</code></span>
             <span><b>后镜开端</b><code>{signedPercentagePoint(motionDeltas.right_change).replace(' 个百分点', ' 点')}</code></span>
             <span><b>后−前平衡</b><code>{signedPercentagePoint(motionDeltas.balance).replace(' 个百分点', ' 点')}</code></span>
+          </div>
+          <div className={styles.boundaryMotionTrialRhythm} aria-label="B − A 动作节奏轨迹">
+            <strong>动作节奏轨迹 B − A</strong>
+            {[
+              { label: '前镜', steps: ['较早→前一', '前一→切点'], values: motionDeltas.left_rhythm },
+              { label: '后镜', steps: ['切点→后一', '后一→更后'], values: motionDeltas.right_rhythm },
+            ].map(group => <section key={group.label}>
+              <b>{group.label}</b>
+              {group.values.map((value, index) => <span key={group.steps[index]}><small>{group.steps[index]}</small><code>{value == null ? '不可比' : signedPercentagePoint(value).replace(' 个百分点', ' 点')}</code></span>)}
+            </section>)}
           </div>
           <div className={styles.boundaryMotionTrialDeltaGrids}>
             {[

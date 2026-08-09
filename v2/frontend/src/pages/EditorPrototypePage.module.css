@@ -1185,6 +1185,45 @@
   border-radius: 3px;
   background: #211e16;
 }
+.boundaryMotionRhythm,
+.boundaryMotionTrialRhythm {
+  min-width: 0;
+  padding: 4px;
+  display: grid;
+  gap: 3px;
+  border-radius: 3px;
+  background: #181710;
+}
+.boundaryMotionRhythm > strong,
+.boundaryMotionTrialRhythm > strong { color: #aaa18b; font-size: 9px; }
+.boundaryMotionRhythm > section,
+.boundaryMotionTrialRhythm > section {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 38px repeat(2, minmax(0, 1fr));
+  gap: 3px;
+  align-items: stretch;
+}
+.boundaryMotionRhythm > section > b,
+.boundaryMotionTrialRhythm > section > b {
+  align-self: center;
+  color: #918975;
+  font-size: 9px;
+}
+.boundaryMotionRhythm > section > span,
+.boundaryMotionTrialRhythm > section > span {
+  min-width: 0;
+  padding: 3px 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px;
+  border-radius: 2px;
+  background: #211f17;
+}
+.boundaryMotionRhythm small,
+.boundaryMotionTrialRhythm small { overflow: hidden; color: #827b69; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryMotionRhythm code,
+.boundaryMotionTrialRhythm code { color: #d8d0bc; font-size: 9px; }
 .boundaryMotionGrids {
   min-width: 0;
   display: grid;
@@ -1295,6 +1334,12 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 5px;
 }
+.boundaryMotionTrialRhythm { background: #17211c; }
+.boundaryMotionTrialRhythm > strong { color: #a7b3ab; }
+.boundaryMotionTrialRhythm > section > b { color: #86958b; }
+.boundaryMotionTrialRhythm > section > span { background: #1c2923; }
+.boundaryMotionTrialRhythm small { color: #819087; }
+.boundaryMotionTrialRhythm code { color: #cbd8d0; }
 .boundaryMotionTrialDeltaGrids > section { min-width: 0; display: grid; gap: 3px; }
 .boundaryMotionTrialDeltaGrids > section > strong { color: #a7b3ab; font-size: 9px; }
 .boundaryMotionTrialDeltaGrids > section > div {
