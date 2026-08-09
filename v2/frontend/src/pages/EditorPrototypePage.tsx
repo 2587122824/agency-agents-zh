@@ -65,6 +65,40 @@ interface BoundaryMotionAnalysis {
   right_minus_left_rhythm_slope_percentage_points: number | null
 }
 
+type BoundaryCandidateComparisonOutcome = 'completed' | 'kept_baseline' | 'shortlisted'
+
+interface BoundaryCandidateReviewSession {
+  measuredMotionEvidence: Record<string, BoundaryMotionAnalysis>
+  comparisonOutcomes: Record<string, BoundaryCandidateComparisonOutcome>
+}
+
+const EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION: BoundaryCandidateReviewSession = {
+  measuredMotionEvidence: {},
+  comparisonOutcomes: {},
+}
+
+function boundaryCandidateReviewSessionKey(
+  projectId: string,
+  left: TimelineItem,
+  right: TimelineItem,
+  frameStepMs: number,
+  fps: number,
+) {
+  return [
+    projectId,
+    left.id,
+    left.asset_id,
+    left.source_in_ms ?? 0,
+    left.source_out_ms ?? left.source_in_ms ?? 0,
+    right.id,
+    right.asset_id,
+    right.source_in_ms ?? 0,
+    right.source_out_ms ?? right.source_in_ms ?? 0,
+    frameStepMs,
+    fps,
+  ].join(':')
+}
+
 interface MotionChangeCentroid {
   x_percent: number
   y_percent: number
@@ -1358,6 +1392,10 @@ function BoundaryActionComparison({
   onApplyLeftPhase,
   onApplyRightPhase,
   onApplyPhasePair,
+  candidateReviewSessionKey,
+  candidateReviewSession,
+  onRememberCandidateMotionEvidence,
+  onRememberCandidateComparisonOutcome,
   onNotice,
 }: {
   projectId: string
@@ -1377,6 +1415,10 @@ function BoundaryActionComparison({
   onApplyLeftPhase: (deltaMs: number) => void
   onApplyRightPhase: (deltaMs: number) => void
   onApplyPhasePair: (leftDeltaMs: number, rightDeltaMs: number) => void
+  candidateReviewSessionKey: string
+  candidateReviewSession: BoundaryCandidateReviewSession
+  onRememberCandidateMotionEvidence: (sessionKey: string, sourceKey: string, analysis: BoundaryMotionAnalysis) => void
+  onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
   onNotice: (message: string) => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
@@ -1406,8 +1448,8 @@ function BoundaryActionComparison({
   const [tunedPixelEvidence, setTunedPixelEvidence] = useState<{ sourceKey: string; analysis: BoundaryPixelAnalysis } | null>(null)
   const [baselineMotionEvidence, setBaselineMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [tunedMotionEvidence, setTunedMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
-  const [measuredCandidateMotionEvidence, setMeasuredCandidateMotionEvidence] = useState<Record<string, BoundaryMotionAnalysis>>({})
-  const [candidateComparisonOutcomes, setCandidateComparisonOutcomes] = useState<Record<string, 'completed' | 'kept_baseline' | 'shortlisted'>>({})
+  const measuredCandidateMotionEvidence = candidateReviewSession.measuredMotionEvidence
+  const candidateComparisonOutcomes = candidateReviewSession.comparisonOutcomes
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [phaseCandidateScanExpanded, setPhaseCandidateScanExpanded] = useState(false)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
@@ -1513,8 +1555,8 @@ function BoundaryActionComparison({
   const handleTunedMotionAnalysis = useCallback((analysis: BoundaryMotionAnalysis | null) => {
     setTunedMotionEvidence(analysis ? { sourceKey: tunedMotionSourceKey, analysis } : null)
     if (!analysis || !activePhaseCandidateSourceKey) return
-    setMeasuredCandidateMotionEvidence(current => ({ ...current, [activePhaseCandidateSourceKey]: analysis }))
-  }, [activePhaseCandidateSourceKey, tunedMotionSourceKey])
+    onRememberCandidateMotionEvidence(candidateReviewSessionKey, activePhaseCandidateSourceKey, analysis)
+  }, [activePhaseCandidateSourceKey, candidateReviewSessionKey, onRememberCandidateMotionEvidence, tunedMotionSourceKey])
   const baselinePixelSourceKey = `${left.asset_id}:${baselinePixelLeftMs}:${right.asset_id}:${baselinePixelRightMs}`
   const baselinePixelAnalysis = baselinePixelEvidence?.sourceKey === baselinePixelSourceKey ? baselinePixelEvidence.analysis : null
   const handleBaselinePixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
@@ -1566,11 +1608,6 @@ function BoundaryActionComparison({
     candidateElement?.focus({ preventScroll: true })
     candidateElement?.scrollIntoView({ block: 'nearest' })
   }
-  useEffect(() => {
-    setMeasuredCandidateMotionEvidence({})
-    setCandidateComparisonOutcomes({})
-    setPhaseCandidateScanExpanded(false)
-  }, [frameStepMs, left.asset_id, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.asset_id, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
   const comparisonDurationMs = Math.max(0, Math.min(
     beforeMs,
     afterMs,
@@ -1849,7 +1886,7 @@ function BoundaryActionComparison({
             }
             setPhaseDecisionSourceKey(phaseTrialSourceKey)
             if (activePhaseCandidateSourceKey) {
-              setCandidateComparisonOutcomes(current => ({ ...current, [activePhaseCandidateSourceKey]: 'completed' }))
+              onRememberCandidateComparisonOutcome(candidateReviewSessionKey, activePhaseCandidateSourceKey, 'completed')
             }
             onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；请选择保留 A 或采用 B。`)
             return
@@ -1865,7 +1902,7 @@ function BoundaryActionComparison({
       if (sequenceAnimationRef.current != null) window.cancelAnimationFrame(sequenceAnimationRef.current)
       sequenceAnimationRef.current = null
     }
-  }, [activeLeftFadeMs, activePhaseCandidateSourceKey, activeRightFadeMs, cancelPhaseSequenceComparison, comparisonEvidenceReady, left.label, onNotice, pauseSequenceMedia, phaseTrialSourceKey, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
+  }, [activeLeftFadeMs, activePhaseCandidateSourceKey, activeRightFadeMs, cancelPhaseSequenceComparison, candidateReviewSessionKey, comparisonEvidenceReady, left.label, onNotice, onRememberCandidateComparisonOutcome, pauseSequenceMedia, phaseTrialSourceKey, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
 
   useEffect(() => () => {
     leftRef.current?.pause()
@@ -2093,7 +2130,7 @@ function BoundaryActionComparison({
 
   const keepBaselinePhase = () => {
     if (phaseDecisionReady && activePhaseCandidateSourceKey) {
-      setCandidateComparisonOutcomes(current => ({ ...current, [activePhaseCandidateSourceKey]: 'kept_baseline' }))
+      onRememberCandidateComparisonOutcome(candidateReviewSessionKey, activePhaseCandidateSourceKey, 'kept_baseline')
     }
     resetPhase()
     onNotice(`已保留 ${left.label} → ${right.label} 的 A 原切点；本次试调未写入草稿。`)
@@ -2101,7 +2138,7 @@ function BoundaryActionComparison({
 
   const shortlistCandidatePhase = () => {
     if (!phaseDecisionReady || !activePhaseCandidateSourceKey) return
-    setCandidateComparisonOutcomes(current => ({ ...current, [activePhaseCandidateSourceKey]: 'shortlisted' }))
+    onRememberCandidateComparisonOutcome(candidateReviewSessionKey, activePhaseCandidateSourceKey, 'shortlisted')
     resetPhase()
     onNotice(`已把 ${left.label} → ${right.label} 的当前 B 候选暂存为本页待复看；草稿未改变。`)
   }
@@ -2703,6 +2740,39 @@ export function EditorPrototypePage() {
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
   const [boundaryFrameStripKey, setBoundaryFrameStripKey] = useState<string | null>(null)
   const [boundaryActionComparisonKey, setBoundaryActionComparisonKey] = useState<string | null>(null)
+  const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
+  const rememberBoundaryCandidateMotionEvidence = useCallback((
+    sessionKey: string,
+    sourceKey: string,
+    analysis: BoundaryMotionAnalysis,
+  ) => {
+    setBoundaryCandidateReviewSessions(current => {
+      const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+      return {
+        ...current,
+        [sessionKey]: {
+          ...session,
+          measuredMotionEvidence: { ...session.measuredMotionEvidence, [sourceKey]: analysis },
+        },
+      }
+    })
+  }, [])
+  const rememberBoundaryCandidateComparisonOutcome = useCallback((
+    sessionKey: string,
+    sourceKey: string,
+    outcome: BoundaryCandidateComparisonOutcome,
+  ) => {
+    setBoundaryCandidateReviewSessions(current => {
+      const session = current[sessionKey] ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
+      return {
+        ...current,
+        [sessionKey]: {
+          ...session,
+          comparisonOutcomes: { ...session.comparisonOutcomes, [sourceKey]: outcome },
+        },
+      }
+    })
+  }, [])
   const [pendingBoundaryPreviewKey, setPendingBoundaryPreviewKey] = useState<string | null>(null)
   const [boundaryRollMonitor, setBoundaryRollMonitor] = useState<{
     boundaryKey: string
@@ -5905,6 +5975,9 @@ export function EditorPrototypePage() {
                  const overlayFrames = boundaryFrameOverlayKey === boundaryKey
                  const stripFrames = boundaryFrameStripKey === boundaryKey
                  const actionComparison = boundaryActionComparisonKey === boundaryKey
+                 const candidateReviewSessionKey = boundaryCandidateReviewSessionKey(projectId, left, right, frameStepMs, outputFps)
+                 const candidateReviewSession = boundaryCandidateReviewSessions[candidateReviewSessionKey]
+                   ?? EMPTY_BOUNDARY_CANDIDATE_REVIEW_SESSION
                  const leftSourceInMs = left.source_in_ms ?? 0
                  const leftSourceOutMs = left.source_out_ms ?? leftSourceInMs
                  const rightSourceInMs = right.source_in_ms ?? 0
@@ -6206,11 +6279,15 @@ export function EditorPrototypePage() {
                            setPendingBoundaryPreviewKey(null)
                            setPendingBoundaryReview(null)
                          }}
-                         onApplyRoll={deltaMs => applyBoundaryRoll(left, right, deltaMs)}
-                         onApplyTransition={(type, transitionDurationMs) => setBoundaryTransition(left, right, type, transitionDurationMs)}
-                         onApplyLeftPhase={deltaMs => slipBoundaryItem(left, deltaMs, Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs), boundaryKey)}
+                          onApplyRoll={deltaMs => applyBoundaryRoll(left, right, deltaMs)}
+                          onApplyTransition={(type, transitionDurationMs) => setBoundaryTransition(left, right, type, transitionDurationMs)}
+                          onApplyLeftPhase={deltaMs => slipBoundaryItem(left, deltaMs, Math.max(left.timeline_in_ms, left.timeline_out_ms - frameStepMs), boundaryKey)}
                          onApplyRightPhase={deltaMs => slipBoundaryItem(right, deltaMs, right.timeline_in_ms, boundaryKey)}
                          onApplyPhasePair={(leftDeltaMs, rightDeltaMs) => slipBoundaryPair(left, right, leftDeltaMs, rightDeltaMs, boundaryKey)}
+                         candidateReviewSessionKey={candidateReviewSessionKey}
+                         candidateReviewSession={candidateReviewSession}
+                         onRememberCandidateMotionEvidence={rememberBoundaryCandidateMotionEvidence}
+                         onRememberCandidateComparisonOutcome={rememberBoundaryCandidateComparisonOutcome}
                          onNotice={setNotice}
                        />
                        : overlayFrames
