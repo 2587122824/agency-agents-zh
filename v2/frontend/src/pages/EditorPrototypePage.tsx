@@ -1161,6 +1161,7 @@ function BoundaryPhaseCandidate({
   fps,
   label,
   baselineAnalysis,
+  measuredMotionAnalysis,
   selected,
   comparePending,
   onSelect,
@@ -1174,6 +1175,7 @@ function BoundaryPhaseCandidate({
   fps: number
   label: string
   baselineAnalysis: BoundaryPixelAnalysis | null
+  measuredMotionAnalysis: BoundaryMotionAnalysis | null
   selected: boolean
   comparePending: boolean
   onSelect: () => void
@@ -1199,6 +1201,22 @@ function BoundaryPhaseCandidate({
         <code>色彩 {signedPercentagePoint(deltas.color)}</code>
         <code>像素 {signedPercentagePoint(deltas.pixel)}</code>
       </span> : <small>等待 A 与候选帧证据…</small>}
+      {measuredMotionAnalysis ? <section className={styles.boundaryPhaseCandidateMeasured} aria-label={`${label} 已实测动作证据`}>
+        <strong>已实测动作</strong>
+        <span>
+          <code>前 {measuredMotionAnalysis.left_change_percent.toFixed(1)}%</code>
+          <code>后 {measuredMotionAnalysis.right_change_percent.toFixed(1)}%</code>
+          <code>后−前 {signedPercentagePoint(measuredMotionAnalysis.right_minus_left_percentage_points).replace(' 个百分点', ' 点')}</code>
+        </span>
+        {measuredMotionAnalysis.centroid_path_continuity
+          ? <span>
+            <code>接续 X {signedPercentagePoint(measuredMotionAnalysis.centroid_path_continuity.x_gap_percentage_points).replace(' 个百分点', '')}</code>
+            <code>Y {signedPercentagePoint(measuredMotionAnalysis.centroid_path_continuity.y_gap_percentage_points).replace(' 个百分点', '')}</code>
+            <code>距 {signedPercentagePoint(measuredMotionAnalysis.centroid_path_continuity.distance_gap_percentage_points).replace(' 个百分点', '')}</code>
+            <code>角 {measuredMotionAnalysis.centroid_path_continuity.angle_degrees == null ? '不可用' : `${measuredMotionAnalysis.centroid_path_continuity.angle_degrees.toFixed(1)}°`}</code>
+          </span>
+          : <small>已实测；前镜或后镜轨迹不可用。</small>}
+      </section> : <small>设为 B 并等待读取后，会在此保留本次页面会话的动作证据。</small>}
       <div className={styles.boundaryPhaseCandidateActions}>
         <button aria-pressed={selected} onClick={onSelect}>{selected ? '当前 B' : '设为单侧 B'}</button>
         <button aria-busy={comparePending} onClick={onCompare}>{comparePending ? '等待证据…' : '设为 B 并对照'}</button>
@@ -1347,6 +1365,7 @@ function BoundaryActionComparison({
   const [tunedPixelEvidence, setTunedPixelEvidence] = useState<{ sourceKey: string; analysis: BoundaryPixelAnalysis } | null>(null)
   const [baselineMotionEvidence, setBaselineMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [tunedMotionEvidence, setTunedMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
+  const [measuredCandidateMotionEvidence, setMeasuredCandidateMotionEvidence] = useState<Record<string, BoundaryMotionAnalysis>>({})
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const leftBaseSourceInMs = left.source_in_ms ?? 0
@@ -1394,6 +1413,40 @@ function BoundaryActionComparison({
   )
   const tunedMotionRightNextMs = Math.min(tunedMotionRightMaximumMs, tunedPixelRightMs + frameStepMs)
   const tunedMotionRightLaterMs = Math.min(tunedMotionRightMaximumMs, tunedMotionRightNextMs + frameStepMs)
+  const candidateMotionSourceKey = useCallback((side: 'left' | 'right', deltaMs: number) => {
+    const candidateLeftMinimumMs = leftBaseSourceInMs + (side === 'left' ? deltaMs : 0)
+    const candidateLeftCurrentMs = Math.max(
+      candidateLeftMinimumMs,
+      leftBaseSourceOutMs + (side === 'left' ? deltaMs : 0) - frameStepMs,
+    )
+    const candidateLeftPreviousMs = Math.max(candidateLeftMinimumMs, candidateLeftCurrentMs - frameStepMs)
+    const candidateLeftEarlierMs = Math.max(candidateLeftMinimumMs, candidateLeftPreviousMs - frameStepMs)
+    const candidateRightCurrentMs = rightBaseSourceInMs + (side === 'right' ? deltaMs : 0)
+    const candidateRightMaximumMs = Math.max(
+      candidateRightCurrentMs,
+      rightBaseSourceOutMs + (side === 'right' ? deltaMs : 0) - frameStepMs,
+    )
+    const candidateRightNextMs = Math.min(candidateRightMaximumMs, candidateRightCurrentMs + frameStepMs)
+    const candidateRightLaterMs = Math.min(candidateRightMaximumMs, candidateRightNextMs + frameStepMs)
+    return [
+      left.id,
+      left.asset_id,
+      leftBaseSourceInMs,
+      leftBaseSourceOutMs,
+      right.id,
+      right.asset_id,
+      rightBaseSourceInMs,
+      rightBaseSourceOutMs,
+      side,
+      deltaMs,
+      candidateLeftEarlierMs,
+      candidateLeftPreviousMs,
+      candidateLeftCurrentMs,
+      candidateRightCurrentMs,
+      candidateRightNextMs,
+      candidateRightLaterMs,
+    ].join(':')
+  }, [frameStepMs, left.asset_id, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.asset_id, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
   const baselineMotionSourceKey = `${left.asset_id}:${baselineMotionLeftEarlierMs}:${baselineMotionLeftPreviousMs}:${baselinePixelLeftMs}:${right.asset_id}:${baselinePixelRightMs}:${baselineMotionRightNextMs}:${baselineMotionRightLaterMs}`
   const tunedMotionSourceKey = `${left.asset_id}:${tunedMotionLeftEarlierMs}:${tunedMotionLeftPreviousMs}:${tunedPixelLeftMs}:${right.asset_id}:${tunedPixelRightMs}:${tunedMotionRightNextMs}:${tunedMotionRightLaterMs}`
   const baselineMotionAnalysis = baselineMotionEvidence?.sourceKey === baselineMotionSourceKey ? baselineMotionEvidence.analysis : null
@@ -1403,7 +1456,15 @@ function BoundaryActionComparison({
   }, [baselineMotionSourceKey])
   const handleTunedMotionAnalysis = useCallback((analysis: BoundaryMotionAnalysis | null) => {
     setTunedMotionEvidence(analysis ? { sourceKey: tunedMotionSourceKey, analysis } : null)
-  }, [tunedMotionSourceKey])
+    if (!analysis || rollTrialDeltaMs !== 0 || transitionTrial) return
+    const candidateSide = leftPhaseDeltaMs !== 0 && rightPhaseDeltaMs === 0
+      ? 'left'
+      : rightPhaseDeltaMs !== 0 && leftPhaseDeltaMs === 0 ? 'right' : null
+    const candidateDeltaMs = candidateSide === 'left' ? leftPhaseDeltaMs : rightPhaseDeltaMs
+    if (!candidateSide || ![-2, -1, 1, 2].some(offset => offset * frameStepMs === candidateDeltaMs)) return
+    const sourceKey = candidateMotionSourceKey(candidateSide, candidateDeltaMs)
+    setMeasuredCandidateMotionEvidence(current => ({ ...current, [sourceKey]: analysis }))
+  }, [candidateMotionSourceKey, frameStepMs, leftPhaseDeltaMs, rightPhaseDeltaMs, rollTrialDeltaMs, transitionTrial, tunedMotionSourceKey])
   const baselinePixelSourceKey = `${left.asset_id}:${baselinePixelLeftMs}:${right.asset_id}:${baselinePixelRightMs}`
   const baselinePixelAnalysis = baselinePixelEvidence?.sourceKey === baselinePixelSourceKey ? baselinePixelEvidence.analysis : null
   const handleBaselinePixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
@@ -1419,6 +1480,9 @@ function BoundaryActionComparison({
     .filter(candidate => phaseCandidateScanSide === 'left'
       ? candidate.deltaMs >= leftMinimumPhaseMs && candidate.deltaMs <= leftMaximumPhaseMs
       : candidate.deltaMs >= rightMinimumPhaseMs && candidate.deltaMs <= rightMaximumPhaseMs)
+  useEffect(() => {
+    setMeasuredCandidateMotionEvidence({})
+  }, [frameStepMs, left.asset_id, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.asset_id, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
   const comparisonDurationMs = Math.max(0, Math.min(
     beforeMs,
     afterMs,
@@ -2166,6 +2230,7 @@ function BoundaryActionComparison({
             fps={fps}
             label={`${sideLabel}${directionLabel} ${Math.abs(candidate.frameOffset)} 帧`}
             baselineAnalysis={baselinePixelAnalysis}
+            measuredMotionAnalysis={measuredCandidateMotionEvidence[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] ?? null}
             selected={selected}
             comparePending={pendingPhaseCandidateCompare?.side === phaseCandidateScanSide
               && pendingPhaseCandidateCompare.deltaMs === candidate.deltaMs}

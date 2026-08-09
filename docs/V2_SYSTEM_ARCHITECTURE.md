@@ -297,3 +297,5 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 同步动作的 A/B 播放状态机以页面内 `sourceKey` 约束异步媒体与 Canvas 结果：像素 key 包含两侧 Asset ID 和切点帧时点，动作 key 包含两侧 Asset ID 与最多六个真实连续帧时点，顺序媒体 key 包含 Asset ID 与当前播放窗口起止点。探针回调只把分析登记到创建回调时冻结的 key；父组件只消费与当前 key 相等的 evidence。Asset 或时点变化会先把派生结果视为未就绪，即使旧 React state 尚未被异步清理也不能通过门禁。
 
 `comparisonEvidenceReady` 要求当前试调存在且 A/B 像素、A/B 动作四套 evidence 同时匹配；手动与候选自动 A→B 都还要求两路顺序媒体已经 seek 到当前 source key。A/B 阶段切换导致窗口改变时，播放 effect 等待新一轮 `seeked`，不会沿用上一视图的 loaded 状态。决策不再是独立布尔值，而记录包含条目、素材、基础源窗、相位、滚动和转场参数的试调 key；只有该 key 仍等于当前试调且四套证据仍有效时才渲染结论。证据失效会停止活动对照，所有调整与清除路径清空结论和候选等待。该实现不进入 Timeline、EditorDraftSession、API、数据库迁移或 FFmpeg。
+
+邻帧候选的已实测动作记忆使用 `BoundaryActionComparison` 内部的 `Record<exactCandidateSourceKey, BoundaryMotionAnalysis>`，只在当前试调为合法的单侧 `±1/±2` 帧、没有滚动或转场试调，且当前 B 动作探针返回有效分析时登记。exact key 包含双方 item/Asset、双方基础源入出点、侧别、delta 与派生的六个动作源时点；渲染候选卡时重新计算同一 key 后精确取值。双方条目、Asset、基础源窗或 frame step 变化会清空整个会话缓存，源 key 不匹配的结果没有读取路径。该缓存不触发候选批量解码、不进入 query cache、localStorage、草稿指纹、后端合同或迁移，也不参与排序和决策。
