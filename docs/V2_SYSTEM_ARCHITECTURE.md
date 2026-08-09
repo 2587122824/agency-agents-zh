@@ -313,6 +313,8 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 
+修正后从 `playhead_ms=0` 重新加载真实页面并点击连续性待办，等待 1.4 秒后草稿的 row version、播放头与 updated_at 三项完全不变，重启后的 API 日志仍无 editor-draft PUT。DOM 同时证明 frames 已展开、并排模式 pressed、同步动作未挂载、所有媒体暂停；三项 checkbox 全部切换为 true 后只更新页面进度，后端草稿仍不变化。
+
 定位到中间片段时，`clipSlide` 的五列控制使用 `minmax(0, fixed)` 与弹性时间码列共同收缩；容器、直接子项和标题子项显式允许收缩，时间码继续在格内 ellipsis。该布局只修正 Inspector 内部几何，不改变片段滑动事务、按钮门禁、自动复检或草稿合同。
 
 候选卡的相对 A 影响不保存第二份派生状态：渲染时仅当 `baselineMotionAnalysis` 与 exact-key 命中的 `measuredMotionAnalysis` 同时存在，才复用 `boundaryMotionDeltas` 计算一位小数的幅度和接续几何差。夹角只在 A/B 两个原始夹角均可用时相减；轨迹缺失则整组接续影响不可比。该投影不增加 effect、媒体、Canvas 遍历、缓存 key、持久化或决策逻辑。
