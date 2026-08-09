@@ -1036,6 +1036,26 @@
   background: #29483c;
   color: #e0f0e9;
 }
+.boundaryActionComparison > .boundaryRollTrial {
+  padding: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 5px;
+  border: 1px solid #34463f;
+  border-radius: 5px;
+  background: #151c19;
+}
+.boundaryRollTrial > span { min-width: 0; display: grid; gap: 2px; color: #cbd8d2; }
+.boundaryRollTrial > span small { color: #82928b; line-height: 1.35; }
+.boundaryRollTrial > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 36px 36px minmax(64px, 1fr) 36px 36px;
+  align-items: center;
+  gap: 3px;
+}
+.boundaryControl .boundaryRollTrial button { min-width: 0; height: 25px; padding: 0 2px; font-size: 9px; }
+.boundaryRollTrial code { color: #a9c7ba; text-align: center; white-space: nowrap; }
 .boundaryActionComparison > div {
   min-width: 0;
   display: grid;
