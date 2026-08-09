@@ -81,6 +81,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 
 提交 `d87bb7bc` 发布切点局部动作 3×3 分区证据后，标准脚本重启为 API `42732`、Worker `42540`，进程创建时间分别为 2026-08-09 16:19:24.383 / 16:19:24.401。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
 
+提交 `778e5001` 发布切点局部变化重心、分散度和网格定位点后，标准脚本重启为 API `34504`、Worker `38372`，进程创建时间分别为 2026-08-09 16:33:46.668 / 16:33:46.686。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
+
 启动或重启：
 
 ```powershell
