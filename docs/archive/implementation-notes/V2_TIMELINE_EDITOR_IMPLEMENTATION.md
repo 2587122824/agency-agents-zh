@@ -389,6 +389,8 @@ A/B 像素证据现补齐精确差值与变化来源。`BoundaryPixelProbe` 新�
 
 提交 `2ef3a3f4` 推送到 `main` 后使用标准脚本重启 8766：API PID `32808`、Worker PID `27088`，两个进程创建时间均为 2026-08-09 10:14:02。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动信息，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
 
+提交 `522ee258` 推送到 `main` 后使用标准脚本重启 8766：API PID `34772`、Worker PID `36596`，两个进程创建时间分别为 2026-08-09 10:33:15.540 / 10:33:15.565。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有三次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动信息，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
+
 ## 8. 事件
 
 ```text
