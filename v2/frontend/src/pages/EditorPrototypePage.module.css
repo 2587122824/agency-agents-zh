@@ -779,6 +779,7 @@
 .boundaryReviewRun svg { width: 13px; }
 .boundaryList { display: grid; gap: 7px; }
 .boundaryControl {
+  min-width: 0;
   padding: 8px;
   display: grid;
   gap: 7px;
@@ -786,6 +787,7 @@
   border-radius: 5px;
   background: #22272a;
 }
+.boundaryControl > * { min-width: 0; }
 .boundaryControl[data-focused="true"] { border-color: #557866; box-shadow: 0 0 0 1px #324c40 inset; }
 .boundaryControl[data-order-warning="true"] {
   border-color: #8a5a2e;
@@ -888,7 +890,7 @@
 .boundaryRoll > div:first-child span { color: #858f8b; text-align: right; }
 .boundaryRoll > div:last-child {
   display: grid;
-  grid-template-columns: 34px 43px minmax(64px, 1fr) 43px 34px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(54px, 1.4fr) repeat(2, minmax(0, 1fr));
   align-items: center;
   gap: 4px;
 }
@@ -908,11 +910,18 @@
 .boundarySlip > div:not(:first-child) {
   min-width: 0;
   display: grid;
-  grid-template-columns: 42px 30px 38px minmax(84px, 1fr) 38px 30px;
+  grid-template-columns: 42px repeat(4, minmax(0, 1fr));
+  grid-template-rows: auto 27px;
   align-items: center;
   gap: 4px;
 }
-.boundarySlip > div:not(:first-child) > span { min-width: 0; display: grid; }
+.boundarySlip > div:not(:first-child) > span { min-width: 0; grid-row: 1 / span 2; display: grid; }
+.boundarySlip > div:not(:first-child) > code { grid-column: 2 / -1; grid-row: 1; }
+.boundarySlip > div:not(:first-child) > button { grid-row: 2; }
+.boundarySlip > div:not(:first-child) > button:nth-of-type(1) { grid-column: 2; }
+.boundarySlip > div:not(:first-child) > button:nth-of-type(2) { grid-column: 3; }
+.boundarySlip > div:not(:first-child) > button:nth-of-type(3) { grid-column: 4; }
+.boundarySlip > div:not(:first-child) > button:nth-of-type(4) { grid-column: 5; }
 .boundarySlip b { color: #aeb6bd; }
 .boundarySlip small { overflow: hidden; color: #747e87; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryControl .boundarySlip button { height: 27px; padding: 0 2px; font-size: 8px; }
@@ -1581,7 +1590,7 @@
 .boundaryRollTrial > div {
   min-width: 0;
   display: grid;
-  grid-template-columns: 36px 36px minmax(64px, 1fr) 36px 36px;
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(52px, 1.4fr) repeat(2, minmax(0, 1fr));
   align-items: center;
   gap: 3px;
 }
