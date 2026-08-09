@@ -59,6 +59,7 @@ interface BoundaryMotionAnalysis {
   right_rhythm_centroids: Array<MotionChangeCentroid | null>
   left_centroid_path: MotionCentroidPath | null
   right_centroid_path: MotionCentroidPath | null
+  centroid_path_continuity: MotionCentroidContinuity | null
   left_rhythm_slope_percentage_points: number | null
   right_rhythm_slope_percentage_points: number | null
   right_minus_left_rhythm_slope_percentage_points: number | null
@@ -74,6 +75,13 @@ interface MotionCentroidPath {
   x_percentage_points: number
   y_percentage_points: number
   distance_percent: number
+}
+
+interface MotionCentroidContinuity {
+  x_gap_percentage_points: number
+  y_gap_percentage_points: number
+  distance_gap_percentage_points: number
+  angle_degrees: number | null
 }
 
 const MOTION_GRID_REGIONS = ['左上', '上中', '右上', '左中', '中心', '右中', '左下', '下中', '右下']
@@ -118,6 +126,12 @@ function boundaryMotionDeltas(baseline: BoundaryMotionAnalysis, candidate: Bound
       x: delta(candidate.right_centroid_path.x_percentage_points, baseline.right_centroid_path.x_percentage_points),
       y: delta(candidate.right_centroid_path.y_percentage_points, baseline.right_centroid_path.y_percentage_points),
       distance: delta(candidate.right_centroid_path.distance_percent, baseline.right_centroid_path.distance_percent),
+    } : null,
+    centroid_path_continuity: baseline.centroid_path_continuity && candidate.centroid_path_continuity ? {
+      x: delta(candidate.centroid_path_continuity.x_gap_percentage_points, baseline.centroid_path_continuity.x_gap_percentage_points),
+      y: delta(candidate.centroid_path_continuity.y_gap_percentage_points, baseline.centroid_path_continuity.y_gap_percentage_points),
+      distance: delta(candidate.centroid_path_continuity.distance_gap_percentage_points, baseline.centroid_path_continuity.distance_gap_percentage_points),
+      angle: nullableDelta(candidate.centroid_path_continuity.angle_degrees, baseline.centroid_path_continuity.angle_degrees),
     } : null,
     left_rhythm_slope: nullableDelta(candidate.left_rhythm_slope_percentage_points, baseline.left_rhythm_slope_percentage_points),
     right_rhythm_slope: nullableDelta(candidate.right_rhythm_slope_percentage_points, baseline.right_rhythm_slope_percentage_points),
@@ -917,8 +931,27 @@ function BoundaryMotionProbe({
               distance_percent: Math.round(Math.hypot(x, y) / Math.sqrt(2) * 10) / 10,
             }
           }
+          const centroidPathContinuity = (leftPath: MotionCentroidPath | null, rightPath: MotionCentroidPath | null): MotionCentroidContinuity | null => {
+            if (!leftPath || !rightPath) return null
+            const leftMagnitude = Math.hypot(leftPath.x_percentage_points, leftPath.y_percentage_points)
+            const rightMagnitude = Math.hypot(rightPath.x_percentage_points, rightPath.y_percentage_points)
+            const angle = leftMagnitude === 0 || rightMagnitude === 0
+              ? null
+              : Math.acos(Math.max(-1, Math.min(1, (
+                leftPath.x_percentage_points * rightPath.x_percentage_points
+                + leftPath.y_percentage_points * rightPath.y_percentage_points
+              ) / (leftMagnitude * rightMagnitude)))) * 180 / Math.PI
+            return {
+              x_gap_percentage_points: Math.round((rightPath.x_percentage_points - leftPath.x_percentage_points) * 10) / 10,
+              y_gap_percentage_points: Math.round((rightPath.y_percentage_points - leftPath.y_percentage_points) * 10) / 10,
+              distance_gap_percentage_points: Math.round((rightPath.distance_percent - leftPath.distance_percent) * 10) / 10,
+              angle_degrees: angle == null ? null : Math.round(angle * 10) / 10,
+            }
+          }
           const leftRhythmSlope = rhythmSlope(leftRhythm)
           const rightRhythmSlope = rhythmSlope(rightRhythm)
+          const leftCentroidPath = centroidPath(leftRhythmCentroids)
+          const rightCentroidPath = centroidPath(rightRhythmCentroids)
           const nextAnalysis: BoundaryMotionAnalysis = {
             left_change_percent: leftMotion.change_percent,
             right_change_percent: rightMotion.change_percent,
@@ -934,8 +967,9 @@ function BoundaryMotionProbe({
             right_rhythm_change_percent: rightRhythm,
             left_rhythm_centroids: leftRhythmCentroids,
             right_rhythm_centroids: rightRhythmCentroids,
-            left_centroid_path: centroidPath(leftRhythmCentroids),
-            right_centroid_path: centroidPath(rightRhythmCentroids),
+            left_centroid_path: leftCentroidPath,
+            right_centroid_path: rightCentroidPath,
+            centroid_path_continuity: centroidPathContinuity(leftCentroidPath, rightCentroidPath),
             left_rhythm_slope_percentage_points: leftRhythmSlope,
             right_rhythm_slope_percentage_points: rightRhythmSlope,
             right_minus_left_rhythm_slope_percentage_points: leftRhythmSlope == null || rightRhythmSlope == null
@@ -1011,6 +1045,17 @@ function BoundaryMotionProbe({
               ? <code>X {signedPercentagePoint(path.x_percentage_points).replace(' 个百分点', '')} · Y {signedPercentagePoint(path.y_percentage_points).replace(' 个百分点', '')} · 距离 {path.distance_percent.toFixed(1)}%</code>
               : <small>至少一步没有可定位变化。</small>}
           </span>)}
+        </div>
+        <div className={styles.boundaryMotionCentroidContinuity} aria-label="切点重心轨迹接续">
+          <b>切点轨迹接续（后镜 − 前镜）</b>
+          {analysis.centroid_path_continuity
+            ? <span>
+              <code>X {signedPercentagePoint(analysis.centroid_path_continuity.x_gap_percentage_points).replace(' 个百分点', '')}</code>
+              <code>Y {signedPercentagePoint(analysis.centroid_path_continuity.y_gap_percentage_points).replace(' 个百分点', '')}</code>
+              <code>距离 {signedPercentagePoint(analysis.centroid_path_continuity.distance_gap_percentage_points).replace(' 个百分点', '')}</code>
+              <code>夹角 {analysis.centroid_path_continuity.angle_degrees == null ? '不可用' : `${analysis.centroid_path_continuity.angle_degrees.toFixed(1)}°`}</code>
+            </span>
+            : <small>前镜或后镜轨迹不可用，无法比较接续。</small>}
         </div>
         <small>重心轨迹只描述两步像素变化区域的重心迁移，不代表主体运动方向、速度或光流。</small>
         <small>正值表示靠后的步长变化幅度更高，负值表示更低；只描述节奏斜率，不代表衔接优劣。</small>
@@ -2008,6 +2053,17 @@ function BoundaryActionComparison({
                   ? <code>X {signedPercentagePoint(path.x).replace(' 个百分点', '')} · Y {signedPercentagePoint(path.y).replace(' 个百分点', '')} · 距离 {signedPercentagePoint(path.distance).replace(' 个百分点', '')}</code>
                   : <small>至少一套方案的某一步不可定位。</small>}
               </span>)}
+            </div>
+            <div className={styles.boundaryMotionCentroidContinuity} aria-label="B − A 切点重心轨迹接续">
+              <b>切点轨迹接续 B − A</b>
+              {motionDeltas.centroid_path_continuity
+                ? <span>
+                  <code>X {signedPercentagePoint(motionDeltas.centroid_path_continuity.x).replace(' 个百分点', '')}</code>
+                  <code>Y {signedPercentagePoint(motionDeltas.centroid_path_continuity.y).replace(' 个百分点', '')}</code>
+                  <code>距离 {signedPercentagePoint(motionDeltas.centroid_path_continuity.distance).replace(' 个百分点', '')}</code>
+                  <code>夹角 {motionDeltas.centroid_path_continuity.angle == null ? '不可比' : `${motionDeltas.centroid_path_continuity.angle > 0 ? '+' : motionDeltas.centroid_path_continuity.angle < 0 ? '−' : ''}${Math.abs(motionDeltas.centroid_path_continuity.angle).toFixed(1)}°`}</code>
+                </span>
+                : <small>至少一套方案缺少前镜或后镜轨迹。</small>}
             </div>
             <small>轨迹差只比较变化重心迁移；正负不表示主体方向或衔接优劣。</small>
           </div>
