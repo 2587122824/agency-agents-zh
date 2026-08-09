@@ -309,6 +309,8 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 
 浏览器验收以普通切点导航完成后的 `row_version=236 / playhead_ms=5118 / PUT=1` 为前置快照；点击待办并等待 1.4 秒自动保存窗口后，三项值及 `updated_at` 完全不变。同步动作 region 为 1、扫描侧 pressed 为 0、B disabled、13 个媒体全部暂停，证明只读 focus 没有借由既有 autosave effect 产生隐式写入。
 
+人工连续性全局进度同样从当前 `mainBoundaries` 同步派生，只纳入双方 Asset 都存在的边界。每个边界重新解析双方正式分镜序号；正式相邻时按右镜 `continuity_relation` 读取 `CONTINUITY_CHECKS`，否则读取 `GENERAL_CONTINUITY_CHECKS`。完成数只计算仍存在于当前 checks 数组的 ID，旧关系下的页面勾选不能抬高新关系进度。未完成队列保持 boundary index 顺序并循环选择下一个；定位复用 `focusBoundaryForReviewAt(..., 'frames')`，而候选待办复用同一函数的 `action` 模式。两者共享媒体停止和迟到回调门禁，但 frames 模式显式卸载同步动作媒体，且都不修改 `playheadMs` 或 autosave 指纹。
+
 定位到中间片段时，`clipSlide` 的五列控制使用 `minmax(0, fixed)` 与弹性时间码列共同收缩；容器、直接子项和标题子项显式允许收缩，时间码继续在格内 ellipsis。该布局只修正 Inspector 内部几何，不改变片段滑动事务、按钮门禁、自动复检或草稿合同。
 
 候选卡的相对 A 影响不保存第二份派生状态：渲染时仅当 `baselineMotionAnalysis` 与 exact-key 命中的 `measuredMotionAnalysis` 同时存在，才复用 `boundaryMotionDeltas` 计算一位小数的幅度和接续几何差。夹角只在 A/B 两个原始夹角均可用时相减；轨迹缺失则整组接续影响不可比。该投影不增加 effect、媒体、Canvas 遍历、缓存 key、持久化或决策逻辑。

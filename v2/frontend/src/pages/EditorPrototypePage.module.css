@@ -763,6 +763,33 @@
 .boundarySectionHeader button svg { width: 12px; }
 .boundarySectionHeader span { min-width: 37px; text-align: center; }
 .boundarySectionHeader b { color: #e2e7e4; }
+.boundaryContinuityReviewQueue {
+  min-width: 0;
+  margin-bottom: 7px;
+  padding: 7px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 7px;
+  border: 1px solid #46584f;
+  border-radius: 4px;
+  background: #27332e;
+}
+.boundaryContinuityReviewQueue > span { min-width: 0; display: grid; gap: 2px; }
+.boundaryContinuityReviewQueue strong { color: #d5e5dc; font-size: 9px; }
+.boundaryContinuityReviewQueue small { color: #91a69b; font-size: 8px; line-height: 1.35; }
+.boundaryContinuityReviewQueue button {
+  flex: 0 0 auto;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid #587164;
+  border-radius: 3px;
+  background: #30443a;
+  color: #d9e9e0;
+  font-size: 8px;
+  cursor: pointer;
+}
+.boundaryContinuityReviewQueue button:disabled { opacity: .48; cursor: not-allowed; }
 .boundaryCandidateReviewQueue {
   min-width: 0;
   margin-bottom: 7px;

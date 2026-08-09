@@ -3094,6 +3094,31 @@ export function EditorPrototypePage() {
     () => mainBoundaries.flatMap((boundary, index) => boundary.left.asset_id && boundary.right.asset_id ? [index] : []),
     [mainBoundaries],
   )
+  const boundaryContinuityReviewProgress = useMemo(
+    () => mainBoundaries.flatMap((boundary, index) => {
+      if (!boundary.left.asset_id || !boundary.right.asset_id) return []
+      const leftSequence = shotSequenceByAssetId.get(boundary.left.asset_id)
+      const rightSequence = shotSequenceByAssetId.get(boundary.right.asset_id)
+      const rightShotCode = shotCodeByAssetId.get(boundary.right.asset_id)
+      const rightFormalShot = rightShotCode ? formalShotByCode.get(rightShotCode) : undefined
+      const checks = leftSequence != null && rightSequence === leftSequence + 1
+        ? CONTINUITY_CHECKS[normalizeContinuityRelation(rightFormalShot?.continuity_relation)]
+        : GENERAL_CONTINUITY_CHECKS
+      const completedIds = new Set(boundaryContinuityChecks[boundary.key] ?? [])
+      const completedCount = checks.filter(check => completedIds.has(check.id)).length
+      return [{ ...boundary, index, completedCount, requiredCount: checks.length, remainingCount: checks.length - completedCount }]
+    }),
+    [boundaryContinuityChecks, formalShotByCode, mainBoundaries, shotCodeByAssetId, shotSequenceByAssetId],
+  )
+  const incompleteBoundaryContinuityReviews = boundaryContinuityReviewProgress.filter(boundary => boundary.remainingCount > 0)
+  const completedBoundaryContinuityReviewCount = boundaryContinuityReviewProgress.length - incompleteBoundaryContinuityReviews.length
+  const remainingBoundaryContinuityCheckCount = incompleteBoundaryContinuityReviews.reduce(
+    (total, boundary) => total + boundary.remainingCount,
+    0,
+  )
+  const nextIncompleteBoundaryContinuityReview = incompleteBoundaryContinuityReviews.find(
+    boundary => boundary.index > activeBoundaryIndex,
+  ) ?? incompleteBoundaryContinuityReviews[0] ?? null
   const candidateReviewFollowUpBoundaries = useMemo(
     () => mainBoundaries.flatMap((boundary, index) => {
       if (!boundary.left.asset_id || !boundary.right.asset_id) return []
@@ -3634,12 +3659,12 @@ export function EditorPrototypePage() {
     setNotice(`已定位第 ${targetIndex + 1}/${mainBoundaries.length} 个切点：${target.left.label} → ${target.right.label}。`)
   }
 
-  const focusCandidateReviewFollowUpAt = (targetIndex: number) => {
+  const focusBoundaryForReviewAt = (targetIndex: number, mode: 'frames' | 'action') => {
     const target = mainBoundaries[targetIndex]
-    if (!target) return
+    if (!target) return null
     const focusItem = target.right.asset_id ? target.right : target.left
     const itemIndex = items.findIndex(item => item.id === focusItem.id)
-    if (itemIndex < 0) return
+    if (itemIndex < 0) return null
     videoRef.current?.pause()
     advancingPlaybackRef.current = true
     setPlaying(false)
@@ -3652,8 +3677,20 @@ export function EditorPrototypePage() {
     setBoundaryFrameComparisonKey(target.key)
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
-    setBoundaryActionComparisonKey(target.key)
+    setBoundaryActionComparisonKey(mode === 'action' ? target.key : null)
+    return target
+  }
+
+  const focusCandidateReviewFollowUpAt = (targetIndex: number) => {
+    const target = focusBoundaryForReviewAt(targetIndex, 'action')
+    if (!target) return
     setNotice(`已定位候选审核待办：${target.left.label} → ${target.right.label}；请继续同步动作审核。`)
+  }
+
+  const focusIncompleteBoundaryContinuityReviewAt = (targetIndex: number) => {
+    const target = focusBoundaryForReviewAt(targetIndex, 'frames')
+    if (!target) return
+    setNotice(`已定位人工连续性待办：${target.left.label} → ${target.right.label}；请逐项确认末帧与首帧。`)
   }
 
   const beginScrub = (
@@ -5973,6 +6010,26 @@ export function EditorPrototypePage() {
                 ><ChevronRight /></button>
               </div>
             </div>
+            {boundaryContinuityReviewProgress.length > 0 && <div
+              className={styles.boundaryContinuityReviewQueue}
+              aria-label="全时间线人工连续性检查进度"
+            >
+              <span>
+                <strong>人工连续性 {completedBoundaryContinuityReviewCount}/{boundaryContinuityReviewProgress.length} 个切点</strong>
+                <small>{nextIncompleteBoundaryContinuityReview
+                  ? `还有 ${remainingBoundaryContinuityCheckCount} 项未检查 · 按时间线顺序循环`
+                  : '当前所有可播放切点已逐项确认'}</small>
+              </span>
+              <button
+                type="button"
+                disabled={!nextIncompleteBoundaryContinuityReview}
+                title={nextIncompleteBoundaryContinuityReview
+                  ? '定位后展开末帧/首帧并排检查；不会改变播放头或写入草稿。'
+                  : '当前所有可播放切点均已完成人工连续性检查。'}
+                onClick={() => nextIncompleteBoundaryContinuityReview
+                  && focusIncompleteBoundaryContinuityReviewAt(nextIncompleteBoundaryContinuityReview.index)}
+              >{nextIncompleteBoundaryContinuityReview ? '下一个未完成' : '已完成'}</button>
+            </div>}
             {candidateReviewFollowUpBoundaries.length > 0 && nextCandidateReviewFollowUpBoundary && <div
               className={styles.boundaryCandidateReviewQueue}
               aria-label="全时间线候选审核待办"
@@ -6028,7 +6085,8 @@ export function EditorPrototypePage() {
                  const continuityChecks = formalAdjacent
                    ? CONTINUITY_CHECKS[continuityRelation]
                    : GENERAL_CONTINUITY_CHECKS
-                 const completedContinuityChecks = boundaryContinuityChecks[boundaryKey] ?? []
+                  const completedContinuityChecks = (boundaryContinuityChecks[boundaryKey] ?? [])
+                    .filter(checkId => continuityChecks.some(check => check.id === checkId))
                  const sharedContinuityGroup = formalAdjacent
                    && leftFormalShot?.continuity_group_id
                    && leftFormalShot.continuity_group_id === rightFormalShot?.continuity_group_id
