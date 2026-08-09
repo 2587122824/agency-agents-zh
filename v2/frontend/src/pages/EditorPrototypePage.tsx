@@ -48,7 +48,12 @@ interface BoundaryMotionAnalysis {
   left_change_percent: number
   right_change_percent: number
   right_minus_left_percentage_points: number
+  left_grid_change_percent: number[]
+  right_grid_change_percent: number[]
+  right_minus_left_grid_percentage_points: number[]
 }
+
+const MOTION_GRID_REGIONS = ['左上', '上中', '右上', '左中', '中心', '右中', '左下', '下中', '右下']
 
 function boundaryPixelDeltas(baseline: BoundaryPixelAnalysis, candidate: BoundaryPixelAnalysis) {
   return {
@@ -159,8 +164,44 @@ function analyzeBoundaryPixels(leftVideo: HTMLVideoElement, rightVideo: HTMLVide
   }
 }
 
-function analyzeFramePixelChange(firstVideo: HTMLVideoElement, secondVideo: HTMLVideoElement) {
-  return analyzeBoundaryPixels(firstVideo, secondVideo).pixel_change_percent
+function readFramePixels(video: HTMLVideoElement) {
+  if (!video.videoWidth || !video.videoHeight) throw new Error('当前连续帧尚未具备可读取的视频画面。')
+  const size = 48
+  const canvas = document.createElement('canvas')
+  canvas.width = size
+  canvas.height = size
+  const context = canvas.getContext('2d', { willReadFrequently: true })
+  if (!context) throw new Error('浏览器没有提供画面像素读取能力。')
+  context.drawImage(video, 0, 0, size, size)
+  return context.getImageData(0, 0, size, size).data
+}
+
+function analyzeFrameMotion(firstVideo: HTMLVideoElement, secondVideo: HTMLVideoElement) {
+  const firstPixels = readFramePixels(firstVideo)
+  const secondPixels = readFramePixels(secondVideo)
+  const size = 48
+  const gridSize = 3
+  const cellSize = size / gridSize
+  const cellDifference = Array.from({ length: gridSize * gridSize }, () => 0)
+  let totalDifference = 0
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const index = (y * size + x) * 4
+      const difference = (
+        Math.abs(firstPixels[index] - secondPixels[index])
+        + Math.abs(firstPixels[index + 1] - secondPixels[index + 1])
+        + Math.abs(firstPixels[index + 2] - secondPixels[index + 2])
+      ) / 3
+      totalDifference += difference
+      const gridIndex = Math.floor(y / cellSize) * gridSize + Math.floor(x / cellSize)
+      cellDifference[gridIndex] += difference
+    }
+  }
+  const percent = (difference: number, pixelCount: number) => Math.round(difference / pixelCount / 255 * 1000) / 10
+  return {
+    change_percent: percent(totalDifference, size * size),
+    grid_change_percent: cellDifference.map(difference => percent(difference, cellSize * cellSize)),
+  }
 }
 
 type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
@@ -737,13 +778,18 @@ function BoundaryMotionProbe({
     let cancelled = false
     const frame = window.requestAnimationFrame(() => {
       try {
-        const leftChange = analyzeFramePixelChange(leftPreviousVideo, leftCurrentVideo)
-        const rightChange = analyzeFramePixelChange(rightCurrentVideo, rightNextVideo)
+        const leftMotion = analyzeFrameMotion(leftPreviousVideo, leftCurrentVideo)
+        const rightMotion = analyzeFrameMotion(rightCurrentVideo, rightNextVideo)
         if (!cancelled) {
           setAnalysis({
-            left_change_percent: leftChange,
-            right_change_percent: rightChange,
-            right_minus_left_percentage_points: Math.round((rightChange - leftChange) * 10) / 10,
+            left_change_percent: leftMotion.change_percent,
+            right_change_percent: rightMotion.change_percent,
+            right_minus_left_percentage_points: Math.round((rightMotion.change_percent - leftMotion.change_percent) * 10) / 10,
+            left_grid_change_percent: leftMotion.grid_change_percent,
+            right_grid_change_percent: rightMotion.grid_change_percent,
+            right_minus_left_grid_percentage_points: rightMotion.grid_change_percent.map((value, index) => (
+              Math.round((value - leftMotion.grid_change_percent[index]) * 10) / 10
+            )),
           })
         }
       } catch (reason) {
@@ -780,11 +826,33 @@ function BoundaryMotionProbe({
       />)}
     </div>
     <header><strong>{label}</strong><code>{timecode(leftPreviousSourceTimeMs, fps)}→{timecode(leftCurrentSourceTimeMs, fps)} · {timecode(rightCurrentSourceTimeMs, fps)}→{timecode(rightNextSourceTimeMs, fps)}</code></header>
-    {analysis ? <div>
-      <span><b>前镜末段</b><code>{analysis.left_change_percent}%</code></span>
-      <span><b>后镜开端</b><code>{analysis.right_change_percent}%</code></span>
-      <span><b>后镜 − 前镜</b><code>{signedPercentagePoint(analysis.right_minus_left_percentage_points)}</code></span>
-    </div> : unavailableMessage
+    {analysis ? <>
+      <div className={styles.boundaryMotionSummary}>
+        <span><b>前镜末段</b><code>{analysis.left_change_percent}%</code></span>
+        <span><b>后镜开端</b><code>{analysis.right_change_percent}%</code></span>
+        <span><b>后镜 − 前镜</b><code>{signedPercentagePoint(analysis.right_minus_left_percentage_points)}</code></span>
+      </div>
+      <div className={styles.boundaryMotionGrids}>
+        <section aria-label="前镜末段局部动作分区">
+          <header><strong>前镜末段分区</strong><small>连续帧变化</small></header>
+          <div>
+            {analysis.left_grid_change_percent.map((value, index) => <span
+              key={MOTION_GRID_REGIONS[index]}
+              style={{ backgroundColor: `rgba(178, 145, 75, ${Math.min(.62, .08 + value / 100)})` }}
+            ><b>{MOTION_GRID_REGIONS[index]}</b><code>{value.toFixed(1)}%</code></span>)}
+          </div>
+        </section>
+        <section aria-label="后镜开端局部动作分区">
+          <header><strong>后镜开端分区</strong><small>括号内为后镜 − 前镜</small></header>
+          <div>
+            {analysis.right_grid_change_percent.map((value, index) => <span
+              key={MOTION_GRID_REGIONS[index]}
+              style={{ backgroundColor: `rgba(104, 151, 139, ${Math.min(.62, .08 + value / 100)})` }}
+            ><b>{MOTION_GRID_REGIONS[index]}</b><code>{value.toFixed(1)}%</code><small>{signedPercentagePoint(analysis.right_minus_left_grid_percentage_points[index]).replace(' 个百分点', '')}</small></span>)}
+          </div>
+        </section>
+      </div>
+    </> : unavailableMessage
       ? <small>动作幅度证据暂不可用：{unavailableMessage}</small>
       : analysisError
       ? <small>动作幅度证据暂不可用：{analysisError}</small>

@@ -1171,13 +1171,13 @@
 .boundaryMotionCard > header { min-width: 0; display: grid; gap: 2px; }
 .boundaryMotionCard > header strong { color: #d4cdb8; }
 .boundaryMotionCard > header code { overflow: hidden; color: #9f9577; text-overflow: ellipsis; white-space: nowrap; }
-.boundaryMotionCard > div:not(.boundaryPixelProbeMedia) {
+.boundaryMotionCard > .boundaryMotionSummary {
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 3px;
 }
-.boundaryMotionCard > div:not(.boundaryPixelProbeMedia) span {
+.boundaryMotionCard > .boundaryMotionSummary span {
   min-width: 0;
   padding: 4px;
   display: grid;
@@ -1185,6 +1185,40 @@
   border-radius: 3px;
   background: #211e16;
 }
+.boundaryMotionGrids {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+.boundaryMotionGrids > section { min-width: 0; display: grid; gap: 3px; }
+.boundaryMotionGrids > section > header {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.boundaryMotionGrids > section > header strong { color: #bdb49c; font-size: 10px; }
+.boundaryMotionGrids > section > header small { overflow: hidden; color: #7f7867; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryMotionGrids > section > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 2px;
+}
+.boundaryMotionGrids > section > div > span {
+  min-width: 0;
+  min-height: 38px;
+  padding: 3px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 1px;
+  border: 1px solid rgb(255 255 255 / 4%);
+  border-radius: 2px;
+}
+.boundaryMotionGrids > section > div b { color: #aaa18c; font-size: 9px; }
+.boundaryMotionGrids > section > div code { color: #e0d9c7; font-size: 10px; }
+.boundaryMotionGrids > section > div small { color: #9ca89f; font-size: 8px; line-height: 1; white-space: nowrap; }
 .boundaryMotionCard b { overflow: hidden; color: #99917d; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryMotionCard code { color: #ded6c0; white-space: nowrap; }
 .boundaryMotionCard > small { color: #8b8370; line-height: 1.35; }
