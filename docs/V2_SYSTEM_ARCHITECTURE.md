@@ -307,6 +307,8 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 
 全时间线待办队列是 `mainBoundaries × boundaryCandidateReviewSessions` 的同步只读投影。页面为每个当前双方素材完整的 boundary 重新计算稳定 session key，只读取 exact-key 命中的 session，并统计 `completed / shortlisted / measured-only`；因此已删除边界、源窗或素材变化后的旧 map 项即使仍留在页面内存，也没有进入全局计数的路径。队列按 `mainBoundaries` 原顺序保存 boundary index；“下一个”先取活动 index 之后的首项，没有则循环到首项。待办定位使用独立的只读 focus 路径：暂停主媒体、门禁迟到回调、停止旧预览/巡检，更新 selected index 与 boundary focus，再设置 frame/action comparison key；它不调用会推进播放头的普通 `focusBoundaryAt`。组件重新挂载时扫描侧、B、pending 与播放为空，`playheadMs` 及草稿指纹保持不变。该投影不新增 state、effect、持久化、API、草稿字段或排序逻辑。
 
+浏览器验收以普通切点导航完成后的 `row_version=236 / playhead_ms=5118 / PUT=1` 为前置快照；点击待办并等待 1.4 秒自动保存窗口后，三项值及 `updated_at` 完全不变。同步动作 region 为 1、扫描侧 pressed 为 0、B disabled、13 个媒体全部暂停，证明只读 focus 没有借由既有 autosave effect 产生隐式写入。
+
 定位到中间片段时，`clipSlide` 的五列控制使用 `minmax(0, fixed)` 与弹性时间码列共同收缩；容器、直接子项和标题子项显式允许收缩，时间码继续在格内 ellipsis。该布局只修正 Inspector 内部几何，不改变片段滑动事务、按钮门禁、自动复检或草稿合同。
 
 候选卡的相对 A 影响不保存第二份派生状态：渲染时仅当 `baselineMotionAnalysis` 与 exact-key 命中的 `measuredMotionAnalysis` 同时存在，才复用 `boundaryMotionDeltas` 计算一位小数的幅度和接续几何差。夹角只在 A/B 两个原始夹角均可用时相减；轨迹缺失则整组接续影响不可比。该投影不增加 effect、媒体、Canvas 遍历、缓存 key、持久化或决策逻辑。
