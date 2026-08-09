@@ -1515,6 +1515,8 @@
 .boundaryPhaseCandidateCompared small { line-height: 1.25; }
 .boundaryPhaseCandidate > div .boundaryPhaseCandidateCompared[data-outcome="kept_baseline"] { border-color: #665d46; background: #292419; }
 .boundaryPhaseCandidateCompared[data-outcome="kept_baseline"] strong { color: #ead9af; }
+.boundaryPhaseCandidate > div .boundaryPhaseCandidateCompared[data-outcome="shortlisted"] { border-color: #46667a; background: #172833; }
+.boundaryPhaseCandidateCompared[data-outcome="shortlisted"] strong { color: #bfdfef; }
 .boundaryPhaseCandidateActions { display: grid; gap: 3px; }
 .boundaryControl .boundaryPhaseCandidateActions button { min-width: 74px; height: 24px; padding: 0 5px; font-size: 9px; }
 .boundaryControl .boundaryPhaseCandidateActions button[aria-pressed="true"] { border-color: #638b9a; background: #2b4954; color: #effbff; }
@@ -1613,7 +1615,9 @@
 .boundaryPhaseDecision > span { min-width: 0; display: grid; gap: 2px; color: #dce9e3; }
 .boundaryPhaseDecision > span small { color: #91a39b; line-height: 1.35; }
 .boundaryPhaseDecision > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.boundaryPhaseDecision > div[data-columns="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .boundaryControl .boundaryPhaseDecision button { height: 28px; }
+.boundaryControl .boundaryPhaseDecision div[data-columns="3"] button { height: 38px; padding: 3px; font-size: 8px; line-height: 1.15; white-space: normal; }
 .boundaryControl .boundaryPhaseDecision button:last-child:not(:disabled) { border-color: #659980; background: #2a503f; color: #e8f5ef; }
 .boundaryActionComparison figure {
   min-width: 0;

@@ -1179,7 +1179,7 @@ function BoundaryPhaseCandidate({
   baselineAnalysis: BoundaryPixelAnalysis | null
   baselineMotionAnalysis: BoundaryMotionAnalysis | null
   measuredMotionAnalysis: BoundaryMotionAnalysis | null
-  comparisonOutcome: 'completed' | 'kept_baseline' | null
+  comparisonOutcome: 'completed' | 'kept_baseline' | 'shortlisted' | null
   selected: boolean
   comparePending: boolean
   onSelect: () => void
@@ -1211,12 +1211,18 @@ function BoundaryPhaseCandidate({
       {comparisonOutcome && <span
         className={styles.boundaryPhaseCandidateCompared}
         data-outcome={comparisonOutcome}
-        aria-label={comparisonOutcome === 'kept_baseline' ? `${label} 本次对照选择保留 A` : `${label} 已完整对照 A 到 B`}
+        aria-label={comparisonOutcome === 'kept_baseline'
+          ? `${label} 本次对照选择保留 A`
+          : comparisonOutcome === 'shortlisted' ? `${label} 已暂存 B 待复看` : `${label} 已完整对照 A 到 B`}
       >
-        <strong>{comparisonOutcome === 'kept_baseline' ? '本次已选择保留 A' : '已完整对照 A→B'}</strong>
+        <strong>{comparisonOutcome === 'kept_baseline'
+          ? '本次已选择保留 A'
+          : comparisonOutcome === 'shortlisted' ? '已暂存 B 待复看' : '已完整对照 A→B'}</strong>
         <small>{comparisonOutcome === 'kept_baseline'
           ? '人工结果仅保留在本页；可再次对照。'
-          : '已看完，尚未选择保留或采用。'}</small>
+          : comparisonOutcome === 'shortlisted'
+            ? '人工短名单仅保留在本页；可再次对照。'
+            : '已看完，尚未选择保留或采用。'}</small>
       </span>}
       {measuredMotionAnalysis ? <section className={styles.boundaryPhaseCandidateMeasured} aria-label={`${label} 已实测动作证据`}>
         <strong>已实测动作</strong>
@@ -1399,7 +1405,7 @@ function BoundaryActionComparison({
   const [baselineMotionEvidence, setBaselineMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [tunedMotionEvidence, setTunedMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [measuredCandidateMotionEvidence, setMeasuredCandidateMotionEvidence] = useState<Record<string, BoundaryMotionAnalysis>>({})
-  const [candidateComparisonOutcomes, setCandidateComparisonOutcomes] = useState<Record<string, 'completed' | 'kept_baseline'>>({})
+  const [candidateComparisonOutcomes, setCandidateComparisonOutcomes] = useState<Record<string, 'completed' | 'kept_baseline' | 'shortlisted'>>({})
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const leftBaseSourceInMs = left.source_in_ms ?? 0
@@ -1523,6 +1529,9 @@ function BoundaryActionComparison({
     : 0
   const keptBaselinePhaseCandidateCount = phaseCandidateScanSide
     ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'kept_baseline').length
+    : 0
+  const shortlistedPhaseCandidateCount = phaseCandidateScanSide
+    ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'shortlisted').length
     : 0
   const nextUnreviewedPhaseCandidate = phaseCandidateScanSide
     ? nearbyPhaseCandidates.find(candidate => !candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)]) ?? null
@@ -2052,6 +2061,13 @@ function BoundaryActionComparison({
     onNotice(`已保留 ${left.label} → ${right.label} 的 A 原切点；本次试调未写入草稿。`)
   }
 
+  const shortlistCandidatePhase = () => {
+    if (!phaseDecisionReady || !activePhaseCandidateSourceKey) return
+    setCandidateComparisonOutcomes(current => ({ ...current, [activePhaseCandidateSourceKey]: 'shortlisted' }))
+    resetPhase()
+    onNotice(`已把 ${left.label} → ${right.label} 的当前 B 候选暂存为本页待复看；草稿未改变。`)
+  }
+
   const applyTunedPhase = () => {
     if (editLocked || !viewingTunedPhase || !hasComparisonTrial) return
     pauseMedia()
@@ -2267,7 +2283,7 @@ function BoundaryActionComparison({
         <div className={styles.boundaryPhaseReviewProgress} aria-label={`${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}邻帧候选对照进度`}>
           <span>
             <strong>{reviewedPhaseCandidateCount}/{nearbyPhaseCandidates.length} 已对照</strong>
-            <small>{keptBaselinePhaseCandidateCount} 项本次保留 A · 按固定时间顺序</small>
+            <small>保留 A {keptBaselinePhaseCandidateCount} · 待复看 {shortlistedPhaseCandidateCount}</small>
           </span>
           <button
             disabled={!nextUnreviewedPhaseCandidate || hasComparisonTrial}
@@ -2383,8 +2399,9 @@ function BoundaryActionComparison({
     </div>
     {phaseDecisionReady && <div className={styles.boundaryPhaseDecision} role="group" aria-label="A/B 切点对照结论">
       <span><strong>选择这次对照结果</strong><small>保留 A 不写草稿；{tunedTrialSummary}</small></span>
-      <div>
+      <div data-columns={activePhaseCandidateSourceKey ? 3 : 2}>
         <button onClick={keepBaselinePhase}><RotateCcw />保留 A 原方案</button>
+        {activePhaseCandidateSourceKey && <button onClick={shortlistCandidatePhase}><Clock3 />暂存 B 待复看</button>}
         <button
           disabled={editLocked || !viewingTunedPhase}
           title={editLocked ? '画面轨已锁定，只能比较或保留 A，不能采用 B。' : !viewingTunedPhase ? '请先切回 B 当前试调，确认要采用的画面。' : '把当前转场、滚动切位或全部非零相位试调作为一次操作写入草稿'}
