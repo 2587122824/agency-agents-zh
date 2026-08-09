@@ -1407,6 +1407,7 @@ function BoundaryActionComparison({
   const [measuredCandidateMotionEvidence, setMeasuredCandidateMotionEvidence] = useState<Record<string, BoundaryMotionAnalysis>>({})
   const [candidateComparisonOutcomes, setCandidateComparisonOutcomes] = useState<Record<string, 'completed' | 'kept_baseline' | 'shortlisted'>>({})
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
+  const [phaseCandidateScanExpanded, setPhaseCandidateScanExpanded] = useState(false)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const leftBaseSourceInMs = left.source_in_ms ?? 0
   const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
@@ -1487,6 +1488,9 @@ function BoundaryActionComparison({
       candidateRightLaterMs,
     ].join(':')
   }, [frameStepMs, left.asset_id, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.asset_id, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
+  const phaseCandidateFrameOffsets = phaseCandidateScanExpanded
+    ? [-4, -3, -2, -1, 1, 2, 3, 4]
+    : [-2, -1, 1, 2]
   const activePhaseCandidateSide = rollTrialDeltaMs === 0 && !transitionTrial
     ? leftPhaseDeltaMs !== 0 && rightPhaseDeltaMs === 0
       ? 'left'
@@ -1494,7 +1498,7 @@ function BoundaryActionComparison({
     : null
   const activePhaseCandidateDeltaMs = activePhaseCandidateSide === 'left' ? leftPhaseDeltaMs : rightPhaseDeltaMs
   const activePhaseCandidateSourceKey = activePhaseCandidateSide
-    && [-2, -1, 1, 2].some(offset => offset * frameStepMs === activePhaseCandidateDeltaMs)
+    && phaseCandidateFrameOffsets.some(offset => offset * frameStepMs === activePhaseCandidateDeltaMs)
     ? candidateMotionSourceKey(activePhaseCandidateSide, activePhaseCandidateDeltaMs)
     : null
   const baselineMotionSourceKey = `${left.asset_id}:${baselineMotionLeftEarlierMs}:${baselineMotionLeftPreviousMs}:${baselinePixelLeftMs}:${right.asset_id}:${baselinePixelRightMs}:${baselineMotionRightNextMs}:${baselineMotionRightLaterMs}`
@@ -1519,11 +1523,13 @@ function BoundaryActionComparison({
   const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
     setTunedPixelEvidence(analysis ? { sourceKey: tunedPixelSourceKey, analysis } : null)
   }, [tunedPixelSourceKey])
-  const nearbyPhaseCandidates = [-2, -1, 1, 2]
+  const allNearbyPhaseCandidates = [-4, -3, -2, -1, 1, 2, 3, 4]
     .map(frameOffset => ({ frameOffset, deltaMs: frameOffset * frameStepMs }))
     .filter(candidate => phaseCandidateScanSide === 'left'
       ? candidate.deltaMs >= leftMinimumPhaseMs && candidate.deltaMs <= leftMaximumPhaseMs
       : candidate.deltaMs >= rightMinimumPhaseMs && candidate.deltaMs <= rightMaximumPhaseMs)
+  const nearbyPhaseCandidates = allNearbyPhaseCandidates.filter(candidate => phaseCandidateScanExpanded || Math.abs(candidate.frameOffset) <= 2)
+  const expandablePhaseCandidateCount = allNearbyPhaseCandidates.filter(candidate => Math.abs(candidate.frameOffset) > 2).length
   const reviewedPhaseCandidateCount = phaseCandidateScanSide
     ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)]).length
     : 0
@@ -1543,6 +1549,7 @@ function BoundaryActionComparison({
   useEffect(() => {
     setMeasuredCandidateMotionEvidence({})
     setCandidateComparisonOutcomes({})
+    setPhaseCandidateScanExpanded(false)
   }, [frameStepMs, left.asset_id, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.asset_id, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
   const comparisonDurationMs = Math.max(0, Math.min(
     beforeMs,
@@ -1979,9 +1986,16 @@ function BoundaryActionComparison({
     positionSequenceMedia()
     const opening = phaseCandidateScanSide !== side
     setPhaseCandidateScanSide(opening ? side : null)
+    setPhaseCandidateScanExpanded(false)
     onNotice(opening
       ? `正在按需读取${side === 'left' ? '前镜' : '后镜'}前后 2 帧内的合法候选；不会写入草稿。`
       : `已收起${side === 'left' ? '前镜' : '后镜'}邻帧候选扫描。`)
+  }
+
+  const expandPhaseCandidateScan = () => {
+    if (!phaseCandidateScanSide || phaseCandidateScanExpanded || hasComparisonTrial || !expandablePhaseCandidateCount) return
+    setPhaseCandidateScanExpanded(true)
+    onNotice(`已显式扩展${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}扫描到前后 4 帧；新增候选仍按时间顺序人工对照，不排序或推荐。`)
   }
 
   const adjustRollTrial = (requestedDeltaMs: number) => {
@@ -2269,7 +2283,7 @@ function BoundaryActionComparison({
     </section>
     <section className={styles.boundaryPhaseScan} aria-label="单侧邻帧候选扫描">
       <header>
-        <span><strong>邻帧候选扫描</strong><small>一次读取前后 2 帧内合法候选；不排序、不推荐，选择后才成为本地 B。</small></span>
+        <span><strong>邻帧候选扫描</strong><small>{phaseCandidateScanExpanded ? '已显式扩展到前后 4 帧' : '默认读取前后 2 帧，可按需扩展到 4 帧'}；不排序、不推荐，选择后才成为本地 B。</small></span>
         <div role="group" aria-label="选择邻帧扫描侧">
           <button
             aria-pressed={phaseCandidateScanSide === 'left'}
@@ -2301,6 +2315,15 @@ function BoundaryActionComparison({
                 ? '复看下一个待复看'
                 : '本侧候选已看完'}</button>
         </div>
+        {!phaseCandidateScanExpanded && expandablePhaseCandidateCount > 0 && <div className={styles.boundaryPhaseScanExpansion}>
+          <span><strong>近邻仍不顺？</strong><small>可再挂载 {expandablePhaseCandidateCount} 个 ±3/±4 帧合法候选。</small></span>
+          <button
+            disabled={hasComparisonTrial}
+            title={hasComparisonTrial ? '请先处理或清除当前 B，再扩展候选范围。' : undefined}
+            onClick={expandPhaseCandidateScan}
+          >扩展到 ±4 帧</button>
+        </div>}
+        {phaseCandidateScanExpanded && <small className={styles.boundaryPhaseScanExpandedNote}>已扩展到 ±4 帧；审核进度与短名单继续沿用同一页面会话。</small>}
         <div>
           {nearbyPhaseCandidates.length ? nearbyPhaseCandidates.map(candidate => {
           const sideLabel = phaseCandidateScanSide === 'left' ? '前镜' : '后镜'
@@ -2331,7 +2354,7 @@ function BoundaryActionComparison({
             onSelect={() => selectPhaseCandidate(phaseCandidateScanSide, candidate.deltaMs)}
             onCompare={() => selectPhaseCandidate(phaseCandidateScanSide, candidate.deltaMs, true)}
           />
-          }) : <small>这一侧在当前素材把手内没有可扫描的 ±2 帧邻近相位。</small>}
+          }) : <small>这一侧在当前素材把手内没有可扫描的邻近相位。</small>}
         </div>
       </>}
       {!phaseCandidateScanSide && <small>选择前镜或后镜后再按需加载候选，不会后台扫描整段素材。</small>}
