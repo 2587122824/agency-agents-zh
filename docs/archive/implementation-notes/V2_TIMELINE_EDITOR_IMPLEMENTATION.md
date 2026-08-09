@@ -347,6 +347,10 @@ A→B 连续对照完成后新增明确结论区。结论只在两阶段完整�
 
 真实咖啡 SH-002 → SH-001 以当前 `cut/cut` 为 A，本地选择 B `fade:200` 并等待自动保存窗口后，服务端仍保持 `row_version=211 / cut:0 / cut:0`。A→B 的 A 阶段保持直接切换；B 阶段 RAF 实测前镜 opacity `0.929→0.473→0.131→0`，后镜 opacity `0.077→0.420→0.839→1`，证明真实经过黑场淡出淡入。完整对照后结论显示“B 将采用 0.2s 淡出淡入”；保留 A 后 row version 不变。再次完成对照并采用 B 后，服务端一次变为前镜 `transition_out=fade:200`、后镜 `transition_in=fade:200`，`row_version=212`；一次撤销整体恢复 `cut:0`。跳到开头后最终草稿为 `row_version=214 / playhead_ms=0`，主画面区间仍为 `0..4709 / 4709..5118 / 5118..15000ms`。1280×720 下 `scrollWidth=clientWidth=1280 / scrollHeight=clientHeight=720`；完整后端 `305 passed`、Python compileall、Vite 生产构建和差异格式检查通过，仅有既有大 chunk 警告。首次未隔离当前真实执行环境的测试进程得到 `304 passed / 1 failed`，唯一失败为注册表默认关闭断言；仅在 pytest 子进程内显式关闭外部执行与智能体执行后，同一完整 305 项全部通过，运行服务配置未改写。
 
+草稿恢复补齐真实零写入边界。本地 schema 从 `editor-local-draft.v3` 显式升级为 v4 并保存 `playhead_ms`；新增规范化语义指纹只投影基线、条目稳定合同、播放头、磁吸和缩放，递归排序 JSON 对象键，避免服务端条目的 UI Asset 元数据与键序差异。恢复 effect 在远端与本地语义相同或远端不旧于本地时采用远端，并把当前指纹同时写入最近成功/尝试状态；自动保存 useMemo 复用同一函数。旧本地 schema 直接失效，不新增兼容分支。
+
+真实项目首次打开前记录服务端草稿 `row_version=214 / updated_at=2026-08-09T00:45:44.463173 / playhead_ms=0`；等待超过 900ms 后保持完全不变且当前 API 日志没有 editor-draft PUT，刷新再等待仍为 214。播放头键盘前移一帧只产生一次 PUT，草稿变为 `row_version=215 / playhead_ms=42`；刷新恢复 `00:00:01` 且版本不再推进。Home 恢复到开头只再产生一次 PUT，最终为 `row_version=216 / playhead_ms=0`；再次刷新仍保持 216。主画面保持 `0..4709 / 4709..5118 / 5118..15000ms`，双方转场保持 `cut:0`；1280×720 的 html/body `scrollWidth == clientWidth`、`scrollHeight == clientHeight`。
+
 提交 `5857bf51` 推送到 `main` 后使用标准脚本重启 8766：API PID `26180`、Worker PID `23280`，两个进程创建时间均为 2026-08-09 00:15:29。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。
 
 提交 `1db36ab1` 推送到 `main` 后使用标准脚本重启 8766：API PID `42312`、Worker PID `12188`，两个进程创建时间均为 2026-08-09 00:37:57。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有两次健康检查，Worker 两份日志为空，标准四份日志均无实际错误。

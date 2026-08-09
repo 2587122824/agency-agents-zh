@@ -17,7 +17,7 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v3'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v4'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -26,6 +26,7 @@ interface LocalEditorDraft {
   items: TimelineItem[]
   timeline_zoom: number
   snap_enabled: boolean
+  playhead_ms: number
   saved_at: string
 }
 
@@ -34,6 +35,42 @@ interface SubtitleCue {
   start_ms: number
   end_ms: number
   text: string
+}
+
+function canonicalDraftValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalDraftValue)
+  if (!value || typeof value !== 'object') return value
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, child]) => [key, canonicalDraftValue(child)]))
+}
+
+function editorDraftFingerprint(
+  sourceTimeline: Timeline | null,
+  items: TimelineItem[],
+  playheadMs: number,
+  snapEnabled: boolean,
+  timelineZoom: number,
+) {
+  return JSON.stringify(canonicalDraftValue({
+    base: sourceTimeline ? [sourceTimeline.id, sourceTimeline.row_version] : null,
+    items: items.map(item => ({
+      id: item.id,
+      track_type: item.track_type,
+      sequence_number: item.sequence_number,
+      asset_id: item.asset_id,
+      label: item.label,
+      gap_reason: item.gap_reason,
+      source_in_ms: item.source_in_ms,
+      source_out_ms: item.source_out_ms,
+      timeline_in_ms: item.timeline_in_ms,
+      timeline_out_ms: item.timeline_out_ms,
+      transform: item.transform,
+    })),
+    playhead_ms: Math.max(0, Math.round(playheadMs)),
+    snap_enabled: snapEnabled,
+    pixels_per_second: timelineZoom,
+  }))
 }
 
 type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
@@ -1387,11 +1424,7 @@ export function EditorPrototypePage() {
       && remote.base_timeline_id === sourceTimeline.id
       && remote.base_timeline_row_version === sourceTimeline.row_version
     )
-    const useRemote = Boolean(
-      remoteMatches
-      && (!localRestored || new Date(remote!.updated_at).getTime() >= new Date(localRestored.saved_at).getTime())
-    )
-    const remoteItems: TimelineItem[] | null = useRemote && remote
+    const remoteItems: TimelineItem[] | null = remoteMatches && remote
       ? remote.items.map(item => {
         const asset = workspace.data.available_assets.find(row => row.id === item.asset_id)
         return {
@@ -1412,19 +1445,47 @@ export function EditorPrototypePage() {
         }
       })
       : null
-    setItems(remoteItems ?? localRestored?.items ?? sourceTimeline.items)
-    setTimelineZoom(remote?.track_config.pixels_per_second && useRemote
-      ? remote.track_config.pixels_per_second
-      : localRestored?.timeline_zoom ?? sourceTimeline.track_config.pixels_per_second ?? 82)
-    setSnapEnabled(useRemote && remote ? remote.track_config.snap_enabled : localRestored?.snap_enabled ?? sourceTimeline.track_config.snap_enabled)
+    const remoteZoom = remote?.track_config.pixels_per_second ?? sourceTimeline.track_config.pixels_per_second ?? 82
+    const remoteSnapEnabled = remote?.track_config.snap_enabled ?? sourceTimeline.track_config.snap_enabled
+    const remotePlayheadMs = remote?.playhead_ms ?? 0
+    const remoteFingerprint = remoteItems
+      ? editorDraftFingerprint(sourceTimeline, remoteItems, remotePlayheadMs, remoteSnapEnabled, remoteZoom)
+      : null
+    const localFingerprint = localRestored
+      ? editorDraftFingerprint(
+        sourceTimeline,
+        localRestored.items,
+        localRestored.playhead_ms,
+        localRestored.snap_enabled,
+        localRestored.timeline_zoom,
+      )
+      : null
+    const localMatchesRemote = Boolean(remoteFingerprint && localFingerprint === remoteFingerprint)
+    const useRemote = Boolean(
+      remoteMatches
+      && (
+        !localRestored
+        || localMatchesRemote
+        || new Date(remote!.updated_at).getTime() >= new Date(localRestored.saved_at).getTime()
+      )
+    )
+    const restoredItems = useRemote && remoteItems
+      ? remoteItems
+      : localRestored?.items ?? sourceTimeline.items
+    const restoredZoom = useRemote ? remoteZoom : localRestored?.timeline_zoom ?? sourceTimeline.track_config.pixels_per_second ?? 82
+    const restoredSnapEnabled = useRemote ? remoteSnapEnabled : localRestored?.snap_enabled ?? sourceTimeline.track_config.snap_enabled
+    const restoredPlayheadMs = useRemote ? remotePlayheadMs : localRestored?.playhead_ms ?? 0
+    setItems(restoredItems)
+    setTimelineZoom(restoredZoom)
+    setSnapEnabled(restoredSnapEnabled)
     setDirty(Boolean(remoteItems || localRestored))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
-    setLastAutoSavedFingerprint(null)
-    setLastAutoSaveAttemptFingerprint(null)
+    setLastAutoSavedFingerprint(useRemote ? remoteFingerprint : null)
+    setLastAutoSaveAttemptFingerprint(useRemote ? remoteFingerprint : null)
     setHistory([])
     setFuture([])
     setSelectedIndex(0)
-    setPlayheadMs(useRemote && remote ? remote.playhead_ms : 0)
+    setPlayheadMs(restoredPlayheadMs)
     setPlaying(false)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
@@ -1601,13 +1662,16 @@ export function EditorPrototypePage() {
   const validationErrors = lastValidation?.validation_report
     ?? sourceTimeline?.validation_report
     ?? []
-  const autoSaveFingerprint = useMemo(() => JSON.stringify({
-    base: sourceTimeline ? [sourceTimeline.id, sourceTimeline.row_version] : null,
-    items,
-    playhead_ms: Math.max(0, Math.round(playheadMs)),
-    snap_enabled: snapEnabled,
-    pixels_per_second: timelineZoom,
-  }), [items, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
+  const autoSaveFingerprint = useMemo(
+    () => editorDraftFingerprint(
+      sourceTimeline,
+      items,
+      playheadMs,
+      snapEnabled,
+      timelineZoom,
+    ),
+    [items, playheadMs, snapEnabled, sourceTimeline, timelineZoom],
+  )
 
   useEffect(() => {
     const currentIndex = items.findIndex(item => item.track_type === 'main_video' && playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms)
@@ -1741,10 +1805,11 @@ export function EditorPrototypePage() {
       items,
       timeline_zoom: timelineZoom,
       snap_enabled: snapEnabled,
+      playhead_ms: Math.max(0, Math.round(playheadMs)),
       saved_at: new Date().toISOString(),
     }
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
-  }, [boundaryRollMonitor, dirty, items, localDraftKey, snapEnabled, sourceTimeline, timelineZoom])
+  }, [boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
 
   const autoSaveDraft = useMutation({
     mutationFn: async (fingerprint: string) => {
