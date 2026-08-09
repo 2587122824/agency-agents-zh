@@ -44,6 +44,12 @@ interface BoundaryPixelAnalysis {
   level: 'low' | 'medium' | 'high'
 }
 
+interface BoundaryMotionAnalysis {
+  left_change_percent: number
+  right_change_percent: number
+  right_minus_left_percentage_points: number
+}
+
 function boundaryPixelDeltas(baseline: BoundaryPixelAnalysis, candidate: BoundaryPixelAnalysis) {
   return {
     luminance: Math.round((candidate.luminance_delta_percent - baseline.luminance_delta_percent) * 10) / 10,
@@ -151,6 +157,10 @@ function analyzeBoundaryPixels(leftVideo: HTMLVideoElement, rightVideo: HTMLVide
     pixel_change_percent: Math.round(pixelChange * 10) / 10,
     level,
   }
+}
+
+function analyzeFramePixelChange(firstVideo: HTMLVideoElement, secondVideo: HTMLVideoElement) {
+  return analyzeBoundaryPixels(firstVideo, secondVideo).pixel_change_percent
 }
 
 type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
@@ -662,6 +672,127 @@ function BoundaryPixelProbe({
   </article>
 }
 
+function BoundaryMotionProbe({
+  projectId,
+  left,
+  right,
+  leftPreviousSourceTimeMs,
+  leftCurrentSourceTimeMs,
+  rightCurrentSourceTimeMs,
+  rightNextSourceTimeMs,
+  fps,
+  label,
+  note,
+}: {
+  projectId: string
+  left: TimelineItem
+  right: TimelineItem
+  leftPreviousSourceTimeMs: number
+  leftCurrentSourceTimeMs: number
+  rightCurrentSourceTimeMs: number
+  rightNextSourceTimeMs: number
+  fps: number
+  label: string
+  note: string
+}) {
+  const leftPreviousRef = useRef<HTMLVideoElement | null>(null)
+  const leftCurrentRef = useRef<HTMLVideoElement | null>(null)
+  const rightCurrentRef = useRef<HTMLVideoElement | null>(null)
+  const rightNextRef = useRef<HTMLVideoElement | null>(null)
+  const [readyMask, setReadyMask] = useState(0)
+  const [analysis, setAnalysis] = useState<BoundaryMotionAnalysis | null>(null)
+  const [analysisError, setAnalysisError] = useState<string | null>(null)
+  const hasLeftPair = leftCurrentSourceTimeMs - leftPreviousSourceTimeMs >= 1
+  const hasRightPair = rightNextSourceTimeMs - rightCurrentSourceTimeMs >= 1
+  const seekFrame = useCallback((video: HTMLVideoElement | null, sourceTimeMs: number) => {
+    if (!video || !Number.isFinite(video.duration)) return
+    video.currentTime = Math.min(Math.max(0, video.duration - .001), Math.max(0, sourceTimeMs / 1000))
+  }, [])
+  const frameIsCurrent = useCallback((video: HTMLVideoElement, sourceTimeMs: number) => {
+    if (!Number.isFinite(video.duration)) return false
+    const expected = Math.min(Math.max(0, video.duration - .001), Math.max(0, sourceTimeMs / 1000))
+    return Math.abs(video.currentTime - expected) <= .02
+  }, [])
+  const markReady = useCallback((bit: number, video: HTMLVideoElement, sourceTimeMs: number) => {
+    if (frameIsCurrent(video, sourceTimeMs)) setReadyMask(current => current | bit)
+  }, [frameIsCurrent])
+
+  useEffect(() => {
+    setReadyMask(0)
+    setAnalysis(null)
+    setAnalysisError(null)
+    seekFrame(leftPreviousRef.current, leftPreviousSourceTimeMs)
+    seekFrame(leftCurrentRef.current, leftCurrentSourceTimeMs)
+    seekFrame(rightCurrentRef.current, rightCurrentSourceTimeMs)
+    seekFrame(rightNextRef.current, rightNextSourceTimeMs)
+  }, [leftCurrentSourceTimeMs, leftPreviousSourceTimeMs, rightCurrentSourceTimeMs, rightNextSourceTimeMs, seekFrame])
+
+  useEffect(() => {
+    if (!hasLeftPair || !hasRightPair || readyMask !== 15) return
+    const leftPreviousVideo = leftPreviousRef.current
+    const leftCurrentVideo = leftCurrentRef.current
+    const rightCurrentVideo = rightCurrentRef.current
+    const rightNextVideo = rightNextRef.current
+    if (!leftPreviousVideo || !leftCurrentVideo || !rightCurrentVideo || !rightNextVideo) return
+    let cancelled = false
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const leftChange = analyzeFramePixelChange(leftPreviousVideo, leftCurrentVideo)
+        const rightChange = analyzeFramePixelChange(rightCurrentVideo, rightNextVideo)
+        if (!cancelled) {
+          setAnalysis({
+            left_change_percent: leftChange,
+            right_change_percent: rightChange,
+            right_minus_left_percentage_points: Math.round((rightChange - leftChange) * 10) / 10,
+          })
+        }
+      } catch (reason) {
+        if (!cancelled) setAnalysisError(reason instanceof Error ? reason.message : '局部动作幅度读取失败。')
+      }
+    })
+    return () => {
+      cancelled = true
+      window.cancelAnimationFrame(frame)
+    }
+  }, [hasLeftPair, hasRightPair, readyMask])
+
+  const media = [
+    { ref: leftPreviousRef, item: left, sourceTimeMs: leftPreviousSourceTimeMs, bit: 1 },
+    { ref: leftCurrentRef, item: left, sourceTimeMs: leftCurrentSourceTimeMs, bit: 2 },
+    { ref: rightCurrentRef, item: right, sourceTimeMs: rightCurrentSourceTimeMs, bit: 4 },
+    { ref: rightNextRef, item: right, sourceTimeMs: rightNextSourceTimeMs, bit: 8 },
+  ]
+  const unavailableMessage = !hasLeftPair
+    ? '前镜切点前不足两个可用帧。'
+    : !hasRightPair ? '后镜切点后不足两个可用帧。' : null
+
+  return <article className={styles.boundaryMotionCard}>
+    <div className={styles.boundaryPixelProbeMedia} aria-hidden="true">
+      {media.map(({ ref, item, sourceTimeMs, bit }) => <video
+        key={`${item.asset_id}-${sourceTimeMs}-${bit}`}
+        ref={ref}
+        muted
+        playsInline
+        preload="auto"
+        src={`/api/v1/projects/${projectId}/assets/${item.asset_id}/content`}
+        onLoadedMetadata={event => seekFrame(event.currentTarget, sourceTimeMs)}
+        onSeeked={event => markReady(bit, event.currentTarget, sourceTimeMs)}
+      />)}
+    </div>
+    <header><strong>{label}</strong><code>{timecode(leftPreviousSourceTimeMs, fps)}→{timecode(leftCurrentSourceTimeMs, fps)} · {timecode(rightCurrentSourceTimeMs, fps)}→{timecode(rightNextSourceTimeMs, fps)}</code></header>
+    {analysis ? <div>
+      <span><b>前镜末段</b><code>{analysis.left_change_percent}%</code></span>
+      <span><b>后镜开端</b><code>{analysis.right_change_percent}%</code></span>
+      <span><b>后镜 − 前镜</b><code>{signedPercentagePoint(analysis.right_minus_left_percentage_points)}</code></span>
+    </div> : unavailableMessage
+      ? <small>动作幅度证据暂不可用：{unavailableMessage}</small>
+      : analysisError
+      ? <small>动作幅度证据暂不可用：{analysisError}</small>
+      : <small>正在读取切点两侧各两个连续帧的本地像素变化…</small>}
+    <small>{note}</small>
+  </article>
+}
+
 function BoundaryPhaseCandidate({
   projectId,
   left,
@@ -886,6 +1017,18 @@ function BoundaryActionComparison({
     leftBaseSourceOutMs + leftPhaseDeltaMs + rollTrialDeltaMs - frameStepMs,
   )
   const tunedPixelRightMs = rightBaseSourceInMs + rightPhaseDeltaMs + rollTrialDeltaMs
+  const baselineMotionLeftPreviousMs = Math.max(leftBaseSourceInMs, baselinePixelLeftMs - frameStepMs)
+  const baselineMotionRightNextMs = Math.min(
+    Math.max(rightBaseSourceInMs, rightBaseSourceOutMs - frameStepMs),
+    baselinePixelRightMs + frameStepMs,
+  )
+  const tunedMotionLeftMinimumMs = leftBaseSourceInMs + leftPhaseDeltaMs
+  const tunedMotionLeftPreviousMs = Math.max(tunedMotionLeftMinimumMs, tunedPixelLeftMs - frameStepMs)
+  const tunedMotionRightMaximumMs = Math.max(
+    rightBaseSourceInMs + rightPhaseDeltaMs + rollTrialDeltaMs,
+    rightBaseSourceOutMs + rightPhaseDeltaMs - frameStepMs,
+  )
+  const tunedMotionRightNextMs = Math.min(tunedMotionRightMaximumMs, tunedPixelRightMs + frameStepMs)
   const tunedPixelSourceKey = `${tunedPixelLeftMs}:${tunedPixelRightMs}`
   const tunedPixelAnalysis = tunedPixelEvidence?.sourceKey === tunedPixelSourceKey ? tunedPixelEvidence.analysis : null
   const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
@@ -1455,6 +1598,40 @@ function BoundaryActionComparison({
         </div> : <small>正在等待 A、B 两套帧证据完成后计算差值…</small>}
         <small>正值只表示 B 的该项变化幅度高于 A，负值表示低于 A；方向不代表衔接更好或更差。</small>
       </div>}
+    </section>
+    <section className={styles.boundaryMotionEvidence} aria-label="A/B 切点动作幅度证据">
+      <header>
+        <span><strong>切点动作幅度</strong><small>分别比较前镜最后两个可用帧、后镜最初两个可用帧的逐像素变化。</small></span>
+        {!hasComparisonTrial && <em>当前只显示 A</em>}
+      </header>
+      <div data-single={!hasComparisonTrial}>
+        <BoundaryMotionProbe
+          projectId={projectId}
+          left={left}
+          right={right}
+          leftPreviousSourceTimeMs={baselineMotionLeftPreviousMs}
+          leftCurrentSourceTimeMs={baselinePixelLeftMs}
+          rightCurrentSourceTimeMs={baselinePixelRightMs}
+          rightNextSourceTimeMs={baselineMotionRightNextMs}
+          fps={fps}
+          label="A 原方案"
+          note="后镜减前镜只表示切点后局部画面变化幅度的增减，不推断运动方向、主体或衔接优劣。"
+        />
+        {hasComparisonTrial && <BoundaryMotionProbe
+          projectId={projectId}
+          left={left}
+          right={right}
+          leftPreviousSourceTimeMs={tunedMotionLeftPreviousMs}
+          leftCurrentSourceTimeMs={tunedPixelLeftMs}
+          rightCurrentSourceTimeMs={tunedPixelRightMs}
+          rightNextSourceTimeMs={tunedMotionRightNextMs}
+          fps={fps}
+          label="B 当前试调"
+          note={transitionTrial && !hasMotionTrial
+            ? '本次只改变转场时间呈现，连续帧源时点与 A 相同。'
+            : '继续调整相位或滚动切位后，会按新的连续帧重新计算。'}
+        />}
+      </div>
     </section>
     <section className={styles.boundaryPhaseScan} aria-label="单侧邻帧候选扫描">
       <header>

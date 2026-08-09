@@ -401,6 +401,10 @@ A/B 像素证据现补齐精确差值与变化来源。`BoundaryPixelProbe` 新�
 
 提交 `d425c4fe` 推送到 `main` 后使用标准脚本重启 8766：API PID `39432`、Worker PID `42468`，进程创建时间分别为 2026-08-09 10:57:42.058 / 10:57:42.070。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动信息，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
 
+同步动作 A/B 主证据区新增确定性的切点动作幅度。`BoundaryMotionProbe` 为每套可见方案读取前镜末帧及其前一帧、后镜首帧及其后一帧，四路媒体都按目标时点重置 readiness 并核对 `seeked` 时钟；复用现有 48×48 逐像素变化算法得到前镜末段和后镜开端幅度，再显示 `后镜−前镜` 的有符号百分点。连续帧按有效源把手钳制，不足两个可用帧明确不可用；B 消费相位或滚动 delta，仅转场 B 与 A 同帧。动作幅度只挂在 A/B 主卡，不增加邻帧候选的媒体数量，不推断方向、主体、速度语义或优劣，也不进入草稿、history、Timeline、QC、API、迁移或 FFmpeg。
+
+真实咖啡 SH-002 → SH-001 的 A 读取 `4.625→4.667s / 0→0.042s`，前镜末段为 `0.6%`、后镜开端为 `1.5%`、`后镜−前镜=+0.9` 个百分点；后镜本地 `+1帧` 后，B 精确更新为 `4.625→4.667s / 0.042→0.084s` 与 `0.6% / 4.4% / +3.8`。清除后回到只显示 A。服务端全程保持 `row_version=223 / updated_at=2026-08-09T02:44:16.953049 / playhead_ms=0`，片段为 SH-002 `0..4709ms`、SH-001 `source=0..409ms / timeline=4709..5118ms`、缺口 `5118..15000ms`、双方 `cut:0`，API 日志零 editor-draft PUT。1280×720 下 html/body 宽高均等于视口，浏览器警告与错误为空。
+
 提交 `0d9bcdb3` 推送到 `main` 后使用标准脚本重启 8766：API PID `22816`、Worker PID `36356`，进程创建时间分别为 2026-08-09 11:16:46.664 / 11:16:46.679。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动信息，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
 
 ## 8. 事件

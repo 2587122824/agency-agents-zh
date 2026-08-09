@@ -1130,6 +1130,64 @@
 }
 .boundaryABPixelDelta b { color: #87978f; font-weight: 500; }
 .boundaryABPixelDelta code { color: #d1ddd7; white-space: nowrap; }
+.boundaryActionComparison > .boundaryMotionEvidence {
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  gap: 6px;
+  border: 1px solid #4b4639;
+  border-radius: 5px;
+  background: #191711;
+}
+.boundaryMotionEvidence > header {
+  min-width: 0;
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 7px;
+}
+.boundaryMotionEvidence > header span { min-width: 0; display: grid; gap: 2px; }
+.boundaryMotionEvidence > header strong { color: #ddd5bd; }
+.boundaryMotionEvidence > header small { color: #948d79; line-height: 1.35; }
+.boundaryMotionEvidence > header em { color: #a39a7f; font-style: normal; white-space: nowrap; }
+.boundaryMotionEvidence > div {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 5px;
+}
+.boundaryMotionEvidence > div[data-single="true"] { grid-template-columns: minmax(0, 1fr); }
+.boundaryMotionCard {
+  position: relative;
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  gap: 5px;
+  overflow: hidden;
+  border: 1px solid #454034;
+  border-radius: 4px;
+  background: #11100c;
+}
+.boundaryMotionCard > header { min-width: 0; display: grid; gap: 2px; }
+.boundaryMotionCard > header strong { color: #d4cdb8; }
+.boundaryMotionCard > header code { overflow: hidden; color: #9f9577; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryMotionCard > div:not(.boundaryPixelProbeMedia) {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+}
+.boundaryMotionCard > div:not(.boundaryPixelProbeMedia) span {
+  min-width: 0;
+  padding: 4px;
+  display: grid;
+  gap: 2px;
+  border-radius: 3px;
+  background: #211e16;
+}
+.boundaryMotionCard b { overflow: hidden; color: #99917d; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryMotionCard code { color: #ded6c0; white-space: nowrap; }
+.boundaryMotionCard > small { color: #8b8370; line-height: 1.35; }
 .boundaryActionComparison > .boundaryPhaseScan {
   min-width: 0;
   padding: 6px;
