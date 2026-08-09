@@ -1161,6 +1161,7 @@ function BoundaryPhaseCandidate({
   fps,
   label,
   baselineAnalysis,
+  baselineMotionAnalysis,
   measuredMotionAnalysis,
   selected,
   comparePending,
@@ -1175,6 +1176,7 @@ function BoundaryPhaseCandidate({
   fps: number
   label: string
   baselineAnalysis: BoundaryPixelAnalysis | null
+  baselineMotionAnalysis: BoundaryMotionAnalysis | null
   measuredMotionAnalysis: BoundaryMotionAnalysis | null
   selected: boolean
   comparePending: boolean
@@ -1183,6 +1185,9 @@ function BoundaryPhaseCandidate({
 }) {
   const [analysis, setAnalysis] = useState<BoundaryPixelAnalysis | null>(null)
   const deltas = baselineAnalysis && analysis ? boundaryPixelDeltas(baselineAnalysis, analysis) : null
+  const motionDeltas = baselineMotionAnalysis && measuredMotionAnalysis
+    ? boundaryMotionDeltas(baselineMotionAnalysis, measuredMotionAnalysis)
+    : null
   return <div className={styles.boundaryPhaseCandidate} data-selected={selected}>
     <BoundaryPixelProbe
       projectId={projectId}
@@ -1216,6 +1221,22 @@ function BoundaryPhaseCandidate({
             <code>角 {measuredMotionAnalysis.centroid_path_continuity.angle_degrees == null ? '不可用' : `${measuredMotionAnalysis.centroid_path_continuity.angle_degrees.toFixed(1)}°`}</code>
           </span>
           : <small>已实测；前镜或后镜轨迹不可用。</small>}
+        {motionDeltas ? <>
+          <strong>相对 A</strong>
+          <span aria-label={`${label} 动作幅度相对 A 的精确影响`}>
+            <code>前 {signedPercentagePoint(motionDeltas.left_change).replace(' 个百分点', '点')}</code>
+            <code>后 {signedPercentagePoint(motionDeltas.right_change).replace(' 个百分点', '点')}</code>
+            <code>差 {signedPercentagePoint(motionDeltas.balance).replace(' 个百分点', '点')}</code>
+          </span>
+          {motionDeltas.centroid_path_continuity
+            ? <span aria-label={`${label} 接续几何相对 A 的精确影响`}>
+              <code>X {signedPercentagePoint(motionDeltas.centroid_path_continuity.x).replace(' 个百分点', '')}</code>
+              <code>Y {signedPercentagePoint(motionDeltas.centroid_path_continuity.y).replace(' 个百分点', '')}</code>
+              <code>距 {signedPercentagePoint(motionDeltas.centroid_path_continuity.distance).replace(' 个百分点', '')}</code>
+              <code>角 {motionDeltas.centroid_path_continuity.angle == null ? '不可比' : `${motionDeltas.centroid_path_continuity.angle > 0 ? '+' : motionDeltas.centroid_path_continuity.angle < 0 ? '−' : ''}${Math.abs(motionDeltas.centroid_path_continuity.angle).toFixed(1)}°`}</code>
+            </span>
+            : <small>接续几何与 A 不可比。</small>}
+        </> : <small>等待 A 动作证据后显示精确影响。</small>}
       </section> : <small>设为 B 并等待读取后，会在此保留本次页面会话的动作证据。</small>}
       <div className={styles.boundaryPhaseCandidateActions}>
         <button aria-pressed={selected} onClick={onSelect}>{selected ? '当前 B' : '设为单侧 B'}</button>
@@ -2230,6 +2251,7 @@ function BoundaryActionComparison({
             fps={fps}
             label={`${sideLabel}${directionLabel} ${Math.abs(candidate.frameOffset)} 帧`}
             baselineAnalysis={baselinePixelAnalysis}
+            baselineMotionAnalysis={baselineMotionAnalysis}
             measuredMotionAnalysis={measuredCandidateMotionEvidence[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] ?? null}
             selected={selected}
             comparePending={pendingPhaseCandidateCompare?.side === phaseCandidateScanSide
