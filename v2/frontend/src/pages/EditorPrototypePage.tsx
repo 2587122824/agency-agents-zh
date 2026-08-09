@@ -3094,6 +3094,27 @@ export function EditorPrototypePage() {
     () => mainBoundaries.flatMap((boundary, index) => boundary.left.asset_id && boundary.right.asset_id ? [index] : []),
     [mainBoundaries],
   )
+  const candidateReviewFollowUpBoundaries = useMemo(
+    () => mainBoundaries.flatMap((boundary, index) => {
+      if (!boundary.left.asset_id || !boundary.right.asset_id) return []
+      const sessionKey = boundaryCandidateReviewSessionKey(projectId, boundary.left, boundary.right, frameStepMs, outputFps)
+      const session = boundaryCandidateReviewSessions[sessionKey]
+      if (!session) return []
+      const followUpCount = Object.values(session.comparisonOutcomes)
+        .filter(outcome => outcome === 'completed' || outcome === 'shortlisted').length
+        + Object.keys(session.measuredMotionEvidence)
+          .filter(sourceKey => !session.comparisonOutcomes[sourceKey]).length
+      return followUpCount > 0 ? [{ ...boundary, index, followUpCount }] : []
+    }),
+    [boundaryCandidateReviewSessions, frameStepMs, mainBoundaries, outputFps, projectId],
+  )
+  const nextCandidateReviewFollowUpBoundary = candidateReviewFollowUpBoundaries.find(
+    boundary => boundary.index > activeBoundaryIndex,
+  ) ?? candidateReviewFollowUpBoundaries[0] ?? null
+  const candidateReviewFollowUpCount = candidateReviewFollowUpBoundaries.reduce(
+    (total, boundary) => total + boundary.followUpCount,
+    0,
+  )
   const nextMainAsset = workspace.data?.available_assets.find(asset => asset.id === nextMainItem?.asset_id) ?? null
   const usedMainVideoAssetIds = useMemo(
     () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
@@ -3611,6 +3632,17 @@ export function EditorPrototypePage() {
     setPlayheadMs(target.left.timeline_out_ms)
     setBoundaryFocusKey(target.key)
     setNotice(`已定位第 ${targetIndex + 1}/${mainBoundaries.length} 个切点：${target.left.label} → ${target.right.label}。`)
+  }
+
+  const focusCandidateReviewFollowUpAt = (targetIndex: number) => {
+    const target = mainBoundaries[targetIndex]
+    if (!target) return
+    focusBoundaryAt(targetIndex)
+    setBoundaryFrameComparisonKey(target.key)
+    setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameStripKey(null)
+    setBoundaryActionComparisonKey(target.key)
+    setNotice(`已定位候选审核待办：${target.left.label} → ${target.right.label}；请继续同步动作审核。`)
   }
 
   const beginScrub = (
@@ -5930,6 +5962,20 @@ export function EditorPrototypePage() {
                 ><ChevronRight /></button>
               </div>
             </div>
+            {candidateReviewFollowUpBoundaries.length > 0 && nextCandidateReviewFollowUpBoundary && <div
+              className={styles.boundaryCandidateReviewQueue}
+              aria-label="全时间线候选审核待办"
+            >
+              <span>
+                <strong>{candidateReviewFollowUpCount} 项候选审核待办 · {candidateReviewFollowUpBoundaries.length} 个切点</strong>
+                <small>按时间线顺序循环，不包含已失效边界</small>
+              </span>
+              <button
+                type="button"
+                title="定位后只展开同步动作；不会恢复扫描侧、设置 B 或启动播放。"
+                onClick={() => focusCandidateReviewFollowUpAt(nextCandidateReviewFollowUpBoundary.index)}
+              >下一个待办</button>
+            </div>}
             <button
               className={styles.boundaryReviewRun}
               aria-pressed={Boolean(boundaryReviewSession)}
