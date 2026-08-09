@@ -1153,7 +1153,7 @@
 .boundaryMotionEvidence > div {
   min-width: 0;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 5px;
 }
 .boundaryMotionEvidence > div[data-single="true"] { grid-template-columns: minmax(0, 1fr); }
@@ -1200,6 +1200,7 @@
 .boundaryMotionGrids > section > header strong { color: #bdb49c; font-size: 10px; }
 .boundaryMotionGrids > section > header small { overflow: hidden; color: #7f7867; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryMotionGrids > section > div {
+  position: relative;
   min-width: 0;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1219,6 +1220,42 @@
 .boundaryMotionGrids > section > div b { color: #aaa18c; font-size: 9px; }
 .boundaryMotionGrids > section > div code { color: #e0d9c7; font-size: 10px; }
 .boundaryMotionGrids > section > div small { color: #9ca89f; font-size: 8px; line-height: 1; white-space: nowrap; }
+.boundaryMotionCentroidPoint {
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  z-index: 1;
+  border: 1px solid #fff4d4;
+  border-radius: 50%;
+  background: #d96843;
+  box-shadow: 0 0 0 2px rgb(17 16 12 / 70%);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+.boundaryMotionGrids > section > p {
+  min-width: 0;
+  margin: 0;
+  padding: 3px;
+  display: grid;
+  gap: 1px;
+  border-radius: 2px;
+  background: #191712;
+}
+.boundaryMotionGrids > section > p b { color: #99917d; font-size: 9px; }
+.boundaryMotionGrids > section > p code { overflow: hidden; color: #d5cdb8; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryMotionGrids > section > p small { color: #827b69; font-size: 8px; }
+.boundaryMotionCentroidDelta {
+  min-width: 0;
+  padding: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  gap: 2px 5px;
+  border-radius: 3px;
+  background: #1a1d18;
+}
+.boundaryMotionCentroidDelta b { color: #9f9b82; font-size: 9px; }
+.boundaryMotionCentroidDelta code { overflow: hidden; color: #d0d7c9; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.boundaryMotionCentroidDelta small { grid-column: 1 / -1; color: #81877b; font-size: 8px; }
 .boundaryMotionCard b { overflow: hidden; color: #99917d; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryMotionCard code { color: #ded6c0; white-space: nowrap; }
 .boundaryMotionCard > small { color: #8b8370; line-height: 1.35; }

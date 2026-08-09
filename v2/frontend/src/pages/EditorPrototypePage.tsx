@@ -51,6 +51,14 @@ interface BoundaryMotionAnalysis {
   left_grid_change_percent: number[]
   right_grid_change_percent: number[]
   right_minus_left_grid_percentage_points: number[]
+  left_centroid: MotionChangeCentroid | null
+  right_centroid: MotionChangeCentroid | null
+}
+
+interface MotionChangeCentroid {
+  x_percent: number
+  y_percent: number
+  dispersion_percent: number
 }
 
 const MOTION_GRID_REGIONS = ['左上', '上中', '右上', '左中', '中心', '右中', '左下', '下中', '右下']
@@ -183,7 +191,10 @@ function analyzeFrameMotion(firstVideo: HTMLVideoElement, secondVideo: HTMLVideo
   const gridSize = 3
   const cellSize = size / gridSize
   const cellDifference = Array.from({ length: gridSize * gridSize }, () => 0)
+  const pixelDifference = new Float32Array(size * size)
   let totalDifference = 0
+  let weightedX = 0
+  let weightedY = 0
   for (let y = 0; y < size; y += 1) {
     for (let x = 0; x < size; x += 1) {
       const index = (y * size + x) * 4
@@ -193,14 +204,35 @@ function analyzeFrameMotion(firstVideo: HTMLVideoElement, secondVideo: HTMLVideo
         + Math.abs(firstPixels[index + 2] - secondPixels[index + 2])
       ) / 3
       totalDifference += difference
+      pixelDifference[y * size + x] = difference
+      weightedX += difference * (x + .5)
+      weightedY += difference * (y + .5)
       const gridIndex = Math.floor(y / cellSize) * gridSize + Math.floor(x / cellSize)
       cellDifference[gridIndex] += difference
     }
   }
   const percent = (difference: number, pixelCount: number) => Math.round(difference / pixelCount / 255 * 1000) / 10
+  let centroid: MotionChangeCentroid | null = null
+  if (totalDifference > 0) {
+    const centerX = weightedX / totalDifference
+    const centerY = weightedY / totalDifference
+    let weightedDistance = 0
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const difference = pixelDifference[y * size + x]
+        weightedDistance += difference * Math.hypot(x + .5 - centerX, y + .5 - centerY)
+      }
+    }
+    centroid = {
+      x_percent: Math.round(centerX / size * 1000) / 10,
+      y_percent: Math.round(centerY / size * 1000) / 10,
+      dispersion_percent: Math.round(weightedDistance / totalDifference / (Math.sqrt(2) * size) * 1000) / 10,
+    }
+  }
   return {
     change_percent: percent(totalDifference, size * size),
     grid_change_percent: cellDifference.map(difference => percent(difference, cellSize * cellSize)),
+    centroid,
   }
 }
 
@@ -790,6 +822,8 @@ function BoundaryMotionProbe({
             right_minus_left_grid_percentage_points: rightMotion.grid_change_percent.map((value, index) => (
               Math.round((value - leftMotion.grid_change_percent[index]) * 10) / 10
             )),
+            left_centroid: leftMotion.centroid,
+            right_centroid: rightMotion.centroid,
           })
         }
       } catch (reason) {
@@ -834,24 +868,45 @@ function BoundaryMotionProbe({
       </div>
       <div className={styles.boundaryMotionGrids}>
         <section aria-label="前镜末段局部动作分区">
-          <header><strong>前镜末段分区</strong><small>连续帧变化</small></header>
+          <header><strong>前镜末段分区</strong><small>X/Y 从画面左上起算</small></header>
           <div>
             {analysis.left_grid_change_percent.map((value, index) => <span
               key={MOTION_GRID_REGIONS[index]}
               style={{ backgroundColor: `rgba(178, 145, 75, ${Math.min(.62, .08 + value / 100)})` }}
             ><b>{MOTION_GRID_REGIONS[index]}</b><code>{value.toFixed(1)}%</code></span>)}
+            {analysis.left_centroid && <i
+              className={styles.boundaryMotionCentroidPoint}
+              style={{ left: `${analysis.left_centroid.x_percent}%`, top: `${analysis.left_centroid.y_percent}%` }}
+              aria-hidden="true"
+            />}
           </div>
+          {analysis.left_centroid
+            ? <p><b>变化重心</b><code>X {analysis.left_centroid.x_percent.toFixed(1)}% · Y {analysis.left_centroid.y_percent.toFixed(1)}%</code><small>分散 {analysis.left_centroid.dispersion_percent.toFixed(1)}%</small></p>
+            : <p><small>连续帧无可定位的像素变化。</small></p>}
         </section>
         <section aria-label="后镜开端局部动作分区">
-          <header><strong>后镜开端分区</strong><small>括号内为后镜 − 前镜</small></header>
+          <header><strong>后镜开端分区</strong><small>括号为同格后镜 − 前镜</small></header>
           <div>
             {analysis.right_grid_change_percent.map((value, index) => <span
               key={MOTION_GRID_REGIONS[index]}
               style={{ backgroundColor: `rgba(104, 151, 139, ${Math.min(.62, .08 + value / 100)})` }}
             ><b>{MOTION_GRID_REGIONS[index]}</b><code>{value.toFixed(1)}%</code><small>{signedPercentagePoint(analysis.right_minus_left_grid_percentage_points[index]).replace(' 个百分点', '')}</small></span>)}
+            {analysis.right_centroid && <i
+              className={styles.boundaryMotionCentroidPoint}
+              style={{ left: `${analysis.right_centroid.x_percent}%`, top: `${analysis.right_centroid.y_percent}%` }}
+              aria-hidden="true"
+            />}
           </div>
+          {analysis.right_centroid
+            ? <p><b>变化重心</b><code>X {analysis.right_centroid.x_percent.toFixed(1)}% · Y {analysis.right_centroid.y_percent.toFixed(1)}%</code><small>分散 {analysis.right_centroid.dispersion_percent.toFixed(1)}%</small></p>
+            : <p><small>连续帧无可定位的像素变化。</small></p>}
         </section>
       </div>
+      {analysis.left_centroid && analysis.right_centroid && <div className={styles.boundaryMotionCentroidDelta}>
+        <b>重心坐标差（后镜 − 前镜）</b>
+        <code>X {signedPercentagePoint(Math.round((analysis.right_centroid.x_percent - analysis.left_centroid.x_percent) * 10) / 10).replace(' 个百分点', '')} · Y {signedPercentagePoint(Math.round((analysis.right_centroid.y_percent - analysis.left_centroid.y_percent) * 10) / 10).replace(' 个百分点', '')}</code>
+        <small>分散 {signedPercentagePoint(Math.round((analysis.right_centroid.dispersion_percent - analysis.left_centroid.dispersion_percent) * 10) / 10)}</small>
+      </div>}
     </> : unavailableMessage
       ? <small>动作幅度证据暂不可用：{unavailableMessage}</small>
       : analysisError
