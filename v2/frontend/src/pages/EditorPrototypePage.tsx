@@ -1580,16 +1580,22 @@ function BoundaryActionComparison({
   const keptBaselinePhaseCandidateCount = phaseCandidateScanSide
     ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'kept_baseline').length
     : 0
+  const undecidedPhaseCandidateCount = phaseCandidateScanSide
+    ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'completed').length
+    : 0
   const shortlistedPhaseCandidateCount = phaseCandidateScanSide
     ? nearbyPhaseCandidates.filter(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'shortlisted').length
     : 0
   const nextUnreviewedPhaseCandidate = phaseCandidateScanSide
     ? nearbyPhaseCandidates.find(candidate => !candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)]) ?? null
     : null
+  const nextUndecidedPhaseCandidate = phaseCandidateScanSide
+    ? nearbyPhaseCandidates.find(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'completed') ?? null
+    : null
   const nextShortlistedPhaseCandidate = phaseCandidateScanSide
     ? nearbyPhaseCandidates.find(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'shortlisted') ?? null
     : null
-  const nextReviewPhaseCandidate = nextUnreviewedPhaseCandidate ?? nextShortlistedPhaseCandidate
+  const nextReviewPhaseCandidate = nextUnreviewedPhaseCandidate ?? nextUndecidedPhaseCandidate ?? nextShortlistedPhaseCandidate
   const phaseCandidateElementId = (side: 'left' | 'right', frameOffset: number) => `phase-candidate-${left.id}-${right.id}-${side}-${frameOffset}`
   const isPhaseCandidateSelected = (side: 'left' | 'right', deltaMs: number) => side === 'left'
     ? leftPhaseDeltaMs === deltaMs && rightPhaseDeltaMs === 0
@@ -2357,7 +2363,7 @@ function BoundaryActionComparison({
       {phaseCandidateScanSide && <>
         <div className={styles.boundaryPhaseReviewProgress} aria-label={`${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}邻帧候选对照进度`}>
           <span>
-            <strong>{reviewedPhaseCandidateCount}/{nearbyPhaseCandidates.length} 已对照</strong>
+            <strong>{reviewedPhaseCandidateCount}/{nearbyPhaseCandidates.length} 已对照{undecidedPhaseCandidateCount > 0 ? ` · 待决定 ${undecidedPhaseCandidateCount}` : ''}</strong>
             <small>保留 A {keptBaselinePhaseCandidateCount} · 待复看 {shortlistedPhaseCandidateCount}</small>
           </span>
           <button
@@ -2368,9 +2374,11 @@ function BoundaryActionComparison({
             ? '没有合法候选'
             : nextUnreviewedPhaseCandidate
               ? '对照下一个未看候选'
-              : nextShortlistedPhaseCandidate
-                ? '复看下一个待复看'
-                : '本侧候选已看完'}</button>
+              : nextUndecidedPhaseCandidate
+                ? '复看下一个待决定'
+                : nextShortlistedPhaseCandidate
+                  ? '复看下一个待复看'
+                  : '本侧候选已处理完'}</button>
         </div>
         {!phaseCandidateScanExpanded && expandablePhaseCandidateCount > 0 && <div className={styles.boundaryPhaseScanExpansion}>
           <span><strong>近邻仍不顺？</strong><small>可再挂载 {expandablePhaseCandidateCount} 个 ±3/±4 帧合法候选。</small></span>
