@@ -302,4 +302,4 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 
 候选卡的相对 A 影响不保存第二份派生状态：渲染时仅当 `baselineMotionAnalysis` 与 exact-key 命中的 `measuredMotionAnalysis` 同时存在，才复用 `boundaryMotionDeltas` 计算一位小数的幅度和接续几何差。夹角只在 A/B 两个原始夹角均可用时相减；轨迹缺失则整组接续影响不可比。该投影不增加 effect、媒体、Canvas 遍历、缓存 key、持久化或决策逻辑。
 
-候选完整观看记忆使用同组件内的 `Record<exactCandidateSourceKey, true>`。A→B 状态机只有在 tuned 阶段播放到右侧冻结终点、当前四套 source-key 证据仍有效时，才把当前合法单侧 `±1/±2` 帧候选的 exact key 登记为已完整对照；停止、异常、只播放 A、证据失效、滚动或转场试调没有写入路径。基础边界依赖变化时与实测动作缓存同步清空。该记录不复用 `phaseDecisionSourceKey` 充当持久事实，也不进入 Timeline、EditorDraftSession、history、API、localStorage、排序或采用逻辑。
+候选人工结果记忆使用同组件内的 `Record<exactCandidateSourceKey, 'completed' | 'kept_baseline'>`。A→B 状态机只有在 tuned 阶段播放到右侧冻结终点、当前四套 source-key 证据仍有效时，才把当前合法单侧 `±1/±2` 帧候选登记为 `completed`；当前 exact trial 的结论门禁仍有效且用户点击“保留 A”时，才更新为 `kept_baseline`。再次完整播放同一候选会用 `completed` 覆盖旧保留结果，停止、异常、只播放 A、证据失效、滚动或转场试调没有写入路径。基础边界依赖变化时与实测动作缓存同步清空。该记录不复用 `phaseDecisionSourceKey` 充当持久事实，也不进入 Timeline、EditorDraftSession、history、API、localStorage、排序或采用逻辑。

@@ -1163,7 +1163,7 @@ function BoundaryPhaseCandidate({
   baselineAnalysis,
   baselineMotionAnalysis,
   measuredMotionAnalysis,
-  comparisonCompleted,
+  comparisonOutcome,
   selected,
   comparePending,
   onSelect,
@@ -1179,7 +1179,7 @@ function BoundaryPhaseCandidate({
   baselineAnalysis: BoundaryPixelAnalysis | null
   baselineMotionAnalysis: BoundaryMotionAnalysis | null
   measuredMotionAnalysis: BoundaryMotionAnalysis | null
-  comparisonCompleted: boolean
+  comparisonOutcome: 'completed' | 'kept_baseline' | null
   selected: boolean
   comparePending: boolean
   onSelect: () => void
@@ -1208,9 +1208,15 @@ function BoundaryPhaseCandidate({
         <code>色彩 {signedPercentagePoint(deltas.color)}</code>
         <code>像素 {signedPercentagePoint(deltas.pixel)}</code>
       </span> : <small>等待 A 与候选帧证据…</small>}
-      {comparisonCompleted && <span className={styles.boundaryPhaseCandidateCompared} aria-label={`${label} 已完整对照 A 到 B`}>
-        <strong>已完整对照 A→B</strong>
-        <small>仅记录本页观看进度，不代表优劣或已采用。</small>
+      {comparisonOutcome && <span
+        className={styles.boundaryPhaseCandidateCompared}
+        data-outcome={comparisonOutcome}
+        aria-label={comparisonOutcome === 'kept_baseline' ? `${label} 本次对照选择保留 A` : `${label} 已完整对照 A 到 B`}
+      >
+        <strong>{comparisonOutcome === 'kept_baseline' ? '本次已选择保留 A' : '已完整对照 A→B'}</strong>
+        <small>{comparisonOutcome === 'kept_baseline'
+          ? '人工结果仅保留在本页；可再次对照。'
+          : '已看完，尚未选择保留或采用。'}</small>
       </span>}
       {measuredMotionAnalysis ? <section className={styles.boundaryPhaseCandidateMeasured} aria-label={`${label} 已实测动作证据`}>
         <strong>已实测动作</strong>
@@ -1393,7 +1399,7 @@ function BoundaryActionComparison({
   const [baselineMotionEvidence, setBaselineMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [tunedMotionEvidence, setTunedMotionEvidence] = useState<{ sourceKey: string; analysis: BoundaryMotionAnalysis } | null>(null)
   const [measuredCandidateMotionEvidence, setMeasuredCandidateMotionEvidence] = useState<Record<string, BoundaryMotionAnalysis>>({})
-  const [comparedCandidateSourceKeys, setComparedCandidateSourceKeys] = useState<Record<string, true>>({})
+  const [candidateComparisonOutcomes, setCandidateComparisonOutcomes] = useState<Record<string, 'completed' | 'kept_baseline'>>({})
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const leftBaseSourceInMs = left.source_in_ms ?? 0
@@ -1514,7 +1520,7 @@ function BoundaryActionComparison({
       : candidate.deltaMs >= rightMinimumPhaseMs && candidate.deltaMs <= rightMaximumPhaseMs)
   useEffect(() => {
     setMeasuredCandidateMotionEvidence({})
-    setComparedCandidateSourceKeys({})
+    setCandidateComparisonOutcomes({})
   }, [frameStepMs, left.asset_id, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.asset_id, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
   const comparisonDurationMs = Math.max(0, Math.min(
     beforeMs,
@@ -1794,7 +1800,7 @@ function BoundaryActionComparison({
             }
             setPhaseDecisionSourceKey(phaseTrialSourceKey)
             if (activePhaseCandidateSourceKey) {
-              setComparedCandidateSourceKeys(current => ({ ...current, [activePhaseCandidateSourceKey]: true }))
+              setCandidateComparisonOutcomes(current => ({ ...current, [activePhaseCandidateSourceKey]: 'completed' }))
             }
             onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；请选择保留 A 或采用 B。`)
             return
@@ -2030,6 +2036,9 @@ function BoundaryActionComparison({
   }
 
   const keepBaselinePhase = () => {
+    if (phaseDecisionReady && activePhaseCandidateSourceKey) {
+      setCandidateComparisonOutcomes(current => ({ ...current, [activePhaseCandidateSourceKey]: 'kept_baseline' }))
+    }
     resetPhase()
     onNotice(`已保留 ${left.label} → ${right.label} 的 A 原切点；本次试调未写入草稿。`)
   }
@@ -2268,7 +2277,7 @@ function BoundaryActionComparison({
             baselineAnalysis={baselinePixelAnalysis}
             baselineMotionAnalysis={baselineMotionAnalysis}
             measuredMotionAnalysis={measuredCandidateMotionEvidence[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] ?? null}
-            comparisonCompleted={Boolean(comparedCandidateSourceKeys[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)])}
+            comparisonOutcome={candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] ?? null}
             selected={selected}
             comparePending={pendingPhaseCandidateCompare?.side === phaseCandidateScanSide
               && pendingPhaseCandidateCompare.deltaMs === candidate.deltaMs}
