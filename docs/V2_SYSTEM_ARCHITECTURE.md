@@ -301,3 +301,5 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 邻帧候选的已实测动作记忆使用 `BoundaryActionComparison` 内部的 `Record<exactCandidateSourceKey, BoundaryMotionAnalysis>`，只在当前试调为合法的单侧 `±1/±2` 帧、没有滚动或转场试调，且当前 B 动作探针返回有效分析时登记。exact key 包含双方 item/Asset、双方基础源入出点、侧别、delta 与派生的六个动作源时点；渲染候选卡时重新计算同一 key 后精确取值。双方条目、Asset、基础源窗或 frame step 变化会清空整个会话缓存，源 key 不匹配的结果没有读取路径。该缓存不触发候选批量解码、不进入 query cache、localStorage、草稿指纹、后端合同或迁移，也不参与排序和决策。
 
 候选卡的相对 A 影响不保存第二份派生状态：渲染时仅当 `baselineMotionAnalysis` 与 exact-key 命中的 `measuredMotionAnalysis` 同时存在，才复用 `boundaryMotionDeltas` 计算一位小数的幅度和接续几何差。夹角只在 A/B 两个原始夹角均可用时相减；轨迹缺失则整组接续影响不可比。该投影不增加 effect、媒体、Canvas 遍历、缓存 key、持久化或决策逻辑。
+
+候选完整观看记忆使用同组件内的 `Record<exactCandidateSourceKey, true>`。A→B 状态机只有在 tuned 阶段播放到右侧冻结终点、当前四套 source-key 证据仍有效时，才把当前合法单侧 `±1/±2` 帧候选的 exact key 登记为已完整对照；停止、异常、只播放 A、证据失效、滚动或转场试调没有写入路径。基础边界依赖变化时与实测动作缓存同步清空。该记录不复用 `phaseDecisionSourceKey` 充当持久事实，也不进入 Timeline、EditorDraftSession、history、API、localStorage、排序或采用逻辑。

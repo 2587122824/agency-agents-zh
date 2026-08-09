@@ -1505,6 +1505,9 @@
 .boundaryPhaseCandidate > div span { min-width: 0; display: grid; gap: 2px; }
 .boundaryPhaseCandidate > div code { overflow: hidden; color: #8fa8b2; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .boundaryPhaseCandidate > div small { color: #78878d; }
+.boundaryPhaseCandidate > div .boundaryPhaseCandidateCompared { min-width: 0; padding: 4px 5px; display: grid; gap: 1px; border: 1px solid #536345; border-radius: 4px; background: #1d281b; }
+.boundaryPhaseCandidateCompared strong { color: #d8e7c7; font-size: 9px; }
+.boundaryPhaseCandidateCompared small { line-height: 1.25; }
 .boundaryPhaseCandidateActions { display: grid; gap: 3px; }
 .boundaryControl .boundaryPhaseCandidateActions button { min-width: 74px; height: 24px; padding: 0 5px; font-size: 9px; }
 .boundaryControl .boundaryPhaseCandidateActions button[aria-pressed="true"] { border-color: #638b9a; background: #2b4954; color: #effbff; }
