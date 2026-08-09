@@ -355,6 +355,8 @@ A→B 连续对照完成后新增明确结论区。结论只在两阶段完整�
 
 提交 `9fa8a111` 推送到 `main` 后使用标准脚本重启 8766：API PID `13848`、Worker PID `26852`，两个进程创建时间均为 2026-08-09 02:28:00。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查 200，Worker 两份日志为空，标准四份日志均无实际错误。
 
+提交 `f8231a75` 推送到 `main` 后使用标准脚本重启 8766：API PID `30444`、Worker PID `35880`，两个进程创建时间均为 2026-08-09 08:12:44。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；API stderr 只有 Uvicorn 正常启动信息，API stdout 只有健康检查 200，Worker 两份日志为空，标准四份日志均无实际错误。
+
 ## 8. 事件
 
 ```text

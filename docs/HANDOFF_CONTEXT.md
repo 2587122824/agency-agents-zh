@@ -59,6 +59,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 
 提交 `9fa8a111` 发布一键 A→B 连续对照试播后，标准脚本重启为 API `13848`、Worker `26852`，两个进程创建时间均为 2026-08-09 02:28:00。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，Worker 两份日志为空，标准四份日志均无实际错误。
 
+提交 `f8231a75` 发布 A/B 对照结论与单侧/双侧确定性采用后，标准脚本重启为 API `30444`、Worker `35880`，两个进程创建时间均为 2026-08-09 08:12:44。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，Worker 两份日志为空，标准四份日志均无实际错误。
+
 启动或重启：
 
 ```powershell
