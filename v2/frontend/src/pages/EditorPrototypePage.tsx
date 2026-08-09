@@ -55,6 +55,9 @@ interface BoundaryMotionAnalysis {
   right_centroid: MotionChangeCentroid | null
   left_rhythm_change_percent: Array<number | null>
   right_rhythm_change_percent: Array<number | null>
+  left_rhythm_slope_percentage_points: number | null
+  right_rhythm_slope_percentage_points: number | null
+  right_minus_left_rhythm_slope_percentage_points: number | null
 }
 
 interface MotionChangeCentroid {
@@ -77,6 +80,9 @@ function boundaryMotionDeltas(baseline: BoundaryMotionAnalysis, candidate: Bound
   const delta = (candidateValue: number, baselineValue: number) => (
     Math.round((candidateValue - baselineValue) * 10) / 10
   )
+  const nullableDelta = (candidateValue: number | null, baselineValue: number | null) => (
+    candidateValue == null || baselineValue == null ? null : delta(candidateValue, baselineValue)
+  )
   return {
     left_change: delta(candidate.left_change_percent, baseline.left_change_percent),
     right_change: delta(candidate.right_change_percent, baseline.right_change_percent),
@@ -93,6 +99,9 @@ function boundaryMotionDeltas(baseline: BoundaryMotionAnalysis, candidate: Bound
         ? null
         : delta(value, baseline.right_rhythm_change_percent[index] as number)
     )),
+    left_rhythm_slope: nullableDelta(candidate.left_rhythm_slope_percentage_points, baseline.left_rhythm_slope_percentage_points),
+    right_rhythm_slope: nullableDelta(candidate.right_rhythm_slope_percentage_points, baseline.right_rhythm_slope_percentage_points),
+    rhythm_slope_gap: nullableDelta(candidate.right_minus_left_rhythm_slope_percentage_points, baseline.right_minus_left_rhythm_slope_percentage_points),
     left_centroid: baseline.left_centroid && candidate.left_centroid ? {
       x: delta(candidate.left_centroid.x_percent, baseline.left_centroid.x_percent),
       y: delta(candidate.left_centroid.y_percent, baseline.left_centroid.y_percent),
@@ -870,6 +879,13 @@ function BoundaryMotionProbe({
           ? analyzeFrameMotion(rightNextVideo, rightLaterVideo)
           : null
         if (!cancelled) {
+          const leftRhythm = [leftEarlierMotion?.change_percent ?? null, leftMotion.change_percent]
+          const rightRhythm = [rightMotion.change_percent, rightLaterMotion?.change_percent ?? null]
+          const rhythmSlope = (values: Array<number | null>) => values[0] == null || values[1] == null
+            ? null
+            : Math.round((values[1] - values[0]) * 10) / 10
+          const leftRhythmSlope = rhythmSlope(leftRhythm)
+          const rightRhythmSlope = rhythmSlope(rightRhythm)
           const nextAnalysis: BoundaryMotionAnalysis = {
             left_change_percent: leftMotion.change_percent,
             right_change_percent: rightMotion.change_percent,
@@ -881,8 +897,13 @@ function BoundaryMotionProbe({
             )),
             left_centroid: leftMotion.centroid,
             right_centroid: rightMotion.centroid,
-            left_rhythm_change_percent: [leftEarlierMotion?.change_percent ?? null, leftMotion.change_percent],
-            right_rhythm_change_percent: [rightMotion.change_percent, rightLaterMotion?.change_percent ?? null],
+            left_rhythm_change_percent: leftRhythm,
+            right_rhythm_change_percent: rightRhythm,
+            left_rhythm_slope_percentage_points: leftRhythmSlope,
+            right_rhythm_slope_percentage_points: rightRhythmSlope,
+            right_minus_left_rhythm_slope_percentage_points: leftRhythmSlope == null || rightRhythmSlope == null
+              ? null
+              : Math.round((rightRhythmSlope - leftRhythmSlope) * 10) / 10,
           }
           setAnalysis(nextAnalysis)
           onAnalysis(nextAnalysis)
@@ -938,6 +959,12 @@ function BoundaryMotionProbe({
           <b>{group.label}</b>
           {group.values.map((value, index) => <span key={group.steps[index]}><small>{group.steps[index]}</small><code>{value == null ? '边缘无帧' : `${value.toFixed(1)}%`}</code></span>)}
         </section>)}
+        <div className={styles.boundaryMotionRhythmSlope}>
+          <span><b>前镜趋向切点</b><code>{analysis.left_rhythm_slope_percentage_points == null ? '不可用' : signedPercentagePoint(analysis.left_rhythm_slope_percentage_points).replace(' 个百分点', ' 点')}</code></span>
+          <span><b>后镜离开切点</b><code>{analysis.right_rhythm_slope_percentage_points == null ? '不可用' : signedPercentagePoint(analysis.right_rhythm_slope_percentage_points).replace(' 个百分点', ' 点')}</code></span>
+          <span><b>后镜 − 前镜斜率</b><code>{analysis.right_minus_left_rhythm_slope_percentage_points == null ? '不可用' : signedPercentagePoint(analysis.right_minus_left_rhythm_slope_percentage_points).replace(' 个百分点', ' 点')}</code></span>
+        </div>
+        <small>正值表示靠后的步长变化幅度更高，负值表示更低；只描述节奏斜率，不代表衔接优劣。</small>
         {(!hasLeftEarlierStep || !hasRightLaterStep) && <small>素材边缘不足三帧的一侧只保留真实可用步长，不用重复帧补零。</small>}
       </div>
       <div className={styles.boundaryMotionGrids}>
@@ -1917,6 +1944,11 @@ function BoundaryActionComparison({
               <b>{group.label}</b>
               {group.values.map((value, index) => <span key={group.steps[index]}><small>{group.steps[index]}</small><code>{value == null ? '不可比' : signedPercentagePoint(value).replace(' 个百分点', ' 点')}</code></span>)}
             </section>)}
+            <div className={styles.boundaryMotionRhythmSlope}>
+              <span><b>前镜斜率</b><code>{motionDeltas.left_rhythm_slope == null ? '不可比' : signedPercentagePoint(motionDeltas.left_rhythm_slope).replace(' 个百分点', ' 点')}</code></span>
+              <span><b>后镜斜率</b><code>{motionDeltas.right_rhythm_slope == null ? '不可比' : signedPercentagePoint(motionDeltas.right_rhythm_slope).replace(' 个百分点', ' 点')}</code></span>
+              <span><b>后−前斜率差</b><code>{motionDeltas.rhythm_slope_gap == null ? '不可比' : signedPercentagePoint(motionDeltas.rhythm_slope_gap).replace(' 个百分点', ' 点')}</code></span>
+            </div>
           </div>
           <div className={styles.boundaryMotionTrialDeltaGrids}>
             {[
