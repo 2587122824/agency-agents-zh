@@ -1075,6 +1075,20 @@
 }
 .boundarySequencePreview > span small { overflow: hidden; color: #9eb0a8; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .boundarySequencePreview > span code { grid-column: 1 / -1; color: #bdd2c8; }
+.boundaryActionComparison > .boundaryPhaseDecision {
+  padding: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+  border: 1px solid #557869;
+  border-radius: 5px;
+  background: #17241f;
+}
+.boundaryPhaseDecision > span { min-width: 0; display: grid; gap: 2px; color: #dce9e3; }
+.boundaryPhaseDecision > span small { color: #91a39b; line-height: 1.35; }
+.boundaryPhaseDecision > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; }
+.boundaryControl .boundaryPhaseDecision button { height: 28px; }
+.boundaryControl .boundaryPhaseDecision button:last-child:not(:disabled) { border-color: #659980; background: #2a503f; color: #e8f5ef; }
 .boundaryActionComparison figure {
   min-width: 0;
   margin: 0;

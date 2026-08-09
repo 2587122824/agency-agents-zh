@@ -513,6 +513,7 @@ function BoundaryActionComparison({
   const [sequenceLeftReady, setSequenceLeftReady] = useState(false)
   const [sequenceRightReady, setSequenceRightReady] = useState(false)
   const [phaseSequenceCompareStage, setPhaseSequenceCompareStage] = useState<'idle' | 'baseline' | 'tuned'>('idle')
+  const [phaseDecisionReady, setPhaseDecisionReady] = useState(false)
   const [leftPhaseDeltaMs, setLeftPhaseDeltaMs] = useState(0)
   const [rightPhaseDeltaMs, setRightPhaseDeltaMs] = useState(0)
   const [phaseView, setPhaseView] = useState<'baseline' | 'tuned'>('baseline')
@@ -598,6 +599,7 @@ function BoundaryActionComparison({
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
     setPhaseView('baseline')
+    setPhaseDecisionReady(false)
     cancelPhaseSequenceComparison()
   }, [cancelPhaseSequenceComparison, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
 
@@ -713,7 +715,8 @@ function BoundaryActionComparison({
           if (phaseSequenceCompareStageRef.current === 'tuned') {
             phaseSequenceCompareStageRef.current = 'idle'
             setPhaseSequenceCompareStage('idle')
-            onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；当前停在 B，可直接应用或继续调整。`)
+            setPhaseDecisionReady(true)
+            onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；请选择保留 A 或采用 B。`)
             return
           }
           onNotice(`${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原相位'}顺序试播已完成；可切换 A/B 后重播。`)
@@ -787,6 +790,7 @@ function BoundaryActionComparison({
     pauseSequenceMedia()
     phaseSequenceCompareStageRef.current = 'baseline'
     setPhaseSequenceCompareStage('baseline')
+    setPhaseDecisionReady(false)
     setPhaseView('baseline')
     onNotice(`正在连续对照 ${left.label} → ${right.label}：先播放 A 原相位，再自动播放 B 当前试调。`)
   }
@@ -796,6 +800,7 @@ function BoundaryActionComparison({
     pauseMedia()
     cancelPhaseSequenceComparison()
     positionSequenceMedia()
+    setPhaseDecisionReady(false)
     setPhaseView('tuned')
     if (side === 'left') {
       setLeftPhaseDeltaMs(value => Math.max(leftMinimumPhaseMs, Math.min(leftMaximumPhaseMs, value + requestedDeltaMs)))
@@ -816,6 +821,7 @@ function BoundaryActionComparison({
     positionSequenceMedia()
     setLeftPhaseDeltaMs(0)
     setRightPhaseDeltaMs(0)
+    setPhaseDecisionReady(false)
     setPhaseView('baseline')
     setProgressMs(0)
   }
@@ -828,6 +834,25 @@ function BoundaryActionComparison({
     positionSequenceMedia()
     setPhaseView(view)
     setProgressMs(0)
+  }
+
+  const keepBaselinePhase = () => {
+    resetPhase()
+    onNotice(`已保留 ${left.label} → ${right.label} 的 A 原相位；本次试调未写入草稿。`)
+  }
+
+  const applyTunedPhase = () => {
+    if (editLocked || !viewingTunedPhase || !hasPhaseTrial) return
+    pauseMedia()
+    cancelPhaseSequenceComparison()
+    setPhaseDecisionReady(false)
+    if (leftPhaseDeltaMs !== 0 && rightPhaseDeltaMs !== 0) {
+      onApplyPhasePair(leftPhaseDeltaMs, rightPhaseDeltaMs)
+    } else if (leftPhaseDeltaMs !== 0) {
+      onApplyLeftPhase(leftPhaseDeltaMs)
+    } else {
+      onApplyRightPhase(rightPhaseDeltaMs)
+    }
   }
 
   return <section className={styles.boundaryActionComparison} aria-label={`${left.label} 到 ${right.label} 的同步动作对比`}>
@@ -870,6 +895,17 @@ function BoundaryActionComparison({
       />
       <span><strong>{sequenceSide === 'left' ? left.label : right.label}</strong><small>{sequenceSide === 'left' ? '切前' : '切后'} · {viewingTunedPhase ? 'B 当前试调' : 'A 原相位'}{phaseSequenceCompareStage !== 'idle' ? ` · ${phaseSequenceCompareStage === 'baseline' ? '1/2' : '2/2'}` : ''}</small><code>{timecode(sequenceProgressMs, fps)} / {timecode(sequenceDurationMs, fps)}</code></span>
     </div>
+    {phaseDecisionReady && <div className={styles.boundaryPhaseDecision} role="group" aria-label="A/B 相位对照结论">
+      <span><strong>选择这次对照结果</strong><small>保留 A 不写草稿；采用 B 会按当前单侧或双侧试调形成一次撤销。</small></span>
+      <div>
+        <button onClick={keepBaselinePhase}><RotateCcw />保留 A 原相位</button>
+        <button
+          disabled={editLocked || !viewingTunedPhase}
+          title={editLocked ? '画面轨已锁定，只能比较或保留 A，不能采用 B。' : !viewingTunedPhase ? '请先切回 B 当前试调，确认要采用的画面。' : '把当前所有非零相位试调作为一次操作写入草稿'}
+          onClick={applyTunedPhase}
+        ><CheckCircle2 />采用 B 当前试调</button>
+      </div>
+    </div>}
     <div>
       <figure>
         <video
