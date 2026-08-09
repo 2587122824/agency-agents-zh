@@ -75,6 +75,8 @@ V2 正在独立于 V1 建设合同驱动、状态可审计的 AI 视频生产系
 
 提交 `d425c4fe` 发布按需单侧邻帧候选扫描后，标准脚本重启为 API `39432`、Worker `42468`，进程创建时间分别为 2026-08-09 10:57:42.058 / 10:57:42.070。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
 
+提交 `0d9bcdb3` 发布邻帧候选一键设置 B 与证据就绪后自动连续对照后，标准脚本重启为 API `22816`、Worker `36356`，进程创建时间分别为 2026-08-09 11:16:46.664 / 11:16:46.679。8766 监听 PID 精确等于 API PID，健康检查为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有两次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动记录，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
+
 启动或重启：
 
 ```powershell
