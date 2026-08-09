@@ -84,6 +84,43 @@ interface MotionCentroidContinuity {
   angle_degrees: number | null
 }
 
+function MotionCentroidContinuityDiagram({
+  leftCentroids,
+  rightCentroids,
+}: {
+  leftCentroids: Array<MotionChangeCentroid | null>
+  rightCentroids: Array<MotionChangeCentroid | null>
+}) {
+  const [leftStart, leftEnd] = leftCentroids
+  const [rightStart, rightEnd] = rightCentroids
+  if (!leftStart || !leftEnd || !rightStart || !rightEnd) return null
+  const pointSummary = (point: MotionChangeCentroid) => `X ${point.x_percent.toFixed(1)}%、Y ${point.y_percent.toFixed(1)}%`
+  return <div className={styles.boundaryMotionCentroidDiagram}>
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="xMidYMid meet"
+      role="img"
+      aria-label={`变化重心接续图：前镜 ${pointSummary(leftStart)} 到 ${pointSummary(leftEnd)}，切点连接到后镜 ${pointSummary(rightStart)}，再到 ${pointSummary(rightEnd)}`}
+    >
+      <title>变化重心接续图；虚线是切点两侧变化区域重心的空间连接</title>
+      <rect x="0.5" y="0.5" width="99" height="99" rx="3" />
+      {[33.3, 66.7].map(value => <g key={value}>
+        <line className={styles.boundaryMotionCentroidDiagramGrid} x1={value} y1="1" x2={value} y2="99" />
+        <line className={styles.boundaryMotionCentroidDiagramGrid} x1="1" y1={value} x2="99" y2={value} />
+      </g>)}
+      <line className={styles.boundaryMotionCentroidDiagramCut} x1={leftEnd.x_percent} y1={leftEnd.y_percent} x2={rightStart.x_percent} y2={rightStart.y_percent} />
+      <line className={styles.boundaryMotionCentroidDiagramLeft} x1={leftStart.x_percent} y1={leftStart.y_percent} x2={leftEnd.x_percent} y2={leftEnd.y_percent} />
+      <circle className={styles.boundaryMotionCentroidDiagramLeftStart} cx={leftStart.x_percent} cy={leftStart.y_percent} r="2.5" />
+      <circle className={styles.boundaryMotionCentroidDiagramLeftEnd} cx={leftEnd.x_percent} cy={leftEnd.y_percent} r="2.8" />
+      <line className={styles.boundaryMotionCentroidDiagramRight} x1={rightStart.x_percent} y1={rightStart.y_percent} x2={rightEnd.x_percent} y2={rightEnd.y_percent} />
+      <circle className={styles.boundaryMotionCentroidDiagramRightStart} cx={rightStart.x_percent} cy={rightStart.y_percent} r="2.5" />
+      <circle className={styles.boundaryMotionCentroidDiagramRightEnd} cx={rightEnd.x_percent} cy={rightEnd.y_percent} r="2.8" />
+    </svg>
+    <small><i data-tone="left" />前镜路径 <i data-tone="cut" />切点连接 <i data-tone="right" />后镜路径</small>
+    <small>空心为每侧第一步，实心为第二步；坐标按采样画面归一化。</small>
+  </div>
+}
+
 const MOTION_GRID_REGIONS = ['左上', '上中', '右上', '左中', '中心', '右中', '左下', '下中', '右下']
 
 function boundaryPixelDeltas(baseline: BoundaryPixelAnalysis, candidate: BoundaryPixelAnalysis) {
@@ -1056,6 +1093,10 @@ function BoundaryMotionProbe({
               <code>夹角 {analysis.centroid_path_continuity.angle_degrees == null ? '不可用' : `${analysis.centroid_path_continuity.angle_degrees.toFixed(1)}°`}</code>
             </span>
             : <small>前镜或后镜轨迹不可用，无法比较接续。</small>}
+          <MotionCentroidContinuityDiagram
+            leftCentroids={analysis.left_rhythm_centroids}
+            rightCentroids={analysis.right_rhythm_centroids}
+          />
         </div>
         <small>重心轨迹只描述两步像素变化区域的重心迁移，不代表主体运动方向、速度或光流。</small>
         <small>正值表示靠后的步长变化幅度更高，负值表示更低；只描述节奏斜率，不代表衔接优劣。</small>
