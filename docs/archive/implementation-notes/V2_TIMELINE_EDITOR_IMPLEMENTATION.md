@@ -533,6 +533,10 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 上下文卡显示 handling/recheck 聚合计数，并逐项展示原问题、工具和可访问名称包含问题标签的继续/复检按钮。每项状态继续从当前 outcome 派生；passed 只移除本项，其他项保持。列表使用一列容器、每项 `minmax(0,1fr)+38px` 按钮，长标签可断行，不扩大 Inspector。该变化只升级页面内存结构，不新增草稿、history、API、迁移或兼容逻辑。
 
+提交 `404afb45` 已发布同边界多问题复检队列并推送到 `main`。完整后端 `305 passed in 162.58s`、Python compileall、Vite 生产构建和 `git diff --check` 通过，Vite 仅有既有大 chunk 警告。真实 subject+motion 同时需调整时，进入 motion 捕获两项；源窗后移一帧后两项均变 recheck。motion 通过后只剩 subject，subject 通过后 context 才消失；action 无扫描侧/B，媒体暂停。卡片/两行/按钮/Inspector/html/body 为 `200/200`、`188/188`、`36/36`、`244/244`、`1280/1280`，页面 warning/error 为空。
+
+验收编辑已撤销，最终草稿 `row_version=248 / updated_at=2026-08-11T03:03:45.064469 / playhead_ms=0 / SH-002 0..4709ms / SH-001 0..409ms / gap 5118..15000ms`。最终标准重启为 API `4612` / Worker `26180`，创建时间分别为 `2026-08-11 11:04:29.855 / 11:04:29.871`；8766 监听 PID 精确等于 API，健康 `ok`，Alembic runtime/head `20260730_42`，四份日志无错误，最终服务周期 editor-draft PUT 为 0。
+
 ## 8. 事件
 
 ```text

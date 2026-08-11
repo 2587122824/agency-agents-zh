@@ -567,6 +567,8 @@ v2/runtime/worker.err.log
 - 原问题复检真实验收：motion 需调整进入同步动作后，SH-001 源窗实际后移一帧 `0..409 → 42..451ms`；检查按既有规则回到未检查，但上下文准确显示“待复检原问题”和原动作标签。重新复检仍只打开同步动作，扫描侧为空、无 B、13 路媒体暂停、播放头保持自动试听终点 `5118ms`；明确通过后 context 消失。卡片/按钮/Inspector/html/body 为 `200/200`、`50/50`、`244/244`、`1280/1280`，页面 warning/error 为空。验收后界面撤销并归零，源窗恢复 `0..409ms`。
 - 提交 `1cd266c3` 已发布原问题跨修改复检并推送到 `main`。完整后端 `305 passed in 288.89s`、Python compileall、Vite build、差异检查通过。最终标准重启为 API `35608` / Worker `13960`，创建时间分别为 `2026-08-11 10:51:59.268 / 10:51:59.287`；健康 `ok`，Alembic runtime/head `20260730_42`，四份日志无错误。草稿最终 `row_version=245 / updated_at=2026-08-11T02:51:08.331065 / playhead_ms=0 / SH-001 source=0..409ms`，最终服务周期 editor-draft PUT 为 0。
 - 连续性复检上下文已从每边界单项升级为有序多问题队列。进入任一需调整项时，一次捕获当前关系清单内全部需调整 check 及各自观察模式；真实编辑清空多个 outcome 后，所有原问题都保留为待复检。逐项继续/复检只打开该工具，passed 只关闭该 check，其他项不丢失；重新打开会按 check ID 合并当前新问题，去重且不排序推荐。列表仍只在页面内存，按当前关系过滤、按 boundary key 裁剪。
+- 多问题真实验收：subject+motion 同时需调整，从 motion 入口进入后为 `处理中 2 · 待复检 0`；SH-001 源窗后移一帧后两项 outcome 均重置，列表为 `处理中 0 · 待复检 2`。motion 复检进入同步动作且无扫描侧/B，通过后仅移除 motion；subject 复检进入并排，通过后 context 才归零。卡片/两行/按钮/Inspector/html/body 为 `200/200`、`188/188`、`36/36`、`244/244`、`1280/1280`，页面 warning/error 为空。验收编辑已撤销并恢复播放头 0。
+- 提交 `404afb45` 已发布多问题复检并推送到 `main`。完整后端 `305 passed in 162.58s`、Python compileall、Vite build、差异检查通过。最终标准重启为 API `4612` / Worker `26180`，创建时间分别为 `2026-08-11 11:04:29.855 / 11:04:29.871`；健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误。草稿最终 `row_version=248 / updated_at=2026-08-11T03:03:45.064469 / playhead_ms=0 / SH-001 source=0..409ms`，最终服务周期 editor-draft PUT 为 0。
 
 ## 9. 下一步
 
