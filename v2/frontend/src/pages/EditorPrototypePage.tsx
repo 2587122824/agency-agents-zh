@@ -17,7 +17,7 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v7'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v8'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -76,7 +76,7 @@ type BoundaryContinuityObservations = Record<
 >
 type BoundaryContinuityReadyEvidence = Record<
   string,
-  Partial<Record<'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence', true>>
+  Partial<Record<'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence-realtime', true>>
 >
 
 interface BoundaryContinuityIssueContext {
@@ -461,7 +461,7 @@ function continuityReviewModeForCheckId(checkId: string): BoundaryContinuityRevi
 }
 
 function continuityReviewModeLabel(mode: BoundaryContinuityReviewMode) {
-  if (mode === 'action') return '同步动作与顺序切点'
+  if (mode === 'action') return '同步动作与 1× 顺序切点'
   if (mode === 'overlay') return '叠加对齐'
   return '并排复核'
 }
@@ -1556,7 +1556,7 @@ function BoundaryActionComparison({
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
   onNotice: (message: string) => void
   observationKey: string
-  onObserved: (observationKey: string, evidence: 'action-synchronous' | 'action-sequence') => void
+  onObserved: (observationKey: string, evidence: 'action-synchronous' | 'action-sequence-realtime') => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
   const rightRef = useRef<HTMLVideoElement | null>(null)
@@ -2035,8 +2035,12 @@ function BoundaryActionComparison({
             onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；请选择保留 A 或采用 B。`)
             return
           }
-          if (!viewingTunedPhase) onObserved(observationKey, 'action-sequence')
-          onNotice(`${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原切点'}顺序试播已完成；可切换 A/B 后重播。`)
+          if (!viewingTunedPhase && rate === 1) {
+            onObserved(observationKey, 'action-sequence-realtime')
+          }
+          onNotice(!viewingTunedPhase && rate !== 1
+            ? `${left.label} → ${right.label} 的原切点 ${rate}× 慢放已完成；慢放只用于分析动作，仍需在 1× 下完整观看顺序切点才能通过。`
+            : `${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原切点'}顺序试播已完成；可切换 A/B 后重播。`)
           return
         }
       }
@@ -2945,7 +2949,7 @@ export function EditorPrototypePage() {
   const [boundaryContinuityReadyEvidence, setBoundaryContinuityReadyEvidence] = useState<BoundaryContinuityReadyEvidence>({})
   const recordBoundaryContinuityReadyEvidence = useCallback((
     observationKey: string,
-    evidence: 'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence',
+    evidence: 'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence-realtime',
   ) => {
     setBoundaryContinuityReadyEvidence(current => current[observationKey]?.[evidence]
       ? current
@@ -6923,7 +6927,7 @@ export function EditorPrototypePage() {
                          ? ['left_frame', 'right_frame'] as const
                          : observationMode === 'overlay'
                            ? ['overlay'] as const
-                           : ['synchronous_action', 'sequential_cut'] as const
+                           : ['synchronous_action', 'sequential_cut_realtime'] as const
                        const persistedObservationCurrent = currentObservation?.boundary_fingerprint === boundaryFingerprint
                          && currentObservation.completed_steps.length === requiredCompletedSteps.length
                          && currentObservation.completed_steps.every((step, index) => step === requiredCompletedSteps[index])
@@ -6932,7 +6936,7 @@ export function EditorPrototypePage() {
                          ? Boolean(readyEvidence['frames-left'] && readyEvidence['frames-right'])
                          : observationMode === 'overlay'
                            ? Boolean(readyEvidence.overlay)
-                           : Boolean(readyEvidence['action-synchronous'] && readyEvidence['action-sequence'])
+                           : Boolean(readyEvidence['action-synchronous'] && readyEvidence['action-sequence-realtime'])
                        const canPass = persistedObservationCurrent || observationReady
                        const setOutcome = (nextOutcome: BoundaryContinuityCheckOutcome | null) => {
                          if (nextOutcome === 'passed' && !canPass) {

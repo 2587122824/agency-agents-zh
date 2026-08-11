@@ -427,7 +427,7 @@ class EditorDraftSession(Base):
     snapshot_id: Mapped[str] = mapped_column(ForeignKey("production_snapshots.id"), index=True)
     base_timeline_id: Mapped[str] = mapped_column(ForeignKey("timelines.id"), index=True)
     base_timeline_row_version: Mapped[int] = mapped_column(Integer)
-    schema_version: Mapped[str] = mapped_column(String(40), default="editor-draft-session.v4")
+    schema_version: Mapped[str] = mapped_column(String(40), default="editor-draft-session.v5")
     track_config: Mapped[dict] = mapped_column(JSON)
     items: Mapped[list] = mapped_column(JSON)
     playhead_ms: Mapped[int] = mapped_column(Integer, default=0)
