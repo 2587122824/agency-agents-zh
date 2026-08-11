@@ -2892,7 +2892,7 @@ export function EditorPrototypePage() {
     boundaryIndexes: number[]
     position: number
     skippedCount: number
-    scope: 'timeline' | 'slide' | 'trim' | 'history'
+    scope: 'timeline' | 'slide' | 'trim' | 'history' | 'repair'
   } | null>(null)
   const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
     boundaryKey: string
@@ -2953,7 +2953,7 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [pendingBoundaryReview, setPendingBoundaryReview] = useState<{
     keys: string[]
-    scope: 'slide' | 'trim' | 'history'
+    scope: 'slide' | 'trim' | 'history' | 'repair'
   } | null>(null)
   const [boundaryFrameBlendPercent, setBoundaryFrameBlendPercent] = useState(50)
   const [boundaryContinuityOutcomes, setBoundaryContinuityOutcomes] = useState<
@@ -3479,6 +3479,24 @@ export function EditorPrototypePage() {
       remainingGapMs: gapDurationMs - safeExtensionMs,
     }
   }, [mainItems, selectedItem])
+  const selectedGapCombinedRepair = useMemo(() => {
+    if (
+      !selectedItem
+      || !selectedGapPrecedingExtension
+      || !selectedGapFormalRecommendation
+      || selectedGapFormalRecommendation.assets.length !== 1
+    ) return null
+    const asset = selectedGapFormalRecommendation.assets[0]
+    const gapAfterExtensionMs = selectedItem.timeline_out_ms - selectedItem.timeline_in_ms
+      - selectedGapPrecedingExtension.extensionMs
+    const insertedDurationMs = Math.min(asset.duration_ms ?? 0, gapAfterExtensionMs)
+    if (insertedDurationMs < 200) return null
+    return {
+      asset,
+      insertedDurationMs,
+      remainingGapMs: gapAfterExtensionMs - insertedDurationMs,
+    }
+  }, [selectedGapFormalRecommendation, selectedGapPrecedingExtension, selectedItem])
   const normalizedAssetSearch = assetSearchQuery.trim().toLocaleLowerCase('zh-CN')
   const visibleAssets = workspace.data?.available_assets.filter(asset => (
     (assetFilter === 'all' || asset.asset_type === assetFilter)
@@ -4279,6 +4297,8 @@ export function EditorPrototypePage() {
         ? '片段滑动'
         : pendingBoundaryReview.scope === 'trim'
         ? '片段裁切'
+        : pendingBoundaryReview.scope === 'repair'
+        ? '组合修复'
         : '撤销/重做'}成功，但更新后的受影响切点均缺少双侧画面或已不存在，未启动自动试听。`)
       return
     }
@@ -4334,6 +4354,8 @@ export function EditorPrototypePage() {
         ? '已停止片段滑动后的前后切点试听。'
         : boundaryReviewSession.scope === 'trim'
         ? '已停止片段裁切后的受影响切点试听。'
+        : boundaryReviewSession.scope === 'repair'
+        ? '已停止组合修复后的新切点试听。'
         : boundaryReviewSession.scope === 'history'
         ? '已停止撤销/重做后的受影响切点试听。'
         : '已停止全时间线切点连续巡检。')
@@ -4388,6 +4410,8 @@ export function EditorPrototypePage() {
       ? '片段滑动后试听'
       : boundaryReviewSession.scope === 'trim'
       ? '片段裁切后试听'
+      : boundaryReviewSession.scope === 'repair'
+      ? '组合修复后试听'
       : boundaryReviewSession.scope === 'history'
       ? '撤销/重做后试听'
       : '连续巡检'
@@ -4710,6 +4734,79 @@ export function EditorPrototypePage() {
       item.id,
     )
     queueTrimBoundaryReview(item, 'end', items)
+  }
+
+  const applySelectedGapCombinedRepair = () => {
+    if (
+      !selectedItem
+      || !selectedGapPrecedingExtension
+      || !selectedGapFormalRecommendation
+      || !selectedGapCombinedRepair
+      || blockMainTrackEdit(selectedGapPrecedingExtension.item)
+    ) return
+    const { item, extensionMs } = selectedGapPrecedingExtension
+    const { asset, insertedDurationMs, remainingGapMs } = selectedGapCombinedRepair
+    const extendedSourceOutMs = (item.source_out_ms ?? 0) + extensionMs
+    const insertedItem: TimelineItem = {
+      ...selectedItem,
+      id: `prototype-${asset.id}-${Date.now()}`,
+      asset_id: asset.id,
+      asset_state: asset.state,
+      asset_type: asset.asset_type,
+      asset_duration_ms: asset.duration_ms,
+      label: asset.node_key ?? asset.role,
+      gap_reason: null,
+      source_in_ms: 0,
+      source_out_ms: insertedDurationMs,
+      timeline_in_ms: 0,
+      timeline_out_ms: insertedDurationMs,
+      transform: { fit: 'cover', transition_in: { type: 'cut', duration_ms: 0 }, transition_out: { type: 'cut', duration_ms: 0 } },
+    }
+    const repairedRows = mainItems.flatMap(row => {
+      if (row.id === item.id) return [{
+        ...row,
+        source_out_ms: extendedSourceOutMs,
+        timeline_out_ms: row.timeline_out_ms + extensionMs,
+      }]
+      if (row.id !== selectedItem.id) return [row]
+      return [
+        insertedItem,
+        ...(remainingGapMs > 0 ? [{
+          ...row,
+          timeline_in_ms: 0,
+          timeline_out_ms: remainingGapMs,
+        }] : []),
+      ]
+    })
+    const sortable = repairedRows
+      .map((row, index) => ({
+        row,
+        index,
+        sequence: row.asset_id ? shotSequenceByAssetId.get(row.asset_id) : undefined,
+      }))
+      .filter((entry): entry is { row: TimelineItem; index: number; sequence: number } => entry.sequence != null)
+      .sort((left, right) => left.sequence - right.sequence || left.index - right.index)
+    let sortableIndex = 0
+    const reorderedRows = repairedRows.map(row => (
+      row.asset_id && shotSequenceByAssetId.has(row.asset_id)
+        ? sortable[sortableIndex++].row
+        : row
+    ))
+    const normalized = normalizeMainTrack(reorderedRows, durationMs)
+    const reconciled = reconcileStructuralTransitions(mainItems, normalized)
+    const repairedBoundaryKeys = reconciled.rows.slice(0, -1).flatMap((left, index) => {
+      const right = reconciled.rows[index + 1]
+      return left.asset_id && right.asset_id ? [`${left.id}-${right.id}`] : []
+    })
+    resetStructuralPreviewState()
+    commitItems(
+      replaceMainTrack(items, reconciled.rows),
+      `已组合修复：${item.label} 延长 ${seconds(extensionMs)}、补入正式分镜 ${selectedGapFormalRecommendation.shot.shot_code} 并按正式顺序整理；剩余缺口 ${seconds(remainingGapMs)}，正在复检新切点。`,
+      insertedItem.id,
+    )
+    setGapAssetSelection(false)
+    setDraggedAssetId(null)
+    if (repairedBoundaryKeys.length) setPendingBoundaryReview({ keys: repairedBoundaryKeys, scope: 'repair' })
   }
 
   const addAssetToTrack = (trackType: TimelineItem['track_type'], assetId = draggedAssetId) => {
@@ -6122,6 +6219,8 @@ export function EditorPrototypePage() {
             ? `片段滑动后的前后切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个受影响切点；人工连续性检查仍需逐项确认。`
             : boundaryReviewSession.scope === 'trim'
             ? `片段裁切后的受影响切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个受影响切点；人工连续性检查仍需逐项确认。`
+            : boundaryReviewSession.scope === 'repair'
+            ? `组合修复后的新切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；人工连续性检查仍需逐项确认。`
             : boundaryReviewSession.scope === 'history'
             ? `撤销/重做后的受影响切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；恢复的人工连续性结果仍需按当前画面确认。`
             : `全时间线切点连续巡检播放完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个可用切点${boundaryReviewSession.skippedCount ? `，跳过 ${boundaryReviewSession.skippedCount} 个含缺口边界` : ''}；人工检查项仍需逐项确认。`)
@@ -7315,6 +7414,13 @@ export function EditorPrototypePage() {
           </section>}
         </> : <section className={styles.gapActions}>
           <div className={styles.gapTitle}><AlertTriangle /><span><strong>缺少 {selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '0.9s'} 画面</strong><small>当前素材不足以覆盖 15 秒目标时长</small></span></div>
+          {selectedGapPrecedingExtension && selectedGapFormalRecommendation && selectedGapCombinedRepair && <button
+            disabled={videoTrackLocked}
+            onClick={applySelectedGapCombinedRepair}
+          ><WandSparkles /><span>
+            <strong>{videoTrackLocked ? '解锁后应用组合修复' : '组合修复正式顺序与缺口'}</strong>
+            <small>延长 {selectedGapPrecedingExtension.item.label} {seconds(selectedGapPrecedingExtension.extensionMs)} + 补入 {selectedGapFormalRecommendation.shot.shot_code} {seconds(selectedGapCombinedRepair.insertedDurationMs)} + 正式排序；预计剩余 {seconds(selectedGapCombinedRepair.remainingGapMs)} 并自动试听新切点</small>
+          </span></button>}
           {selectedGapPrecedingExtension && <button
             disabled={videoTrackLocked}
             onClick={extendPrecedingItemIntoSelectedGap}
