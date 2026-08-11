@@ -3454,6 +3454,31 @@ export function EditorPrototypePage() {
       .sort((left, right) => left.shot.sequence_number - right.shot.sequence_number)
   }, [mainItems, selectedItem, shotCodeByAssetId, shotSequenceByAssetId, usedMainVideoAssetIds, workspace.data?.available_assets, workspace.data?.shot_sequence])
   const selectedGapFormalRecommendation = selectedGapFormalRecommendations[0] ?? null
+  const selectedGapPrecedingExtension = useMemo(() => {
+    if (!selectedItem || selectedItem.track_type !== 'main_video' || selectedItem.asset_id) return null
+    const selectedGapIndex = mainItems.findIndex(item => item.id === selectedItem.id)
+    const precedingItem = selectedGapIndex > 0 ? mainItems[selectedGapIndex - 1] : null
+    if (
+      !precedingItem?.asset_id
+      || precedingItem.source_out_ms == null
+      || precedingItem.asset_duration_ms == null
+      || precedingItem.timeline_out_ms !== selectedItem.timeline_in_ms
+    ) return null
+    const gapDurationMs = selectedItem.timeline_out_ms - selectedItem.timeline_in_ms
+    const availableSourceTailMs = precedingItem.asset_duration_ms - precedingItem.source_out_ms
+    const extensionMs = Math.min(gapDurationMs, availableSourceTailMs)
+    if (extensionMs <= 0) return null
+    const remainingGapMs = gapDurationMs - extensionMs
+    const safeExtensionMs = remainingGapMs > 0 && remainingGapMs < 200
+      ? Math.max(0, gapDurationMs - 200)
+      : extensionMs
+    if (safeExtensionMs <= 0) return null
+    return {
+      item: precedingItem,
+      extensionMs: safeExtensionMs,
+      remainingGapMs: gapDurationMs - safeExtensionMs,
+    }
+  }, [mainItems, selectedItem])
   const normalizedAssetSearch = assetSearchQuery.trim().toLocaleLowerCase('zh-CN')
   const visibleAssets = workspace.data?.available_assets.filter(asset => (
     (assetFilter === 'all' || asset.asset_type === assetFilter)
@@ -4658,6 +4683,33 @@ export function EditorPrototypePage() {
       : preferredShotCode
         ? `正式分镜 ${preferredShotCode} 当前没有可用的未使用视频。`
         : '当前没有未使用的已批准视频。请返回生产流程生成补充镜头，或先分析缩短目标时长的影响。')
+  }
+
+  const extendPrecedingItemIntoSelectedGap = () => {
+    if (!selectedItem || !selectedGapPrecedingExtension || blockMainTrackEdit(selectedGapPrecedingExtension.item)) return
+    const { item, extensionMs, remainingGapMs } = selectedGapPrecedingExtension
+    const extendedSourceOutMs = (item.source_out_ms ?? 0) + extensionMs
+    const extendedRows = mainItems.flatMap(row => {
+      if (row.id === item.id) return [{
+        ...row,
+        source_out_ms: extendedSourceOutMs,
+        timeline_out_ms: row.timeline_out_ms + extensionMs,
+      }]
+      if (row.id !== selectedItem.id) return [row]
+      return remainingGapMs > 0 ? [{
+        ...row,
+        timeline_in_ms: row.timeline_in_ms + extensionMs,
+        timeline_out_ms: row.timeline_out_ms,
+      }] : []
+    })
+    const normalized = normalizeMainTrack(extendedRows, durationMs)
+    const reconciled = reconcileStructuralTransitions(mainItems, normalized)
+    commitItems(
+      replaceMainTrack(items, reconciled.rows),
+      `已把 ${item.label} 延长 ${seconds(extensionMs)} 到源时点 ${timecode(extendedSourceOutMs, outputFps)}，并等量缩短所选缺口${remainingGapMs > 0 ? `至 ${seconds(remainingGapMs)}` : '至 0 秒'}；请重新检查受影响切点。`,
+      item.id,
+    )
+    queueTrimBoundaryReview(item, 'end', items)
   }
 
   const addAssetToTrack = (trackType: TimelineItem['track_type'], assetId = draggedAssetId) => {
@@ -7263,6 +7315,13 @@ export function EditorPrototypePage() {
           </section>}
         </> : <section className={styles.gapActions}>
           <div className={styles.gapTitle}><AlertTriangle /><span><strong>缺少 {selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '0.9s'} 画面</strong><small>当前素材不足以覆盖 15 秒目标时长</small></span></div>
+          {selectedGapPrecedingExtension && <button
+            disabled={videoTrackLocked}
+            onClick={extendPrecedingItemIntoSelectedGap}
+          ><Clock3 /><span>
+            <strong>{videoTrackLocked ? '解锁后延长前一镜' : `延长前一镜 ${selectedGapPrecedingExtension.item.label}`}</strong>
+            <small>可使用剩余源尾 {seconds(selectedGapPrecedingExtension.extensionMs)}，缺口将{selectedGapPrecedingExtension.remainingGapMs > 0 ? `缩短为 ${seconds(selectedGapPrecedingExtension.remainingGapMs)}` : '完全补齐'}；会改变镜头时长并要求复检</small>
+          </span></button>}
           {selectedItem && selectedGapFormalRecommendation && <button
             disabled={videoTrackLocked}
             onClick={() => {

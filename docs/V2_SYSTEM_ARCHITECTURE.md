@@ -222,6 +222,7 @@ draft
 - 质量审核投影只把已执行终态且没有媒体的节点列为输出缺口；`queued`、`waiting_phase` 和 `running` 不表示输出缺失。
 - 剪辑模型只产生 `TimelineCandidate`；素材缺口必须显式列出，不能自动复用、补帧或插入替代素材。
 - 缺口正式分镜推荐是客户端确定性投影，不是模型决策。它以 `EditorWorkspace.shot_sequence`、`available_assets[].shot_code/shot_sequence_number` 和当前主画面 Asset 集合为唯一事实，先从缺口前后最近的已识别 Shot 限定正式顺序区间，再排除已使用 Shot 与 Asset；只有精确 Shot 映射、已批准、未使用且时长有效的视频进入推荐。单候选点击继续调用既有 `dropAssetOnItem`，多候选只按 `shot_code` 打开素材箱筛选；锁轨时两条路径均禁用。该投影不新增 API、数据库字段、迁移、Timeline 合同或旧数据兼容分支。
+- 缺口前镜源尾延长投影只在选中主画面空位与其前一条已批准视频时间线相邻、且前镜 `source_out_ms < asset_duration_ms` 时成立；可延长量为 `min(gapDuration, assetDuration-sourceOut)`，并避免留下 `1..199ms` 空位。提交事务同时延长前镜源出点和成片出点、把同一毫秒数从选中 gap 起点扣除，随后重新规范化主画面并复用结构转场协调、一次历史快照和右裁切复检队列。总时长因此严格守恒，不使用普通波纹裁切产生超出输出规格的时间线；本轮不新增服务端合同或迁移。
 - 发布提交 `ba3c4e52` 的真实 v12 缺口投影精确得到 SH-003 单候选；补入把缺口从 9.9 秒缩短为 5.2 秒，一次 undo 与草稿丢弃恢复原 Timeline。完整后端 `305 passed in 148.52s`；最终 API `41932` / Worker `31316`，健康 `ok`，Alembic runtime/head `20260811_49`，四份日志零实际错误，最终项目没有 editor draft 且服务周期没有 PUT。
 - 编辑器边界预览是只读播放会话：从相邻主画面切点前后各 1 秒映射到已有媒体时钟，跨片段继续逐帧推进并在冻结结束点自动暂停，不写 `EditorDraftSession`。
 - 成对柔和过渡仍是两个相邻 TimelineItem 上的 `transition_out / transition_in` 冻结值，由一次前端事务和一个撤销步骤修改；后端校验与 FFmpeg 继续只认识既有 `cut/fade`，不增加改变时长的隐式叠化合同。
