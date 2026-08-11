@@ -6642,7 +6642,7 @@ def save_fully_reviewed_editor_draft(
                 "completed_steps": {
                     "frames": ["left_frame", "right_frame"],
                     "overlay": ["overlay"],
-                    "action": ["synchronous_action", "sequential_cut_realtime"],
+                    "action": ["synchronous_action", "sequential_cut_realtime_context"],
                 }[mode],
             }
             for mode in ("frames", "overlay", "action")
@@ -8030,7 +8030,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
         },
     )
     assert saved_draft.status_code == 200
-    assert saved_draft.json()["schema_version"] == "editor-draft-session.v5"
+    assert saved_draft.json()["schema_version"] == "editor-draft-session.v6"
     assert saved_draft.json()["playhead_ms"] == 12_000
     assert saved_draft.json()["continuity_outcomes"] == {
         first_boundary_key: {"motion": "needs_adjustment", "subject": "passed"},
@@ -8154,7 +8154,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     assert revised.status_code == 201
     assert revised.json()["status"] == "candidate"
     assert revised.json()["supersedes_timeline_id"] == exported["id"]
-    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v4"
+    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v5"
     assert revised.json()["continuity_review"]["boundary_count"] == 2
     assert revised.json()["continuity_review_hash"]
     assert revised.json()["continuity_review_hash"] == hashlib.sha256(
@@ -8179,7 +8179,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
         check["completed_steps"] == {
             "frames": ["left_frame", "right_frame"],
             "overlay": ["overlay"],
-            "action": ["synchronous_action", "sequential_cut_realtime"],
+            "action": ["synchronous_action", "sequential_cut_realtime_context"],
         }[check["observation_mode"]]
         for boundary in revised.json()["continuity_review"]["boundaries"]
         for check in boundary["checks"]

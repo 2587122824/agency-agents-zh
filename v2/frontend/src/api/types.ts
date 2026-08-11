@@ -1282,7 +1282,7 @@ export interface Timeline {
   track_config: TimelineTrackConfig
   validation_report: Array<{ code: string; path: string; message: string; evidence: Record<string, unknown> }>
   continuity_review: {
-    schema_version?: 'timeline-continuity-review.v4'
+    schema_version?: 'timeline-continuity-review.v5'
     editor_draft_row_version?: number
     editor_draft_updated_at?: string
     boundary_count?: number
@@ -1404,10 +1404,10 @@ export type EditorContinuityObservationStep =
   | 'right_frame'
   | 'overlay'
   | 'synchronous_action'
-  | 'sequential_cut_realtime'
+  | 'sequential_cut_realtime_context'
 
 export interface EditorDraft {
-  schema_version: 'editor-draft-session.v5'
+  schema_version: 'editor-draft-session.v6'
   project_id: string
   snapshot_id: string
   base_timeline_id: string

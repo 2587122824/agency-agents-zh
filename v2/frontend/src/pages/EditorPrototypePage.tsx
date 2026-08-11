@@ -17,7 +17,7 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, EditorContinuityObservation, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v8'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v9'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -76,7 +76,7 @@ type BoundaryContinuityObservations = Record<
 >
 type BoundaryContinuityReadyEvidence = Record<
   string,
-  Partial<Record<'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence-realtime', true>>
+  Partial<Record<'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence-realtime-context', true>>
 >
 
 interface BoundaryContinuityIssueContext {
@@ -461,7 +461,7 @@ function continuityReviewModeForCheckId(checkId: string): BoundaryContinuityRevi
 }
 
 function continuityReviewModeLabel(mode: BoundaryContinuityReviewMode) {
-  if (mode === 'action') return '同步动作与 1× 顺序切点'
+  if (mode === 'action') return '同步动作与 1× 完整上下文切点'
   if (mode === 'overlay') return '叠加对齐'
   return '并排复核'
 }
@@ -1556,7 +1556,7 @@ function BoundaryActionComparison({
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
   onNotice: (message: string) => void
   observationKey: string
-  onObserved: (observationKey: string, evidence: 'action-synchronous' | 'action-sequence-realtime') => void
+  onObserved: (observationKey: string, evidence: 'action-synchronous' | 'action-sequence-realtime-context') => void
 }) {
   const leftRef = useRef<HTMLVideoElement | null>(null)
   const rightRef = useRef<HTMLVideoElement | null>(null)
@@ -1766,6 +1766,10 @@ function BoundaryActionComparison({
   const sequenceRightEndMs = Math.min(rightSourceOutMs, rightSourceInMs + afterMs)
   const sequenceLeftDurationMs = Math.max(0, sequenceLeftEndMs - sequenceLeftStartMs)
   const sequenceRightDurationMs = Math.max(0, sequenceRightEndMs - sequenceRightStartMs)
+  const requiredSequenceLeftContextMs = Math.min(1000, Math.max(0, leftSourceOutMs - leftSourceInMs))
+  const requiredSequenceRightContextMs = Math.min(1000, Math.max(0, rightSourceOutMs - rightSourceInMs))
+  const sequenceContextComplete = sequenceLeftDurationMs >= requiredSequenceLeftContextMs
+    && sequenceRightDurationMs >= requiredSequenceRightContextMs
   const sequenceDurationMs = sequenceLeftDurationMs + sequenceRightDurationMs
   const sequenceLeftSourceKey = `${left.asset_id}:${sequenceLeftStartMs}:${sequenceLeftEndMs}`
   const sequenceRightSourceKey = `${right.asset_id}:${sequenceRightStartMs}:${sequenceRightEndMs}`
@@ -2035,12 +2039,14 @@ function BoundaryActionComparison({
             onNotice(`${left.label} → ${right.label} 的 A→B 连续对照已完成；请选择保留 A 或采用 B。`)
             return
           }
-          if (!viewingTunedPhase && rate === 1) {
-            onObserved(observationKey, 'action-sequence-realtime')
+          if (!viewingTunedPhase && rate === 1 && sequenceContextComplete) {
+            onObserved(observationKey, 'action-sequence-realtime-context')
           }
           onNotice(!viewingTunedPhase && rate !== 1
             ? `${left.label} → ${right.label} 的原切点 ${rate}× 慢放已完成；慢放只用于分析动作，仍需在 1× 下完整观看顺序切点才能通过。`
-            : `${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原切点'}顺序试播已完成；可切换 A/B 后重播。`)
+            : !viewingTunedPhase && !sequenceContextComplete
+              ? `${left.label} → ${right.label} 的 1× 短窗口试播已完成，但上下文不足；请把切前设为至少 ${previewSeconds(requiredSequenceLeftContextMs)}、切后设为至少 ${previewSeconds(requiredSequenceRightContextMs)}后重新完整观看。`
+              : `${left.label} → ${right.label} 的${viewingTunedPhase ? '当前试调' : '原切点'}顺序试播已完成；可切换 A/B 后重播。`)
           return
         }
       }
@@ -2051,7 +2057,7 @@ function BoundaryActionComparison({
       if (sequenceAnimationRef.current != null) window.cancelAnimationFrame(sequenceAnimationRef.current)
       sequenceAnimationRef.current = null
     }
-  }, [activeLeftFadeMs, activePhaseCandidateSourceKey, activeRightFadeMs, cancelPhaseSequenceComparison, candidateReviewSessionKey, comparisonEvidenceReady, left.label, observationKey, onNotice, onObserved, onRememberCandidateComparisonOutcome, pauseSequenceMedia, phaseTrialSourceKey, rate, right.label, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
+  }, [activeLeftFadeMs, activePhaseCandidateSourceKey, activeRightFadeMs, cancelPhaseSequenceComparison, candidateReviewSessionKey, comparisonEvidenceReady, left.label, observationKey, onNotice, onObserved, onRememberCandidateComparisonOutcome, pauseSequenceMedia, phaseTrialSourceKey, rate, requiredSequenceLeftContextMs, requiredSequenceRightContextMs, right.label, sequenceContextComplete, sequenceDurationMs, sequenceLeftDurationMs, sequenceLeftEndMs, sequenceLeftStartMs, sequencePlaying, sequenceRightEndMs, sequenceRightStartMs, viewingTunedPhase])
 
   useEffect(() => () => {
     leftRef.current?.pause()
@@ -2738,7 +2744,7 @@ function BoundaryActionComparison({
         onClick={() => onApplyPhasePair(leftPhaseDeltaMs, rightPhaseDeltaMs)}
       >应用双方相位</button>
     </footer>
-    <small>同步播放用于并排看动作阶段；顺序试播会在同一黑色舞台播放前镜再切后镜，并真实消费当前 A/B 的淡出淡入透明度。转场、滚动切位与源窗口相位均可先无损试调，再用 A→B 连续对照和明确结论决定是否写入；三类试调互斥。该会话不写草稿，也不包含音频或字幕。切回 A 不会丢失试调值；只有正在查看 B 时才能采用。锁轨时仍可试播，但不能采用。</small>
+    <small>同步播放用于并排看动作阶段；顺序试播会在同一黑色舞台播放前镜再切后镜，并真实消费当前 A/B 的淡出淡入透明度。只有 A 原方案在 1× 下看完切点两侧各最多 1 秒的完整可用上下文，才计入通过证据；慢放或更短窗口只用于分析。转场、滚动切位与源窗口相位均可先无损试调，再用 A→B 连续对照和明确结论决定是否写入；三类试调互斥。该会话不写草稿，也不包含音频或字幕。切回 A 不会丢失试调值；只有正在查看 B 时才能采用。锁轨时仍可试播，但不能采用。</small>
   </section>
 }
 
@@ -2949,7 +2955,7 @@ export function EditorPrototypePage() {
   const [boundaryContinuityReadyEvidence, setBoundaryContinuityReadyEvidence] = useState<BoundaryContinuityReadyEvidence>({})
   const recordBoundaryContinuityReadyEvidence = useCallback((
     observationKey: string,
-    evidence: 'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence-realtime',
+    evidence: 'frames-left' | 'frames-right' | 'overlay' | 'action-synchronous' | 'action-sequence-realtime-context',
   ) => {
     setBoundaryContinuityReadyEvidence(current => current[observationKey]?.[evidence]
       ? current
@@ -6927,7 +6933,7 @@ export function EditorPrototypePage() {
                          ? ['left_frame', 'right_frame'] as const
                          : observationMode === 'overlay'
                            ? ['overlay'] as const
-                           : ['synchronous_action', 'sequential_cut_realtime'] as const
+                           : ['synchronous_action', 'sequential_cut_realtime_context'] as const
                        const persistedObservationCurrent = currentObservation?.boundary_fingerprint === boundaryFingerprint
                          && currentObservation.completed_steps.length === requiredCompletedSteps.length
                          && currentObservation.completed_steps.every((step, index) => step === requiredCompletedSteps[index])
@@ -6936,7 +6942,7 @@ export function EditorPrototypePage() {
                          ? Boolean(readyEvidence['frames-left'] && readyEvidence['frames-right'])
                          : observationMode === 'overlay'
                            ? Boolean(readyEvidence.overlay)
-                           : Boolean(readyEvidence['action-synchronous'] && readyEvidence['action-sequence-realtime'])
+                           : Boolean(readyEvidence['action-synchronous'] && readyEvidence['action-sequence-realtime-context'])
                        const canPass = persistedObservationCurrent || observationReady
                        const setOutcome = (nextOutcome: BoundaryContinuityCheckOutcome | null) => {
                          if (nextOutcome === 'passed' && !canPass) {

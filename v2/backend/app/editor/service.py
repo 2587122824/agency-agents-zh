@@ -473,7 +473,7 @@ def _freeze_continuity_review(
     required_observation_steps = {
         "frames": ["left_frame", "right_frame"],
         "overlay": ["overlay"],
-        "action": ["synchronous_action", "sequential_cut_realtime"],
+        "action": ["synchronous_action", "sequential_cut_realtime_context"],
     }
     boundaries = []
     unresolved = []
@@ -545,7 +545,7 @@ def _freeze_continuity_review(
             f"仍有 {len(unresolved)} 项镜头连续性检查未通过，不能生成可导出版本。",
         )
     return {
-        "schema_version": "timeline-continuity-review.v4",
+        "schema_version": "timeline-continuity-review.v5",
         "editor_draft_row_version": draft.row_version,
         "editor_draft_updated_at": draft.updated_at.isoformat(),
         "boundary_count": len(boundaries),

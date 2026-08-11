@@ -77,7 +77,7 @@ class EditorContinuityObservation(BaseModel):
             "right_frame",
             "overlay",
             "synchronous_action",
-            "sequential_cut_realtime",
+            "sequential_cut_realtime_context",
         ]
     ] = Field(min_length=1, max_length=2)
 
@@ -100,7 +100,7 @@ class SaveEditorDraft(BaseModel):
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v5"] = "editor-draft-session.v5"
+    schema_version: Literal["editor-draft-session.v6"] = "editor-draft-session.v6"
     project_id: str
     snapshot_id: str
     base_timeline_id: str
