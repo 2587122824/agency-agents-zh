@@ -497,6 +497,10 @@ A/B 决策门禁已从“候选快捷操作等待像素”收紧为统一的当�
 
 每项使用三个显式 `aria-pressed` 按钮，避免通过重复点击暗中清除结论。结果卡用 `data-status=unreviewed|passed|needs_adjustment` 提供确定性窄栏样式，三个按钮使用可收缩等宽网格；状态文字、图标、单边界摘要和全局摘要共享同一 render-time 派生，不保存第二份计数。所有结构修改入口继续按 boundary key 清理 map，待办定位继续复用只读 frames focus，因此三态结果不进入自动保存、撤销、API、Timeline、EditorDraftSession、数据库迁移或 FFmpeg。
 
+提交 `f2fba22f` 已把三态结果、全时间线待处理队列和四份合同文档推送到 `main`。完整后端 `305 passed in 162.55s`、Python compileall、Vite 生产构建与 `git diff --check` 通过，Vite 仅有既有大 chunk 警告。真实 1280×720 页面完成“需调整仍阻断 → 其余通过仍阻断 → 全部通过 → 恢复未检查”往返，播放头与草稿不变、媒体暂停、editor-draft PUT 为 0、页面和三态控件无溢出、浏览器日志为空。
+
+最终标准重启的 API PID `14644`、Worker PID `33584`，创建时间分别为 `2026-08-11 09:58:42.964 / 09:58:42.981`。8766 监听 PID 精确等于 API，健康为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有健康与草稿只读请求，`api.err.log` 只有 Uvicorn 正常启动，Worker 两份日志为空，四份日志无实际错误。
+
 ## 8. 事件
 
 ```text
