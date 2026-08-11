@@ -222,6 +222,7 @@ draft
 - 质量审核投影只把已执行终态且没有媒体的节点列为输出缺口；`queued`、`waiting_phase` 和 `running` 不表示输出缺失。
 - 剪辑模型只产生 `TimelineCandidate`；素材缺口必须显式列出，不能自动复用、补帧或插入替代素材。
 - 缺口正式分镜推荐是客户端确定性投影，不是模型决策。它以 `EditorWorkspace.shot_sequence`、`available_assets[].shot_code/shot_sequence_number` 和当前主画面 Asset 集合为唯一事实，先从缺口前后最近的已识别 Shot 限定正式顺序区间，再排除已使用 Shot 与 Asset；只有精确 Shot 映射、已批准、未使用且时长有效的视频进入推荐。单候选点击继续调用既有 `dropAssetOnItem`，多候选只按 `shot_code` 打开素材箱筛选；锁轨时两条路径均禁用。该投影不新增 API、数据库字段、迁移、Timeline 合同或旧数据兼容分支。
+- 发布提交 `ba3c4e52` 的真实 v12 缺口投影精确得到 SH-003 单候选；补入把缺口从 9.9 秒缩短为 5.2 秒，一次 undo 与草稿丢弃恢复原 Timeline。完整后端 `305 passed in 148.52s`；最终 API `41932` / Worker `31316`，健康 `ok`，Alembic runtime/head `20260811_49`，四份日志零实际错误，最终项目没有 editor draft 且服务周期没有 PUT。
 - 编辑器边界预览是只读播放会话：从相邻主画面切点前后各 1 秒映射到已有媒体时钟，跨片段继续逐帧推进并在冻结结束点自动暂停，不写 `EditorDraftSession`。
 - 成对柔和过渡仍是两个相邻 TimelineItem 上的 `transition_out / transition_in` 冻结值，由一次前端事务和一个撤销步骤修改；后端校验与 FFmpeg 继续只认识既有 `cut/fade`，不增加改变时长的隐式叠化合同。
 - 结构编辑通过客户端 `reconcileStructuralTransitions(previousRows, nextRows)` 维护成对转场完整性：它用稳定 TimelineItem ID 比较编辑前后的有序相邻边界，只保留仍按原顺序相邻且两侧类型、时长一致的 fade；已断开边界的左侧 `transition_out` 与右侧 `transition_in` 在同一次 `commitItems` 中归零为 `cut:0`。删除、重排、Inspector 移动和正式分镜整理复用同一重建函数；分割则显式让新内部边界为双方 `cut:0`，仅保留原片段外侧转场。该规则不新增服务端字段、迁移或旧数据兼容分支，后端现有 Timeline v4 校验继续作为最终门禁。
