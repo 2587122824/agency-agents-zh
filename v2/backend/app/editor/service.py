@@ -73,6 +73,35 @@ class EditorNotFoundError(ValueError):
     pass
 
 
+_CONTINUITY_CHECKS = {
+    "same_moment": [
+        ("subject", "主体身份、服装和场景保持一致"),
+        ("motion", "动作阶段与运动方向自然承接"),
+        ("eyeline", "构图、视线与主体位置没有异常跳变"),
+    ],
+    "time_jump": [
+        ("jump-readable", "时间跳转在画面或叙事中足够清楚"),
+        ("subject", "跳转前后主体身份仍可辨认"),
+        ("new-information", "后镜提供了符合跳转意图的新信息"),
+    ],
+    "location_change": [
+        ("location-readable", "新地点在切点后能够被清楚识别"),
+        ("subject", "跨地点的主体与叙事承接一致"),
+        ("orientation", "空间方向变化不会造成误读"),
+    ],
+    "outfit_change": [
+        ("outfit-readable", "服装变化明确且不是生成漂移"),
+        ("reason", "换装与时间、地点或剧情变化一致"),
+        ("subject", "人物身份和其他稳定特征保持一致"),
+    ],
+}
+_GENERAL_CONTINUITY_CHECKS = [
+    ("subject", "主体身份和外观没有非预期漂移"),
+    ("motion", "动作阶段、运动方向与切点节奏自然"),
+    ("change-readable", "时间、地点或服装变化是有意且可读的"),
+]
+
+
 def _editor(session: Session) -> EditorRepository:
     return SqlAlchemyEditorRepository(session)
 
@@ -333,6 +362,126 @@ def _add_items(session: Session, timeline: Timeline, items) -> None:
         ))
 
 
+def _freeze_continuity_review(
+    session: Session,
+    project: Project,
+    supersedes: Timeline,
+    payload: ReviseTimelineCandidate,
+) -> dict:
+    repository = _editor(session)
+    draft = repository.editor_draft(project.id)
+    if not draft:
+        raise EditorConflictError(
+            "EDITOR_CONTINUITY_DRAFT_REQUIRED",
+            "生成可导出版本前必须先保存当前项目草稿与人工连续性结果。",
+        )
+    if draft.row_version != payload.expected_editor_draft_row_version:
+        raise EditorConflictError(
+            "EDITOR_DRAFT_ROW_VERSION_MISMATCH",
+            "项目草稿已变化，请刷新连续性检查后重试。",
+        )
+    if (
+        draft.snapshot_id != payload.expected_snapshot_id
+        or draft.base_timeline_id != supersedes.id
+        or draft.base_timeline_row_version != supersedes.row_version
+    ):
+        raise EditorConflictError(
+            "EDITOR_CONTINUITY_DRAFT_BASE_MISMATCH",
+            "项目草稿不再对应当前时间线基线，请刷新后重新检查切点。",
+        )
+    submitted_items = [item.model_dump() for item in payload.items]
+    draft_items = [
+        {key: value for key, value in item.items() if key != "client_item_id"}
+        for item in draft.items
+    ]
+    if draft.track_config != payload.track_config.model_dump() or draft_items != submitted_items:
+        raise EditorConflictError(
+            "EDITOR_CONTINUITY_DRAFT_CONTENT_MISMATCH",
+            "待冻结条目与已审核项目草稿不一致，请等待草稿保存后重试。",
+        )
+
+    snapshot = repository.snapshot(draft.snapshot_id)
+    shots = repository.shots(snapshot.plan_version_id) if snapshot else []
+    shots_by_id = {shot.id: shot for shot in shots}
+    asset_rows = repository.available_assets(project.id, draft.snapshot_id)
+    node_ids = [row.dag_node_id for row in asset_rows if row.dag_node_id]
+    nodes = {
+        node.id: node
+        for node in repository.dag_nodes_by_ids(node_ids)
+    } if node_ids else {}
+    shot_by_asset_id = {}
+    for asset in asset_rows:
+        node = nodes.get(asset.dag_node_id) if asset.dag_node_id else None
+        shot = shots_by_id.get(node.shot_id) if node and node.shot_id else None
+        if shot:
+            shot_by_asset_id[asset.id] = shot
+
+    main_items = sorted(
+        (item for item in draft.items if item.get("track_type") == "main_video"),
+        key=lambda item: item["sequence_number"],
+    )
+    outcomes_by_boundary = draft.continuity_outcomes or {}
+    contexts_by_boundary = draft.continuity_issue_contexts or {}
+    boundaries = []
+    unresolved = []
+    for left, right in zip(main_items, main_items[1:]):
+        if not left.get("asset_id") or not right.get("asset_id"):
+            continue
+        left_shot = shot_by_asset_id.get(left["asset_id"])
+        right_shot = shot_by_asset_id.get(right["asset_id"])
+        formal_adjacent = bool(
+            left_shot
+            and right_shot
+            and right_shot.sequence_number == left_shot.sequence_number + 1
+        )
+        relation = right_shot.continuity_relation if formal_adjacent else "general"
+        checks = _CONTINUITY_CHECKS.get(relation, _GENERAL_CONTINUITY_CHECKS)
+        boundary_key = f'{left["client_item_id"]}-{right["client_item_id"]}'
+        outcomes = outcomes_by_boundary.get(boundary_key, {})
+        active_context_ids = {
+            context.get("check_id")
+            for context in contexts_by_boundary.get(boundary_key, [])
+        }
+        frozen_checks = []
+        for check_id, check_label in checks:
+            outcome = outcomes.get(check_id)
+            if outcome != "passed" or check_id in active_context_ids:
+                unresolved.append({
+                    "boundary_key": boundary_key,
+                    "check_id": check_id,
+                    "outcome": outcome or "unreviewed",
+                    "recheck": check_id in active_context_ids,
+                })
+            frozen_checks.append({
+                "check_id": check_id,
+                "check_label": check_label,
+                "outcome": outcome or "unreviewed",
+            })
+        boundaries.append({
+            "boundary_key": boundary_key,
+            "left_client_item_id": left["client_item_id"],
+            "right_client_item_id": right["client_item_id"],
+            "left_sequence_number": left["sequence_number"],
+            "right_sequence_number": right["sequence_number"],
+            "left_asset_id": left["asset_id"],
+            "right_asset_id": right["asset_id"],
+            "relation": relation,
+            "checks": frozen_checks,
+        })
+    if unresolved:
+        raise EditorConflictError(
+            "TIMELINE_CONTINUITY_REVIEW_INCOMPLETE",
+            f"仍有 {len(unresolved)} 项镜头连续性检查未通过，不能生成可导出版本。",
+        )
+    return {
+        "schema_version": "timeline-continuity-review.v1",
+        "editor_draft_row_version": draft.row_version,
+        "editor_draft_updated_at": draft.updated_at.isoformat(),
+        "boundary_count": len(boundaries),
+        "boundaries": boundaries,
+    }
+
+
 def _create_candidate(
     session: Session,
     project: Project,
@@ -381,6 +530,9 @@ def _create_candidate(
             raise EditorConflictError("TIMELINE_ROW_VERSION_MISMATCH", "时间线已变化，请刷新后重试。")
         if supersedes.status == "superseded":
             raise EditorConflictError("TIMELINE_NOT_REVISABLE", "已被替代的时间线不能再修订。")
+    continuity_review = {}
+    if supersedes and isinstance(payload, ReviseTimelineCandidate) and payload.source == "user":
+        continuity_review = _freeze_continuity_review(session, project, supersedes, payload)
     version = repository.next_timeline_version(project.id)
     timeline = Timeline(
         project_id=project.id,
@@ -393,6 +545,8 @@ def _create_candidate(
         output_spec=snapshot.output_spec,
         track_config=payload.track_config.model_dump(),
         validation_report=[],
+        continuity_review=continuity_review,
+        continuity_review_hash=_hash(continuity_review) if continuity_review else None,
         created_by=payload.actor_id,
     )
     repository.add(timeline)
@@ -429,6 +583,7 @@ def _create_candidate(
             "source": payload.source,
             "source_agent_run_id": payload.source_agent_run_id,
             "supersedes_timeline_id": timeline.supersedes_timeline_id,
+            "continuity_review_hash": timeline.continuity_review_hash,
         },
     ))
     session.commit()

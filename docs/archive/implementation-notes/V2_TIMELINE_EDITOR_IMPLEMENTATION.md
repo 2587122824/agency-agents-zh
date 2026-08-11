@@ -582,6 +582,8 @@ timeline.confirmed.v1
 - 迁移 `20260811_43` 添加两列并把现有开发草稿统一升级为 v2、审核 map 重建为空。开发环境不保留 v1/v4 运行时兼容分支；显式丢弃草稿清空审核状态，结构编辑按现存稳定 boundary key 清理后继续自动保存。
 - 发布提交 `a2c72e98` 实现合同与恢复链；真实 Browser 验收发现旧说明仍声称结果不写草稿，提交 `fdb2355f` 将用户文案改为权威自动保存事实。needs/handling、源窗 `+1帧` 后 recheck、passed/context 清除均经刷新验证；最终恢复三项未检查、源窗 `0..409ms`、播放头 0。1280×720 html/body 均 `1280/1280`、Inspector `244/244`，页面 warning/error 为空。
 - 完整回归为后端 `305 passed in 164.85s`，Python compileall、Vite 生产构建与 `git diff --check` 通过。最终标准服务 API `13004` / Worker `36596`，创建时间 `2026-08-11 12:43:37.838 / 12:43:37.858`；健康 `ok`，Alembic runtime/head `20260811_43`，四份日志零错误，草稿 `editor-draft-session.v2 / row_version=279 / updated_at=2026-08-11T04:42:56.843950 / playhead_ms=0 / outcomes={} / contexts={}`，最终服务周期 editor-draft PUT 为 0。
+- 可导出修订现强制消费完全通过的连续性草稿。客户端主操作在三类未解决检查非零时只定位下一项；全部通过后先保存草稿，再提交 `expected_editor_draft_row_version`。后端复验草稿基线、内容与每个当前双画面边界的三项结果，拒绝未检查、需调整、待复检、context 残留、陈旧行版本或条目不一致。
+- 新 Timeline 字段 `continuity_review / continuity_review_hash` 由迁移 `20260811_44` 建立。冻结快照包含来源草稿、稳定边界双方、Asset、关系与 passed 清单，独立哈希用于版本证据；旧 Timeline 回填空值。`/editor/setup` 的已有版本修订入口改为进入正式剪辑台，不能再从无连续性检查的旧表单绕过门禁。
 
 ## 10. 迁移与索引
 

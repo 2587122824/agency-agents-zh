@@ -106,6 +106,7 @@ class CreateTimelineCandidate(EditorCommand):
 
 class ReviseTimelineCandidate(CreateTimelineCandidate):
     expected_row_version: int = Field(ge=1)
+    expected_editor_draft_row_version: int = Field(ge=1)
 
 
 class ValidateTimeline(EditorCommand):
@@ -197,6 +198,8 @@ class TimelineRead(BaseModel):
     output_spec: dict
     track_config: TimelineTrackConfig
     validation_report: list[dict]
+    continuity_review: dict
+    continuity_review_hash: str | None
     contract_hash: str | None
     row_version: int
     created_by: str

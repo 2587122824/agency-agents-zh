@@ -3273,6 +3273,9 @@ export function EditorPrototypePage() {
     (total, boundary) => total + boundary.recheckCount,
     0,
   )
+  const continuityReviewIssueCount = unreviewedBoundaryContinuityCheckCount
+    + needsAdjustmentBoundaryContinuityCheckCount
+    + recheckBoundaryContinuityCheckCount
   const nextUnresolvedBoundaryContinuityReview = unresolvedBoundaryContinuityReviews.find(
     boundary => boundary.index > activeBoundaryIndex,
   ) ?? unresolvedBoundaryContinuityReviews[0] ?? null
@@ -3509,25 +3512,29 @@ export function EditorPrototypePage() {
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
   }, [boundaryContinuityIssueContexts, boundaryContinuityOutcomes, boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
 
+  const saveCurrentEditorDraft = async () => {
+    if (!sourceTimeline) throw new Error('当前没有可保存的剪辑基线。')
+    return api.saveEditorDraft(projectId, sourceTimeline, {
+      ...sourceTimeline.track_config,
+      audio_enabled: audioItems.length > 0,
+      subtitle_enabled: subtitleItems.length > 0,
+      snap_enabled: snapEnabled,
+      pixels_per_second: timelineZoom,
+    }, items, playheadMs, boundaryContinuityOutcomes, Object.fromEntries(
+      Object.entries(boundaryContinuityIssueContexts).map(([key, contexts]) => [
+        key,
+        contexts.map(context => ({
+          check_id: context.checkId,
+          check_label: context.checkLabel,
+          mode: context.mode,
+        })),
+      ]),
+    ))
+  }
+
   const autoSaveDraft = useMutation({
     mutationFn: async (fingerprint: string) => {
-      if (!sourceTimeline) throw new Error('当前没有可保存的剪辑基线。')
-      const draft = await api.saveEditorDraft(projectId, sourceTimeline, {
-        ...sourceTimeline.track_config,
-        audio_enabled: audioItems.length > 0,
-        subtitle_enabled: subtitleItems.length > 0,
-        snap_enabled: snapEnabled,
-        pixels_per_second: timelineZoom,
-      }, items, playheadMs, boundaryContinuityOutcomes, Object.fromEntries(
-        Object.entries(boundaryContinuityIssueContexts).map(([key, contexts]) => [
-          key,
-          contexts.map(context => ({
-            check_id: context.checkId,
-            check_label: context.checkLabel,
-            mode: context.mode,
-          })),
-        ]),
-      ))
+      const draft = await saveCurrentEditorDraft()
       return { draft, fingerprint }
     },
     onSuccess: ({ draft, fingerprint }) => {
@@ -3581,7 +3588,11 @@ export function EditorPrototypePage() {
   const saveAndValidate = useMutation({
     mutationFn: async () => {
       if (!sourceTimeline) throw new Error('当前没有可修订的时间线版本。')
-      const revised = await api.reviseTimelineCandidate(projectId, sourceTimeline, {
+      if (continuityReviewIssueCount > 0) {
+        throw new Error(`仍有 ${continuityReviewIssueCount} 项镜头连续性检查未通过，不能生成可导出版本。`)
+      }
+      const savedDraft = await saveCurrentEditorDraft()
+      const revised = await api.reviseTimelineCandidate(projectId, sourceTimeline, savedDraft.row_version, {
         ...sourceTimeline.track_config,
         audio_enabled: audioItems.length > 0,
         subtitle_enabled: subtitleItems.length > 0,
@@ -6006,18 +6017,29 @@ export function EditorPrototypePage() {
         <button title="重做" disabled={!future.length} onClick={redo}><Redo2 /></button>
         {dirty && <button title="丢弃自动保存的项目草稿" onClick={discardDraft}><RotateCcw /></button>}
         <button className={styles.primaryAction} disabled={saveAndValidate.isPending} onClick={() => {
-          if (dirty) setConfirmSaveOpen(true)
+          if (dirty && nextUnresolvedBoundaryContinuityReview) {
+            focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)
+          }
+          else if (dirty) setConfirmSaveOpen(true)
           else if (validationErrors.length || unresolvedCount) setValidationOpen(true)
           else setNotice('当前版本已经通过检查，可以进入确认阶段。')
         }}>
-          {dirty ? <CheckCircle2 /> : unresolvedCount || validationErrors.length ? <AlertTriangle /> : <CheckCircle2 />}
-          {saveAndValidate.isPending ? '正在生成…' : dirty ? '生成可导出版本' : unresolvedCount || validationErrors.length ? `处理 ${Math.max(unresolvedCount, validationErrors.length)} 个问题` : '版本已通过'}
+          {dirty && continuityReviewIssueCount > 0 ? <AlertTriangle /> : dirty ? <CheckCircle2 /> : unresolvedCount || validationErrors.length ? <AlertTriangle /> : <CheckCircle2 />}
+          {saveAndValidate.isPending
+            ? '正在生成…'
+            : dirty && continuityReviewIssueCount > 0
+              ? `处理 ${continuityReviewIssueCount} 个衔接检查`
+              : dirty
+                ? '生成可导出版本'
+                : unresolvedCount || validationErrors.length
+                  ? `处理 ${Math.max(unresolvedCount, validationErrors.length)} 个问题`
+                  : '版本已通过'}
         </button>
       </div>
     </header>
 
-    <section className={styles.statusbar} data-warning={unresolvedCount > 0 || validationErrors.length > 0 || Boolean(autoSaveDraft.error) || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
-      {autoSaveDraft.isPending ? <Cloud /> : autoSaveDraft.error ? <CloudOff /> : unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
+    <section className={styles.statusbar} data-warning={continuityReviewIssueCount > 0 || unresolvedCount > 0 || validationErrors.length > 0 || Boolean(autoSaveDraft.error) || Boolean(saveAndValidate.error) || Boolean(renderPreview.error) || Boolean(reviewPreview.error) || Boolean(confirmTimeline.error) || Boolean(authorizeDelivery.error) || Boolean(uploadDelivery.error) || Boolean(verifyDelivery.error)}>
+      {autoSaveDraft.isPending ? <Cloud /> : autoSaveDraft.error ? <CloudOff /> : continuityReviewIssueCount > 0 || unresolvedCount || validationErrors.length || saveAndValidate.error || renderPreview.error || reviewPreview.error || confirmTimeline.error || authorizeDelivery.error || uploadDelivery.error || verifyDelivery.error ? <AlertTriangle /> : <CheckCircle2 />}
       <span>{notice}</span>
       {autoSaveDraft.error && <button disabled={autoSaveDraft.isPending} onClick={() => {
         setLastAutoSaveAttemptFingerprint(autoSaveFingerprint)
@@ -6031,6 +6053,7 @@ export function EditorPrototypePage() {
       {uploadDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{uploadDelivery.error instanceof Error ? uploadDelivery.error.message : '交付文件上传失败'}</button>}
       {verifyDelivery.error && <button onClick={() => setDeliveryStatusOpen(true)}>{verifyDelivery.error instanceof Error ? verifyDelivery.error.message : '交付文件验证失败'}</button>}
       {validationErrors.length > 0 && <button onClick={() => setValidationOpen(true)}>查看 {validationErrors.length} 个检查问题</button>}
+      {continuityReviewIssueCount > 0 && nextUnresolvedBoundaryContinuityReview && <button onClick={() => focusIncompleteBoundaryContinuityReviewAt(nextUnresolvedBoundaryContinuityReview.index)}>处理 {continuityReviewIssueCount} 个衔接检查</button>}
       <code>{lastAutoSavedAt ? `自动保存 ${new Date(lastAutoSavedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} · ` : ''}{workspace.data.aspect_ratio} · {outputFps}fps · {seconds(durationMs)}</code>
     </section>
 
@@ -7243,6 +7266,7 @@ export function EditorPrototypePage() {
               <div><dt>创建时间</dt><dd>{new Date(timeline.created_at).toLocaleString('zh-CN', { hour12: false })}</dd></div>
               <div><dt>输出规格</dt><dd>{String(timeline.output_spec.width ?? '—')}×{String(timeline.output_spec.height ?? '—')} · {String(timeline.output_spec.fps ?? '—')}fps</dd></div>
               <div><dt>复核证据</dt><dd>{timeline.preview_review ? '已绑定低清预览复核' : '尚未绑定'}</dd></div>
+              <div><dt>连续性审核</dt><dd>{timeline.continuity_review_hash ? `${timeline.continuity_review.boundary_count ?? 0} 个切点 · ${timeline.continuity_review_hash.slice(0, 12)}` : '未冻结'}</dd></div>
               <div><dt>行版本</dt><dd>{timeline.row_version}</dd></div>
               <div><dt>创建者</dt><dd>{timeline.created_by}</dd></div>
             </dl>
@@ -7260,10 +7284,12 @@ export function EditorPrototypePage() {
         <div><dt>新版本</dt><dd>v{(sourceTimeline?.version_number ?? 0) + 1}</dd></div>
         <div><dt>画面片段</dt><dd>{mainItems.length}</dd></div>
         <div><dt>显式空位</dt><dd>{unresolvedCount}</dd></div>
+        <div><dt>连续性审核</dt><dd>{passedBoundaryContinuityReviewCount}/{boundaryContinuityReviewProgress.length} 个切点通过</dd></div>
         <div><dt>基线版本</dt><dd>v{sourceTimeline?.version_number} · row {sourceTimeline?.row_version}</dd></div>
       </dl>
       {unresolvedCount > 0 && <div className={styles.modalWarning}><AlertTriangle /><span>允许保存含空位的候选，但检查不会通过；保存后会精确定位这些问题。</span></div>}
-      <footer><button onClick={() => setConfirmSaveOpen(false)}>继续调整</button><button className={styles.confirmButton} disabled={saveAndValidate.isPending} onClick={() => saveAndValidate.mutate()}>{saveAndValidate.isPending ? '正在生成并检查…' : '生成可导出版本'}</button></footer>
+      {continuityReviewIssueCount > 0 && <div className={styles.modalWarning}><AlertTriangle /><span>仍有 {continuityReviewIssueCount} 项镜头连续性检查未通过，必须先逐项处理。</span></div>}
+      <footer><button onClick={() => setConfirmSaveOpen(false)}>继续调整</button><button className={styles.confirmButton} disabled={saveAndValidate.isPending || continuityReviewIssueCount > 0} onClick={() => saveAndValidate.mutate()}>{saveAndValidate.isPending ? '正在生成并检查…' : '生成可导出版本'}</button></footer>
     </section></div>}
     {validationOpen && <div className={styles.modal} role="dialog" aria-modal="true" aria-label="时间线检查问题"><section>
       <header><AlertTriangle /><div><span>VALIDATION ISSUES</span><h2>需要处理的时间线问题</h2></div><button title="关闭" onClick={() => setValidationOpen(false)}><X /></button></header>

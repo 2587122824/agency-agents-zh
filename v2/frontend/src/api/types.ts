@@ -1281,6 +1281,24 @@ export interface Timeline {
   output_spec: Record<string, unknown>
   track_config: TimelineTrackConfig
   validation_report: Array<{ code: string; path: string; message: string; evidence: Record<string, unknown> }>
+  continuity_review: {
+    schema_version?: 'timeline-continuity-review.v1'
+    editor_draft_row_version?: number
+    editor_draft_updated_at?: string
+    boundary_count?: number
+    boundaries?: Array<{
+      boundary_key: string
+      left_client_item_id: string
+      right_client_item_id: string
+      left_sequence_number: number
+      right_sequence_number: number
+      left_asset_id: string
+      right_asset_id: string
+      relation: 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change' | 'general'
+      checks: Array<{ check_id: string; check_label: string; outcome: 'passed' }>
+    }>
+  }
+  continuity_review_hash: string | null
   contract_hash: string | null
   row_version: number
   created_by: string

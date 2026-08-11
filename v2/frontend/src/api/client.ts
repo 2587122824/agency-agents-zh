@@ -415,8 +415,8 @@ export const api = {
   createTimelineCandidate: (projectId: string, snapshotId: string, source: 'user' | 'editor_assistant', trackConfig: Timeline['track_config'], items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timeline-candidates`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: snapshotId, source, track_config: trackConfig, items }),
   }),
-  reviseTimelineCandidate: (projectId: string, timeline: Timeline, trackConfig: Timeline['track_config'], items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:revise`, {
-    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: timeline.snapshot_id, expected_row_version: timeline.row_version, source: 'user', track_config: trackConfig, items }),
+  reviseTimelineCandidate: (projectId: string, timeline: Timeline, editorDraftRowVersion: number, trackConfig: Timeline['track_config'], items: TimelineItemDraft[]) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:revise`, {
+    method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_snapshot_id: timeline.snapshot_id, expected_row_version: timeline.row_version, expected_editor_draft_row_version: editorDraftRowVersion, source: 'user', track_config: trackConfig, items }),
   }),
   validateTimeline: (projectId: string, timeline: Timeline) => request<Timeline>(`/projects/${projectId}/timelines/${timeline.id}:validate`, {
     method: 'POST', body: JSON.stringify({ command_id: crypto.randomUUID(), actor_id: 'local-user', expected_row_version: timeline.row_version }),

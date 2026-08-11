@@ -6585,6 +6585,57 @@ def timeline_items_for_assets(video_assets: list[dict]) -> list[dict]:
     return items
 
 
+def save_fully_reviewed_editor_draft(
+    client: TestClient,
+    project: dict,
+    timeline: dict,
+    track_config: dict,
+    items: list[dict],
+) -> dict:
+    item_fields = {
+        "track_type", "sequence_number", "asset_id", "label", "gap_reason",
+        "source_in_ms", "source_out_ms", "timeline_in_ms", "timeline_out_ms", "transform",
+    }
+    draft_items = [
+        {
+            **{key: value for key, value in item.items() if key in item_fields},
+            "client_item_id": f"review-{item['track_type']}-{item['sequence_number']}",
+        }
+        for item in items
+    ]
+    all_check_ids = {
+        "subject", "motion", "eyeline", "jump-readable", "new-information",
+        "location-readable", "orientation", "outfit-readable", "reason", "change-readable",
+    }
+    main_items = sorted(
+        (item for item in draft_items if item["track_type"] == "main_video"),
+        key=lambda item: item["sequence_number"],
+    )
+    outcomes = {
+        f"{left['client_item_id']}-{right['client_item_id']}": {
+            check_id: "passed" for check_id in all_check_ids
+        }
+        for left, right in zip(main_items, main_items[1:])
+        if left.get("asset_id") and right.get("asset_id")
+    }
+    response = client.put(
+        f"/api/v1/projects/{project['id']}/editor-draft",
+        json={
+            "actor_id": "test-user",
+            "expected_snapshot_id": timeline["snapshot_id"],
+            "base_timeline_id": timeline["id"],
+            "base_timeline_row_version": timeline["row_version"],
+            "track_config": track_config,
+            "items": draft_items,
+            "playhead_ms": 0,
+            "continuity_outcomes": outcomes,
+            "continuity_issue_contexts": {},
+        },
+    )
+    assert response.status_code == 200
+    return response.json()
+
+
 def create_confirmed_timeline(
     client: TestClient,
     *,
@@ -6842,15 +6893,21 @@ def test_timeline_revision_freezes_snap_toggle_and_changes_contract_hash(client:
     )
     assert first_validated.status_code == 200
     first = first_validated.json()
+    revised_track_config = {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True}
+    revised_items = timeline_items_for_assets(video_assets)
+    reviewed_draft = save_fully_reviewed_editor_draft(
+        client, project, first, revised_track_config, revised_items,
+    )
     revised = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{first['id']}:revise",
         json={
             "command_id": "timeline-snap-revise-001",
             "expected_snapshot_id": snapshot["id"],
             "expected_row_version": first["row_version"],
+            "expected_editor_draft_row_version": reviewed_draft["row_version"],
             "source": "user",
-            "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
-            "items": timeline_items_for_assets(video_assets),
+            "track_config": revised_track_config,
+            "items": revised_items,
         },
     )
     assert revised.status_code == 201
@@ -6993,12 +7050,16 @@ def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
                 ],
             }
         revised_items.append(draft)
+    reviewed_draft = save_fully_reviewed_editor_draft(
+        client, project, validated.json(), timeline["track_config"], revised_items,
+    )
     revised = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:revise",
         json={
             "command_id": "editor-subtitle-cues-revise-01",
             "expected_snapshot_id": snapshot["id"],
             "expected_row_version": validated.json()["row_version"],
+            "expected_editor_draft_row_version": reviewed_draft["row_version"],
             "source": "user",
             "track_config": timeline["track_config"],
             "items": revised_items,
@@ -7021,12 +7082,16 @@ def test_editor_assistant_adds_the_exact_approved_voiceover_to_audio_track(
     invalid_items = json.loads(json.dumps(revised_items, ensure_ascii=False))
     invalid_subtitle = next(item for item in invalid_items if item["track_type"] == "subtitle")
     invalid_subtitle["transform"]["subtitle_cues"][1]["start_ms"] = 1500
+    reviewed_draft = save_fully_reviewed_editor_draft(
+        client, project, revised_validation.json(), timeline["track_config"], invalid_items,
+    )
     invalid_revision = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{revised.json()['id']}:revise",
         json={
             "command_id": "editor-subtitle-cues-revise-invalid-01",
             "expected_snapshot_id": snapshot["id"],
             "expected_row_version": revised_validation.json()["row_version"],
+            "expected_editor_draft_row_version": reviewed_draft["row_version"],
             "source": "user",
             "track_config": timeline["track_config"],
             "items": invalid_items,
@@ -7529,13 +7594,18 @@ def test_timeline_freezes_authorized_looping_bgm_ducking_and_mastering(client: T
     assert {row["code"] for row in invalid.json()["validation_report"]} >= {
         "BGM_RIGHTS_AUTHORIZATION_REQUIRED", "BGM_DUCKING_REGIONS_STALE",
     }
+    revised_items = [*timeline_items_for_assets(video_assets), *audio_items]
+    reviewed_draft = save_fully_reviewed_editor_draft(
+        client, project, invalid.json(), track_config, revised_items,
+    )
     revised = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{timeline['id']}:revise",
         json={
             "command_id": "timeline-bgm-revise-001", "expected_snapshot_id": snapshot["id"],
             "expected_row_version": invalid.json()["row_version"], "source": "user",
+            "expected_editor_draft_row_version": reviewed_draft["row_version"],
             "track_config": track_config,
-            "items": [*timeline_items_for_assets(video_assets), *audio_items],
+            "items": revised_items,
         },
     )
     assert revised.status_code == 201
@@ -7718,18 +7788,27 @@ def test_confirmed_timeline_revision_creates_new_version_without_mutating_items(
     )
     assert unlinked.status_code == 409
     assert unlinked.headers["x-error-code"] == "TIMELINE_REVISION_REQUIRED"
+    revised_items = list(reversed([
+        {**item, "sequence_number": len(items) - index}
+        for index, item in enumerate(items)
+    ]))
+    reviewed_draft = save_fully_reviewed_editor_draft(
+        client,
+        project,
+        first,
+        {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
+        revised_items,
+    )
     revised = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{first['id']}:revise",
         json={
             "command_id": "timeline-revision-create-002",
             "expected_snapshot_id": snapshot["id"],
             "expected_row_version": first["row_version"],
+            "expected_editor_draft_row_version": reviewed_draft["row_version"],
             "source": "user",
             "track_config": {"audio_enabled": False, "subtitle_enabled": False, "snap_enabled": True},
-            "items": list(reversed([
-                {**item, "sequence_number": len(items) - index}
-                for index, item in enumerate(items)
-            ])),
+            "items": revised_items,
         },
     )
     assert revised.status_code == 201
@@ -7868,6 +7947,7 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
         "timeline_out_ms": item["timeline_out_ms"],
         "transform": item["transform"],
     } for item in exported["items"]]
+    first_boundary_key = f"{draft_items[0]['client_item_id']}-{draft_items[1]['client_item_id']}"
     saved_draft = client.put(
         f"/api/v1/projects/{project['id']}/editor-draft",
         json={
@@ -7879,10 +7959,10 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
             "items": draft_items,
             "playhead_ms": 12_000,
             "continuity_outcomes": {
-                "item-left-item-right": {"motion": "needs_adjustment", "subject": "passed"},
+                first_boundary_key: {"motion": "needs_adjustment", "subject": "passed"},
             },
             "continuity_issue_contexts": {
-                "item-left-item-right": [{
+                first_boundary_key: [{
                     "check_id": "motion",
                     "check_label": "动作阶段与运动方向自然承接",
                     "mode": "action",
@@ -7894,10 +7974,10 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     assert saved_draft.json()["schema_version"] == "editor-draft-session.v2"
     assert saved_draft.json()["playhead_ms"] == 12_000
     assert saved_draft.json()["continuity_outcomes"] == {
-        "item-left-item-right": {"motion": "needs_adjustment", "subject": "passed"},
+        first_boundary_key: {"motion": "needs_adjustment", "subject": "passed"},
     }
     assert saved_draft.json()["continuity_issue_contexts"] == {
-        "item-left-item-right": [{
+        first_boundary_key: [{
             "check_id": "motion",
             "check_label": "动作阶段与运动方向自然承接",
             "mode": "action",
@@ -7905,21 +7985,60 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
     }
     assert client.get(f"/api/v1/projects/{project['id']}/editor-draft").json()["items"] == draft_items
 
-    revised = client.post(
+    stripped_draft_items = [
+        {key: value for key, value in item.items() if key != "client_item_id"}
+        for item in draft_items
+    ]
+    blocked_revision = client.post(
         f"/api/v1/projects/{project['id']}/timelines/{exported['id']}:revise",
         json={
             "command_id": "post-delivery-revision-001",
             "actor_id": "test-user",
             "expected_snapshot_id": snapshot["id"],
             "expected_row_version": exported["row_version"],
+            "expected_editor_draft_row_version": saved_draft.json()["row_version"],
             "source": "user",
             "track_config": exported["track_config"],
-            "items": [{key: value for key, value in item.items() if key != "client_item_id"} for item in draft_items],
+            "items": stripped_draft_items,
+        },
+    )
+    assert blocked_revision.status_code == 409
+    assert blocked_revision.headers["x-error-code"] == "TIMELINE_CONTINUITY_REVIEW_INCOMPLETE"
+    reviewed_draft = save_fully_reviewed_editor_draft(
+        client, project, exported, exported["track_config"], stripped_draft_items,
+    )
+    revised = client.post(
+        f"/api/v1/projects/{project['id']}/timelines/{exported['id']}:revise",
+        json={
+            "command_id": "post-delivery-revision-002",
+            "actor_id": "test-user",
+            "expected_snapshot_id": snapshot["id"],
+            "expected_row_version": exported["row_version"],
+            "expected_editor_draft_row_version": reviewed_draft["row_version"],
+            "source": "user",
+            "track_config": exported["track_config"],
+            "items": stripped_draft_items,
         },
     )
     assert revised.status_code == 201
     assert revised.json()["status"] == "candidate"
     assert revised.json()["supersedes_timeline_id"] == exported["id"]
+    assert revised.json()["continuity_review"]["schema_version"] == "timeline-continuity-review.v1"
+    assert revised.json()["continuity_review"]["boundary_count"] == 2
+    assert revised.json()["continuity_review_hash"]
+    assert revised.json()["continuity_review_hash"] == hashlib.sha256(
+        json.dumps(
+            revised.json()["continuity_review"],
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    assert all(
+        check["outcome"] == "passed"
+        for boundary in revised.json()["continuity_review"]["boundaries"]
+        for check in boundary["checks"]
+    )
     assert client.get(f"/api/v1/projects/{project['id']}/editor-draft").json() is None
     editor = client.get(f"/api/v1/projects/{project['id']}/editor-workspace").json()
     assert editor["project_status"] == "editing"

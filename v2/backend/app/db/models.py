@@ -391,6 +391,8 @@ class Timeline(Base):
     output_spec: Mapped[dict] = mapped_column(JSON)
     track_config: Mapped[dict] = mapped_column(JSON)
     validation_report: Mapped[list] = mapped_column(JSON, default=list)
+    continuity_review: Mapped[dict] = mapped_column(JSON, default=dict)
+    continuity_review_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     contract_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     row_version: Mapped[int] = mapped_column(Integer, default=1)
     created_by: Mapped[str] = mapped_column(String(48), default="local-user")

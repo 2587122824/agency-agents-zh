@@ -158,7 +158,7 @@ export function EditorPage() {
   })
   const save = useMutation({
     mutationFn: () => revisionBase
-      ? api.reviseTimelineCandidate(projectId, revisionBase, { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, snap_enabled: snapEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs, audio_mastering: { loudness_target_lufs: loudnessTargetLufs, true_peak_limit_dbtp: truePeakLimitDbtp, clipping_control: 'limiter' } }, draftItems)
+      ? Promise.reject(new Error('已有时间线版本必须进入正式剪辑台完成人工连续性检查后再生成修订。'))
       : api.createTimelineCandidate(projectId, workspace.data!.active_snapshot_id!, 'user', { audio_enabled: audioEnabled, subtitle_enabled: subtitleEnabled, snap_enabled: snapEnabled, pixels_per_second: pixelsPerSecond, snap_interval_ms: snapIntervalMs, audio_mastering: { loudness_target_lufs: loudnessTargetLufs, true_peak_limit_dbtp: truePeakLimitDbtp, clipping_control: 'limiter' } }, draftItems),
     onSuccess: async timeline => {
       setSelectedTimelineId(timeline.id)
@@ -231,19 +231,8 @@ export function EditorPage() {
     setLoudnessTargetLufs(-16)
     setTruePeakLimitDbtp(-1)
   }
-  const beginRevision = (timeline: Timeline) => {
-    setDraftMode('revision')
-    setSelectedTimelineId(timeline.id)
-    setDraftItems(timelineDraftItems(timeline))
-    setAudioEnabled(timeline.track_config.audio_enabled)
-    setSubtitleEnabled(timeline.track_config.subtitle_enabled)
-    setSnapEnabled(timeline.track_config.snap_enabled)
-    setPixelsPerSecond(timeline.track_config.pixels_per_second)
-    setSnapIntervalMs(timeline.track_config.snap_interval_ms)
-    setLoudnessTargetLufs(timeline.track_config.audio_mastering.loudness_target_lufs)
-    setTruePeakLimitDbtp(timeline.track_config.audio_mastering.true_peak_limit_dbtp)
-    setRevisionBase(timeline)
-    setSelectedDraftIndex(null)
+  const beginRevision = (_timeline: Timeline) => {
+    window.location.assign(`/editor?project=${projectId}`)
   }
   const addAsset = (asset: EditorAsset) => {
     if (draftMode === 'view' || !asset.duration_ms || asset.duration_ms <= 0) return
@@ -499,7 +488,7 @@ export function EditorPage() {
               {!workspace.data.timelines.length && <p>尚未创建时间线候选</p>}
               {workspace.data.timelines.map(timeline => <article key={timeline.id} data-selected={selectedTimeline?.id === timeline.id} onClick={() => { setDraftMode('view'); setSelectedTimelineId(timeline.id) }}>
                 <div><strong>v{timeline.version_number}</strong><em>{timelineStatusLabels[timeline.status]}</em><span>{timelineSourceLabels[timeline.source]}</span></div><small>{timeline.items.length} 个片段 · {timeline.contract_hash?.slice(0, 12) ?? '尚未校验'}</small>
-                <footer>{timeline.status === 'candidate' && <button className="secondaryButton" disabled={validate.isPending} onClick={event => { event.stopPropagation(); validate.mutate(timeline) }}>校验</button>}{timeline.status === 'review' && <button className="primaryButton" onClick={event => { event.stopPropagation(); setConfirming(timeline) }}><Check size={14} />确认合同</button>}{!['exported', 'superseded'].includes(timeline.status) && <button className="secondaryButton" onClick={event => { event.stopPropagation(); beginRevision(timeline) }}>创建修订</button>}</footer>
+                <footer>{timeline.status === 'candidate' && <button className="secondaryButton" disabled={validate.isPending} onClick={event => { event.stopPropagation(); validate.mutate(timeline) }}>校验</button>}{timeline.status === 'review' && <button className="primaryButton" onClick={event => { event.stopPropagation(); setConfirming(timeline) }}><Check size={14} />确认合同</button>}{!['exported', 'superseded'].includes(timeline.status) && <button className="secondaryButton" title="进入正式剪辑台完成人工连续性检查后创建修订" onClick={event => { event.stopPropagation(); beginRevision(timeline) }}>进入剪辑台修订</button>}</footer>
                 {timeline.validation_report.length > 0 && <div className={styles.validation}>{timeline.validation_report.map((row, index) => <p key={`${row.code}-${index}`}><AlertTriangle /><span><b>{row.code}</b>{row.message}</span></p>)}</div>}
               </article>)}
             </section>
