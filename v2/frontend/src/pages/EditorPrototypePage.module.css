@@ -1575,6 +1575,24 @@
 .boundaryPhaseScan > header > div { display: grid; grid-template-columns: repeat(2, 42px); gap: 3px; }
 .boundaryControl .boundaryPhaseScan > header button { min-width: 0; height: 25px; padding: 0 4px; font-size: 9px; }
 .boundaryControl .boundaryPhaseScan > header button[aria-pressed="true"] { border-color: #628394; background: #29414c; color: #eaf7fc; }
+.boundaryPhaseScan > .boundaryPhaseGuidance {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 6px;
+  border: 1px solid #5b756f;
+  border-radius: 4px;
+  background: #172522;
+}
+.boundaryPhaseGuidance > span { min-width: 0; display: grid; gap: 2px; }
+.boundaryPhaseGuidance strong { color: #d8e8e2; font-size: 9px; line-height: 1.35; overflow-wrap: anywhere; }
+.boundaryPhaseGuidance small { color: #91a9a1; font-size: 8px; line-height: 1.35; overflow-wrap: anywhere; }
+.boundaryControl .boundaryPhaseGuidanceContinue {
+  width: 100%;
+  height: 28px;
+  border-color: #526f68;
+  background: #20332e;
+  color: #c7ded5;
+  font-size: 8px;
+}
 .boundaryPhaseScan > div:not([role="group"]) { min-width: 0; display: grid; gap: 5px; }
 .boundaryPhaseScan > .boundaryPhaseReviewProgress { grid-template-columns: minmax(0, 1fr) 88px; align-items: center; padding: 5px; border: 1px solid #35434a; border-radius: 4px; background: #172126; }
 .boundaryPhaseReviewProgress > span { min-width: 0; display: grid; gap: 1px; }

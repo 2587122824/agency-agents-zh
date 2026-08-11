@@ -1553,6 +1553,8 @@ function BoundaryActionComparison({
   onApplyPhasePair,
   candidateReviewSessionKey,
   candidateReviewSession,
+  guidedScanRequest,
+  onConsumeGuidedScanRequest,
   onRememberCandidateMotionEvidence,
   onRememberCandidateComparisonOutcome,
   onNotice,
@@ -1578,6 +1580,8 @@ function BoundaryActionComparison({
   onApplyPhasePair: (leftDeltaMs: number, rightDeltaMs: number) => void
   candidateReviewSessionKey: string
   candidateReviewSession: BoundaryCandidateReviewSession
+  guidedScanRequest: { requestToken: number; issueLabel: string } | null
+  onConsumeGuidedScanRequest: (requestToken: number) => void
   onRememberCandidateMotionEvidence: (sessionKey: string, sourceKey: string, analysis: BoundaryMotionAnalysis) => void
   onRememberCandidateComparisonOutcome: (sessionKey: string, sourceKey: string, outcome: BoundaryCandidateComparisonOutcome) => void
   onNotice: (message: string) => void
@@ -1619,6 +1623,7 @@ function BoundaryActionComparison({
   const candidateComparisonOutcomes = candidateReviewSession.comparisonOutcomes
   const [phaseCandidateScanSide, setPhaseCandidateScanSide] = useState<'left' | 'right' | null>(null)
   const [phaseCandidateScanExpanded, setPhaseCandidateScanExpanded] = useState(false)
+  const [guidedIssueLabel, setGuidedIssueLabel] = useState<string | null>(null)
   const [pendingPhaseCandidateCompare, setPendingPhaseCandidateCompare] = useState<{ side: 'left' | 'right'; deltaMs: number } | null>(null)
   const leftBaseSourceInMs = left.source_in_ms ?? 0
   const leftBaseSourceOutMs = left.source_out_ms ?? leftBaseSourceInMs
@@ -1699,9 +1704,11 @@ function BoundaryActionComparison({
       candidateRightLaterMs,
     ].join(':')
   }, [frameStepMs, left.asset_id, left.id, leftBaseSourceInMs, leftBaseSourceOutMs, right.asset_id, right.id, rightBaseSourceInMs, rightBaseSourceOutMs])
+  const defaultPhaseCandidateFrameOffsets = [-2, -1, 1, 2]
+  const allPhaseCandidateFrameOffsets = [-4, -3, -2, -1, 1, 2, 3, 4]
   const phaseCandidateFrameOffsets = phaseCandidateScanExpanded
-    ? [-4, -3, -2, -1, 1, 2, 3, 4]
-    : [-2, -1, 1, 2]
+    ? allPhaseCandidateFrameOffsets
+    : defaultPhaseCandidateFrameOffsets
   const activePhaseCandidateSide = rollTrialDeltaMs === 0 && !transitionTrial
     ? leftPhaseDeltaMs !== 0 && rightPhaseDeltaMs === 0
       ? 'left'
@@ -1734,11 +1741,16 @@ function BoundaryActionComparison({
   const handleTunedPixelAnalysis = useCallback((analysis: BoundaryPixelAnalysis | null) => {
     setTunedPixelEvidence(analysis ? { sourceKey: tunedPixelSourceKey, analysis } : null)
   }, [tunedPixelSourceKey])
-  const allNearbyPhaseCandidates = [-4, -3, -2, -1, 1, 2, 3, 4]
+  const legalPhaseCandidatesForSide = (side: 'left' | 'right', frameOffsets: number[]) => frameOffsets
     .map(frameOffset => ({ frameOffset, deltaMs: frameOffset * frameStepMs }))
-    .filter(candidate => phaseCandidateScanSide === 'left'
+    .filter(candidate => side === 'left'
       ? candidate.deltaMs >= leftMinimumPhaseMs && candidate.deltaMs <= leftMaximumPhaseMs
       : candidate.deltaMs >= rightMinimumPhaseMs && candidate.deltaMs <= rightMaximumPhaseMs)
+  const leftDefaultPhaseCandidates = legalPhaseCandidatesForSide('left', defaultPhaseCandidateFrameOffsets)
+  const rightDefaultPhaseCandidates = legalPhaseCandidatesForSide('right', defaultPhaseCandidateFrameOffsets)
+  const allNearbyPhaseCandidates = phaseCandidateScanSide
+    ? legalPhaseCandidatesForSide(phaseCandidateScanSide, allPhaseCandidateFrameOffsets)
+    : []
   const nearbyPhaseCandidates = allNearbyPhaseCandidates.filter(candidate => phaseCandidateScanExpanded || Math.abs(candidate.frameOffset) <= 2)
   const expandablePhaseCandidateCount = allNearbyPhaseCandidates.filter(candidate => Math.abs(candidate.frameOffset) > 2).length
   const reviewedPhaseCandidateCount = phaseCandidateScanSide
@@ -1763,6 +1775,10 @@ function BoundaryActionComparison({
     ? nearbyPhaseCandidates.find(candidate => candidateComparisonOutcomes[candidateMotionSourceKey(phaseCandidateScanSide, candidate.deltaMs)] === 'shortlisted') ?? null
     : null
   const nextReviewPhaseCandidate = nextUnreviewedPhaseCandidate ?? nextUndecidedPhaseCandidate ?? nextShortlistedPhaseCandidate
+  const otherGuidedScanSide = phaseCandidateScanSide === 'left' ? 'right' : 'left'
+  const otherGuidedScanCandidateCount = phaseCandidateScanSide === 'left'
+    ? rightDefaultPhaseCandidates.length
+    : leftDefaultPhaseCandidates.length
   const phaseCandidateElementId = (side: 'left' | 'right', frameOffset: number) => `phase-candidate-${left.id}-${right.id}-${side}-${frameOffset}`
   const isPhaseCandidateSelected = (side: 'left' | 'right', deltaMs: number) => side === 'left'
     ? leftPhaseDeltaMs === deltaMs && rightPhaseDeltaMs === 0
@@ -1781,6 +1797,7 @@ function BoundaryActionComparison({
     candidateElement?.focus({ preventScroll: true })
     candidateElement?.scrollIntoView({ block: 'nearest' })
   }
+
   const comparisonDurationMs = Math.max(0, Math.min(
     beforeMs,
     afterMs,
@@ -1927,6 +1944,20 @@ function BoundaryActionComparison({
     rightBaseSourceInMs,
     rightBaseSourceOutMs,
   ])
+
+  useEffect(() => {
+    if (!guidedScanRequest) return
+    const preferredSide = leftDefaultPhaseCandidates.length > 0
+      ? 'left'
+      : rightDefaultPhaseCandidates.length > 0 ? 'right' : null
+    setGuidedIssueLabel(guidedScanRequest.issueLabel)
+    setPhaseCandidateScanSide(preferredSide)
+    setPhaseCandidateScanExpanded(false)
+    onNotice(preferredSide
+      ? `正在处理“${guidedScanRequest.issueLabel}”；已自动打开${preferredSide === 'left' ? '前镜' : '后镜'} ±2 帧内的合法候选，不排序、不推荐。`
+      : `正在处理“${guidedScanRequest.issueLabel}”；当前切点两侧在 ±2 帧内都没有合法源窗口候选。`)
+    onConsumeGuidedScanRequest(guidedScanRequest.requestToken)
+  }, [guidedScanRequest, leftDefaultPhaseCandidates.length, onConsumeGuidedScanRequest, onNotice, rightDefaultPhaseCandidates.length])
 
   useEffect(() => {
     setSequenceLeftEvidenceKey(null)
@@ -2543,6 +2574,15 @@ function BoundaryActionComparison({
           >后镜</button>
         </div>
       </header>
+      {guidedIssueLabel && <div className={styles.boundaryPhaseGuidance} role="status">
+        <span>
+          <strong>正在处理：{guidedIssueLabel}</strong>
+          <small>{phaseCandidateScanSide
+            ? `已打开${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'} ${phaseCandidateScanSide === 'left' ? leftDefaultPhaseCandidates.length : rightDefaultPhaseCandidates.length} 个 ±2 帧合法候选。`
+            : '当前两侧在 ±2 帧内都没有合法源窗口候选。'}</small>
+        </span>
+        <small>只跳过没有合法候选的一侧；不排序、不推荐，也不会自动设置 B、播放或采用。</small>
+      </div>}
       {phaseCandidateScanSide && <>
         <div className={styles.boundaryPhaseReviewProgress} aria-label={`${phaseCandidateScanSide === 'left' ? '前镜' : '后镜'}邻帧候选对照进度`}>
           <span>
@@ -2563,6 +2603,11 @@ function BoundaryActionComparison({
                   ? '复看下一个待复看'
                   : '本侧候选已处理完'}</button>
         </div>
+        {guidedIssueLabel && !nextReviewPhaseCandidate && !hasComparisonTrial && otherGuidedScanCandidateCount > 0 && <button
+          type="button"
+          className={styles.boundaryPhaseGuidanceContinue}
+          onClick={() => togglePhaseCandidateScan(otherGuidedScanSide)}
+        >继续检查{otherGuidedScanSide === 'left' ? '前镜' : '后镜'}候选（{otherGuidedScanCandidateCount}）</button>}
         {!phaseCandidateScanExpanded && expandablePhaseCandidateCount > 0 && <div className={styles.boundaryPhaseScanExpansion}>
           <span><strong>近邻仍不顺？</strong><small>可再挂载 {expandablePhaseCandidateCount} 个 ±3/±4 帧合法候选。</small></span>
           <button
@@ -2944,6 +2989,12 @@ export function EditorPrototypePage() {
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
   const [boundaryFrameStripKey, setBoundaryFrameStripKey] = useState<string | null>(null)
   const [boundaryActionComparisonKey, setBoundaryActionComparisonKey] = useState<string | null>(null)
+  const [boundaryCandidateGuidanceRequest, setBoundaryCandidateGuidanceRequest] = useState<{
+    boundaryKey: string
+    checkId: string
+    checkLabel: string
+    requestToken: number
+  } | null>(null)
   const [boundaryCandidateReviewSessions, setBoundaryCandidateReviewSessions] = useState<Record<string, BoundaryCandidateReviewSession>>({})
   const rememberBoundaryCandidateMotionEvidence = useCallback((
     sessionKey: string,
@@ -3103,6 +3154,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
     setBoundaryActionComparisonKey(null)
+    setBoundaryCandidateGuidanceRequest(null)
     setPendingBoundaryPreviewKey(null)
     setBoundaryRollMonitor(null)
     setBoundaryFrameBlendPercent(50)
@@ -4264,6 +4316,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameOverlayKey(mode === 'overlay' ? target.key : null)
     setBoundaryFrameStripKey(null)
     setBoundaryActionComparisonKey(mode === 'action' ? target.key : null)
+    setBoundaryCandidateGuidanceRequest(null)
     return target
   }
 
@@ -4293,6 +4346,14 @@ export function EditorPrototypePage() {
         ...current,
         [target.key]: mergeBoundaryContinuityIssueContexts(current[target.key] ?? [], additions),
       }))
+      if (mode === 'action') {
+        setBoundaryCandidateGuidanceRequest(current => ({
+          boundaryKey: target.key,
+          checkId: firstAdjustment.id,
+          checkLabel: firstAdjustment.label,
+          requestToken: (current?.requestToken ?? 0) + 1,
+        }))
+      }
     }
     setNotice(firstAdjustment
       ? `已定位待调整项“${firstAdjustment.label}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}。`
@@ -4319,6 +4380,14 @@ export function EditorPrototypePage() {
       ...current,
       [target.key]: mergeBoundaryContinuityIssueContexts(current[target.key] ?? [], additions),
     }))
+    if (mode === 'action' && boundaryContinuityOutcomes[target.key]?.[checkId] === 'needs_adjustment') {
+      setBoundaryCandidateGuidanceRequest(current => ({
+        boundaryKey: target.key,
+        checkId,
+        checkLabel,
+        requestToken: (current?.requestToken ?? 0) + 1,
+      }))
+    }
     setNotice(`正在处理“${checkLabel}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}，不会自动修改切点。`)
   }
 
@@ -4727,6 +4796,7 @@ export function EditorPrototypePage() {
     setBoundaryFrameOverlayKey(null)
     setBoundaryFrameStripKey(null)
     setBoundaryActionComparisonKey(null)
+    setBoundaryCandidateGuidanceRequest(null)
     setBoundaryFocusKey(null)
     setBoundaryReviewSession(null)
     setPendingBoundaryPreviewKey(null)
@@ -7558,6 +7628,15 @@ export function EditorPrototypePage() {
                          onApplyPhasePair={(leftDeltaMs, rightDeltaMs) => slipBoundaryPair(left, right, leftDeltaMs, rightDeltaMs, boundaryKey)}
                          candidateReviewSessionKey={candidateReviewSessionKey}
                          candidateReviewSession={candidateReviewSession}
+                         guidedScanRequest={boundaryCandidateGuidanceRequest?.boundaryKey === boundaryKey
+                           ? {
+                             requestToken: boundaryCandidateGuidanceRequest.requestToken,
+                             issueLabel: boundaryCandidateGuidanceRequest.checkLabel,
+                           }
+                           : null}
+                         onConsumeGuidedScanRequest={requestToken => setBoundaryCandidateGuidanceRequest(current => (
+                           current?.requestToken === requestToken ? null : current
+                         ))}
                          onRememberCandidateMotionEvidence={rememberBoundaryCandidateMotionEvidence}
                          onRememberCandidateComparisonOutcome={rememberBoundaryCandidateComparisonOutcome}
                          onNotice={setNotice}
