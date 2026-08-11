@@ -1903,23 +1903,61 @@
 .boundaryPixelAnalysis > div code { color: #d0dbd7; }
 .boundaryPixelAnalysis small { color: #78857f; line-height: 1.4; }
 .continuityChecklist { display: grid; gap: 4px; }
-.boundaryControl .continuityChecklist button {
-  width: 100%;
-  height: auto;
-  min-height: 30px;
-  padding: 5px 7px;
-  justify-content: flex-start;
-  text-align: left;
-  line-height: 1.35;
+.continuityCheckRow {
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid #3d4542;
+  border-radius: 4px;
+  background: #171c1a;
+}
+.continuityCheckRow > div:first-child {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 5px;
   color: #aeb8b3;
+  line-height: 1.35;
 }
-.boundaryControl .continuityChecklist button svg { flex: 0 0 auto; color: #66716c; }
-.boundaryControl .continuityChecklist button[data-checked="true"] {
-  border-color: #3f6958;
-  background: #263b33;
-  color: #d5e8df;
+.continuityCheckRow > div:first-child svg { width: 12px; height: 12px; margin-top: 1px; }
+.continuityCheckRow > div:first-child em { color: #7f8984; font-style: normal; white-space: nowrap; }
+.continuityCheckRow[data-status="passed"] { border-color: #3f6958; background: #1d2b25; }
+.continuityCheckRow[data-status="passed"] > div:first-child svg,
+.continuityCheckRow[data-status="passed"] > div:first-child em { color: #73c49e; }
+.continuityCheckRow[data-status="needs_adjustment"] { border-color: #765548; background: #2b1d19; }
+.continuityCheckRow[data-status="needs_adjustment"] > div:first-child svg,
+.continuityCheckRow[data-status="needs_adjustment"] > div:first-child em { color: #e09a7f; }
+.continuityOutcomeButtons {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
 }
-.boundaryControl .continuityChecklist button[data-checked="true"] svg { color: #73c49e; fill: #294f3e; }
+.boundaryControl .continuityOutcomeButtons button {
+  width: 100%;
+  height: 24px;
+  padding: 0 2px;
+  color: #838e89;
+  font-size: 8px;
+  white-space: nowrap;
+}
+.boundaryControl .continuityOutcomeButtons button[aria-pressed="true"] {
+  border-color: #65726c;
+  background: #343d39;
+  color: #eef2f0;
+}
+.continuityCheckRow[data-status="passed"] .continuityOutcomeButtons button[aria-pressed="true"] {
+  border-color: #4f806b;
+  background: #2b483b;
+  color: #d7eee3;
+}
+.continuityCheckRow[data-status="needs_adjustment"] .continuityOutcomeButtons button[aria-pressed="true"] {
+  border-color: #94624e;
+  background: #553126;
+  color: #f2c4b1;
+}
 .continuityChecklist small { color: #7f8984; line-height: 1.4; }
 .inspector label {
   margin-top: 7px;

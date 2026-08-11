@@ -309,7 +309,9 @@ SQLite 目前适用于本地单用户阶段。Repository 已隔离持久层，�
 
 浏览器验收以普通切点导航完成后的 `row_version=236 / playhead_ms=5118 / PUT=1` 为前置快照；点击待办并等待 1.4 秒自动保存窗口后，三项值及 `updated_at` 完全不变。同步动作 region 为 1、扫描侧 pressed 为 0、B disabled、13 个媒体全部暂停，证明只读 focus 没有借由既有 autosave effect 产生隐式写入。
 
-人工连续性全局进度同样从当前 `mainBoundaries` 同步派生，只纳入双方 Asset 都存在的边界。每个边界重新解析双方正式分镜序号；正式相邻时按右镜 `continuity_relation` 读取 `CONTINUITY_CHECKS`，否则读取 `GENERAL_CONTINUITY_CHECKS`。完成数只计算仍存在于当前 checks 数组的 ID，旧关系下的页面勾选不能抬高新关系进度。未完成队列保持 boundary index 顺序并循环选择下一个；定位复用 `focusBoundaryForReviewAt(..., 'frames')`，而候选待办复用同一函数的 `action` 模式。两者共享媒体停止和迟到回调门禁，但 frames 模式显式卸载同步动作媒体，且都不修改 `playheadMs` 或 autosave 指纹。
+人工连续性页面态使用 `Record<boundaryKey, Record<checkId, 'passed' | 'needs_adjustment'>>`；缺少 check ID 即“未检查”，不把未检查和失败压成同一个布尔值。全局进度从当前 `mainBoundaries` 同步派生，只纳入双方 Asset 都存在的边界。每个边界重新解析双方正式分镜序号；正式相邻时按右镜 `continuity_relation` 读取 `CONTINUITY_CHECKS`，否则读取 `GENERAL_CONTINUITY_CHECKS`。派生层只读取当前 checks 数组中的 ID，分别累计 passed、needs-adjustment 与 unreviewed；只有 required checks 全部 passed 的边界计入通过数，后两类任一非零都保留在 unresolved 队列。旧关系下的页面结果不能抬高新关系进度。
+
+unresolved 队列保持 boundary index 顺序并循环选择下一个；定位复用 `focusBoundaryForReviewAt(..., 'frames')`，而候选待办复用同一函数的 `action` 模式。两者共享媒体停止和迟到回调门禁，但 frames 模式显式卸载同步动作媒体，且都不修改 `playheadMs` 或 autosave 指纹。三态按钮只更新上述页面 map；选择“未检查”会删除该 check ID，边界 map 为空时再删除 boundary key。结构编辑沿用现有受影响 key 过滤/删除逻辑，因此不需要后端合同、迁移、运行时旧数据兼容、草稿字段或保存 effect。
 
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 

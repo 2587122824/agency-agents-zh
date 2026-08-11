@@ -491,6 +491,12 @@ A/B 决策门禁已从“候选快捷操作等待像素”收紧为统一的当�
 
 提交 `213cd2db` 推送到 `main` 后使用标准脚本重启 8766：API PID `37204`、Worker PID `24392`，进程创建时间分别为 2026-08-09 17:50:56.927 / 17:50:56.943。`GET /api/v1/health` 返回 `ok`，8766 监听 PID 精确等于 API PID，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有三次健康检查 200，`api.err.log` 只有 Uvicorn 正常启动信息，`worker.out.log / worker.err.log` 为空，标准四份日志均无实际错误。
 
+### 人工连续性三态结果与待处理队列
+
+`EditorPrototypePage` 的人工连续性结果由 `Record<string, string[]>` 改为边界、检查项两级 map，值只允许 `passed | needs_adjustment`，缺失值表示未检查。渲染时仍根据当前正式相邻关系选择三项关系清单，否则使用通用清单；所有统计先以当前清单过滤 ID，再派生边界级 `passedCount / needsAdjustmentCount / unreviewedCount / unresolvedCount`。边界仅在 `unresolvedCount === 0` 时计为通过；全局“下一个待处理”对 unresolved 边界按既有时间线 index 循环。
+
+每项使用三个显式 `aria-pressed` 按钮，避免通过重复点击暗中清除结论。结果卡用 `data-status=unreviewed|passed|needs_adjustment` 提供确定性窄栏样式，三个按钮使用可收缩等宽网格；状态文字、图标、单边界摘要和全局摘要共享同一 render-time 派生，不保存第二份计数。所有结构修改入口继续按 boundary key 清理 map，待办定位继续复用只读 frames focus，因此三态结果不进入自动保存、撤销、API、Timeline、EditorDraftSession、数据库迁移或 FFmpeg。
+
 ## 8. 事件
 
 ```text
