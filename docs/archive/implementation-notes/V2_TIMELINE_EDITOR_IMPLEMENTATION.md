@@ -563,6 +563,8 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 history 恢复使用已经计算出的 changed boundary key 集合排队，不重新推测影响范围。pending effect 在更新后的时间线上查找 key、过滤缺少双侧素材的边界并按 index 排序，随后复用 `boundaryReviewSession` 的切前/切后窗口、速度、跨媒体推进和结束门禁。scope 只增加 history 文案分支；零合法切点不创建播放会话，多切点依次播放，用户可显式停止。人工结果恢复与媒体试听仍为两条独立职责。
 
+真实验收先用单边界 fade undo/redo 证明 `history 1/1` 与 needs/recheck 同步恢复、完成后媒体停止。随后临时补入 SH-003.video，把 SH-001 源窗后移一帧同时改变两边指纹；undo 和 redo 均观测到 `1/2 SH-002→SH-001`、`2/2 SH-001→SH-003.video` 及“已播放 2 个切点”。最终 undo 源窗并中止试听，再 undo 临时补片，pending 只含已删除 key，安全提示不播放。提交 `32e2eccf` 已推送；完整验证 `305 passed in 162.05s`、compileall、Vite build、diff check。最终 API `18332` / Worker `31200`，创建时间 `2026-08-11 12:14:52.317 / 12:14:52.336`，健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误；草稿 `row_version=272 / updated_at=2026-08-11T04:14:12.034501 / playhead_ms=0 / SH-001 0..409ms / 原缺口`，最终周期 editor-draft PUT 为 0。
+
 ## 8. 事件
 
 ```text
