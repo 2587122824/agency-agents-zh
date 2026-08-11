@@ -6578,8 +6578,10 @@ export function EditorPrototypePage() {
                        }
                        return <div className={styles.continuityCheckRow} data-status={status} key={check.id}>
                          <div>
-                           {status === 'passed' ? <CheckCircle2 /> : status === 'needs_adjustment' ? <AlertTriangle /> : null}
-                           <span>{check.label}</span>
+                           <span className={styles.continuityCheckIcon} aria-hidden="true">
+                             {status === 'passed' ? <CheckCircle2 /> : status === 'needs_adjustment' ? <AlertTriangle /> : null}
+                           </span>
+                           <span className={styles.continuityCheckLabel}>{check.label}</span>
                            <em>{status === 'passed' ? '通过' : status === 'needs_adjustment' ? '需调整' : '未检查'}</em>
                          </div>
                          <div className={styles.continuityOutcomeButtons} role="group" aria-label={`${check.label}的检查结果`}>

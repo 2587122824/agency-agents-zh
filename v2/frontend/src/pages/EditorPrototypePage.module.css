@@ -1921,8 +1921,9 @@
   color: #aeb8b3;
   line-height: 1.35;
 }
-.continuityCheckRow > div:first-child svg { width: 12px; height: 12px; margin-top: 1px; }
-.continuityCheckRow > div:first-child span { min-width: 0; overflow-wrap: anywhere; }
+.continuityCheckIcon { width: 12px; height: 12px; margin-top: 1px; }
+.continuityCheckIcon svg { width: 12px; height: 12px; }
+.continuityCheckLabel { min-width: 0; overflow-wrap: anywhere; }
 .continuityCheckRow > div:first-child em { color: #7f8984; font-style: normal; white-space: nowrap; }
 .continuityCheckRow[data-status="passed"] { border-color: #3f6958; background: #1d2b25; }
 .continuityCheckRow[data-status="passed"] > div:first-child svg,
