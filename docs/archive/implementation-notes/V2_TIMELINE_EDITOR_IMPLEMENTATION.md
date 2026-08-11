@@ -557,6 +557,8 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 完整 map 快照仍保留用于历史证据，但恢复改为先比较两版主画面边界指纹。指纹只包含该切点左右两条的身份、素材、源窗、时间线区间、fit，以及前镜 out / 后镜 in 转场；边界新增、删除或任一合同值变化才进入恢复 key 集合。两张连续性 map 分别只对这些 key 应用历史值，其他切点在该编辑之后产生的人工结果保持当前值。该逻辑同样覆盖 structural reset 的精确恢复，不增加持久化或旧历史兼容分支。
 
+真实验收临时补入 SH-003.video 形成两个有效切点：第一切点 motion needs → SH-001 入场 `fade:204` → recheck；第二切点随后 subject passed。undo 第一转场只恢复第一切点 `cut:0 / needs 1 / handling 1`，第二切点仍 `passed 1`；redo 第一切点回到 fade/recheck，第二切点仍不变。最终依次 undo 转场、清空两边 outcome/context、undo 临时补片并归零，草稿恢复 SH-002 → SH-001 → 9.9s 缺口。提交 `1937f0f4` 已推送，完整验证 `305 passed in 162.26s`、compileall、Vite build、diff check；最终 API `47496` / Worker `45484`，创建时间 `2026-08-11 11:59:17.060 / 11:59:17.077`，健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误。草稿 `row_version=265 / updated_at=2026-08-11T03:58:22.871473 / playhead_ms=0 / SH-001 0..409ms / cut:0`，最终周期 editor-draft PUT 为 0。
+
 ## 8. 事件
 
 ```text
