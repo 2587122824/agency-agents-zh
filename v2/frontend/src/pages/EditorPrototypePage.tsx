@@ -4315,21 +4315,33 @@ export function EditorPrototypePage() {
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
     setBoundaryPreviewSession(null)
+    const targetMainIndex = mainItems.findIndex(item => item.id === target.id)
+    const reachableBoundaryKeys = new Set<string>()
+    for (let index = targetMainIndex; index >= 0 && index < mainItems.length - 1; index += 1) {
+      const left = mainItems[index]
+      const right = mainItems[index + 1]
+      if (!left.asset_id || !right.asset_id) break
+      reachableBoundaryKeys.add(`${left.id}-${right.id}`)
+    }
+    const observationBoundaries = mainBoundaries.flatMap(boundary => {
+      if (!reachableBoundaryKeys.has(boundary.key)) return []
+      const evidence = boundarySequentialObservationEvidence(boundary.left, boundary.right, 1000, 1000, 1)
+      if (!evidence || playbackStartMs > boundary.left.timeline_out_ms - evidence.left_context_ms) return []
+      return [{
+        boundaryKey: boundary.key,
+        boundaryFingerprint: continuityBoundaryFingerprint(boundary.left, boundary.right),
+        boundaryMs: boundary.left.timeline_out_ms,
+        evidence,
+        status: 'pending' as const,
+      }]
+    })
     timelinePlaybackObservationRef.current = {
-      boundaries: mainBoundaries.flatMap(boundary => {
-        if (!boundary.left.asset_id || !boundary.right.asset_id) return []
-        const evidence = boundarySequentialObservationEvidence(boundary.left, boundary.right, 1000, 1000, 1)
-        if (!evidence || playbackStartMs > boundary.left.timeline_out_ms - evidence.left_context_ms) return []
-        return [{
-          boundaryKey: boundary.key,
-          boundaryFingerprint: continuityBoundaryFingerprint(boundary.left, boundary.right),
-          boundaryMs: boundary.left.timeline_out_ms,
-          evidence,
-          status: 'pending' as const,
-        }]
-      }),
+      boundaries: observationBoundaries,
     }
     setPlaying(true)
+    setNotice(observationBoundaries.length > 0
+      ? `正在预览时间线：当前连续可播放范围内有 ${observationBoundaries.length} 个切点可形成 1× 完整上下文观察。`
+      : '正在预览时间线：当前起播位置到下一缺口或结尾前没有可形成完整上下文观察的切点。')
   }
 
   const previewBoundary = (left: TimelineItem, right: TimelineItem, loop = false) => {
@@ -6379,6 +6391,9 @@ export function EditorPrototypePage() {
             'action-sequence-realtime-context',
             candidate.evidence,
           )
+          const recordedCount = timelinePlaybackObservationRef.current.boundaries
+            .filter(boundary => boundary.status === 'recorded').length
+          setNotice(`时间线预览进行中：已记录 ${recordedCount}/${timelinePlaybackObservationRef.current.boundaries.length} 个切点的 1× 完整上下文顺序观察。`)
         }
       }
       if (boundaryPreviewEndMs != null && timelinePosition >= boundaryPreviewEndMs - boundaryLeadMs) {

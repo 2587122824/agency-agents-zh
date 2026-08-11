@@ -393,3 +393,5 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 候选范围扩展只增加一个组件内布尔页面态。默认偏移数组为 `[-2,-1,1,2]`；用户显式扩展后切换为 `[-4,-3,-2,-1,1,2,3,4]`，再统一经过既有素材把手过滤。扩展入口只在过滤后确有 `abs(offset)>2` 的候选且 `hasComparisonTrial=false` 时可用；切侧、收起或基础边界依赖变化会复位范围，不清除仍有效的 exact-key 缓存。额外候选各自复用现有 `BoundaryPixelProbe`，动作证据仍只在候选成为当前 B 后由主探针产生，因此没有后台动作扫描、指标排序、推荐、自动播放、草稿字段、API 或迁移。
 
 候选快速导航不引入 React state。父组件对每个当前合法候选同步调用现有 exact-key 派生：当前单侧 delta 优先投影为 `当前 B`，其后依次读取 `kept_baseline / shortlisted / completed`，没有人工结果但存在动作记忆时为 `已实测`，否则为 `未看`。稳定 DOM ID 由双方 item ID、扫描侧和整数帧偏移组成；点击只执行 `focus({preventScroll:true}) + scrollIntoView({block:'nearest'})`。候选卡通过 `tabIndex=-1` 接受程序化焦点，导航按钮用 `aria-controls` 绑定目标。CSS sticky 只以 Inspector 为滚动容器、以候选扫描 section 为约束范围固定导航，候选卡的 scroll margin 为工具条预留定位空间；没有额外滚动监听、observer 或布局 state。该路径不调用 `selectPhaseCandidate`、播放状态机、证据回调、保存或排序逻辑。
+
+普通时间线播放的页面级观察 ref 只冻结当前连续可达链。`togglePlayback` 先从实际目标条目在 `mainItems` 中的位置向后遍历，只有相邻两项都具备画面素材时才登记稳定 boundary key；遇到第一个显式 gap 立即结束遍历。随后再与 `mainBoundaries` 求交，并执行完整上下文、起播位置和 fingerprint 门禁。RAF 每登记一项就从同一冻结数组派生 `recorded/total` 进度；缺口或终点仍由 `advancePlayback` 结束会话。该范围收敛不进入 React 持久状态、EditorDraftSession、Timeline、API、数据库迁移或 FFmpeg。
