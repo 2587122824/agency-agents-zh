@@ -343,6 +343,8 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 
 真实 motion 源窗修改验证三部分快照对称恢复：修改后 SH-001 `42..451ms / recheck`，undo 为 `0..409ms / needs-adjustment+handling`，redo 再为 `42..451ms / recheck`。功能提交 `3354a27d` 推送后最终草稿为 `row_version=256 / playhead_ms=0 / SH-001 0..409ms`；标准重启 API `43548` / Worker `15872`，健康、迁移和日志通过，最终服务周期没有 editor-draft PUT。
 
+历史恢复不再整表替换两张连续性 map。`continuityBoundaryFingerprints` 从每版主画面生成稳定 boundary key → 视觉合同指纹；左侧只纳入其 `transition_out`，右侧只纳入其 `transition_in`，避免一个中间片段属于前一边界的入场参数误污染后一边界。undo/redo 对两版指纹取并集差异，再由 `restoreBoundaryStateForKeys` 仅覆盖或删除这些 key；无差异时返回原 map 引用。结构变化产生的旧/新 key、源窗、成片区间与适配变化仍会被纳入，音频编辑或无关切点不会触碰连续性结果。
+
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 
 修正后从 `playhead_ms=0` 重新加载真实页面并点击连续性待办，等待 1.4 秒后草稿的 row version、播放头与 updated_at 三项完全不变，重启后的 API 日志仍无 editor-draft PUT。DOM 同时证明 frames 已展开、并排模式 pressed、同步动作未挂载、所有媒体暂停；三项 checkbox 全部切换为 true 后只更新页面进度，后端草稿仍不变化。

@@ -462,6 +462,54 @@ function mergeBoundaryContinuityIssueContexts(
   return merged
 }
 
+function continuityBoundaryFingerprints(items: TimelineItem[]) {
+  const mainItems = items.filter(item => item.track_type === 'main_video')
+  const itemFingerprint = (item: TimelineItem, side: 'left' | 'right') => {
+    const transition = item.transform[side === 'left' ? 'transition_out' : 'transition_in'] as {
+      type?: string
+      duration_ms?: number
+    } | undefined
+    return [
+      item.id,
+      item.asset_id,
+      item.source_in_ms,
+      item.source_out_ms,
+      item.timeline_in_ms,
+      item.timeline_out_ms,
+      item.transform.fit,
+      transition?.type ?? 'cut',
+      transition?.duration_ms ?? 0,
+    ]
+  }
+  return new Map(mainItems.slice(0, -1).map((left, index) => {
+    const right = mainItems[index + 1]
+    return [`${left.id}-${right.id}`, JSON.stringify([
+      itemFingerprint(left, 'left'),
+      itemFingerprint(right, 'right'),
+    ])]
+  }))
+}
+
+function changedContinuityBoundaryKeys(beforeItems: TimelineItem[], afterItems: TimelineItem[]) {
+  const before = continuityBoundaryFingerprints(beforeItems)
+  const after = continuityBoundaryFingerprints(afterItems)
+  return new Set([...before.keys(), ...after.keys()].filter(key => before.get(key) !== after.get(key)))
+}
+
+function restoreBoundaryStateForKeys<T>(
+  current: Record<string, T>,
+  snapshot: Record<string, T>,
+  keys: Set<string>,
+) {
+  if (keys.size === 0) return current
+  const next = { ...current }
+  for (const key of keys) {
+    if (snapshot[key] !== undefined) next[key] = snapshot[key]
+    else delete next[key]
+  }
+  return next
+}
+
 function normalizeContinuityRelation(value: string | undefined): ContinuityRelation {
   return value && value in CONTINUITY_RELATION_COPY ? value as ContinuityRelation : 'same_moment'
 }
@@ -4165,11 +4213,20 @@ export function EditorPrototypePage() {
     setPendingBoundaryReview(null)
     const previous = history[history.length - 1]
     if (!previous) return
+    const affectedBoundaryKeys = changedContinuityBoundaryKeys(items, previous.items)
     setFuture(rows => [historySnapshot(items), ...rows].slice(0, 50))
     setHistory(rows => rows.slice(0, -1))
     setItems(previous.items)
-    setBoundaryContinuityOutcomes(previous.boundaryContinuityOutcomes)
-    setBoundaryContinuityIssueContexts(previous.boundaryContinuityIssueContexts)
+    setBoundaryContinuityOutcomes(current => restoreBoundaryStateForKeys(
+      current,
+      previous.boundaryContinuityOutcomes,
+      affectedBoundaryKeys,
+    ))
+    setBoundaryContinuityIssueContexts(current => restoreBoundaryStateForKeys(
+      current,
+      previous.boundaryContinuityIssueContexts,
+      affectedBoundaryKeys,
+    ))
     setDirty(true)
     setSelectedIndex(index => Math.min(index, Math.max(0, previous.items.length - 1)))
     setNotice('已撤销上一步本地剪辑操作；相关人工连续性结果也已恢复。')
@@ -4186,11 +4243,20 @@ export function EditorPrototypePage() {
     setPendingBoundaryReview(null)
     const next = future[0]
     if (!next) return
+    const affectedBoundaryKeys = changedContinuityBoundaryKeys(items, next.items)
     setHistory(rows => [...rows.slice(-49), historySnapshot(items)])
     setFuture(rows => rows.slice(1))
     setItems(next.items)
-    setBoundaryContinuityOutcomes(next.boundaryContinuityOutcomes)
-    setBoundaryContinuityIssueContexts(next.boundaryContinuityIssueContexts)
+    setBoundaryContinuityOutcomes(current => restoreBoundaryStateForKeys(
+      current,
+      next.boundaryContinuityOutcomes,
+      affectedBoundaryKeys,
+    ))
+    setBoundaryContinuityIssueContexts(current => restoreBoundaryStateForKeys(
+      current,
+      next.boundaryContinuityIssueContexts,
+      affectedBoundaryKeys,
+    ))
     setDirty(true)
     setSelectedIndex(index => Math.min(index, Math.max(0, next.items.length - 1)))
     setNotice('已恢复下一步本地剪辑操作；相关人工连续性结果也已随编辑重现。')
