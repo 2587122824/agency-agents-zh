@@ -551,6 +551,8 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 历史元素改为 `EditorHistorySnapshot`，同时保存条目、人工结果 map 和多问题 context map。统一提交与四处直接写历史的指针手势全部捕获编辑前快照；撤销先保存编辑后完整快照再恢复三部分，重做反向执行。由此修改产生的 recheck 在 undo 后回到原 needs-adjustment/handling，redo 再回到 recheck，不会把已撤销的修改错误投影成仍待复检。候选审核记忆、播放状态和后端草稿合同不进入这次历史扩展。
 
+真实验收链为：motion needs → 同步动作 → SH-001 源窗 `0..409 → 42..451ms` 与 `recheck 1`；undo → `0..409ms / needs 1 / handling 1`；redo → `42..451ms / recheck 1`；最终 undo 并清理页面结果 → `0..409ms / 三项未检查 / playhead 0`。Inspector `244/244`、html/body `1280/1280`，页面日志为空。提交 `3354a27d` 已推送；完整验证 `305 passed in 162.45s`、compileall、Vite build、diff check。最终 API `43548` / Worker `15872`，创建时间 `2026-08-11 11:36:03.854 / 11:36:03.872`，健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误；草稿 `row_version=256 / updated_at=2026-08-11T03:35:35.953383 / playhead_ms=0`，最终周期 editor-draft PUT 为 0。
+
 ## 8. 事件
 
 ```text
