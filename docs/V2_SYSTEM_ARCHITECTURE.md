@@ -319,6 +319,8 @@ unresolved 队列保持 boundary index 顺序并循环选择下一个；定位�
 
 三态行首使用 `auto minmax(0,1fr) auto`，并始终渲染固定 `12px` 的 `continuityCheckIcon` 槽。未检查状态只让槽内容为空，不能省略第一 DOM 子项；否则标签会自动落到首个 `auto` 列，绕过第二列 minmax 并以 min-content 宽度撑大整行。`continuityCheckLabel` 显式 `min-width:0 / overflow-wrap:anywhere`，状态 em 保持 nowrap，处理按钮与三态组继续消费行内可用宽度。该修正只影响 Inspector 几何，不改变 outcome 或处理模式状态机。
 
+浏览器在最终构建上验证 frames 与 action 两条真实映射：单项主体入口打开并排；全局 unresolved 队列读取 motion 的首个 needs-adjustment check 后打开 action。两条路径播放头均为 0、媒体全部 paused；action 内部扫描侧为空且没有 B。缺口边界仍可记录页面人工结果，但 `boundaryIndex/assets` 门禁使处理按钮 disabled。最终 DOM 几何中 checklist/rows/groups/action 分别为 `202/202`、`200/200`、`188/188`、`186/186`，证明固定图标槽消除未检查行的 min-content 溢出。最终服务周期 editor-draft PUT 为 0；草稿保持 SH-002 → SH-001 → 缺口、`row_version=242 / playhead_ms=0`。
+
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 
 修正后从 `playhead_ms=0` 重新加载真实页面并点击连续性待办，等待 1.4 秒后草稿的 row version、播放头与 updated_at 三项完全不变，重启后的 API 日志仍无 editor-draft PUT。DOM 同时证明 frames 已展开、并排模式 pressed、同步动作未挂载、所有媒体暂停；三项 checkbox 全部切换为 true 后只更新页面进度，后端草稿仍不变化。
