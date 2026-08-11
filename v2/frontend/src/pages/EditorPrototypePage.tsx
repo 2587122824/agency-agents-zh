@@ -387,6 +387,7 @@ function analyzeFrameMotion(firstVideo: HTMLVideoElement, secondVideo: HTMLVideo
 }
 
 type ContinuityRelation = 'same_moment' | 'time_jump' | 'location_change' | 'outfit_change'
+type BoundaryContinuityReviewMode = 'frames' | 'overlay' | 'action'
 
 const CONTINUITY_RELATION_COPY: Record<ContinuityRelation, { label: string; tone: 'locked' | 'change'; summary: string }> = {
   same_moment: { label: '同一时刻', tone: 'locked', summary: '重点核对主体、动作阶段和运动方向是否连续。' },
@@ -423,6 +424,18 @@ const GENERAL_CONTINUITY_CHECKS = [
   { id: 'motion', label: '动作阶段、运动方向与切点节奏自然' },
   { id: 'change-readable', label: '时间、地点或服装变化是有意且可读的' },
 ]
+
+function continuityReviewModeForCheckId(checkId: string): BoundaryContinuityReviewMode {
+  if (checkId === 'motion') return 'action'
+  if (checkId === 'eyeline' || checkId === 'orientation') return 'overlay'
+  return 'frames'
+}
+
+function continuityReviewModeLabel(mode: BoundaryContinuityReviewMode) {
+  if (mode === 'action') return '同步动作'
+  if (mode === 'overlay') return '叠加对齐'
+  return '并排复核'
+}
 
 function normalizeContinuityRelation(value: string | undefined): ContinuityRelation {
   return value && value in CONTINUITY_RELATION_COPY ? value as ContinuityRelation : 'same_moment'
@@ -3110,13 +3123,15 @@ export function EditorPrototypePage() {
         : GENERAL_CONTINUITY_CHECKS
       const outcomes = boundaryContinuityOutcomes[boundary.key] ?? {}
       const passedCount = checks.filter(check => outcomes[check.id] === 'passed').length
-      const needsAdjustmentCount = checks.filter(check => outcomes[check.id] === 'needs_adjustment').length
+      const needsAdjustmentChecks = checks.filter(check => outcomes[check.id] === 'needs_adjustment')
+      const needsAdjustmentCount = needsAdjustmentChecks.length
       const unreviewedCount = checks.length - passedCount - needsAdjustmentCount
       return [{
         ...boundary,
         index,
         passedCount,
         requiredCount: checks.length,
+        needsAdjustmentChecks,
         needsAdjustmentCount,
         unreviewedCount,
         unresolvedCount: needsAdjustmentCount + unreviewedCount,
@@ -3681,7 +3696,7 @@ export function EditorPrototypePage() {
     setNotice(`已定位第 ${targetIndex + 1}/${mainBoundaries.length} 个切点：${target.left.label} → ${target.right.label}。`)
   }
 
-  const focusBoundaryForReviewAt = (targetIndex: number, mode: 'frames' | 'action') => {
+  const focusBoundaryForReviewAt = (targetIndex: number, mode: BoundaryContinuityReviewMode) => {
     const target = mainBoundaries[targetIndex]
     if (!target) return null
     const focusItem = target.right.asset_id ? target.right : target.left
@@ -3698,7 +3713,7 @@ export function EditorPrototypePage() {
     setSelectedIndex(itemIndex)
     setBoundaryFocusKey(target.key)
     setBoundaryFrameComparisonKey(target.key)
-    setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameOverlayKey(mode === 'overlay' ? target.key : null)
     setBoundaryFrameStripKey(null)
     setBoundaryActionComparisonKey(mode === 'action' ? target.key : null)
     return target
@@ -3711,9 +3726,21 @@ export function EditorPrototypePage() {
   }
 
   const focusIncompleteBoundaryContinuityReviewAt = (targetIndex: number) => {
-    const target = focusBoundaryForReviewAt(targetIndex, 'frames')
+    const review = boundaryContinuityReviewProgress.find(boundary => boundary.index === targetIndex)
+    const firstAdjustment = review?.needsAdjustmentChecks[0]
+    const mode = firstAdjustment ? continuityReviewModeForCheckId(firstAdjustment.id) : 'frames'
+    const target = focusBoundaryForReviewAt(targetIndex, mode)
     if (!target) return
-    setNotice(`已定位人工连续性待处理项：${target.left.label} → ${target.right.label}；请处理未检查或需调整的结论。`)
+    setNotice(firstAdjustment
+      ? `已定位待调整项“${firstAdjustment.label}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}。`
+      : `已定位人工连续性待处理项：${target.left.label} → ${target.right.label}；请逐项检查末帧与首帧。`)
+  }
+
+  const openBoundaryContinuityAdjustmentAt = (targetIndex: number, checkId: string, checkLabel: string) => {
+    const mode = continuityReviewModeForCheckId(checkId)
+    const target = focusBoundaryForReviewAt(targetIndex, mode)
+    if (!target) return
+    setNotice(`正在处理“${checkLabel}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}，不会自动修改切点。`)
   }
 
   const beginScrub = (
@@ -6095,6 +6122,7 @@ export function EditorPrototypePage() {
                   ? 'cut'
                   : pairedFade ? `fade:${durationMs}` : 'mixed'
                 const boundaryKey = `${left.id}-${right.id}`
+                const boundaryIndex = mainBoundaries.findIndex(boundary => boundary.key === boundaryKey)
                  const leftShotSequence = left.asset_id ? shotSequenceByAssetId.get(left.asset_id) : undefined
                  const rightShotSequence = right.asset_id ? shotSequenceByAssetId.get(right.asset_id) : undefined
                  const orderWarning = leftShotSequence != null && rightShotSequence != null && leftShotSequence > rightShotSequence
@@ -6559,6 +6587,15 @@ export function EditorPrototypePage() {
                            <button type="button" aria-pressed={status === 'passed'} onClick={() => setOutcome('passed')}>通过</button>
                            <button type="button" aria-pressed={status === 'needs_adjustment'} onClick={() => setOutcome('needs_adjustment')}>需调整</button>
                          </div>
+                         {status === 'needs_adjustment' && <button
+                           type="button"
+                           className={styles.continuityAdjustmentAction}
+                           disabled={boundaryIndex < 0 || !left.asset_id || !right.asset_id}
+                           title={left.asset_id && right.asset_id
+                             ? `只打开${continuityReviewModeLabel(continuityReviewModeForCheckId(check.id))}；不会自动修改素材、切点或转场。`
+                             : '需要先补齐切点两侧画面。'}
+                           onClick={() => openBoundaryContinuityAdjustmentAt(boundaryIndex, check.id, check.label)}
+                         >处理：{continuityReviewModeLabel(continuityReviewModeForCheckId(check.id))}</button>}
                        </div>
                      })}
                      <small>本切点：通过 {passedContinuityCheckCount} · 未检查 {unreviewedContinuityCheckCount} · 待调整 {needsAdjustmentContinuityCheckCount}。结果仅保留在本次页面，不写入草稿；“需调整”不会自动修改素材、切点或转场。</small>

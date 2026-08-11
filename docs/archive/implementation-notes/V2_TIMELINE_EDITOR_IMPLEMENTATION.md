@@ -501,6 +501,12 @@ A/B 决策门禁已从“候选快捷操作等待像素”收紧为统一的当�
 
 最终标准重启的 API PID `14644`、Worker PID `33584`，创建时间分别为 `2026-08-11 09:58:42.964 / 09:58:42.981`。8766 监听 PID 精确等于 API，健康为 `ok`，Alembic runtime/head 均为 `20260730_42`；`api.out.log` 只有健康与草稿只读请求，`api.err.log` 只有 Uvicorn 正常启动，Worker 两份日志为空，四份日志无实际错误。
 
+### 需调整问题的上下文处理入口
+
+三态结果进一步接入确定性观察模式映射。`motion` 使用同步动作，`eyeline / orientation` 使用叠加对齐，其余检查使用并排定格；映射不消费媒体分析结果，也不形成建议或排序。进度投影保留当前关系清单顺序下的 `needsAdjustmentChecks`，全局下一项据第一项打开模式；单项“处理”按钮按自身 check ID 打开模式。`focusBoundaryForReviewAt` 的 mode union 扩为 frames/overlay/action，并以同一事务设置 frame、overlay、strip、action keys，继续暂停媒体、清理旧预览和保持播放头。双方素材不完整时单项处理禁用。
+
+处理入口本身不改 outcome；只有用户明确切回未检查/通过，或真实结构编辑触发既有 boundary key 清理时结果才变化。同步动作重新挂载时内部扫描侧、B、播放与 pending 仍为空；叠加只读取当前源窗末帧/首帧。该实现只增加页面导航与窄栏按钮样式，不进入 Timeline、EditorDraftSession、history、API、迁移、FFmpeg 或运行时兼容分支。
+
 ## 8. 事件
 
 ```text

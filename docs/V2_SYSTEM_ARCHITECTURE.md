@@ -315,6 +315,8 @@ unresolved 队列保持 boundary index 顺序并循环选择下一个；定位�
 
 真实浏览器依次验证 needs-adjustment、两项 passed、全部 passed、恢复 unreviewed 五个状态，派生计数分别精确落到 `2/1`、`0/1`、`1/1` 与 `1/0`；只有全部 passed 时 unresolved 入口禁用。只读 focus 后主播放头 `aria-valuenow=0`，三路媒体均 paused；最终服务端草稿仍为 `row_version=239 / playhead_ms=0 / updated_at=2026-08-09T15:44:35.466871`，重启周期 editor-draft PUT 为 0。1280×720 下 html/body `1280/1280`、Inspector `244/244`、全局卡 `218/218`、清单 `202/202`、每个三态按钮组 `188/188`，页面 warning/error 为空。
 
+需调整处理模式由纯函数 `continuityReviewModeForCheckId(checkId)` 确定：`motion → action`，`eyeline|orientation → overlay`，其他 ID → `frames`。`boundaryContinuityReviewProgress` 在当前关系清单内同时保留有序的 `needsAdjustmentChecks`；全局定位取首项计算模式，单项入口直接用自身 ID 计算模式，两条路径都调用扩展后的 `focusBoundaryForReviewAt(index, 'frames'|'overlay'|'action')`。该函数以同一批同步 state 更新打开 frames、清空 strip，并精确设置 overlay 或 action key；selected item 变化继续由 `preservePlayheadOnReviewFocusRef` 门禁媒体回写。映射、标签和 notice 均为 render-time/事件时派生，不新增持久状态、effect、API、草稿字段、迁移或旧数据兼容。
+
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 
 修正后从 `playhead_ms=0` 重新加载真实页面并点击连续性待办，等待 1.4 秒后草稿的 row version、播放头与 updated_at 三项完全不变，重启后的 API 日志仍无 editor-draft PUT。DOM 同时证明 frames 已展开、并排模式 pressed、同步动作未挂载、所有媒体暂停；三项 checkbox 全部切换为 true 后只更新页面进度，后端草稿仍不变化。
