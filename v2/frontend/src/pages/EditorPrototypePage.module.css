@@ -2849,6 +2849,22 @@
   font-weight: 800;
   letter-spacing: .04em;
 }
+.previewWatchGate {
+  padding: 8px 9px;
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #51452d;
+  border-radius: 4px;
+  background: #302a1f;
+}
+.previewWatchGate[data-complete="true"] { border-color: #34553e; background: #1d2d22; }
+.previewWatchGate > svg { width: 15px; color: #d0aa67; }
+.previewWatchGate[data-complete="true"] > svg { color: #7ac08d; }
+.previewWatchGate > span { min-width: 0; display: grid; gap: 2px; }
+.previewWatchGate strong { font-size: 9px; line-height: 1.4; }
+.previewWatchGate small { color: #8b9295; font-size: 8px; line-height: 1.45; }
 .previewReviewChecklist label {
   display: grid;
   grid-template-columns: 16px minmax(0, 1fr);
@@ -2857,6 +2873,7 @@
   color: #dce1de;
   cursor: pointer;
 }
+.previewReviewChecklist label:has(input:disabled) { cursor: not-allowed; opacity: .52; }
 .previewReviewChecklist input {
   width: 13px;
   height: 13px;

@@ -396,4 +396,6 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 
 普通时间线播放的页面级观察 ref 只冻结当前连续可达链。`togglePlayback` 先从实际目标条目在 `mainItems` 中的位置向后遍历，只有相邻两项都具备画面素材时才登记稳定 boundary key；遇到第一个显式 gap 立即结束遍历。随后再与 `mainBoundaries` 求交，并执行完整上下文、起播位置和 fingerprint 门禁。RAF 每登记一项就从同一冻结数组派生 `recorded/total` 进度；缺口或终点仍由 `advancePlayback` 结束会话。该范围收敛不进入 React 持久状态、EditorDraftSession、Timeline、API、数据库迁移或 FFmpeg。
 
+低清预览完整观看门禁同样只存在于 `EditorPrototypePage` 的瞬时页面状态。`previewWatchKey` 由当前 `TimelinePreview.preview_key` 与 `content_hash` 拼接；会话 ref 保存冻结 key 和最后一次媒体时钟，`play / timeupdate / ended` 依次复验近零起播、`playbackRate===1`、单调且无大步跳转、到达精确自然结尾。暂停不销毁会话；`seeking / ratechange`、缓存重检以及 `lastPreview` 变化会清除未完成进度。完成键只解锁当前文件的 checklist，`reviewPreview.mutationFn` 在调用既有 API 前再次比较同一派生状态。该层不新增后端字段、事件、迁移、Timeline/草稿合同或 FFmpeg 参数，服务端原有精确合同与内容哈希校验保持独立权威。
+
 功能提交 `6739750d` 已推送 `main`。完整后端 `305 passed in 151.34s`、Python compileall、Vite build 与 diff check 通过；真实 Browser 覆盖缺口前单候选、4000ms 起播零候选以及临时三镜连续链 `1/2` 进度，清理后回到 v12、播放头 0 和草稿 null。最终标准服务 API `48428` / Worker `39820`，创建时间 `2026-08-11 18:55:35.839 / 18:55:35.862`；健康 `ok`、Alembic runtime/head `20260811_49`、四日志零实际错误、服务周期 editor-draft PUT 为 0。

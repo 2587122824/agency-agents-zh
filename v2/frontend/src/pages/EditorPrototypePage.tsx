@@ -10,6 +10,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type SyntheticEvent as ReactSyntheticEvent,
 } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 
@@ -3042,6 +3043,8 @@ export function EditorPrototypePage() {
   const [lastPreview, setLastPreview] = useState<TimelinePreview | null>(null)
   const [previewCompareMode, setPreviewCompareMode] = useState<'result' | 'compare'>('result')
   const [previewCompareMs, setPreviewCompareMs] = useState(0)
+  const [previewWatchCompleteKey, setPreviewWatchCompleteKey] = useState<string | null>(null)
+  const [previewWatchProgressMs, setPreviewWatchProgressMs] = useState(0)
   const [previewReviewSaved, setPreviewReviewSaved] = useState(false)
   const [previewReviewChecks, setPreviewReviewChecks] = useState({
     visualContinuity: false,
@@ -3058,6 +3061,10 @@ export function EditorPrototypePage() {
   const timelineViewportRef = useRef<HTMLDivElement | null>(null)
   const renderedPreviewRef = useRef<HTMLVideoElement | null>(null)
   const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
+  const previewWatchSessionRef = useRef<{
+    previewKey: string
+    lastTimeSeconds: number
+  } | null>(null)
   const advancingPlaybackRef = useRef(false)
   const timelinePlaybackObservationRef = useRef<{
     boundaries: Array<{
@@ -3108,6 +3115,9 @@ export function EditorPrototypePage() {
     setDirty(false)
     setLastValidation(null)
     setLastPreview(null)
+    setPreviewWatchCompleteKey(null)
+    setPreviewWatchProgressMs(0)
+    previewWatchSessionRef.current = null
     setLastAutoSavedAt(null)
     setLastAutoSavedFingerprint(null)
     setLastAutoSaveAttemptFingerprint(null)
@@ -3242,6 +3252,9 @@ export function EditorPrototypePage() {
     setLastPreview(null)
     setPreviewCompareMode('result')
     setPreviewCompareMs(0)
+    setPreviewWatchCompleteKey(null)
+    setPreviewWatchProgressMs(0)
+    previewWatchSessionRef.current = null
     setPreviewReviewSaved(Boolean(sourceTimeline.preview_review))
     setPreviewReviewChecks({
       visualContinuity: false,
@@ -3259,6 +3272,16 @@ export function EditorPrototypePage() {
 
   const durationMs = workspace.data?.duration_ms ?? 15000
   const outputFps = Math.max(1, Number(sourceTimeline?.output_spec.fps) || 24)
+  const previewWatchKey = lastPreview?.preview_key && lastPreview.content_hash
+    ? `${lastPreview.preview_key}:${lastPreview.content_hash}`
+    : null
+  const previewWatchComplete = Boolean(previewWatchKey && previewWatchCompleteKey === previewWatchKey)
+
+  useEffect(() => {
+    if (previewOpen) return
+    previewWatchSessionRef.current = null
+    if (!previewWatchComplete) setPreviewWatchProgressMs(0)
+  }, [previewOpen, previewWatchComplete])
   const frameStepMs = Math.max(1, Math.round(1000 / outputFps))
   const snapIntervalMs = sourceTimeline?.track_config.snap_interval_ms ?? 100
   const snapMs = (value: number) => snapEnabled
@@ -3879,6 +3902,9 @@ export function EditorPrototypePage() {
       setLastPreview(preview)
       setPreviewCompareMode('result')
       setPreviewCompareMs(0)
+      setPreviewWatchCompleteKey(null)
+      setPreviewWatchProgressMs(0)
+      previewWatchSessionRef.current = null
       setPreviewReviewSaved(Boolean(
         sourceTimeline?.preview_review
         && sourceTimeline.preview_review.preview_key === preview.preview_key
@@ -3902,6 +3928,9 @@ export function EditorPrototypePage() {
       if (!sourceTimeline || !lastPreview?.preview_key || !lastPreview.content_hash) {
         throw new Error('当前没有可提交人工复核的精确预览文件。')
       }
+      if (!previewWatchComplete) {
+        throw new Error('请先以 1× 从头完整播放当前低清预览到自然结尾。')
+      }
       return api.reviewTimelinePreview(
         projectId,
         sourceTimeline,
@@ -3920,6 +3949,91 @@ export function EditorPrototypePage() {
       setPreviewReviewSaved(true)
     },
   })
+
+  const invalidatePreviewWatchAttempt = (message: string) => {
+    if (previewWatchComplete) return
+    previewWatchSessionRef.current = null
+    setPreviewWatchProgressMs(0)
+    setPreviewReviewChecks(current => ({
+      ...current,
+      visualContinuity: false,
+      subjectiveSync: false,
+      subtitleReadability: false,
+      warnings: false,
+    }))
+    setNotice(message)
+  }
+
+  const handleRenderedPreviewPlay = (event: ReactSyntheticEvent<HTMLVideoElement>) => {
+    const video = event.currentTarget
+    const source = sourceCompareRef.current
+    if (source && previewCompareMode === 'compare') void source.play().catch(() => undefined)
+    if (!previewWatchKey || previewWatchComplete) return
+    const toleranceSeconds = Math.max(.12, 2 / Math.max(1, lastPreview?.fps ?? 24))
+    if (video.playbackRate !== 1) {
+      invalidatePreviewWatchAttempt('低清预览完整观看只接受 1×；请恢复正常速度并从头重新播放。')
+      return
+    }
+    const existing = previewWatchSessionRef.current
+    if (!existing) {
+      if (video.currentTime > toleranceSeconds) {
+        invalidatePreviewWatchAttempt('请把低清预览播放头回到开头，再以 1× 完整播放到自然结尾。')
+        return
+      }
+      previewWatchSessionRef.current = { previewKey: previewWatchKey, lastTimeSeconds: video.currentTime }
+      setPreviewWatchProgressMs(Math.round(video.currentTime * 1000))
+      setNotice('正在以 1× 完整观看低清预览；暂停后可从原位置继续，跳转或倍速会要求从头重看。')
+      return
+    }
+    if (
+      existing.previewKey !== previewWatchKey
+      || Math.abs(video.currentTime - existing.lastTimeSeconds) > Math.max(.35, toleranceSeconds * 2)
+    ) {
+      invalidatePreviewWatchAttempt('低清预览播放位置已跳转；请回到开头并以 1× 重新完整播放。')
+    }
+  }
+
+  const handleRenderedPreviewTimeUpdate = (event: ReactSyntheticEvent<HTMLVideoElement>) => {
+    const video = event.currentTarget
+    const currentMs = Math.round(video.currentTime * 1000)
+    setPreviewCompareMs(currentMs)
+    if (previewWatchComplete || !previewWatchKey) return
+    const session = previewWatchSessionRef.current
+    if (!session) return
+    const deltaSeconds = video.currentTime - session.lastTimeSeconds
+    if (
+      session.previewKey !== previewWatchKey
+      || video.playbackRate !== 1
+      || deltaSeconds < -.12
+      || deltaSeconds > 1.5
+    ) {
+      invalidatePreviewWatchAttempt('低清预览没有保持 1× 连续播放；请回到开头重新完整观看。')
+      return
+    }
+    session.lastTimeSeconds = video.currentTime
+    setPreviewWatchProgressMs(currentMs)
+  }
+
+  const handleRenderedPreviewEnded = (event: ReactSyntheticEvent<HTMLVideoElement>) => {
+    const video = event.currentTarget
+    const session = previewWatchSessionRef.current
+    const toleranceSeconds = Math.max(.12, 2 / Math.max(1, lastPreview?.fps ?? 24))
+    if (
+      !previewWatchKey
+      || !session
+      || session.previewKey !== previewWatchKey
+      || video.playbackRate !== 1
+      || !Number.isFinite(video.duration)
+      || video.currentTime < video.duration - toleranceSeconds
+    ) {
+      invalidatePreviewWatchAttempt('低清预览没有自然播放到结尾；请回到开头并以 1× 重新完整观看。')
+      return
+    }
+    previewWatchSessionRef.current = null
+    setPreviewWatchProgressMs(lastPreview?.duration_ms ?? Math.round(video.duration * 1000))
+    setPreviewWatchCompleteKey(previewWatchKey)
+    setNotice('当前低清预览已完成 1× 从头到尾观看，可以逐项确认人工复核。')
+  }
 
   const confirmTimeline = useMutation({
     mutationFn: async () => {
@@ -8081,13 +8195,21 @@ export function EditorPrototypePage() {
               onLoadedMetadata={event => {
                 event.currentTarget.currentTime = previewCompareMs / 1000
               }}
-              onTimeUpdate={event => setPreviewCompareMs(Math.round(event.currentTarget.currentTime * 1000))}
+              onTimeUpdate={handleRenderedPreviewTimeUpdate}
               onSeeked={event => setPreviewCompareMs(Math.round(event.currentTarget.currentTime * 1000))}
-              onPlay={() => {
-                const source = sourceCompareRef.current
-                if (source && previewCompareMode === 'compare') void source.play().catch(() => undefined)
+              onSeeking={() => {
+                if (previewWatchSessionRef.current) {
+                  invalidatePreviewWatchAttempt('低清预览播放位置已跳转；请回到开头并以 1× 重新完整播放。')
+                }
               }}
+              onRateChange={event => {
+                if (event.currentTarget.playbackRate !== 1 && previewWatchSessionRef.current) {
+                  invalidatePreviewWatchAttempt('低清预览倍速已变化；完整观看只接受 1×，请从头重新播放。')
+                }
+              }}
+              onPlay={handleRenderedPreviewPlay}
               onPause={() => sourceCompareRef.current?.pause()}
+              onEnded={handleRenderedPreviewEnded}
             />
           </figure>
         </div>
@@ -8115,10 +8237,16 @@ export function EditorPrototypePage() {
         </section>}
         {lastPreview.quality_report && lastPreview.quality_report.status !== 'blocked' && !previewReviewSaved && <fieldset className={styles.previewReviewChecklist}>
           <legend>观看后逐项确认</legend>
-          <label><input type="checkbox" checked={previewReviewChecks.visualContinuity} onChange={event => setPreviewReviewChecks(value => ({ ...value, visualContinuity: event.target.checked }))} /><span><strong>画面连续性</strong><small>已完整观看镜头衔接、主体一致性、动作连续性和异常闪跳。</small></span></label>
-          <label><input type="checkbox" checked={previewReviewChecks.subjectiveSync} onChange={event => setPreviewReviewChecks(value => ({ ...value, subjectiveSync: event.target.checked }))} /><span><strong>主观音画同步</strong><small>已检查旁白、音乐、字幕与画面节奏是否符合预期。</small></span></label>
-          {sourceTimeline?.track_config.subtitle_enabled && <label><input type="checkbox" checked={previewReviewChecks.subtitleReadability} onChange={event => setPreviewReviewChecks(value => ({ ...value, subtitleReadability: event.target.checked }))} /><span><strong>字幕可读性</strong><small>已检查文字、换行、遮挡和画面安全区。</small></span></label>}
-          {lastPreview.quality_report.checks.some(check => check.state === 'warning') && <label><input type="checkbox" checked={previewReviewChecks.warnings} onChange={event => setPreviewReviewChecks(value => ({ ...value, warnings: event.target.checked }))} /><span><strong>警告项已逐项确认</strong><small>已确认检测到的黑画面或其他警告均为有意效果或可接受结果。</small></span></label>}
+          <div className={styles.previewWatchGate} data-complete={previewWatchComplete}>
+            {previewWatchComplete ? <CheckCircle2 /> : <Clock3 />}
+            <span><strong>{previewWatchComplete ? '1× 完整观看已完成' : '先从头完整播放当前预览'}</strong><small>{previewWatchComplete
+              ? '观看证据绑定当前预览文件；现在可以逐项确认。'
+              : `连续观看 ${timecode(previewWatchProgressMs, lastPreview.fps)} / ${timecode(lastPreview.duration_ms, lastPreview.fps)}；暂停可继续，跳转或倍速会归零。`}</small></span>
+          </div>
+          <label><input type="checkbox" disabled={!previewWatchComplete} checked={previewReviewChecks.visualContinuity} onChange={event => setPreviewReviewChecks(value => ({ ...value, visualContinuity: event.target.checked }))} /><span><strong>画面连续性</strong><small>已完整观看镜头衔接、主体一致性、动作连续性和异常闪跳。</small></span></label>
+          <label><input type="checkbox" disabled={!previewWatchComplete} checked={previewReviewChecks.subjectiveSync} onChange={event => setPreviewReviewChecks(value => ({ ...value, subjectiveSync: event.target.checked }))} /><span><strong>主观音画同步</strong><small>已检查旁白、音乐、字幕与画面节奏是否符合预期。</small></span></label>
+          {sourceTimeline?.track_config.subtitle_enabled && <label><input type="checkbox" disabled={!previewWatchComplete} checked={previewReviewChecks.subtitleReadability} onChange={event => setPreviewReviewChecks(value => ({ ...value, subtitleReadability: event.target.checked }))} /><span><strong>字幕可读性</strong><small>已检查文字、换行、遮挡和画面安全区。</small></span></label>}
+          {lastPreview.quality_report.checks.some(check => check.state === 'warning') && <label><input type="checkbox" disabled={!previewWatchComplete} checked={previewReviewChecks.warnings} onChange={event => setPreviewReviewChecks(value => ({ ...value, warnings: event.target.checked }))} /><span><strong>警告项已逐项确认</strong><small>已确认检测到的黑画面或其他警告均为有意效果或可接受结果。</small></span></label>}
         </fieldset>}
         {previewReviewSaved && <div className={styles.previewReviewSaved}><CheckCircle2 /><span><strong>人工复核已保存</strong><small>记录已绑定当前时间线合同和本次预览文件哈希。</small></span></div>}
       </> : <>
@@ -8138,6 +8266,7 @@ export function EditorPrototypePage() {
           className={styles.confirmButton}
           disabled={
             reviewPreview.isPending
+            || !previewWatchComplete
             || !previewReviewChecks.visualContinuity
             || !previewReviewChecks.subjectiveSync
             || Boolean(sourceTimeline?.track_config.subtitle_enabled && !previewReviewChecks.subtitleReadability)
