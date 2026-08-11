@@ -3056,6 +3056,15 @@ export function EditorPrototypePage() {
   const renderedPreviewRef = useRef<HTMLVideoElement | null>(null)
   const sourceCompareRef = useRef<HTMLVideoElement | null>(null)
   const advancingPlaybackRef = useRef(false)
+  const timelinePlaybackObservationRef = useRef<{
+    boundaries: Array<{
+      boundaryKey: string
+      boundaryFingerprint: string
+      boundaryMs: number
+      evidence: EditorActionSequenceEvidence
+      status: 'pending' | 'recorded' | 'invalid'
+    }>
+  } | null>(null)
   const preservePlayheadOnReviewFocusRef = useRef(false)
   const timelineScrubbingRef = useRef(false)
   const pendingTimelineViewRef = useRef<{
@@ -3711,6 +3720,10 @@ export function EditorPrototypePage() {
   }, [boundaryPreviewEndMs])
 
   useEffect(() => {
+    if (!playing) timelinePlaybackObservationRef.current = null
+  }, [playing])
+
+  useEffect(() => {
     const source = sourceCompareRef.current
     if (!source || !comparisonItem?.asset_id || previewCompareMode !== 'compare') return
     const sourceTime = (
@@ -4036,6 +4049,7 @@ export function EditorPrototypePage() {
     setPlayheadMs(item.timeline_in_ms)
     setPlaying(false)
     if (!preserveBoundaryPreview) {
+      timelinePlaybackObservationRef.current = null
       setBoundaryPreviewEndMs(null)
       setBoundaryPreviewLoop(null)
       setBoundaryFocusKey(boundaryKeyForItem(item))
@@ -4045,6 +4059,7 @@ export function EditorPrototypePage() {
   }
 
   const seekTimeline = (positionMs: number) => {
+    timelinePlaybackObservationRef.current = null
     const position = Math.max(0, Math.min(durationMs, Math.round(positionMs)))
     const target = mainItems.find(item => (
       position >= item.timeline_in_ms
@@ -4261,11 +4276,17 @@ export function EditorPrototypePage() {
 
   const togglePlayback = () => {
     if (playing) {
+      const observedCount = timelinePlaybackObservationRef.current?.boundaries
+        .filter(boundary => boundary.status === 'recorded').length ?? 0
+      timelinePlaybackObservationRef.current = null
       setPlaying(false)
       setBoundaryPreviewEndMs(null)
       setBoundaryPreviewLoop(null)
       setBoundaryReviewSession(null)
       setBoundaryPreviewSession(null)
+      setNotice(observedCount > 0
+        ? `已暂停时间线预览；本次已记录 ${observedCount} 个切点的 1× 完整上下文顺序观察。`
+        : '已暂停时间线预览。')
       return
     }
     let target = mainItems.find(item => playheadMs >= item.timeline_in_ms && playheadMs < item.timeline_out_ms) ?? null
@@ -4278,12 +4299,27 @@ export function EditorPrototypePage() {
       setNotice(target ? '当前播放头位于显式空位，请先选择补齐方式。' : '当前时间线没有可以播放的画面。')
       return
     }
+    const playbackStartMs = selectedItem?.id === target.id ? playheadMs : target.timeline_in_ms
     if (selectedItem?.id !== target.id) selectItem(target)
     advancingPlaybackRef.current = false
     setBoundaryPreviewEndMs(null)
     setBoundaryPreviewLoop(null)
     setBoundaryReviewSession(null)
     setBoundaryPreviewSession(null)
+    timelinePlaybackObservationRef.current = {
+      boundaries: mainBoundaries.flatMap(boundary => {
+        if (!boundary.left.asset_id || !boundary.right.asset_id) return []
+        const evidence = boundarySequentialObservationEvidence(boundary.left, boundary.right, 1000, 1000, 1)
+        if (!evidence || playbackStartMs > boundary.left.timeline_out_ms - evidence.left_context_ms) return []
+        return [{
+          boundaryKey: boundary.key,
+          boundaryFingerprint: continuityBoundaryFingerprint(boundary.left, boundary.right),
+          boundaryMs: boundary.left.timeline_out_ms,
+          evidence,
+          status: 'pending' as const,
+        }]
+      }),
+    }
     setPlaying(true)
   }
 
@@ -4297,6 +4333,7 @@ export function EditorPrototypePage() {
     const endMs = Math.min(right.timeline_out_ms, boundaryMs + boundaryPreviewAfterMs)
     const boundaryKey = `${left.id}-${right.id}`
     const label = `${left.label} → ${right.label}`
+    timelinePlaybackObservationRef.current = null
     setBoundaryReviewSession(null)
     setBoundaryPreviewSession(loop ? null : {
       boundaryKey,
@@ -4424,6 +4461,7 @@ export function EditorPrototypePage() {
       setNotice('当前时间线没有两侧画面都已补齐的切点，无法连续巡检。')
       return
     }
+    timelinePlaybackObservationRef.current = null
     videoRef.current?.pause()
     setPlaying(false)
     setBoundaryPreviewEndMs(null)
@@ -6249,15 +6287,25 @@ export function EditorPrototypePage() {
     const position = mainItems.findIndex(item => item.id === selectedItem?.id)
     const next = position >= 0 ? mainItems[position + 1] : null
     if (!next) {
+      const observedCount = timelinePlaybackObservationRef.current?.boundaries
+        .filter(boundary => boundary.status === 'recorded').length ?? 0
+      timelinePlaybackObservationRef.current = null
       setPlayheadMs(durationMs)
       setPlaying(false)
-      setNotice('时间线预览播放完成。')
+      setNotice(observedCount > 0
+        ? `时间线预览播放完成；已记录 ${observedCount} 个切点的 1× 完整上下文顺序观察，人工连续性检查仍需逐项确认。`
+        : '时间线预览播放完成。')
       return
     }
     selectItem(next, true)
     if (!next.asset_id) {
+      const observedCount = timelinePlaybackObservationRef.current?.boundaries
+        .filter(boundary => boundary.status === 'recorded').length ?? 0
+      timelinePlaybackObservationRef.current = null
       setPlaying(false)
-      setNotice('播放到缺口：需要先选择一种补齐方式。')
+      setNotice(observedCount > 0
+        ? `播放到缺口：此前已记录 ${observedCount} 个切点的 1× 完整上下文顺序观察；请先选择一种补齐方式。`
+        : '播放到缺口：需要先选择一种补齐方式。')
       return
     }
     setPlaying(true)
@@ -6298,6 +6346,26 @@ export function EditorPrototypePage() {
       const mediaTimeMs = mediaTimeSeconds * 1000
       const timelinePosition = selectedItem.timeline_in_ms + Math.max(0, mediaTimeMs - sourceIn)
       setPlayheadMs(Math.min(timelinePosition, selectedItem.timeline_out_ms))
+      if (boundaryPreviewEndMs == null && timelinePlaybackObservationRef.current) {
+        for (const candidate of timelinePlaybackObservationRef.current.boundaries) {
+          if (candidate.status !== 'pending') continue
+          if (timelinePosition < candidate.boundaryMs + candidate.evidence.right_context_ms - boundaryLeadMs) continue
+          const currentBoundary = mainBoundaries.find(boundary => boundary.key === candidate.boundaryKey)
+          if (
+            !currentBoundary
+            || continuityBoundaryFingerprint(currentBoundary.left, currentBoundary.right) !== candidate.boundaryFingerprint
+          ) {
+            candidate.status = 'invalid'
+            continue
+          }
+          candidate.status = 'recorded'
+          recordBoundaryContinuityReadyEvidence(
+            JSON.stringify([candidate.boundaryKey, candidate.boundaryFingerprint]),
+            'action-sequence-realtime-context',
+            candidate.evidence,
+          )
+        }
+      }
       if (boundaryPreviewEndMs != null && timelinePosition >= boundaryPreviewEndMs - boundaryLeadMs) {
         if (boundaryPreviewLoop) {
           video.pause()
