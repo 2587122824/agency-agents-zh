@@ -580,6 +580,8 @@ timeline.confirmed.v1
 - 服务端草稿合同升级为 `editor-draft-session.v2`，`EditorDraftSession` 新增非空 JSON `continuity_outcomes` 与 `continuity_issue_contexts`。读写服务在同一次草稿事务中保存并返回两张 map；context 使用严格的 `check_id / check_label / mode(frames|overlay|action)` 合同。
 - 前端本地兜底升级为 `editor-local-draft.v5`。远端 snake_case context 在恢复时转换为页面 camelCase，自动保存时再转换回 API 合同；人工结果、处理上下文、条目、播放头、磁吸和缩放共用规范化指纹与 900ms 自动保存。首次恢复会同时初始化最近成功/尝试指纹，相同内容刷新保持零写入。
 - 迁移 `20260811_43` 添加两列并把现有开发草稿统一升级为 v2、审核 map 重建为空。开发环境不保留 v1/v4 运行时兼容分支；显式丢弃草稿清空审核状态，结构编辑按现存稳定 boundary key 清理后继续自动保存。
+- 发布提交 `a2c72e98` 实现合同与恢复链；真实 Browser 验收发现旧说明仍声称结果不写草稿，提交 `fdb2355f` 将用户文案改为权威自动保存事实。needs/handling、源窗 `+1帧` 后 recheck、passed/context 清除均经刷新验证；最终恢复三项未检查、源窗 `0..409ms`、播放头 0。1280×720 html/body 均 `1280/1280`、Inspector `244/244`，页面 warning/error 为空。
+- 完整回归为后端 `305 passed in 164.85s`，Python compileall、Vite 生产构建与 `git diff --check` 通过。最终标准服务 API `13004` / Worker `36596`，创建时间 `2026-08-11 12:43:37.838 / 12:43:37.858`；健康 `ok`，Alembic runtime/head `20260811_43`，四份日志零错误，草稿 `editor-draft-session.v2 / row_version=279 / updated_at=2026-08-11T04:42:56.843950 / playhead_ms=0 / outcomes={} / contexts={}`，最终服务周期 editor-draft PUT 为 0。
 
 ## 10. 迁移与索引
 
