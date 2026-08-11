@@ -337,6 +337,8 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 
 全局 focus 在目标边界内依次选择 `needsAdjustmentChecks[0]`、`recheckContexts[0]`、frames fallback。needs 分支继续捕获当前全部问题；recheck 分支只读取已保存 mode 并给出原问题 notice，不重写 context。边界选择仍使用原 mainBoundaries index 循环，因此状态优先级只作用于同一边界，不形成跨时间线排序。
 
+提交 `7786b8c6` 的浏览器验收证明该派生在真实编辑后将两项 context 从 handling 迁移为 recheck，且全局与单边界四类计数一致。跨边界导航依次恢复 subject/frames 与 motion/action；逐项 passed 只删除对应 context，第二项完成后 map 项消失。验收撤销后的权威草稿为 `row_version=251 / playhead_ms=0 / SH-001 source=0..409ms`。最终标准重启 API `40752` / Worker `38208`，健康与迁移一致，日志无错误且 editor-draft PUT 为 0。
+
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 
 修正后从 `playhead_ms=0` 重新加载真实页面并点击连续性待办，等待 1.4 秒后草稿的 row version、播放头与 updated_at 三项完全不变，重启后的 API 日志仍无 editor-draft PUT。DOM 同时证明 frames 已展开、并排模式 pressed、同步动作未挂载、所有媒体暂停；三项 checkbox 全部切换为 true 后只更新页面进度，后端草稿仍不变化。

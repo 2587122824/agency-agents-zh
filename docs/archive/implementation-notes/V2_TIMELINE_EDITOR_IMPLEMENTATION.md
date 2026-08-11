@@ -543,6 +543,10 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 全局下一项仍按 boundary index 循环。目标边界内先取 needs，再取 context 数组首个 recheck，最后使用 frames 处理普通未检查；recheck 直接消费保存的 mode/label。该路径不调用 merge、不产生新 context、不改变 outcome，不新增 state、API 或保存副作用。
 
+真实验收结果：subject+motion 编辑后全局/本切点均为 `未检查 1 · 待调整 0 · 待复检 2`；离开切点后全局入口先恢复 subject 并排，通过后待复检为 1，再恢复 motion 同步动作且扫描侧 pressed 0、无 B、无播放残留。两项通过后 context 清空，只剩普通未检查 1。全局卡 `218/218`、Inspector `244/244`、html/body `1280/1280`，页面 warning/error 为空；编辑已通过撤销恢复。
+
+功能提交 `7786b8c6` 已推送。完整验证为后端 `305 passed in 166.35s`、compileall、Vite build 和 diff check。最终标准重启 API `40752` / Worker `38208`，创建时间 `2026-08-11 11:20:34.538 / 11:20:34.556`；健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误。草稿 `row_version=251 / updated_at=2026-08-11T03:19:50.837760 / playhead_ms=0 / SH-002 0..4709ms / SH-001 0..409ms / gap 5118..15000ms`，最终服务周期 editor-draft PUT 为 0。
+
 ## 8. 事件
 
 ```text
