@@ -2928,13 +2928,16 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
     boundaryKey: string
+    boundaryFingerprint: string
     leftItemId: string
     startMs: number
     endMs: number
     beforeMs: number
     afterMs: number
+    playbackRate: number
     label: string
     iteration: number
+    observationRecorded: boolean
   } | null>(null)
   const [boundaryFrameComparisonKey, setBoundaryFrameComparisonKey] = useState<string | null>(null)
   const [boundaryFrameOverlayKey, setBoundaryFrameOverlayKey] = useState<string | null>(null)
@@ -3681,12 +3684,15 @@ export function EditorPrototypePage() {
   useEffect(() => {
     const rate = boundaryPreviewEndMs == null
       ? 1
-      : boundaryReviewSession?.playbackRate ?? boundaryPreviewSession?.playbackRate ?? boundaryPreviewRate
+      : boundaryReviewSession?.playbackRate
+        ?? boundaryPreviewSession?.playbackRate
+        ?? boundaryPreviewLoop?.playbackRate
+        ?? boundaryPreviewRate
     if (videoRef.current) videoRef.current.playbackRate = rate
     Object.values(timelineAudioRefs.current).forEach(audio => {
       if (audio) audio.playbackRate = rate
     })
-  }, [boundaryPreviewEndMs, boundaryPreviewRate, boundaryPreviewSession?.playbackRate, boundaryReviewSession?.playbackRate, selectedItem?.id])
+  }, [boundaryPreviewEndMs, boundaryPreviewLoop?.playbackRate, boundaryPreviewRate, boundaryPreviewSession?.playbackRate, boundaryReviewSession?.playbackRate, selectedItem?.id])
 
   useEffect(() => {
     for (const item of audioItems) {
@@ -3696,7 +3702,10 @@ export function EditorPrototypePage() {
       audio.muted = audioTrackMuted
       audio.playbackRate = boundaryPreviewEndMs == null
         ? 1
-        : boundaryReviewSession?.playbackRate ?? boundaryPreviewSession?.playbackRate ?? boundaryPreviewRate
+        : boundaryReviewSession?.playbackRate
+          ?? boundaryPreviewSession?.playbackRate
+          ?? boundaryPreviewLoop?.playbackRate
+          ?? boundaryPreviewRate
       if (!active) {
         audio.pause()
         continue
@@ -3713,7 +3722,7 @@ export function EditorPrototypePage() {
       if (playing) void audio.play().catch(() => setNotice('浏览器阻止了时间线声音播放，请再次点击播放。'))
       else audio.pause()
     }
-  }, [audioItems, audioTrackMuted, boundaryPreviewEndMs, boundaryPreviewRate, boundaryPreviewSession?.playbackRate, boundaryReviewSession?.playbackRate, playheadMs, playing])
+  }, [audioItems, audioTrackMuted, boundaryPreviewEndMs, boundaryPreviewLoop?.playbackRate, boundaryPreviewRate, boundaryPreviewSession?.playbackRate, boundaryReviewSession?.playbackRate, playheadMs, playing])
 
   useEffect(() => {
     if (boundaryPreviewEndMs == null) setBoundaryPreviewSession(null)
@@ -4349,13 +4358,16 @@ export function EditorPrototypePage() {
     setBoundaryPreviewEndMs(endMs)
     setBoundaryPreviewLoop(loop ? {
       boundaryKey,
+      boundaryFingerprint: continuityBoundaryFingerprint(left, right),
       leftItemId: left.id,
       startMs,
       endMs,
       beforeMs: boundaryPreviewBeforeMs,
       afterMs: boundaryPreviewAfterMs,
+      playbackRate: boundaryPreviewRate,
       label,
       iteration: 0,
+      observationRecorded: false,
     } : null)
     setPlaying(true)
     setNotice(`正在以 ${boundaryPreviewRate}× ${loop ? '循环' : ''}预览 ${label}：切前 ${previewSeconds(boundaryPreviewBeforeMs)}，切后 ${previewSeconds(boundaryPreviewAfterMs)}。`)
@@ -4412,10 +4424,13 @@ export function EditorPrototypePage() {
   const toggleBoundaryLoop = (left: TimelineItem, right: TimelineItem) => {
     const boundaryKey = `${left.id}-${right.id}`
     if (boundaryPreviewLoop?.boundaryKey === boundaryKey) {
+      const observationRecorded = boundaryPreviewLoop.observationRecorded
       setPlaying(false)
       setBoundaryPreviewEndMs(null)
       setBoundaryPreviewLoop(null)
-      setNotice(`已停止 ${left.label} → ${right.label} 的切点循环预览。`)
+      setNotice(observationRecorded
+        ? `已停止 ${left.label} → ${right.label} 的切点循环预览；已记录 1× 完整上下文顺序观察。`
+        : `已停止 ${left.label} → ${right.label} 的切点循环预览；尚未完成可登记的 1× 完整上下文观察。`)
       return
     }
     previewBoundary(left, right, true)
@@ -4435,7 +4450,7 @@ export function EditorPrototypePage() {
     setPlayheadMs(boundaryPreviewLoop.startMs)
     setBoundaryPreviewEndMs(boundaryPreviewLoop.endMs)
     setPlaying(true)
-    setNotice(`正在以 ${boundaryPreviewRate}× 循环预览 ${boundaryPreviewLoop.label}：切前 ${previewSeconds(boundaryPreviewLoop.beforeMs)}，切后 ${previewSeconds(boundaryPreviewLoop.afterMs)}。`)
+    setNotice(`正在以 ${boundaryPreviewLoop.playbackRate}× 循环预览 ${boundaryPreviewLoop.label}（第 ${boundaryPreviewLoop.iteration + 1} 轮）：切前 ${previewSeconds(boundaryPreviewLoop.beforeMs)}，切后 ${previewSeconds(boundaryPreviewLoop.afterMs)}${boundaryPreviewLoop.observationRecorded ? '；首轮完整观察已登记。' : '。'}`)
   }, [boundaryPreviewLoop?.iteration])
 
   const toggleBoundaryReview = () => {
@@ -6368,11 +6383,44 @@ export function EditorPrototypePage() {
       }
       if (boundaryPreviewEndMs != null && timelinePosition >= boundaryPreviewEndMs - boundaryLeadMs) {
         if (boundaryPreviewLoop) {
+          const completedBoundary = mainBoundaries.find(boundary => (
+            boundary.key === boundaryPreviewLoop.boundaryKey
+            && continuityBoundaryFingerprint(boundary.left, boundary.right) === boundaryPreviewLoop.boundaryFingerprint
+          ))
+          if (!completedBoundary) {
+            video.pause()
+            advancingPlaybackRef.current = true
+            setPlaying(false)
+            setBoundaryPreviewEndMs(null)
+            setBoundaryPreviewLoop(null)
+            setNotice('循环预览期间切点关系已变化，旧循环已停止且没有登记观察。')
+            return
+          }
+          const completedSequentialEvidence = boundaryPreviewLoop.observationRecorded
+            ? null
+            : boundarySequentialObservationEvidence(
+              completedBoundary.left,
+              completedBoundary.right,
+              boundaryPreviewLoop.beforeMs,
+              boundaryPreviewLoop.afterMs,
+              boundaryPreviewLoop.playbackRate,
+            )
+          if (completedSequentialEvidence) {
+            recordBoundaryContinuityReadyEvidence(
+              JSON.stringify([completedBoundary.key, boundaryPreviewLoop.boundaryFingerprint]),
+              'action-sequence-realtime-context',
+              completedSequentialEvidence,
+            )
+          }
           video.pause()
           advancingPlaybackRef.current = true
           setPlaying(false)
           setBoundaryPreviewEndMs(null)
-          setBoundaryPreviewLoop({ ...boundaryPreviewLoop, iteration: boundaryPreviewLoop.iteration + 1 })
+          setBoundaryPreviewLoop({
+            ...boundaryPreviewLoop,
+            iteration: boundaryPreviewLoop.iteration + 1,
+            observationRecorded: boundaryPreviewLoop.observationRecorded || Boolean(completedSequentialEvidence),
+          })
           return
         }
         if (boundaryReviewSession) {
@@ -6685,7 +6733,10 @@ export function EditorPrototypePage() {
               event.currentTarget.currentTime = Math.min(sourceOut, sourceIn + timelineOffset) / 1000
               event.currentTarget.playbackRate = boundaryPreviewEndMs == null
                 ? 1
-                : boundaryReviewSession?.playbackRate ?? boundaryPreviewSession?.playbackRate ?? boundaryPreviewRate
+                : boundaryReviewSession?.playbackRate
+                  ?? boundaryPreviewSession?.playbackRate
+                  ?? boundaryPreviewLoop?.playbackRate
+                  ?? boundaryPreviewRate
               if (playing) void event.currentTarget.play().catch(() => setNotice('浏览器阻止了时间线视频播放，请再次点击播放。'))
             }}
             onTimeUpdate={handleTimeUpdate}
@@ -7090,7 +7141,7 @@ export function EditorPrototypePage() {
                        <span>切前</span>
                        <select
                          aria-label={`${left.label} 到 ${right.label} 的切前预览窗口`}
-                         disabled={!left.asset_id || !right.asset_id || Boolean(boundaryReviewSession) || Boolean(boundaryPreviewSession)}
+                         disabled={!left.asset_id || !right.asset_id || Boolean(boundaryReviewSession) || Boolean(boundaryPreviewSession) || Boolean(boundaryPreviewLoop)}
                          value={boundaryPreviewBeforeMs}
                          onChange={event => {
                            setBoundaryPreviewBeforeMs(Number(event.target.value) as 250 | 500 | 1000 | 2000)
@@ -7111,7 +7162,7 @@ export function EditorPrototypePage() {
                        <span>切后</span>
                        <select
                          aria-label={`${left.label} 到 ${right.label} 的切后预览窗口`}
-                         disabled={!left.asset_id || !right.asset_id || Boolean(boundaryReviewSession) || Boolean(boundaryPreviewSession)}
+                         disabled={!left.asset_id || !right.asset_id || Boolean(boundaryReviewSession) || Boolean(boundaryPreviewSession) || Boolean(boundaryPreviewLoop)}
                          value={boundaryPreviewAfterMs}
                          onChange={event => {
                            setBoundaryPreviewAfterMs(Number(event.target.value) as 250 | 500 | 1000 | 2000)
@@ -7132,7 +7183,7 @@ export function EditorPrototypePage() {
                        <span>速度</span>
                        <select
                          aria-label={`${left.label} 到 ${right.label} 的切点预览速度`}
-                         disabled={!left.asset_id || !right.asset_id || Boolean(boundaryReviewSession) || Boolean(boundaryPreviewSession)}
+                         disabled={!left.asset_id || !right.asset_id || Boolean(boundaryReviewSession) || Boolean(boundaryPreviewSession) || Boolean(boundaryPreviewLoop)}
                          value={boundaryPreviewRate}
                          onChange={event => {
                            const rate = Number(event.target.value) as 0.25 | 0.5 | 1
