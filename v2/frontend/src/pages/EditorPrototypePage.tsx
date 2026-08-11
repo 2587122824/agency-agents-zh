@@ -2892,7 +2892,7 @@ export function EditorPrototypePage() {
     boundaryIndexes: number[]
     position: number
     skippedCount: number
-    scope: 'timeline' | 'slide' | 'trim' | 'history' | 'repair'
+    scope: 'timeline' | 'slide' | 'trim' | 'history' | 'repair' | 'asset'
   } | null>(null)
   const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
     boundaryKey: string
@@ -2953,7 +2953,7 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [pendingBoundaryReview, setPendingBoundaryReview] = useState<{
     keys: string[]
-    scope: 'slide' | 'trim' | 'history' | 'repair'
+    scope: 'slide' | 'trim' | 'history' | 'repair' | 'asset'
   } | null>(null)
   const [boundaryFrameBlendPercent, setBoundaryFrameBlendPercent] = useState(50)
   const [boundaryContinuityOutcomes, setBoundaryContinuityOutcomes] = useState<
@@ -3497,6 +3497,9 @@ export function EditorPrototypePage() {
       remainingGapMs: gapAfterExtensionMs - insertedDurationMs,
     }
   }, [selectedGapFormalRecommendation, selectedGapPrecedingExtension, selectedItem])
+  const selectedGapDurationMs = selectedItem?.track_type === 'main_video' && !selectedItem.asset_id
+    ? selectedItem.timeline_out_ms - selectedItem.timeline_in_ms
+    : 0
   const normalizedAssetSearch = assetSearchQuery.trim().toLocaleLowerCase('zh-CN')
   const visibleAssets = workspace.data?.available_assets.filter(asset => (
     (assetFilter === 'all' || asset.asset_type === assetFilter)
@@ -4299,6 +4302,8 @@ export function EditorPrototypePage() {
         ? '片段裁切'
         : pendingBoundaryReview.scope === 'repair'
         ? '组合修复'
+        : pendingBoundaryReview.scope === 'asset'
+        ? '素材填入'
         : '撤销/重做'}成功，但更新后的受影响切点均缺少双侧画面或已不存在，未启动自动试听。`)
       return
     }
@@ -4356,6 +4361,8 @@ export function EditorPrototypePage() {
         ? '已停止片段裁切后的受影响切点试听。'
         : boundaryReviewSession.scope === 'repair'
         ? '已停止组合修复后的新切点试听。'
+        : boundaryReviewSession.scope === 'asset'
+        ? '已停止素材填入后的新切点试听。'
         : boundaryReviewSession.scope === 'history'
         ? '已停止撤销/重做后的受影响切点试听。'
         : '已停止全时间线切点连续巡检。')
@@ -4412,6 +4419,8 @@ export function EditorPrototypePage() {
       ? '片段裁切后试听'
       : boundaryReviewSession.scope === 'repair'
       ? '组合修复后试听'
+      : boundaryReviewSession.scope === 'asset'
+      ? '素材填入后试听'
       : boundaryReviewSession.scope === 'history'
       ? '撤销/重做后试听'
       : '连续巡检'
@@ -4678,15 +4687,57 @@ export function EditorPrototypePage() {
     }
     const rows = mainItems.map(item => item.id === target.id ? replacement : item)
     const normalized = normalizeMainTrack(rows, durationMs)
+    const reconciled = reconcileStructuralTransitions(mainItems, normalized)
+    const targetIndex = mainItems.findIndex(item => item.id === target.id)
+    const invalidatedBoundaryKeys = [
+      targetIndex > 0 ? `${mainItems[targetIndex - 1].id}-${target.id}` : null,
+      targetIndex >= 0 && targetIndex < mainItems.length - 1 ? `${target.id}-${mainItems[targetIndex + 1].id}` : null,
+    ].filter((key): key is string => Boolean(key))
+    const replacementIndex = reconciled.rows.findIndex(item => item.id === replacement.id)
+    const replacementBoundaryKeys = [
+      replacementIndex > 0 && reconciled.rows[replacementIndex - 1].asset_id
+        ? `${reconciled.rows[replacementIndex - 1].id}-${replacement.id}`
+        : null,
+      replacementIndex >= 0
+        && replacementIndex < reconciled.rows.length - 1
+        && reconciled.rows[replacementIndex + 1].asset_id
+        ? `${replacement.id}-${reconciled.rows[replacementIndex + 1].id}`
+        : null,
+    ].filter((key): key is string => Boolean(key))
+    setPlaying(false)
+    setBoundaryPreviewEndMs(null)
+    setBoundaryPreviewLoop(null)
+    setBoundaryFrameComparisonKey(null)
+    setBoundaryFrameOverlayKey(null)
+    setBoundaryFrameStripKey(null)
+    setBoundaryActionComparisonKey(null)
+    setBoundaryFocusKey(null)
+    setBoundaryReviewSession(null)
+    setPendingBoundaryPreviewKey(null)
+    setBoundaryRollMonitor(null)
+    setPendingBoundaryReview(null)
+    setBoundaryContinuityOutcomes(current => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !invalidatedBoundaryKeys.includes(key)),
+    ))
+    setBoundaryContinuityIssueContexts(current => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !invalidatedBoundaryKeys.includes(key)),
+    ))
+    setBoundaryContinuityObservations(current => Object.fromEntries(
+      Object.entries(current).filter(([key]) => !invalidatedBoundaryKeys.includes(key)),
+    ))
+    setBoundaryContinuityReadyEvidence({})
     commitItems(
-      replaceMainTrack(items, normalized),
+      replaceMainTrack(items, reconciled.rows),
       asset.duration_ms > replacementDuration
-        ? `已把 ${replacement.label} 投放到时间线，并按 ${(replacementDuration / 1000).toFixed(1)}s 缺口裁切。`
-        : `已把 ${replacement.label} 投放到时间线。`,
+        ? `已把 ${replacement.label} 投放到时间线，按 ${seconds(replacementDuration)} 缺口裁切并准备试听新切点。`
+        : `已把 ${replacement.label} 投放到时间线并准备试听新切点。`,
       replacement.id,
     )
     setDraggedAssetId(null)
     setGapAssetSelection(false)
+    if (replacementBoundaryKeys.length) {
+      setPendingBoundaryReview({ keys: replacementBoundaryKeys, scope: 'asset' })
+    }
   }
 
   const startGapAssetSelection = (preferredShotCode?: string) => {
@@ -6221,6 +6272,8 @@ export function EditorPrototypePage() {
             ? `片段裁切后的受影响切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个受影响切点；人工连续性检查仍需逐项确认。`
             : boundaryReviewSession.scope === 'repair'
             ? `组合修复后的新切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；人工连续性检查仍需逐项确认。`
+            : boundaryReviewSession.scope === 'asset'
+            ? `素材填入后的新切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；人工连续性检查仍需逐项确认。`
             : boundaryReviewSession.scope === 'history'
             ? `撤销/重做后的受影响切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；恢复的人工连续性结果仍需按当前画面确认。`
             : `全时间线切点连续巡检播放完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个可用切点${boundaryReviewSession.skippedCount ? `，跳过 ${boundaryReviewSession.skippedCount} 个含缺口边界` : ''}；人工检查项仍需逐项确认。`)
@@ -6379,7 +6432,7 @@ export function EditorPrototypePage() {
             setAssetSearchOpen(false)
           }
         }} />{assetSearchQuery && <button title="清空搜索" onClick={() => setAssetSearchQuery('')}><X /></button>}</div>}
-        {gapAssetSelection && <div className={styles.assetSelectionBanner}><strong>缺口素材选择</strong><span>仅显示未用于主画面的已批准视频</span><button onClick={() => setGapAssetSelection(false)}>退出</button></div>}
+        {gapAssetSelection && <div className={styles.assetSelectionBanner}><strong>为 {seconds(selectedGapDurationMs)} 缺口选择素材</strong><span>仅显示未用于主画面的已批准视频；点击后按缺口裁切并自动试听新切点</span><button onClick={() => setGapAssetSelection(false)}>退出</button></div>}
         <nav>
           {([
             ['all', '全部', Layers3],
@@ -6412,7 +6465,11 @@ export function EditorPrototypePage() {
               else setNotice(`${asset.node_key ?? asset.role} 尚未加入当前时间线，请拖到目标画面位置。`)
           }}>
             <i>{asset.asset_type === 'video' ? <Film /> : asset.asset_type === 'audio' ? <Music2 /> : <Subtitles />}</i>
-            <span><strong>{asset.node_key ?? asset.role}</strong><small>{seconds(asset.duration_ms)} · {asset.width && asset.height ? `${asset.width}×${asset.height}` : '已批准'}</small></span>
+            <span><strong>{asset.node_key ?? asset.role}</strong><small>{gapAssetSelection && asset.asset_type === 'video' && asset.duration_ms && selectedGapDurationMs > 0
+              ? asset.duration_ms >= selectedGapDurationMs
+                ? `完整覆盖 ${seconds(selectedGapDurationMs)}${asset.duration_ms > selectedGapDurationMs ? ` · 裁切 ${seconds(asset.duration_ms - selectedGapDurationMs)}` : ''}`
+                : `覆盖 ${seconds(asset.duration_ms)} · 仍缺 ${seconds(selectedGapDurationMs - asset.duration_ms)}`
+              : `${seconds(asset.duration_ms)} · ${asset.width && asset.height ? `${asset.width}×${asset.height}` : '已批准'}`}</small></span>
             <Plus />
           </button>)}
         </div>
@@ -6660,6 +6717,10 @@ export function EditorPrototypePage() {
                   ? '停止前后切点试听'
                   : boundaryReviewSession.scope === 'trim'
                   ? '停止裁切切点试听'
+                  : boundaryReviewSession.scope === 'asset'
+                  ? '停止素材填入切点试听'
+                  : boundaryReviewSession.scope === 'repair'
+                  ? '停止组合修复切点试听'
                   : boundaryReviewSession.scope === 'history'
                   ? '停止撤销/重做切点试听'
                   : '停止连续巡检'}（${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}）`
