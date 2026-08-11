@@ -293,6 +293,8 @@ Inspector 片段操作新增三点联动的片段滑动。`slideMainItem` 保持
 
 页面在允许勾选上述人工项之前先建立精确预览观看会话：key 为 `${preview_key}:${content_hash}`，ref 记录最后媒体时钟，状态只保留进度和完成 key。首次 `play` 必须位于零点容差内且速度为 `1×`；`timeupdate` 只接受单调小步前进，`ended` 还要复验最后时钟和真实 duration。暂停保留会话，seek、倍速、非零起播、缓存重检和新预览使未完成会话失效。完成前 checklist 与保存按钮 disabled；mutationFn 再次检查完成 key 后才调用 `ReviewTimelinePreview`。该实现不持久化观看进度，也不改变服务端复核命令和不可变事件合同。
 
+功能提交 `fec8d097` 已发布。真实 Browser 在隔离 Timeline v99 合法缓存上验证 15 秒预览初始门禁、暂停续播、自然 `ended` 解锁、ArrowRight seek 归零和解锁后两项勾选；保存请求进入既有服务端后，被隔离夹具的人为版本/合同差异按哈希门禁拒绝，证明页面门禁没有替代服务端校验。隔离 8767、数据库副本、脚本和日志随后全部删除。完整后端 `305 passed in 151.29s`、compileall、两次 Vite build 和 diff check 通过；最终标准服务 API `1736` / Worker `4208`，健康 `ok`、Alembic runtime/head `20260811_49`、四日志零实际错误，正式项目草稿 `null`、服务周期 PUT `0`，1280×720 无横向溢出且 Inspector 244px。
+
 Timeline 读取投影会从不可变事件中选择当前 Timeline ID 与合同哈希都匹配的最新复核，前端刷新或重新打开相同缓存时据此恢复已复核状态。预览弹窗支持结果单窗和源时间线/结果双窗；结果播放器是唯一主时钟，源窗按 `source_in_ms + preview_ms - timeline_in_ms` 定位，跨主画面条目边界后切换精确 Asset，源窗保持静音。
 
 复核完成后，新版剪辑台继续显式调用时间线确认命令；确认成功才打开交付授权弹窗。授权前重新读取 DeliveryWorkspace，要求确认时间线与精确复核同时存在，再由用户选择 `local_ffmpeg` 或 `external_upload`。这只是把既有合同步骤编排到同一界面，不合并命令、不隐式授权、不自动重试。
