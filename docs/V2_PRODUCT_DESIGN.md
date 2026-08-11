@@ -1461,7 +1461,7 @@ V1 中缺少工作流 ID 或 NodeInfoList 的多人物、首尾帧、真人转�
 
 动作连续性不能只凭并排同步播放判断。`action` 模式必须在同一当前边界指纹下分别完整观看 A 原方案的“同步动作”和“1× 完整上下文顺序切点”，前者用于比较动作阶段与方向，后者用于按最终成片时间尺度观看前镜到后镜的真实 cut/fade 与切点节奏；两项缺一时“通过”保持禁用。0.25×/0.5× 慢放仍可用于逐帧分析动作，但改变了节奏感，完整播完也不能登记顺序切点证据；1× 试播还必须在切点两侧分别覆盖最多 1 秒，若某侧片段不足 1 秒则覆盖该侧全部可用源区间。用户把切前或切后窗口缩到不足上述值时，播放仍可用于快速定位，但完成后必须提示所需精确窗口且不能登记证据。A→B 连续对照、B 当前试调、媒体就绪、播放失败或中止同样不能替代。权威观察保存严格有序 `completed_steps=['synchronous_action','sequential_cut_realtime_context']`，并在 action 下冻结 `action_sequence_evidence={playback_rate:1,left_context_ms,right_context_ms}`；服务端必须独立确认两个时长不小于当前源窗要求且不大于各自源窗。frames/overlay 必须显式保存该参数为 `null`。草稿升级为 `editor-draft-session.v7 / editor-local-draft.v10`，冻结结果升级为 `timeline-continuity-review.v6`。
 
-提交 `0058bfbb` 已发布该规则。真实 Browser 证明初始三枚通过全部禁用，双帧只解锁对应画面项，完整同步播放才解锁动作项；临时 same_moment 夹具证明叠加只解锁 eyeline，夹具和验收草稿已恢复。正式项目生成 v8 后冻结模式 `frames/action/frames`，完整哈希为 `4b9c81f575abf4d97a02f77aa0498ca8cba9b4fb87c2221ae259d19e518ab955`，规范化 JSON 校验一致；显式缺口仍独立阻断。完整后端 `305 passed in 164.20s`，最终 Alembic runtime/head 为 `20260811_45`。
+提交 `36e52963` 已发布结构化动作顺序证据。真实 Browser 完成同步动作、1× 完整上下文顺序切点与双帧观察后生成 v12；action 参数精确冻结为 `playback_rate=1 / left_context_ms=1000 / right_context_ms=409`，两个 frames check 的参数均为 null，审核哈希 `bc72b4aa5ac25004484012f43c638eca1312db001dd472cdbda91d02777b03ce` 与规范化 JSON 一致。显式缺口仍以 `TIMELINE_GAP_UNRESOLVED` 独立阻断。完整后端 `305 passed in 163.00s`，最终 Alembic runtime/head 为 `20260811_49`；1280×720 页面无溢出且页面日志为空。
 
 真实 SH-002 → SH-001 动作问题验收中，处理入口先显示“正在处理 / 当前观察工具：同步动作”；后镜源窗口实际后移一帧到 `42..451ms` 并完成自动试听后，动作项回到未检查，全局为 `未检查 3 · 待调整 0`，但上下文准确变为“待复检原问题 / 动作阶段、运动方向与切点节奏自然”。点击重新复检只打开同步动作，扫描侧为空、没有 B、13 路媒体暂停，并保持自动试听结束后的播放头 `5118ms`。明确选择通过后上下文数量归零。卡片 `200/200`、按钮 `50/50`、Inspector `244/244`、html/body `1280/1280`，页面日志为空；验收编辑已撤销并恢复源窗与播放头。
 
