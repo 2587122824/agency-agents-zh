@@ -1974,6 +1974,33 @@
   background: #493027;
   color: #ffd3bf;
 }
+.continuityIssueContext {
+  min-width: 0;
+  padding: 6px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #765548;
+  border-radius: 4px;
+  background: #251a17;
+}
+.continuityIssueContext > span { min-width: 0; display: grid; gap: 2px; }
+.continuityIssueContext strong { color: #e7a98f; font-size: 8px; }
+.continuityIssueContext b { color: #d7c4bc; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
+.continuityIssueContext small { color: #95817a; line-height: 1.35; overflow-wrap: anywhere; }
+.continuityIssueContext[data-state="recheck"] { border-color: #6e6343; background: #242116; }
+.continuityIssueContext[data-state="recheck"] strong { color: #d7c578; }
+.boundaryControl .continuityIssueContext button {
+  width: 52px;
+  height: auto;
+  min-height: 30px;
+  padding: 4px;
+  color: #e9d6a0;
+  font-size: 8px;
+  line-height: 1.25;
+  white-space: normal;
+}
 .continuityChecklist small { color: #7f8984; line-height: 1.4; }
 .inspector label {
   margin-top: 7px;

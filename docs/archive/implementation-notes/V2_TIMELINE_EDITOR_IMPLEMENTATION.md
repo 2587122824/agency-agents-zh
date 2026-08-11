@@ -517,6 +517,12 @@ A/B 决策门禁已从“候选快捷操作等待像素”收紧为统一的当�
 
 最终标准重启为 API PID `32424` / Worker PID `19084`，创建时间分别为 `2026-08-11 10:34:33.693 / 10:34:33.713`；8766 监听 PID 精确等于 API，健康为 `ok`，Alembic runtime/head 均为 `20260730_42`。最终服务周期 editor-draft PUT 为 0；`api.out.log` 只有健康与草稿只读请求，`api.err.log` 只有 Uvicorn 正常启动，Worker 两份日志为空，四份日志无实际错误。
 
+### 调整后原问题复检上下文
+
+页面新增 `boundaryContinuityIssueContexts`，每个稳定边界最多记录当前主动处理的一项 check ID、显示标签和 frames/overlay/action 模式。单项处理与全局 needs-adjustment 定位都会登记；只打开普通未检查切点不登记。上下文卡直接结合当前 outcome 派生：仍为 needs-adjustment 时是 handling，编辑事务按既有逻辑清除 outcome 后自然变为 recheck，因此没有给滚动、滑移、相位、转场和裁切各加新的兼容分支。
+
+recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入口。相同 check 明确 passed 时同时删除 context；未检查或仍需调整继续保留。workspace 加载与 discard 清空 map，`mainBoundaries` 变化 effect 裁剪已消失 key；关系清单不含 check ID 时 render 过滤。卡片采用可收缩文本列和固定 52px 复检按钮，不扩大 Inspector。状态不写草稿、history、API、localStorage、迁移或 FFmpeg。
+
 ## 8. 事件
 
 ```text

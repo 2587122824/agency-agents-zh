@@ -68,6 +68,12 @@ interface BoundaryMotionAnalysis {
 type BoundaryCandidateComparisonOutcome = 'completed' | 'kept_baseline' | 'shortlisted'
 type BoundaryContinuityCheckOutcome = 'passed' | 'needs_adjustment'
 
+interface BoundaryContinuityIssueContext {
+  checkId: string
+  checkLabel: string
+  mode: BoundaryContinuityReviewMode
+}
+
 interface BoundaryCandidateReviewSession {
   measuredMotionEvidence: Record<string, BoundaryMotionAnalysis>
   comparisonOutcomes: Record<string, BoundaryCandidateComparisonOutcome>
@@ -2813,6 +2819,9 @@ export function EditorPrototypePage() {
   const [boundaryContinuityOutcomes, setBoundaryContinuityOutcomes] = useState<
     Record<string, Record<string, BoundaryContinuityCheckOutcome>>
   >({})
+  const [boundaryContinuityIssueContexts, setBoundaryContinuityIssueContexts] = useState<
+    Record<string, BoundaryContinuityIssueContext>
+  >({})
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
   const [assetFilter, setAssetFilter] = useState<'all' | 'video' | 'audio' | 'subtitle'>('all')
@@ -2891,6 +2900,7 @@ export function EditorPrototypePage() {
     setBoundaryRollMonitor(null)
     setBoundaryFrameBlendPercent(50)
     setBoundaryContinuityOutcomes({})
+    setBoundaryContinuityIssueContexts({})
     setDirty(false)
     setLastValidation(null)
     setLastPreview(null)
@@ -3152,6 +3162,13 @@ export function EditorPrototypePage() {
   const nextUnresolvedBoundaryContinuityReview = unresolvedBoundaryContinuityReviews.find(
     boundary => boundary.index > activeBoundaryIndex,
   ) ?? unresolvedBoundaryContinuityReviews[0] ?? null
+  useEffect(() => {
+    const currentBoundaryKeys = new Set(mainBoundaries.map(boundary => boundary.key))
+    setBoundaryContinuityIssueContexts(current => {
+      const retained = Object.entries(current).filter(([key]) => currentBoundaryKeys.has(key))
+      return retained.length === Object.keys(current).length ? current : Object.fromEntries(retained)
+    })
+  }, [mainBoundaries])
   const candidateReviewFollowUpBoundaries = useMemo(
     () => mainBoundaries.flatMap((boundary, index) => {
       if (!boundary.left.asset_id || !boundary.right.asset_id) return []
@@ -3731,6 +3748,12 @@ export function EditorPrototypePage() {
     const mode = firstAdjustment ? continuityReviewModeForCheckId(firstAdjustment.id) : 'frames'
     const target = focusBoundaryForReviewAt(targetIndex, mode)
     if (!target) return
+    if (firstAdjustment) {
+      setBoundaryContinuityIssueContexts(current => ({
+        ...current,
+        [target.key]: { checkId: firstAdjustment.id, checkLabel: firstAdjustment.label, mode },
+      }))
+    }
     setNotice(firstAdjustment
       ? `已定位待调整项“${firstAdjustment.label}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}。`
       : `已定位人工连续性待处理项：${target.left.label} → ${target.right.label}；请逐项检查末帧与首帧。`)
@@ -3740,6 +3763,10 @@ export function EditorPrototypePage() {
     const mode = continuityReviewModeForCheckId(checkId)
     const target = focusBoundaryForReviewAt(targetIndex, mode)
     if (!target) return
+    setBoundaryContinuityIssueContexts(current => ({
+      ...current,
+      [target.key]: { checkId, checkLabel, mode },
+    }))
     setNotice(`正在处理“${checkLabel}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}，不会自动修改切点。`)
   }
 
@@ -4068,6 +4095,7 @@ export function EditorPrototypePage() {
     setBoundaryRollMonitor(null)
     setPendingBoundaryReview(null)
     setBoundaryContinuityOutcomes({})
+    setBoundaryContinuityIssueContexts({})
   }
 
   const undo = () => {
@@ -6147,6 +6175,14 @@ export function EditorPrototypePage() {
                   const unreviewedContinuityCheckCount = continuityChecks.length
                     - passedContinuityCheckCount
                     - needsAdjustmentContinuityCheckCount
+                  const storedContinuityIssueContext = boundaryContinuityIssueContexts[boundaryKey]
+                  const continuityIssueContext = storedContinuityIssueContext
+                    && continuityChecks.some(check => check.id === storedContinuityIssueContext.checkId)
+                    ? storedContinuityIssueContext
+                    : null
+                  const continuityIssueOutcome = continuityIssueContext
+                    ? currentContinuityOutcomes[continuityIssueContext.checkId]
+                    : undefined
                  const sharedContinuityGroup = formalAdjacent
                    && leftFormalShot?.continuity_group_id
                    && leftFormalShot.continuity_group_id === rightFormalShot?.continuity_group_id
@@ -6564,6 +6600,13 @@ export function EditorPrototypePage() {
                        const outcome = currentContinuityOutcomes[check.id]
                        const status: BoundaryContinuityCheckOutcome | 'unreviewed' = outcome ?? 'unreviewed'
                        const setOutcome = (nextOutcome: BoundaryContinuityCheckOutcome | null) => {
+                         if (nextOutcome === 'passed' && continuityIssueContext?.checkId === check.id) {
+                           setBoundaryContinuityIssueContexts(current => {
+                             const next = { ...current }
+                             delete next[boundaryKey]
+                             return next
+                           })
+                         }
                          setBoundaryContinuityOutcomes(current => {
                            const nextBoundaryOutcomes = { ...(current[boundaryKey] ?? {}) }
                            if (nextOutcome) nextBoundaryOutcomes[check.id] = nextOutcome
@@ -6600,6 +6643,28 @@ export function EditorPrototypePage() {
                          >处理：{continuityReviewModeLabel(continuityReviewModeForCheckId(check.id))}</button>}
                        </div>
                      })}
+                     {continuityIssueContext && <section
+                       className={styles.continuityIssueContext}
+                       data-state={continuityIssueOutcome === 'needs_adjustment' ? 'handling' : 'recheck'}
+                       aria-label={`${left.label} 到 ${right.label} 的连续性问题处理上下文`}
+                     >
+                       <span>
+                         <strong>{continuityIssueOutcome === 'needs_adjustment' ? '正在处理' : '待复检原问题'}</strong>
+                         <b>{continuityIssueContext.checkLabel}</b>
+                         <small>{continuityIssueOutcome === 'needs_adjustment'
+                           ? `当前观察工具：${continuityReviewModeLabel(continuityIssueContext.mode)}。实际修改后本项会回到未检查。`
+                           : `请重新打开${continuityReviewModeLabel(continuityIssueContext.mode)}复检，再明确选择通过或需调整。`}</small>
+                       </span>
+                       <button
+                         type="button"
+                         disabled={boundaryIndex < 0 || !left.asset_id || !right.asset_id}
+                         onClick={() => openBoundaryContinuityAdjustmentAt(
+                           boundaryIndex,
+                           continuityIssueContext.checkId,
+                           continuityIssueContext.checkLabel,
+                         )}
+                       >{continuityIssueOutcome === 'needs_adjustment' ? '继续处理' : '重新复检'}</button>
+                     </section>}
                      <small>本切点：通过 {passedContinuityCheckCount} · 未检查 {unreviewedContinuityCheckCount} · 待调整 {needsAdjustmentContinuityCheckCount}。结果仅保留在本次页面，不写入草稿；“需调整”不会自动修改素材、切点或转场。</small>
                    </div>
                  </div>
