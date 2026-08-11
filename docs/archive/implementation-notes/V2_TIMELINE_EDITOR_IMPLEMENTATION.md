@@ -559,6 +559,10 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 真实验收临时补入 SH-003.video 形成两个有效切点：第一切点 motion needs → SH-001 入场 `fade:204` → recheck；第二切点随后 subject passed。undo 第一转场只恢复第一切点 `cut:0 / needs 1 / handling 1`，第二切点仍 `passed 1`；redo 第一切点回到 fade/recheck，第二切点仍不变。最终依次 undo 转场、清空两边 outcome/context、undo 临时补片并归零，草稿恢复 SH-002 → SH-001 → 9.9s 缺口。提交 `1937f0f4` 已推送，完整验证 `305 passed in 162.26s`、compileall、Vite build、diff check；最终 API `47496` / Worker `45484`，创建时间 `2026-08-11 11:59:17.060 / 11:59:17.077`，健康 `ok`、Alembic runtime/head `20260730_42`、四份日志无错误。草稿 `row_version=265 / updated_at=2026-08-11T03:58:22.871473 / playhead_ms=0 / SH-001 0..409ms / cut:0`，最终周期 editor-draft PUT 为 0。
 
+### 撤销/重做后受影响切点试听
+
+history 恢复使用已经计算出的 changed boundary key 集合排队，不重新推测影响范围。pending effect 在更新后的时间线上查找 key、过滤缺少双侧素材的边界并按 index 排序，随后复用 `boundaryReviewSession` 的切前/切后窗口、速度、跨媒体推进和结束门禁。scope 只增加 history 文案分支；零合法切点不创建播放会话，多切点依次播放，用户可显式停止。人工结果恢复与媒体试听仍为两条独立职责。
+
 ## 8. 事件
 
 ```text

@@ -2819,7 +2819,7 @@ export function EditorPrototypePage() {
     boundaryIndexes: number[]
     position: number
     skippedCount: number
-    scope: 'timeline' | 'slide' | 'trim'
+    scope: 'timeline' | 'slide' | 'trim' | 'history'
   } | null>(null)
   const [boundaryPreviewLoop, setBoundaryPreviewLoop] = useState<{
     boundaryKey: string
@@ -2880,7 +2880,7 @@ export function EditorPrototypePage() {
   } | null>(null)
   const [pendingBoundaryReview, setPendingBoundaryReview] = useState<{
     keys: string[]
-    scope: 'slide' | 'trim'
+    scope: 'slide' | 'trim' | 'history'
   } | null>(null)
   const [boundaryFrameBlendPercent, setBoundaryFrameBlendPercent] = useState(50)
   const [boundaryContinuityOutcomes, setBoundaryContinuityOutcomes] = useState<
@@ -4033,11 +4033,18 @@ export function EditorPrototypePage() {
   useEffect(() => {
     if (!pendingBoundaryReview) return
     const boundaryIndexes = pendingBoundaryReview.keys
-      .map(key => mainBoundaries.findIndex(boundary => boundary.key === key))
+      .map(key => mainBoundaries.findIndex(boundary => (
+        boundary.key === key && boundary.left.asset_id && boundary.right.asset_id
+      )))
       .filter(index => index >= 0)
+      .sort((left, right) => left - right)
     setPendingBoundaryReview(null)
     if (!boundaryIndexes.length) {
-      setNotice(`${pendingBoundaryReview.scope === 'slide' ? '片段滑动' : '片段裁切'}成功，但更新后的受影响切点已不存在，未启动自动试听。`)
+      setNotice(`${pendingBoundaryReview.scope === 'slide'
+        ? '片段滑动'
+        : pendingBoundaryReview.scope === 'trim'
+        ? '片段裁切'
+        : '撤销/重做'}成功，但更新后的受影响切点均缺少双侧画面或已不存在，未启动自动试听。`)
       return
     }
     videoRef.current?.pause()
@@ -4092,6 +4099,8 @@ export function EditorPrototypePage() {
         ? '已停止片段滑动后的前后切点试听。'
         : boundaryReviewSession.scope === 'trim'
         ? '已停止片段裁切后的受影响切点试听。'
+        : boundaryReviewSession.scope === 'history'
+        ? '已停止撤销/重做后的受影响切点试听。'
         : '已停止全时间线切点连续巡检。')
       return
     }
@@ -4144,6 +4153,8 @@ export function EditorPrototypePage() {
       ? '片段滑动后试听'
       : boundaryReviewSession.scope === 'trim'
       ? '片段裁切后试听'
+      : boundaryReviewSession.scope === 'history'
+      ? '撤销/重做后试听'
       : '连续巡检'
     setNotice(`${reviewLabel} ${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}：正在以 ${boundaryPreviewRate}× 预览 ${boundary.left.label} → ${boundary.right.label}。`)
   }, [boundaryReviewSession, boundaryPreviewAfterMs, boundaryPreviewBeforeMs, items, mainBoundaries])
@@ -4227,6 +4238,9 @@ export function EditorPrototypePage() {
       previous.boundaryContinuityIssueContexts,
       affectedBoundaryKeys,
     ))
+    if (affectedBoundaryKeys.size > 0) {
+      setPendingBoundaryReview({ keys: [...affectedBoundaryKeys], scope: 'history' })
+    }
     setDirty(true)
     setSelectedIndex(index => Math.min(index, Math.max(0, previous.items.length - 1)))
     setNotice('已撤销上一步本地剪辑操作；相关人工连续性结果也已恢复。')
@@ -4257,6 +4271,9 @@ export function EditorPrototypePage() {
       next.boundaryContinuityIssueContexts,
       affectedBoundaryKeys,
     ))
+    if (affectedBoundaryKeys.size > 0) {
+      setPendingBoundaryReview({ keys: [...affectedBoundaryKeys], scope: 'history' })
+    }
     setDirty(true)
     setSelectedIndex(index => Math.min(index, Math.max(0, next.items.length - 1)))
     setNotice('已恢复下一步本地剪辑操作；相关人工连续性结果也已随编辑重现。')
@@ -5833,6 +5850,8 @@ export function EditorPrototypePage() {
             ? `片段滑动后的前后切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个受影响切点；人工连续性检查仍需逐项确认。`
             : boundaryReviewSession.scope === 'trim'
             ? `片段裁切后的受影响切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个受影响切点；人工连续性检查仍需逐项确认。`
+            : boundaryReviewSession.scope === 'history'
+            ? `撤销/重做后的受影响切点试听完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个切点；恢复的人工连续性结果仍需按当前画面确认。`
             : `全时间线切点连续巡检播放完成：已播放 ${boundaryReviewSession.boundaryIndexes.length} 个可用切点${boundaryReviewSession.skippedCount ? `，跳过 ${boundaryReviewSession.skippedCount} 个含缺口边界` : ''}；人工检查项仍需逐项确认。`)
           return
         }
@@ -6258,6 +6277,8 @@ export function EditorPrototypePage() {
                   ? '停止前后切点试听'
                   : boundaryReviewSession.scope === 'trim'
                   ? '停止裁切切点试听'
+                  : boundaryReviewSession.scope === 'history'
+                  ? '停止撤销/重做切点试听'
                   : '停止连续巡检'}（${boundaryReviewSession.position + 1}/${boundaryReviewSession.boundaryIndexes.length}）`
                 : `连续巡检 ${reviewableBoundaryIndexes.length} 个可播放切点${mainBoundaries.length > reviewableBoundaryIndexes.length ? ` · 跳过 ${mainBoundaries.length - reviewableBoundaryIndexes.length} 个缺口` : ''}`}</button>
             <div className={styles.boundaryList}>
