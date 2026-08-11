@@ -1,4 +1,4 @@
-import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorDraft, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProjectProductionProfileOptions, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview, TimelinePreviewReview, VoiceCloneAuthorization, WorkItem } from './types'
+import type { AssetRevisionRequest, AssetRevisionResult, AttachmentBinding, AudioWaveform, BlockedProductionClosed, CosyVoiceValidationRun, CosyVoiceValidationWorkspace, CreationAttachment, CreationCenter, CreationMessage, CreativeBriefCandidate, Decision, DecisionChangeImpactAnalysis, DecisionChangeImpactWorkspace, DecisionImpactGraph, DeliveryAttempt, DeliveryWorkspace, EditorContinuityIssueContext, EditorContinuityOutcome, EditorDraft, EditorWorkspace, EntityRegistry, Health, MaterialContactSheet, PlanningCenter, PlanVersion, ProductionAsset, ProductionExecution, ProductionImpactAnalysis, ProductionPlanCandidate, ProductionPreparation, ProductionRetryBatch, ProductionSnapshot, Project, ProjectAuditLedger, ProjectControl, ProjectControlSummary, ProjectCreate, ProjectDetail, ProjectProductionProfileOptions, ProviderReadiness, QCReport, QCReportCandidate, QualityReview, RequirementCandidate, RequirementVersion, ShotContract, ShotPlanCandidate, SystemConfigurationDiff, SystemConfigurationDraft, SystemConfigurationSummary, SystemConfigurationVersion, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview, TimelinePreviewReview, VoiceCloneAuthorization, WorkItem } from './types'
 
 const API_ROOT = '/api/v1'
 
@@ -369,6 +369,8 @@ export const api = {
     trackConfig: Timeline['track_config'],
     items: TimelineItem[],
     playheadMs: number,
+    continuityOutcomes: Record<string, Record<string, EditorContinuityOutcome>>,
+    continuityIssueContexts: Record<string, EditorContinuityIssueContext[]>,
   ) => request<EditorDraft>(`/projects/${projectId}/editor-draft`, {
     method: 'PUT',
     body: JSON.stringify({
@@ -391,6 +393,8 @@ export const api = {
         transform: item.transform,
       })),
       playhead_ms: Math.max(0, Math.round(playheadMs)),
+      continuity_outcomes: continuityOutcomes,
+      continuity_issue_contexts: continuityIssueContexts,
     }),
   }),
   discardEditorDraft: (projectId: string) => request<{ status: 'discarded' }>(`/projects/${projectId}/editor-draft`, {

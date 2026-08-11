@@ -17,7 +17,7 @@ import { api } from '../api/client'
 import type { DeliveryAttempt, DeliveryWorkspace, Timeline, TimelineItem, TimelineItemDraft, TimelinePreview } from '../api/types'
 import styles from './EditorPrototypePage.module.css'
 
-const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v4'
+const LOCAL_DRAFT_SCHEMA = 'editor-local-draft.v5'
 
 interface LocalEditorDraft {
   schema_version: typeof LOCAL_DRAFT_SCHEMA
@@ -27,6 +27,8 @@ interface LocalEditorDraft {
   timeline_zoom: number
   snap_enabled: boolean
   playhead_ms: number
+  boundary_continuity_outcomes: Record<string, Record<string, BoundaryContinuityCheckOutcome>>
+  boundary_continuity_issue_contexts: Record<string, BoundaryContinuityIssueContext[]>
   saved_at: string
 }
 
@@ -253,6 +255,8 @@ function editorDraftFingerprint(
   playheadMs: number,
   snapEnabled: boolean,
   timelineZoom: number,
+  boundaryContinuityOutcomes: Record<string, Record<string, BoundaryContinuityCheckOutcome>>,
+  boundaryContinuityIssueContexts: Record<string, BoundaryContinuityIssueContext[]>,
 ) {
   return JSON.stringify(canonicalDraftValue({
     base: sourceTimeline ? [sourceTimeline.id, sourceTimeline.row_version] : null,
@@ -272,6 +276,8 @@ function editorDraftFingerprint(
     playhead_ms: Math.max(0, Math.round(playheadMs)),
     snap_enabled: snapEnabled,
     pixels_per_second: timelineZoom,
+    boundary_continuity_outcomes: boundaryContinuityOutcomes,
+    boundary_continuity_issue_contexts: boundaryContinuityIssueContexts,
   }))
 }
 
@@ -3022,8 +3028,27 @@ export function EditorPrototypePage() {
     const remoteZoom = remote?.track_config.pixels_per_second ?? sourceTimeline.track_config.pixels_per_second ?? 82
     const remoteSnapEnabled = remote?.track_config.snap_enabled ?? sourceTimeline.track_config.snap_enabled
     const remotePlayheadMs = remote?.playhead_ms ?? 0
+    const remoteContinuityOutcomes = remote?.continuity_outcomes ?? {}
+    const remoteContinuityIssueContexts = Object.fromEntries(
+      Object.entries(remote?.continuity_issue_contexts ?? {}).map(([key, contexts]) => [
+        key,
+        contexts.map(context => ({
+          checkId: context.check_id,
+          checkLabel: context.check_label,
+          mode: context.mode,
+        })),
+      ]),
+    )
     const remoteFingerprint = remoteItems
-      ? editorDraftFingerprint(sourceTimeline, remoteItems, remotePlayheadMs, remoteSnapEnabled, remoteZoom)
+      ? editorDraftFingerprint(
+        sourceTimeline,
+        remoteItems,
+        remotePlayheadMs,
+        remoteSnapEnabled,
+        remoteZoom,
+        remoteContinuityOutcomes,
+        remoteContinuityIssueContexts,
+      )
       : null
     const localFingerprint = localRestored
       ? editorDraftFingerprint(
@@ -3032,6 +3057,8 @@ export function EditorPrototypePage() {
         localRestored.playhead_ms,
         localRestored.snap_enabled,
         localRestored.timeline_zoom,
+        localRestored.boundary_continuity_outcomes,
+        localRestored.boundary_continuity_issue_contexts,
       )
       : null
     const localMatchesRemote = Boolean(remoteFingerprint && localFingerprint === remoteFingerprint)
@@ -3049,9 +3076,17 @@ export function EditorPrototypePage() {
     const restoredZoom = useRemote ? remoteZoom : localRestored?.timeline_zoom ?? sourceTimeline.track_config.pixels_per_second ?? 82
     const restoredSnapEnabled = useRemote ? remoteSnapEnabled : localRestored?.snap_enabled ?? sourceTimeline.track_config.snap_enabled
     const restoredPlayheadMs = useRemote ? remotePlayheadMs : localRestored?.playhead_ms ?? 0
+    const restoredContinuityOutcomes = useRemote
+      ? remoteContinuityOutcomes
+      : localRestored?.boundary_continuity_outcomes ?? {}
+    const restoredContinuityIssueContexts = useRemote
+      ? remoteContinuityIssueContexts
+      : localRestored?.boundary_continuity_issue_contexts ?? {}
     setItems(restoredItems)
     setTimelineZoom(restoredZoom)
     setSnapEnabled(restoredSnapEnabled)
+    setBoundaryContinuityOutcomes(restoredContinuityOutcomes)
+    setBoundaryContinuityIssueContexts(restoredContinuityIssueContexts)
     setDirty(Boolean(remoteItems || localRestored))
     setLastAutoSavedAt(useRemote && remote ? remote.updated_at : null)
     setLastAutoSavedFingerprint(useRemote ? remoteFingerprint : null)
@@ -3324,8 +3359,10 @@ export function EditorPrototypePage() {
       playheadMs,
       snapEnabled,
       timelineZoom,
+      boundaryContinuityOutcomes,
+      boundaryContinuityIssueContexts,
     ),
-    [items, playheadMs, snapEnabled, sourceTimeline, timelineZoom],
+    [boundaryContinuityIssueContexts, boundaryContinuityOutcomes, items, playheadMs, snapEnabled, sourceTimeline, timelineZoom],
   )
 
   useEffect(() => {
@@ -3465,10 +3502,12 @@ export function EditorPrototypePage() {
       timeline_zoom: timelineZoom,
       snap_enabled: snapEnabled,
       playhead_ms: Math.max(0, Math.round(playheadMs)),
+      boundary_continuity_outcomes: boundaryContinuityOutcomes,
+      boundary_continuity_issue_contexts: boundaryContinuityIssueContexts,
       saved_at: new Date().toISOString(),
     }
     window.localStorage.setItem(localDraftKey, JSON.stringify(draft))
-  }, [boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
+  }, [boundaryContinuityIssueContexts, boundaryContinuityOutcomes, boundaryRollMonitor, dirty, items, localDraftKey, playheadMs, snapEnabled, sourceTimeline, timelineZoom])
 
   const autoSaveDraft = useMutation({
     mutationFn: async (fingerprint: string) => {
@@ -3479,7 +3518,16 @@ export function EditorPrototypePage() {
         subtitle_enabled: subtitleItems.length > 0,
         snap_enabled: snapEnabled,
         pixels_per_second: timelineZoom,
-      }, items, playheadMs)
+      }, items, playheadMs, boundaryContinuityOutcomes, Object.fromEntries(
+        Object.entries(boundaryContinuityIssueContexts).map(([key, contexts]) => [
+          key,
+          contexts.map(context => ({
+            check_id: context.checkId,
+            check_label: context.checkLabel,
+            mode: context.mode,
+          })),
+        ]),
+      ))
       return { draft, fingerprint }
     },
     onSuccess: ({ draft, fingerprint }) => {
@@ -3713,6 +3761,8 @@ export function EditorPrototypePage() {
     setSnapEnabled(sourceTimeline.track_config.snap_enabled)
     setHistory([])
     setFuture([])
+    setBoundaryContinuityOutcomes({})
+    setBoundaryContinuityIssueContexts({})
     setDirty(false)
     setLastAutoSavedAt(null)
     setLastAutoSavedFingerprint(null)
@@ -3831,6 +3881,7 @@ export function EditorPrototypePage() {
     const target = focusBoundaryForReviewAt(targetIndex, mode)
     if (!target) return
     if (firstAdjustment) {
+      setDirty(true)
       const additions = review?.needsAdjustmentChecks.map(check => ({
         checkId: check.id,
         checkLabel: check.label,
@@ -3852,6 +3903,7 @@ export function EditorPrototypePage() {
     const mode = continuityReviewModeForCheckId(checkId)
     const target = focusBoundaryForReviewAt(targetIndex, mode)
     if (!target) return
+    setDirty(true)
     const review = boundaryContinuityReviewProgress.find(boundary => boundary.index === targetIndex)
     const additions = review?.needsAdjustmentChecks.map(check => ({
       checkId: check.id,
@@ -6746,6 +6798,7 @@ export function EditorPrototypePage() {
                        const outcome = currentContinuityOutcomes[check.id]
                        const status: BoundaryContinuityCheckOutcome | 'unreviewed' = outcome ?? 'unreviewed'
                        const setOutcome = (nextOutcome: BoundaryContinuityCheckOutcome | null) => {
+                         setDirty(true)
                          if (nextOutcome === 'passed' && continuityIssueContexts.some(context => context.checkId === check.id)) {
                            setBoundaryContinuityIssueContexts(current => {
                              const retained = (current[boundaryKey] ?? []).filter(context => context.checkId !== check.id)

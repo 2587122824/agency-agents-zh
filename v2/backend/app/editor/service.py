@@ -91,6 +91,8 @@ def _editor_draft_read(draft: EditorDraftSession) -> dict:
         "track_config": draft.track_config,
         "items": draft.items,
         "playhead_ms": draft.playhead_ms,
+        "continuity_outcomes": draft.continuity_outcomes,
+        "continuity_issue_contexts": draft.continuity_issue_contexts,
         "row_version": draft.row_version,
         "updated_by": draft.updated_by,
         "updated_at": draft.updated_at,
@@ -131,6 +133,11 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
             track_config=payload.track_config.model_dump(),
             items=[item.model_dump() for item in payload.items],
             playhead_ms=min(payload.playhead_ms, project.duration_seconds * 1000),
+            continuity_outcomes=payload.continuity_outcomes,
+            continuity_issue_contexts={
+                key: [context.model_dump() for context in contexts]
+                for key, contexts in payload.continuity_issue_contexts.items()
+            },
             updated_by=payload.actor_id,
             updated_at=now,
         )
@@ -142,6 +149,11 @@ def save_editor_draft(session: Session, project: Project, payload: SaveEditorDra
         draft.track_config = payload.track_config.model_dump()
         draft.items = [item.model_dump() for item in payload.items]
         draft.playhead_ms = min(payload.playhead_ms, project.duration_seconds * 1000)
+        draft.continuity_outcomes = payload.continuity_outcomes
+        draft.continuity_issue_contexts = {
+            key: [context.model_dump() for context in contexts]
+            for key, contexts in payload.continuity_issue_contexts.items()
+        }
         draft.row_version += 1
         draft.updated_by = payload.actor_id
         draft.updated_at = now

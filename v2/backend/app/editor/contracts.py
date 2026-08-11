@@ -60,6 +60,13 @@ class EditorDraftItem(TimelineItemInput):
     client_item_id: str = Field(min_length=1, max_length=96)
 
 
+class EditorContinuityIssueContext(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    check_id: str = Field(min_length=1, max_length=80)
+    check_label: str = Field(min_length=1, max_length=240)
+    mode: Literal["frames", "overlay", "action"]
+
+
 class SaveEditorDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
     actor_id: str = Field(default="local-user", min_length=1, max_length=48)
@@ -69,10 +76,12 @@ class SaveEditorDraft(BaseModel):
     track_config: TimelineTrackConfig
     items: list[EditorDraftItem] = Field(min_length=1, max_length=500)
     playhead_ms: int = Field(default=0, ge=0)
+    continuity_outcomes: dict[str, dict[str, Literal["passed", "needs_adjustment"]]] = Field(max_length=500)
+    continuity_issue_contexts: dict[str, list[EditorContinuityIssueContext]] = Field(max_length=500)
 
 
 class EditorDraftRead(BaseModel):
-    schema_version: Literal["editor-draft-session.v1"] = "editor-draft-session.v1"
+    schema_version: Literal["editor-draft-session.v2"] = "editor-draft-session.v2"
     project_id: str
     snapshot_id: str
     base_timeline_id: str
@@ -80,6 +89,8 @@ class EditorDraftRead(BaseModel):
     track_config: TimelineTrackConfig
     items: list[EditorDraftItem]
     playhead_ms: int
+    continuity_outcomes: dict[str, dict[str, Literal["passed", "needs_adjustment"]]]
+    continuity_issue_contexts: dict[str, list[EditorContinuityIssueContext]]
     row_version: int
     updated_by: str
     updated_at: datetime

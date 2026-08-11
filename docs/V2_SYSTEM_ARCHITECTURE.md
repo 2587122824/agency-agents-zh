@@ -224,8 +224,8 @@ draft
 - 编辑器边界预览是只读播放会话：从相邻主画面切点前后各 1 秒映射到已有媒体时钟，跨片段继续逐帧推进并在冻结结束点自动暂停，不写 `EditorDraftSession`。
 - 成对柔和过渡仍是两个相邻 TimelineItem 上的 `transition_out / transition_in` 冻结值，由一次前端事务和一个撤销步骤修改；后端校验与 FFmpeg 继续只认识既有 `cut/fade`，不增加改变时长的隐式叠化合同。
 - 结构编辑通过客户端 `reconcileStructuralTransitions(previousRows, nextRows)` 维护成对转场完整性：它用稳定 TimelineItem ID 比较编辑前后的有序相邻边界，只保留仍按原顺序相邻且两侧类型、时长一致的 fade；已断开边界的左侧 `transition_out` 与右侧 `transition_in` 在同一次 `commitItems` 中归零为 `cut:0`。删除、重排、Inspector 移动和正式分镜整理复用同一重建函数；分割则显式让新内部边界为双方 `cut:0`，仅保留原片段外侧转场。该规则不新增服务端字段、迁移或旧数据兼容分支，后端现有 Timeline v4 校验继续作为最终门禁。
-- `EditorDraftSession` 请求把浏览器播放头规范化为整数毫秒。同一内容指纹失败后自动保存停止，只有用户显式重试或内容变化才可再次写入；API 的结构化校验错误向用户保留字段路径和消息，不触发客户端自动重试。
-- 本地兜底草稿显式升级为 `editor-local-draft.v4` 并补齐 `playhead_ms`。客户端用同一个 `editorDraftFingerprint` 处理恢复选择与 900ms 自动保存：指纹只投影基线 Timeline ID/行版本、TimelineItem 稳定合同字段、取整播放头、磁吸和缩放，递归规范化对象键，因此服务端为展示补齐的 Asset 元数据与 JSON 键序不会制造差异。基线匹配且本地/远端语义相同时直接采用远端，并同时初始化最近成功与最近尝试指纹；只有语义更新的本地 v4 草稿才触发一次 PUT。旧 schema 不读取，不保留兼容分支。
+- `EditorDraftSession` 请求把浏览器播放头规范化为整数毫秒。同一内容指纹失败后自动保存停止，只有用户显式重试或内容变化才可再次写入；API 的结构化校验错误向用户保留字段路径和消息，不触发客户端自动重试。`editor-draft-session.v2` 新增非空 JSON `continuity_outcomes` 与 `continuity_issue_contexts`，分别保存稳定 boundary key 下的人工三态结果和有序原问题复检上下文；它们与条目共享行版本、更新时间及保存事务。
+- 本地兜底草稿显式升级为 `editor-local-draft.v5`，保存 `playhead_ms` 与相同两张连续性 map。客户端用同一个 `editorDraftFingerprint` 处理恢复选择与 900ms 自动保存：指纹投影基线 Timeline ID/行版本、TimelineItem 稳定合同字段、取整播放头、磁吸、缩放、人工结果和复检上下文，并递归规范化对象键，因此服务端为展示补齐的 Asset 元数据与 JSON 键序不会制造差异。基线匹配且本地/远端语义相同时直接采用远端，并同时初始化最近成功与最近尝试指纹；只有语义更新的本地 v5 草稿才触发一次 PUT。迁移 `20260811_43` 给服务端草稿增加两列，把既有开发行升级为 v2 并显式清空旧审核状态；旧 v1/v4 schema 不读取，不保留运行时兼容分支。
 - EditorWorkspace 从活动 ProductionSnapshot 的 `plan_version_id` 读取权威 Shot 顺序，并通过 Asset → DAGNode → Shot 关系投影每个视频素材的 `shot_code / shot_sequence_number`。顺序检查只消费这些类型化字段，不解析标签或节点名；一键整理是可撤销草稿事务，未知补充素材保持槽位，声音/字幕保持原成片时点。
 - 切点末帧/首帧对比使用两个独立静音视频元素分别定位 `source_out_ms - one_output_frame` 与 `source_in_ms`；元素只读、暂停、按需挂载，点击定格才调用统一时间线 seek。该预览不创建分析候选，也不声称已完成视觉连续性判断。
 - `BoundaryActionComparison` 是定格区的双路动态比较器。它用 `comparisonDurationMs=min(boundaryPreviewBeforeMs, boundaryPreviewAfterMs, left_available_tail, right_available_head)` 冻结共同窗口，两路共享页面级 `boundaryPreviewRate`，不循环、不拉伸、不独立补速。`requestAnimationFrame` 分别读取两个媒体元素的真实 `currentTime`；单路到达冻结终点就立即 pause 并精确 seek，双路都完成后才结束会话。主 `playing`、`items` 或定格模式变化会清理 `boundaryActionComparisonKey`，组件卸载再次暂停两路媒体。该比较器只写 React 页面状态，不进入 EditorDraftSession、Timeline、撤销历史、迁移或 FFmpeg 合同。
@@ -339,7 +339,7 @@ render 对每个 context 独立读取当前 outcome，派生 handling/recheck �
 
 提交 `7786b8c6` 的浏览器验收证明该派生在真实编辑后将两项 context 从 handling 迁移为 recheck，且全局与单边界四类计数一致。跨边界导航依次恢复 subject/frames 与 motion/action；逐项 passed 只删除对应 context，第二项完成后 map 项消失。验收撤销后的权威草稿为 `row_version=251 / playhead_ms=0 / SH-001 source=0..409ms`。最终标准重启 API `40752` / Worker `38208`，健康与迁移一致，日志无错误且 editor-draft PUT 为 0。
 
-页面撤销栈由裸 `TimelineItem[]` 升级为 `EditorHistorySnapshot`，原子冻结 `items`、`boundaryContinuityOutcomes` 与 `boundaryContinuityIssueContexts`。所有 `commitItems` 入口及画面滚动拖动、画面裁切拖动、声音移动、声音裁切四类手势入口使用同一快照；undo 在把当前完整快照压入 future 后恢复上一快照三部分，redo 对称恢复并把当前完整快照压回 history。状态仍通过不可变替换更新，因此快照可安全持有引用；不序列化到 LocalEditorDraft 或 EditorDraftSession，也不读取或兼容旧运行时历史。
+页面撤销栈由裸 `TimelineItem[]` 升级为 `EditorHistorySnapshot`，原子冻结 `items`、`boundaryContinuityOutcomes` 与 `boundaryContinuityIssueContexts`。所有 `commitItems` 入口及画面滚动拖动、画面裁切拖动、声音移动、声音裁切四类手势入口使用同一快照；undo 在把当前完整快照压入 future 后恢复上一快照三部分，redo 对称恢复并把当前完整快照压回 history。状态仍通过不可变替换更新，因此快照可安全持有引用；历史栈本身不序列化，但当前投影的两张连续性 map 会随 `EditorDraftSession.v2` / LocalEditorDraft.v5 自动保存，不读取或兼容旧运行时历史。
 
 真实 motion 源窗修改验证三部分快照对称恢复：修改后 SH-001 `42..451ms / recheck`，undo 为 `0..409ms / needs-adjustment+handling`，redo 再为 `42..451ms / recheck`。功能提交 `3354a27d` 推送后最终草稿为 `row_version=256 / playhead_ms=0 / SH-001 0..409ms`；标准重启 API `43548` / Worker `15872`，健康、迁移和日志通过，最终服务周期没有 editor-draft PUT。
 

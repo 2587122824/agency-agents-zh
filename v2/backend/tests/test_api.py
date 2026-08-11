@@ -7878,10 +7878,31 @@ def test_delivery_authorization_and_verified_mp4_complete_project_without_execut
             "track_config": exported["track_config"],
             "items": draft_items,
             "playhead_ms": 12_000,
+            "continuity_outcomes": {
+                "item-left-item-right": {"motion": "needs_adjustment", "subject": "passed"},
+            },
+            "continuity_issue_contexts": {
+                "item-left-item-right": [{
+                    "check_id": "motion",
+                    "check_label": "动作阶段与运动方向自然承接",
+                    "mode": "action",
+                }],
+            },
         },
     )
     assert saved_draft.status_code == 200
+    assert saved_draft.json()["schema_version"] == "editor-draft-session.v2"
     assert saved_draft.json()["playhead_ms"] == 12_000
+    assert saved_draft.json()["continuity_outcomes"] == {
+        "item-left-item-right": {"motion": "needs_adjustment", "subject": "passed"},
+    }
+    assert saved_draft.json()["continuity_issue_contexts"] == {
+        "item-left-item-right": [{
+            "check_id": "motion",
+            "check_label": "动作阶段与运动方向自然承接",
+            "mode": "action",
+        }],
+    }
     assert client.get(f"/api/v1/projects/{project['id']}/editor-draft").json()["items"] == draft_items
 
     revised = client.post(

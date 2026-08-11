@@ -1359,8 +1359,16 @@ export interface TimelineItemDraft {
   transform: Record<string, unknown>
 }
 
+export type EditorContinuityOutcome = 'passed' | 'needs_adjustment'
+
+export interface EditorContinuityIssueContext {
+  check_id: string
+  check_label: string
+  mode: 'frames' | 'overlay' | 'action'
+}
+
 export interface EditorDraft {
-  schema_version: 'editor-draft-session.v1'
+  schema_version: 'editor-draft-session.v2'
   project_id: string
   snapshot_id: string
   base_timeline_id: string
@@ -1368,6 +1376,8 @@ export interface EditorDraft {
   track_config: TimelineTrackConfig
   items: Array<TimelineItemDraft & { client_item_id: string }>
   playhead_ms: number
+  continuity_outcomes: Record<string, Record<string, EditorContinuityOutcome>>
+  continuity_issue_contexts: Record<string, EditorContinuityIssueContext[]>
   row_version: number
   updated_by: string
   updated_at: string
