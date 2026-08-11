@@ -3411,11 +3411,54 @@ export function EditorPrototypePage() {
     () => new Set(mainItems.flatMap(item => item.asset_id ? [item.asset_id] : [])),
     [mainItems],
   )
+  const selectedGapFormalRecommendations = useMemo(() => {
+    if (!selectedItem || selectedItem.track_type !== 'main_video' || selectedItem.asset_id) return []
+    const selectedGapIndex = mainItems.findIndex(item => item.id === selectedItem.id)
+    if (selectedGapIndex < 0) return []
+    const sequenceForItem = (item: TimelineItem) => item.asset_id
+      ? shotSequenceByAssetId.get(item.asset_id)
+      : undefined
+    let leftSequence: number | undefined
+    for (let index = selectedGapIndex - 1; index >= 0; index -= 1) {
+      leftSequence = sequenceForItem(mainItems[index])
+      if (leftSequence != null) break
+    }
+    let rightSequence: number | undefined
+    for (let index = selectedGapIndex + 1; index < mainItems.length; index += 1) {
+      rightSequence = sequenceForItem(mainItems[index])
+      if (rightSequence != null) break
+    }
+    const usedShotCodes = new Set(mainItems.flatMap(item => {
+      const code = item.asset_id ? shotCodeByAssetId.get(item.asset_id) : undefined
+      return code ? [code] : []
+    }))
+    return (workspace.data?.shot_sequence ?? [])
+      .filter(shot => (
+        !usedShotCodes.has(shot.shot_code)
+        && (leftSequence == null || shot.sequence_number > leftSequence)
+        && (rightSequence == null || shot.sequence_number < rightSequence)
+      ))
+      .map(shot => ({
+        shot,
+        assets: (workspace.data?.available_assets ?? [])
+          .filter(asset => (
+            asset.asset_type === 'video'
+            && asset.duration_ms != null
+            && asset.duration_ms > 0
+            && asset.shot_code === shot.shot_code
+            && !usedMainVideoAssetIds.has(asset.id)
+          ))
+          .sort((left, right) => left.id.localeCompare(right.id)),
+      }))
+      .filter(recommendation => recommendation.assets.length > 0)
+      .sort((left, right) => left.shot.sequence_number - right.shot.sequence_number)
+  }, [mainItems, selectedItem, shotCodeByAssetId, shotSequenceByAssetId, usedMainVideoAssetIds, workspace.data?.available_assets, workspace.data?.shot_sequence])
+  const selectedGapFormalRecommendation = selectedGapFormalRecommendations[0] ?? null
   const normalizedAssetSearch = assetSearchQuery.trim().toLocaleLowerCase('zh-CN')
   const visibleAssets = workspace.data?.available_assets.filter(asset => (
     (assetFilter === 'all' || asset.asset_type === assetFilter)
     && (!gapAssetSelection || (asset.asset_type === 'video' && !usedMainVideoAssetIds.has(asset.id)))
-    && (!normalizedAssetSearch || [asset.node_key, asset.role, asset.asset_type]
+    && (!normalizedAssetSearch || [asset.node_key, asset.role, asset.asset_type, asset.shot_code]
       .filter(Boolean)
       .some(value => String(value).toLocaleLowerCase('zh-CN').includes(normalizedAssetSearch)))
   )) ?? []
@@ -4597,16 +4640,24 @@ export function EditorPrototypePage() {
     setGapAssetSelection(false)
   }
 
-  const startGapAssetSelection = () => {
+  const startGapAssetSelection = (preferredShotCode?: string) => {
     if (blockMainTrackEdit()) return
     setAssetFilter('video')
     setGapAssetSelection(true)
+    setAssetSearchOpen(Boolean(preferredShotCode))
+    setAssetSearchQuery(preferredShotCode ?? '')
     const available = workspace.data?.available_assets.filter(asset => (
-      asset.asset_type === 'video' && !usedMainVideoAssetIds.has(asset.id)
+      asset.asset_type === 'video'
+      && !usedMainVideoAssetIds.has(asset.id)
+      && (!preferredShotCode || asset.shot_code === preferredShotCode)
     )) ?? []
     setNotice(available.length
-      ? `素材箱已只显示 ${available.length} 个未用于主画面的已批准视频；点击即可填入当前缺口。`
-      : '当前没有未使用的已批准视频。请返回生产流程生成补充镜头，或先分析缩短目标时长的影响。')
+      ? preferredShotCode
+        ? `素材箱已定位 ${available.length} 个属于正式分镜 ${preferredShotCode} 的未使用视频；请选择一个填入当前缺口。`
+        : `素材箱已只显示 ${available.length} 个未用于主画面的已批准视频；点击即可填入当前缺口。`
+      : preferredShotCode
+        ? `正式分镜 ${preferredShotCode} 当前没有可用的未使用视频。`
+        : '当前没有未使用的已批准视频。请返回生产流程生成补充镜头，或先分析缩短目标时长的影响。')
   }
 
   const addAssetToTrack = (trackType: TimelineItem['track_type'], assetId = draggedAssetId) => {
@@ -7212,9 +7263,28 @@ export function EditorPrototypePage() {
           </section>}
         </> : <section className={styles.gapActions}>
           <div className={styles.gapTitle}><AlertTriangle /><span><strong>缺少 {selectedItem ? seconds(selectedItem.timeline_out_ms - selectedItem.timeline_in_ms) : '0.9s'} 画面</strong><small>当前素材不足以覆盖 15 秒目标时长</small></span></div>
+          {selectedItem && selectedGapFormalRecommendation && <button
+            disabled={videoTrackLocked}
+            onClick={() => {
+              if (selectedGapFormalRecommendation.assets.length === 1) {
+                dropAssetOnItem(selectedItem, selectedGapFormalRecommendation.assets[0].id)
+                return
+              }
+              startGapAssetSelection(selectedGapFormalRecommendation.shot.shot_code)
+            }}
+          ><Sparkles /><span>
+            <strong>{videoTrackLocked
+              ? '解锁后补入正式缺失分镜'
+              : selectedGapFormalRecommendation.assets.length === 1
+                ? `补入正式分镜 ${selectedGapFormalRecommendation.shot.shot_code}`
+                : `选择 ${selectedGapFormalRecommendation.shot.shot_code} 的素材`}</strong>
+            <small>{selectedGapFormalRecommendation.assets.length === 1
+              ? `${selectedGapFormalRecommendation.assets[0].node_key ?? selectedGapFormalRecommendation.assets[0].role} · 可覆盖 ${seconds(Math.min(selectedGapFormalRecommendation.assets[0].duration_ms ?? 0, selectedItem.timeline_out_ms - selectedItem.timeline_in_ms))}`
+              : `${selectedGapFormalRecommendation.assets.length} 个已批准且未使用的精确 Shot 候选，不自动替你选择`}</small>
+          </span></button>}
           <Link to={`/projects/${projectId}/decision-impact`}><Clock3 /><span><strong>分析缩短成片</strong><small>先评估修改 15 秒目标的下游影响</small></span></Link>
           <Link to={`/production?project=${projectId}`}><WandSparkles /><span><strong>前往生成补充镜头</strong><small>在生产流程登记新镜头，授权后才可能产生费用</small></span></Link>
-          <button disabled={videoTrackLocked} onClick={startGapAssetSelection}><Plus /><span><strong>{videoTrackLocked ? '先解锁画面轨' : '选择其他素材'}</strong><small>{videoTrackLocked ? '锁定期间不会替换缺口' : '只列出未用于主画面的已批准视频'}</small></span></button>
+          <button disabled={videoTrackLocked} onClick={() => startGapAssetSelection()}><Plus /><span><strong>{videoTrackLocked ? '先解锁画面轨' : '选择其他素材'}</strong><small>{videoTrackLocked ? '锁定期间不会替换缺口' : '只列出未用于主画面的已批准视频'}</small></span></button>
         </section>}
       </aside>
     </section>
