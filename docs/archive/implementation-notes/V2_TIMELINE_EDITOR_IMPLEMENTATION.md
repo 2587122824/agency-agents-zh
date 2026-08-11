@@ -527,6 +527,12 @@ recheck 卡保留原问题标签和原观察工具，按钮复用只读处理入
 
 验收编辑与播放头已通过界面撤销/归零，权威草稿最终为 `row_version=245 / updated_at=2026-08-11T02:51:08.331065 / playhead_ms=0 / SH-002 0..4709ms / SH-001 0..409ms / gap 5118..15000ms`。最终标准重启为 API PID `35608` / Worker PID `13960`，创建时间分别为 `2026-08-11 10:51:59.268 / 10:51:59.287`；8766 监听 PID 精确等于 API，健康 `ok`，Alembic runtime/head `20260730_42`。四份日志无错误，最终服务周期 editor-draft PUT 为 0。
 
+### 同边界多问题复检队列
+
+单 context 会在一次结构编辑同时清空多个 needs-adjustment outcome 时只保住最后打开的问题。页面因此把 map value 改为 context 数组。处理任一项时，从当前 progress 取有序 `needsAdjustmentChecks`，映射各自 review mode 后与旧数组按 check ID 合并；选中项若不是当前 needs 投影则补入。已有待复检项不会被新处理项覆盖，重复打开也不会复制。
+
+上下文卡显示 handling/recheck 聚合计数，并逐项展示原问题、工具和可访问名称包含问题标签的继续/复检按钮。每项状态继续从当前 outcome 派生；passed 只移除本项，其他项保持。列表使用一列容器、每项 `minmax(0,1fr)+38px` 按钮，长标签可断行，不扩大 Inspector。该变化只升级页面内存结构，不新增草稿、history、API、迁移或兼容逻辑。
+
 ## 8. 事件
 
 ```text

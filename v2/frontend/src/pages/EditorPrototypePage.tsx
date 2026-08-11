@@ -443,6 +443,19 @@ function continuityReviewModeLabel(mode: BoundaryContinuityReviewMode) {
   return '并排复核'
 }
 
+function mergeBoundaryContinuityIssueContexts(
+  current: BoundaryContinuityIssueContext[],
+  additions: BoundaryContinuityIssueContext[],
+) {
+  const merged = [...current]
+  for (const addition of additions) {
+    const index = merged.findIndex(context => context.checkId === addition.checkId)
+    if (index >= 0) merged[index] = addition
+    else merged.push(addition)
+  }
+  return merged
+}
+
 function normalizeContinuityRelation(value: string | undefined): ContinuityRelation {
   return value && value in CONTINUITY_RELATION_COPY ? value as ContinuityRelation : 'same_moment'
 }
@@ -2820,7 +2833,7 @@ export function EditorPrototypePage() {
     Record<string, Record<string, BoundaryContinuityCheckOutcome>>
   >({})
   const [boundaryContinuityIssueContexts, setBoundaryContinuityIssueContexts] = useState<
-    Record<string, BoundaryContinuityIssueContext>
+    Record<string, BoundaryContinuityIssueContext[]>
   >({})
   const [monitorScale, setMonitorScale] = useState<'fit' | 'actual'>('fit')
   const [monitorFullscreen, setMonitorFullscreen] = useState(false)
@@ -3749,9 +3762,14 @@ export function EditorPrototypePage() {
     const target = focusBoundaryForReviewAt(targetIndex, mode)
     if (!target) return
     if (firstAdjustment) {
+      const additions = review?.needsAdjustmentChecks.map(check => ({
+        checkId: check.id,
+        checkLabel: check.label,
+        mode: continuityReviewModeForCheckId(check.id),
+      })) ?? []
       setBoundaryContinuityIssueContexts(current => ({
         ...current,
-        [target.key]: { checkId: firstAdjustment.id, checkLabel: firstAdjustment.label, mode },
+        [target.key]: mergeBoundaryContinuityIssueContexts(current[target.key] ?? [], additions),
       }))
     }
     setNotice(firstAdjustment
@@ -3763,9 +3781,18 @@ export function EditorPrototypePage() {
     const mode = continuityReviewModeForCheckId(checkId)
     const target = focusBoundaryForReviewAt(targetIndex, mode)
     if (!target) return
+    const review = boundaryContinuityReviewProgress.find(boundary => boundary.index === targetIndex)
+    const additions = review?.needsAdjustmentChecks.map(check => ({
+      checkId: check.id,
+      checkLabel: check.label,
+      mode: continuityReviewModeForCheckId(check.id),
+    })) ?? []
+    if (!additions.some(context => context.checkId === checkId)) {
+      additions.push({ checkId, checkLabel, mode })
+    }
     setBoundaryContinuityIssueContexts(current => ({
       ...current,
-      [target.key]: { checkId, checkLabel, mode },
+      [target.key]: mergeBoundaryContinuityIssueContexts(current[target.key] ?? [], additions),
     }))
     setNotice(`正在处理“${checkLabel}”：${target.left.label} → ${target.right.label}；已打开${continuityReviewModeLabel(mode)}，不会自动修改切点。`)
   }
@@ -6175,14 +6202,12 @@ export function EditorPrototypePage() {
                   const unreviewedContinuityCheckCount = continuityChecks.length
                     - passedContinuityCheckCount
                     - needsAdjustmentContinuityCheckCount
-                  const storedContinuityIssueContext = boundaryContinuityIssueContexts[boundaryKey]
-                  const continuityIssueContext = storedContinuityIssueContext
-                    && continuityChecks.some(check => check.id === storedContinuityIssueContext.checkId)
-                    ? storedContinuityIssueContext
-                    : null
-                  const continuityIssueOutcome = continuityIssueContext
-                    ? currentContinuityOutcomes[continuityIssueContext.checkId]
-                    : undefined
+                  const continuityIssueContexts = (boundaryContinuityIssueContexts[boundaryKey] ?? [])
+                    .filter(context => continuityChecks.some(check => check.id === context.checkId))
+                  const handlingContinuityIssueCount = continuityIssueContexts.filter(
+                    context => currentContinuityOutcomes[context.checkId] === 'needs_adjustment',
+                  ).length
+                  const recheckContinuityIssueCount = continuityIssueContexts.length - handlingContinuityIssueCount
                  const sharedContinuityGroup = formalAdjacent
                    && leftFormalShot?.continuity_group_id
                    && leftFormalShot.continuity_group_id === rightFormalShot?.continuity_group_id
@@ -6600,8 +6625,10 @@ export function EditorPrototypePage() {
                        const outcome = currentContinuityOutcomes[check.id]
                        const status: BoundaryContinuityCheckOutcome | 'unreviewed' = outcome ?? 'unreviewed'
                        const setOutcome = (nextOutcome: BoundaryContinuityCheckOutcome | null) => {
-                         if (nextOutcome === 'passed' && continuityIssueContext?.checkId === check.id) {
+                         if (nextOutcome === 'passed' && continuityIssueContexts.some(context => context.checkId === check.id)) {
                            setBoundaryContinuityIssueContexts(current => {
+                             const retained = (current[boundaryKey] ?? []).filter(context => context.checkId !== check.id)
+                             if (retained.length > 0) return { ...current, [boundaryKey]: retained }
                              const next = { ...current }
                              delete next[boundaryKey]
                              return next
@@ -6643,27 +6670,36 @@ export function EditorPrototypePage() {
                          >处理：{continuityReviewModeLabel(continuityReviewModeForCheckId(check.id))}</button>}
                        </div>
                      })}
-                     {continuityIssueContext && <section
+                     {continuityIssueContexts.length > 0 && <section
                        className={styles.continuityIssueContext}
-                       data-state={continuityIssueOutcome === 'needs_adjustment' ? 'handling' : 'recheck'}
+                       data-state={recheckContinuityIssueCount > 0 ? 'recheck' : 'handling'}
                        aria-label={`${left.label} 到 ${right.label} 的连续性问题处理上下文`}
                      >
-                       <span>
-                         <strong>{continuityIssueOutcome === 'needs_adjustment' ? '正在处理' : '待复检原问题'}</strong>
-                         <b>{continuityIssueContext.checkLabel}</b>
-                         <small>{continuityIssueOutcome === 'needs_adjustment'
-                           ? `当前观察工具：${continuityReviewModeLabel(continuityIssueContext.mode)}。实际修改后本项会回到未检查。`
-                           : `请重新打开${continuityReviewModeLabel(continuityIssueContext.mode)}复检，再明确选择通过或需调整。`}</small>
-                       </span>
-                       <button
-                         type="button"
-                         disabled={boundaryIndex < 0 || !left.asset_id || !right.asset_id}
-                         onClick={() => openBoundaryContinuityAdjustmentAt(
-                           boundaryIndex,
-                           continuityIssueContext.checkId,
-                           continuityIssueContext.checkLabel,
-                         )}
-                       >{continuityIssueOutcome === 'needs_adjustment' ? '继续处理' : '重新复检'}</button>
+                       <header>
+                         <strong>{recheckContinuityIssueCount > 0 ? '原问题待复检' : '正在处理连续性问题'}</strong>
+                         <small>处理中 {handlingContinuityIssueCount} · 待复检 {recheckContinuityIssueCount}</small>
+                       </header>
+                       <div>
+                         {continuityIssueContexts.map(context => {
+                           const handling = currentContinuityOutcomes[context.checkId] === 'needs_adjustment'
+                           return <div data-state={handling ? 'handling' : 'recheck'} key={context.checkId}>
+                             <span>
+                               <b>{context.checkLabel}</b>
+                               <small>{continuityReviewModeLabel(context.mode)} · {handling ? '正在处理' : '待重新判断'}</small>
+                             </span>
+                             <button
+                               type="button"
+                               aria-label={`${handling ? '继续处理' : '重新复检'}：${context.checkLabel}`}
+                               disabled={boundaryIndex < 0 || !left.asset_id || !right.asset_id}
+                               onClick={() => openBoundaryContinuityAdjustmentAt(
+                                 boundaryIndex,
+                                 context.checkId,
+                                 context.checkLabel,
+                               )}
+                             >{handling ? '继续' : '复检'}</button>
+                           </div>
+                         })}
+                       </div>
                      </section>}
                      <small>本切点：通过 {passedContinuityCheckCount} · 未检查 {unreviewedContinuityCheckCount} · 待调整 {needsAdjustmentContinuityCheckCount}。结果仅保留在本次页面，不写入草稿；“需调整”不会自动修改素材、切点或转场。</small>
                    </div>

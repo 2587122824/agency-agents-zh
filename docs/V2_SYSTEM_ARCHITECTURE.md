@@ -327,6 +327,10 @@ unresolved 队列保持 boundary index 顺序并循环选择下一个；定位�
 
 浏览器通过真实 `slipBoundaryItem` 事务验证派生阶段：处理 motion 时 context/outcome 为 handling/needs-adjustment；源窗 `0..409 → 42..451ms` 后既有 invalidation 删除 outcome，但 boundary key 未变，context 自动成为 recheck。重新打开 action 不改播放头 `5118ms`，不恢复扫描侧或 B；passed 事件同一批删除 context 并写入 outcome。验收界面撤销后源窗回到 `0..409ms`，最终草稿 `row_version=245 / playhead_ms=0`。最终服务周期只有健康与草稿 GET，editor-draft PUT 为 0。
 
+处理上下文值升级为 `Record<boundaryKey, BoundaryContinuityIssueContext[]>`。`mergeBoundaryContinuityIssueContexts` 复制现有数组，按 check ID 更新或追加当前 needs-adjustment 投影；单项入口和全局入口都先读取 `boundaryContinuityReviewProgress[targetIndex].needsAdjustmentChecks`，因此进入任一问题即捕获当前全部问题，选中项若不在投影中再显式补入。合并不按证据排序，保持已有项及当前清单的稳定顺序。
+
+render 对每个 context 独立读取当前 outcome，派生 handling/recheck 计数和逐项状态。passed 只 filter 掉相同 check ID；数组为空才删除 boundary key。重新打开某项继续合并当前问题，不覆盖其他 recheck 项。边界集合 effect 仍按 key 裁剪整组，关系清单仍按 ID 过滤显示。该结构没有新增阶段字段、编辑事务分支、服务端合同或迁移。
+
 只读 focus 改变选中片段时，主监看会因 React key 变化重新挂载 video；其 metadata 定位可能派发 `timeupdate`。`preservePlayheadOnReviewFocusRef` 只为这一次 selected item 变化保留 `advancingPlaybackRef=true`，使新媒体定位回调不能把源时点反写为播放头；标记随后一次性消费。用户主动播放会显式解除门禁，之后正常选择其他片段也会由既有 selected-item effect 恢复常规回调，不能把只读门禁扩散为永久忽略媒体时钟。
 
 修正后从 `playhead_ms=0` 重新加载真实页面并点击连续性待办，等待 1.4 秒后草稿的 row version、播放头与 updated_at 三项完全不变，重启后的 API 日志仍无 editor-draft PUT。DOM 同时证明 frames 已展开、并排模式 pressed、同步动作未挂载、所有媒体暂停；三项 checkbox 全部切换为 true 后只更新页面进度，后端草稿仍不变化。

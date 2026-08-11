@@ -1978,21 +1978,31 @@
   min-width: 0;
   padding: 6px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
   gap: 6px;
   border: 1px solid #765548;
   border-radius: 4px;
   background: #251a17;
 }
-.continuityIssueContext > span { min-width: 0; display: grid; gap: 2px; }
+.continuityIssueContext header { min-width: 0; display: flex; justify-content: space-between; gap: 5px; }
+.continuityIssueContext header small { white-space: nowrap; }
+.continuityIssueContext > div { min-width: 0; display: grid; gap: 4px; }
+.continuityIssueContext > div > div {
+  min-width: 0;
+  padding-top: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 5px;
+  border-top: 1px solid #493832;
+}
+.continuityIssueContext > div > div > span { min-width: 0; display: grid; gap: 2px; }
 .continuityIssueContext strong { color: #e7a98f; font-size: 8px; }
 .continuityIssueContext b { color: #d7c4bc; font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
 .continuityIssueContext small { color: #95817a; line-height: 1.35; overflow-wrap: anywhere; }
 .continuityIssueContext[data-state="recheck"] { border-color: #6e6343; background: #242116; }
 .continuityIssueContext[data-state="recheck"] strong { color: #d7c578; }
 .boundaryControl .continuityIssueContext button {
-  width: 52px;
+  width: 38px;
   height: auto;
   min-height: 30px;
   padding: 4px;
